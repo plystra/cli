@@ -10,6 +10,8 @@ New project trees are populated and validated in a same-parent staging directory
 
 In-place CLI mutations use sorted same-root staged replacements and backups. Paths that traverse symbolic links are rejected, existing files are checked again for concurrent edits, and validation failures or panics restore original bytes and modes before temporary state is removed. If a file changes again during validation, the user edit is preserved and the original backup location is reported for recovery.
 
+Commands invoked below a module root resolve the real working directory and use the nearest enclosing regular `go.mod`; nested modules do not leak mutations into an outer module.
+
 ## Current commands
 
 ```text
