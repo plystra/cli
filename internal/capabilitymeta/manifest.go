@@ -62,6 +62,14 @@ func ParseID(data []byte) (capabilityid.Identifier, error) {
 }
 
 func decodeDocument(data []byte) (*yaml.Node, error) {
+	document, err := decodeYAMLDocument(data)
+	if err != nil {
+		return nil, err
+	}
+	return document.Content[0], nil
+}
+
+func decodeYAMLDocument(data []byte) (*yaml.Node, error) {
 	if len(data) == 0 {
 		return nil, invalid("document is empty")
 	}
@@ -86,7 +94,7 @@ func decodeDocument(data []byte) (*yaml.Node, error) {
 	if err := rejectReferences(&document); err != nil {
 		return nil, err
 	}
-	return document.Content[0], nil
+	return &document, nil
 }
 
 func rejectReferences(root *yaml.Node) error {

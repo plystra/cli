@@ -28,6 +28,8 @@ Creation-plan source resolution loads every local provider of the selected sourc
 
 Capability-source schema normalization produces the deterministic Kernel-compatible wire projection used for provider comparison. It ignores descriptions, formatting, mapping order, enum order, error order, and explicit false defaults while preserving identity, field, type, required, item, enum, and error semantics; full contract ownership remains with Kernel.
 
+Validated schemas can be retargeted when a new capability version copies the highest visible version. Existing-version copies preserve exact bytes; new-version copies update only the top-level identity through the YAML syntax tree, normalize line endings deterministically, and preserve comments and human descriptions.
+
 ## Current commands
 
 ```text

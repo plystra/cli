@@ -1,0 +1,8 @@
+# Account capability.
+
+id: 'account.register/v2' # Exact identity.
+description: Registers an account.
+request:
+  email: {type: string, required: true} # Login address.
+response: {}
+errors: [already_exists]
