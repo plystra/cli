@@ -27,6 +27,7 @@ var ErrCreate = errors.New("create Plystra project")
 type Options struct {
 	Parent      string
 	ModulePath  string
+	Library     bool
 	GoCommand   string
 	Environment []string
 }
@@ -43,7 +44,7 @@ func (r Result) ModulePath() string { return r.modulePath }
 // Path returns the absolute committed project directory.
 func (r Result) Path() string { return r.path }
 
-// Create stages, validates, and atomically commits a new runnable project.
+// Create stages, validates, and atomically commits a new Plystra Go Module.
 func Create(ctx context.Context, options Options) (Result, error) {
 	if err := module.CheckPath(options.ModulePath); err != nil {
 		return Result{}, fmt.Errorf("%w: invalid Go Module path %q: %v", ErrCreate, options.ModulePath, err)
@@ -75,7 +76,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	}
 
 	err = atomicfs.CreateDirectory(target, func(stagingRoot string) error {
-		if err := populate(stagingRoot, options.ModulePath, name); err != nil {
+		if err := populate(stagingRoot, options.ModulePath, name, options.Library); err != nil {
 			return err
 		}
 		for _, arguments := range [][]string{{"mod", "download"}, {"mod", "tidy"}, {"test", "./..."}} {
@@ -83,7 +84,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 				return err
 			}
 		}
-		return verifyModule(stagingRoot, options.ModulePath)
+		return verifyModule(stagingRoot, options.ModulePath, options.Library)
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrCreate, err)
@@ -91,22 +92,31 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	return Result{modulePath: options.ModulePath, path: target}, nil
 }
 
-func populate(root, modulePath, name string) error {
+func populate(root, modulePath, name string, library bool) error {
 	compatibility, err := assemblygen.RenderCompatibility("assembly")
 	if err != nil {
 		return fmt.Errorf("render Kernel compatibility source: %w", err)
+	}
+	readme := readmeTemplate
+	if library {
+		readme = libraryReadmeTemplate
 	}
 	files := []struct {
 		path string
 		data []byte
 	}{
 		{path: "go.mod", data: []byte(fmt.Sprintf(goModuleTemplate, modulePath, KernelVersion))},
-		{path: "plystra.yaml", data: []byte(fmt.Sprintf(plystraTemplate, name))},
-		{path: "README.md", data: []byte(fmt.Sprintf(readmeTemplate, name, modulePath))},
+		{path: "README.md", data: []byte(fmt.Sprintf(readme, name, modulePath))},
 		{path: ".gitignore", data: []byte(gitignoreTemplate)},
 		{path: ".gitattributes", data: []byte(gitattributesTemplate)},
 		{path: ".github/workflows/ci.yml", data: []byte(ciTemplate)},
 		{path: "generated/assembly/compatibility_gen.go", data: compatibility},
+	}
+	if !library {
+		files = append(files, struct {
+			path string
+			data []byte
+		}{path: "plystra.yaml", data: []byte(fmt.Sprintf(plystraTemplate, name))})
 	}
 	for _, file := range files {
 		fullPath := filepath.Join(root, filepath.FromSlash(file.path))
@@ -120,7 +130,7 @@ func populate(root, modulePath, name string) error {
 	return nil
 }
 
-func verifyModule(root, modulePath string) error {
+func verifyModule(root, modulePath string, library bool) error {
 	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
 		return fmt.Errorf("read generated go.mod: %w", err)
@@ -148,6 +158,22 @@ func verifyModule(root, modulePath string) error {
 	}
 	if !info.Mode().IsRegular() || info.Size() == 0 {
 		return errors.New("generated go.sum is empty or not a regular file")
+	}
+	configuration, err := os.Lstat(filepath.Join(root, "plystra.yaml"))
+	if library {
+		if err == nil {
+			return errors.New("library module contains plystra.yaml")
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect library plystra.yaml: %w", err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect generated plystra.yaml: %w", err)
+	}
+	if !configuration.Mode().IsRegular() {
+		return errors.New("generated plystra.yaml is not a regular file")
 	}
 	return nil
 }

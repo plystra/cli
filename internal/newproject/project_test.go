@@ -89,6 +89,66 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	assertModuleState(t, direct.Path(), modulePath)
 }
 
+func TestCreateLibraryAndPublicCommandProduceDeterministicBuildableModules(t *testing.T) {
+	proxy := createKernelProxy(t)
+	environment := isolatedGoEnvironment(t, proxy)
+	const modulePath = "example.com/acme/email"
+
+	directParent := t.TempDir()
+	direct, err := newproject.Create(context.Background(), newproject.Options{
+		Parent:      directParent,
+		ModulePath:  modulePath,
+		Library:     true,
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Create library: %v", err)
+	}
+
+	commandParent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if exitCode := command.RunIn([]string{"new", modulePath, "--library"}, &stdout, &stderr, commandParent, environment); exitCode != 0 {
+		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
+	}
+	commandTarget := filepath.Join(commandParent, "email")
+	wantOutput := fmt.Sprintf("created %s in %s\n", modulePath, commandTarget)
+	if stdout.String() != wantOutput || stderr.Len() != 0 {
+		t.Fatalf("RunIn output = stdout %q, stderr %q", stdout.String(), stderr.String())
+	}
+
+	directTree := snapshotTree(t, direct.Path())
+	commandTree := snapshotTree(t, commandTarget)
+	if !reflect.DeepEqual(directTree, commandTree) {
+		t.Fatalf("repeated library creation differed:\ndirect:  %#v\ncommand: %#v", directTree, commandTree)
+	}
+	wantFiles := []string{
+		".gitattributes",
+		".github/workflows/ci.yml",
+		".gitignore",
+		"README.md",
+		"generated/assembly/compatibility_gen.go",
+		"go.mod",
+		"go.sum",
+	}
+	var gotFiles []string
+	for name := range directTree {
+		gotFiles = append(gotFiles, name)
+	}
+	sort.Strings(gotFiles)
+	if !reflect.DeepEqual(gotFiles, wantFiles) {
+		t.Fatalf("library files = %v, want %v", gotFiles, wantFiles)
+	}
+	delete(directTree, "go.sum")
+	if goldenTree := snapshotTree(t, "testdata/library"); !reflect.DeepEqual(directTree, goldenTree) {
+		t.Fatalf("library scaffold differs from golden files:\n got: %#v\nwant: %#v", directTree, goldenTree)
+	}
+	if _, err := os.Lstat(filepath.Join(direct.Path(), "plystra.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("library contains plystra.yaml: %v", err)
+	}
+	assertModuleState(t, direct.Path(), modulePath)
+}
+
 func TestCreateRollsBackGoValidationFailure(t *testing.T) {
 	t.Parallel()
 

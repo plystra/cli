@@ -16,7 +16,7 @@ import (
 const usage = `Usage:
   plystra help
   plystra version
-  plystra new <module-path>
+  plystra new <module-path> [--library]
   plystra plugin create <name>
 `
 
@@ -58,8 +58,8 @@ func RunIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		_, _ = fmt.Fprintf(stdout, "plystra %s\n", version.Current)
 		return 0
 	case "new":
-		if len(arguments) != 2 {
-			_, _ = io.WriteString(stderr, "usage: plystra new <module-path>\n")
+		if len(arguments) < 2 || len(arguments) > 3 || len(arguments) == 3 && arguments[2] != "--library" {
+			_, _ = io.WriteString(stderr, "usage: plystra new <module-path> [--library]\n")
 			return 2
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -67,6 +67,7 @@ func RunIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		result, err := newproject.Create(ctx, newproject.Options{
 			Parent:      workingDirectory,
 			ModulePath:  arguments[1],
+			Library:     len(arguments) == 3,
 			Environment: environment,
 		})
 		if err != nil {

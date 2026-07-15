@@ -7,7 +7,7 @@ import (
 	"github.com/plystra/cli/internal/command"
 )
 
-const wantUsage = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path>\n  plystra plugin create <name>\n"
+const wantUsage = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path> [--library]\n  plystra plugin create <name>\n"
 
 func TestRunHelp(t *testing.T) {
 	t.Parallel()
@@ -64,8 +64,9 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "unknown", arguments: []string{"unknown"}, wantError: "unknown command \"unknown\"\n\n" + wantUsage},
 		{name: "help arguments", arguments: []string{"help", "extra"}, wantError: "help does not accept arguments\n"},
 		{name: "version arguments", arguments: []string{"version", "extra"}, wantError: "version does not accept arguments\n"},
-		{name: "new missing module", arguments: []string{"new"}, wantError: "usage: plystra new <module-path>\n"},
-		{name: "new extra argument", arguments: []string{"new", "example.com/app", "extra"}, wantError: "usage: plystra new <module-path>\n"},
+		{name: "new missing module", arguments: []string{"new"}, wantError: "usage: plystra new <module-path> [--library]\n"},
+		{name: "new unknown option", arguments: []string{"new", "example.com/app", "--unknown"}, wantError: "usage: plystra new <module-path> [--library]\n"},
+		{name: "new extra argument", arguments: []string{"new", "example.com/app", "--library", "extra"}, wantError: "usage: plystra new <module-path> [--library]\n"},
 		{name: "plugin missing subcommand", arguments: []string{"plugin"}, wantError: "usage: plystra plugin create <name>\n"},
 		{name: "plugin unknown subcommand", arguments: []string{"plugin", "remove", "account"}, wantError: "usage: plystra plugin create <name>\n"},
 		{name: "plugin missing name", arguments: []string{"plugin", "create"}, wantError: "usage: plystra plugin create <name>\n"},
