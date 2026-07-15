@@ -48,6 +48,40 @@ func TestWriteFilesCommitsAfterValidation(t *testing.T) {
 	assertNoFileTransaction(t, root)
 }
 
+func TestWriteFilesRequiresMissingParentWhenRequested(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	parent := filepath.Join(root, "account")
+	if err := os.Mkdir(parent, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	keep := filepath.Join(parent, "keep.txt")
+	if err := os.WriteFile(keep, []byte("keep"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	validated := false
+	err := atomicfs.WriteFiles(root, []atomicfs.Write{{
+		Path:               "account/plugin.yaml",
+		Data:               []byte("id: acme.account\n"),
+		MustNotExist:       true,
+		ParentMustNotExist: true,
+	}}, func(string) error {
+		validated = true
+		return nil
+	})
+	if !errors.Is(err, atomicfs.ErrTargetExists) {
+		t.Fatalf("WriteFiles error = %v, want ErrTargetExists", err)
+	}
+	if validated {
+		t.Fatal("validation ran after the parent precondition failed")
+	}
+	assertFile(t, keep, "keep")
+	if _, err := os.Lstat(filepath.Join(parent, "plugin.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("plugin.yaml exists after rejected transaction: %v", err)
+	}
+}
+
 func TestWriteFilesRollsBackValidationFailure(t *testing.T) {
 	t.Parallel()
 

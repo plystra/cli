@@ -23,10 +23,11 @@ var (
 
 // Write describes one complete file replacement.
 type Write struct {
-	Path         string
-	Data         []byte
-	Mode         fs.FileMode
-	MustNotExist bool
+	Path               string
+	Data               []byte
+	Mode               fs.FileMode
+	MustNotExist       bool
+	ParentMustNotExist bool
 }
 
 type plannedWrite struct {
@@ -179,6 +180,17 @@ func planWrites(root *os.Root, writes []Write) ([]plannedWrite, error) {
 			return nil, err
 		}
 		item.missingParents = missingParents
+		if write.ParentMustNotExist {
+			parent := filepath.Dir(item.osPath)
+			if parent == "." {
+				return nil, fmt.Errorf("%w: %s has no child parent", ErrUnsafePath, canonical)
+			}
+			if _, err := root.Lstat(parent); err == nil {
+				return nil, fmt.Errorf("%w: parent %s", ErrTargetExists, filepath.ToSlash(parent))
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("%w: inspect parent %s: %w", ErrWriteFiles, filepath.ToSlash(parent), err)
+			}
+		}
 		info, err := root.Lstat(item.osPath)
 		switch {
 		case err == nil:

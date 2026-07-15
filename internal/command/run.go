@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/plystra/cli/internal/newproject"
+	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/version"
 )
 
@@ -16,6 +17,7 @@ const usage = `Usage:
   plystra help
   plystra version
   plystra new <module-path>
+  plystra plugin create <name>
 `
 
 // Run executes one Plystra command and returns its process exit code.
@@ -72,6 +74,24 @@ func RunIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			return 1
 		}
 		_, _ = fmt.Fprintf(stdout, "created %s in %s\n", result.ModulePath(), result.Path())
+		return 0
+	case "plugin":
+		if len(arguments) != 3 || arguments[1] != "create" {
+			_, _ = io.WriteString(stderr, "usage: plystra plugin create <name>\n")
+			return 2
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		result, err := plugincreate.Create(ctx, plugincreate.Options{
+			Start:       workingDirectory,
+			Name:        arguments[2],
+			Environment: environment,
+		})
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "create plugin: %v\n", err)
+			return 1
+		}
+		_, _ = fmt.Fprintf(stdout, "created plugin %s in %s\n", result.ID(), result.Path())
 		return 0
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown command %q\n\n%s", arguments[0], usage)

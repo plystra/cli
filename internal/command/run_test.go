@@ -7,6 +7,8 @@ import (
 	"github.com/plystra/cli/internal/command"
 )
 
+const wantUsage = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path>\n  plystra plugin create <name>\n"
+
 func TestRunHelp(t *testing.T) {
 	t.Parallel()
 
@@ -19,9 +21,8 @@ func TestRunHelp(t *testing.T) {
 			if exitCode := command.Run(arguments, &stdout, &stderr); exitCode != 0 {
 				t.Fatalf("Run(%q) exit code = %d, want 0", arguments, exitCode)
 			}
-			const want = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path>\n"
-			if stdout.String() != want {
-				t.Fatalf("Run(%q) stdout = %q, want %q", arguments, stdout.String(), want)
+			if stdout.String() != wantUsage {
+				t.Fatalf("Run(%q) stdout = %q, want %q", arguments, stdout.String(), wantUsage)
 			}
 			if stderr.Len() != 0 {
 				t.Fatalf("Run(%q) stderr = %q, want empty", arguments, stderr.String())
@@ -60,11 +61,15 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		arguments []string
 		wantError string
 	}{
-		{name: "unknown", arguments: []string{"unknown"}, wantError: "unknown command \"unknown\"\n\nUsage:\n  plystra help\n  plystra version\n  plystra new <module-path>\n"},
+		{name: "unknown", arguments: []string{"unknown"}, wantError: "unknown command \"unknown\"\n\n" + wantUsage},
 		{name: "help arguments", arguments: []string{"help", "extra"}, wantError: "help does not accept arguments\n"},
 		{name: "version arguments", arguments: []string{"version", "extra"}, wantError: "version does not accept arguments\n"},
 		{name: "new missing module", arguments: []string{"new"}, wantError: "usage: plystra new <module-path>\n"},
 		{name: "new extra argument", arguments: []string{"new", "example.com/app", "extra"}, wantError: "usage: plystra new <module-path>\n"},
+		{name: "plugin missing subcommand", arguments: []string{"plugin"}, wantError: "usage: plystra plugin create <name>\n"},
+		{name: "plugin unknown subcommand", arguments: []string{"plugin", "remove", "account"}, wantError: "usage: plystra plugin create <name>\n"},
+		{name: "plugin missing name", arguments: []string{"plugin", "create"}, wantError: "usage: plystra plugin create <name>\n"},
+		{name: "plugin extra argument", arguments: []string{"plugin", "create", "account", "extra"}, wantError: "usage: plystra plugin create <name>\n"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -1,0 +1,254 @@
+package plugincreate_test
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/plystra/cli/internal/command"
+	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/plugincreate"
+	"github.com/plystra/cli/internal/pluginscan"
+)
+
+func TestCreateAndPublicCommandProduceDeterministicBuildablePlugins(t *testing.T) {
+	const modulePath = "example.com/acme/my-app/v2"
+	const name = "account-profile"
+	environment := isolatedGoEnvironment(t)
+
+	directRoot := createModule(t, modulePath)
+	directStart := filepath.Join(directRoot, "docs", "work")
+	if err := os.MkdirAll(directStart, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	direct, err := plugincreate.Create(context.Background(), plugincreate.Options{
+		Start:       directStart,
+		Name:        name,
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if direct.ID() != "acme.my-app.account-profile" || direct.ModuleRoot() != directRoot || direct.Path() != filepath.Join(directRoot, name) {
+		t.Fatalf("Create result = ID %q, module %q, path %q", direct.ID(), direct.ModuleRoot(), direct.Path())
+	}
+
+	commandRoot := createModule(t, modulePath)
+	commandStart := filepath.Join(commandRoot, "docs", "work")
+	if err := os.MkdirAll(commandStart, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if exitCode := command.RunIn([]string{"plugin", "create", name}, &stdout, &stderr, commandStart, environment); exitCode != 0 {
+		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
+	}
+	wantOutput := fmt.Sprintf("created plugin acme.my-app.account-profile in %s\n", filepath.Join(commandRoot, name))
+	if stdout.String() != wantOutput || stderr.Len() != 0 {
+		t.Fatalf("RunIn output = stdout %q, stderr %q", stdout.String(), stderr.String())
+	}
+
+	directTree := scaffoldSnapshot(t, directRoot)
+	commandTree := scaffoldSnapshot(t, commandRoot)
+	if !reflect.DeepEqual(directTree, commandTree) {
+		t.Fatalf("repeated creation differed:\ndirect:  %#v\ncommand: %#v", directTree, commandTree)
+	}
+	wantFiles := []string{
+		"account-profile/README.md",
+		"account-profile/plugin.go",
+		"account-profile/plugin.yaml",
+		"account-profile/plugin_test.go",
+		"generated/assembly/account-profile_gen.go",
+		"generated/configuration/account-profile_gen.go",
+	}
+	gotFiles := make([]string, 0, len(directTree))
+	for name := range directTree {
+		gotFiles = append(gotFiles, name)
+	}
+	sort.Strings(gotFiles)
+	if !reflect.DeepEqual(gotFiles, wantFiles) {
+		t.Fatalf("plugin files = %v, want %v", gotFiles, wantFiles)
+	}
+	if golden := snapshotTree(t, "testdata/plugin"); !reflect.DeepEqual(directTree, golden) {
+		t.Fatalf("plugin scaffold differs from golden files:\n got: %#v\nwant: %#v", directTree, golden)
+	}
+	for path, content := range directTree {
+		if bytes.Contains(content, []byte(directRoot)) || bytes.Contains(content, []byte(commandRoot)) {
+			t.Fatalf("%s contains a local absolute path", path)
+		}
+	}
+	scan, err := pluginscan.ScanRoot(directRoot)
+	if err != nil || len(scan.Directories()) != 1 || scan.Directories()[0].Name() != name {
+		t.Fatalf("ScanRoot = %#v, %v", scan.Directories(), err)
+	}
+}
+
+func TestCreateRollsBackValidationFailure(t *testing.T) {
+	t.Parallel()
+
+	root := createModule(t, "example.com/acme/my-app")
+	before := snapshotTree(t, root)
+	_, err := plugincreate.Create(context.Background(), plugincreate.Options{
+		Start:     root,
+		Name:      "account",
+		GoCommand: filepath.Join(root, "missing-go-command"),
+	})
+	if !errors.Is(err, plugincreate.ErrCreate) || !errors.Is(err, gocommand.ErrRun) {
+		t.Fatalf("Create error = %v, want ErrCreate and ErrRun", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("tree changed after rollback:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoTransactionFiles(t, root)
+}
+
+func TestCreatePreservesExistingDirectoriesAndGeneratedTargets(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, root string)
+	}{
+		{
+			name: "plugin directory",
+			setup: func(t *testing.T, root string) {
+				t.Helper()
+				if err := os.Mkdir(filepath.Join(root, "account"), 0o755); err != nil {
+					t.Fatalf("Mkdir: %v", err)
+				}
+				writeFile(t, filepath.Join(root, "account", "keep.txt"), "keep")
+			},
+		},
+		{
+			name: "generated target",
+			setup: func(t *testing.T, root string) {
+				t.Helper()
+				path := filepath.Join(root, "generated", "assembly", "account_gen.go")
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatalf("MkdirAll: %v", err)
+				}
+				writeFile(t, path, "keep")
+			},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := createModule(t, "example.com/acme/my-app")
+			test.setup(t, root)
+			before := snapshotTree(t, root)
+			_, err := plugincreate.Create(context.Background(), plugincreate.Options{Start: root, Name: "account"})
+			if !errors.Is(err, plugincreate.ErrCreate) {
+				t.Fatalf("Create error = %v, want ErrCreate", err)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("existing tree changed:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			assertNoTransactionFiles(t, root)
+		})
+	}
+}
+
+func TestCreateRejectsInvalidNamesBeforeFilesystemInspection(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"", "Account", "account--profile", "account-", "account_profile", "generated", ".hidden", strings.Repeat("a", 65)} {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := plugincreate.Create(context.Background(), plugincreate.Options{Start: "missing", Name: name})
+			if !errors.Is(err, plugincreate.ErrInvalidName) {
+				t.Fatalf("Create(%q) error = %v, want ErrInvalidName", name, err)
+			}
+		})
+	}
+}
+
+func createModule(t *testing.T, modulePath string) string {
+	t.Helper()
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module "+modulePath+"\n\ngo 1.26\n")
+	return root
+}
+
+func isolatedGoEnvironment(t *testing.T) []string {
+	t.Helper()
+	overrides := map[string]string{
+		"GOCACHE":     filepath.Join(t.TempDir(), "build-cache"),
+		"GOENV":       "off",
+		"GOFLAGS":     "",
+		"GOMODCACHE":  filepath.Join(t.TempDir(), "module-cache"),
+		"GOPROXY":     "off",
+		"GOSUMDB":     "off",
+		"GOTOOLCHAIN": "local",
+		"GOWORK":      "off",
+	}
+	environment := make([]string, 0, len(os.Environ())+len(overrides))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, replaced := overrides[strings.ToUpper(key)]; !replaced {
+			environment = append(environment, entry)
+		}
+	}
+	for key, value := range overrides {
+		environment = append(environment, key+"="+value)
+	}
+	return environment
+}
+
+func scaffoldSnapshot(t *testing.T, root string) map[string][]byte {
+	t.Helper()
+	tree := snapshotTree(t, root)
+	delete(tree, "go.mod")
+	return tree
+}
+
+func snapshotTree(t *testing.T, root string) map[string][]byte {
+	t.Helper()
+	result := make(map[string][]byte)
+	err := fs.WalkDir(os.DirFS(root), ".", func(name string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		if err != nil {
+			return err
+		}
+		result[filepath.ToSlash(name)] = data
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WalkDir: %v", err)
+	}
+	return result
+}
+
+func writeFile(t *testing.T, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(name, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s): %v", name, err)
+	}
+}
+
+func assertNoTransactionFiles(t *testing.T, root string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(root, ".plystra-files-*"))
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("transaction files remain: %v", matches)
+	}
+}
