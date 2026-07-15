@@ -163,4 +163,13 @@ func assertTarget(t *testing.T, target plugintarget.Target, moduleRoot, director
 	if target.ID() != id || target.Directory() != directory || target.ModuleRoot() != moduleRoot || target.Path() != filepath.Join(moduleRoot, directory) {
 		t.Fatalf("target = ID %q, directory %q, module %q, path %q", target.ID(), target.Directory(), target.ModuleRoot(), target.Path())
 	}
+	wantManifest := []byte("id: " + id + "\n")
+	if got := target.ManifestData(); !bytes.Equal(got, wantManifest) {
+		t.Fatalf("ManifestData = %q, want %q", got, wantManifest)
+	}
+	manifest := target.ManifestData()
+	manifest[0] = 'x'
+	if target.ManifestData()[0] != 'i' {
+		t.Fatal("ManifestData exposed mutable target storage")
+	}
 }

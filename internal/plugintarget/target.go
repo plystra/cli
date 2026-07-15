@@ -39,6 +39,7 @@ type Target struct {
 	directory  string
 	path       string
 	moduleRoot string
+	manifest   []byte
 }
 
 // ID returns the canonical Plugin ID.
@@ -52,6 +53,10 @@ func (t Target) Path() string { return t.path }
 
 // ModuleRoot returns the canonical absolute Go Module root.
 func (t Target) ModuleRoot() string { return t.moduleRoot }
+
+// ManifestData returns a defensive copy of the validated plugin.yaml snapshot
+// used to select this target.
+func (t Target) ManifestData() []byte { return append([]byte(nil), t.manifest...) }
 
 // Infer selects an explicit reference, enclosing plugin, sole local plugin, or
 // selector result in that exact order.
@@ -142,6 +147,7 @@ func makeTarget(moduleRoot string, plugin pluginindex.Plugin) Target {
 		directory:  plugin.Name(),
 		path:       filepath.Join(moduleRoot, filepath.FromSlash(plugin.Path())),
 		moduleRoot: moduleRoot,
+		manifest:   plugin.ManifestData(),
 	}
 }
 

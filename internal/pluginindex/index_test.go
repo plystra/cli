@@ -1,6 +1,7 @@
 package pluginindex_test
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -16,7 +17,8 @@ func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
 
 	root := t.TempDir()
 	writePlugin(t, root, "profile", "acme.app.profile")
-	writeManifest(t, root, "account", "id: acme.app.account\nprovides:\n  - profile.get/v2\n  - account.register/v1\n")
+	accountManifest := []byte("id: acme.app.account\nprovides:\n  - profile.get/v2\n  - account.register/v1\n")
+	writeManifest(t, root, "account", string(accountManifest))
 	index, err := pluginindex.Scan(root)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
@@ -27,6 +29,9 @@ func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
 	}
 	if got := identifierStrings(plugins[0].Provides()); !reflect.DeepEqual(got, []string{"account.register/v1", "profile.get/v2"}) {
 		t.Fatalf("account Provides() = %v", got)
+	}
+	if got := plugins[0].ManifestData(); !bytes.Equal(got, accountManifest) {
+		t.Fatalf("account ManifestData() = %q", got)
 	}
 	if byName, ok := index.ByReference("account"); !ok || byName.ID() != "acme.app.account" {
 		t.Fatalf("ByReference(directory) = %#v, %t", byName, ok)
@@ -45,6 +50,11 @@ func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
 	provided[0] = capabilityid.Identifier{}
 	if index.Plugins()[0].Provides()[0].String() != "account.register/v1" {
 		t.Fatal("Provides exposed mutable index storage")
+	}
+	manifest := index.Plugins()[0].ManifestData()
+	manifest[0] = 'x'
+	if index.Plugins()[0].ManifestData()[0] != 'i' {
+		t.Fatal("ManifestData exposed mutable index storage")
 	}
 }
 

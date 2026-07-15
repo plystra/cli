@@ -29,6 +29,7 @@ type Plugin struct {
 	path     string
 	id       string
 	provides []capabilityid.Identifier
+	manifest []byte
 }
 
 // Name returns the direct-child directory name.
@@ -45,6 +46,9 @@ func (p Plugin) ID() string { return p.id }
 func (p Plugin) Provides() []capabilityid.Identifier {
 	return append([]capabilityid.Identifier(nil), p.provides...)
 }
+
+// ManifestData returns a defensive copy of the validated plugin.yaml snapshot.
+func (p Plugin) ManifestData() []byte { return append([]byte(nil), p.manifest...) }
 
 // Index is an immutable deterministic collection of local plugins.
 type Index struct {
@@ -115,6 +119,7 @@ func Scan(rootPath string) (result Index, indexErr error) {
 			path:     directory.Path(),
 			id:       id,
 			provides: metadata.Provides(),
+			manifest: append([]byte(nil), data...),
 		})
 	}
 	after, err := pluginscan.ScanRoot(rootPath)

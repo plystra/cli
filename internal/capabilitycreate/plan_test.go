@@ -30,6 +30,14 @@ func TestPrepareInfersTargetVersionAndAllLocalSources(t *testing.T) {
 	if plan.Target().ID() != "acme.app.account" || plan.Target().Directory() != "account" || plan.Target().Path() != filepath.Join(root, "account") {
 		t.Fatalf("Target = ID %q, directory %q, path %q", plan.Target().ID(), plan.Target().Directory(), plan.Target().Path())
 	}
+	manifest := plan.Target().ManifestData()
+	if string(manifest) != "id: acme.app.account\nprovides: [account.register/v1, account.register/v3]\n" {
+		t.Fatalf("Target manifest = %q", manifest)
+	}
+	manifest[0] = 'x'
+	if plan.Target().ManifestData()[0] != 'i' {
+		t.Fatal("Target manifest exposed mutable plan storage")
+	}
 	version := plan.Version()
 	source, hasSource := version.Source()
 	highest, hasHighest := version.HighestVisible()

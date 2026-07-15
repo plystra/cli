@@ -34,6 +34,8 @@ Capability schema-write rendering is non-mutating and produces one guarded, modu
 
 Plugin capability declarations are updated idempotently through the YAML syntax tree. New `provides` entries are canonical and sorted while plugin identity, requirements, opaque configuration, and comments are preserved; an already declared capability returns the exact original bytes.
 
+Plugin indexing retains the exact validated `plugin.yaml` bytes as an immutable snapshot. Target inference carries that snapshot into compound authoring plans, so later render steps use one coherent scan rather than rereading mutable manifest state.
+
 ## Current commands
 
 ```text
