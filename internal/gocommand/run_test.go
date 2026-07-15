@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -13,10 +12,15 @@ import (
 func TestMain(main *testing.M) {
 	switch os.Getenv("PLYSTRA_GO_COMMAND_HELPER") {
 	case "success":
-		if len(os.Args) == 3 && os.Args[1] == "test" && os.Args[2] == "./..." && samePath(mustGetwd(), os.Getenv("EXPECTED_DIRECTORY")) {
-			os.Exit(0)
+		if len(os.Args) != 3 || os.Args[1] != "test" || os.Args[2] != "./..." {
+			_, _ = fmt.Fprintln(os.Stderr, "unexpected helper arguments")
+			os.Exit(3)
 		}
-		os.Exit(3)
+		if !samePath(mustGetwd(), os.Getenv("EXPECTED_DIRECTORY")) {
+			_, _ = fmt.Fprintln(os.Stderr, "helper working directory differs from expected directory")
+			os.Exit(3)
+		}
+		os.Exit(0)
 	case "failure":
 		_, _ = fmt.Fprintln(os.Stderr, "go: reading https://person:secret@example.com/private?token=secret: denied")
 		_, _ = fmt.Fprintln(os.Stderr, strings.Repeat(mustGetwd()+" ", 300))
@@ -40,15 +44,11 @@ func TestRunUsesDirectoryEnvironmentAndArguments(t *testing.T) {
 	t.Parallel()
 
 	directory := t.TempDir()
-	expectedDirectory, err := filepath.EvalSymlinks(directory)
-	if err != nil {
-		t.Fatalf("EvalSymlinks: %v", err)
-	}
 	command, err := os.Executable()
 	if err != nil {
 		t.Fatalf("Executable: %v", err)
 	}
-	environment := append(os.Environ(), "PLYSTRA_GO_COMMAND_HELPER=success", "EXPECTED_DIRECTORY="+expectedDirectory)
+	environment := append(os.Environ(), "PLYSTRA_GO_COMMAND_HELPER=success", "EXPECTED_DIRECTORY="+directory)
 	if err := Run(context.Background(), Options{Command: command, Directory: directory, Environment: environment}, "test", "./..."); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -103,5 +103,7 @@ func mustGetwd() string {
 }
 
 func samePath(left, right string) bool {
-	return strings.EqualFold(strings.TrimRight(left, `\/`), strings.TrimRight(right, `\/`))
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
 }
