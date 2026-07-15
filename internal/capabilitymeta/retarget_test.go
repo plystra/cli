@@ -11,10 +11,10 @@ import (
 	"github.com/plystra/cli/internal/capabilitymeta"
 )
 
-func TestRetargetSchemaPreservesSourceMaterialAndWireSemantics(t *testing.T) {
+func TestRetargetSchemaPreservesSourceMaterialAndContractSemantics(t *testing.T) {
 	t.Parallel()
 
-	source := []byte("# Account capability.\r\nid: 'account.register/v1' # Exact identity.\r\ndescription: Registers an account.\r\nrequest:\r\n  email: {type: string, required: true} # Login address.\r\nresponse: {}\r\nerrors: [already_exists]\r\n")
+	source := []byte("# Account capability.\r\nid: 'account.register/v1' # Exact identity.\r\ndescription: Registers an account.\r\nrequest:\r\n  email: {type: string, required: true} # Login address.\r\nresponse: {}\r\nerrors: [already_exists]\r\nextensions:\r\n  authn: {authenticated: true}\r\n")
 	original := append([]byte(nil), source...)
 	target := mustIdentifier(t, "account.register/v2")
 	got, err := capabilitymeta.RetargetSchema(source, target)
@@ -42,7 +42,7 @@ func TestRetargetSchemaPreservesSourceMaterialAndWireSemantics(t *testing.T) {
 	}
 	gotSchema, err := capabilitymeta.NormalizeSchema(got)
 	if err != nil || !bytes.Equal(gotSchema, wantSchema) {
-		t.Fatalf("retargeted wire schema = %s, want %s, %v", gotSchema, wantSchema, err)
+		t.Fatalf("retargeted contract = %s, want %s, %v", gotSchema, wantSchema, err)
 	}
 	repeated, err := capabilitymeta.RetargetSchema(source, target)
 	if err != nil || !bytes.Equal(repeated, got) {
@@ -102,7 +102,7 @@ func mustIdentifier(t *testing.T, value string) capabilityid.Identifier {
 }
 
 func FuzzRetargetSchema(f *testing.F) {
-	for _, seed := range []string{normalizationInput, "id: account.register/v1\n", "[]\n", "id: &x account.register/v1\ndescription: *x\n"} {
+	for _, seed := range []string{normalizationInput, "id: account.register/v1\n", "id: account.register/v1\nextensions:\n  authn: {authenticated: true}\n", "[]\n", "id: &x account.register/v1\ndescription: *x\n"} {
 		f.Add(seed)
 	}
 	target := mustFuzzIdentifier(f, "account.register/v2")

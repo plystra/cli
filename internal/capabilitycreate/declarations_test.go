@@ -68,7 +68,7 @@ func TestWriteDeclarationsCommitsRetainedSourceCopy(t *testing.T) {
 	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
 	writePlugin(t, root, "profile", "id: acme.app.profile\n")
 	id := mustCapabilityID(t, "account.register/v1")
-	sourceData := []byte("# Account contract.\nid: account.register/v1\ndescription: Registers an account.\nrequest: {email: {type: string, required: true}}\n")
+	sourceData := []byte("# Account contract.\nid: account.register/v1\ndescription: Registers an account.\nrequest: {email: {type: string, required: true}}\nextensions: {authn: {authenticated: true}}\n")
 	writeCapabilitySource(t, filepath.Join(root, "account"), id, sourceData)
 	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register", Plugin: "profile"})
 	if err != nil {

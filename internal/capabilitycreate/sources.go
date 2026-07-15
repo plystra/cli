@@ -25,9 +25,10 @@ func (s ResolvedSource) Provider() Provider { return s.provider }
 // Source returns the immutable loaded capability declaration.
 func (s ResolvedSource) Source() capabilitysource.Source { return s.source }
 
-// ResolveSources loads and semantically compares every local provider candidate
-// for the plan's source version. It returns no partial result when any
-// declaration is unavailable, invalid, or inconsistent.
+// ResolveSources loads and exactly compares every local provider candidate for
+// the plan's source version, including normalized extension metadata. It
+// returns no partial result when any declaration is unavailable, invalid, or
+// inconsistent.
 func ResolveSources(plan Plan) ([]ResolvedSource, error) {
 	if plan.Target().ID() == "" || plan.Version().Target().String() == "" {
 		return nil, fmt.Errorf("%w: plan is empty", ErrResolveSources)

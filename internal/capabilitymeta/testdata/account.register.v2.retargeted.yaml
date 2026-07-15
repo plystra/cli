@@ -6,3 +6,5 @@ request:
   email: {type: string, required: true} # Login address.
 response: {}
 errors: [already_exists]
+extensions:
+  authn: {authenticated: true}

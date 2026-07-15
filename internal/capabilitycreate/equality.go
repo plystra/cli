@@ -19,14 +19,14 @@ var ErrSchemaConflict = errors.New("capability schema conflict")
 const maximumDifferenceValueRunes = 256
 
 // SchemaDifference is one deterministic structural difference between two
-// canonical capability schemas.
+// canonical capability contracts.
 type SchemaDifference struct {
 	path        string
 	baseline    string
 	conflicting string
 }
 
-// Path returns the dot-separated schema path that differs.
+// Path returns the dot-separated contract path that differs.
 func (d SchemaDifference) Path() string { return d.path }
 
 // Baseline returns the canonical JSON value carried by the first provider, or
@@ -38,7 +38,7 @@ func (d SchemaDifference) Baseline() string { return d.baseline }
 func (d SchemaDifference) Conflicting() string { return d.conflicting }
 
 // SchemaConflictError identifies two providers carrying meaningfully different
-// schemas for the same exact capability version.
+// contracts for the same exact capability version.
 type SchemaConflictError struct {
 	capability          capabilityid.Identifier
 	baselineProvider    Provider
@@ -63,7 +63,7 @@ func (e *SchemaConflictError) ConflictingProvider() Provider { return e.conflict
 // ConflictingSourcePath returns the conflicting provider's absolute capability.yaml path.
 func (e *SchemaConflictError) ConflictingSourcePath() string { return e.conflictingPath }
 
-// Differences returns a defensive copy in deterministic schema-path order.
+// Differences returns a defensive copy in deterministic contract-path order.
 func (e *SchemaConflictError) Differences() []SchemaDifference {
 	return append([]SchemaDifference(nil), e.differences...)
 }

@@ -23,8 +23,8 @@ func TestResolveSourcesLoadsEveryProviderWithoutRequiringByteEquality(t *testing
 	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
 	writePlugin(t, root, "profile", "id: acme.app.profile\nprovides: [account.register/v1]\n")
 	id := mustCapabilityID(t, "account.register/v1")
-	first := []byte("id: account.register/v1\ndescription: Account provider wording.\nrequest:\n  email: {type: string, required: false, enum: [work, personal]}\nerrors: [unavailable, invalid_email]\n")
-	second := []byte("errors: [invalid_email, unavailable]\nrequest: {email: {enum: [personal, work], type: string}}\ndescription: Profile provider wording.\nid: account.register/v1\n")
+	first := []byte("id: account.register/v1\ndescription: Account provider wording.\nrequest:\n  email: {type: string, required: false, enum: [work, personal]}\nerrors: [unavailable, invalid_email]\nextensions:\n  authz: {space: request.space_id, permission: account.register}\n  authn: {authenticated: true}\n")
+	second := []byte("extensions: {authn: {authenticated: true}, authz: {permission: account.register, space: request.space_id}}\nerrors: [invalid_email, unavailable]\nrequest: {email: {enum: [personal, work], type: string}}\ndescription: Profile provider wording.\nid: account.register/v1\n")
 	writeCapabilitySource(t, filepath.Join(root, "account"), id, first)
 	writeCapabilitySource(t, filepath.Join(root, "profile"), id, second)
 
@@ -41,6 +41,40 @@ func TestResolveSourcesLoadsEveryProviderWithoutRequiringByteEquality(t *testing
 	}
 	if resolved[0].Source().ID() != id || !bytes.Equal(resolved[0].Source().Data(), first) || !bytes.Equal(resolved[1].Source().Data(), second) || bytes.Equal(resolved[0].Source().Data(), resolved[1].Source().Data()) {
 		t.Fatalf("resolved data = %q and %q", resolved[0].Source().Data(), resolved[1].Source().Data())
+	}
+}
+
+func TestResolveSourcesRejectsExtensionMetadataConflict(t *testing.T) {
+	t.Parallel()
+
+	root := createModule(t)
+	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
+	writePlugin(t, root, "profile", "id: acme.app.profile\nprovides: [account.register/v1]\n")
+	id := mustCapabilityID(t, "account.register/v1")
+	writeCapabilitySource(t, filepath.Join(root, "account"), id, []byte("id: account.register/v1\nextensions:\n  authn: {authenticated: true}\n  authz: {permission: account.register, space: request.space_id}\n"))
+	writeCapabilitySource(t, filepath.Join(root, "profile"), id, []byte("id: account.register/v1\nextensions:\n  authz: {permission: account.update, space: request.space_id}\n"))
+
+	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: filepath.Join(root, "account"), Reference: "account.register"})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	resolved, err := capabilitycreate.ResolveSources(plan)
+	if !errors.Is(err, capabilitycreate.ErrResolveSources) || !errors.Is(err, capabilitycreate.ErrSchemaConflict) || resolved != nil {
+		t.Fatalf("ResolveSources = %#v, %v", resolved, err)
+	}
+	var conflict *capabilitycreate.SchemaConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("ResolveSources error type = %T", err)
+	}
+	differences := conflict.Differences()
+	if len(differences) != 2 || differences[0].Path() != "extensions.authn" || differences[0].Baseline() != `{"authenticated":true}` || differences[0].Conflicting() != "<missing>" || differences[1].Path() != "extensions.authz.permission" || differences[1].Baseline() != `"account.register"` || differences[1].Conflicting() != `"account.update"` {
+		t.Fatalf("extension differences = %#v", differences)
+	}
+	message := err.Error()
+	for _, required := range []string{"extensions.authn", "extensions.authz.permission", "account.register", "account.update", "new capability version"} {
+		if !strings.Contains(message, required) {
+			t.Fatalf("conflict error %q does not contain %q", message, required)
+		}
 	}
 }
 

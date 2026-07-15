@@ -132,7 +132,7 @@ func TestRenderRejectsInvalidInputs(t *testing.T) {
 }
 
 func FuzzRender(f *testing.F) {
-	for _, seed := range []string{emailSendSchema, "id: kernel.health/v1\n", "id: workflow.retry--now-/v2\n", "[]\n", "id: &x example.call/v1\ndescription: *x\n"} {
+	for _, seed := range []string{emailSendSchema, "id: kernel.health/v1\n", "id: workflow.retry--now-/v2\n", "id: order.cancel/v1\nextensions: {authn: {authenticated: true}}\n", "[]\n", "id: &x example.call/v1\ndescription: *x\n"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, input string) {

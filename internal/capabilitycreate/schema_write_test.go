@@ -52,7 +52,7 @@ func TestRenderSchemaWriteCopiesAndRetargetsDeterministicSource(t *testing.T) {
 	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
 	writePlugin(t, root, "profile", "id: acme.app.profile\n")
 	id := mustCapabilityID(t, "account.register/v1")
-	sourceData := []byte("# Account contract.\r\nid: account.register/v1\r\ndescription: Registers an account.\r\nrequest: {email: {type: string, required: true}}\r\n")
+	sourceData := []byte("# Account contract.\r\nid: account.register/v1\r\ndescription: Registers an account.\r\nrequest: {email: {type: string, required: true}}\r\nextensions: {authn: {authenticated: true}}\r\n")
 	sourcePath := filepath.Join(root, "account")
 	writeCapabilitySource(t, sourcePath, id, sourceData)
 	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register", Plugin: "profile"})

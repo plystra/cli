@@ -16,10 +16,11 @@ import (
 )
 
 type canonicalSchema struct {
-	ID       string                    `json:"id"`
-	Request  map[string]canonicalField `json:"request"`
-	Response map[string]canonicalField `json:"response"`
-	Errors   []string                  `json:"errors"`
+	ID         string                     `json:"id"`
+	Request    map[string]canonicalField  `json:"request"`
+	Response   map[string]canonicalField  `json:"response"`
+	Errors     []string                   `json:"errors"`
+	Extensions map[string]json.RawMessage `json:"extensions,omitempty"`
 }
 
 type canonicalField struct {
@@ -29,7 +30,7 @@ type canonicalField struct {
 	Enum     []json.RawMessage `json:"enum,omitempty"`
 }
 
-// NormalizeSchema returns the deterministic semantic wire projection used to
+// NormalizeSchema returns the deterministic exact contract projection used to
 // compare provider-carried declarations. Human descriptions and source
 // formatting are excluded. Kernel remains authoritative for the public
 // capability contract model and runtime validation.
@@ -44,7 +45,7 @@ func NormalizeSchema(data []byte) ([]byte, error) {
 	}
 	for _, key := range sortedNodeKeys(values) {
 		switch key {
-		case "id", "description", "request", "response", "errors":
+		case "id", "description", "request", "response", "errors", "extensions":
 		default:
 			return nil, invalid("unknown key %q", key)
 		}
@@ -80,16 +81,39 @@ func NormalizeSchema(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	extensions, err := normalizeCapabilityExtensions(values["extensions"])
+	if err != nil {
+		return nil, err
+	}
 	encoded, err := json.Marshal(canonicalSchema{
-		ID:       identifier.String(),
-		Request:  request,
-		Response: response,
-		Errors:   errorsList,
+		ID:         identifier.String(),
+		Request:    request,
+		Response:   response,
+		Errors:     errorsList,
+		Extensions: extensions,
 	})
 	if err != nil {
 		return nil, invalid("encode canonical schema: %v", err)
 	}
 	return encoded, nil
+}
+
+func normalizeCapabilityExtensions(node *yaml.Node) (map[string]json.RawMessage, error) {
+	if node == nil {
+		return nil, nil
+	}
+	extensions, err := parseCapabilityExtensions(node)
+	if err != nil {
+		return nil, err
+	}
+	if len(extensions.values) == 0 {
+		return nil, nil
+	}
+	canonical := make(map[string]json.RawMessage, len(extensions.values))
+	for _, extension := range extensions.values {
+		canonical[extension.namespace] = json.RawMessage(extension.ValueJSON())
+	}
+	return canonical, nil
 }
 
 func normalizeSection(section string, node *yaml.Node) (map[string]canonicalField, error) {
