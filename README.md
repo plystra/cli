@@ -30,6 +30,8 @@ Capability-source schema normalization produces the deterministic Kernel-compati
 
 Validated schemas can be retargeted when a new capability version copies the highest visible version. Existing-version copies preserve exact bytes; new-version copies update only the top-level identity through the YAML syntax tree, normalize line endings deterministically, and preserve comments and human descriptions.
 
+Capability schema-write rendering is non-mutating and produces one guarded, module-relative `capability.yaml` write. First versions receive a complete empty wire schema; later versions use the validated deterministic source snapshot, and existing target files or version directories are never eligible for replacement.
+
 ## Current commands
 
 ```text
