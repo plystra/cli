@@ -40,6 +40,8 @@ Capability plans render `plugin.yaml` replacements directly from that retained s
 
 Atomic file writes can require an exact existing source snapshot. A missing or edited source fails before staging and validation, preventing a compound authoring transaction from overwriting user changes made after planning.
 
+Capability schema and manifest declarations are committed through one atomic file transaction. The updated plugin index and target schema are validated together, retained source schemas are rechecked before commit, and any failure restores both declarations while preserving unrelated concurrent edits.
+
 ## Current commands
 
 ```text
