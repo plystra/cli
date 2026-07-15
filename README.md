@@ -12,6 +12,8 @@ In-place CLI mutations use sorted same-root staged replacements and backups. Pat
 
 Commands invoked below a module root resolve the real working directory and use the nearest enclosing regular `go.mod`; nested modules do not leak mutations into an outer module.
 
+Plugin-target inference indexes strict bounded identity envelopes from root-level `plugin.yaml` files and resolves, in order, an explicit directory or Plugin ID, the enclosing plugin, the only local plugin, or an interactive numeric selection. Multiple plugins fail with an actionable `--plugin` diagnostic whenever no terminal selector is available.
+
 ## Current commands
 
 ```text
