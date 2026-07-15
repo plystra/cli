@@ -30,16 +30,17 @@ type Write struct {
 }
 
 type plannedWrite struct {
-	path         string
-	osPath       string
-	data         []byte
-	mode         fs.FileMode
-	mustNotExist bool
-	existed      bool
-	original     []byte
-	originalMode fs.FileMode
-	stagePath    string
-	backupPath   string
+	path           string
+	osPath         string
+	data           []byte
+	mode           fs.FileMode
+	mustNotExist   bool
+	existed        bool
+	original       []byte
+	originalMode   fs.FileMode
+	stagePath      string
+	backupPath     string
+	missingParents []string
 }
 
 type appliedWrite struct {
@@ -173,9 +174,11 @@ func planWrites(root *os.Root, writes []Write) ([]plannedWrite, error) {
 			mode:         mode,
 			mustNotExist: write.MustNotExist,
 		}
-		if err := inspectParents(root, item.osPath); err != nil {
+		missingParents, err := inspectParents(root, item.osPath)
+		if err != nil {
 			return nil, err
 		}
+		item.missingParents = missingParents
 		info, err := root.Lstat(item.osPath)
 		switch {
 		case err == nil:
@@ -204,26 +207,34 @@ func planWrites(root *os.Root, writes []Write) ([]plannedWrite, error) {
 	return planned, nil
 }
 
-func inspectParents(root *os.Root, target string) error {
+func inspectParents(root *os.Root, target string) ([]string, error) {
 	parent := filepath.Dir(target)
 	if parent == "." {
-		return nil
+		return nil, nil
 	}
+	missing := false
+	var missingParents []string
 	current := ""
 	for _, component := range splitPath(parent) {
 		current = filepath.Join(current, component)
+		if missing {
+			missingParents = append(missingParents, current)
+			continue
+		}
 		info, err := root.Lstat(current)
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil
+			missing = true
+			missingParents = append(missingParents, current)
+			continue
 		}
 		if err != nil {
-			return fmt.Errorf("%w: inspect parent %s: %w", ErrWriteFiles, filepath.ToSlash(current), err)
+			return nil, fmt.Errorf("%w: inspect parent %s: %w", ErrWriteFiles, filepath.ToSlash(current), err)
 		}
 		if !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("%w: parent %s is not a regular directory", ErrUnsafePath, filepath.ToSlash(current))
+			return nil, fmt.Errorf("%w: parent %s is not a regular directory", ErrUnsafePath, filepath.ToSlash(current))
 		}
 	}
-	return nil
+	return missingParents, nil
 }
 
 func stageWrites(transactionRoot, transactionName string, planned []plannedWrite) error {
@@ -250,6 +261,12 @@ func stageWrites(transactionRoot, transactionName string, planned []plannedWrite
 func createParentDirectories(root *os.Root, planned []plannedWrite) ([]string, error) {
 	created := make([]string, 0)
 	known := make(map[string]struct{})
+	expectedMissing := make(map[string]struct{})
+	for _, write := range planned {
+		for _, parent := range write.missingParents {
+			expectedMissing[parent] = struct{}{}
+		}
+	}
 	for _, write := range planned {
 		parent := filepath.Dir(write.osPath)
 		if parent == "." {
@@ -265,11 +282,17 @@ func createParentDirectories(root *os.Root, planned []plannedWrite) ([]string, e
 			info, err := root.Lstat(current)
 			switch {
 			case err == nil:
+				if _, appeared := expectedMissing[current]; appeared {
+					return created, fmt.Errorf("%w: parent %s appeared", ErrConcurrentChange, filepath.ToSlash(current))
+				}
 				if !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
 					return created, fmt.Errorf("%w: parent %s is not a regular directory", ErrUnsafePath, filepath.ToSlash(current))
 				}
 			case errors.Is(err, fs.ErrNotExist):
 				if err := root.Mkdir(current, 0o755); err != nil {
+					if errors.Is(err, fs.ErrExist) {
+						return created, fmt.Errorf("%w: parent %s appeared", ErrConcurrentChange, filepath.ToSlash(current))
+					}
 					return created, fmt.Errorf("%w: create parent %s: %w", ErrWriteFiles, filepath.ToSlash(current), err)
 				}
 				created = append(created, current)
