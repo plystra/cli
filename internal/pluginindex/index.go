@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"strings"
 
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/pluginmeta"
@@ -19,18 +20,22 @@ var (
 	ErrIndex = errors.New("index local plugins")
 	// ErrDuplicateID reports two local directories declaring one Plugin ID.
 	ErrDuplicateID = errors.New("duplicate local plugin ID")
-	// ErrConcurrentChange reports a marker that changed while it was read.
-	ErrConcurrentChange = errors.New("plugin manifest changed during indexing")
+	// ErrConcurrentChange reports plugin input that changed during indexing.
+	ErrConcurrentChange = errors.New("plugin input changed during indexing")
+	// ErrInvalidGenerationPackage reports a missing, non-directory, or symbolic
+	// package path declared by a plugin generation extension.
+	ErrInvalidGenerationPackage = errors.New("invalid generation package")
 )
 
 // Plugin identifies one indexed root-level plugin.
 type Plugin struct {
-	name       string
-	path       string
-	id         string
-	provides   []capabilityid.Identifier
-	generation pluginmeta.Generation
-	manifest   []byte
+	name                  string
+	path                  string
+	id                    string
+	provides              []capabilityid.Identifier
+	generation            pluginmeta.Generation
+	generationPackagePath string
+	manifest              []byte
 }
 
 // Name returns the direct-child directory name.
@@ -51,6 +56,13 @@ func (p Plugin) Provides() []capabilityid.Identifier {
 // Generation returns the optional trusted build-time generation declaration.
 func (p Plugin) Generation() (pluginmeta.Generation, bool) {
 	return p.generation, p.generation.API() != ""
+}
+
+// GenerationPackagePath returns the canonical module-relative path of the
+// validated generation package. This CLI-only provenance is not extension
+// input.
+func (p Plugin) GenerationPackagePath() (string, bool) {
+	return p.generationPackagePath, p.generationPackagePath != ""
 }
 
 // ManifestData returns a defensive copy of the validated plugin.yaml snapshot.
@@ -104,6 +116,7 @@ func Scan(rootPath string) (result Index, indexErr error) {
 
 	discovered := directories.Directories()
 	plugins := make([]Plugin, 0, len(discovered))
+	generationPackages := make([]generationPackageSnapshot, 0, len(discovered))
 	ids := make(map[string]string, len(discovered))
 	for _, directory := range discovered {
 		markerPath := path.Join(directory.Path(), "plugin.yaml")
@@ -116,18 +129,28 @@ func Scan(rootPath string) (result Index, indexErr error) {
 			return Index{}, fmt.Errorf("%w: %s: %w", ErrIndex, markerPath, err)
 		}
 		id := metadata.ID()
-		generation, _ := metadata.Generation()
 		if previous, duplicate := ids[id]; duplicate {
 			return Index{}, fmt.Errorf("%w: %w %q in %s and %s", ErrIndex, ErrDuplicateID, id, previous, directory.Path())
 		}
+		generation, hasGeneration := metadata.Generation()
+		var generationPackagePath string
+		if hasGeneration {
+			snapshot, err := inspectGenerationPackage(root, id, directory.Path(), generation)
+			if err != nil {
+				return Index{}, fmt.Errorf("%w: %s: %w", ErrIndex, markerPath, err)
+			}
+			generationPackagePath = snapshot.modulePath
+			generationPackages = append(generationPackages, snapshot)
+		}
 		ids[id] = directory.Path()
 		plugins = append(plugins, Plugin{
-			name:       directory.Name(),
-			path:       directory.Path(),
-			id:         id,
-			provides:   metadata.Provides(),
-			generation: generation,
-			manifest:   append([]byte(nil), data...),
+			name:                  directory.Name(),
+			path:                  directory.Path(),
+			id:                    id,
+			provides:              metadata.Provides(),
+			generation:            generation,
+			generationPackagePath: generationPackagePath,
+			manifest:              append([]byte(nil), data...),
 		})
 	}
 	after, err := pluginscan.ScanRoot(rootPath)
@@ -137,7 +160,75 @@ func Scan(rootPath string) (result Index, indexErr error) {
 	if !sameDirectories(discovered, after.Directories()) {
 		return Index{}, fmt.Errorf("%w: %w: local plugin inventory changed", ErrIndex, ErrConcurrentChange)
 	}
+	for _, before := range generationPackages {
+		after, err := inspectGenerationPackage(root, before.pluginID, before.pluginPath, before.declaration)
+		if err != nil {
+			return Index{}, fmt.Errorf("%w: %w: generation package changed while indexing: %w", ErrIndex, ErrConcurrentChange, err)
+		}
+		if !sameGenerationPackage(before, after) {
+			return Index{}, fmt.Errorf("%w: %w: generation package %s for plugin %q changed while indexing", ErrIndex, ErrConcurrentChange, before.modulePath, before.pluginID)
+		}
+	}
 	return Index{plugins: plugins}, nil
+}
+
+type generationPackageSnapshot struct {
+	pluginID    string
+	pluginPath  string
+	declaration pluginmeta.Generation
+	modulePath  string
+	components  []generationPackageComponent
+}
+
+type generationPackageComponent struct {
+	path string
+	info fs.FileInfo
+}
+
+type lstatFS interface {
+	Lstat(name string) (fs.FileInfo, error)
+}
+
+func inspectGenerationPackage(source lstatFS, pluginID, pluginPath string, generation pluginmeta.Generation) (generationPackageSnapshot, error) {
+	modulePath := path.Join(pluginPath, strings.TrimPrefix(generation.Package(), "./"))
+	parts := strings.Split(modulePath, "/")
+	components := make([]generationPackageComponent, 0, len(parts))
+	for index := range parts {
+		componentPath := path.Join(parts[:index+1]...)
+		info, err := source.Lstat(componentPath)
+		if errors.Is(err, fs.ErrNotExist) {
+			return generationPackageSnapshot{}, fmt.Errorf("%w: plugin %q generation.package %q resolves to %s, but path component %s does not exist", ErrInvalidGenerationPackage, pluginID, generation.Package(), modulePath, componentPath)
+		}
+		if err != nil {
+			return generationPackageSnapshot{}, fmt.Errorf("%w: plugin %q generation.package %q cannot inspect path component %s: %w", ErrInvalidGenerationPackage, pluginID, generation.Package(), componentPath, err)
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return generationPackageSnapshot{}, fmt.Errorf("%w: plugin %q generation.package %q resolves through symbolic path component %s", ErrInvalidGenerationPackage, pluginID, generation.Package(), componentPath)
+		}
+		if !info.IsDir() {
+			return generationPackageSnapshot{}, fmt.Errorf("%w: plugin %q generation.package %q resolves through non-directory path component %s", ErrInvalidGenerationPackage, pluginID, generation.Package(), componentPath)
+		}
+		components = append(components, generationPackageComponent{path: componentPath, info: info})
+	}
+	return generationPackageSnapshot{
+		pluginID:    pluginID,
+		pluginPath:  pluginPath,
+		declaration: generation,
+		modulePath:  modulePath,
+		components:  components,
+	}, nil
+}
+
+func sameGenerationPackage(left, right generationPackageSnapshot) bool {
+	if left.pluginID != right.pluginID || left.pluginPath != right.pluginPath || left.modulePath != right.modulePath || len(left.components) != len(right.components) {
+		return false
+	}
+	for index := range left.components {
+		if left.components[index].path != right.components[index].path || !sameFileState(left.components[index].info, right.components[index].info) {
+			return false
+		}
+	}
+	return true
 }
 
 func readStableMarker(root *os.Root, markerPath string) ([]byte, error) {
