@@ -1,69 +1,129 @@
 # Plystra CLI
 
-`github.com/plystra/cli` builds the user-installed `plystra` command. The CLI owns project creation, plugin and capability authoring, deterministic generation, static assembly, validation, development, testing, building, and release preparation.
+`github.com/plystra/cli` builds the user-installed `plystra` command. It is the developer, resolution, generation, assembly, validation, build, test, and delivery half of Plystra Core.
 
-The CLI is a separate Go Module from `github.com/plystra/kernel`. It completes build-time work and emits source targeting the Kernel's versioned assembly API; it is not a second runtime.
+The CLI is a separate Go Module from `github.com/plystra/kernel`. It completes build-time work and emits deterministic Go and JavaScript source targeting the Kernel's versioned assembly API; it is not a second runtime.
 
-Generated assembly source imports `github.com/plystra/kernel/assembly`, declares `assembly.V1`, and validates that exact contract before runtime registration. This compile-time import also keeps the Kernel dependency visible to ordinary Go tooling.
+## Ownership
 
-New project trees are populated and validated in a same-parent staging directory before a final rename. Failed population and validation remove the staged tree, and an existing or concurrently created target is preserved.
+The CLI owns:
 
-In-place CLI mutations use sorted same-root staged replacements and backups. Paths that traverse symbolic links are rejected, existing files are checked again for concurrent edits, and validation failures or panics restore original bytes and modes before temporary state is removed. If a file changes again during validation, the user edit is preserved and the original backup location is reported for recovery.
+- Go Module, Plugin, and Capability creation.
+- Root-level plugin and intended dependency-module scanning.
+- The complete normalized application model.
+- Official and intrinsic Capability discovery.
+- Exact requirement closure and ordinary provider resolution.
+- Plugin-provided build-time rule discovery and validation.
+- Generation-derived Capability requirements.
+- Deterministic structured contribution validation and merging.
+- Contracts, clients, providers, configuration, application invocation, adapters, assembly, bootstrap, JavaScript SDKs, documentation, and manifests.
+- Transactional mutation, generated consistency, development, testing, building, and release preparation.
 
-Commands invoked below a module root resolve the real working directory and use the nearest enclosing regular `go.mod`; nested modules do not leak mutations into an outer module.
+The CLI is the sole writer of final `generated/` source.
 
-Plugin-target inference indexes strict bounded metadata envelopes from root-level `plugin.yaml` files, including deterministic exact provided-capability identities. Full manifest and schema validation remains owned by the Kernel parser. Targeting resolves, in order, an explicit directory or Plugin ID, the enclosing plugin, the only local plugin, or an interactive numeric selection. Multiple plugins fail with an actionable `--plugin` diagnostic whenever no terminal selector is available.
+## Resolution and generation fixed point
 
-Capability-reference parsing accepts only canonical lower-case dotted names such as `account.register`, optionally followed by an exact positive major version such as `/v2`. Inputs are rejected instead of normalized, including leading-zero versions and identifiers outside the unsigned 64-bit range.
+The CLI derives one statically resolved application from local plugins, explicit public exposure, generated client use, non-inferable declared requirements, namespaced build-time metadata, selected plugin rules, and explicit provider choices only when several ordinary providers exist.
 
-Capability-version planning creates `v1` when no matching capability is visible and otherwise chooses one above the highest visible major without filling gaps. Exact existing versions become implementation plans; explicit older or skipped versions require confirmation; and exhausting the unsigned 64-bit major range fails instead of wrapping.
+Reserved `kernel.*` Capabilities are always available outside ordinary provider selection. Ordinary providers are never chosen by priority, official status, discovery order, or filesystem order.
 
-Local capability-creation planning uses one immutable module plugin snapshot to combine target inference, visible declared versions, and the version decision. It retains every local provider of the source version in deterministic directory order so schema equality can be enforced before any later mutation chooses bytes to copy.
+Rule-derived requirements participate in the same transitive fixed point. A missing provider, unclaimed metadata namespace, ambiguous rule owner, rule cycle, incompatible contribution, or provider ambiguity fails before the CLI writes a runnable artifact.
 
-Capability-source identity parsing reads bounded single-document `capability.yaml` envelopes, rejects references, duplicate or unknown top-level keys, and non-canonical exact IDs, and leaves full request, response, error, and compatibility validation to the Kernel contract parser.
+## Plugin-provided build-time rules
 
-Local capability sources load only from the exact conventional path below a plugin. Symbolic or non-regular path components, oversized files, replacement during the read, and a declared ID that differs from the expected capability all fail before source bytes are returned.
+Advanced infrastructure plugins may declare:
 
-Creation-plan source resolution loads every local provider of the selected source version in deterministic plugin order, normalizes every schema, and returns no partial set. Non-semantic source differences are accepted; meaningful conflicts fail with both plugin and source locations, deterministic schema paths and values, and corrective guidance.
-
-Capability-source schema normalization produces the deterministic Kernel-compatible wire projection used for provider comparison. It ignores descriptions, formatting, mapping order, enum order, error order, and explicit false defaults while preserving identity, field, type, required, item, enum, and error semantics; full contract ownership remains with Kernel.
-
-Validated schemas can be retargeted when a new capability version copies the highest visible version. Existing-version copies preserve exact bytes; new-version copies update only the top-level identity through the YAML syntax tree, normalize line endings deterministically, and preserve comments and human descriptions.
-
-Capability schema-write rendering is non-mutating and produces one guarded, module-relative `capability.yaml` write. First versions receive a complete empty wire schema; later versions use the validated deterministic source snapshot, and existing target files or version directories are never eligible for replacement.
-
-Plugin capability declarations are updated idempotently through the YAML syntax tree. New `provides` entries are canonical and sorted while plugin identity, requirements, opaque configuration, and comments are preserved; an already declared capability returns the exact original bytes.
-
-Plugin indexing retains the exact validated `plugin.yaml` bytes as an immutable snapshot. Target inference carries that snapshot into compound authoring plans, so later render steps use one coherent scan rather than rereading mutable manifest state.
-
-Capability plans render `plugin.yaml` replacements directly from that retained snapshot. The replacement preserves the existing file mode, requires the source bytes to remain unchanged, and is omitted when the target capability is already declared.
-
-Atomic file writes can require an exact existing source snapshot. A missing or edited source fails before staging and validation, preventing a compound authoring transaction from overwriting user changes made after planning.
-
-Capability schema and manifest declarations are committed through one atomic file transaction. The updated plugin index and target schema are validated together, retained source schemas are rechecked before commit, and any failure restores both declarations while preserving unrelated concurrent edits.
-
-Go contract rendering derives one deterministic version-specific package under `generated/go/contracts/<capability name segments>/vN`. It emits request and response structs with presence-preserving optional pointers, typed scalar enums, semantic error codes, stable JSON names, and collision diagnostics before any generated file is written.
-
-Go provider-interface rendering derives a matching package under `generated/go/providers/<capability name segments>/vN`. It emits one capability operation method over `context.Context` and the exact generated request and response types, importing no concrete provider or Kernel runtime implementation.
-
-Go capability-client rendering derives a matching package under `generated/go/clients/<capability name segments>/vN`. Each client is bound by generated assembly to an opaque caller-scoped Kernel `invocation.Handle`; its named operation and availability check delegate only through governed capability dispatch and never import a concrete provider.
-
-## Current commands
-
-```text
-plystra help
-plystra version
-plystra new <module-path> [--library] [--plugin <name>]
-plystra plugin create <name>
+```yaml
+generation:
+  api: v1
+  package: ./generation
+  rules:
+    - authn.authenticated
 ```
 
-`plystra new github.com/acme/my-app` creates a zero-local-plugin runnable module in `my-app/`. It pins the compatible Kernel, resolves checksums with standard Go tooling, emits the assembly API handshake and project policy files, and runs `go test ./...` before the staged directory is committed.
+The CLI loads the confined package only during resolution or generation. It supplies a filtered read-only normalized model containing public declarations, exact schemas, extension metadata, requirements, provider mappings, exposure, and only explicitly build-visible structure. Secret values, the unrestricted environment, private runtime configuration, writable user source, and final generated paths are excluded.
 
-`plystra new github.com/acme/email --library` creates the same validated Go Module foundation without `plystra.yaml`. The resulting module is distributable and testable but non-runnable; development commands can provide a temporary host when runtime behavior is needed.
+Rules return protocol-defined exact requirements, diagnostics, structured operations, and dependency edges at:
 
-Add `--plugin account` to either form to create and validate the initial root-level plugin inside the same outer project transaction. `plystra new github.com/acme/email --library --plugin smtp` therefore leaves either the complete library-plus-plugin module or no target directory at all.
+```text
+http.ingress
+invocation.prepare
+invocation.complete
+http.egress
+```
 
-`plystra plugin create account` finds the nearest enclosing Go Module, derives a host- and major-version-independent Plugin ID such as `acme.my-app.account`, and transactionally creates the root-level plugin, manifest, constructor test, configuration type, assembly binding, and plugin documentation. It runs the module tests with read-only module metadata and restores every created path if validation fails.
+They cannot patch arbitrary text, write source, choose providers, mutate another plugin, or own final generated files. The CLI validates duplicate IDs, missing dependencies, cycles, incompatible outputs, and contradictory failure behavior. Semantic order comes from declared dependencies; stable sorting affects bytes only when operations are already order-independent.
+
+Rule inputs, outputs, dependency graphs, contribution digests, and final results enter the generated manifest without Secret values. `plystra generate --check` recomputes them, and removing a plugin or metadata match removes obsolete output.
+
+## Generated application invocation
+
+Every ordinary external or cross-plugin call uses generated code:
+
+```text
+generated adapter or Capability client
+-> selected plugin rule contributions
+-> Kernel exact dispatch
+-> selected provider
+```
+
+For `extensions.authn.authenticated: true`, an AuthN rule adds `authn.session.verify/v1` and generated verification before target dispatch. For `extensions.authz.permission`, an AuthZ rule adds `authz.check/v1`, generates the decision using permission and Space/resource data, and rejects denial. These are static application calls, not Kernel behavior.
+
+## Method-specific login surfaces
+
+Authentication methods use real contracts such as:
+
+```text
+authn.login.password/v1
+authn.login.passkey/v1
+authn.login.oidc.begin/v1
+authn.login.oidc.complete/v1
+```
+
+When exactly one login method is resolved and explicitly exposed, generated HTTP and JavaScript surfaces may add the application-local `authn.login/v1` alias with that method's exact contract. The alias is not a canonical Capability, Kernel registry entry, provider requirement, or distributed contract. Several methods produce no implicit alias.
+
+## Transaction safety
+
+New project trees are populated and validated in a same-parent staging directory before rename. In-place changes use same-filesystem staged replacements and backups, reject unsafe symbolic traversal, recheck source snapshots, preserve concurrent user edits, and restore original bytes and modes after validation failure or panic.
+
+Commands below a module root use the nearest real enclosing `go.mod`; nested modules do not leak mutations into an outer module. The Module Cache remains read-only.
+
+## Authoring behavior
+
+Plugin-target inference resolves an explicit target, the enclosing plugin, the only local plugin, an interactive choice, or an actionable non-interactive ambiguity error.
+
+Capability creation and implementation update schemas, `plugin.yaml`, generated contracts, providers, clients, application invocation, adapters, assembly, SDKs, docs, and manifests in one transaction. Existing user implementations are never overwritten.
+
+## Public command surface
+
+The intended command set includes:
+
+```text
+plystra new
+plystra add
+plystra remove
+plystra update
+plystra plugin create
+plystra capability create
+plystra capability implement
+plystra capability expose
+plystra capability require
+plystra use
+plystra dev
+plystra test
+plystra build
+plystra check
+plystra fix
+plystra generate
+plystra generate --check
+plystra doctor
+plystra sdk link
+plystra sdk pack
+plystra sdk publish
+plystra release
+```
+
+Mutating commands perform all derivable generation automatically. Build and generation never publish or release as a side effect.
 
 ## Development
 
