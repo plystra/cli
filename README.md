@@ -18,6 +18,8 @@ Capability-reference parsing accepts only canonical lower-case dotted names such
 
 Capability-version planning creates `v1` when no matching capability is visible and otherwise chooses one above the highest visible major without filling gaps. Exact existing versions become implementation plans; explicit older or skipped versions require confirmation; and exhausting the unsigned 64-bit major range fails instead of wrapping.
 
+Local capability-creation planning uses one immutable module plugin snapshot to combine target inference, visible declared versions, and the version decision. It retains every local provider of the source version in deterministic directory order so schema equality can be enforced before any later mutation chooses bytes to copy.
+
 ## Current commands
 
 ```text

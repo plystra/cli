@@ -64,6 +64,18 @@ func Infer(options Options) (Target, error) {
 	if err != nil {
 		return Target{}, fmt.Errorf("%w: %w", ErrInfer, err)
 	}
+	return InferIndexed(options, module, index)
+}
+
+// InferIndexed selects a target from one already validated module and immutable
+// plugin snapshot. It lets compound authoring plans avoid inconsistent rescans.
+func InferIndexed(options Options, module modulelocate.Module, index pluginindex.Index) (Target, error) {
+	if module.Path() == "" {
+		return Target{}, fmt.Errorf("%w: module root is empty", ErrInfer)
+	}
+	if options.Start == "" {
+		return Target{}, fmt.Errorf("%w: start path is empty", ErrInfer)
+	}
 	if options.Explicit != "" {
 		plugin, ok := index.ByReference(options.Explicit)
 		if !ok {
