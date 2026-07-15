@@ -19,7 +19,7 @@ func TestRunHelp(t *testing.T) {
 			if exitCode := command.Run(arguments, &stdout, &stderr); exitCode != 0 {
 				t.Fatalf("Run(%q) exit code = %d, want 0", arguments, exitCode)
 			}
-			const want = "Usage:\n  plystra help\n  plystra version\n"
+			const want = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path>\n"
 			if stdout.String() != want {
 				t.Fatalf("Run(%q) stdout = %q, want %q", arguments, stdout.String(), want)
 			}
@@ -60,9 +60,11 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		arguments []string
 		wantError string
 	}{
-		{name: "unknown", arguments: []string{"unknown"}, wantError: "unknown command \"unknown\"\n\nUsage:\n  plystra help\n  plystra version\n"},
+		{name: "unknown", arguments: []string{"unknown"}, wantError: "unknown command \"unknown\"\n\nUsage:\n  plystra help\n  plystra version\n  plystra new <module-path>\n"},
 		{name: "help arguments", arguments: []string{"help", "extra"}, wantError: "help does not accept arguments\n"},
 		{name: "version arguments", arguments: []string{"version", "extra"}, wantError: "version does not accept arguments\n"},
+		{name: "new missing module", arguments: []string{"new"}, wantError: "usage: plystra new <module-path>\n"},
+		{name: "new extra argument", arguments: []string{"new", "example.com/app", "extra"}, wantError: "usage: plystra new <module-path>\n"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

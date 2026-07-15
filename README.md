@@ -13,7 +13,10 @@ New project trees are populated and validated in a same-parent staging directory
 ```text
 plystra help
 plystra version
+plystra new <module-path>
 ```
+
+`plystra new github.com/acme/my-app` creates a zero-local-plugin runnable module in `my-app/`. It pins the compatible Kernel, resolves checksums with standard Go tooling, emits the assembly API handshake and project policy files, and runs `go test ./...` before the staged directory is committed.
 
 ## Development
 
