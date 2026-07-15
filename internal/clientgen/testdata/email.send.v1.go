@@ -19,8 +19,8 @@ func New(handle invocation.Handle[contract.Request, contract.Response]) Client {
 	return Client{handle: handle}
 }
 
-// Available reports whether assembly selected a provider for this capability.
-func (c Client) Available() bool {
+// Available reports whether assembly selected a provider for this client.
+func Available(c Client) bool {
 	return c.handle.Available()
 }
 

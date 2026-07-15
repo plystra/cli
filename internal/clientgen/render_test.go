@@ -82,6 +82,30 @@ func TestRenderDerivesOperationNameAndVersionedImport(t *testing.T) {
 	}
 }
 
+func TestRenderAvoidsAvailableOperationCollision(t *testing.T) {
+	t.Parallel()
+
+	schema := []byte("id: status.available/v1\n")
+	file, err := clientgen.Render(testModulePath, schema)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	got := strings.Join(strings.Fields(string(file.Data())), " ")
+	for _, required := range []string{
+		`func Available(c Client) bool`,
+		`func (c Client) Available(ctx context.Context, request contract.Request) (contract.Response, error)`,
+	} {
+		if !strings.Contains(got, required) {
+			t.Fatalf("generated client does not contain %q:\n%s", required, file.Data())
+		}
+	}
+	contract, err := contractgen.Render(schema)
+	if err != nil {
+		t.Fatalf("Render contract: %v", err)
+	}
+	assertGeneratedModuleCompiles(t, contract, file)
+}
+
 func TestRenderIgnoresNonSemanticSourceDifferences(t *testing.T) {
 	t.Parallel()
 
