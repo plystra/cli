@@ -24,7 +24,7 @@ Capability-source identity parsing reads bounded single-document `capability.yam
 
 Local capability sources load only from the exact conventional path below a plugin. Symbolic or non-regular path components, oversized files, replacement during the read, and a declared ID that differs from the expected capability all fail before source bytes are returned.
 
-Creation-plan source resolution loads every local provider of the selected source version in deterministic plugin order and returns no partial set. Formatting differences remain accepted at this stage so only semantic normalization, not raw bytes, can decide cross-provider schema equality.
+Creation-plan source resolution loads every local provider of the selected source version in deterministic plugin order, normalizes every schema, and returns no partial set. Non-semantic source differences are accepted; meaningful conflicts fail with both plugin and source locations, deterministic schema paths and values, and corrective guidance.
 
 Capability-source schema normalization produces the deterministic Kernel-compatible wire projection used for provider comparison. It ignores descriptions, formatting, mapping order, enum order, error order, and explicit false defaults while preserving identity, field, type, required, item, enum, and error semantics; full contract ownership remains with Kernel.
 

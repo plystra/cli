@@ -1,9 +1,11 @@
 package capabilitycreate
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
+	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/capabilitysource"
 )
 
@@ -11,7 +13,7 @@ import (
 // be loaded coherently.
 var ErrResolveSources = errors.New("resolve local capability sources")
 
-// ResolvedSource binds one planned provider to its identity-checked source.
+// ResolvedSource binds one planned provider to its schema-validated source.
 type ResolvedSource struct {
 	provider Provider
 	source   capabilitysource.Source
@@ -23,8 +25,9 @@ func (s ResolvedSource) Provider() Provider { return s.provider }
 // Source returns the immutable loaded capability declaration.
 func (s ResolvedSource) Source() capabilitysource.Source { return s.source }
 
-// ResolveSources loads every local provider candidate for the plan's source
-// version. It returns no partial result when any declaration is unavailable.
+// ResolveSources loads and semantically compares every local provider candidate
+// for the plan's source version. It returns no partial result when any
+// declaration is unavailable, invalid, or inconsistent.
 func ResolveSources(plan Plan) ([]ResolvedSource, error) {
 	if plan.Target().ID() == "" || plan.Version().Target().String() == "" {
 		return nil, fmt.Errorf("%w: plan is empty", ErrResolveSources)
@@ -42,6 +45,7 @@ func ResolveSources(plan Plan) ([]ResolvedSource, error) {
 	}
 
 	resolved := make([]ResolvedSource, 0, len(providers))
+	var baselineSchema []byte
 	for _, provider := range providers {
 		if provider.Capability() != sourceID {
 			return nil, fmt.Errorf("%w: provider %s declares %s, expected %s", ErrResolveSources, provider.PluginID(), provider.Capability(), sourceID)
@@ -50,7 +54,21 @@ func ResolveSources(plan Plan) ([]ResolvedSource, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: provider %s: %w", ErrResolveSources, provider.PluginID(), err)
 		}
-		resolved = append(resolved, ResolvedSource{provider: provider, source: source})
+		canonical, err := capabilitymeta.NormalizeSchema(source.Data())
+		if err != nil {
+			return nil, fmt.Errorf("%w: provider %s source %s: %w", ErrResolveSources, provider.PluginID(), source.Path(), err)
+		}
+		candidate := ResolvedSource{provider: provider, source: source}
+		if len(resolved) == 0 {
+			baselineSchema = canonical
+		} else if !bytes.Equal(baselineSchema, canonical) {
+			conflict, err := newSchemaConflict(resolved[0], baselineSchema, candidate, canonical)
+			if err != nil {
+				return nil, fmt.Errorf("%w: compare provider schemas: %w", ErrResolveSources, err)
+			}
+			return nil, fmt.Errorf("%w: %w", ErrResolveSources, conflict)
+		}
+		resolved = append(resolved, candidate)
 	}
 	return resolved, nil
 }
