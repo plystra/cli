@@ -6,6 +6,8 @@ The CLI is a separate Go Module from `github.com/plystra/kernel`. It completes b
 
 Generated assembly source imports `github.com/plystra/kernel/assembly`, declares `assembly.V1`, and validates that exact contract before runtime registration. This compile-time import also keeps the Kernel dependency visible to ordinary Go tooling.
 
+New project trees are populated and validated in a same-parent staging directory before a final rename. Failed population and validation remove the staged tree, and an existing or concurrently created target is preserved.
+
 ## Current commands
 
 ```text
