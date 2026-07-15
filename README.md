@@ -22,6 +22,8 @@ Local capability-creation planning uses one immutable module plugin snapshot to 
 
 Capability-source identity parsing reads bounded single-document `capability.yaml` envelopes, rejects references, duplicate or unknown top-level keys, and non-canonical exact IDs, and leaves full request, response, error, and compatibility validation to the Kernel contract parser.
 
+Local capability sources load only from the exact conventional path below a plugin. Symbolic or non-regular path components, oversized files, replacement during the read, and a declared ID that differs from the expected capability all fail before source bytes are returned.
+
 ## Current commands
 
 ```text
