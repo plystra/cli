@@ -32,6 +32,8 @@ Validated schemas can be retargeted when a new capability version copies the hig
 
 Capability schema-write rendering is non-mutating and produces one guarded, module-relative `capability.yaml` write. First versions receive a complete empty wire schema; later versions use the validated deterministic source snapshot, and existing target files or version directories are never eligible for replacement.
 
+Plugin capability declarations are updated idempotently through the YAML syntax tree. New `provides` entries are canonical and sorted while plugin identity, requirements, opaque configuration, and comments are preserved; an already declared capability returns the exact original bytes.
+
 ## Current commands
 
 ```text

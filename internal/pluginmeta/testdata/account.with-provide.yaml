@@ -1,0 +1,10 @@
+# Account plugin.
+
+id: acme.app.account # Stable identity.
+provides:
+  - account.register/v1 # Account API.
+  - audit.export/v1
+  - profile.get/v2 # Profile API.
+requires: [audit.write/v1]
+config:
+  token: {type: secret} # Runtime secret.

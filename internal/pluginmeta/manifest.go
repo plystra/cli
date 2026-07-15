@@ -1,4 +1,4 @@
-// Package pluginmeta reads the bounded indexing envelope of plugin.yaml.
+// Package pluginmeta reads and updates the bounded indexing envelope of plugin.yaml.
 package pluginmeta
 
 import (
@@ -37,28 +37,8 @@ func (m Manifest) Provides() []capabilityid.Identifier {
 // Parse returns the strict top-level identity and capability declarations from
 // one plugin.yaml document. Configuration contents are intentionally opaque.
 func Parse(data []byte) (Manifest, error) {
-	if len(data) == 0 {
-		return Manifest{}, invalid("document is empty")
-	}
-	if len(data) > MaximumSize {
-		return Manifest{}, invalid("document exceeds %d bytes", MaximumSize)
-	}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	var document yaml.Node
-	if err := decoder.Decode(&document); err != nil {
-		return Manifest{}, invalid("decode YAML: %v", err)
-	}
-	var trailing yaml.Node
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return Manifest{}, invalid("multiple YAML documents are not allowed")
-		}
-		return Manifest{}, invalid("decode trailing YAML: %v", err)
-	}
-	if document.Kind != yaml.DocumentNode || len(document.Content) != 1 {
-		return Manifest{}, invalid("expected one YAML document")
-	}
-	if err := rejectReferences(&document); err != nil {
+	document, err := decodeYAMLDocument(data)
+	if err != nil {
 		return Manifest{}, err
 	}
 	root := document.Content[0]
@@ -107,6 +87,34 @@ func Parse(data []byte) (Manifest, error) {
 		return Manifest{}, err
 	}
 	return Manifest{id: idNode.Value, provides: provides}, nil
+}
+
+func decodeYAMLDocument(data []byte) (*yaml.Node, error) {
+	if len(data) == 0 {
+		return nil, invalid("document is empty")
+	}
+	if len(data) > MaximumSize {
+		return nil, invalid("document exceeds %d bytes", MaximumSize)
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var document yaml.Node
+	if err := decoder.Decode(&document); err != nil {
+		return nil, invalid("decode YAML: %v", err)
+	}
+	var trailing yaml.Node
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return nil, invalid("multiple YAML documents are not allowed")
+		}
+		return nil, invalid("decode trailing YAML: %v", err)
+	}
+	if document.Kind != yaml.DocumentNode || len(document.Content) != 1 {
+		return nil, invalid("expected one YAML document")
+	}
+	if err := rejectReferences(&document); err != nil {
+		return nil, err
+	}
+	return &document, nil
 }
 
 func parseCapabilities(field string, node *yaml.Node) ([]capabilityid.Identifier, error) {
