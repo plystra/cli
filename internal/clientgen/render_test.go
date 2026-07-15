@@ -82,6 +82,19 @@ func TestRenderDerivesOperationNameAndVersionedImport(t *testing.T) {
 	}
 }
 
+func TestRenderDerivesHierarchicalCapabilityPath(t *testing.T) {
+	t.Parallel()
+
+	file, err := clientgen.Render(testModulePath, []byte("id: authn.login.oidc.complete/v1\n"))
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	got := strings.Join(strings.Fields(string(file.Data())), " ")
+	if file.Path() != "generated/go/clients/authn/login/oidc/complete/v1/client_gen.go" || file.PackageName() != "authnloginoidccompletev1" || !strings.Contains(got, `func (c Client) Complete(ctx context.Context, request contract.Request) (contract.Response, error)`) {
+		t.Fatalf("hierarchical generated file = path %q, package %q\n%s", file.Path(), file.PackageName(), file.Data())
+	}
+}
+
 func TestRenderAvoidsAvailableOperationCollision(t *testing.T) {
 	t.Parallel()
 
@@ -145,7 +158,7 @@ func TestRenderRejectsInvalidInputs(t *testing.T) {
 }
 
 func FuzzRender(f *testing.F) {
-	for _, seed := range []string{emailSendSchema, "id: kernel.health/v1\n", "[]\n", "id: &x example.call/v1\ndescription: *x\n"} {
+	for _, seed := range []string{emailSendSchema, "id: kernel.health/v1\n", "id: workflow.retry--now-/v2\n", "[]\n", "id: &x example.call/v1\ndescription: *x\n"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, input string) {

@@ -18,6 +18,8 @@ func TestCapabilityNames(t *testing.T) {
 		{identifier: "email.send/v1", packageName: "emailsendv1", operation: "Send"},
 		{identifier: "workspace.invite-member/v2", packageName: "workspaceinvitememberv2", operation: "InviteMember"},
 		{identifier: "account.lookup-by-id/v12", packageName: "accountlookupbyidv12", operation: "LookupByID"},
+		{identifier: "authn.login.oidc.complete/v1", packageName: "authnloginoidccompletev1", operation: "Complete"},
+		{identifier: "workflow.retry--now-/v2", packageName: "workflowretrynowv2", operation: "RetryNow"},
 		{identifier: "gateway.send-http/v18446744073709551615", packageName: "gatewaysendhttpv18446744073709551615", operation: "SendHTTP"},
 	}
 	for _, test := range tests {

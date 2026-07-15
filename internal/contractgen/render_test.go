@@ -89,6 +89,19 @@ response: {}
 	assertGeneratedCompiles(t, file)
 }
 
+func TestRenderDerivesHierarchicalCapabilityPath(t *testing.T) {
+	t.Parallel()
+
+	file, err := contractgen.Render([]byte("id: authn.login.oidc.complete/v1\n"))
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if file.Path() != "generated/go/contracts/authn/login/oidc/complete/v1/contract_gen.go" || file.PackageName() != "authnloginoidccompletev1" || !bytes.Contains(file.Data(), []byte(`const CapabilityID = "authn.login.oidc.complete/v1"`)) {
+		t.Fatalf("hierarchical generated file = path %q, package %q\n%s", file.Path(), file.PackageName(), file.Data())
+	}
+	assertGeneratedCompiles(t, file)
+}
+
 func TestRenderDisambiguatesEnumValueNames(t *testing.T) {
 	t.Parallel()
 
@@ -147,7 +160,7 @@ func TestRenderRejectsInvalidSchemaAndGoNameCollisions(t *testing.T) {
 }
 
 func FuzzRender(f *testing.F) {
-	for _, seed := range []string{emailSendSchema, "id: kernel.health/v1\n", "[]\n", "id: &x example.call/v1\ndescription: *x\n"} {
+	for _, seed := range []string{emailSendSchema, "id: kernel.health/v1\n", "id: workflow.retry--now-/v2\n", "[]\n", "id: &x example.call/v1\ndescription: *x\n"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, input string) {

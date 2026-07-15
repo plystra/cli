@@ -17,6 +17,10 @@ func TestParseExactIdentifiers(t *testing.T) {
 	}{
 		{value: "email.send/v1", name: "email.send", major: 1},
 		{value: "workspace.invite-member/v12", name: "workspace.invite-member", major: 12},
+		{value: "authn.login.password/v1", name: "authn.login.password", major: 1},
+		{value: "authn.login.oidc.complete/v1", name: "authn.login.oidc.complete", major: 1},
+		{value: "authn.passkey.challenge.create/v1", name: "authn.passkey.challenge.create", major: 1},
+		{value: "workflow.retry--now-/v2", name: "workflow.retry--now-", major: 2},
 		{value: "storage.object.put/v18446744073709551615", name: "storage.object.put", major: ^uint64(0)},
 	}
 	for _, test := range tests {
@@ -70,8 +74,8 @@ func TestParsersRejectNonCanonicalValues(t *testing.T) {
 		"email_send",
 		"email..send",
 		"email.-send",
-		"email.send-",
-		"email.send--now",
+		"email.1send",
+		"email.send_",
 		" email.send",
 		"email.send ",
 		"邮件.send",
@@ -119,7 +123,7 @@ func TestNewAndZeroValues(t *testing.T) {
 }
 
 func FuzzParse(f *testing.F) {
-	for _, seed := range []string{"email.send/v1", "workspace.invite-member/v12", "bad", "email.send/v0", "邮件.send/v1"} {
+	for _, seed := range []string{"email.send/v1", "workspace.invite-member/v12", "authn.login.oidc.complete/v1", "workflow.retry--now-/v2", "bad", "email.send/v0", "邮件.send/v1"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, value string) {
@@ -141,7 +145,7 @@ func FuzzParse(f *testing.F) {
 }
 
 func FuzzParseReference(f *testing.F) {
-	for _, seed := range []string{"account.register", "account.register/v2", "bad", "account.register/v0", "账户.register"} {
+	for _, seed := range []string{"account.register", "account.register/v2", "authn.passkey.challenge.create", "workflow.retry--now-/v2", "bad", "account.register/v0", "账户.register"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, value string) {

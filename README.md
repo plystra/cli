@@ -92,6 +92,8 @@ Commands below a module root use the nearest real enclosing `go.mod`; nested mod
 
 Plugin-target inference resolves an explicit target, the enclosing plugin, the only local plugin, an interactive choice, or an actionable non-interactive ambiguity error.
 
+Capability identities use `<capability-name>/v<number>`. Names contain at least two dot-separated lower-case segments, may use any logical hierarchy depth, and never imply a fixed namespace/operation split.
+
 Capability creation and implementation update schemas, `plugin.yaml`, generated contracts, providers, clients, application invocation, adapters, assembly, SDKs, docs, and manifests in one transaction. Existing user implementations are never overwritten.
 
 ## Public command surface

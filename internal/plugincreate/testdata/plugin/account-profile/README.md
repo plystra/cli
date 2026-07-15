@@ -9,11 +9,11 @@ This is a root-level plugin in the `example.com/acme/my-app/v2` Go Module. Its d
 This plugin starts without capabilities. Add a custom capability with:
 
 ```text
-plystra capability create <namespace.operation>
+plystra capability create <capability-name>
 ```
 
 Implement an existing canonical capability with:
 
 ```text
-plystra capability implement <namespace.operation/vN>
+plystra capability implement <capability-name>/vN
 ```

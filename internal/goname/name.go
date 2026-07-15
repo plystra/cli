@@ -19,7 +19,9 @@ func Package(identifier capabilityid.Identifier) string {
 // final dotted segment.
 func Operation(identifier capabilityid.Identifier) string {
 	segments := strings.Split(identifier.Name(), ".")
-	words := strings.Split(segments[len(segments)-1], "-")
+	words := strings.FieldsFunc(segments[len(segments)-1], func(character rune) bool {
+		return character == '-'
+	})
 	for index := range words {
 		words[index] = ExportedWord(words[index])
 	}

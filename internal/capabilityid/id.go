@@ -33,7 +33,7 @@ func New(name string, major uint64) (Identifier, error) {
 func Parse(value string) (Identifier, error) {
 	name, version, ok := strings.Cut(value, "/")
 	if !ok || strings.Contains(version, "/") || len(version) < 2 || version[0] != 'v' {
-		return Identifier{}, invalid("expected <namespace>.<operation>/v<major>")
+		return Identifier{}, invalid("expected <capability-name>/v<major>")
 	}
 	if version[1] == '0' {
 		return Identifier{}, invalid("major version must not have a leading zero")
@@ -77,7 +77,7 @@ func ParseReference(value string) (Reference, error) {
 		return Reference(identifier), nil
 	}
 	if !validName(value) {
-		return Reference{}, invalid("expected <namespace>.<operation> with optional /v<major>")
+		return Reference{}, invalid("expected <capability-name> with optional /v<major>")
 	}
 	return Reference{name: value}, nil
 }
@@ -128,19 +128,13 @@ func validSegment(segment string) bool {
 	if segment == "" || segment[0] < 'a' || segment[0] > 'z' {
 		return false
 	}
-	previousHyphen := false
 	for index := 1; index < len(segment); index++ {
 		character := segment[index]
-		switch {
-		case character >= 'a' && character <= 'z', character >= '0' && character <= '9':
-			previousHyphen = false
-		case character == '-' && !previousHyphen:
-			previousHyphen = true
-		default:
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
 			return false
 		}
 	}
-	return !previousHyphen
+	return true
 }
 
 func invalid(message string) error {
