@@ -42,6 +42,8 @@ Atomic file writes can require an exact existing source snapshot. A missing or e
 
 Capability schema and manifest declarations are committed through one atomic file transaction. The updated plugin index and target schema are validated together, retained source schemas are rechecked before commit, and any failure restores both declarations while preserving unrelated concurrent edits.
 
+Go contract rendering derives one deterministic version-specific package under `generated/go/contracts/<capability name segments>/vN`. It emits request and response structs with presence-preserving optional pointers, typed scalar enums, semantic error codes, stable JSON names, and collision diagnostics before any generated file is written.
+
 ## Current commands
 
 ```text
