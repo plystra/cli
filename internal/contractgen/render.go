@@ -15,6 +15,7 @@ import (
 
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilitymeta"
+	"github.com/plystra/cli/internal/goname"
 )
 
 var (
@@ -103,7 +104,7 @@ func Render(schema []byte) (File, error) {
 		return File{}, fmt.Errorf("%w: %w", ErrRender, err)
 	}
 
-	packageName := generatedPackage(identifier)
+	packageName := goname.Package(identifier)
 	if !token.IsIdentifier(packageName) || token.Lookup(packageName).IsKeyword() {
 		return File{}, fmt.Errorf("%w: generated package %q is invalid", ErrRender, packageName)
 	}
@@ -333,29 +334,11 @@ func exportedName(value string) string {
 }
 
 func exportedWord(value string) string {
-	lower := strings.ToLower(value)
-	if _, ok := initialisms[lower]; ok {
-		return strings.ToUpper(lower)
-	}
-	return strings.ToUpper(value[:1]) + value[1:]
-}
-
-func generatedPackage(identifier capabilityid.Identifier) string {
-	name := strings.NewReplacer(".", "", "-", "").Replace(identifier.Name())
-	return name + "v" + strconv.FormatUint(identifier.Major(), 10)
+	return goname.ExportedWord(value)
 }
 
 func generatedPath(identifier capabilityid.Identifier) string {
 	components := append([]string{"generated", "go", "contracts"}, strings.Split(identifier.Name(), ".")...)
 	components = append(components, "v"+strconv.FormatUint(identifier.Major(), 10), "contract_gen.go")
 	return path.Join(components...)
-}
-
-var initialisms = map[string]struct{}{
-	"api": {}, "ascii": {}, "cpu": {}, "css": {}, "dns": {}, "eof": {},
-	"guid": {}, "html": {}, "http": {}, "https": {}, "id": {}, "ip": {},
-	"json": {}, "qps": {}, "ram": {}, "rpc": {}, "sla": {}, "smtp": {},
-	"sql": {}, "ssh": {}, "tcp": {}, "tls": {}, "ttl": {}, "udp": {},
-	"ui": {}, "uid": {}, "uri": {}, "url": {}, "utf8": {}, "uuid": {},
-	"vm": {}, "xml": {}, "xmpp": {}, "xsrf": {}, "xss": {},
 }

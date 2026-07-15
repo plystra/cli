@@ -44,6 +44,8 @@ Capability schema and manifest declarations are committed through one atomic fil
 
 Go contract rendering derives one deterministic version-specific package under `generated/go/contracts/<capability name segments>/vN`. It emits request and response structs with presence-preserving optional pointers, typed scalar enums, semantic error codes, stable JSON names, and collision diagnostics before any generated file is written.
 
+Go provider-interface rendering derives a matching package under `generated/go/providers/<capability name segments>/vN`. It emits one capability operation method over `context.Context` and the exact generated request and response types, importing no concrete provider or Kernel runtime implementation.
+
 ## Current commands
 
 ```text
