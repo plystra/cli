@@ -6,14 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/atomicfs"
+	"github.com/plystra/cli/internal/gocommand"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
@@ -23,8 +22,6 @@ const KernelVersion = "v0.1.0"
 
 // ErrCreate reports a project creation failure.
 var ErrCreate = errors.New("create Plystra project")
-
-var commandOutputURL = regexp.MustCompile(`(?i)\b(?:https?|file)://[^\s]+`)
 
 // Options contains the explicit inputs and process environment for creation.
 type Options struct {
@@ -82,7 +79,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 			return err
 		}
 		for _, arguments := range [][]string{{"mod", "download"}, {"mod", "tidy"}, {"test", "./..."}} {
-			if err := runGo(ctx, goCommand, environment, stagingRoot, arguments...); err != nil {
+			if err := gocommand.Run(ctx, gocommand.Options{Command: goCommand, Directory: stagingRoot, Environment: environment}, arguments...); err != nil {
 				return err
 			}
 		}
@@ -121,35 +118,6 @@ func populate(root, modulePath, name string) error {
 		}
 	}
 	return nil
-}
-
-func runGo(ctx context.Context, command string, environment []string, directory string, arguments ...string) error {
-	process := exec.CommandContext(ctx, command, arguments...)
-	process.Dir = directory
-	process.Env = append([]string(nil), environment...)
-	output, err := process.CombinedOutput()
-	if err == nil {
-		return nil
-	}
-	operation := "go " + strings.Join(arguments, " ")
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return fmt.Errorf("%s: %w", operation, ctxErr)
-	}
-	message := sanitizeCommandOutput(string(output), directory)
-	if message == "" {
-		return fmt.Errorf("%s: %w", operation, err)
-	}
-	if len(message) > 4096 {
-		message = message[:4096] + "..."
-	}
-	return fmt.Errorf("%s: %w: %s", operation, err, message)
-}
-
-func sanitizeCommandOutput(output, stagingRoot string) string {
-	message := strings.TrimSpace(output)
-	message = strings.ReplaceAll(message, stagingRoot, ".")
-	message = strings.ReplaceAll(message, filepath.ToSlash(stagingRoot), ".")
-	return commandOutputURL.ReplaceAllString(message, "<redacted-url>")
 }
 
 func verifyModule(root, modulePath string) error {
