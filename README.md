@@ -48,6 +48,14 @@ The CLI accepts only a supported generation API, a canonical plugin-relative pac
 
 The public v1 input contract is `github.com/plystra/cli/generation/v1`. It validates complete resolved state, exposes only defensive immutable views, canonically orders every collection and JSON-compatible metadata value, and provides stable SHA-256 input and contract digests. Its empty context is valid for applications with no plugins or extensions.
 
+Each compatible generation package exports exactly:
+
+```go
+func Generate(context generation.GenerationContext) (generation.Output, error)
+```
+
+The v1 output protocol carries exact generation-derived Capability requirements and structured diagnostics with rule, namespace, and source-Capability provenance. The CLI normalizes every result against the supplied context, rejects malformed, duplicate, inconsistent, or oversized output, and computes canonical output bytes and a stable SHA-256 digest before consuming any contribution.
+
 Rules return protocol-defined exact requirements, diagnostics, structured operations, and dependency edges at:
 
 ```text

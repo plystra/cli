@@ -8,6 +8,11 @@
 //
 // Generation extensions are trusted Go build dependencies. This package makes
 // supported inputs immutable and deterministic; it is not a security sandbox.
+// A generation package exposes this compile-time checked entry point:
+//
+//	func Generate(context generation.GenerationContext) (generation.Output, error)
+//
+// GenerateFunc captures that signature for CLI-generated helper programs.
 package generation
 
 // Version is the exact generation-extension API version implemented here.
