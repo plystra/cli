@@ -22,7 +22,7 @@ func TestWriteFilesCommitsAfterValidation(t *testing.T) {
 	validated := false
 	err := atomicfs.WriteFiles(root, []atomicfs.Write{
 		{Path: "nested/new.txt", Data: []byte("new"), Mode: 0o640, MustNotExist: true},
-		{Path: "existing.txt", Data: []byte("after")},
+		{Path: "existing.txt", Data: []byte("after"), ExpectedData: []byte("before")},
 	}, func(updatedRoot string) error {
 		validated = true
 		assertFile(t, filepath.Join(updatedRoot, "existing.txt"), "after")
@@ -46,6 +46,100 @@ func TestWriteFilesCommitsAfterValidation(t *testing.T) {
 		}
 	}
 	assertNoFileTransaction(t, root)
+}
+
+func TestWriteFilesRejectsStaleOrMissingExpectedSource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		setup    func(t *testing.T, root string)
+		expected []byte
+	}{
+		{
+			name: "stale",
+			setup: func(t *testing.T, root string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(root, "target.txt"), []byte("current"), 0o644); err != nil {
+					t.Fatalf("WriteFile: %v", err)
+				}
+			},
+			expected: []byte("planned"),
+		},
+		{name: "missing", setup: func(*testing.T, string) {}, expected: []byte{}},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			test.setup(t, root)
+			validated := false
+			err := atomicfs.WriteFiles(root, []atomicfs.Write{{Path: "target.txt", Data: []byte("replacement"), ExpectedData: test.expected}}, func(string) error {
+				validated = true
+				return nil
+			})
+			if !errors.Is(err, atomicfs.ErrWriteFiles) || !errors.Is(err, atomicfs.ErrConcurrentChange) {
+				t.Fatalf("WriteFiles error = %v", err)
+			}
+			if validated {
+				t.Fatal("validation ran after source snapshot precondition failed")
+			}
+			if test.name == "stale" {
+				assertFile(t, filepath.Join(root, "target.txt"), "current")
+			} else if _, err := os.Lstat(filepath.Join(root, "target.txt")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("missing target appeared: %v", err)
+			}
+			assertNoFileTransaction(t, root)
+		})
+	}
+}
+
+func TestWriteFilesAcceptsExpectedEmptySource(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	target := filepath.Join(root, "target.txt")
+	if err := os.WriteFile(target, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	err := atomicfs.WriteFiles(root, []atomicfs.Write{{Path: "target.txt", Data: []byte("replacement"), ExpectedData: []byte{}}}, func(string) error { return nil })
+	if err != nil {
+		t.Fatalf("WriteFiles: %v", err)
+	}
+	assertFile(t, target, "replacement")
+	assertNoFileTransaction(t, root)
+}
+
+func TestWriteFilesRejectsConflictingExistencePreconditions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		write atomicfs.Write
+	}{
+		{name: "target must not exist", write: atomicfs.Write{Path: "target.txt", Data: []byte("replacement"), MustNotExist: true, ExpectedData: []byte("before")}},
+		{name: "parent must not exist", write: atomicfs.Write{Path: "nested/target.txt", Data: []byte("replacement"), ParentMustNotExist: true, ExpectedData: []byte("before")}},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			validated := false
+			err := atomicfs.WriteFiles(root, []atomicfs.Write{test.write}, func(string) error {
+				validated = true
+				return nil
+			})
+			if !errors.Is(err, atomicfs.ErrWriteFiles) {
+				t.Fatalf("WriteFiles error = %v", err)
+			}
+			if validated {
+				t.Fatal("validation ran for conflicting preconditions")
+			}
+			assertNoFileTransaction(t, root)
+		})
+	}
 }
 
 func TestWriteFilesRequiresMissingParentWhenRequested(t *testing.T) {
@@ -171,6 +265,7 @@ func TestWriteFilesRejectsUnsafeAndDuplicatePaths(t *testing.T) {
 		{name: "traversal", writes: []atomicfs.Write{{Path: "../outside", Data: []byte("x")}}, want: atomicfs.ErrUnsafePath},
 		{name: "backslash", writes: []atomicfs.Write{{Path: `nested\file`, Data: []byte("x")}}, want: atomicfs.ErrUnsafePath},
 		{name: "root", writes: []atomicfs.Write{{Path: ".", Data: []byte("x")}}, want: atomicfs.ErrUnsafePath},
+		{name: "unsafe conflicting preconditions", writes: []atomicfs.Write{{Path: "../outside", MustNotExist: true, ExpectedData: []byte("x")}}, want: atomicfs.ErrUnsafePath},
 		{name: "duplicate", writes: []atomicfs.Write{{Path: "same", Data: []byte("a")}, {Path: "same", Data: []byte("b")}}, want: atomicfs.ErrWriteFiles},
 	}
 	for _, test := range tests {

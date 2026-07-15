@@ -36,6 +36,8 @@ Plugin capability declarations are updated idempotently through the YAML syntax 
 
 Plugin indexing retains the exact validated `plugin.yaml` bytes as an immutable snapshot. Target inference carries that snapshot into compound authoring plans, so later render steps use one coherent scan rather than rereading mutable manifest state.
 
+Atomic file writes can require an exact existing source snapshot. A missing or edited source fails before staging and validation, preventing a compound authoring transaction from overwriting user changes made after planning.
+
 ## Current commands
 
 ```text

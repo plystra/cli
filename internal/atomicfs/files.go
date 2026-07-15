@@ -28,6 +28,9 @@ type Write struct {
 	Mode               fs.FileMode
 	MustNotExist       bool
 	ParentMustNotExist bool
+	// ExpectedData, when non-nil, requires an existing target with these exact
+	// bytes before any transaction staging begins.
+	ExpectedData []byte
 }
 
 type plannedWrite struct {
@@ -39,6 +42,8 @@ type plannedWrite struct {
 	existed        bool
 	original       []byte
 	originalMode   fs.FileMode
+	expected       []byte
+	expectOriginal bool
 	stagePath      string
 	backupPath     string
 	missingParents []string
@@ -160,6 +165,9 @@ func planWrites(root *os.Root, writes []Write) ([]plannedWrite, error) {
 		if canonical != write.Path {
 			return nil, fmt.Errorf("%w: %q is not canonical", ErrUnsafePath, write.Path)
 		}
+		if write.ExpectedData != nil && (write.MustNotExist || write.ParentMustNotExist) {
+			return nil, fmt.Errorf("%w: %s has conflicting existence preconditions", ErrWriteFiles, canonical)
+		}
 		if _, duplicate := seen[canonical]; duplicate {
 			return nil, fmt.Errorf("%w: duplicate write %q", ErrWriteFiles, canonical)
 		}
@@ -169,11 +177,15 @@ func planWrites(root *os.Root, writes []Write) ([]plannedWrite, error) {
 			mode = 0o644
 		}
 		item := plannedWrite{
-			path:         canonical,
-			osPath:       filepath.FromSlash(canonical),
-			data:         append([]byte(nil), write.Data...),
-			mode:         mode,
-			mustNotExist: write.MustNotExist,
+			path:           canonical,
+			osPath:         filepath.FromSlash(canonical),
+			data:           append([]byte(nil), write.Data...),
+			mode:           mode,
+			mustNotExist:   write.MustNotExist,
+			expectOriginal: write.ExpectedData != nil,
+		}
+		if item.expectOriginal {
+			item.expected = append(make([]byte, 0, len(write.ExpectedData)), write.ExpectedData...)
 		}
 		missingParents, err := inspectParents(root, item.osPath)
 		if err != nil {
@@ -206,10 +218,16 @@ func planWrites(root *os.Root, writes []Write) ([]plannedWrite, error) {
 			if err != nil {
 				return nil, fmt.Errorf("%w: read %s: %w", ErrWriteFiles, canonical, err)
 			}
+			if item.expectOriginal && !bytes.Equal(item.original, item.expected) {
+				return nil, fmt.Errorf("%w: %w: %s does not match the planned source snapshot", ErrWriteFiles, ErrConcurrentChange, canonical)
+			}
 			if write.Mode.Perm() == 0 {
 				item.mode = item.originalMode
 			}
 		case errors.Is(err, fs.ErrNotExist):
+			if item.expectOriginal {
+				return nil, fmt.Errorf("%w: %w: %s is missing from the planned source snapshot", ErrWriteFiles, ErrConcurrentChange, canonical)
+			}
 		case err != nil:
 			return nil, fmt.Errorf("%w: inspect %s: %w", ErrWriteFiles, canonical, err)
 		}
