@@ -46,6 +46,8 @@ generation:
 
 The CLI accepts only a supported generation API, a canonical plugin-relative package path that resolves to an existing directory through non-symbolic components, and unique lower-kebab namespace activations naming Capabilities provided by the same plugin. It loads the confined package only during resolution or generation. It supplies a filtered read-only normalized model containing public declarations, exact schemas, extension metadata, requirements, provider mappings, exposure, and only explicitly build-visible structure. Secret values, the unrestricted environment, private runtime configuration, writable user source, and final generated paths are excluded.
 
+The public v1 input contract is `github.com/plystra/cli/generation/v1`. It validates complete resolved state, exposes only defensive immutable views, canonically orders every collection and JSON-compatible metadata value, and provides stable SHA-256 input and contract digests. Its empty context is valid for applications with no plugins or extensions.
+
 Rules return protocol-defined exact requirements, diagnostics, structured operations, and dependency edges at:
 
 ```text
