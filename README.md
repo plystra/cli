@@ -46,6 +46,8 @@ Go contract rendering derives one deterministic version-specific package under `
 
 Go provider-interface rendering derives a matching package under `generated/go/providers/<capability name segments>/vN`. It emits one capability operation method over `context.Context` and the exact generated request and response types, importing no concrete provider or Kernel runtime implementation.
 
+Go capability-client rendering derives a matching package under `generated/go/clients/<capability name segments>/vN`. Each client is bound by generated assembly to an opaque caller-scoped Kernel `invocation.Handle`; its named operation and availability check delegate only through governed capability dispatch and never import a concrete provider.
+
 ## Current commands
 
 ```text
