@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -39,11 +40,15 @@ func TestRunUsesDirectoryEnvironmentAndArguments(t *testing.T) {
 	t.Parallel()
 
 	directory := t.TempDir()
+	expectedDirectory, err := filepath.EvalSymlinks(directory)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
 	command, err := os.Executable()
 	if err != nil {
 		t.Fatalf("Executable: %v", err)
 	}
-	environment := append(os.Environ(), "PLYSTRA_GO_COMMAND_HELPER=success", "EXPECTED_DIRECTORY="+directory)
+	environment := append(os.Environ(), "PLYSTRA_GO_COMMAND_HELPER=success", "EXPECTED_DIRECTORY="+expectedDirectory)
 	if err := Run(context.Background(), Options{Command: command, Directory: directory, Environment: environment}, "test", "./..."); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

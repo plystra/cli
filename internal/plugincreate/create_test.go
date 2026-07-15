@@ -177,7 +177,11 @@ func createModule(t *testing.T, modulePath string) string {
 	t.Helper()
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.mod"), "module "+modulePath+"\n\ngo 1.26\n")
-	return root
+	canonical, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	return canonical
 }
 
 func isolatedGoEnvironment(t *testing.T) []string {

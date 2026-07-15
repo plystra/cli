@@ -30,7 +30,8 @@ func TestFindNearestEnclosingModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
-	if located.Path() != nestedModule || located.ModulePath() != "example.com/acme/inner" {
+	wantRoot := canonicalPath(t, nestedModule)
+	if located.Path() != wantRoot || located.ModulePath() != "example.com/acme/inner" {
 		t.Fatalf("Find = path %q, module %q", located.Path(), located.ModulePath())
 	}
 }
@@ -52,7 +53,7 @@ func TestFindResolvesStartSymlink(t *testing.T) {
 		t.Fatalf("Symlink: %v", err)
 	}
 	located, err := modulelocate.Find(link)
-	if err != nil || located.Path() != root {
+	if err != nil || located.Path() != canonicalPath(t, root) {
 		t.Fatalf("Find(link) = %#v, %v", located, err)
 	}
 }
@@ -111,4 +112,13 @@ func writeFile(t *testing.T, name, content string) {
 	if err := os.WriteFile(name, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile(%s): %v", name, err)
 	}
+}
+
+func canonicalPath(t *testing.T, name string) string {
+	t.Helper()
+	canonical, err := filepath.EvalSymlinks(name)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", name, err)
+	}
+	return canonical
 }

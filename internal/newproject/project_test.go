@@ -399,7 +399,7 @@ func isolatedGoEnvironment(t *testing.T, proxyRoot string) []string {
 	overrides := map[string]string{
 		"GOCACHE":     filepath.Join(t.TempDir(), "build-cache"),
 		"GOENV":       "off",
-		"GOFLAGS":     "",
+		"GOFLAGS":     "-modcacherw",
 		"GOMODCACHE":  filepath.Join(t.TempDir(), "module-cache"),
 		"GONOPROXY":   "none",
 		"GONOSUMDB":   "",

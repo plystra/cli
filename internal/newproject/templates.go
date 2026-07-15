@@ -70,7 +70,7 @@ go.work
 go.work.sum
 `
 
-const gitattributesTemplate = `* text=auto
+const gitattributesTemplate = `* text=auto eol=lf
 /generated/** linguist-generated=true
 `
 
