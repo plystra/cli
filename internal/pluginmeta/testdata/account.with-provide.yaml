@@ -6,5 +6,11 @@ provides:
   - audit.export/v1
   - profile.get/v2 # Profile API.
 requires: [audit.write/v1]
+generation:
+  api: v1
+  package: ./generation
+  activations:
+    - namespace: profile
+      capability: profile.get/v2
 config:
   token: {type: secret} # Runtime secret.

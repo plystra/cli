@@ -10,6 +10,7 @@ import (
 
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/pluginindex"
+	"github.com/plystra/cli/internal/pluginmeta"
 )
 
 func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
@@ -17,7 +18,7 @@ func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
 
 	root := t.TempDir()
 	writePlugin(t, root, "profile", "acme.app.profile")
-	accountManifest := []byte("id: acme.app.account\nprovides:\n  - profile.get/v2\n  - account.register/v1\n")
+	accountManifest := []byte("id: acme.app.account\nprovides:\n  - profile.get/v2\n  - account.register/v1\ngeneration: {api: v1, package: ./generation, activations: [{namespace: profile, capability: profile.get/v2}]}\n")
 	writeManifest(t, root, "account", string(accountManifest))
 	index, err := pluginindex.Scan(root)
 	if err != nil {
@@ -32,6 +33,19 @@ func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
 	}
 	if got := plugins[0].ManifestData(); !bytes.Equal(got, accountManifest) {
 		t.Fatalf("account ManifestData() = %q", got)
+	}
+	generation, ok := plugins[0].Generation()
+	if !ok || generation.API() != "v1" || generation.Package() != "./generation" || len(generation.Activations()) != 1 || generation.Activations()[0].Namespace() != "profile" {
+		t.Fatalf("account Generation() = %#v, %t", generation, ok)
+	}
+	activations := generation.Activations()
+	activations[0] = pluginmeta.GenerationActivation{}
+	indexedGeneration, _ := index.Plugins()[0].Generation()
+	if indexedGeneration.Activations()[0].Namespace() != "profile" {
+		t.Fatal("Generation exposed mutable index storage")
+	}
+	if _, ok := plugins[1].Generation(); ok {
+		t.Fatal("profile unexpectedly has generation metadata")
 	}
 	if byName, ok := index.ByReference("account"); !ok || byName.ID() != "acme.app.account" {
 		t.Fatalf("ByReference(directory) = %#v, %t", byName, ok)

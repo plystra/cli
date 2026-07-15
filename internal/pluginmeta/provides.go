@@ -79,10 +79,32 @@ func AddProvided(data []byte, capability capabilityid.Identifier) ([]byte, bool,
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: validate updated manifest: %w", ErrAddProvided, err)
 	}
-	if parsed.ID() != metadata.ID() || len(parsed.Provides()) != len(metadata.Provides())+1 || !containsCapability(parsed.Provides(), capability) {
+	if parsed.ID() != metadata.ID() || len(parsed.Provides()) != len(metadata.Provides())+1 || !containsCapability(parsed.Provides(), capability) || !sameGeneration(metadata, parsed) {
 		return nil, false, fmt.Errorf("%w: updated manifest did not preserve identity and add %s", ErrAddProvided, capability)
 	}
 	return append([]byte(nil), updated...), true, nil
+}
+
+func sameGeneration(left, right Manifest) bool {
+	leftGeneration, leftExists := left.Generation()
+	rightGeneration, rightExists := right.Generation()
+	if leftExists != rightExists || !leftExists {
+		return leftExists == rightExists
+	}
+	if leftGeneration.API() != rightGeneration.API() || leftGeneration.Package() != rightGeneration.Package() {
+		return false
+	}
+	leftActivations := leftGeneration.Activations()
+	rightActivations := rightGeneration.Activations()
+	if len(leftActivations) != len(rightActivations) {
+		return false
+	}
+	for index := range leftActivations {
+		if leftActivations[index] != rightActivations[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func containsCapability(values []capabilityid.Identifier, target capabilityid.Identifier) bool {

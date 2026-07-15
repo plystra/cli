@@ -19,11 +19,12 @@ const MaximumSize = 1 << 20
 // ErrInvalidManifest reports unsafe or invalid indexed plugin metadata.
 var ErrInvalidManifest = errors.New("invalid plugin manifest metadata")
 
-// Manifest is the immutable subset of plugin.yaml needed for local indexing.
-// The Kernel parser remains responsible for complete manifest validation.
+// Manifest is the immutable subset of plugin.yaml needed for local indexing
+// and build-time generation discovery. Runtime configuration remains opaque.
 type Manifest struct {
-	id       string
-	provides []capabilityid.Identifier
+	id         string
+	provides   []capabilityid.Identifier
+	generation Generation
 }
 
 // ID returns the canonical Plugin ID.
@@ -32,6 +33,11 @@ func (m Manifest) ID() string { return m.id }
 // Provides returns a defensive copy sorted by canonical capability identity.
 func (m Manifest) Provides() []capabilityid.Identifier {
 	return append([]capabilityid.Identifier(nil), m.provides...)
+}
+
+// Generation returns the optional trusted build-time generation declaration.
+func (m Manifest) Generation() (Generation, bool) {
+	return m.generation, m.generation.api != ""
 }
 
 // Parse returns the strict top-level identity and capability declarations from
@@ -46,7 +52,7 @@ func Parse(data []byte) (Manifest, error) {
 		return Manifest{}, invalid("document must be a mapping")
 	}
 
-	var idNode, providesNode, requiresNode *yaml.Node
+	var idNode, providesNode, requiresNode, generationNode *yaml.Node
 	seen := make(map[string]struct{}, len(root.Content)/2)
 	for index := 0; index < len(root.Content); index += 2 {
 		keyNode, valueNode := root.Content[index], root.Content[index+1]
@@ -66,6 +72,8 @@ func Parse(data []byte) (Manifest, error) {
 		case "requires":
 			requiresNode = valueNode
 		case "config":
+		case "generation":
+			generationNode = valueNode
 		default:
 			return Manifest{}, invalid("unknown key %q", key)
 		}
@@ -86,7 +94,14 @@ func Parse(data []byte) (Manifest, error) {
 	if _, err := parseCapabilities("requires", requiresNode); err != nil {
 		return Manifest{}, err
 	}
-	return Manifest{id: idNode.Value, provides: provides}, nil
+	var generation Generation
+	if generationNode != nil {
+		generation, err = parseGeneration(generationNode, provides)
+		if err != nil {
+			return Manifest{}, err
+		}
+	}
+	return Manifest{id: idNode.Value, provides: provides, generation: generation}, nil
 }
 
 func decodeYAMLDocument(data []byte) (*yaml.Node, error) {

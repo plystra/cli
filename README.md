@@ -39,11 +39,12 @@ Advanced infrastructure plugins may declare:
 generation:
   api: v1
   package: ./generation
-  rules:
-    - authn.authenticated
+  activations:
+    - namespace: authn
+      capability: authn.session.verify/v1
 ```
 
-The CLI loads the confined package only during resolution or generation. It supplies a filtered read-only normalized model containing public declarations, exact schemas, extension metadata, requirements, provider mappings, exposure, and only explicitly build-visible structure. Secret values, the unrestricted environment, private runtime configuration, writable user source, and final generated paths are excluded.
+The CLI accepts only a supported generation API, a canonical plugin-relative package path, and unique lower-kebab namespace activations naming Capabilities provided by the same plugin. It loads the confined package only during resolution or generation. It supplies a filtered read-only normalized model containing public declarations, exact schemas, extension metadata, requirements, provider mappings, exposure, and only explicitly build-visible structure. Secret values, the unrestricted environment, private runtime configuration, writable user source, and final generated paths are excluded.
 
 Rules return protocol-defined exact requirements, diagnostics, structured operations, and dependency edges at:
 

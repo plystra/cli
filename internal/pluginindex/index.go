@@ -25,11 +25,12 @@ var (
 
 // Plugin identifies one indexed root-level plugin.
 type Plugin struct {
-	name     string
-	path     string
-	id       string
-	provides []capabilityid.Identifier
-	manifest []byte
+	name       string
+	path       string
+	id         string
+	provides   []capabilityid.Identifier
+	generation pluginmeta.Generation
+	manifest   []byte
 }
 
 // Name returns the direct-child directory name.
@@ -45,6 +46,11 @@ func (p Plugin) ID() string { return p.id }
 // plugin, sorted by canonical identity.
 func (p Plugin) Provides() []capabilityid.Identifier {
 	return append([]capabilityid.Identifier(nil), p.provides...)
+}
+
+// Generation returns the optional trusted build-time generation declaration.
+func (p Plugin) Generation() (pluginmeta.Generation, bool) {
+	return p.generation, p.generation.API() != ""
 }
 
 // ManifestData returns a defensive copy of the validated plugin.yaml snapshot.
@@ -110,16 +116,18 @@ func Scan(rootPath string) (result Index, indexErr error) {
 			return Index{}, fmt.Errorf("%w: %s: %w", ErrIndex, markerPath, err)
 		}
 		id := metadata.ID()
+		generation, _ := metadata.Generation()
 		if previous, duplicate := ids[id]; duplicate {
 			return Index{}, fmt.Errorf("%w: %w %q in %s and %s", ErrIndex, ErrDuplicateID, id, previous, directory.Path())
 		}
 		ids[id] = directory.Path()
 		plugins = append(plugins, Plugin{
-			name:     directory.Name(),
-			path:     directory.Path(),
-			id:       id,
-			provides: metadata.Provides(),
-			manifest: append([]byte(nil), data...),
+			name:       directory.Name(),
+			path:       directory.Path(),
+			id:         id,
+			provides:   metadata.Provides(),
+			generation: generation,
+			manifest:   append([]byte(nil), data...),
 		})
 	}
 	after, err := pluginscan.ScanRoot(rootPath)
