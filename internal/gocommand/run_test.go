@@ -35,8 +35,8 @@ func TestSanitizeOutput(t *testing.T) {
 	const staging = `C:\Users\person\workspace\.app.plystra-123`
 	input := "go: reading https://person:secret@example.com/private?token=secret: denied\n" + staging + `\go.mod`
 	want := "go: reading <redacted-url> denied\n.\\go.mod"
-	if got := sanitizeOutput(input, staging); got != want {
-		t.Fatalf("sanitizeOutput() = %q, want %q", got, want)
+	if got := SanitizeOutput(input, staging); got != want {
+		t.Fatalf("SanitizeOutput() = %q, want %q", got, want)
 	}
 }
 

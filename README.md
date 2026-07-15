@@ -56,6 +56,8 @@ func Generate(context generation.GenerationContext) (generation.Output, error)
 
 The v1 output protocol carries exact generation-derived Capability requirements and structured diagnostics with rule, namespace, and source-Capability provenance. The CLI normalizes every result against the supplied context, rejects malformed, duplicate, inconsistent, or oversized output, and computes canonical output bytes and a stable SHA-256 digest before consuming any contribution.
 
+For reliability isolation, the CLI compiles each selected package into a transient helper against the application's own Go Module graph. The helper enforces the exact `Generate` signature, receives a bounded strict-JSON context envelope, runs from an empty temporary working directory with a minimal environment and deadline, and returns a bounded strict-JSON result. Compile errors, extension errors, panics, abnormal exits, timeouts, oversized output, malformed envelopes, and invalid normalized output remain distinct diagnostics that name the Plugin ID, API, package, and activation namespaces. Cancellation terminates the helper process tree, and closing the helper removes its temporary source and executable. This process boundary is crash and timeout containment, not a security sandbox for malicious trusted code.
+
 Rules return protocol-defined exact requirements, diagnostics, structured operations, and dependency edges at:
 
 ```text

@@ -49,7 +49,7 @@ func Run(ctx context.Context, options Options, arguments ...string) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return fmt.Errorf("%s: %w", operation, ctxErr)
 	}
-	message := sanitizeOutput(string(output), options.Directory)
+	message := SanitizeOutput(string(output), options.Directory)
 	if message == "" {
 		return fmt.Errorf("%w: %s", ErrRun, operation)
 	}
@@ -59,11 +59,16 @@ func Run(ctx context.Context, options Options, arguments ...string) error {
 	return fmt.Errorf("%w: %s: %s", ErrRun, operation, message)
 }
 
-func sanitizeOutput(output, directory string) string {
+// SanitizeOutput removes private local paths and credential-bearing URLs from
+// bounded command diagnostics.
+func SanitizeOutput(output string, privatePaths ...string) string {
 	message := strings.TrimSpace(output)
-	if directory != "" {
-		message = strings.ReplaceAll(message, directory, ".")
-		message = strings.ReplaceAll(message, filepath.ToSlash(directory), ".")
+	for _, privatePath := range privatePaths {
+		if privatePath == "" {
+			continue
+		}
+		message = strings.ReplaceAll(message, privatePath, ".")
+		message = strings.ReplaceAll(message, filepath.ToSlash(privatePath), ".")
 	}
 	return commandOutputURL.ReplaceAllString(message, "<redacted-url>")
 }
