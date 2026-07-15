@@ -16,6 +16,8 @@ Plugin-target inference indexes strict bounded identity envelopes from root-leve
 
 Capability-reference parsing accepts only canonical lower-case dotted names such as `account.register`, optionally followed by an exact positive major version such as `/v2`. Inputs are rejected instead of normalized, including leading-zero versions and identifiers outside the unsigned 64-bit range.
 
+Capability-version planning creates `v1` when no matching capability is visible and otherwise chooses one above the highest visible major without filling gaps. Exact existing versions become implementation plans; explicit older or skipped versions require confirmation; and exhausting the unsigned 64-bit major range fails instead of wrapping.
+
 ## Current commands
 
 ```text
