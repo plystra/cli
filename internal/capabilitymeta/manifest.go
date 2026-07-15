@@ -17,48 +17,79 @@ const MaximumSize = 1 << 20
 // ErrInvalidManifest reports unsafe or invalid capability planning metadata.
 var ErrInvalidManifest = errors.New("invalid capability manifest metadata")
 
-// ParseID returns the exact canonical ID from one capability.yaml document.
-// Full contract validation remains the Kernel parser's responsibility.
-func ParseID(data []byte) (capabilityid.Identifier, error) {
+// Manifest is the immutable subset of capability.yaml needed for planning.
+// Complete contract validation remains the Kernel parser's responsibility.
+type Manifest struct {
+	id         capabilityid.Identifier
+	extensions CapabilityExtensions
+}
+
+// ID returns the exact canonical Capability ID.
+func (m Manifest) ID() capabilityid.Identifier { return m.id }
+
+// Extensions returns immutable normalized build-time metadata.
+func (m Manifest) Extensions() CapabilityExtensions { return m.extensions }
+
+// Parse returns the strict planning metadata from one capability.yaml document.
+// Request, response, error, and description contents remain opaque here.
+func Parse(data []byte) (Manifest, error) {
 	root, err := decodeDocument(data)
 	if err != nil {
-		return capabilityid.Identifier{}, err
+		return Manifest{}, err
 	}
 	if root.Kind != yaml.MappingNode {
-		return capabilityid.Identifier{}, invalid("document must be a mapping")
+		return Manifest{}, invalid("document must be a mapping")
 	}
 
-	var idNode *yaml.Node
+	var idNode, extensionsNode *yaml.Node
 	seen := make(map[string]struct{}, len(root.Content)/2)
 	for index := 0; index < len(root.Content); index += 2 {
 		keyNode, valueNode := root.Content[index], root.Content[index+1]
 		if keyNode.Kind != yaml.ScalarNode || keyNode.Tag != "!!str" {
-			return capabilityid.Identifier{}, invalid("document contains a non-string key")
+			return Manifest{}, invalid("document contains a non-string key")
 		}
 		key := keyNode.Value
 		if _, duplicate := seen[key]; duplicate {
-			return capabilityid.Identifier{}, invalid("duplicate key %q", key)
+			return Manifest{}, invalid("duplicate key %q", key)
 		}
 		seen[key] = struct{}{}
 		switch key {
 		case "id":
 			idNode = valueNode
+		case "extensions":
+			extensionsNode = valueNode
 		case "description", "request", "response", "errors":
 		default:
-			return capabilityid.Identifier{}, invalid("unknown key %q", key)
+			return Manifest{}, invalid("unknown key %q", key)
 		}
 	}
 	if idNode == nil {
-		return capabilityid.Identifier{}, invalid("id is required")
+		return Manifest{}, invalid("id is required")
 	}
 	if idNode.Kind != yaml.ScalarNode || idNode.Tag != "!!str" {
-		return capabilityid.Identifier{}, invalid("id must be a string")
+		return Manifest{}, invalid("id must be a string")
 	}
 	identifier, err := capabilityid.Parse(idNode.Value)
 	if err != nil {
-		return capabilityid.Identifier{}, invalid("id %q is not canonical", idNode.Value)
+		return Manifest{}, invalid("id %q is not canonical", idNode.Value)
 	}
-	return identifier, nil
+	var extensions CapabilityExtensions
+	if extensionsNode != nil {
+		extensions, err = parseCapabilityExtensions(extensionsNode)
+		if err != nil {
+			return Manifest{}, err
+		}
+	}
+	return Manifest{id: identifier, extensions: extensions}, nil
+}
+
+// ParseID returns the exact canonical ID from one capability.yaml document.
+func ParseID(data []byte) (capabilityid.Identifier, error) {
+	manifest, err := Parse(data)
+	if err != nil {
+		return capabilityid.Identifier{}, err
+	}
+	return manifest.ID(), nil
 }
 
 func decodeDocument(data []byte) (*yaml.Node, error) {

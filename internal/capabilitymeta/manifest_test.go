@@ -18,6 +18,8 @@ id: account.register/v2
 request:
   email: {type: string, required: true}
 errors: [already_exists]
+extensions:
+  authn: {authenticated: true}
 `
 	identifier, err := capabilitymeta.ParseID([]byte(input))
 	if err != nil || identifier.String() != "account.register/v2" {
@@ -40,6 +42,7 @@ func TestParseIDRejectsInvalidIdentityEnvelopes(t *testing.T) {
 		"id: account.register/v1\nrequest: &fields {}\nresponse: *fields\n",
 		"1: value\n",
 		"id: account.register/v1\nversion: 1.0.0\n",
+		"id: account.register/v1\nextensions: []\n",
 		"id: account.register/v1\nid: account.register/v2\n",
 		"request: {}\n",
 		"id: 1\n",

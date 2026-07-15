@@ -21,6 +21,8 @@ The CLI owns:
 
 The CLI is the sole writer of final `generated/` source.
 
+Capability inspection strictly parses the optional `extensions` mapping within the 1 MiB declaration boundary. The CLI preserves every valid lower-kebab namespace, including unknown namespaces, as immutable namespace-sorted canonical JSON-compatible metadata: object key order is normalized, scalar types and array order are preserved, and omitted and empty metadata are equivalent. Namespace interpretation remains a selected plugin generation-extension responsibility.
+
 ## Resolution and generation fixed point
 
 The CLI derives one statically resolved application from local plugins, explicit public exposure, generated client use, non-inferable declared requirements, namespaced build-time metadata, selected plugin rules, and explicit provider choices only when several ordinary providers exist.
