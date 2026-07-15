@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 
+	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/pluginmeta"
 	"github.com/plystra/cli/internal/pluginscan"
 )
@@ -24,9 +25,10 @@ var (
 
 // Plugin identifies one indexed root-level plugin.
 type Plugin struct {
-	name string
-	path string
-	id   string
+	name     string
+	path     string
+	id       string
+	provides []capabilityid.Identifier
 }
 
 // Name returns the direct-child directory name.
@@ -37,6 +39,12 @@ func (p Plugin) Path() string { return p.path }
 
 // ID returns the canonical Plugin ID declared by plugin.yaml.
 func (p Plugin) ID() string { return p.id }
+
+// Provides returns a defensive copy of the exact capabilities declared by the
+// plugin, sorted by canonical identity.
+func (p Plugin) Provides() []capabilityid.Identifier {
+	return append([]capabilityid.Identifier(nil), p.provides...)
+}
 
 // Index is an immutable deterministic collection of local plugins.
 type Index struct {
@@ -93,15 +101,21 @@ func Scan(rootPath string) (result Index, indexErr error) {
 		if err != nil {
 			return Index{}, err
 		}
-		id, err := pluginmeta.ParseID(data)
+		metadata, err := pluginmeta.Parse(data)
 		if err != nil {
 			return Index{}, fmt.Errorf("%w: %s: %w", ErrIndex, markerPath, err)
 		}
+		id := metadata.ID()
 		if previous, duplicate := ids[id]; duplicate {
 			return Index{}, fmt.Errorf("%w: %w %q in %s and %s", ErrIndex, ErrDuplicateID, id, previous, directory.Path())
 		}
 		ids[id] = directory.Path()
-		plugins = append(plugins, Plugin{name: directory.Name(), path: directory.Path(), id: id})
+		plugins = append(plugins, Plugin{
+			name:     directory.Name(),
+			path:     directory.Path(),
+			id:       id,
+			provides: metadata.Provides(),
+		})
 	}
 	after, err := pluginscan.ScanRoot(rootPath)
 	if err != nil {

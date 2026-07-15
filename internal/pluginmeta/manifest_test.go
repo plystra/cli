@@ -2,27 +2,37 @@ package pluginmeta_test
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/pluginmeta"
 )
 
-func TestParseID(t *testing.T) {
+func TestParseIndexesCanonicalMetadata(t *testing.T) {
 	t.Parallel()
 
-	input := "provides: [email.send/v1]\nid: acme.email.smtp\nconfig:\n  host: {type: string}\n"
-	got, err := pluginmeta.ParseID([]byte(input))
-	if err != nil || got != "acme.email.smtp" {
-		t.Fatalf("ParseID = %q, %v", got, err)
+	input := "provides: [profile.get/v2, account.register/v1]\nid: acme.app.account\nrequires: [audit.write/v1]\nconfig:\n  token: {type: secret}\n"
+	metadata, err := pluginmeta.Parse([]byte(input))
+	if err != nil || metadata.ID() != "acme.app.account" {
+		t.Fatalf("Parse = %#v, %v", metadata, err)
 	}
-	quoted, err := pluginmeta.ParseID([]byte("id: 'acme.email.smtp'\n"))
-	if err != nil || quoted != got {
-		t.Fatalf("ParseID quoted = %q, %v", quoted, err)
+	if got := identifierStrings(metadata.Provides()); !reflect.DeepEqual(got, []string{"account.register/v1", "profile.get/v2"}) {
+		t.Fatalf("Provides = %v", got)
+	}
+	provided := metadata.Provides()
+	provided[0] = capabilityid.Identifier{}
+	if metadata.Provides()[0].String() != "account.register/v1" {
+		t.Fatal("Provides exposed mutable metadata")
+	}
+	quoted, err := pluginmeta.Parse([]byte("id: 'acme.app.account'\n"))
+	if err != nil || quoted.ID() != metadata.ID() || len(quoted.Provides()) != 0 {
+		t.Fatalf("Parse quoted = %#v, %v", quoted, err)
 	}
 }
 
-func TestParseIDRejectsInvalidIdentityEnvelopes(t *testing.T) {
+func TestParseRejectsInvalidMetadataEnvelopes(t *testing.T) {
 	t.Parallel()
 
 	tests := []string{
@@ -37,39 +47,58 @@ func TestParseIDRejectsInvalidIdentityEnvelopes(t *testing.T) {
 		"provides: []\n",
 		"id: 1\n",
 		"id: Acme.One\n",
+		"id: acme.one\nprovides: email.send/v1\n",
+		"id: acme.one\nprovides: [1]\n",
+		"id: acme.one\nprovides: [email.send]\n",
+		"id: acme.one\nprovides: [email.send/v1, email.send/v1]\n",
+		"id: acme.one\nrequires: [Audit.write/v1]\n",
 		strings.Repeat("x", pluginmeta.MaximumSize+1),
 	}
 	for _, input := range tests {
 		input := input
 		t.Run(testName(input), func(t *testing.T) {
 			t.Parallel()
-			got, err := pluginmeta.ParseID([]byte(input))
+			metadata, err := pluginmeta.Parse([]byte(input))
 			if !errors.Is(err, pluginmeta.ErrInvalidManifest) {
-				t.Fatalf("ParseID error = %v, want ErrInvalidManifest", err)
+				t.Fatalf("Parse error = %v, want ErrInvalidManifest", err)
 			}
-			if got != "" {
-				t.Fatalf("invalid ParseID returned %q", got)
+			if metadata.ID() != "" || len(metadata.Provides()) != 0 {
+				t.Fatalf("invalid Parse returned %#v", metadata)
 			}
 		})
 	}
 }
 
-func FuzzParseID(f *testing.F) {
-	for _, seed := range []string{"id: acme.one\n", "[]\n", "id: &x acme.one\nrequires: [*x]\n"} {
+func FuzzParse(f *testing.F) {
+	for _, seed := range []string{"id: acme.one\n", "id: acme.one\nprovides: [email.send/v1]\n", "[]\n", "id: &x acme.one\nrequires: [*x]\n"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, input string) {
-		id, err := pluginmeta.ParseID([]byte(input))
+		metadata, err := pluginmeta.Parse([]byte(input))
 		if err != nil {
 			if !errors.Is(err, pluginmeta.ErrInvalidManifest) {
-				t.Fatalf("ParseID returned unexpected error: %v", err)
+				t.Fatalf("Parse returned unexpected error: %v", err)
 			}
 			return
 		}
-		if id == "" {
-			t.Fatal("ParseID returned an empty ID")
+		if metadata.ID() == "" {
+			t.Fatal("Parse returned metadata without an ID")
+		}
+		provided := metadata.Provides()
+		for index := 1; index < len(provided); index++ {
+			if provided[index-1].String() >= provided[index].String() {
+				t.Fatalf("Provides are not uniquely sorted: %q then %q", provided[index-1], provided[index])
+			}
 		}
 	})
+}
+
+func identifierStrings(identifiers []capabilityid.Identifier) []string {
+	values := make([]string, len(identifiers))
+	for index, identifier := range identifiers {
+		values[index] = identifier.String()
+	}
+	return values
 }
 
 func testName(input string) string {

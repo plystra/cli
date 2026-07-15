@@ -4,8 +4,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
+	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/pluginindex"
 )
 
@@ -14,7 +16,7 @@ func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
 
 	root := t.TempDir()
 	writePlugin(t, root, "profile", "acme.app.profile")
-	writePlugin(t, root, "account", "acme.app.account")
+	writeManifest(t, root, "account", "id: acme.app.account\nprovides:\n  - profile.get/v2\n  - account.register/v1\n")
 	index, err := pluginindex.Scan(root)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
@@ -22,6 +24,9 @@ func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
 	plugins := index.Plugins()
 	if len(plugins) != 2 || plugins[0].Name() != "account" || plugins[0].Path() != "account" || plugins[0].ID() != "acme.app.account" || plugins[1].Name() != "profile" {
 		t.Fatalf("Plugins() = %#v", plugins)
+	}
+	if got := identifierStrings(plugins[0].Provides()); !reflect.DeepEqual(got, []string{"account.register/v1", "profile.get/v2"}) {
+		t.Fatalf("account Provides() = %v", got)
 	}
 	if byName, ok := index.ByReference("account"); !ok || byName.ID() != "acme.app.account" {
 		t.Fatalf("ByReference(directory) = %#v, %t", byName, ok)
@@ -35,6 +40,11 @@ func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
 	plugins[0] = pluginindex.Plugin{}
 	if index.Plugins()[0].Name() != "account" {
 		t.Fatal("Plugins exposed mutable index storage")
+	}
+	provided := index.Plugins()[0].Provides()
+	provided[0] = capabilityid.Identifier{}
+	if index.Plugins()[0].Provides()[0].String() != "account.register/v1" {
+		t.Fatal("Provides exposed mutable index storage")
 	}
 }
 
@@ -53,29 +63,46 @@ func TestScanRejectsDuplicateIDs(t *testing.T) {
 	}
 }
 
-func TestScanRejectsInvalidManifestIdentity(t *testing.T) {
+func TestScanRejectsInvalidIndexedMetadata(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	directory := filepath.Join(root, "account")
-	if err := os.Mkdir(directory, 0o755); err != nil {
-		t.Fatalf("Mkdir: %v", err)
+	tests := map[string]string{
+		"identity":   "id: Acme.Bad\n",
+		"capability": "id: acme.app.account\nprovides: [account.register]\n",
 	}
-	if err := os.WriteFile(filepath.Join(directory, "plugin.yaml"), []byte("id: Acme.Bad\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if _, err := pluginindex.Scan(root); !errors.Is(err, pluginindex.ErrIndex) {
-		t.Fatalf("Scan error = %v, want ErrIndex", err)
+	for name, declaration := range tests {
+		name, declaration := name, declaration
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeManifest(t, root, "account", declaration)
+			if _, err := pluginindex.Scan(root); !errors.Is(err, pluginindex.ErrIndex) {
+				t.Fatalf("Scan error = %v, want ErrIndex", err)
+			}
+		})
 	}
 }
 
 func writePlugin(t *testing.T, root, name, id string) {
 	t.Helper()
+	writeManifest(t, root, name, "id: "+id+"\n")
+}
+
+func writeManifest(t *testing.T, root, name, declaration string) {
+	t.Helper()
 	directory := filepath.Join(root, name)
 	if err := os.Mkdir(directory, 0o755); err != nil {
 		t.Fatalf("Mkdir(%s): %v", name, err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, "plugin.yaml"), []byte("id: "+id+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, "plugin.yaml"), []byte(declaration), 0o644); err != nil {
 		t.Fatalf("WriteFile(%s): %v", name, err)
 	}
+}
+
+func identifierStrings(identifiers []capabilityid.Identifier) []string {
+	values := make([]string, len(identifiers))
+	for index, identifier := range identifiers {
+		values[index] = identifier.String()
+	}
+	return values
 }
