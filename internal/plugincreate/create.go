@@ -12,6 +12,7 @@ import (
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/modulelocate"
+	"github.com/plystra/cli/internal/pluginid"
 	"github.com/plystra/cli/internal/pluginscan"
 	"golang.org/x/mod/module"
 )
@@ -109,7 +110,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 }
 
 func validateName(name string) error {
-	if name == "" || len(name) > 64 || !validIDSegment(name) {
+	if name == "" || len(name) > 64 || !pluginid.ValidSegment(name) {
 		return fmt.Errorf("%w %q: expected lower-case ASCII kebab-case", ErrInvalidName, name)
 	}
 	if pluginscan.IsReserved(name) {
@@ -131,29 +132,8 @@ func deriveID(modulePath, name string) (string, error) {
 		return "", fmt.Errorf("%w: module path %q has no namespace below its host", ErrDeriveID, modulePath)
 	}
 	id := strings.Join(components[1:], ".") + "." + name
-	for _, segment := range strings.Split(id, ".") {
-		if !validIDSegment(segment) {
-			return "", fmt.Errorf("%w: module path %q produces non-canonical segment %q", ErrDeriveID, modulePath, segment)
-		}
+	if err := pluginid.Validate(id); err != nil {
+		return "", fmt.Errorf("%w: module path %q produces %q: %v", ErrDeriveID, modulePath, id, err)
 	}
 	return id, nil
-}
-
-func validIDSegment(segment string) bool {
-	if segment == "" || segment[0] < 'a' || segment[0] > 'z' {
-		return false
-	}
-	previousHyphen := false
-	for index := 1; index < len(segment); index++ {
-		character := segment[index]
-		switch {
-		case character >= 'a' && character <= 'z', character >= '0' && character <= '9':
-			previousHyphen = false
-		case character == '-' && !previousHyphen:
-			previousHyphen = true
-		default:
-			return false
-		}
-	}
-	return !previousHyphen
 }
