@@ -31,6 +31,8 @@ Reserved `kernel.*` Capabilities are always available outside ordinary provider 
 
 Rule-derived requirements participate in the same transitive fixed point. A missing provider, unclaimed metadata namespace, ambiguous rule owner, rule cycle, incompatible contribution, or provider ambiguity fails before the CLI writes a runnable artifact.
 
+Visible generation declarations are first indexed by extension namespace. Several candidate providers may associate one namespace with the same exact activation Capability, but different activation Capabilities for one namespace fail with every declaring Plugin ID, API, package, and source. After ordinary provider resolution selects that Capability's provider, only the matching extension owned by that selected plugin is eligible to run; every unselected provider extension is excluded.
+
 ## Plugin-provided build-time rules
 
 Advanced infrastructure plugins may declare:
