@@ -18,10 +18,26 @@ import (
 	"time"
 
 	"github.com/plystra/cli/internal/command"
+	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/newproject"
+	"github.com/plystra/cli/internal/plugincreate"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
+
+func TestMain(main *testing.M) {
+	if os.Getenv("PLYSTRA_NEW_PLUGIN_ROLLBACK_HELPER") == "1" {
+		switch {
+		case len(os.Args) == 3 && os.Args[1] == "mod" && (os.Args[2] == "download" || os.Args[2] == "tidy"):
+			os.Exit(0)
+		case len(os.Args) == 4 && os.Args[1] == "test" && os.Args[2] == "-mod=readonly" && os.Args[3] == "./...":
+			os.Exit(9)
+		default:
+			os.Exit(8)
+		}
+	}
+	os.Exit(main.Run())
+}
 
 func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.T) {
 	proxy := createKernelProxy(t)
@@ -149,6 +165,52 @@ func TestCreateLibraryAndPublicCommandProduceDeterministicBuildableModules(t *te
 	assertModuleState(t, direct.Path(), modulePath)
 }
 
+func TestCreateWithInitialPluginComposesRunnableAndLibraryTransactions(t *testing.T) {
+	proxy := createKernelProxy(t)
+	environment := isolatedGoEnvironment(t, proxy)
+	const modulePath = "example.com/acme/my-app/v2"
+	const pluginName = "account-profile"
+
+	runnableParent := t.TempDir()
+	runnable, err := newproject.Create(context.Background(), newproject.Options{
+		Parent:      runnableParent,
+		ModulePath:  modulePath,
+		Plugin:      pluginName,
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Create with plugin: %v", err)
+	}
+
+	libraryParent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	arguments := []string{"new", modulePath, "--plugin", pluginName, "--library"}
+	if exitCode := command.RunIn(arguments, &stdout, &stderr, libraryParent, environment); exitCode != 0 {
+		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
+	}
+	libraryRoot := filepath.Join(libraryParent, "my-app")
+	wantOutput := fmt.Sprintf("created %s in %s\n", modulePath, libraryRoot)
+	if stdout.String() != wantOutput || stderr.Len() != 0 {
+		t.Fatalf("RunIn output = stdout %q, stderr %q", stdout.String(), stderr.String())
+	}
+
+	golden := snapshotTree(t, filepath.Join("..", "plugincreate", "testdata", "plugin"))
+	for kind, root := range map[string]string{"runnable": runnable.Path(), "library": libraryRoot} {
+		pluginTree := pluginScaffoldSnapshot(t, root, pluginName)
+		if !reflect.DeepEqual(pluginTree, golden) {
+			t.Fatalf("%s initial plugin differs from plugin-create golden:\n got: %#v\nwant: %#v", kind, pluginTree, golden)
+		}
+		assertModuleState(t, root, modulePath)
+	}
+	if info, err := os.Stat(filepath.Join(runnable.Path(), "plystra.yaml")); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("runnable plystra.yaml = %#v, %v", info, err)
+	}
+	if _, err := os.Lstat(filepath.Join(libraryRoot, "plystra.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("library contains plystra.yaml: %v", err)
+	}
+}
+
 func TestCreateRollsBackGoValidationFailure(t *testing.T) {
 	t.Parallel()
 
@@ -164,6 +226,31 @@ func TestCreateRollsBackGoValidationFailure(t *testing.T) {
 	}
 	if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("target exists after failed validation: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
+}
+
+func TestCreateWithInitialPluginRollsBackOuterProjectOnPluginValidationFailure(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatalf("Executable: %v", err)
+	}
+	environment := append(os.Environ(), "PLYSTRA_NEW_PLUGIN_ROLLBACK_HELPER=1")
+	_, err = newproject.Create(context.Background(), newproject.Options{
+		Parent:      parent,
+		ModulePath:  "example.com/acme/my-app",
+		Plugin:      "account",
+		GoCommand:   command,
+		Environment: environment,
+	})
+	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, plugincreate.ErrCreate) || !errors.Is(err, gocommand.ErrRun) {
+		t.Fatalf("Create error = %v, want project, plugin, and Go command errors", err)
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists after plugin validation failure: %v", err)
 	}
 	assertNoTransactionFiles(t, parent)
 }
@@ -188,6 +275,30 @@ func TestCreateRejectsInvalidInputsBeforeMutation(t *testing.T) {
 			_, err := newproject.Create(context.Background(), newproject.Options{Parent: parent, ModulePath: test.modulePath})
 			if !errors.Is(err, newproject.ErrCreate) {
 				t.Fatalf("Create error = %v, want ErrCreate", err)
+			}
+			entries, readErr := os.ReadDir(parent)
+			if readErr != nil || len(entries) != 0 {
+				t.Fatalf("parent entries = %v, %v", entries, readErr)
+			}
+		})
+	}
+}
+
+func TestCreateRejectsInvalidInitialPluginBeforeMutation(t *testing.T) {
+	t.Parallel()
+
+	for _, pluginName := range []string{"Account", "generated", "account--profile"} {
+		pluginName := pluginName
+		t.Run(pluginName, func(t *testing.T) {
+			t.Parallel()
+			parent := t.TempDir()
+			_, err := newproject.Create(context.Background(), newproject.Options{
+				Parent:     parent,
+				ModulePath: "example.com/acme/my-app",
+				Plugin:     pluginName,
+			})
+			if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, plugincreate.ErrInvalidName) {
+				t.Fatalf("Create error = %v, want ErrCreate and ErrInvalidName", err)
 			}
 			entries, readErr := os.ReadDir(parent)
 			if readErr != nil || len(entries) != 0 {
@@ -351,6 +462,20 @@ func snapshotTree(t *testing.T, root string) map[string][]byte {
 	})
 	if err != nil {
 		t.Fatalf("WalkDir: %v", err)
+	}
+	return result
+}
+
+func pluginScaffoldSnapshot(t *testing.T, root, pluginName string) map[string][]byte {
+	t.Helper()
+	tree := snapshotTree(t, root)
+	result := make(map[string][]byte)
+	pluginPrefix := pluginName + "/"
+	generatedSuffix := "/" + pluginName + "_gen.go"
+	for name, data := range tree {
+		if strings.HasPrefix(name, pluginPrefix) || strings.HasPrefix(name, "generated/") && strings.HasSuffix(name, generatedSuffix) {
+			result[name] = data
+		}
 	}
 	return result
 }

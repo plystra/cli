@@ -13,6 +13,7 @@ import (
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/plugincreate"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
@@ -28,6 +29,7 @@ type Options struct {
 	Parent      string
 	ModulePath  string
 	Library     bool
+	Plugin      string
 	GoCommand   string
 	Environment []string
 }
@@ -57,6 +59,11 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	if !validProjectName(name) {
 		return Result{}, fmt.Errorf("%w: module base %q must be lower-case ASCII kebab-case", ErrCreate, name)
 	}
+	if options.Plugin != "" {
+		if _, err := plugincreate.DeriveID(options.ModulePath, options.Plugin); err != nil {
+			return Result{}, fmt.Errorf("%w: initial plugin: %w", ErrCreate, err)
+		}
+	}
 	parent := options.Parent
 	if strings.TrimSpace(parent) == "" {
 		return Result{}, fmt.Errorf("%w: parent directory is empty", ErrCreate)
@@ -79,10 +86,22 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		if err := populate(stagingRoot, options.ModulePath, name, options.Library); err != nil {
 			return err
 		}
-		for _, arguments := range [][]string{{"mod", "download"}, {"mod", "tidy"}, {"test", "./..."}} {
+		for _, arguments := range [][]string{{"mod", "download"}, {"mod", "tidy"}} {
 			if err := gocommand.Run(ctx, gocommand.Options{Command: goCommand, Directory: stagingRoot, Environment: environment}, arguments...); err != nil {
 				return err
 			}
+		}
+		if options.Plugin != "" {
+			if _, err := plugincreate.Create(ctx, plugincreate.Options{
+				Start:       stagingRoot,
+				Name:        options.Plugin,
+				GoCommand:   goCommand,
+				Environment: environment,
+			}); err != nil {
+				return err
+			}
+		} else if err := gocommand.Run(ctx, gocommand.Options{Command: goCommand, Directory: stagingRoot, Environment: environment}, "test", "./..."); err != nil {
+			return err
 		}
 		return verifyModule(stagingRoot, options.ModulePath, options.Library)
 	})

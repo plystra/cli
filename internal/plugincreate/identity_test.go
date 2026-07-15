@@ -44,6 +44,18 @@ func TestDeriveIDRejectsMissingOrNonCanonicalNamespaces(t *testing.T) {
 	}
 }
 
+func TestExportedDeriveIDAlsoValidatesPluginName(t *testing.T) {
+	t.Parallel()
+
+	if _, err := DeriveID("example.com/acme/app", "generated"); !errors.Is(err, ErrInvalidName) {
+		t.Fatalf("DeriveID reserved name error = %v, want ErrInvalidName", err)
+	}
+	got, err := DeriveID("example.com/acme/app/v2", "account")
+	if err != nil || got != "acme.app.account" {
+		t.Fatalf("DeriveID = %q, %v", got, err)
+	}
+}
+
 func TestGeneratedGoNamesAreDeterministicAndKeywordSafe(t *testing.T) {
 	t.Parallel()
 

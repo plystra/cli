@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/plystra/cli/internal/newproject"
@@ -16,7 +17,7 @@ import (
 const usage = `Usage:
   plystra help
   plystra version
-  plystra new <module-path> [--library]
+  plystra new <module-path> [--library] [--plugin <name>]
   plystra plugin create <name>
 `
 
@@ -58,16 +59,18 @@ func RunIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		_, _ = fmt.Fprintf(stdout, "plystra %s\n", version.Current)
 		return 0
 	case "new":
-		if len(arguments) < 2 || len(arguments) > 3 || len(arguments) == 3 && arguments[2] != "--library" {
-			_, _ = io.WriteString(stderr, "usage: plystra new <module-path> [--library]\n")
+		options, ok := parseNewArguments(arguments)
+		if !ok {
+			_, _ = io.WriteString(stderr, "usage: plystra new <module-path> [--library] [--plugin <name>]\n")
 			return 2
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		result, err := newproject.Create(ctx, newproject.Options{
 			Parent:      workingDirectory,
-			ModulePath:  arguments[1],
-			Library:     len(arguments) == 3,
+			ModulePath:  options.modulePath,
+			Library:     options.library,
+			Plugin:      options.plugin,
 			Environment: environment,
 		})
 		if err != nil {
@@ -98,6 +101,39 @@ func RunIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		_, _ = fmt.Fprintf(stderr, "unknown command %q\n\n%s", arguments[0], usage)
 		return 2
 	}
+}
+
+type newArguments struct {
+	modulePath string
+	library    bool
+	plugin     string
+}
+
+func parseNewArguments(arguments []string) (newArguments, bool) {
+	if len(arguments) < 2 || arguments[1] == "" || strings.HasPrefix(arguments[1], "--") {
+		return newArguments{}, false
+	}
+	result := newArguments{modulePath: arguments[1]}
+	pluginSet := false
+	for index := 2; index < len(arguments); index++ {
+		switch arguments[index] {
+		case "--library":
+			if result.library {
+				return newArguments{}, false
+			}
+			result.library = true
+		case "--plugin":
+			if pluginSet || index+1 >= len(arguments) || arguments[index+1] == "" || strings.HasPrefix(arguments[index+1], "--") {
+				return newArguments{}, false
+			}
+			pluginSet = true
+			index++
+			result.plugin = arguments[index]
+		default:
+			return newArguments{}, false
+		}
+	}
+	return result, true
 }
 
 func rejectArguments(stderr io.Writer, command string) int {

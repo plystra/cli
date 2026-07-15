@@ -49,6 +49,14 @@ func (r Result) Path() string { return r.path }
 // ModuleRoot returns the canonical absolute Go Module root.
 func (r Result) ModuleRoot() string { return r.moduleRoot }
 
+// DeriveID validates name and derives its canonical Plugin ID from modulePath.
+func DeriveID(modulePath, name string) (string, error) {
+	if err := validateName(name); err != nil {
+		return "", err
+	}
+	return deriveID(modulePath, name)
+}
+
 // Create writes and validates one new plugin as an atomic module mutation.
 func Create(ctx context.Context, options Options) (Result, error) {
 	if err := validateName(options.Name); err != nil {
