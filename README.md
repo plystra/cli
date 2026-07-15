@@ -20,6 +20,8 @@ Capability-version planning creates `v1` when no matching capability is visible 
 
 Local capability-creation planning uses one immutable module plugin snapshot to combine target inference, visible declared versions, and the version decision. It retains every local provider of the source version in deterministic directory order so schema equality can be enforced before any later mutation chooses bytes to copy.
 
+Capability-source identity parsing reads bounded single-document `capability.yaml` envelopes, rejects references, duplicate or unknown top-level keys, and non-canonical exact IDs, and leaves full request, response, error, and compatibility validation to the Kernel contract parser.
+
 ## Current commands
 
 ```text
