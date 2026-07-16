@@ -229,6 +229,7 @@ type canonicalOutputContribution struct {
 	Point     GenerationPoint     `json:"point"`
 	Requires  []ContributionToken `json:"requires"`
 	Provides  []ContributionToken `json:"provides"`
+	Nodes     []GeneratedNode     `json:"nodes"`
 }
 
 func encodeOutput(requirements []Requirement, diagnostics []Diagnostic, contributions []NormalizedContribution) ([]byte, error) {
@@ -256,6 +257,10 @@ func encodeOutput(requirements []Requirement, diagnostics []Diagnostic, contribu
 		}
 	}
 	for index, contribution := range contributions {
+		nodes := make([]GeneratedNode, len(contribution.nodes))
+		for nodeIndex, node := range contribution.nodes {
+			nodes[nodeIndex] = node.canonicalNode()
+		}
 		canonical.Contributions[index] = canonicalOutputContribution{
 			ID:        contribution.id,
 			Namespace: contribution.namespace,
@@ -263,6 +268,7 @@ func encodeOutput(requirements []Requirement, diagnostics []Diagnostic, contribu
 			Point:     contribution.point,
 			Requires:  append([]ContributionToken{}, contribution.requires...),
 			Provides:  append([]ContributionToken{}, contribution.provides...),
+			Nodes:     nodes,
 		}
 	}
 	return json.Marshal(canonical)

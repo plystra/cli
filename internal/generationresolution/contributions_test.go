@@ -11,13 +11,20 @@ import (
 
 func TestResolveContributionGraphUsesPointAndDependencyOrder(t *testing.T) {
 	generationContext := contributionTestContext(t)
+	verifyContribution := contributionTestValue(t,
+		"z-verify", "authn", generation.GenerationPointInvocationPrepare, nil, []generation.ContributionToken{"verified-authn-context"},
+	)
+	verifyContribution.Nodes = []generation.GeneratedNode{{
+		ID: "attach-verification",
+		MetadataAttachment: &generation.GeneratedMetadataAttachment{
+			Key: "authn.verification", Value: generation.StringValue("verified"), MaximumBytes: 32,
+		},
+	}}
 	outputs := []ExtensionOutput{
 		contributionTestOutput(t, generationContext, "example.z-ingress", contributionTestValue(t,
 			"z-ingress", "authn", generation.GenerationPointHTTPIngress, nil, []generation.ContributionToken{"request-traced"},
 		)),
-		contributionTestOutput(t, generationContext, "example.z-authn", contributionTestValue(t,
-			"z-verify", "authn", generation.GenerationPointInvocationPrepare, nil, []generation.ContributionToken{"verified-authn-context"},
-		)),
+		contributionTestOutput(t, generationContext, "example.z-authn", verifyContribution),
 		contributionTestOutput(t, generationContext, "example.a-authz", contributionTestValue(t,
 			"a-authorize", "authz", generation.GenerationPointInvocationPrepare, []generation.ContributionToken{"verified-authn-context"}, []generation.ContributionToken{"authorization-approved"},
 		)),
@@ -43,6 +50,20 @@ func TestResolveContributionGraphUsesPointAndDependencyOrder(t *testing.T) {
 		}
 		if got := resolvedContributionPluginIDs(resolved); !slices.Equal(got, wantPlugins) {
 			t.Fatalf("permutation %d plugin IDs = %v, want %v", permutations, got, wantPlugins)
+		}
+		nodes := resolved[1].Nodes()
+		if len(nodes) != 1 || nodes[0].ID() != "attach-verification" || nodes[0].Kind() != generation.GeneratedNodeKindMetadataAttachment {
+			t.Fatalf("permutation %d resolved nodes = %#v", permutations, nodes)
+		}
+		attachment, ok := nodes[0].MetadataAttachment()
+		if !ok || attachment.Key != "authn.verification" || attachment.Value.Literal == nil || attachment.Value.Literal.String == nil || *attachment.Value.Literal.String != "verified" {
+			t.Fatalf("permutation %d resolved attachment = %#v, %v", permutations, attachment, ok)
+		}
+		nodes[0] = generation.NormalizedGeneratedNode{}
+		*attachment.Value.Literal.String = "changed"
+		fresh, _ := resolved[1].Nodes()[0].MetadataAttachment()
+		if fresh.Key != "authn.verification" || *fresh.Value.Literal.String != "verified" {
+			t.Fatalf("permutation %d resolved nodes exposed mutable storage", permutations)
 		}
 	})
 	if permutations != 120 {

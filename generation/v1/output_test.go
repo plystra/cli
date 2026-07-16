@@ -155,8 +155,8 @@ func TestNormalizeOutputSupportsEveryGenerationPoint(t *testing.T) {
 			if len(contributions) != 1 || contributions[0].ID() != test.id || contributions[0].Point() != test.point {
 				t.Fatalf("Contributions = %#v", contributions)
 			}
-			if !strings.Contains(string(normalized.CanonicalJSON()), `"requires":[],"provides":[`) {
-				t.Fatalf("empty tokens did not canonicalize as arrays: %s", normalized.CanonicalJSON())
+			if !strings.Contains(string(normalized.CanonicalJSON()), `"requires":[],"provides":[`) || !strings.Contains(string(normalized.CanonicalJSON()), `"nodes":[]`) {
+				t.Fatalf("empty tokens or nodes did not canonicalize as arrays: %s", normalized.CanonicalJSON())
 			}
 		})
 	}

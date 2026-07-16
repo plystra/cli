@@ -60,6 +60,11 @@ func (c ResolvedContribution) Provides() []generation.ContributionToken {
 	return c.contribution.Provides()
 }
 
+// Nodes returns immutable operations in contribution-local semantic order.
+func (c ResolvedContribution) Nodes() []generation.NormalizedGeneratedNode {
+	return c.contribution.Nodes()
+}
+
 // ContributionDependency is one token-labelled provider-to-consumer edge.
 type ContributionDependency struct {
 	provider ResolvedContribution

@@ -59,6 +59,14 @@ func TestHelperGeneratesNormalizedOutputWithSanitizedEnvironment(t *testing.T) {
 	if len(contributions) != 1 || contributions[0].ID() != "authn.verify" || contributions[0].Point() != generation.GenerationPointInvocationPrepare || !slices.Equal(contributions[0].Provides(), []generation.ContributionToken{"verified-authn-context"}) {
 		t.Fatalf("Contributions = %#v", contributions)
 	}
+	nodes := contributions[0].Nodes()
+	if len(nodes) != 1 || nodes[0].ID() != "attach-verification" || nodes[0].Kind() != generation.GeneratedNodeKindMetadataAttachment {
+		t.Fatalf("Generated nodes = %#v", nodes)
+	}
+	attachment, ok := nodes[0].MetadataAttachment()
+	if !ok || attachment.Key != "authn.verification" || attachment.Value.Literal == nil || attachment.Value.Literal.String == nil || *attachment.Value.Literal.String != "reused" {
+		t.Fatalf("Metadata attachment = %#v, %v", attachment, ok)
+	}
 	if output.Digest() == "" || len(output.CanonicalJSON()) == 0 {
 		t.Fatalf("normalized output = %q, %s", output.Digest(), output.CanonicalJSON())
 	}
@@ -248,6 +256,7 @@ func TestDecodeResponseRejectsDuplicateUnknownAndTrailingData(t *testing.T) {
 	tests := []string{
 		`{"api":"v1","api":"v1","status":"success","output":{"requirements":[],"diagnostics":[]}}`,
 		`{"api":"v1","status":"success","output":{"requirements":[],"diagnostics":[],"unknown":true}}`,
+		`{"api":"v1","status":"success","output":{"requirements":[],"diagnostics":[],"contributions":[{"id":"authn.verify","namespace":"authn","source":"order.create/v1","point":"invocation.prepare","requires":[],"provides":[],"nodes":[{"id":"attach","metadata_attachment":{"key":"authn.value","value":{"literal":{"string":"value"}},"maximum_bytes":16,"unknown":true}}]}]}}`,
 		`{"api":"v1","status":"success","output":{"requirements":[],"diagnostics":[]}} {}`,
 		strings.Repeat("[", maximumProtocolJSONDepth+1) + strings.Repeat("]", maximumProtocolJSONDepth+1),
 	}
@@ -542,7 +551,16 @@ func Generate(context generation.GenerationContext) (generation.Output, error) {
 		return generation.Output{
 			Requirements: []generation.Requirement{{RuleID: "authn.require-audit", Namespace: "authn", Source: order, Capability: audit}},
 			Diagnostics: []generation.Diagnostic{{Code: "authn.verified", Severity: generation.DiagnosticInfo, Message: "verified context reused", Namespace: "authn", Source: order, RuleID: "authn.require-audit"}},
-			Contributions: []generation.Contribution{{ID: "authn.verify", Namespace: "authn", Source: order, Point: generation.GenerationPointInvocationPrepare, Provides: []generation.ContributionToken{"verified-authn-context"}}},
+			Contributions: []generation.Contribution{{
+				ID: "authn.verify", Namespace: "authn", Source: order, Point: generation.GenerationPointInvocationPrepare,
+				Provides: []generation.ContributionToken{"verified-authn-context"},
+				Nodes: []generation.GeneratedNode{{
+					ID: "attach-verification",
+					MetadataAttachment: &generation.GeneratedMetadataAttachment{
+						Key: "authn.verification", Value: generation.StringValue("reused"), MaximumBytes: 32,
+					},
+				}},
+			}},
 		}, nil
 	case "error":
 		return generation.Output{}, errors.New("request failed at https://person:secret@example.com/private?token=secret")

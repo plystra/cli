@@ -30,8 +30,8 @@ type ContributionToken string
 func (t ContributionToken) String() string { return string(t) }
 
 // Contribution declares one selected extension's semantic generation unit and
-// its explicit ordering dependencies. Namespace and Source identify the exact
-// normalized metadata input that caused the contribution.
+// its explicit ordering dependencies and ordered typed operations. Namespace
+// and Source identify the exact normalized metadata input that caused it.
 type Contribution struct {
 	ID        string              `json:"id"`
 	Namespace string              `json:"namespace"`
@@ -39,6 +39,7 @@ type Contribution struct {
 	Point     GenerationPoint     `json:"point"`
 	Requires  []ContributionToken `json:"requires"`
 	Provides  []ContributionToken `json:"provides"`
+	Nodes     []GeneratedNode     `json:"nodes"`
 	_         struct{}
 }
 
@@ -52,6 +53,7 @@ type NormalizedContribution struct {
 	point     GenerationPoint
 	requires  []ContributionToken
 	provides  []ContributionToken
+	nodes     []NormalizedGeneratedNode
 }
 
 // ID returns the globally stable contribution identifier.
@@ -74,6 +76,11 @@ func (c NormalizedContribution) Requires() []ContributionToken {
 // Provides returns defensive dependency tokens in canonical order.
 func (c NormalizedContribution) Provides() []ContributionToken {
 	return append([]ContributionToken{}, c.provides...)
+}
+
+// Nodes returns defensive immutable views in semantic operation order.
+func (c NormalizedContribution) Nodes() []NormalizedGeneratedNode {
+	return append([]NormalizedGeneratedNode{}, c.nodes...)
 }
 
 func normalizeContributions(context Context, inputs []Contribution) ([]NormalizedContribution, error) {
@@ -104,6 +111,10 @@ func normalizeContributions(context Context, inputs []Contribution) ([]Normalize
 		if overlap := firstTokenOverlap(requires, provides); overlap != "" {
 			return nil, invalidOutput("%s both requires and provides token %q", field, overlap)
 		}
+		nodes, err := normalizeGeneratedNodes(context, input, field)
+		if err != nil {
+			return nil, err
+		}
 		seen[input.ID] = index
 		contributions = append(contributions, NormalizedContribution{
 			id:        input.ID,
@@ -112,6 +123,7 @@ func normalizeContributions(context Context, inputs []Contribution) ([]Normalize
 			point:     input.Point,
 			requires:  requires,
 			provides:  provides,
+			nodes:     nodes,
 		})
 	}
 	sort.Slice(contributions, func(left, right int) bool {
