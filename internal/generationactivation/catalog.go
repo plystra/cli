@@ -107,6 +107,19 @@ func New(inputs []Declaration) (Catalog, error) {
 		if generation.API() == "" || generation.Package() == "" || len(generation.Activations()) == 0 {
 			return Catalog{}, fmt.Errorf("%w: %w: plugin %q at %q has an incomplete generation declaration", ErrCatalog, ErrInvalidDeclaration, input.PluginID, input.Source)
 		}
+		for _, activation := range generation.Activations() {
+			if strings.HasPrefix(activation.Capability().Name(), "kernel.") {
+				return Catalog{}, fmt.Errorf(
+					"%w: %w: plugin %q at %q associates namespace %q with intrinsic Capability %s; generation extensions must activate through an ordinary canonical Capability provided by the selected plugin",
+					ErrCatalog,
+					ErrInvalidDeclaration,
+					input.PluginID,
+					input.Source,
+					activation.Namespace(),
+					activation.Capability(),
+				)
+			}
+		}
 		declarations[index] = normalizedDeclaration{pluginID: input.PluginID, source: input.Source, generation: generation}
 	}
 	sort.Slice(declarations, func(left, right int) bool {

@@ -122,12 +122,13 @@ func TestCatalogRejectsInvalidOrDuplicatePluginDeclarations(t *testing.T) {
 	t.Parallel()
 	valid := declaration(t, "example.authn", "authn.session.verify/v1", "authn", "authn/plugin.yaml")
 	tests := map[string][]generationactivation.Declaration{
-		"invalid plugin":   {{PluginID: "Example", Source: valid.Source, Generation: valid.Generation}},
-		"missing source":   {{PluginID: valid.PluginID, Generation: valid.Generation}},
-		"multiline source": {{PluginID: valid.PluginID, Source: "plugin.yaml\nforged", Generation: valid.Generation}},
-		"invalid UTF-8":    {{PluginID: valid.PluginID, Source: string([]byte{0xff}), Generation: valid.Generation}},
-		"empty generation": {{PluginID: valid.PluginID, Source: valid.Source}},
-		"duplicate plugin": {valid, {PluginID: valid.PluginID, Source: "duplicate/plugin.yaml", Generation: valid.Generation}},
+		"invalid plugin":       {{PluginID: "Example", Source: valid.Source, Generation: valid.Generation}},
+		"missing source":       {{PluginID: valid.PluginID, Generation: valid.Generation}},
+		"multiline source":     {{PluginID: valid.PluginID, Source: "plugin.yaml\nforged", Generation: valid.Generation}},
+		"invalid UTF-8":        {{PluginID: valid.PluginID, Source: string([]byte{0xff}), Generation: valid.Generation}},
+		"empty generation":     {{PluginID: valid.PluginID, Source: valid.Source}},
+		"intrinsic activation": {declaration(t, "example.kernel", "kernel.health/v1", "health", "kernel/plugin.yaml")},
+		"duplicate plugin":     {valid, {PluginID: valid.PluginID, Source: "duplicate/plugin.yaml", Generation: valid.Generation}},
 	}
 	for name, inputs := range tests {
 		t.Run(name, func(t *testing.T) {
