@@ -69,6 +69,124 @@ func TestResolveSelectsSoleOrdinaryProviderAndIntrinsicCapability(t *testing.T) 
 	}
 }
 
+func TestResolveInfersReferenceOnlyRequirementFromExactProviders(t *testing.T) {
+	t.Parallel()
+
+	contractData := contract("authn.session.verify/v1", "extensions: {audit: {event: authn.session.verified}}\n")
+	result, err := providerresolution.Resolve(providerresolution.Input{
+		Requirements: []providerresolution.Requirement{{
+			Capability: "authn.session.verify/v1",
+			Source:     "extensions.authn on order.cancel/v1",
+		}},
+		Candidates: []providerresolution.Candidate{{
+			PluginID: "example.authn",
+			Contract: contractData,
+			Source:   "authn/capabilities/authn.session.verify/v1/capability.yaml",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	capability, exists := result.Capability(mustID(t, "authn.session.verify/v1"))
+	if !exists || capability.Intrinsic() || !slices.Equal(capability.Sources(), []string{"extensions.authn on order.cancel/v1"}) || !bytes.Contains(capability.ContractJSON(), []byte(`"audit"`)) {
+		t.Fatalf("inferred Capability = %#v, %t", capability, exists)
+	}
+	selection, exists := result.SelectedProvider(capability.ID())
+	if !exists || selection.PluginID() != "example.authn" || selection.Explicit() {
+		t.Fatalf("inferred selection = %#v, %t", selection, exists)
+	}
+
+	result, err = providerresolution.Resolve(providerresolution.Input{
+		Requirements: []providerresolution.Requirement{
+			{Contract: contractData, Source: "official authn catalog"},
+			{Capability: "authn.session.verify/v1", Source: "extensions.authn on order.cancel/v1"},
+		},
+		Candidates: []providerresolution.Candidate{{PluginID: "example.authn", Contract: contractData, Source: "authn/capability.yaml"}},
+	})
+	if err != nil {
+		t.Fatalf("Resolve(mixed): %v", err)
+	}
+	capability, _ = result.Capability(mustID(t, "authn.session.verify/v1"))
+	if !slices.Equal(capability.Sources(), []string{"extensions.authn on order.cancel/v1", "official authn catalog"}) {
+		t.Fatalf("mixed requirement Sources = %v", capability.Sources())
+	}
+}
+
+func TestResolveReferenceOnlyRequirementStillRequiresExplicitProviderChoice(t *testing.T) {
+	t.Parallel()
+
+	contractData := contract("authz.check/v1", "request: {permission: {type: string, required: true}}\n")
+	input := providerresolution.Input{
+		Requirements: []providerresolution.Requirement{{Capability: "authz.check/v1", Source: "extensions.authz on order.cancel/v1"}},
+		Candidates: []providerresolution.Candidate{
+			{PluginID: "example.authz-default", Contract: contractData, Source: "default/authz.check"},
+			{PluginID: "example.authz-allow-all", Contract: contractData, Source: "allow-all/authz.check"},
+		},
+	}
+	_, err := providerresolution.Resolve(input)
+	if !errors.Is(err, providerresolution.ErrAmbiguousProvider) {
+		t.Fatalf("Resolve error = %v, want ErrAmbiguousProvider", err)
+	}
+	input.Choices = []providerresolution.Choice{{Capability: "authz.check/v1", PluginID: "example.authz-default", Source: "plystra.yaml capabilities.use.authz.check/v1"}}
+	result, err := providerresolution.Resolve(input)
+	if err != nil {
+		t.Fatalf("Resolve(explicit): %v", err)
+	}
+	selection, exists := result.SelectedProvider(mustID(t, "authz.check/v1"))
+	if !exists || selection.PluginID() != "example.authz-default" || !selection.Explicit() {
+		t.Fatalf("explicit reference selection = %#v, %t", selection, exists)
+	}
+}
+
+func TestResolveReferenceOnlyRequirementReportsMissingAndConflictingProviders(t *testing.T) {
+	t.Parallel()
+
+	t.Run("missing", func(t *testing.T) {
+		t.Parallel()
+		_, err := providerresolution.Resolve(providerresolution.Input{Requirements: []providerresolution.Requirement{{
+			Capability: "audit.write/v1",
+			Source:     "generation rule require-audit",
+		}}})
+		if !errors.Is(err, providerresolution.ErrMissingProvider) || !strings.Contains(err.Error(), "generation rule require-audit") {
+			t.Fatalf("Resolve error = %v, want actionable ErrMissingProvider", err)
+		}
+	})
+
+	t.Run("conflicting contracts", func(t *testing.T) {
+		t.Parallel()
+		input := providerresolution.Input{
+			Requirements: []providerresolution.Requirement{{Capability: "audit.write/v1", Source: "generation rule require-audit"}},
+			Candidates: []providerresolution.Candidate{
+				{PluginID: "zeta.audit", Contract: contract("audit.write/v1", "extensions: {retention: {days: 30}}\n"), Source: "zeta/audit.write"},
+				{PluginID: "acme.audit", Contract: contract("audit.write/v1", "extensions: {retention: {days: 7}}\n"), Source: "acme/audit.write"},
+			},
+		}
+		_, firstErr := providerresolution.Resolve(input)
+		slices.Reverse(input.Candidates)
+		_, secondErr := providerresolution.Resolve(input)
+		if !errors.Is(firstErr, providerresolution.ErrProviderContract) || firstErr.Error() != secondErr.Error() {
+			t.Fatalf("contract conflict diagnostics:\nfirst:  %v\nsecond: %v", firstErr, secondErr)
+		}
+		var conflict *providerresolution.ProviderContractConflictError
+		if !errors.As(firstErr, &conflict) || conflict.Capability().String() != "audit.write/v1" || !slices.Equal(conflict.Sources(), []string{"generation rule require-audit"}) {
+			t.Fatalf("ProviderContractConflictError = %#v", conflict)
+		}
+		providers := conflict.Providers()
+		if len(providers) != 2 || providers[0].PluginID() != "acme.audit" || providers[1].PluginID() != "zeta.audit" || providers[0].ContractDigest() == providers[1].ContractDigest() {
+			t.Fatalf("conflicting Providers = %#v", providers)
+		}
+		providers[0] = providerresolution.ProviderDetail{}
+		if conflict.Providers()[0].PluginID() != "acme.audit" {
+			t.Fatal("ProviderContractConflictError exposed mutable providers")
+		}
+		for _, detail := range []string{"provider-independent contract", "normalized extension metadata", "new /vN", "no provider contract is chosen by ordering"} {
+			if !strings.Contains(firstErr.Error(), detail) {
+				t.Fatalf("contract conflict omits %q: %v", detail, firstErr)
+			}
+		}
+	})
+}
+
 func TestResolveRequiresExplicitChoiceForSeveralProviders(t *testing.T) {
 	t.Parallel()
 
@@ -306,6 +424,18 @@ func TestResolveRejectsInvalidProviderAndInputEnvelopes(t *testing.T) {
 		},
 		"invalid source": {
 			input: providerresolution.Input{Requirements: []providerresolution.Requirement{{Contract: ordinary, Source: "forged\nsource"}}},
+		},
+		"empty requirement": {
+			input: providerresolution.Input{Requirements: []providerresolution.Requirement{{Source: "empty/requirement"}}},
+		},
+		"invalid referenced capability": {
+			input: providerresolution.Input{Requirements: []providerresolution.Requirement{{Capability: "email.send", Source: "bad/reference"}}},
+		},
+		"mismatched capability and contract": {
+			input: providerresolution.Input{Requirements: []providerresolution.Requirement{{Capability: "audit.write/v1", Contract: ordinary, Source: "bad/mismatch"}}},
+		},
+		"intrinsic without contract": {
+			input: providerresolution.Input{Requirements: []providerresolution.Requirement{{Capability: "kernel.health/v1", Source: "bad/intrinsic-reference"}}},
 		},
 	}
 	for name, test := range tests {

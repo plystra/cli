@@ -37,12 +37,15 @@ var (
 	ErrInvalidChoice = errors.New("invalid explicit Capability provider choice")
 )
 
-// Requirement carries one exact canonical Capability contract and deterministic
-// provenance describing why the application requires it. Contract may use the
-// accepted capability.yaml syntax; Resolve canonicalizes it before comparison.
+// Requirement carries deterministic provenance describing why the application
+// requires one exact canonical Capability. Contract may use the accepted
+// capability.yaml syntax. Capability may instead carry an exact ordinary ID
+// whose contract must be inferred identically from all visible providers. When
+// both are present, they must identify the same exact Capability.
 type Requirement struct {
-	Contract []byte
-	Source   string
+	Capability string
+	Contract   []byte
+	Source     string
 }
 
 // Candidate carries one plugin's provider copy of an exact canonical contract.
@@ -182,6 +185,13 @@ type normalizedContract struct {
 	source string
 }
 
+type normalizedRequirement struct {
+	id          capabilityid.Identifier
+	contract    normalizedContract
+	hasContract bool
+	source      string
+}
+
 type normalizedCandidate struct {
 	pluginID string
 	contract normalizedContract
@@ -212,11 +222,11 @@ func Resolve(input Input) (Result, error) {
 		return Result{}, resolutionError(issues)
 	}
 
-	groups, issues := groupRequirements(requirements)
+	candidatesByCapability, knownPlugins, issues := groupCandidates(candidates)
 	if len(issues) != 0 {
 		return Result{}, resolutionError(issues)
 	}
-	candidatesByCapability, knownPlugins, issues := groupCandidates(candidates)
+	groups, issues := groupRequirements(requirements, candidatesByCapability)
 	if len(issues) != 0 {
 		return Result{}, resolutionError(issues)
 	}
@@ -309,8 +319,8 @@ func Resolve(input Input) (Result, error) {
 	}, nil
 }
 
-func normalizeRequirements(inputs []Requirement) ([]normalizedContract, []error) {
-	values := make([]normalizedContract, 0, len(inputs))
+func normalizeRequirements(inputs []Requirement) ([]normalizedRequirement, []error) {
+	values := make([]normalizedRequirement, 0, len(inputs))
 	var issues []error
 	for _, input := range inputs {
 		source, err := normalizeSource(input.Source)
@@ -318,12 +328,39 @@ func normalizeRequirements(inputs []Requirement) ([]normalizedContract, []error)
 			issues = append(issues, fmt.Errorf("%w: requirement source: %v", ErrInvalidInput, err))
 			continue
 		}
-		contract, err := normalizeContract(input.Contract, source)
-		if err != nil {
-			issues = append(issues, fmt.Errorf("%w: requirement at %q: %v", ErrInvalidInput, source, err))
+		var identifier capabilityid.Identifier
+		var contract normalizedContract
+		hasContract := len(input.Contract) != 0
+		if hasContract {
+			contract, err = normalizeContract(input.Contract, source)
+			if err != nil {
+				issues = append(issues, fmt.Errorf("%w: requirement at %q: %v", ErrInvalidInput, source, err))
+				continue
+			}
+			identifier = contract.id
+		}
+		if input.Capability != "" {
+			declared, err := capabilityid.Parse(input.Capability)
+			if err != nil {
+				issues = append(issues, fmt.Errorf("%w: requirement at %q has non-canonical Capability ID %q", ErrInvalidInput, source, input.Capability))
+				continue
+			}
+			if hasContract && declared != contract.id {
+				issues = append(issues, fmt.Errorf("%w: requirement at %q names %s but its contract declares %s", ErrInvalidInput, source, declared, contract.id))
+				continue
+			}
+			identifier = declared
+		}
+		if identifier.String() == "" {
+			issues = append(issues, fmt.Errorf("%w: requirement at %q must contain Capability or Contract", ErrInvalidInput, source))
 			continue
 		}
-		values = append(values, contract)
+		values = append(values, normalizedRequirement{
+			id:          identifier,
+			contract:    contract,
+			hasContract: hasContract,
+			source:      source,
+		})
 	}
 	return values, issues
 }
@@ -395,16 +432,21 @@ func normalizeContract(input []byte, source string) (normalizedContract, error) 
 	}, nil
 }
 
-func groupRequirements(inputs []normalizedContract) ([]requirementGroup, []error) {
+func groupRequirements(inputs []normalizedRequirement, candidates map[capabilityid.Identifier][]normalizedCandidate) ([]requirementGroup, []error) {
 	sort.Slice(inputs, func(left, right int) bool {
 		if inputs[left].id != inputs[right].id {
 			return inputs[left].id.String() < inputs[right].id.String()
 		}
-		if inputs[left].digest != inputs[right].digest {
-			return inputs[left].digest < inputs[right].digest
+		if inputs[left].hasContract != inputs[right].hasContract {
+			return inputs[left].hasContract
 		}
-		if compared := bytes.Compare(inputs[left].json, inputs[right].json); compared != 0 {
-			return compared < 0
+		if inputs[left].hasContract {
+			if inputs[left].contract.digest != inputs[right].contract.digest {
+				return inputs[left].contract.digest < inputs[right].contract.digest
+			}
+			if compared := bytes.Compare(inputs[left].contract.json, inputs[right].contract.json); compared != 0 {
+				return compared < 0
+			}
 		}
 		return inputs[left].source < inputs[right].source
 	})
@@ -415,16 +457,52 @@ func groupRequirements(inputs []normalizedContract) ([]requirementGroup, []error
 		for last < len(inputs) && inputs[last].id == inputs[first].id {
 			last++
 		}
-		variants := contractVariants(inputs[first:last])
-		if len(variants) != 1 {
+		contracts := make([]normalizedContract, 0, last-first)
+		sources := make([]string, 0, last-first)
+		for _, input := range inputs[first:last] {
+			sources = append(sources, input.source)
+			if input.hasContract {
+				contracts = append(contracts, input.contract)
+			}
+		}
+		sources = uniqueStrings(sources)
+		variants := contractVariants(contracts)
+		if len(variants) > 1 {
 			issues = append(issues, &RequirementConflictError{capability: inputs[first].id, variants: variants})
-		} else {
+		} else if len(variants) == 1 {
 			groups = append(groups, requirementGroup{
 				id:           inputs[first].id,
-				contractJSON: append([]byte(nil), inputs[first].json...),
-				digest:       inputs[first].digest,
-				sources:      variants[0].Sources(),
+				contractJSON: append([]byte(nil), contracts[0].json...),
+				digest:       contracts[0].digest,
+				sources:      sources,
 			})
+		} else if isIntrinsic(inputs[first].id) {
+			issues = append(issues, fmt.Errorf(
+				"%w: intrinsic requirement %s from [%s] must include its authoritative Kernel contract",
+				ErrInvalidInput,
+				inputs[first].id,
+				strings.Join(sources, ", "),
+			))
+		} else {
+			providers := candidates[inputs[first].id]
+			if providersHaveDifferentContracts(providers) {
+				details := make([]ProviderDetail, len(providers))
+				for index, provider := range providers {
+					details[index] = providerDetail(provider)
+				}
+				issues = append(issues, &ProviderContractConflictError{
+					capability: inputs[first].id,
+					sources:    sources,
+					providers:  details,
+				})
+			} else {
+				group := requirementGroup{id: inputs[first].id, sources: sources}
+				if len(providers) != 0 {
+					group.contractJSON = append([]byte(nil), providers[0].contract.json...)
+					group.digest = providers[0].contract.digest
+				}
+				groups = append(groups, group)
+			}
 		}
 		first = last
 	}
@@ -574,6 +652,19 @@ func providerDetail(candidate normalizedCandidate) ProviderDetail {
 	}
 }
 
+func providersHaveDifferentContracts(providers []normalizedCandidate) bool {
+	if len(providers) < 2 {
+		return false
+	}
+	baseline := providers[0].contract.json
+	for _, provider := range providers[1:] {
+		if !bytes.Equal(baseline, provider.contract.json) {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeSource(value string) (string, error) {
 	if value == "" || len(value) > 1024 || !utf8.ValidString(value) || strings.ContainsAny(value, "\x00\r\n") {
 		return "", errors.New("must be non-empty valid single-line UTF-8, at most 1024 bytes")
@@ -711,6 +802,63 @@ func (p ProviderDetail) Source() string { return p.source }
 
 // ContractDigest returns the candidate's exact contract digest.
 func (p ProviderDetail) ContractDigest() string { return p.digest }
+
+// ProviderContractConflictError reports provider copies that disagree when a
+// requirement contributes only an exact Capability ID and no baseline contract.
+type ProviderContractConflictError struct {
+	capability capabilityid.Identifier
+	sources    []string
+	providers  []ProviderDetail
+}
+
+// Capability returns the exact ID with conflicting provider contracts.
+func (e *ProviderContractConflictError) Capability() capabilityid.Identifier {
+	if e == nil {
+		return capabilityid.Identifier{}
+	}
+	return e.capability
+}
+
+// Sources returns sorted reference-only requirement provenance.
+func (e *ProviderContractConflictError) Sources() []string {
+	if e == nil {
+		return nil
+	}
+	return append([]string(nil), e.sources...)
+}
+
+// Providers returns every conflicting candidate in Plugin ID order.
+func (e *ProviderContractConflictError) Providers() []ProviderDetail {
+	if e == nil {
+		return nil
+	}
+	return append([]ProviderDetail(nil), e.providers...)
+}
+
+func (e *ProviderContractConflictError) Error() string {
+	if e == nil {
+		return ErrProviderContract.Error()
+	}
+	var message strings.Builder
+	fmt.Fprintf(
+		&message,
+		"%s: %s referenced by [%s] has providers carrying different exact contracts",
+		ErrProviderContract,
+		e.capability,
+		strings.Join(e.sources, ", "),
+	)
+	for _, provider := range e.providers {
+		fmt.Fprintf(&message, "; plugin %q at %q carries %s", provider.pluginID, provider.source, provider.digest)
+	}
+	fmt.Fprintf(
+		&message,
+		"; correction: make every provider carry one provider-independent contract, including normalized extension metadata, or use a new /vN; no provider contract is chosen by ordering",
+	)
+	return message.String()
+}
+
+// Unwrap supports errors.Is with ErrProviderContract.
+func (*ProviderContractConflictError) Unwrap() error { return ErrProviderContract }
 
 // ProviderContractError reports candidates that do not carry the required exact contract.
 type ProviderContractError struct {
