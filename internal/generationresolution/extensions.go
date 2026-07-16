@@ -18,7 +18,8 @@ import (
 
 var (
 	// ErrResolveExtensions reports failure to reach one stable generation-derived
-	// requirement closure after activation providers have been selected.
+	// requirement closure and contribution plan after activation providers have
+	// been selected.
 	ErrResolveExtensions = errors.New("resolve generation extension requirements")
 	// ErrApplicationContext reports incomplete or inconsistent normalized input
 	// used to construct the immutable extension context.
@@ -113,13 +114,14 @@ func (o ExtensionOutput) Namespaces() []string {
 // Output returns the immutable normalized helper output.
 func (o ExtensionOutput) Output() generation.NormalizedOutput { return o.output }
 
-// ExtensionResult is one immutable stable activation, provider, context, and
-// generation-derived requirement closure.
+// ExtensionResult is one immutable stable activation, provider, context,
+// generation-derived requirement closure, and semantic contribution plan.
 type ExtensionResult struct {
 	activation            Result
 	generationContext     generation.Context
 	outputs               []ExtensionOutput
 	generatedRequirements []GeneratedRequirement
+	contributions         []ResolvedContribution
 	passes                int
 }
 
@@ -139,6 +141,12 @@ func (r ExtensionResult) GeneratedRequirements() []GeneratedRequirement {
 	return append([]GeneratedRequirement(nil), r.generatedRequirements...)
 }
 
+// Contributions returns selected-extension contributions in semantic graph
+// order with complete selected-plugin provenance.
+func (r ExtensionResult) Contributions() []ResolvedContribution {
+	return append([]ResolvedContribution(nil), r.contributions...)
+}
+
 // Passes returns the number of extension execution passes. Applications with
 // no selected extensions stabilize without a confirmation pass.
 func (r ExtensionResult) Passes() int { return r.passes }
@@ -151,8 +159,8 @@ type extensionHelper interface {
 type extensionHelperBuilder func(context.Context, generationexec.Spec, generationexec.BuildOptions) (extensionHelper, error)
 
 // ResolveExtensions executes only extensions owned by selected activation
-// providers and feeds their exact requirements back through ordinary provider
-// resolution until both normalized input and output are stable.
+// providers, feeds their exact requirements back through ordinary provider
+// resolution until stable, and validates the final semantic contribution plan.
 func ResolveExtensions(ctx context.Context, input ExtensionInput) (ExtensionResult, error) {
 	return resolveExtensions(ctx, input, func(ctx context.Context, spec generationexec.Spec, options generationexec.BuildOptions) (extensionHelper, error) {
 		return generationexec.Build(ctx, spec, options)
@@ -274,11 +282,16 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 				)
 			}
 			if added == 0 {
+				contributions, err := resolveContributionGraph(outputs)
+				if err != nil {
+					return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w", ErrResolveExtensions, pass, err)
+				}
 				return ExtensionResult{
 					activation:            activation,
 					generationContext:     generationContext,
 					outputs:               outputs,
 					generatedRequirements: generated,
+					contributions:         contributions,
 					passes:                pass,
 				}, nil
 			}

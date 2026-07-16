@@ -46,6 +46,13 @@ func TestResolveExtensionsBuildsStableGeneratedRequirementClosure(t *testing.T) 
 						Source:    extensionTestCapabilityID(t, "order.create/v1"),
 						RuleID:    "authn.require-audit",
 					}},
+					Contributions: []generation.Contribution{{
+						ID:        "authn.verify",
+						Namespace: "authn",
+						Source:    extensionTestCapabilityID(t, "order.create/v1"),
+						Point:     generation.GenerationPointInvocationPrepare,
+						Provides:  []generation.ContributionToken{"verified-authn-context"},
+					}},
 				}, nil
 			},
 		},
@@ -87,6 +94,10 @@ func TestResolveExtensionsBuildsStableGeneratedRequirementClosure(t *testing.T) 
 	if len(outputs) != 1 || outputs[0].PluginID() != "example.authn" || outputs[0].API() != "v1" || outputs[0].Package() != "./generation" || !slices.Equal(outputs[0].Namespaces(), []string{"authn"}) || len(outputs[0].Output().Diagnostics()) != 1 {
 		t.Fatalf("Outputs = %#v", outputs)
 	}
+	contributions := result.Contributions()
+	if len(contributions) != 1 || contributions[0].PluginID() != "example.authn" || contributions[0].ID() != "authn.verify" || contributions[0].Namespace() != "authn" || contributions[0].Source().String() != "order.create/v1" || contributions[0].Point() != generation.GenerationPointInvocationPrepare || !slices.Equal(contributions[0].Provides(), []generation.ContributionToken{"verified-authn-context"}) {
+		t.Fatalf("Contributions = %#v", contributions)
+	}
 	if got := builder.BuiltPluginIDs(); !slices.Equal(got, []string{"example.authn"}) {
 		t.Fatalf("built helpers = %v", got)
 	}
@@ -101,7 +112,10 @@ func TestResolveExtensionsBuildsStableGeneratedRequirementClosure(t *testing.T) 
 
 	outputs[0] = ExtensionOutput{}
 	generated[0] = GeneratedRequirement{}
-	if result.Outputs()[0].PluginID() != "example.authn" || result.GeneratedRequirements()[0].PluginID() != "example.authn" {
+	provided := contributions[0].Provides()
+	provided[0] = "changed"
+	contributions[0] = ResolvedContribution{}
+	if result.Outputs()[0].PluginID() != "example.authn" || result.GeneratedRequirements()[0].PluginID() != "example.authn" || result.Contributions()[0].PluginID() != "example.authn" || result.Contributions()[0].Provides()[0] != "verified-authn-context" {
 		t.Fatal("ExtensionResult exposed mutable result storage")
 	}
 }
@@ -169,8 +183,8 @@ func TestResolveExtensionsSkipsHelpersWhenNoExtensionIsSelected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveExtensions: %v", err)
 	}
-	if result.Passes() != 1 || len(result.Outputs()) != 0 || len(result.GeneratedRequirements()) != 0 || len(builder.builds) != 0 {
-		t.Fatalf("empty extension result = passes %d, outputs %#v, generated %#v, builds %#v", result.Passes(), result.Outputs(), result.GeneratedRequirements(), builder.builds)
+	if result.Passes() != 1 || len(result.Outputs()) != 0 || len(result.GeneratedRequirements()) != 0 || len(result.Contributions()) != 0 || len(builder.builds) != 0 {
+		t.Fatalf("empty extension result = passes %d, outputs %#v, generated %#v, contributions %#v, builds %#v", result.Passes(), result.Outputs(), result.GeneratedRequirements(), result.Contributions(), builder.builds)
 	}
 	if _, exists := result.Context().Plugin(extensionTestPluginID(t, "example.local")); !exists {
 		t.Fatal("root-level local plugin is absent from the normalized application context")
