@@ -22,9 +22,10 @@ type GenerateFunc func(GenerationContext) (Output, error)
 // The unexported field intentionally prevents unkeyed external literals so v1
 // can add backward-compatible structured result fields.
 type Output struct {
-	Requirements []Requirement `json:"requirements"`
-	Diagnostics  []Diagnostic  `json:"diagnostics"`
-	_            struct{}
+	Requirements  []Requirement  `json:"requirements"`
+	Diagnostics   []Diagnostic   `json:"diagnostics"`
+	Contributions []Contribution `json:"contributions"`
+	_             struct{}
 }
 
 // Requirement records one exact generation-derived canonical Capability
@@ -62,6 +63,7 @@ type Diagnostic struct {
 type NormalizedOutput struct {
 	requirements  []Requirement
 	diagnostics   []Diagnostic
+	contributions []NormalizedContribution
 	canonicalJSON []byte
 	digest        string
 }
@@ -77,7 +79,11 @@ func NormalizeOutput(context Context, output Output) (NormalizedOutput, error) {
 	if err != nil {
 		return NormalizedOutput{}, err
 	}
-	canonical, err := encodeOutput(requirements, diagnostics)
+	contributions, err := normalizeContributions(context, output.Contributions)
+	if err != nil {
+		return NormalizedOutput{}, err
+	}
+	canonical, err := encodeOutput(requirements, diagnostics, contributions)
 	if err != nil {
 		return NormalizedOutput{}, invalidOutput("encode canonical output: %v", err)
 	}
@@ -87,6 +93,7 @@ func NormalizeOutput(context Context, output Output) (NormalizedOutput, error) {
 	return NormalizedOutput{
 		requirements:  requirements,
 		diagnostics:   diagnostics,
+		contributions: contributions,
 		canonicalJSON: canonical,
 		digest:        outputDigest(canonical),
 	}, nil
@@ -100,6 +107,12 @@ func (o NormalizedOutput) Requirements() []Requirement {
 // Diagnostics returns defensive copies in canonical diagnostic order.
 func (o NormalizedOutput) Diagnostics() []Diagnostic {
 	return append([]Diagnostic(nil), o.diagnostics...)
+}
+
+// Contributions returns immutable views in canonical serialization order by
+// contribution ID. Semantic execution order is determined only by graph merge.
+func (o NormalizedOutput) Contributions() []NormalizedContribution {
+	return append([]NormalizedContribution(nil), o.contributions...)
 }
 
 // CanonicalJSON returns a defensive copy of the normalized protocol output.
@@ -188,8 +201,9 @@ func validateOutputSource(context Context, field, namespace string, source Capab
 }
 
 type canonicalOutput struct {
-	Requirements []canonicalOutputRequirement `json:"requirements"`
-	Diagnostics  []canonicalOutputDiagnostic  `json:"diagnostics"`
+	Requirements  []canonicalOutputRequirement  `json:"requirements"`
+	Diagnostics   []canonicalOutputDiagnostic   `json:"diagnostics"`
+	Contributions []canonicalOutputContribution `json:"contributions"`
 }
 
 type canonicalOutputRequirement struct {
@@ -208,10 +222,20 @@ type canonicalOutputDiagnostic struct {
 	RuleID    string             `json:"rule_id"`
 }
 
-func encodeOutput(requirements []Requirement, diagnostics []Diagnostic) ([]byte, error) {
+type canonicalOutputContribution struct {
+	ID        string              `json:"id"`
+	Namespace string              `json:"namespace"`
+	Source    string              `json:"source"`
+	Point     GenerationPoint     `json:"point"`
+	Requires  []ContributionToken `json:"requires"`
+	Provides  []ContributionToken `json:"provides"`
+}
+
+func encodeOutput(requirements []Requirement, diagnostics []Diagnostic, contributions []NormalizedContribution) ([]byte, error) {
 	canonical := canonicalOutput{
-		Requirements: make([]canonicalOutputRequirement, len(requirements)),
-		Diagnostics:  make([]canonicalOutputDiagnostic, len(diagnostics)),
+		Requirements:  make([]canonicalOutputRequirement, len(requirements)),
+		Diagnostics:   make([]canonicalOutputDiagnostic, len(diagnostics)),
+		Contributions: make([]canonicalOutputContribution, len(contributions)),
 	}
 	for index, requirement := range requirements {
 		canonical.Requirements[index] = canonicalOutputRequirement{
@@ -229,6 +253,16 @@ func encodeOutput(requirements []Requirement, diagnostics []Diagnostic) ([]byte,
 			Namespace: diagnostic.Namespace,
 			Source:    diagnostic.Source.String(),
 			RuleID:    diagnostic.RuleID,
+		}
+	}
+	for index, contribution := range contributions {
+		canonical.Contributions[index] = canonicalOutputContribution{
+			ID:        contribution.id,
+			Namespace: contribution.namespace,
+			Source:    contribution.source.String(),
+			Point:     contribution.point,
+			Requires:  append([]ContributionToken{}, contribution.requires...),
+			Provides:  append([]ContributionToken{}, contribution.provides...),
 		}
 	}
 	return json.Marshal(canonical)

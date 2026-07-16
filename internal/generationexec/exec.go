@@ -602,7 +602,7 @@ func validateResponseShape(response helperResponse) error {
 		if response.Error == "" {
 			return fmt.Errorf("%s response contains no error", response.Status)
 		}
-		if len(response.Output.Requirements) != 0 || len(response.Output.Diagnostics) != 0 {
+		if len(response.Output.Requirements) != 0 || len(response.Output.Diagnostics) != 0 || len(response.Output.Contributions) != 0 {
 			return fmt.Errorf("%s response contains output", response.Status)
 		}
 		return nil

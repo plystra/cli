@@ -407,6 +407,30 @@ func TestResolveExtensionsRejectsOutputOutsideSelectedActivationInputs(t *testin
 			t.Fatalf("provenance error omits %q: %v", detail, err)
 		}
 	}
+
+	contributionBuilder := newFakeExtensionBuilder(map[string]*fakeExtensionHelper{
+		"example.authn": {
+			output: func(_ int, _ generation.Context) (generation.Output, error) {
+				return generation.Output{Contributions: []generation.Contribution{{
+					ID:        "authn.cross-namespace",
+					Namespace: "authz",
+					Source:    extensionTestCapabilityID(t, "order.create/v1"),
+					Point:     generation.GenerationPointInvocationPrepare,
+					Provides:  []generation.ContributionToken{"authorization-approved"},
+				}}}, nil
+			},
+		},
+		"example.authz": {output: emptyExtensionOutput},
+	})
+	_, err = resolveExtensions(t.Context(), input, contributionBuilder.Build)
+	if !errors.Is(err, ErrExtensionProvenance) {
+		t.Fatalf("cross-namespace contribution error = %v", err)
+	}
+	for _, detail := range []string{"example.authn", "authn.cross-namespace", "extensions.authz", "order.create/v1", "not one of its selected activation inputs"} {
+		if !strings.Contains(err.Error(), detail) {
+			t.Fatalf("contribution provenance error omits %q: %v", detail, err)
+		}
+	}
 }
 
 func TestResolveExtensionsFailsOnStructuredErrorDiagnostic(t *testing.T) {

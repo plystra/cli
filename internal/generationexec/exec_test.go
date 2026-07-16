@@ -55,6 +55,10 @@ func TestHelperGeneratesNormalizedOutputWithSanitizedEnvironment(t *testing.T) {
 	if len(diagnostics) != 1 || diagnostics[0].Code != "authn.verified" || diagnostics[0].Message != "verified context reused" {
 		t.Fatalf("Diagnostics = %#v", diagnostics)
 	}
+	contributions := output.Contributions()
+	if len(contributions) != 1 || contributions[0].ID() != "authn.verify" || contributions[0].Point() != generation.GenerationPointInvocationPrepare || !slices.Equal(contributions[0].Provides(), []generation.ContributionToken{"verified-authn-context"}) {
+		t.Fatalf("Contributions = %#v", contributions)
+	}
 	if output.Digest() == "" || len(output.CanonicalJSON()) == 0 {
 		t.Fatalf("normalized output = %q, %s", output.Digest(), output.CanonicalJSON())
 	}
@@ -223,6 +227,7 @@ func TestValidateResponseShapeRejectsContradictoryEnvelopes(t *testing.T) {
 		{Status: "success", Error: "unexpected"},
 		{Status: "extension-error"},
 		{Status: "panic", Error: "panic", Output: generation.Output{Diagnostics: []generation.Diagnostic{{Message: "hidden"}}}},
+		{Status: "panic", Error: "panic", Output: generation.Output{Contributions: []generation.Contribution{{ID: "hidden"}}}},
 		{Status: "unknown", Error: "error"},
 	}
 	for _, response := range tests {
@@ -537,6 +542,7 @@ func Generate(context generation.GenerationContext) (generation.Output, error) {
 		return generation.Output{
 			Requirements: []generation.Requirement{{RuleID: "authn.require-audit", Namespace: "authn", Source: order, Capability: audit}},
 			Diagnostics: []generation.Diagnostic{{Code: "authn.verified", Severity: generation.DiagnosticInfo, Message: "verified context reused", Namespace: "authn", Source: order, RuleID: "authn.require-audit"}},
+			Contributions: []generation.Contribution{{ID: "authn.verify", Namespace: "authn", Source: order, Point: generation.GenerationPointInvocationPrepare, Provides: []generation.ContributionToken{"verified-authn-context"}}},
 		}, nil
 	case "error":
 		return generation.Output{}, errors.New("request failed at https://person:secret@example.com/private?token=secret")

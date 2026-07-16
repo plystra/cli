@@ -28,6 +28,10 @@ func TestNormalizeOutputBuildsDeterministicImmutableProtocolData(t *testing.T) {
 			{Code: "authz.optional-space", Severity: generation.DiagnosticWarning, Message: "Space binding is optional.", Namespace: "authz", Source: order, RuleID: "authz.require-health"},
 			{Code: "authn.verified", Severity: generation.DiagnosticInfo, Message: "Verified state will be reused.", Namespace: "authn", Source: order, RuleID: "authn.require-audit"},
 		},
+		Contributions: []generation.Contribution{
+			{ID: "authz.authorize", Namespace: "authz", Source: order, Point: generation.GenerationPointInvocationPrepare, Requires: []generation.ContributionToken{"verified-authn-context", "credentials-read"}, Provides: []generation.ContributionToken{"authorization-approved"}},
+			{ID: "authn.verify", Namespace: "authn", Source: order, Point: generation.GenerationPointInvocationPrepare, Provides: []generation.ContributionToken{"verified-authn-context", "credentials-read"}},
+		},
 	}
 	normalized, err := generation.NormalizeOutput(context, output)
 	if err != nil {
@@ -45,6 +49,12 @@ func TestNormalizeOutputBuildsDeterministicImmutableProtocolData(t *testing.T) {
 	}) {
 		t.Fatalf("Diagnostics = %v", got)
 	}
+	if got := contributionStrings(normalized.Contributions()); !slices.Equal(got, []string{
+		"authn.verify|authn|order.create/v1|invocation.prepare||credentials-read,verified-authn-context",
+		"authz.authorize|authz|order.create/v1|invocation.prepare|credentials-read,verified-authn-context|authorization-approved",
+	}) {
+		t.Fatalf("Contributions = %v", got)
+	}
 	if !json.Valid(normalized.CanonicalJSON()) || !digestPattern.MatchString(normalized.Digest()) {
 		t.Fatalf("CanonicalJSON = %s, Digest = %q", normalized.CanonicalJSON(), normalized.Digest())
 	}
@@ -53,15 +63,20 @@ func TestNormalizeOutputBuildsDeterministicImmutableProtocolData(t *testing.T) {
 	requirements[0].RuleID = "changed"
 	diagnostics := normalized.Diagnostics()
 	diagnostics[0].Message = "changed"
+	contributions := normalized.Contributions()
+	requires := contributions[1].Requires()
+	requires[0] = "changed"
+	contributions[0] = generation.NormalizedContribution{}
 	canonical := normalized.CanonicalJSON()
 	canonical[0] = '['
-	if normalized.Requirements()[0].RuleID != "authn.require-audit" || normalized.Diagnostics()[0].Message != "Verified state will be reused." || normalized.CanonicalJSON()[0] != '{' {
+	if normalized.Requirements()[0].RuleID != "authn.require-audit" || normalized.Diagnostics()[0].Message != "Verified state will be reused." || normalized.Contributions()[0].ID() != "authn.verify" || normalized.Contributions()[1].Requires()[0] != "credentials-read" || normalized.CanonicalJSON()[0] != '{' {
 		t.Fatal("NormalizedOutput exposed mutable storage")
 	}
 
 	output.Requirements[0].RuleID = "changed"
 	output.Diagnostics[0].Message = "changed"
-	if normalized.Requirements()[1].RuleID != "authz.require-health" || normalized.Diagnostics()[1].Message != "Space binding is optional." {
+	output.Contributions[0].Requires[0] = "changed"
+	if normalized.Requirements()[1].RuleID != "authz.require-health" || normalized.Diagnostics()[1].Message != "Space binding is optional." || normalized.Contributions()[1].Requires()[0] != "credentials-read" {
 		t.Fatal("NormalizeOutput retained mutable input storage")
 	}
 
@@ -73,6 +88,10 @@ func TestNormalizeOutputBuildsDeterministicImmutableProtocolData(t *testing.T) {
 		Diagnostics: []generation.Diagnostic{
 			{Code: "authn.verified", Severity: generation.DiagnosticInfo, Message: "Verified state will be reused.", Namespace: "authn", Source: order, RuleID: "authn.require-audit"},
 			{Code: "authz.optional-space", Severity: generation.DiagnosticWarning, Message: "Space binding is optional.", Namespace: "authz", Source: order, RuleID: "authz.require-health"},
+		},
+		Contributions: []generation.Contribution{
+			{ID: "authn.verify", Namespace: "authn", Source: order, Point: generation.GenerationPointInvocationPrepare, Provides: []generation.ContributionToken{"credentials-read", "verified-authn-context"}},
+			{ID: "authz.authorize", Namespace: "authz", Source: order, Point: generation.GenerationPointInvocationPrepare, Requires: []generation.ContributionToken{"credentials-read", "verified-authn-context"}, Provides: []generation.ContributionToken{"authorization-approved"}},
 		},
 	}
 	second, err := generation.NormalizeOutput(context, equivalent)
@@ -100,8 +119,46 @@ func TestNormalizeOutputBuildsDeterministicImmutableProtocolData(t *testing.T) {
 		return equivalent, nil
 	}
 	generated, err := generate(context)
-	if err != nil || len(generated.Requirements) != 2 {
+	if err != nil || len(generated.Requirements) != 2 || len(generated.Contributions) != 2 {
 		t.Fatalf("GenerateFunc = %#v, %v", generated, err)
+	}
+}
+
+func TestNormalizeOutputSupportsEveryGenerationPoint(t *testing.T) {
+	t.Parallel()
+
+	order := mustCapabilityID(t, "order.create/v1")
+	tests := []struct {
+		id    string
+		point generation.GenerationPoint
+	}{
+		{id: "authn.http-ingress", point: generation.GenerationPointHTTPIngress},
+		{id: "authn.invocation-prepare", point: generation.GenerationPointInvocationPrepare},
+		{id: "authn.invocation-complete", point: generation.GenerationPointInvocationComplete},
+		{id: "authn.http-egress", point: generation.GenerationPointHTTPEgress},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.id, func(t *testing.T) {
+			t.Parallel()
+			normalized, err := generation.NormalizeOutput(outputContext(t), generation.Output{Contributions: []generation.Contribution{{
+				ID:        test.id,
+				Namespace: "authn",
+				Source:    order,
+				Point:     test.point,
+				Provides:  []generation.ContributionToken{generation.ContributionToken(strings.ReplaceAll(string(test.point), ".", "-"))},
+			}}})
+			if err != nil {
+				t.Fatalf("NormalizeOutput: %v", err)
+			}
+			contributions := normalized.Contributions()
+			if len(contributions) != 1 || contributions[0].ID() != test.id || contributions[0].Point() != test.point {
+				t.Fatalf("Contributions = %#v", contributions)
+			}
+			if !strings.Contains(string(normalized.CanonicalJSON()), `"requires":[],"provides":[`) {
+				t.Fatalf("empty tokens did not canonicalize as arrays: %s", normalized.CanonicalJSON())
+			}
+		})
 	}
 }
 
@@ -112,8 +169,8 @@ func TestNormalizeOutputSupportsNoContributions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormalizeOutput: %v", err)
 	}
-	want := `{"requirements":[],"diagnostics":[]}`
-	if string(normalized.CanonicalJSON()) != want || len(normalized.Requirements()) != 0 || len(normalized.Diagnostics()) != 0 || !digestPattern.MatchString(normalized.Digest()) {
+	want := `{"requirements":[],"diagnostics":[],"contributions":[]}`
+	if string(normalized.CanonicalJSON()) != want || len(normalized.Requirements()) != 0 || len(normalized.Diagnostics()) != 0 || len(normalized.Contributions()) != 0 || !digestPattern.MatchString(normalized.Digest()) {
 		t.Fatalf("empty NormalizedOutput = %s, %q", normalized.CanonicalJSON(), normalized.Digest())
 	}
 }
@@ -128,26 +185,41 @@ func TestNormalizeOutputRejectsMalformedOrInconsistentData(t *testing.T) {
 	unknown := mustCapabilityID(t, "missing.operation/v1")
 	validRequirement := generation.Requirement{RuleID: "authn.require-audit", Namespace: "authn", Source: order, Capability: audit}
 	validDiagnostic := generation.Diagnostic{Code: "authn.verified", Severity: generation.DiagnosticInfo, Message: "Verified state will be reused.", Namespace: "authn", Source: order, RuleID: "authn.require-audit"}
+	validContribution := generation.Contribution{ID: "authn.verify", Namespace: "authn", Source: order, Point: generation.GenerationPointInvocationPrepare, Provides: []generation.ContributionToken{"verified-authn-context"}}
 	tests := map[string]generation.Output{
-		"invalid rule ID":             {Requirements: []generation.Requirement{{RuleID: "AuthN.Rule", Namespace: "authn", Source: order, Capability: audit}}},
-		"invalid namespace":           {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "AuthN", Source: order, Capability: audit}}},
-		"zero source":                 {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "authn", Capability: audit}}},
-		"unknown source":              {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "authn", Source: unknown, Capability: audit}}},
-		"source not required":         {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "authn", Source: profile, Capability: audit}}},
-		"source missing metadata":     {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "authn", Source: audit, Capability: audit}}},
-		"zero requirement":            {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "authn", Source: order}}},
-		"unknown requirement":         {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "authn", Source: order, Capability: unknown}}},
-		"alias requirement":           {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "authn", Source: order, Capability: alias}}},
-		"duplicate requirement":       {Requirements: []generation.Requirement{validRequirement, validRequirement}},
-		"invalid diagnostic code":     {Diagnostics: []generation.Diagnostic{{Code: "AUTHN", Severity: generation.DiagnosticInfo, Message: "message", Namespace: "authn", Source: order, RuleID: "authn.rule"}}},
-		"invalid diagnostic rule":     {Diagnostics: []generation.Diagnostic{{Code: "authn.code", Severity: generation.DiagnosticInfo, Message: "message", Namespace: "authn", Source: order, RuleID: "AuthN.Rule"}}},
-		"invalid diagnostic severity": {Diagnostics: []generation.Diagnostic{{Code: "authn.code", Severity: "fatal", Message: "message", Namespace: "authn", Source: order, RuleID: "authn.rule"}}},
-		"empty diagnostic message":    {Diagnostics: []generation.Diagnostic{{Code: "authn.code", Severity: generation.DiagnosticInfo, Namespace: "authn", Source: order, RuleID: "authn.rule"}}},
-		"long diagnostic message":     {Diagnostics: []generation.Diagnostic{{Code: "authn.code", Severity: generation.DiagnosticInfo, Message: strings.Repeat("x", 4097), Namespace: "authn", Source: order, RuleID: "authn.rule"}}},
-		"nul diagnostic message":      {Diagnostics: []generation.Diagnostic{{Code: "authn.code", Severity: generation.DiagnosticInfo, Message: "unsafe\x00message", Namespace: "authn", Source: order, RuleID: "authn.rule"}}},
-		"invalid diagnostic UTF-8":    {Diagnostics: []generation.Diagnostic{{Code: "authn.code", Severity: generation.DiagnosticInfo, Message: string([]byte{0xff}), Namespace: "authn", Source: order, RuleID: "authn.rule"}}},
-		"diagnostic missing metadata": {Diagnostics: []generation.Diagnostic{{Code: "authn.code", Severity: generation.DiagnosticInfo, Message: "message", Namespace: "authn", Source: audit, RuleID: "authn.rule"}}},
-		"duplicate diagnostic":        {Diagnostics: []generation.Diagnostic{validDiagnostic, validDiagnostic}},
+		"invalid rule ID":                      {Requirements: []generation.Requirement{{RuleID: "AuthN.Rule", Namespace: "authn", Source: order, Capability: audit}}},
+		"invalid namespace":                    {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "AuthN", Source: order, Capability: audit}}},
+		"zero source":                          {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "authn", Capability: audit}}},
+		"unknown source":                       {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "authn", Source: unknown, Capability: audit}}},
+		"source not required":                  {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "authn", Source: profile, Capability: audit}}},
+		"source missing metadata":              {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "authn", Source: audit, Capability: audit}}},
+		"zero requirement":                     {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "authn", Source: order}}},
+		"unknown requirement":                  {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "authn", Source: order, Capability: unknown}}},
+		"alias requirement":                    {Requirements: []generation.Requirement{{RuleID: "authn.rule", Namespace: "authn", Source: order, Capability: alias}}},
+		"duplicate requirement":                {Requirements: []generation.Requirement{validRequirement, validRequirement}},
+		"invalid diagnostic code":              {Diagnostics: []generation.Diagnostic{{Code: "AUTHN", Severity: generation.DiagnosticInfo, Message: "message", Namespace: "authn", Source: order, RuleID: "authn.rule"}}},
+		"invalid diagnostic rule":              {Diagnostics: []generation.Diagnostic{{Code: "authn.code", Severity: generation.DiagnosticInfo, Message: "message", Namespace: "authn", Source: order, RuleID: "AuthN.Rule"}}},
+		"invalid diagnostic severity":          {Diagnostics: []generation.Diagnostic{{Code: "authn.code", Severity: "fatal", Message: "message", Namespace: "authn", Source: order, RuleID: "authn.rule"}}},
+		"empty diagnostic message":             {Diagnostics: []generation.Diagnostic{{Code: "authn.code", Severity: generation.DiagnosticInfo, Namespace: "authn", Source: order, RuleID: "authn.rule"}}},
+		"long diagnostic message":              {Diagnostics: []generation.Diagnostic{{Code: "authn.code", Severity: generation.DiagnosticInfo, Message: strings.Repeat("x", 4097), Namespace: "authn", Source: order, RuleID: "authn.rule"}}},
+		"nul diagnostic message":               {Diagnostics: []generation.Diagnostic{{Code: "authn.code", Severity: generation.DiagnosticInfo, Message: "unsafe\x00message", Namespace: "authn", Source: order, RuleID: "authn.rule"}}},
+		"invalid diagnostic UTF-8":             {Diagnostics: []generation.Diagnostic{{Code: "authn.code", Severity: generation.DiagnosticInfo, Message: string([]byte{0xff}), Namespace: "authn", Source: order, RuleID: "authn.rule"}}},
+		"diagnostic missing metadata":          {Diagnostics: []generation.Diagnostic{{Code: "authn.code", Severity: generation.DiagnosticInfo, Message: "message", Namespace: "authn", Source: audit, RuleID: "authn.rule"}}},
+		"duplicate diagnostic":                 {Diagnostics: []generation.Diagnostic{validDiagnostic, validDiagnostic}},
+		"invalid contribution ID":              {Contributions: []generation.Contribution{{ID: "AuthN.Verify", Namespace: "authn", Source: order, Point: generation.GenerationPointInvocationPrepare}}},
+		"duplicate contribution":               {Contributions: []generation.Contribution{validContribution, validContribution}},
+		"invalid contribution namespace":       {Contributions: []generation.Contribution{{ID: "authn.verify", Namespace: "AuthN", Source: order, Point: generation.GenerationPointInvocationPrepare}}},
+		"zero contribution source":             {Contributions: []generation.Contribution{{ID: "authn.verify", Namespace: "authn", Point: generation.GenerationPointInvocationPrepare}}},
+		"unknown contribution source":          {Contributions: []generation.Contribution{{ID: "authn.verify", Namespace: "authn", Source: unknown, Point: generation.GenerationPointInvocationPrepare}}},
+		"unrequired contribution source":       {Contributions: []generation.Contribution{{ID: "authn.verify", Namespace: "authn", Source: profile, Point: generation.GenerationPointInvocationPrepare}}},
+		"contribution source missing metadata": {Contributions: []generation.Contribution{{ID: "authn.verify", Namespace: "authn", Source: audit, Point: generation.GenerationPointInvocationPrepare}}},
+		"invalid contribution point":           {Contributions: []generation.Contribution{{ID: "authn.verify", Namespace: "authn", Source: order, Point: "invocation.before"}}},
+		"invalid required token":               {Contributions: []generation.Contribution{{ID: "authn.verify", Namespace: "authn", Source: order, Point: generation.GenerationPointInvocationPrepare, Requires: []generation.ContributionToken{"Verified"}}}},
+		"invalid provided token":               {Contributions: []generation.Contribution{{ID: "authn.verify", Namespace: "authn", Source: order, Point: generation.GenerationPointInvocationPrepare, Provides: []generation.ContributionToken{"verified_"}}}},
+		"duplicate required token":             {Contributions: []generation.Contribution{{ID: "authn.verify", Namespace: "authn", Source: order, Point: generation.GenerationPointInvocationPrepare, Requires: []generation.ContributionToken{"verified", "verified"}}}},
+		"duplicate provided token":             {Contributions: []generation.Contribution{{ID: "authn.verify", Namespace: "authn", Source: order, Point: generation.GenerationPointInvocationPrepare, Provides: []generation.ContributionToken{"verified", "verified"}}}},
+		"required and provided token overlap":  {Contributions: []generation.Contribution{{ID: "authn.verify", Namespace: "authn", Source: order, Point: generation.GenerationPointInvocationPrepare, Requires: []generation.ContributionToken{"verified"}, Provides: []generation.ContributionToken{"verified"}}}},
+		"too many contribution tokens":         {Contributions: []generation.Contribution{{ID: "authn.verify", Namespace: "authn", Source: order, Point: generation.GenerationPointInvocationPrepare, Requires: tooManyContributionTokens()}}},
 	}
 	for name, output := range tests {
 		name, output := name, output
@@ -185,7 +257,9 @@ func FuzzNormalizeOutputJSON(f *testing.F) {
 		`{"requirements":[],"diagnostics":[]}`,
 		`{"requirements":[{"rule_id":"authn.require-audit","namespace":"authn","source":"order.create/v1","capability":"audit.write/v1"}],"diagnostics":[]}`,
 		`{"requirements":[],"diagnostics":[{"code":"authn.verified","severity":"info","message":"Verified state will be reused.","namespace":"authn","source":"order.create/v1","rule_id":"authn.require-audit"}]}`,
+		`{"requirements":[],"diagnostics":[],"contributions":[{"id":"authn.verify","namespace":"authn","source":"order.create/v1","point":"invocation.prepare","requires":[],"provides":["verified-authn-context"]}]}`,
 		`{"requirements":[{}]}`,
+		`{"contributions":[{}]}`,
 		`[]`,
 		`{`,
 	} {
@@ -243,6 +317,30 @@ func diagnosticStrings(values []generation.Diagnostic) []string {
 	result := make([]string, len(values))
 	for index, value := range values {
 		result[index] = value.Code + "|" + string(value.Severity) + "|" + value.Namespace + "|" + value.Source.String() + "|" + value.RuleID + "|" + value.Message
+	}
+	return result
+}
+
+func contributionStrings(values []generation.NormalizedContribution) []string {
+	result := make([]string, len(values))
+	for index, value := range values {
+		requires := make([]string, len(value.Requires()))
+		for tokenIndex, token := range value.Requires() {
+			requires[tokenIndex] = token.String()
+		}
+		provides := make([]string, len(value.Provides()))
+		for tokenIndex, token := range value.Provides() {
+			provides[tokenIndex] = token.String()
+		}
+		result[index] = value.ID() + "|" + value.Namespace() + "|" + value.Source().String() + "|" + string(value.Point()) + "|" + strings.Join(requires, ",") + "|" + strings.Join(provides, ",")
+	}
+	return result
+}
+
+func tooManyContributionTokens() []generation.ContributionToken {
+	result := make([]generation.ContributionToken, 4097)
+	for index := range result {
+		result[index] = generation.ContributionToken(fmt.Sprintf("token-%d", index))
 	}
 	return result
 }

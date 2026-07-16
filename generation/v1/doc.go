@@ -13,6 +13,8 @@
 //	func Generate(context generation.GenerationContext) (generation.Output, error)
 //
 // GenerateFunc captures that signature for CLI-generated helper programs.
+// Output carries only structured requirements, diagnostics, and contribution
+// dependency declarations; extensions never receive or own final file paths.
 package generation
 
 // Version is the exact generation-extension API version implemented here.
