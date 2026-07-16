@@ -1,5 +1,3 @@
-instance_id: my-app
-
 http:
   address: ":8080"
   expose: []

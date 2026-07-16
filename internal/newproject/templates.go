@@ -7,9 +7,7 @@ go 1.26
 require github.com/plystra/kernel %s
 `
 
-const plystraTemplate = `instance_id: %s
-
-http:
+const plystraTemplate = `http:
   address: ":8080"
   expose: []
 

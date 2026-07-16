@@ -97,6 +97,9 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	if !reflect.DeepEqual(directTree, goldenTree) {
 		t.Fatalf("project scaffold differs from golden files:\n got: %#v\nwant: %#v", directTree, goldenTree)
 	}
+	if bytes.Contains(directTree["plystra.yaml"], []byte("instance_id")) {
+		t.Fatalf("project scaffold contains deprecated instance_id:\n%s", directTree["plystra.yaml"])
+	}
 	for name, content := range directTree {
 		if bytes.Contains(content, []byte(directParent)) || bytes.Contains(content, []byte(commandParent)) {
 			t.Fatalf("%s contains a local absolute path", name)

@@ -135,7 +135,7 @@ func populate(root, modulePath, name string, library bool) error {
 		files = append(files, struct {
 			path string
 			data []byte
-		}{path: "plystra.yaml", data: []byte(fmt.Sprintf(plystraTemplate, name))})
+		}{path: "plystra.yaml", data: []byte(plystraTemplate)})
 	}
 	for _, file := range files {
 		fullPath := filepath.Join(root, filepath.FromSlash(file.path))
