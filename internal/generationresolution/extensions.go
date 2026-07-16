@@ -12,6 +12,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/aliasresolution"
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/providerresolution"
@@ -58,13 +59,14 @@ type Plugin struct {
 }
 
 // ExtensionInput contains the activation-resolution inputs plus the complete
-// visible canonical catalog and public plugin metadata needed by extensions.
+// visible canonical catalog, public plugin metadata, and parsed application
+// Alias declarations needed to build each immutable extension context.
 type ExtensionInput struct {
 	Input
-	Plugins           []Plugin
-	Capabilities      []generation.CapabilityInput
-	CapabilityAliases []generation.CapabilityAliasInput
-	BuildOptions      generationexec.BuildOptions
+	Plugins            []Plugin
+	Capabilities       []generation.CapabilityInput
+	ApplicationAliases []applicationmeta.Alias
+	BuildOptions       generationexec.BuildOptions
 }
 
 // GeneratedRequirement records one exact ordinary requirement and complete
@@ -216,6 +218,10 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 	}()
 
 	requirements := cloneRequirements(input.Requirements)
+	requirements, err = addApplicationAliasRequirements(requirements, input.ApplicationAliases, input.Capabilities)
+	if err != nil {
+		return ExtensionResult{}, fmt.Errorf("%w: %w: %w", ErrResolveExtensions, ErrApplicationContext, err)
+	}
 	generatedByKey := make(map[string]GeneratedRequirement)
 	observedOutputs := make(map[string]string)
 	maximumPasses := 2*(len(input.Capabilities)+1) + 1
@@ -382,11 +388,10 @@ func buildGenerationContext(input ExtensionInput, plugins map[string]Plugin, res
 		requirementIDs[index] = capability.ID().String()
 	}
 	contextInput := generation.Input{
-		Plugins:           pluginInputs,
-		Capabilities:      cloneCapabilityInputs(input.Capabilities),
-		Requirements:      requirementIDs,
-		Providers:         providerInputs,
-		CapabilityAliases: cloneAliasInputs(input.CapabilityAliases),
+		Plugins:      pluginInputs,
+		Capabilities: cloneCapabilityInputs(input.Capabilities),
+		Requirements: requirementIDs,
+		Providers:    providerInputs,
 	}
 	generationContext, err := generation.NewContext(contextInput)
 	if err != nil {
@@ -405,7 +410,49 @@ func buildGenerationContext(input ExtensionInput, plugins map[string]Plugin, res
 			return generation.Context{}, fmt.Errorf("resolved Capability %s differs from the visible generation catalog contract", capability.ID())
 		}
 	}
+	aliases, err := aliasresolution.NormalizeApplication(generationContext, input.ApplicationAliases)
+	if err != nil {
+		return generation.Context{}, err
+	}
+	if len(aliases) == 0 {
+		return generationContext, nil
+	}
+	contextInput.CapabilityAliases = aliases
+	generationContext, err = generation.NewContext(contextInput)
+	if err != nil {
+		return generation.Context{}, err
+	}
 	return generationContext, nil
+}
+
+func addApplicationAliasRequirements(
+	requirements []providerresolution.Requirement,
+	aliases []applicationmeta.Alias,
+	capabilities []generation.CapabilityInput,
+) ([]providerresolution.Requirement, error) {
+	if len(aliases) == 0 {
+		return requirements, nil
+	}
+	catalog, err := generation.NewContext(generation.Input{Capabilities: cloneCapabilityInputs(capabilities)})
+	if err != nil {
+		return nil, err
+	}
+	result := append([]providerresolution.Requirement(nil), requirements...)
+	for _, alias := range aliases {
+		targetID, err := generation.ParseCapabilityID(alias.Target().String())
+		if err != nil {
+			return nil, fmt.Errorf("%s target %q is not canonical", alias.Source(), alias.Target())
+		}
+		requirement := providerresolution.Requirement{
+			Capability: targetID.String(),
+			Source:     alias.Source() + " target",
+		}
+		if target, exists := catalog.Capability(targetID); exists {
+			requirement.Contract = target.ContractJSON()
+		}
+		result = append(result, requirement)
+	}
+	return result, nil
 }
 
 func clonePluginInput(input generation.PluginInput) generation.PluginInput {
@@ -420,15 +467,6 @@ func cloneCapabilityInputs(inputs []generation.CapabilityInput) []generation.Cap
 	for index, input := range inputs {
 		result[index] = input
 		result[index].ContractJSON = append([]byte(nil), input.ContractJSON...)
-	}
-	return result
-}
-
-func cloneAliasInputs(inputs []generation.CapabilityAliasInput) []generation.CapabilityAliasInput {
-	result := make([]generation.CapabilityAliasInput, len(inputs))
-	for index, input := range inputs {
-		result[index] = input
-		result[index].Sources = append([]generation.AliasSourceInput(nil), input.Sources...)
 	}
 	return result
 }

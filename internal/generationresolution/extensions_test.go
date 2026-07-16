@@ -15,6 +15,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/aliasresolution"
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/generationactivation"
@@ -184,18 +185,21 @@ func TestResolveExtensionsExecutesSelectedHelperProcess(t *testing.T) {
 
 func TestResolveExtensionsSkipsHelpersWhenNoExtensionIsSelected(t *testing.T) {
 	plain := extensionTestContract(t, "order.read/v1", "")
+	health := extensionTestContract(t, "kernel.health/v1", "")
 	local := extensionTestPlugin("example.local", "local")
 	local.Local = true
 	input := ExtensionInput{
 		Input: Input{
-			Requirements: []providerresolution.Requirement{{Contract: plain, Source: "order route"}},
-			Candidates:   []providerresolution.Candidate{{PluginID: "example.business", Contract: plain, Source: "business/order.read"}},
+			Candidates: []providerresolution.Candidate{{PluginID: "example.business", Contract: plain, Source: "business/order.read"}},
 		},
-		Plugins:      []Plugin{extensionTestPlugin("example.business", "business", "order.read/v1"), local},
-		Capabilities: []generation.CapabilityInput{{ContractJSON: plain}},
-		CapabilityAliases: []generation.CapabilityAliasInput{{
-			ID: "orders.read/v1", Target: "order.read/v1", Sources: []generation.AliasSourceInput{{Kind: generation.AliasSourceApplication, ID: "application"}},
-		}},
+		Plugins: []Plugin{extensionTestPlugin("example.business", "business", "order.read/v1"), local},
+		Capabilities: []generation.CapabilityInput{
+			{ContractJSON: plain, Exposure: generation.Exposure{Go: true}},
+			{ContractJSON: health, Intrinsic: true, Exposure: generation.Exposure{Go: true}},
+		},
+		ApplicationAliases: extensionTestApplicationAliases(t, `    orders.read/v1: order.read/v1
+    health.status/v1: kernel.health/v1
+`),
 	}
 	builder := newFakeExtensionBuilder(nil)
 	result, err := resolveExtensions(t.Context(), input, builder.Build)
@@ -205,8 +209,15 @@ func TestResolveExtensionsSkipsHelpersWhenNoExtensionIsSelected(t *testing.T) {
 	if result.Passes() != 1 || len(result.Outputs()) != 0 || len(result.GeneratedRequirements()) != 0 || len(result.Contributions()) != 0 || len(builder.builds) != 0 {
 		t.Fatalf("empty extension result = passes %d, outputs %#v, generated %#v, contributions %#v, builds %#v", result.Passes(), result.Outputs(), result.GeneratedRequirements(), result.Contributions(), builder.builds)
 	}
-	if aliases := result.AliasResolution().Aliases(); len(aliases) != 1 || aliases[0].ID().String() != "orders.read/v1" || aliases[0].Target().String() != "order.read/v1" || aliases[0].Sources()[0].Kind() != generation.AliasSourceApplication {
+	if aliases := result.AliasResolution().Aliases(); len(aliases) != 2 || aliases[0].ID().String() != "health.status/v1" || aliases[0].Target().String() != "kernel.health/v1" || aliases[1].ID().String() != "orders.read/v1" || aliases[1].Target().String() != "order.read/v1" || aliases[1].Sources()[0].Kind() != generation.AliasSourceApplication {
 		t.Fatalf("explicit Alias resolution = %#v", aliases)
+	}
+	resolved := result.ActivationResolution().ProviderResolution().Capabilities()
+	if got := extensionResolvedCapabilityIDs(result.ActivationResolution().ProviderResolution()); !slices.Equal(got, []string{"kernel.health/v1", "order.read/v1"}) {
+		t.Fatalf("Alias target requirements = %v", got)
+	}
+	if !slices.Equal(resolved[0].Sources(), []string{`plystra.yaml capabilities.aliases["health.status/v1"] target`}) || !slices.Equal(resolved[1].Sources(), []string{`plystra.yaml capabilities.aliases["orders.read/v1"] target`}) {
+		t.Fatalf("Alias target requirement sources = %v, %v", resolved[0].Sources(), resolved[1].Sources())
 	}
 	if _, exists := result.Context().Plugin(extensionTestPluginID(t, "example.local")); !exists {
 		t.Fatal("root-level local plugin is absent from the normalized application context")
@@ -218,9 +229,7 @@ func TestResolveExtensionsRejectsFinalAliasConflict(t *testing.T) {
 	verify := extensionTestContract(t, "authn.session.verify/v1", "")
 	audit := extensionTestContract(t, "audit.write/v1", "")
 	input := extensionTestInput(t, order, verify, audit)
-	input.CapabilityAliases = []generation.CapabilityAliasInput{{
-		ID: "orders.submit/v1", Target: "order.create/v1", Sources: []generation.AliasSourceInput{{Kind: generation.AliasSourceApplication, ID: "application"}},
-	}}
+	input.ApplicationAliases = extensionTestApplicationAliases(t, "    orders.submit/v1: order.create/v1\n")
 	builder := newFakeExtensionBuilder(map[string]*fakeExtensionHelper{
 		"example.authn": {
 			output: func(_ int, _ generation.Context) (generation.Output, error) {
@@ -704,6 +713,15 @@ func extensionTestInput(t *testing.T, order, verify, audit []byte) ExtensionInpu
 			{ContractJSON: audit},
 		},
 	}
+}
+
+func extensionTestApplicationAliases(t *testing.T, aliases string) []applicationmeta.Alias {
+	t.Helper()
+	manifest, err := applicationmeta.Parse([]byte("capabilities:\n  aliases:\n" + aliases))
+	if err != nil {
+		t.Fatalf("applicationmeta.Parse: %v", err)
+	}
+	return manifest.Aliases()
 }
 
 func extensionTestPlugin(id, path string, provides ...string) Plugin {
