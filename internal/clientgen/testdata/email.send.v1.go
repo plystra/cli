@@ -6,25 +6,25 @@ import (
 	"context"
 
 	contract "example.com/acme/project/generated/go/contracts/email/send/v1"
-	"github.com/plystra/kernel/invocation"
+	applicationinvocation "example.com/acme/project/generated/go/invocation/email/send/v1"
 )
 
-// Client invokes one exact capability through the Kernel governance boundary.
+// Client invokes one exact Capability through its generated application path.
 type Client struct {
-	handle invocation.Handle[contract.Request, contract.Response]
+	handle applicationinvocation.Handle
 }
 
-// New binds a generated client to one caller-scoped capability handle.
-func New(handle invocation.Handle[contract.Request, contract.Response]) Client {
+// New binds a generated client to the canonical application invocation path.
+func New(handle applicationinvocation.Handle) Client {
 	return Client{handle: handle}
 }
 
 // Available reports whether assembly selected a provider for this client.
 func Available(c Client) bool {
-	return c.handle.Available()
+	return applicationinvocation.Available(c.handle)
 }
 
-// Send invokes email.send/v1 through governed Kernel dispatch.
+// Send invokes email.send/v1 through the generated application path.
 func (c Client) Send(ctx context.Context, request contract.Request) (contract.Response, error) {
 	return c.handle.Invoke(ctx, request)
 }
