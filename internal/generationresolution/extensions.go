@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/aliasresolution"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/providerresolution"
@@ -40,6 +41,9 @@ var (
 	// ErrExtensionConvergence reports exhaustion of the finite monotonic pass
 	// bound before a stable context and output state was confirmed.
 	ErrExtensionConvergence = errors.New("generation extension requirements did not converge")
+	// ErrAliasResolution reports failure to merge explicit and selected-extension
+	// Alias candidates after requirement and provider closure stabilized.
+	ErrAliasResolution = errors.New("resolve final generation Capability Aliases")
 )
 
 // Plugin supplies one visible plugin's supported public generation context
@@ -114,21 +118,24 @@ func (o ExtensionOutput) Namespaces() []string {
 // Output returns the immutable normalized helper output.
 func (o ExtensionOutput) Output() generation.NormalizedOutput { return o.output }
 
-// ExtensionResult is one immutable stable activation, provider, context,
-// generation-derived requirement closure, and semantic contribution plan.
+// ExtensionResult is one immutable stable activation, provider, extension
+// context, generation-derived requirement closure, semantic contribution plan,
+// and final application Alias map.
 type ExtensionResult struct {
 	activation            Result
 	generationContext     generation.Context
 	outputs               []ExtensionOutput
 	generatedRequirements []GeneratedRequirement
 	contributions         []ResolvedContribution
+	aliases               aliasresolution.Result
 	passes                int
 }
 
 // ActivationResolution returns the final activation and provider closure.
 func (r ExtensionResult) ActivationResolution() Result { return r.activation }
 
-// Context returns the final immutable extension input.
+// Context returns the final immutable input supplied to extensions. Their
+// Alias proposals are merged separately in AliasResolution.
 func (r ExtensionResult) Context() generation.Context { return r.generationContext }
 
 // Outputs returns defensive selected-extension output views in Plugin ID order.
@@ -146,6 +153,10 @@ func (r ExtensionResult) GeneratedRequirements() []GeneratedRequirement {
 func (r ExtensionResult) Contributions() []ResolvedContribution {
 	return append([]ResolvedContribution(nil), r.contributions...)
 }
+
+// AliasResolution returns the immutable final multi-source application Alias
+// map. It is computed even when no generation extension is selected.
+func (r ExtensionResult) AliasResolution() aliasresolution.Result { return r.aliases }
 
 // Passes returns the number of extension execution passes. Applications with
 // no selected extensions stabilize without a confirmation pass.
@@ -227,9 +238,14 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 		}
 		selected := activation.Extensions()
 		if len(selected) == 0 {
+			aliases, err := aliasresolution.Resolve(generationContext, []ExtensionOutput{})
+			if err != nil {
+				return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w: %w", ErrResolveExtensions, pass, ErrAliasResolution, err)
+			}
 			return ExtensionResult{
 				activation:        activation,
 				generationContext: generationContext,
+				aliases:           aliases,
 				passes:            pass,
 			}, nil
 		}
@@ -286,12 +302,17 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 				if err != nil {
 					return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w", ErrResolveExtensions, pass, err)
 				}
+				aliases, err := aliasresolution.Resolve(generationContext, outputs)
+				if err != nil {
+					return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w: %w", ErrResolveExtensions, pass, ErrAliasResolution, err)
+				}
 				return ExtensionResult{
 					activation:            activation,
 					generationContext:     generationContext,
 					outputs:               outputs,
 					generatedRequirements: generated,
 					contributions:         contributions,
+					aliases:               aliases,
 					passes:                pass,
 				}, nil
 			}

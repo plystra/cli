@@ -14,6 +14,7 @@ import (
 	"time"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/aliasresolution"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/generationactivation"
@@ -52,6 +53,13 @@ func TestResolveExtensionsBuildsStableGeneratedRequirementClosure(t *testing.T) 
 						Source:    extensionTestCapabilityID(t, "order.create/v1"),
 						Point:     generation.GenerationPointInvocationPrepare,
 						Provides:  []generation.ContributionToken{"verified-authn-context"},
+					}},
+					AliasContributions: []generation.CapabilityAliasContribution{{
+						ID:        "authn.order-shortcut",
+						Namespace: "authn",
+						Source:    extensionTestCapabilityID(t, "order.create/v1"),
+						Alias:     extensionTestCapabilityID(t, "orders.submit/v1"),
+						Target:    extensionTestCapabilityID(t, "order.create/v1"),
 					}},
 				}, nil
 			},
@@ -98,6 +106,10 @@ func TestResolveExtensionsBuildsStableGeneratedRequirementClosure(t *testing.T) 
 	if len(contributions) != 1 || contributions[0].PluginID() != "example.authn" || contributions[0].ID() != "authn.verify" || contributions[0].Namespace() != "authn" || contributions[0].Source().String() != "order.create/v1" || contributions[0].Point() != generation.GenerationPointInvocationPrepare || !slices.Equal(contributions[0].Provides(), []generation.ContributionToken{"verified-authn-context"}) {
 		t.Fatalf("Contributions = %#v", contributions)
 	}
+	aliases := result.AliasResolution().Aliases()
+	if len(aliases) != 1 || aliases[0].ID().String() != "orders.submit/v1" || aliases[0].Target().String() != "order.create/v1" || len(aliases[0].Sources()) != 1 || aliases[0].Sources()[0].ID() != "example.authn" || aliases[0].Sources()[0].ContributionID() != "authn.order-shortcut" {
+		t.Fatalf("AliasResolution = %#v", aliases)
+	}
 	if got := builder.BuiltPluginIDs(); !slices.Equal(got, []string{"example.authn"}) {
 		t.Fatalf("built helpers = %v", got)
 	}
@@ -115,8 +127,12 @@ func TestResolveExtensionsBuildsStableGeneratedRequirementClosure(t *testing.T) 
 	provided := contributions[0].Provides()
 	provided[0] = "changed"
 	contributions[0] = ResolvedContribution{}
+	aliases[0] = aliasresolution.Alias{}
 	if result.Outputs()[0].PluginID() != "example.authn" || result.GeneratedRequirements()[0].PluginID() != "example.authn" || result.Contributions()[0].PluginID() != "example.authn" || result.Contributions()[0].Provides()[0] != "verified-authn-context" {
 		t.Fatal("ExtensionResult exposed mutable result storage")
+	}
+	if result.AliasResolution().Aliases()[0].ID().String() != "orders.submit/v1" {
+		t.Fatal("ExtensionResult exposed mutable Alias resolution storage")
 	}
 }
 
@@ -177,6 +193,9 @@ func TestResolveExtensionsSkipsHelpersWhenNoExtensionIsSelected(t *testing.T) {
 		},
 		Plugins:      []Plugin{extensionTestPlugin("example.business", "business", "order.read/v1"), local},
 		Capabilities: []generation.CapabilityInput{{ContractJSON: plain}},
+		CapabilityAliases: []generation.CapabilityAliasInput{{
+			ID: "orders.read/v1", Target: "order.read/v1", Sources: []generation.AliasSourceInput{{Kind: generation.AliasSourceApplication, ID: "application"}},
+		}},
 	}
 	builder := newFakeExtensionBuilder(nil)
 	result, err := resolveExtensions(t.Context(), input, builder.Build)
@@ -186,8 +205,46 @@ func TestResolveExtensionsSkipsHelpersWhenNoExtensionIsSelected(t *testing.T) {
 	if result.Passes() != 1 || len(result.Outputs()) != 0 || len(result.GeneratedRequirements()) != 0 || len(result.Contributions()) != 0 || len(builder.builds) != 0 {
 		t.Fatalf("empty extension result = passes %d, outputs %#v, generated %#v, contributions %#v, builds %#v", result.Passes(), result.Outputs(), result.GeneratedRequirements(), result.Contributions(), builder.builds)
 	}
+	if aliases := result.AliasResolution().Aliases(); len(aliases) != 1 || aliases[0].ID().String() != "orders.read/v1" || aliases[0].Target().String() != "order.read/v1" || aliases[0].Sources()[0].Kind() != generation.AliasSourceApplication {
+		t.Fatalf("explicit Alias resolution = %#v", aliases)
+	}
 	if _, exists := result.Context().Plugin(extensionTestPluginID(t, "example.local")); !exists {
 		t.Fatal("root-level local plugin is absent from the normalized application context")
+	}
+}
+
+func TestResolveExtensionsRejectsFinalAliasConflict(t *testing.T) {
+	order := extensionTestContract(t, "order.create/v1", "extensions:\n  authn: {authenticated: true}\n")
+	verify := extensionTestContract(t, "authn.session.verify/v1", "")
+	audit := extensionTestContract(t, "audit.write/v1", "")
+	input := extensionTestInput(t, order, verify, audit)
+	input.CapabilityAliases = []generation.CapabilityAliasInput{{
+		ID: "orders.submit/v1", Target: "order.create/v1", Sources: []generation.AliasSourceInput{{Kind: generation.AliasSourceApplication, ID: "application"}},
+	}}
+	builder := newFakeExtensionBuilder(map[string]*fakeExtensionHelper{
+		"example.authn": {
+			output: func(_ int, _ generation.Context) (generation.Output, error) {
+				return generation.Output{AliasContributions: []generation.CapabilityAliasContribution{{
+					ID:        "authn.order-shortcut",
+					Namespace: "authn",
+					Source:    extensionTestCapabilityID(t, "order.create/v1"),
+					Alias:     extensionTestCapabilityID(t, "orders.submit/v1"),
+					Target:    extensionTestCapabilityID(t, "authn.session.verify/v1"),
+				}}}, nil
+			},
+		},
+	})
+	result, err := resolveExtensions(t.Context(), input, builder.Build)
+	if !errors.Is(err, ErrResolveExtensions) || !errors.Is(err, ErrAliasResolution) || !errors.Is(err, aliasresolution.ErrConflict) {
+		t.Fatalf("Alias conflict error = %v", err)
+	}
+	for _, detail := range []string{"orders.submit/v1", "order.create/v1", "authn.session.verify/v1", "application plystra.yaml", "example.authn", "authn.order-shortcut", "no source priority"} {
+		if !strings.Contains(err.Error(), detail) {
+			t.Fatalf("Alias conflict error omits %q: %v", detail, err)
+		}
+	}
+	if result.Passes() != 0 || len(result.AliasResolution().Aliases()) != 0 || len(result.Outputs()) != 0 {
+		t.Fatalf("Alias conflict returned partial result %#v", result)
 	}
 }
 
