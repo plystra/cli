@@ -67,6 +67,10 @@ func TestHelperGeneratesNormalizedOutputWithSanitizedEnvironment(t *testing.T) {
 	if !ok || attachment.Key != "authn.verification" || attachment.Value.Literal == nil || attachment.Value.Literal.String == nil || *attachment.Value.Literal.String != "reused" {
 		t.Fatalf("Metadata attachment = %#v, %v", attachment, ok)
 	}
+	aliases := output.AliasContributions()
+	if len(aliases) != 1 || aliases[0].ID() != "authn.order-shortcut" || aliases[0].Alias().String() != "orders.submit/v1" || aliases[0].Target().String() != "order.create/v1" {
+		t.Fatalf("AliasContributions = %#v", aliases)
+	}
 	if output.Digest() == "" || len(output.CanonicalJSON()) == 0 {
 		t.Fatalf("normalized output = %q, %s", output.Digest(), output.CanonicalJSON())
 	}
@@ -257,6 +261,7 @@ func TestDecodeResponseRejectsDuplicateUnknownAndTrailingData(t *testing.T) {
 		`{"api":"v1","api":"v1","status":"success","output":{"requirements":[],"diagnostics":[]}}`,
 		`{"api":"v1","status":"success","output":{"requirements":[],"diagnostics":[],"unknown":true}}`,
 		`{"api":"v1","status":"success","output":{"requirements":[],"diagnostics":[],"contributions":[{"id":"authn.verify","namespace":"authn","source":"order.create/v1","point":"invocation.prepare","requires":[],"provides":[],"nodes":[{"id":"attach","metadata_attachment":{"key":"authn.value","value":{"literal":{"string":"value"}},"maximum_bytes":16,"unknown":true}}]}]}}`,
+		`{"api":"v1","status":"success","output":{"requirements":[],"diagnostics":[],"contributions":[],"alias_contributions":[{"id":"authn.shortcut","namespace":"authn","source":"order.create/v1","alias":"orders.submit/v1","target":"order.create/v1","unknown":true}]}}`,
 		`{"api":"v1","status":"success","output":{"requirements":[],"diagnostics":[]}} {}`,
 		strings.Repeat("[", maximumProtocolJSONDepth+1) + strings.Repeat("]", maximumProtocolJSONDepth+1),
 	}
@@ -544,6 +549,7 @@ func Generate(context generation.GenerationContext) (generation.Output, error) {
 		return generation.Output{}, fmt.Errorf("helper working directory is not empty: entries=%d error=%v", len(entries), err)
 	}
 	order, _ := generation.ParseCapabilityID("order.create/v1")
+	orderAlias, _ := generation.ParseCapabilityID("orders.submit/v1")
 	audit, _ := generation.ParseCapabilityID("audit.write/v1")
 	unknown, _ := generation.ParseCapabilityID("unknown.write/v1")
 	switch metadata.Mode {
@@ -560,6 +566,9 @@ func Generate(context generation.GenerationContext) (generation.Output, error) {
 						Key: "authn.verification", Value: generation.StringValue("reused"), MaximumBytes: 32,
 					},
 				}},
+			}},
+			AliasContributions: []generation.CapabilityAliasContribution{{
+				ID: "authn.order-shortcut", Namespace: "authn", Source: order, Alias: orderAlias, Target: order,
 			}},
 		}, nil
 	case "error":

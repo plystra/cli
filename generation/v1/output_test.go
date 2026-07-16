@@ -169,8 +169,8 @@ func TestNormalizeOutputSupportsNoContributions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormalizeOutput: %v", err)
 	}
-	want := `{"requirements":[],"diagnostics":[],"contributions":[]}`
-	if string(normalized.CanonicalJSON()) != want || len(normalized.Requirements()) != 0 || len(normalized.Diagnostics()) != 0 || len(normalized.Contributions()) != 0 || !digestPattern.MatchString(normalized.Digest()) {
+	want := `{"requirements":[],"diagnostics":[],"contributions":[],"alias_contributions":[]}`
+	if string(normalized.CanonicalJSON()) != want || len(normalized.Requirements()) != 0 || len(normalized.Diagnostics()) != 0 || len(normalized.Contributions()) != 0 || len(normalized.AliasContributions()) != 0 || !digestPattern.MatchString(normalized.Digest()) {
 		t.Fatalf("empty NormalizedOutput = %s, %q", normalized.CanonicalJSON(), normalized.Digest())
 	}
 }

@@ -536,6 +536,20 @@ func validateExtensionProvenance(extension SelectedExtension, output generation.
 			)
 		}
 	}
+	for _, contribution := range output.AliasContributions() {
+		if !allowedOutputSource(allowed, contribution.Namespace(), contribution.Source().String()) {
+			return fmt.Errorf(
+				"%w: plugin %q Alias contribution %q for %s -> %s names extensions.%s on %s, which was not one of its selected activation inputs",
+				ErrExtensionProvenance,
+				extension.PluginID(),
+				contribution.ID(),
+				contribution.Alias().String(),
+				contribution.Target().String(),
+				contribution.Namespace(),
+				contribution.Source().String(),
+			)
+		}
+	}
 	return nil
 }
 

@@ -445,6 +445,30 @@ func TestResolveExtensionsRejectsOutputOutsideSelectedActivationInputs(t *testin
 			t.Fatalf("contribution provenance error omits %q: %v", detail, err)
 		}
 	}
+
+	aliasBuilder := newFakeExtensionBuilder(map[string]*fakeExtensionHelper{
+		"example.authn": {
+			output: func(_ int, _ generation.Context) (generation.Output, error) {
+				return generation.Output{AliasContributions: []generation.CapabilityAliasContribution{{
+					ID:        "authn.cross-namespace",
+					Namespace: "authz",
+					Source:    extensionTestCapabilityID(t, "order.create/v1"),
+					Alias:     extensionTestCapabilityID(t, "orders.submit/v1"),
+					Target:    extensionTestCapabilityID(t, "order.create/v1"),
+				}}}, nil
+			},
+		},
+		"example.authz": {output: emptyExtensionOutput},
+	})
+	_, err = resolveExtensions(t.Context(), input, aliasBuilder.Build)
+	if !errors.Is(err, ErrExtensionProvenance) {
+		t.Fatalf("cross-namespace Alias contribution error = %v", err)
+	}
+	for _, detail := range []string{"example.authn", "authn.cross-namespace", "orders.submit/v1", "order.create/v1", "extensions.authz", "not one of its selected activation inputs"} {
+		if !strings.Contains(err.Error(), detail) {
+			t.Fatalf("Alias contribution provenance error omits %q: %v", detail, err)
+		}
+	}
 }
 
 func TestResolveExtensionsFailsOnStructuredErrorDiagnostic(t *testing.T) {

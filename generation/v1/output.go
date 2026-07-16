@@ -22,10 +22,11 @@ type GenerateFunc func(GenerationContext) (Output, error)
 // The unexported field intentionally prevents unkeyed external literals so v1
 // can add backward-compatible structured result fields.
 type Output struct {
-	Requirements  []Requirement  `json:"requirements"`
-	Diagnostics   []Diagnostic   `json:"diagnostics"`
-	Contributions []Contribution `json:"contributions"`
-	_             struct{}
+	Requirements       []Requirement                 `json:"requirements"`
+	Diagnostics        []Diagnostic                  `json:"diagnostics"`
+	Contributions      []Contribution                `json:"contributions"`
+	AliasContributions []CapabilityAliasContribution `json:"alias_contributions"`
+	_                  struct{}
 }
 
 // Requirement records one exact generation-derived canonical Capability
@@ -61,11 +62,12 @@ type Diagnostic struct {
 
 // NormalizedOutput is immutable, deterministically ordered extension output.
 type NormalizedOutput struct {
-	requirements  []Requirement
-	diagnostics   []Diagnostic
-	contributions []NormalizedContribution
-	canonicalJSON []byte
-	digest        string
+	requirements       []Requirement
+	diagnostics        []Diagnostic
+	contributions      []NormalizedContribution
+	aliasContributions []NormalizedCapabilityAliasContribution
+	canonicalJSON      []byte
+	digest             string
 }
 
 // NormalizeOutput validates one extension result against the exact context it
@@ -83,7 +85,11 @@ func NormalizeOutput(context Context, output Output) (NormalizedOutput, error) {
 	if err != nil {
 		return NormalizedOutput{}, err
 	}
-	canonical, err := encodeOutput(requirements, diagnostics, contributions)
+	aliasContributions, err := normalizeCapabilityAliasContributions(context, output.AliasContributions)
+	if err != nil {
+		return NormalizedOutput{}, err
+	}
+	canonical, err := encodeOutput(requirements, diagnostics, contributions, aliasContributions)
 	if err != nil {
 		return NormalizedOutput{}, invalidOutput("encode canonical output: %v", err)
 	}
@@ -91,11 +97,12 @@ func NormalizeOutput(context Context, output Output) (NormalizedOutput, error) {
 		return NormalizedOutput{}, invalidOutput("canonical output exceeds %d bytes", maximumJSONSize)
 	}
 	return NormalizedOutput{
-		requirements:  requirements,
-		diagnostics:   diagnostics,
-		contributions: contributions,
-		canonicalJSON: canonical,
-		digest:        outputDigest(canonical),
+		requirements:       requirements,
+		diagnostics:        diagnostics,
+		contributions:      contributions,
+		aliasContributions: aliasContributions,
+		canonicalJSON:      canonical,
+		digest:             outputDigest(canonical),
 	}, nil
 }
 
@@ -113,6 +120,12 @@ func (o NormalizedOutput) Diagnostics() []Diagnostic {
 // contribution ID. Semantic execution order is determined only by graph merge.
 func (o NormalizedOutput) Contributions() []NormalizedContribution {
 	return append([]NormalizedContribution(nil), o.contributions...)
+}
+
+// AliasContributions returns immutable views in canonical serialization order
+// by stable contribution ID. Final cross-source merging remains CLI-owned.
+func (o NormalizedOutput) AliasContributions() []NormalizedCapabilityAliasContribution {
+	return append([]NormalizedCapabilityAliasContribution(nil), o.aliasContributions...)
 }
 
 // CanonicalJSON returns a defensive copy of the normalized protocol output.
@@ -201,9 +214,10 @@ func validateOutputSource(context Context, field, namespace string, source Capab
 }
 
 type canonicalOutput struct {
-	Requirements  []canonicalOutputRequirement  `json:"requirements"`
-	Diagnostics   []canonicalOutputDiagnostic   `json:"diagnostics"`
-	Contributions []canonicalOutputContribution `json:"contributions"`
+	Requirements       []canonicalOutputRequirement       `json:"requirements"`
+	Diagnostics        []canonicalOutputDiagnostic        `json:"diagnostics"`
+	Contributions      []canonicalOutputContribution      `json:"contributions"`
+	AliasContributions []canonicalOutputAliasContribution `json:"alias_contributions"`
 }
 
 type canonicalOutputRequirement struct {
@@ -232,11 +246,22 @@ type canonicalOutputContribution struct {
 	Nodes     []GeneratedNode     `json:"nodes"`
 }
 
-func encodeOutput(requirements []Requirement, diagnostics []Diagnostic, contributions []NormalizedContribution) ([]byte, error) {
+type canonicalOutputAliasContribution struct {
+	ID         string    `json:"id"`
+	Namespace  string    `json:"namespace"`
+	Source     string    `json:"source"`
+	Alias      string    `json:"alias"`
+	Target     string    `json:"target"`
+	Exposure   *Exposure `json:"exposure,omitempty"`
+	Deprecated string    `json:"deprecated,omitempty"`
+}
+
+func encodeOutput(requirements []Requirement, diagnostics []Diagnostic, contributions []NormalizedContribution, aliasContributions []NormalizedCapabilityAliasContribution) ([]byte, error) {
 	canonical := canonicalOutput{
-		Requirements:  make([]canonicalOutputRequirement, len(requirements)),
-		Diagnostics:   make([]canonicalOutputDiagnostic, len(diagnostics)),
-		Contributions: make([]canonicalOutputContribution, len(contributions)),
+		Requirements:       make([]canonicalOutputRequirement, len(requirements)),
+		Diagnostics:        make([]canonicalOutputDiagnostic, len(diagnostics)),
+		Contributions:      make([]canonicalOutputContribution, len(contributions)),
+		AliasContributions: make([]canonicalOutputAliasContribution, len(aliasContributions)),
 	}
 	for index, requirement := range requirements {
 		canonical.Requirements[index] = canonicalOutputRequirement{
@@ -269,6 +294,22 @@ func encodeOutput(requirements []Requirement, diagnostics []Diagnostic, contribu
 			Requires:  append([]ContributionToken{}, contribution.requires...),
 			Provides:  append([]ContributionToken{}, contribution.provides...),
 			Nodes:     nodes,
+		}
+	}
+	for index, contribution := range aliasContributions {
+		var exposure *Exposure
+		if contribution.hasExposure {
+			value := contribution.exposure
+			exposure = &value
+		}
+		canonical.AliasContributions[index] = canonicalOutputAliasContribution{
+			ID:         contribution.id,
+			Namespace:  contribution.namespace,
+			Source:     contribution.source.String(),
+			Alias:      contribution.alias.String(),
+			Target:     contribution.target.String(),
+			Exposure:   exposure,
+			Deprecated: contribution.deprecated,
 		}
 	}
 	return json.Marshal(canonical)
