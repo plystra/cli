@@ -11,16 +11,13 @@ const plystraTemplate = `http:
   address: ":8080"
   expose: []
 
-database:
-  dsn_file: /run/secrets/plystra_database_dsn
-
 timeouts:
   startup: 2m
-  audit_write: 5s
 
 capabilities:
   require: []
   use: {}
+  aliases: {}
 
 config: {}
 `

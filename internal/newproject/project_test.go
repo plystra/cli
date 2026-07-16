@@ -100,6 +100,14 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	if bytes.Contains(directTree["plystra.yaml"], []byte("instance_id")) {
 		t.Fatalf("project scaffold contains deprecated instance_id:\n%s", directTree["plystra.yaml"])
 	}
+	for _, obsolete := range [][]byte{[]byte("database:"), []byte("audit_write:")} {
+		if bytes.Contains(directTree["plystra.yaml"], obsolete) {
+			t.Fatalf("project scaffold contains obsolete configuration %q:\n%s", obsolete, directTree["plystra.yaml"])
+		}
+	}
+	if !bytes.Contains(directTree["plystra.yaml"], []byte("  aliases: {}")) {
+		t.Fatalf("project scaffold omits capabilities.aliases:\n%s", directTree["plystra.yaml"])
+	}
 	for name, content := range directTree {
 		if bytes.Contains(content, []byte(directParent)) || bytes.Contains(content, []byte(commandParent)) {
 			t.Fatalf("%s contains a local absolute path", name)
