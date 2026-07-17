@@ -90,6 +90,12 @@ Each application-local Capability Alias exposed to Go generates only a thin Alia
 
 For `extensions.authn.authenticated: true`, an AuthN rule adds `authn.session.verify/v1` and generated verification before target dispatch. For `extensions.authz.permission`, an AuthZ rule adds `authz.check/v1`, generates the decision using permission and Space/resource data, and rejects denial. These are static application calls, not Kernel behavior.
 
+## Canonical HTTP transport
+
+Each explicitly HTTP-exposed canonical Capability can generate one `net/http` adapter at `POST /api/v1/capabilities/<capability-name>/vN/invoke`. The adapter accepts a trusted root-context factory and the concrete generated application-invocation handle; it never constructs a raw Kernel handle, registers a provider, or dispatches a route identity itself.
+
+The generated transport accepts one `application/json` object with no content encoding other than identity and bounds request and response JSON to 1 MiB. It rejects alternate paths, query parameters, duplicate media headers, duplicate or unknown fields, missing or `null` required fields, incompatible JSON types, invalid enum values, trailing JSON, and oversized bodies before application invocation. Responses are validated and fully encoded before headers are committed. Error bodies contain only stable transport, semantic Capability, or Kernel invocation codes; provider messages, panic values, and root-context failures are normalized to `internal`. Every response uses `application/json`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`.
+
 ## Method-specific login surfaces
 
 Authentication methods use real contracts such as:
