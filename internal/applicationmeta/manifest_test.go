@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationmeta"
@@ -44,6 +45,9 @@ config: {}
 	manifest, err := applicationmeta.Parse(data)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
+	}
+	if manifest.StartupTimeout() != 2*time.Minute {
+		t.Fatalf("StartupTimeout = %s", manifest.StartupTimeout())
 	}
 	requirements := manifest.Requirements()
 	if got := requirementStrings(requirements); !slices.Equal(got, []string{
@@ -104,7 +108,7 @@ timeouts: {startup: 2m}
 http: {expose: [], address: ":8080"}
 `)
 	second, err := applicationmeta.Parse(reordered)
-	if err != nil || !slices.Equal(aliasStrings(second.Aliases()), aliasStrings(manifest.Aliases())) || !slices.Equal(requirementStrings(second.Requirements()), requirementStrings(manifest.Requirements())) || !slices.Equal(providerChoiceStrings(second.ProviderChoices()), providerChoiceStrings(manifest.ProviderChoices())) {
+	if err != nil || second.StartupTimeout() != manifest.StartupTimeout() || !slices.Equal(aliasStrings(second.Aliases()), aliasStrings(manifest.Aliases())) || !slices.Equal(requirementStrings(second.Requirements()), requirementStrings(manifest.Requirements())) || !slices.Equal(providerChoiceStrings(second.ProviderChoices()), providerChoiceStrings(manifest.ProviderChoices())) {
 		t.Fatalf("reordered Parse = %v, %v", aliasStrings(second.Aliases()), err)
 	}
 	for index, alias := range second.Aliases() {
@@ -224,7 +228,7 @@ func TestParseAcceptsCurrentGeneratedApplicationManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse generated plystra.yaml: %v\n%s", err, data)
 	}
-	if len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.Configurations()) != 0 {
+	if len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.Configurations()) != 0 || manifest.StartupTimeout() != 2*time.Minute {
 		t.Fatalf("generated Aliases = %#v", manifest.Aliases())
 	}
 	if address, explicit := manifest.HTTPAddress(); !explicit || address != ":8080" || len(manifest.HTTPExposures()) != 0 {
@@ -244,7 +248,7 @@ func TestParseAllowsEmptyOptionalSections(t *testing.T) {
 	} {
 		manifest, err := applicationmeta.Parse(data)
 		address, hasAddress := manifest.HTTPAddress()
-		if err != nil || len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.Configurations()) != 0 || hasAddress || address != "" || len(manifest.HTTPExposures()) != 0 {
+		if err != nil || len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.Configurations()) != 0 || manifest.StartupTimeout() != applicationmeta.DefaultStartupTimeout || hasAddress || address != "" || len(manifest.HTTPExposures()) != 0 {
 			t.Fatalf("Parse(%q) = %#v, %v", data, manifest, err)
 		}
 	}
@@ -280,6 +284,15 @@ func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 		{name: "invalid HTTP exposure", data: "http: {expose: [Order.Create/v1]}\n", want: "not a canonical Capability ID"},
 		{name: "duplicate HTTP exposure", data: "http: {expose: [order.create/v1, order.create/v1]}\n", want: "duplicates Capability"},
 		{name: "timeouts type", data: "timeouts: []\n", want: "timeouts must be a mapping"},
+		{name: "unknown timeout", data: "timeouts: {shutdown: 1m}\n", want: `timeouts contains unknown key "shutdown"`},
+		{name: "startup timeout type", data: "timeouts: {startup: 120}\n", want: "timeouts.startup must be"},
+		{name: "empty startup timeout", data: `timeouts: {startup: ""}` + "\n", want: "timeouts.startup must be"},
+		{name: "untrimmed startup timeout", data: `timeouts: {startup: " 2m "}` + "\n", want: "timeouts.startup must be"},
+		{name: "invalid startup timeout", data: "timeouts: {startup: eventually}\n", want: "positive Go duration"},
+		{name: "zero startup timeout", data: "timeouts: {startup: 0s}\n", want: "positive Go duration"},
+		{name: "negative startup timeout", data: "timeouts: {startup: -1s}\n", want: "positive Go duration"},
+		{name: "oversized startup timeout", data: "timeouts: {startup: " + strings.Repeat("1", 65) + "s}\n", want: "at most 64 bytes"},
+		{name: "NUL startup timeout", data: `timeouts: {startup: "2m\0"}` + "\n", want: "no NUL"},
 		{name: "config type", data: "config: []\n", want: "config must be a mapping"},
 		{name: "non-string config key", data: "config:\n  ? [one, two]\n  : {}\n", want: "non-string key"},
 		{name: "invalid config Plugin ID", data: "config: {Acme.Plugin: {}}\n", want: "not a canonical Plugin ID"},
@@ -387,7 +400,8 @@ func FuzzParseApplicationManifest(f *testing.F) {
 			!slices.Equal(httpExposureStrings(first.HTTPExposures()), httpExposureStrings(second.HTTPExposures())) ||
 			!slices.Equal(requirementStrings(first.Requirements()), requirementStrings(second.Requirements())) ||
 			!slices.Equal(providerChoiceStrings(first.ProviderChoices()), providerChoiceStrings(second.ProviderChoices())) ||
-			firstAddress != secondAddress || firstHasAddress != secondHasAddress {
+			firstAddress != secondAddress || firstHasAddress != secondHasAddress ||
+			first.StartupTimeout() != second.StartupTimeout() {
 			t.Fatalf("Parse is nondeterministic: %#v then %#v", first, second)
 		}
 	})

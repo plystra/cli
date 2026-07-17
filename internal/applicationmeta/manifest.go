@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilityid"
@@ -17,8 +18,13 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// MaximumSize is the largest application declaration inspected by the CLI.
-const MaximumSize = 1 << 20
+const (
+	// MaximumSize is the largest application declaration inspected by the CLI.
+	MaximumSize = 1 << 20
+	// DefaultStartupTimeout is the runtime provider-startup bound used when
+	// timeouts.startup is omitted.
+	DefaultStartupTimeout = 2 * time.Minute
+)
 
 // ErrInvalidManifest reports unsafe or invalid plystra.yaml metadata.
 var ErrInvalidManifest = errors.New("invalid application manifest metadata")
@@ -145,6 +151,7 @@ type Manifest struct {
 	providerChoices []ProviderChoice
 	aliases         []Alias
 	configurations  []PluginConfiguration
+	startupTimeout  time.Duration
 }
 
 // String returns only a redaction marker because the manifest can contain
@@ -168,6 +175,10 @@ func (Manifest) LogValue() slog.Value {
 // HTTPAddress returns the explicitly configured listener address. A false
 // result means the http section or address field was omitted.
 func (m Manifest) HTTPAddress() (string, bool) { return m.httpAddress, m.hasHTTPAddress }
+
+// StartupTimeout returns the normalized positive provider-startup timeout.
+// Omitted timeouts.startup uses DefaultStartupTimeout.
+func (m Manifest) StartupTimeout() time.Duration { return m.startupTimeout }
 
 // HTTPExposures returns defensive declarations sorted by canonical ID.
 func (m Manifest) HTTPExposures() []HTTPExposure {
@@ -223,13 +234,11 @@ func Parse(data []byte) (Manifest, error) {
 			return Manifest{}, invalid("unknown key %q", key)
 		}
 	}
-	for _, section := range []string{"timeouts"} {
-		if node, exists := values[section]; exists && node.Kind != yaml.MappingNode {
-			return Manifest{}, invalid("%s must be a mapping", section)
-		}
-	}
-
 	address, hasAddress, exposures, err := parseHTTP(values["http"])
+	if err != nil {
+		return Manifest{}, err
+	}
+	startupTimeout, err := parseTimeouts(values["timeouts"])
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -249,7 +258,36 @@ func Parse(data []byte) (Manifest, error) {
 		providerChoices: choices,
 		aliases:         aliases,
 		configurations:  configurations,
+		startupTimeout:  startupTimeout,
 	}, nil
+}
+
+func parseTimeouts(node *yaml.Node) (time.Duration, error) {
+	if node == nil {
+		return DefaultStartupTimeout, nil
+	}
+	values, err := mapping(node, "timeouts")
+	if err != nil {
+		return 0, err
+	}
+	for _, key := range sortedNodeKeys(values) {
+		if key != "startup" {
+			return 0, invalid("timeouts contains unknown key %q", key)
+		}
+	}
+	startupNode, exists := values["startup"]
+	if !exists {
+		return DefaultStartupTimeout, nil
+	}
+	startup, err := strictString(startupNode)
+	if err != nil || startup == "" || len(startup) > 64 || strings.TrimSpace(startup) != startup || strings.ContainsRune(startup, '\x00') {
+		return 0, invalid("timeouts.startup must be a non-empty trimmed Go duration string of at most 64 bytes with no NUL")
+	}
+	duration, err := time.ParseDuration(startup)
+	if err != nil || duration <= 0 {
+		return 0, invalid("timeouts.startup must be a positive Go duration")
+	}
+	return duration, nil
 }
 
 func parseConfigurations(node *yaml.Node) ([]PluginConfiguration, error) {
