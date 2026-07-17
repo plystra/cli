@@ -126,6 +126,8 @@ func TestLowerBuildsImmutableRenderReadyPlan(t *testing.T) {
 	if got := importStrings(imports); !slices.Equal(got, []string{
 		"auditwritev1=example.com/acme/app/v2/generated/go/clients/audit/write/v1",
 		"authzcheckv1=example.com/acme/app/v2/generated/go/clients/authz/check/v1",
+		"auditwritev1contract=example.com/acme/app/v2/generated/go/contracts/audit/write/v1",
+		"authzcheckv1contract=example.com/acme/app/v2/generated/go/contracts/authz/check/v1",
 	}) {
 		t.Fatalf("imports = %v", got)
 	}
@@ -149,7 +151,7 @@ func TestLowerBuildsImmutableRenderReadyPlan(t *testing.T) {
 		t.Fatalf("authz identifiers = %v", got)
 	}
 	target, ok := authzNodes[1].Target()
-	if !ok || target.Capability() != authz || target.ImportName() != "authzcheckv1" || target.Operation() != "Check" {
+	if !ok || target.Capability() != authz || target.ImportName() != "authzcheckv1" || target.ContractImportPath() != "example.com/acme/app/v2/generated/go/contracts/authz/check/v1" || target.ContractImportName() != "authzcheckv1contract" || target.Operation() != "Check" {
 		t.Fatalf("authz target = %#v, %v", target, ok)
 	}
 	auditNodes := contributions[1].Nodes()

@@ -36,10 +36,12 @@ type ContributionView interface {
 // TargetReference is one exact generated canonical Capability client used by
 // a typed call node.
 type TargetReference struct {
-	capability generation.CapabilityID
-	importPath string
-	importName string
-	operation  string
+	capability         generation.CapabilityID
+	importPath         string
+	importName         string
+	contractImportPath string
+	contractImportName string
+	operation          string
 }
 
 // Capability returns the exact canonical call target.
@@ -50,6 +52,14 @@ func (r TargetReference) ImportPath() string { return r.importPath }
 
 // ImportName returns the deterministic local package identifier.
 func (r TargetReference) ImportName() string { return r.importName }
+
+// ContractImportPath returns the application-module generated canonical
+// contract import path used to construct typed requests.
+func (r TargetReference) ContractImportPath() string { return r.contractImportPath }
+
+// ContractImportName returns the deterministic local canonical contract
+// package identifier.
+func (r TargetReference) ContractImportName() string { return r.contractImportName }
 
 // Operation returns the generated client method name.
 func (r TargetReference) Operation() string { return r.operation }
@@ -237,6 +247,7 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 			return Node{}, nil, nil, fmt.Errorf("%w: capability-call operation is absent", ErrInvalidContribution)
 		}
 		target = operation.Capability
+		identifiers = append(identifiers, invocationRuntimeIdentifiers()...)
 		reserve(generation.GeneratedNodeResponse, "Response")
 		reserve(generation.GeneratedNodeError, "Error")
 	case generation.GeneratedNodeKindContextDerivation:
@@ -260,6 +271,7 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 			return Node{}, nil, nil, fmt.Errorf("%w: audit-event-call operation is absent", ErrInvalidContribution)
 		}
 		target = operation.Capability
+		identifiers = append(identifiers, invocationRuntimeIdentifiers()...)
 		reserve(generation.GeneratedNodeError, "Error")
 	default:
 		return Node{}, nil, nil, fmt.Errorf("%w: unsupported node kind %q", ErrInvalidContribution, generated.Kind())
@@ -274,11 +286,18 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 	}
 	node.target = reference
 	node.hasTarget = true
-	return node, []ImportRequest{{
-		Path:   reference.importPath,
-		Name:   reference.importName,
-		Source: provenance + " target " + target.String(),
-	}}, identifiers, nil
+	return node, []ImportRequest{
+		{
+			Path:   reference.importPath,
+			Name:   reference.importName,
+			Source: provenance + " target client " + target.String(),
+		},
+		{
+			Path:   reference.contractImportPath,
+			Name:   reference.contractImportName,
+			Source: provenance + " target contract " + target.String(),
+		},
+	}, identifiers, nil
 }
 
 func targetReference(modulePath string, target generation.CapabilityID) (TargetReference, error) {
@@ -288,12 +307,24 @@ func targetReference(modulePath string, target generation.CapabilityID) (TargetR
 	}
 	components := append([]string{modulePath, "generated", "go", "clients"}, strings.Split(identifier.Name(), ".")...)
 	components = append(components, "v"+strconv.FormatUint(identifier.Major(), 10))
+	contractComponents := append([]string{modulePath, "generated", "go", "contracts"}, strings.Split(identifier.Name(), ".")...)
+	contractComponents = append(contractComponents, "v"+strconv.FormatUint(identifier.Major(), 10))
+	importName := goname.Package(identifier)
 	return TargetReference{
-		capability: target,
-		importPath: path.Join(components...),
-		importName: goname.Package(identifier),
-		operation:  goname.Operation(identifier),
+		capability:         target,
+		importPath:         path.Join(components...),
+		importName:         importName,
+		contractImportPath: path.Join(contractComponents...),
+		contractImportName: importName + "contract",
+		operation:          goname.Operation(identifier),
 	}, nil
+}
+
+func invocationRuntimeIdentifiers() []IdentifierRequest {
+	return []IdentifierRequest{
+		{Name: "plystraErrInvalidContext", Source: "generated invocation timeout runtime"},
+		{Name: "plystraInvokeWithTimeout", Source: "generated invocation timeout runtime"},
+	}
 }
 
 func generatedIdentifierBase(parts ...string) string {

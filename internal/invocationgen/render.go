@@ -8,18 +8,26 @@ import (
 	"fmt"
 	"go/format"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 
+	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilitymeta"
+	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/goname"
 	"golang.org/x/mod/module"
 )
 
-// ErrRender reports that a capability declaration could not produce a Go
-// application-invocation file.
-var ErrRender = errors.New("render Go application invocation")
+var (
+	// ErrRender reports that a capability declaration could not produce a Go
+	// application-invocation file.
+	ErrRender = errors.New("render Go application invocation")
+	// ErrContribution reports a lowered operation that cannot enter the current
+	// canonical invocation surface without losing its declared semantics.
+	ErrContribution = errors.New("render lowered invocation contribution")
+)
 
 // File is one immutable generated canonical application-invocation output.
 type File struct {
@@ -45,6 +53,19 @@ type canonicalContract struct {
 // application invocation path for one exact Capability. This base path performs
 // direct governed dispatch when no generation contributions apply.
 func Render(modulePath string, schema []byte) (File, error) {
+	return render(modulePath, schema, nil)
+}
+
+// RenderPlan emits one canonical application path with the source Capability's
+// lowered contributions in their already-resolved semantic order.
+func RenderPlan(modulePath string, schema []byte, plan generationlowering.Plan) (File, error) {
+	if plan.ModulePath() != modulePath {
+		return File{}, fmt.Errorf("%w: %w: lowering plan module %q does not match %q", ErrRender, ErrContribution, plan.ModulePath(), modulePath)
+	}
+	return render(modulePath, schema, &plan)
+}
+
+func render(modulePath string, schema []byte, plan *generationlowering.Plan) (File, error) {
 	if err := module.CheckPath(modulePath); err != nil {
 		return File{}, fmt.Errorf("%w: invalid Go Module path %q: %v", ErrRender, modulePath, err)
 	}
@@ -60,6 +81,10 @@ func Render(modulePath string, schema []byte) (File, error) {
 	if err != nil {
 		return File{}, fmt.Errorf("%w: decode canonical identity: %w", ErrRender, err)
 	}
+	prepared, err := preparePlan(identifier, plan)
+	if err != nil {
+		return File{}, fmt.Errorf("%w: %w", ErrRender, err)
+	}
 
 	packageName := goname.Package(identifier)
 	contractImport := path.Join(modulePath, generatedDirectory("contracts", identifier))
@@ -69,19 +94,45 @@ func Render(modulePath string, schema []byte) (File, error) {
 	fmt.Fprintf(&source, "package %s\n\n", packageName)
 	fmt.Fprintln(&source, "import (")
 	fmt.Fprintln(&source, "\t\"context\"")
+	if prepared.hasTimedCalls {
+		fmt.Fprintln(&source, "\t\"errors\"")
+		fmt.Fprintln(&source, "\t\"time\"")
+	}
 	fmt.Fprintln(&source)
 	fmt.Fprintf(&source, "\tcontract %s\n", strconv.Quote(contractImport))
+	for _, dependency := range prepared.dependencies {
+		fmt.Fprintf(&source, "\t%s %s\n", dependency.reference.ImportName(), strconv.Quote(dependency.reference.ImportPath()))
+		fmt.Fprintf(&source, "\t%s %s\n", dependency.reference.ContractImportName(), strconv.Quote(dependency.reference.ContractImportPath()))
+	}
 	fmt.Fprintln(&source, "\tkernelinvocation \"github.com/plystra/kernel/invocation\"")
 	fmt.Fprintln(&source, ")")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// Handle is the opaque generated application path to one exact canonical Capability.")
 	fmt.Fprintln(&source, "type Handle struct {")
 	fmt.Fprintln(&source, "\ttarget kernelinvocation.Handle[contract.Request, contract.Response]")
+	for _, dependency := range prepared.dependencies {
+		fmt.Fprintf(&source, "\t%s %s.Client\n", dependency.field, dependency.reference.ImportName())
+	}
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// New binds the application path to its caller-scoped canonical Kernel handle.")
-	fmt.Fprintln(&source, "func New(target kernelinvocation.Handle[contract.Request, contract.Response]) Handle {")
-	fmt.Fprintln(&source, "\treturn Handle{target: target}")
+	if len(prepared.dependencies) == 0 {
+		fmt.Fprintln(&source, "func New(target kernelinvocation.Handle[contract.Request, contract.Response]) Handle {")
+		fmt.Fprintln(&source, "\treturn Handle{target: target}")
+	} else {
+		fmt.Fprintln(&source, "func New(")
+		fmt.Fprintln(&source, "\ttarget kernelinvocation.Handle[contract.Request, contract.Response],")
+		for _, dependency := range prepared.dependencies {
+			fmt.Fprintf(&source, "\t%s %s.Client,\n", dependency.field, dependency.reference.ImportName())
+		}
+		fmt.Fprintln(&source, ") Handle {")
+		fmt.Fprintln(&source, "\treturn Handle{")
+		fmt.Fprintln(&source, "\t\ttarget: target,")
+		for _, dependency := range prepared.dependencies {
+			fmt.Fprintf(&source, "\t\t%s: %s,\n", dependency.field, dependency.field)
+		}
+		fmt.Fprintln(&source, "\t}")
+	}
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// Available reports whether assembly selected the canonical provider.")
@@ -91,8 +142,34 @@ func Render(modulePath string, schema []byte) (File, error) {
 	fmt.Fprintln(&source)
 	fmt.Fprintf(&source, "// Invoke runs the application path for %s and dispatches its canonical ID.\n", identifier.String())
 	fmt.Fprintln(&source, "func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.Response, error) {")
+	for _, contribution := range prepared.contributions {
+		for _, node := range contribution.Nodes() {
+			if err := renderPrepareCall(&source, prepared.dependencies, contribution, node); err != nil {
+				return File{}, fmt.Errorf("%w: %w", ErrRender, err)
+			}
+		}
+	}
 	fmt.Fprintln(&source, "\treturn h.target.Invoke(ctx, request)")
 	fmt.Fprintln(&source, "}")
+	if prepared.hasTimedCalls {
+		fmt.Fprintln(&source)
+		fmt.Fprintln(&source, "var plystraErrInvalidContext = errors.New(\"nil generated invocation context\")")
+		fmt.Fprintln(&source)
+		fmt.Fprintln(&source, "func plystraInvokeWithTimeout[Request, Response any](")
+		fmt.Fprintln(&source, "\tctx context.Context,")
+		fmt.Fprintln(&source, "\ttimeout time.Duration,")
+		fmt.Fprintln(&source, "\tinvoke func(context.Context, Request) (Response, error),")
+		fmt.Fprintln(&source, "\trequest Request,")
+		fmt.Fprintln(&source, ") (Response, error) {")
+		fmt.Fprintln(&source, "\tif ctx == nil {")
+		fmt.Fprintln(&source, "\t\tvar response Response")
+		fmt.Fprintln(&source, "\t\treturn response, plystraErrInvalidContext")
+		fmt.Fprintln(&source, "\t}")
+		fmt.Fprintln(&source, "\tcallContext, cancel := context.WithTimeout(ctx, timeout)")
+		fmt.Fprintln(&source, "\tdefer cancel()")
+		fmt.Fprintln(&source, "\treturn invoke(callContext, request)")
+		fmt.Fprintln(&source, "}")
+	}
 	formatted, err := format.Source([]byte(source.String()))
 	if err != nil {
 		return File{}, fmt.Errorf("%w: format generated source: %w", ErrRender, err)
@@ -102,6 +179,154 @@ func Render(modulePath string, schema []byte) (File, error) {
 		packageName: packageName,
 		data:        append([]byte(nil), formatted...),
 	}, nil
+}
+
+type preparedPlan struct {
+	contributions []generationlowering.Contribution
+	dependencies  []invocationDependency
+	hasTimedCalls bool
+}
+
+type invocationDependency struct {
+	reference generationlowering.TargetReference
+	field     string
+}
+
+func preparePlan(identifier capabilityid.Identifier, plan *generationlowering.Plan) (preparedPlan, error) {
+	if plan == nil {
+		return preparedPlan{}, nil
+	}
+	result := preparedPlan{}
+	byCapability := make(map[string]invocationDependency)
+	for _, contribution := range plan.Contributions() {
+		if contribution.Source().String() != identifier.String() {
+			continue
+		}
+		nodes := contribution.Nodes()
+		if len(nodes) != 0 && contribution.Point() != generation.GenerationPointInvocationPrepare {
+			return preparedPlan{}, fmt.Errorf(
+				"%w: contribution %q for %s uses unsupported point %q",
+				ErrContribution,
+				contribution.ID(),
+				identifier,
+				contribution.Point(),
+			)
+		}
+		for _, node := range nodes {
+			if node.Kind() != generation.GeneratedNodeKindCapabilityCall {
+				return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q uses unsupported kind %q", ErrContribution, contribution.ID(), node.ID(), node.Kind())
+			}
+			operation, ok := node.Generated().CapabilityCall()
+			if !ok || operation.OnError != generation.GeneratedCallFailClosed {
+				return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q must be a fail-closed Capability call", ErrContribution, contribution.ID(), node.ID())
+			}
+			if operation.Capability.String() == identifier.String() {
+				return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q recursively calls its own source %s", ErrContribution, contribution.ID(), node.ID(), identifier)
+			}
+			for _, binding := range operation.Request {
+				if binding.Value.Literal == nil {
+					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q binding %q uses a value source not yet renderable at this boundary", ErrContribution, contribution.ID(), node.ID(), binding.Field)
+				}
+			}
+			reference, ok := node.Target()
+			if !ok {
+				return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q has no lowered target", ErrContribution, contribution.ID(), node.ID())
+			}
+			key := reference.Capability().String()
+			dependency := invocationDependency{reference: reference, field: reference.ImportName() + "Client"}
+			if previous, exists := byCapability[key]; exists && previous != dependency {
+				return preparedPlan{}, fmt.Errorf("%w: target %s has inconsistent lowered references", ErrContribution, key)
+			}
+			byCapability[key] = dependency
+			result.hasTimedCalls = true
+		}
+		result.contributions = append(result.contributions, contribution)
+	}
+	keys := make([]string, 0, len(byCapability))
+	for key := range byCapability {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(left, right int) bool {
+		leftValue, rightValue := byCapability[keys[left]], byCapability[keys[right]]
+		if leftValue.reference.ImportPath() != rightValue.reference.ImportPath() {
+			return leftValue.reference.ImportPath() < rightValue.reference.ImportPath()
+		}
+		return keys[left] < keys[right]
+	})
+	result.dependencies = make([]invocationDependency, len(keys))
+	for index, key := range keys {
+		result.dependencies[index] = byCapability[key]
+	}
+	return result, nil
+}
+
+func renderPrepareCall(
+	source *strings.Builder,
+	dependencies []invocationDependency,
+	contribution generationlowering.Contribution,
+	node generationlowering.Node,
+) error {
+	operation, ok := node.Generated().CapabilityCall()
+	if !ok {
+		return fmt.Errorf("%w: contribution %q node %q lost its Capability call", ErrContribution, contribution.ID(), node.ID())
+	}
+	reference, ok := node.Target()
+	if !ok {
+		return fmt.Errorf("%w: contribution %q node %q lost its target", ErrContribution, contribution.ID(), node.ID())
+	}
+	dependency, ok := findDependency(dependencies, reference.Capability().String())
+	if !ok {
+		return fmt.Errorf("%w: contribution %q node %q target %s has no generated client dependency", ErrContribution, contribution.ID(), node.ID(), reference.Capability())
+	}
+	responseIdentifier, responseOK := node.Identifier(generation.GeneratedNodeResponse)
+	errorIdentifier, errorOK := node.Identifier(generation.GeneratedNodeError)
+	if !responseOK || !errorOK {
+		return fmt.Errorf("%w: contribution %q node %q has incomplete lowered identifiers", ErrContribution, contribution.ID(), node.ID())
+	}
+	fmt.Fprintf(source, "\t%s, %s := plystraInvokeWithTimeout(\n", responseIdentifier, errorIdentifier)
+	fmt.Fprintln(source, "\t\tctx,")
+	fmt.Fprintf(source, "\t\t%d*time.Millisecond,\n", operation.TimeoutMilliseconds)
+	fmt.Fprintf(source, "\t\th.%s.%s,\n", dependency.field, reference.Operation())
+	fmt.Fprintf(source, "\t\t%s.Request{\n", reference.ContractImportName())
+	for _, binding := range operation.Request {
+		value, err := renderLiteral(binding.Value)
+		if err != nil {
+			return fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, err)
+		}
+		fmt.Fprintf(source, "\t\t\t%s: %s,\n", goname.Field(binding.Field), value)
+	}
+	fmt.Fprintln(source, "\t\t},")
+	fmt.Fprintln(source, "\t)")
+	fmt.Fprintf(source, "\tif %s != nil {\n", errorIdentifier)
+	fmt.Fprintf(source, "\t\treturn contract.Response{}, %s\n", errorIdentifier)
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintf(source, "\t_ = %s\n", responseIdentifier)
+	return nil
+}
+
+func renderLiteral(value generation.GeneratedValue) (string, error) {
+	if value.Literal == nil {
+		return "", errors.New("value is not a literal")
+	}
+	switch {
+	case value.Literal.String != nil:
+		return strconv.Quote(*value.Literal.String), nil
+	case value.Literal.Integer != nil:
+		return strconv.FormatInt(*value.Literal.Integer, 10), nil
+	case value.Literal.Boolean != nil:
+		return strconv.FormatBool(*value.Literal.Boolean), nil
+	default:
+		return "", errors.New("literal has no supported scalar value")
+	}
+}
+
+func findDependency(values []invocationDependency, capability string) (invocationDependency, bool) {
+	for _, value := range values {
+		if value.reference.Capability().String() == capability {
+			return value, true
+		}
+	}
+	return invocationDependency{}, false
 }
 
 func generatedDirectory(category string, identifier capabilityid.Identifier) string {

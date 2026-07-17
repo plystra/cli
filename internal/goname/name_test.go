@@ -39,3 +39,23 @@ func TestCapabilityNames(t *testing.T) {
 		})
 	}
 }
+
+func TestFieldNames(t *testing.T) {
+	t.Parallel()
+
+	for input, want := range map[string]string{
+		"caller_id":     "CallerID",
+		"http_status":   "HTTPStatus",
+		"permission":    "Permission",
+		"space_id_list": "SpaceIDList",
+	} {
+		if got := goname.Field(input); got != want {
+			t.Fatalf("Field(%q) = %q, want %q", input, got, want)
+		}
+	}
+	for _, input := range []string{"", "bad__field", "_bad", "bad_"} {
+		if got := goname.Field(input); got != "" {
+			t.Fatalf("Field(%q) = %q, want empty", input, got)
+		}
+	}
+}

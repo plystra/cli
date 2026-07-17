@@ -326,11 +326,7 @@ func goType(schemaType string) (string, error) {
 }
 
 func exportedName(value string) string {
-	parts := strings.Split(value, "_")
-	for index := range parts {
-		parts[index] = exportedWord(parts[index])
-	}
-	return strings.Join(parts, "")
+	return goname.Field(value)
 }
 
 func exportedWord(value string) string {

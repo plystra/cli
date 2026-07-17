@@ -28,6 +28,19 @@ func Operation(identifier capabilityid.Identifier) string {
 	return strings.Join(words, "")
 }
 
+// Field returns the exported Go struct field used for one canonical lower
+// snake-case wire name.
+func Field(value string) string {
+	parts := strings.Split(value, "_")
+	for index := range parts {
+		if parts[index] == "" {
+			return ""
+		}
+		parts[index] = ExportedWord(parts[index])
+	}
+	return strings.Join(parts, "")
+}
+
 // ExportedWord returns one exported Go word while preserving common
 // initialisms used by generated API names.
 func ExportedWord(value string) string {
