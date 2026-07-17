@@ -14,7 +14,6 @@ import (
 
 	contract "example.com/acme/project/generated/go/contracts/email/send/v1"
 	applicationinvocation "example.com/acme/project/generated/go/invocation/email/send/v1"
-	kernelaudit "github.com/plystra/kernel/audit"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
@@ -268,35 +267,35 @@ func plystraWriteInvocationError(writer http.ResponseWriter, err error) {
 		return
 	}
 	var classified *kernelinvocation.Error
-	if errors.As(err, &classified) && classified.Code().Valid() && kernelaudit.ValidDetailCode(classified.DetailCode()) {
+	if errors.As(err, &classified) && classified.Code().Valid() && kernelinvocation.ValidDetailCode(classified.DetailCode()) {
 		plystraWriteError(writer, plystraStatus(classified.Code()), classified.Code().String(), classified.DetailCode())
 		return
 	}
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
-		plystraWriteError(writer, http.StatusServiceUnavailable, kernelaudit.ErrorTimeout.String(), "")
+		plystraWriteError(writer, http.StatusServiceUnavailable, kernelinvocation.ErrorTimeout.String(), "")
 	case errors.Is(err, context.Canceled):
-		plystraWriteError(writer, 499, kernelaudit.ErrorCancelled.String(), "")
+		plystraWriteError(writer, 499, kernelinvocation.ErrorCancelled.String(), "")
 	default:
 		plystraWriteError(writer, http.StatusInternalServerError, "internal", "")
 	}
 }
 
-func plystraStatus(code kernelaudit.ErrorCode) int {
+func plystraStatus(code kernelinvocation.ErrorCode) int {
 	switch code {
-	case kernelaudit.ErrorInvalidArgument:
+	case kernelinvocation.ErrorInvalidArgument:
 		return http.StatusBadRequest
-	case kernelaudit.ErrorUnauthenticated:
+	case kernelinvocation.ErrorUnauthenticated:
 		return http.StatusUnauthorized
-	case kernelaudit.ErrorDenied:
+	case kernelinvocation.ErrorDenied:
 		return http.StatusForbidden
-	case kernelaudit.ErrorNotFound:
+	case kernelinvocation.ErrorNotFound:
 		return http.StatusNotFound
-	case kernelaudit.ErrorConflict, kernelaudit.ErrorVersionIncompatible:
+	case kernelinvocation.ErrorConflict, kernelinvocation.ErrorVersionIncompatible:
 		return http.StatusConflict
-	case kernelaudit.ErrorTimeout, kernelaudit.ErrorUnavailable, kernelaudit.ErrorResultUnknown:
+	case kernelinvocation.ErrorTimeout, kernelinvocation.ErrorUnavailable, kernelinvocation.ErrorResultUnknown:
 		return http.StatusServiceUnavailable
-	case kernelaudit.ErrorCancelled:
+	case kernelinvocation.ErrorCancelled:
 		return 499
 	default:
 		return http.StatusInternalServerError

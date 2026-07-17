@@ -244,7 +244,7 @@ func assertGeneratedHTTPAdapterRuns(t testing.TB, contract contractgen.File, inv
 	writeGeneratedFile(t, root, invocation.Path(), invocation.Data())
 	writeGeneratedFile(t, root, adapter.Path(), adapter.Data())
 	writeGeneratedFile(t, root, "kernel/go.mod", []byte("module github.com/plystra/kernel\n\ngo 1.26\n"))
-	writeGeneratedFile(t, root, "kernel/audit/error.go", []byte(testKernelAuditSource))
+	writeGeneratedFile(t, root, "kernel/invocation/code.go", []byte(testKernelInvocationCodeSource))
 	writeGeneratedFile(t, root, "kernel/invocation/handle.go", []byte(testKernelInvocationSource))
 	writeGeneratedFile(t, root, "generated/go/adapters/http/email/send/v1/handler_gen_test.go", []byte(generatedHTTPRuntimeTest))
 	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\n\nreplace github.com/plystra/kernel => ./kernel\n"))
@@ -268,7 +268,7 @@ func writeGeneratedFile(t testing.TB, root, relative string, data []byte) {
 	}
 }
 
-const testKernelAuditSource = `package audit
+const testKernelInvocationCodeSource = `package invocation
 
 import "strings"
 
@@ -304,11 +304,7 @@ func ValidDetailCode(value string) bool {
 
 const testKernelInvocationSource = `package invocation
 
-import (
-	"context"
-
-	"github.com/plystra/kernel/audit"
-)
+import "context"
 
 type Handle[Request, Response any] struct {
 	available bool
@@ -328,12 +324,12 @@ func (h Handle[Request, Response]) Invoke(ctx context.Context, request Request) 
 }
 
 type Error struct {
-	code audit.ErrorCode
+	code ErrorCode
 	detail string
 }
-func NewTestError(code audit.ErrorCode, detail string) *Error { return &Error{code: code, detail: detail} }
+func NewTestError(code ErrorCode, detail string) *Error { return &Error{code: code, detail: detail} }
 func (e *Error) Error() string { return "classified secret must not cross transport" }
-func (e *Error) Code() audit.ErrorCode { return e.code }
+func (e *Error) Code() ErrorCode { return e.code }
 func (e *Error) DetailCode() string { return e.detail }
 `
 
@@ -350,7 +346,6 @@ import (
 	adapter "example.com/acme/project/generated/go/adapters/http/email/send/v1"
 	contract "example.com/acme/project/generated/go/contracts/email/send/v1"
 	applicationinvocation "example.com/acme/project/generated/go/invocation/email/send/v1"
-	kernelaudit "github.com/plystra/kernel/audit"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
@@ -363,7 +358,7 @@ func TestGeneratedHTTPHandlerValidatesAndInvokesCanonicalPath(t *testing.T) {
 		case "semantic":
 			return contract.Response{}, contract.ErrInvalidRecipient
 		case "denied":
-			return contract.Response{}, kernelinvocation.NewTestError(kernelaudit.ErrorDenied, "authorization.denied")
+			return contract.Response{}, kernelinvocation.NewTestError(kernelinvocation.ErrorDenied, "authorization.denied")
 		case "cancelled":
 			return contract.Response{}, context.Canceled
 		case "unknown-secret":
