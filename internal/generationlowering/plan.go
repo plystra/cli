@@ -289,8 +289,23 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 			Source: provenance + " generated invocation context",
 		})
 	case generation.GeneratedNodeKindConditionalFailure:
-		if _, ok := generated.ConditionalFailure(); !ok {
+		operation, ok := generated.ConditionalFailure()
+		if !ok {
 			return Node{}, nil, nil, fmt.Errorf("%w: conditional-failure operation is absent", ErrInvalidContribution)
+		}
+		identifiers = append(identifiers, conditionalRuntimeIdentifiers()...)
+		if operation.Condition.Value.Invocation != nil && operation.Condition.Value.Invocation.Source == generation.GeneratedInvocationContextValue {
+			node.sourceIdentifier = base + "Source"
+			node.presenceIdentifier = base + "Present"
+			identifiers = append(identifiers,
+				IdentifierRequest{Name: node.sourceIdentifier, Source: provenance + " optional source"},
+				IdentifierRequest{Name: node.presenceIdentifier, Source: provenance + " optional presence"},
+			)
+			imports = append(imports, ImportRequest{
+				Path:   path.Join(modulePath, "generated/go/internal/invocationcontext"),
+				Name:   "invocationcontext",
+				Source: provenance + " generated invocation context",
+			})
 		}
 	case generation.GeneratedNodeKindMetadataAttachment:
 		if _, ok := generated.MetadataAttachment(); !ok {
@@ -365,6 +380,12 @@ func invocationRuntimeIdentifiers() []IdentifierRequest {
 func contextRuntimeIdentifiers() []IdentifierRequest {
 	return []IdentifierRequest{
 		{Name: "plystraPointer", Source: "generated invocation typed binding runtime"},
+	}
+}
+
+func conditionalRuntimeIdentifiers() []IdentifierRequest {
+	return []IdentifierRequest{
+		{Name: "plystraConditionalError", Source: "generated invocation conditional failure runtime"},
 	}
 }
 

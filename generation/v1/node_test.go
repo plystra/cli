@@ -52,9 +52,20 @@ func TestNormalizeOutputBuildsTypedImmutableGenerationNodes(t *testing.T) {
 	if _, ok := output.Contributions[0].Nodes[1].CapabilityCall.Request[0].Target(); ok {
 		t.Fatal("raw extension binding exposed a normalized target")
 	}
+	shape, ok := call.Request[0].Value.Shape()
+	if !ok || shape.Type() != generation.GeneratedValueString || shape.Items() != "" || shape.Optional() || shape.Error() || !shape.Sensitive() || shape.Enumerated() {
+		t.Fatalf("capability call value shape = %#v, %v", shape, ok)
+	}
+	if _, ok := output.Contributions[0].Nodes[1].CapabilityCall.Request[0].Value.Shape(); ok {
+		t.Fatal("raw extension value exposed a normalized shape")
+	}
 	failure, ok := nodes[2].ConditionalFailure()
 	if !ok || failure.Condition.Operator != generation.GeneratedConditionError || failure.ErrorCode != "invalid_state" || failure.Condition.Value.Node == nil || failure.Condition.Value.Node.ID != "verify-session" {
 		t.Fatalf("conditional failure = %#v, %v", failure, ok)
+	}
+	errorShape, ok := failure.Condition.Value.Shape()
+	if !ok || !errorShape.Error() || !errorShape.Optional() || errorShape.Type() != "" {
+		t.Fatalf("conditional error shape = %#v, %v", errorShape, ok)
 	}
 	contextNode, ok := nodes[3].ContextDerivation()
 	if !ok || contextNode.Key != "authn.verified-session" || contextNode.Type != generation.GeneratedValueObject || contextNode.Presence != generation.GeneratedContextRequired || !contextNode.Sensitive {

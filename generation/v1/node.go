@@ -195,8 +195,45 @@ type GeneratedValue struct {
 	Literal    *GeneratedLiteral         `json:"literal,omitempty"`
 	Invocation *GeneratedInvocationValue `json:"invocation,omitempty"`
 	Node       *GeneratedNodeValue       `json:"node,omitempty"`
+	shape      GeneratedValueShape
 	_          struct{}
 }
+
+// GeneratedValueShape is the immutable canonical type and presence metadata
+// attached to a value during output normalization. Raw extension output has no
+// shape until the CLI validates its source.
+type GeneratedValueShape struct {
+	typeName   GeneratedValueType
+	items      GeneratedValueType
+	optional   bool
+	errorValue bool
+	sensitive  bool
+	enumerated bool
+	valid      bool
+}
+
+// Shape returns the canonical value shape established by output
+// normalization. It reports false for an unnormalized value.
+func (v GeneratedValue) Shape() (GeneratedValueShape, bool) { return v.shape, v.shape.valid }
+
+// Type returns the canonical scalar, object, or array type. It is empty for an
+// error value.
+func (s GeneratedValueShape) Type() GeneratedValueType { return s.typeName }
+
+// Items returns the canonical array item type, or an empty value otherwise.
+func (s GeneratedValueShape) Items() GeneratedValueType { return s.items }
+
+// Optional reports whether the value may be absent at runtime.
+func (s GeneratedValueShape) Optional() bool { return s.optional }
+
+// Error reports whether the value is an error rather than contract data.
+func (s GeneratedValueShape) Error() bool { return s.errorValue }
+
+// Sensitive reports whether the value carries sensitive data.
+func (s GeneratedValueShape) Sensitive() bool { return s.sensitive }
+
+// Enumerated reports whether the value uses a named generated enum type.
+func (s GeneratedValueShape) Enumerated() bool { return s.enumerated }
 
 // GeneratedLiteral is one typed scalar literal. Exactly one member must be
 // set, including a pointer to false, zero, or an empty string when intended.
@@ -337,11 +374,12 @@ type generatedContractSchema struct {
 }
 
 type generatedValueInfo struct {
-	typeName  GeneratedValueType
-	items     GeneratedValueType
-	optional  bool
-	isError   bool
-	sensitive bool
+	typeName   GeneratedValueType
+	items      GeneratedValueType
+	optional   bool
+	isError    bool
+	sensitive  bool
+	enumerated bool
 }
 
 type generatedNodeNormalizer struct {
@@ -710,20 +748,38 @@ func (n *generatedNodeNormalizer) normalizeValue(field string, input GeneratedVa
 		if err != nil {
 			return GeneratedValue{}, generatedValueInfo{}, err
 		}
-		return GeneratedValue{Literal: &literal}, info, nil
+		value := GeneratedValue{Literal: &literal}
+		value.shape = generatedShape(info)
+		return value, info, nil
 	}
 	if input.Invocation != nil {
 		invocation, info, err := n.normalizeInvocationValue(field+".invocation", *input.Invocation)
 		if err != nil {
 			return GeneratedValue{}, generatedValueInfo{}, err
 		}
-		return GeneratedValue{Invocation: &invocation}, info, nil
+		value := GeneratedValue{Invocation: &invocation}
+		value.shape = generatedShape(info)
+		return value, info, nil
 	}
 	node, info, err := n.normalizeNodeValue(field+".node", *input.Node)
 	if err != nil {
 		return GeneratedValue{}, generatedValueInfo{}, err
 	}
-	return GeneratedValue{Node: &node}, info, nil
+	value := GeneratedValue{Node: &node}
+	value.shape = generatedShape(info)
+	return value, info, nil
+}
+
+func generatedShape(info generatedValueInfo) GeneratedValueShape {
+	return GeneratedValueShape{
+		typeName:   info.typeName,
+		items:      info.items,
+		optional:   info.optional,
+		errorValue: info.isError,
+		sensitive:  info.sensitive,
+		enumerated: info.enumerated,
+		valid:      true,
+	}
 }
 
 func normalizeGeneratedLiteral(field string, input GeneratedLiteral) (GeneratedLiteral, generatedValueInfo, error) {
@@ -829,7 +885,7 @@ func generatedInvocationSchemaValue(field string, input GeneratedInvocationValue
 	if !exists {
 		return GeneratedInvocationValue{}, generatedValueInfo{}, invalidOutput("%s.name %q is not declared by the source Capability", field, name)
 	}
-	return input, generatedValueInfo{typeName: value.Type, items: value.Items, optional: !value.Required}, nil
+	return input, generatedValueInfo{typeName: value.Type, items: value.Items, optional: !value.Required, enumerated: len(value.Enum) != 0}, nil
 }
 
 func (n *generatedNodeNormalizer) normalizeNodeValue(field string, input GeneratedNodeValue) (GeneratedNodeValue, generatedValueInfo, error) {
@@ -863,7 +919,7 @@ func (n *generatedNodeNormalizer) normalizeNodeValue(field string, input Generat
 			if !exists {
 				return GeneratedNodeValue{}, generatedValueInfo{}, invalidOutput("%s.field %q is not declared by call %q response", field, input.Field, call.Capability.String())
 			}
-			return input, generatedValueInfo{typeName: output.Type, items: output.Items, optional: !output.Required}, nil
+			return input, generatedValueInfo{typeName: output.Type, items: output.Items, optional: !output.Required, enumerated: len(output.Enum) != 0}, nil
 		case GeneratedNodeError:
 			if input.Field != "" {
 				return GeneratedNodeValue{}, generatedValueInfo{}, invalidOutput("%s.field must be empty for an error output", field)
@@ -1076,7 +1132,7 @@ func cloneGeneratedBindings(inputs []GeneratedFieldBinding) []GeneratedFieldBind
 }
 
 func cloneGeneratedValue(input GeneratedValue) GeneratedValue {
-	result := GeneratedValue{}
+	result := GeneratedValue{shape: input.shape}
 	if input.Literal != nil {
 		literal := GeneratedLiteral{}
 		if input.Literal.String != nil {

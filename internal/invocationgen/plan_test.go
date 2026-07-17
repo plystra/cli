@@ -20,6 +20,8 @@ const (
 	orderCreateSchema = `id: order.create/v1
 request:
   order_id: {type: string, required: true}
+  note: {type: string}
+  reject: {type: boolean, required: true}
 response:
   accepted: {type: boolean, required: true}
 errors: [policy_failed]
@@ -316,6 +318,89 @@ func TestRenderPlanDerivesAndReusesBoundedContext(t *testing.T) {
 	}
 }
 
+func TestRenderPlanGoldenAndRuntimeConditionalFailures(t *testing.T) {
+	t.Parallel()
+
+	plan := prepareCallPlan(t, generation.Contribution{
+		ID:        "policy.conditions",
+		Namespace: "policy",
+		Source:    planCapabilityID(t, "order.create/v1"),
+		Point:     generation.GenerationPointInvocationPrepare,
+		Nodes: []generation.GeneratedNode{
+			{
+				ID: "check",
+				CapabilityCall: &generation.GeneratedCapabilityCall{
+					Capability:          planCapabilityID(t, "policy.check/v1"),
+					Request:             policyLiteralBindings(),
+					TimeoutMilliseconds: 50,
+					OnError:             generation.GeneratedCallCapture,
+				},
+			},
+			{
+				ID: "provider-failed",
+				ConditionalFailure: &generation.GeneratedConditionalFailure{
+					Condition: generation.GeneratedCondition{Operator: generation.GeneratedConditionError, Value: planNodeValue("check", generation.GeneratedNodeError)},
+					ErrorCode: "policy_failed",
+					Message:   "Policy provider failed.",
+				},
+			},
+			{
+				ID: "denied",
+				ConditionalFailure: &generation.GeneratedConditionalFailure{
+					Condition: generation.GeneratedCondition{Operator: generation.GeneratedConditionFalse, Value: generation.GeneratedValue{Node: &generation.GeneratedNodeValue{ID: "check", Output: generation.GeneratedNodeResponse, Field: "allowed"}}},
+					ErrorCode: "policy_failed",
+					Message:   "Policy denied the request.",
+				},
+			},
+			{
+				ID: "note-required",
+				ConditionalFailure: &generation.GeneratedConditionalFailure{
+					Condition: generation.GeneratedCondition{Operator: generation.GeneratedConditionMissing, Value: planInvocationValue(generation.GeneratedInvocationRequestField, "note")},
+					ErrorCode: "policy_failed",
+					Message:   "Order note is required.",
+				},
+			},
+			{
+				ID: "request-rejected",
+				ConditionalFailure: &generation.GeneratedConditionalFailure{
+					Condition: generation.GeneratedCondition{Operator: generation.GeneratedConditionTrue, Value: planInvocationValue(generation.GeneratedInvocationRequestField, "reject")},
+					ErrorCode: "policy_failed",
+					Message:   "Order was explicitly rejected.",
+				},
+			},
+			{
+				ID: "context-blocked",
+				ConditionalFailure: &generation.GeneratedConditionalFailure{
+					Condition: generation.GeneratedCondition{Operator: generation.GeneratedConditionPresent, Value: generation.GeneratedValue{Invocation: &generation.GeneratedInvocationValue{
+						Source: generation.GeneratedInvocationContextValue,
+						Name:   "policy.block",
+						Type:   generation.GeneratedValueString,
+					}}},
+					ErrorCode: "policy_failed",
+					Message:   "Policy context blocked the request.",
+				},
+			},
+		},
+	})
+	file, err := invocationgen.RenderPlan(testModulePath, []byte(orderCreateSchema), plan)
+	if err != nil {
+		t.Fatalf("RenderPlan: %v", err)
+	}
+	want, err := os.ReadFile("testdata/order.create.conditions.go")
+	if err != nil {
+		t.Fatalf("ReadFile(conditions golden): %v\n%s", err, file.Data())
+	}
+	if file.Path() != "generated/go/invocation/order/create/v1/invocation_gen.go" || file.PackageName() != "ordercreatev1" || !bytes.Equal(file.Data(), want) {
+		t.Fatalf("generated conditions plan = path %q, package %q\n%s\nwant:\n%s", file.Path(), file.PackageName(), file.Data(), want)
+	}
+	assertGeneratedConditionalFailuresRun(t, file)
+
+	repeated, err := invocationgen.RenderPlan(testModulePath, []byte(orderCreateSchema), plan)
+	if err != nil || !bytes.Equal(repeated.Data(), file.Data()) {
+		t.Fatalf("repeated RenderPlan = %#v, %v", repeated, err)
+	}
+}
+
 func TestRenderPlanRejectsUnsupportedOrUnsafeCalls(t *testing.T) {
 	t.Parallel()
 
@@ -324,17 +409,6 @@ func TestRenderPlanRejectsUnsupportedOrUnsafeCalls(t *testing.T) {
 		contribution generation.Contribution
 		want         []string
 	}{
-		{
-			name: "captured failure",
-			contribution: generation.Contribution{
-				ID: "policy.capture", Namespace: "policy", Source: planCapabilityID(t, "order.create/v1"), Point: generation.GenerationPointInvocationPrepare,
-				Nodes: []generation.GeneratedNode{
-					{ID: "check", CapabilityCall: &generation.GeneratedCapabilityCall{Capability: planCapabilityID(t, "policy.check/v1"), Request: policyLiteralBindings(), TimeoutMilliseconds: 50, OnError: generation.GeneratedCallCapture}},
-					{ID: "reject", ConditionalFailure: &generation.GeneratedConditionalFailure{Condition: generation.GeneratedCondition{Operator: generation.GeneratedConditionError, Value: planNodeValue("check", generation.GeneratedNodeError)}, ErrorCode: "policy_failed", Message: "Policy failed."}},
-				},
-			},
-			want: []string{"policy.capture", "check", "fail-closed"},
-		},
 		{
 			name: "adapter credential binding",
 			contribution: generation.Contribution{
@@ -377,8 +451,11 @@ func TestRenderPlanRejectsUnsupportedOrUnsafeCalls(t *testing.T) {
 			contribution: generation.Contribution{
 				ID: "policy.self", Namespace: "policy", Source: planCapabilityID(t, "order.create/v1"), Point: generation.GenerationPointInvocationPrepare,
 				Nodes: []generation.GeneratedNode{{ID: "check", CapabilityCall: &generation.GeneratedCapabilityCall{
-					Capability:          planCapabilityID(t, "order.create/v1"),
-					Request:             []generation.GeneratedFieldBinding{{Field: "order_id", Value: generation.StringValue("recursive")}},
+					Capability: planCapabilityID(t, "order.create/v1"),
+					Request: []generation.GeneratedFieldBinding{
+						{Field: "order_id", Value: generation.StringValue("recursive")},
+						{Field: "reject", Value: generation.BooleanValue(false)},
+					},
 					TimeoutMilliseconds: 50, OnError: generation.GeneratedCallFailClosed,
 				}}},
 			},
@@ -867,6 +944,125 @@ func TestContextDerivationIsBoundedOptionalAndReusable(t *testing.T) {
 	}
 	if dispatches != before {
 		t.Fatalf("failed derivation dispatched: before %d after %d", before, dispatches)
+	}
+}
+`))
+	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\n\nreplace github.com/plystra/kernel => ./kernel\n"))
+	runGeneratedGoTests(t, root)
+}
+
+func assertGeneratedConditionalFailuresRun(t testing.TB, sourceInvocation invocationgen.File) {
+	t.Helper()
+	root := t.TempDir()
+	sourceContract, err := contractgen.Render([]byte(orderCreateSchema))
+	if err != nil {
+		t.Fatalf("Render(conditional source contract): %v", err)
+	}
+	targetContract, err := contractgen.Render([]byte(policyCheckSchema))
+	if err != nil {
+		t.Fatalf("Render(conditional target contract): %v", err)
+	}
+	targetInvocation, err := invocationgen.Render(testModulePath, []byte(policyCheckSchema))
+	if err != nil {
+		t.Fatalf("Render(conditional target invocation): %v", err)
+	}
+	targetClient, err := clientgen.Render(testModulePath, []byte(policyCheckSchema))
+	if err != nil {
+		t.Fatalf("Render(conditional target client): %v", err)
+	}
+	contextFile, err := invocationgen.RenderContext()
+	if err != nil {
+		t.Fatalf("RenderContext: %v", err)
+	}
+	for _, file := range []struct {
+		path string
+		data []byte
+	}{
+		{sourceContract.Path(), sourceContract.Data()},
+		{targetContract.Path(), targetContract.Data()},
+		{targetInvocation.Path(), targetInvocation.Data()},
+		{targetClient.Path(), targetClient.Data()},
+		{contextFile.Path(), contextFile.Data()},
+		{sourceInvocation.Path(), sourceInvocation.Data()},
+	} {
+		writeGeneratedFile(t, root, file.path, file.data)
+	}
+	writeInvocationTestKernel(t, root)
+	writeGeneratedFile(t, root, "generated/go/invocation/order/create/v1/invocation_gen_test.go", []byte(`package ordercreatev1_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	policyclient "example.com/acme/project/generated/go/clients/policy/check/v1"
+	ordercontract "example.com/acme/project/generated/go/contracts/order/create/v1"
+	policycontract "example.com/acme/project/generated/go/contracts/policy/check/v1"
+	invocationcontext "example.com/acme/project/generated/go/internal/invocationcontext"
+	orderinvocation "example.com/acme/project/generated/go/invocation/order/create/v1"
+	policyinvocation "example.com/acme/project/generated/go/invocation/policy/check/v1"
+	kernelinvocation "github.com/plystra/kernel/invocation"
+)
+
+func TestConditionalFailuresPreventCanonicalDispatch(t *testing.T) {
+	policyAllowed := true
+	var policyError error
+	policyCalls := 0
+	policyTarget := kernelinvocation.NewTestHandle(true, func(_ context.Context, request policycontract.Request) (policycontract.Response, error) {
+		policyCalls++
+		if request.Permission != "order.create" || request.RetryCount != 2 || !request.Enforce {
+			t.Fatalf("policy request = %#v", request)
+		}
+		return policycontract.Response{Allowed: policyAllowed}, policyError
+	})
+	dispatches := 0
+	orderTarget := kernelinvocation.NewTestHandle(true, func(_ context.Context, _ ordercontract.Request) (ordercontract.Response, error) {
+		dispatches++
+		return ordercontract.Response{Accepted: true}, nil
+	})
+	policy := policyclient.New(policyinvocation.New(policyTarget))
+	handle := orderinvocation.New(orderTarget, policy)
+	note := "memo"
+	request := ordercontract.Request{OrderID: "order-1", Note: &note}
+	response, err := handle.Invoke(context.Background(), request)
+	if err != nil || !response.Accepted || policyCalls != 1 || dispatches != 1 {
+		t.Fatalf("Invoke(happy) = %#v, %v, policy calls %d, dispatches %d", response, err, policyCalls, dispatches)
+	}
+
+	blockedContext, err := invocationcontext.WithValue(context.Background(), "policy.block", "manual", 32)
+	if err != nil {
+		t.Fatalf("WithValue(block): %v", err)
+	}
+	tests := []struct {
+		name             string
+		ctx              context.Context
+		request          ordercontract.Request
+		allowed          bool
+		providerError    error
+		wantMessage      string
+		wantPolicyCalls int
+	}{
+		{name: "provider error", ctx: context.Background(), request: request, allowed: true, providerError: errors.New("unavailable"), wantMessage: "Policy provider failed.", wantPolicyCalls: 1},
+		{name: "denial", ctx: context.Background(), request: request, wantMessage: "Policy denied the request.", wantPolicyCalls: 1},
+		{name: "missing note", ctx: context.Background(), request: ordercontract.Request{OrderID: "order-1"}, allowed: true, wantMessage: "Order note is required.", wantPolicyCalls: 1},
+		{name: "request rejection", ctx: context.Background(), request: ordercontract.Request{OrderID: "order-1", Note: &note, Reject: true}, allowed: true, wantMessage: "Order was explicitly rejected.", wantPolicyCalls: 1},
+		{name: "context block", ctx: blockedContext, request: request, allowed: true, wantMessage: "Policy context blocked the request.", wantPolicyCalls: 1},
+		{name: "nil context", request: request, allowed: true, wantMessage: "Policy provider failed."},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			policyAllowed = test.allowed
+			policyError = test.providerError
+			beforePolicyCalls := policyCalls
+			beforeDispatches := dispatches
+			response, err := handle.Invoke(test.ctx, test.request)
+			if !errors.Is(err, ordercontract.ErrPolicyFailed) || err.Error() != test.wantMessage || response.Accepted {
+				t.Fatalf("Invoke = %#v, %v", response, err)
+			}
+			if policyCalls-beforePolicyCalls != test.wantPolicyCalls || dispatches != beforeDispatches {
+				t.Fatalf("calls = policy %d, dispatches before %d after %d", policyCalls-beforePolicyCalls, beforeDispatches, dispatches)
+			}
+		})
 	}
 }
 `))
