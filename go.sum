@@ -1,5 +1,5 @@
-github.com/plystra/kernel v0.0.0-20260717123601-236f1ee85cae h1:P8EcF67QipGxPZLG8qUxq+orZr2S8MH9i9GuBqC3p5o=
-github.com/plystra/kernel v0.0.0-20260717123601-236f1ee85cae/go.mod h1:9NpMvVkhP9tR1tqfzIDJQ1Qbe3oj9+CtDnJpLabOqZc=
+github.com/plystra/kernel v0.0.0-20260717205506-9040decf2087 h1:56sgw5j4Nom0GqgTxIYWcanluOvwhVdrXpbeGm0679s=
+github.com/plystra/kernel v0.0.0-20260717205506-9040decf2087/go.mod h1:9NpMvVkhP9tR1tqfzIDJQ1Qbe3oj9+CtDnJpLabOqZc=
 go.yaml.in/yaml/v3 v3.0.4 h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=
 go.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=
 golang.org/x/mod v0.38.0 h1:MECBjubtXD7yj4HrhIUcywNaGeNVUdfVnxmPajOk4yk=

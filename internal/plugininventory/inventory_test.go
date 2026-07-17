@@ -15,6 +15,7 @@ import (
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/plugininventory"
+	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 )
 
 func TestBuildIndexesLocalAndExplicitDependencyPlugins(t *testing.T) {
@@ -28,7 +29,7 @@ func TestBuildIndexesLocalAndExplicitDependencyPlugins(t *testing.T) {
 	writeModule(t, aRoot, "example.com/a")
 	writeModule(t, zRoot, "example.com/z")
 	writePlugin(t, appRoot, "orders", "id: acme.orders\n")
-	manifest := []byte("id: acme.smtp\nprovides: [email.send/v1]\nrequires: [audit.write/v1]\ngeneration: {api: v1, package: ./generation, activations: [{namespace: email, capability: email.send/v1}]}\n")
+	manifest := []byte("id: acme.smtp\nprovides: [email.send/v1]\nrequires: [audit.write/v1]\nconfig: {password: {type: secret, required: true}}\ngeneration: {api: v1, package: ./generation, activations: [{namespace: email, capability: email.send/v1}]}\n")
 	writePlugin(t, aRoot, "smtp", string(manifest))
 	if err := os.MkdirAll(filepath.Join(aRoot, "smtp", "generation"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(generation): %v", err)
@@ -64,6 +65,10 @@ func TestBuildIndexesLocalAndExplicitDependencyPlugins(t *testing.T) {
 	}
 	if got := identifierStrings(smtp.Requires()); !reflect.DeepEqual(got, []string{"audit.write/v1"}) {
 		t.Fatalf("smtp Requires() = %v", got)
+	}
+	password, ok := smtp.Config().Lookup("password")
+	if !ok || password.Type() != kernelmanifest.ConfigSecret || !password.Required() {
+		t.Fatalf("smtp Config password = %#v, %t", password, ok)
 	}
 	generation, ok := smtp.Generation()
 	if !ok || generation.API() != "v1" || generation.Package() != "./generation" {

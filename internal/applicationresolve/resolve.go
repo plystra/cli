@@ -10,6 +10,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/moduledependency"
@@ -52,6 +53,7 @@ type Result struct {
 	manifest   applicationmeta.Manifest
 	inventory  plugininventory.Index
 	resolution generationresolution.ExtensionResult
+	configs    configurationresolve.Result
 }
 
 // Module returns the nearest runnable application Go Module.
@@ -66,6 +68,10 @@ func (r Result) Inventory() plugininventory.Index { return r.inventory }
 // Resolution returns the stable provider, extension, contribution, and Alias
 // closure.
 func (r Result) Resolution() generationresolution.ExtensionResult { return r.resolution }
+
+// Configurations returns the validated private selected-plugin configuration
+// closure. Its values never enter generation-extension input.
+func (r Result) Configurations() configurationresolve.Result { return r.configs }
 
 // Resolve locates the nearest module, loads its root plystra.yaml, discovers
 // only explicit Go Module dependencies, indexes visible plugins and contracts,
@@ -109,6 +115,10 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
+	configs, err := configurationresolve.Resolve(manifest, inventory, resolution.Context())
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
 	after, err := readManifestSnapshot(module.Path())
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w: recheck plystra.yaml: %v", ErrResolve, ErrConcurrentChange, err)
@@ -121,5 +131,6 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		manifest:   manifest,
 		inventory:  inventory,
 		resolution: resolution,
+		configs:    configs,
 	}, nil
 }

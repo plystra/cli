@@ -169,6 +169,7 @@ type fingerprintDocument struct {
 	ModulePath      string                 `json:"module_path"`
 	ContextDigest   string                 `json:"context_digest"`
 	AliasDigest     string                 `json:"alias_digest"`
+	ConfigDigest    string                 `json:"configuration_digest"`
 	Passes          int                    `json:"passes"`
 	Extensions      []extensionFingerprint `json:"extensions"`
 	OutputOwnership json.RawMessage        `json:"output_ownership"`
@@ -199,6 +200,7 @@ func generationFingerprint(resolved applicationresolve.Result, output generatedf
 		ModulePath:      resolved.Module().ModulePath(),
 		ContextDigest:   resolution.Context().Digest(),
 		AliasDigest:     resolution.AliasResolution().Digest(),
+		ConfigDigest:    resolved.Configurations().Digest(),
 		Passes:          resolution.Passes(),
 		Extensions:      extensions,
 		OutputOwnership: output.ManifestJSON(),

@@ -8,6 +8,7 @@ import (
 
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/pluginmeta"
+	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 )
 
 func TestParseIndexesCanonicalMetadata(t *testing.T) {
@@ -36,6 +37,10 @@ config:
 	}
 	if got := identifierStrings(metadata.Requires()); !reflect.DeepEqual(got, []string{"audit.write/v1"}) {
 		t.Fatalf("Requires = %v", got)
+	}
+	token, ok := metadata.Config().Lookup("token")
+	if !ok || token.Type() != kernelmanifest.ConfigSecret {
+		t.Fatalf("Config token = %#v, %t", token, ok)
 	}
 	generation, ok := metadata.Generation()
 	if !ok || generation.API() != pluginmeta.GenerationAPIV1 || generation.Package() != "./generation" {
@@ -145,6 +150,10 @@ func TestParseRejectsInvalidMetadataEnvelopes(t *testing.T) {
 		"id: acme.one\nprovides: [email.send]\n",
 		"id: acme.one\nprovides: [email.send/v1, email.send/v1]\n",
 		"id: acme.one\nrequires: [Audit.write/v1]\n",
+		"id: acme.one\nconfig: null\n",
+		"id: acme.one\nconfig: []\n",
+		"id: acme.one\nconfig: {token: {type: unknown}}\n",
+		"id: acme.one\nconfig: {token: {type: secret}, token: {type: secret}}\n",
 		strings.Repeat("x", pluginmeta.MaximumSize+1),
 	}
 	for _, input := range tests {

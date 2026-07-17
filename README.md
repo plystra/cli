@@ -75,6 +75,12 @@ They cannot patch arbitrary text, write source, choose providers, mutate another
 
 Rule inputs, outputs, dependency graphs, contribution digests, and final results enter the generated manifest without Secret values. `plystra generate --check` recomputes them, and removing a plugin or metadata match removes obsolete output.
 
+## Runtime configuration resolution
+
+The CLI indexes each plugin's strict Kernel configuration declaration and preserves each `plystra.yaml` object only in a separate private resolution path. After the provider and generation fixed point stabilizes, it validates exactly one object for every selected Plugin ID with the Kernel's non-resolving validator. Omitted objects normalize to `{}` so optional fields and defaults remain usable; missing required fields, unknown fields, invalid values or Secret-reference syntax, and configuration for an unselected plugin fail before rendering. Environment variables and files are never read during generation.
+
+Private values and Secret reference targets do not enter generation-extension context, generated source, manifests, SDKs, documentation, or diagnostics. A private digest covers the validated selected plugin manifests and values only for concurrent-input detection during the generation transaction.
+
 ## Generated application invocation
 
 Every ordinary external or cross-plugin call uses generated code:

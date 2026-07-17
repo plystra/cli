@@ -1,8 +1,10 @@
 package applicationmeta_test
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"slices"
 	"strings"
@@ -152,6 +154,65 @@ func TestParseNormalizesHTTPAddressAndCanonicalExposure(t *testing.T) {
 	}
 }
 
+func TestParseNormalizesAndRedactsPluginConfiguration(t *testing.T) {
+	t.Parallel()
+
+	const (
+		environment = "SMTP_PASSWORD_PRIVATE_TARGET"
+		privateHost = "private.smtp.example.com"
+	)
+	manifest, err := applicationmeta.Parse([]byte(`config:
+  acme.profile:
+    enabled: true
+  acme.email.smtp:
+    host: private.smtp.example.com
+    password: {env: SMTP_PASSWORD_PRIVATE_TARGET}
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	configurations := manifest.Configurations()
+	if len(configurations) != 2 || configurations[0].PluginID() != "acme.email.smtp" || configurations[1].PluginID() != "acme.profile" {
+		t.Fatalf("Configurations = %#v", configurations)
+	}
+	smtp, ok := manifest.Configuration("acme.email.smtp")
+	if !ok || smtp.Source() != `plystra.yaml config["acme.email.smtp"]` {
+		t.Fatalf("Configuration(smtp) = %#v, %t", smtp, ok)
+	}
+	data := smtp.YAML()
+	if !bytes.Contains(data, []byte(privateHost)) || !bytes.Contains(data, []byte(environment)) {
+		t.Fatalf("Configuration YAML lost private values: %q", data)
+	}
+	data[0] = 'X'
+	if bytes.Equal(data, smtp.YAML()) {
+		t.Fatal("Configuration YAML exposed mutable storage")
+	}
+	configurations[0] = applicationmeta.PluginConfiguration{}
+	if manifest.Configurations()[0].PluginID() != "acme.email.smtp" {
+		t.Fatal("Configurations exposed mutable storage")
+	}
+	if _, exists := manifest.Configuration("acme.missing"); exists {
+		t.Fatal("Configuration(missing) succeeded")
+	}
+	for _, value := range []any{smtp, manifest} {
+		for _, formatted := range []string{fmt.Sprintf("%v", value), fmt.Sprintf("%+v", value), fmt.Sprintf("%#v", value), fmt.Sprintf("%q", value)} {
+			if !strings.Contains(formatted, "redacted") || strings.Contains(formatted, environment) || strings.Contains(formatted, privateHost) {
+				t.Fatalf("configuration formatting = %q", formatted)
+			}
+		}
+	}
+	for _, handler := range []func(*bytes.Buffer) slog.Handler{
+		func(buffer *bytes.Buffer) slog.Handler { return slog.NewTextHandler(buffer, nil) },
+		func(buffer *bytes.Buffer) slog.Handler { return slog.NewJSONHandler(buffer, nil) },
+	} {
+		var output bytes.Buffer
+		slog.New(handler(&output)).Info("configuration", "value", manifest)
+		if !strings.Contains(output.String(), "redacted") || strings.Contains(output.String(), environment) || strings.Contains(output.String(), privateHost) {
+			t.Fatalf("structured configuration log = %s", output.String())
+		}
+	}
+}
+
 func TestParseAcceptsCurrentGeneratedApplicationManifest(t *testing.T) {
 	t.Parallel()
 
@@ -163,7 +224,7 @@ func TestParseAcceptsCurrentGeneratedApplicationManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse generated plystra.yaml: %v\n%s", err, data)
 	}
-	if len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 {
+	if len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.Configurations()) != 0 {
 		t.Fatalf("generated Aliases = %#v", manifest.Aliases())
 	}
 	if address, explicit := manifest.HTTPAddress(); !explicit || address != ":8080" || len(manifest.HTTPExposures()) != 0 {
@@ -183,7 +244,7 @@ func TestParseAllowsEmptyOptionalSections(t *testing.T) {
 	} {
 		manifest, err := applicationmeta.Parse(data)
 		address, hasAddress := manifest.HTTPAddress()
-		if err != nil || len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || hasAddress || address != "" || len(manifest.HTTPExposures()) != 0 {
+		if err != nil || len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.Configurations()) != 0 || hasAddress || address != "" || len(manifest.HTTPExposures()) != 0 {
 			t.Fatalf("Parse(%q) = %#v, %v", data, manifest, err)
 		}
 	}
@@ -220,6 +281,10 @@ func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 		{name: "duplicate HTTP exposure", data: "http: {expose: [order.create/v1, order.create/v1]}\n", want: "duplicates Capability"},
 		{name: "timeouts type", data: "timeouts: []\n", want: "timeouts must be a mapping"},
 		{name: "config type", data: "config: []\n", want: "config must be a mapping"},
+		{name: "non-string config key", data: "config:\n  ? [one, two]\n  : {}\n", want: "non-string key"},
+		{name: "invalid config Plugin ID", data: "config: {Acme.Plugin: {}}\n", want: "not a canonical Plugin ID"},
+		{name: "duplicate config Plugin ID", data: "config:\n  acme.plugin: {}\n  acme.plugin: {}\n", want: "duplicate key"},
+		{name: "plugin config type", data: "config: {acme.plugin: []}\n", want: `config["acme.plugin"] must be a mapping`},
 		{name: "capabilities type", data: "capabilities: []\n", want: "capabilities must be a mapping"},
 		{name: "unknown capabilities key", data: "capabilities: {providers: {}}\n", want: `unknown key "providers"`},
 		{name: "require type", data: "capabilities: {require: {}}\n", want: "require must be a sequence"},

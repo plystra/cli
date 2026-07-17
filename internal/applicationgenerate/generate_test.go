@@ -230,6 +230,43 @@ func TestGenerateRollsBackValidationFailureAndPreservesConcurrentSourceEdit(t *t
 	assertNoTransactions(t, root)
 }
 
+func TestGenerateDetectsConcurrentPrivateConfigurationChange(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeApplicationModule(t, root, "example.com/acme/config-change-app")
+	writePlugin(t, root, "business", "id: acme.business\nconfig: {label: {type: string}}\n")
+	manifestPath := filepath.Join(root, "plystra.yaml")
+	first := "config:\n  acme.business:\n    label: private-one\n"
+	second := "config:\n  acme.business:\n    label: private-two\n"
+	writeFile(t, manifestPath, first)
+	environment := goEnvironment(nil)
+	noValidation := func(_ context.Context, _ string) error { return nil }
+	if result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Environment: environment, Validate: noValidation}); err != nil || !result.Report().Clean() {
+		t.Fatalf("initial Generate = %#v, %v", result.Report().Changes(), err)
+	}
+	generatedBefore := snapshotGenerated(t, root)
+
+	_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: environment,
+		Validate: func(_ context.Context, _ string) error {
+			writeFile(t, manifestPath, second)
+			return nil
+		},
+	})
+	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
+		t.Fatalf("concurrent private configuration edit = %v", err)
+	}
+	if got := string(readAbsoluteFile(t, manifestPath)); got != second {
+		t.Fatalf("concurrent private configuration edit was not preserved: %q", got)
+	}
+	if after := snapshotGenerated(t, root); !reflect.DeepEqual(after, generatedBefore) {
+		t.Fatalf("generated tree changed after private configuration edit:\nbefore: %#v\nafter:  %#v", generatedBefore, after)
+	}
+	assertNoTransactions(t, root)
+}
+
 func TestGenerateExecutesRealSelectedExtensionAndCleansHelpers(t *testing.T) {
 	root := t.TempDir()
 	temporaryParent := t.TempDir()

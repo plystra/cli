@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -98,6 +99,42 @@ func (c ProviderChoice) PluginID() string { return c.pluginID }
 // Source returns stable configuration-path provenance for diagnostics.
 func (c ProviderChoice) Source() string { return c.source }
 
+// PluginConfiguration is one immutable plugin-owned runtime configuration
+// mapping. Its values and Secret reference targets remain redacted from
+// formatting and are never part of generation-extension input.
+type PluginConfiguration struct {
+	pluginID string
+	source   string
+	yaml     []byte
+}
+
+// PluginID returns the canonical configured Plugin ID.
+func (c PluginConfiguration) PluginID() string { return c.pluginID }
+
+// Source returns stable configuration-path provenance for diagnostics.
+func (c PluginConfiguration) Source() string { return c.source }
+
+// YAML returns defensive bytes for CLI-owned validation and generated runtime
+// binding. Callers must not copy them into diagnostics or extension input.
+func (c PluginConfiguration) YAML() []byte { return append([]byte(nil), c.yaml...) }
+
+// String returns only a redaction marker.
+func (PluginConfiguration) String() string { return "<redacted-plugin-configuration>" }
+
+// GoString prevents Go-syntax formatting from exposing configuration values.
+func (PluginConfiguration) GoString() string { return "<redacted-plugin-configuration>" }
+
+// Format redacts configuration values for every fmt verb.
+func (PluginConfiguration) Format(state fmt.State, _ rune) {
+	_, _ = state.Write([]byte("<redacted-plugin-configuration>"))
+}
+
+// LogValue redacts configuration values for structured standard-library
+// logging.
+func (PluginConfiguration) LogValue() slog.Value {
+	return slog.StringValue("<redacted-plugin-configuration>")
+}
+
 // Manifest is the immutable normalized application metadata used by canonical
 // provider, HTTP exposure, and Capability Alias resolution.
 type Manifest struct {
@@ -107,6 +144,25 @@ type Manifest struct {
 	requirements    []CapabilityRequirement
 	providerChoices []ProviderChoice
 	aliases         []Alias
+	configurations  []PluginConfiguration
+}
+
+// String returns only a redaction marker because the manifest can contain
+// private runtime configuration and Secret reference targets.
+func (Manifest) String() string { return "<redacted-application-manifest>" }
+
+// GoString prevents Go-syntax formatting from exposing private configuration.
+func (Manifest) GoString() string { return "<redacted-application-manifest>" }
+
+// Format redacts the complete manifest for every fmt verb.
+func (Manifest) Format(state fmt.State, _ rune) {
+	_, _ = state.Write([]byte("<redacted-application-manifest>"))
+}
+
+// LogValue redacts the complete manifest for structured standard-library
+// logging.
+func (Manifest) LogValue() slog.Value {
+	return slog.StringValue("<redacted-application-manifest>")
 }
 
 // HTTPAddress returns the explicitly configured listener address. A false
@@ -132,6 +188,23 @@ func (m Manifest) ProviderChoices() []ProviderChoice {
 // Aliases returns defensive declarations sorted by Alias ID.
 func (m Manifest) Aliases() []Alias { return append([]Alias(nil), m.aliases...) }
 
+// Configurations returns defensive Plugin-ID-sorted runtime configuration
+// declarations. Each value retains its own defensive YAML accessor.
+func (m Manifest) Configurations() []PluginConfiguration {
+	return append([]PluginConfiguration(nil), m.configurations...)
+}
+
+// Configuration returns one exact Plugin ID's runtime configuration.
+func (m Manifest) Configuration(pluginID string) (PluginConfiguration, bool) {
+	index := sort.Search(len(m.configurations), func(index int) bool {
+		return m.configurations[index].pluginID >= pluginID
+	})
+	if index >= len(m.configurations) || m.configurations[index].pluginID != pluginID {
+		return PluginConfiguration{}, false
+	}
+	return m.configurations[index], true
+}
+
 // Parse reads one strict bounded plystra.yaml and normalizes canonical provider
 // inputs, HTTP exposure, and concise or expanded capabilities.aliases declarations.
 func Parse(data []byte) (Manifest, error) {
@@ -150,7 +223,7 @@ func Parse(data []byte) (Manifest, error) {
 			return Manifest{}, invalid("unknown key %q", key)
 		}
 	}
-	for _, section := range []string{"timeouts", "config"} {
+	for _, section := range []string{"timeouts"} {
 		if node, exists := values[section]; exists && node.Kind != yaml.MappingNode {
 			return Manifest{}, invalid("%s must be a mapping", section)
 		}
@@ -164,6 +237,10 @@ func Parse(data []byte) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
+	configurations, err := parseConfigurations(values["config"])
+	if err != nil {
+		return Manifest{}, err
+	}
 	return Manifest{
 		httpAddress:     address,
 		hasHTTPAddress:  hasAddress,
@@ -171,7 +248,37 @@ func Parse(data []byte) (Manifest, error) {
 		requirements:    requirements,
 		providerChoices: choices,
 		aliases:         aliases,
+		configurations:  configurations,
 	}, nil
+}
+
+func parseConfigurations(node *yaml.Node) ([]PluginConfiguration, error) {
+	if node == nil {
+		return nil, nil
+	}
+	values, err := mapping(node, "config")
+	if err != nil {
+		return nil, err
+	}
+	configurations := make([]PluginConfiguration, 0, len(values))
+	for _, pluginID := range sortedNodeKeys(values) {
+		if err := pluginid.Validate(pluginID); err != nil {
+			return nil, invalid("config key %q is not a canonical Plugin ID", pluginID)
+		}
+		if values[pluginID].Kind != yaml.MappingNode {
+			return nil, invalid("config[%q] must be a mapping", pluginID)
+		}
+		data, err := yaml.Marshal(values[pluginID])
+		if err != nil {
+			return nil, invalid("config[%q] cannot be normalized", pluginID)
+		}
+		configurations = append(configurations, PluginConfiguration{
+			pluginID: pluginID,
+			source:   fmt.Sprintf("plystra.yaml config[%q]", pluginID),
+			yaml:     append([]byte(nil), data...),
+		})
+	}
+	return configurations, nil
 }
 
 func parseHTTP(node *yaml.Node) (string, bool, []HTTPExposure, error) {

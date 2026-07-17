@@ -13,6 +13,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/pluginmeta"
 	"github.com/plystra/cli/internal/pluginscan"
+	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 )
 
 var (
@@ -34,6 +35,7 @@ type Plugin struct {
 	id                    string
 	provides              []capabilityid.Identifier
 	requires              []capabilityid.Identifier
+	config                kernelmanifest.Config
 	generation            pluginmeta.Generation
 	generationPackagePath string
 	manifest              []byte
@@ -59,6 +61,9 @@ func (p Plugin) Provides() []capabilityid.Identifier {
 func (p Plugin) Requires() []capabilityid.Identifier {
 	return append([]capabilityid.Identifier(nil), p.requires...)
 }
+
+// Config returns the immutable validated runtime configuration declaration.
+func (p Plugin) Config() kernelmanifest.Config { return p.config }
 
 // Generation returns the optional trusted build-time generation declaration.
 func (p Plugin) Generation() (pluginmeta.Generation, bool) {
@@ -156,6 +161,7 @@ func Scan(rootPath string) (result Index, indexErr error) {
 			id:                    id,
 			provides:              metadata.Provides(),
 			requires:              metadata.Requires(),
+			config:                metadata.Config(),
 			generation:            generation,
 			generationPackagePath: generationPackagePath,
 			manifest:              append([]byte(nil), data...),

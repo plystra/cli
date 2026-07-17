@@ -10,6 +10,7 @@ import (
 
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/pluginid"
+	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -25,6 +26,7 @@ type Manifest struct {
 	id         string
 	provides   []capabilityid.Identifier
 	requires   []capabilityid.Identifier
+	config     kernelmanifest.Config
 	generation Generation
 }
 
@@ -40,6 +42,9 @@ func (m Manifest) Provides() []capabilityid.Identifier {
 func (m Manifest) Requires() []capabilityid.Identifier {
 	return append([]capabilityid.Identifier(nil), m.requires...)
 }
+
+// Config returns the immutable validated runtime configuration declaration.
+func (m Manifest) Config() kernelmanifest.Config { return m.config }
 
 // Generation returns the optional trusted build-time generation declaration.
 func (m Manifest) Generation() (Generation, bool) {
@@ -58,7 +63,7 @@ func Parse(data []byte) (Manifest, error) {
 		return Manifest{}, invalid("document must be a mapping")
 	}
 
-	var idNode, providesNode, requiresNode, generationNode *yaml.Node
+	var idNode, providesNode, requiresNode, configNode, generationNode *yaml.Node
 	seen := make(map[string]struct{}, len(root.Content)/2)
 	for index := 0; index < len(root.Content); index += 2 {
 		keyNode, valueNode := root.Content[index], root.Content[index+1]
@@ -78,6 +83,7 @@ func Parse(data []byte) (Manifest, error) {
 		case "requires":
 			requiresNode = valueNode
 		case "config":
+			configNode = valueNode
 		case "generation":
 			generationNode = valueNode
 		default:
@@ -101,6 +107,17 @@ func Parse(data []byte) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
+	var config kernelmanifest.Config
+	if configNode != nil {
+		configData, marshalErr := yaml.Marshal(configNode)
+		if marshalErr != nil {
+			return Manifest{}, invalid("config cannot be normalized")
+		}
+		config, err = kernelmanifest.ParseConfig(configData)
+		if err != nil {
+			return Manifest{}, invalid("config: %v", err)
+		}
+	}
 	var generation Generation
 	if generationNode != nil {
 		generation, err = parseGeneration(generationNode, provides)
@@ -108,7 +125,7 @@ func Parse(data []byte) (Manifest, error) {
 			return Manifest{}, err
 		}
 	}
-	return Manifest{id: idNode.Value, provides: provides, requires: requires, generation: generation}, nil
+	return Manifest{id: idNode.Value, provides: provides, requires: requires, config: config, generation: generation}, nil
 }
 
 func decodeYAMLDocument(data []byte) (*yaml.Node, error) {

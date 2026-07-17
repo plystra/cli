@@ -15,6 +15,7 @@ import (
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/pluginindex"
 	"github.com/plystra/cli/internal/pluginmeta"
+	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 	"golang.org/x/mod/module"
 )
 
@@ -84,6 +85,9 @@ func (p Plugin) Provides() []capabilityid.Identifier { return p.indexed.Provides
 
 // Requires returns a defensive copy of declared canonical requirements.
 func (p Plugin) Requires() []capabilityid.Identifier { return p.indexed.Requires() }
+
+// Config returns the immutable validated runtime configuration declaration.
+func (p Plugin) Config() kernelmanifest.Config { return p.indexed.Config() }
 
 // Generation returns the optional trusted build-time generation declaration.
 func (p Plugin) Generation() (pluginmeta.Generation, bool) { return p.indexed.Generation() }

@@ -20,6 +20,7 @@ import (
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/plugininventory"
 )
 
@@ -66,12 +67,15 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if len(resolved.AliasResolution().Aliases()) != 0 {
 		t.Fatalf("Aliases = %#v", resolved.AliasResolution().Aliases())
 	}
+	if !first.Configurations().Valid() || len(first.Configurations().Bindings()) != 0 || first.Configurations().Digest() == "" {
+		t.Fatalf("Configurations = %#v", first.Configurations())
+	}
 
 	second, err := applicationresolve.Resolve(t.Context(), options)
 	if err != nil {
 		t.Fatalf("Resolve repeated: %v", err)
 	}
-	if !bytes.Equal(resolved.Context().CanonicalJSON(), second.Resolution().Context().CanonicalJSON()) || resolved.Context().Digest() != second.Resolution().Context().Digest() || !bytes.Equal(resolved.AliasResolution().CanonicalJSON(), second.Resolution().AliasResolution().CanonicalJSON()) {
+	if !bytes.Equal(resolved.Context().CanonicalJSON(), second.Resolution().Context().CanonicalJSON()) || resolved.Context().Digest() != second.Resolution().Context().Digest() || !bytes.Equal(resolved.AliasResolution().CanonicalJSON(), second.Resolution().AliasResolution().CanonicalJSON()) || first.Configurations().Digest() != second.Configurations().Digest() {
 		t.Fatal("repeated empty resolution is not byte-deterministic")
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
@@ -86,7 +90,7 @@ func TestResolveClosesLocalRequirementsThroughDependencyProvidersAndAliases(t *t
 	appRoot := filepath.Join(root, "app")
 	providerRoot := filepath.Join(root, "providers")
 	writeModule(t, providerRoot, "example.com/providers")
-	writePlugin(t, providerRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\n")
+	writePlugin(t, providerRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\nconfig: {host: {type: string, required: true}, password: {type: secret, required: true}}\n")
 	writeCapability(t, providerRoot, "smtp", "email.send/v1", `id: email.send/v1
 request:
   to: {type: string, required: true}
@@ -108,6 +112,10 @@ replace example.com/providers => ../providers
 capabilities:
   aliases:
     mail.send/v1: email.send/v1
+config:
+  example.smtp:
+    host: private.smtp.example.com
+    password: {env: PLYSTRA_APPLICATION_RESOLVE_PRIVATE_SECRET}
 `)
 	before := snapshotTree(t, appRoot)
 	options := applicationresolve.Options{
@@ -143,12 +151,20 @@ capabilities:
 	if len(aliases) != 1 || aliases[0].ID().String() != "mail.send/v1" || aliases[0].Target().String() != "email.send/v1" || aliases[0].Exposure() != target.Exposure() {
 		t.Fatalf("Aliases = %#v", aliases)
 	}
+	if got := configurationBindingIDs(first.Configurations().Bindings()); !reflect.DeepEqual(got, []string{"example.local", "example.smtp"}) {
+		t.Fatalf("configuration bindings = %v", got)
+	}
+	for _, forbidden := range []string{"private.smtp.example.com", "PLYSTRA_APPLICATION_RESOLVE_PRIVATE_SECRET"} {
+		if bytes.Contains(resolved.Context().CanonicalJSON(), []byte(forbidden)) {
+			t.Fatalf("generation context exposed private configuration %q: %s", forbidden, resolved.Context().CanonicalJSON())
+		}
+	}
 
 	second, err := applicationresolve.Resolve(t.Context(), options)
 	if err != nil {
 		t.Fatalf("Resolve repeated: %v", err)
 	}
-	if !bytes.Equal(resolved.Context().CanonicalJSON(), second.Resolution().Context().CanonicalJSON()) || !bytes.Equal(resolved.AliasResolution().CanonicalJSON(), second.Resolution().AliasResolution().CanonicalJSON()) {
+	if !bytes.Equal(resolved.Context().CanonicalJSON(), second.Resolution().Context().CanonicalJSON()) || !bytes.Equal(resolved.AliasResolution().CanonicalJSON(), second.Resolution().AliasResolution().CanonicalJSON()) || first.Configurations().Digest() != second.Configurations().Digest() {
 		t.Fatal("repeated dependency resolution is not byte-deterministic")
 	}
 	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, before) {
@@ -386,6 +402,14 @@ func parseGenerationCapability(t testing.TB, value string) generation.Capability
 		t.Fatalf("generation.ParseCapabilityID(%s): %v", value, err)
 	}
 	return identifier
+}
+
+func configurationBindingIDs(bindings []configurationresolve.Binding) []string {
+	result := make([]string, len(bindings))
+	for index, binding := range bindings {
+		result[index] = binding.PluginID()
+	}
+	return result
 }
 
 func pluginSummaries(plugins []plugininventory.Plugin) []string {

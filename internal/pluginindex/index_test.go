@@ -12,6 +12,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/pluginindex"
 	"github.com/plystra/cli/internal/pluginmeta"
+	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 )
 
 func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
@@ -19,7 +20,7 @@ func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
 
 	root := t.TempDir()
 	writePlugin(t, root, "profile", "acme.app.profile")
-	accountManifest := []byte("id: acme.app.account\nprovides:\n  - profile.get/v2\n  - account.register/v1\nrequires: [email.send/v1, audit.write/v1]\ngeneration: {api: v1, package: ./generation, activations: [{namespace: profile, capability: profile.get/v2}]}\n")
+	accountManifest := []byte("id: acme.app.account\nprovides:\n  - profile.get/v2\n  - account.register/v1\nrequires: [email.send/v1, audit.write/v1]\nconfig: {token: {type: secret, required: true}}\ngeneration: {api: v1, package: ./generation, activations: [{namespace: profile, capability: profile.get/v2}]}\n")
 	writeManifest(t, root, "account", string(accountManifest))
 	writeGenerationPackage(t, root, "account", "generation")
 	index, err := pluginindex.Scan(root)
@@ -38,6 +39,10 @@ func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
 	}
 	if got := plugins[0].ManifestData(); !bytes.Equal(got, accountManifest) {
 		t.Fatalf("account ManifestData() = %q", got)
+	}
+	token, ok := plugins[0].Config().Lookup("token")
+	if !ok || token.Type() != kernelmanifest.ConfigSecret || !token.Required() {
+		t.Fatalf("account Config token = %#v, %t", token, ok)
 	}
 	generation, ok := plugins[0].Generation()
 	if !ok || generation.API() != "v1" || generation.Package() != "./generation" || len(generation.Activations()) != 1 || generation.Activations()[0].Namespace() != "profile" {
