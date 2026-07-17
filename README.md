@@ -98,6 +98,8 @@ The generated transport accepts one `application/json` object with no content en
 
 When a lowered plan contains `http.ingress`, `http.egress`, or an adapter-credential input, the generated handler selects the matching external invocation path. It runs ingress before shared invocation preparation, preserves the generated invocation context through completion, then runs egress before serialization; internal `Invoke` calls run only the shared preparation/completion path and receive no adapter credentials. Canonical lower-snake credential names map deterministically to HTTP headers (`authorization` to `Authorization`, `x_api_key` to `X-Api-Key`). Missing, empty, duplicate, control-containing, or larger-than-64-KiB credential values are treated as absent, and only the downstream generated verification contribution can turn raw credential text into trusted state.
 
+Each validated HTTP-exposed Alias generates only its own route identity and a thin wrapper around the already-bound canonical handler. Several Alias handlers can share that one canonical transport instance; they do not copy request validation, own an invocation handle, register a provider, or dispatch an Alias ID. The canonical handler validates the Alias path and runs the same planned ingress, invocation, completion, egress, response, and safe-error logic. Alias generation revalidates same-version direct targeting, target contract digest, exposure narrowing, and bounded deprecation metadata; deprecated wrappers carry native Go `Deprecated:` markers without changing runtime behavior or deprecating the target.
+
 ## Method-specific login surfaces
 
 Authentication methods use real contracts such as:

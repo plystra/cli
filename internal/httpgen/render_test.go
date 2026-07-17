@@ -53,6 +53,8 @@ func TestRenderCanonicalHTTPAdapter(t *testing.T) {
 		`RoutePath = "/api/v1/capabilities/email.send/v1/invoke"`,
 		`applicationinvocation "example.com/acme/project/generated/go/invocation/email/send/v1"`,
 		`func New(root RootContext, target applicationinvocation.Handle) (Handler, error)`,
+		`func Available(handler Handler) bool`,
+		`func (h Handler) ServeRoute(writer http.ResponseWriter, request *http.Request, routePath string)`,
 		`response, err := plystraInvoke(ctx, h.target, decoded)`,
 		`decoder.Token()`,
 		`bytes.Equal(bytes.TrimSpace(value), []byte("null"))`,
@@ -386,6 +388,9 @@ func TestGeneratedHTTPHandlerValidatesAndInvokesCanonicalPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	if !adapter.Available(handler) {
+		t.Fatal("constructed handler is unavailable")
+	}
 	valid := httptest.NewRequest(http.MethodPost, adapter.RoutePath, strings.NewReader("{\"to\":[\"person@example.com\"],\"subject\":\"Welcome\",\"priority\":\"urgent\"}"))
 	valid.Header.Set("Content-Type", "application/json; charset=UTF-8")
 	response := httptest.NewRecorder()
@@ -470,6 +475,9 @@ func TestGeneratedHTTPHandlerValidatesAndInvokesCanonicalPath(t *testing.T) {
 }
 
 func TestGeneratedHTTPHandlerRejectsInvalidConstructionAndRoot(t *testing.T) {
+	if adapter.Available(adapter.Handler{}) {
+		t.Fatal("zero handler is available")
+	}
 	target := kernelinvocation.NewTestHandle(true, func(_ context.Context, request contract.Request) (contract.Response, error) {
 		return contract.Response{MessageID: request.Subject, Status: contract.ResponseStatusSent}, nil
 	})

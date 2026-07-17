@@ -50,6 +50,16 @@ func TestRenderPlanRunsOrderedHTTPContributions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderPlan(invocation): %v", err)
 	}
+	alias, err := httpgen.RenderAlias(testModulePath, testHTTPAlias{
+		id:         httpCapabilityID(t, "mail.deliver/v1"),
+		target:     target.ID(),
+		digest:     target.ContractDigest(),
+		exposure:   generation.Exposure{HTTP: true},
+		deprecated: "Use email.send/v1 instead.",
+	}, target)
+	if err != nil {
+		t.Fatalf("RenderAlias: %v", err)
+	}
 	for _, required := range []string{
 		"target.InvokeHTTP(ctx, input",
 		"plystraAdapterCredential(request, name)",
@@ -69,7 +79,7 @@ func TestRenderPlanRunsOrderedHTTPContributions(t *testing.T) {
 			t.Fatalf("planned invocation omits %q:\n%s", required, invocation.Data())
 		}
 	}
-	assertGeneratedHTTPPlanRuns(t, adapter, invocation)
+	assertGeneratedHTTPPlanRuns(t, adapter, alias, invocation)
 
 	repeated, err := httpgen.RenderPlan(testModulePath, target, plan)
 	if err != nil || !bytes.Equal(repeated.Data(), adapter.Data()) {
@@ -260,7 +270,7 @@ func httpCanonicalContract(t testing.TB, schema string) []byte {
 	return canonical
 }
 
-func assertGeneratedHTTPPlanRuns(t testing.TB, adapter httpgen.File, invocation invocationgen.File) {
+func assertGeneratedHTTPPlanRuns(t testing.TB, adapter, alias httpgen.File, invocation invocationgen.File) {
 	t.Helper()
 	root := t.TempDir()
 	sourceContract, err := contractgen.Render([]byte(plannedEmailSendSchema))
@@ -294,6 +304,7 @@ func assertGeneratedHTTPPlanRuns(t testing.TB, adapter httpgen.File, invocation 
 		{contextFile.Path(), contextFile.Data()},
 		{invocation.Path(), invocation.Data()},
 		{adapter.Path(), adapter.Data()},
+		{alias.Path(), alias.Data()},
 	} {
 		writeGeneratedFile(t, root, file.path, file.data)
 	}
@@ -323,6 +334,7 @@ import (
 	"testing"
 
 	adapter "example.com/acme/project/generated/go/adapters/http/email/send/v1"
+	aliasadapter "example.com/acme/project/generated/go/adapters/http/mail/deliver/v1"
 	policyclient "example.com/acme/project/generated/go/clients/policy/check/v1"
 	contract "example.com/acme/project/generated/go/contracts/email/send/v1"
 	policycontract "example.com/acme/project/generated/go/contracts/policy/check/v1"
@@ -357,14 +369,28 @@ func TestGeneratedHTTPContributionLifecycle(t *testing.T) {
 	})
 	policy := policyclient.New(policyinvocation.New(policyTarget))
 	application := applicationinvocation.New(emailTarget, policy)
-	handler, err := adapter.New(func(request *http.Request) (context.Context, error) {
+	if _, err := aliasadapter.New(adapter.Handler{}); !errors.Is(err, adapter.ErrInvalidHandler) {
+		t.Fatalf("zero canonical handler error = %v", err)
+	}
+	canonicalHandler, err := adapter.New(func(request *http.Request) (context.Context, error) {
 		return request.Context(), nil
 	}, application)
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("canonical New: %v", err)
+	}
+	handler, err := aliasadapter.New(canonicalHandler)
+	if err != nil || !aliasadapter.Available(handler) {
+		t.Fatalf("Alias New: %v, available %t", err, aliasadapter.Available(handler))
+	}
+	wrongRoute := httptest.NewRequest(http.MethodPost, adapter.RoutePath, strings.NewReader("{}"))
+	wrongRoute.Header.Set("Content-Type", "application/json")
+	wrongResponse := httptest.NewRecorder()
+	handler.ServeHTTP(wrongResponse, wrongRoute)
+	if wrongResponse.Code != http.StatusNotFound || len(sequence) != 0 {
+		t.Fatalf("canonical path through Alias = %d %s, sequence %v", wrongResponse.Code, wrongResponse.Body.String(), sequence)
 	}
 
-	request := httptest.NewRequest(http.MethodPost, adapter.RoutePath, strings.NewReader("{\"to\":[\"person@example.com\"],\"subject\":\"Welcome\"}"))
+	request := httptest.NewRequest(http.MethodPost, aliasadapter.RoutePath, strings.NewReader("{\"to\":[\"person@example.com\"],\"subject\":\"Welcome\"}"))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "  Bearer adapter-token  ")
 	response := httptest.NewRecorder()
@@ -398,7 +424,7 @@ func TestGeneratedHTTPContributionLifecycle(t *testing.T) {
 	for _, test := range invalidCredentials {
 		t.Run(test.name, func(t *testing.T) {
 			sequence = nil
-			request := httptest.NewRequest(http.MethodPost, adapter.RoutePath, strings.NewReader("{\"to\":[\"person@example.com\"],\"subject\":\"Blocked\"}"))
+			request := httptest.NewRequest(http.MethodPost, aliasadapter.RoutePath, strings.NewReader("{\"to\":[\"person@example.com\"],\"subject\":\"Blocked\"}"))
 			request.Header.Set("Content-Type", "application/json")
 			for _, value := range test.values {
 				request.Header.Add("Authorization", value)

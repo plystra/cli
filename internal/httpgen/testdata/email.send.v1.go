@@ -44,13 +44,23 @@ func New(root RootContext, target applicationinvocation.Handle) (Handler, error)
 	return Handler{root: root, target: target}, nil
 }
 
+// Available reports whether the canonical generated handler is fully bound.
+func Available(handler Handler) bool {
+	return handler.root != nil && applicationinvocation.Available(handler.target)
+}
+
 // ServeHTTP accepts only the generated exact route and strict JSON contract.
 func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	h.ServeRoute(writer, request, RoutePath)
+}
+
+// ServeRoute serves one CLI-validated canonical or Alias route through this canonical target.
+func (h Handler) ServeRoute(writer http.ResponseWriter, request *http.Request, routePath string) {
 	if request == nil || request.URL == nil {
 		plystraWriteError(writer, http.StatusInternalServerError, "internal", "")
 		return
 	}
-	if request.URL.Path != RoutePath || request.URL.RawPath != "" {
+	if request.URL.Path != routePath || request.URL.RawPath != "" {
 		plystraWriteError(writer, http.StatusNotFound, "not_found", "")
 		return
 	}
