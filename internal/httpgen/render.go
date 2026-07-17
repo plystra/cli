@@ -666,24 +666,30 @@ func renderInvocationBoundary(source *strings.Builder, semanticErrors []string, 
 	fmt.Fprintln(source, "\t}")
 	fmt.Fprintln(source, "}")
 	fmt.Fprintln(source)
+	fmt.Fprintln(source, "type plystraSemanticErrorCoder interface {")
+	fmt.Fprintln(source, "\terror")
+	fmt.Fprintln(source, "\tSemanticErrorCode() string")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
 	fmt.Fprintln(source, "func plystraSemanticError(err error) (string, bool) {")
 	if len(semanticErrors) == 0 {
 		fmt.Fprintln(source, "\treturn \"\", false")
 	} else {
-		fmt.Fprintln(source, "\tvar code contract.ErrorCode")
-		fmt.Fprintln(source, "\tif !errors.As(err, &code) {")
+		fmt.Fprintln(source, "\tvar semantic plystraSemanticErrorCoder")
+		fmt.Fprintln(source, "\tif !errors.As(err, &semantic) {")
 		fmt.Fprintln(source, "\t\treturn \"\", false")
 		fmt.Fprintln(source, "\t}")
+		fmt.Fprintln(source, "\tcode := semantic.SemanticErrorCode()")
 		fmt.Fprintln(source, "\tswitch code {")
 		fmt.Fprint(source, "\tcase ")
 		for index, code := range semanticErrors {
 			if index != 0 {
 				fmt.Fprint(source, ", ")
 			}
-			fmt.Fprintf(source, "contract.ErrorCode(%s)", strconv.Quote(code))
+			fmt.Fprint(source, strconv.Quote(code))
 		}
 		fmt.Fprintln(source, ":")
-		fmt.Fprintln(source, "\t\treturn string(code), true")
+		fmt.Fprintln(source, "\t\treturn code, true")
 		fmt.Fprintln(source, "\tdefault:")
 		fmt.Fprintln(source, "\t\treturn \"\", false")
 		fmt.Fprintln(source, "\t}")

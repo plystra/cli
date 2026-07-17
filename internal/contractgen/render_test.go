@@ -186,7 +186,20 @@ func assertGeneratedCompiles(t testing.TB, file contractgen.File) {
 	if err != nil {
 		t.Fatalf("parse generated Go: %v", err)
 	}
-	if _, err := new(types.Config).Check("generated.test", fileSet, []*ast.File{parsed}, nil); err != nil {
+	checked, err := new(types.Config).Check("generated.test", fileSet, []*ast.File{parsed}, nil)
+	if err != nil {
 		t.Fatalf("type-check generated Go: %v", err)
+	}
+	errorCode := checked.Scope().Lookup("ErrorCode")
+	if errorCode == nil {
+		t.Fatal("generated ErrorCode type is absent")
+	}
+	method := types.NewMethodSet(errorCode.Type()).Lookup(nil, "SemanticErrorCode")
+	if method == nil {
+		t.Fatal("generated ErrorCode does not expose SemanticErrorCode")
+	}
+	signature, ok := method.Obj().Type().(*types.Signature)
+	if !ok || signature.Params().Len() != 0 || signature.Results().Len() != 1 || signature.Results().At(0).Type().String() != "string" {
+		t.Fatalf("SemanticErrorCode signature = %v", method.Obj().Type())
 	}
 }

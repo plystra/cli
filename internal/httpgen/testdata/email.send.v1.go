@@ -302,14 +302,20 @@ func plystraStatus(code kernelinvocation.ErrorCode) int {
 	}
 }
 
+type plystraSemanticErrorCoder interface {
+	error
+	SemanticErrorCode() string
+}
+
 func plystraSemanticError(err error) (string, bool) {
-	var code contract.ErrorCode
-	if !errors.As(err, &code) {
+	var semantic plystraSemanticErrorCoder
+	if !errors.As(err, &semantic) {
 		return "", false
 	}
+	code := semantic.SemanticErrorCode()
 	switch code {
-	case contract.ErrorCode("authentication_failed"), contract.ErrorCode("invalid_recipient"), contract.ErrorCode("temporarily_unavailable"):
-		return string(code), true
+	case "authentication_failed", "invalid_recipient", "temporarily_unavailable":
+		return code, true
 	default:
 		return "", false
 	}

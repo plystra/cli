@@ -306,6 +306,10 @@ func renderErrors(source *strings.Builder, codes, names []string) {
 	fmt.Fprintln(source, "func (c ErrorCode) Error() string {")
 	fmt.Fprintln(source, "\treturn string(c)")
 	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "func (c ErrorCode) SemanticErrorCode() string {")
+	fmt.Fprintln(source, "\treturn string(c)")
+	fmt.Fprintln(source, "}")
 }
 
 func goType(schemaType string) (string, error) {

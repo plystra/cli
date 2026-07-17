@@ -60,6 +60,7 @@ func TestRenderCanonicalHTTPAdapter(t *testing.T) {
 		`bytes.Equal(bytes.TrimSpace(value), []byte("null"))`,
 		`http.MaxBytesReader(writer, request.Body, MaximumRequestBytes)`,
 		`plystraWriteError(writer, http.StatusUnprocessableEntity, "capability_error", semantic)`,
+		`SemanticErrorCode() string`,
 	} {
 		if !strings.Contains(generated, required) {
 			t.Fatalf("generated adapter omits %q:\n%s", required, file.Data())
@@ -331,6 +332,16 @@ func NewTestError(code ErrorCode, detail string) *Error { return &Error{code: co
 func (e *Error) Error() string { return "classified secret must not cross transport" }
 func (e *Error) Code() ErrorCode { return e.code }
 func (e *Error) DetailCode() string { return e.detail }
+
+type SemanticError struct { code string }
+func NewTestSemanticError(code string) *SemanticError { return &SemanticError{code: code} }
+func (e *SemanticError) Error() string { return "semantic provider secret must not cross transport" }
+func (e *SemanticError) SemanticErrorCode() string { return e.code }
+
+type PanickingSemanticError struct{}
+func NewTestPanickingSemanticError() *PanickingSemanticError { return &PanickingSemanticError{} }
+func (*PanickingSemanticError) Error() string { return "semantic panic secret must not cross transport" }
+func (*PanickingSemanticError) SemanticErrorCode() string { panic("semantic code panic secret") }
 `
 
 const generatedHTTPRuntimeTest = `package emailsendv1_test
@@ -356,7 +367,13 @@ func TestGeneratedHTTPHandlerValidatesAndInvokesCanonicalPath(t *testing.T) {
 		calls++
 		switch request.Subject {
 		case "semantic":
-			return contract.Response{}, contract.ErrInvalidRecipient
+			return contract.Response{}, kernelinvocation.NewTestSemanticError("invalid_recipient")
+		case "generated-semantic":
+			return contract.Response{}, contract.ErrTemporarilyUnavailable
+		case "undeclared-semantic":
+			return contract.Response{}, kernelinvocation.NewTestSemanticError("provider_secret")
+		case "panicking-semantic":
+			return contract.Response{}, kernelinvocation.NewTestPanickingSemanticError()
 		case "denied":
 			return contract.Response{}, kernelinvocation.NewTestError(kernelinvocation.ErrorDenied, "authorization.denied")
 		case "cancelled":
@@ -445,7 +462,10 @@ func TestGeneratedHTTPHandlerValidatesAndInvokesCanonicalPath(t *testing.T) {
 	}
 
 	for _, test := range []struct{name string; subject string; status int; code string; detail string}{
-		{name:"semantic", subject:"semantic", status:http.StatusUnprocessableEntity, code:"capability_error", detail:"invalid_recipient"},
+		{name:"Kernel semantic", subject:"semantic", status:http.StatusUnprocessableEntity, code:"capability_error", detail:"invalid_recipient"},
+		{name:"generated semantic", subject:"generated-semantic", status:http.StatusUnprocessableEntity, code:"capability_error", detail:"temporarily_unavailable"},
+		{name:"undeclared semantic", subject:"undeclared-semantic", status:http.StatusInternalServerError, code:"internal"},
+		{name:"panicking semantic", subject:"panicking-semantic", status:http.StatusInternalServerError, code:"internal"},
 		{name:"classified", subject:"denied", status:http.StatusForbidden, code:"denied", detail:"authorization.denied"},
 		{name:"cancelled", subject:"cancelled", status:499, code:"cancelled"},
 		{name:"unknown", subject:"unknown-secret", status:http.StatusInternalServerError, code:"internal"},
