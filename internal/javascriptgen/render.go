@@ -1,0 +1,738 @@
+// Package javascriptgen renders deterministic ESM TypeScript application SDKs
+// from the provider-independent shared SDK model.
+package javascriptgen
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"path"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/plystra/cli/internal/sdkmodel"
+)
+
+const (
+	generatedRoot     = "generated/sdk/javascript"
+	typescriptVersion = "7.0.2"
+)
+
+// ErrRender reports that a normalized SDK model could not produce a complete
+// deterministic JavaScript package.
+var ErrRender = errors.New("render generated JavaScript SDK")
+
+// Options controls application-owned npm package identity.
+type Options struct {
+	PackageName string
+}
+
+// File is one immutable generated JavaScript SDK source file.
+type File struct {
+	path string
+	data []byte
+}
+
+// Path returns the slash-separated application-relative generated path.
+func (f File) Path() string { return f.path }
+
+// Data returns a defensive copy of generated file bytes.
+func (f File) Data() []byte { return append([]byte(nil), f.data...) }
+
+type renderedOperation struct {
+	operation sdkmodel.Operation
+	segments  []string
+	version   string
+	symbol    string
+	source    string
+}
+
+type clientNode struct {
+	children  map[string]*clientNode
+	operation *renderedOperation
+}
+
+// Render validates package identity and renders a complete source package.
+// Provider IDs, runtime plugin configuration, build metadata, and Secret
+// values are absent from both the input model and final files.
+func Render(options Options, model sdkmodel.Model) ([]File, error) {
+	if !validPackageName(options.PackageName) {
+		return nil, fmt.Errorf("%w: npm package name %q is not canonical lower-case package identity", ErrRender, options.PackageName)
+	}
+	canonical := model.CanonicalJSON()
+	if len(canonical) == 0 || model.Digest() != digest(canonical) {
+		return nil, fmt.Errorf("%w: SDK model is absent or has an invalid digest", ErrRender)
+	}
+	operations, err := prepareOperations(model.Operations())
+	if err != nil {
+		return nil, err
+	}
+	files := []File{
+		newFile(path.Join(generatedRoot, "package.json"), renderPackageJSON(options.PackageName)),
+		newFile(path.Join(generatedRoot, "tsconfig.json"), []byte(tsconfigSource)),
+		newFile(path.Join(generatedRoot, "src", "runtime.ts"), []byte(runtimeSource)),
+	}
+	index, err := renderIndex(operations)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files,
+		newFile(path.Join(generatedRoot, "src", "index.ts"), index),
+		newFile(path.Join(generatedRoot, "README.md"), renderREADME(options.PackageName, operations)),
+	)
+	for _, operation := range operations {
+		source, err := renderOperation(operation)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, newFile(path.Join(generatedRoot, operation.source), source))
+	}
+	sort.Slice(files, func(left, right int) bool {
+		return files[left].path < files[right].path
+	})
+	for index := 1; index < len(files); index++ {
+		if files[index-1].path == files[index].path {
+			return nil, fmt.Errorf("%w: generated path collision at %s", ErrRender, files[index].path)
+		}
+	}
+	return files, nil
+}
+
+func prepareOperations(values []sdkmodel.Operation) ([]renderedOperation, error) {
+	operations := make([]renderedOperation, len(values))
+	baseCounts := make(map[string]int, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for index, operation := range values {
+		id := operation.ID()
+		if id.String() == "" {
+			return nil, fmt.Errorf("%w: operations[%d] has an empty Capability ID", ErrRender, index)
+		}
+		if _, duplicate := seen[id.String()]; duplicate {
+			return nil, fmt.Errorf("%w: operations[%d] duplicates Capability %s", ErrRender, index, id)
+		}
+		seen[id.String()] = struct{}{}
+		segments := strings.Split(id.Name(), ".")
+		version := "v" + strconv.FormatUint(id.Major(), 10)
+		symbol := operationSymbol(id.Name(), version)
+		baseCounts[symbol]++
+		sourceComponents := append([]string{"src", "operations"}, segments...)
+		sourceComponents = append(sourceComponents, version+".ts")
+		operations[index] = renderedOperation{
+			operation: operation,
+			segments:  segments,
+			version:   version,
+			symbol:    symbol,
+			source:    path.Join(sourceComponents...),
+		}
+	}
+	sort.Slice(operations, func(left, right int) bool {
+		return operations[left].operation.ID().String() < operations[right].operation.ID().String()
+	})
+	for index := range operations {
+		if baseCounts[operations[index].symbol] > 1 {
+			operations[index].symbol += "_" + hex.EncodeToString([]byte(operations[index].operation.ID().String()))
+		}
+	}
+	return operations, nil
+}
+
+func renderPackageJSON(packageName string) []byte {
+	type packageExport struct {
+		Types  string `json:"types"`
+		Import string `json:"import"`
+	}
+	type packageExports struct {
+		Root packageExport `json:"."`
+	}
+	type packageScripts struct {
+		Build     string `json:"build"`
+		Typecheck string `json:"typecheck"`
+	}
+	type packageDependencies struct {
+		TypeScript string `json:"typescript"`
+	}
+	manifest := struct {
+		Name            string              `json:"name"`
+		Version         string              `json:"version"`
+		Description     string              `json:"description"`
+		Type            string              `json:"type"`
+		SideEffects     bool                `json:"sideEffects"`
+		Files           []string            `json:"files"`
+		Main            string              `json:"main"`
+		Module          string              `json:"module"`
+		Types           string              `json:"types"`
+		Exports         packageExports      `json:"exports"`
+		Scripts         packageScripts      `json:"scripts"`
+		DevDependencies packageDependencies `json:"devDependencies"`
+	}{
+		Name:        packageName,
+		Version:     "0.0.0",
+		Description: "Generated Plystra application SDK.",
+		Type:        "module",
+		SideEffects: false,
+		Files:       []string{"dist", "README.md"},
+		Main:        "./dist/index.js",
+		Module:      "./dist/index.js",
+		Types:       "./dist/index.d.ts",
+		Exports: packageExports{Root: packageExport{
+			Types:  "./dist/index.d.ts",
+			Import: "./dist/index.js",
+		}},
+		Scripts: packageScripts{
+			Build:     "tsc -p tsconfig.json",
+			Typecheck: "tsc -p tsconfig.json --noEmit",
+		},
+		DevDependencies: packageDependencies{TypeScript: typescriptVersion},
+	}
+	encoded, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		panic(err)
+	}
+	return append(encoded, '\n')
+}
+
+const tsconfigSource = `{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "rootDir": "src",
+    "outDir": "dist",
+    "declaration": true,
+    "noEmitOnError": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "useUnknownInCatchVariables": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts"]
+}
+`
+
+func renderOperation(operation renderedOperation) ([]byte, error) {
+	if err := validateJavaScriptFields(operation.operation.ID().String()+" request", operation.operation.Request()); err != nil {
+		return nil, err
+	}
+	if err := validateJavaScriptFields(operation.operation.ID().String()+" response", operation.operation.Response()); err != nil {
+		return nil, err
+	}
+	var source strings.Builder
+	fmt.Fprintln(&source, "// Code generated by Plystra CLI. DO NOT EDIT.")
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "import {")
+	fmt.Fprintln(&source, "  createRuntime,")
+	fmt.Fprintln(&source, "  hasOwn,")
+	fmt.Fprintln(&source, "  invoke,")
+	if operationUsesJSONValue(operation.operation) {
+		fmt.Fprintln(&source, "  isJSONValue,")
+	}
+	fmt.Fprintln(&source, "  isPlainObject,")
+	fmt.Fprintln(&source, "  PlystraError,")
+	fmt.Fprintln(&source, "  type ClientOptions,")
+	if operationUsesJSONValue(operation.operation) {
+		fmt.Fprintln(&source, "  type JSONValue,")
+	}
+	fmt.Fprintln(&source, "  type RequestOptions,")
+	fmt.Fprintln(&source, "  type Runtime,")
+	fmt.Fprintf(&source, "} from %s;\n\n", jsString(strings.Repeat("../", len(operation.segments)+1)+"runtime.js"))
+	fmt.Fprintf(&source, "export const capabilityID = %s;\n", jsString(operation.operation.ID().String()))
+	fmt.Fprintf(&source, "export const contractDigest = %s;\n", jsString(operation.operation.ContractDigest()))
+	fmt.Fprintf(&source, "const routePath = %s;\n\n", jsString("api/v1/capabilities/"+operation.operation.ID().String()+"/invoke"))
+	renderType(&source, "Request", operation.operation.Request())
+	renderType(&source, "Response", operation.operation.Response())
+	renderErrorCode(&source, operation.operation.Errors())
+	renderValidator(&source, "isRequest", "Request", operation.operation.Request())
+	renderValidator(&source, "isResponse", "Response", operation.operation.Response())
+	fmt.Fprintln(&source, "export type Operation = (")
+	fmt.Fprintln(&source, "  request: Request,")
+	fmt.Fprintln(&source, "  options?: RequestOptions,")
+	fmt.Fprintln(&source, ") => Promise<Response>;")
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "export function bindOperation(runtime: Runtime): Operation {")
+	fmt.Fprintln(&source, "  return async (request, options = {}) => {")
+	fmt.Fprintln(&source, "    let requestIsValid = false;")
+	fmt.Fprintln(&source, "    try {")
+	fmt.Fprintln(&source, "      requestIsValid = isRequest(request);")
+	fmt.Fprintln(&source, "    } catch {")
+	fmt.Fprintln(&source, "      requestIsValid = false;")
+	fmt.Fprintln(&source, "    }")
+	fmt.Fprintln(&source, "    if (!requestIsValid) {")
+	fmt.Fprintf(&source, "      throw new TypeError(%s);\n", jsString("request does not match "+operation.operation.ID().String()))
+	fmt.Fprintln(&source, "    }")
+	fmt.Fprintln(&source, "    const response = await invoke(runtime, routePath, request, options);")
+	fmt.Fprintln(&source, "    if (!isResponse(response)) {")
+	fmt.Fprintln(&source, "      throw new PlystraError(200, \"invalid_response\");")
+	fmt.Fprintln(&source, "    }")
+	fmt.Fprintln(&source, "    return response;")
+	fmt.Fprintln(&source, "  };")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "export function createOperation(options: ClientOptions): Operation {")
+	fmt.Fprintln(&source, "  return bindOperation(createRuntime(options));")
+	fmt.Fprintln(&source, "}")
+	return []byte(source.String()), nil
+}
+
+func renderType(source *strings.Builder, name string, fields []sdkmodel.Field) {
+	if len(fields) == 0 {
+		fmt.Fprintf(source, "export type %s = Readonly<Record<string, never>>;\n\n", name)
+		return
+	}
+	fmt.Fprintf(source, "export interface %s {\n", name)
+	for _, field := range fields {
+		optional := ""
+		if !field.Required() {
+			optional = "?"
+		}
+		fmt.Fprintf(source, "  readonly %s%s: %s;\n", jsString(field.Name()), optional, typescriptType(field))
+	}
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+}
+
+func renderErrorCode(source *strings.Builder, errors []string) {
+	if len(errors) == 0 {
+		fmt.Fprintln(source, "export type ErrorCode = never;")
+		fmt.Fprintln(source)
+		return
+	}
+	values := make([]string, len(errors))
+	for index, value := range errors {
+		values[index] = jsString(value)
+	}
+	fmt.Fprintf(source, "export type ErrorCode = %s;\n\n", strings.Join(values, " | "))
+}
+
+func renderValidator(source *strings.Builder, functionName, typeName string, fields []sdkmodel.Field) {
+	fmt.Fprintf(source, "function %s(value: unknown): value is %s {\n", functionName, typeName)
+	fmt.Fprintln(source, "  return (")
+	fmt.Fprintln(source, "    isPlainObject(value) &&")
+	if len(fields) == 0 {
+		fmt.Fprintln(source, "    Object.keys(value).length === 0")
+	} else {
+		allowed := make([]string, len(fields))
+		for index, field := range fields {
+			allowed[index] = "key === " + jsString(field.Name())
+		}
+		fmt.Fprintf(source, "    Object.keys(value).every((key) => %s) &&\n", strings.Join(allowed, " || "))
+		for index, field := range fields {
+			expression := "value[" + jsString(field.Name()) + "]"
+			valid := validValue(field, expression)
+			condition := ""
+			if field.Required() {
+				condition = "hasOwn(value, " + jsString(field.Name()) + ") && " + valid
+			} else {
+				condition = "(!hasOwn(value, " + jsString(field.Name()) + ") || " + valid + ")"
+			}
+			suffix := ""
+			if index != len(fields)-1 {
+				suffix = " &&"
+			}
+			fmt.Fprintf(source, "    %s%s\n", condition, suffix)
+		}
+	}
+	fmt.Fprintln(source, "  );")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+}
+
+func renderIndex(operations []renderedOperation) ([]byte, error) {
+	root, err := buildClientTree(operations)
+	if err != nil {
+		return nil, err
+	}
+	var source strings.Builder
+	fmt.Fprintln(&source, "// Code generated by Plystra CLI. DO NOT EDIT.")
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "import { createRuntime, type ClientOptions } from \"./runtime.js\";")
+	for _, operation := range operations {
+		importPath := indexImportPath(operation)
+		fmt.Fprintln(&source, "import {")
+		fmt.Fprintf(&source, "  bindOperation as bind%s,\n", operation.symbol)
+		fmt.Fprintf(&source, "  createOperation as create%s,\n", operation.symbol)
+		fmt.Fprintf(&source, "  type Operation as %sOperation,\n", operation.symbol)
+		fmt.Fprintf(&source, "} from %s;\n", jsString(importPath))
+	}
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "export { PlystraError } from \"./runtime.js\";")
+	fmt.Fprintln(&source, "export type { ClientOptions, JSONValue, RequestOptions } from \"./runtime.js\";")
+	for _, operation := range operations {
+		importPath := indexImportPath(operation)
+		fmt.Fprintf(&source, "export { create%s };\n", operation.symbol)
+		fmt.Fprintln(&source, "export type {")
+		fmt.Fprintf(&source, "  ErrorCode as %sErrorCode,\n", operation.symbol)
+		fmt.Fprintf(&source, "  Request as %sRequest,\n", operation.symbol)
+		fmt.Fprintf(&source, "  Response as %sResponse,\n", operation.symbol)
+		fmt.Fprintf(&source, "} from %s;\n", jsString(importPath))
+	}
+	fmt.Fprintln(&source)
+	fmt.Fprint(&source, "export type PlystraClient = ")
+	if len(operations) == 0 {
+		fmt.Fprintln(&source, "Readonly<Record<string, never>>;")
+	} else {
+		renderNodeType(&source, root, "")
+		fmt.Fprintln(&source, ";")
+	}
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "export function createPlystraClient(options: ClientOptions): PlystraClient {")
+	fmt.Fprintln(&source, "  const runtime = createRuntime(options);")
+	fmt.Fprint(&source, "  return ")
+	renderNodeValue(&source, root, "  ")
+	fmt.Fprintln(&source, ";")
+	fmt.Fprintln(&source, "}")
+	return []byte(source.String()), nil
+}
+
+func indexImportPath(operation renderedOperation) string {
+	return "./" + strings.TrimSuffix(strings.TrimPrefix(operation.source, "src/"), ".ts") + ".js"
+}
+
+func buildClientTree(operations []renderedOperation) (*clientNode, error) {
+	root := &clientNode{children: make(map[string]*clientNode)}
+	for index := range operations {
+		operation := &operations[index]
+		components := append(append([]string(nil), operation.segments...), operation.version)
+		node := root
+		for _, component := range components {
+			child := node.children[component]
+			if child == nil {
+				child = &clientNode{children: make(map[string]*clientNode)}
+				node.children[component] = child
+			}
+			node = child
+		}
+		if node.operation != nil {
+			return nil, fmt.Errorf("%w: client path collision for %s and %s", ErrRender, node.operation.operation.ID(), operation.operation.ID())
+		}
+		node.operation = operation
+	}
+	return root, nil
+}
+
+func renderNodeType(source *strings.Builder, node *clientNode, indent string) {
+	if node.operation != nil {
+		fmt.Fprintf(source, "%sOperation", node.operation.symbol)
+		if len(node.children) != 0 {
+			fmt.Fprint(source, " & ")
+		}
+	}
+	if node.operation == nil || len(node.children) != 0 {
+		fmt.Fprintln(source, "{")
+		for _, name := range sortedChildNames(node) {
+			fmt.Fprintf(source, "%s  readonly %s: ", indent, jsString(name))
+			renderNodeType(source, node.children[name], indent+"  ")
+			fmt.Fprintln(source, ";")
+		}
+		fmt.Fprintf(source, "%s}", indent)
+	}
+}
+
+func renderNodeValue(source *strings.Builder, node *clientNode, indent string) {
+	switch {
+	case node.operation != nil && len(node.children) == 0:
+		fmt.Fprintf(source, "bind%s(runtime)", node.operation.symbol)
+	case node.operation != nil:
+		fmt.Fprintf(source, "Object.freeze(Object.assign(bind%s(runtime), ", node.operation.symbol)
+		renderChildrenValue(source, node, indent)
+		fmt.Fprint(source, "))")
+	default:
+		fmt.Fprint(source, "Object.freeze(")
+		renderChildrenValue(source, node, indent)
+		fmt.Fprint(source, ")")
+	}
+}
+
+func renderChildrenValue(source *strings.Builder, node *clientNode, indent string) {
+	if len(node.children) == 0 {
+		fmt.Fprint(source, "{}")
+		return
+	}
+	fmt.Fprintln(source, "{")
+	names := sortedChildNames(node)
+	for _, name := range names {
+		fmt.Fprintf(source, "%s  %s: ", indent, jsString(name))
+		renderNodeValue(source, node.children[name], indent+"  ")
+		fmt.Fprintln(source, ",")
+	}
+	fmt.Fprintf(source, "%s}", indent)
+}
+
+func sortedChildNames(node *clientNode) []string {
+	names := make([]string, 0, len(node.children))
+	for name := range node.children {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func renderREADME(packageName string, operations []renderedOperation) []byte {
+	var readme strings.Builder
+	fmt.Fprintf(&readme, "# %s\n\n", packageName)
+	fmt.Fprintln(&readme, "Generated Plystra application SDK. Do not edit generated files.")
+	fmt.Fprintln(&readme)
+	if len(operations) == 0 {
+		fmt.Fprintln(&readme, "This application currently exposes no JavaScript Capability operations.")
+		return []byte(readme.String())
+	}
+	first := operations[0]
+	fmt.Fprintln(&readme, "## Usage")
+	fmt.Fprintln(&readme)
+	fmt.Fprintln(&readme, "```ts")
+	fmt.Fprintf(&readme, "import { createPlystraClient } from %s;\n\n", jsString(packageName))
+	fmt.Fprintln(&readme, "const client = createPlystraClient({")
+	fmt.Fprintln(&readme, "  baseUrl: \"https://api.example.com\",")
+	fmt.Fprintln(&readme, "  getAccessToken: async () => accessToken,")
+	fmt.Fprintln(&readme, "});")
+	fmt.Fprintln(&readme)
+	request := exampleRequest(first.operation.Request())
+	fmt.Fprintf(&readme, "const response = await client%s(%s);\n", clientAccessor(first), request)
+	fmt.Fprintln(&readme, "```")
+	fmt.Fprintln(&readme)
+	fmt.Fprintln(&readme, "Only explicitly exposed canonical operations are generated. Requests use strict JSON over the matching generated HTTP transport; provider packages, server configuration, verified internal context, and Secret values are never included.")
+	fmt.Fprintln(&readme)
+	fmt.Fprintln(&readme, "## Operations")
+	fmt.Fprintln(&readme)
+	for _, operation := range operations {
+		fmt.Fprintf(&readme, "- `%s` (`%s`)\n", operation.operation.ID(), operation.operation.ContractDigest())
+	}
+	return []byte(readme.String())
+}
+
+func typescriptType(field sdkmodel.Field) string {
+	enum := field.EnumJSON()
+	if len(enum) != 0 {
+		values := make([]string, len(enum))
+		for index, value := range enum {
+			values[index] = string(value)
+		}
+		return strings.Join(values, " | ")
+	}
+	if field.Kind() == sdkmodel.KindArray {
+		return "ReadonlyArray<" + typescriptKind(field.Items()) + ">"
+	}
+	return typescriptKind(field.Kind())
+}
+
+func typescriptKind(kind sdkmodel.Kind) string {
+	switch kind {
+	case sdkmodel.KindString:
+		return "string"
+	case sdkmodel.KindInteger, sdkmodel.KindNumber:
+		return "number"
+	case sdkmodel.KindBoolean:
+		return "boolean"
+	case sdkmodel.KindObject:
+		return "Readonly<Record<string, JSONValue>>"
+	default:
+		panic("unsupported normalized SDK kind " + string(kind))
+	}
+}
+
+func validValue(field sdkmodel.Field, expression string) string {
+	enum := field.EnumJSON()
+	if len(enum) != 0 {
+		values := make([]string, len(enum))
+		for index, value := range enum {
+			values[index] = expression + " === " + string(value)
+		}
+		valid := "(" + strings.Join(values, " || ") + ")"
+		if field.Kind() == sdkmodel.KindInteger {
+			valid = "Number.isSafeInteger(" + expression + ") && " + valid
+		}
+		return valid
+	}
+	if field.Kind() == sdkmodel.KindArray {
+		return "Array.isArray(" + expression + ") && " + expression + ".every((item) => " + validKind(field.Items(), "item") + ")"
+	}
+	return validKind(field.Kind(), expression)
+}
+
+func validateJavaScriptFields(section string, fields []sdkmodel.Field) error {
+	const maximumSafeInteger = int64(9_007_199_254_740_991)
+	for _, field := range fields {
+		if field.Kind() != sdkmodel.KindInteger {
+			continue
+		}
+		for _, raw := range field.EnumJSON() {
+			value, err := strconv.ParseInt(string(raw), 10, 64)
+			if err != nil || value < -maximumSafeInteger || value > maximumSafeInteger {
+				return fmt.Errorf("%w: %s field %q enum value %s is outside the JavaScript safe-integer range", ErrRender, section, field.Name(), raw)
+			}
+		}
+	}
+	return nil
+}
+
+func validKind(kind sdkmodel.Kind, expression string) string {
+	switch kind {
+	case sdkmodel.KindString:
+		return "typeof " + expression + " === \"string\""
+	case sdkmodel.KindInteger:
+		return "typeof " + expression + " === \"number\" && Number.isSafeInteger(" + expression + ")"
+	case sdkmodel.KindNumber:
+		return "typeof " + expression + " === \"number\" && Number.isFinite(" + expression + ")"
+	case sdkmodel.KindBoolean:
+		return "typeof " + expression + " === \"boolean\""
+	case sdkmodel.KindObject:
+		return "isPlainObject(" + expression + ") && isJSONValue(" + expression + ")"
+	default:
+		panic("unsupported normalized SDK kind " + string(kind))
+	}
+}
+
+func operationUsesJSONValue(operation sdkmodel.Operation) bool {
+	for _, fields := range [][]sdkmodel.Field{operation.Request(), operation.Response()} {
+		for _, field := range fields {
+			if field.Kind() == sdkmodel.KindObject || field.Kind() == sdkmodel.KindArray && field.Items() == sdkmodel.KindObject {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func operationSymbol(name, version string) string {
+	var result strings.Builder
+	upper := true
+	for _, character := range name {
+		switch {
+		case character >= 'a' && character <= 'z':
+			if upper {
+				character -= 'a' - 'A'
+			}
+			result.WriteRune(character)
+			upper = false
+		case character >= '0' && character <= '9':
+			result.WriteRune(character)
+			upper = false
+		default:
+			upper = true
+		}
+	}
+	result.WriteString(strings.ToUpper(version[:1]))
+	result.WriteString(version[1:])
+	return result.String()
+}
+
+func clientAccessor(operation renderedOperation) string {
+	components := append(append([]string(nil), operation.segments...), operation.version)
+	var result strings.Builder
+	for _, component := range components {
+		if javascriptIdentifier(component) {
+			result.WriteByte('.')
+			result.WriteString(component)
+		} else {
+			result.WriteByte('[')
+			result.WriteString(jsString(component))
+			result.WriteByte(']')
+		}
+	}
+	return result.String()
+}
+
+func exampleRequest(fields []sdkmodel.Field) string {
+	values := make(map[string]any)
+	for _, field := range fields {
+		if !field.Required() {
+			continue
+		}
+		values[field.Name()] = exampleValue(field)
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		panic(err)
+	}
+	return string(encoded)
+}
+
+func exampleValue(field sdkmodel.Field) any {
+	if values := field.EnumJSON(); len(values) != 0 {
+		var result any
+		if err := json.Unmarshal(values[0], &result); err != nil {
+			panic(err)
+		}
+		return result
+	}
+	switch field.Kind() {
+	case sdkmodel.KindString:
+		return "value"
+	case sdkmodel.KindInteger, sdkmodel.KindNumber:
+		return 0
+	case sdkmodel.KindBoolean:
+		return false
+	case sdkmodel.KindObject:
+		return map[string]any{}
+	case sdkmodel.KindArray:
+		return []any{}
+	default:
+		panic("unsupported normalized SDK kind " + string(field.Kind()))
+	}
+}
+
+func validPackageName(value string) bool {
+	if value == "" || len(value) > 214 || value != strings.ToLower(value) {
+		return false
+	}
+	if strings.HasPrefix(value, "@") {
+		parts := strings.Split(value, "/")
+		return len(parts) == 2 && validPackagePart(strings.TrimPrefix(parts[0], "@")) && validPackagePart(parts[1])
+	}
+	return !strings.Contains(value, "/") && validPackagePart(value)
+}
+
+func validPackagePart(value string) bool {
+	if value == "" || len(value) > 100 || !asciiLowerOrDigit(value[0]) || !asciiLowerOrDigit(value[len(value)-1]) || strings.Contains(value, "..") {
+		return false
+	}
+	for index := 1; index < len(value)-1; index++ {
+		character := value[index]
+		if !asciiLowerOrDigit(character) && character != '-' && character != '_' && character != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+func asciiLowerOrDigit(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= '0' && value <= '9'
+}
+
+func javascriptIdentifier(value string) bool {
+	if value == "" || !(value[0] >= 'a' && value[0] <= 'z' || value[0] >= 'A' && value[0] <= 'Z' || value[0] == '_' || value[0] == '$') {
+		return false
+	}
+	for index := 1; index < len(value); index++ {
+		character := value[index]
+		if !(character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '_' || character == '$') {
+			return false
+		}
+	}
+	return true
+}
+
+func jsString(value string) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return string(encoded)
+}
+
+func newFile(filePath string, data []byte) File {
+	return File{path: filePath, data: append([]byte(nil), data...)}
+}
+
+func digest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}

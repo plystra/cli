@@ -16,6 +16,8 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+/internal/javascriptgen/testdata/canonical/node_modules/
+/internal/javascriptgen/testdata/canonical/dist/
 
 # Go workspace file
 go.work

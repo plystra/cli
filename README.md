@@ -100,6 +100,12 @@ When a lowered plan contains `http.ingress`, `http.egress`, or an adapter-creden
 
 Each validated HTTP-exposed Alias generates only its own route identity and a thin wrapper around the already-bound canonical handler. Several Alias handlers can share that one canonical transport instance; they do not copy request validation, own an invocation handle, register a provider, or dispatch an Alias ID. The canonical handler validates the Alias path and runs the same planned ingress, invocation, completion, egress, response, and safe-error logic. Alias generation revalidates same-version direct targeting, target contract digest, exposure narrowing, and bounded deprecation metadata; deprecated wrappers carry native Go `Deprecated:` markers without changing runtime behavior or deprecating the target.
 
+## Generated JavaScript SDK
+
+Explicitly JavaScript-exposed canonical Capabilities lower into one immutable provider-independent SDK model and a deterministic ESM TypeScript package under `generated/sdk/javascript/`. The package contains nested exact-version methods such as `client.email.send.v1`, tree-shakable operation factories, strict request and response types, semantic error-code types, native `fetch` transport, declarations, and package documentation. Contract digests include extension metadata, while provider identities, runtime plugin configuration, verified internal context, and Secret values never enter the SDK model or source.
+
+The generated browser transport uses the matching strict HTTP route, preserves an application base-path prefix, bounds JSON to 1 MiB, accepts an optional access-token callback and `AbortSignal`, and exposes only stable error status/code/detail fields. It validates exact fields, enums, finite numbers, safe integers, plain JSON objects, response media types, and unexpected response data. Credentials are attached only as one bounded `Authorization` header and callback, network, cancellation, malformed-response, and schema failures are normalized without copying provider text.
+
 ## Method-specific login surfaces
 
 Authentication methods use real contracts such as:
@@ -166,6 +172,18 @@ go test -race ./...
 go vet ./...
 go run ./cmd/plystra --help
 go test ./internal/clientgen -run '^$' -bench 'BenchmarkGenerated(CanonicalInvocation|AliasForwarding)$' -benchmem
+```
+
+The checked-in JavaScript golden package is validated with:
+
+```powershell
+cd internal/javascriptgen/testdata/canonical
+npm ci --ignore-scripts --no-audit --no-fund
+npm run typecheck
+npm run build
+npx --no-install tsc -p test/tsconfig.json
+node --conditions=browser --test test/runtime.test.mjs
+npm pack --dry-run --json
 ```
 
 The two generated-client benchmarks use identical no-op canonical target work. `BenchmarkGeneratedCanonicalInvocation` measures the canonical generated client and invocation path; `BenchmarkGeneratedAliasForwarding` adds exactly the application-local Alias client layer. Raw Kernel canonical dispatch remains a separate `kernel` benchmark and is not folded into either CLI result.
