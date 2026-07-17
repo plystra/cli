@@ -46,7 +46,15 @@ func (f File) PackageName() string { return f.packageName }
 func (f File) Data() []byte { return append([]byte(nil), f.data...) }
 
 type canonicalContract struct {
-	ID string `json:"id"`
+	ID      string                    `json:"id"`
+	Request map[string]canonicalField `json:"request"`
+}
+
+type canonicalField struct {
+	Type     generation.GeneratedValueType `json:"type"`
+	Items    generation.GeneratedValueType `json:"items,omitempty"`
+	Required bool                          `json:"required,omitempty"`
+	Enum     []json.RawMessage             `json:"enum,omitempty"`
 }
 
 // Render validates schema and module identity, then emits the canonical
@@ -81,7 +89,7 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	if err != nil {
 		return File{}, fmt.Errorf("%w: decode canonical identity: %w", ErrRender, err)
 	}
-	prepared, err := preparePlan(identifier, plan)
+	prepared, err := preparePlan(identifier, contract.Request, plan)
 	if err != nil {
 		return File{}, fmt.Errorf("%w: %w", ErrRender, err)
 	}
@@ -144,7 +152,7 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	fmt.Fprintln(&source, "func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.Response, error) {")
 	for _, contribution := range prepared.contributions {
 		for _, node := range contribution.Nodes() {
-			if err := renderPrepareCall(&source, prepared.dependencies, contribution, node); err != nil {
+			if err := renderPrepareCall(&source, contract.Request, prepared.dependencies, contribution, node); err != nil {
 				return File{}, fmt.Errorf("%w: %w", ErrRender, err)
 			}
 		}
@@ -170,6 +178,22 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 		fmt.Fprintln(&source, "\treturn invoke(callContext, request)")
 		fmt.Fprintln(&source, "}")
 	}
+	if prepared.hasPointerBindings {
+		fmt.Fprintln(&source)
+		fmt.Fprintln(&source, "func plystraPointer[Value any](value Value) *Value {")
+		fmt.Fprintln(&source, "\treturn &value")
+		fmt.Fprintln(&source, "}")
+	}
+	if prepared.hasOptionalConversions {
+		fmt.Fprintln(&source)
+		fmt.Fprintln(&source, "func plystraConvertOptional[Source, Target any](value *Source, convert func(Source) Target) *Target {")
+		fmt.Fprintln(&source, "\tif value == nil {")
+		fmt.Fprintln(&source, "\t\treturn nil")
+		fmt.Fprintln(&source, "\t}")
+		fmt.Fprintln(&source, "\tresult := convert(*value)")
+		fmt.Fprintln(&source, "\treturn &result")
+		fmt.Fprintln(&source, "}")
+	}
 	formatted, err := format.Source([]byte(source.String()))
 	if err != nil {
 		return File{}, fmt.Errorf("%w: format generated source: %w", ErrRender, err)
@@ -182,9 +206,11 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 }
 
 type preparedPlan struct {
-	contributions []generationlowering.Contribution
-	dependencies  []invocationDependency
-	hasTimedCalls bool
+	contributions          []generationlowering.Contribution
+	dependencies           []invocationDependency
+	hasTimedCalls          bool
+	hasPointerBindings     bool
+	hasOptionalConversions bool
 }
 
 type invocationDependency struct {
@@ -192,7 +218,7 @@ type invocationDependency struct {
 	field     string
 }
 
-func preparePlan(identifier capabilityid.Identifier, plan *generationlowering.Plan) (preparedPlan, error) {
+func preparePlan(identifier capabilityid.Identifier, sourceRequest map[string]canonicalField, plan *generationlowering.Plan) (preparedPlan, error) {
 	if plan == nil {
 		return preparedPlan{}, nil
 	}
@@ -223,14 +249,17 @@ func preparePlan(identifier capabilityid.Identifier, plan *generationlowering.Pl
 			if operation.Capability.String() == identifier.String() {
 				return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q recursively calls its own source %s", ErrContribution, contribution.ID(), node.ID(), identifier)
 			}
-			for _, binding := range operation.Request {
-				if binding.Value.Literal == nil {
-					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q binding %q uses a value source not yet renderable at this boundary", ErrContribution, contribution.ID(), node.ID(), binding.Field)
-				}
-			}
 			reference, ok := node.Target()
 			if !ok {
 				return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q has no lowered target", ErrContribution, contribution.ID(), node.ID())
+			}
+			for _, binding := range operation.Request {
+				needsPointer, needsOptionalConversion, err := prepareBinding(sourceRequest, reference, binding)
+				if err != nil {
+					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, err)
+				}
+				result.hasPointerBindings = result.hasPointerBindings || needsPointer
+				result.hasOptionalConversions = result.hasOptionalConversions || needsOptionalConversion
 			}
 			key := reference.Capability().String()
 			dependency := invocationDependency{reference: reference, field: reference.ImportName() + "Client"}
@@ -260,8 +289,53 @@ func preparePlan(identifier capabilityid.Identifier, plan *generationlowering.Pl
 	return result, nil
 }
 
+func prepareBinding(
+	sourceRequest map[string]canonicalField,
+	reference generationlowering.TargetReference,
+	binding generation.GeneratedFieldBinding,
+) (bool, bool, error) {
+	target, ok := binding.Target()
+	if !ok {
+		return false, false, errors.New("normalized target field shape is absent")
+	}
+	if _, err := generatedFieldGoType(reference.ContractImportName(), "Request", binding.Field, target.Type(), target.Items(), target.Enumerated()); err != nil {
+		return false, false, err
+	}
+	if binding.Value.Literal != nil {
+		return !target.Required(), false, nil
+	}
+	if binding.Value.Invocation == nil {
+		return false, false, errors.New("value source is not renderable at invocation.prepare")
+	}
+	invocation := binding.Value.Invocation
+	if invocation.Source != generation.GeneratedInvocationRequestField {
+		return false, false, fmt.Errorf("value source %q is not renderable at invocation.prepare", invocation.Source)
+	}
+	if invocation.Name == "" {
+		return false, false, errors.New("request-field source must name one canonical request field")
+	}
+	sourceField, exists := sourceRequest[invocation.Name]
+	if !exists {
+		return false, false, fmt.Errorf("request field %q is absent from the source contract", invocation.Name)
+	}
+	if _, err := canonicalFieldGoType("contract", "Request", invocation.Name, sourceField); err != nil {
+		return false, false, err
+	}
+	if !sourceField.Required && target.Required() {
+		return false, false, fmt.Errorf("optional request field %q cannot populate required target field %q", invocation.Name, binding.Field)
+	}
+	if target.Required() {
+		return false, false, nil
+	}
+	if sourceField.Required {
+		return true, false, nil
+	}
+	return false, true, nil
+}
+
 func renderPrepareCall(
 	source *strings.Builder,
+	sourceRequest map[string]canonicalField,
 	dependencies []invocationDependency,
 	contribution generationlowering.Contribution,
 	node generationlowering.Node,
@@ -289,7 +363,7 @@ func renderPrepareCall(
 	fmt.Fprintf(source, "\t\th.%s.%s,\n", dependency.field, reference.Operation())
 	fmt.Fprintf(source, "\t\t%s.Request{\n", reference.ContractImportName())
 	for _, binding := range operation.Request {
-		value, err := renderLiteral(binding.Value)
+		value, err := renderBindingValue(sourceRequest, reference, binding)
 		if err != nil {
 			return fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, err)
 		}
@@ -302,6 +376,59 @@ func renderPrepareCall(
 	fmt.Fprintln(source, "\t}")
 	fmt.Fprintf(source, "\t_ = %s\n", responseIdentifier)
 	return nil
+}
+
+func renderBindingValue(
+	sourceRequest map[string]canonicalField,
+	reference generationlowering.TargetReference,
+	binding generation.GeneratedFieldBinding,
+) (string, error) {
+	target, ok := binding.Target()
+	if !ok {
+		return "", errors.New("normalized target field shape is absent")
+	}
+	targetType, err := generatedFieldGoType(reference.ContractImportName(), "Request", binding.Field, target.Type(), target.Items(), target.Enumerated())
+	if err != nil {
+		return "", err
+	}
+
+	var expression string
+	var sourceType string
+	sourceOptional := false
+	switch {
+	case binding.Value.Literal != nil:
+		expression, err = renderLiteral(binding.Value)
+	case binding.Value.Invocation != nil && binding.Value.Invocation.Source == generation.GeneratedInvocationRequestField:
+		name := binding.Value.Invocation.Name
+		field, exists := sourceRequest[name]
+		if !exists {
+			return "", fmt.Errorf("request field %q is absent from the source contract", name)
+		}
+		sourceType, err = canonicalFieldGoType("contract", "Request", name, field)
+		expression = "request." + goname.Field(name)
+		sourceOptional = !field.Required
+	default:
+		return "", errors.New("value source is not renderable at invocation.prepare")
+	}
+	if err != nil {
+		return "", err
+	}
+	if target.Required() {
+		if sourceOptional {
+			return "", errors.New("optional source cannot populate a required target field")
+		}
+		return targetType + "(" + expression + ")", nil
+	}
+	if sourceOptional {
+		return fmt.Sprintf(
+			"plystraConvertOptional(%s, func(value %s) %s { return %s(value) })",
+			expression,
+			sourceType,
+			targetType,
+			targetType,
+		), nil
+	}
+	return "plystraPointer(" + targetType + "(" + expression + "))", nil
 }
 
 func renderLiteral(value generation.GeneratedValue) (string, error) {
@@ -317,6 +444,47 @@ func renderLiteral(value generation.GeneratedValue) (string, error) {
 		return strconv.FormatBool(*value.Literal.Boolean), nil
 	default:
 		return "", errors.New("literal has no supported scalar value")
+	}
+}
+
+func canonicalFieldGoType(importName, section, fieldName string, field canonicalField) (string, error) {
+	return generatedFieldGoType(importName, section, fieldName, field.Type, field.Items, len(field.Enum) != 0)
+}
+
+func generatedFieldGoType(
+	importName string,
+	section string,
+	fieldName string,
+	typeName generation.GeneratedValueType,
+	items generation.GeneratedValueType,
+	enumerated bool,
+) (string, error) {
+	if enumerated {
+		return importName + "." + section + goname.Field(fieldName), nil
+	}
+	return generatedValueGoType(typeName, items)
+}
+
+func generatedValueGoType(typeName, items generation.GeneratedValueType) (string, error) {
+	switch typeName {
+	case generation.GeneratedValueString:
+		return "string", nil
+	case generation.GeneratedValueInteger:
+		return "int64", nil
+	case generation.GeneratedValueNumber:
+		return "float64", nil
+	case generation.GeneratedValueBoolean:
+		return "bool", nil
+	case generation.GeneratedValueObject:
+		return "map[string]any", nil
+	case generation.GeneratedValueArray:
+		itemType, err := generatedValueGoType(items, "")
+		if err != nil {
+			return "", fmt.Errorf("array item type: %w", err)
+		}
+		return "[]" + itemType, nil
+	default:
+		return "", fmt.Errorf("unsupported generated value type %q", typeName)
 	}
 }
 

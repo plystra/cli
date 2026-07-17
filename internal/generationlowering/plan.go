@@ -324,6 +324,8 @@ func invocationRuntimeIdentifiers() []IdentifierRequest {
 	return []IdentifierRequest{
 		{Name: "plystraErrInvalidContext", Source: "generated invocation timeout runtime"},
 		{Name: "plystraInvokeWithTimeout", Source: "generated invocation timeout runtime"},
+		{Name: "plystraPointer", Source: "generated invocation typed binding runtime"},
+		{Name: "plystraConvertOptional", Source: "generated invocation typed binding runtime"},
 	}
 }
 

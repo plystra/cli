@@ -45,6 +45,13 @@ func TestNormalizeOutputBuildsTypedImmutableGenerationNodes(t *testing.T) {
 	if !ok || call.Capability.String() != "authn.session.verify/v1" || call.OnError != generation.GeneratedCallCapture || call.TimeoutMilliseconds != 1500 || len(call.Request) != 1 || call.Request[0].Field != "token" {
 		t.Fatalf("capability call = %#v, %v", call, ok)
 	}
+	target, ok := call.Request[0].Target()
+	if !ok || target.Type() != generation.GeneratedValueString || target.Items() != "" || !target.Required() || target.Enumerated() {
+		t.Fatalf("capability call target = %#v, %v", target, ok)
+	}
+	if _, ok := output.Contributions[0].Nodes[1].CapabilityCall.Request[0].Target(); ok {
+		t.Fatal("raw extension binding exposed a normalized target")
+	}
 	failure, ok := nodes[2].ConditionalFailure()
 	if !ok || failure.Condition.Operator != generation.GeneratedConditionError || failure.ErrorCode != "invalid_state" || failure.Condition.Value.Node == nil || failure.Condition.Value.Node.ID != "verify-session" {
 		t.Fatalf("conditional failure = %#v, %v", failure, ok)
@@ -222,7 +229,7 @@ func TestNormalizeOutputValidatesGeneratedNodeTypesReferencesBoundsAndFailures(t
 		}, want: "present scalar"},
 		{name: "object metadata value", edit: func(c *generation.Contribution) {
 			c.Nodes[4].MetadataAttachment.Value = invocationGeneratedValue(generation.GeneratedInvocationRequestField, "", "", "")
-		}, want: "present scalar"},
+		}, want: "must identify one canonical field"},
 		{name: "zero metadata bound", edit: func(c *generation.Contribution) { c.Nodes[4].MetadataAttachment.MaximumBytes = 0 }, want: ".maximum_bytes"},
 		{name: "literal exceeds metadata bound", edit: func(c *generation.Contribution) {
 			c.Nodes[4].MetadataAttachment.Value = generation.StringValue("space")
@@ -324,6 +331,11 @@ func TestNormalizeOutputSupportsCompletionPointResponseAndErrorConditions(t *tes
 	}
 	if got := normalized.Contributions()[0].Nodes(); len(got) != 2 || got[0].Kind() != generation.GeneratedNodeKindConditionalFailure || got[1].Kind() != generation.GeneratedNodeKindMetadataAttachment {
 		t.Fatalf("nodes = %#v", got)
+	}
+	unnamed := cloneContributionForTest(t, contribution)
+	unnamed.Nodes[1].MetadataAttachment.Value = invocationGeneratedValue(generation.GeneratedInvocationResponseField, "", "", "")
+	if _, err := generation.NormalizeOutput(generatedNodeContext(t), generation.Output{Contributions: []generation.Contribution{unnamed}}); !errors.Is(err, generation.ErrInvalidOutput) || !strings.Contains(err.Error(), "must identify one canonical field") {
+		t.Fatalf("unnamed response field error = %v", err)
 	}
 	contribution.Nodes[0], contribution.Nodes[1] = contribution.Nodes[1], contribution.Nodes[0]
 	if _, err := generation.NormalizeOutput(generatedNodeContext(t), generation.Output{Contributions: []generation.Contribution{contribution}}); !errors.Is(err, generation.ErrInvalidOutput) || !strings.Contains(err.Error(), "response before an is-error conditional-failure") {

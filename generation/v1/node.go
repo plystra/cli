@@ -154,10 +154,41 @@ type GeneratedAuditEventCall struct {
 // GeneratedFieldBinding assigns one typed value to a canonical request field.
 // Bindings are structurally unordered and normalize by field name.
 type GeneratedFieldBinding struct {
-	Field string         `json:"field"`
-	Value GeneratedValue `json:"value"`
-	_     struct{}
+	Field  string         `json:"field"`
+	Value  GeneratedValue `json:"value"`
+	target GeneratedFieldTarget
+	_      struct{}
 }
+
+// GeneratedFieldTarget is the immutable canonical target-field shape attached
+// to a binding during output normalization. Raw extension output has no target
+// until the CLI validates it against the called Capability contract.
+type GeneratedFieldTarget struct {
+	typeName   GeneratedValueType
+	items      GeneratedValueType
+	required   bool
+	enumerated bool
+}
+
+// Target returns the canonical request-field shape established by output
+// normalization. It reports false for an unnormalized binding.
+func (b GeneratedFieldBinding) Target() (GeneratedFieldTarget, bool) {
+	return b.target, b.target.typeName != ""
+}
+
+// Type returns the canonical scalar, object, or array type.
+func (t GeneratedFieldTarget) Type() GeneratedValueType { return t.typeName }
+
+// Items returns the canonical array item type, or an empty value for a
+// non-array field.
+func (t GeneratedFieldTarget) Items() GeneratedValueType { return t.items }
+
+// Required reports whether the target request field is required.
+func (t GeneratedFieldTarget) Required() bool { return t.required }
+
+// Enumerated reports whether the target request field uses a named generated
+// enum type.
+func (t GeneratedFieldTarget) Enumerated() bool { return t.enumerated }
 
 // GeneratedValue is one closed value union. Exactly one member must be set.
 type GeneratedValue struct {
@@ -296,6 +327,7 @@ type generatedSchemaField struct {
 	Type     GeneratedValueType `json:"type"`
 	Items    GeneratedValueType `json:"items,omitempty"`
 	Required bool               `json:"required,omitempty"`
+	Enum     []json.RawMessage  `json:"enum,omitempty"`
 }
 
 type generatedContractSchema struct {
@@ -632,7 +664,16 @@ func (n *generatedNodeNormalizer) normalizeBindings(field string, inputs []Gener
 			return nil, invalidOutput("%s.value may be absent, but target field %q is required; derive a required value first", bindingField, input.Field)
 		}
 		seen[input.Field] = index
-		bindings = append(bindings, GeneratedFieldBinding{Field: input.Field, Value: value})
+		bindings = append(bindings, GeneratedFieldBinding{
+			Field: input.Field,
+			Value: value,
+			target: GeneratedFieldTarget{
+				typeName:   target.Type,
+				items:      target.Items,
+				required:   target.Required,
+				enumerated: len(target.Enum) != 0,
+			},
+		})
 	}
 	required := make([]string, 0)
 	for name, target := range schema {
@@ -721,7 +762,7 @@ func (n *generatedNodeNormalizer) normalizeInvocationValue(field string, input G
 		if input.Type != "" || input.Items != "" || input.Sensitive {
 			return GeneratedInvocationValue{}, generatedValueInfo{}, invalidOutput("%s type is inferred from the source request", field)
 		}
-		return generatedInvocationSchemaValue(field, result, input.Name, n.sourceSchema.Request, false)
+		return generatedInvocationSchemaValue(field, result, input.Name, n.sourceSchema.Request)
 	case GeneratedInvocationResponseField:
 		if n.point != GenerationPointInvocationComplete && n.point != GenerationPointHTTPEgress {
 			return GeneratedInvocationValue{}, generatedValueInfo{}, invalidOutput("%s source %q is unavailable before canonical dispatch at point %q", field, input.Source, n.point)
@@ -732,7 +773,7 @@ func (n *generatedNodeNormalizer) normalizeInvocationValue(field string, input G
 		if !n.invocationErrorHandled {
 			return GeneratedInvocationValue{}, generatedValueInfo{}, invalidOutput("%s uses the canonical response before an is-error conditional-failure handles the invocation error", field)
 		}
-		return generatedInvocationSchemaValue(field, result, input.Name, n.sourceSchema.Response, false)
+		return generatedInvocationSchemaValue(field, result, input.Name, n.sourceSchema.Response)
 	case GeneratedInvocationError:
 		if n.point != GenerationPointInvocationComplete && n.point != GenerationPointHTTPEgress {
 			return GeneratedInvocationValue{}, generatedValueInfo{}, invalidOutput("%s source %q is unavailable before canonical dispatch at point %q", field, input.Source, n.point)
@@ -777,9 +818,9 @@ func (n *generatedNodeNormalizer) normalizeInvocationValue(field string, input G
 	}
 }
 
-func generatedInvocationSchemaValue(field string, input GeneratedInvocationValue, name string, schema map[string]generatedSchemaField, optionalWhole bool) (GeneratedInvocationValue, generatedValueInfo, error) {
+func generatedInvocationSchemaValue(field string, input GeneratedInvocationValue, name string, schema map[string]generatedSchemaField) (GeneratedInvocationValue, generatedValueInfo, error) {
 	if name == "" {
-		return input, generatedValueInfo{typeName: GeneratedValueObject, optional: optionalWhole}, nil
+		return GeneratedInvocationValue{}, generatedValueInfo{}, invalidOutput("%s.name must identify one canonical field", field)
 	}
 	if !validGeneratedFieldName(name) {
 		return GeneratedInvocationValue{}, generatedValueInfo{}, invalidOutput("%s.name %q is not a canonical field name", field, name)
@@ -1029,7 +1070,7 @@ func cloneGeneratedAuditEventCall(input GeneratedAuditEventCall) GeneratedAuditE
 func cloneGeneratedBindings(inputs []GeneratedFieldBinding) []GeneratedFieldBinding {
 	result := make([]GeneratedFieldBinding, len(inputs))
 	for index, input := range inputs {
-		result[index] = GeneratedFieldBinding{Field: input.Field, Value: cloneGeneratedValue(input.Value)}
+		result[index] = GeneratedFieldBinding{Field: input.Field, Value: cloneGeneratedValue(input.Value), target: input.target}
 	}
 	return result
 }

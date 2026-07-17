@@ -32,6 +32,38 @@ request:
   permission: {type: string, required: true}
   retry_count: {type: integer, required: true}
   enforce: {type: boolean, required: true}
+  credential: {type: string}
+response:
+  allowed: {type: boolean, required: true}
+errors: [unavailable]
+`
+	typedOrderSchema = `id: order.typed-create/v1
+request:
+  name: {type: string, required: true}
+  note: {type: string}
+  attempts: {type: integer, required: true}
+  active: {type: boolean, required: true}
+  labels: {type: array, items: string, required: true}
+  attributes: {type: object, required: true}
+  mode: {type: string, enum: [fast, safe], required: true}
+response:
+  accepted: {type: boolean, required: true}
+errors: [policy_failed]
+extensions:
+  policy:
+    permission: order.typed-create
+`
+	typedPolicySchema = `id: policy.typed-check/v1
+request:
+  name: {type: string, required: true}
+  optional_name: {type: string}
+  optional_note: {type: string}
+  ratio: {type: number, required: true}
+  active: {type: boolean, required: true}
+  labels: {type: array, items: string, required: true}
+  attributes: {type: object, required: true}
+  mode: {type: string, enum: [fast, safe], required: true}
+  optional_literal: {type: boolean}
 response:
   allowed: {type: boolean, required: true}
 errors: [unavailable]
@@ -51,7 +83,7 @@ func TestRenderPlanGoldenAndRuntimeOrder(t *testing.T) {
 			CapabilityCall: &generation.GeneratedCapabilityCall{
 				Capability: planCapabilityID(t, "policy.check/v1"),
 				Request: []generation.GeneratedFieldBinding{
-					{Field: "permission", Value: generation.StringValue("order.create")},
+					{Field: "permission", Value: planInvocationValue(generation.GeneratedInvocationRequestField, "order_id")},
 					{Field: "retry_count", Value: generation.IntegerValue(2)},
 					{Field: "enforce", Value: generation.BooleanValue(true)},
 				},
@@ -116,6 +148,64 @@ func TestRenderPlanPreservesLoweredSemanticOrder(t *testing.T) {
 	}
 }
 
+func TestRenderPlanSupportsEveryTypedRequestFieldShape(t *testing.T) {
+	t.Parallel()
+
+	sourceID := planCapabilityID(t, "order.typed-create/v1")
+	targetID := planCapabilityID(t, "policy.typed-check/v1")
+	plan := prepareCallPlanForSchemas(t, typedOrderSchema, typedPolicySchema, sourceID, targetID, generation.Contribution{
+		ID:        "policy.typed",
+		Namespace: "policy",
+		Source:    sourceID,
+		Point:     generation.GenerationPointInvocationPrepare,
+		Nodes: []generation.GeneratedNode{{
+			ID: "check",
+			CapabilityCall: &generation.GeneratedCapabilityCall{
+				Capability: targetID,
+				Request: []generation.GeneratedFieldBinding{
+					{Field: "name", Value: planInvocationValue(generation.GeneratedInvocationRequestField, "name")},
+					{Field: "optional_name", Value: planInvocationValue(generation.GeneratedInvocationRequestField, "name")},
+					{Field: "optional_note", Value: planInvocationValue(generation.GeneratedInvocationRequestField, "note")},
+					{Field: "ratio", Value: planInvocationValue(generation.GeneratedInvocationRequestField, "attempts")},
+					{Field: "active", Value: planInvocationValue(generation.GeneratedInvocationRequestField, "active")},
+					{Field: "labels", Value: planInvocationValue(generation.GeneratedInvocationRequestField, "labels")},
+					{Field: "attributes", Value: planInvocationValue(generation.GeneratedInvocationRequestField, "attributes")},
+					{Field: "mode", Value: planInvocationValue(generation.GeneratedInvocationRequestField, "mode")},
+					{Field: "optional_literal", Value: generation.BooleanValue(true)},
+				},
+				TimeoutMilliseconds: 80,
+				OnError:             generation.GeneratedCallFailClosed,
+			},
+		}},
+	})
+	file, err := invocationgen.RenderPlan(testModulePath, []byte(typedOrderSchema), plan)
+	if err != nil {
+		t.Fatalf("RenderPlan: %v", err)
+	}
+	source := string(file.Data())
+	for _, want := range []string{
+		"Name:            string(request.Name)",
+		"OptionalName:    plystraPointer(string(request.Name))",
+		"OptionalNote:    plystraConvertOptional(request.Note",
+		"Ratio:           float64(request.Attempts)",
+		"Active:          bool(request.Active)",
+		"Labels:          []string(request.Labels)",
+		"Attributes:      map[string]any(request.Attributes)",
+		"Mode:            policytypedcheckv1contract.RequestMode(request.Mode)",
+		"OptionalLiteral: plystraPointer(bool(true))",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("generated typed binding source omits %q:\n%s", want, source)
+		}
+	}
+	assertGeneratedTypedRequestBindingsRun(t, file)
+
+	repeated, err := invocationgen.RenderPlan(testModulePath, []byte(typedOrderSchema), plan)
+	if err != nil || !bytes.Equal(repeated.Data(), file.Data()) {
+		t.Fatalf("repeated RenderPlan = %#v, %v", repeated, err)
+	}
+}
+
 func TestRenderPlanRejectsUnsupportedOrUnsafeCalls(t *testing.T) {
 	t.Parallel()
 
@@ -136,20 +226,16 @@ func TestRenderPlanRejectsUnsupportedOrUnsafeCalls(t *testing.T) {
 			want: []string{"policy.capture", "check", "fail-closed"},
 		},
 		{
-			name: "invocation value binding",
+			name: "adapter credential binding",
 			contribution: generation.Contribution{
 				ID: "policy.request", Namespace: "policy", Source: planCapabilityID(t, "order.create/v1"), Point: generation.GenerationPointInvocationPrepare,
 				Nodes: []generation.GeneratedNode{{ID: "check", CapabilityCall: &generation.GeneratedCapabilityCall{
-					Capability: planCapabilityID(t, "policy.check/v1"),
-					Request: []generation.GeneratedFieldBinding{
-						{Field: "permission", Value: planInvocationValue(generation.GeneratedInvocationRequestField, "order_id")},
-						{Field: "retry_count", Value: generation.IntegerValue(2)},
-						{Field: "enforce", Value: generation.BooleanValue(true)},
-					},
+					Capability:          planCapabilityID(t, "policy.check/v1"),
+					Request:             append(policyLiteralBindings(), generation.GeneratedFieldBinding{Field: "credential", Value: planInvocationValue(generation.GeneratedInvocationAdapterCredential, "authorization")}),
 					TimeoutMilliseconds: 50, OnError: generation.GeneratedCallFailClosed,
 				}}},
 			},
-			want: []string{"policy.request", "permission", "not yet renderable"},
+			want: []string{"policy.request", "credential", "adapter-credential", "not renderable"},
 		},
 		{
 			name: "complete point",
@@ -210,18 +296,49 @@ func prepareCallPlan(t *testing.T, contribution generation.Contribution) generat
 
 func prepareOrderedCallPlan(t *testing.T, contributions []generation.Contribution) generationlowering.Plan {
 	t.Helper()
-	order := planCanonicalContract(t, orderCreateSchema)
-	policy := planCanonicalContract(t, policyCheckSchema)
+	return prepareOrderedCallPlanForSchemas(
+		t,
+		orderCreateSchema,
+		policyCheckSchema,
+		planCapabilityID(t, "order.create/v1"),
+		planCapabilityID(t, "policy.check/v1"),
+		contributions,
+	)
+}
+
+func prepareCallPlanForSchemas(
+	t *testing.T,
+	sourceSchema string,
+	targetSchema string,
+	sourceID generation.CapabilityID,
+	targetID generation.CapabilityID,
+	contribution generation.Contribution,
+) generationlowering.Plan {
+	t.Helper()
+	return prepareOrderedCallPlanForSchemas(t, sourceSchema, targetSchema, sourceID, targetID, []generation.Contribution{contribution})
+}
+
+func prepareOrderedCallPlanForSchemas(
+	t *testing.T,
+	sourceSchema string,
+	targetSchema string,
+	sourceID generation.CapabilityID,
+	targetID generation.CapabilityID,
+	contributions []generation.Contribution,
+) generationlowering.Plan {
+	t.Helper()
+	sourceContract := planCanonicalContract(t, sourceSchema)
+	targetContract := planCanonicalContract(t, targetSchema)
 	context, err := generation.NewContext(generation.Input{
 		Plugins: []generation.PluginInput{
-			{ID: "example.orders", ModulePath: testModulePath, Provides: []string{"order.create/v1"}, BuildMetadataJSON: []byte("{}")},
-			{ID: "example.policy", ModulePath: testModulePath, Provides: []string{"policy.check/v1"}, BuildMetadataJSON: []byte("{}")},
+			{ID: "example.source", ModulePath: testModulePath, Provides: []string{sourceID.String()}, BuildMetadataJSON: []byte("{}")},
+			{ID: "example.target", ModulePath: testModulePath, Provides: []string{targetID.String()}, BuildMetadataJSON: []byte("{}")},
 		},
-		Capabilities: []generation.CapabilityInput{{ContractJSON: order}, {ContractJSON: policy}},
-		Requirements: []string{"order.create/v1", "policy.check/v1"},
+		Capabilities: []generation.CapabilityInput{{ContractJSON: sourceContract}, {ContractJSON: targetContract}},
+		Requirements: []string{sourceID.String(), targetID.String()},
 		Providers: []generation.ProviderInput{
-			{Capability: "order.create/v1", Plugin: "example.orders"},
-			{Capability: "policy.check/v1", Plugin: "example.policy"},
+			{Capability: sourceID.String(), Plugin: "example.source"},
+			{Capability: targetID.String(), Plugin: "example.target"},
 		},
 	})
 	if err != nil {
@@ -311,6 +428,178 @@ func assertGeneratedPrepareInvocationRuns(t testing.TB, sourceInvocation invocat
 	} {
 		writeGeneratedFile(t, root, file.path, file.data)
 	}
+	writeInvocationTestKernel(t, root)
+	writeGeneratedFile(t, root, "generated/go/invocation/order/create/v1/invocation_gen_test.go", []byte(`package ordercreatev1_test
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"testing"
+	"time"
+
+	policyclient "example.com/acme/project/generated/go/clients/policy/check/v1"
+	ordercontract "example.com/acme/project/generated/go/contracts/order/create/v1"
+	policycontract "example.com/acme/project/generated/go/contracts/policy/check/v1"
+	orderinvocation "example.com/acme/project/generated/go/invocation/order/create/v1"
+	policyinvocation "example.com/acme/project/generated/go/invocation/policy/check/v1"
+	kernelinvocation "github.com/plystra/kernel/invocation"
+)
+
+func TestPrepareCallRunsBeforeCanonicalDispatchAndFailsClosed(t *testing.T) {
+	sequence := []string{}
+	failPolicy := false
+	policyTarget := kernelinvocation.NewTestHandle(true, func(ctx context.Context, request policycontract.Request) (policycontract.Response, error) {
+		sequence = append(sequence, "policy:"+request.Permission)
+		deadline, ok := ctx.Deadline()
+		remaining := time.Until(deadline)
+		if !ok || remaining <= 0 || remaining > 100*time.Millisecond {
+			t.Fatalf("policy deadline = %v, %t, remaining %v", deadline, ok, remaining)
+		}
+		if request.Permission == "" || request.RetryCount != 2 || !request.Enforce {
+			t.Fatalf("policy request = %#v", request)
+		}
+		if failPolicy {
+			return policycontract.Response{}, errors.New("policy unavailable")
+		}
+		return policycontract.Response{Allowed: true}, nil
+	})
+	orderTarget := kernelinvocation.NewTestHandle(true, func(_ context.Context, request ordercontract.Request) (ordercontract.Response, error) {
+		sequence = append(sequence, "order:"+request.OrderID)
+		return ordercontract.Response{Accepted: true}, nil
+	})
+	policy := policyclient.New(policyinvocation.New(policyTarget))
+	handle := orderinvocation.New(orderTarget, policy)
+	response, err := handle.Invoke(context.Background(), ordercontract.Request{OrderID: "one"})
+	if err != nil || !response.Accepted || !slices.Equal(sequence, []string{"policy:one", "order:one"}) {
+		t.Fatalf("Invoke = %#v, %v, sequence %v", response, err, sequence)
+	}
+
+	failPolicy = true
+	sequence = nil
+	response, err = handle.Invoke(context.Background(), ordercontract.Request{OrderID: "two"})
+	if err == nil || response.Accepted || !slices.Equal(sequence, []string{"policy:two"}) {
+		t.Fatalf("failed Invoke = %#v, %v, sequence %v", response, err, sequence)
+	}
+	sequence = nil
+	if _, err := handle.Invoke(nil, ordercontract.Request{OrderID: "three"}); err == nil || len(sequence) != 0 {
+		t.Fatalf("nil-context Invoke = %v, sequence %v", err, sequence)
+	}
+}
+`))
+	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\n\nreplace github.com/plystra/kernel => ./kernel\n"))
+	runGeneratedGoTests(t, root)
+}
+
+func assertGeneratedTypedRequestBindingsRun(t testing.TB, sourceInvocation invocationgen.File) {
+	t.Helper()
+	root := t.TempDir()
+	sourceContract, err := contractgen.Render([]byte(typedOrderSchema))
+	if err != nil {
+		t.Fatalf("Render(typed source contract): %v", err)
+	}
+	targetContract, err := contractgen.Render([]byte(typedPolicySchema))
+	if err != nil {
+		t.Fatalf("Render(typed target contract): %v", err)
+	}
+	targetInvocation, err := invocationgen.Render(testModulePath, []byte(typedPolicySchema))
+	if err != nil {
+		t.Fatalf("Render(typed target invocation): %v", err)
+	}
+	targetClient, err := clientgen.Render(testModulePath, []byte(typedPolicySchema))
+	if err != nil {
+		t.Fatalf("Render(typed target client): %v", err)
+	}
+	for _, file := range []struct {
+		path string
+		data []byte
+	}{
+		{sourceContract.Path(), sourceContract.Data()},
+		{targetContract.Path(), targetContract.Data()},
+		{targetInvocation.Path(), targetInvocation.Data()},
+		{targetClient.Path(), targetClient.Data()},
+		{sourceInvocation.Path(), sourceInvocation.Data()},
+	} {
+		writeGeneratedFile(t, root, file.path, file.data)
+	}
+	writeInvocationTestKernel(t, root)
+	writeGeneratedFile(t, root, "generated/go/invocation/order/typed-create/v1/invocation_gen_test.go", []byte(`package ordertypedcreatev1_test
+
+import (
+	"context"
+	"reflect"
+	"slices"
+	"testing"
+
+	policyclient "example.com/acme/project/generated/go/clients/policy/typed-check/v1"
+	ordercontract "example.com/acme/project/generated/go/contracts/order/typed-create/v1"
+	policycontract "example.com/acme/project/generated/go/contracts/policy/typed-check/v1"
+	orderinvocation "example.com/acme/project/generated/go/invocation/order/typed-create/v1"
+	policyinvocation "example.com/acme/project/generated/go/invocation/policy/typed-check/v1"
+	kernelinvocation "github.com/plystra/kernel/invocation"
+)
+
+func TestTypedBindingsPreserveValuesAndAbsence(t *testing.T) {
+	policyCalls := 0
+	sawPresentNote := false
+	sawAbsentNote := false
+	policyTarget := kernelinvocation.NewTestHandle(true, func(_ context.Context, request policycontract.Request) (policycontract.Response, error) {
+		policyCalls++
+		if request.Name != "alpha" || request.OptionalName == nil || *request.OptionalName != "alpha" || request.Ratio != 3 || !request.Active {
+			t.Fatalf("scalar request = %#v", request)
+		}
+		if !slices.Equal(request.Labels, []string{"one", "two"}) || !reflect.DeepEqual(request.Attributes, map[string]any{"source": "test"}) {
+			t.Fatalf("collection request = %#v", request)
+		}
+		if string(request.Mode) != "fast" || request.OptionalLiteral == nil || !*request.OptionalLiteral {
+			t.Fatalf("enum or literal request = %#v", request)
+		}
+		if request.OptionalNote == nil {
+			sawAbsentNote = true
+		} else if *request.OptionalNote == "memo" {
+			sawPresentNote = true
+		} else {
+			t.Fatalf("optional note = %#v", request.OptionalNote)
+		}
+		return policycontract.Response{Allowed: true}, nil
+	})
+	dispatches := 0
+	orderTarget := kernelinvocation.NewTestHandle(true, func(_ context.Context, request ordercontract.Request) (ordercontract.Response, error) {
+		dispatches++
+		return ordercontract.Response{Accepted: request.Name == "alpha"}, nil
+	})
+	policy := policyclient.New(policyinvocation.New(policyTarget))
+	handle := orderinvocation.New(orderTarget, policy)
+	note := "memo"
+	request := ordercontract.Request{
+		Name:       "alpha",
+		Note:       &note,
+		Attempts:   3,
+		Active:     true,
+		Labels:     []string{"one", "two"},
+		Attributes: map[string]any{"source": "test"},
+		Mode:       ordercontract.RequestModeFast,
+	}
+	response, err := handle.Invoke(context.Background(), request)
+	if err != nil || !response.Accepted {
+		t.Fatalf("Invoke(present) = %#v, %v", response, err)
+	}
+	request.Note = nil
+	response, err = handle.Invoke(context.Background(), request)
+	if err != nil || !response.Accepted {
+		t.Fatalf("Invoke(absent) = %#v, %v", response, err)
+	}
+	if policyCalls != 2 || dispatches != 2 || !sawPresentNote || !sawAbsentNote {
+		t.Fatalf("calls = policy %d dispatch %d, notes present=%t absent=%t", policyCalls, dispatches, sawPresentNote, sawAbsentNote)
+	}
+}
+`))
+	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\n\nreplace github.com/plystra/kernel => ./kernel\n"))
+	runGeneratedGoTests(t, root)
+}
+
+func writeInvocationTestKernel(t testing.TB, root string) {
+	t.Helper()
 	writeGeneratedFile(t, root, "kernel/go.mod", []byte("module github.com/plystra/kernel\n\ngo 1.26\n"))
 	writeGeneratedFile(t, root, "kernel/invocation/handle.go", []byte(`package invocation
 
@@ -335,70 +624,15 @@ func (h Handle[Request, Response]) Invoke(ctx context.Context, request Request) 
 	return h.invoke(ctx, request)
 }
 `))
-	writeGeneratedFile(t, root, "generated/go/invocation/order/create/v1/invocation_gen_test.go", []byte(`package ordercreatev1_test
-
-import (
-	"context"
-	"errors"
-	"slices"
-	"testing"
-	"time"
-
-	policyclient "example.com/acme/project/generated/go/clients/policy/check/v1"
-	ordercontract "example.com/acme/project/generated/go/contracts/order/create/v1"
-	policycontract "example.com/acme/project/generated/go/contracts/policy/check/v1"
-	orderinvocation "example.com/acme/project/generated/go/invocation/order/create/v1"
-	policyinvocation "example.com/acme/project/generated/go/invocation/policy/check/v1"
-	kernelinvocation "github.com/plystra/kernel/invocation"
-)
-
-func TestPrepareCallRunsBeforeCanonicalDispatchAndFailsClosed(t *testing.T) {
-	sequence := []string{}
-	failPolicy := false
-	policyTarget := kernelinvocation.NewTestHandle(true, func(ctx context.Context, request policycontract.Request) (policycontract.Response, error) {
-		sequence = append(sequence, "policy")
-		deadline, ok := ctx.Deadline()
-		remaining := time.Until(deadline)
-		if !ok || remaining <= 0 || remaining > 100*time.Millisecond {
-			t.Fatalf("policy deadline = %v, %t, remaining %v", deadline, ok, remaining)
-		}
-		if request.Permission != "order.create" || request.RetryCount != 2 || !request.Enforce {
-			t.Fatalf("policy request = %#v", request)
-		}
-		if failPolicy {
-			return policycontract.Response{}, errors.New("policy unavailable")
-		}
-		return policycontract.Response{Allowed: true}, nil
-	})
-	orderTarget := kernelinvocation.NewTestHandle(true, func(_ context.Context, request ordercontract.Request) (ordercontract.Response, error) {
-		sequence = append(sequence, "order:"+request.OrderID)
-		return ordercontract.Response{Accepted: true}, nil
-	})
-	policy := policyclient.New(policyinvocation.New(policyTarget))
-	handle := orderinvocation.New(orderTarget, policy)
-	response, err := handle.Invoke(context.Background(), ordercontract.Request{OrderID: "one"})
-	if err != nil || !response.Accepted || !slices.Equal(sequence, []string{"policy", "order:one"}) {
-		t.Fatalf("Invoke = %#v, %v, sequence %v", response, err, sequence)
-	}
-
-	failPolicy = true
-	sequence = nil
-	response, err = handle.Invoke(context.Background(), ordercontract.Request{OrderID: "two"})
-	if err == nil || response.Accepted || !slices.Equal(sequence, []string{"policy"}) {
-		t.Fatalf("failed Invoke = %#v, %v, sequence %v", response, err, sequence)
-	}
-	sequence = nil
-	if _, err := handle.Invoke(nil, ordercontract.Request{OrderID: "three"}); err == nil || len(sequence) != 0 {
-		t.Fatalf("nil-context Invoke = %v, sequence %v", err, sequence)
-	}
 }
-`))
-	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\n\nreplace github.com/plystra/kernel => ./kernel\n"))
+
+func runGeneratedGoTests(t testing.TB, root string) {
+	t.Helper()
 	command := exec.CommandContext(t.Context(), "go", "test", "-count=1", "./...")
 	command.Dir = root
 	command.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=readonly")
 	output, err := command.CombinedOutput()
 	if err != nil {
-		t.Fatalf("run generated prepare invocation: %v\n%s", err, output)
+		t.Fatalf("run generated invocation tests: %v\n%s", err, output)
 	}
 }

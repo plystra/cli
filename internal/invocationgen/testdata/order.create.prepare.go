@@ -42,9 +42,9 @@ func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.
 		75*time.Millisecond,
 		h.policycheckv1Client.Check,
 		policycheckv1contract.Request{
-			Enforce:    true,
-			Permission: "order.create",
-			RetryCount: 2,
+			Enforce:    bool(true),
+			Permission: string(request.OrderID),
+			RetryCount: int64(2),
 		},
 	)
 	if plystraPolicyRequireCreateCheckError != nil {
