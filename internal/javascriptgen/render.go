@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/sdkmodel"
 )
 
@@ -43,12 +44,17 @@ func (f File) Path() string { return f.path }
 func (f File) Data() []byte { return append([]byte(nil), f.data...) }
 
 type renderedOperation struct {
-	operation sdkmodel.Operation
-	segments  []string
-	version   string
-	symbol    string
-	source    string
+	id         generation.CapabilityID
+	target     generation.CapabilityID
+	operation  sdkmodel.Operation
+	deprecated string
+	segments   []string
+	version    string
+	symbol     string
+	source     string
 }
+
+func (o renderedOperation) isAlias() bool { return o.id != o.target }
 
 type clientNode struct {
 	children  map[string]*clientNode
@@ -66,7 +72,7 @@ func Render(options Options, model sdkmodel.Model) ([]File, error) {
 	if len(canonical) == 0 || model.Digest() != digest(canonical) {
 		return nil, fmt.Errorf("%w: SDK model is absent or has an invalid digest", ErrRender)
 	}
-	operations, err := prepareOperations(model.Operations())
+	operations, err := prepareOperations(model.Operations(), model.Aliases())
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +90,12 @@ func Render(options Options, model sdkmodel.Model) ([]File, error) {
 		newFile(path.Join(generatedRoot, "README.md"), renderREADME(options.PackageName, operations)),
 	)
 	for _, operation := range operations {
-		source, err := renderOperation(operation)
+		var source []byte
+		if operation.isAlias() {
+			source, err = renderAliasOperation(operation)
+		} else {
+			source, err = renderOperation(operation)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -101,12 +112,27 @@ func Render(options Options, model sdkmodel.Model) ([]File, error) {
 	return files, nil
 }
 
-func prepareOperations(values []sdkmodel.Operation) ([]renderedOperation, error) {
-	operations := make([]renderedOperation, len(values))
-	baseCounts := make(map[string]int, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for index, operation := range values {
-		id := operation.ID()
+func prepareOperations(values []sdkmodel.Operation, aliases []sdkmodel.Alias) ([]renderedOperation, error) {
+	operations := make([]renderedOperation, 0, len(values)+len(aliases))
+	for _, operation := range values {
+		operations = append(operations, renderedOperation{
+			id:        operation.ID(),
+			target:    operation.ID(),
+			operation: operation,
+		})
+	}
+	for _, alias := range aliases {
+		operations = append(operations, renderedOperation{
+			id:         alias.ID(),
+			target:     alias.Target(),
+			operation:  alias.TargetOperation(),
+			deprecated: alias.Deprecated(),
+		})
+	}
+	baseCounts := make(map[string]int, len(operations))
+	seen := make(map[string]struct{}, len(operations))
+	for index := range operations {
+		id := operations[index].id
 		if id.String() == "" {
 			return nil, fmt.Errorf("%w: operations[%d] has an empty Capability ID", ErrRender, index)
 		}
@@ -120,20 +146,17 @@ func prepareOperations(values []sdkmodel.Operation) ([]renderedOperation, error)
 		baseCounts[symbol]++
 		sourceComponents := append([]string{"src", "operations"}, segments...)
 		sourceComponents = append(sourceComponents, version+".ts")
-		operations[index] = renderedOperation{
-			operation: operation,
-			segments:  segments,
-			version:   version,
-			symbol:    symbol,
-			source:    path.Join(sourceComponents...),
-		}
+		operations[index].segments = segments
+		operations[index].version = version
+		operations[index].symbol = symbol
+		operations[index].source = path.Join(sourceComponents...)
 	}
 	sort.Slice(operations, func(left, right int) bool {
-		return operations[left].operation.ID().String() < operations[right].operation.ID().String()
+		return operations[left].id.String() < operations[right].id.String()
 	})
 	for index := range operations {
 		if baseCounts[operations[index].symbol] > 1 {
-			operations[index].symbol += "_" + hex.EncodeToString([]byte(operations[index].operation.ID().String()))
+			operations[index].symbol += "_" + hex.EncodeToString([]byte(operations[index].id.String()))
 		}
 	}
 	return operations, nil
@@ -258,6 +281,10 @@ func renderOperation(operation renderedOperation) ([]byte, error) {
 	fmt.Fprintln(&source, ") => Promise<Response>;")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "export function bindOperation(runtime: Runtime): Operation {")
+	fmt.Fprintln(&source, "  return bindOperationRoute(runtime, routePath);")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "export function bindOperationRoute(runtime: Runtime, operationRoutePath: string): Operation {")
 	fmt.Fprintln(&source, "  return async (request, options = {}) => {")
 	fmt.Fprintln(&source, "    let requestIsValid = false;")
 	fmt.Fprintln(&source, "    try {")
@@ -268,7 +295,7 @@ func renderOperation(operation renderedOperation) ([]byte, error) {
 	fmt.Fprintln(&source, "    if (!requestIsValid) {")
 	fmt.Fprintf(&source, "      throw new TypeError(%s);\n", jsString("request does not match "+operation.operation.ID().String()))
 	fmt.Fprintln(&source, "    }")
-	fmt.Fprintln(&source, "    const response = await invoke(runtime, routePath, request, options);")
+	fmt.Fprintln(&source, "    const response = await invoke(runtime, operationRoutePath, request, options);")
 	fmt.Fprintln(&source, "    if (!isResponse(response)) {")
 	fmt.Fprintln(&source, "      throw new PlystraError(200, \"invalid_response\");")
 	fmt.Fprintln(&source, "    }")
@@ -276,6 +303,40 @@ func renderOperation(operation renderedOperation) ([]byte, error) {
 	fmt.Fprintln(&source, "  };")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "export function createOperation(options: ClientOptions): Operation {")
+	fmt.Fprintln(&source, "  return bindOperation(createRuntime(options));")
+	fmt.Fprintln(&source, "}")
+	return []byte(source.String()), nil
+}
+
+func renderAliasOperation(alias renderedOperation) ([]byte, error) {
+	if !alias.isAlias() || alias.operation.ID() != alias.target || alias.operation.ContractDigest() == "" {
+		return nil, fmt.Errorf("%w: Alias %s does not name one complete canonical target", ErrRender, alias.id)
+	}
+	rootPrefix := strings.Repeat("../", len(alias.segments)+1)
+	targetComponents := append([]string{"operations"}, strings.Split(alias.target.Name(), ".")...)
+	targetComponents = append(targetComponents, "v"+strconv.FormatUint(alias.target.Major(), 10)+".js")
+	targetImport := rootPrefix + path.Join(targetComponents...)
+	var source strings.Builder
+	fmt.Fprintln(&source, "// Code generated by Plystra CLI. DO NOT EDIT.")
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "import { createRuntime, type ClientOptions, type Runtime } from "+jsString(rootPrefix+"runtime.js")+";")
+	fmt.Fprintln(&source, "import {")
+	fmt.Fprintln(&source, "  bindOperationRoute as bindCanonicalOperationRoute,")
+	fmt.Fprintln(&source, "  type Operation,")
+	fmt.Fprintln(&source, "} from "+jsString(targetImport)+";")
+	fmt.Fprintln(&source, "export type { ErrorCode, Operation, Request, Response } from "+jsString(targetImport)+";")
+	fmt.Fprintln(&source)
+	fmt.Fprintf(&source, "export const capabilityID = %s;\n", jsString(alias.id.String()))
+	fmt.Fprintf(&source, "export const targetCapabilityID = %s;\n", jsString(alias.target.String()))
+	fmt.Fprintf(&source, "export const contractDigest = %s;\n", jsString(alias.operation.ContractDigest()))
+	fmt.Fprintf(&source, "const routePath = %s;\n\n", jsString("api/v1/capabilities/"+alias.id.String()+"/invoke"))
+	renderJSDocDeprecation(&source, "", alias.deprecated)
+	fmt.Fprintln(&source, "export function bindOperation(runtime: Runtime): Operation {")
+	fmt.Fprintln(&source, "  return bindCanonicalOperationRoute(runtime, routePath);")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source)
+	renderJSDocDeprecation(&source, "", alias.deprecated)
 	fmt.Fprintln(&source, "export function createOperation(options: ClientOptions): Operation {")
 	fmt.Fprintln(&source, "  return bindOperation(createRuntime(options));")
 	fmt.Fprintln(&source, "}")
@@ -358,7 +419,11 @@ func renderIndex(operations []renderedOperation) ([]byte, error) {
 		importPath := indexImportPath(operation)
 		fmt.Fprintln(&source, "import {")
 		fmt.Fprintf(&source, "  bindOperation as bind%s,\n", operation.symbol)
-		fmt.Fprintf(&source, "  createOperation as create%s,\n", operation.symbol)
+		if operation.isAlias() {
+			fmt.Fprintf(&source, "  createOperation as create%sOperation,\n", operation.symbol)
+		} else {
+			fmt.Fprintf(&source, "  createOperation as create%s,\n", operation.symbol)
+		}
 		fmt.Fprintf(&source, "  type Operation as %sOperation,\n", operation.symbol)
 		fmt.Fprintf(&source, "} from %s;\n", jsString(importPath))
 	}
@@ -367,7 +432,12 @@ func renderIndex(operations []renderedOperation) ([]byte, error) {
 	fmt.Fprintln(&source, "export type { ClientOptions, JSONValue, RequestOptions } from \"./runtime.js\";")
 	for _, operation := range operations {
 		importPath := indexImportPath(operation)
-		fmt.Fprintf(&source, "export { create%s };\n", operation.symbol)
+		if operation.isAlias() {
+			renderJSDocDeprecation(&source, "", operation.deprecated)
+			fmt.Fprintf(&source, "export const create%s = create%sOperation;\n", operation.symbol, operation.symbol)
+		} else {
+			fmt.Fprintf(&source, "export { create%s };\n", operation.symbol)
+		}
 		fmt.Fprintln(&source, "export type {")
 		fmt.Fprintf(&source, "  ErrorCode as %sErrorCode,\n", operation.symbol)
 		fmt.Fprintf(&source, "  Request as %sRequest,\n", operation.symbol)
@@ -411,7 +481,7 @@ func buildClientTree(operations []renderedOperation) (*clientNode, error) {
 			node = child
 		}
 		if node.operation != nil {
-			return nil, fmt.Errorf("%w: client path collision for %s and %s", ErrRender, node.operation.operation.ID(), operation.operation.ID())
+			return nil, fmt.Errorf("%w: client path collision for %s and %s", ErrRender, node.operation.id, operation.id)
 		}
 		node.operation = operation
 	}
@@ -428,8 +498,12 @@ func renderNodeType(source *strings.Builder, node *clientNode, indent string) {
 	if node.operation == nil || len(node.children) != 0 {
 		fmt.Fprintln(source, "{")
 		for _, name := range sortedChildNames(node) {
+			child := node.children[name]
+			if child.operation != nil {
+				renderJSDocDeprecation(source, indent+"  ", child.operation.deprecated)
+			}
 			fmt.Fprintf(source, "%s  readonly %s: ", indent, jsString(name))
-			renderNodeType(source, node.children[name], indent+"  ")
+			renderNodeType(source, child, indent+"  ")
 			fmt.Fprintln(source, ";")
 		}
 		fmt.Fprintf(source, "%s}", indent)
@@ -485,6 +559,12 @@ func renderREADME(packageName string, operations []renderedOperation) []byte {
 		return []byte(readme.String())
 	}
 	first := operations[0]
+	for _, operation := range operations {
+		if !operation.isAlias() {
+			first = operation
+			break
+		}
+	}
 	fmt.Fprintln(&readme, "## Usage")
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "```ts")
@@ -498,12 +578,35 @@ func renderREADME(packageName string, operations []renderedOperation) []byte {
 	fmt.Fprintf(&readme, "const response = await client%s(%s);\n", clientAccessor(first), request)
 	fmt.Fprintln(&readme, "```")
 	fmt.Fprintln(&readme)
-	fmt.Fprintln(&readme, "Only explicitly exposed canonical operations are generated. Requests use strict JSON over the matching generated HTTP transport; provider packages, server configuration, verified internal context, and Secret values are never included.")
+	fmt.Fprintln(&readme, "Only explicitly exposed canonical operations and validated application-local Alias surfaces are generated. Alias methods reuse their direct canonical target contract and invoke the matching generated Alias HTTP route. Provider packages, server configuration, verified internal context, and Secret values are never included.")
 	fmt.Fprintln(&readme)
-	fmt.Fprintln(&readme, "## Operations")
+	fmt.Fprintln(&readme, "## Canonical operations")
 	fmt.Fprintln(&readme)
 	for _, operation := range operations {
-		fmt.Fprintf(&readme, "- `%s` (`%s`)\n", operation.operation.ID(), operation.operation.ContractDigest())
+		if !operation.isAlias() {
+			fmt.Fprintf(&readme, "- `%s` (`%s`)\n", operation.id, operation.operation.ContractDigest())
+		}
+	}
+	aliasCount := 0
+	for _, operation := range operations {
+		if operation.isAlias() {
+			aliasCount++
+		}
+	}
+	if aliasCount != 0 {
+		fmt.Fprintln(&readme)
+		fmt.Fprintln(&readme, "## Capability aliases")
+		fmt.Fprintln(&readme)
+		for _, operation := range operations {
+			if !operation.isAlias() {
+				continue
+			}
+			fmt.Fprintf(&readme, "- `%s` -> `%s` (`%s`)", operation.id, operation.target, operation.operation.ContractDigest())
+			if operation.deprecated != "" {
+				fmt.Fprintf(&readme, " - deprecated: %s", jsString(operation.deprecated))
+			}
+			fmt.Fprintln(&readme)
+		}
 	}
 	return []byte(readme.String())
 }
@@ -718,6 +821,26 @@ func javascriptIdentifier(value string) bool {
 		}
 	}
 	return true
+}
+
+func renderJSDocDeprecation(source *strings.Builder, indent, message string) {
+	if message == "" {
+		return
+	}
+	message = strings.ReplaceAll(message, "\r\n", "\n")
+	message = strings.ReplaceAll(message, "\r", "\n")
+	message = strings.ReplaceAll(message, "*/", "*\\/")
+	lines := strings.Split(message, "\n")
+	if len(lines) == 1 {
+		fmt.Fprintf(source, "%s/** @deprecated %s */\n", indent, lines[0])
+		return
+	}
+	fmt.Fprintf(source, "%s/**\n", indent)
+	fmt.Fprintf(source, "%s * @deprecated %s\n", indent, lines[0])
+	for _, line := range lines[1:] {
+		fmt.Fprintf(source, "%s * %s\n", indent, line)
+	}
+	fmt.Fprintf(source, "%s */\n", indent)
 }
 
 func jsString(value string) string {

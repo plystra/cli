@@ -41,6 +41,10 @@ export type Operation = (
 ) => Promise<Response>;
 
 export function bindOperation(runtime: Runtime): Operation {
+  return bindOperationRoute(runtime, routePath);
+}
+
+export function bindOperationRoute(runtime: Runtime, operationRoutePath: string): Operation {
   return async (request, options = {}) => {
     let requestIsValid = false;
     try {
@@ -51,7 +55,7 @@ export function bindOperation(runtime: Runtime): Operation {
     if (!requestIsValid) {
       throw new TypeError("request does not match foo.bar-send/v1");
     }
-    const response = await invoke(runtime, routePath, request, options);
+    const response = await invoke(runtime, operationRoutePath, request, options);
     if (!isResponse(response)) {
       throw new PlystraError(200, "invalid_response");
     }

@@ -106,6 +106,8 @@ Explicitly JavaScript-exposed canonical Capabilities lower into one immutable pr
 
 The generated browser transport uses the matching strict HTTP route, preserves an application base-path prefix, bounds JSON to 1 MiB, accepts an optional access-token callback and `AbortSignal`, and exposes only stable error status/code/detail fields. It validates exact fields, enums, finite numbers, safe integers, plain JSON objects, response media types, and unexpected response data. Credentials are attached only as one bounded `Authorization` header and callback, network, cancellation, malformed-response, and schema failures are normalized without copying provider text.
 
+Every final Alias whose normalized exposure includes JavaScript generates a nested method and tree-shakable factory under its Alias ID. The Alias module imports the canonical target's exact request, response, semantic errors, validators, and contract digest, then changes only the HTTP route identity so the generated Alias handler forwards into the canonical application invocation path. Several aliases may reuse one target without copying its schema or provider details. Alias exposure cannot broaden the target, and compatibility aliases emit native TypeScript `@deprecated` declarations without deprecating the target.
+
 ## Method-specific login surfaces
 
 Authentication methods use real contracts such as:

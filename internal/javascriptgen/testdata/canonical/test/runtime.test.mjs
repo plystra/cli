@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   PlystraError,
+  createCompatSendV1,
   createEmailSendV1,
+  createMailDeliverV1,
   createPlystraClient,
 } from "@acme/project-sdk";
 
@@ -82,6 +84,41 @@ test("tree-shakable operation factory uses the same canonical transport", async 
     requested,
     "https://api.example.test/api/v1/capabilities/email.send/v1/invoke",
   );
+});
+
+test("multiple aliases reuse the canonical contract over their generated routes", async () => {
+  const paths = [];
+  const options = {
+    baseUrl: "https://api.example.test/root",
+    fetch: async (input) => {
+      paths.push(input.pathname);
+      return jsonResponse({ accepted: true });
+    },
+  };
+  const client = createPlystraClient(options);
+  const request = {
+    to: "person@example.com",
+    tags: ["alias"],
+    priority: "normal",
+  };
+
+  assert.deepEqual(await client.compat.send.v1(request), { accepted: true });
+  assert.deepEqual(await client.mail.deliver.v1(request), { accepted: true });
+  assert.deepEqual(await createCompatSendV1(options)(request), {
+    accepted: true,
+  });
+  assert.deepEqual(await createMailDeliverV1(options)(request), {
+    accepted: true,
+  });
+  assert.deepEqual(paths, [
+    "/root/api/v1/capabilities/compat.send/v1/invoke",
+    "/root/api/v1/capabilities/mail.deliver/v1/invoke",
+    "/root/api/v1/capabilities/compat.send/v1/invoke",
+    "/root/api/v1/capabilities/mail.deliver/v1/invoke",
+  ]);
+
+  await assert.rejects(() => client.compat.send.v1({}), TypeError);
+  assert.equal(paths.length, 4);
 });
 
 test("request validation rejects malformed, unsafe, and unknown values before fetch", async () => {

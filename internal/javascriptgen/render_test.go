@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilitymeta"
@@ -39,14 +40,20 @@ extensions:
 func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 	t.Parallel()
 
-	model := javascriptModel(t,
-		javascriptTarget(t, javascriptEmailSchema),
+	email := javascriptTarget(t, javascriptEmailSchema)
+	targets := []javascriptTargetView{
+		email,
 		javascriptTarget(t, "id: account.profile.get/v2\n"),
 		javascriptTarget(t, "id: alpha.beta/v1\n"),
 		javascriptTarget(t, "id: alpha.beta.v1.check/v1\n"),
 		javascriptTarget(t, "id: foo-bar.send/v1\n"),
 		javascriptTarget(t, "id: foo.bar-send/v1\n"),
-	)
+	}
+	model := javascriptModelWithAliases(t, targets, []javascriptAliasView{
+		javascriptAlias(t, "mail.deliver/v1", email, "Use email.send/v1 instead."),
+		javascriptAlias(t, "compat.send/v1", email, ""),
+		javascriptHiddenAlias(t, "internal.send/v1", email),
+	})
 	files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "@acme/project-sdk"}, model)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -58,9 +65,11 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		"generated/sdk/javascript/src/operations/account/profile/get/v2.ts",
 		"generated/sdk/javascript/src/operations/alpha/beta/v1.ts",
 		"generated/sdk/javascript/src/operations/alpha/beta/v1/check/v1.ts",
+		"generated/sdk/javascript/src/operations/compat/send/v1.ts",
 		"generated/sdk/javascript/src/operations/email/send/v1.ts",
 		"generated/sdk/javascript/src/operations/foo-bar/send/v1.ts",
 		"generated/sdk/javascript/src/operations/foo/bar-send/v1.ts",
+		"generated/sdk/javascript/src/operations/mail/deliver/v1.ts",
 		"generated/sdk/javascript/src/runtime.ts",
 		"generated/sdk/javascript/tsconfig.json",
 	}
@@ -75,6 +84,10 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		`readonly "v1": EmailSendV1Operation`,
 		`createEmailSendV1`,
 		`api/v1/capabilities/email.send/v1/invoke`,
+		`api/v1/capabilities/compat.send/v1/invoke`,
+		`targetCapabilityID = "email.send/v1"`,
+		`bindOperationRoute as bindCanonicalOperationRoute`,
+		`/** @deprecated Use email.send/v1 instead. */`,
 		`export type ErrorCode = "invalid_recipient" | "temporarily_unavailable";`,
 		`Number.isSafeInteger`,
 		`getAccessToken`,
@@ -103,6 +116,54 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 	files[0] = javascriptgen.File{}
 	if repeated[0].Path() == "" {
 		t.Fatal("Render exposed shared File slice storage")
+	}
+}
+
+func TestRenderJavaScriptAliasesReuseCanonicalOperation(t *testing.T) {
+	t.Parallel()
+
+	email := javascriptTarget(t, javascriptEmailSchema)
+	model := javascriptModelWithAliases(t, []javascriptTargetView{email}, []javascriptAliasView{
+		javascriptAlias(t, "compat.send/v1", email, ""),
+		javascriptAlias(t, "mail.deliver/v1", email, "Use email.send/v1 instead."),
+	})
+	files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "alias-sdk"}, model)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	compat := fileData(t, files, "generated/sdk/javascript/src/operations/compat/send/v1.ts")
+	deprecated := fileData(t, files, "generated/sdk/javascript/src/operations/mail/deliver/v1.ts")
+	index := fileData(t, files, "generated/sdk/javascript/src/index.ts")
+	for _, alias := range [][]byte{compat, deprecated} {
+		for _, required := range []string{
+			`from "../../../operations/email/send/v1.js"`,
+			`bindCanonicalOperationRoute(runtime, routePath)`,
+			`export type { ErrorCode, Operation, Request, Response }`,
+		} {
+			if !bytes.Contains(alias, []byte(required)) {
+				t.Fatalf("Alias operation omits %q:\n%s", required, alias)
+			}
+		}
+		for _, forbidden := range []string{"function isRequest", "function isResponse", "invoke(runtime", "interface Request", "interface Response"} {
+			if bytes.Contains(alias, []byte(forbidden)) {
+				t.Fatalf("Alias operation duplicates canonical concern %q:\n%s", forbidden, alias)
+			}
+		}
+	}
+	if count := bytes.Count(deprecated, []byte("/** @deprecated Use email.send/v1 instead. */")); count != 2 {
+		t.Fatalf("deprecated Alias marker count = %d:\n%s", count, deprecated)
+	}
+	if count := bytes.Count(index, []byte("/** @deprecated Use email.send/v1 instead. */")); count != 2 {
+		t.Fatalf("deprecated index marker count = %d:\n%s", count, index)
+	}
+	for _, required := range []string{
+		`readonly "compat"`,
+		`readonly "mail"`,
+		`export const createMailDeliverV1 = createMailDeliverV1Operation;`,
+	} {
+		if !bytes.Contains(index, []byte(required)) {
+			t.Fatalf("index omits %q:\n%s", required, index)
+		}
 	}
 }
 
@@ -201,10 +262,66 @@ func FuzzRenderCanonicalJavaScriptPackageName(f *testing.F) {
 	})
 }
 
+func FuzzRenderJavaScriptAliasDeprecation(f *testing.F) {
+	for _, seed := range []string{
+		"",
+		"Use email.send/v1 instead.",
+		"First line.\nSecond line.",
+		"close */ comment",
+		"carriage\rreturn",
+		"invalid\x00message",
+		string([]byte{0xff}),
+	} {
+		f.Add(seed)
+	}
+	target := javascriptTarget(f, javascriptEmailSchema)
+	f.Fuzz(func(t *testing.T, deprecated string) {
+		if len(deprecated) > 2048 {
+			return
+		}
+		alias := javascriptAlias(t, "mail.deliver/v1", target, deprecated)
+		model, err := sdkmodel.Build(
+			[]sdkmodel.CanonicalTargetView{target},
+			[]sdkmodel.AliasView{alias},
+		)
+		invalid := len(deprecated) > 1024 || !utf8.ValidString(deprecated) || strings.ContainsRune(deprecated, '\x00')
+		if invalid {
+			if !errors.Is(err, sdkmodel.ErrAlias) {
+				t.Fatalf("Build invalid deprecation error = %v", err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		first, firstErr := javascriptgen.Render(javascriptgen.Options{PackageName: "alias-sdk"}, model)
+		second, secondErr := javascriptgen.Render(javascriptgen.Options{PackageName: "alias-sdk"}, model)
+		if firstErr != nil || secondErr != nil || !equalFiles(first, second) {
+			t.Fatalf("Render Alias is not deterministic: %v then %v", firstErr, secondErr)
+		}
+		generated := fileData(t, first, "generated/sdk/javascript/src/operations/mail/deliver/v1.ts")
+		wantTerminators := 0
+		if deprecated != "" {
+			wantTerminators = 2
+		}
+		if got := bytes.Count(generated, []byte("*/")); got != wantTerminators {
+			t.Fatalf("Alias JSDoc terminators = %d, want %d:\n%s", got, wantTerminators, generated)
+		}
+	})
+}
+
 type javascriptTargetView struct {
 	id       generation.CapabilityID
 	contract []byte
 	digest   string
+}
+
+type javascriptAliasView struct {
+	id         generation.CapabilityID
+	target     generation.CapabilityID
+	digest     string
+	exposure   generation.Exposure
+	deprecated string
 }
 
 func (v javascriptTargetView) ID() generation.CapabilityID { return v.id }
@@ -213,6 +330,12 @@ func (v javascriptTargetView) ContractDigest() string      { return v.digest }
 func (v javascriptTargetView) Exposure() generation.Exposure {
 	return generation.Exposure{HTTP: true, JavaScript: true}
 }
+
+func (v javascriptAliasView) ID() generation.CapabilityID     { return v.id }
+func (v javascriptAliasView) Target() generation.CapabilityID { return v.target }
+func (v javascriptAliasView) TargetContractDigest() string    { return v.digest }
+func (v javascriptAliasView) Exposure() generation.Exposure   { return v.exposure }
+func (v javascriptAliasView) Deprecated() string              { return v.deprecated }
 
 func javascriptTarget(t testing.TB, schema string) javascriptTargetView {
 	t.Helper()
@@ -231,15 +354,54 @@ func javascriptTarget(t testing.TB, schema string) javascriptTargetView {
 	return javascriptTargetView{id: id, contract: canonical, digest: hash(canonical)}
 }
 
+func javascriptAlias(t testing.TB, id string, target javascriptTargetView, deprecated string) javascriptAliasView {
+	t.Helper()
+	return javascriptAliasView{
+		id:         javascriptCapabilityID(t, id),
+		target:     target.id,
+		digest:     target.digest,
+		exposure:   generation.Exposure{HTTP: true, JavaScript: true},
+		deprecated: deprecated,
+	}
+}
+
+func javascriptHiddenAlias(t testing.TB, id string, target javascriptTargetView) javascriptAliasView {
+	t.Helper()
+	return javascriptAliasView{
+		id:       javascriptCapabilityID(t, id),
+		target:   target.id,
+		digest:   target.digest,
+		exposure: generation.Exposure{Go: true},
+	}
+}
+
+func javascriptCapabilityID(t testing.TB, value string) generation.CapabilityID {
+	t.Helper()
+	id, err := generation.ParseCapabilityID(value)
+	if err != nil {
+		t.Fatalf("ParseCapabilityID(%q): %v", value, err)
+	}
+	return id
+}
+
 func javascriptModel(t testing.TB, targets ...javascriptTargetView) sdkmodel.Model {
+	t.Helper()
+	return javascriptModelWithAliases(t, targets, nil)
+}
+
+func javascriptModelWithAliases(t testing.TB, targets []javascriptTargetView, aliases []javascriptAliasView) sdkmodel.Model {
 	t.Helper()
 	views := make([]sdkmodel.CanonicalTargetView, len(targets))
 	for index, target := range targets {
 		views[index] = target
 	}
-	model, err := sdkmodel.BuildCanonical(views)
+	aliasViews := make([]sdkmodel.AliasView, len(aliases))
+	for index, alias := range aliases {
+		aliasViews[index] = alias
+	}
+	model, err := sdkmodel.Build(views, aliasViews)
 	if err != nil {
-		t.Fatalf("BuildCanonical: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
 	return model
 }

@@ -17,6 +17,11 @@ import {
   type Operation as AlphaBetaV1Operation,
 } from "./operations/alpha/beta/v1.js";
 import {
+  bindOperation as bindCompatSendV1,
+  createOperation as createCompatSendV1Operation,
+  type Operation as CompatSendV1Operation,
+} from "./operations/compat/send/v1.js";
+import {
   bindOperation as bindEmailSendV1,
   createOperation as createEmailSendV1,
   type Operation as EmailSendV1Operation,
@@ -31,6 +36,11 @@ import {
   createOperation as createFooBarSendV1_666f6f2e6261722d73656e642f7631,
   type Operation as FooBarSendV1_666f6f2e6261722d73656e642f7631Operation,
 } from "./operations/foo/bar-send/v1.js";
+import {
+  bindOperation as bindMailDeliverV1,
+  createOperation as createMailDeliverV1Operation,
+  type Operation as MailDeliverV1Operation,
+} from "./operations/mail/deliver/v1.js";
 
 export { PlystraError } from "./runtime.js";
 export type { ClientOptions, JSONValue, RequestOptions } from "./runtime.js";
@@ -52,6 +62,12 @@ export type {
   Request as AlphaBetaV1Request,
   Response as AlphaBetaV1Response,
 } from "./operations/alpha/beta/v1.js";
+export const createCompatSendV1 = createCompatSendV1Operation;
+export type {
+  ErrorCode as CompatSendV1ErrorCode,
+  Request as CompatSendV1Request,
+  Response as CompatSendV1Response,
+} from "./operations/compat/send/v1.js";
 export { createEmailSendV1 };
 export type {
   ErrorCode as EmailSendV1ErrorCode,
@@ -70,6 +86,13 @@ export type {
   Request as FooBarSendV1_666f6f2e6261722d73656e642f7631Request,
   Response as FooBarSendV1_666f6f2e6261722d73656e642f7631Response,
 } from "./operations/foo/bar-send/v1.js";
+/** @deprecated Use email.send/v1 instead. */
+export const createMailDeliverV1 = createMailDeliverV1Operation;
+export type {
+  ErrorCode as MailDeliverV1ErrorCode,
+  Request as MailDeliverV1Request,
+  Response as MailDeliverV1Response,
+} from "./operations/mail/deliver/v1.js";
 
 export type PlystraClient = {
   readonly "account": {
@@ -88,6 +111,11 @@ export type PlystraClient = {
       };
     };
   };
+  readonly "compat": {
+    readonly "send": {
+      readonly "v1": CompatSendV1Operation;
+    };
+  };
   readonly "email": {
     readonly "send": {
       readonly "v1": EmailSendV1Operation;
@@ -101,6 +129,12 @@ export type PlystraClient = {
   readonly "foo-bar": {
     readonly "send": {
       readonly "v1": FooBarSendV1_666f6f2d6261722e73656e642f7631Operation;
+    };
+  };
+  readonly "mail": {
+    readonly "deliver": {
+      /** @deprecated Use email.send/v1 instead. */
+      readonly "v1": MailDeliverV1Operation;
     };
   };
 };
@@ -124,6 +158,11 @@ export function createPlystraClient(options: ClientOptions): PlystraClient {
         })),
       }),
     }),
+    "compat": Object.freeze({
+      "send": Object.freeze({
+        "v1": bindCompatSendV1(runtime),
+      }),
+    }),
     "email": Object.freeze({
       "send": Object.freeze({
         "v1": bindEmailSendV1(runtime),
@@ -137,6 +176,11 @@ export function createPlystraClient(options: ClientOptions): PlystraClient {
     "foo-bar": Object.freeze({
       "send": Object.freeze({
         "v1": bindFooBarSendV1_666f6f2d6261722e73656e642f7631(runtime),
+      }),
+    }),
+    "mail": Object.freeze({
+      "deliver": Object.freeze({
+        "v1": bindMailDeliverV1(runtime),
       }),
     }),
   });
