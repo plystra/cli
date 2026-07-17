@@ -108,6 +108,10 @@ The generated browser transport uses the matching strict HTTP route, preserves a
 
 Every final Alias whose normalized exposure includes JavaScript generates a nested method and tree-shakable factory under its Alias ID. The Alias module imports the canonical target's exact request, response, semantic errors, validators, and contract digest, then changes only the HTTP route identity so the generated Alias handler forwards into the canonical application invocation path. Several aliases may reuse one target without copying its schema or provider details. Alias exposure cannot broaden the target, and compatibility aliases emit native TypeScript `@deprecated` declarations without deprecating the target.
 
+## Generated application API documentation
+
+The CLI renders `generated/docs/api.md` and OpenAPI 3.1 JSON at `generated/docs/openapi.json` from the same provider-independent canonical contracts and final Alias map. Both outputs list exact HTTP routes, strict request and response schemas, semantic errors, target contract digests, and direct Alias targets. HTTP-only narrowed aliases remain documented even when excluded from the browser SDK; deprecated aliases are marked without changing or deprecating the canonical target. Operation IDs remain deterministic when distinct Capability names normalize to the same identifier, and provider identities, runtime configuration, verified internal context, and Secret values are excluded.
+
 ## Method-specific login surfaces
 
 Authentication methods use real contracts such as:

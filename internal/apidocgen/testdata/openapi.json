@@ -1,0 +1,546 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Plystra Application API",
+    "version": "0.0.0"
+  },
+  "paths": {
+    "/api/v1/capabilities/account.profile.get/v2/invoke": {
+      "post": {
+        "operationId": "invoke_account_profile_get_v2",
+        "summary": "Invoke account.profile.get/v2",
+        "description": "Invoke the exact canonical Capability contract.",
+        "x-plystra-capability-id": "account.profile.get/v2",
+        "x-plystra-contract-digest": "sha256:b867859b40c593d2fb90992083d56c12b97691e7507b69e117c3de5671f0d036",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful exact Capability response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Stable transport or invocation error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/capabilities/browser.hidden/v1/invoke": {
+      "post": {
+        "operationId": "invoke_browser_hidden_v1",
+        "summary": "Invoke browser.hidden/v1",
+        "description": "Application-local Alias for email.send/v1.",
+        "x-plystra-capability-id": "browser.hidden/v1",
+        "x-plystra-canonical-target": "email.send/v1",
+        "x-plystra-contract-digest": "sha256:836377411dbd56a4b2e7441377ce8e3f093d1e8758677ae44b8062bb69c6a8a5",
+        "x-plystra-semantic-errors": [
+          "invalid_recipient",
+          "temporarily_unavailable"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "normal",
+                      "urgent"
+                    ]
+                  },
+                  "retries": {
+                    "type": "integer",
+                    "enum": [
+                      -1,
+                      0,
+                      2
+                    ]
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "to": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "priority",
+                  "tags",
+                  "to"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful exact Capability response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "boolean"
+                    },
+                    "latency": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "accepted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Stable transport or invocation error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/capabilities/compat.send/v1/invoke": {
+      "post": {
+        "operationId": "invoke_compat_send_v1",
+        "summary": "Invoke compat.send/v1",
+        "description": "Application-local Alias for email.send/v1.",
+        "x-plystra-capability-id": "compat.send/v1",
+        "x-plystra-canonical-target": "email.send/v1",
+        "x-plystra-contract-digest": "sha256:836377411dbd56a4b2e7441377ce8e3f093d1e8758677ae44b8062bb69c6a8a5",
+        "x-plystra-semantic-errors": [
+          "invalid_recipient",
+          "temporarily_unavailable"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "normal",
+                      "urgent"
+                    ]
+                  },
+                  "retries": {
+                    "type": "integer",
+                    "enum": [
+                      -1,
+                      0,
+                      2
+                    ]
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "to": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "priority",
+                  "tags",
+                  "to"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful exact Capability response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "boolean"
+                    },
+                    "latency": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "accepted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Stable transport or invocation error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/capabilities/email.send/v1/invoke": {
+      "post": {
+        "operationId": "invoke_email_send_v1",
+        "summary": "Invoke email.send/v1",
+        "description": "Invoke the exact canonical Capability contract.",
+        "x-plystra-capability-id": "email.send/v1",
+        "x-plystra-contract-digest": "sha256:836377411dbd56a4b2e7441377ce8e3f093d1e8758677ae44b8062bb69c6a8a5",
+        "x-plystra-semantic-errors": [
+          "invalid_recipient",
+          "temporarily_unavailable"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "normal",
+                      "urgent"
+                    ]
+                  },
+                  "retries": {
+                    "type": "integer",
+                    "enum": [
+                      -1,
+                      0,
+                      2
+                    ]
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "to": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "priority",
+                  "tags",
+                  "to"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful exact Capability response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "boolean"
+                    },
+                    "latency": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "accepted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Stable transport or invocation error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/capabilities/foo-bar.send/v1/invoke": {
+      "post": {
+        "operationId": "invoke_foo_bar_send_v1_666f6f2d6261722e73656e642f7631",
+        "summary": "Invoke foo-bar.send/v1",
+        "description": "Invoke the exact canonical Capability contract.",
+        "x-plystra-capability-id": "foo-bar.send/v1",
+        "x-plystra-contract-digest": "sha256:29cf8dc8817a0f702540369a08146a329f4f1d482310112b79871d821d8b9d35",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful exact Capability response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Stable transport or invocation error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/capabilities/foo.bar-send/v1/invoke": {
+      "post": {
+        "operationId": "invoke_foo_bar_send_v1_666f6f2e6261722d73656e642f7631",
+        "summary": "Invoke foo.bar-send/v1",
+        "description": "Invoke the exact canonical Capability contract.",
+        "x-plystra-capability-id": "foo.bar-send/v1",
+        "x-plystra-contract-digest": "sha256:0203205b8651a604925db9af60394d2f3272bd9d5cb969bb87cc6c5594831c4e",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful exact Capability response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Stable transport or invocation error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/capabilities/mail.deliver/v1/invoke": {
+      "post": {
+        "operationId": "invoke_mail_deliver_v1",
+        "summary": "Invoke mail.deliver/v1",
+        "description": "Application-local Alias for email.send/v1. Deprecated: Use email.send/v1 instead.",
+        "deprecated": true,
+        "x-plystra-capability-id": "mail.deliver/v1",
+        "x-plystra-canonical-target": "email.send/v1",
+        "x-plystra-contract-digest": "sha256:836377411dbd56a4b2e7441377ce8e3f093d1e8758677ae44b8062bb69c6a8a5",
+        "x-plystra-semantic-errors": [
+          "invalid_recipient",
+          "temporarily_unavailable"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "normal",
+                      "urgent"
+                    ]
+                  },
+                  "retries": {
+                    "type": "integer",
+                    "enum": [
+                      -1,
+                      0,
+                      2
+                    ]
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "to": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "priority",
+                  "tags",
+                  "to"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful exact Capability response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "boolean"
+                    },
+                    "latency": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "accepted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Stable transport or invocation error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "detail_code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Error"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "x-plystra-generated": true
+}
