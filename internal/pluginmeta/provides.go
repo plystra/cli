@@ -79,7 +79,7 @@ func AddProvided(data []byte, capability capabilityid.Identifier) ([]byte, bool,
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: validate updated manifest: %w", ErrAddProvided, err)
 	}
-	if parsed.ID() != metadata.ID() || len(parsed.Provides()) != len(metadata.Provides())+1 || !containsCapability(parsed.Provides(), capability) || !sameGeneration(metadata, parsed) {
+	if parsed.ID() != metadata.ID() || len(parsed.Provides()) != len(metadata.Provides())+1 || !containsCapability(parsed.Provides(), capability) || !sameCapabilities(metadata.Requires(), parsed.Requires()) || !sameGeneration(metadata, parsed) {
 		return nil, false, fmt.Errorf("%w: updated manifest did not preserve identity and add %s", ErrAddProvided, capability)
 	}
 	return append([]byte(nil), updated...), true, nil
@@ -112,4 +112,16 @@ func containsCapability(values []capabilityid.Identifier, target capabilityid.Id
 		return values[index].String() >= target.String()
 	})
 	return index < len(values) && values[index] == target
+}
+
+func sameCapabilities(left, right []capabilityid.Identifier) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }

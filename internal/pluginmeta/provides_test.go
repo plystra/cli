@@ -31,7 +31,7 @@ func TestAddProvidedPreservesManifestSourceAndAddsSortedCapability(t *testing.T)
 		t.Fatalf("updated manifest:\n got: %s\nwant: %s", got, want)
 	}
 	metadata, err := pluginmeta.Parse(got)
-	if err != nil || metadata.ID() != "acme.app.account" || !reflect.DeepEqual(identifierStrings(metadata.Provides()), []string{"account.register/v1", "audit.export/v1", "profile.get/v2"}) {
+	if err != nil || metadata.ID() != "acme.app.account" || !reflect.DeepEqual(identifierStrings(metadata.Provides()), []string{"account.register/v1", "audit.export/v1", "profile.get/v2"}) || !reflect.DeepEqual(identifierStrings(metadata.Requires()), []string{"audit.write/v1"}) {
 		t.Fatalf("Parse(updated) = %#v, %v", metadata, err)
 	}
 	generation, ok := metadata.Generation()
@@ -137,7 +137,7 @@ func FuzzAddProvided(f *testing.F) {
 			want = append(want, target.String())
 			sort.Strings(want)
 		}
-		if err != nil || metadata.ID() != before.ID() || changed == wasPresent || !reflect.DeepEqual(identifierStrings(metadata.Provides()), want) || !sameGenerationMetadata(before, metadata) {
+		if err != nil || metadata.ID() != before.ID() || changed == wasPresent || !reflect.DeepEqual(identifierStrings(metadata.Provides()), want) || !reflect.DeepEqual(metadata.Requires(), before.Requires()) || !sameGenerationMetadata(before, metadata) {
 			t.Fatalf("Parse(updated) = %#v, %v", metadata, err)
 		}
 		repeated, changed, err := pluginmeta.AddProvided(got, target)

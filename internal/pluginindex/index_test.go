@@ -19,7 +19,7 @@ func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
 
 	root := t.TempDir()
 	writePlugin(t, root, "profile", "acme.app.profile")
-	accountManifest := []byte("id: acme.app.account\nprovides:\n  - profile.get/v2\n  - account.register/v1\ngeneration: {api: v1, package: ./generation, activations: [{namespace: profile, capability: profile.get/v2}]}\n")
+	accountManifest := []byte("id: acme.app.account\nprovides:\n  - profile.get/v2\n  - account.register/v1\nrequires: [email.send/v1, audit.write/v1]\ngeneration: {api: v1, package: ./generation, activations: [{namespace: profile, capability: profile.get/v2}]}\n")
 	writeManifest(t, root, "account", string(accountManifest))
 	writeGenerationPackage(t, root, "account", "generation")
 	index, err := pluginindex.Scan(root)
@@ -32,6 +32,9 @@ func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
 	}
 	if got := identifierStrings(plugins[0].Provides()); !reflect.DeepEqual(got, []string{"account.register/v1", "profile.get/v2"}) {
 		t.Fatalf("account Provides() = %v", got)
+	}
+	if got := identifierStrings(plugins[0].Requires()); !reflect.DeepEqual(got, []string{"audit.write/v1", "email.send/v1"}) {
+		t.Fatalf("account Requires() = %v", got)
 	}
 	if got := plugins[0].ManifestData(); !bytes.Equal(got, accountManifest) {
 		t.Fatalf("account ManifestData() = %q", got)
@@ -72,6 +75,11 @@ func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
 	provided[0] = capabilityid.Identifier{}
 	if index.Plugins()[0].Provides()[0].String() != "account.register/v1" {
 		t.Fatal("Provides exposed mutable index storage")
+	}
+	required := index.Plugins()[0].Requires()
+	required[0] = capabilityid.Identifier{}
+	if index.Plugins()[0].Requires()[0].String() != "audit.write/v1" {
+		t.Fatal("Requires exposed mutable index storage")
 	}
 	manifest := index.Plugins()[0].ManifestData()
 	manifest[0] = 'x'

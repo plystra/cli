@@ -34,6 +34,9 @@ config:
 	if got := identifierStrings(metadata.Provides()); !reflect.DeepEqual(got, []string{"account.register/v1", "authn.session.verify/v1", "authz.check/v1", "profile.get/v2"}) {
 		t.Fatalf("Provides = %v", got)
 	}
+	if got := identifierStrings(metadata.Requires()); !reflect.DeepEqual(got, []string{"audit.write/v1"}) {
+		t.Fatalf("Requires = %v", got)
+	}
 	generation, ok := metadata.Generation()
 	if !ok || generation.API() != pluginmeta.GenerationAPIV1 || generation.Package() != "./generation" {
 		t.Fatalf("Generation = %#v, %t", generation, ok)
@@ -47,13 +50,18 @@ config:
 	if metadata.Provides()[0].String() != "account.register/v1" {
 		t.Fatal("Provides exposed mutable metadata")
 	}
+	required := metadata.Requires()
+	required[0] = capabilityid.Identifier{}
+	if metadata.Requires()[0].String() != "audit.write/v1" {
+		t.Fatal("Requires exposed mutable metadata")
+	}
 	activations[0] = pluginmeta.GenerationActivation{}
 	if metadataGenerationActivations(metadata)[0].Namespace() != "authn" {
 		t.Fatal("Activations exposed mutable metadata")
 	}
 	quoted, err := pluginmeta.Parse([]byte("id: 'acme.app.account'\n"))
 	_, hasQuotedGeneration := quoted.Generation()
-	if err != nil || quoted.ID() != metadata.ID() || len(quoted.Provides()) != 0 || hasQuotedGeneration {
+	if err != nil || quoted.ID() != metadata.ID() || len(quoted.Provides()) != 0 || len(quoted.Requires()) != 0 || hasQuotedGeneration {
 		t.Fatalf("Parse quoted = %#v, %v", quoted, err)
 	}
 }
@@ -107,7 +115,7 @@ func TestParseRejectsInvalidGenerationDeclarations(t *testing.T) {
 			if !errors.Is(err, pluginmeta.ErrInvalidManifest) || test.also != nil && !errors.Is(err, test.also) {
 				t.Fatalf("Parse error = %v", err)
 			}
-			if metadata.ID() != "" || len(metadata.Provides()) != 0 {
+			if metadata.ID() != "" || len(metadata.Provides()) != 0 || len(metadata.Requires()) != 0 {
 				t.Fatalf("invalid Parse returned %#v", metadata)
 			}
 			if _, ok := metadata.Generation(); ok {
@@ -147,7 +155,7 @@ func TestParseRejectsInvalidMetadataEnvelopes(t *testing.T) {
 			if !errors.Is(err, pluginmeta.ErrInvalidManifest) {
 				t.Fatalf("Parse error = %v, want ErrInvalidManifest", err)
 			}
-			if metadata.ID() != "" || len(metadata.Provides()) != 0 {
+			if metadata.ID() != "" || len(metadata.Provides()) != 0 || len(metadata.Requires()) != 0 {
 				t.Fatalf("invalid Parse returned %#v", metadata)
 			}
 			if _, ok := metadata.Generation(); ok {
@@ -176,6 +184,12 @@ func FuzzParse(f *testing.F) {
 		for index := 1; index < len(provided); index++ {
 			if provided[index-1].String() >= provided[index].String() {
 				t.Fatalf("Provides are not uniquely sorted: %q then %q", provided[index-1], provided[index])
+			}
+		}
+		required := metadata.Requires()
+		for index := 1; index < len(required); index++ {
+			if required[index-1].String() >= required[index].String() {
+				t.Fatalf("Requires are not uniquely sorted: %q then %q", required[index-1], required[index])
 			}
 		}
 		if generation, ok := metadata.Generation(); ok {

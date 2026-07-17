@@ -24,6 +24,7 @@ var ErrInvalidManifest = errors.New("invalid plugin manifest metadata")
 type Manifest struct {
 	id         string
 	provides   []capabilityid.Identifier
+	requires   []capabilityid.Identifier
 	generation Generation
 }
 
@@ -33,6 +34,11 @@ func (m Manifest) ID() string { return m.id }
 // Provides returns a defensive copy sorted by canonical capability identity.
 func (m Manifest) Provides() []capabilityid.Identifier {
 	return append([]capabilityid.Identifier(nil), m.provides...)
+}
+
+// Requires returns a defensive copy sorted by canonical capability identity.
+func (m Manifest) Requires() []capabilityid.Identifier {
+	return append([]capabilityid.Identifier(nil), m.requires...)
 }
 
 // Generation returns the optional trusted build-time generation declaration.
@@ -91,7 +97,8 @@ func Parse(data []byte) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
-	if _, err := parseCapabilities("requires", requiresNode); err != nil {
+	requires, err := parseCapabilities("requires", requiresNode)
+	if err != nil {
 		return Manifest{}, err
 	}
 	var generation Generation
@@ -101,7 +108,7 @@ func Parse(data []byte) (Manifest, error) {
 			return Manifest{}, err
 		}
 	}
-	return Manifest{id: idNode.Value, provides: provides, generation: generation}, nil
+	return Manifest{id: idNode.Value, provides: provides, requires: requires, generation: generation}, nil
 }
 
 func decodeYAMLDocument(data []byte) (*yaml.Node, error) {

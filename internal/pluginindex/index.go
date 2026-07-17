@@ -33,6 +33,7 @@ type Plugin struct {
 	path                  string
 	id                    string
 	provides              []capabilityid.Identifier
+	requires              []capabilityid.Identifier
 	generation            pluginmeta.Generation
 	generationPackagePath string
 	manifest              []byte
@@ -51,6 +52,12 @@ func (p Plugin) ID() string { return p.id }
 // plugin, sorted by canonical identity.
 func (p Plugin) Provides() []capabilityid.Identifier {
 	return append([]capabilityid.Identifier(nil), p.provides...)
+}
+
+// Requires returns a defensive copy of the exact canonical capabilities
+// required by the plugin, sorted by identity.
+func (p Plugin) Requires() []capabilityid.Identifier {
+	return append([]capabilityid.Identifier(nil), p.requires...)
 }
 
 // Generation returns the optional trusted build-time generation declaration.
@@ -148,6 +155,7 @@ func Scan(rootPath string) (result Index, indexErr error) {
 			path:                  directory.Path(),
 			id:                    id,
 			provides:              metadata.Provides(),
+			requires:              metadata.Requires(),
 			generation:            generation,
 			generationPackagePath: generationPackagePath,
 			manifest:              append([]byte(nil), data...),
