@@ -35,8 +35,11 @@ request:
   retry_count: {type: integer, required: true}
   enforce: {type: boolean, required: true}
   credential: {type: string}
+  evidence: {type: object}
 response:
   allowed: {type: boolean, required: true}
+  reason: {type: string}
+  details: {type: object}
 errors: [unavailable]
 `
 	typedOrderSchema = `id: order.typed-create/v1
@@ -394,6 +397,104 @@ func TestRenderPlanGoldenAndRuntimeConditionalFailures(t *testing.T) {
 		t.Fatalf("generated conditions plan = path %q, package %q\n%s\nwant:\n%s", file.Path(), file.PackageName(), file.Data(), want)
 	}
 	assertGeneratedConditionalFailuresRun(t, file)
+
+	repeated, err := invocationgen.RenderPlan(testModulePath, []byte(orderCreateSchema), plan)
+	if err != nil || !bytes.Equal(repeated.Data(), file.Data()) {
+		t.Fatalf("repeated RenderPlan = %#v, %v", repeated, err)
+	}
+}
+
+func TestRenderPlanGoldenAndRuntimeNodeValues(t *testing.T) {
+	t.Parallel()
+
+	plan := prepareCallPlan(t, generation.Contribution{
+		ID:        "policy.node-values",
+		Namespace: "policy",
+		Source:    planCapabilityID(t, "order.create/v1"),
+		Point:     generation.GenerationPointInvocationPrepare,
+		Nodes: []generation.GeneratedNode{
+			{
+				ID: "derive-permission",
+				ContextDerivation: &generation.GeneratedContextDerivation{
+					Key:          "policy.permission",
+					Value:        planInvocationValue(generation.GeneratedInvocationRequestField, "order_id"),
+					Type:         generation.GeneratedValueString,
+					Presence:     generation.GeneratedContextRequired,
+					MaximumBytes: 32,
+				},
+			},
+			{
+				ID: "check-source",
+				CapabilityCall: &generation.GeneratedCapabilityCall{
+					Capability: planCapabilityID(t, "policy.check/v1"),
+					Request: []generation.GeneratedFieldBinding{
+						{Field: "permission", Value: planNodeValue("derive-permission", generation.GeneratedNodeDerived)},
+						{Field: "retry_count", Value: generation.IntegerValue(1)},
+						{Field: "enforce", Value: generation.BooleanValue(true)},
+					},
+					TimeoutMilliseconds: 50,
+					OnError:             generation.GeneratedCallFailClosed,
+				},
+			},
+			{
+				ID: "derive-allowed",
+				ContextDerivation: &generation.GeneratedContextDerivation{
+					Key:          "policy.allowed",
+					Value:        generation.GeneratedValue{Node: &generation.GeneratedNodeValue{ID: "check-source", Output: generation.GeneratedNodeResponse, Field: "allowed"}},
+					Type:         generation.GeneratedValueBoolean,
+					Presence:     generation.GeneratedContextRequired,
+					MaximumBytes: 5,
+				},
+			},
+			{
+				ID: "derive-reason",
+				ContextDerivation: &generation.GeneratedContextDerivation{
+					Key:          "policy.reason",
+					Value:        generation.GeneratedValue{Node: &generation.GeneratedNodeValue{ID: "check-source", Output: generation.GeneratedNodeResponse, Field: "reason"}},
+					Type:         generation.GeneratedValueString,
+					Presence:     generation.GeneratedContextOptional,
+					MaximumBytes: 32,
+				},
+			},
+			{
+				ID: "derive-evidence",
+				ContextDerivation: &generation.GeneratedContextDerivation{
+					Key:          "policy.evidence",
+					Value:        planNodeValue("check-source", generation.GeneratedNodeResponse),
+					Type:         generation.GeneratedValueObject,
+					Presence:     generation.GeneratedContextRequired,
+					MaximumBytes: 256,
+				},
+			},
+			{
+				ID: "check-derived",
+				CapabilityCall: &generation.GeneratedCapabilityCall{
+					Capability: planCapabilityID(t, "policy.check/v1"),
+					Request: []generation.GeneratedFieldBinding{
+						{Field: "permission", Value: planNodeValue("derive-permission", generation.GeneratedNodeDerived)},
+						{Field: "retry_count", Value: generation.IntegerValue(2)},
+						{Field: "enforce", Value: planNodeValue("derive-allowed", generation.GeneratedNodeDerived)},
+						{Field: "credential", Value: generation.GeneratedValue{Node: &generation.GeneratedNodeValue{ID: "check-source", Output: generation.GeneratedNodeResponse, Field: "reason"}}},
+						{Field: "evidence", Value: planNodeValue("check-source", generation.GeneratedNodeResponse)},
+					},
+					TimeoutMilliseconds: 50,
+					OnError:             generation.GeneratedCallFailClosed,
+				},
+			},
+		},
+	})
+	file, err := invocationgen.RenderPlan(testModulePath, []byte(orderCreateSchema), plan)
+	if err != nil {
+		t.Fatalf("RenderPlan: %v", err)
+	}
+	want, err := os.ReadFile("testdata/order.create.node-values.go")
+	if err != nil {
+		t.Fatalf("ReadFile(node-values golden): %v\n%s", err, file.Data())
+	}
+	if file.Path() != "generated/go/invocation/order/create/v1/invocation_gen.go" || file.PackageName() != "ordercreatev1" || !bytes.Equal(file.Data(), want) {
+		t.Fatalf("generated node-values plan = path %q, package %q\n%s\nwant:\n%s", file.Path(), file.PackageName(), file.Data(), want)
+	}
+	assertGeneratedNodeValuesRun(t, file)
 
 	repeated, err := invocationgen.RenderPlan(testModulePath, []byte(orderCreateSchema), plan)
 	if err != nil || !bytes.Equal(repeated.Data(), file.Data()) {
@@ -1063,6 +1164,164 @@ func TestConditionalFailuresPreventCanonicalDispatch(t *testing.T) {
 				t.Fatalf("calls = policy %d, dispatches before %d after %d", policyCalls-beforePolicyCalls, beforeDispatches, dispatches)
 			}
 		})
+	}
+}
+`))
+	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\n\nreplace github.com/plystra/kernel => ./kernel\n"))
+	runGeneratedGoTests(t, root)
+}
+
+func assertGeneratedNodeValuesRun(t testing.TB, sourceInvocation invocationgen.File) {
+	t.Helper()
+	root := t.TempDir()
+	sourceContract, err := contractgen.Render([]byte(orderCreateSchema))
+	if err != nil {
+		t.Fatalf("Render(node source contract): %v", err)
+	}
+	targetContract, err := contractgen.Render([]byte(policyCheckSchema))
+	if err != nil {
+		t.Fatalf("Render(node target contract): %v", err)
+	}
+	targetInvocation, err := invocationgen.Render(testModulePath, []byte(policyCheckSchema))
+	if err != nil {
+		t.Fatalf("Render(node target invocation): %v", err)
+	}
+	targetClient, err := clientgen.Render(testModulePath, []byte(policyCheckSchema))
+	if err != nil {
+		t.Fatalf("Render(node target client): %v", err)
+	}
+	contextFile, err := invocationgen.RenderContext()
+	if err != nil {
+		t.Fatalf("RenderContext: %v", err)
+	}
+	for _, file := range []struct {
+		path string
+		data []byte
+	}{
+		{sourceContract.Path(), sourceContract.Data()},
+		{targetContract.Path(), targetContract.Data()},
+		{targetInvocation.Path(), targetInvocation.Data()},
+		{targetClient.Path(), targetClient.Data()},
+		{contextFile.Path(), contextFile.Data()},
+		{sourceInvocation.Path(), sourceInvocation.Data()},
+	} {
+		writeGeneratedFile(t, root, file.path, file.data)
+	}
+	writeInvocationTestKernel(t, root)
+	writeGeneratedFile(t, root, "generated/go/invocation/order/create/v1/invocation_gen_test.go", []byte(`package ordercreatev1_test
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"testing"
+
+	policyclient "example.com/acme/project/generated/go/clients/policy/check/v1"
+	ordercontract "example.com/acme/project/generated/go/contracts/order/create/v1"
+	policycontract "example.com/acme/project/generated/go/contracts/policy/check/v1"
+	invocationcontext "example.com/acme/project/generated/go/internal/invocationcontext"
+	orderinvocation "example.com/acme/project/generated/go/invocation/order/create/v1"
+	policyinvocation "example.com/acme/project/generated/go/invocation/policy/check/v1"
+	kernelinvocation "github.com/plystra/kernel/invocation"
+)
+
+func TestEarlierNodeValuesFlowIntoContextAndCalls(t *testing.T) {
+	var sourceReason *string
+	var sourceDetails *map[string]any
+	failCall := 0
+	callIndex := 0
+	wantEvidence := func() map[string]any {
+		result := map[string]any{"allowed": true}
+		if sourceReason != nil {
+			result["reason"] = *sourceReason
+		}
+		if sourceDetails != nil {
+			result["details"] = *sourceDetails
+		}
+		return result
+	}
+	policyTarget := kernelinvocation.NewTestHandle(true, func(_ context.Context, request policycontract.Request) (policycontract.Response, error) {
+		callIndex++
+		switch callIndex {
+		case 1:
+			if request.Permission != "order-1" || request.RetryCount != 1 || !request.Enforce || request.Credential != nil || request.Evidence != nil {
+				t.Fatalf("source policy request = %#v", request)
+			}
+			if failCall == 1 {
+				return policycontract.Response{}, errors.New("source policy failed")
+			}
+			return policycontract.Response{Allowed: true, Reason: sourceReason, Details: sourceDetails}, nil
+		case 2:
+			if request.Permission != "order-1" || request.RetryCount != 2 || !request.Enforce {
+				t.Fatalf("derived policy request = %#v", request)
+			}
+			if sourceReason == nil && request.Credential != nil || sourceReason != nil && (request.Credential == nil || *request.Credential != *sourceReason) {
+				t.Fatalf("derived credential = %#v, source %#v", request.Credential, sourceReason)
+			}
+			if request.Evidence == nil || !reflect.DeepEqual(*request.Evidence, wantEvidence()) {
+				t.Fatalf("derived evidence = %#v, want %#v", request.Evidence, wantEvidence())
+			}
+			if failCall == 2 {
+				return policycontract.Response{}, errors.New("derived policy failed")
+			}
+			return policycontract.Response{Allowed: true}, nil
+		default:
+			t.Fatalf("unexpected policy call %d", callIndex)
+			return policycontract.Response{}, errors.New("unexpected call")
+		}
+	})
+	dispatches := 0
+	orderTarget := kernelinvocation.NewTestHandle(true, func(ctx context.Context, _ ordercontract.Request) (ordercontract.Response, error) {
+		dispatches++
+		permission, permissionOK := invocationcontext.Value[string](ctx, "policy.permission")
+		allowed, allowedOK := invocationcontext.Value[bool](ctx, "policy.allowed")
+		reason, reasonOK := invocationcontext.Value[string](ctx, "policy.reason")
+		evidence, evidenceOK := invocationcontext.Value[map[string]any](ctx, "policy.evidence")
+		if !permissionOK || permission != "order-1" || !allowedOK || !allowed || !evidenceOK || !reflect.DeepEqual(evidence, wantEvidence()) {
+			t.Fatalf("derived context = permission %q/%t allowed %t/%t evidence %#v/%t", permission, permissionOK, allowed, allowedOK, evidence, evidenceOK)
+		}
+		if sourceReason == nil && reasonOK || sourceReason != nil && (!reasonOK || reason != *sourceReason) {
+			t.Fatalf("derived reason = %q/%t, source %#v", reason, reasonOK, sourceReason)
+		}
+		return ordercontract.Response{Accepted: true}, nil
+	})
+	policy := policyclient.New(policyinvocation.New(policyTarget))
+	handle := orderinvocation.New(orderTarget, policy)
+	invoke := func(ctx context.Context, reason *string, details *map[string]any, failure int) (ordercontract.Response, error, int, int) {
+		sourceReason = reason
+		sourceDetails = details
+		failCall = failure
+		callIndex = 0
+		beforeDispatches := dispatches
+		response, err := handle.Invoke(ctx, ordercontract.Request{OrderID: "order-1"})
+		return response, err, callIndex, dispatches - beforeDispatches
+	}
+
+	reason := "verified"
+	response, err, calls, dispatched := invoke(context.Background(), &reason, nil, 0)
+	if err != nil || !response.Accepted || calls != 2 || dispatched != 1 {
+		t.Fatalf("Invoke(present) = %#v, %v, calls %d, dispatched %d", response, err, calls, dispatched)
+	}
+	response, err, calls, dispatched = invoke(context.Background(), nil, nil, 0)
+	if err != nil || !response.Accepted || calls != 2 || dispatched != 1 {
+		t.Fatalf("Invoke(absent) = %#v, %v, calls %d, dispatched %d", response, err, calls, dispatched)
+	}
+	response, err, calls, dispatched = invoke(context.Background(), &reason, nil, 1)
+	if err == nil || response.Accepted || calls != 1 || dispatched != 0 {
+		t.Fatalf("Invoke(first failure) = %#v, %v, calls %d, dispatched %d", response, err, calls, dispatched)
+	}
+	response, err, calls, dispatched = invoke(context.Background(), &reason, nil, 2)
+	if err == nil || response.Accepted || calls != 2 || dispatched != 0 {
+		t.Fatalf("Invoke(second failure) = %#v, %v, calls %d, dispatched %d", response, err, calls, dispatched)
+	}
+	invalidDetails := map[string]any{"invalid": func() {}}
+	response, err, calls, dispatched = invoke(context.Background(), &reason, &invalidDetails, 0)
+	if err == nil || err.Error() != "invalid generated invocation value" || response.Accepted || calls != 1 || dispatched != 0 {
+		t.Fatalf("Invoke(conversion failure) = %#v, %v, calls %d, dispatched %d", response, err, calls, dispatched)
+	}
+	response, err, calls, dispatched = invoke(nil, &reason, nil, 0)
+	if !errors.Is(err, invocationcontext.ErrInvalidValue) || response.Accepted || calls != 0 || dispatched != 0 {
+		t.Fatalf("Invoke(nil context) = %#v, %v, calls %d, dispatched %d", response, err, calls, dispatched)
 	}
 }
 `))

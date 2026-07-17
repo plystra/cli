@@ -74,6 +74,7 @@ type Node struct {
 	derivedIdentifier  string
 	sourceIdentifier   string
 	presenceIdentifier string
+	bindingIdentifiers map[string]string
 }
 
 // ID returns the contribution-local stable node identifier.
@@ -115,6 +116,13 @@ func (n Node) SourceIdentifier() (string, bool) {
 // optional generated invocation value exists.
 func (n Node) PresenceIdentifier() (string, bool) {
 	return n.presenceIdentifier, n.presenceIdentifier != ""
+}
+
+// BindingIdentifier returns the CLI-owned local used to convert one request
+// binding before a generated Capability call.
+func (n Node) BindingIdentifier(field string) (string, bool) {
+	value, ok := n.bindingIdentifiers[field]
+	return value, ok
 }
 
 // Contribution is one immutable lowered semantic contribution.
@@ -166,6 +174,16 @@ func (p Plan) Contributions() []Contribution {
 	for index, contribution := range p.contributions {
 		result[index] = contribution
 		result[index].nodes = append([]Node(nil), contribution.nodes...)
+		for nodeIndex := range result[index].nodes {
+			bindings := result[index].nodes[nodeIndex].bindingIdentifiers
+			if len(bindings) == 0 {
+				continue
+			}
+			result[index].nodes[nodeIndex].bindingIdentifiers = make(map[string]string, len(bindings))
+			for field, identifier := range bindings {
+				result[index].nodes[nodeIndex].bindingIdentifiers[field] = identifier
+			}
+		}
 	}
 	return result
 }
@@ -265,6 +283,20 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 		identifiers = append(identifiers, invocationRuntimeIdentifiers()...)
 		reserve(generation.GeneratedNodeResponse, "Response")
 		reserve(generation.GeneratedNodeError, "Error")
+		for _, binding := range operation.Request {
+			if binding.Value.Node == nil || binding.Value.Node.Output != generation.GeneratedNodeResponse || binding.Value.Node.Field != "" {
+				continue
+			}
+			name := generatedIdentifierBase(contribution.id, generated.ID(), "request", binding.Field)
+			if node.bindingIdentifiers == nil {
+				node.bindingIdentifiers = make(map[string]string)
+			}
+			node.bindingIdentifiers[binding.Field] = name
+			identifiers = append(identifiers,
+				IdentifierRequest{Name: name, Source: provenance + " whole-response request binding " + binding.Field},
+			)
+			identifiers = append(identifiers, valueConversionRuntimeIdentifiers()...)
+		}
 	case generation.GeneratedNodeKindContextDerivation:
 		operation, ok := generated.ContextDerivation()
 		if !ok {
@@ -282,6 +314,9 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 		}
 		if operation.Presence == generation.GeneratedContextOptional {
 			identifiers = append(identifiers, contextRuntimeIdentifiers()...)
+		}
+		if operation.Value.Node != nil && operation.Value.Node.Output == generation.GeneratedNodeResponse && operation.Value.Node.Field == "" {
+			identifiers = append(identifiers, valueConversionRuntimeIdentifiers()...)
 		}
 		imports = append(imports, ImportRequest{
 			Path:   path.Join(modulePath, "generated/go/internal/invocationcontext"),
@@ -386,6 +421,13 @@ func contextRuntimeIdentifiers() []IdentifierRequest {
 func conditionalRuntimeIdentifiers() []IdentifierRequest {
 	return []IdentifierRequest{
 		{Name: "plystraConditionalError", Source: "generated invocation conditional failure runtime"},
+	}
+}
+
+func valueConversionRuntimeIdentifiers() []IdentifierRequest {
+	return []IdentifierRequest{
+		{Name: "plystraErrInvalidGeneratedValue", Source: "generated invocation value conversion runtime"},
+		{Name: "plystraConvertValue", Source: "generated invocation value conversion runtime"},
 	}
 }
 
