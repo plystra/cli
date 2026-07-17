@@ -68,6 +68,17 @@ response:
   allowed: {type: boolean, required: true}
 errors: [unavailable]
 `
+	contextOrderSchema = `id: order.context-create/v1
+request:
+  space_id: {type: string, required: true}
+  note: {type: string}
+response:
+  accepted: {type: boolean, required: true}
+errors: [policy_failed]
+extensions:
+  policy:
+    permission: order.context-create
+`
 )
 
 func TestRenderPlanGoldenAndRuntimeOrder(t *testing.T) {
@@ -206,6 +217,105 @@ func TestRenderPlanSupportsEveryTypedRequestFieldShape(t *testing.T) {
 	}
 }
 
+func TestRenderPlanDerivesAndReusesBoundedContext(t *testing.T) {
+	t.Parallel()
+
+	sourceID := planCapabilityID(t, "order.context-create/v1")
+	plan := prepareSourcePlan(t, contextOrderSchema, []generation.Contribution{{
+		ID:        "policy.context",
+		Namespace: "policy",
+		Source:    sourceID,
+		Point:     generation.GenerationPointInvocationPrepare,
+		Nodes: []generation.GeneratedNode{
+			{
+				ID: "derive-space",
+				ContextDerivation: &generation.GeneratedContextDerivation{
+					Key:          "policy.space-id",
+					Value:        planInvocationValue(generation.GeneratedInvocationRequestField, "space_id"),
+					Type:         generation.GeneratedValueString,
+					Presence:     generation.GeneratedContextRequired,
+					MaximumBytes: 16,
+				},
+			},
+			{
+				ID: "derive-note",
+				ContextDerivation: &generation.GeneratedContextDerivation{
+					Key:          "policy.note",
+					Value:        planInvocationValue(generation.GeneratedInvocationRequestField, "note"),
+					Type:         generation.GeneratedValueString,
+					Presence:     generation.GeneratedContextOptional,
+					MaximumBytes: 32,
+				},
+			},
+			{
+				ID: "derive-mode",
+				ContextDerivation: &generation.GeneratedContextDerivation{
+					Key:          "policy.mode",
+					Value:        generation.StringValue("strict"),
+					Type:         generation.GeneratedValueString,
+					Presence:     generation.GeneratedContextRequired,
+					MaximumBytes: 16,
+				},
+			},
+			{
+				ID: "derive-optional-literal",
+				ContextDerivation: &generation.GeneratedContextDerivation{
+					Key:          "policy.optional-literal",
+					Value:        generation.StringValue("present"),
+					Type:         generation.GeneratedValueString,
+					Presence:     generation.GeneratedContextOptional,
+					MaximumBytes: 16,
+				},
+			},
+			{
+				ID: "reuse-caller",
+				ContextDerivation: &generation.GeneratedContextDerivation{
+					Key: "policy.caller-copy",
+					Value: generation.GeneratedValue{Invocation: &generation.GeneratedInvocationValue{
+						Source: generation.GeneratedInvocationContextValue,
+						Name:   "policy.caller",
+						Type:   generation.GeneratedValueString,
+					}},
+					Type:         generation.GeneratedValueString,
+					Presence:     generation.GeneratedContextRequired,
+					MaximumBytes: 32,
+				},
+			},
+			{
+				ID: "reuse-optional",
+				ContextDerivation: &generation.GeneratedContextDerivation{
+					Key: "policy.optional-copy",
+					Value: generation.GeneratedValue{Invocation: &generation.GeneratedInvocationValue{
+						Source: generation.GeneratedInvocationContextValue,
+						Name:   "policy.optional",
+						Type:   generation.GeneratedValueString,
+					}},
+					Type:         generation.GeneratedValueString,
+					Presence:     generation.GeneratedContextOptional,
+					MaximumBytes: 32,
+				},
+			},
+		},
+	}})
+	file, err := invocationgen.RenderPlan(testModulePath, []byte(contextOrderSchema), plan)
+	if err != nil {
+		t.Fatalf("RenderPlan: %v", err)
+	}
+	want, err := os.ReadFile("testdata/order.context-create.context.go")
+	if err != nil {
+		t.Fatalf("ReadFile(context golden): %v\n%s", err, file.Data())
+	}
+	if file.Path() != "generated/go/invocation/order/context-create/v1/invocation_gen.go" || file.PackageName() != "ordercontextcreatev1" || !bytes.Equal(file.Data(), want) {
+		t.Fatalf("generated context plan = path %q, package %q\n%s\nwant:\n%s", file.Path(), file.PackageName(), file.Data(), want)
+	}
+	assertGeneratedContextDerivationRuns(t, file)
+
+	repeated, err := invocationgen.RenderPlan(testModulePath, []byte(contextOrderSchema), plan)
+	if err != nil || !bytes.Equal(repeated.Data(), file.Data()) {
+		t.Fatalf("repeated RenderPlan = %#v, %v", repeated, err)
+	}
+}
+
 func TestRenderPlanRejectsUnsupportedOrUnsafeCalls(t *testing.T) {
 	t.Parallel()
 
@@ -244,6 +354,23 @@ func TestRenderPlanRejectsUnsupportedOrUnsafeCalls(t *testing.T) {
 				Nodes: []generation.GeneratedNode{{ID: "check", CapabilityCall: &generation.GeneratedCapabilityCall{Capability: planCapabilityID(t, "policy.check/v1"), Request: policyLiteralBindings(), TimeoutMilliseconds: 50, OnError: generation.GeneratedCallFailClosed}}},
 			},
 			want: []string{"policy.complete", "invocation.complete", "unsupported point"},
+		},
+		{
+			name: "adapter credential derivation",
+			contribution: generation.Contribution{
+				ID: "policy.credential", Namespace: "policy", Source: planCapabilityID(t, "order.create/v1"), Point: generation.GenerationPointInvocationPrepare,
+				Nodes: []generation.GeneratedNode{{
+					ID: "derive-credential",
+					ContextDerivation: &generation.GeneratedContextDerivation{
+						Key:          "policy.credential",
+						Value:        planInvocationValue(generation.GeneratedInvocationAdapterCredential, "authorization"),
+						Type:         generation.GeneratedValueString,
+						Presence:     generation.GeneratedContextRequired,
+						MaximumBytes: 64,
+					},
+				}},
+			},
+			want: []string{"policy.credential", "derive-credential", "adapter-credential", "not renderable"},
 		},
 		{
 			name: "self call",
@@ -340,6 +467,45 @@ func prepareOrderedCallPlanForSchemas(
 			{Capability: sourceID.String(), Plugin: "example.source"},
 			{Capability: targetID.String(), Plugin: "example.target"},
 		},
+	})
+	if err != nil {
+		t.Fatalf("NewContext: %v", err)
+	}
+	output, err := generation.NormalizeOutput(context, generation.Output{Contributions: contributions})
+	if err != nil {
+		t.Fatalf("NormalizeOutput: %v", err)
+	}
+	byID := make(map[string]generation.NormalizedContribution, len(contributions))
+	for _, contribution := range output.Contributions() {
+		byID[contribution.ID()] = contribution
+	}
+	ordered := make([]generation.NormalizedContribution, len(contributions))
+	for index, contribution := range contributions {
+		ordered[index] = byID[contribution.ID]
+	}
+	plan, err := generationlowering.Lower(testModulePath, ordered)
+	if err != nil {
+		t.Fatalf("Lower: %v", err)
+	}
+	return plan
+}
+
+func prepareSourcePlan(t *testing.T, sourceSchema string, contributions []generation.Contribution) generationlowering.Plan {
+	t.Helper()
+	if len(contributions) == 0 {
+		t.Fatal("prepareSourcePlan requires at least one contribution")
+	}
+	sourceID := contributions[0].Source
+	context, err := generation.NewContext(generation.Input{
+		Plugins: []generation.PluginInput{{
+			ID:                "example.source",
+			ModulePath:        testModulePath,
+			Provides:          []string{sourceID.String()},
+			BuildMetadataJSON: []byte("{}"),
+		}},
+		Capabilities: []generation.CapabilityInput{{ContractJSON: planCanonicalContract(t, sourceSchema)}},
+		Requirements: []string{sourceID.String()},
+		Providers:    []generation.ProviderInput{{Capability: sourceID.String(), Plugin: "example.source"}},
 	})
 	if err != nil {
 		t.Fatalf("NewContext: %v", err)
@@ -591,6 +757,116 @@ func TestTypedBindingsPreserveValuesAndAbsence(t *testing.T) {
 	}
 	if policyCalls != 2 || dispatches != 2 || !sawPresentNote || !sawAbsentNote {
 		t.Fatalf("calls = policy %d dispatch %d, notes present=%t absent=%t", policyCalls, dispatches, sawPresentNote, sawAbsentNote)
+	}
+}
+`))
+	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\n\nreplace github.com/plystra/kernel => ./kernel\n"))
+	runGeneratedGoTests(t, root)
+}
+
+func assertGeneratedContextDerivationRuns(t testing.TB, sourceInvocation invocationgen.File) {
+	t.Helper()
+	root := t.TempDir()
+	sourceContract, err := contractgen.Render([]byte(contextOrderSchema))
+	if err != nil {
+		t.Fatalf("Render(context source contract): %v", err)
+	}
+	contextFile, err := invocationgen.RenderContext()
+	if err != nil {
+		t.Fatalf("RenderContext: %v", err)
+	}
+	for _, file := range []struct {
+		path string
+		data []byte
+	}{
+		{sourceContract.Path(), sourceContract.Data()},
+		{contextFile.Path(), contextFile.Data()},
+		{sourceInvocation.Path(), sourceInvocation.Data()},
+	} {
+		writeGeneratedFile(t, root, file.path, file.data)
+	}
+	writeInvocationTestKernel(t, root)
+	writeGeneratedFile(t, root, "generated/go/invocation/order/context-create/v1/invocation_gen_test.go", []byte(`package ordercontextcreatev1_test
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	ordercontract "example.com/acme/project/generated/go/contracts/order/context-create/v1"
+	invocationcontext "example.com/acme/project/generated/go/internal/invocationcontext"
+	orderinvocation "example.com/acme/project/generated/go/invocation/order/context-create/v1"
+	kernelinvocation "github.com/plystra/kernel/invocation"
+)
+
+func TestContextDerivationIsBoundedOptionalAndReusable(t *testing.T) {
+	dispatches := 0
+	notePresence := []bool{}
+	optionalCopyPresence := []bool{}
+	target := kernelinvocation.NewTestHandle(true, func(ctx context.Context, _ ordercontract.Request) (ordercontract.Response, error) {
+		dispatches++
+		space, spaceOK := invocationcontext.Value[string](ctx, "policy.space-id")
+		mode, modeOK := invocationcontext.Value[string](ctx, "policy.mode")
+		optionalLiteral, optionalLiteralOK := invocationcontext.Value[string](ctx, "policy.optional-literal")
+		caller, callerOK := invocationcontext.Value[string](ctx, "policy.caller")
+		copy, copyOK := invocationcontext.Value[string](ctx, "policy.caller-copy")
+		_, noteOK := invocationcontext.Value[string](ctx, "policy.note")
+		_, optionalCopyOK := invocationcontext.Value[string](ctx, "policy.optional-copy")
+		notePresence = append(notePresence, noteOK)
+		optionalCopyPresence = append(optionalCopyPresence, optionalCopyOK)
+		if !spaceOK || space != "space-1" || !modeOK || mode != "strict" || !optionalLiteralOK || optionalLiteral != "present" || !callerOK || caller != "caller-1" || !copyOK || copy != caller {
+			t.Fatalf("derived context = space %q/%t mode %q/%t optional %q/%t caller %q/%t copy %q/%t", space, spaceOK, mode, modeOK, optionalLiteral, optionalLiteralOK, caller, callerOK, copy, copyOK)
+		}
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("derived context lost its parent deadline")
+		}
+		return ordercontract.Response{Accepted: true}, nil
+	})
+	handle := orderinvocation.New(target)
+	deadlineContext, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	parent, err := invocationcontext.WithValue(deadlineContext, "policy.caller", "caller-1", 32)
+	if err != nil {
+		t.Fatalf("WithValue(parent): %v", err)
+	}
+	parentWithOptional, err := invocationcontext.WithValue(parent, "policy.optional", "optional-1", 32)
+	if err != nil {
+		t.Fatalf("WithValue(optional): %v", err)
+	}
+	note := "memo"
+	response, err := handle.Invoke(parentWithOptional, ordercontract.Request{SpaceID: "space-1", Note: &note})
+	if err != nil || !response.Accepted {
+		t.Fatalf("Invoke(present): %#v, %v", response, err)
+	}
+	response, err = handle.Invoke(parent, ordercontract.Request{SpaceID: "space-1"})
+	if err != nil || !response.Accepted || !slices.Equal(notePresence, []bool{true, false}) || !slices.Equal(optionalCopyPresence, []bool{true, false}) {
+		t.Fatalf("Invoke(absent): %#v, %v, notes %v, optional copies %v", response, err, notePresence, optionalCopyPresence)
+	}
+
+	before := dispatches
+	oversizedNote := strings.Repeat("x", 32)
+	for _, test := range []struct {
+		name string
+		ctx context.Context
+		request ordercontract.Request
+	}{
+		{name: "missing reusable value", ctx: context.Background(), request: ordercontract.Request{SpaceID: "space-1"}},
+		{name: "oversized required value", ctx: parent, request: ordercontract.Request{SpaceID: strings.Repeat("x", 16)}},
+		{name: "oversized optional value", ctx: parent, request: ordercontract.Request{SpaceID: "space-1", Note: &oversizedNote}},
+		{name: "nil context", request: ordercontract.Request{SpaceID: "space-1"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response, err := handle.Invoke(test.ctx, test.request)
+			if !errors.Is(err, invocationcontext.ErrInvalidValue) || response.Accepted {
+				t.Fatalf("Invoke = %#v, %v", response, err)
+			}
+		})
+	}
+	if dispatches != before {
+		t.Fatalf("failed derivation dispatched: before %d after %d", before, dispatches)
 	}
 }
 `))

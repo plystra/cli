@@ -108,6 +108,9 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	}
 	fmt.Fprintln(&source)
 	fmt.Fprintf(&source, "\tcontract %s\n", strconv.Quote(contractImport))
+	if prepared.hasContextOperations {
+		fmt.Fprintf(&source, "\tinvocationcontext %s\n", strconv.Quote(path.Join(modulePath, "generated/go/internal/invocationcontext")))
+	}
 	for _, dependency := range prepared.dependencies {
 		fmt.Fprintf(&source, "\t%s %s\n", dependency.reference.ImportName(), strconv.Quote(dependency.reference.ImportPath()))
 		fmt.Fprintf(&source, "\t%s %s\n", dependency.reference.ContractImportName(), strconv.Quote(dependency.reference.ContractImportPath()))
@@ -152,7 +155,16 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	fmt.Fprintln(&source, "func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.Response, error) {")
 	for _, contribution := range prepared.contributions {
 		for _, node := range contribution.Nodes() {
-			if err := renderPrepareCall(&source, contract.Request, prepared.dependencies, contribution, node); err != nil {
+			var err error
+			switch node.Kind() {
+			case generation.GeneratedNodeKindCapabilityCall:
+				err = renderPrepareCall(&source, contract.Request, prepared.dependencies, contribution, node)
+			case generation.GeneratedNodeKindContextDerivation:
+				err = renderContextDerivation(&source, contract.Request, contribution, node)
+			default:
+				err = fmt.Errorf("%w: contribution %q node %q uses unsupported kind %q", ErrContribution, contribution.ID(), node.ID(), node.Kind())
+			}
+			if err != nil {
 				return File{}, fmt.Errorf("%w: %w", ErrRender, err)
 			}
 		}
@@ -209,6 +221,7 @@ type preparedPlan struct {
 	contributions          []generationlowering.Contribution
 	dependencies           []invocationDependency
 	hasTimedCalls          bool
+	hasContextOperations   bool
 	hasPointerBindings     bool
 	hasOptionalConversions bool
 }
@@ -239,35 +252,47 @@ func preparePlan(identifier capabilityid.Identifier, sourceRequest map[string]ca
 			)
 		}
 		for _, node := range nodes {
-			if node.Kind() != generation.GeneratedNodeKindCapabilityCall {
+			switch node.Kind() {
+			case generation.GeneratedNodeKindCapabilityCall:
+				operation, ok := node.Generated().CapabilityCall()
+				if !ok || operation.OnError != generation.GeneratedCallFailClosed {
+					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q must be a fail-closed Capability call", ErrContribution, contribution.ID(), node.ID())
+				}
+				if operation.Capability.String() == identifier.String() {
+					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q recursively calls its own source %s", ErrContribution, contribution.ID(), node.ID(), identifier)
+				}
+				reference, ok := node.Target()
+				if !ok {
+					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q has no lowered target", ErrContribution, contribution.ID(), node.ID())
+				}
+				for _, binding := range operation.Request {
+					needsPointer, needsOptionalConversion, err := prepareBinding(sourceRequest, reference, binding)
+					if err != nil {
+						return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, err)
+					}
+					result.hasPointerBindings = result.hasPointerBindings || needsPointer
+					result.hasOptionalConversions = result.hasOptionalConversions || needsOptionalConversion
+				}
+				key := reference.Capability().String()
+				dependency := invocationDependency{reference: reference, field: reference.ImportName() + "Client"}
+				if previous, exists := byCapability[key]; exists && previous != dependency {
+					return preparedPlan{}, fmt.Errorf("%w: target %s has inconsistent lowered references", ErrContribution, key)
+				}
+				byCapability[key] = dependency
+				result.hasTimedCalls = true
+			case generation.GeneratedNodeKindContextDerivation:
+				operation, ok := node.Generated().ContextDerivation()
+				if !ok {
+					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q lost its context derivation", ErrContribution, contribution.ID(), node.ID())
+				}
+				if err := prepareContextDerivation(sourceRequest, operation); err != nil {
+					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q: %v", ErrContribution, contribution.ID(), node.ID(), err)
+				}
+				result.hasContextOperations = true
+				result.hasPointerBindings = result.hasPointerBindings || operation.Presence == generation.GeneratedContextOptional
+			default:
 				return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q uses unsupported kind %q", ErrContribution, contribution.ID(), node.ID(), node.Kind())
 			}
-			operation, ok := node.Generated().CapabilityCall()
-			if !ok || operation.OnError != generation.GeneratedCallFailClosed {
-				return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q must be a fail-closed Capability call", ErrContribution, contribution.ID(), node.ID())
-			}
-			if operation.Capability.String() == identifier.String() {
-				return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q recursively calls its own source %s", ErrContribution, contribution.ID(), node.ID(), identifier)
-			}
-			reference, ok := node.Target()
-			if !ok {
-				return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q has no lowered target", ErrContribution, contribution.ID(), node.ID())
-			}
-			for _, binding := range operation.Request {
-				needsPointer, needsOptionalConversion, err := prepareBinding(sourceRequest, reference, binding)
-				if err != nil {
-					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, err)
-				}
-				result.hasPointerBindings = result.hasPointerBindings || needsPointer
-				result.hasOptionalConversions = result.hasOptionalConversions || needsOptionalConversion
-			}
-			key := reference.Capability().String()
-			dependency := invocationDependency{reference: reference, field: reference.ImportName() + "Client"}
-			if previous, exists := byCapability[key]; exists && previous != dependency {
-				return preparedPlan{}, fmt.Errorf("%w: target %s has inconsistent lowered references", ErrContribution, key)
-			}
-			byCapability[key] = dependency
-			result.hasTimedCalls = true
 		}
 		result.contributions = append(result.contributions, contribution)
 	}
@@ -331,6 +356,159 @@ func prepareBinding(
 		return true, false, nil
 	}
 	return false, true, nil
+}
+
+func prepareContextDerivation(sourceRequest map[string]canonicalField, operation generation.GeneratedContextDerivation) error {
+	if _, err := generatedValueGoType(operation.Type, operation.Items); err != nil {
+		return err
+	}
+	switch {
+	case operation.Value.Literal != nil:
+		_, err := renderLiteral(operation.Value)
+		return err
+	case operation.Value.Invocation == nil:
+		return errors.New("value source is not renderable at invocation.prepare")
+	case operation.Value.Invocation.Source == generation.GeneratedInvocationRequestField:
+		name := operation.Value.Invocation.Name
+		field, exists := sourceRequest[name]
+		if !exists {
+			return fmt.Errorf("request field %q is absent from the source contract", name)
+		}
+		_, err := canonicalFieldGoType("contract", "Request", name, field)
+		return err
+	case operation.Value.Invocation.Source == generation.GeneratedInvocationContextValue:
+		_, err := generatedValueGoType(operation.Value.Invocation.Type, operation.Value.Invocation.Items)
+		return err
+	default:
+		return fmt.Errorf("value source %q is not renderable at invocation.prepare", operation.Value.Invocation.Source)
+	}
+}
+
+func renderContextDerivation(
+	source *strings.Builder,
+	sourceRequest map[string]canonicalField,
+	contribution generationlowering.Contribution,
+	node generationlowering.Node,
+) error {
+	operation, ok := node.Generated().ContextDerivation()
+	if !ok {
+		return fmt.Errorf("%w: contribution %q node %q lost its context derivation", ErrContribution, contribution.ID(), node.ID())
+	}
+	derivedIdentifier, derivedOK := node.Identifier(generation.GeneratedNodeDerived)
+	errorIdentifier, errorOK := node.Identifier(generation.GeneratedNodeError)
+	if !derivedOK || !errorOK {
+		return fmt.Errorf("%w: contribution %q node %q has incomplete lowered identifiers", ErrContribution, contribution.ID(), node.ID())
+	}
+	targetType, err := generatedValueGoType(operation.Type, operation.Items)
+	if err != nil {
+		return fmt.Errorf("%w: contribution %q node %q: %v", ErrContribution, contribution.ID(), node.ID(), err)
+	}
+
+	expression := ""
+	optionalPointer := false
+	optionalPresence := false
+	presenceIdentifier := ""
+	switch {
+	case operation.Value.Literal != nil:
+		expression, err = renderLiteral(operation.Value)
+	case operation.Value.Invocation != nil && operation.Value.Invocation.Source == generation.GeneratedInvocationRequestField:
+		name := operation.Value.Invocation.Name
+		field, exists := sourceRequest[name]
+		if !exists {
+			return fmt.Errorf("%w: contribution %q node %q request field %q is absent from the source contract", ErrContribution, contribution.ID(), node.ID(), name)
+		}
+		_, err = canonicalFieldGoType("contract", "Request", name, field)
+		expression = "request." + goname.Field(name)
+		optionalPointer = !field.Required
+	case operation.Value.Invocation != nil && operation.Value.Invocation.Source == generation.GeneratedInvocationContextValue:
+		sourceIdentifier, sourceOK := node.SourceIdentifier()
+		var presenceOK bool
+		presenceIdentifier, presenceOK = node.PresenceIdentifier()
+		if !sourceOK || !presenceOK {
+			return fmt.Errorf("%w: contribution %q node %q has incomplete context-read identifiers", ErrContribution, contribution.ID(), node.ID())
+		}
+		sourceType, typeErr := generatedValueGoType(operation.Value.Invocation.Type, operation.Value.Invocation.Items)
+		err = typeErr
+		if err == nil {
+			fmt.Fprintf(
+				source,
+				"\t%s, %s := invocationcontext.Value[%s](ctx, %s)\n",
+				sourceIdentifier,
+				presenceIdentifier,
+				sourceType,
+				strconv.Quote(operation.Value.Invocation.Name),
+			)
+			expression = sourceIdentifier
+			optionalPresence = true
+		}
+	default:
+		return fmt.Errorf("%w: contribution %q node %q uses a value source not renderable at invocation.prepare", ErrContribution, contribution.ID(), node.ID())
+	}
+	if err != nil {
+		return fmt.Errorf("%w: contribution %q node %q: %v", ErrContribution, contribution.ID(), node.ID(), err)
+	}
+
+	valueExpression := expression
+	if optionalPointer {
+		valueExpression = "*" + expression
+	}
+	converted := targetType + "(" + valueExpression + ")"
+	if operation.Presence == generation.GeneratedContextRequired {
+		if optionalPointer {
+			fmt.Fprintf(source, "\tif %s == nil {\n", expression)
+			fmt.Fprintln(source, "\t\treturn contract.Response{}, invocationcontext.ErrInvalidValue")
+			fmt.Fprintln(source, "\t}")
+		}
+		if optionalPresence {
+			fmt.Fprintf(source, "\tif !%s {\n", presenceIdentifier)
+			fmt.Fprintln(source, "\t\treturn contract.Response{}, invocationcontext.ErrInvalidValue")
+			fmt.Fprintln(source, "\t}")
+		}
+		fmt.Fprintf(source, "\t%s := %s\n", derivedIdentifier, converted)
+		fmt.Fprintf(
+			source,
+			"\tctx, %s := invocationcontext.WithValue(ctx, %s, %s, %d)\n",
+			errorIdentifier,
+			strconv.Quote(operation.Key),
+			derivedIdentifier,
+			operation.MaximumBytes,
+		)
+		fmt.Fprintf(source, "\tif %s != nil {\n", errorIdentifier)
+		fmt.Fprintf(source, "\t\treturn contract.Response{}, %s\n", errorIdentifier)
+		fmt.Fprintln(source, "\t}")
+		return nil
+	}
+
+	fmt.Fprintf(source, "\tvar %s *%s\n", derivedIdentifier, targetType)
+	fmt.Fprintf(source, "\tvar %s error\n", errorIdentifier)
+	condition := "true"
+	if optionalPointer {
+		condition = expression + " != nil"
+	} else if optionalPresence {
+		condition = presenceIdentifier
+	}
+	indent := "\t"
+	if condition != "true" {
+		fmt.Fprintf(source, "\tif %s {\n", condition)
+		indent = "\t\t"
+	}
+	fmt.Fprintf(source, "%s%s = plystraPointer(%s)\n", indent, derivedIdentifier, converted)
+	fmt.Fprintf(
+		source,
+		"%sctx, %s = invocationcontext.WithValue(ctx, %s, *%s, %d)\n",
+		indent,
+		errorIdentifier,
+		strconv.Quote(operation.Key),
+		derivedIdentifier,
+		operation.MaximumBytes,
+	)
+	if condition != "true" {
+		fmt.Fprintln(source, "\t}")
+	}
+	fmt.Fprintf(source, "\tif %s != nil {\n", errorIdentifier)
+	fmt.Fprintf(source, "\t\treturn contract.Response{}, %s\n", errorIdentifier)
+	fmt.Fprintln(source, "\t}")
+	return nil
 }
 
 func renderPrepareCall(

@@ -128,6 +128,7 @@ func TestLowerBuildsImmutableRenderReadyPlan(t *testing.T) {
 		"authzcheckv1=example.com/acme/app/v2/generated/go/clients/authz/check/v1",
 		"auditwritev1contract=example.com/acme/app/v2/generated/go/contracts/audit/write/v1",
 		"authzcheckv1contract=example.com/acme/app/v2/generated/go/contracts/authz/check/v1",
+		"invocationcontext=example.com/acme/app/v2/generated/go/internal/invocationcontext",
 	}) {
 		t.Fatalf("imports = %v", got)
 	}
@@ -149,6 +150,12 @@ func TestLowerBuildsImmutableRenderReadyPlan(t *testing.T) {
 		"check-permission:error=plystraAuthzAuthorizeCheckPermissionError",
 	}) {
 		t.Fatalf("authz identifiers = %v", got)
+	}
+	if _, ok := authzNodes[0].SourceIdentifier(); ok {
+		t.Fatal("request-field derivation reserved an unused source identifier")
+	}
+	if _, ok := authzNodes[0].PresenceIdentifier(); ok {
+		t.Fatal("request-field derivation reserved an unused presence identifier")
 	}
 	target, ok := authzNodes[1].Target()
 	if !ok || target.Capability() != authz || target.ImportName() != "authzcheckv1" || target.ContractImportPath() != "example.com/acme/app/v2/generated/go/contracts/authz/check/v1" || target.ContractImportName() != "authzcheckv1contract" || target.Operation() != "Check" {

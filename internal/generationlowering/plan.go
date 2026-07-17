@@ -72,6 +72,8 @@ type Node struct {
 	responseIdentifier string
 	errorIdentifier    string
 	derivedIdentifier  string
+	sourceIdentifier   string
+	presenceIdentifier string
 }
 
 // ID returns the contribution-local stable node identifier.
@@ -101,6 +103,18 @@ func (n Node) Identifier(output generation.GeneratedNodeOutput) (string, bool) {
 		value = n.derivedIdentifier
 	}
 	return value, value != ""
+}
+
+// SourceIdentifier returns the CLI-owned local used while reading an optional
+// generated invocation value.
+func (n Node) SourceIdentifier() (string, bool) {
+	return n.sourceIdentifier, n.sourceIdentifier != ""
+}
+
+// PresenceIdentifier returns the CLI-owned local that records whether an
+// optional generated invocation value exists.
+func (n Node) PresenceIdentifier() (string, bool) {
+	return n.presenceIdentifier, n.presenceIdentifier != ""
 }
 
 // Contribution is one immutable lowered semantic contribution.
@@ -223,6 +237,7 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 	base := generatedIdentifierBase(contribution.id, generated.ID())
 	provenance := nodeProvenance(contribution, generated)
 	identifiers := make([]IdentifierRequest, 0, 2)
+	imports := make([]ImportRequest, 0, 1)
 	reserve := func(output generation.GeneratedNodeOutput, suffix string) {
 		name := base + suffix
 		identifiers = append(identifiers, IdentifierRequest{
@@ -251,11 +266,28 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 		reserve(generation.GeneratedNodeResponse, "Response")
 		reserve(generation.GeneratedNodeError, "Error")
 	case generation.GeneratedNodeKindContextDerivation:
-		if _, ok := generated.ContextDerivation(); !ok {
+		operation, ok := generated.ContextDerivation()
+		if !ok {
 			return Node{}, nil, nil, fmt.Errorf("%w: context-derivation operation is absent", ErrInvalidContribution)
 		}
 		reserve(generation.GeneratedNodeDerived, "Derived")
 		reserve(generation.GeneratedNodeError, "Error")
+		if operation.Value.Invocation != nil && operation.Value.Invocation.Source == generation.GeneratedInvocationContextValue {
+			node.sourceIdentifier = base + "Source"
+			node.presenceIdentifier = base + "Present"
+			identifiers = append(identifiers,
+				IdentifierRequest{Name: node.sourceIdentifier, Source: provenance + " optional source"},
+				IdentifierRequest{Name: node.presenceIdentifier, Source: provenance + " optional presence"},
+			)
+		}
+		if operation.Presence == generation.GeneratedContextOptional {
+			identifiers = append(identifiers, contextRuntimeIdentifiers()...)
+		}
+		imports = append(imports, ImportRequest{
+			Path:   path.Join(modulePath, "generated/go/internal/invocationcontext"),
+			Name:   "invocationcontext",
+			Source: provenance + " generated invocation context",
+		})
 	case generation.GeneratedNodeKindConditionalFailure:
 		if _, ok := generated.ConditionalFailure(); !ok {
 			return Node{}, nil, nil, fmt.Errorf("%w: conditional-failure operation is absent", ErrInvalidContribution)
@@ -278,7 +310,7 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 	}
 
 	if target.String() == "" {
-		return node, nil, identifiers, nil
+		return node, imports, identifiers, nil
 	}
 	reference, err := targetReference(modulePath, target)
 	if err != nil {
@@ -286,18 +318,19 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 	}
 	node.target = reference
 	node.hasTarget = true
-	return node, []ImportRequest{
-		{
+	imports = append(imports,
+		ImportRequest{
 			Path:   reference.importPath,
 			Name:   reference.importName,
 			Source: provenance + " target client " + target.String(),
 		},
-		{
+		ImportRequest{
 			Path:   reference.contractImportPath,
 			Name:   reference.contractImportName,
 			Source: provenance + " target contract " + target.String(),
 		},
-	}, identifiers, nil
+	)
+	return node, imports, identifiers, nil
 }
 
 func targetReference(modulePath string, target generation.CapabilityID) (TargetReference, error) {
@@ -326,6 +359,12 @@ func invocationRuntimeIdentifiers() []IdentifierRequest {
 		{Name: "plystraInvokeWithTimeout", Source: "generated invocation timeout runtime"},
 		{Name: "plystraPointer", Source: "generated invocation typed binding runtime"},
 		{Name: "plystraConvertOptional", Source: "generated invocation typed binding runtime"},
+	}
+}
+
+func contextRuntimeIdentifiers() []IdentifierRequest {
+	return []IdentifierRequest{
+		{Name: "plystraPointer", Source: "generated invocation typed binding runtime"},
 	}
 }
 
