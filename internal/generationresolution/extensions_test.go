@@ -224,6 +224,64 @@ func TestResolveExtensionsSkipsHelpersWhenNoExtensionIsSelected(t *testing.T) {
 	}
 }
 
+func TestResolveExtensionsAddsCanonicalHTTPExposureRequirements(t *testing.T) {
+	plain := extensionTestContract(t, "order.read/v1", "")
+	health := extensionTestContract(t, "kernel.health/v1", "")
+	input := ExtensionInput{
+		Input: Input{
+			Candidates: []providerresolution.Candidate{{PluginID: "example.business", Contract: plain, Source: "business/order.read"}},
+		},
+		Plugins: []Plugin{extensionTestPlugin("example.business", "business", "order.read/v1")},
+		Capabilities: []generation.CapabilityInput{
+			{ContractJSON: plain, Exposure: generation.Exposure{Go: true}},
+			{ContractJSON: health, Intrinsic: true},
+		},
+		ApplicationHTTPExposures: extensionTestHTTPExposures(t, "order.read/v1", "kernel.health/v1"),
+	}
+	builder := newFakeExtensionBuilder(nil)
+	result, err := resolveExtensions(t.Context(), input, builder.Build)
+	if err != nil {
+		t.Fatalf("resolveExtensions: %v", err)
+	}
+	if result.Passes() != 1 || len(result.Outputs()) != 0 || len(builder.builds) != 0 {
+		t.Fatalf("HTTP-only result = passes %d, outputs %#v, builds %#v", result.Passes(), result.Outputs(), builder.builds)
+	}
+	resolved := result.ActivationResolution().ProviderResolution().Capabilities()
+	if got := extensionResolvedCapabilityIDs(result.ActivationResolution().ProviderResolution()); !slices.Equal(got, []string{"kernel.health/v1", "order.read/v1"}) {
+		t.Fatalf("HTTP requirements = %v", got)
+	}
+	if !slices.Equal(resolved[0].Sources(), []string{`plystra.yaml http.expose["kernel.health/v1"]`}) || !slices.Equal(resolved[1].Sources(), []string{`plystra.yaml http.expose["order.read/v1"]`}) {
+		t.Fatalf("HTTP requirement sources = %v, %v", resolved[0].Sources(), resolved[1].Sources())
+	}
+	for _, id := range []string{"kernel.health/v1", "order.read/v1"} {
+		view, exists := result.Context().Capability(extensionTestCapabilityID(t, id))
+		if !exists || !view.Exposure().HTTP || !view.Exposure().JavaScript {
+			t.Fatalf("HTTP exposure for %s = %#v, %t", id, view.Exposure(), exists)
+		}
+		if id == "order.read/v1" && !view.Exposure().Go {
+			t.Fatalf("HTTP exposure erased existing Go surface for %s", id)
+		}
+	}
+	if input.Capabilities[0].Exposure != (generation.Exposure{Go: true}) || input.Capabilities[1].Exposure != (generation.Exposure{}) {
+		t.Fatalf("ResolveExtensions mutated input exposure: %#v", input.Capabilities)
+	}
+}
+
+func TestResolveExtensionsRejectsUnknownCanonicalHTTPExposure(t *testing.T) {
+	plain := extensionTestContract(t, "order.read/v1", "")
+	input := ExtensionInput{
+		Capabilities:             []generation.CapabilityInput{{ContractJSON: plain}},
+		ApplicationHTTPExposures: extensionTestHTTPExposures(t, "missing.operation/v1"),
+	}
+	result, err := resolveExtensions(t.Context(), input, newFakeExtensionBuilder(nil).Build)
+	if !errors.Is(err, ErrResolveExtensions) || !errors.Is(err, ErrApplicationContext) || !strings.Contains(err.Error(), `plystra.yaml http.expose["missing.operation/v1"]`) || !strings.Contains(err.Error(), "absent from the visible canonical catalog") {
+		t.Fatalf("unknown HTTP exposure error = %v", err)
+	}
+	if result.Passes() != 0 || len(result.Context().CanonicalJSON()) != 0 {
+		t.Fatalf("unknown HTTP exposure returned partial result %#v", result)
+	}
+}
+
 func TestResolveExtensionsRejectsFinalAliasConflict(t *testing.T) {
 	order := extensionTestContract(t, "order.create/v1", "extensions:\n  authn: {authenticated: true}\n")
 	verify := extensionTestContract(t, "authn.session.verify/v1", "")
@@ -694,7 +752,6 @@ func extensionTestInput(t *testing.T, order, verify, audit []byte) ExtensionInpu
 	t.Helper()
 	return ExtensionInput{
 		Input: Input{
-			Requirements: []providerresolution.Requirement{{Contract: order, Source: "plystra.yaml http.expose.order.create/v1"}},
 			Candidates: []providerresolution.Candidate{
 				{PluginID: "example.business", Contract: order, Source: "business/order.create"},
 				{PluginID: "example.authn", Contract: verify, Source: "authn/session.verify"},
@@ -712,6 +769,7 @@ func extensionTestInput(t *testing.T, order, verify, audit []byte) ExtensionInpu
 			{ContractJSON: verify},
 			{ContractJSON: audit},
 		},
+		ApplicationHTTPExposures: extensionTestHTTPExposures(t, "order.create/v1"),
 	}
 }
 
@@ -722,6 +780,22 @@ func extensionTestApplicationAliases(t *testing.T, aliases string) []application
 		t.Fatalf("applicationmeta.Parse: %v", err)
 	}
 	return manifest.Aliases()
+}
+
+func extensionTestHTTPExposures(t *testing.T, capabilities ...string) []applicationmeta.HTTPExposure {
+	t.Helper()
+	var source strings.Builder
+	source.WriteString("http:\n  expose:\n")
+	for _, capability := range capabilities {
+		source.WriteString("    - ")
+		source.WriteString(capability)
+		source.WriteByte('\n')
+	}
+	manifest, err := applicationmeta.Parse([]byte(source.String()))
+	if err != nil {
+		t.Fatalf("applicationmeta.Parse HTTP exposure: %v", err)
+	}
+	return manifest.HTTPExposures()
 }
 
 func extensionTestPlugin(id, path string, provides ...string) Plugin {

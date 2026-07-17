@@ -54,17 +54,42 @@ func (a Alias) Deprecated() string { return a.deprecated }
 // Source returns stable configuration-path provenance for diagnostics.
 func (a Alias) Source() string { return a.source }
 
-// Manifest is the immutable application metadata currently required for Alias
-// normalization. Other validated top-level sections remain CLI-owned inputs.
+// HTTPExposure is one explicit canonical Capability selected for generated
+// HTTP and browser-facing application surfaces.
+type HTTPExposure struct {
+	id     capabilityid.Identifier
+	source string
+}
+
+// ID returns the exact canonical Capability ID declared under http.expose.
+func (e HTTPExposure) ID() capabilityid.Identifier { return e.id }
+
+// Source returns stable configuration-path provenance for diagnostics.
+func (e HTTPExposure) Source() string { return e.source }
+
+// Manifest is the immutable normalized application metadata currently used by
+// canonical HTTP exposure and Capability Alias resolution.
 type Manifest struct {
-	aliases []Alias
+	httpAddress    string
+	hasHTTPAddress bool
+	httpExposures  []HTTPExposure
+	aliases        []Alias
+}
+
+// HTTPAddress returns the explicitly configured listener address. A false
+// result means the http section or address field was omitted.
+func (m Manifest) HTTPAddress() (string, bool) { return m.httpAddress, m.hasHTTPAddress }
+
+// HTTPExposures returns defensive declarations sorted by canonical ID.
+func (m Manifest) HTTPExposures() []HTTPExposure {
+	return append([]HTTPExposure(nil), m.httpExposures...)
 }
 
 // Aliases returns defensive declarations sorted by Alias ID.
 func (m Manifest) Aliases() []Alias { return append([]Alias(nil), m.aliases...) }
 
-// Parse reads one strict bounded plystra.yaml and normalizes concise and
-// expanded capabilities.aliases declarations.
+// Parse reads one strict bounded plystra.yaml and normalizes canonical HTTP
+// exposure together with concise and expanded capabilities.aliases declarations.
 func Parse(data []byte) (Manifest, error) {
 	root, err := decodeDocument(data)
 	if err != nil {
@@ -81,17 +106,83 @@ func Parse(data []byte) (Manifest, error) {
 			return Manifest{}, invalid("unknown key %q", key)
 		}
 	}
-	for _, section := range []string{"http", "timeouts", "config"} {
+	for _, section := range []string{"timeouts", "config"} {
 		if node, exists := values[section]; exists && node.Kind != yaml.MappingNode {
 			return Manifest{}, invalid("%s must be a mapping", section)
 		}
 	}
 
+	address, hasAddress, exposures, err := parseHTTP(values["http"])
+	if err != nil {
+		return Manifest{}, err
+	}
 	aliases, err := parseCapabilities(values["capabilities"])
 	if err != nil {
 		return Manifest{}, err
 	}
-	return Manifest{aliases: aliases}, nil
+	return Manifest{
+		httpAddress:    address,
+		hasHTTPAddress: hasAddress,
+		httpExposures:  exposures,
+		aliases:        aliases,
+	}, nil
+}
+
+func parseHTTP(node *yaml.Node) (string, bool, []HTTPExposure, error) {
+	if node == nil {
+		return "", false, nil, nil
+	}
+	values, err := mapping(node, "http")
+	if err != nil {
+		return "", false, nil, err
+	}
+	for _, key := range sortedNodeKeys(values) {
+		switch key {
+		case "address", "expose":
+		default:
+			return "", false, nil, invalid("http contains unknown key %q", key)
+		}
+	}
+	address := ""
+	hasAddress := false
+	if addressNode, exists := values["address"]; exists {
+		address, err = strictString(addressNode)
+		if err != nil || address == "" || len(address) > 4096 || strings.TrimSpace(address) != address || strings.ContainsRune(address, '\x00') {
+			return "", false, nil, invalid("http.address must be a non-empty trimmed string of at most 4096 bytes with no NUL")
+		}
+		hasAddress = true
+	}
+	exposeNode, exists := values["expose"]
+	if !exists {
+		return address, hasAddress, nil, nil
+	}
+	if exposeNode.Kind != yaml.SequenceNode {
+		return "", false, nil, invalid("http.expose must be a sequence of canonical Capability IDs")
+	}
+	exposures := make([]HTTPExposure, 0, len(exposeNode.Content))
+	seen := make(map[capabilityid.Identifier]int, len(exposeNode.Content))
+	for index, item := range exposeNode.Content {
+		value, valueErr := strictString(item)
+		if valueErr != nil || value == "" {
+			return "", false, nil, invalid("http.expose[%d] must be a canonical Capability ID string", index)
+		}
+		id, parseErr := capabilityid.Parse(value)
+		if parseErr != nil {
+			return "", false, nil, invalid("http.expose[%d] %q is not a canonical Capability ID", index, value)
+		}
+		if previous, duplicate := seen[id]; duplicate {
+			return "", false, nil, invalid("http.expose[%d] duplicates Capability %q from http.expose[%d]", index, id.String(), previous)
+		}
+		seen[id] = index
+		exposures = append(exposures, HTTPExposure{
+			id:     id,
+			source: fmt.Sprintf("plystra.yaml http.expose[%q]", id.String()),
+		})
+	}
+	sort.Slice(exposures, func(left, right int) bool {
+		return exposures[left].id.String() < exposures[right].id.String()
+	})
+	return address, hasAddress, exposures, nil
 }
 
 func parseCapabilities(node *yaml.Node) ([]Alias, error) {

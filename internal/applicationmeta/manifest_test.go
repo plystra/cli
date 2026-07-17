@@ -93,6 +93,44 @@ http: {expose: [], address: ":8080"}
 	}
 }
 
+func TestParseNormalizesHTTPAddressAndCanonicalExposure(t *testing.T) {
+	t.Parallel()
+
+	data := []byte(`http:
+  expose:
+    - customer.profile.get/v1
+    - kernel.health/v1
+    - authn.login.password/v1
+  address: ":8080"
+`)
+	manifest, err := applicationmeta.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	address, explicit := manifest.HTTPAddress()
+	if !explicit || address != ":8080" {
+		t.Fatalf("HTTPAddress = %q, %t", address, explicit)
+	}
+	exposures := manifest.HTTPExposures()
+	if got := httpExposureStrings(exposures); !slices.Equal(got, []string{
+		`authn.login.password/v1@plystra.yaml http.expose["authn.login.password/v1"]`,
+		`customer.profile.get/v1@plystra.yaml http.expose["customer.profile.get/v1"]`,
+		`kernel.health/v1@plystra.yaml http.expose["kernel.health/v1"]`,
+	}) {
+		t.Fatalf("HTTPExposures = %v", got)
+	}
+	exposures[0] = applicationmeta.HTTPExposure{}
+	if manifest.HTTPExposures()[0].ID().String() != "authn.login.password/v1" {
+		t.Fatal("Manifest exposed mutable HTTP exposure storage")
+	}
+
+	reordered, err := applicationmeta.Parse([]byte(`http: {address: ":8080", expose: [kernel.health/v1, authn.login.password/v1, customer.profile.get/v1]}
+`))
+	if err != nil || !slices.Equal(httpExposureStrings(reordered.HTTPExposures()), httpExposureStrings(manifest.HTTPExposures())) {
+		t.Fatalf("reordered Parse = %v, %v", httpExposureStrings(reordered.HTTPExposures()), err)
+	}
+}
+
 func TestParseAcceptsCurrentGeneratedApplicationManifest(t *testing.T) {
 	t.Parallel()
 
@@ -107,6 +145,9 @@ func TestParseAcceptsCurrentGeneratedApplicationManifest(t *testing.T) {
 	if len(manifest.Aliases()) != 0 {
 		t.Fatalf("generated Aliases = %#v", manifest.Aliases())
 	}
+	if address, explicit := manifest.HTTPAddress(); !explicit || address != ":8080" || len(manifest.HTTPExposures()) != 0 {
+		t.Fatalf("generated HTTP = address %q/%t, exposures %#v", address, explicit, manifest.HTTPExposures())
+	}
 }
 
 func TestParseAllowsEmptyOptionalSections(t *testing.T) {
@@ -114,20 +155,24 @@ func TestParseAllowsEmptyOptionalSections(t *testing.T) {
 
 	for _, data := range [][]byte{
 		[]byte(`{}`),
+		[]byte("http: {}\n"),
+		[]byte("http: {expose: []}\n"),
 		[]byte("capabilities: {}\n"),
 		[]byte("capabilities:\n  aliases: {}\n"),
 	} {
 		manifest, err := applicationmeta.Parse(data)
-		if err != nil || len(manifest.Aliases()) != 0 {
+		address, hasAddress := manifest.HTTPAddress()
+		if err != nil || len(manifest.Aliases()) != 0 || hasAddress || address != "" || len(manifest.HTTPExposures()) != 0 {
 			t.Fatalf("Parse(%q) = %#v, %v", data, manifest, err)
 		}
 	}
 }
 
-func TestParseRejectsUnsafeOrInvalidApplicationAliases(t *testing.T) {
+func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 	t.Parallel()
 
 	overlong := strings.Repeat("x", 1025)
+	overlongAddress := strings.Repeat("x", 4097)
 	tests := []struct {
 		name string
 		data string
@@ -142,6 +187,16 @@ func TestParseRejectsUnsafeOrInvalidApplicationAliases(t *testing.T) {
 		{name: "deprecated instance ID", data: "instance_id: app\n", want: `unknown key "instance_id"`},
 		{name: "legacy database", data: "database: {}\n", want: `unknown key "database"`},
 		{name: "http type", data: "http: []\n", want: "http must be a mapping"},
+		{name: "unknown http key", data: "http: {route: /api}\n", want: `http contains unknown key "route"`},
+		{name: "http address type", data: "http: {address: 8080}\n", want: "http.address must be"},
+		{name: "empty http address", data: `http: {address: ""}` + "\n", want: "http.address must be"},
+		{name: "untrimmed http address", data: `http: {address: " :8080 "}` + "\n", want: "http.address must be"},
+		{name: "oversized http address", data: "http:\n  address: " + overlongAddress + "\n", want: "at most 4096 bytes"},
+		{name: "NUL http address", data: `http: {address: "bad\0address"}` + "\n", want: "no NUL"},
+		{name: "http exposure type", data: "http: {expose: {}}\n", want: "http.expose must be a sequence"},
+		{name: "http exposure item type", data: "http: {expose: [true]}\n", want: "http.expose[0] must be"},
+		{name: "invalid HTTP exposure", data: "http: {expose: [Order.Create/v1]}\n", want: "not a canonical Capability ID"},
+		{name: "duplicate HTTP exposure", data: "http: {expose: [order.create/v1, order.create/v1]}\n", want: "duplicates Capability"},
 		{name: "timeouts type", data: "timeouts: []\n", want: "timeouts must be a mapping"},
 		{name: "config type", data: "config: []\n", want: "config must be a mapping"},
 		{name: "capabilities type", data: "capabilities: []\n", want: "capabilities must be a mapping"},
@@ -202,9 +257,10 @@ func TestParseRejectsOversizedManifest(t *testing.T) {
 	}
 }
 
-func FuzzParseAliases(f *testing.F) {
+func FuzzParseApplicationManifest(f *testing.F) {
 	for _, seed := range []string{
 		"{}\n",
+		"http: {address: \":8080\", expose: [kernel.health/v1, order.create/v1]}\n",
 		"capabilities: {aliases: {}}\n",
 		aliasYAML("authn.login/v1: authn.login.password/v1"),
 		aliasYAML("account.sign-in/v1: {target: authn.login.password/v1, expose: {go: true, http: false, javascript: false}, deprecated: {message: old}}"),
@@ -227,8 +283,12 @@ func FuzzParseAliases(f *testing.F) {
 			}
 			return
 		}
-		if !slices.Equal(aliasStrings(first.Aliases()), aliasStrings(second.Aliases())) {
-			t.Fatalf("Parse is nondeterministic: %v then %v", aliasStrings(first.Aliases()), aliasStrings(second.Aliases()))
+		firstAddress, firstHasAddress := first.HTTPAddress()
+		secondAddress, secondHasAddress := second.HTTPAddress()
+		if !slices.Equal(aliasStrings(first.Aliases()), aliasStrings(second.Aliases())) ||
+			!slices.Equal(httpExposureStrings(first.HTTPExposures()), httpExposureStrings(second.HTTPExposures())) ||
+			firstAddress != secondAddress || firstHasAddress != secondHasAddress {
+			t.Fatalf("Parse is nondeterministic: %#v then %#v", first, second)
 		}
 	})
 }
@@ -241,6 +301,14 @@ func aliasStrings(values []applicationmeta.Alias) []string {
 	result := make([]string, len(values))
 	for index, value := range values {
 		result[index] = fmt.Sprintf("%s->%s", value.ID(), value.Target())
+	}
+	return result
+}
+
+func httpExposureStrings(values []applicationmeta.HTTPExposure) []string {
+	result := make([]string, len(values))
+	for index, value := range values {
+		result[index] = fmt.Sprintf("%s@%s", value.ID(), value.Source())
 	}
 	return result
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/plystra/cli/internal/aliasresolution"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/providerresolution"
 )
@@ -60,13 +61,15 @@ type Plugin struct {
 
 // ExtensionInput contains the activation-resolution inputs plus the complete
 // visible canonical catalog, public plugin metadata, and parsed application
-// Alias declarations needed to build each immutable extension context.
+// HTTP exposure and Alias declarations needed to build each immutable
+// extension context.
 type ExtensionInput struct {
 	Input
-	Plugins            []Plugin
-	Capabilities       []generation.CapabilityInput
-	ApplicationAliases []applicationmeta.Alias
-	BuildOptions       generationexec.BuildOptions
+	Plugins                  []Plugin
+	Capabilities             []generation.CapabilityInput
+	ApplicationHTTPExposures []applicationmeta.HTTPExposure
+	ApplicationAliases       []applicationmeta.Alias
+	BuildOptions             generationexec.BuildOptions
 }
 
 // GeneratedRequirement records one exact ordinary requirement and complete
@@ -218,6 +221,10 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 	}()
 
 	requirements := cloneRequirements(input.Requirements)
+	requirements, err = addApplicationHTTPRequirements(requirements, input.ApplicationHTTPExposures, input.Capabilities)
+	if err != nil {
+		return ExtensionResult{}, fmt.Errorf("%w: %w: %w", ErrResolveExtensions, ErrApplicationContext, err)
+	}
 	requirements, err = addApplicationAliasRequirements(requirements, input.ApplicationAliases, input.Capabilities)
 	if err != nil {
 		return ExtensionResult{}, fmt.Errorf("%w: %w: %w", ErrResolveExtensions, ErrApplicationContext, err)
@@ -387,9 +394,13 @@ func buildGenerationContext(input ExtensionInput, plugins map[string]Plugin, res
 	for index, capability := range capabilities {
 		requirementIDs[index] = capability.ID().String()
 	}
+	capabilityInputs, err := applyApplicationHTTPExposure(input.Capabilities, input.ApplicationHTTPExposures)
+	if err != nil {
+		return generation.Context{}, err
+	}
 	contextInput := generation.Input{
 		Plugins:      pluginInputs,
-		Capabilities: cloneCapabilityInputs(input.Capabilities),
+		Capabilities: capabilityInputs,
 		Requirements: requirementIDs,
 		Providers:    providerInputs,
 	}
@@ -423,6 +434,64 @@ func buildGenerationContext(input ExtensionInput, plugins map[string]Plugin, res
 		return generation.Context{}, err
 	}
 	return generationContext, nil
+}
+
+func addApplicationHTTPRequirements(
+	requirements []providerresolution.Requirement,
+	exposures []applicationmeta.HTTPExposure,
+	capabilities []generation.CapabilityInput,
+) ([]providerresolution.Requirement, error) {
+	if len(exposures) == 0 {
+		return requirements, nil
+	}
+	catalog, err := generation.NewContext(generation.Input{Capabilities: cloneCapabilityInputs(capabilities)})
+	if err != nil {
+		return nil, err
+	}
+	result := append([]providerresolution.Requirement(nil), requirements...)
+	for _, exposure := range exposures {
+		id, err := generation.ParseCapabilityID(exposure.ID().String())
+		if err != nil {
+			return nil, fmt.Errorf("%s ID %q is not canonical", exposure.Source(), exposure.ID())
+		}
+		capability, exists := catalog.Capability(id)
+		if !exists {
+			return nil, fmt.Errorf("%s Capability %s is absent from the visible canonical catalog", exposure.Source(), id)
+		}
+		result = append(result, providerresolution.Requirement{
+			Capability: id.String(),
+			Contract:   capability.ContractJSON(),
+			Source:     exposure.Source(),
+		})
+	}
+	return result, nil
+}
+
+func applyApplicationHTTPExposure(
+	capabilities []generation.CapabilityInput,
+	exposures []applicationmeta.HTTPExposure,
+) ([]generation.CapabilityInput, error) {
+	result := cloneCapabilityInputs(capabilities)
+	if len(exposures) == 0 {
+		return result, nil
+	}
+	byID := make(map[string]int, len(result))
+	for index, capability := range result {
+		metadata, err := capabilitymeta.Parse(capability.ContractJSON)
+		if err != nil {
+			return nil, fmt.Errorf("capabilities[%d] cannot supply HTTP exposure: %v", index, err)
+		}
+		byID[metadata.ID().String()] = index
+	}
+	for _, exposure := range exposures {
+		index, exists := byID[exposure.ID().String()]
+		if !exists {
+			return nil, fmt.Errorf("%s Capability %s is absent from the visible canonical catalog", exposure.Source(), exposure.ID())
+		}
+		result[index].Exposure.HTTP = true
+		result[index].Exposure.JavaScript = true
+	}
+	return result, nil
 }
 
 func addApplicationAliasRequirements(

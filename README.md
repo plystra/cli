@@ -29,6 +29,8 @@ The CLI derives one statically resolved application from local plugins, explicit
 
 Reserved `kernel.*` Capabilities are always available outside ordinary provider selection. Ordinary providers are never chosen by priority, official status, discovery order, or filesystem order.
 
+The CLI strictly normalizes `plystra.yaml` `http.address` and the unordered `http.expose` list. Every exposed exact canonical ID becomes a root requirement with stable configuration provenance and enters the generation model with HTTP and JavaScript exposure; duplicates, malformed IDs, unknown configuration keys, and IDs absent from the visible canonical catalog fail before extension execution or generated output. Internal availability alone never creates a public surface, while intrinsic `kernel.*` targets still require explicit exposure.
+
 Rule-derived requirements participate in the same transitive fixed point. A missing provider, unclaimed metadata namespace, ambiguous rule owner, rule cycle, incompatible contribution, or provider ambiguity fails before the CLI writes a runnable artifact.
 
 Visible generation declarations are first indexed by extension namespace. Several candidate providers may associate one namespace with the same exact activation Capability, but different activation Capabilities for one namespace fail with every declaring Plugin ID, API, package, and source. After ordinary provider resolution selects that Capability's provider, only the matching extension owned by that selected plugin is eligible to run; every unselected provider extension is excluded.
