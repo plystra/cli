@@ -39,7 +39,7 @@ func TestResolveBindsExactlyOneValidatedObjectPerSelectedPlugin(t *testing.T) {
 		t.Fatalf("Bindings = %v", got)
 	}
 	smtp, ok := result.Binding("acme.email.smtp")
-	if !ok || !smtp.Explicit() || smtp.ImportPath() != "example.com/app/smtp" || smtp.Source() != `plystra.yaml config["acme.email.smtp"]` {
+	if !ok || !smtp.Explicit() || smtp.ModulePath() != "example.com/app" || smtp.ImportPath() != "example.com/app/smtp" || smtp.Source() != `plystra.yaml config["acme.email.smtp"]` {
 		t.Fatalf("smtp Binding = %#v, %t", smtp, ok)
 	}
 	password, ok := smtp.Schema().Lookup("password")

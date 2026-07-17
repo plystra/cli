@@ -81,6 +81,8 @@ The CLI indexes each plugin's strict Kernel configuration declaration and preser
 
 Private values and Secret reference targets do not enter generation-extension context, generated source, manifests, SDKs, documentation, or diagnostics. A private digest covers the validated selected plugin manifests and values only for concurrent-input detection during the generation transaction.
 
+For every selected local plugin, generation derives its module-owned type and decoder under `generated/go/configuration/` from the validated `plugin.yaml` schema alone. Required fields and fields with defaults use direct Go values; omitted optional scalars use pointers, while optional objects and arrays preserve nil-versus-configured-empty behavior. The generated decoder calls Kernel `configuration.Decode` at runtime, constructs one typed object for the Plugin ID, and redacts formatting and serialization. Application values and Secret reference targets are never embedded in this source. Selected dependency plugins ship the same generated configuration boundary in their own Go Modules.
+
 ## Generated application invocation
 
 Every ordinary external or cross-plugin call uses generated code:

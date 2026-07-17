@@ -14,12 +14,14 @@ import (
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/capabilitymeta"
+	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationactivation"
 	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/providerresolution"
+	"github.com/plystra/kernel/plugin/manifest"
 )
 
 const (
@@ -189,6 +191,58 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	}
 }
 
+func TestRenderManagesSchemaOnlyLocalPluginConfiguration(t *testing.T) {
+	t.Parallel()
+
+	schema, err := manifest.ParseConfig([]byte(`
+host: {type: string, required: true}
+password: {type: secret, required: true}
+timeout: {type: duration, default: 5s}
+`))
+	if err != nil {
+		t.Fatalf("manifest.ParseConfig: %v", err)
+	}
+	resolution := resolvedApplication(t, "")
+	options := applicationgen.Options{
+		ModulePath:        applicationModulePath,
+		JavaScriptPackage: applicationSDKPackage,
+		Configurations: []configurationgen.Input{{
+			PluginName: "business",
+			PluginID:   "acme.business",
+			Schema:     schema,
+		}},
+	}
+	withConfiguration, err := applicationgen.Render(options, resolution)
+	if err != nil {
+		t.Fatalf("Render with configuration: %v", err)
+	}
+	const configurationPath = "generated/go/configuration/business_gen.go"
+	configuration := outputData(t, withConfiguration, configurationPath)
+	for _, required := range []string{"type BusinessConfig struct", "DecodeBusiness", "kernelconfiguration.Decode", "Password kernelconfiguration.Secret", "Timeout time.Duration"} {
+		if !bytes.Contains(configuration, []byte(required)) {
+			t.Fatalf("configuration source omits %q:\n%s", required, configuration)
+		}
+	}
+	for _, forbidden := range []string{"runtime-private-host", "APPLICATION_SECRET_TARGET"} {
+		if bytes.Contains(configuration, []byte(forbidden)) {
+			t.Fatalf("configuration source contains private value %q:\n%s", forbidden, configuration)
+		}
+	}
+
+	withoutConfiguration, err := applicationgen.Render(applicationgen.Options{ModulePath: applicationModulePath, JavaScriptPackage: applicationSDKPackage}, resolution)
+	if err != nil {
+		t.Fatalf("Render without configuration: %v", err)
+	}
+	root := t.TempDir()
+	if report, err := generatedfiles.Install(root, withConfiguration, func(string) error { return nil }); err != nil || !report.Clean() {
+		t.Fatalf("Install with configuration = %#v, %v", report.Changes(), err)
+	}
+	report, err := generatedfiles.Check(root, withoutConfiguration)
+	if err != nil || !slices.Equal(report.Obsolete(), []string{configurationPath}) {
+		t.Fatalf("configuration cleanup = %#v, %v", report.Changes(), err)
+	}
+}
+
 func TestRenderRejectsInvalidResolutionModuleAndPackage(t *testing.T) {
 	t.Parallel()
 
@@ -201,6 +255,21 @@ func TestRenderRejectsInvalidResolutionModuleAndPackage(t *testing.T) {
 	}
 	if _, err := applicationgen.Render(applicationgen.Options{ModulePath: applicationModulePath}, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, javascriptgen.ErrRender) {
 		t.Fatalf("Render missing JavaScript package error = %v", err)
+	}
+	empty, err := manifest.ParseConfig([]byte("{}\n"))
+	if err != nil {
+		t.Fatalf("manifest.ParseConfig: %v", err)
+	}
+	colliding := applicationgen.Options{
+		ModulePath:        applicationModulePath,
+		JavaScriptPackage: applicationSDKPackage,
+		Configurations: []configurationgen.Input{
+			{PluginName: "http", PluginID: "acme.http", Schema: empty},
+			{PluginName: "h-t-t-p", PluginID: "acme.h-t-t-p", Schema: empty},
+		},
+	}
+	if _, err := applicationgen.Render(colliding, resolution); !errors.Is(err, applicationgen.ErrRender) || !strings.Contains(err.Error(), "both generate Go type HTTPConfig") {
+		t.Fatalf("configuration identifier collision error = %v", err)
 	}
 }
 

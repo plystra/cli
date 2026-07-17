@@ -389,7 +389,9 @@ func createKernelProxy(t *testing.T) string {
 		data []byte
 	}{
 		{name: "assembly/version.go", data: []byte("package assembly\n\nimport \"fmt\"\n\ntype Version uint32\n\nconst V1 Version = 1\n\nfunc RequireVersion(version Version) error {\n\tif version != V1 { return fmt.Errorf(\"unsupported assembly API version %d\", version) }\n\treturn nil\n}\n")},
+		{name: "configuration/configuration.go", data: []byte("package configuration\n\nimport (\n\t\"context\"\n\t\"errors\"\n\n\t\"github.com/plystra/kernel/plugin/manifest\"\n)\n\nvar ErrSecretExposure = errors.New(\"Secret serialization is prohibited\")\n\ntype Resolver struct{}\n\ntype Values struct{}\n\nfunc Decode(context.Context, *Resolver, manifest.Config, []byte) (Values, error) { return Values{}, nil }\n")},
 		{name: "go.mod", data: moduleFile},
+		{name: "plugin/manifest/config.go", data: []byte("package manifest\n\ntype Config struct{}\n\nfunc ParseConfig([]byte) (Config, error) { return Config{}, nil }\n")},
 	}
 	for _, file := range files {
 		header := &zip.FileHeader{Name: prefix + file.name, Method: zip.Deflate}

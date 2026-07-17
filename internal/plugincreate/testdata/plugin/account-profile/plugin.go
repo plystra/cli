@@ -1,6 +1,6 @@
 package accountprofile
 
-import configuration "example.com/acme/my-app/v2/generated/configuration"
+import configuration "example.com/acme/my-app/v2/generated/go/configuration"
 
 // Config is the generated configuration type for acme.my-app.account-profile.
 type Config = configuration.AccountProfileConfig

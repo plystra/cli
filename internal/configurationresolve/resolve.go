@@ -38,6 +38,7 @@ var (
 // and private runtime values. Formatting never exposes the values.
 type Binding struct {
 	pluginID   string
+	modulePath string
 	importPath string
 	source     string
 	schema     manifest.Config
@@ -47,6 +48,9 @@ type Binding struct {
 
 // PluginID returns the selected concrete Plugin ID.
 func (b Binding) PluginID() string { return b.pluginID }
+
+// ModulePath returns the selected plugin's owning Go Module path.
+func (b Binding) ModulePath() string { return b.modulePath }
 
 // ImportPath returns the selected plugin package import path.
 func (b Binding) ImportPath() string { return b.importPath }
@@ -175,6 +179,7 @@ func Resolve(application applicationmeta.Manifest, inventory plugininventory.Ind
 		}
 		binding := Binding{
 			pluginID:   pluginID,
+			modulePath: plugin.ModulePath(),
 			importPath: plugin.ImportPath(),
 			source:     source,
 			schema:     plugin.Config(),

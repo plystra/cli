@@ -7,12 +7,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/aliasresolution"
 	"github.com/plystra/cli/internal/apidocgen"
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/clientgen"
+	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/contractgen"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationlowering"
@@ -41,6 +43,7 @@ var (
 type Options struct {
 	ModulePath        string
 	JavaScriptPackage string
+	Configurations    []configurationgen.Input
 }
 
 // Render lowers final selected contributions once and renders the Kernel
@@ -69,6 +72,27 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		}
 		files = append(files, file)
 		return nil
+	}
+	configurationInputs := append([]configurationgen.Input(nil), options.Configurations...)
+	sort.Slice(configurationInputs, func(left, right int) bool {
+		if configurationInputs[left].PluginID != configurationInputs[right].PluginID {
+			return configurationInputs[left].PluginID < configurationInputs[right].PluginID
+		}
+		return configurationInputs[left].PluginName < configurationInputs[right].PluginName
+	})
+	configurationTypes := make(map[string]string, len(configurationInputs))
+	for _, input := range configurationInputs {
+		configuration, err := configurationgen.Render(input)
+		if err != nil {
+			return generatedfiles.Output{}, fmt.Errorf("%w: configuration for plugin %q: %w", ErrRender, input.PluginID, err)
+		}
+		if previous, collision := configurationTypes[configuration.TypeName()]; collision {
+			return generatedfiles.Output{}, fmt.Errorf("%w: configurations for plugins %q and %q both generate Go type %s", ErrRender, previous, input.PluginID, configuration.TypeName())
+		}
+		configurationTypes[configuration.TypeName()] = input.PluginID
+		if err := add(configuration.Path(), configuration.Data()); err != nil {
+			return generatedfiles.Output{}, fmt.Errorf("%w: configuration for plugin %q: %w", ErrRender, input.PluginID, err)
+		}
 	}
 	aliasManifest := append(aliases.CanonicalJSON(), '\n')
 	if err := add(aliasManifestPath, aliasManifest); err != nil {

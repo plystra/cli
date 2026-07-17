@@ -67,7 +67,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildablePlugins(t *testing.T
 		"account-profile/plugin.yaml",
 		"account-profile/plugin_test.go",
 		"generated/assembly/account-profile_gen.go",
-		"generated/configuration/account-profile_gen.go",
+		"generated/go/configuration/account-profile_gen.go",
 	}
 	gotFiles := make([]string, 0, len(directTree))
 	for name := range directTree {
@@ -176,7 +176,30 @@ func TestCreateRejectsInvalidNamesBeforeFilesystemInspection(t *testing.T) {
 func createModule(t *testing.T, modulePath string) string {
 	t.Helper()
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "go.mod"), "module "+modulePath+"\n\ngo 1.26\n")
+	cliRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve CLI root: %v", err)
+	}
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	goMod := fmt.Sprintf(`module %s
+
+go 1.26
+
+require (
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+)
+
+replace github.com/plystra/kernel => %s
+`, modulePath, filepath.ToSlash(kernelRoot))
+	writeFile(t, filepath.Join(root, "go.mod"), goMod)
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("read CLI go.sum: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.sum"), goSum, 0o644); err != nil {
+		t.Fatalf("write go.sum: %v", err)
+	}
 	canonical, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		t.Fatalf("EvalSymlinks: %v", err)
@@ -190,7 +213,6 @@ func isolatedGoEnvironment(t *testing.T) []string {
 		"GOCACHE":     filepath.Join(t.TempDir(), "build-cache"),
 		"GOENV":       "off",
 		"GOFLAGS":     "",
-		"GOMODCACHE":  filepath.Join(t.TempDir(), "module-cache"),
 		"GOPROXY":     "off",
 		"GOSUMDB":     "off",
 		"GOTOOLCHAIN": "local",
@@ -213,6 +235,7 @@ func scaffoldSnapshot(t *testing.T, root string) map[string][]byte {
 	t.Helper()
 	tree := snapshotTree(t, root)
 	delete(tree, "go.mod")
+	delete(tree, "go.sum")
 	return tree
 }
 

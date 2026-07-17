@@ -133,6 +133,7 @@ capabilities:
 		"generated/go/clients/email/send/v1/client_gen.go",
 		"generated/go/clients/mail/deliver/v1/client_gen.go",
 		"generated/go/contracts/email/send/v1/contract_gen.go",
+		"generated/go/configuration/business_gen.go",
 		"generated/go/invocation/email/send/v1/invocation_gen.go",
 		"generated/go/providers/email/send/v1/provider_gen.go",
 		"generated/manifest.json",
@@ -246,6 +247,12 @@ func TestGenerateDetectsConcurrentPrivateConfigurationChange(t *testing.T) {
 		t.Fatalf("initial Generate = %#v, %v", result.Report().Changes(), err)
 	}
 	generatedBefore := snapshotGenerated(t, root)
+	configurationSource := readFile(t, root, "generated/go/configuration/business_gen.go")
+	for _, forbidden := range []string{"private-one", "private-two"} {
+		if bytes.Contains(configurationSource, []byte(forbidden)) {
+			t.Fatalf("generated configuration source exposed %q:\n%s", forbidden, configurationSource)
+		}
+	}
 
 	_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       root,

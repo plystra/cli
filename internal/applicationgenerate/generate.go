@@ -9,11 +9,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationresolve"
+	"github.com/plystra/cli/internal/configurationgen"
+	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/javascriptgen"
@@ -141,9 +144,14 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 			return preparedGeneration{}, err
 		}
 	}
+	configurations, err := localConfigurationInputs(resolved.Module().ModulePath(), resolved.Configurations())
+	if err != nil {
+		return preparedGeneration{}, err
+	}
 	output, err := applicationgen.Render(applicationgen.Options{
 		ModulePath:        resolved.Module().ModulePath(),
 		JavaScriptPackage: javaScriptPackage,
+		Configurations:    configurations,
 	}, resolved.Resolution())
 	if err != nil {
 		return preparedGeneration{}, err
@@ -153,6 +161,26 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		return preparedGeneration{}, err
 	}
 	return preparedGeneration{resolved: resolved, output: output, fingerprint: fingerprint}, nil
+}
+
+func localConfigurationInputs(modulePath string, resolved configurationresolve.Result) ([]configurationgen.Input, error) {
+	bindings := resolved.Bindings()
+	inputs := make([]configurationgen.Input, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding.ModulePath() != modulePath {
+			continue
+		}
+		pluginName, found := strings.CutPrefix(binding.ImportPath(), modulePath+"/")
+		if !found || pluginName == "" || strings.Contains(pluginName, "/") {
+			return nil, fmt.Errorf("local selected plugin %q has non-root import path %q", binding.PluginID(), binding.ImportPath())
+		}
+		inputs = append(inputs, configurationgen.Input{
+			PluginName: pluginName,
+			PluginID:   binding.PluginID(),
+			Schema:     binding.Schema(),
+		})
+	}
+	return inputs, nil
 }
 
 func exposesJavaScript(context generation.Context) bool {
