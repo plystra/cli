@@ -15,6 +15,7 @@ import (
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationresolve"
+	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/generatedfiles"
@@ -152,6 +153,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		ModulePath:        resolved.Module().ModulePath(),
 		JavaScriptPackage: javaScriptPackage,
 		Configurations:    configurations,
+		Providers:         providerInputs(resolved.Configurations()),
 	}, resolved.Resolution())
 	if err != nil {
 		return preparedGeneration{}, err
@@ -161,6 +163,19 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		return preparedGeneration{}, err
 	}
 	return preparedGeneration{resolved: resolved, output: output, fingerprint: fingerprint}, nil
+}
+
+func providerInputs(resolved configurationresolve.Result) []assemblygen.ProviderInput {
+	bindings := resolved.Bindings()
+	inputs := make([]assemblygen.ProviderInput, len(bindings))
+	for index, binding := range bindings {
+		inputs[index] = assemblygen.ProviderInput{
+			PluginID:   binding.PluginID(),
+			ModulePath: binding.ModulePath(),
+			ImportPath: binding.ImportPath(),
+		}
+	}
+	return inputs
 }
 
 func localConfigurationInputs(modulePath string, resolved configurationresolve.Result) ([]configurationgen.Input, error) {

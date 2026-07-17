@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/format"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -18,7 +20,10 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/generatedfiles"
+	"github.com/plystra/cli/internal/modulelocate"
+	"github.com/plystra/cli/internal/pluginmeta"
 )
 
 func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *testing.T) {
@@ -41,7 +46,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	if !checked.Checked() || checked.Module().Path() != root || checked.Module().ModulePath() != "example.com/Acme/empty" {
 		t.Fatalf("checked result = %#v", checked)
 	}
-	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/assembly/compatibility_gen.go", "generated/manifest.json"}; !reflect.DeepEqual(got, want) {
+	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/providers_gen.go", "generated/manifest.json"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("missing files = %v, want %v", got, want)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
@@ -62,6 +67,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	assertFile(t, root, "generated/manifest.json", "{\"capability_aliases\":[]}\n")
 	assertFileExists(t, root, generatedfiles.ManifestPath)
 	assertFileExists(t, root, "generated/go/assembly/compatibility_gen.go")
+	assertFileExists(t, root, "generated/go/assembly/providers_gen.go")
 	assertFileMissing(t, root, "generated/sdk/javascript/package.json")
 
 	writeFile(t, filepath.Join(root, "generated", "manifest.json"), "drift\n")
@@ -130,6 +136,7 @@ capabilities:
 		"generated/go/adapters/http/email/send/v1/handler_gen.go",
 		"generated/go/adapters/http/mail/deliver/v1/handler_gen.go",
 		"generated/go/assembly/compatibility_gen.go",
+		"generated/go/assembly/providers_gen.go",
 		"generated/go/clients/email/send/v1/client_gen.go",
 		"generated/go/clients/mail/deliver/v1/client_gen.go",
 		"generated/go/contracts/email/send/v1/contract_gen.go",
@@ -368,6 +375,35 @@ func writeModule(t testing.TB, root, modulePath, extra string) {
 func writePlugin(t testing.TB, root, name, manifest string) {
 	t.Helper()
 	writeFile(t, filepath.Join(root, name, "plugin.yaml"), manifest)
+	metadata, err := pluginmeta.Parse([]byte(manifest))
+	if err != nil {
+		t.Fatalf("pluginmeta.Parse(%s): %v", name, err)
+	}
+	module, err := modulelocate.Find(root)
+	if err != nil {
+		t.Fatalf("modulelocate.Find(%s): %v", root, err)
+	}
+	names, err := configurationgen.DeriveGoNames(name)
+	if err != nil {
+		t.Fatalf("configurationgen.DeriveGoNames(%s): %v", name, err)
+	}
+	packageName := strings.ReplaceAll(name, "-", "")
+	if token.Lookup(packageName).IsKeyword() {
+		packageName += "plugin"
+	}
+	source, err := format.Source([]byte(fmt.Sprintf(`package %s
+
+import configuration %q
+
+type Config = configuration.%s
+type Plugin struct{}
+
+func New(_ Config) *Plugin { return &Plugin{} }
+`, packageName, module.ModulePath()+"/generated/go/configuration", names.TypeName())))
+	if err != nil {
+		t.Fatalf("format %s/plugin.go for %s: %v", name, metadata.ID(), err)
+	}
+	writeFile(t, filepath.Join(root, name, "plugin.go"), string(source))
 }
 
 func writeCapability(t testing.TB, root, plugin, value, source string) {

@@ -117,13 +117,22 @@ func populate(root, modulePath, name string, library bool) error {
 	if err != nil {
 		return fmt.Errorf("render Kernel compatibility source: %w", err)
 	}
-	managed := make([]generatedfiles.File, 0, 2)
+	managed := make([]generatedfiles.File, 0, 3)
 	compatibilityFile, err := generatedfiles.NewFile("generated/go/assembly/compatibility_gen.go", compatibility)
 	if err != nil {
 		return fmt.Errorf("prepare Kernel compatibility source: %w", err)
 	}
 	managed = append(managed, compatibilityFile)
 	if !library {
+		providers, err := assemblygen.RenderProviders(nil)
+		if err != nil {
+			return fmt.Errorf("render empty selected-provider source: %w", err)
+		}
+		providersFile, err := generatedfiles.NewFile(assemblygen.ProvidersPath, providers)
+		if err != nil {
+			return fmt.Errorf("prepare empty selected-provider source: %w", err)
+		}
+		managed = append(managed, providersFile)
 		aliasManifest, err := generatedfiles.NewFile("generated/manifest.json", []byte("{\"capability_aliases\":[]}\n"))
 		if err != nil {
 			return fmt.Errorf("prepare empty Alias manifest: %w", err)

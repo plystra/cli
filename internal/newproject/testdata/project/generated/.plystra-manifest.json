@@ -6,6 +6,10 @@
       "sha256": "sha256:f3cd92d2b0829d1fd646c4bf65840d578f784ab5111c6972d3545d31fc847a42"
     },
     {
+      "path": "generated/go/assembly/providers_gen.go",
+      "sha256": "sha256:9edd08ecc8659bad7f504f2f681a6ade326d6088f7e7c6afb04a2f2ac98a69c1"
+    },
+    {
       "path": "generated/manifest.json",
       "sha256": "sha256:60e7d36f3d5026d53797748f55dc22cfb2e0ebc7c2d0245afbf9453daf2657e9"
     }

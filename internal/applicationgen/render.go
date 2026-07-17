@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/aliasresolution"
@@ -44,6 +45,7 @@ type Options struct {
 	ModulePath        string
 	JavaScriptPackage string
 	Configurations    []configurationgen.Input
+	Providers         []assemblygen.ProviderInput
 }
 
 // Render lowers final selected contributions once and renders the Kernel
@@ -58,6 +60,13 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	aliases := resolution.AliasResolution()
 	if !validAliases(aliases) {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: final Alias map is absent or has an invalid digest", ErrRender, ErrResolution)
+	}
+	providers, err := assemblygen.RenderProviders(options.Providers)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: selected providers: %w", ErrRender, err)
+	}
+	if err := validateAssemblyClosure(options, context); err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: %w: %v", ErrRender, ErrResolution, err)
 	}
 	plan, err := generationlowering.Lower(options.ModulePath, resolution.Contributions())
 	if err != nil {
@@ -104,6 +113,9 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	if err := add(assemblyCompatibilityPath, compatibility); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Kernel assembly compatibility: %w", ErrRender, err)
+	}
+	if err := add(assemblygen.ProvidersPath, providers); err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: selected providers: %w", ErrRender, err)
 	}
 
 	requirements := context.Requirements()
@@ -238,6 +250,58 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		return generatedfiles.Output{}, fmt.Errorf("%w: finalize managed output: %w", ErrRender, err)
 	}
 	return output, nil
+}
+
+func validateAssemblyClosure(options Options, context generation.Context) error {
+	selected := context.Plugins()
+	if len(options.Providers) != len(selected) {
+		return fmt.Errorf("selected plugin count %d does not match provider input count %d", len(selected), len(options.Providers))
+	}
+	providers := make(map[string]assemblygen.ProviderInput, len(options.Providers))
+	for _, provider := range options.Providers {
+		if _, duplicate := providers[provider.PluginID]; duplicate {
+			return fmt.Errorf("provider input duplicates Plugin ID %q", provider.PluginID)
+		}
+		providers[provider.PluginID] = provider
+	}
+	for _, plugin := range selected {
+		pluginID := plugin.ID().String()
+		provider, exists := providers[pluginID]
+		if !exists {
+			return fmt.Errorf("selected plugin %q has no provider input", pluginID)
+		}
+		if provider.ModulePath != plugin.Module().Path() {
+			return fmt.Errorf("selected plugin %q module %q does not match provider input module %q", pluginID, plugin.Module().Path(), provider.ModulePath)
+		}
+	}
+
+	configurations := make(map[string]configurationgen.Input, len(options.Configurations))
+	for _, configuration := range options.Configurations {
+		if _, duplicate := configurations[configuration.PluginID]; duplicate {
+			return fmt.Errorf("configuration input duplicates Plugin ID %q", configuration.PluginID)
+		}
+		provider, exists := providers[configuration.PluginID]
+		if !exists {
+			return fmt.Errorf("configuration input for Plugin ID %q has no selected provider", configuration.PluginID)
+		}
+		if provider.ModulePath != options.ModulePath {
+			return fmt.Errorf("configuration input for Plugin ID %q belongs to non-local module %q", configuration.PluginID, provider.ModulePath)
+		}
+		pluginName, found := strings.CutPrefix(provider.ImportPath, options.ModulePath+"/")
+		if !found || pluginName != configuration.PluginName {
+			return fmt.Errorf("configuration input for Plugin ID %q names plugin %q instead of selected import %q", configuration.PluginID, configuration.PluginName, provider.ImportPath)
+		}
+		configurations[configuration.PluginID] = configuration
+	}
+	for _, provider := range options.Providers {
+		if provider.ModulePath != options.ModulePath {
+			continue
+		}
+		if _, exists := configurations[provider.PluginID]; !exists {
+			return fmt.Errorf("local selected plugin %q has no generated configuration input", provider.PluginID)
+		}
+	}
+	return nil
 }
 
 func validContext(context generation.Context) bool {

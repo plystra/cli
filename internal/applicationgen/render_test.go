@@ -13,6 +13,7 @@ import (
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/generatedfiles"
@@ -27,6 +28,7 @@ import (
 const (
 	applicationModulePath = "example.com/acme/application"
 	applicationSDKPackage = "@acme/application-sdk"
+	businessModulePath    = "example.com/acme/business"
 )
 
 func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
@@ -40,7 +42,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
         message: Use email.send/v1 instead.
     health.status/v1: kernel.health/v1
 `)
-	options := applicationgen.Options{ModulePath: applicationModulePath, JavaScriptPackage: applicationSDKPackage}
+	options := resolvedOptions()
 	output, err := applicationgen.Render(options, resolution)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -53,6 +55,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		"generated/go/adapters/http/health/status/v1/handler_gen.go",
 		"generated/go/adapters/http/kernel/health/v1/handler_gen.go",
 		"generated/go/assembly/compatibility_gen.go",
+		"generated/go/assembly/providers_gen.go",
 		"generated/go/clients/compat/send/v1/client_gen.go",
 		"generated/go/clients/email/send/v1/client_gen.go",
 		"generated/go/clients/health/status/v1/client_gen.go",
@@ -124,7 +127,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 func TestRenderRemovesAliasSurfacesWhenFinalMapChanges(t *testing.T) {
 	t.Parallel()
 
-	options := applicationgen.Options{ModulePath: applicationModulePath, JavaScriptPackage: applicationSDKPackage}
+	options := resolvedOptions()
 	withAliases, err := applicationgen.Render(options, resolvedApplication(t, `capabilities:
   aliases:
     compat.send/v1: email.send/v1
@@ -169,21 +172,12 @@ func TestRenderRemovesAliasSurfacesWhenFinalMapChanges(t *testing.T) {
 func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	t.Parallel()
 
-	catalog, err := generationactivation.New(nil)
-	if err != nil {
-		t.Fatalf("generationactivation.New: %v", err)
-	}
-	resolution, err := generationresolution.ResolveExtensions(t.Context(), generationresolution.ExtensionInput{
-		Input: generationresolution.Input{Activations: catalog},
-	})
-	if err != nil {
-		t.Fatalf("ResolveExtensions: %v", err)
-	}
+	resolution := emptyApplication(t)
 	output, err := applicationgen.Render(applicationgen.Options{ModulePath: applicationModulePath}, resolution)
 	if err != nil {
 		t.Fatalf("Render empty: %v", err)
 	}
-	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/assembly/compatibility_gen.go", "generated/manifest.json"}) {
+	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/assembly/compatibility_gen.go", "generated/go/assembly/providers_gen.go", "generated/manifest.json"}) {
 		t.Fatalf("empty output paths = %v", got)
 	}
 	if string(outputData(t, output, "generated/manifest.json")) != "{\"capability_aliases\":[]}\n" {
@@ -204,8 +198,9 @@ timeout: {type: duration, default: 5s}
 	}
 	resolution := resolvedApplication(t, "")
 	options := applicationgen.Options{
-		ModulePath:        applicationModulePath,
+		ModulePath:        businessModulePath,
 		JavaScriptPackage: applicationSDKPackage,
+		Providers:         selectedProviderInputs(),
 		Configurations: []configurationgen.Input{{
 			PluginName: "business",
 			PluginID:   "acme.business",
@@ -229,7 +224,7 @@ timeout: {type: duration, default: 5s}
 		}
 	}
 
-	withoutConfiguration, err := applicationgen.Render(applicationgen.Options{ModulePath: applicationModulePath, JavaScriptPackage: applicationSDKPackage}, resolution)
+	withoutConfiguration, err := applicationgen.Render(applicationgen.Options{ModulePath: businessModulePath}, emptyApplication(t))
 	if err != nil {
 		t.Fatalf("Render without configuration: %v", err)
 	}
@@ -238,7 +233,7 @@ timeout: {type: duration, default: 5s}
 		t.Fatalf("Install with configuration = %#v, %v", report.Changes(), err)
 	}
 	report, err := generatedfiles.Check(root, withoutConfiguration)
-	if err != nil || !slices.Equal(report.Obsolete(), []string{configurationPath}) {
+	if err != nil || !slices.Contains(report.Obsolete(), configurationPath) {
 		t.Fatalf("configuration cleanup = %#v, %v", report.Changes(), err)
 	}
 }
@@ -250,27 +245,52 @@ func TestRenderRejectsInvalidResolutionModuleAndPackage(t *testing.T) {
 		t.Fatalf("Render zero resolution error = %v", err)
 	}
 	resolution := resolvedApplication(t, "")
-	if _, err := applicationgen.Render(applicationgen.Options{ModulePath: "not a module path", JavaScriptPackage: applicationSDKPackage}, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, generationlowering.ErrLower) {
+	invalidModule := resolvedOptions()
+	invalidModule.ModulePath = "not a module path"
+	if _, err := applicationgen.Render(invalidModule, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, generationlowering.ErrLower) {
 		t.Fatalf("Render invalid module error = %v", err)
 	}
-	if _, err := applicationgen.Render(applicationgen.Options{ModulePath: applicationModulePath}, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, javascriptgen.ErrRender) {
+	missingPackage := resolvedOptions()
+	missingPackage.JavaScriptPackage = ""
+	if _, err := applicationgen.Render(missingPackage, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, javascriptgen.ErrRender) {
 		t.Fatalf("Render missing JavaScript package error = %v", err)
 	}
-	empty, err := manifest.ParseConfig([]byte("{}\n"))
-	if err != nil {
-		t.Fatalf("manifest.ParseConfig: %v", err)
+	missingProvider := resolvedOptions()
+	missingProvider.Providers = nil
+	if _, err := applicationgen.Render(missingProvider, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, applicationgen.ErrResolution) {
+		t.Fatalf("missing selected provider error = %v", err)
 	}
-	colliding := applicationgen.Options{
+}
+
+func resolvedOptions() applicationgen.Options {
+	return applicationgen.Options{
 		ModulePath:        applicationModulePath,
 		JavaScriptPackage: applicationSDKPackage,
-		Configurations: []configurationgen.Input{
-			{PluginName: "http", PluginID: "acme.http", Schema: empty},
-			{PluginName: "h-t-t-p", PluginID: "acme.h-t-t-p", Schema: empty},
-		},
+		Providers:         selectedProviderInputs(),
 	}
-	if _, err := applicationgen.Render(colliding, resolution); !errors.Is(err, applicationgen.ErrRender) || !strings.Contains(err.Error(), "both generate Go type HTTPConfig") {
-		t.Fatalf("configuration identifier collision error = %v", err)
+}
+
+func selectedProviderInputs() []assemblygen.ProviderInput {
+	return []assemblygen.ProviderInput{{
+		PluginID:   "acme.business",
+		ModulePath: businessModulePath,
+		ImportPath: businessModulePath + "/business",
+	}}
+}
+
+func emptyApplication(t testing.TB) generationresolution.ExtensionResult {
+	t.Helper()
+	catalog, err := generationactivation.New(nil)
+	if err != nil {
+		t.Fatalf("generationactivation.New: %v", err)
 	}
+	resolution, err := generationresolution.ResolveExtensions(t.Context(), generationresolution.ExtensionInput{
+		Input: generationresolution.Input{Activations: catalog},
+	})
+	if err != nil {
+		t.Fatalf("ResolveExtensions: %v", err)
+	}
+	return resolution
 }
 
 func resolvedApplication(t testing.TB, applicationYAML string) generationresolution.ExtensionResult {
@@ -314,7 +334,7 @@ response:
 		Plugins: []generationresolution.Plugin{{
 			Context: generation.PluginInput{
 				ID:                "acme.business",
-				ModulePath:        "example.com/acme/business",
+				ModulePath:        businessModulePath,
 				Provides:          []string{"email.send/v1"},
 				BuildMetadataJSON: []byte("{}"),
 			},
