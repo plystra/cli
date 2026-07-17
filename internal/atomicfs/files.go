@@ -33,6 +33,13 @@ type Write struct {
 	ExpectedData []byte
 }
 
+// Remove describes one existing regular file to remove. ExpectedData, when
+// non-nil, requires the target to contain those exact bytes before staging.
+type Remove struct {
+	Path         string
+	ExpectedData []byte
+}
+
 type plannedWrite struct {
 	path           string
 	osPath         string
@@ -58,9 +65,29 @@ type appliedWrite struct {
 	mode       fs.FileMode
 }
 
+type plannedRemove struct {
+	path         string
+	osPath       string
+	original     []byte
+	originalMode fs.FileMode
+	backupPath   string
+}
+
+type appliedRemove struct {
+	path       string
+	backupPath string
+}
+
 // WriteFiles stages replacements, applies them in canonical path order, runs
 // validation against the updated root, and restores every target on failure.
 func WriteFiles(rootPath string, writes []Write, validate func(root string) error) (operationErr error) {
+	return ApplyFiles(rootPath, writes, nil, validate)
+}
+
+// ApplyFiles stages replacements and removals, applies them in canonical path
+// order, runs validation against the updated root, and restores every target
+// on failure or panic. Write and removal paths must be disjoint.
+func ApplyFiles(rootPath string, writes []Write, removes []Remove, validate func(root string) error) (operationErr error) {
 	if validate == nil {
 		return fmt.Errorf("%w: validation callback is nil", ErrWriteFiles)
 	}
@@ -85,7 +112,12 @@ func WriteFiles(rootPath string, writes []Write, validate func(root string) erro
 		}
 	}()
 
-	planned, err := planWrites(root, writes)
+	seen := make(map[string]struct{}, len(writes)+len(removes))
+	planned, err := planWrites(root, writes, seen)
+	if err != nil {
+		return err
+	}
+	plannedRemoves, err := planRemoves(root, removes, seen)
 	if err != nil {
 		return err
 	}
@@ -96,11 +128,16 @@ func WriteFiles(rootPath string, writes []Write, validate func(root string) erro
 	transactionName := filepath.Base(transactionRoot)
 	committed := false
 	var applied []appliedWrite
+	var removed []appliedRemove
 	var createdDirectories []string
 	defer func() {
 		rollbackSucceeded := true
 		if !committed {
 			if err := rollbackWrites(root, applied, createdDirectories); err != nil {
+				rollbackSucceeded = false
+				operationErr = errors.Join(operationErr, fmt.Errorf("%w: recovery data retained in %s", err, transactionName))
+			}
+			if err := rollbackRemoves(root, removed); err != nil {
 				rollbackSucceeded = false
 				operationErr = errors.Join(operationErr, fmt.Errorf("%w: recovery data retained in %s", err, transactionName))
 			}
@@ -112,7 +149,7 @@ func WriteFiles(rootPath string, writes []Write, validate func(root string) erro
 		}
 	}()
 
-	if err := stageWrites(transactionRoot, transactionName, planned); err != nil {
+	if err := stageWrites(transactionRoot, transactionName, planned, plannedRemoves); err != nil {
 		return err
 	}
 	createdDirectories, err = createParentDirectories(root, planned)
@@ -147,6 +184,16 @@ func WriteFiles(rootPath string, writes []Write, validate func(root string) erro
 		}
 		applied[len(applied)-1].mode = info.Mode().Perm()
 	}
+	for index := range plannedRemoves {
+		remove := plannedRemoves[index]
+		if err := confirmRemoveUnchanged(root, remove); err != nil {
+			return err
+		}
+		if err := root.Rename(remove.osPath, remove.backupPath); err != nil {
+			return fmt.Errorf("%w: remove %s: %w", ErrWriteFiles, remove.path, err)
+		}
+		removed = append(removed, appliedRemove{path: remove.osPath, backupPath: remove.backupPath})
+	}
 	if err := validate(absoluteRoot); err != nil {
 		return fmt.Errorf("%w: validate updated root: %w", ErrWriteFiles, err)
 	}
@@ -154,9 +201,8 @@ func WriteFiles(rootPath string, writes []Write, validate func(root string) erro
 	return nil
 }
 
-func planWrites(root *os.Root, writes []Write) ([]plannedWrite, error) {
+func planWrites(root *os.Root, writes []Write, seen map[string]struct{}) ([]plannedWrite, error) {
 	planned := make([]plannedWrite, 0, len(writes))
-	seen := make(map[string]struct{}, len(writes))
 	for _, write := range writes {
 		if !fs.ValidPath(write.Path) || write.Path == "." || strings.ContainsRune(write.Path, '\\') {
 			return nil, fmt.Errorf("%w: %q", ErrUnsafePath, write.Path)
@@ -237,6 +283,52 @@ func planWrites(root *os.Root, writes []Write) ([]plannedWrite, error) {
 	return planned, nil
 }
 
+func planRemoves(root *os.Root, removes []Remove, seen map[string]struct{}) ([]plannedRemove, error) {
+	planned := make([]plannedRemove, 0, len(removes))
+	for _, remove := range removes {
+		if !fs.ValidPath(remove.Path) || remove.Path == "." || strings.ContainsRune(remove.Path, '\\') {
+			return nil, fmt.Errorf("%w: %q", ErrUnsafePath, remove.Path)
+		}
+		canonical := path.Clean(remove.Path)
+		if canonical != remove.Path {
+			return nil, fmt.Errorf("%w: %q is not canonical", ErrUnsafePath, remove.Path)
+		}
+		if _, duplicate := seen[canonical]; duplicate {
+			return nil, fmt.Errorf("%w: duplicate write or removal %q", ErrWriteFiles, canonical)
+		}
+		seen[canonical] = struct{}{}
+		osPath := filepath.FromSlash(canonical)
+		if _, err := inspectParents(root, osPath); err != nil {
+			return nil, err
+		}
+		info, err := root.Lstat(osPath)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("%w: remove target %s does not exist", ErrWriteFiles, canonical)
+			}
+			return nil, fmt.Errorf("%w: inspect remove target %s: %w", ErrWriteFiles, canonical, err)
+		}
+		if !info.Mode().IsRegular() || info.Mode()&fs.ModeSymlink != 0 {
+			return nil, fmt.Errorf("%w: %s is not a regular file", ErrUnsafePath, canonical)
+		}
+		original, err := root.ReadFile(osPath)
+		if err != nil {
+			return nil, fmt.Errorf("%w: read remove target %s: %w", ErrWriteFiles, canonical, err)
+		}
+		if remove.ExpectedData != nil && !bytes.Equal(original, remove.ExpectedData) {
+			return nil, fmt.Errorf("%w: %w: %s does not match the planned removal snapshot", ErrWriteFiles, ErrConcurrentChange, canonical)
+		}
+		planned = append(planned, plannedRemove{
+			path:         canonical,
+			osPath:       osPath,
+			original:     original,
+			originalMode: info.Mode().Perm(),
+		})
+	}
+	sort.Slice(planned, func(left, right int) bool { return planned[left].path < planned[right].path })
+	return planned, nil
+}
+
 func inspectParents(root *os.Root, target string) ([]string, error) {
 	parent := filepath.Dir(target)
 	if parent == "." {
@@ -267,7 +359,7 @@ func inspectParents(root *os.Root, target string) ([]string, error) {
 	return missingParents, nil
 }
 
-func stageWrites(transactionRoot, transactionName string, planned []plannedWrite) error {
+func stageWrites(transactionRoot, transactionName string, planned []plannedWrite, removes []plannedRemove) error {
 	stagedDirectory := filepath.Join(transactionRoot, "staged")
 	backupDirectory := filepath.Join(transactionRoot, "backup")
 	if err := os.Mkdir(stagedDirectory, 0o700); err != nil {
@@ -284,6 +376,10 @@ func stageWrites(transactionRoot, transactionName string, planned []plannedWrite
 		}
 		planned[index].stagePath = filepath.Join(transactionName, "staged", name)
 		planned[index].backupPath = filepath.Join(transactionName, "backup", name)
+	}
+	for index := range removes {
+		name := fmt.Sprintf("remove-%06d", index)
+		removes[index].backupPath = filepath.Join(transactionName, "backup", name)
 	}
 	return nil
 }
@@ -361,6 +457,24 @@ func confirmUnchanged(root *os.Root, write plannedWrite) error {
 	return nil
 }
 
+func confirmRemoveUnchanged(root *os.Root, remove plannedRemove) error {
+	info, err := root.Lstat(remove.osPath)
+	if err != nil {
+		return fmt.Errorf("%w: %s disappeared", ErrConcurrentChange, remove.path)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&fs.ModeSymlink != 0 || info.Mode().Perm() != remove.originalMode {
+		return fmt.Errorf("%w: %s metadata changed", ErrConcurrentChange, remove.path)
+	}
+	current, err := root.ReadFile(remove.osPath)
+	if err != nil {
+		return fmt.Errorf("%w: read %s: %v", ErrWriteFiles, remove.path, err)
+	}
+	if !bytes.Equal(current, remove.original) {
+		return fmt.Errorf("%w: %s contents changed", ErrConcurrentChange, remove.path)
+	}
+	return nil
+}
+
 func rollbackWrites(root *os.Root, applied []appliedWrite, createdDirectories []string) error {
 	var rollbackErr error
 	for index := len(applied) - 1; index >= 0; index-- {
@@ -400,6 +514,27 @@ func rollbackWrites(root *os.Root, applied []appliedWrite, createdDirectories []
 	}
 	if rollbackErr != nil {
 		return fmt.Errorf("%w: rollback: %w", ErrWriteFiles, rollbackErr)
+	}
+	return nil
+}
+
+func rollbackRemoves(root *os.Root, removed []appliedRemove) error {
+	var rollbackErr error
+	for index := len(removed) - 1; index >= 0; index-- {
+		remove := removed[index]
+		if _, err := root.Lstat(remove.path); err == nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("%w: %s appeared before restore", ErrConcurrentChange, filepath.ToSlash(remove.path)))
+			continue
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("inspect removed target %s: %w", filepath.ToSlash(remove.path), err))
+			continue
+		}
+		if err := root.Rename(remove.backupPath, remove.path); err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore removed target %s: %w", filepath.ToSlash(remove.path), err))
+		}
+	}
+	if rollbackErr != nil {
+		return fmt.Errorf("%w: rollback removals: %w", ErrWriteFiles, rollbackErr)
 	}
 	return nil
 }

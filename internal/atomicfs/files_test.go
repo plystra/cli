@@ -48,6 +48,275 @@ func TestWriteFilesCommitsAfterValidation(t *testing.T) {
 	assertNoFileTransaction(t, root)
 }
 
+func TestApplyFilesCommitsWritesAndRemovalsAfterValidation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	obsolete := filepath.Join(root, "generated", "obsolete.txt")
+	keep := filepath.Join(root, "generated", "keep.txt")
+	if err := os.Mkdir(filepath.Dir(obsolete), 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	if err := os.WriteFile(obsolete, []byte("obsolete"), 0o600); err != nil {
+		t.Fatalf("WriteFile obsolete: %v", err)
+	}
+	if err := os.WriteFile(keep, []byte("unmanaged"), 0o644); err != nil {
+		t.Fatalf("WriteFile keep: %v", err)
+	}
+
+	validated := false
+	err := atomicfs.ApplyFiles(root,
+		[]atomicfs.Write{{Path: "generated/current.txt", Data: []byte("current"), MustNotExist: true}},
+		[]atomicfs.Remove{{Path: "generated/obsolete.txt", ExpectedData: []byte("obsolete")}},
+		func(updatedRoot string) error {
+			validated = true
+			assertFile(t, filepath.Join(updatedRoot, "generated", "current.txt"), "current")
+			if _, err := os.Lstat(filepath.Join(updatedRoot, "generated", "obsolete.txt")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("obsolete file exists during validation: %v", err)
+			}
+			assertFile(t, filepath.Join(updatedRoot, "generated", "keep.txt"), "unmanaged")
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("ApplyFiles: %v", err)
+	}
+	if !validated {
+		t.Fatal("validation callback did not run")
+	}
+	assertFile(t, filepath.Join(root, "generated", "current.txt"), "current")
+	if _, err := os.Lstat(obsolete); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("obsolete file remains after commit: %v", err)
+	}
+	assertFile(t, keep, "unmanaged")
+	assertNoFileTransaction(t, root)
+}
+
+func TestApplyFilesRollsBackWritesAndRemovalsOnValidationFailure(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	current := filepath.Join(root, "current.txt")
+	obsolete := filepath.Join(root, "obsolete.txt")
+	if err := os.WriteFile(current, []byte("before"), 0o600); err != nil {
+		t.Fatalf("WriteFile current: %v", err)
+	}
+	if err := os.WriteFile(obsolete, []byte("restore me"), 0o640); err != nil {
+		t.Fatalf("WriteFile obsolete: %v", err)
+	}
+	wantErr := errors.New("generated output is invalid")
+	err := atomicfs.ApplyFiles(root,
+		[]atomicfs.Write{{Path: "current.txt", Data: []byte("after"), ExpectedData: []byte("before")}},
+		[]atomicfs.Remove{{Path: "obsolete.txt", ExpectedData: []byte("restore me")}},
+		func(updatedRoot string) error {
+			assertFile(t, filepath.Join(updatedRoot, "current.txt"), "after")
+			if _, err := os.Lstat(filepath.Join(updatedRoot, "obsolete.txt")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("obsolete file exists during validation: %v", err)
+			}
+			return wantErr
+		})
+	if !errors.Is(err, atomicfs.ErrWriteFiles) || !errors.Is(err, wantErr) {
+		t.Fatalf("ApplyFiles error = %v", err)
+	}
+	assertFile(t, current, "before")
+	assertFile(t, obsolete, "restore me")
+	if runtime.GOOS != "windows" {
+		if info, err := os.Stat(current); err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("restored current mode = %#v, %v", info, err)
+		}
+		if info, err := os.Stat(obsolete); err != nil || info.Mode().Perm() != 0o640 {
+			t.Fatalf("restored obsolete mode = %#v, %v", info, err)
+		}
+	}
+	assertNoFileTransaction(t, root)
+}
+
+func TestApplyFilesRollsBackRemovalsOnValidationPanic(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	obsolete := filepath.Join(root, "obsolete.txt")
+	if err := os.WriteFile(obsolete, []byte("restore me"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		_ = atomicfs.ApplyFiles(root,
+			[]atomicfs.Write{{Path: "current.txt", Data: []byte("current"), MustNotExist: true}},
+			[]atomicfs.Remove{{Path: "obsolete.txt", ExpectedData: []byte("restore me")}},
+			func(string) error { panic("validation panic") })
+	}()
+	if recovered != "validation panic" {
+		t.Fatalf("recovered value = %#v", recovered)
+	}
+	assertFile(t, obsolete, "restore me")
+	if _, err := os.Lstat(filepath.Join(root, "current.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("new file remains after panic: %v", err)
+	}
+	assertNoFileTransaction(t, root)
+}
+
+func TestApplyFilesRejectsStaleOrMissingRemovalSnapshot(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		setup          func(t *testing.T, root string)
+		expected       []byte
+		wantConcurrent bool
+	}{
+		{
+			name: "stale",
+			setup: func(t *testing.T, root string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(root, "obsolete.txt"), []byte("current"), 0o644); err != nil {
+					t.Fatalf("WriteFile: %v", err)
+				}
+			},
+			expected:       []byte("planned"),
+			wantConcurrent: true,
+		},
+		{name: "missing", setup: func(*testing.T, string) {}, expected: []byte("planned")},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			test.setup(t, root)
+			validated := false
+			err := atomicfs.ApplyFiles(root, nil,
+				[]atomicfs.Remove{{Path: "obsolete.txt", ExpectedData: test.expected}},
+				func(string) error {
+					validated = true
+					return nil
+				})
+			if !errors.Is(err, atomicfs.ErrWriteFiles) {
+				t.Fatalf("ApplyFiles error = %v", err)
+			}
+			if test.wantConcurrent && !errors.Is(err, atomicfs.ErrConcurrentChange) {
+				t.Fatalf("ApplyFiles error = %v, want ErrConcurrentChange", err)
+			}
+			if validated {
+				t.Fatal("validation ran after removal precondition failed")
+			}
+			if test.name == "stale" {
+				assertFile(t, filepath.Join(root, "obsolete.txt"), "current")
+			}
+			assertNoFileTransaction(t, root)
+		})
+	}
+}
+
+func TestApplyFilesRejectsUnsafeAndDuplicateRemovalPaths(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		removes []atomicfs.Remove
+		writes  []atomicfs.Write
+		want    error
+	}{
+		{name: "absolute", removes: []atomicfs.Remove{{Path: "/outside"}}, want: atomicfs.ErrUnsafePath},
+		{name: "traversal", removes: []atomicfs.Remove{{Path: "../outside"}}, want: atomicfs.ErrUnsafePath},
+		{name: "backslash", removes: []atomicfs.Remove{{Path: `nested\file`}}, want: atomicfs.ErrUnsafePath},
+		{name: "root", removes: []atomicfs.Remove{{Path: "."}}, want: atomicfs.ErrUnsafePath},
+		{name: "duplicate removals", removes: []atomicfs.Remove{{Path: "same"}, {Path: "same"}}, want: atomicfs.ErrWriteFiles},
+		{
+			name:    "write and removal collision",
+			writes:  []atomicfs.Write{{Path: "same", Data: []byte("replacement")}},
+			removes: []atomicfs.Remove{{Path: "same"}},
+			want:    atomicfs.ErrWriteFiles,
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			if test.removes[0].Path == "same" {
+				if err := os.WriteFile(filepath.Join(root, "same"), []byte("current"), 0o644); err != nil {
+					t.Fatalf("WriteFile: %v", err)
+				}
+			}
+			err := atomicfs.ApplyFiles(root, test.writes, test.removes, func(string) error { return nil })
+			if !errors.Is(err, test.want) {
+				t.Fatalf("ApplyFiles error = %v, want %v", err, test.want)
+			}
+			assertNoFileTransaction(t, root)
+		})
+	}
+}
+
+func TestApplyFilesRejectsSymlinkRemovalPaths(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "outside.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(root, "linked-file")); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink creation is unavailable: %v", err)
+		}
+		t.Fatalf("Symlink file: %v", err)
+	}
+	err := atomicfs.ApplyFiles(root, nil, []atomicfs.Remove{{Path: "linked-file"}}, func(string) error { return nil })
+	if !errors.Is(err, atomicfs.ErrUnsafePath) {
+		t.Fatalf("ApplyFiles symlink target error = %v, want ErrUnsafePath", err)
+	}
+	assertFile(t, outsideFile, "outside")
+
+	if err := os.Symlink(outside, filepath.Join(root, "linked-parent")); err != nil {
+		t.Fatalf("Symlink directory: %v", err)
+	}
+	err = atomicfs.ApplyFiles(root, nil, []atomicfs.Remove{{Path: "linked-parent/outside.txt"}}, func(string) error { return nil })
+	if !errors.Is(err, atomicfs.ErrUnsafePath) {
+		t.Fatalf("ApplyFiles symlink parent error = %v, want ErrUnsafePath", err)
+	}
+	assertFile(t, outsideFile, "outside")
+	assertNoFileTransaction(t, root)
+}
+
+func TestApplyFilesPreservesConcurrentCreationAndRemovalRecoveryBackup(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	target := filepath.Join(root, "obsolete.txt")
+	if err := os.WriteFile(target, []byte("generated before"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	validationErr := errors.New("validation failed")
+	err := atomicfs.ApplyFiles(root, nil,
+		[]atomicfs.Remove{{Path: "obsolete.txt", ExpectedData: []byte("generated before")}},
+		func(string) error {
+			if err := os.WriteFile(target, []byte("concurrent user file"), 0o644); err != nil {
+				return err
+			}
+			return validationErr
+		})
+	if !errors.Is(err, validationErr) || !errors.Is(err, atomicfs.ErrConcurrentChange) {
+		t.Fatalf("ApplyFiles error = %v", err)
+	}
+	if !strings.Contains(err.Error(), "recovery data retained in .plystra-files-") {
+		t.Fatalf("ApplyFiles error does not identify recovery data: %v", err)
+	}
+	assertFile(t, target, "concurrent user file")
+	backups, globErr := filepath.Glob(filepath.Join(root, ".plystra-files-*", "backup", "remove-*"))
+	if globErr != nil || len(backups) != 1 {
+		t.Fatalf("recovery backups = %v, %v", backups, globErr)
+	}
+	assertFile(t, backups[0], "generated before")
+	transactionRoot := filepath.Dir(filepath.Dir(backups[0]))
+	t.Cleanup(func() {
+		if err := os.RemoveAll(transactionRoot); err != nil {
+			t.Errorf("remove recovery transaction: %v", err)
+		}
+	})
+}
+
 func TestWriteFilesRejectsStaleOrMissingExpectedSource(t *testing.T) {
 	t.Parallel()
 
