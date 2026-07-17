@@ -86,6 +86,33 @@ func TestTypedValuesAreBoundedAndDefensive(t *testing.T) {
 	if value, ok := invocationcontext.Value[string](ctx, "authz.space-id"); !ok || value != "space-1" {
 		t.Fatalf("second value = %q, %t", value, ok)
 	}
+	ctx, err = invocationcontext.WithMetadata(ctx, "authz.space-id", "metadata-space", 32)
+	if err != nil {
+		t.Fatalf("WithMetadata: %v", err)
+	}
+	if value, ok := invocationcontext.Value[string](ctx, "authz.space-id"); !ok || value != "space-1" {
+		t.Fatalf("typed value was overwritten by metadata: %q, %t", value, ok)
+	}
+	if value, ok := invocationcontext.Metadata[string](ctx, "authz.space-id"); !ok || value != "metadata-space" {
+		t.Fatalf("Metadata = %q, %t", value, ok)
+	}
+	ctx, err = invocationcontext.WithMetadata(ctx, "audit.allowed", false, 5)
+	if err != nil {
+		t.Fatalf("WithMetadata(false): %v", err)
+	}
+	ctx, err = invocationcontext.WithMetadata(ctx, "audit.attempt", int64(0), 1)
+	if err != nil {
+		t.Fatalf("WithMetadata(zero): %v", err)
+	}
+	if value, ok := invocationcontext.Metadata[bool](ctx, "audit.allowed"); !ok || value {
+		t.Fatalf("boolean metadata = %t, %t", value, ok)
+	}
+	if value, ok := invocationcontext.Metadata[int64](ctx, "audit.attempt"); !ok || value != 0 {
+		t.Fatalf("integer metadata = %d, %t", value, ok)
+	}
+	if _, ok := invocationcontext.Metadata[string](ctx, "audit.allowed"); ok {
+		t.Fatal("mismatched metadata type was returned")
+	}
 	cancel()
 	if !errors.Is(ctx.Err(), context.Canceled) {
 		t.Fatalf("context cancellation = %v", ctx.Err())
@@ -117,6 +144,32 @@ func TestInvalidValuesFailClosed(t *testing.T) {
 	}
 	if _, ok := invocationcontext.Value[string](nil, "authn.value"); ok {
 		t.Fatal("Value accepted nil context")
+	}
+	for _, test := range []struct {
+		name string
+		ctx context.Context
+		key string
+		value string
+		maximum uint32
+	}{
+		{name: "nil metadata context", key: "audit.value", value: "x", maximum: 8},
+		{name: "invalid metadata key", ctx: valid, key: "Audit.value", value: "x", maximum: 8},
+		{name: "zero metadata bound", ctx: valid, key: "audit.value", value: "x"},
+		{name: "excessive metadata bound", ctx: valid, key: "audit.value", value: "x", maximum: 4097},
+		{name: "oversized metadata", ctx: valid, key: "audit.value", value: strings.Repeat("x", 8), maximum: 8},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, err := invocationcontext.WithMetadata(test.ctx, test.key, test.value, test.maximum)
+			if !errors.Is(err, invocationcontext.ErrInvalidMetadata) || ctx != nil {
+				t.Fatalf("WithMetadata = %#v, %v", ctx, err)
+			}
+		})
+	}
+	if ctx, err := invocationcontext.WithMetadata(valid, "audit.ratio", math.Inf(1), 64); !errors.Is(err, invocationcontext.ErrInvalidMetadata) || ctx != nil {
+		t.Fatalf("WithMetadata(unserializable) = %#v, %v", ctx, err)
+	}
+	if _, ok := invocationcontext.Metadata[string](nil, "audit.value"); ok {
+		t.Fatal("Metadata accepted nil context")
 	}
 }
 `))

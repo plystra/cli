@@ -343,10 +343,24 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 			})
 		}
 	case generation.GeneratedNodeKindMetadataAttachment:
-		if _, ok := generated.MetadataAttachment(); !ok {
+		operation, ok := generated.MetadataAttachment()
+		if !ok {
 			return Node{}, nil, nil, fmt.Errorf("%w: metadata-attachment operation is absent", ErrInvalidContribution)
 		}
 		reserve(generation.GeneratedNodeError, "Error")
+		if operation.Value.Invocation != nil && operation.Value.Invocation.Source == generation.GeneratedInvocationContextValue {
+			node.sourceIdentifier = base + "Source"
+			node.presenceIdentifier = base + "Present"
+			identifiers = append(identifiers,
+				IdentifierRequest{Name: node.sourceIdentifier, Source: provenance + " metadata source"},
+				IdentifierRequest{Name: node.presenceIdentifier, Source: provenance + " metadata presence"},
+			)
+		}
+		imports = append(imports, ImportRequest{
+			Path:   path.Join(modulePath, "generated/go/internal/invocationcontext"),
+			Name:   "invocationcontext",
+			Source: provenance + " generated invocation metadata",
+		})
 	case generation.GeneratedNodeKindAuditEventCall:
 		operation, ok := generated.AuditEventCall()
 		if !ok {

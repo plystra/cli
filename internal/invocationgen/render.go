@@ -169,6 +169,8 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 				err = renderContextDerivation(&source, contract.Request, contribution, node, previous)
 			case generation.GeneratedNodeKindConditionalFailure:
 				err = renderConditionalFailure(&source, contract.Request, contribution, node, previous)
+			case generation.GeneratedNodeKindMetadataAttachment:
+				err = renderMetadataAttachment(&source, contract.Request, contribution, node, previous)
 			default:
 				err = fmt.Errorf("%w: contribution %q node %q uses unsupported kind %q", ErrContribution, contribution.ID(), node.ID(), node.Kind())
 			}
@@ -343,6 +345,15 @@ func preparePlan(identifier capabilityid.Identifier, sourceRequest map[string]ca
 				}
 				result.hasConditionalFailures = true
 				result.hasContextOperations = result.hasContextOperations || usesContext
+			case generation.GeneratedNodeKindMetadataAttachment:
+				operation, ok := node.Generated().MetadataAttachment()
+				if !ok {
+					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q lost its metadata attachment", ErrContribution, contribution.ID(), node.ID())
+				}
+				if err := prepareMetadataAttachment(sourceRequest, previous, operation); err != nil {
+					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q: %v", ErrContribution, contribution.ID(), node.ID(), err)
+				}
+				result.hasContextOperations = true
 			default:
 				return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q uses unsupported kind %q", ErrContribution, contribution.ID(), node.ID(), node.Kind())
 			}
@@ -411,6 +422,32 @@ func prepareContextDerivation(
 	}
 	source, err := resolvePrepareValue(sourceRequest, previous, operation.Value)
 	return source.wholeResponse, err
+}
+
+func prepareMetadataAttachment(
+	sourceRequest map[string]canonicalField,
+	previous map[string]generationlowering.Node,
+	operation generation.GeneratedMetadataAttachment,
+) error {
+	shape, ok := operation.Value.Shape()
+	if !ok {
+		return errors.New("normalized metadata value shape is absent")
+	}
+	if _, err := generatedValueGoType(shape.Type(), shape.Items()); err != nil {
+		return err
+	}
+	if operation.Value.Invocation != nil && operation.Value.Invocation.Source == generation.GeneratedInvocationContextValue {
+		_, err := generatedValueGoType(operation.Value.Invocation.Type, operation.Value.Invocation.Items)
+		return err
+	}
+	source, err := resolvePrepareValue(sourceRequest, previous, operation.Value)
+	if err != nil {
+		return err
+	}
+	if source.optional || source.wholeResponse {
+		return errors.New("metadata source must be one present scalar")
+	}
+	return nil
 }
 
 type prepareValue struct {
@@ -668,6 +705,78 @@ func renderContextDerivation(
 	if condition != "true" {
 		fmt.Fprintln(source, "\t}")
 	}
+	fmt.Fprintf(source, "\tif %s != nil {\n", errorIdentifier)
+	fmt.Fprintf(source, "\t\treturn contract.Response{}, %s\n", errorIdentifier)
+	fmt.Fprintln(source, "\t}")
+	return nil
+}
+
+func renderMetadataAttachment(
+	source *strings.Builder,
+	sourceRequest map[string]canonicalField,
+	contribution generationlowering.Contribution,
+	node generationlowering.Node,
+	previous map[string]generationlowering.Node,
+) error {
+	operation, ok := node.Generated().MetadataAttachment()
+	if !ok {
+		return fmt.Errorf("%w: contribution %q node %q lost its metadata attachment", ErrContribution, contribution.ID(), node.ID())
+	}
+	errorIdentifier, errorOK := node.Identifier(generation.GeneratedNodeError)
+	if !errorOK {
+		return fmt.Errorf("%w: contribution %q node %q has no metadata error identifier", ErrContribution, contribution.ID(), node.ID())
+	}
+	shape, shapeOK := operation.Value.Shape()
+	if !shapeOK {
+		return fmt.Errorf("%w: contribution %q node %q has no normalized metadata value shape", ErrContribution, contribution.ID(), node.ID())
+	}
+	targetType, err := generatedValueGoType(shape.Type(), shape.Items())
+	if err != nil {
+		return fmt.Errorf("%w: contribution %q node %q: %v", ErrContribution, contribution.ID(), node.ID(), err)
+	}
+
+	expression := ""
+	if operation.Value.Invocation != nil && operation.Value.Invocation.Source == generation.GeneratedInvocationContextValue {
+		sourceIdentifier, sourceOK := node.SourceIdentifier()
+		presenceIdentifier, presenceOK := node.PresenceIdentifier()
+		if !sourceOK || !presenceOK {
+			return fmt.Errorf("%w: contribution %q node %q has incomplete metadata-source identifiers", ErrContribution, contribution.ID(), node.ID())
+		}
+		sourceType, typeErr := generatedValueGoType(operation.Value.Invocation.Type, operation.Value.Invocation.Items)
+		if typeErr != nil {
+			return fmt.Errorf("%w: contribution %q node %q: %v", ErrContribution, contribution.ID(), node.ID(), typeErr)
+		}
+		fmt.Fprintf(
+			source,
+			"\t%s, %s := invocationcontext.Value[%s](ctx, %s)\n",
+			sourceIdentifier,
+			presenceIdentifier,
+			sourceType,
+			strconv.Quote(operation.Value.Invocation.Name),
+		)
+		fmt.Fprintf(source, "\tif !%s {\n", presenceIdentifier)
+		fmt.Fprintln(source, "\t\treturn contract.Response{}, invocationcontext.ErrInvalidValue")
+		fmt.Fprintln(source, "\t}")
+		expression = sourceIdentifier
+	} else {
+		resolved, resolveErr := resolvePrepareValue(sourceRequest, previous, operation.Value)
+		if resolveErr != nil {
+			return fmt.Errorf("%w: contribution %q node %q: %v", ErrContribution, contribution.ID(), node.ID(), resolveErr)
+		}
+		if resolved.optional || resolved.wholeResponse {
+			return fmt.Errorf("%w: contribution %q node %q metadata source is not one present scalar", ErrContribution, contribution.ID(), node.ID())
+		}
+		expression = resolved.expression
+	}
+	fmt.Fprintf(
+		source,
+		"\tctx, %s := invocationcontext.WithMetadata(ctx, %s, %s(%s), %d)\n",
+		errorIdentifier,
+		strconv.Quote(operation.Key),
+		targetType,
+		expression,
+		operation.MaximumBytes,
+	)
 	fmt.Fprintf(source, "\tif %s != nil {\n", errorIdentifier)
 	fmt.Fprintf(source, "\t\treturn contract.Response{}, %s\n", errorIdentifier)
 	fmt.Fprintln(source, "\t}")

@@ -19,15 +19,28 @@ import (
 	"strings"
 )
 
-const maximumValueBytes = 64 << 10
+const (
+	maximumValueBytes    = 64 << 10
+	maximumMetadataBytes = 4 << 10
+)
 
 // ErrInvalidValue reports an invalid, oversized, or unserializable generated
 // invocation-context value.
 var ErrInvalidValue = errors.New("invalid generated invocation context value")
 
+// ErrInvalidMetadata reports invalid, oversized, or unserializable generated
+// invocation metadata.
+var ErrInvalidMetadata = errors.New("invalid generated invocation metadata")
+
 type stateKey struct{}
 
+type metadataStateKey struct{}
+
 type valueState struct {
+	values map[string]valueEntry
+}
+
+type metadataState struct {
 	values map[string]valueEntry
 }
 
@@ -74,6 +87,63 @@ func Value[T any](ctx context.Context, key string) (T, bool) {
 		return zero, false
 	}
 	current, ok := ctx.Value(stateKey{}).(valueState)
+	if !ok {
+		return zero, false
+	}
+	entry, ok := current.values[key]
+	if !ok || entry.typeOf != reflect.TypeOf((*T)(nil)).Elem() {
+		return zero, false
+	}
+	var result T
+	if err := json.Unmarshal(entry.data, &result); err != nil {
+		return zero, false
+	}
+	return result, true
+}
+
+type metadataValue interface {
+	~string | ~int64 | ~float64 | ~bool
+}
+
+// WithMetadata validates and defensively stores one non-sensitive scalar in
+// the propagated metadata channel. Metadata never overwrites typed values with
+// the same namespaced key.
+func WithMetadata[T metadataValue](ctx context.Context, key string, value T, maximumBytes uint32) (context.Context, error) {
+	if ctx == nil || !validKey(key) || maximumBytes == 0 || maximumBytes > maximumMetadataBytes {
+		return nil, ErrInvalidMetadata
+	}
+	data, err := json.Marshal(value)
+	if err != nil || len(data) > int(maximumBytes) {
+		return nil, ErrInvalidMetadata
+	}
+	var validated T
+	if err := json.Unmarshal(data, &validated); err != nil {
+		return nil, ErrInvalidMetadata
+	}
+
+	values := make(map[string]valueEntry)
+	if current, ok := ctx.Value(metadataStateKey{}).(metadataState); ok {
+		values = make(map[string]valueEntry, len(current.values)+1)
+		for name, entry := range current.values {
+			values[name] = entry
+		}
+	}
+	values[key] = valueEntry{
+		typeOf: reflect.TypeOf((*T)(nil)).Elem(),
+		data:   append([]byte(nil), data...),
+	}
+	return context.WithValue(ctx, metadataStateKey{}, metadataState{values: values}), nil
+}
+
+// Metadata returns one defensive scalar from the metadata channel. It reports
+// false for absent keys, mismatched types, corrupt state, nil contexts, or
+// invalid keys.
+func Metadata[T metadataValue](ctx context.Context, key string) (T, bool) {
+	var zero T
+	if ctx == nil || !validKey(key) {
+		return zero, false
+	}
+	current, ok := ctx.Value(metadataStateKey{}).(metadataState)
 	if !ok {
 		return zero, false
 	}

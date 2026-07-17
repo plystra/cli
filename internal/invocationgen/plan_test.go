@@ -321,6 +321,90 @@ func TestRenderPlanDerivesAndReusesBoundedContext(t *testing.T) {
 	}
 }
 
+func TestRenderPlanGoldenAndRuntimeMetadataAttachment(t *testing.T) {
+	t.Parallel()
+
+	plan := prepareSourcePlan(t, orderCreateSchema, []generation.Contribution{{
+		ID:        "policy.metadata",
+		Namespace: "policy",
+		Source:    planCapabilityID(t, "order.create/v1"),
+		Point:     generation.GenerationPointInvocationPrepare,
+		Nodes: []generation.GeneratedNode{
+			{
+				ID: "derive-code",
+				ContextDerivation: &generation.GeneratedContextDerivation{
+					Key:          "policy.code",
+					Value:        planInvocationValue(generation.GeneratedInvocationRequestField, "order_id"),
+					Type:         generation.GeneratedValueString,
+					Presence:     generation.GeneratedContextRequired,
+					MaximumBytes: 32,
+				},
+			},
+			{
+				ID: "attach-context-copy",
+				MetadataAttachment: &generation.GeneratedMetadataAttachment{
+					Key: "policy.code",
+					Value: generation.GeneratedValue{Invocation: &generation.GeneratedInvocationValue{
+						Source: generation.GeneratedInvocationContextValue,
+						Name:   "policy.code",
+						Type:   generation.GeneratedValueString,
+					}},
+					MaximumBytes: 16,
+				},
+			},
+			{
+				ID: "attach-request",
+				MetadataAttachment: &generation.GeneratedMetadataAttachment{
+					Key:          "policy.order-id",
+					Value:        planInvocationValue(generation.GeneratedInvocationRequestField, "order_id"),
+					MaximumBytes: 16,
+				},
+			},
+			{
+				ID: "attach-derived",
+				MetadataAttachment: &generation.GeneratedMetadataAttachment{
+					Key:          "policy.derived",
+					Value:        planNodeValue("derive-code", generation.GeneratedNodeDerived),
+					MaximumBytes: 16,
+				},
+			},
+			{
+				ID: "attach-rejected",
+				MetadataAttachment: &generation.GeneratedMetadataAttachment{
+					Key:          "policy.rejected",
+					Value:        planInvocationValue(generation.GeneratedInvocationRequestField, "reject"),
+					MaximumBytes: 5,
+				},
+			},
+			{
+				ID: "attach-literal",
+				MetadataAttachment: &generation.GeneratedMetadataAttachment{
+					Key:          "policy.literal",
+					Value:        generation.BooleanValue(false),
+					MaximumBytes: 5,
+				},
+			},
+		},
+	}})
+	file, err := invocationgen.RenderPlan(testModulePath, []byte(orderCreateSchema), plan)
+	if err != nil {
+		t.Fatalf("RenderPlan: %v", err)
+	}
+	want, err := os.ReadFile("testdata/order.create.metadata.go")
+	if err != nil {
+		t.Fatalf("ReadFile(metadata golden): %v\n%s", err, file.Data())
+	}
+	if file.Path() != "generated/go/invocation/order/create/v1/invocation_gen.go" || file.PackageName() != "ordercreatev1" || !bytes.Equal(file.Data(), want) {
+		t.Fatalf("generated metadata plan = path %q, package %q\n%s\nwant:\n%s", file.Path(), file.PackageName(), file.Data(), want)
+	}
+	assertGeneratedMetadataAttachmentRuns(t, file)
+
+	repeated, err := invocationgen.RenderPlan(testModulePath, []byte(orderCreateSchema), plan)
+	if err != nil || !bytes.Equal(repeated.Data(), file.Data()) {
+		t.Fatalf("repeated RenderPlan = %#v, %v", repeated, err)
+	}
+}
+
 func TestRenderPlanGoldenAndRuntimeConditionalFailures(t *testing.T) {
 	t.Parallel()
 
@@ -1045,6 +1129,80 @@ func TestContextDerivationIsBoundedOptionalAndReusable(t *testing.T) {
 	}
 	if dispatches != before {
 		t.Fatalf("failed derivation dispatched: before %d after %d", before, dispatches)
+	}
+}
+`))
+	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\n\nreplace github.com/plystra/kernel => ./kernel\n"))
+	runGeneratedGoTests(t, root)
+}
+
+func assertGeneratedMetadataAttachmentRuns(t testing.TB, sourceInvocation invocationgen.File) {
+	t.Helper()
+	root := t.TempDir()
+	sourceContract, err := contractgen.Render([]byte(orderCreateSchema))
+	if err != nil {
+		t.Fatalf("Render(metadata source contract): %v", err)
+	}
+	contextFile, err := invocationgen.RenderContext()
+	if err != nil {
+		t.Fatalf("RenderContext: %v", err)
+	}
+	for _, file := range []struct {
+		path string
+		data []byte
+	}{
+		{sourceContract.Path(), sourceContract.Data()},
+		{contextFile.Path(), contextFile.Data()},
+		{sourceInvocation.Path(), sourceInvocation.Data()},
+	} {
+		writeGeneratedFile(t, root, file.path, file.data)
+	}
+	writeInvocationTestKernel(t, root)
+	writeGeneratedFile(t, root, "generated/go/invocation/order/create/v1/invocation_gen_test.go", []byte(`package ordercreatev1_test
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	ordercontract "example.com/acme/project/generated/go/contracts/order/create/v1"
+	invocationcontext "example.com/acme/project/generated/go/internal/invocationcontext"
+	orderinvocation "example.com/acme/project/generated/go/invocation/order/create/v1"
+	kernelinvocation "github.com/plystra/kernel/invocation"
+)
+
+func TestMetadataIsBoundedPropagatedAndSeparateFromTypedValues(t *testing.T) {
+	dispatches := 0
+	target := kernelinvocation.NewTestHandle(true, func(ctx context.Context, request ordercontract.Request) (ordercontract.Response, error) {
+		dispatches++
+		codeValue, codeValueOK := invocationcontext.Value[string](ctx, "policy.code")
+		codeMetadata, codeMetadataOK := invocationcontext.Metadata[string](ctx, "policy.code")
+		orderID, orderIDOK := invocationcontext.Metadata[string](ctx, "policy.order-id")
+		derived, derivedOK := invocationcontext.Metadata[string](ctx, "policy.derived")
+		rejected, rejectedOK := invocationcontext.Metadata[bool](ctx, "policy.rejected")
+		literal, literalOK := invocationcontext.Metadata[bool](ctx, "policy.literal")
+		if !codeValueOK || codeValue != request.OrderID || !codeMetadataOK || codeMetadata != request.OrderID || !orderIDOK || orderID != request.OrderID || !derivedOK || derived != request.OrderID {
+			t.Fatalf("string metadata = value %q/%t code %q/%t order %q/%t derived %q/%t", codeValue, codeValueOK, codeMetadata, codeMetadataOK, orderID, orderIDOK, derived, derivedOK)
+		}
+		if !rejectedOK || !rejected || !literalOK || literal {
+			t.Fatalf("boolean metadata = rejected %t/%t literal %t/%t", rejected, rejectedOK, literal, literalOK)
+		}
+		return ordercontract.Response{Accepted: true}, nil
+	})
+	handle := orderinvocation.New(target)
+	response, err := handle.Invoke(context.Background(), ordercontract.Request{OrderID: "order-1", Reject: true})
+	if err != nil || !response.Accepted || dispatches != 1 {
+		t.Fatalf("Invoke = %#v, %v, dispatches %d", response, err, dispatches)
+	}
+
+	response, err = handle.Invoke(context.Background(), ordercontract.Request{OrderID: strings.Repeat("x", 16)})
+	if !errors.Is(err, invocationcontext.ErrInvalidMetadata) || response.Accepted || dispatches != 1 {
+		t.Fatalf("Invoke(oversized) = %#v, %v, dispatches %d", response, err, dispatches)
+	}
+	response, err = handle.Invoke(nil, ordercontract.Request{OrderID: "order-1"})
+	if !errors.Is(err, invocationcontext.ErrInvalidValue) || response.Accepted || dispatches != 1 {
+		t.Fatalf("Invoke(nil context) = %#v, %v, dispatches %d", response, err, dispatches)
 	}
 }
 `))
