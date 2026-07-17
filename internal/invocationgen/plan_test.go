@@ -29,6 +29,18 @@ extensions:
   policy:
     permission: order.create
 `
+	auditOrderSchema = `id: order.create/v1
+request:
+  order_id: {type: string, required: true}
+  note: {type: string}
+  reject: {type: boolean, required: true}
+response:
+  accepted: {type: boolean, required: true}
+errors: [policy_failed]
+extensions:
+  audit:
+    event: order.create
+`
 	policyCheckSchema = `id: policy.check/v1
 request:
   permission: {type: string, required: true}
@@ -41,6 +53,16 @@ response:
   reason: {type: string}
   details: {type: object}
 errors: [unavailable]
+`
+	auditWriteSchema = `id: audit.write/v1
+request:
+  event: {type: string, required: true}
+  note: {type: string}
+  order_id: {type: string, required: true}
+  rejected: {type: boolean, required: true}
+response:
+  recorded: {type: boolean, required: true}
+errors: [write_failed]
 `
 	typedOrderSchema = `id: order.typed-create/v1
 request:
@@ -405,6 +427,85 @@ func TestRenderPlanGoldenAndRuntimeMetadataAttachment(t *testing.T) {
 	}
 }
 
+func TestRenderPlanGoldenAndRuntimeAuditEvents(t *testing.T) {
+	t.Parallel()
+
+	sourceID := planCapabilityID(t, "order.create/v1")
+	auditID := planCapabilityID(t, "audit.write/v1")
+	plan := prepareCallPlanForSchemas(t, auditOrderSchema, auditWriteSchema, sourceID, auditID, generation.Contribution{
+		ID:        "audit.events",
+		Namespace: "audit",
+		Source:    sourceID,
+		Point:     generation.GenerationPointInvocationPrepare,
+		Nodes: []generation.GeneratedNode{
+			{
+				ID: "derive-order",
+				ContextDerivation: &generation.GeneratedContextDerivation{
+					Key:          "audit.order-id",
+					Value:        planInvocationValue(generation.GeneratedInvocationRequestField, "order_id"),
+					Type:         generation.GeneratedValueString,
+					Presence:     generation.GeneratedContextRequired,
+					MaximumBytes: 32,
+				},
+			},
+			{
+				ID: "observe",
+				AuditEventCall: &generation.GeneratedAuditEventCall{
+					Event:      "order-observed",
+					Capability: auditID,
+					Request: []generation.GeneratedFieldBinding{
+						{Field: "event", Value: generation.StringValue("order.observed")},
+						{Field: "note", Value: generation.GeneratedValue{Invocation: &generation.GeneratedInvocationValue{
+							Source: generation.GeneratedInvocationContextValue,
+							Name:   "audit.note",
+							Type:   generation.GeneratedValueString,
+						}}},
+						{Field: "order_id", Value: generation.GeneratedValue{Invocation: &generation.GeneratedInvocationValue{
+							Source: generation.GeneratedInvocationContextValue,
+							Name:   "audit.order-id",
+							Type:   generation.GeneratedValueString,
+						}}},
+						{Field: "rejected", Value: planInvocationValue(generation.GeneratedInvocationRequestField, "reject")},
+					},
+					TimeoutMilliseconds: 50,
+					OnError:             generation.GeneratedCallContinue,
+				},
+			},
+			{
+				ID: "record-required",
+				AuditEventCall: &generation.GeneratedAuditEventCall{
+					Event:      "order-required",
+					Capability: auditID,
+					Request: []generation.GeneratedFieldBinding{
+						{Field: "event", Value: generation.StringValue("order.required")},
+						{Field: "order_id", Value: planInvocationValue(generation.GeneratedInvocationRequestField, "order_id")},
+						{Field: "rejected", Value: generation.BooleanValue(false)},
+					},
+					TimeoutMilliseconds: 50,
+					OnError:             generation.GeneratedCallFailClosed,
+				},
+			},
+		},
+	})
+	file, err := invocationgen.RenderPlan(testModulePath, []byte(auditOrderSchema), plan)
+	if err != nil {
+		t.Fatalf("RenderPlan: %v", err)
+	}
+	want, err := os.ReadFile("testdata/order.create.audit.go")
+	if err != nil {
+		t.Fatalf("ReadFile(audit golden): %v\n%s", err, file.Data())
+	}
+	if file.Path() != "generated/go/invocation/order/create/v1/invocation_gen.go" || file.PackageName() != "ordercreatev1" || !bytes.Equal(file.Data(), want) {
+		t.Fatalf("generated audit plan = path %q, package %q\n%s\nwant:\n%s", file.Path(), file.PackageName(), file.Data(), want)
+	}
+	assertGeneratedAuditEventsRun(t, file)
+
+	repeated, err := invocationgen.RenderPlan(testModulePath, []byte(orderCreateSchema), plan)
+	if err != nil || !bytes.Equal(repeated.Data(), file.Data()) {
+		t.Fatalf("repeated RenderPlan = %#v, %v", repeated, err)
+	}
+}
+
 func TestRenderPlanGoldenAndRuntimeConditionalFailures(t *testing.T) {
 	t.Parallel()
 
@@ -645,6 +746,22 @@ func TestRenderPlanRejectsUnsupportedOrUnsafeCalls(t *testing.T) {
 				}}},
 			},
 			want: []string{"policy.self", "recursively calls", "order.create/v1"},
+		},
+		{
+			name: "self audit",
+			contribution: generation.Contribution{
+				ID: "policy.audit-self", Namespace: "policy", Source: planCapabilityID(t, "order.create/v1"), Point: generation.GenerationPointInvocationPrepare,
+				Nodes: []generation.GeneratedNode{{ID: "record", AuditEventCall: &generation.GeneratedAuditEventCall{
+					Event:      "order-recursive",
+					Capability: planCapabilityID(t, "order.create/v1"),
+					Request: []generation.GeneratedFieldBinding{
+						{Field: "order_id", Value: generation.StringValue("recursive")},
+						{Field: "reject", Value: generation.BooleanValue(false)},
+					},
+					TimeoutMilliseconds: 50, OnError: generation.GeneratedCallFailClosed,
+				}}},
+			},
+			want: []string{"policy.audit-self", "recursively audits", "order.create/v1"},
 		},
 	}
 	for _, test := range tests {
@@ -1203,6 +1320,143 @@ func TestMetadataIsBoundedPropagatedAndSeparateFromTypedValues(t *testing.T) {
 	response, err = handle.Invoke(nil, ordercontract.Request{OrderID: "order-1"})
 	if !errors.Is(err, invocationcontext.ErrInvalidValue) || response.Accepted || dispatches != 1 {
 		t.Fatalf("Invoke(nil context) = %#v, %v, dispatches %d", response, err, dispatches)
+	}
+}
+`))
+	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\n\nreplace github.com/plystra/kernel => ./kernel\n"))
+	runGeneratedGoTests(t, root)
+}
+
+func assertGeneratedAuditEventsRun(t testing.TB, sourceInvocation invocationgen.File) {
+	t.Helper()
+	root := t.TempDir()
+	sourceContract, err := contractgen.Render([]byte(auditOrderSchema))
+	if err != nil {
+		t.Fatalf("Render(audit source contract): %v", err)
+	}
+	auditContract, err := contractgen.Render([]byte(auditWriteSchema))
+	if err != nil {
+		t.Fatalf("Render(audit target contract): %v", err)
+	}
+	auditInvocation, err := invocationgen.Render(testModulePath, []byte(auditWriteSchema))
+	if err != nil {
+		t.Fatalf("Render(audit target invocation): %v", err)
+	}
+	auditClient, err := clientgen.Render(testModulePath, []byte(auditWriteSchema))
+	if err != nil {
+		t.Fatalf("Render(audit target client): %v", err)
+	}
+	contextFile, err := invocationgen.RenderContext()
+	if err != nil {
+		t.Fatalf("RenderContext: %v", err)
+	}
+	for _, file := range []struct {
+		path string
+		data []byte
+	}{
+		{sourceContract.Path(), sourceContract.Data()},
+		{auditContract.Path(), auditContract.Data()},
+		{auditInvocation.Path(), auditInvocation.Data()},
+		{auditClient.Path(), auditClient.Data()},
+		{contextFile.Path(), contextFile.Data()},
+		{sourceInvocation.Path(), sourceInvocation.Data()},
+	} {
+		writeGeneratedFile(t, root, file.path, file.data)
+	}
+	writeInvocationTestKernel(t, root)
+	writeGeneratedFile(t, root, "generated/go/invocation/order/create/v1/invocation_gen_test.go", []byte(`package ordercreatev1_test
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"testing"
+	"time"
+
+	auditclient "example.com/acme/project/generated/go/clients/audit/write/v1"
+	auditcontract "example.com/acme/project/generated/go/contracts/audit/write/v1"
+	ordercontract "example.com/acme/project/generated/go/contracts/order/create/v1"
+	invocationcontext "example.com/acme/project/generated/go/internal/invocationcontext"
+	auditinvocation "example.com/acme/project/generated/go/invocation/audit/write/v1"
+	orderinvocation "example.com/acme/project/generated/go/invocation/order/create/v1"
+	kernelinvocation "github.com/plystra/kernel/invocation"
+)
+
+func TestAuditEventsUseCanonicalClientAndDeclaredFailureModes(t *testing.T) {
+	sequence := []string{}
+	failEvent := ""
+	wantObservedNote := (*string)(nil)
+	auditTarget := kernelinvocation.NewTestHandle(true, func(ctx context.Context, request auditcontract.Request) (auditcontract.Response, error) {
+		sequence = append(sequence, "audit:"+request.Event)
+		deadline, ok := ctx.Deadline()
+		remaining := time.Until(deadline)
+		if !ok || remaining <= 0 || remaining > 100*time.Millisecond {
+			t.Fatalf("audit deadline = %v, %t, remaining %v", deadline, ok, remaining)
+		}
+		if request.OrderID != "order-1" {
+			t.Fatalf("audit request = %#v", request)
+		}
+		switch request.Event {
+		case "order.observed":
+			if !request.Rejected {
+				t.Fatalf("observed request = %#v", request)
+			}
+			if wantObservedNote == nil && request.Note != nil || wantObservedNote != nil && (request.Note == nil || *request.Note != *wantObservedNote) {
+				t.Fatalf("observed note = %#v, want %#v", request.Note, wantObservedNote)
+			}
+		case "order.required":
+			if request.Rejected || request.Note != nil {
+				t.Fatalf("required request = %#v", request)
+			}
+		default:
+			t.Fatalf("unexpected audit event %q", request.Event)
+		}
+		if request.Event == failEvent {
+			return auditcontract.Response{}, errors.New("audit unavailable")
+		}
+		return auditcontract.Response{Recorded: true}, nil
+	})
+	dispatches := 0
+	orderTarget := kernelinvocation.NewTestHandle(true, func(ctx context.Context, request ordercontract.Request) (ordercontract.Response, error) {
+		sequence = append(sequence, "order:"+request.OrderID)
+		dispatches++
+		orderID, ok := invocationcontext.Value[string](ctx, "audit.order-id")
+		if !ok || orderID != request.OrderID {
+			t.Fatalf("audit context = %q, %t", orderID, ok)
+		}
+		return ordercontract.Response{Accepted: true}, nil
+	})
+	audit := auditclient.New(auditinvocation.New(auditTarget))
+	handle := orderinvocation.New(orderTarget, audit)
+	request := ordercontract.Request{OrderID: "order-1", Reject: true}
+
+	note := "caller-note"
+	wantObservedNote = &note
+	ctx, err := invocationcontext.WithValue(context.Background(), "audit.note", note, 32)
+	if err != nil {
+		t.Fatalf("WithValue(audit.note): %v", err)
+	}
+	response, err := handle.Invoke(ctx, request)
+	if err != nil || !response.Accepted || dispatches != 1 || !slices.Equal(sequence, []string{"audit:order.observed", "audit:order.required", "order:order-1"}) {
+		t.Fatalf("Invoke(happy) = %#v, %v, dispatches %d, sequence %v", response, err, dispatches, sequence)
+	}
+	failEvent = "order.observed"
+	wantObservedNote = nil
+	sequence = nil
+	response, err = handle.Invoke(context.Background(), request)
+	if err != nil || !response.Accepted || dispatches != 2 || !slices.Equal(sequence, []string{"audit:order.observed", "audit:order.required", "order:order-1"}) {
+		t.Fatalf("Invoke(continue) = %#v, %v, dispatches %d, sequence %v", response, err, dispatches, sequence)
+	}
+	failEvent = "order.required"
+	sequence = nil
+	response, err = handle.Invoke(context.Background(), request)
+	if err == nil || response.Accepted || dispatches != 2 || !slices.Equal(sequence, []string{"audit:order.observed", "audit:order.required"}) {
+		t.Fatalf("Invoke(fail closed) = %#v, %v, dispatches %d, sequence %v", response, err, dispatches, sequence)
+	}
+	sequence = nil
+	response, err = handle.Invoke(nil, request)
+	if !errors.Is(err, invocationcontext.ErrInvalidValue) || response.Accepted || dispatches != 2 || len(sequence) != 0 {
+		t.Fatalf("Invoke(nil context) = %#v, %v, dispatches %d, sequence %v", response, err, dispatches, sequence)
 	}
 }
 `))

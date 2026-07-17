@@ -171,6 +171,8 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 				err = renderConditionalFailure(&source, contract.Request, contribution, node, previous)
 			case generation.GeneratedNodeKindMetadataAttachment:
 				err = renderMetadataAttachment(&source, contract.Request, contribution, node, previous)
+			case generation.GeneratedNodeKindAuditEventCall:
+				err = renderAuditEventCall(&source, contract.Request, prepared.dependencies, contribution, node, previous)
 			default:
 				err = fmt.Errorf("%w: contribution %q node %q uses unsupported kind %q", ErrContribution, contribution.ID(), node.ID(), node.Kind())
 			}
@@ -266,6 +268,20 @@ type preparedPlan struct {
 	hasValueConversions    bool
 }
 
+type bindingRequirements struct {
+	pointer            bool
+	optionalConversion bool
+	valueConversion    bool
+	contextRead        bool
+}
+
+func (p *preparedPlan) includeBinding(requirements bindingRequirements) {
+	p.hasPointerBindings = p.hasPointerBindings || requirements.pointer
+	p.hasOptionalConversions = p.hasOptionalConversions || requirements.optionalConversion
+	p.hasValueConversions = p.hasValueConversions || requirements.valueConversion
+	p.hasContextOperations = p.hasContextOperations || requirements.contextRead
+}
+
 type invocationDependency struct {
 	reference generationlowering.TargetReference
 	field     string
@@ -307,13 +323,11 @@ func preparePlan(identifier capabilityid.Identifier, sourceRequest map[string]ca
 					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q has no lowered target", ErrContribution, contribution.ID(), node.ID())
 				}
 				for _, binding := range operation.Request {
-					needsPointer, needsOptionalConversion, needsValueConversion, err := prepareBinding(sourceRequest, previous, reference, binding)
+					requirements, err := prepareBinding(sourceRequest, previous, reference, binding)
 					if err != nil {
 						return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, err)
 					}
-					result.hasPointerBindings = result.hasPointerBindings || needsPointer
-					result.hasOptionalConversions = result.hasOptionalConversions || needsOptionalConversion
-					result.hasValueConversions = result.hasValueConversions || needsValueConversion
+					result.includeBinding(requirements)
 				}
 				key := reference.Capability().String()
 				dependency := invocationDependency{reference: reference, field: reference.ImportName() + "Client"}
@@ -354,6 +368,32 @@ func preparePlan(identifier capabilityid.Identifier, sourceRequest map[string]ca
 					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q: %v", ErrContribution, contribution.ID(), node.ID(), err)
 				}
 				result.hasContextOperations = true
+			case generation.GeneratedNodeKindAuditEventCall:
+				operation, ok := node.Generated().AuditEventCall()
+				if !ok {
+					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q lost its audit-event call", ErrContribution, contribution.ID(), node.ID())
+				}
+				if operation.Capability.String() == identifier.String() {
+					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q recursively audits through its own source %s", ErrContribution, contribution.ID(), node.ID(), identifier)
+				}
+				reference, ok := node.Target()
+				if !ok {
+					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q has no lowered audit target", ErrContribution, contribution.ID(), node.ID())
+				}
+				for _, binding := range operation.Request {
+					requirements, err := prepareBinding(sourceRequest, previous, reference, binding)
+					if err != nil {
+						return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, err)
+					}
+					result.includeBinding(requirements)
+				}
+				key := reference.Capability().String()
+				dependency := invocationDependency{reference: reference, field: reference.ImportName() + "Client"}
+				if previous, exists := byCapability[key]; exists && previous != dependency {
+					return preparedPlan{}, fmt.Errorf("%w: audit target %s has inconsistent lowered references", ErrContribution, key)
+				}
+				byCapability[key] = dependency
+				result.hasTimedCalls = true
 			default:
 				return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q uses unsupported kind %q", ErrContribution, contribution.ID(), node.ID(), node.Kind())
 			}
@@ -384,28 +424,47 @@ func prepareBinding(
 	previous map[string]generationlowering.Node,
 	reference generationlowering.TargetReference,
 	binding generation.GeneratedFieldBinding,
-) (bool, bool, bool, error) {
+) (bindingRequirements, error) {
 	target, ok := binding.Target()
 	if !ok {
-		return false, false, false, errors.New("normalized target field shape is absent")
+		return bindingRequirements{}, errors.New("normalized target field shape is absent")
 	}
 	if _, err := generatedFieldGoType(reference.ContractImportName(), "Request", binding.Field, target.Type(), target.Items(), target.Enumerated()); err != nil {
-		return false, false, false, err
+		return bindingRequirements{}, err
 	}
-	source, err := resolvePrepareValue(sourceRequest, previous, binding.Value)
-	if err != nil {
-		return false, false, false, err
+	requirements := bindingRequirements{}
+	var source prepareValue
+	if binding.Value.Invocation != nil && binding.Value.Invocation.Source == generation.GeneratedInvocationContextValue {
+		shape, shapeOK := binding.Value.Shape()
+		if !shapeOK {
+			return bindingRequirements{}, errors.New("normalized context value shape is absent")
+		}
+		goType, err := generatedValueGoType(shape.Type(), shape.Items())
+		if err != nil {
+			return bindingRequirements{}, err
+		}
+		source = prepareValue{goType: goType, optional: shape.Optional()}
+		requirements.contextRead = true
+	} else {
+		var err error
+		source, err = resolvePrepareValue(sourceRequest, previous, binding.Value)
+		if err != nil {
+			return bindingRequirements{}, err
+		}
 	}
 	if source.optional && target.Required() {
-		return false, false, false, fmt.Errorf("optional source cannot populate required target field %q", binding.Field)
+		return bindingRequirements{}, fmt.Errorf("optional source cannot populate required target field %q", binding.Field)
 	}
+	requirements.valueConversion = source.wholeResponse
 	if target.Required() {
-		return false, false, source.wholeResponse, nil
+		return requirements, nil
 	}
 	if source.optional {
-		return false, true, source.wholeResponse, nil
+		requirements.optionalConversion = true
+		return requirements, nil
 	}
-	return true, false, source.wholeResponse, nil
+	requirements.pointer = true
+	return requirements, nil
 }
 
 func prepareContextDerivation(
@@ -911,6 +970,55 @@ func renderConditionalFailure(
 	return nil
 }
 
+func renderAuditEventCall(
+	source *strings.Builder,
+	sourceRequest map[string]canonicalField,
+	dependencies []invocationDependency,
+	contribution generationlowering.Contribution,
+	node generationlowering.Node,
+	previous map[string]generationlowering.Node,
+) error {
+	operation, ok := node.Generated().AuditEventCall()
+	if !ok {
+		return fmt.Errorf("%w: contribution %q node %q lost its audit-event call", ErrContribution, contribution.ID(), node.ID())
+	}
+	reference, ok := node.Target()
+	if !ok {
+		return fmt.Errorf("%w: contribution %q node %q lost its audit target", ErrContribution, contribution.ID(), node.ID())
+	}
+	dependency, ok := findDependency(dependencies, reference.Capability().String())
+	if !ok {
+		return fmt.Errorf("%w: contribution %q node %q audit target %s has no generated client dependency", ErrContribution, contribution.ID(), node.ID(), reference.Capability())
+	}
+	errorIdentifier, errorOK := node.Identifier(generation.GeneratedNodeError)
+	if !errorOK {
+		return fmt.Errorf("%w: contribution %q node %q has no audit error identifier", ErrContribution, contribution.ID(), node.ID())
+	}
+	fmt.Fprintf(source, "\tvar %s error\n", errorIdentifier)
+	bindings, err := renderCallBindings(source, sourceRequest, contribution, node, previous, reference, errorIdentifier, operation.Request)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(source, "\t_, %s = plystraInvokeWithTimeout(\n", errorIdentifier)
+	fmt.Fprintln(source, "\t\tctx,")
+	fmt.Fprintf(source, "\t\t%d*time.Millisecond,\n", operation.TimeoutMilliseconds)
+	fmt.Fprintf(source, "\t\th.%s.%s,\n", dependency.field, reference.Operation())
+	fmt.Fprintf(source, "\t\t%s.Request{\n", reference.ContractImportName())
+	for index, binding := range operation.Request {
+		fmt.Fprintf(source, "\t\t\t%s: %s,\n", goname.Field(binding.Field), bindings[index])
+	}
+	fmt.Fprintln(source, "\t\t},")
+	fmt.Fprintln(source, "\t)")
+	if operation.OnError == generation.GeneratedCallFailClosed {
+		fmt.Fprintf(source, "\tif %s != nil {\n", errorIdentifier)
+		fmt.Fprintf(source, "\t\treturn contract.Response{}, %s\n", errorIdentifier)
+		fmt.Fprintln(source, "\t}")
+	} else {
+		fmt.Fprintf(source, "\t_ = %s\n", errorIdentifier)
+	}
+	return nil
+}
+
 func renderPrepareCall(
 	source *strings.Builder,
 	sourceRequest map[string]canonicalField,
@@ -936,35 +1044,9 @@ func renderPrepareCall(
 	if !responseOK || !errorOK {
 		return fmt.Errorf("%w: contribution %q node %q has incomplete lowered identifiers", ErrContribution, contribution.ID(), node.ID())
 	}
-	bindings := make([]string, len(operation.Request))
-	for index, binding := range operation.Request {
-		resolved, err := resolvePrepareValue(sourceRequest, previous, binding.Value)
-		if err != nil {
-			return fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, err)
-		}
-		if resolved.wholeResponse {
-			target, targetOK := binding.Target()
-			if !targetOK {
-				return fmt.Errorf("%w: contribution %q node %q binding %q has no normalized target shape", ErrContribution, contribution.ID(), node.ID(), binding.Field)
-			}
-			targetType, typeErr := generatedFieldGoType(reference.ContractImportName(), "Request", binding.Field, target.Type(), target.Items(), target.Enumerated())
-			if typeErr != nil {
-				return fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, typeErr)
-			}
-			conversionIdentifier, identifierOK := node.BindingIdentifier(binding.Field)
-			if !identifierOK {
-				return fmt.Errorf("%w: contribution %q node %q binding %q has no conversion identifier", ErrContribution, contribution.ID(), node.ID(), binding.Field)
-			}
-			fmt.Fprintf(source, "\t%s, %s := plystraConvertValue[%s](%s)\n", conversionIdentifier, errorIdentifier, targetType, resolved.expression)
-			fmt.Fprintf(source, "\tif %s != nil {\n", errorIdentifier)
-			fmt.Fprintf(source, "\t\treturn contract.Response{}, %s\n", errorIdentifier)
-			fmt.Fprintln(source, "\t}")
-			resolved = prepareValue{expression: conversionIdentifier, goType: targetType}
-		}
-		bindings[index], err = renderBindingValue(reference, binding, resolved)
-		if err != nil {
-			return fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, err)
-		}
+	bindings, err := renderCallBindings(source, sourceRequest, contribution, node, previous, reference, errorIdentifier, operation.Request)
+	if err != nil {
+		return err
 	}
 	fmt.Fprintf(source, "\t%s, %s := plystraInvokeWithTimeout(\n", responseIdentifier, errorIdentifier)
 	fmt.Fprintln(source, "\t\tctx,")
@@ -983,6 +1065,91 @@ func renderPrepareCall(
 	}
 	fmt.Fprintf(source, "\t_ = %s\n", responseIdentifier)
 	return nil
+}
+
+func renderCallBindings(
+	source *strings.Builder,
+	sourceRequest map[string]canonicalField,
+	contribution generationlowering.Contribution,
+	node generationlowering.Node,
+	previous map[string]generationlowering.Node,
+	reference generationlowering.TargetReference,
+	errorIdentifier string,
+	request []generation.GeneratedFieldBinding,
+) ([]string, error) {
+	bindings := make([]string, len(request))
+	for index, binding := range request {
+		resolved := prepareValue{}
+		var err error
+		if binding.Value.Invocation != nil && binding.Value.Invocation.Source == generation.GeneratedInvocationContextValue {
+			shape, shapeOK := binding.Value.Shape()
+			if !shapeOK {
+				return nil, fmt.Errorf("%w: contribution %q node %q binding %q has no normalized context value shape", ErrContribution, contribution.ID(), node.ID(), binding.Field)
+			}
+			sourceType, typeErr := generatedValueGoType(shape.Type(), shape.Items())
+			if typeErr != nil {
+				return nil, fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, typeErr)
+			}
+			sourceIdentifier, sourceOK := node.BindingSourceIdentifier(binding.Field)
+			presenceIdentifier, presenceOK := node.BindingPresenceIdentifier(binding.Field)
+			if !sourceOK || !presenceOK {
+				return nil, fmt.Errorf("%w: contribution %q node %q binding %q has incomplete context-read identifiers", ErrContribution, contribution.ID(), node.ID(), binding.Field)
+			}
+			fmt.Fprintf(
+				source,
+				"\t%s, %s := invocationcontext.Value[%s](ctx, %s)\n",
+				sourceIdentifier,
+				presenceIdentifier,
+				sourceType,
+				strconv.Quote(binding.Value.Invocation.Name),
+			)
+			resolved = prepareValue{expression: sourceIdentifier, goType: sourceType, optional: shape.Optional()}
+			if shape.Optional() {
+				optionalIdentifier, identifierOK := node.BindingIdentifier(binding.Field)
+				if !identifierOK {
+					return nil, fmt.Errorf("%w: contribution %q node %q binding %q has no optional context identifier", ErrContribution, contribution.ID(), node.ID(), binding.Field)
+				}
+				fmt.Fprintf(source, "\tvar %s *%s\n", optionalIdentifier, sourceType)
+				fmt.Fprintf(source, "\tif %s {\n", presenceIdentifier)
+				fmt.Fprintf(source, "\t\t%s = &%s\n", optionalIdentifier, sourceIdentifier)
+				fmt.Fprintln(source, "\t}")
+				resolved.expression = optionalIdentifier
+			} else {
+				fmt.Fprintf(source, "\tif !%s {\n", presenceIdentifier)
+				fmt.Fprintln(source, "\t\treturn contract.Response{}, invocationcontext.ErrInvalidValue")
+				fmt.Fprintln(source, "\t}")
+			}
+		} else {
+			resolved, err = resolvePrepareValue(sourceRequest, previous, binding.Value)
+			if err != nil {
+				return nil, fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, err)
+			}
+		}
+		if resolved.wholeResponse {
+			target, targetOK := binding.Target()
+			if !targetOK {
+				return nil, fmt.Errorf("%w: contribution %q node %q binding %q has no normalized target shape", ErrContribution, contribution.ID(), node.ID(), binding.Field)
+			}
+			targetType, typeErr := generatedFieldGoType(reference.ContractImportName(), "Request", binding.Field, target.Type(), target.Items(), target.Enumerated())
+			if typeErr != nil {
+				return nil, fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, typeErr)
+			}
+			conversionIdentifier, identifierOK := node.BindingIdentifier(binding.Field)
+			if !identifierOK {
+				return nil, fmt.Errorf("%w: contribution %q node %q binding %q has no conversion identifier", ErrContribution, contribution.ID(), node.ID(), binding.Field)
+			}
+			fmt.Fprintf(source, "\t%s, %s := plystraConvertValue[%s](%s)\n", conversionIdentifier, errorIdentifier, targetType, resolved.expression)
+			fmt.Fprintf(source, "\tif %s != nil {\n", errorIdentifier)
+			fmt.Fprintf(source, "\t\treturn contract.Response{}, %s\n", errorIdentifier)
+			fmt.Fprintln(source, "\t}")
+			resolved = prepareValue{expression: conversionIdentifier, goType: targetType}
+		}
+		bindings[index], err = renderBindingValue(reference, binding, resolved)
+		if err != nil {
+			return nil, fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, err)
+		}
+	}
+	return bindings, nil
 }
 
 func renderBindingValue(

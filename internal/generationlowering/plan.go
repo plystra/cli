@@ -66,15 +66,17 @@ func (r TargetReference) Operation() string { return r.operation }
 
 // Node is one lowered operation in contribution-local semantic order.
 type Node struct {
-	generated          generation.NormalizedGeneratedNode
-	target             TargetReference
-	hasTarget          bool
-	responseIdentifier string
-	errorIdentifier    string
-	derivedIdentifier  string
-	sourceIdentifier   string
-	presenceIdentifier string
-	bindingIdentifiers map[string]string
+	generated                  generation.NormalizedGeneratedNode
+	target                     TargetReference
+	hasTarget                  bool
+	responseIdentifier         string
+	errorIdentifier            string
+	derivedIdentifier          string
+	sourceIdentifier           string
+	presenceIdentifier         string
+	bindingIdentifiers         map[string]string
+	bindingSourceIdentifiers   map[string]string
+	bindingPresenceIdentifiers map[string]string
 }
 
 // ID returns the contribution-local stable node identifier.
@@ -122,6 +124,20 @@ func (n Node) PresenceIdentifier() (string, bool) {
 // binding before a generated Capability call.
 func (n Node) BindingIdentifier(field string) (string, bool) {
 	value, ok := n.bindingIdentifiers[field]
+	return value, ok
+}
+
+// BindingSourceIdentifier returns the CLI-owned local used to read a context
+// value for one request binding.
+func (n Node) BindingSourceIdentifier(field string) (string, bool) {
+	value, ok := n.bindingSourceIdentifiers[field]
+	return value, ok
+}
+
+// BindingPresenceIdentifier returns the CLI-owned local that records whether
+// a context-sourced request binding exists.
+func (n Node) BindingPresenceIdentifier(field string) (string, bool) {
+	value, ok := n.bindingPresenceIdentifiers[field]
 	return value, ok
 }
 
@@ -175,14 +191,9 @@ func (p Plan) Contributions() []Contribution {
 		result[index] = contribution
 		result[index].nodes = append([]Node(nil), contribution.nodes...)
 		for nodeIndex := range result[index].nodes {
-			bindings := result[index].nodes[nodeIndex].bindingIdentifiers
-			if len(bindings) == 0 {
-				continue
-			}
-			result[index].nodes[nodeIndex].bindingIdentifiers = make(map[string]string, len(bindings))
-			for field, identifier := range bindings {
-				result[index].nodes[nodeIndex].bindingIdentifiers[field] = identifier
-			}
+			result[index].nodes[nodeIndex].bindingIdentifiers = cloneIdentifierMap(result[index].nodes[nodeIndex].bindingIdentifiers)
+			result[index].nodes[nodeIndex].bindingSourceIdentifiers = cloneIdentifierMap(result[index].nodes[nodeIndex].bindingSourceIdentifiers)
+			result[index].nodes[nodeIndex].bindingPresenceIdentifiers = cloneIdentifierMap(result[index].nodes[nodeIndex].bindingPresenceIdentifiers)
 		}
 	}
 	return result
@@ -273,6 +284,7 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 	}
 
 	var target generation.CapabilityID
+	var requestBindings []generation.GeneratedFieldBinding
 	switch generated.Kind() {
 	case generation.GeneratedNodeKindCapabilityCall:
 		operation, ok := generated.CapabilityCall()
@@ -280,23 +292,10 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 			return Node{}, nil, nil, fmt.Errorf("%w: capability-call operation is absent", ErrInvalidContribution)
 		}
 		target = operation.Capability
+		requestBindings = operation.Request
 		identifiers = append(identifiers, invocationRuntimeIdentifiers()...)
 		reserve(generation.GeneratedNodeResponse, "Response")
 		reserve(generation.GeneratedNodeError, "Error")
-		for _, binding := range operation.Request {
-			if binding.Value.Node == nil || binding.Value.Node.Output != generation.GeneratedNodeResponse || binding.Value.Node.Field != "" {
-				continue
-			}
-			name := generatedIdentifierBase(contribution.id, generated.ID(), "request", binding.Field)
-			if node.bindingIdentifiers == nil {
-				node.bindingIdentifiers = make(map[string]string)
-			}
-			node.bindingIdentifiers[binding.Field] = name
-			identifiers = append(identifiers,
-				IdentifierRequest{Name: name, Source: provenance + " whole-response request binding " + binding.Field},
-			)
-			identifiers = append(identifiers, valueConversionRuntimeIdentifiers()...)
-		}
 	case generation.GeneratedNodeKindContextDerivation:
 		operation, ok := generated.ContextDerivation()
 		if !ok {
@@ -367,10 +366,57 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 			return Node{}, nil, nil, fmt.Errorf("%w: audit-event-call operation is absent", ErrInvalidContribution)
 		}
 		target = operation.Capability
+		requestBindings = operation.Request
 		identifiers = append(identifiers, invocationRuntimeIdentifiers()...)
 		reserve(generation.GeneratedNodeError, "Error")
 	default:
 		return Node{}, nil, nil, fmt.Errorf("%w: unsupported node kind %q", ErrInvalidContribution, generated.Kind())
+	}
+
+	for _, binding := range requestBindings {
+		if binding.Value.Invocation != nil && binding.Value.Invocation.Source == generation.GeneratedInvocationContextValue {
+			shape, ok := binding.Value.Shape()
+			if !ok {
+				return Node{}, nil, nil, fmt.Errorf("%w: request binding %q has no normalized value shape", ErrInvalidContribution, binding.Field)
+			}
+			sourceName := generatedIdentifierBase(contribution.id, generated.ID(), "request", binding.Field, "source")
+			presenceName := generatedIdentifierBase(contribution.id, generated.ID(), "request", binding.Field, "present")
+			if node.bindingSourceIdentifiers == nil {
+				node.bindingSourceIdentifiers = make(map[string]string)
+				node.bindingPresenceIdentifiers = make(map[string]string)
+			}
+			node.bindingSourceIdentifiers[binding.Field] = sourceName
+			node.bindingPresenceIdentifiers[binding.Field] = presenceName
+			identifiers = append(identifiers,
+				IdentifierRequest{Name: sourceName, Source: provenance + " context request binding " + binding.Field},
+				IdentifierRequest{Name: presenceName, Source: provenance + " context request presence " + binding.Field},
+			)
+			if shape.Optional() {
+				name := generatedIdentifierBase(contribution.id, generated.ID(), "request", binding.Field)
+				if node.bindingIdentifiers == nil {
+					node.bindingIdentifiers = make(map[string]string)
+				}
+				node.bindingIdentifiers[binding.Field] = name
+				identifiers = append(identifiers, IdentifierRequest{Name: name, Source: provenance + " optional context request binding " + binding.Field})
+			}
+			imports = append(imports, ImportRequest{
+				Path:   path.Join(modulePath, "generated/go/internal/invocationcontext"),
+				Name:   "invocationcontext",
+				Source: provenance + " generated invocation context binding",
+			})
+		}
+		if binding.Value.Node == nil || binding.Value.Node.Output != generation.GeneratedNodeResponse || binding.Value.Node.Field != "" {
+			continue
+		}
+		name := generatedIdentifierBase(contribution.id, generated.ID(), "request", binding.Field)
+		if node.bindingIdentifiers == nil {
+			node.bindingIdentifiers = make(map[string]string)
+		}
+		node.bindingIdentifiers[binding.Field] = name
+		identifiers = append(identifiers,
+			IdentifierRequest{Name: name, Source: provenance + " whole-response request binding " + binding.Field},
+		)
+		identifiers = append(identifiers, valueConversionRuntimeIdentifiers()...)
 	}
 
 	if target.String() == "" {
@@ -443,6 +489,17 @@ func valueConversionRuntimeIdentifiers() []IdentifierRequest {
 		{Name: "plystraErrInvalidGeneratedValue", Source: "generated invocation value conversion runtime"},
 		{Name: "plystraConvertValue", Source: "generated invocation value conversion runtime"},
 	}
+}
+
+func cloneIdentifierMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(input))
+	for field, identifier := range input {
+		result[field] = identifier
+	}
+	return result
 }
 
 func generatedIdentifierBase(parts ...string) string {
