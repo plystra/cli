@@ -36,6 +36,32 @@ type Input struct {
 	Schema     manifest.Config
 }
 
+// GoNames are the deterministic exported symbols owned by one plugin's
+// generated configuration source.
+type GoNames struct {
+	typeName   string
+	decodeName string
+}
+
+// TypeName returns the generated configuration struct name.
+func (n GoNames) TypeName() string { return n.typeName }
+
+// DecodeName returns the generated runtime decoder name.
+func (n GoNames) DecodeName() string { return n.decodeName }
+
+// DeriveGoNames validates one module-root plugin directory name and returns
+// the symbols shared by module-owned configuration and application assembly.
+func DeriveGoNames(pluginName string) (GoNames, error) {
+	if !validPluginName(pluginName) {
+		return GoNames{}, fmt.Errorf("%w: plugin name %q is not canonical lower-case kebab-case", ErrInvalidInput, pluginName)
+	}
+	stem := exportedPluginName(pluginName)
+	if stem == "" {
+		return GoNames{}, fmt.Errorf("%w: plugin name %q has no Go identifier", ErrInvalidInput, pluginName)
+	}
+	return GoNames{typeName: stem + "Config", decodeName: "Decode" + stem}, nil
+}
+
 // File is one immutable generated configuration source file.
 type File struct {
 	path       string
@@ -79,17 +105,15 @@ type schemaFieldDocument struct {
 // generated decoder parses only the embedded schema and delegates all runtime
 // value validation and Secret resolution to Kernel configuration.Decode.
 func Render(input Input) (File, error) {
-	if !validPluginName(input.PluginName) {
-		return File{}, fmt.Errorf("%w: %w: plugin name %q is not canonical lower-case kebab-case", ErrRender, ErrInvalidInput, input.PluginName)
+	names, err := DeriveGoNames(input.PluginName)
+	if err != nil {
+		return File{}, fmt.Errorf("%w: %w", ErrRender, err)
 	}
 	if err := pluginid.Validate(input.PluginID); err != nil {
 		return File{}, fmt.Errorf("%w: %w: Plugin ID %q: %v", ErrRender, ErrInvalidInput, input.PluginID, err)
 	}
 
 	stem := exportedPluginName(input.PluginName)
-	if stem == "" {
-		return File{}, fmt.Errorf("%w: %w: plugin name %q has no Go identifier", ErrRender, ErrInvalidInput, input.PluginName)
-	}
 	fields, err := planFields(input.Schema)
 	if err != nil {
 		return File{}, fmt.Errorf("%w: plugin %q: %w", ErrRender, input.PluginID, err)
@@ -99,8 +123,8 @@ func Render(input Input) (File, error) {
 		return File{}, fmt.Errorf("%w: plugin %q schema: %v", ErrRender, input.PluginID, err)
 	}
 
-	typeName := stem + "Config"
-	decodeName := "Decode" + stem
+	typeName := names.TypeName()
+	decodeName := names.DecodeName()
 	privateStem := lowerFirst(stem)
 	pluginIDName := stem + "PluginID"
 	schemaName := privateStem + "Schema"

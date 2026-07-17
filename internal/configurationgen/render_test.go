@@ -132,6 +132,20 @@ user_i_d: {type: string}
 	}
 }
 
+func TestDeriveGoNamesMatchesRenderedIdentity(t *testing.T) {
+	t.Parallel()
+
+	names, err := configurationgen.DeriveGoNames("email-smtp")
+	if err != nil || names.TypeName() != "EmailSMTPConfig" || names.DecodeName() != "DecodeEmailSMTP" {
+		t.Fatalf("DeriveGoNames = type %q, decode %q, %v", names.TypeName(), names.DecodeName(), err)
+	}
+	for _, invalid := range []string{"", "Email", "email--smtp", "email_legacy"} {
+		if names, err := configurationgen.DeriveGoNames(invalid); names.TypeName() != "" || names.DecodeName() != "" || !errors.Is(err, configurationgen.ErrInvalidInput) {
+			t.Fatalf("DeriveGoNames(%q) = %#v, %v", invalid, names, err)
+		}
+	}
+}
+
 func parseConfig(t testing.TB, source string) manifest.Config {
 	t.Helper()
 	schema, err := manifest.ParseConfig([]byte(source))
