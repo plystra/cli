@@ -132,6 +132,11 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	}
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
+	if prepared.hasHTTPPath {
+		fmt.Fprintln(&source, "// AdapterCredentialSource returns one raw trusted-adapter credential by canonical name.")
+		fmt.Fprintln(&source, "type AdapterCredentialSource func(string) (string, bool)")
+		fmt.Fprintln(&source)
+	}
 	fmt.Fprintln(&source, "// New binds the application path to its caller-scoped canonical Kernel handle.")
 	if len(prepared.dependencies) == 0 {
 		fmt.Fprintln(&source, "func New(target kernelinvocation.Handle[contract.Request, contract.Response]) Handle {")
@@ -157,21 +162,80 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	fmt.Fprintln(&source, "\treturn handle.target.Available()")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
-	fmt.Fprintf(&source, "// Invoke runs the application path for %s and dispatches its canonical ID.\n", identifier.String())
-	fmt.Fprintln(&source, "func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.Response, error) {")
-	if err := renderContributions(&source, contract, prepared, prepared.preparations); err != nil {
-		return File{}, fmt.Errorf("%w: %w", ErrRender, err)
-	}
-	if len(prepared.completions) == 0 {
-		fmt.Fprintln(&source, "\treturn h.target.Invoke(ctx, request)")
-	} else {
-		fmt.Fprintln(&source, "\tresponse, invocationError := h.target.Invoke(ctx, request)")
-		if err := renderContributions(&source, contract, prepared, prepared.completions); err != nil {
+	if prepared.hasHTTPPath {
+		fmt.Fprintf(&source, "// Invoke runs the internal application path for %s without HTTP-only integration.\n", identifier.String())
+		fmt.Fprintln(&source, "func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.Response, error) {")
+		fmt.Fprintln(&source, "\t_, response, invocationError := h.invoke(ctx, request, nil)")
+		fmt.Fprintln(&source, "\treturn response, invocationError")
+		fmt.Fprintln(&source, "}")
+		fmt.Fprintln(&source)
+		fmt.Fprintf(&source, "// InvokeHTTP runs the external HTTP path for %s around the same canonical dispatch.\n", identifier.String())
+		fmt.Fprintln(&source, "func (h Handle) InvokeHTTP(ctx context.Context, request contract.Request, adapterCredentials AdapterCredentialSource) (contract.Response, error) {")
+		if err := renderContributions(&source, contract, prepared, prepared.ingress); err != nil {
+			return File{}, fmt.Errorf("%w: %w", ErrRender, err)
+		}
+		fmt.Fprintln(&source, "\tctx, response, invocationError := h.invoke(ctx, request, adapterCredentials)")
+		if err := renderContributions(&source, contract, prepared, prepared.egress); err != nil {
 			return File{}, fmt.Errorf("%w: %w", ErrRender, err)
 		}
 		fmt.Fprintln(&source, "\treturn response, invocationError")
+		fmt.Fprintln(&source, "}")
+		fmt.Fprintln(&source)
+		fmt.Fprintln(&source, "func (h Handle) invoke(parentContext context.Context, request contract.Request, adapterCredentials AdapterCredentialSource) (context.Context, contract.Response, error) {")
+		fmt.Fprintln(&source, "\tvar invocationContext context.Context")
+		fmt.Fprintln(&source, "\tresponse, invocationError := func() (contract.Response, error) {")
+		fmt.Fprintln(&source, "\t\tctx := parentContext")
+		fmt.Fprintln(&source, "\t\tdefer func() { invocationContext = ctx }()")
+		if err := renderContributions(&source, contract, prepared, prepared.preparations); err != nil {
+			return File{}, fmt.Errorf("%w: %w", ErrRender, err)
+		}
+		if len(prepared.completions) == 0 {
+			fmt.Fprintln(&source, "\t\treturn h.target.Invoke(ctx, request)")
+		} else {
+			fmt.Fprintln(&source, "\t\tresponse, invocationError := h.target.Invoke(ctx, request)")
+			if err := renderContributions(&source, contract, prepared, prepared.completions); err != nil {
+				return File{}, fmt.Errorf("%w: %w", ErrRender, err)
+			}
+			fmt.Fprintln(&source, "\t\treturn response, invocationError")
+		}
+		fmt.Fprintln(&source, "\t}()")
+		fmt.Fprintln(&source, "\treturn invocationContext, response, invocationError")
+		fmt.Fprintln(&source, "}")
+	} else {
+		fmt.Fprintf(&source, "// Invoke runs the application path for %s and dispatches its canonical ID.\n", identifier.String())
+		fmt.Fprintln(&source, "func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.Response, error) {")
+		if err := renderContributions(&source, contract, prepared, prepared.preparations); err != nil {
+			return File{}, fmt.Errorf("%w: %w", ErrRender, err)
+		}
+		if len(prepared.completions) == 0 {
+			fmt.Fprintln(&source, "\treturn h.target.Invoke(ctx, request)")
+		} else {
+			fmt.Fprintln(&source, "\tresponse, invocationError := h.target.Invoke(ctx, request)")
+			if err := renderContributions(&source, contract, prepared, prepared.completions); err != nil {
+				return File{}, fmt.Errorf("%w: %w", ErrRender, err)
+			}
+			fmt.Fprintln(&source, "\treturn response, invocationError")
+		}
+		fmt.Fprintln(&source, "}")
 	}
-	fmt.Fprintln(&source, "}")
+	if prepared.hasAdapterCredentials {
+		fmt.Fprintln(&source)
+		fmt.Fprintln(&source, "func plystraAdapterCredential(source AdapterCredentialSource, name string) (credential *string) {")
+		fmt.Fprintln(&source, "\tif source == nil {")
+		fmt.Fprintln(&source, "\t\treturn nil")
+		fmt.Fprintln(&source, "\t}")
+		fmt.Fprintln(&source, "\tdefer func() {")
+		fmt.Fprintln(&source, "\t\tif recover() != nil {")
+		fmt.Fprintln(&source, "\t\t\tcredential = nil")
+		fmt.Fprintln(&source, "\t\t}")
+		fmt.Fprintln(&source, "\t}()")
+		fmt.Fprintln(&source, "\tvalue, ok := source(name)")
+		fmt.Fprintln(&source, "\tif !ok || value == \"\" || len(value) > 64<<10 {")
+		fmt.Fprintln(&source, "\t\treturn nil")
+		fmt.Fprintln(&source, "\t}")
+		fmt.Fprintln(&source, "\treturn &value")
+		fmt.Fprintln(&source, "}")
+	}
 	if prepared.hasTimedCalls {
 		fmt.Fprintln(&source)
 		fmt.Fprintln(&source, "var plystraErrInvalidContext = errors.New(\"nil generated invocation context\")")
@@ -279,8 +343,10 @@ func renderContributions(
 }
 
 type preparedPlan struct {
+	ingress                []generationlowering.Contribution
 	preparations           []generationlowering.Contribution
 	completions            []generationlowering.Contribution
+	egress                 []generationlowering.Contribution
 	dependencies           []invocationDependency
 	hasTimedCalls          bool
 	hasContextOperations   bool
@@ -288,6 +354,8 @@ type preparedPlan struct {
 	hasOptionalConversions bool
 	hasConditionalFailures bool
 	hasValueConversions    bool
+	hasHTTPPath            bool
+	hasAdapterCredentials  bool
 }
 
 type bindingRequirements struct {
@@ -326,7 +394,10 @@ func preparePlan(
 		}
 		nodes := contribution.Nodes()
 		point := contribution.Point()
-		if len(nodes) != 0 && point != generation.GenerationPointInvocationPrepare && point != generation.GenerationPointInvocationComplete {
+		if len(nodes) != 0 && point != generation.GenerationPointHTTPIngress &&
+			point != generation.GenerationPointInvocationPrepare &&
+			point != generation.GenerationPointInvocationComplete &&
+			point != generation.GenerationPointHTTPEgress {
 			return preparedPlan{}, fmt.Errorf(
 				"%w: contribution %q for %s uses unsupported point %q",
 				ErrContribution,
@@ -337,6 +408,10 @@ func preparePlan(
 		}
 		previous := make(map[string]generationlowering.Node, len(nodes))
 		for _, node := range nodes {
+			if node.UsesAdapterCredential() {
+				result.hasHTTPPath = true
+				result.hasAdapterCredentials = true
+			}
 			switch node.Kind() {
 			case generation.GeneratedNodeKindCapabilityCall:
 				operation, ok := node.Generated().CapabilityCall()
@@ -431,10 +506,16 @@ func preparePlan(
 			continue
 		}
 		switch point {
+		case generation.GenerationPointHTTPIngress:
+			result.ingress = append(result.ingress, contribution)
+			result.hasHTTPPath = true
 		case generation.GenerationPointInvocationPrepare:
 			result.preparations = append(result.preparations, contribution)
 		case generation.GenerationPointInvocationComplete:
 			result.completions = append(result.completions, contribution)
+		case generation.GenerationPointHTTPEgress:
+			result.egress = append(result.egress, contribution)
+			result.hasHTTPPath = true
 		}
 	}
 	keys := make([]string, 0, len(byCapability))
@@ -586,7 +667,7 @@ func resolveInvocationValue(
 		goType, err := canonicalFieldGoType("contract", "Request", name, field)
 		return prepareValue{expression: "request." + goname.Field(name), goType: goType, optional: !field.Required}, err
 	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationResponseField:
-		if point != generation.GenerationPointInvocationComplete {
+		if !pointHasInvocationOutcome(point) {
 			return prepareValue{}, fmt.Errorf("value source %q is unavailable at point %q", value.Invocation.Source, point)
 		}
 		name := value.Invocation.Name
@@ -638,6 +719,12 @@ func resolveInvocationValue(
 		default:
 			return prepareValue{}, fmt.Errorf("node output %q is not renderable as contract data", value.Node.Output)
 		}
+	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationAdapterCredential:
+		return prepareValue{
+			expression: "plystraAdapterCredential(adapterCredentials, " + strconv.Quote(value.Invocation.Name) + ")",
+			goType:     "string",
+			optional:   true,
+		}, nil
 	case value.Invocation != nil:
 		return prepareValue{}, fmt.Errorf("value source %q is not renderable at %s", value.Invocation.Source, point)
 	default:
@@ -668,7 +755,7 @@ func prepareConditionalFailure(
 		_, err := canonicalFieldGoType("contract", "Request", value.Invocation.Name, field)
 		return false, err
 	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationResponseField:
-		if point != generation.GenerationPointInvocationComplete {
+		if !pointHasInvocationOutcome(point) {
 			return false, fmt.Errorf("value source %q is unavailable at point %q", value.Invocation.Source, point)
 		}
 		field, exists := sourceResponse[value.Invocation.Name]
@@ -678,13 +765,15 @@ func prepareConditionalFailure(
 		_, err := canonicalFieldGoType("contract", "Response", value.Invocation.Name, field)
 		return false, err
 	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationError:
-		if point != generation.GenerationPointInvocationComplete {
+		if !pointHasInvocationOutcome(point) {
 			return false, fmt.Errorf("value source %q is unavailable at point %q", value.Invocation.Source, point)
 		}
 		return false, nil
 	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationContextValue:
 		_, err := generatedValueGoType(value.Invocation.Type, value.Invocation.Items)
 		return true, err
+	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationAdapterCredential:
+		return false, nil
 	case value.Node != nil:
 		if _, exists := previous[value.Node.ID]; !exists {
 			return false, fmt.Errorf("referenced node %q is absent from earlier rendered nodes", value.Node.ID)
@@ -695,6 +784,10 @@ func prepareConditionalFailure(
 	default:
 		return false, fmt.Errorf("value source is not renderable at %s", point)
 	}
+}
+
+func pointHasInvocationOutcome(point generation.GenerationPoint) bool {
+	return point == generation.GenerationPointInvocationComplete || point == generation.GenerationPointHTTPEgress
 }
 
 func renderContextDerivation(
@@ -950,7 +1043,7 @@ func renderConditionalFailure(
 		expression = "request." + goname.Field(value.Invocation.Name)
 		optionalPointer = !field.Required
 	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationResponseField:
-		if contribution.Point() != generation.GenerationPointInvocationComplete {
+		if !pointHasInvocationOutcome(contribution.Point()) {
 			return fmt.Errorf("%w: contribution %q node %q cannot read the canonical response at point %q", ErrContribution, contribution.ID(), node.ID(), contribution.Point())
 		}
 		field, exists := sourceResponse[value.Invocation.Name]
@@ -961,7 +1054,7 @@ func renderConditionalFailure(
 		expression = "response." + goname.Field(value.Invocation.Name)
 		optionalPointer = !field.Required
 	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationError:
-		if contribution.Point() != generation.GenerationPointInvocationComplete {
+		if !pointHasInvocationOutcome(contribution.Point()) {
 			return fmt.Errorf("%w: contribution %q node %q cannot read the canonical invocation error at point %q", ErrContribution, contribution.ID(), node.ID(), contribution.Point())
 		}
 		expression = "invocationError"
@@ -995,6 +1088,9 @@ func renderConditionalFailure(
 				fmt.Fprintln(source, "\t}")
 			}
 		}
+	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationAdapterCredential:
+		expression = "plystraAdapterCredential(adapterCredentials, " + strconv.Quote(value.Invocation.Name) + ")"
+		optionalPointer = true
 	case value.Node != nil:
 		prior, exists := previous[value.Node.ID]
 		if !exists {

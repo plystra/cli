@@ -96,6 +96,8 @@ Each explicitly HTTP-exposed canonical Capability can generate one `net/http` ad
 
 The generated transport accepts one `application/json` object with no content encoding other than identity and bounds request and response JSON to 1 MiB. It rejects alternate paths, query parameters, duplicate media headers, duplicate or unknown fields, missing or `null` required fields, incompatible JSON types, invalid enum values, trailing JSON, and oversized bodies before application invocation. Responses are validated and fully encoded before headers are committed. Error bodies contain only stable transport, semantic Capability, or Kernel invocation codes; provider messages, panic values, and root-context failures are normalized to `internal`. Every response uses `application/json`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`.
 
+When a lowered plan contains `http.ingress`, `http.egress`, or an adapter-credential input, the generated handler selects the matching external invocation path. It runs ingress before shared invocation preparation, preserves the generated invocation context through completion, then runs egress before serialization; internal `Invoke` calls run only the shared preparation/completion path and receive no adapter credentials. Canonical lower-snake credential names map deterministically to HTTP headers (`authorization` to `Authorization`, `x_api_key` to `X-Api-Key`). Missing, empty, duplicate, control-containing, or larger-than-64-KiB credential values are treated as absent, and only the downstream generated verification contribution can turn raw credential text into trusted state.
+
 ## Method-specific login surfaces
 
 Authentication methods use real contracts such as:

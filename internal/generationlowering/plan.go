@@ -141,6 +141,12 @@ func (n Node) BindingPresenceIdentifier(field string) (string, bool) {
 	return value, ok
 }
 
+// UsesAdapterCredential reports whether this node reads one trusted external
+// adapter credential. Internal invocation paths never supply these values.
+func (n Node) UsesAdapterCredential() bool {
+	return generatedNodeUsesAdapterCredential(n.generated)
+}
+
 // Contribution is one immutable lowered semantic contribution.
 type Contribution struct {
 	pluginID  string
@@ -197,6 +203,27 @@ func (p Plan) Contributions() []Contribution {
 		}
 	}
 	return result
+}
+
+// RequiresHTTPPath reports whether one source Capability has operations that
+// can run only at an HTTP integration point or read an adapter credential.
+func (p Plan) RequiresHTTPPath(source generation.CapabilityID) bool {
+	if source.String() == "" {
+		return false
+	}
+	for _, contribution := range p.contributions {
+		if contribution.source != source {
+			continue
+		}
+		for _, node := range contribution.nodes {
+			if contribution.point == generation.GenerationPointHTTPIngress ||
+				contribution.point == generation.GenerationPointHTTPEgress ||
+				node.UsesAdapterCredential() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Lower converts validated contributions in their already-resolved semantic
@@ -372,6 +399,9 @@ func lowerNode(modulePath string, contribution Contribution, generated generatio
 	default:
 		return Node{}, nil, nil, fmt.Errorf("%w: unsupported node kind %q", ErrInvalidContribution, generated.Kind())
 	}
+	if generatedNodeUsesAdapterCredential(generated) {
+		identifiers = append(identifiers, adapterCredentialRuntimeIdentifiers()...)
+	}
 
 	for _, binding := range requestBindings {
 		if binding.Value.Invocation != nil && binding.Value.Invocation.Source == generation.GeneratedInvocationContextValue {
@@ -489,6 +519,48 @@ func valueConversionRuntimeIdentifiers() []IdentifierRequest {
 		{Name: "plystraErrInvalidGeneratedValue", Source: "generated invocation value conversion runtime"},
 		{Name: "plystraConvertValue", Source: "generated invocation value conversion runtime"},
 	}
+}
+
+func adapterCredentialRuntimeIdentifiers() []IdentifierRequest {
+	return []IdentifierRequest{
+		{Name: "AdapterCredentialSource", Source: "generated HTTP adapter credential runtime"},
+		{Name: "plystraAdapterCredential", Source: "generated HTTP adapter credential runtime"},
+	}
+}
+
+func generatedNodeUsesAdapterCredential(node generation.NormalizedGeneratedNode) bool {
+	switch node.Kind() {
+	case generation.GeneratedNodeKindCapabilityCall:
+		operation, ok := node.CapabilityCall()
+		return ok && generatedBindingsUseAdapterCredential(operation.Request)
+	case generation.GeneratedNodeKindContextDerivation:
+		operation, ok := node.ContextDerivation()
+		return ok && generatedValueUsesAdapterCredential(operation.Value)
+	case generation.GeneratedNodeKindConditionalFailure:
+		operation, ok := node.ConditionalFailure()
+		return ok && generatedValueUsesAdapterCredential(operation.Condition.Value)
+	case generation.GeneratedNodeKindMetadataAttachment:
+		operation, ok := node.MetadataAttachment()
+		return ok && generatedValueUsesAdapterCredential(operation.Value)
+	case generation.GeneratedNodeKindAuditEventCall:
+		operation, ok := node.AuditEventCall()
+		return ok && generatedBindingsUseAdapterCredential(operation.Request)
+	default:
+		return false
+	}
+}
+
+func generatedBindingsUseAdapterCredential(bindings []generation.GeneratedFieldBinding) bool {
+	for _, binding := range bindings {
+		if generatedValueUsesAdapterCredential(binding.Value) {
+			return true
+		}
+	}
+	return false
+}
+
+func generatedValueUsesAdapterCredential(value generation.GeneratedValue) bool {
+	return value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationAdapterCredential
 }
 
 func cloneIdentifierMap(input map[string]string) map[string]string {

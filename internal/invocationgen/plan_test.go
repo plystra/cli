@@ -803,43 +803,6 @@ func TestRenderPlanRejectsUnsupportedOrUnsafeCalls(t *testing.T) {
 		want         []string
 	}{
 		{
-			name: "adapter credential binding",
-			contribution: generation.Contribution{
-				ID: "policy.request", Namespace: "policy", Source: planCapabilityID(t, "order.create/v1"), Point: generation.GenerationPointInvocationPrepare,
-				Nodes: []generation.GeneratedNode{{ID: "check", CapabilityCall: &generation.GeneratedCapabilityCall{
-					Capability:          planCapabilityID(t, "policy.check/v1"),
-					Request:             append(policyLiteralBindings(), generation.GeneratedFieldBinding{Field: "credential", Value: planInvocationValue(generation.GeneratedInvocationAdapterCredential, "authorization")}),
-					TimeoutMilliseconds: 50, OnError: generation.GeneratedCallFailClosed,
-				}}},
-			},
-			want: []string{"policy.request", "credential", "adapter-credential", "not renderable"},
-		},
-		{
-			name: "HTTP ingress point",
-			contribution: generation.Contribution{
-				ID: "policy.ingress", Namespace: "policy", Source: planCapabilityID(t, "order.create/v1"), Point: generation.GenerationPointHTTPIngress,
-				Nodes: []generation.GeneratedNode{{ID: "check", CapabilityCall: &generation.GeneratedCapabilityCall{Capability: planCapabilityID(t, "policy.check/v1"), Request: policyLiteralBindings(), TimeoutMilliseconds: 50, OnError: generation.GeneratedCallFailClosed}}},
-			},
-			want: []string{"policy.ingress", "http.ingress", "unsupported point"},
-		},
-		{
-			name: "adapter credential derivation",
-			contribution: generation.Contribution{
-				ID: "policy.credential", Namespace: "policy", Source: planCapabilityID(t, "order.create/v1"), Point: generation.GenerationPointInvocationPrepare,
-				Nodes: []generation.GeneratedNode{{
-					ID: "derive-credential",
-					ContextDerivation: &generation.GeneratedContextDerivation{
-						Key:          "policy.credential",
-						Value:        planInvocationValue(generation.GeneratedInvocationAdapterCredential, "authorization"),
-						Type:         generation.GeneratedValueString,
-						Presence:     generation.GeneratedContextRequired,
-						MaximumBytes: 64,
-					},
-				}},
-			},
-			want: []string{"policy.credential", "derive-credential", "adapter-credential", "not renderable"},
-		},
-		{
 			name: "self call",
 			contribution: generation.Contribution{
 				ID: "policy.self", Namespace: "policy", Source: planCapabilityID(t, "order.create/v1"), Point: generation.GenerationPointInvocationPrepare,
