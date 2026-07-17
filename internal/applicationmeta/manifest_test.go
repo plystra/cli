@@ -12,7 +12,7 @@ import (
 	"github.com/plystra/cli/internal/applicationmeta"
 )
 
-func TestParseNormalizesConciseExpandedAndMultipleAliases(t *testing.T) {
+func TestParseNormalizesProviderInputsAndMultipleAliases(t *testing.T) {
 	t.Parallel()
 
 	data := []byte(`http:
@@ -21,8 +21,10 @@ func TestParseNormalizesConciseExpandedAndMultipleAliases(t *testing.T) {
 timeouts:
   startup: 2m
 capabilities:
-  require: []
-  use: {}
+  require: [kernel.info/v1, email.send/v1]
+  use:
+    email.send/v1: acme.email.smtp
+    authz.check/v1: plystra.authz.rbac.default
   aliases:
     authn.sign-in/v1:
       target: authn.login.password/v1
@@ -40,6 +42,25 @@ config: {}
 	manifest, err := applicationmeta.Parse(data)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
+	}
+	requirements := manifest.Requirements()
+	if got := requirementStrings(requirements); !slices.Equal(got, []string{
+		`email.send/v1@plystra.yaml capabilities.require["email.send/v1"]`,
+		`kernel.info/v1@plystra.yaml capabilities.require["kernel.info/v1"]`,
+	}) {
+		t.Fatalf("Requirements = %v", got)
+	}
+	choices := manifest.ProviderChoices()
+	if got := providerChoiceStrings(choices); !slices.Equal(got, []string{
+		`authz.check/v1->plystra.authz.rbac.default@plystra.yaml capabilities.use["authz.check/v1"]`,
+		`email.send/v1->acme.email.smtp@plystra.yaml capabilities.use["email.send/v1"]`,
+	}) {
+		t.Fatalf("ProviderChoices = %v", got)
+	}
+	requirements[0] = applicationmeta.CapabilityRequirement{}
+	choices[0] = applicationmeta.ProviderChoice{}
+	if manifest.Requirements()[0].ID().String() != "email.send/v1" || manifest.ProviderChoices()[0].Capability().String() != "authz.check/v1" {
+		t.Fatal("Manifest exposed mutable provider-resolution input storage")
 	}
 	aliases := manifest.Aliases()
 	if got := aliasStrings(aliases); !slices.Equal(got, []string{
@@ -75,13 +96,13 @@ capabilities:
       expose: {javascript: false, http: false, go: true}
       target: authn.login.password/v1
     authn.sign-in/v1: {target: authn.login.password/v1}
-  use: {}
-  require: []
+  use: {authz.check/v1: plystra.authz.rbac.default, email.send/v1: acme.email.smtp}
+  require: [email.send/v1, kernel.info/v1]
 timeouts: {startup: 2m}
 http: {expose: [], address: ":8080"}
 `)
 	second, err := applicationmeta.Parse(reordered)
-	if err != nil || !slices.Equal(aliasStrings(second.Aliases()), aliasStrings(manifest.Aliases())) {
+	if err != nil || !slices.Equal(aliasStrings(second.Aliases()), aliasStrings(manifest.Aliases())) || !slices.Equal(requirementStrings(second.Requirements()), requirementStrings(manifest.Requirements())) || !slices.Equal(providerChoiceStrings(second.ProviderChoices()), providerChoiceStrings(manifest.ProviderChoices())) {
 		t.Fatalf("reordered Parse = %v, %v", aliasStrings(second.Aliases()), err)
 	}
 	for index, alias := range second.Aliases() {
@@ -142,7 +163,7 @@ func TestParseAcceptsCurrentGeneratedApplicationManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse generated plystra.yaml: %v\n%s", err, data)
 	}
-	if len(manifest.Aliases()) != 0 {
+	if len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 {
 		t.Fatalf("generated Aliases = %#v", manifest.Aliases())
 	}
 	if address, explicit := manifest.HTTPAddress(); !explicit || address != ":8080" || len(manifest.HTTPExposures()) != 0 {
@@ -162,7 +183,7 @@ func TestParseAllowsEmptyOptionalSections(t *testing.T) {
 	} {
 		manifest, err := applicationmeta.Parse(data)
 		address, hasAddress := manifest.HTTPAddress()
-		if err != nil || len(manifest.Aliases()) != 0 || hasAddress || address != "" || len(manifest.HTTPExposures()) != 0 {
+		if err != nil || len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || hasAddress || address != "" || len(manifest.HTTPExposures()) != 0 {
 			t.Fatalf("Parse(%q) = %#v, %v", data, manifest, err)
 		}
 	}
@@ -202,7 +223,16 @@ func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 		{name: "capabilities type", data: "capabilities: []\n", want: "capabilities must be a mapping"},
 		{name: "unknown capabilities key", data: "capabilities: {providers: {}}\n", want: `unknown key "providers"`},
 		{name: "require type", data: "capabilities: {require: {}}\n", want: "require must be a sequence"},
+		{name: "require item type", data: "capabilities: {require: [true]}\n", want: "require[0] must be"},
+		{name: "invalid requirement", data: "capabilities: {require: [Order.Create/v1]}\n", want: "not a canonical Capability ID"},
+		{name: "duplicate requirement", data: "capabilities: {require: [order.create/v1, order.create/v1]}\n", want: "duplicates Capability"},
 		{name: "use type", data: "capabilities: {use: []}\n", want: "use must be a mapping"},
+		{name: "non-string use key", data: "capabilities:\n  use:\n    ? [one, two]\n    : acme.orders\n", want: "non-string key"},
+		{name: "invalid use Capability", data: "capabilities: {use: {Order.Create/v1: acme.orders}}\n", want: "not a canonical Capability ID"},
+		{name: "intrinsic use", data: "capabilities: {use: {kernel.health/v1: acme.kernel}}\n", want: "intrinsic kernel.*"},
+		{name: "use value type", data: "capabilities: {use: {order.create/v1: true}}\n", want: "canonical Plugin ID string"},
+		{name: "invalid use Plugin", data: "capabilities: {use: {order.create/v1: Acme.Orders}}\n", want: "canonical Plugin ID string"},
+		{name: "duplicate use", data: "capabilities:\n  use:\n    order.create/v1: acme.one\n    order.create/v1: acme.two\n", want: "duplicate key"},
 		{name: "aliases type", data: "capabilities: {aliases: []}\n", want: "aliases must be a mapping"},
 		{name: "non-string Alias key", data: "capabilities:\n  aliases:\n    ? [one, two]\n    : order.create/v1\n", want: "non-string key"},
 		{name: "duplicate Alias", data: aliasYAML("orders.start/v1: order.create/v1\n    orders.start/v1: order.create/v1"), want: "duplicate key"},
@@ -228,6 +258,8 @@ func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 		{name: "NUL deprecation message", data: aliasYAML(`orders.start/v1: {target: order.create/v1, deprecated: {message: "bad\0message"}}`), want: "no NUL"},
 		{name: "Alias chain", data: aliasYAML("compat.a/v1: compat.b/v1\n    compat.b/v1: order.create/v1"), want: "compat.a/v1 -> compat.b/v1 -> order.create/v1"},
 		{name: "Alias cycle", data: aliasYAML("compat.a/v1: compat.b/v1\n    compat.b/v1: compat.a/v1"), want: "compat.a/v1 -> compat.b/v1 -> compat.a/v1"},
+		{name: "Alias requirement", data: "capabilities:\n  require: [orders.start/v1]\n  aliases: {orders.start/v1: order.create/v1}\n", want: "requirements must name canonical Capabilities"},
+		{name: "Alias provider choice", data: "capabilities:\n  use: {orders.start/v1: acme.orders}\n  aliases: {orders.start/v1: order.create/v1}\n", want: "provider choices must name canonical Capabilities"},
 	}
 
 	for _, test := range tests {
@@ -238,7 +270,7 @@ func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 			if !errors.Is(err, applicationmeta.ErrInvalidManifest) || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Parse error = %v, want ErrInvalidManifest containing %q", err, test.want)
 			}
-			if len(manifest.Aliases()) != 0 {
+			if len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 {
 				t.Fatalf("invalid Parse returned %#v", manifest)
 			}
 		})
@@ -262,6 +294,7 @@ func FuzzParseApplicationManifest(f *testing.F) {
 		"{}\n",
 		"http: {address: \":8080\", expose: [kernel.health/v1, order.create/v1]}\n",
 		"capabilities: {aliases: {}}\n",
+		"capabilities: {require: [kernel.health/v1, order.create/v1], use: {order.create/v1: acme.orders}, aliases: {}}\n",
 		aliasYAML("authn.login/v1: authn.login.password/v1"),
 		aliasYAML("account.sign-in/v1: {target: authn.login.password/v1, expose: {go: true, http: false, javascript: false}, deprecated: {message: old}}"),
 		aliasYAML("compat.a/v1: compat.b/v1\n    compat.b/v1: compat.a/v1"),
@@ -287,6 +320,8 @@ func FuzzParseApplicationManifest(f *testing.F) {
 		secondAddress, secondHasAddress := second.HTTPAddress()
 		if !slices.Equal(aliasStrings(first.Aliases()), aliasStrings(second.Aliases())) ||
 			!slices.Equal(httpExposureStrings(first.HTTPExposures()), httpExposureStrings(second.HTTPExposures())) ||
+			!slices.Equal(requirementStrings(first.Requirements()), requirementStrings(second.Requirements())) ||
+			!slices.Equal(providerChoiceStrings(first.ProviderChoices()), providerChoiceStrings(second.ProviderChoices())) ||
 			firstAddress != secondAddress || firstHasAddress != secondHasAddress {
 			t.Fatalf("Parse is nondeterministic: %#v then %#v", first, second)
 		}
@@ -309,6 +344,22 @@ func httpExposureStrings(values []applicationmeta.HTTPExposure) []string {
 	result := make([]string, len(values))
 	for index, value := range values {
 		result[index] = fmt.Sprintf("%s@%s", value.ID(), value.Source())
+	}
+	return result
+}
+
+func requirementStrings(values []applicationmeta.CapabilityRequirement) []string {
+	result := make([]string, len(values))
+	for index, value := range values {
+		result[index] = fmt.Sprintf("%s@%s", value.ID(), value.Source())
+	}
+	return result
+}
+
+func providerChoiceStrings(values []applicationmeta.ProviderChoice) []string {
+	result := make([]string, len(values))
+	for index, value := range values {
+		result[index] = fmt.Sprintf("%s->%s@%s", value.Capability(), value.PluginID(), value.Source())
 	}
 	return result
 }

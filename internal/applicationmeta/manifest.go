@@ -12,6 +12,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/pluginid"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -67,13 +68,45 @@ func (e HTTPExposure) ID() capabilityid.Identifier { return e.id }
 // Source returns stable configuration-path provenance for diagnostics.
 func (e HTTPExposure) Source() string { return e.source }
 
-// Manifest is the immutable normalized application metadata currently used by
-// canonical HTTP exposure and Capability Alias resolution.
+// CapabilityRequirement is one explicit canonical Capability requirement.
+type CapabilityRequirement struct {
+	id     capabilityid.Identifier
+	source string
+}
+
+// ID returns the exact canonical Capability ID declared under
+// capabilities.require.
+func (r CapabilityRequirement) ID() capabilityid.Identifier { return r.id }
+
+// Source returns stable configuration-path provenance for diagnostics.
+func (r CapabilityRequirement) Source() string { return r.source }
+
+// ProviderChoice is one explicit canonical Capability-to-Plugin selection.
+type ProviderChoice struct {
+	capability capabilityid.Identifier
+	pluginID   string
+	source     string
+}
+
+// Capability returns the exact canonical Capability selected under
+// capabilities.use.
+func (c ProviderChoice) Capability() capabilityid.Identifier { return c.capability }
+
+// PluginID returns the canonical selected Plugin ID.
+func (c ProviderChoice) PluginID() string { return c.pluginID }
+
+// Source returns stable configuration-path provenance for diagnostics.
+func (c ProviderChoice) Source() string { return c.source }
+
+// Manifest is the immutable normalized application metadata used by canonical
+// provider, HTTP exposure, and Capability Alias resolution.
 type Manifest struct {
-	httpAddress    string
-	hasHTTPAddress bool
-	httpExposures  []HTTPExposure
-	aliases        []Alias
+	httpAddress     string
+	hasHTTPAddress  bool
+	httpExposures   []HTTPExposure
+	requirements    []CapabilityRequirement
+	providerChoices []ProviderChoice
+	aliases         []Alias
 }
 
 // HTTPAddress returns the explicitly configured listener address. A false
@@ -85,11 +118,22 @@ func (m Manifest) HTTPExposures() []HTTPExposure {
 	return append([]HTTPExposure(nil), m.httpExposures...)
 }
 
+// Requirements returns defensive declarations sorted by canonical ID.
+func (m Manifest) Requirements() []CapabilityRequirement {
+	return append([]CapabilityRequirement(nil), m.requirements...)
+}
+
+// ProviderChoices returns defensive declarations sorted by canonical
+// Capability ID.
+func (m Manifest) ProviderChoices() []ProviderChoice {
+	return append([]ProviderChoice(nil), m.providerChoices...)
+}
+
 // Aliases returns defensive declarations sorted by Alias ID.
 func (m Manifest) Aliases() []Alias { return append([]Alias(nil), m.aliases...) }
 
-// Parse reads one strict bounded plystra.yaml and normalizes canonical HTTP
-// exposure together with concise and expanded capabilities.aliases declarations.
+// Parse reads one strict bounded plystra.yaml and normalizes canonical provider
+// inputs, HTTP exposure, and concise or expanded capabilities.aliases declarations.
 func Parse(data []byte) (Manifest, error) {
 	root, err := decodeDocument(data)
 	if err != nil {
@@ -116,15 +160,17 @@ func Parse(data []byte) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
-	aliases, err := parseCapabilities(values["capabilities"])
+	requirements, choices, aliases, err := parseCapabilities(values["capabilities"])
 	if err != nil {
 		return Manifest{}, err
 	}
 	return Manifest{
-		httpAddress:    address,
-		hasHTTPAddress: hasAddress,
-		httpExposures:  exposures,
-		aliases:        aliases,
+		httpAddress:     address,
+		hasHTTPAddress:  hasAddress,
+		httpExposures:   exposures,
+		requirements:    requirements,
+		providerChoices: choices,
+		aliases:         aliases,
 	}, nil
 }
 
@@ -185,29 +231,104 @@ func parseHTTP(node *yaml.Node) (string, bool, []HTTPExposure, error) {
 	return address, hasAddress, exposures, nil
 }
 
-func parseCapabilities(node *yaml.Node) ([]Alias, error) {
+func parseCapabilities(node *yaml.Node) ([]CapabilityRequirement, []ProviderChoice, []Alias, error) {
 	if node == nil {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 	values, err := mapping(node, "capabilities")
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	for _, key := range sortedNodeKeys(values) {
 		switch key {
 		case "require", "use", "aliases":
 		default:
-			return nil, invalid("capabilities contains unknown key %q", key)
+			return nil, nil, nil, invalid("capabilities contains unknown key %q", key)
 		}
 	}
-	if require, exists := values["require"]; exists && require.Kind != yaml.SequenceNode {
-		return nil, invalid("capabilities.require must be a sequence")
+	requirements, err := parseRequirements(values["require"])
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	if use, exists := values["use"]; exists && use.Kind != yaml.MappingNode {
-		return nil, invalid("capabilities.use must be a mapping")
+	choices, err := parseProviderChoices(values["use"])
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	aliasesNode, exists := values["aliases"]
-	if !exists {
+	aliases, err := parseAliases(values["aliases"])
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if err := rejectAliasResolutionInputs(requirements, choices, aliases); err != nil {
+		return nil, nil, nil, err
+	}
+	return requirements, choices, aliases, nil
+}
+
+func parseRequirements(node *yaml.Node) ([]CapabilityRequirement, error) {
+	if node == nil {
+		return nil, nil
+	}
+	if node.Kind != yaml.SequenceNode {
+		return nil, invalid("capabilities.require must be a sequence of canonical Capability IDs")
+	}
+	requirements := make([]CapabilityRequirement, 0, len(node.Content))
+	seen := make(map[capabilityid.Identifier]int, len(node.Content))
+	for index, item := range node.Content {
+		value, err := strictString(item)
+		if err != nil || value == "" {
+			return nil, invalid("capabilities.require[%d] must be a canonical Capability ID string", index)
+		}
+		id, err := capabilityid.Parse(value)
+		if err != nil {
+			return nil, invalid("capabilities.require[%d] %q is not a canonical Capability ID", index, value)
+		}
+		if previous, duplicate := seen[id]; duplicate {
+			return nil, invalid("capabilities.require[%d] duplicates Capability %q from capabilities.require[%d]", index, id.String(), previous)
+		}
+		seen[id] = index
+		requirements = append(requirements, CapabilityRequirement{
+			id:     id,
+			source: fmt.Sprintf("plystra.yaml capabilities.require[%q]", id.String()),
+		})
+	}
+	sort.Slice(requirements, func(left, right int) bool {
+		return requirements[left].id.String() < requirements[right].id.String()
+	})
+	return requirements, nil
+}
+
+func parseProviderChoices(node *yaml.Node) ([]ProviderChoice, error) {
+	if node == nil {
+		return nil, nil
+	}
+	values, err := mapping(node, "capabilities.use")
+	if err != nil {
+		return nil, err
+	}
+	choices := make([]ProviderChoice, 0, len(values))
+	for _, value := range sortedNodeKeys(values) {
+		capability, err := capabilityid.Parse(value)
+		if err != nil {
+			return nil, invalid("capabilities.use key %q is not a canonical Capability ID", value)
+		}
+		if strings.HasPrefix(capability.Name(), "kernel.") {
+			return nil, invalid("capabilities.use key %q selects an intrinsic kernel.* Capability", value)
+		}
+		selected, err := strictString(values[value])
+		if err != nil || pluginid.Validate(selected) != nil {
+			return nil, invalid("capabilities.use[%q] must be a canonical Plugin ID string", value)
+		}
+		choices = append(choices, ProviderChoice{
+			capability: capability,
+			pluginID:   selected,
+			source:     fmt.Sprintf("plystra.yaml capabilities.use[%q]", capability.String()),
+		})
+	}
+	return choices, nil
+}
+
+func parseAliases(aliasesNode *yaml.Node) ([]Alias, error) {
+	if aliasesNode == nil {
 		return nil, nil
 	}
 	aliasValues, err := mapping(aliasesNode, "capabilities.aliases")
@@ -234,6 +355,24 @@ func parseCapabilities(node *yaml.Node) ([]Alias, error) {
 		return nil, err
 	}
 	return aliases, nil
+}
+
+func rejectAliasResolutionInputs(requirements []CapabilityRequirement, choices []ProviderChoice, aliases []Alias) error {
+	aliasIDs := make(map[capabilityid.Identifier]struct{}, len(aliases))
+	for _, alias := range aliases {
+		aliasIDs[alias.id] = struct{}{}
+	}
+	for _, requirement := range requirements {
+		if _, isAlias := aliasIDs[requirement.id]; isAlias {
+			return invalid("capabilities.require contains application-local Alias %q; requirements must name canonical Capabilities", requirement.id.String())
+		}
+	}
+	for _, choice := range choices {
+		if _, isAlias := aliasIDs[choice.capability]; isAlias {
+			return invalid("capabilities.use contains application-local Alias %q; provider choices must name canonical Capabilities", choice.capability.String())
+		}
+	}
+	return nil
 }
 
 func parseAlias(path string, id capabilityid.Identifier, node *yaml.Node) (Alias, error) {
