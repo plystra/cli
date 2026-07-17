@@ -230,6 +230,14 @@ func TestCreateWithInitialPluginComposesRunnableAndLibraryTransactions(t *testin
 	if info, err := os.Stat(filepath.Join(runnable.Path(), "plystra.yaml")); err != nil || !info.Mode().IsRegular() {
 		t.Fatalf("runnable plystra.yaml = %#v, %v", info, err)
 	}
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       runnable.Path(),
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil || !checked.Report().Clean() {
+		t.Fatalf("runnable initial-plugin generation = %#v, %v", checked.Report().Changes(), err)
+	}
 	if _, err := os.Lstat(filepath.Join(libraryRoot, "plystra.yaml")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("library contains plystra.yaml: %v", err)
 	}
@@ -390,7 +398,7 @@ func createKernelProxy(t *testing.T) string {
 		data []byte
 	}{
 		{name: "assembly/version.go", data: []byte("package assembly\n\nimport \"fmt\"\n\ntype Version uint32\n\nconst V1 Version = 1\n\nfunc RequireVersion(version Version) error {\n\tif version != V1 { return fmt.Errorf(\"unsupported assembly API version %d\", version) }\n\treturn nil\n}\n")},
-		{name: "configuration/configuration.go", data: []byte("package configuration\n\nimport (\n\t\"context\"\n\t\"errors\"\n\n\t\"github.com/plystra/kernel/plugin/manifest\"\n)\n\nvar ErrSecretExposure = errors.New(\"Secret serialization is prohibited\")\n\ntype Resolver struct{}\n\ntype Values struct{}\n\ntype ObjectMap struct{}\n\nfunc (ObjectMap) Names() []string { return nil }\n\nfunc ExtractObjectMap([]byte, string) (ObjectMap, error) { return ObjectMap{}, nil }\n\nfunc Decode(context.Context, *Resolver, manifest.Config, []byte) (Values, error) { return Values{}, nil }\n")},
+		{name: "configuration/configuration.go", data: []byte("package configuration\n\nimport (\n\t\"context\"\n\t\"errors\"\n\n\t\"github.com/plystra/kernel/plugin/manifest\"\n)\n\nvar ErrSecretExposure = errors.New(\"Secret serialization is prohibited\")\n\ntype Resolver struct{}\n\ntype Values struct{}\n\ntype ObjectMap struct{}\n\nfunc (ObjectMap) Names() []string { return nil }\n\nfunc (ObjectMap) YAML(string) ([]byte, bool) { return nil, false }\n\nfunc ExtractObjectMap([]byte, string) (ObjectMap, error) { return ObjectMap{}, nil }\n\nfunc Decode(context.Context, *Resolver, manifest.Config, []byte) (Values, error) { return Values{}, nil }\n")},
 		{name: "go.mod", data: moduleFile},
 		{name: "plugin/manifest/config.go", data: []byte("package manifest\n\ntype Config struct{}\n\nfunc ParseConfig([]byte) (Config, error) { return Config{}, nil }\n")},
 	}

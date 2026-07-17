@@ -2,7 +2,7 @@
 
 Plugin ID: `acme.my-app.account-profile`
 
-This is a root-level plugin in the `example.com/acme/my-app/v2` Go Module. Its declarative source is `plugin.yaml`, and generated configuration and assembly bindings are committed under the module's `generated/` directory.
+This is a root-level plugin in the `example.com/acme/my-app/v2` Go Module. Its declarative source is `plugin.yaml`, and its generated configuration adapter is committed under the module's `generated/go/configuration/` directory. Runnable applications generate the final selected-provider assembly centrally.
 
 ## Capabilities
 

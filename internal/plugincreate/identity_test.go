@@ -62,19 +62,15 @@ func TestGeneratedGoNamesAreDeterministicAndKeywordSafe(t *testing.T) {
 	tests := []struct {
 		name        string
 		packageName string
-		exported    string
 		title       string
 	}{
-		{name: "account", packageName: "account", exported: "Account", title: "Account"},
-		{name: "account-profile", packageName: "accountprofile", exported: "AccountProfile", title: "Account Profile"},
-		{name: "type", packageName: "typeplugin", exported: "Type", title: "Type"},
+		{name: "account", packageName: "account", title: "Account"},
+		{name: "account-profile", packageName: "accountprofile", title: "Account Profile"},
+		{name: "type", packageName: "typeplugin", title: "Type"},
 	}
 	for _, test := range tests {
 		if got := goPackageName(test.name); got != test.packageName {
 			t.Errorf("goPackageName(%q) = %q, want %q", test.name, got, test.packageName)
-		}
-		if got := exportedName(test.name); got != test.exported {
-			t.Errorf("exportedName(%q) = %q, want %q", test.name, got, test.exported)
 		}
 		if got := title(test.name); got != test.title {
 			t.Errorf("title(%q) = %q, want %q", test.name, got, test.title)

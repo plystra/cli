@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/modulelocate"
@@ -96,6 +97,21 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		}
 		if !found {
 			return fmt.Errorf("created plugin %q is not discoverable", options.Name)
+		}
+		manifestInfo, manifestErr := os.Lstat(filepath.Join(updatedRoot, "plystra.yaml"))
+		if manifestErr == nil {
+			if !manifestInfo.Mode().IsRegular() || manifestInfo.Mode()&os.ModeSymlink != 0 {
+				return errors.New("runnable module has an unsafe plystra.yaml")
+			}
+			_, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
+				Start:       updatedRoot,
+				GoCommand:   options.GoCommand,
+				Environment: options.Environment,
+			})
+			return err
+		}
+		if !errors.Is(manifestErr, os.ErrNotExist) {
+			return fmt.Errorf("inspect plystra.yaml: %w", manifestErr)
 		}
 		return gocommand.Run(ctx, gocommand.Options{
 			Command:     options.GoCommand,

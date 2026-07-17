@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/plugincreate"
@@ -66,7 +67,6 @@ func TestCreateAndPublicCommandProduceDeterministicBuildablePlugins(t *testing.T
 		"account-profile/plugin.go",
 		"account-profile/plugin.yaml",
 		"account-profile/plugin_test.go",
-		"generated/assembly/account-profile_gen.go",
 		"generated/go/configuration/account-profile_gen.go",
 	}
 	gotFiles := make([]string, 0, len(directTree))
@@ -110,6 +110,45 @@ func TestCreateRollsBackValidationFailure(t *testing.T) {
 	assertNoTransactionFiles(t, root)
 }
 
+func TestCreateRegeneratesRunnableApplicationAssembly(t *testing.T) {
+	t.Parallel()
+
+	root := createModule(t, "example.com/acme/my-app")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	environment := isolatedGoEnvironment(t)
+	result, err := plugincreate.Create(t.Context(), plugincreate.Options{
+		Start:       root,
+		Name:        "account",
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Create runnable plugin: %v", err)
+	}
+	if result.ID() != "acme.my-app.account" {
+		t.Fatalf("created Plugin ID = %q", result.ID())
+	}
+	providers, err := os.ReadFile(filepath.Join(root, "generated", "go", "assembly", "providers_gen.go"))
+	if err != nil {
+		t.Fatalf("read generated providers: %v", err)
+	}
+	for _, required := range [][]byte{[]byte(`"example.com/acme/my-app/account"`), []byte("DecodeAccount"), []byte("provider0.New(configuration)")} {
+		if !bytes.Contains(providers, required) {
+			t.Fatalf("generated providers omit %q:\n%s", required, providers)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(root, "generated", "assembly")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("obsolete generated/assembly remains: %v", err)
+	}
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil || !checked.Report().Clean() {
+		t.Fatalf("generated application check = %#v, %v", checked.Report().Changes(), err)
+	}
+}
+
 func TestCreatePreservesExistingDirectoriesAndGeneratedTargets(t *testing.T) {
 	t.Parallel()
 
@@ -131,7 +170,7 @@ func TestCreatePreservesExistingDirectoriesAndGeneratedTargets(t *testing.T) {
 			name: "generated target",
 			setup: func(t *testing.T, root string) {
 				t.Helper()
-				path := filepath.Join(root, "generated", "assembly", "account_gen.go")
+				path := filepath.Join(root, "generated", "go", "configuration", "account_gen.go")
 				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 					t.Fatalf("MkdirAll: %v", err)
 				}
