@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/atomicfs"
+	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/plugincreate"
@@ -117,13 +119,25 @@ func populate(root, modulePath, name string, library bool) error {
 	if err != nil {
 		return fmt.Errorf("render Kernel compatibility source: %w", err)
 	}
-	managed := make([]generatedfiles.File, 0, 3)
+	managed := make([]generatedfiles.File, 0, 4)
 	compatibilityFile, err := generatedfiles.NewFile("generated/go/assembly/compatibility_gen.go", compatibility)
 	if err != nil {
 		return fmt.Errorf("prepare Kernel compatibility source: %w", err)
 	}
 	managed = append(managed, compatibilityFile)
 	if !library {
+		bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
+			ModulePath:            modulePath,
+			DefaultStartupTimeout: applicationmeta.DefaultStartupTimeout,
+		})
+		if err != nil {
+			return fmt.Errorf("render runtime bootstrap source: %w", err)
+		}
+		bootstrapFile, err := generatedfiles.NewFile(bootstrapgen.Path, bootstrap)
+		if err != nil {
+			return fmt.Errorf("prepare runtime bootstrap source: %w", err)
+		}
+		managed = append(managed, bootstrapFile)
 		providers, err := assemblygen.RenderProviders(nil)
 		if err != nil {
 			return fmt.Errorf("render empty selected-provider source: %w", err)

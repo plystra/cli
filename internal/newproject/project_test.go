@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -25,6 +26,8 @@ import (
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
+
+var updateProjectGolden = flag.Bool("update", false, "update generated project scaffold golden files")
 
 func TestMain(main *testing.M) {
 	if os.Getenv("PLYSTRA_NEW_PLUGIN_ROLLBACK_HELPER") == "1" {
@@ -83,6 +86,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 		"generated/.plystra-manifest.json",
 		"generated/go/assembly/compatibility_gen.go",
 		"generated/go/assembly/providers_gen.go",
+		"generated/go/bootstrap/bootstrap_gen.go",
 		"generated/manifest.json",
 		"go.mod",
 		"go.sum",
@@ -98,6 +102,10 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	}
 	goldenTree := snapshotTree(t, "testdata/project")
 	delete(directTree, "go.sum")
+	if *updateProjectGolden {
+		writeGoldenTree(t, "testdata/project", directTree)
+		goldenTree = snapshotTree(t, "testdata/project")
+	}
 	if !reflect.DeepEqual(directTree, goldenTree) {
 		t.Fatalf("project scaffold differs from golden files:\n got: %#v\nwant: %#v", directTree, goldenTree)
 	}
@@ -180,6 +188,9 @@ func TestCreateLibraryAndPublicCommandProduceDeterministicBuildableModules(t *te
 		t.Fatalf("library files = %v, want %v", gotFiles, wantFiles)
 	}
 	delete(directTree, "go.sum")
+	if *updateProjectGolden {
+		writeGoldenTree(t, "testdata/library", directTree)
+	}
 	if goldenTree := snapshotTree(t, "testdata/library"); !reflect.DeepEqual(directTree, goldenTree) {
 		t.Fatalf("library scaffold differs from golden files:\n got: %#v\nwant: %#v", directTree, goldenTree)
 	}
@@ -187,6 +198,17 @@ func TestCreateLibraryAndPublicCommandProduceDeterministicBuildableModules(t *te
 		t.Fatalf("library contains plystra.yaml: %v", err)
 	}
 	assertModuleState(t, direct.Path(), modulePath)
+}
+
+func writeGoldenTree(t *testing.T, root string, tree map[string][]byte) {
+	t.Helper()
+	for name, data := range tree {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", filepath.Dir(path), err)
+		}
+		writeTestFile(t, path, data)
+	}
 }
 
 func TestCreateWithInitialPluginComposesRunnableAndLibraryTransactions(t *testing.T) {
@@ -398,9 +420,9 @@ func createKernelProxy(t *testing.T) string {
 		data []byte
 	}{
 		{name: "assembly/version.go", data: []byte("package assembly\n\nimport \"fmt\"\n\ntype Version uint32\n\nconst V1 Version = 1\n\nfunc RequireVersion(version Version) error {\n\tif version != V1 { return fmt.Errorf(\"unsupported assembly API version %d\", version) }\n\treturn nil\n}\n")},
-		{name: "configuration/configuration.go", data: []byte("package configuration\n\nimport (\n\t\"context\"\n\t\"errors\"\n\n\t\"github.com/plystra/kernel/plugin/manifest\"\n)\n\nvar ErrSecretExposure = errors.New(\"Secret serialization is prohibited\")\n\ntype Resolver struct{}\n\ntype Values struct{}\n\ntype ObjectMap struct{}\n\nfunc (ObjectMap) Names() []string { return nil }\n\nfunc (ObjectMap) YAML(string) ([]byte, bool) { return nil, false }\n\nfunc ExtractObjectMap([]byte, string) (ObjectMap, error) { return ObjectMap{}, nil }\n\nfunc Decode(context.Context, *Resolver, manifest.Config, []byte) (Values, error) { return Values{}, nil }\n")},
+		{name: "configuration/configuration.go", data: []byte("package configuration\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"os\"\n\n\t\"github.com/plystra/kernel/plugin/manifest\"\n)\n\nconst MaximumSecretValueBytes = 1 << 20\n\nvar ErrSecretExposure = errors.New(\"Secret serialization is prohibited\")\n\ntype ResolverOptions struct { MaximumValueBytes int }\ntype Resolver struct{}\ntype Values struct{}\ntype ObjectMap struct{}\ntype StringMap struct{}\n\nfunc NewResolver(ResolverOptions) (*Resolver, error) { return &Resolver{}, nil }\nfunc LoadDocument(path string) ([]byte, error) { return os.ReadFile(path) }\nfunc (ObjectMap) Names() []string { return nil }\nfunc (ObjectMap) YAML(string) ([]byte, bool) { return nil, false }\nfunc (StringMap) Names() []string { return nil }\nfunc (StringMap) Value(string) (string, bool) { return \"\", false }\nfunc ExtractObjectMap([]byte, string) (ObjectMap, error) { return ObjectMap{}, nil }\nfunc ExtractStringMap([]byte, string) (StringMap, error) { return StringMap{}, nil }\nfunc Decode(context.Context, *Resolver, manifest.Config, []byte) (Values, error) { return Values{}, nil }\n")},
 		{name: "go.mod", data: moduleFile},
-		{name: "lifecycle/lifecycle.go", data: []byte("package lifecycle\n\nimport (\n\t\"context\"\n\t\"time\"\n\n\t\"github.com/plystra/kernel/plugin\"\n)\n\ntype Provider interface {\n\tStart(context.Context) error\n\tStop(context.Context) error\n}\n\ntype Binding struct{}\ntype Manager struct{}\ntype ManagerOptions struct { RollbackTimeout time.Duration }\n\nfunc NewBinding(plugin.ID, Provider) (Binding, error) { return Binding{}, nil }\nfunc NewManager(ManagerOptions, []Binding) (*Manager, error) { return &Manager{}, nil }\n")},
+		{name: "lifecycle/lifecycle.go", data: []byte("package lifecycle\n\nimport (\n\t\"context\"\n\t\"time\"\n\n\t\"github.com/plystra/kernel/plugin\"\n)\n\ntype Provider interface {\n\tStart(context.Context) error\n\tStop(context.Context) error\n}\n\ntype State string\ntype Binding struct{}\ntype Manager struct{}\ntype ManagerOptions struct { RollbackTimeout time.Duration }\n\nfunc NewBinding(plugin.ID, Provider) (Binding, error) { return Binding{}, nil }\nfunc NewManager(ManagerOptions, []Binding) (*Manager, error) { return &Manager{}, nil }\nfunc (*Manager) State() State { return \"new\" }\nfunc (*Manager) Start(context.Context) error { return nil }\nfunc (*Manager) Stop(context.Context) error { return nil }\n")},
 		{name: "plugin/id.go", data: []byte("package plugin\n\ntype ID struct{}\n\nfunc ParseID(string) (ID, error) { return ID{}, nil }\n")},
 		{name: "plugin/manifest/config.go", data: []byte("package manifest\n\ntype Config struct{}\n\nfunc ParseConfig([]byte) (Config, error) { return Config{}, nil }\n")},
 	}

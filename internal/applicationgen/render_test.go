@@ -56,6 +56,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		"generated/go/adapters/http/kernel/health/v1/handler_gen.go",
 		"generated/go/assembly/compatibility_gen.go",
 		"generated/go/assembly/providers_gen.go",
+		"generated/go/bootstrap/bootstrap_gen.go",
 		"generated/go/clients/compat/send/v1/client_gen.go",
 		"generated/go/clients/email/send/v1/client_gen.go",
 		"generated/go/clients/health/status/v1/client_gen.go",
@@ -177,7 +178,7 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render empty: %v", err)
 	}
-	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/assembly/compatibility_gen.go", "generated/go/assembly/providers_gen.go", "generated/manifest.json"}) {
+	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/assembly/compatibility_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json"}) {
 		t.Fatalf("empty output paths = %v", got)
 	}
 	if string(outputData(t, output, "generated/manifest.json")) != "{\"capability_aliases\":[]}\n" {

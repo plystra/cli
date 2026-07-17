@@ -15,7 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/assemblygen"
+	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/kernel/plugin/manifest"
 )
@@ -114,7 +116,7 @@ func TestRenderProvidersRejectsInvalidOrDuplicateProvenance(t *testing.T) {
 	}
 }
 
-func TestGeneratedProvidersConstructLocalAndDependencyPluginsSafely(t *testing.T) {
+func TestGeneratedBootstrapConstructsLocalAndDependencyPluginsSafely(t *testing.T) {
 	root := t.TempDir()
 	applicationRoot := filepath.Join(root, "application")
 	dependencyRoot := filepath.Join(root, "dependency")
@@ -163,6 +165,7 @@ label: {type: string, default: public-default-label}
 		Schema: parseConfig(t, `
 endpoint: {type: string, required: true}
 token: {type: secret, required: true}
+startup: {type: string, default: ready, enum: [ready, wait]}
 `),
 	})
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(localConfiguration.Path())), localConfiguration.Data())
@@ -187,9 +190,18 @@ token: {type: secret, required: true}
 	if err != nil {
 		t.Fatalf("RenderCompatibility: %v", err)
 	}
+	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
+		ModulePath:            "example.com/assemblyapp",
+		DefaultStartupTimeout: applicationmeta.DefaultStartupTimeout,
+	})
+	if err != nil {
+		t.Fatalf("Render bootstrap: %v", err)
+	}
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(assemblygen.ProvidersPath)), providers)
 	writeBytes(t, filepath.Join(applicationRoot, "generated", "go", "assembly", "compatibility_gen.go"), compatibility)
 	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "assembly", "providers_gen_test.go"), generatedProvidersRuntimeTest)
+	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(bootstrapgen.Path)), bootstrap)
+	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "bootstrap", "bootstrap_gen_test.go"), generatedBootstrapRuntimeTest)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -199,6 +211,59 @@ token: {type: secret, required: true}
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("generated multi-module provider test: %v\n%s", err, output)
+	}
+}
+
+func TestGeneratedBootstrapRunsWithoutSelectedProviders(t *testing.T) {
+	applicationRoot := t.TempDir()
+	cliRoot := repositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+
+	writeFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/emptyapp
+
+go 1.26
+
+require (
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+)
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot)))
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("read CLI go.sum: %v", err)
+	}
+	writeBytes(t, filepath.Join(applicationRoot, "go.sum"), goSum)
+
+	providers, err := assemblygen.RenderProviders(nil)
+	if err != nil {
+		t.Fatalf("RenderProviders: %v", err)
+	}
+	compatibility, err := assemblygen.RenderCompatibility("assembly")
+	if err != nil {
+		t.Fatalf("RenderCompatibility: %v", err)
+	}
+	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
+		ModulePath:            "example.com/emptyapp",
+		DefaultStartupTimeout: applicationmeta.DefaultStartupTimeout,
+	})
+	if err != nil {
+		t.Fatalf("Render bootstrap: %v", err)
+	}
+	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(assemblygen.ProvidersPath)), providers)
+	writeBytes(t, filepath.Join(applicationRoot, "generated", "go", "assembly", "compatibility_gen.go"), compatibility)
+	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(bootstrapgen.Path)), bootstrap)
+	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "bootstrap", "bootstrap_gen_test.go"), emptyGeneratedBootstrapRuntimeTest)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	command := exec.CommandContext(ctx, "go", "test", "-mod=readonly", "-count=1", "./...")
+	command.Dir = applicationRoot
+	command.Env = isolatedGoEnvironment(os.Environ())
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated empty-application bootstrap test: %v\n%s", err, output)
 	}
 }
 
@@ -339,7 +404,7 @@ import (
 )
 
 type Config = configuration.RemoteStoreConfig
-type Plugin struct{}
+type Plugin struct{ startup string }
 
 var state struct {
 	sync.Mutex
@@ -352,11 +417,15 @@ func New(config Config) *Plugin {
 	defer state.Unlock()
 	state.calls++
 	state.config = config
-	return &Plugin{}
+	return &Plugin{startup: config.Startup}
 }
 
-func (*Plugin) Start(context.Context) error {
+func (p *Plugin) Start(ctx context.Context) error {
 	lifecycleevents.Add("zeta.remote-store.start")
+	if p.startup == "wait" {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return nil
 }
 
@@ -573,6 +642,281 @@ func assertSafeError(t *testing.T, err error) {
 		if strings.Contains(err.Error(), forbidden) {
 			t.Fatalf("error exposed %q: %v", forbidden, err)
 		}
+	}
+}
+`
+
+const generatedBootstrapRuntimeTest = `package bootstrap
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	localservice "example.com/assemblyapp/local-service"
+	"example.com/assemblydependency/lifecycleevents"
+	remotestore "example.com/assemblydependency/remote-store"
+	kernelconfiguration "github.com/plystra/kernel/configuration"
+	kernellifecycle "github.com/plystra/kernel/lifecycle"
+)
+
+const bootstrapRemoteConfiguration = "  zeta.remote-store:\n    endpoint: runtime-private-endpoint\n    token: {env: PLYSTRA_ASSEMBLY_PRIVATE_SECRET}\n"
+
+const validRuntimeDocument = "config:\n" + bootstrapRemoteConfiguration
+
+func TestApplicationConstructsStartsAndStopsSelectedProviders(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	localservice.Reset()
+	remotestore.Reset()
+
+	application, err := New(context.Background(), writeRuntimeDocument(t, validRuntimeDocument))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if !application.Valid() || application.State() != kernellifecycle.StateNew {
+		t.Fatalf("application validity = %t, state %q", application.Valid(), application.State())
+	}
+	localCalls, localConfig := localservice.Snapshot()
+	remoteCalls, remoteConfig := remotestore.Snapshot()
+	if localCalls != 1 || localConfig.Mode != "ready" || localConfig.Label != "public-default-label" {
+		t.Fatalf("local constructor = calls %d, config mode %q label %q", localCalls, localConfig.Mode, localConfig.Label)
+	}
+	if remoteCalls != 1 || remoteConfig.Endpoint != "runtime-private-endpoint" || string(remoteConfig.Token.Bytes()) != "runtime-private-secret-value" || remoteConfig.Startup != "ready" {
+		t.Fatalf("remote constructor did not receive resolved configuration")
+	}
+
+	for _, formatted := range []string{fmt.Sprintf("%v", application), fmt.Sprintf("%+v", application), fmt.Sprintf("%#v", application), fmt.Sprintf("%q", application)} {
+		if !strings.Contains(formatted, "redacted") || strings.Contains(formatted, "runtime-private") {
+			t.Fatalf("application formatting = %q", formatted)
+		}
+	}
+	var logOutput bytes.Buffer
+	slog.New(slog.NewJSONHandler(&logOutput, nil)).Info("application", "value", application)
+	if !strings.Contains(logOutput.String(), "redacted") || strings.Contains(logOutput.String(), "runtime-private") {
+		t.Fatalf("application log = %s", logOutput.String())
+	}
+	if data, err := json.Marshal(application); data != nil || !errors.Is(err, kernelconfiguration.ErrSecretExposure) {
+		t.Fatalf("json.Marshal = %q, %v", data, err)
+	}
+	if data, err := application.MarshalText(); data != nil || !errors.Is(err, kernelconfiguration.ErrSecretExposure) {
+		t.Fatalf("MarshalText = %q, %v", data, err)
+	}
+	if data, err := application.MarshalYAML(); data != nil || !errors.Is(err, kernelconfiguration.ErrSecretExposure) {
+		t.Fatalf("MarshalYAML = %#v, %v", data, err)
+	}
+
+	lifecycleevents.Reset()
+	if err := application.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if application.State() != kernellifecycle.StateRunning {
+		t.Fatalf("state after Start = %q", application.State())
+	}
+	if err := application.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if application.State() != kernellifecycle.StateStopped {
+		t.Fatalf("state after Stop = %q", application.State())
+	}
+	want := "acme.local-service.start,zeta.remote-store.start,zeta.remote-store.stop,acme.local-service.stop"
+	if got := strings.Join(lifecycleevents.Snapshot(), ","); got != want {
+		t.Fatalf("lifecycle order = %q, want %q", got, want)
+	}
+}
+
+func TestApplicationRejectsInvalidSettingsBeforeConstructors(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	tests := map[string]string{
+		"unknown":   "timeouts:\n  shutdown: 1s\n" + validRuntimeDocument,
+		"zero":      "timeouts:\n  startup: 0s\n" + validRuntimeDocument,
+		"non-string": "timeouts:\n  startup: 25\n" + validRuntimeDocument,
+	}
+	for name, document := range tests {
+		t.Run(name, func(t *testing.T) {
+			localservice.Reset()
+			remotestore.Reset()
+			application, err := New(context.Background(), writeRuntimeDocument(t, document))
+			if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrRuntimeSettings) {
+				t.Fatalf("New = %#v, %v", application, err)
+			}
+			assertNoBootstrapConstructorCalls(t)
+			assertSafeBootstrapError(t, err)
+		})
+	}
+}
+
+func TestApplicationStartupTimeoutCancelsAndRollsBack(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	localservice.Reset()
+	remotestore.Reset()
+	lifecycleevents.Reset()
+	document := "timeouts:\n  startup: 25ms\nconfig:\n  zeta.remote-store:\n    endpoint: runtime-private-endpoint\n    token: {env: PLYSTRA_ASSEMBLY_PRIVATE_SECRET}\n    startup: wait\n"
+	application, err := New(context.Background(), writeRuntimeDocument(t, document))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := application.Start(context.Background()); !errors.Is(err, ErrApplicationStart) || !errors.Is(err, kernellifecycle.ErrStart) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Start = %v", err)
+	} else {
+		assertSafeBootstrapError(t, err)
+	}
+	if application.State() != kernellifecycle.StateFailed {
+		t.Fatalf("state after timeout = %q", application.State())
+	}
+	want := "acme.local-service.start,zeta.remote-store.start,zeta.remote-store.stop,acme.local-service.stop"
+	if got := strings.Join(lifecycleevents.Snapshot(), ","); got != want {
+		t.Fatalf("rollback order = %q, want %q", got, want)
+	}
+	if err := application.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop after rollback: %v", err)
+	}
+	if application.State() != kernellifecycle.StateStopped {
+		t.Fatalf("state after Stop = %q", application.State())
+	}
+}
+
+func TestApplicationRejectsMissingRuntimeDocument(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	localservice.Reset()
+	remotestore.Reset()
+	missing := filepath.Join(t.TempDir(), "runtime-private-missing-document")
+	application, err := New(context.Background(), missing)
+	if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, kernelconfiguration.ErrLoadDocument) || !errors.Is(err, kernelconfiguration.ErrDocumentUnavailable) {
+		t.Fatalf("New(missing) = %#v, %v", application, err)
+	}
+	assertNoBootstrapConstructorCalls(t)
+	assertSafeBootstrapError(t, err)
+}
+
+func TestApplicationRejectsSymbolicRuntimeDocument(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	localservice.Reset()
+	remotestore.Reset()
+	root := t.TempDir()
+	target := filepath.Join(root, "runtime-private-target")
+	link := filepath.Join(root, "runtime-private-link")
+	if err := os.WriteFile(target, []byte(validRuntimeDocument), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symbolic links are unavailable: %v", err)
+	}
+	application, err := New(context.Background(), link)
+	if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, kernelconfiguration.ErrLoadDocument) || !errors.Is(err, kernelconfiguration.ErrDocumentUnavailable) {
+		t.Fatalf("New(symbolic link) = %#v, %v", application, err)
+	}
+	assertNoBootstrapConstructorCalls(t)
+	assertSafeBootstrapError(t, err)
+}
+
+func TestApplicationRejectsInvalidContextsAndValues(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	localservice.Reset()
+	remotestore.Reset()
+	documentPath := writeRuntimeDocument(t, validRuntimeDocument)
+	if application, err := New(nil, documentPath); application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrInvalidContext) {
+		t.Fatalf("New(nil) = %#v, %v", application, err)
+	}
+	assertNoBootstrapConstructorCalls(t)
+
+	application, err := New(context.Background(), documentPath)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := application.Start(nil); !errors.Is(err, ErrApplicationStart) || !errors.Is(err, ErrInvalidContext) {
+		t.Fatalf("Start(nil) = %v", err)
+	}
+	if err := application.Stop(nil); !errors.Is(err, ErrApplicationStop) || !errors.Is(err, ErrInvalidContext) {
+		t.Fatalf("Stop(nil) = %v", err)
+	}
+	var absent *Application
+	if absent.Valid() || absent.State() != "" {
+		t.Fatalf("absent application validity = %t, state %q", absent.Valid(), absent.State())
+	}
+	if err := absent.Start(context.Background()); !errors.Is(err, ErrApplicationStart) || !errors.Is(err, ErrInvalidApplication) {
+		t.Fatalf("absent Start = %v", err)
+	}
+	if err := absent.Stop(context.Background()); !errors.Is(err, ErrApplicationStop) || !errors.Is(err, ErrInvalidApplication) {
+		t.Fatalf("absent Stop = %v", err)
+	}
+}
+
+func writeRuntimeDocument(t *testing.T, document string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "runtime.yaml")
+	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+		t.Fatalf("write runtime document: %v", err)
+	}
+	return path
+}
+
+func assertNoBootstrapConstructorCalls(t *testing.T) {
+	t.Helper()
+	localCalls, _ := localservice.Snapshot()
+	remoteCalls, _ := remotestore.Snapshot()
+	if localCalls != 0 || remoteCalls != 0 {
+		t.Fatalf("constructors ran: local %d, remote %d", localCalls, remoteCalls)
+	}
+}
+
+func assertSafeBootstrapError(t *testing.T, err error) {
+	t.Helper()
+	for _, forbidden := range []string{
+		"runtime-private-endpoint",
+		"PLYSTRA_ASSEMBLY_PRIVATE_SECRET",
+		"runtime-private-secret-value",
+		"runtime-private-missing-document",
+		"runtime-private-target",
+		"runtime-private-link",
+	} {
+		if strings.Contains(err.Error(), forbidden) {
+			t.Fatalf("error exposed %q: %v", forbidden, err)
+		}
+	}
+}
+`
+
+const emptyGeneratedBootstrapRuntimeTest = `package bootstrap
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
+	kernellifecycle "github.com/plystra/kernel/lifecycle"
+)
+
+func TestEmptyApplicationLifecycle(t *testing.T) {
+	documentPath := filepath.Join(t.TempDir(), "runtime.yaml")
+	if err := os.WriteFile(documentPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatalf("write runtime document: %v", err)
+	}
+	application, err := New(context.Background(), documentPath)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if !application.Valid() || application.State() != kernellifecycle.StateNew {
+		t.Fatalf("application validity = %t, state %q", application.Valid(), application.State())
+	}
+	if err := application.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if application.State() != kernellifecycle.StateRunning {
+		t.Fatalf("state after Start = %q", application.State())
+	}
+	if err := application.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if application.State() != kernellifecycle.StateStopped {
+		t.Fatalf("state after Stop = %q", application.State())
 	}
 }
 `

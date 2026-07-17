@@ -31,7 +31,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 
 	root := t.TempDir()
 	writeModule(t, root, "example.com/Acme/empty", "")
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "timeouts:\n  startup: 17s\n")
 	environment := goEnvironment(nil)
 	before := snapshotTree(t, root)
 
@@ -46,7 +46,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	if !checked.Checked() || checked.Module().Path() != root || checked.Module().ModulePath() != "example.com/Acme/empty" {
 		t.Fatalf("checked result = %#v", checked)
 	}
-	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/providers_gen.go", "generated/manifest.json"}; !reflect.DeepEqual(got, want) {
+	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("missing files = %v, want %v", got, want)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
@@ -68,6 +68,10 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	assertFileExists(t, root, generatedfiles.ManifestPath)
 	assertFileExists(t, root, "generated/go/assembly/compatibility_gen.go")
 	assertFileExists(t, root, "generated/go/assembly/providers_gen.go")
+	assertFileExists(t, root, "generated/go/bootstrap/bootstrap_gen.go")
+	if bootstrap := readFile(t, root, "generated/go/bootstrap/bootstrap_gen.go"); bytes.Contains(bootstrap, []byte("17s")) {
+		t.Fatalf("generated bootstrap embeds application-specific startup timeout:\n%s", bootstrap)
+	}
 	assertFileMissing(t, root, "generated/sdk/javascript/package.json")
 
 	writeFile(t, filepath.Join(root, "generated", "manifest.json"), "drift\n")
@@ -137,6 +141,7 @@ capabilities:
 		"generated/go/adapters/http/mail/deliver/v1/handler_gen.go",
 		"generated/go/assembly/compatibility_gen.go",
 		"generated/go/assembly/providers_gen.go",
+		"generated/go/bootstrap/bootstrap_gen.go",
 		"generated/go/clients/email/send/v1/client_gen.go",
 		"generated/go/clients/mail/deliver/v1/client_gen.go",
 		"generated/go/contracts/email/send/v1/contract_gen.go",

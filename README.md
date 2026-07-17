@@ -83,6 +83,8 @@ Private values and Secret reference targets do not enter generation-extension co
 
 For every selected local plugin, generation derives its module-owned type and decoder under `generated/go/configuration/` from the validated `plugin.yaml` schema alone. Required fields and fields with defaults use direct Go values; omitted optional scalars use pointers, while optional objects and arrays preserve nil-versus-configured-empty behavior. The generated decoder calls Kernel `configuration.Decode` at runtime, constructs one typed object for the Plugin ID, and redacts formatting and serialization. Application values and Secret reference targets are never embedded in this source. Selected dependency plugins ship the same generated configuration boundary in their own Go Modules.
 
+The application-owned `generated/go/bootstrap` package is the runtime construction boundary. Its `New` function accepts the runtime document path, loads it through the Kernel's bounded regular-file API, validates `timeouts.startup`, resolves Secrets, constructs each selected provider exactly once, and returns a private redacted `Application`. `Application.Start` applies the configured startup deadline and bounded failed-start rollback; `Application.Stop` shuts active lifecycle providers down in reverse selected Plugin ID order. Callers retain control of the document location and lifecycle contexts, and no runtime value or Secret reference target is embedded in generated source.
+
 ## Generated application invocation
 
 Every ordinary external or cross-plugin call uses generated code:

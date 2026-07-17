@@ -10,6 +10,10 @@
       "sha256": "sha256:16068beb9055e314a5deaa0bee6d58c42a4a1631e73137ce4080a4540e1939fc"
     },
     {
+      "path": "generated/go/bootstrap/bootstrap_gen.go",
+      "sha256": "sha256:1bb998be98463de05cf6a817ef6b8a7bcb7c56ada598e73e2e374d46f6bacf76"
+    },
+    {
       "path": "generated/manifest.json",
       "sha256": "sha256:60e7d36f3d5026d53797748f55dc22cfb2e0ebc7c2d0245afbf9453daf2657e9"
     }

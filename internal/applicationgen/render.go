@@ -13,7 +13,9 @@ import (
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/aliasresolution"
 	"github.com/plystra/cli/internal/apidocgen"
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/assemblygen"
+	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/clientgen"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/contractgen"
@@ -49,9 +51,10 @@ type Options struct {
 }
 
 // Render lowers final selected contributions once and renders the Kernel
-// assembly compatibility handshake, contracts, providers, canonical and Alias
-// clients, canonical invocation paths, HTTP adapters, the JavaScript SDK, API
-// documentation, and the current Alias manifest into one managed output model.
+// assembly compatibility handshake, runtime bootstrap, contracts, providers,
+// canonical and Alias clients, canonical invocation paths, HTTP adapters, the
+// JavaScript SDK, API documentation, and the current Alias manifest into one
+// managed output model.
 func Render(options Options, resolution generationresolution.ExtensionResult) (generatedfiles.Output, error) {
 	context := resolution.Context()
 	if !validContext(context) {
@@ -116,6 +119,16 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	if err := add(assemblygen.ProvidersPath, providers); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: selected providers: %w", ErrRender, err)
+	}
+	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
+		ModulePath:            options.ModulePath,
+		DefaultStartupTimeout: applicationmeta.DefaultStartupTimeout,
+	})
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: runtime bootstrap: %w", ErrRender, err)
+	}
+	if err := add(bootstrapgen.Path, bootstrap); err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: runtime bootstrap: %w", ErrRender, err)
 	}
 
 	requirements := context.Requirements()
