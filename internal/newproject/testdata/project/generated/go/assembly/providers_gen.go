@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	kernelconfiguration "github.com/plystra/kernel/configuration"
+	kernellifecycle "github.com/plystra/kernel/lifecycle"
 )
 
 var (
@@ -18,6 +20,8 @@ var (
 	ErrUnselectedPluginConfiguration = errors.New("configuration targets unselected plugin")
 	// ErrPluginConstructor reports a selected constructor panic or nil result.
 	ErrPluginConstructor = errors.New("plugin constructor failed")
+	// ErrProviderLifecycle reports invalid generated lifecycle binding or manager options.
+	ErrProviderLifecycle = errors.New("assemble selected provider lifecycle")
 )
 
 // Providers is the immutable set of selected in-process plugin providers.
@@ -90,4 +94,18 @@ func NewProviders(ctx context.Context, resolver *kernelconfiguration.Resolver, d
 	return Providers{
 		initialized: true,
 	}, nil
+}
+
+// NewProviderLifecycle binds optional lifecycle providers in deterministic
+// selected Plugin ID order. The Kernel starts this order and stops it in reverse.
+func NewProviderLifecycle(providers Providers, rollbackTimeout time.Duration) (*kernellifecycle.Manager, error) {
+	if !providers.Valid() {
+		return nil, fmt.Errorf("%w: providers are invalid", ErrProviderLifecycle)
+	}
+	bindings := make([]kernellifecycle.Binding, 0, 0)
+	manager, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, bindings)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrProviderLifecycle, err)
+	}
+	return manager, nil
 }

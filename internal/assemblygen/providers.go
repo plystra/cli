@@ -69,8 +69,13 @@ func RenderProviders(inputs []ProviderInput) ([]byte, error) {
 	fmt.Fprintln(&source, "\t\"errors\"")
 	fmt.Fprintln(&source, "\t\"fmt\"")
 	fmt.Fprintln(&source, "\t\"log/slog\"")
+	fmt.Fprintln(&source, "\t\"time\"")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "\tkernelconfiguration \"github.com/plystra/kernel/configuration\"")
+	fmt.Fprintln(&source, "\tkernellifecycle \"github.com/plystra/kernel/lifecycle\"")
+	if len(providers) != 0 {
+		fmt.Fprintln(&source, "\tkernelplugin \"github.com/plystra/kernel/plugin\"")
+	}
 	for _, imported := range imports {
 		fmt.Fprintf(&source, "\t%s %s\n", imported.alias, strconv.Quote(imported.path))
 	}
@@ -83,6 +88,8 @@ func RenderProviders(inputs []ProviderInput) ([]byte, error) {
 	fmt.Fprintln(&source, "\tErrUnselectedPluginConfiguration = errors.New(\"configuration targets unselected plugin\")")
 	fmt.Fprintln(&source, "\t// ErrPluginConstructor reports a selected constructor panic or nil result.")
 	fmt.Fprintln(&source, "\tErrPluginConstructor = errors.New(\"plugin constructor failed\")")
+	fmt.Fprintln(&source, "\t// ErrProviderLifecycle reports invalid generated lifecycle binding or manager options.")
+	fmt.Fprintln(&source, "\tErrProviderLifecycle = errors.New(\"assemble selected provider lifecycle\")")
 	fmt.Fprintln(&source, ")")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// Providers is the immutable set of selected in-process plugin providers.")
@@ -204,6 +211,33 @@ func RenderProviders(inputs []ProviderInput) ([]byte, error) {
 	}
 	fmt.Fprintln(&source, "\t\tinitialized: true,")
 	fmt.Fprintln(&source, "\t}, nil")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "// NewProviderLifecycle binds optional lifecycle providers in deterministic")
+	fmt.Fprintln(&source, "// selected Plugin ID order. The Kernel starts this order and stops it in reverse.")
+	fmt.Fprintln(&source, "func NewProviderLifecycle(providers Providers, rollbackTimeout time.Duration) (*kernellifecycle.Manager, error) {")
+	fmt.Fprintln(&source, "\tif !providers.Valid() {")
+	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: providers are invalid\", ErrProviderLifecycle)")
+	fmt.Fprintln(&source, "\t}")
+	fmt.Fprintf(&source, "\tbindings := make([]kernellifecycle.Binding, 0, %d)\n", len(providers))
+	for index, provider := range providers {
+		fmt.Fprintf(&source, "\tif lifecycleProvider, ok := any(providers.plugin%d).(kernellifecycle.Provider); ok {\n", index)
+		fmt.Fprintf(&source, "\t\tpluginID, err := kernelplugin.ParseID(%s)\n", strconv.Quote(provider.PluginID))
+		fmt.Fprintln(&source, "\t\tif err != nil {")
+		fmt.Fprintf(&source, "\t\t\treturn nil, fmt.Errorf(\"%%w: generated Plugin ID %%q: %%w\", ErrProviderLifecycle, %s, err)\n", strconv.Quote(provider.PluginID))
+		fmt.Fprintln(&source, "\t\t}")
+		fmt.Fprintln(&source, "\t\tbinding, err := kernellifecycle.NewBinding(pluginID, lifecycleProvider)")
+		fmt.Fprintln(&source, "\t\tif err != nil {")
+		fmt.Fprintf(&source, "\t\t\treturn nil, fmt.Errorf(\"%%w: plugin %%q: %%w\", ErrProviderLifecycle, %s, err)\n", strconv.Quote(provider.PluginID))
+		fmt.Fprintln(&source, "\t\t}")
+		fmt.Fprintln(&source, "\t\tbindings = append(bindings, binding)")
+		fmt.Fprintln(&source, "\t}")
+	}
+	fmt.Fprintln(&source, "\tmanager, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, bindings)")
+	fmt.Fprintln(&source, "\tif err != nil {")
+	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: %w\", ErrProviderLifecycle, err)")
+	fmt.Fprintln(&source, "\t}")
+	fmt.Fprintln(&source, "\treturn manager, nil")
 	fmt.Fprintln(&source, "}")
 
 	for index, provider := range providers {

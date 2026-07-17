@@ -43,6 +43,9 @@ func TestRenderProvidersIsDeterministicSchemaOnlySource(t *testing.T) {
 		"provider1.New(configuration)",
 		"clear(configurationData0)",
 		"ErrUnselectedPluginConfiguration",
+		"NewProviderLifecycle",
+		"kernellifecycle.NewBinding",
+		"kernellifecycle.NewManager",
 		"recover()",
 		"type Providers struct",
 	} {
@@ -166,6 +169,7 @@ token: {type: secret, required: true}
 	writeBytes(t, filepath.Join(dependencyRoot, filepath.FromSlash(remoteConfiguration.Path())), remoteConfiguration.Data())
 	writeFile(t, filepath.Join(applicationRoot, "local-service", "plugin.go"), localPluginSource)
 	writeFile(t, filepath.Join(dependencyRoot, "remote-store", "plugin.go"), remotePluginSource)
+	writeFile(t, filepath.Join(dependencyRoot, "lifecycleevents", "events.go"), lifecycleEventsSource)
 
 	providers, err := assemblygen.RenderProviders([]assemblygen.ProviderInput{
 		{PluginID: "zeta.remote-store", ModulePath: "example.com/assemblydependency", ImportPath: "example.com/assemblydependency/remote-store"},
@@ -268,8 +272,10 @@ func isolatedGoEnvironment(environment []string) []string {
 const localPluginSource = `package localservice
 
 import (
+	"context"
 	"sync"
 
+	"example.com/assemblydependency/lifecycleevents"
 	configuration "example.com/assemblyapp/generated/go/configuration"
 )
 
@@ -298,6 +304,16 @@ func New(config Config) *Plugin {
 	}
 }
 
+func (*Plugin) Start(context.Context) error {
+	lifecycleevents.Add("acme.local-service.start")
+	return nil
+}
+
+func (*Plugin) Stop(context.Context) error {
+	lifecycleevents.Add("acme.local-service.stop")
+	return nil
+}
+
 func Reset() {
 	state.Lock()
 	defer state.Unlock()
@@ -315,9 +331,11 @@ func Snapshot() (int, Config) {
 const remotePluginSource = `package remotestore
 
 import (
+	"context"
 	"sync"
 
 	configuration "example.com/assemblydependency/generated/go/configuration"
+	"example.com/assemblydependency/lifecycleevents"
 )
 
 type Config = configuration.RemoteStoreConfig
@@ -337,6 +355,16 @@ func New(config Config) *Plugin {
 	return &Plugin{}
 }
 
+func (*Plugin) Start(context.Context) error {
+	lifecycleevents.Add("zeta.remote-store.start")
+	return nil
+}
+
+func (*Plugin) Stop(context.Context) error {
+	lifecycleevents.Add("zeta.remote-store.stop")
+	return nil
+}
+
 func Reset() {
 	state.Lock()
 	defer state.Unlock()
@@ -351,6 +379,34 @@ func Snapshot() (int, Config) {
 }
 `
 
+const lifecycleEventsSource = `package lifecycleevents
+
+import "sync"
+
+var state struct {
+	sync.Mutex
+	events []string
+}
+
+func Add(event string) {
+	state.Lock()
+	defer state.Unlock()
+	state.events = append(state.events, event)
+}
+
+func Reset() {
+	state.Lock()
+	defer state.Unlock()
+	state.events = nil
+}
+
+func Snapshot() []string {
+	state.Lock()
+	defer state.Unlock()
+	return append([]string(nil), state.events...)
+}
+`
+
 const generatedProvidersRuntimeTest = `package assembly
 
 import (
@@ -362,8 +418,10 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	localservice "example.com/assemblyapp/local-service"
+	"example.com/assemblydependency/lifecycleevents"
 	remotestore "example.com/assemblydependency/remote-store"
 	kernelconfiguration "github.com/plystra/kernel/configuration"
 )
@@ -408,6 +466,32 @@ func TestConstructProviders(t *testing.T) {
 	}
 	if data, err := providers.MarshalYAML(); data != nil || !errors.Is(err, kernelconfiguration.ErrSecretExposure) {
 		t.Fatalf("MarshalYAML = %#v, %v", data, err)
+	}
+}
+
+func TestLifecycleUsesDeterministicSelectedPluginOrder(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	providers, err := NewProviders(context.Background(), newResolver(t), []byte("config:\n"+remoteConfiguration))
+	if err != nil {
+		t.Fatalf("NewProviders: %v", err)
+	}
+	if manager, err := NewProviderLifecycle(Providers{}, time.Second); manager != nil || !errors.Is(err, ErrProviderLifecycle) {
+		t.Fatalf("invalid NewProviderLifecycle = %#v, %v", manager, err)
+	}
+	manager, err := NewProviderLifecycle(providers, time.Second)
+	if err != nil {
+		t.Fatalf("NewProviderLifecycle: %v", err)
+	}
+	lifecycleevents.Reset()
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := manager.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	want := "acme.local-service.start,zeta.remote-store.start,zeta.remote-store.stop,acme.local-service.stop"
+	if got := strings.Join(lifecycleevents.Snapshot(), ","); got != want {
+		t.Fatalf("lifecycle order = %q, want %q", got, want)
 	}
 }
 
