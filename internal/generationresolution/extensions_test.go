@@ -224,6 +224,131 @@ func TestResolveExtensionsSkipsHelpersWhenNoExtensionIsSelected(t *testing.T) {
 	}
 }
 
+func TestResolveExtensionsClosesSelectedPluginRequirementsTransitively(t *testing.T) {
+	order := extensionTestContract(t, "order.create/v1", "")
+	audit := extensionTestContract(t, "audit.write/v1", "")
+	storage := extensionTestContract(t, "storage.write/v1", "")
+	unused := extensionTestContract(t, "unused.call/v1", "")
+	business := extensionTestPlugin("example.business", "business", "order.create/v1")
+	business.Context.Requires = []string{"audit.write/v1"}
+	auditPlugin := extensionTestPlugin("example.audit", "audit", "audit.write/v1")
+	auditPlugin.Context.Requires = []string{"storage.write/v1"}
+	unusedPlugin := extensionTestPlugin("example.unused", "unused", "unused.call/v1")
+	unusedPlugin.Context.Requires = []string{"missing.call/v1"}
+	input := ExtensionInput{
+		Input: Input{
+			Requirements: []providerresolution.Requirement{{Contract: order, Source: "order route"}},
+			Candidates: []providerresolution.Candidate{
+				{PluginID: "example.business", Contract: order, Source: "business/order.create"},
+				{PluginID: "example.audit", Contract: audit, Source: "audit/audit.write"},
+				{PluginID: "example.storage", Contract: storage, Source: "storage/storage.write"},
+				{PluginID: "example.unused", Contract: unused, Source: "unused/unused.call"},
+			},
+		},
+		Plugins: []Plugin{
+			business,
+			auditPlugin,
+			extensionTestPlugin("example.storage", "storage", "storage.write/v1"),
+			unusedPlugin,
+		},
+		Capabilities: []generation.CapabilityInput{
+			{ContractJSON: order},
+			{ContractJSON: audit},
+			{ContractJSON: storage},
+			{ContractJSON: unused},
+		},
+	}
+	result, err := resolveExtensions(t.Context(), input, newFakeExtensionBuilder(nil).Build)
+	if err != nil {
+		t.Fatalf("resolveExtensions: %v", err)
+	}
+	if result.Passes() != 3 {
+		t.Fatalf("Passes = %d, want 3", result.Passes())
+	}
+	if got := generationRequirementIDs(result.Context()); !slices.Equal(got, []string{"audit.write/v1", "order.create/v1", "storage.write/v1"}) {
+		t.Fatalf("context requirements = %v", got)
+	}
+	if _, exists := result.Context().Plugin(extensionTestPluginID(t, "example.unused")); exists {
+		t.Fatal("unselected dependency plugin entered the normalized context")
+	}
+	resolved := result.ActivationResolution().ProviderResolution()
+	auditCapability, exists := resolved.Capability(extensionTestInternalCapabilityID(t, "audit.write/v1"))
+	if !exists || !slices.Equal(auditCapability.Sources(), []string{"plugin example.business at example.com/application@local/business/plugin.yaml requires audit.write/v1"}) {
+		t.Fatalf("audit requirement sources = %v, %t", auditCapability.Sources(), exists)
+	}
+	storageCapability, exists := resolved.Capability(extensionTestInternalCapabilityID(t, "storage.write/v1"))
+	if !exists || !slices.Equal(storageCapability.Sources(), []string{"plugin example.audit at example.com/application@local/audit/plugin.yaml requires storage.write/v1"}) {
+		t.Fatalf("storage requirement sources = %v, %t", storageCapability.Sources(), exists)
+	}
+}
+
+func TestResolveExtensionsAddsLocalPluginRequirementsBeforeSelection(t *testing.T) {
+	audit := extensionTestContract(t, "audit.write/v1", "")
+	local := extensionTestPlugin("example.local", "local")
+	local.Local = true
+	local.Context.Requires = []string{"audit.write/v1"}
+	input := ExtensionInput{
+		Input: Input{Candidates: []providerresolution.Candidate{{PluginID: "example.audit", Contract: audit, Source: "audit/audit.write"}}},
+		Plugins: []Plugin{
+			local,
+			extensionTestPlugin("example.audit", "audit", "audit.write/v1"),
+		},
+		Capabilities: []generation.CapabilityInput{{ContractJSON: audit}},
+	}
+	result, err := resolveExtensions(t.Context(), input, newFakeExtensionBuilder(nil).Build)
+	if err != nil {
+		t.Fatalf("resolveExtensions: %v", err)
+	}
+	if result.Passes() != 1 || !slices.Equal(generationRequirementIDs(result.Context()), []string{"audit.write/v1"}) {
+		t.Fatalf("result = passes %d, requirements %v", result.Passes(), generationRequirementIDs(result.Context()))
+	}
+	if provider, exists := result.Context().SelectedProvider(extensionTestCapabilityID(t, "audit.write/v1")); !exists || provider.String() != "example.audit" {
+		t.Fatalf("audit provider = %s, %t", provider, exists)
+	}
+}
+
+func TestResolveExtensionsRetainsAllPluginRequirementProvenance(t *testing.T) {
+	audit := extensionTestContract(t, "audit.write/v1", "")
+	local := extensionTestPlugin("example.local", "local")
+	local.Local = true
+	local.Context.Requires = []string{"audit.write/v1"}
+	input := ExtensionInput{
+		Input: Input{
+			Requirements: []providerresolution.Requirement{{Contract: audit, Source: "plystra.yaml capabilities.require[0]"}},
+			Candidates:   []providerresolution.Candidate{{PluginID: "example.audit", Contract: audit, Source: "audit/audit.write"}},
+		},
+		Plugins:      []Plugin{local, extensionTestPlugin("example.audit", "audit", "audit.write/v1")},
+		Capabilities: []generation.CapabilityInput{{ContractJSON: audit}},
+	}
+	result, err := resolveExtensions(t.Context(), input, newFakeExtensionBuilder(nil).Build)
+	if err != nil {
+		t.Fatalf("resolveExtensions: %v", err)
+	}
+	capability, exists := result.ActivationResolution().ProviderResolution().Capability(extensionTestInternalCapabilityID(t, "audit.write/v1"))
+	want := []string{
+		"plugin example.local at example.com/application@local/local/plugin.yaml requires audit.write/v1",
+		"plystra.yaml capabilities.require[0]",
+	}
+	if !exists || !slices.Equal(capability.Sources(), want) {
+		t.Fatalf("audit sources = %v, %t; want %v", capability.Sources(), exists, want)
+	}
+}
+
+func TestResolveExtensionsRejectsDuplicateSelectedPluginRequirements(t *testing.T) {
+	audit := extensionTestContract(t, "audit.write/v1", "")
+	local := extensionTestPlugin("example.local", "local")
+	local.Local = true
+	local.Context.Requires = []string{"audit.write/v1", "audit.write/v1"}
+	input := ExtensionInput{
+		Plugins:      []Plugin{local},
+		Capabilities: []generation.CapabilityInput{{ContractJSON: audit}},
+	}
+	_, err := resolveExtensions(t.Context(), input, newFakeExtensionBuilder(nil).Build)
+	if !errors.Is(err, ErrApplicationContext) || !strings.Contains(err.Error(), "duplicates required Capability audit.write/v1") {
+		t.Fatalf("duplicate plugin requirement error = %v", err)
+	}
+}
+
 func TestResolveExtensionsAddsCanonicalHTTPExposureRequirements(t *testing.T) {
 	plain := extensionTestContract(t, "order.read/v1", "")
 	health := extensionTestContract(t, "kernel.health/v1", "")

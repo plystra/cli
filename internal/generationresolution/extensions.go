@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -229,6 +230,17 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 	if err != nil {
 		return ExtensionResult{}, fmt.Errorf("%w: %w: %w", ErrResolveExtensions, ErrApplicationContext, err)
 	}
+	pluginRequirements := make(map[pluginRequirementKey]struct{})
+	localPlugins := make(map[string]struct{})
+	for pluginID, plugin := range plugins {
+		if plugin.Local {
+			localPlugins[pluginID] = struct{}{}
+		}
+	}
+	requirements, _, err = addSelectedPluginRequirements(requirements, plugins, localPlugins, pluginRequirements)
+	if err != nil {
+		return ExtensionResult{}, fmt.Errorf("%w: %w: %w", ErrResolveExtensions, ErrApplicationContext, err)
+	}
 	generatedByKey := make(map[string]GeneratedRequirement)
 	observedOutputs := make(map[string]string)
 	maximumPasses := 2*(len(input.Capabilities)+1) + 1
@@ -244,6 +256,21 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 		})
 		if err != nil {
 			return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w", ErrResolveExtensions, pass, err)
+		}
+		selectedPlugins := make(map[string]struct{}, len(localPlugins)+len(activation.ProviderResolution().Selections()))
+		for pluginID := range localPlugins {
+			selectedPlugins[pluginID] = struct{}{}
+		}
+		for _, selection := range activation.ProviderResolution().Selections() {
+			selectedPlugins[selection.PluginID()] = struct{}{}
+		}
+		var addedPluginRequirements int
+		requirements, addedPluginRequirements, err = addSelectedPluginRequirements(requirements, plugins, selectedPlugins, pluginRequirements)
+		if err != nil {
+			return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w: %w", ErrResolveExtensions, pass, ErrApplicationContext, err)
+		}
+		if addedPluginRequirements != 0 {
+			continue
 		}
 		generationContext, err := buildGenerationContext(input, plugins, activation.ProviderResolution())
 		if err != nil {
@@ -340,6 +367,72 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 		maximumPasses,
 		len(input.Capabilities),
 	)
+}
+
+type pluginRequirementKey struct {
+	pluginID   string
+	capability capabilityid.Identifier
+}
+
+func addSelectedPluginRequirements(
+	requirements []providerresolution.Requirement,
+	plugins map[string]Plugin,
+	selected map[string]struct{},
+	added map[pluginRequirementKey]struct{},
+) ([]providerresolution.Requirement, int, error) {
+	pluginIDs := make([]string, 0, len(selected))
+	for pluginID := range selected {
+		pluginIDs = append(pluginIDs, pluginID)
+	}
+	sort.Strings(pluginIDs)
+	result := requirements
+	count := 0
+	for _, pluginID := range pluginIDs {
+		plugin, exists := plugins[pluginID]
+		if !exists {
+			return nil, 0, fmt.Errorf("selected plugin %q has no normalized plugin provenance", pluginID)
+		}
+		declared := append([]string(nil), plugin.Context.Requires...)
+		sort.Strings(declared)
+		for index, value := range declared {
+			capability, err := capabilityid.Parse(value)
+			if err != nil {
+				return nil, 0, fmt.Errorf("plugin %q requires non-canonical Capability %q", pluginID, value)
+			}
+			if index > 0 && declared[index-1] == value {
+				return nil, 0, fmt.Errorf("plugin %q duplicates required Capability %s", pluginID, capability)
+			}
+			key := pluginRequirementKey{pluginID: pluginID, capability: capability}
+			if _, exists := added[key]; exists {
+				continue
+			}
+			added[key] = struct{}{}
+			result = append(result, providerresolution.Requirement{
+				Capability: capability.String(),
+				Source:     selectedPluginRequirementSource(pluginID, plugin, capability),
+			})
+			count++
+		}
+	}
+	return result, count, nil
+}
+
+func selectedPluginRequirementSource(pluginID string, plugin Plugin, capability capabilityid.Identifier) string {
+	version := plugin.Context.ModuleVersion
+	if version == "" {
+		version = "local"
+	}
+	source := plugin.Context.ModulePath + "@" + version
+	if plugin.PluginPath != "" {
+		source = path.Join(source, plugin.PluginPath, "plugin.yaml")
+	}
+	value := "plugin " + pluginID + " at " + source + " requires " + capability.String()
+	if len(value) <= maximumRequirementSourceSize {
+		return value
+	}
+	sum := sha256.Sum256([]byte(value))
+	suffix := "...#sha256:" + hex.EncodeToString(sum[:])
+	return value[:maximumRequirementSourceSize-len(suffix)] + suffix
 }
 
 func indexPlugins(inputs []Plugin) (map[string]Plugin, error) {
