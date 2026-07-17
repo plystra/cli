@@ -84,6 +84,8 @@ generated adapter or Capability client
 -> selected provider
 ```
 
+Each application-local Capability Alias exposed to Go generates only a thin Alias-named client package. It reuses the canonical target's request, response, and errors and forwards to the target's generated client, so every target contribution runs before the Kernel receives the canonical ID. Alias clients create no Alias contract, invocation handle, provider, or Kernel registration. Several Alias clients may forward to one canonical target, and native Go deprecation comments carry application-local compatibility guidance.
+
 For `extensions.authn.authenticated: true`, an AuthN rule adds `authn.session.verify/v1` and generated verification before target dispatch. For `extensions.authz.permission`, an AuthZ rule adds `authz.check/v1`, generates the decision using permission and Space/resource data, and rejects denial. These are static application calls, not Kernel behavior.
 
 ## Method-specific login surfaces
@@ -97,7 +99,7 @@ authn.login.oidc.begin/v1
 authn.login.oidc.complete/v1
 ```
 
-When exactly one login method is resolved and explicitly exposed, generated HTTP and JavaScript surfaces may add the application-local `authn.login/v1` alias with that method's exact contract. The alias is not a canonical Capability, Kernel registry entry, provider requirement, or distributed contract. Several methods produce no implicit alias.
+When exactly one login method is resolved and explicitly exposed, generated Go, HTTP, and JavaScript surfaces may add the application-local `authn.login/v1` Alias with that method's exact contract. The Alias is not a canonical Capability, Kernel registry entry, provider requirement, or distributed contract. Several methods produce no implicit Alias.
 
 ## Transaction safety
 
