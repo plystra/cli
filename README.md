@@ -27,7 +27,7 @@ Capability inspection strictly parses the optional `extensions` mapping within t
 
 The CLI derives one statically resolved application from local plugins, explicit public exposure, generated client use, non-inferable declared requirements, namespaced build-time metadata, selected plugin rules, and explicit provider choices only when several ordinary providers exist.
 
-Reserved `kernel.*` Capabilities are always available outside ordinary provider selection. Ordinary providers are never chosen by priority, official status, discovery order, or filesystem order.
+Reserved `kernel.*` Capabilities are always available outside ordinary provider selection. Their exact schemas and digests come from the versioned `github.com/plystra/kernel/capability/catalog` API and are revalidated against the CLI contract model at startup; the CLI does not maintain a second intrinsic schema copy. Ordinary providers are never chosen by priority, official status, discovery order, or filesystem order.
 
 The CLI strictly normalizes `plystra.yaml` `http.address` and the unordered `http.expose` list. Every exposed exact canonical ID becomes a root requirement with stable configuration provenance and enters the generation model with HTTP and JavaScript exposure; duplicates, malformed IDs, unknown configuration keys, and IDs absent from the visible canonical catalog fail before extension execution or generated output. Internal availability alone never creates a public surface, while intrinsic `kernel.*` targets still require explicit exposure.
 
