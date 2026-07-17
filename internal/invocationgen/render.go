@@ -46,8 +46,9 @@ func (f File) PackageName() string { return f.packageName }
 func (f File) Data() []byte { return append([]byte(nil), f.data...) }
 
 type canonicalContract struct {
-	ID      string                    `json:"id"`
-	Request map[string]canonicalField `json:"request"`
+	ID       string                    `json:"id"`
+	Request  map[string]canonicalField `json:"request"`
+	Response map[string]canonicalField `json:"response"`
 }
 
 type canonicalField struct {
@@ -89,7 +90,7 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	if err != nil {
 		return File{}, fmt.Errorf("%w: decode canonical identity: %w", ErrRender, err)
 	}
-	prepared, err := preparePlan(identifier, contract.Request, plan)
+	prepared, err := preparePlan(identifier, contract.Request, contract.Response, plan)
 	if err != nil {
 		return File{}, fmt.Errorf("%w: %w", ErrRender, err)
 	}
@@ -158,31 +159,18 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	fmt.Fprintln(&source)
 	fmt.Fprintf(&source, "// Invoke runs the application path for %s and dispatches its canonical ID.\n", identifier.String())
 	fmt.Fprintln(&source, "func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.Response, error) {")
-	for _, contribution := range prepared.contributions {
-		previous := make(map[string]generationlowering.Node)
-		for _, node := range contribution.Nodes() {
-			var err error
-			switch node.Kind() {
-			case generation.GeneratedNodeKindCapabilityCall:
-				err = renderPrepareCall(&source, contract.Request, prepared.dependencies, contribution, node, previous)
-			case generation.GeneratedNodeKindContextDerivation:
-				err = renderContextDerivation(&source, contract.Request, contribution, node, previous)
-			case generation.GeneratedNodeKindConditionalFailure:
-				err = renderConditionalFailure(&source, contract.Request, contribution, node, previous)
-			case generation.GeneratedNodeKindMetadataAttachment:
-				err = renderMetadataAttachment(&source, contract.Request, contribution, node, previous)
-			case generation.GeneratedNodeKindAuditEventCall:
-				err = renderAuditEventCall(&source, contract.Request, prepared.dependencies, contribution, node, previous)
-			default:
-				err = fmt.Errorf("%w: contribution %q node %q uses unsupported kind %q", ErrContribution, contribution.ID(), node.ID(), node.Kind())
-			}
-			if err != nil {
-				return File{}, fmt.Errorf("%w: %w", ErrRender, err)
-			}
-			previous[node.ID()] = node
-		}
+	if err := renderContributions(&source, contract, prepared, prepared.preparations); err != nil {
+		return File{}, fmt.Errorf("%w: %w", ErrRender, err)
 	}
-	fmt.Fprintln(&source, "\treturn h.target.Invoke(ctx, request)")
+	if len(prepared.completions) == 0 {
+		fmt.Fprintln(&source, "\treturn h.target.Invoke(ctx, request)")
+	} else {
+		fmt.Fprintln(&source, "\tresponse, invocationError := h.target.Invoke(ctx, request)")
+		if err := renderContributions(&source, contract, prepared, prepared.completions); err != nil {
+			return File{}, fmt.Errorf("%w: %w", ErrRender, err)
+		}
+		fmt.Fprintln(&source, "\treturn response, invocationError")
+	}
 	fmt.Fprintln(&source, "}")
 	if prepared.hasTimedCalls {
 		fmt.Fprintln(&source)
@@ -257,8 +245,42 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	}, nil
 }
 
+func renderContributions(
+	source *strings.Builder,
+	contract canonicalContract,
+	prepared preparedPlan,
+	contributions []generationlowering.Contribution,
+) error {
+	for _, contribution := range contributions {
+		previous := make(map[string]generationlowering.Node)
+		for _, node := range contribution.Nodes() {
+			var err error
+			switch node.Kind() {
+			case generation.GeneratedNodeKindCapabilityCall:
+				err = renderCapabilityCall(source, contract.Request, contract.Response, prepared.dependencies, contribution, node, previous)
+			case generation.GeneratedNodeKindContextDerivation:
+				err = renderContextDerivation(source, contract.Request, contract.Response, contribution, node, previous)
+			case generation.GeneratedNodeKindConditionalFailure:
+				err = renderConditionalFailure(source, contract.Request, contract.Response, contribution, node, previous)
+			case generation.GeneratedNodeKindMetadataAttachment:
+				err = renderMetadataAttachment(source, contract.Request, contract.Response, contribution, node, previous)
+			case generation.GeneratedNodeKindAuditEventCall:
+				err = renderAuditEventCall(source, contract.Request, contract.Response, prepared.dependencies, contribution, node, previous)
+			default:
+				err = fmt.Errorf("%w: contribution %q node %q uses unsupported kind %q", ErrContribution, contribution.ID(), node.ID(), node.Kind())
+			}
+			if err != nil {
+				return err
+			}
+			previous[node.ID()] = node
+		}
+	}
+	return nil
+}
+
 type preparedPlan struct {
-	contributions          []generationlowering.Contribution
+	preparations           []generationlowering.Contribution
+	completions            []generationlowering.Contribution
 	dependencies           []invocationDependency
 	hasTimedCalls          bool
 	hasContextOperations   bool
@@ -287,7 +309,12 @@ type invocationDependency struct {
 	field     string
 }
 
-func preparePlan(identifier capabilityid.Identifier, sourceRequest map[string]canonicalField, plan *generationlowering.Plan) (preparedPlan, error) {
+func preparePlan(
+	identifier capabilityid.Identifier,
+	sourceRequest map[string]canonicalField,
+	sourceResponse map[string]canonicalField,
+	plan *generationlowering.Plan,
+) (preparedPlan, error) {
 	if plan == nil {
 		return preparedPlan{}, nil
 	}
@@ -298,13 +325,14 @@ func preparePlan(identifier capabilityid.Identifier, sourceRequest map[string]ca
 			continue
 		}
 		nodes := contribution.Nodes()
-		if len(nodes) != 0 && contribution.Point() != generation.GenerationPointInvocationPrepare {
+		point := contribution.Point()
+		if len(nodes) != 0 && point != generation.GenerationPointInvocationPrepare && point != generation.GenerationPointInvocationComplete {
 			return preparedPlan{}, fmt.Errorf(
 				"%w: contribution %q for %s uses unsupported point %q",
 				ErrContribution,
 				contribution.ID(),
 				identifier,
-				contribution.Point(),
+				point,
 			)
 		}
 		previous := make(map[string]generationlowering.Node, len(nodes))
@@ -323,7 +351,7 @@ func preparePlan(identifier capabilityid.Identifier, sourceRequest map[string]ca
 					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q has no lowered target", ErrContribution, contribution.ID(), node.ID())
 				}
 				for _, binding := range operation.Request {
-					requirements, err := prepareBinding(sourceRequest, previous, reference, binding)
+					requirements, err := prepareBinding(sourceRequest, sourceResponse, previous, reference, binding, point)
 					if err != nil {
 						return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, err)
 					}
@@ -341,7 +369,7 @@ func preparePlan(identifier capabilityid.Identifier, sourceRequest map[string]ca
 				if !ok {
 					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q lost its context derivation", ErrContribution, contribution.ID(), node.ID())
 				}
-				needsValueConversion, err := prepareContextDerivation(sourceRequest, previous, operation)
+				needsValueConversion, err := prepareContextDerivation(sourceRequest, sourceResponse, previous, operation, point)
 				if err != nil {
 					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q: %v", ErrContribution, contribution.ID(), node.ID(), err)
 				}
@@ -353,7 +381,7 @@ func preparePlan(identifier capabilityid.Identifier, sourceRequest map[string]ca
 				if !ok {
 					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q lost its conditional failure", ErrContribution, contribution.ID(), node.ID())
 				}
-				usesContext, err := prepareConditionalFailure(sourceRequest, previous, operation)
+				usesContext, err := prepareConditionalFailure(sourceRequest, sourceResponse, previous, operation, point)
 				if err != nil {
 					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q: %v", ErrContribution, contribution.ID(), node.ID(), err)
 				}
@@ -364,7 +392,7 @@ func preparePlan(identifier capabilityid.Identifier, sourceRequest map[string]ca
 				if !ok {
 					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q lost its metadata attachment", ErrContribution, contribution.ID(), node.ID())
 				}
-				if err := prepareMetadataAttachment(sourceRequest, previous, operation); err != nil {
+				if err := prepareMetadataAttachment(sourceRequest, sourceResponse, previous, operation, point); err != nil {
 					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q: %v", ErrContribution, contribution.ID(), node.ID(), err)
 				}
 				result.hasContextOperations = true
@@ -381,7 +409,7 @@ func preparePlan(identifier capabilityid.Identifier, sourceRequest map[string]ca
 					return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q has no lowered audit target", ErrContribution, contribution.ID(), node.ID())
 				}
 				for _, binding := range operation.Request {
-					requirements, err := prepareBinding(sourceRequest, previous, reference, binding)
+					requirements, err := prepareBinding(sourceRequest, sourceResponse, previous, reference, binding, point)
 					if err != nil {
 						return preparedPlan{}, fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, err)
 					}
@@ -399,7 +427,15 @@ func preparePlan(identifier capabilityid.Identifier, sourceRequest map[string]ca
 			}
 			previous[node.ID()] = node
 		}
-		result.contributions = append(result.contributions, contribution)
+		if len(nodes) == 0 {
+			continue
+		}
+		switch point {
+		case generation.GenerationPointInvocationPrepare:
+			result.preparations = append(result.preparations, contribution)
+		case generation.GenerationPointInvocationComplete:
+			result.completions = append(result.completions, contribution)
+		}
 	}
 	keys := make([]string, 0, len(byCapability))
 	for key := range byCapability {
@@ -421,9 +457,11 @@ func preparePlan(identifier capabilityid.Identifier, sourceRequest map[string]ca
 
 func prepareBinding(
 	sourceRequest map[string]canonicalField,
+	sourceResponse map[string]canonicalField,
 	previous map[string]generationlowering.Node,
 	reference generationlowering.TargetReference,
 	binding generation.GeneratedFieldBinding,
+	point generation.GenerationPoint,
 ) (bindingRequirements, error) {
 	target, ok := binding.Target()
 	if !ok {
@@ -447,7 +485,7 @@ func prepareBinding(
 		requirements.contextRead = true
 	} else {
 		var err error
-		source, err = resolvePrepareValue(sourceRequest, previous, binding.Value)
+		source, err = resolveInvocationValue(sourceRequest, sourceResponse, previous, binding.Value, point)
 		if err != nil {
 			return bindingRequirements{}, err
 		}
@@ -469,8 +507,10 @@ func prepareBinding(
 
 func prepareContextDerivation(
 	sourceRequest map[string]canonicalField,
+	sourceResponse map[string]canonicalField,
 	previous map[string]generationlowering.Node,
 	operation generation.GeneratedContextDerivation,
+	point generation.GenerationPoint,
 ) (bool, error) {
 	if _, err := generatedValueGoType(operation.Type, operation.Items); err != nil {
 		return false, err
@@ -479,14 +519,16 @@ func prepareContextDerivation(
 		_, err := generatedValueGoType(operation.Value.Invocation.Type, operation.Value.Invocation.Items)
 		return false, err
 	}
-	source, err := resolvePrepareValue(sourceRequest, previous, operation.Value)
+	source, err := resolveInvocationValue(sourceRequest, sourceResponse, previous, operation.Value, point)
 	return source.wholeResponse, err
 }
 
 func prepareMetadataAttachment(
 	sourceRequest map[string]canonicalField,
+	sourceResponse map[string]canonicalField,
 	previous map[string]generationlowering.Node,
 	operation generation.GeneratedMetadataAttachment,
+	point generation.GenerationPoint,
 ) error {
 	shape, ok := operation.Value.Shape()
 	if !ok {
@@ -499,7 +541,7 @@ func prepareMetadataAttachment(
 		_, err := generatedValueGoType(operation.Value.Invocation.Type, operation.Value.Invocation.Items)
 		return err
 	}
-	source, err := resolvePrepareValue(sourceRequest, previous, operation.Value)
+	source, err := resolveInvocationValue(sourceRequest, sourceResponse, previous, operation.Value, point)
 	if err != nil {
 		return err
 	}
@@ -516,10 +558,12 @@ type prepareValue struct {
 	wholeResponse bool
 }
 
-func resolvePrepareValue(
+func resolveInvocationValue(
 	sourceRequest map[string]canonicalField,
+	sourceResponse map[string]canonicalField,
 	previous map[string]generationlowering.Node,
 	value generation.GeneratedValue,
+	point generation.GenerationPoint,
 ) (prepareValue, error) {
 	shape, ok := value.Shape()
 	if !ok {
@@ -541,6 +585,17 @@ func resolvePrepareValue(
 		}
 		goType, err := canonicalFieldGoType("contract", "Request", name, field)
 		return prepareValue{expression: "request." + goname.Field(name), goType: goType, optional: !field.Required}, err
+	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationResponseField:
+		if point != generation.GenerationPointInvocationComplete {
+			return prepareValue{}, fmt.Errorf("value source %q is unavailable at point %q", value.Invocation.Source, point)
+		}
+		name := value.Invocation.Name
+		field, exists := sourceResponse[name]
+		if !exists {
+			return prepareValue{}, fmt.Errorf("response field %q is absent from the source contract", name)
+		}
+		goType, err := canonicalFieldGoType("contract", "Response", name, field)
+		return prepareValue{expression: "response." + goname.Field(name), goType: goType, optional: !field.Required}, err
 	case value.Node != nil:
 		prior, exists := previous[value.Node.ID]
 		if !exists {
@@ -584,16 +639,18 @@ func resolvePrepareValue(
 			return prepareValue{}, fmt.Errorf("node output %q is not renderable as contract data", value.Node.Output)
 		}
 	case value.Invocation != nil:
-		return prepareValue{}, fmt.Errorf("value source %q is not renderable at invocation.prepare", value.Invocation.Source)
+		return prepareValue{}, fmt.Errorf("value source %q is not renderable at %s", value.Invocation.Source, point)
 	default:
-		return prepareValue{}, errors.New("value source is not renderable at invocation.prepare")
+		return prepareValue{}, fmt.Errorf("value source is not renderable at %s", point)
 	}
 }
 
 func prepareConditionalFailure(
 	sourceRequest map[string]canonicalField,
+	sourceResponse map[string]canonicalField,
 	previous map[string]generationlowering.Node,
 	operation generation.GeneratedConditionalFailure,
+	point generation.GenerationPoint,
 ) (bool, error) {
 	value := operation.Condition.Value
 	if _, ok := value.Shape(); !ok {
@@ -610,6 +667,21 @@ func prepareConditionalFailure(
 		}
 		_, err := canonicalFieldGoType("contract", "Request", value.Invocation.Name, field)
 		return false, err
+	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationResponseField:
+		if point != generation.GenerationPointInvocationComplete {
+			return false, fmt.Errorf("value source %q is unavailable at point %q", value.Invocation.Source, point)
+		}
+		field, exists := sourceResponse[value.Invocation.Name]
+		if !exists {
+			return false, fmt.Errorf("response field %q is absent from the source contract", value.Invocation.Name)
+		}
+		_, err := canonicalFieldGoType("contract", "Response", value.Invocation.Name, field)
+		return false, err
+	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationError:
+		if point != generation.GenerationPointInvocationComplete {
+			return false, fmt.Errorf("value source %q is unavailable at point %q", value.Invocation.Source, point)
+		}
+		return false, nil
 	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationContextValue:
 		_, err := generatedValueGoType(value.Invocation.Type, value.Invocation.Items)
 		return true, err
@@ -619,15 +691,16 @@ func prepareConditionalFailure(
 		}
 		return false, nil
 	case value.Invocation != nil:
-		return false, fmt.Errorf("value source %q is not renderable at invocation.prepare", value.Invocation.Source)
+		return false, fmt.Errorf("value source %q is not renderable at %s", value.Invocation.Source, point)
 	default:
-		return false, errors.New("value source is not renderable at invocation.prepare")
+		return false, fmt.Errorf("value source is not renderable at %s", point)
 	}
 }
 
 func renderContextDerivation(
 	source *strings.Builder,
 	sourceRequest map[string]canonicalField,
+	sourceResponse map[string]canonicalField,
 	contribution generationlowering.Contribution,
 	node generationlowering.Node,
 	previous map[string]generationlowering.Node,
@@ -673,7 +746,7 @@ func renderContextDerivation(
 			optionalPresence = true
 		}
 	} else {
-		resolved, resolveErr := resolvePrepareValue(sourceRequest, previous, operation.Value)
+		resolved, resolveErr := resolveInvocationValue(sourceRequest, sourceResponse, previous, operation.Value, contribution.Point())
 		err = resolveErr
 		expression = resolved.expression
 		optionalPointer = resolved.optional
@@ -773,6 +846,7 @@ func renderContextDerivation(
 func renderMetadataAttachment(
 	source *strings.Builder,
 	sourceRequest map[string]canonicalField,
+	sourceResponse map[string]canonicalField,
 	contribution generationlowering.Contribution,
 	node generationlowering.Node,
 	previous map[string]generationlowering.Node,
@@ -818,7 +892,7 @@ func renderMetadataAttachment(
 		fmt.Fprintln(source, "\t}")
 		expression = sourceIdentifier
 	} else {
-		resolved, resolveErr := resolvePrepareValue(sourceRequest, previous, operation.Value)
+		resolved, resolveErr := resolveInvocationValue(sourceRequest, sourceResponse, previous, operation.Value, contribution.Point())
 		if resolveErr != nil {
 			return fmt.Errorf("%w: contribution %q node %q: %v", ErrContribution, contribution.ID(), node.ID(), resolveErr)
 		}
@@ -845,6 +919,7 @@ func renderMetadataAttachment(
 func renderConditionalFailure(
 	source *strings.Builder,
 	sourceRequest map[string]canonicalField,
+	sourceResponse map[string]canonicalField,
 	contribution generationlowering.Contribution,
 	node generationlowering.Node,
 	previous map[string]generationlowering.Node,
@@ -874,6 +949,22 @@ func renderConditionalFailure(
 		_, err = canonicalFieldGoType("contract", "Request", value.Invocation.Name, field)
 		expression = "request." + goname.Field(value.Invocation.Name)
 		optionalPointer = !field.Required
+	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationResponseField:
+		if contribution.Point() != generation.GenerationPointInvocationComplete {
+			return fmt.Errorf("%w: contribution %q node %q cannot read the canonical response at point %q", ErrContribution, contribution.ID(), node.ID(), contribution.Point())
+		}
+		field, exists := sourceResponse[value.Invocation.Name]
+		if !exists {
+			return fmt.Errorf("%w: contribution %q node %q response field %q is absent from the source contract", ErrContribution, contribution.ID(), node.ID(), value.Invocation.Name)
+		}
+		_, err = canonicalFieldGoType("contract", "Response", value.Invocation.Name, field)
+		expression = "response." + goname.Field(value.Invocation.Name)
+		optionalPointer = !field.Required
+	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationError:
+		if contribution.Point() != generation.GenerationPointInvocationComplete {
+			return fmt.Errorf("%w: contribution %q node %q cannot read the canonical invocation error at point %q", ErrContribution, contribution.ID(), node.ID(), contribution.Point())
+		}
+		expression = "invocationError"
 	case value.Invocation != nil && value.Invocation.Source == generation.GeneratedInvocationContextValue:
 		sourceIdentifier, sourceOK := node.SourceIdentifier()
 		var presenceOK bool
@@ -929,7 +1020,7 @@ func renderConditionalFailure(
 			return fmt.Errorf("%w: contribution %q node %q cannot render output %q from node %q", ErrContribution, contribution.ID(), node.ID(), value.Node.Output, value.Node.ID)
 		}
 	default:
-		return fmt.Errorf("%w: contribution %q node %q uses a condition value not renderable at invocation.prepare", ErrContribution, contribution.ID(), node.ID())
+		return fmt.Errorf("%w: contribution %q node %q uses a condition value not renderable at %s", ErrContribution, contribution.ID(), node.ID(), contribution.Point())
 	}
 	if err != nil {
 		return fmt.Errorf("%w: contribution %q node %q: %v", ErrContribution, contribution.ID(), node.ID(), err)
@@ -973,6 +1064,7 @@ func renderConditionalFailure(
 func renderAuditEventCall(
 	source *strings.Builder,
 	sourceRequest map[string]canonicalField,
+	sourceResponse map[string]canonicalField,
 	dependencies []invocationDependency,
 	contribution generationlowering.Contribution,
 	node generationlowering.Node,
@@ -995,7 +1087,7 @@ func renderAuditEventCall(
 		return fmt.Errorf("%w: contribution %q node %q has no audit error identifier", ErrContribution, contribution.ID(), node.ID())
 	}
 	fmt.Fprintf(source, "\tvar %s error\n", errorIdentifier)
-	bindings, err := renderCallBindings(source, sourceRequest, contribution, node, previous, reference, errorIdentifier, operation.Request)
+	bindings, err := renderCallBindings(source, sourceRequest, sourceResponse, contribution, node, previous, reference, errorIdentifier, operation.Request)
 	if err != nil {
 		return err
 	}
@@ -1019,9 +1111,10 @@ func renderAuditEventCall(
 	return nil
 }
 
-func renderPrepareCall(
+func renderCapabilityCall(
 	source *strings.Builder,
 	sourceRequest map[string]canonicalField,
+	sourceResponse map[string]canonicalField,
 	dependencies []invocationDependency,
 	contribution generationlowering.Contribution,
 	node generationlowering.Node,
@@ -1044,7 +1137,7 @@ func renderPrepareCall(
 	if !responseOK || !errorOK {
 		return fmt.Errorf("%w: contribution %q node %q has incomplete lowered identifiers", ErrContribution, contribution.ID(), node.ID())
 	}
-	bindings, err := renderCallBindings(source, sourceRequest, contribution, node, previous, reference, errorIdentifier, operation.Request)
+	bindings, err := renderCallBindings(source, sourceRequest, sourceResponse, contribution, node, previous, reference, errorIdentifier, operation.Request)
 	if err != nil {
 		return err
 	}
@@ -1070,6 +1163,7 @@ func renderPrepareCall(
 func renderCallBindings(
 	source *strings.Builder,
 	sourceRequest map[string]canonicalField,
+	sourceResponse map[string]canonicalField,
 	contribution generationlowering.Contribution,
 	node generationlowering.Node,
 	previous map[string]generationlowering.Node,
@@ -1120,7 +1214,7 @@ func renderCallBindings(
 				fmt.Fprintln(source, "\t}")
 			}
 		} else {
-			resolved, err = resolvePrepareValue(sourceRequest, previous, binding.Value)
+			resolved, err = resolveInvocationValue(sourceRequest, sourceResponse, previous, binding.Value, contribution.Point())
 			if err != nil {
 				return nil, fmt.Errorf("%w: contribution %q node %q binding %q: %v", ErrContribution, contribution.ID(), node.ID(), binding.Field, err)
 			}
