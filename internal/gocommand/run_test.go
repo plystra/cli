@@ -21,6 +21,17 @@ func TestMain(main *testing.M) {
 			os.Exit(3)
 		}
 		os.Exit(0)
+	case "output":
+		if len(os.Args) != 4 || os.Args[1] != "list" || os.Args[2] != "-m" || os.Args[3] != "example.com/plugin" {
+			_, _ = fmt.Fprintln(os.Stderr, "unexpected output helper arguments")
+			os.Exit(3)
+		}
+		_, _ = fmt.Fprintln(os.Stdout, `{"Path":"example.com/plugin"}`)
+		_, _ = fmt.Fprintln(os.Stderr, "non-fatal go warning")
+		os.Exit(0)
+	case "oversized":
+		_, _ = fmt.Fprint(os.Stdout, strings.Repeat("x", 1025))
+		os.Exit(0)
 	case "failure":
 		_, _ = fmt.Fprintln(os.Stderr, "go: reading https://person:secret@example.com/private?token=secret: denied")
 		_, _ = fmt.Fprintln(os.Stderr, strings.Repeat(mustGetwd()+" ", 300))
@@ -76,6 +87,63 @@ func TestRunReportsFailuresWithoutLeakingURLsOrLongOutput(t *testing.T) {
 	}
 	if !strings.Contains(message, "<redacted-url>") || len(message) > 4200 {
 		t.Fatalf("Run error was not redacted and bounded: length %d, value %q", len(message), message)
+	}
+}
+
+func TestOutputReturnsBoundedStdout(t *testing.T) {
+	t.Parallel()
+
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatalf("Executable: %v", err)
+	}
+	output, err := Output(context.Background(), Options{
+		Command:     command,
+		Directory:   t.TempDir(),
+		Environment: append(os.Environ(), "PLYSTRA_GO_COMMAND_HELPER=output"),
+		OutputLimit: 1024,
+	}, "list", "-m", "example.com/plugin")
+	if err != nil || string(output) != "{\"Path\":\"example.com/plugin\"}\n" {
+		t.Fatalf("Output = %q, %v", output, err)
+	}
+	output[0] = 'x'
+	if string(output) == "{\"Path\":\"example.com/plugin\"}\n" {
+		t.Fatal("test did not mutate returned output")
+	}
+}
+
+func TestOutputRejectsOversizedStdout(t *testing.T) {
+	t.Parallel()
+
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatalf("Executable: %v", err)
+	}
+	output, err := Output(context.Background(), Options{
+		Command:     command,
+		Environment: append(os.Environ(), "PLYSTRA_GO_COMMAND_HELPER=oversized"),
+		OutputLimit: 1024,
+	}, "list")
+	if !errors.Is(err, ErrOutputTooLarge) || output != nil {
+		t.Fatalf("Output = %q, %v, want ErrOutputTooLarge", output, err)
+	}
+}
+
+func TestOutputReportsRedactedFailure(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatalf("Executable: %v", err)
+	}
+	output, err := Output(context.Background(), Options{
+		Command:     command,
+		Directory:   directory,
+		Environment: append(os.Environ(), "PLYSTRA_GO_COMMAND_HELPER=failure"),
+	}, "list", "-m")
+	if !errors.Is(err, ErrRun) || output != nil || strings.Contains(err.Error(), directory) || strings.Contains(err.Error(), "person:secret") || !strings.Contains(err.Error(), "<redacted-url>") {
+		t.Fatalf("Output = %q, %v", output, err)
 	}
 }
 
