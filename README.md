@@ -170,6 +170,24 @@ plystra release
 
 Mutating commands perform all derivable generation automatically. Build and generation never publish or release as a side effect.
 
+### Application generation
+
+From any directory inside a runnable application module, install the complete current managed tree with:
+
+```powershell
+plystra generate
+```
+
+The command resolves the nearest root `plystra.yaml`, explicit Go Module dependencies, canonical providers, selected generation extensions, generation-derived requirements, contributions, and Capability Aliases. It renders the application-owned Go, HTTP, JavaScript, documentation, assembly-compatibility, and manifest surfaces; installs them transactionally; runs `go test -mod=readonly ./...` before commit; and re-resolves the application before completing so changed inputs or nondeterministic extension output roll back.
+
+Use the read-only consistency gate in local checks and CI:
+
+```powershell
+plystra generate --check
+```
+
+Check mode never writes application files. Both modes report deterministic `changed`, `missing`, `unexpected`, and `obsolete` paths and return a failing exit status while any drift remains. Installation preserves an unexpected unowned file rather than overwriting or deleting it.
+
 ## Development
 
 ```powershell

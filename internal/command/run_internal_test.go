@@ -37,3 +37,25 @@ func TestParseNewArguments(t *testing.T) {
 		})
 	}
 }
+
+func TestParseGenerateArguments(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		arguments []string
+		check     bool
+		ok        bool
+	}{
+		{arguments: []string{"generate"}, ok: true},
+		{arguments: []string{"generate", "--check"}, check: true, ok: true},
+		{arguments: nil},
+		{arguments: []string{"generate", "--write"}},
+		{arguments: []string{"generate", "--check", "--check"}},
+	}
+	for _, test := range tests {
+		check, ok := parseGenerateArguments(test.arguments)
+		if check != test.check || ok != test.ok {
+			t.Errorf("parseGenerateArguments(%q) = %t, %t; want %t, %t", test.arguments, check, ok, test.check, test.ok)
+		}
+	}
+}

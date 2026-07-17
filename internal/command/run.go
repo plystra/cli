@@ -9,17 +9,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/newproject"
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/version"
 )
 
-const usage = `Usage:
+const (
+	generationCommandTimeout = 15 * time.Minute
+	usage                    = `Usage:
   plystra help
   plystra version
   plystra new <module-path> [--library] [--plugin <name>]
   plystra plugin create <name>
+  plystra generate [--check]
 `
+)
 
 // Run executes one Plystra command and returns its process exit code.
 func Run(arguments []string, stdout, stderr io.Writer) int {
@@ -97,9 +103,58 @@ func RunIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		}
 		_, _ = fmt.Fprintf(stdout, "created plugin %s in %s\n", result.ID(), result.Path())
 		return 0
+	case "generate":
+		check, ok := parseGenerateArguments(arguments)
+		if !ok {
+			_, _ = io.WriteString(stderr, "usage: plystra generate [--check]\n")
+			return 2
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
+		defer cancel()
+		result, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
+			Start:       workingDirectory,
+			Check:       check,
+			Environment: environment,
+		})
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "%v\n", err)
+			return 1
+		}
+		if !result.Report().Clean() {
+			heading := "generated output remains inconsistent after installation"
+			if result.Checked() {
+				heading = "generated output is not current"
+			}
+			writeGenerationReport(stderr, heading, result.Report())
+			return 1
+		}
+		if result.Checked() {
+			_, _ = fmt.Fprintf(stdout, "generated output is current for %s in %s\n", result.Module().ModulePath(), result.Module().Path())
+		} else {
+			_, _ = fmt.Fprintf(stdout, "generated %s in %s\n", result.Module().ModulePath(), result.Module().Path())
+		}
+		return 0
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown command %q\n\n%s", arguments[0], usage)
 		return 2
+	}
+}
+
+func parseGenerateArguments(arguments []string) (bool, bool) {
+	switch {
+	case len(arguments) == 1:
+		return false, true
+	case len(arguments) == 2 && arguments[1] == "--check":
+		return true, true
+	default:
+		return false, false
+	}
+}
+
+func writeGenerationReport(writer io.Writer, heading string, report generatedfiles.Report) {
+	_, _ = fmt.Fprintf(writer, "%s:\n", heading)
+	for _, change := range report.Changes() {
+		_, _ = fmt.Fprintf(writer, "  %s %s\n", change.Kind(), change.Path())
 	}
 }
 

@@ -7,7 +7,7 @@ import (
 	"github.com/plystra/cli/internal/command"
 )
 
-const wantUsage = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path> [--library] [--plugin <name>]\n  plystra plugin create <name>\n"
+const wantUsage = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path> [--library] [--plugin <name>]\n  plystra plugin create <name>\n  plystra generate [--check]\n"
 
 func TestRunHelp(t *testing.T) {
 	t.Parallel()
@@ -72,6 +72,8 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "plugin unknown subcommand", arguments: []string{"plugin", "remove", "account"}, wantError: "usage: plystra plugin create <name>\n"},
 		{name: "plugin missing name", arguments: []string{"plugin", "create"}, wantError: "usage: plystra plugin create <name>\n"},
 		{name: "plugin extra argument", arguments: []string{"plugin", "create", "account", "extra"}, wantError: "usage: plystra plugin create <name>\n"},
+		{name: "generate unknown option", arguments: []string{"generate", "--write"}, wantError: "usage: plystra generate [--check]\n"},
+		{name: "generate duplicate check", arguments: []string{"generate", "--check", "--check"}, wantError: "usage: plystra generate [--check]\n"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
