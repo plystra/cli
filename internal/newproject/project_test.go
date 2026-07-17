@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/newproject"
@@ -79,7 +80,9 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 		".github/workflows/ci.yml",
 		".gitignore",
 		"README.md",
-		"generated/assembly/compatibility_gen.go",
+		"generated/.plystra-manifest.json",
+		"generated/go/assembly/compatibility_gen.go",
+		"generated/manifest.json",
 		"go.mod",
 		"go.sum",
 		"plystra.yaml",
@@ -114,6 +117,14 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 		}
 	}
 	assertModuleState(t, direct.Path(), modulePath)
+	generated, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       direct.Path(),
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil || !generated.Report().Clean() {
+		t.Fatalf("initial generated output = %#v, %v", generated.Report().Changes(), err)
+	}
 }
 
 func TestCreateLibraryAndPublicCommandProduceDeterministicBuildableModules(t *testing.T) {
@@ -154,7 +165,8 @@ func TestCreateLibraryAndPublicCommandProduceDeterministicBuildableModules(t *te
 		".github/workflows/ci.yml",
 		".gitignore",
 		"README.md",
-		"generated/assembly/compatibility_gen.go",
+		"generated/.plystra-manifest.json",
+		"generated/go/assembly/compatibility_gen.go",
 		"go.mod",
 		"go.sum",
 	}

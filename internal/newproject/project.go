@@ -12,6 +12,7 @@ import (
 
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/atomicfs"
+	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/plugincreate"
 	"golang.org/x/mod/modfile"
@@ -116,27 +117,45 @@ func populate(root, modulePath, name string, library bool) error {
 	if err != nil {
 		return fmt.Errorf("render Kernel compatibility source: %w", err)
 	}
+	managed := make([]generatedfiles.File, 0, 2)
+	compatibilityFile, err := generatedfiles.NewFile("generated/go/assembly/compatibility_gen.go", compatibility)
+	if err != nil {
+		return fmt.Errorf("prepare Kernel compatibility source: %w", err)
+	}
+	managed = append(managed, compatibilityFile)
+	if !library {
+		aliasManifest, err := generatedfiles.NewFile("generated/manifest.json", []byte("{\"capability_aliases\":[]}\n"))
+		if err != nil {
+			return fmt.Errorf("prepare empty Alias manifest: %w", err)
+		}
+		managed = append(managed, aliasManifest)
+	}
+	generated, err := generatedfiles.NewOutput(managed)
+	if err != nil {
+		return fmt.Errorf("prepare initial generated output: %w", err)
+	}
 	readme := readmeTemplate
 	if library {
 		readme = libraryReadmeTemplate
 	}
-	files := []struct {
+	type projectFile struct {
 		path string
 		data []byte
-	}{
+	}
+	files := []projectFile{
 		{path: "go.mod", data: []byte(fmt.Sprintf(goModuleTemplate, modulePath, KernelVersion))},
 		{path: "README.md", data: []byte(fmt.Sprintf(readme, name, modulePath))},
 		{path: ".gitignore", data: []byte(gitignoreTemplate)},
 		{path: ".gitattributes", data: []byte(gitattributesTemplate)},
 		{path: ".github/workflows/ci.yml", data: []byte(ciTemplate)},
-		{path: "generated/assembly/compatibility_gen.go", data: compatibility},
 	}
 	if !library {
-		files = append(files, struct {
-			path string
-			data []byte
-		}{path: "plystra.yaml", data: []byte(plystraTemplate)})
+		files = append(files, projectFile{path: "plystra.yaml", data: []byte(plystraTemplate)})
 	}
+	for _, file := range generated.Files() {
+		files = append(files, projectFile{path: file.Path(), data: file.Data()})
+	}
+	files = append(files, projectFile{path: generatedfiles.ManifestPath, data: generated.ManifestJSON()})
 	for _, file := range files {
 		fullPath := filepath.Join(root, filepath.FromSlash(file.path))
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {

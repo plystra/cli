@@ -41,7 +41,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	if !checked.Checked() || checked.Module().Path() != root || checked.Module().ModulePath() != "example.com/Acme/empty" {
 		t.Fatalf("checked result = %#v", checked)
 	}
-	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/manifest.json"}; !reflect.DeepEqual(got, want) {
+	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/assembly/compatibility_gen.go", "generated/manifest.json"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("missing files = %v, want %v", got, want)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
@@ -61,6 +61,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	}
 	assertFile(t, root, "generated/manifest.json", "{\"capability_aliases\":[]}\n")
 	assertFileExists(t, root, generatedfiles.ManifestPath)
+	assertFileExists(t, root, "generated/go/assembly/compatibility_gen.go")
 	assertFileMissing(t, root, "generated/sdk/javascript/package.json")
 
 	writeFile(t, filepath.Join(root, "generated", "manifest.json"), "drift\n")
@@ -128,6 +129,7 @@ capabilities:
 		"generated/docs/openapi.json",
 		"generated/go/adapters/http/email/send/v1/handler_gen.go",
 		"generated/go/adapters/http/mail/deliver/v1/handler_gen.go",
+		"generated/go/assembly/compatibility_gen.go",
 		"generated/go/clients/email/send/v1/client_gen.go",
 		"generated/go/clients/mail/deliver/v1/client_gen.go",
 		"generated/go/contracts/email/send/v1/contract_gen.go",

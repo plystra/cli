@@ -11,6 +11,7 @@ import (
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/aliasresolution"
 	"github.com/plystra/cli/internal/apidocgen"
+	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/clientgen"
 	"github.com/plystra/cli/internal/contractgen"
 	"github.com/plystra/cli/internal/generatedfiles"
@@ -23,7 +24,10 @@ import (
 	"github.com/plystra/cli/internal/sdkmodel"
 )
 
-const aliasManifestPath = "generated/manifest.json"
+const (
+	aliasManifestPath         = "generated/manifest.json"
+	assemblyCompatibilityPath = "generated/go/assembly/compatibility_gen.go"
+)
 
 var (
 	// ErrRender reports an incomplete or inconsistent resolved application or
@@ -39,10 +43,10 @@ type Options struct {
 	JavaScriptPackage string
 }
 
-// Render lowers final selected contributions once and renders contracts,
-// providers, canonical and Alias clients, canonical invocation paths, HTTP
-// adapters, the JavaScript SDK, API documentation, and the current Alias
-// manifest into one managed output model.
+// Render lowers final selected contributions once and renders the Kernel
+// assembly compatibility handshake, contracts, providers, canonical and Alias
+// clients, canonical invocation paths, HTTP adapters, the JavaScript SDK, API
+// documentation, and the current Alias manifest into one managed output model.
 func Render(options Options, resolution generationresolution.ExtensionResult) (generatedfiles.Output, error) {
 	context := resolution.Context()
 	if !validContext(context) {
@@ -69,6 +73,13 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	aliasManifest := append(aliases.CanonicalJSON(), '\n')
 	if err := add(aliasManifestPath, aliasManifest); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Alias manifest: %w", ErrRender, err)
+	}
+	compatibility, err := assemblygen.RenderCompatibility("assembly")
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: Kernel assembly compatibility: %w", ErrRender, err)
+	}
+	if err := add(assemblyCompatibilityPath, compatibility); err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: Kernel assembly compatibility: %w", ErrRender, err)
 	}
 
 	requirements := context.Requirements()
