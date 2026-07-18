@@ -34,7 +34,7 @@ var (
 	ErrGenerate = errors.New("generate Plystra module")
 	// ErrConcurrentChange reports module inputs or extension output that
 	// changed after the transaction's desired output was prepared.
-	ErrConcurrentChange = errors.New("Plystra module changed during generation")
+	ErrConcurrentChange = errors.New("plystra module changed during generation")
 	// ErrKernelDependency reports a runnable application that does not directly
 	// select the Kernel Go Module used by its generated runtime.
 	ErrKernelDependency = errors.New("invalid application Kernel dependency")
