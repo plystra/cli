@@ -124,6 +124,11 @@ type PluginConfiguration struct {
 	yaml     []byte
 }
 
+type pluginConfigurationRemoval struct {
+	pluginID string
+	source   string
+}
+
 // PluginID returns the canonical configured Plugin ID.
 func (c PluginConfiguration) PluginID() string { return c.pluginID }
 
@@ -166,6 +171,7 @@ type Manifest struct {
 	aliases                []Alias
 	removedAliases         []capabilityRemoval
 	configurations         []PluginConfiguration
+	removedConfigurations  []pluginConfigurationRemoval
 	startupTimeout         time.Duration
 	removeStartupTimeout   bool
 }
@@ -262,7 +268,7 @@ func Parse(data []byte) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
-	configurations, err := parseConfigurations(values["config"])
+	configurations, removedConfigurations, err := parseConfigurations(values["config"])
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -279,6 +285,7 @@ func Parse(data []byte) (Manifest, error) {
 		aliases:                aliases,
 		removedAliases:         removedAliases,
 		configurations:         configurations,
+		removedConfigurations:  removedConfigurations,
 		startupTimeout:         startupTimeout,
 		removeStartupTimeout:   removeStartupTimeout,
 	}, nil
@@ -315,33 +322,39 @@ func parseTimeouts(node *yaml.Node) (time.Duration, bool, error) {
 	return duration, false, nil
 }
 
-func parseConfigurations(node *yaml.Node) ([]PluginConfiguration, error) {
+func parseConfigurations(node *yaml.Node) ([]PluginConfiguration, []pluginConfigurationRemoval, error) {
 	if node == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	values, err := mapping(node, "config")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	configurations := make([]PluginConfiguration, 0, len(values))
+	removals := make([]pluginConfigurationRemoval, 0, len(values))
 	for _, pluginID := range sortedNodeKeys(values) {
 		if err := pluginid.Validate(pluginID); err != nil {
-			return nil, invalid("config key %q is not a canonical Plugin ID", pluginID)
+			return nil, nil, invalid("config key %q is not a canonical Plugin ID", pluginID)
+		}
+		source := fmt.Sprintf("plystra.yaml config[%q]", pluginID)
+		if isNull(values[pluginID]) {
+			removals = append(removals, pluginConfigurationRemoval{pluginID: pluginID, source: source})
+			continue
 		}
 		if values[pluginID].Kind != yaml.MappingNode {
-			return nil, invalid("config[%q] must be a mapping", pluginID)
+			return nil, nil, invalid("config[%q] must be a mapping or null", pluginID)
 		}
 		data, err := yaml.Marshal(values[pluginID])
 		if err != nil {
-			return nil, invalid("config[%q] cannot be normalized", pluginID)
+			return nil, nil, invalid("config[%q] cannot be normalized", pluginID)
 		}
 		configurations = append(configurations, PluginConfiguration{
 			pluginID: pluginID,
-			source:   fmt.Sprintf("plystra.yaml config[%q]", pluginID),
+			source:   source,
 			yaml:     append([]byte(nil), data...),
 		})
 	}
-	return configurations, nil
+	return configurations, removals, nil
 }
 
 func parseHTTP(node *yaml.Node) (string, bool, bool, []HTTPExposure, []capabilityRemoval, error) {

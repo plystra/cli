@@ -23,6 +23,7 @@ import (
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/projectlocate"
+	kernelconfiguration "github.com/plystra/kernel/configuration"
 )
 
 func TestMain(main *testing.M) {
@@ -380,6 +381,47 @@ replace example.com/smtp => ../smtp
 	records := compositionProvenance(result.Composition().Provenance(), `capabilities.use["email.send/v1"]`)
 	if len(records) != 1 || len(records[0].Sources()) != 1 || !strings.Contains(records[0].Sources()[0], "example.com/smtp@v1.0.0/plystra.yaml") {
 		t.Fatalf("inherited Provider provenance = %#v", records)
+	}
+}
+
+func TestResolveConfigurationRemovalStillRunsFinalRequiredFieldValidation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	dependencyRoot := filepath.Join(root, "smtp")
+	writeModule(t, dependencyRoot, "example.com/smtp")
+	privateHost := "private-dependency.example"
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities: {use: {email.send/v1: example.smtp}}\nconfig: {example.smtp: {host: "+privateHost+"}}\n")
+	writePlugin(t, dependencyRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\nconfig:\n  host: {type: string, required: true}\n")
+	writeCapability(t, dependencyRoot, "smtp", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
+
+go 1.26
+
+require example.com/smtp v1.0.0
+
+replace example.com/smtp => ../smtp
+`)
+	manifestPath := filepath.Join(appRoot, "plystra.yaml")
+	writeFile(t, manifestPath, "capabilities: {require: [email.send/v1]}\nconfig: {example.smtp: {host: null}}\n")
+	options := applicationresolve.Options{
+		Start:       appRoot,
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+	}
+
+	_, err := applicationresolve.Resolve(t.Context(), options)
+	if !errors.Is(err, kernelconfiguration.ErrMissingField) || strings.Contains(err.Error(), privateHost) {
+		t.Fatalf("Resolve removed required field error = %v", err)
+	}
+	writeFile(t, manifestPath, "capabilities: {require: [email.send/v1]}\nconfig: {example.smtp: {host: current.example}}\n")
+	result, err := applicationresolve.Resolve(t.Context(), options)
+	if err != nil {
+		t.Fatalf("Resolve replacement field: %v", err)
+	}
+	configured, exists := result.Manifest().Configuration("example.smtp")
+	if !exists || !bytes.Contains(configured.YAML(), []byte("host: current.example")) {
+		t.Fatalf("effective replacement configuration = %s, %t", configured.YAML(), exists)
 	}
 }
 

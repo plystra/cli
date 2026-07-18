@@ -651,6 +651,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"Remove only exact inherited declarations with sparse edits and null",
 		"remove: [diagnostics.internal/v1]",
 		"email.send/v1: null",
+		"legacy_host: null",
+		"Declared objects merge recursively",
 		"dependency composition digest",
 		"There is no handwritten provider registration",
 		"dependencies.Dependencies",

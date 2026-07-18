@@ -322,7 +322,10 @@ Composition is typed and independent of dependency order:
 - Identical additions, removals, Provider selections, and Alias declarations
   deduplicate.
 - Plugin configuration merges by fields declared in that Plugin's
-  `plugin.yaml`; unknown fields and invalid types fail.
+  `plugin.yaml`. Declared objects merge recursively; scalar and array fields
+  replace as complete values. A keyed `null` removes one inherited field, and
+  `config.<plugin-id>: null` removes that Plugin's inherited object. Unknown
+  fields and invalid or changing types fail.
 - Dependency `http.address`, `timeouts.startup`, and other process settings do
   not enter the current Project.
 - Incompatible inherited Providers, Aliases, or Plugin fields fail with every
@@ -360,12 +363,20 @@ capabilities:
     email.send/v1: null
   aliases:
     mail.send/v1: null
+
+config:
+  acme.email.smtp:
+    legacy_host: null
 ```
 
 The sparse set form may contain `add`, `remove`, or both, but the same
 Capability cannot occur in both lists. A keyed `null` removes only that exact
-Provider or Alias decision. When dependencies disagree between an addition
-and removal, the current Project must make that same exact decision.
+Provider, Alias, Plugin object, or declared Plugin-field decision. Nested
+object keys merge recursively, while arrays are one replaceable value rather
+than an appendable list. When dependencies disagree between an addition and
+removal, the current Project must make that same exact decision. Removing a
+required Plugin field still fails final configuration validation unless a
+valid default supplies it.
 
 After changing `go.mod`, a replacement, or a dependency version, run:
 

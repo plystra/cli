@@ -247,6 +247,7 @@ func TestParseAllowsEmptyOptionalSections(t *testing.T) {
 		[]byte("capabilities: {}\n"),
 		[]byte("capabilities:\n  aliases: {}\n"),
 		[]byte("capabilities: {require: {add: [], remove: []}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n"),
+		[]byte("config: {acme.plugin: null}\n"),
 		[]byte("timeouts: {startup: null}\n"),
 	} {
 		manifest, err := applicationmeta.Parse(data)
@@ -381,6 +382,8 @@ func FuzzParseApplicationManifest(f *testing.F) {
 		"http: {address: null, expose: {add: [kernel.health/v1], remove: [order.create/v1]}}\n",
 		"capabilities: {aliases: {}}\n",
 		"capabilities: {require: {remove: [order.create/v1]}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n",
+		"config: {acme.plugin: null}\n",
+		"config: {acme.plugin: {settings: {legacy: null, nested: {enabled: true}}}}\n",
 		"capabilities: {require: [kernel.health/v1, order.create/v1], use: {order.create/v1: acme.orders}, aliases: {}}\n",
 		aliasYAML("authn.login/v1: authn.login.password/v1"),
 		aliasYAML("account.sign-in/v1: {target: authn.login.password/v1, expose: {go: true, http: false, javascript: false}, deprecated: {message: old}}"),

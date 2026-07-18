@@ -1,21 +1,17 @@
 package applicationmeta
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilityid"
-	"github.com/plystra/kernel/configuration"
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
-	"go.yaml.in/yaml/v3"
 )
 
 var (
@@ -159,7 +155,7 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
-	configurations, err := composeConfigurations(ordered, current.Configurations(), schemas, records)
+	configurations, err := composePluginConfigurations(ordered, current, schemas, records)
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
@@ -542,219 +538,6 @@ func inheritedAliasConflict(id capabilityid.Identifier, candidates map[string]*a
 		parts = append(parts, fmt.Sprintf("%s from %s", declaration, strings.Join(sortedSet(candidate.sources), ", ")))
 	}
 	return fmt.Errorf("%w: capabilities.aliases[%q] has incompatible declarations: %s; set or remove that exact key in the current Project configuration", ErrInheritedConflict, id.String(), strings.Join(parts, "; "))
-}
-
-type configCandidate struct {
-	yaml    []byte
-	sources map[string]struct{}
-}
-
-type configuredField struct {
-	pluginID string
-	name     string
-	yaml     []byte
-	digest   string
-	source   string
-}
-
-func composeConfigurations(dependencies []Dependency, current []PluginConfiguration, schemas SchemaLookup, records map[string]*provenanceRecord) ([]PluginConfiguration, error) {
-	inherited := make(map[string]map[string]*configCandidate)
-	configuredPlugins := make(map[string]string)
-	for _, dependency := range dependencies {
-		for _, configured := range dependency.Manifest.Configurations() {
-			source := dependencySource(dependency, configured.source)
-			if existing, exists := configuredPlugins[configured.pluginID]; !exists || source < existing {
-				configuredPlugins[configured.pluginID] = source
-			}
-			fields, err := normalizeConfiguredFields(configured, schemas)
-			if err != nil {
-				return nil, fmt.Errorf("dependency %s: %w", dependencyIdentity(dependency), err)
-			}
-			for _, field := range fields {
-				path := configFieldPath(field.pluginID, field.name)
-				source := dependencySource(dependency, field.source)
-				addProvenance(records, path, field.digest, source, false)
-				byDigest := inherited[path]
-				if byDigest == nil {
-					byDigest = make(map[string]*configCandidate)
-					inherited[path] = byDigest
-				}
-				candidate := byDigest[field.digest]
-				if candidate == nil {
-					candidate = &configCandidate{yaml: append([]byte(nil), field.yaml...), sources: make(map[string]struct{})}
-					byDigest[field.digest] = candidate
-				}
-				candidate.sources[source] = struct{}{}
-				if bytes.Compare(field.yaml, candidate.yaml) < 0 {
-					candidate.yaml = append(candidate.yaml[:0], field.yaml...)
-				}
-			}
-		}
-	}
-
-	selected := make(map[string]configuredField)
-	for _, configured := range current {
-		configuredPlugins[configured.pluginID] = configured.source
-		fields, err := normalizeConfiguredFields(configured, schemas)
-		if err != nil {
-			return nil, err
-		}
-		for _, field := range fields {
-			selected[configFieldPath(field.pluginID, field.name)] = field
-		}
-	}
-	paths := make([]string, 0, len(inherited))
-	for path := range inherited {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	for _, path := range paths {
-		candidates := inherited[path]
-		if _, replaced := selected[path]; replaced {
-			continue
-		}
-		if len(candidates) != 1 {
-			return nil, inheritedConfigurationConflict(path, candidates)
-		}
-		pluginID, name, err := parseConfigFieldPath(path)
-		if err != nil {
-			return nil, err
-		}
-		for digest, candidate := range candidates {
-			sources := sortedSet(candidate.sources)
-			selected[path] = configuredField{pluginID: pluginID, name: name, yaml: append([]byte(nil), candidate.yaml...), digest: digest, source: sources[0]}
-		}
-	}
-
-	byPlugin := make(map[string]map[string]configuredField)
-	for pluginID := range configuredPlugins {
-		byPlugin[pluginID] = make(map[string]configuredField)
-	}
-	for _, field := range selected {
-		fields := byPlugin[field.pluginID]
-		if fields == nil {
-			fields = make(map[string]configuredField)
-			byPlugin[field.pluginID] = fields
-		}
-		fields[field.name] = field
-	}
-	pluginIDs := make([]string, 0, len(byPlugin))
-	for pluginID := range byPlugin {
-		pluginIDs = append(pluginIDs, pluginID)
-	}
-	sort.Strings(pluginIDs)
-	result := make([]PluginConfiguration, 0, len(pluginIDs))
-	for _, pluginID := range pluginIDs {
-		data, err := marshalConfigurationFields(byPlugin[pluginID])
-		if err != nil {
-			return nil, fmt.Errorf("config[%q]: %v", pluginID, err)
-		}
-		source := configuredPlugins[pluginID]
-		result = append(result, PluginConfiguration{pluginID: pluginID, source: source, yaml: data})
-	}
-	return result, nil
-}
-
-func normalizeConfiguredFields(configured PluginConfiguration, schemas SchemaLookup) ([]configuredField, error) {
-	schema, exists := schemas(configured.pluginID)
-	if !exists {
-		return nil, fmt.Errorf("%w for Plugin %q at %s", ErrConfigurationSchema, configured.pluginID, configured.source)
-	}
-	partial, err := configuration.NormalizePartial(schema, configured.yaml)
-	if err != nil {
-		return nil, fmt.Errorf("config[%q] at %s: %w", configured.pluginID, configured.source, err)
-	}
-	fields := make([]configuredField, 0, len(partial.Names()))
-	for _, name := range partial.Names() {
-		data, _ := partial.YAML(name)
-		digest, _ := partial.Digest(name)
-		fields = append(fields, configuredField{
-			pluginID: configured.pluginID,
-			name:     name,
-			yaml:     data,
-			digest:   digest,
-			source:   configFieldSource(configured.source, name),
-		})
-	}
-	return fields, nil
-}
-
-func inheritedConfigurationConflict(path string, candidates map[string]*configCandidate) error {
-	digests := make([]string, 0, len(candidates))
-	for digest := range candidates {
-		digests = append(digests, digest)
-	}
-	sort.Strings(digests)
-	parts := make([]string, 0, len(digests))
-	for _, digest := range digests {
-		parts = append(parts, strings.Join(sortedSet(candidates[digest].sources), ", "))
-	}
-	return fmt.Errorf("%w: %s has incompatible normalized values from %s; set or remove that exact field in the current Project configuration", ErrInheritedConflict, path, strings.Join(parts, "; "))
-}
-
-func marshalConfigurationFields(fields map[string]configuredField) ([]byte, error) {
-	names := make([]string, 0, len(fields))
-	for name := range fields {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	root := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	for _, name := range names {
-		node, err := decodeFieldNode(fields[name].yaml)
-		if err != nil {
-			return nil, err
-		}
-		root.Content = append(root.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name},
-			node,
-		)
-	}
-	var output bytes.Buffer
-	encoder := yaml.NewEncoder(&output)
-	encoder.SetIndent(2)
-	if err := encoder.Encode(root); err != nil {
-		_ = encoder.Close()
-		return nil, err
-	}
-	if err := encoder.Close(); err != nil {
-		return nil, err
-	}
-	return append([]byte(nil), output.Bytes()...), nil
-}
-
-func decodeFieldNode(data []byte) (*yaml.Node, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	var document yaml.Node
-	if err := decoder.Decode(&document); err != nil || document.Kind != yaml.DocumentNode || len(document.Content) != 1 {
-		return nil, errors.New("normalized field is not one YAML document")
-	}
-	var trailing yaml.Node
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return nil, errors.New("normalized field has trailing YAML")
-	}
-	return document.Content[0], nil
-}
-
-func configFieldPath(pluginID, name string) string {
-	return fmt.Sprintf("config[%q][%q]", pluginID, name)
-}
-
-func parseConfigFieldPath(path string) (string, string, error) {
-	const prefix = "config[\""
-	if !strings.HasPrefix(path, prefix) {
-		return "", "", errors.New("invalid composed configuration field path")
-	}
-	separator := "\"][\""
-	remainder := strings.TrimPrefix(path, prefix)
-	pluginID, name, exists := strings.Cut(remainder, separator)
-	if !exists || !strings.HasSuffix(name, "\"]") {
-		return "", "", errors.New("invalid composed configuration field path")
-	}
-	return pluginID, strings.TrimSuffix(name, "\"]"), nil
-}
-
-func configFieldSource(source, name string) string {
-	return source + fmt.Sprintf("[%q]", name)
 }
 
 func dependencySource(dependency Dependency, source string) string {

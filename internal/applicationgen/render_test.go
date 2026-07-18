@@ -116,6 +116,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		`"path":"http.expose[\"diagnostics.internal/v1\"]"`,
 		`"removed":true`,
 		`"path":"config[\"acme.business\"][\"password\"]"`,
+		`"path":"config[\"acme.business\"][\"legacy\"]"`,
 		`example.com/platform@v1.2.3/plystra.yaml config[\"acme.business\"][\"password\"]`,
 	} {
 		if !strings.Contains(manifest, required) {
@@ -380,11 +381,11 @@ func testComposition() applicationmeta.Composition {
 
 func dependencyComposition(t testing.TB) applicationmeta.Composition {
 	t.Helper()
-	schema, err := manifest.ParseConfig([]byte("password: {type: secret}\n"))
+	schema, err := manifest.ParseConfig([]byte("legacy: {type: string}\npassword: {type: secret}\n"))
 	if err != nil {
 		t.Fatalf("manifest.ParseConfig: %v", err)
 	}
-	dependency, err := applicationmeta.Parse([]byte("http: {expose: {remove: [diagnostics.internal/v1]}}\nconfig: {acme.business: {password: {env: PRIVATE_APPLICATION_TOKEN}}}\n"))
+	dependency, err := applicationmeta.Parse([]byte("http: {expose: {remove: [diagnostics.internal/v1]}}\nconfig: {acme.business: {legacy: null, password: {env: PRIVATE_APPLICATION_TOKEN}}}\n"))
 	if err != nil {
 		t.Fatalf("applicationmeta.Parse dependency: %v", err)
 	}

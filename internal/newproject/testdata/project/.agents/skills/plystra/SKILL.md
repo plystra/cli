@@ -80,6 +80,8 @@ Composition uses field-specific rules:
 - Identical additions, removals, Provider selections, and Alias declarations
   deduplicate.
 - Plugin configuration merges only by fields declared in plugin.yaml.
+  Declared objects merge recursively; scalar and array fields replace as one
+  value. Null removes one inherited field or a complete Plugin config entry.
 - Dependency http.address and timeouts.startup never replace this Project's
   process settings.
 - Incompatible Provider, Alias, or Plugin-field values fail with every
@@ -113,11 +115,16 @@ tombstones:
         email.send/v1: null
       aliases:
         mail.send/v1: null
+    config:
+      acme.email.smtp:
+        legacy_host: null
 
 The same Capability cannot appear in both add and remove. A null entry removes
-only that keyed Provider or Alias decision. An inherited add/remove conflict
-must be resolved by the current Project at that exact key; dependency ordering
-never resolves it.
+only that keyed Provider, Alias, Plugin object, or declared Plugin field.
+Nested object keys merge recursively, while arrays replace as a complete value.
+Removing a required field still fails final validation unless it has a valid
+default. An inherited add/remove conflict must be resolved by the current
+Project at that exact key; dependency ordering never resolves it.
 
 ## Naming and identity rules
 

@@ -153,6 +153,9 @@ func manifestDifferenceOutsideHTTPExposure(left, right Manifest) string {
 	if !slices.Equal(left.removedAliases, right.removedAliases) {
 		return "capabilities.aliases removals"
 	}
+	if !slices.Equal(left.removedConfigurations, right.removedConfigurations) {
+		return "config removals"
+	}
 	leftConfigurations := left.Configurations()
 	rightConfigurations := right.Configurations()
 	if len(leftConfigurations) != len(rightConfigurations) {
