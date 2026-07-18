@@ -859,7 +859,7 @@ func emptyExtensionOutput(_ int, _ generation.Context) (generation.Output, error
 	return generation.Output{}, nil
 }
 
-func requireCapabilityOutput(t *testing.T, namespace, source, rule, capability string) func(int, generation.Context) (generation.Output, error) {
+func requireCapabilityOutput(t testing.TB, namespace, source, rule, capability string) func(int, generation.Context) (generation.Output, error) {
 	t.Helper()
 	sourceID := extensionTestCapabilityID(t, source)
 	capabilityID := extensionTestCapabilityID(t, capability)
@@ -873,7 +873,7 @@ func requireCapabilityOutput(t *testing.T, namespace, source, rule, capability s
 	}
 }
 
-func extensionTestInput(t *testing.T, order, verify, audit []byte) ExtensionInput {
+func extensionTestInput(t testing.TB, order, verify, audit []byte) ExtensionInput {
 	t.Helper()
 	return ExtensionInput{
 		Input: Input{
@@ -898,7 +898,7 @@ func extensionTestInput(t *testing.T, order, verify, audit []byte) ExtensionInpu
 	}
 }
 
-func extensionTestApplicationAliases(t *testing.T, aliases string) []applicationmeta.Alias {
+func extensionTestApplicationAliases(t testing.TB, aliases string) []applicationmeta.Alias {
 	t.Helper()
 	manifest, err := applicationmeta.Parse([]byte("capabilities:\n  aliases:\n" + aliases))
 	if err != nil {
@@ -907,7 +907,7 @@ func extensionTestApplicationAliases(t *testing.T, aliases string) []application
 	return manifest.Aliases()
 }
 
-func extensionTestHTTPExposures(t *testing.T, capabilities ...string) []applicationmeta.HTTPExposure {
+func extensionTestHTTPExposures(t testing.TB, capabilities ...string) []applicationmeta.HTTPExposure {
 	t.Helper()
 	var source strings.Builder
 	source.WriteString("http:\n  expose:\n")
@@ -936,7 +936,7 @@ func extensionTestPlugin(id, path string, provides ...string) Plugin {
 	}
 }
 
-func extensionTestContract(t *testing.T, id, extra string) []byte {
+func extensionTestContract(t testing.TB, id, extra string) []byte {
 	t.Helper()
 	source := []byte("id: " + id + "\nrequest: {}\nresponse: {}\nerrors: []\n" + extra)
 	canonical, err := capabilitymeta.NormalizeSchema(source)
@@ -946,7 +946,7 @@ func extensionTestContract(t *testing.T, id, extra string) []byte {
 	return canonical
 }
 
-func extensionTestDeclaration(t *testing.T, pluginID, namespace, capability string) generationactivation.Declaration {
+func extensionTestDeclaration(t testing.TB, pluginID, namespace, capability string) generationactivation.Declaration {
 	t.Helper()
 	data := []byte("id: " + pluginID + "\nprovides: [" + capability + "]\ngeneration:\n  api: v1\n  package: ./generation\n  activations:\n    - namespace: " + namespace + "\n      capability: " + capability + "\n")
 	manifest, err := pluginmeta.Parse(data)
@@ -964,7 +964,7 @@ func extensionTestDeclaration(t *testing.T, pluginID, namespace, capability stri
 	}
 }
 
-func extensionTestCatalog(t *testing.T, declarations ...generationactivation.Declaration) generationactivation.Catalog {
+func extensionTestCatalog(t testing.TB, declarations ...generationactivation.Declaration) generationactivation.Catalog {
 	t.Helper()
 	catalog, err := generationactivation.New(declarations)
 	if err != nil {
@@ -973,7 +973,7 @@ func extensionTestCatalog(t *testing.T, declarations ...generationactivation.Dec
 	return catalog
 }
 
-func extensionTestCapabilityID(t *testing.T, value string) generation.CapabilityID {
+func extensionTestCapabilityID(t testing.TB, value string) generation.CapabilityID {
 	t.Helper()
 	id, err := generation.ParseCapabilityID(value)
 	if err != nil {
@@ -982,7 +982,7 @@ func extensionTestCapabilityID(t *testing.T, value string) generation.Capability
 	return id
 }
 
-func extensionTestPluginID(t *testing.T, value string) generation.PluginID {
+func extensionTestPluginID(t testing.TB, value string) generation.PluginID {
 	t.Helper()
 	id, err := generation.ParsePluginID(value)
 	if err != nil {
@@ -991,7 +991,7 @@ func extensionTestPluginID(t *testing.T, value string) generation.PluginID {
 	return id
 }
 
-func extensionTestInternalCapabilityID(t *testing.T, value string) capabilityid.Identifier {
+func extensionTestInternalCapabilityID(t testing.TB, value string) capabilityid.Identifier {
 	t.Helper()
 	parsed, err := capabilityid.Parse(value)
 	if err != nil {

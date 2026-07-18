@@ -244,6 +244,7 @@ go test ./...
 go test -race ./...
 go vet ./...
 go run ./cmd/plystra --help
+go test ./internal/generationresolution -run '^$' -bench '^BenchmarkGenerationFixedPoint$' -benchmem
 go test ./internal/clientgen -run '^$' -bench 'BenchmarkGenerated(CanonicalInvocation|AliasForwarding)$' -benchmem
 go test ./internal/httpgen -run '^$' -bench '^BenchmarkGeneratedHTTPInvocation$' -benchmem
 ```
@@ -260,4 +261,4 @@ node --conditions=browser --test test/runtime.test.mjs
 npm pack --dry-run --json
 ```
 
-The two generated-client benchmarks use identical no-op canonical target work. `BenchmarkGeneratedCanonicalInvocation` measures the canonical generated client and invocation path; `BenchmarkGeneratedAliasForwarding` adds exactly the application-local Alias client layer. `BenchmarkGeneratedHTTPInvocation` measures the generated strict JSON transport, root context, canonical application invocation, and response serialization around a no-op in-process provider. Raw Kernel canonical dispatch remains a separate `kernel` benchmark and is not folded into these CLI results.
+`BenchmarkGenerationFixedPoint` measures a three-pass selected-extension closure that activates AuthN and derives one ordinary audit requirement through the real resolver with an in-process test extension helper. The two generated-client benchmarks use identical no-op canonical target work. `BenchmarkGeneratedCanonicalInvocation` measures the canonical generated client and invocation path; `BenchmarkGeneratedAliasForwarding` adds exactly the application-local Alias client layer. `BenchmarkGeneratedHTTPInvocation` measures the generated strict JSON transport, root context, canonical application invocation, and response serialization around a no-op in-process provider. Raw Kernel canonical dispatch remains a separate `kernel` benchmark and is not folded into these CLI results.
