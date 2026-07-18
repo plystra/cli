@@ -563,6 +563,9 @@ the documented install command.
 Use createPlystraClient from the generated package and call the nested exact
 version method, for example client.records.read.v1({record_id: "demo"}). Only
 explicitly exposed canonical Capabilities and valid Alias surfaces appear.
+When configuring getAccessToken, return only the raw token. The generated
+transport adds the Bearer authorization scheme and rejects a callback value
+that already includes the Bearer scheme before sending a request.
 Provider packages, runtime configuration, verified internal context, and Secret
 values must never appear in the browser package.
 

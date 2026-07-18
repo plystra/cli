@@ -20,11 +20,13 @@ import { createPlystraClient } from "@acme/project-sdk";
 
 const client = createPlystraClient({
   baseUrl: "https://api.example.com",
-  getAccessToken: async () => accessToken,
+  getAccessToken: async () => rawAccessToken,
 });
 
 const response = await client.account.profile.get.v2({});
 ```
+
+`getAccessToken` returns only the raw token value. The generated transport adds the `Bearer` authorization scheme; returning a value that already includes that scheme fails before the request is sent.
 
 Only explicitly exposed canonical operations and validated application-local Alias surfaces are generated. Alias methods reuse their direct canonical target contract and invoke the matching generated Alias HTTP route. Provider packages, server configuration, verified internal context, and Secret values are never included.
 

@@ -92,6 +92,7 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		`export type ErrorCode = "invalid_recipient" | "temporarily_unavailable";`,
 		`Number.isSafeInteger`,
 		`getAccessToken`,
+		`raw token without the Bearer scheme`,
 		`"typescript": "7.0.2"`,
 		`package-lock=false`,
 		`npm install --ignore-scripts --no-audit --no-fund`,

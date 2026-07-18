@@ -31,6 +31,7 @@ export type JSONValue =
 
 export interface ClientOptions {
   readonly baseUrl: string | URL;
+  /** Returns the raw access token; Plystra adds the Bearer authorization scheme. */
   readonly getAccessToken?: () => Awaitable<string | null | undefined>;
   readonly fetch?: typeof globalThis.fetch;
 }
@@ -126,6 +127,11 @@ export async function invoke(
         new TextEncoder().encode(token).byteLength > maximumCredentialBytes
       ) {
         throw new TypeError("getAccessToken returned an invalid credential");
+      }
+      if (/^Bearer(?: |$)/i.test(token)) {
+        throw new TypeError(
+          "getAccessToken must return the raw token without the Bearer scheme",
+        );
       }
       headers.set("Authorization", "Bearer " + token);
     }

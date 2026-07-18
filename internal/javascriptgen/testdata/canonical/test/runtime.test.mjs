@@ -283,6 +283,27 @@ test("credentials, cancellation, and network failures are bounded and normalized
     TypeError,
   );
 
+  const prefixedCredential = createEmailSendV1({
+    baseUrl: "https://api.example.test",
+    getAccessToken: () => "Bearer browser-token",
+    fetch: async () => {
+      calls++;
+      return jsonResponse({ accepted: true });
+    },
+  });
+  await assert.rejects(
+    () =>
+      prefixedCredential({
+        to: "person@example.com",
+        tags: [],
+        priority: "normal",
+      }),
+    (error) =>
+      error instanceof TypeError &&
+      error.message ===
+        "getAccessToken must return the raw token without the Bearer scheme",
+  );
+
   const credentialFailure = createEmailSendV1({
     baseUrl: "https://api.example.test",
     getAccessToken: () => {

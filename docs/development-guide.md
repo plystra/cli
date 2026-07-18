@@ -657,11 +657,15 @@ import { createPlystraClient } from "@acme/orders-sdk";
 
 const client = createPlystraClient({
   baseUrl: "http://localhost:8080",
-  getAccessToken: async () => accessToken,
+  getAccessToken: async () => rawAccessToken,
 });
 
 const item = await client.catalog.item.get.v1({item_id: "coffee"});
 ```
+
+`getAccessToken` returns the raw token only. The generated transport adds the
+`Bearer` authorization scheme; do not include `Bearer` in the callback result.
+An already-prefixed value fails locally before any request is sent.
 
 The SDK validates requests and responses, uses the exact generated HTTP route,
 normalizes network and credential failures, and exposes only stable error
