@@ -258,6 +258,8 @@ For a runnable module, the command resolves the root `plystra.yaml`, explicit Go
 
 Both paths install output transactionally and run `go test -mod=readonly ./...` before commit. Runnable generation re-resolves the complete application, while library generation reindexes its declarations and rendered ownership snapshot; changed inputs or nondeterministic output roll back the transaction.
 
+Go subprocesses preserve an explicit `GOWORK` selection. An automatically discovered enclosing `go.work` remains active when it validly includes the nearest module; when it is valid but does not list that module, the CLI runs the subprocess with `GOWORK=off` so an unrelated parent workspace cannot redirect generation or validation. Malformed workspaces, missing `use` directories, and invalid used modules remain active so the Go tool reports the original workspace error instead of having it hidden.
+
 Use the read-only consistency gate in local checks and CI:
 
 ```powershell
