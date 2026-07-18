@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationgen"
@@ -25,7 +26,7 @@ func TestLoadGeneratedDependencyBaselinePrefersOwnershipRecovery(t *testing.T) {
 	writeRecoveryOutput(t, root, recoveryManifest)
 	writeBaselineFile(t, root, generatedfiles.ApplicationManifestPath, driftedManifest)
 
-	baseline, err := loadGeneratedDependencyBaseline(root)
+	baseline, _, err := loadGeneratedDependencyBaseline(root, defaultConfigurationSelector())
 	if err != nil {
 		t.Fatalf("loadGeneratedDependencyBaseline: %v", err)
 	}
@@ -42,7 +43,7 @@ func TestLoadGeneratedDependencyBaselineFallsBackToPrimaryWithoutRecovery(t *tes
 	writeBaselineFile(t, root, generatedfiles.ApplicationManifestPath, manifest)
 	writeBaselineFile(t, root, generatedfiles.ManifestPath, []byte("{\"version\":2,\"files\":[]}\n"))
 
-	baseline, err := loadGeneratedDependencyBaseline(root)
+	baseline, _, err := loadGeneratedDependencyBaseline(root, defaultConfigurationSelector())
 	if err != nil || !baseline.Valid() || baseline.Digest() != want.Digest() {
 		t.Fatalf("loadGeneratedDependencyBaseline = %#v, %v", baseline.Records(), err)
 	}
@@ -65,7 +66,7 @@ func TestLoadGeneratedDependencyBaselineRejectsMalformedRecovery(t *testing.T) {
 			root := t.TempDir()
 			writeBaselineFile(t, root, generatedfiles.ApplicationManifestPath, validPrimary)
 			writeBaselineFile(t, root, generatedfiles.ManifestPath, test.data)
-			baseline, err := loadGeneratedDependencyBaseline(root)
+			baseline, _, err := loadGeneratedDependencyBaseline(root, defaultConfigurationSelector())
 			if err == nil || baseline.Valid() {
 				t.Fatalf("loadGeneratedDependencyBaseline = %#v, %v", baseline.Records(), err)
 			}
@@ -82,7 +83,7 @@ func TestLoadGeneratedDependencyBaselineRejectsMalformedRecovery(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(generatedfiles.ManifestPath)), 0o755); err != nil {
 			t.Fatalf("MkdirAll: %v", err)
 		}
-		baseline, err := loadGeneratedDependencyBaseline(root)
+		baseline, _, err := loadGeneratedDependencyBaseline(root, defaultConfigurationSelector())
 		if !errors.Is(err, generatedfiles.ErrManifest) || baseline.Valid() {
 			t.Fatalf("loadGeneratedDependencyBaseline = %#v, %v", baseline.Records(), err)
 		}
@@ -109,11 +110,27 @@ func renderDependencyBaseline(t testing.TB, capability string) ([]byte, applicat
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
-	data, err := applicationgen.RenderManifest([]byte("{\"capability_aliases\":[]}"), composition)
+	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
+		Mode:                   applicationgen.ConfigurationModeDefault,
+		RootPath:               applicationManifestName,
+		RootData:               []byte("{}\n"),
+		SelectedPath:           applicationManifestName,
+		SelectedData:           []byte("{}\n"),
+		Composition:            composition,
+		ApplicationModelDigest: "sha256:" + strings.Repeat("1", 64),
+	})
+	if err != nil {
+		t.Fatalf("NewManifestProvenance: %v", err)
+	}
+	data, err := applicationgen.RenderManifest([]byte("{\"capability_aliases\":[]}"), provenance)
 	if err != nil {
 		t.Fatalf("RenderManifest: %v", err)
 	}
 	return data, composition.DependencyBaseline()
+}
+
+func defaultConfigurationSelector() configurationSelector {
+	return configurationSelector{mode: configurationModeDefault, path: applicationManifestName}
 }
 
 func writeRecoveryOutput(t testing.TB, root string, applicationManifest []byte) {

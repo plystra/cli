@@ -43,6 +43,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 `)
 	options := resolvedOptions()
 	options.Composition = dependencyComposition(t)
+	options = withManifestProvenance(t, options, resolution)
 	output, err := applicationgen.Render(options, resolution)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -110,9 +111,11 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		`"id":"health.status/v1"`,
 		`"target":"kernel.health/v1"`,
 		`"kind":"application"`,
-		`"configuration":{"version":1,"mode":"default"`,
-		`"root":{"path":"plystra.yaml"}`,
+		`"configuration":{"version":2,"mode":"default"`,
+		`"root":{"path":"plystra.yaml","digest":"sha256:`,
+		`"selected":{"path":"plystra.yaml","digest":"sha256:`,
 		`"dependency_composition_digest":"sha256:`,
+		`"application_model_digest":"` + options.ManifestProvenance.ApplicationModelDigest() + `"`,
 		`"path":"http.expose[\"diagnostics.internal/v1\"]"`,
 		`"removed":true`,
 		`"path":"config[\"acme.business\"][\"password\"]"`,
@@ -128,9 +131,10 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 			t.Fatalf("Alias manifest contains forbidden value %q:\n%s", forbidden, manifest)
 		}
 	}
-	baseline, err := applicationgen.DecodeDependencyBaseline([]byte(manifest))
+	provenance, err := applicationgen.DecodeManifestProvenance([]byte(manifest))
+	baseline := provenance.DependencyBaseline()
 	if err != nil || !baseline.Valid() || baseline.Digest() != options.Composition.DependencyDigest() || len(baseline.Records()) != len(options.Composition.Provenance()) {
-		t.Fatalf("DecodeDependencyBaseline = %#v, %v", baseline.Records(), err)
+		t.Fatalf("DecodeManifestProvenance = %#v, %v", baseline.Records(), err)
 	}
 	for _, file := range output.Files() {
 		if filepath.Ext(file.Path()) != ".go" {
@@ -158,16 +162,18 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 func TestRenderRemovesAliasSurfacesWhenFinalMapChanges(t *testing.T) {
 	t.Parallel()
 
-	options := resolvedOptions()
-	withAliases, err := applicationgen.Render(options, resolvedApplication(t, `capabilities:
+	withAliasResolution := resolvedApplication(t, `capabilities:
   aliases:
     compat.send/v1: email.send/v1
     health.status/v1: kernel.health/v1
-`))
+`)
+	options := withManifestProvenance(t, resolvedOptions(), withAliasResolution)
+	withAliases, err := applicationgen.Render(options, withAliasResolution)
 	if err != nil {
 		t.Fatalf("Render with Aliases: %v", err)
 	}
-	withoutAliases, err := applicationgen.Render(options, resolvedApplication(t, ""))
+	withoutAliasResolution := resolvedApplication(t, "")
+	withoutAliases, err := applicationgen.Render(withManifestProvenance(t, resolvedOptions(), withoutAliasResolution), withoutAliasResolution)
 	if err != nil {
 		t.Fatalf("Render without Aliases: %v", err)
 	}
@@ -204,14 +210,15 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	t.Parallel()
 
 	resolution := emptyApplication(t)
-	output, err := applicationgen.Render(emptyOptions(applicationModulePath), resolution)
+	options := withManifestProvenance(t, emptyOptions(applicationModulePath), resolution)
+	output, err := applicationgen.Render(options, resolution)
 	if err != nil {
 		t.Fatalf("Render empty: %v", err)
 	}
 	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json"}) {
 		t.Fatalf("empty output paths = %v", got)
 	}
-	wantManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), testComposition())
+	wantManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), options.ManifestProvenance)
 	if err != nil {
 		t.Fatalf("RenderManifest: %v", err)
 	}
@@ -228,7 +235,7 @@ func TestRenderGeneratesOnlyDeveloperSurfacesForUnrequiredLocalCapability(t *tes
 		t.Fatalf("manifest.ParseConfig: %v", err)
 	}
 	resolution := unrequiredLocalApplication(t)
-	output, err := applicationgen.Render(applicationgen.Options{
+	options := applicationgen.Options{
 		ModulePath:          applicationModulePath,
 		KernelModuleVersion: "v0.0.0",
 		KernelBuildIdentity: "application-render-test",
@@ -243,7 +250,8 @@ func TestRenderGeneratesOnlyDeveloperSurfacesForUnrequiredLocalCapability(t *tes
 			PluginID:   "acme.business",
 			Schema:     schema,
 		}},
-	}, resolution)
+	}
+	output, err := applicationgen.Render(withManifestProvenance(t, options, resolution), resolution)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -298,6 +306,7 @@ timeout: {type: duration, default: 5s}
 			Schema:     schema,
 		}},
 	}
+	options = withManifestProvenance(t, options, resolution)
 	withConfiguration, err := applicationgen.Render(options, resolution)
 	if err != nil {
 		t.Fatalf("Render with configuration: %v", err)
@@ -315,7 +324,8 @@ timeout: {type: duration, default: 5s}
 		}
 	}
 
-	withoutConfiguration, err := applicationgen.Render(emptyOptions(businessModulePath), emptyApplication(t))
+	emptyResolution := emptyApplication(t)
+	withoutConfiguration, err := applicationgen.Render(withManifestProvenance(t, emptyOptions(businessModulePath), emptyResolution), emptyResolution)
 	if err != nil {
 		t.Fatalf("Render without configuration: %v", err)
 	}
@@ -338,15 +348,17 @@ func TestRenderRejectsInvalidResolutionModuleAndPackage(t *testing.T) {
 	resolution := resolvedApplication(t, "")
 	invalidModule := resolvedOptions()
 	invalidModule.ModulePath = "not a module path"
+	invalidModule = withManifestProvenance(t, invalidModule, resolution)
 	if _, err := applicationgen.Render(invalidModule, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, assemblygen.ErrRenderProviders) {
 		t.Fatalf("Render invalid module error = %v", err)
 	}
 	missingPackage := resolvedOptions()
 	missingPackage.JavaScriptPackage = ""
+	missingPackage = withManifestProvenance(t, missingPackage, resolution)
 	if _, err := applicationgen.Render(missingPackage, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, javascriptgen.ErrRender) {
 		t.Fatalf("Render missing JavaScript package error = %v", err)
 	}
-	missingProvider := resolvedOptions()
+	missingProvider := withManifestProvenance(t, resolvedOptions(), resolution)
 	missingProvider.Providers = nil
 	if _, err := applicationgen.Render(missingProvider, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, applicationgen.ErrResolution) {
 		t.Fatalf("missing selected provider error = %v", err)
@@ -371,6 +383,36 @@ func emptyOptions(modulePath string) applicationgen.Options {
 		KernelBuildIdentity: "application-render-test",
 		Composition:         testComposition(),
 	}
+}
+
+func withManifestProvenance(t testing.TB, options applicationgen.Options, resolution generationresolution.ExtensionResult) applicationgen.Options {
+	t.Helper()
+	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
+		ModulePath:          options.ModulePath,
+		JavaScriptPackage:   options.JavaScriptPackage,
+		KernelModuleVersion: options.KernelModuleVersion,
+		KernelBuildIdentity: options.KernelBuildIdentity,
+		Configurations:      options.Configurations,
+		Providers:           options.Providers,
+		Resolution:          resolution,
+	})
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest: %v", err)
+	}
+	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
+		Mode:                   applicationgen.ConfigurationModeDefault,
+		RootPath:               "plystra.yaml",
+		RootData:               []byte("{}\n"),
+		SelectedPath:           "plystra.yaml",
+		SelectedData:           []byte("{}\n"),
+		Composition:            options.Composition,
+		ApplicationModelDigest: modelDigest,
+	})
+	if err != nil {
+		t.Fatalf("NewManifestProvenance: %v", err)
+	}
+	options.ManifestProvenance = provenance
+	return options
 }
 
 func testComposition() applicationmeta.Composition {

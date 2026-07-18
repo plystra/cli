@@ -29,7 +29,7 @@ const (
   plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
   plystra capability expose <capability-name>/vN
-  plystra generate [--check]
+  plystra generate [--check] [--config <yaml-path>]
 `
 	newUsage = `Usage:
   plystra new <module-path> [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]
@@ -43,6 +43,18 @@ Options:
 
 Interactive creation asks for each unspecified choice. Non-interactive creation
 must specify one flag from every choice pair.
+`
+	generateUsage = `Usage:
+  plystra generate [--check] [--config <yaml-path>]
+
+Options:
+  --check                Report drift without modifying configuration or generated files.
+  --config <yaml-path>   Use one complete current-project configuration instead of root plystra.yaml.
+
+PLYSTRA_CONFIG supplies the configuration path when --config is omitted.
+Relative paths are resolved from the detected Plystra Project root. Root
+plystra.yaml remains mandatory as the Project marker and is not merged beneath
+an explicitly selected configuration.
 `
 )
 
@@ -150,17 +162,22 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 	case "capability":
 		return runCapability(arguments, stdout, stderr, workingDirectory, environment, selectPlugin)
 	case "generate":
-		check, ok := parseGenerateArguments(arguments)
+		if len(arguments) == 2 && (arguments[1] == "help" || arguments[1] == "-h" || arguments[1] == "--help") {
+			_, _ = io.WriteString(stdout, generateUsage)
+			return 0
+		}
+		generate, ok := parseGenerateArguments(arguments)
 		if !ok {
-			_, _ = io.WriteString(stderr, "usage: plystra generate [--check]\n")
+			_, _ = io.WriteString(stderr, generateUsage)
 			return 2
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
 		defer cancel()
 		result, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
-			Start:       workingDirectory,
-			Check:       check,
-			Environment: environment,
+			Start:             workingDirectory,
+			Check:             generate.check,
+			ConfigurationPath: generate.configurationPath,
+			Environment:       environment,
 		})
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "%v\n", err)
@@ -175,7 +192,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 					heading = "Project configuration or generated output is not current"
 				}
 			}
-			writeGenerationReport(stderr, heading, configurationDrift, result.Report())
+			writeGenerationReport(stderr, heading, configurationDrift, result.ConfigurationPath(), result.Report())
 			return 1
 		}
 		if result.Checked() {
@@ -214,21 +231,42 @@ func terminalFile(file *os.File) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-func parseGenerateArguments(arguments []string) (bool, bool) {
-	switch {
-	case len(arguments) == 1:
-		return false, true
-	case len(arguments) == 2 && arguments[1] == "--check":
-		return true, true
-	default:
-		return false, false
-	}
+type generateArguments struct {
+	check             bool
+	configurationPath string
 }
 
-func writeGenerationReport(writer io.Writer, heading string, configurationDrift bool, report generatedfiles.Report) {
+func parseGenerateArguments(arguments []string) (generateArguments, bool) {
+	if len(arguments) == 0 || arguments[0] != "generate" {
+		return generateArguments{}, false
+	}
+	var result generateArguments
+	configurationSet := false
+	for index := 1; index < len(arguments); index++ {
+		switch arguments[index] {
+		case "--check":
+			if result.check {
+				return generateArguments{}, false
+			}
+			result.check = true
+		case "--config":
+			if configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+				return generateArguments{}, false
+			}
+			configurationSet = true
+			index++
+			result.configurationPath = arguments[index]
+		default:
+			return generateArguments{}, false
+		}
+	}
+	return result, true
+}
+
+func writeGenerationReport(writer io.Writer, heading string, configurationDrift bool, configurationPath string, report generatedfiles.Report) {
 	_, _ = fmt.Fprintf(writer, "%s:\n", heading)
 	if configurationDrift {
-		_, _ = io.WriteString(writer, "  changed plystra.yaml (dependency composition)\n")
+		_, _ = fmt.Fprintf(writer, "  changed %s (dependency composition)\n", configurationPath)
 	}
 	for _, change := range report.Changes() {
 		_, _ = fmt.Fprintf(writer, "  %s %s\n", change.Kind(), change.Path())

@@ -29,7 +29,7 @@ plystra plugin create <name>
 plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
 plystra capability implement <capability-name>/vN [--plugin <plugin>]
 plystra capability expose <capability-name>/vN
-plystra generate [--check]
+plystra generate [--check] [--config <yaml-path>]
 ```
 
 Commands documented in the roadmap but absent from `plystra --help` are not
@@ -400,6 +400,50 @@ digest and path/digest/removal/source baseline. An explicit tombstone has
 `"removed": true`; the manifest records provenance, not raw Plugin
 configuration or Secret reference targets.
 
+## Select a complete alternative configuration
+
+Root `plystra.yaml` is mandatory and is the default current-Project
+configuration. To generate against one complete alternative document, select
+it explicitly:
+
+```powershell
+plystra generate --config deploy/customer-a.yaml
+plystra generate --check --config deploy/customer-a.yaml
+```
+
+The effective declarative order is dependency Project composition followed by
+the selected complete document. Root `plystra.yaml` remains the Project marker
+but is not merged beneath `deploy/customer-a.yaml`. Put every current-Project
+Provider choice, exposure, Alias, process setting, and Plugin value needed by
+that application model in the selected document.
+
+Relative paths are resolved from the detected Project root, including when the
+command starts in a nested Plugin directory. An absolute path is accepted only
+when it resolves inside that root. For automation, set the selector variable:
+
+```powershell
+$env:PLYSTRA_CONFIG = "deploy/customer-a.yaml"
+plystra generate --check
+```
+
+An explicit `--config` overrides `PLYSTRA_CONFIG`. Generation maintains only
+the selected document, preserving its comments, explicit edits, and typed
+removals; it never copies the same edit into root or another alternative file.
+Dependency baseline history is retained independently for each selection, so
+switching back to the default does not transfer ownership decisions from an
+alternative. Configuration maintenance and generated output share one
+transaction. Check mode reports the selected path, such as
+`changed deploy/customer-a.yaml (dependency composition)`, and does not write
+either surface.
+
+`generated/manifest.json` configuration schema v2 records `default` or
+`explicit-config` mode, project-relative root and selected paths, normalized
+document digests, per-selection dependency baselines, and the final
+build-affecting application-model digest. It excludes raw configuration,
+Secret reference targets, resolved Secrets, and machine-specific absolute
+paths. Use the same selection for generation and its check; selecting another
+build-affecting model correctly reports generated drift.
+
 ## Create and configure a Plugin
 
 From a module root:
@@ -436,7 +480,8 @@ config:
 ```
 
 Generation emits the typed configuration adapter under
-`generated/go/configuration/`. Runtime values belong in root `plystra.yaml`:
+`generated/go/configuration/`. Runtime values belong in the selected
+current-Project document, which is root `plystra.yaml` by default:
 
 ```yaml
 config:
@@ -821,12 +866,15 @@ order, and platforms.
 
 ## Regenerate and diagnose drift
 
-After a manual `plugin.yaml`, `capability.yaml`, `plystra.yaml`, `go.mod`, or
-generation-package edit:
+After a manual `plugin.yaml`, `capability.yaml`, selected configuration,
+`go.mod`, or generation-package edit, regenerate and check with the same
+selection:
 
 ```powershell
 plystra generate
 plystra generate --check
+plystra generate --config deploy/customer-a.yaml
+plystra generate --check --config deploy/customer-a.yaml
 ```
 
 Clean check output resembles:
@@ -868,6 +916,15 @@ every contributing module named by the diagnostic. Add one explicit decision
 for that exact key or declared Plugin field in root `plystra.yaml`, then
 regenerate. Changing dependency order, making a module direct, or sorting
 Plugin IDs cannot resolve the conflict.
+
+### Wrong configuration selection
+
+If drift or a Provider choice does not match the intended deployment, inspect
+the configuration mode and selected project-relative path in
+`generated/manifest.json`. Run generation and check with the same explicit
+`--config`, or set one `PLYSTRA_CONFIG` value for automation. Remember that an
+explicit file is complete: root `plystra.yaml` is not merged beneath it. A
+missing root marker remains an error even when the selected file exists.
 
 ### Incompatible contract
 

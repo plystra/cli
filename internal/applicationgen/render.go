@@ -53,6 +53,7 @@ type Options struct {
 	KernelModuleVersion string
 	KernelBuildIdentity string
 	Composition         applicationmeta.Composition
+	ManifestProvenance  ManifestProvenance
 	Configurations      []configurationgen.Input
 	Providers           []assemblygen.ProviderInput
 }
@@ -73,6 +74,21 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	if !options.Composition.Valid() {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: dependency configuration composition is absent or invalid", ErrRender, ErrResolution)
+	}
+	modelDigest, err := ApplicationModelDigest(ApplicationModelOptions{
+		ModulePath:          options.ModulePath,
+		JavaScriptPackage:   options.JavaScriptPackage,
+		KernelModuleVersion: options.KernelModuleVersion,
+		KernelBuildIdentity: options.KernelBuildIdentity,
+		Configurations:      options.Configurations,
+		Providers:           options.Providers,
+		Resolution:          resolution,
+	})
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: %w: application model: %v", ErrRender, ErrResolution, err)
+	}
+	if !options.ManifestProvenance.matches(options.Composition, modelDigest) {
+		return generatedfiles.Output{}, fmt.Errorf("%w: %w: application manifest provenance is absent or inconsistent", ErrRender, ErrResolution)
 	}
 	providers, err := assemblygen.RenderProviders(options.ModulePath, options.Providers)
 	if err != nil {
@@ -138,7 +154,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 			return generatedfiles.Output{}, fmt.Errorf("%w: dependencies for plugin %q: %w", ErrRender, provider.PluginID, err)
 		}
 	}
-	aliasManifest, err := RenderManifest(aliases.CanonicalJSON(), options.Composition)
+	aliasManifest, err := RenderManifest(aliases.CanonicalJSON(), options.ManifestProvenance)
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: application manifest: %w", ErrRender, err)
 	}

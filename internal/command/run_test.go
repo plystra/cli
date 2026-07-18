@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	wantUsage    = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path> [options]\n  plystra plugin create <name>\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN\n  plystra generate [--check]\n"
-	wantNewUsage = "Usage:\n  plystra new <module-path> [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]\n\nOptions:\n  --plugin <name>           Create an initial root-level plugin.\n  --git, --no-git           Initialize or omit a Git repository.\n  --github-ci, --no-github-ci\n                            Include or omit GitHub Actions CI.\n  --skills, --no-skills     Include or omit Plystra agent skills.\n\nInteractive creation asks for each unspecified choice. Non-interactive creation\nmust specify one flag from every choice pair.\n"
+	wantUsage         = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path> [options]\n  plystra plugin create <name>\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN\n  plystra generate [--check] [--config <yaml-path>]\n"
+	wantNewUsage      = "Usage:\n  plystra new <module-path> [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]\n\nOptions:\n  --plugin <name>           Create an initial root-level plugin.\n  --git, --no-git           Initialize or omit a Git repository.\n  --github-ci, --no-github-ci\n                            Include or omit GitHub Actions CI.\n  --skills, --no-skills     Include or omit Plystra agent skills.\n\nInteractive creation asks for each unspecified choice. Non-interactive creation\nmust specify one flag from every choice pair.\n"
+	wantGenerateUsage = "Usage:\n  plystra generate [--check] [--config <yaml-path>]\n\nOptions:\n  --check                Report drift without modifying configuration or generated files.\n  --config <yaml-path>   Use one complete current-project configuration instead of root plystra.yaml.\n\nPLYSTRA_CONFIG supplies the configuration path when --config is omitted.\nRelative paths are resolved from the detected Plystra Project root. Root\nplystra.yaml remains mandatory as the Project marker and is not merged beneath\nan explicitly selected configuration.\n"
 )
 
 func TestRunHelp(t *testing.T) {
@@ -32,6 +33,18 @@ func TestRunHelp(t *testing.T) {
 				t.Fatalf("Run(%q) stderr = %q, want empty", arguments, stderr.String())
 			}
 		})
+	}
+}
+
+func TestRunGenerateHelp(t *testing.T) {
+	t.Parallel()
+
+	for _, argument := range []string{"help", "-h", "--help"} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		if exitCode := command.Run([]string{"generate", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantGenerateUsage || stderr.Len() != 0 {
+			t.Fatalf("Run(generate %s) = exit %d, stdout %q, stderr %q", argument, exitCode, stdout.String(), stderr.String())
+		}
 	}
 }
 
@@ -124,8 +137,10 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "capability implement expose", arguments: []string{"capability", "implement", "records.create/v1", "--expose"}, wantError: "usage: plystra capability implement <capability-name>/vN [--plugin <plugin>]\n"},
 		{name: "capability expose extra option", arguments: []string{"capability", "expose", "records.create/v1", "--confirm"}, wantError: "usage: plystra capability expose <capability-name>/vN\n"},
 		{name: "capability create missing plugin", arguments: []string{"capability", "create", "records.create", "--plugin"}, wantError: "usage: plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]\n"},
-		{name: "generate unknown option", arguments: []string{"generate", "--write"}, wantError: "usage: plystra generate [--check]\n"},
-		{name: "generate duplicate check", arguments: []string{"generate", "--check", "--check"}, wantError: "usage: plystra generate [--check]\n"},
+		{name: "generate unknown option", arguments: []string{"generate", "--write"}, wantError: wantGenerateUsage},
+		{name: "generate duplicate check", arguments: []string{"generate", "--check", "--check"}, wantError: wantGenerateUsage},
+		{name: "generate missing configuration path", arguments: []string{"generate", "--config"}, wantError: wantGenerateUsage},
+		{name: "generate duplicate configuration", arguments: []string{"generate", "--config", "a.yaml", "--config", "b.yaml"}, wantError: wantGenerateUsage},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

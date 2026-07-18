@@ -12,13 +12,17 @@ import (
 	"strings"
 
 	"github.com/plystra/cli/internal/applicationgen"
+	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/generatedfiles"
+	"github.com/plystra/cli/internal/generationexec"
+	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/plugincreate"
+	"github.com/plystra/cli/internal/plugininventory"
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -96,7 +100,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	}
 
 	err = atomicfs.CreateDirectory(target, func(stagingRoot string) error {
-		if err := populate(stagingRoot, options.ModulePath, name, options.GitHubCI, options.Skills); err != nil {
+		if err := populate(ctx, stagingRoot, options.ModulePath, name, options.GitHubCI, options.Skills); err != nil {
 			return err
 		}
 		for _, arguments := range [][]string{{"mod", "download"}, {"mod", "tidy"}} {
@@ -132,7 +136,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	return Result{modulePath: options.ModulePath, path: target}, nil
 }
 
-func populate(root, modulePath, name string, githubCI, skills bool) error {
+func populate(ctx context.Context, root, modulePath, name string, githubCI, skills bool) error {
 	compatibility, err := assemblygen.RenderCompatibility("assembly")
 	if err != nil {
 		return fmt.Errorf("render Kernel compatibility source: %w", err)
@@ -143,9 +147,35 @@ func populate(root, modulePath, name string, githubCI, skills bool) error {
 		return fmt.Errorf("prepare Kernel compatibility source: %w", err)
 	}
 	managed = append(managed, compatibilityFile)
+	currentManifest, err := applicationmeta.Parse([]byte(plystraTemplate))
+	if err != nil {
+		return fmt.Errorf("parse initial Project configuration: %w", err)
+	}
+	composition, err := applicationmeta.Compose(nil, currentManifest, func(string) (kernelmanifest.Config, bool) {
+		return kernelmanifest.Config{}, false
+	})
+	if err != nil {
+		return fmt.Errorf("compose initial Project configuration: %w", err)
+	}
+	input, err := applicationinput.Build(currentManifest, plugininventory.Index{}, generationexec.BuildOptions{})
+	if err != nil {
+		return fmt.Errorf("build initial application model: %w", err)
+	}
+	resolution, err := generationresolution.ResolveExtensions(ctx, input)
+	if err != nil {
+		return fmt.Errorf("resolve initial application model: %w", err)
+	}
+	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
+		ModulePath:          modulePath,
+		KernelModuleVersion: KernelVersion,
+		Resolution:          resolution,
+	})
+	if err != nil {
+		return fmt.Errorf("digest initial application model: %w", err)
+	}
 	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
 		ModulePath:               modulePath,
-		ApplicationBuildIdentity: "initial-scaffold",
+		ApplicationBuildIdentity: resolution.Context().Digest(),
 		KernelModuleVersion:      KernelVersion,
 		DefaultTimeout:           applicationmeta.DefaultInvocationTimeout,
 	})
@@ -178,17 +208,19 @@ func populate(root, modulePath, name string, githubCI, skills bool) error {
 		return fmt.Errorf("prepare empty selected-provider source: %w", err)
 	}
 	managed = append(managed, providersFile)
-	currentManifest, err := applicationmeta.Parse([]byte(plystraTemplate))
-	if err != nil {
-		return fmt.Errorf("parse initial Project configuration: %w", err)
-	}
-	composition, err := applicationmeta.Compose(nil, currentManifest, func(string) (kernelmanifest.Config, bool) {
-		return kernelmanifest.Config{}, false
+	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
+		Mode:                   applicationgen.ConfigurationModeDefault,
+		RootPath:               "plystra.yaml",
+		RootData:               []byte(plystraTemplate),
+		SelectedPath:           "plystra.yaml",
+		SelectedData:           []byte(plystraTemplate),
+		Composition:            composition,
+		ApplicationModelDigest: modelDigest,
 	})
 	if err != nil {
-		return fmt.Errorf("compose initial Project configuration: %w", err)
+		return fmt.Errorf("construct initial application manifest provenance: %w", err)
 	}
-	manifestData, err := applicationgen.RenderManifest([]byte("{\"capability_aliases\":[]}"), composition)
+	manifestData, err := applicationgen.RenderManifest(resolution.AliasResolution().CanonicalJSON(), provenance)
 	if err != nil {
 		return fmt.Errorf("render initial application manifest: %w", err)
 	}

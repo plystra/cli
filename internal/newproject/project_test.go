@@ -167,7 +167,7 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 			t.Fatalf("generated README advertises unavailable command %q:\n%s", unavailable, readme)
 		}
 	}
-	for _, available := range [][]byte{[]byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("go test ./..."), []byte("go vet ./...")} {
+	for _, available := range [][]byte{[]byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("plystra generate --config"), []byte("PLYSTRA_CONFIG"), []byte("go test ./..."), []byte("go vet ./...")} {
 		if !bytes.Contains(readme, available) {
 			t.Fatalf("generated README omits available workflow %q:\n%s", available, readme)
 		}
@@ -654,6 +654,13 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"legacy_host: null",
 		"Declared objects merge recursively",
 		"dependency composition digest",
+		"## Select one complete current-Project configuration",
+		"plystra generate --config deploy/customer-a.yaml",
+		"plystra generate --check --config deploy/customer-a.yaml",
+		"PLYSTRA_CONFIG supplies the same path",
+		"root and selected paths",
+		"configuration schema v2",
+		"merged beneath deploy/customer-a.yaml",
 		"There is no handwritten provider registration",
 		"dependencies.Dependencies",
 		"generated/go/dependencies/",

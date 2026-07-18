@@ -19,19 +19,31 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:0c943cb573d3253e89f3de0fd90b76bb610bcd367716165b336f6eca53056dca"
+      "sha256": "sha256:e04bf95e17746191907fdfbcb61349fd0cfcd1be9e9797bda52d79da5634d63b"
     }
   ],
   "application_manifest": {
     "capability_aliases": [],
     "configuration": {
-      "version": 1,
+      "version": 2,
       "mode": "default",
       "root": {
-        "path": "plystra.yaml"
+        "path": "plystra.yaml",
+        "digest": "sha256:751041f141718d68179258343ab084a490e134bd9c6b8571702634a2133049c2"
       },
-      "dependency_composition_digest": "sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130",
-      "dependency_baseline": []
+      "selected": {
+        "path": "plystra.yaml",
+        "digest": "sha256:751041f141718d68179258343ab084a490e134bd9c6b8571702634a2133049c2"
+      },
+      "dependency_baselines": [
+        {
+          "mode": "default",
+          "path": "plystra.yaml",
+          "dependency_composition_digest": "sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130",
+          "dependency_baseline": []
+        }
+      ],
+      "application_model_digest": "sha256:d6316e511be668caa273acb647f7b56941f016f9198372ba50fb05cee7243752"
     }
   }
 }

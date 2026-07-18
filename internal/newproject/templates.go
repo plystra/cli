@@ -41,6 +41,8 @@ go vet ./...
 
 Mutating Plystra commands regenerate automatically. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate.
 
+Root ` + "`plystra.yaml`" + ` is the mandatory Project marker and default configuration. To use one complete alternative current-Project document, run ` + "`plystra generate --config deploy/customer-a.yaml`" + ` and check it with the same option. Root configuration is not merged beneath an explicitly selected file. ` + "`PLYSTRA_CONFIG`" + ` supplies the path for automation when ` + "`--config`" + ` is omitted.
+
 Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 `
 
@@ -209,15 +211,16 @@ non-secret dependency composition digest and path/digest/removal/source
 baseline. An explicit tombstone has removed: true; the manifest never contains
 raw Plugin configuration or Secret reference targets.
 
-Plystra generate maintains root plystra.yaml with a typed three-way update from
-the previous dependency baseline, the authored current file, and the newly
-resolved dependency baseline. It preserves comments, explicit current-Project
+Plystra generate maintains the selected current-Project document with a typed
+three-way update from that selection's previous dependency baseline, the
+authored current file, and the newly resolved dependency baseline. Default mode
+selects root plystra.yaml. It preserves comments, explicit current-Project
 values, and exact tombstones; introduces new inherited declarations; and
 removes inherited declarations that disappeared. A hand-deleted inherited
 value is ambiguous, so express that decision with the field's sparse removal or
 null tombstone. Configuration and generated output share one rollback boundary.
-Plystra generate --check reports dependency-composition drift without writing
-either surface.
+Plystra generate --check reports dependency-composition drift against the
+selected path without writing either surface.
 
 Remove only exact inherited declarations with sparse edits and null
 tombstones:
@@ -242,6 +245,34 @@ Nested object keys merge recursively, while arrays replace as a complete value.
 Removing a required field still fails final validation unless it has a valid
 default. An inherited add/remove conflict must be resolved by the current
 Project at that exact key; dependency ordering never resolves it.
+
+## Select one complete current-Project configuration
+
+Root plystra.yaml is mandatory and is the default current-Project document. To
+generate from a complete alternative document, use the same selection for the
+write and read-only check:
+
+    plystra generate --config deploy/customer-a.yaml
+    plystra generate --check --config deploy/customer-a.yaml
+
+The effective order is dependency Project composition followed by the selected
+complete document. Root plystra.yaml remains the Project marker but is not
+merged beneath deploy/customer-a.yaml. Put every current-Project process
+setting, requirement, exposure, Provider replacement, Alias, and Plugin value
+needed by that application model in the selected document.
+
+Relative paths are resolved from the detected Project root even when the
+command starts inside a Plugin. An absolute path must still resolve inside that
+root. PLYSTRA_CONFIG supplies the same path for automation when --config is
+omitted; an explicit --config wins. Generation maintains only the selected
+file, and independent selections retain independent dependency baselines.
+
+Inspect generated/manifest.json configuration schema v2 for the default or
+explicit-config mode, Project-relative root and selected paths, normalized
+document digests, per-selection dependency baselines, and final
+application-model digest. It never records raw configuration, Secret reference
+targets, resolved Secrets, or machine-specific absolute paths. Switching a
+build-affecting selection correctly creates generated drift.
 
 ## Naming and identity rules
 
@@ -410,8 +441,9 @@ scan. Do not add one.
 
 ## Configure the selected application
 
-Runtime values and application choices belong in root plystra.yaml, not in
-plugin.yaml or generated source:
+Runtime values and application choices belong in the selected current-Project
+document, which is root plystra.yaml by default, not in plugin.yaml or
+generated source:
 
     http:
       address: ":8080"
@@ -619,6 +651,7 @@ values must never appear in the browser package.
 Run the narrowest relevant test first, then the complete module checks:
 
     plystra generate --check
+    plystra generate --check --config deploy/customer-a.yaml
     go test ./...
     go test -race ./...
     go vet ./...
@@ -656,8 +689,12 @@ build and distribution boundary for every Plystra module.
 - Unavailable generated client: confirm assembly completed and avoid invoking
   clients during Plugin construction.
 - Invalid configuration: compare the concrete selected Plugin ID and its
-  plugin.yaml config schema with the object in plystra.yaml. Keep Secret values
-  behind valid env or file references.
+  plugin.yaml config schema with the object in the selected current-Project
+  document. Keep Secret values behind valid env or file references.
+- Wrong configuration selection: inspect generated/manifest.json mode and
+  selected path, then run generate and generate --check with the same --config
+  or one PLYSTRA_CONFIG value. An explicit file is complete; root plystra.yaml
+  is not merged beneath it and remains mandatory as the Project marker.
 - Alias error: point directly to a resolved canonical target with the same
   version and exposure no broader than the target.
 - Unclaimed extension namespace: add a compatible selected Plugin whose
