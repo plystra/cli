@@ -124,7 +124,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	after, err := readManifestSnapshot(module.Path())
+	after, err := ReadManifestSnapshot(module.Path())
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w: recheck plystra.yaml: %v", ErrResolve, ErrConcurrentChange, err)
 	}

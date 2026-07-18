@@ -9,6 +9,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/atomicfs"
+	"github.com/plystra/cli/internal/capabilityexpose"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilityversion"
 	"github.com/plystra/cli/internal/modulemutation"
@@ -30,11 +31,14 @@ var (
 
 // AuthorOptions contains planning inputs and the bounded hooks used by one
 // complete Capability authoring transaction. Confirm accepts an unusual new
-// version. Validate overrides generated-module validation in tests and
-// specialized embedding; ordinary callers leave it nil.
+// version. Expose adds the authored exact Capability to a runnable
+// application's HTTP surface in the same transaction. Validate overrides
+// generated-module validation in tests and specialized embedding; ordinary
+// callers leave it nil.
 type AuthorOptions struct {
 	Options
 	Confirm  bool
+	Expose   bool
 	Validate applicationgenerate.Validator
 }
 
@@ -44,6 +48,7 @@ type Result struct {
 	capability            capabilityid.Identifier
 	pluginID              string
 	pluginPath            string
+	moduleRoot            string
 	capabilityPath        string
 	recommendations       []capabilityid.Identifier
 	declarationCreated    bool
@@ -58,6 +63,15 @@ func (r Result) PluginID() string { return r.pluginID }
 
 // PluginPath returns the canonical absolute selected Plugin directory.
 func (r Result) PluginPath() string { return r.pluginPath }
+
+// ModuleRoot returns the canonical absolute Go Module containing the selected
+// local Plugin.
+func (r Result) ModuleRoot() string { return r.moduleRoot }
+
+// ApplicationManifestPath returns the root plystra.yaml path. It is useful
+// when authoring was requested with HTTP exposure, which requires a runnable
+// application module.
+func (r Result) ApplicationManifestPath() string { return filepath.Join(r.moduleRoot, "plystra.yaml") }
 
 // CapabilityPath returns the canonical absolute capability.yaml path.
 func (r Result) CapabilityPath() string { return r.capabilityPath }
@@ -106,6 +120,9 @@ func author(ctx context.Context, options AuthorOptions, expected capabilityversi
 		return Result{}, err
 	}
 	version := plan.Version()
+	identifier := version.Target()
+	target := plan.Target()
+	root := target.ModuleRoot()
 	if version.Action() != expected {
 		switch expected {
 		case capabilityversion.ActionCreate:
@@ -132,7 +149,7 @@ func author(ctx context.Context, options AuthorOptions, expected capabilityversi
 	if err != nil {
 		return Result{}, err
 	}
-	writes := make([]atomicfs.Write, 0, 3)
+	writes := make([]atomicfs.Write, 0, 4)
 	if declarationCreated {
 		schemaWrite, err := RenderSchemaWrite(plan, sources)
 		if err != nil {
@@ -149,8 +166,16 @@ func author(ctx context.Context, options AuthorOptions, expected capabilityversi
 	if implementationCreated {
 		writes = append(writes, implementationWrite)
 	}
+	if options.Expose {
+		exposureWrite, changed, err := capabilityexpose.ManifestWrite(root, identifier)
+		if err != nil {
+			return Result{}, err
+		}
+		if changed {
+			writes = append(writes, exposureWrite)
+		}
+	}
 
-	root := plan.Target().ModuleRoot()
 	if err := atomicfs.WriteFiles(root, writes, func(updatedRoot string) error {
 		if err := validateDeclarations(updatedRoot, plan, sources); err != nil {
 			return fmt.Errorf("validate authored declarations: %w", err)
@@ -171,8 +196,6 @@ func author(ctx context.Context, options AuthorOptions, expected capabilityversi
 		return Result{}, err
 	}
 
-	target := plan.Target()
-	identifier := version.Target()
 	capabilityPath := filepath.Join(
 		target.Path(),
 		"capabilities",
@@ -184,6 +207,7 @@ func author(ctx context.Context, options AuthorOptions, expected capabilityversi
 		capability:            identifier,
 		pluginID:              target.ID(),
 		pluginPath:            target.Path(),
+		moduleRoot:            root,
 		capabilityPath:        capabilityPath,
 		recommendations:       plan.Recommendations(),
 		declarationCreated:    declarationCreated,

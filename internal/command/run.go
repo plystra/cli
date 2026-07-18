@@ -24,8 +24,9 @@ const (
   plystra version
   plystra new <module-path> [--library] [--plugin <name>]
   plystra plugin create <name>
-  plystra capability create <capability-name> [--plugin <plugin>] [--confirm]
+  plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
+  plystra capability expose <capability-name>/vN
   plystra generate [--check]
 `
 )

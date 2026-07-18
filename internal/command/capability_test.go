@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/plystra/cli/internal/applicationmeta"
 )
 
 func TestRunCapabilityCreateAndImplementUsePublicTransactionalSurface(t *testing.T) {
@@ -73,7 +75,7 @@ func TestRunCapabilityCreateAndImplementUsePublicTransactionalSurface(t *testing
 	assertNoCommandTransactions(t, root)
 }
 
-func TestRunCapabilityCreateRegeneratesRunnableApplicationWithoutRequiringIt(t *testing.T) {
+func TestRunCapabilityCreateAndExposeRegenerateRunnableApplication(t *testing.T) {
 	root := writeCapabilityCommandModule(t)
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	environment := commandGoEnvironment()
@@ -102,6 +104,55 @@ func TestRunCapabilityCreateRegeneratesRunnableApplicationWithoutRequiringIt(t *
 			t.Fatalf("unrequired Capability emitted %s: %v", filePath, err)
 		}
 	}
+
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "expose", "records.list/v1"}, filepath.Join(root, "records"), environment)
+	wantManifestPath := filepath.Join(root, "plystra.yaml")
+	wantOutput = "exposed capability records.list/v1 over HTTP in " + wantManifestPath + "\n"
+	if exitCode != 0 || stdout != wantOutput || stderr != "" {
+		t.Fatalf("capability expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	for _, filePath := range []string{
+		"generated/docs/api.md",
+		"generated/docs/openapi.json",
+		"generated/go/adapters/http/records/list/v1/handler_gen.go",
+		"generated/go/clients/records/list/v1/client_gen.go",
+		"generated/go/invocation/records/list/v1/invocation_gen.go",
+		"generated/sdk/javascript/package.json",
+		"generated/sdk/javascript/src/operations/records/list/v1.ts",
+	} {
+		assertCommandFile(t, root, filePath)
+	}
+	idempotentBefore := commandTree(t, root)
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "expose", "records.list/v1"}, root, environment)
+	wantOutput = "capability records.list/v1 is already exposed over HTTP in " + wantManifestPath + "\n"
+	if exitCode != 0 || stdout != wantOutput || stderr != "" {
+		t.Fatalf("idempotent capability expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, idempotentBefore) {
+		t.Fatalf("idempotent capability expose changed module:\nbefore: %#v\nafter:  %#v", idempotentBefore, after)
+	}
+
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.write", "--expose", "--plugin", "records"}, root, environment)
+	wantWritePath := filepath.Join(root, "records", "capabilities", "records.write", "v1", "capability.yaml")
+	wantOutput = "created capability records.write/v1 in acme.library.records at " + wantWritePath + "\n" +
+		"exposed capability records.write/v1 over HTTP in " + wantManifestPath + "\n"
+	if exitCode != 0 || stdout != wantOutput || stderr != "" {
+		t.Fatalf("capability create --expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	for _, filePath := range []string{
+		"records/capabilities/records.write/v1/capability.yaml",
+		"generated/go/adapters/http/records/write/v1/handler_gen.go",
+		"generated/go/clients/records/write/v1/client_gen.go",
+		"generated/go/invocation/records/write/v1/invocation_gen.go",
+		"generated/sdk/javascript/src/operations/records/write/v1.ts",
+	} {
+		assertCommandFile(t, root, filePath)
+	}
+	manifestData := readCommandFile(t, root, "plystra.yaml")
+	manifest, err := applicationmeta.Parse(manifestData)
+	if err != nil || len(manifest.HTTPExposures()) != 2 || manifest.HTTPExposures()[0].ID().String() != "records.list/v1" || manifest.HTTPExposures()[1].ID().String() != "records.write/v1" {
+		t.Fatalf("application manifest exposures are incomplete or unsorted: %#v, %v\n%s", manifest.HTTPExposures(), err, manifestData)
+	}
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
 	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/library in "+root+"\n" {
 		t.Fatalf("runnable post-authoring check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
@@ -111,15 +162,35 @@ func TestRunCapabilityCreateRegeneratesRunnableApplicationWithoutRequiringIt(t *
 func TestRunCapabilityRejectsUnexpectedGeneratedOutput(t *testing.T) {
 	root := writeCapabilityCommandModule(t)
 	environment := commandGoEnvironment()
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	missingBefore := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"capability", "expose", "missing.operation/v1"}, root, environment)
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "missing.operation/v1") || !strings.Contains(stderr, "absent from the visible canonical catalog") {
+		t.Fatalf("missing capability expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, missingBefore) {
+		t.Fatalf("missing expose changed module:\nbefore: %#v\nafter:  %#v", missingBefore, after)
+	}
+	assertNoCommandTransactions(t, root)
+
 	writeCommandFile(t, filepath.Join(root, "generated", "manual.txt"), "user-owned\n")
 	before := commandTree(t, root)
 
-	exitCode, stdout, stderr := runCommand(t, []string{"capability", "create", "records.create", "--plugin", "records"}, root, environment)
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.create", "--expose", "--plugin", "records"}, root, environment)
 	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "unexpected generated output") || !strings.Contains(stderr, "generated/manual.txt") {
 		t.Fatalf("unexpected-output capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("failed command changed module:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoCommandTransactions(t, root)
+
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "expose", "kernel.health/v1"}, root, environment)
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "unexpected generated output") || !strings.Contains(stderr, "generated/manual.txt") {
+		t.Fatalf("unexpected-output capability expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("failed expose changed module:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 	assertNoCommandTransactions(t, root)
 }

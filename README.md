@@ -160,6 +160,7 @@ Create a first or next version from inside the target plugin, from a single-plug
 ```powershell
 plystra capability create records.create
 plystra capability create records.archive --plugin records
+plystra capability create records.read --plugin records --expose
 ```
 
 An omitted version selects `v1` when none is visible and otherwise selects one above the highest visible version, copying that highest exact schema as an editing base. An explicit older or skipped new version is rejected without mutation until it is deliberately repeated with `--confirm`. An existing exact version is never recreated; implement it instead:
@@ -171,6 +172,15 @@ plystra capability implement email.send/v1 --plugin mailer
 For a genuinely new name, creation reports conservative typo-like visible exact Capabilities as advisory recommendations. It never redirects or blocks the requested custom identity based only on similar spelling.
 
 Implementation searches local and explicit Go Module dependency contracts, requires exact provider-independent equality including normalized extension metadata, copies the canonical schema when the target plugin does not yet provide it, adds a compile-safe user-owned method only when absent, regenerates all affected module surfaces, tidies module metadata, and validates with `go test -mod=readonly ./...`. Repeating the command preserves an existing method byte-for-byte.
+
+In a runnable application, expose an existing exact canonical Capability or create and expose a new one in the same transaction:
+
+```powershell
+plystra capability expose records.create/v1
+plystra capability create records.update --plugin records --expose
+```
+
+`capability expose` requires an exact `<capability-name>/vN` and updates the root `plystra.yaml` `http.expose` list before regenerating every affected Go, HTTP, JavaScript, documentation, assembly, and manifest surface. Repeating it is byte-idempotent when generated output is current. A library module without `plystra.yaml`, an absent visible contract or provider, unsafe or concurrently changed configuration, unexpected generated output, generation failure, untidy module state, or validation failure leaves the configuration and every generated or module-owned file unchanged. `capability create --expose` uses the same rollback boundary for the new schema, plugin declaration, implementation scaffold, application exposure, module metadata, and generated output.
 
 Generation always emits the contract and provider interface for every Capability provided by a local plugin, even before the application requires that Capability. This keeps user-owned provider implementations buildable while they are being authored. Clients, invocation paths, HTTP adapters, SDK operations, documentation, provider selection, and Kernel registration remain requirement- and exposure-driven, so an unrequired local Capability does not enter the runnable application surface.
 

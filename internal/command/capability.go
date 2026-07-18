@@ -8,18 +8,22 @@ import (
 	"strings"
 
 	"github.com/plystra/cli/internal/capabilitycreate"
+	"github.com/plystra/cli/internal/capabilityexpose"
 	"github.com/plystra/cli/internal/plugintarget"
 )
 
 const (
-	capabilityCreateSynopsis    = "plystra capability create <capability-name> [--plugin <plugin>] [--confirm]"
+	capabilityCreateSynopsis    = "plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]"
 	capabilityImplementSynopsis = "plystra capability implement <capability-name>/vN [--plugin <plugin>]"
+	capabilityExposeSynopsis    = "plystra capability expose <capability-name>/vN"
 	capabilityUsage             = `Usage:
   ` + capabilityCreateSynopsis + `
   ` + capabilityImplementSynopsis + `
+  ` + capabilityExposeSynopsis + `
 `
 	capabilityCreateUsage    = "usage: " + capabilityCreateSynopsis + "\n"
 	capabilityImplementUsage = "usage: " + capabilityImplementSynopsis + "\n"
+	capabilityExposeUsage    = "usage: " + capabilityExposeSynopsis + "\n"
 )
 
 type capabilityArguments struct {
@@ -27,6 +31,7 @@ type capabilityArguments struct {
 	reference string
 	plugin    string
 	confirm   bool
+	expose    bool
 }
 
 func runCapability(arguments []string, stdout, stderr io.Writer, workingDirectory string, environment []string, selectPlugin plugintarget.Selector) int {
@@ -41,6 +46,23 @@ func runCapability(arguments []string, stdout, stderr io.Writer, workingDirector
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
 	defer cancel()
+	if parsed.action == "expose" {
+		result, err := capabilityexpose.Expose(ctx, capabilityexpose.Options{
+			Start:       workingDirectory,
+			Reference:   parsed.reference,
+			Environment: environment,
+		})
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "%v\n", err)
+			return 1
+		}
+		if result.Changed() {
+			_, _ = fmt.Fprintf(stdout, "exposed capability %s over HTTP in %s\n", result.Capability(), result.ManifestPath())
+		} else {
+			_, _ = fmt.Fprintf(stdout, "capability %s is already exposed over HTTP in %s\n", result.Capability(), result.ManifestPath())
+		}
+		return 0
+	}
 	options := capabilitycreate.AuthorOptions{
 		Options: capabilitycreate.Options{
 			Start:       workingDirectory,
@@ -50,6 +72,7 @@ func runCapability(arguments []string, stdout, stderr io.Writer, workingDirector
 			Environment: environment,
 		},
 		Confirm: parsed.confirm,
+		Expose:  parsed.expose,
 	}
 	var result capabilitycreate.Result
 	var err error
@@ -70,6 +93,9 @@ func runCapability(arguments []string, stdout, stderr io.Writer, workingDirector
 		return 1
 	}
 	_, _ = fmt.Fprintf(stdout, "%s capability %s in %s at %s\n", pastTense(parsed.action), result.Capability(), result.PluginID(), result.CapabilityPath())
+	if parsed.expose {
+		_, _ = fmt.Fprintf(stdout, "exposed capability %s over HTTP in %s\n", result.Capability(), result.ApplicationManifestPath())
+	}
 	writeCapabilityRecommendations(stderr, result)
 	return 0
 }
@@ -91,10 +117,16 @@ func writeCapabilityRecommendations(writer io.Writer, result capabilitycreate.Re
 }
 
 func parseCapabilityArguments(arguments []string) (capabilityArguments, bool) {
-	if len(arguments) < 3 || arguments[0] != "capability" || (arguments[1] != "create" && arguments[1] != "implement") || arguments[2] == "" || strings.HasPrefix(arguments[2], "--") {
+	if len(arguments) < 3 || arguments[0] != "capability" || (arguments[1] != "create" && arguments[1] != "implement" && arguments[1] != "expose") || arguments[2] == "" || strings.HasPrefix(arguments[2], "--") {
 		return capabilityArguments{}, false
 	}
 	result := capabilityArguments{action: arguments[1], reference: arguments[2]}
+	if result.action == "expose" {
+		if len(arguments) != 3 {
+			return capabilityArguments{}, false
+		}
+		return result, true
+	}
 	pluginSet := false
 	for index := 3; index < len(arguments); index++ {
 		switch arguments[index] {
@@ -110,6 +142,11 @@ func parseCapabilityArguments(arguments []string) (capabilityArguments, bool) {
 				return capabilityArguments{}, false
 			}
 			result.confirm = true
+		case "--expose":
+			if result.action != "create" || result.expose {
+				return capabilityArguments{}, false
+			}
+			result.expose = true
 		default:
 			return capabilityArguments{}, false
 		}
@@ -125,6 +162,8 @@ func capabilityHelp(arguments []string) (string, bool) {
 		return "Usage:\n  " + capabilityCreateSynopsis + "\n", true
 	case len(arguments) == 3 && arguments[0] == "capability" && arguments[1] == "implement" && isHelp(arguments[2]):
 		return "Usage:\n  " + capabilityImplementSynopsis + "\n", true
+	case len(arguments) == 3 && arguments[0] == "capability" && arguments[1] == "expose" && isHelp(arguments[2]):
+		return "Usage:\n  " + capabilityExposeSynopsis + "\n", true
 	default:
 		return "", false
 	}
@@ -137,6 +176,8 @@ func capabilityArgumentUsage(arguments []string) string {
 			return capabilityCreateUsage
 		case "implement":
 			return capabilityImplementUsage
+		case "expose":
+			return capabilityExposeUsage
 		}
 	}
 	return strings.ToLower(capabilityUsage[:1]) + capabilityUsage[1:]
