@@ -49,16 +49,18 @@ This is a root-level plugin in the ` + "`%s`" + ` Go Module. Its declarative sou
 
 ## Capabilities
 
-This plugin starts without capabilities. Add a custom capability with:
+Canonical capabilities implemented by this plugin are listed under ` + "`provides`" + ` in ` + "`plugin.yaml`" + `. Their declarations live at ` + "`capabilities/<capability-name>/vN/capability.yaml`" + `, and provider methods remain in plugin-owned Go files outside ` + "`generated/`" + `.
+
+Create a custom capability from the module root with:
 
 ` + "```text" + `
-plystra capability create <capability-name>
+plystra capability create <capability-name> --plugin %s
 ` + "```" + `
 
 Implement an existing canonical capability with:
 
 ` + "```text" + `
-plystra capability implement <capability-name>/vN
+plystra capability implement <capability-name>/vN --plugin %s
 ` + "```" + `
 `
 
@@ -96,7 +98,7 @@ func renderScaffold(modulePath, name, id string) ([]atomicfs.Write, error) {
 		{Path: name + "/plugin.yaml", Data: []byte("id: " + id + "\n\nconfig: {}\n"), Mode: 0o644, MustNotExist: true, ParentMustNotExist: true},
 		{Path: name + "/plugin.go", Data: pluginSource, Mode: 0o644, MustNotExist: true},
 		{Path: name + "/plugin_test.go", Data: testSource, Mode: 0o644, MustNotExist: true},
-		{Path: name + "/README.md", Data: []byte(fmt.Sprintf(pluginReadmeTemplate, title(name), id, modulePath)), Mode: 0o644, MustNotExist: true},
+		{Path: name + "/README.md", Data: []byte(fmt.Sprintf(pluginReadmeTemplate, title(name), id, modulePath, name, name)), Mode: 0o644, MustNotExist: true},
 		{Path: configurationSource.Path(), Data: configurationSource.Data(), Mode: 0o644, MustNotExist: true},
 	}, nil
 }
