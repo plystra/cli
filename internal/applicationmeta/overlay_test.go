@@ -57,6 +57,7 @@ settings: {type: object}
 	base := parseOverlayManifest(t, "plystra.yaml", `
 http:
   address: ":8080"
+  transports: {connect: false, rest: true}
   expose: [audit.write/v1, email.send/v1]
 timeouts: {startup: 1m}
 capabilities:
@@ -77,6 +78,7 @@ config:
 	overlay := parseOverlayManifest(t, "plystra.production.yaml", `
 http:
   address: ":9090"
+  transports: {connect: true, rest: null}
   expose:
     add: [reports.read/v1]
     remove: [audit.write/v1]
@@ -107,6 +109,9 @@ config:
 	if address, exists := current.HTTPAddress(); !exists || address != ":9090" {
 		t.Fatalf("HTTPAddress = %q, %t", address, exists)
 	}
+	if transports := current.HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
+		t.Fatalf("HTTPTransports = %#v", transports)
+	}
 	if current.StartupTimeout() != applicationmeta.DefaultStartupTimeout {
 		t.Fatalf("StartupTimeout = %s", current.StartupTimeout())
 	}
@@ -128,7 +133,7 @@ config:
 			ModulePath:    "example.com/a",
 			ModuleVersion: "v1.0.0",
 			Manifest: parseOverlayManifest(t, "plystra.yaml", `
-http: {expose: [audit.write/v1]}
+http: {transports: {connect: false, rest: true}, expose: [audit.write/v1]}
 capabilities:
   require: [audit.write/v1]
   use:
@@ -153,6 +158,9 @@ config:
 		t.Fatalf("Compose overlaid current Project: %v", err)
 	}
 	effective := composed.Manifest()
+	if transports := effective.HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
+		t.Fatalf("effective HTTP transports = %#v", transports)
+	}
 	if got := overlayRequirementIDs(effective); !reflect.DeepEqual(got, []string{"email.send/v1", "reports.read/v1"}) {
 		t.Fatalf("effective requirements = %v", got)
 	}
@@ -190,7 +198,7 @@ func TestApplyOverlayInheritsOmittedFieldsAndRejectsInvalidChanges(t *testing.T)
 	schema := composeSchema(t, "host: {type: string}\nsettings: {type: object}\n")
 	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{"acme.smtp": schema})
 	base := parseOverlayManifest(t, "plystra.yaml", `
-http: {address: ":8080", expose: [email.send/v1]}
+http: {address: ":8080", transports: {connect: false, rest: true}, expose: [email.send/v1]}
 timeouts: {startup: 45s}
 capabilities: {require: [email.send/v1]}
 config: {acme.smtp: {host: shared.example, settings: {mode: shared}}}
@@ -201,6 +209,9 @@ config: {acme.smtp: {host: shared.example, settings: {mode: shared}}}
 	}
 	if address, exists := inherited.HTTPAddress(); !exists || address != ":8080" || inherited.StartupTimeout() != 45*time.Second {
 		t.Fatalf("inherited process settings = %q/%t %s", address, exists, inherited.StartupTimeout())
+	}
+	if transports := inherited.HTTPTransports(); transports != (applicationmeta.HTTPTransports{REST: true}) {
+		t.Fatalf("inherited HTTP transports = %#v", transports)
 	}
 	if got := overlayRequirementIDs(inherited); !reflect.DeepEqual(got, []string{"email.send/v1"}) {
 		t.Fatalf("inherited requirements = %v", got)

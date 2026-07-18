@@ -158,6 +158,45 @@ func TestParseNormalizesHTTPAddressAndCanonicalExposure(t *testing.T) {
 	}
 }
 
+func TestParseNormalizesClosedHTTPTransportSelection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		data string
+		want applicationmeta.HTTPTransports
+	}{
+		{
+			name: "omitted defaults",
+			data: "{}\n",
+			want: applicationmeta.HTTPTransports{Connect: true},
+		},
+		{
+			name: "explicit values",
+			data: "http: {transports: {rest: true, connect: false}}\n",
+			want: applicationmeta.HTTPTransports{REST: true},
+		},
+		{
+			name: "field removals restore defaults",
+			data: "http: {transports: {connect: null, rest: null}}\n",
+			want: applicationmeta.HTTPTransports{Connect: true},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			manifest, err := applicationmeta.Parse([]byte(test.data))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if got := manifest.HTTPTransports(); got != test.want {
+				t.Fatalf("HTTPTransports = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestParseNormalizesAndRedactsPluginConfiguration(t *testing.T) {
 	t.Parallel()
 
@@ -242,6 +281,8 @@ func TestParseAllowsEmptyOptionalSections(t *testing.T) {
 	for _, data := range [][]byte{
 		[]byte(`{}`),
 		[]byte("http: {}\n"),
+		[]byte("http: {transports: {}}\n"),
+		[]byte("http: {transports: {connect: null, rest: null}}\n"),
 		[]byte("http: {expose: []}\n"),
 		[]byte("http: {address: null, expose: {add: [], remove: []}}\n"),
 		[]byte("capabilities: {}\n"),
@@ -252,7 +293,7 @@ func TestParseAllowsEmptyOptionalSections(t *testing.T) {
 	} {
 		manifest, err := applicationmeta.Parse(data)
 		address, hasAddress := manifest.HTTPAddress()
-		if err != nil || len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.Configurations()) != 0 || manifest.StartupTimeout() != applicationmeta.DefaultStartupTimeout || hasAddress || address != "" || len(manifest.HTTPExposures()) != 0 {
+		if err != nil || len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.Configurations()) != 0 || manifest.StartupTimeout() != applicationmeta.DefaultStartupTimeout || manifest.HTTPTransports() != (applicationmeta.HTTPTransports{Connect: true}) || hasAddress || address != "" || len(manifest.HTTPExposures()) != 0 {
 			t.Fatalf("Parse(%q) = %#v, %v", data, manifest, err)
 		}
 	}
@@ -283,6 +324,10 @@ func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 		{name: "untrimmed http address", data: `http: {address: " :8080 "}` + "\n", want: "http.address must be"},
 		{name: "oversized http address", data: "http:\n  address: " + overlongAddress + "\n", want: "at most 4096 bytes"},
 		{name: "NUL http address", data: `http: {address: "bad\0address"}` + "\n", want: "no NUL"},
+		{name: "http transports type", data: "http: {transports: []}\n", want: "http.transports must be a mapping"},
+		{name: "unknown http transport", data: "http: {transports: {grpc: true}}\n", want: `http.transports contains unknown key "grpc"`},
+		{name: "connect transport type", data: "http: {transports: {connect: enabled}}\n", want: "http.transports.connect must be true, false, or null"},
+		{name: "REST transport type", data: "http: {transports: {rest: 1}}\n", want: "http.transports.rest must be true, false, or null"},
 		{name: "http exposure sparse key", data: "http: {expose: {append: []}}\n", want: `unknown sparse-edit key "append"`},
 		{name: "http exposure sparse add type", data: "http: {expose: {add: {}}}\n", want: "http.expose.add must be a sequence"},
 		{name: "http exposure sparse remove type", data: "http: {expose: {remove: true}}\n", want: "http.expose.remove must be a sequence"},
@@ -379,6 +424,8 @@ func FuzzParseApplicationManifest(f *testing.F) {
 	for _, seed := range []string{
 		"{}\n",
 		"http: {address: \":8080\", expose: [kernel.health/v1, order.create/v1]}\n",
+		"http: {transports: {connect: false, rest: true}}\n",
+		"http: {transports: {connect: null, rest: null}}\n",
 		"http: {address: null, expose: {add: [kernel.health/v1], remove: [order.create/v1]}}\n",
 		"capabilities: {aliases: {}}\n",
 		"capabilities: {require: {remove: [order.create/v1]}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n",
@@ -413,6 +460,7 @@ func FuzzParseApplicationManifest(f *testing.F) {
 			!slices.Equal(requirementStrings(first.Requirements()), requirementStrings(second.Requirements())) ||
 			!slices.Equal(providerChoiceStrings(first.ProviderChoices()), providerChoiceStrings(second.ProviderChoices())) ||
 			firstAddress != secondAddress || firstHasAddress != secondHasAddress ||
+			first.HTTPTransports() != second.HTTPTransports() ||
 			first.StartupTimeout() != second.StartupTimeout() {
 			t.Fatalf("Parse is nondeterministic: %#v then %#v", first, second)
 		}

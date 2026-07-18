@@ -28,6 +28,12 @@ const (
 	// DefaultInvocationTimeout bounds one raw canonical Kernel dispatch when
 	// the caller and generated application path provide no earlier deadline.
 	DefaultInvocationTimeout = 30 * time.Second
+	// DefaultConnectTransport enables the initial external transport when
+	// http.transports.connect is omitted.
+	DefaultConnectTransport = true
+	// DefaultRESTTransport keeps the optional REST projection disabled when
+	// http.transports.rest is omitted.
+	DefaultRESTTransport = false
 )
 
 // ErrInvalidManifest reports unsafe or invalid plystra.yaml metadata.
@@ -78,6 +84,23 @@ func (e HTTPExposure) ID() capabilityid.Identifier { return e.id }
 
 // Source returns stable configuration-path provenance for diagnostics.
 func (e HTTPExposure) Source() string { return e.source }
+
+// HTTPTransports is the closed selected-current-project external transport
+// choice. The zero value is not the schema default; callers obtain resolved
+// defaults through Manifest.HTTPTransports.
+type HTTPTransports struct {
+	Connect bool
+	REST    bool
+}
+
+type httpTransportLayer struct {
+	connect       bool
+	hasConnect    bool
+	removeConnect bool
+	rest          bool
+	hasREST       bool
+	removeREST    bool
+}
 
 // CapabilityRequirement is one explicit canonical Capability requirement.
 type CapabilityRequirement struct {
@@ -163,6 +186,7 @@ type Manifest struct {
 	httpAddress            string
 	hasHTTPAddress         bool
 	removeHTTPAddress      bool
+	httpTransports         httpTransportLayer
 	httpExposures          []HTTPExposure
 	removedHTTPExposures   []capabilityRemoval
 	requirements           []CapabilityRequirement
@@ -199,6 +223,22 @@ func (Manifest) LogValue() slog.Value {
 // HTTPAddress returns the explicitly configured listener address. A false
 // result means the http section or address field was omitted.
 func (m Manifest) HTTPAddress() (string, bool) { return m.httpAddress, m.hasHTTPAddress }
+
+// HTTPTransports returns the selected closed transport values after applying
+// the schema defaults for omitted or explicitly removed fields.
+func (m Manifest) HTTPTransports() HTTPTransports {
+	result := HTTPTransports{
+		Connect: DefaultConnectTransport,
+		REST:    DefaultRESTTransport,
+	}
+	if m.httpTransports.hasConnect {
+		result.Connect = m.httpTransports.connect
+	}
+	if m.httpTransports.hasREST {
+		result.REST = m.httpTransports.rest
+	}
+	return result
+}
 
 // StartupTimeout returns the normalized positive provider-startup timeout.
 // Omitted timeouts.startup uses DefaultStartupTimeout.
@@ -267,7 +307,7 @@ func ParseSource(source string, data []byte) (Manifest, error) {
 			return Manifest{}, invalid("unknown key %q", key)
 		}
 	}
-	address, hasAddress, removeAddress, exposures, removedExposures, err := parseHTTP(values["http"])
+	address, hasAddress, removeAddress, transports, exposures, removedExposures, err := parseHTTP(values["http"])
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -287,6 +327,7 @@ func ParseSource(source string, data []byte) (Manifest, error) {
 		httpAddress:            address,
 		hasHTTPAddress:         hasAddress,
 		removeHTTPAddress:      removeAddress,
+		httpTransports:         transports,
 		httpExposures:          exposures,
 		removedHTTPExposures:   removedExposures,
 		requirements:           requirements,
@@ -410,19 +451,19 @@ func parseConfigurations(node *yaml.Node) ([]PluginConfiguration, []pluginConfig
 	return configurations, removals, nil
 }
 
-func parseHTTP(node *yaml.Node) (string, bool, bool, []HTTPExposure, []capabilityRemoval, error) {
+func parseHTTP(node *yaml.Node) (string, bool, bool, httpTransportLayer, []HTTPExposure, []capabilityRemoval, error) {
 	if node == nil {
-		return "", false, false, nil, nil, nil
+		return "", false, false, httpTransportLayer{}, nil, nil, nil
 	}
 	values, err := mapping(node, "http")
 	if err != nil {
-		return "", false, false, nil, nil, err
+		return "", false, false, httpTransportLayer{}, nil, nil, err
 	}
 	for _, key := range sortedNodeKeys(values) {
 		switch key {
-		case "address", "expose":
+		case "address", "transports", "expose":
 		default:
-			return "", false, false, nil, nil, invalid("http contains unknown key %q", key)
+			return "", false, false, httpTransportLayer{}, nil, nil, invalid("http contains unknown key %q", key)
 		}
 	}
 	address := ""
@@ -434,22 +475,67 @@ func parseHTTP(node *yaml.Node) (string, bool, bool, []HTTPExposure, []capabilit
 		} else {
 			address, err = strictString(addressNode)
 			if err != nil || address == "" || len(address) > 4096 || strings.TrimSpace(address) != address || strings.ContainsRune(address, '\x00') {
-				return "", false, false, nil, nil, invalid("http.address must be a non-empty trimmed string of at most 4096 bytes with no NUL or null")
+				return "", false, false, httpTransportLayer{}, nil, nil, invalid("http.address must be a non-empty trimmed string of at most 4096 bytes with no NUL or null")
 			}
 			hasAddress = true
 		}
 	}
+	transports, err := parseHTTPTransports(values["transports"])
+	if err != nil {
+		return "", false, false, httpTransportLayer{}, nil, nil, err
+	}
 	exposeNode, exists := values["expose"]
 	if !exists {
-		return address, hasAddress, removeAddress, nil, nil, nil
+		return address, hasAddress, removeAddress, transports, nil, nil, nil
 	}
 	exposures, removals, err := parseCapabilitySet(exposeNode, "http.expose", func(id capabilityid.Identifier, source string) HTTPExposure {
 		return HTTPExposure{id: id, source: source}
 	})
 	if err != nil {
-		return "", false, false, nil, nil, err
+		return "", false, false, httpTransportLayer{}, nil, nil, err
 	}
-	return address, hasAddress, removeAddress, exposures, removals, nil
+	return address, hasAddress, removeAddress, transports, exposures, removals, nil
+}
+
+func parseHTTPTransports(node *yaml.Node) (httpTransportLayer, error) {
+	if node == nil {
+		return httpTransportLayer{}, nil
+	}
+	values, err := mapping(node, "http.transports")
+	if err != nil {
+		return httpTransportLayer{}, err
+	}
+	for _, key := range sortedNodeKeys(values) {
+		switch key {
+		case "connect", "rest":
+		default:
+			return httpTransportLayer{}, invalid("http.transports contains unknown key %q", key)
+		}
+	}
+	result := httpTransportLayer{}
+	if connect, exists := values["connect"]; exists {
+		if isNull(connect) {
+			result.removeConnect = true
+		} else {
+			result.connect, err = strictBool(connect)
+			if err != nil {
+				return httpTransportLayer{}, invalid("http.transports.connect must be true, false, or null")
+			}
+			result.hasConnect = true
+		}
+	}
+	if rest, exists := values["rest"]; exists {
+		if isNull(rest) {
+			result.removeREST = true
+		} else {
+			result.rest, err = strictBool(rest)
+			if err != nil {
+				return httpTransportLayer{}, invalid("http.transports.rest must be true, false, or null")
+			}
+			result.hasREST = true
+		}
+	}
+	return result, nil
 }
 
 func parseCapabilitySet[T any](node *yaml.Node, path string, makeValue func(capabilityid.Identifier, string) T) ([]T, []capabilityRemoval, error) {

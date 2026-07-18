@@ -145,6 +145,65 @@ config:
 	}
 }
 
+func TestComposeKeepsDependencyHTTPTransportsOutsideInheritance(t *testing.T) {
+	t.Parallel()
+
+	dependencies := []applicationmeta.Dependency{
+		{
+			ModulePath:    "example.com/connect-off",
+			ModuleVersion: "v1.0.0",
+			Manifest:      composeManifest(t, "http: {transports: {connect: false, rest: true}}\n"),
+		},
+		{
+			ModulePath:    "example.com/rest-off",
+			ModuleVersion: "v2.0.0",
+			Manifest:      composeManifest(t, "http: {transports: {connect: true, rest: false}}\n"),
+		},
+	}
+
+	for _, test := range []struct {
+		name    string
+		current string
+		want    applicationmeta.HTTPTransports
+	}{
+		{
+			name:    "omitted current choice uses schema defaults",
+			current: "{}\n",
+			want:    applicationmeta.HTTPTransports{Connect: true},
+		},
+		{
+			name:    "explicit current choice wins",
+			current: "http: {transports: {connect: false, rest: true}}\n",
+			want:    applicationmeta.HTTPTransports{REST: true},
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			first, err := applicationmeta.Compose(dependencies, composeManifest(t, test.current), composeSchemaLookup(nil))
+			if err != nil {
+				t.Fatalf("Compose: %v", err)
+			}
+			second, err := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[1], dependencies[0]}, composeManifest(t, test.current), composeSchemaLookup(nil))
+			if err != nil {
+				t.Fatalf("Compose(reordered): %v", err)
+			}
+			if got := first.Manifest().HTTPTransports(); got != test.want {
+				t.Fatalf("HTTPTransports = %#v, want %#v", got, test.want)
+			}
+			if got := second.Manifest().HTTPTransports(); got != test.want {
+				t.Fatalf("reordered HTTPTransports = %#v, want %#v", got, test.want)
+			}
+			if first.DependencyDigest() != second.DependencyDigest() {
+				t.Fatalf("dependency digest changed with order: %s then %s", first.DependencyDigest(), second.DependencyDigest())
+			}
+			if records := first.Provenance(); len(records) != 0 {
+				t.Fatalf("dependency-only process settings entered provenance: %#v", provenanceStrings(records))
+			}
+		})
+	}
+}
+
 func TestComposeRequiresCurrentProviderReplacementForInheritedConflict(t *testing.T) {
 	t.Parallel()
 

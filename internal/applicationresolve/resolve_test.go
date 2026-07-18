@@ -56,6 +56,9 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if _, exists := first.Manifest().HTTPAddress(); exists || len(first.Manifest().Requirements()) != 0 || len(first.Manifest().Aliases()) != 0 {
 		t.Fatalf("Manifest is not empty: %#v", first.Manifest())
 	}
+	if transports := first.Manifest().HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
+		t.Fatalf("default HTTP transports = %#v", transports)
+	}
 	if len(first.Inventory().Plugins()) != 0 {
 		t.Fatalf("Inventory = %#v", first.Inventory().Plugins())
 	}
@@ -105,8 +108,8 @@ require example.com/platform v1.0.0
 
 replace example.com/platform => ../platform
 `)
-	rootConfiguration := "http: {address: \":8080\"}\ncapabilities: {require: [kernel.health/v1]}\n"
-	selectedConfiguration := "# selected file remains independently authored\nhttp: {address: \":9090\"}\ncapabilities: {require: [kernel.info/v1]}\n"
+	rootConfiguration := "http: {address: \":8080\", transports: {connect: false, rest: false}}\ncapabilities: {require: [kernel.health/v1]}\n"
+	selectedConfiguration := "# selected file remains independently authored\nhttp: {address: \":9090\", transports: {rest: true}}\ncapabilities: {require: [kernel.info/v1]}\n"
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), rootConfiguration)
 	writeFile(t, filepath.Join(appRoot, "deploy", "customer.yaml"), selectedConfiguration)
 	before := snapshotTree(t, appRoot)
@@ -125,6 +128,9 @@ replace example.com/platform => ../platform
 	}
 	if address, exists := result.Manifest().HTTPAddress(); !exists || address != ":9090" {
 		t.Fatalf("effective HTTP address = %q, %t; root replacement leaked", address, exists)
+	}
+	if transports := result.Manifest().HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true, REST: true}) {
+		t.Fatalf("effective replacement HTTP transports = %#v; root replacement leaked", transports)
 	}
 	if got := applicationRequirementIDs(result.Manifest()); !reflect.DeepEqual(got, []string{"kernel.health/v1", "kernel.info/v1"}) {
 		t.Fatalf("effective requirements = %v", got)
@@ -194,8 +200,8 @@ replace example.com/platform-a => ../platform-a
 
 replace example.com/platform-b => ../platform-b
 `)
-	rootConfiguration := "# shared root\nhttp: {address: \":8080\"}\ncapabilities: {require: [kernel.info/v1]}\n"
-	overlayConfiguration := "# sparse production overlay\nhttp: {address: \":9090\"}\ncapabilities:\n  require: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n"
+	rootConfiguration := "# shared root\nhttp: {address: \":8080\", transports: {connect: false, rest: true}}\ncapabilities: {require: [kernel.info/v1]}\n"
+	overlayConfiguration := "# sparse production overlay\nhttp: {address: \":9090\", transports: {connect: true, rest: null}}\ncapabilities:\n  require: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n"
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), rootConfiguration)
 	writeFile(t, filepath.Join(appRoot, "plystra.production.yaml"), overlayConfiguration)
 	before := snapshotTree(t, appRoot)
@@ -214,6 +220,9 @@ replace example.com/platform-b => ../platform-b
 	}
 	if address, exists := result.Manifest().HTTPAddress(); !exists || address != ":9090" {
 		t.Fatalf("effective HTTP address = %q, %t", address, exists)
+	}
+	if transports := result.Manifest().HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
+		t.Fatalf("effective environment HTTP transports = %#v", transports)
 	}
 	if got := applicationRequirementIDs(result.Manifest()); !reflect.DeepEqual(got, []string{"kernel.health/v1"}) {
 		t.Fatalf("effective requirements = %v", got)

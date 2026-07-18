@@ -191,8 +191,8 @@ Composition uses field-specific rules:
 - Plugin configuration merges only by fields declared in plugin.yaml.
   Declared objects merge recursively; scalar and array fields replace as one
   value. Null removes one inherited field or a complete Plugin config entry.
-- Dependency http.address and timeouts.startup never replace this Project's
-  process settings.
+- Dependency http.address, http.transports, and timeouts.startup never replace
+  this Project's process settings.
 - Incompatible Provider, Alias, or Plugin-field values fail with every
   contributing module@version/plystra.yaml source.
 
@@ -252,6 +252,9 @@ Root plystra.yaml is the mandatory Project marker, shared current-Project base,
 and default configuration. Add only environment-specific differences to one
 optional sparse project-root overlay, for example plystra.production.yaml:
 
+    http:
+      transports:
+        rest: true
     capabilities:
       use:
         email.send/v1: acme.email.smtp
@@ -274,6 +277,18 @@ objects merge by declared field path, set fields use their sparse add/remove
 form, and null keeps its exact tombstone meaning. Unknown fields and type
 mismatches remain errors. Dependency Project environment overlays are never
 inherited.
+
+http.transports is a closed current-Project object. It accepts only boolean
+connect and rest fields. When omitted, connect defaults to true and rest
+defaults to false. In an environment overlay, those fields replace
+independently: omission inherits the root value and null restores that field's
+schema default. A complete --config document does not inherit root transport
+choices; omitted fields use the same defaults. Dependency Project transport
+settings are ignored.
+
+The current CLI validates and composes this selection. Connect/REST projection
+from the selected transport model is a later roadmap feature, so rest: true
+does not yet create a REST adapter.
 
 PLYSTRA_ENV supplies the same environment name for automation when --env is
 omitted. To generate from a complete alternative document instead, use the same
@@ -480,6 +495,9 @@ generated source:
 
     http:
       address: ":8080"
+      transports:
+        connect: true
+        rest: false
       expose:
         - records.read/v1
 
@@ -638,6 +656,13 @@ Or expose during creation with --expose. Exposure is application-owned and
 updates plystra.yaml http.expose. The CLI generates a strict POST handler at:
 
     /api/v1/capabilities/records.read/v1/invoke
+
+Keep transport selection in the selected current-Project document. Only
+connect and rest are valid keys; omitted values use connect: true and
+rest: false. Environment overlays replace those two booleans independently,
+and dependency Project transport choices never override the current Project.
+The current generated handler remains the implemented HTTP surface until the
+later Connect and optional REST projection gates consume this selection.
 
 Generated handlers enforce the exact route, application/json, bounded bodies,
 required and unknown fields, enums, response validation, safe errors, and

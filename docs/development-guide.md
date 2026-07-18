@@ -326,8 +326,8 @@ Composition is typed and independent of dependency order:
   replace as complete values. A keyed `null` removes one inherited field, and
   `config.<plugin-id>: null` removes that Plugin's inherited object. Unknown
   fields and invalid or changing types fail.
-- Dependency `http.address`, `timeouts.startup`, and other process settings do
-  not enter the current Project.
+- Dependency `http.address`, `http.transports`, `timeouts.startup`, and other
+  process settings do not enter the current Project.
 - Incompatible inherited Providers, Aliases, or Plugin fields fail with every
   contributing `module@version/plystra.yaml` source.
 
@@ -408,6 +408,10 @@ that shared root. For example, create only the differences needed by production
 in `plystra.production.yaml`:
 
 ```yaml
+http:
+  transports:
+    rest: true
+
 capabilities:
   use:
     email.send/v1: acme.email.smtp
@@ -434,6 +438,19 @@ field, keyed objects merge by declared field path, set fields use their sparse
 `add` and `remove` form, and `null` keeps its existing exact tombstone meaning.
 Unknown fields and type mismatches remain errors. A dependency Project's own
 environment files are never inherited.
+
+`http.transports` is a closed current-Project object. It accepts only boolean
+`connect` and `rest` fields. When omitted, Connect defaults to enabled and REST
+defaults to disabled. In an environment overlay the two fields replace
+independently: an omitted field inherits the root choice, while `null` restores
+that field's schema default. A full-replacement file does not inherit root
+transport choices; omitted transport fields use the same defaults. Dependency
+Project transport settings never participate in composition.
+
+At this implementation boundary, resolution validates and composes the closed
+selection. Connecting it to the generated application model, Connect output,
+and optional REST projection remains in the later transport gates; setting
+`rest: true` does not yet create a REST adapter.
 
 For automation, select the same environment name with:
 

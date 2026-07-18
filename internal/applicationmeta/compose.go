@@ -187,6 +187,7 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 	manifest := Manifest{
 		httpAddress:     current.httpAddress,
 		hasHTTPAddress:  current.hasHTTPAddress,
+		httpTransports:  current.httpTransports,
 		httpExposures:   exposures,
 		requirements:    requirements,
 		providerChoices: choices,
