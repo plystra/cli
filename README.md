@@ -147,7 +147,7 @@ Commands below a module root use the nearest real enclosing `go.mod`; nested mod
 
 ## Authoring behavior
 
-Plugin-target inference resolves an explicit target, the enclosing plugin, or the only local plugin. When several local plugins remain, current non-interactive commands fail with every candidate and require `--plugin <directory-or-plugin-id>`.
+Plugin-target inference resolves an explicit target, the enclosing plugin, the only local plugin, or an interactive choice when several local plugins remain and a terminal is available. Non-interactive ambiguity fails with every candidate and requires `--plugin <directory-or-plugin-id>`.
 
 Capability identities use `<capability-name>/v<number>`. Names contain at least two dot-separated lower-case segments, may use any logical hierarchy depth, and never imply a fixed namespace/operation split.
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/plystra/cli/internal/capabilitycreate"
+	"github.com/plystra/cli/internal/plugintarget"
 )
 
 const (
@@ -28,7 +29,7 @@ type capabilityArguments struct {
 	confirm   bool
 }
 
-func runCapability(arguments []string, stdout, stderr io.Writer, workingDirectory string, environment []string) int {
+func runCapability(arguments []string, stdout, stderr io.Writer, workingDirectory string, environment []string, selectPlugin plugintarget.Selector) int {
 	if help, ok := capabilityHelp(arguments); ok {
 		_, _ = io.WriteString(stdout, help)
 		return 0
@@ -45,6 +46,7 @@ func runCapability(arguments []string, stdout, stderr io.Writer, workingDirector
 			Start:       workingDirectory,
 			Reference:   parsed.reference,
 			Plugin:      parsed.plugin,
+			Select:      selectPlugin,
 			Environment: environment,
 		},
 		Confirm: parsed.confirm,

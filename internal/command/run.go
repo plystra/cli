@@ -13,6 +13,7 @@ import (
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/newproject"
 	"github.com/plystra/cli/internal/plugincreate"
+	"github.com/plystra/cli/internal/plugintarget"
 	"github.com/plystra/cli/internal/version"
 )
 
@@ -39,12 +40,17 @@ func Run(arguments []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "determine working directory: %v\n", err)
 		return 1
 	}
-	return RunIn(arguments, stdout, stderr, workingDirectory, os.Environ())
+	return runIn(arguments, stdout, stderr, workingDirectory, os.Environ(), terminalPluginSelector(os.Stdin, stderr))
 }
 
 // RunIn executes a command in an explicit environment. It exists so command
-// integration tests can isolate filesystem and Go Module state.
+// integration tests can isolate filesystem and Go Module state. It remains
+// non-interactive so automation never consumes an implicit input stream.
 func RunIn(arguments []string, stdout, stderr io.Writer, workingDirectory string, environment []string) int {
+	return runIn(arguments, stdout, stderr, workingDirectory, environment, nil)
+}
+
+func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string, environment []string, selectPlugin plugintarget.Selector) int {
 	if stdout == nil || stderr == nil {
 		return 2
 	}
@@ -106,7 +112,7 @@ func RunIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		_, _ = fmt.Fprintf(stdout, "created plugin %s in %s\n", result.ID(), result.Path())
 		return 0
 	case "capability":
-		return runCapability(arguments, stdout, stderr, workingDirectory, environment)
+		return runCapability(arguments, stdout, stderr, workingDirectory, environment, selectPlugin)
 	case "generate":
 		check, ok := parseGenerateArguments(arguments)
 		if !ok {
@@ -142,6 +148,22 @@ func RunIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		_, _ = fmt.Fprintf(stderr, "unknown command %q\n\n%s", arguments[0], usage)
 		return 2
 	}
+}
+
+func terminalPluginSelector(input *os.File, output io.Writer) plugintarget.Selector {
+	outputFile, ok := output.(*os.File)
+	if !ok || !terminalFile(input) || !terminalFile(outputFile) {
+		return nil
+	}
+	return plugintarget.Prompt(input, output)
+}
+
+func terminalFile(file *os.File) bool {
+	if file == nil {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func parseGenerateArguments(arguments []string) (bool, bool) {
