@@ -167,7 +167,7 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 			t.Fatalf("generated README advertises unavailable command %q:\n%s", unavailable, readme)
 		}
 	}
-	for _, available := range [][]byte{[]byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("plystra generate --config"), []byte("PLYSTRA_CONFIG"), []byte("go test ./..."), []byte("go vet ./...")} {
+	for _, available := range [][]byte{[]byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("plystra generate --env"), []byte("PLYSTRA_ENV"), []byte("plystra generate --config"), []byte("PLYSTRA_CONFIG"), []byte("go test ./..."), []byte("go vet ./...")} {
 		if !bytes.Contains(readme, available) {
 			t.Fatalf("generated README omits available workflow %q:\n%s", available, readme)
 		}
@@ -654,12 +654,18 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"legacy_host: null",
 		"Declared objects merge recursively",
 		"dependency composition digest",
-		"## Select one complete current-Project configuration",
+		"## Select an environment or one complete current-Project configuration",
+		"plystra generate --env production",
+		"plystra generate --check --env production",
+		"PLYSTRA_ENV supplies the same environment name",
+		"Do not combine --env and --config",
+		"preserves the sparse overlay",
 		"plystra generate --config deploy/customer-a.yaml",
 		"plystra generate --check --config deploy/customer-a.yaml",
 		"PLYSTRA_CONFIG supplies the same path",
-		"root and selected paths",
-		"configuration schema v2",
+		"configuration schema v3",
+		"environment, or explicit-config mode",
+		"root dependency baseline",
 		"merged beneath deploy/customer-a.yaml",
 		"There is no handwritten provider registration",
 		"dependencies.Dependencies",

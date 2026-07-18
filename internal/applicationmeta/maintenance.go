@@ -69,6 +69,17 @@ func (m ConfigurationMaintenance) Changed() bool { return m.changed }
 // as current-project decisions and missing compatible dependency values are
 // introduced without overwriting them.
 func MaintainDependencyConfiguration(data []byte, previous DependencyBaseline, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
+	return maintainDependencyConfiguration(data, nil, previous, dependencies, schemas)
+}
+
+// MaintainDependencyConfigurationWithOverlay maintains only the shared root
+// document while allowing explicit sparse overlay decisions to resolve exact
+// inherited conflicts. Overlay values are never materialized into root data.
+func MaintainDependencyConfigurationWithOverlay(data []byte, overlay Manifest, previous DependencyBaseline, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
+	return maintainDependencyConfiguration(data, &overlay, previous, dependencies, schemas)
+}
+
+func maintainDependencyConfiguration(data []byte, overlay *Manifest, previous DependencyBaseline, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
 	if schemas == nil {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: schema lookup is nil", ErrMaintainConfiguration)
 	}
@@ -83,6 +94,17 @@ func MaintainDependencyConfiguration(data []byte, previous DependencyBaseline, d
 	currentByPath, err := indexMaintenanceDecisions(current)
 	if err != nil {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: %w", ErrMaintainConfiguration, err)
+	}
+	overlayByPath := map[string]maintenanceDecision{}
+	if overlay != nil {
+		overlayDecisions, err := maintenanceDecisions(*overlay, schemas)
+		if err != nil {
+			return ConfigurationMaintenance{}, fmt.Errorf("%w: environment overlay: %w", ErrMaintainConfiguration, err)
+		}
+		overlayByPath, err = indexMaintenanceDecisions(overlayDecisions)
+		if err != nil {
+			return ConfigurationMaintenance{}, fmt.Errorf("%w: environment overlay: %w", ErrMaintainConfiguration, err)
+		}
 	}
 	newCandidates, err := dependencyMaintenanceCandidates(dependencies, schemas)
 	if err != nil {
@@ -115,7 +137,7 @@ func MaintainDependencyConfiguration(data []byte, previous DependencyBaseline, d
 		if _, exists := currentByPath[path]; exists {
 			continue
 		}
-		if suppressedByMaintenanceAncestor(local, path) {
+		if len(old) != 1 || maintenanceDecisionResolvesPath(local, path) || maintenanceDecisionResolvesPath(overlayByPath, path) {
 			continue
 		}
 		sources := baselineSources(old)
@@ -133,7 +155,7 @@ func MaintainDependencyConfiguration(data []byte, previous DependencyBaseline, d
 	for _, path := range paths {
 		candidates := newCandidates[path]
 		if len(candidates) != 1 {
-			if _, resolved := local[path]; resolved || suppressedByMaintenanceAncestor(local, path) {
+			if maintenanceDecisionResolvesPath(local, path) || maintenanceDecisionResolvesPath(overlayByPath, path) {
 				continue
 			}
 			return ConfigurationMaintenance{}, dependencyMaintenanceConflict(path, candidates)
@@ -183,6 +205,11 @@ func MaintainDependencyConfiguration(data []byte, previous DependencyBaseline, d
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: updated Project configuration changed current-project process settings", ErrMaintainConfiguration)
 	}
 	return ConfigurationMaintenance{data: append([]byte(nil), updated...), changed: !bytes.Equal(data, updated)}, nil
+}
+
+func maintenanceDecisionResolvesPath(decisions map[string]maintenanceDecision, path string) bool {
+	_, exact := decisions[path]
+	return exact || suppressedByMaintenanceAncestor(decisions, path)
 }
 
 func maintenanceDecisions(manifest Manifest, schemas SchemaLookup) ([]maintenanceDecision, error) {
@@ -487,6 +514,7 @@ func sameCurrentProjectProcessSettings(left, right Manifest) bool {
 	return leftAddress == rightAddress && leftHasAddress == rightHasAddress &&
 		left.removeHTTPAddress == right.removeHTTPAddress &&
 		left.StartupTimeout() == right.StartupTimeout() &&
+		left.hasStartupTimeout == right.hasStartupTimeout &&
 		left.removeStartupTimeout == right.removeStartupTimeout
 }
 

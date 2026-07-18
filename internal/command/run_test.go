@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	wantUsage         = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path> [options]\n  plystra plugin create <name>\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN\n  plystra generate [--check] [--config <yaml-path>]\n"
+	wantUsage         = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path> [options]\n  plystra plugin create <name>\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]\n"
 	wantNewUsage      = "Usage:\n  plystra new <module-path> [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]\n\nOptions:\n  --plugin <name>           Create an initial root-level plugin.\n  --git, --no-git           Initialize or omit a Git repository.\n  --github-ci, --no-github-ci\n                            Include or omit GitHub Actions CI.\n  --skills, --no-skills     Include or omit Plystra agent skills.\n\nInteractive creation asks for each unspecified choice. Non-interactive creation\nmust specify one flag from every choice pair.\n"
-	wantGenerateUsage = "Usage:\n  plystra generate [--check] [--config <yaml-path>]\n\nOptions:\n  --check                Report drift without modifying configuration or generated files.\n  --config <yaml-path>   Use one complete current-project configuration instead of root plystra.yaml.\n\nPLYSTRA_CONFIG supplies the configuration path when --config is omitted.\nRelative paths are resolved from the detected Plystra Project root. Root\nplystra.yaml remains mandatory as the Project marker and is not merged beneath\nan explicitly selected configuration.\n"
+	wantGenerateUsage = "Usage:\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]\n\nOptions:\n  --check                Report drift without modifying configuration or generated files.\n  --env <environment>    Overlay root plystra.yaml with plystra.<environment>.yaml.\n  --config <yaml-path>   Use one complete current-project configuration instead of root plystra.yaml.\n\nPLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit\nselector is present; setting both is an error. Explicit --env or --config\noverrides both variables, and the two flags cannot be combined. Relative\nconfiguration paths are resolved from the detected Plystra Project root. Root\nplystra.yaml remains mandatory and is not merged beneath --config.\n"
 )
 
 func TestRunHelp(t *testing.T) {
@@ -141,6 +141,9 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "generate duplicate check", arguments: []string{"generate", "--check", "--check"}, wantError: wantGenerateUsage},
 		{name: "generate missing configuration path", arguments: []string{"generate", "--config"}, wantError: wantGenerateUsage},
 		{name: "generate duplicate configuration", arguments: []string{"generate", "--config", "a.yaml", "--config", "b.yaml"}, wantError: wantGenerateUsage},
+		{name: "generate missing environment", arguments: []string{"generate", "--env"}, wantError: wantGenerateUsage},
+		{name: "generate duplicate environment", arguments: []string{"generate", "--env", "test", "--env", "production"}, wantError: wantGenerateUsage},
+		{name: "generate selector conflict", arguments: []string{"generate", "--env", "test", "--config", "deploy.yaml"}, wantError: wantGenerateUsage},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -93,6 +93,38 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManifestProvenance(default): %v", err)
 	}
+	environmentProvenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
+		Mode:                   applicationgen.ConfigurationModeEnvironment,
+		Environment:            "production",
+		RootPath:               "plystra.yaml",
+		RootData:               []byte("config: {acme.business: {legacy: 'C:/private/root-config', password: {env: ROOT_PRIVATE_TOKEN}}}\n"),
+		SelectedPath:           "plystra.production.yaml",
+		SelectedData:           []byte("config: {acme.business: {password: {env: PRODUCTION_PRIVATE_TOKEN}}}\n"),
+		Composition:            dependencyComposition(t),
+		ApplicationModelDigest: defaultModel,
+		Previous:               defaultProvenance,
+	})
+	if err != nil {
+		t.Fatalf("NewManifestProvenance(environment): %v", err)
+	}
+	environmentData, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), environmentProvenance)
+	if err != nil {
+		t.Fatalf("RenderManifest(environment): %v", err)
+	}
+	if !bytes.Contains(environmentData, []byte(`"mode":"environment","environment":"production"`)) ||
+		!bytes.Contains(environmentData, []byte(`"overlay":{"path":"plystra.production.yaml","digest":"sha256:`)) ||
+		bytes.Contains(environmentData, []byte(`"selected":`)) {
+		t.Fatalf("environment provenance = %s", environmentData)
+	}
+	decodedEnvironment, err := applicationgen.DecodeManifestProvenance(environmentData)
+	if err != nil || decodedEnvironment.Environment() != "production" || decodedEnvironment.SelectedPath() != "plystra.production.yaml" {
+		t.Fatalf("DecodeManifestProvenance(environment) = environment %q path %q, %v", decodedEnvironment.Environment(), decodedEnvironment.SelectedPath(), err)
+	}
+	environmentBaseline, environmentExists := decodedEnvironment.BaselineForSelection(applicationgen.ConfigurationModeEnvironment, "plystra.production.yaml")
+	defaultEnvironmentBaseline, defaultEnvironmentExists := decodedEnvironment.BaselineForSelection(applicationgen.ConfigurationModeDefault, "plystra.yaml")
+	if !environmentExists || !defaultEnvironmentExists || environmentBaseline.Digest() != defaultEnvironmentBaseline.Digest() {
+		t.Fatalf("shared environment baseline = environment %q/%t default %q/%t", environmentBaseline.Digest(), environmentExists, defaultEnvironmentBaseline.Digest(), defaultEnvironmentExists)
+	}
 	explicitProvenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
 		Mode:                   applicationgen.ConfigurationModeExplicit,
 		RootPath:               "plystra.yaml",
@@ -101,7 +133,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 		SelectedData:           []byte("# independent complete configuration\nconfig: {acme.business: {legacy: customer-runtime-value, password: {env: CUSTOMER_PRIVATE_TOKEN}}}\n"),
 		Composition:            testComposition(),
 		ApplicationModelDigest: defaultModel,
-		Previous:               defaultProvenance,
+		Previous:               environmentProvenance,
 	})
 	if err != nil {
 		t.Fatalf("NewManifestProvenance(explicit): %v", err)
@@ -123,6 +155,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 		"C:/private/root-config",
 		"ROOT_PRIVATE_TOKEN",
 		"CUSTOMER_PRIVATE_TOKEN",
+		"PRODUCTION_PRIVATE_TOKEN",
 		"customer-runtime-value",
 		"independent complete configuration",
 		"resolved-super-secret",
@@ -131,8 +164,8 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 			t.Fatalf("generated manifest leaked %q: %s", forbidden, data)
 		}
 	}
-	oldSchema := bytes.Replace(data, []byte(`"version":2`), []byte(`"version":1`), 1)
-	if _, err := applicationgen.DecodeManifestProvenance(oldSchema); err == nil || !strings.Contains(err.Error(), "must use version 2") {
+	oldSchema := bytes.Replace(data, []byte(`"version":3`), []byte(`"version":2`), 1)
+	if _, err := applicationgen.DecodeManifestProvenance(oldSchema); err == nil || !strings.Contains(err.Error(), "must use version 3") {
 		t.Fatalf("DecodeManifestProvenance(old schema) error = %v", err)
 	}
 	unknown := bytes.Replace(data, []byte(`"mode":"explicit-config"`), []byte(`"unknown":true,"mode":"explicit-config"`), 1)

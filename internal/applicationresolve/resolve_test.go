@@ -17,6 +17,7 @@ import (
 	"time"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/capabilityid"
@@ -165,6 +166,90 @@ func TestResolveRequiresRootMarkerAndSelectedFile(t *testing.T) {
 	options.ConfigurationPath = "missing.yaml"
 	if _, err := applicationresolve.Resolve(t.Context(), options); err == nil || !strings.Contains(err.Error(), "missing.yaml") {
 		t.Fatalf("Resolve missing selected file error = %v", err)
+	}
+}
+
+func TestResolveAppliesOneEnvironmentOverlayAboveRootAndDependencies(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	dependencyARoot := filepath.Join(root, "platform-a")
+	dependencyBRoot := filepath.Join(root, "platform-b")
+	writeModule(t, dependencyARoot, "example.com/platform-a")
+	writeModule(t, dependencyBRoot, "example.com/platform-b")
+	writeFile(t, filepath.Join(dependencyARoot, "plystra.yaml"), "http: {expose: [kernel.info/v1]}\ncapabilities: {require: [kernel.health/v1]}\n")
+	writeFile(t, filepath.Join(dependencyARoot, "plystra.production.yaml"), "capabilities: {require: [kernel.info/v1]}\n")
+	writeFile(t, filepath.Join(dependencyBRoot, "plystra.yaml"), "capabilities: {require: {remove: [kernel.health/v1]}}\n")
+	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
+
+go 1.26
+
+require (
+	example.com/platform-a v1.0.0
+	example.com/platform-b v1.0.0
+)
+
+replace example.com/platform-a => ../platform-a
+
+replace example.com/platform-b => ../platform-b
+`)
+	rootConfiguration := "# shared root\nhttp: {address: \":8080\"}\ncapabilities: {require: [kernel.info/v1]}\n"
+	overlayConfiguration := "# sparse production overlay\nhttp: {address: \":9090\"}\ncapabilities:\n  require: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n"
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), rootConfiguration)
+	writeFile(t, filepath.Join(appRoot, "plystra.production.yaml"), overlayConfiguration)
+	before := snapshotTree(t, appRoot)
+
+	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:           appRoot,
+		EnvironmentName: "production",
+		Environment:     goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "PLYSTRA_CONFIG": "ignored.yaml", "PLYSTRA_ENV": "ignored"}),
+	})
+	if err != nil {
+		t.Fatalf("Resolve environment: %v", err)
+	}
+	selection := result.ConfigurationSelection()
+	if selection.Mode() != applicationgen.ConfigurationModeEnvironment || selection.Environment() != "production" || selection.Path() != "plystra.production.yaml" || !strings.HasPrefix(selection.Digest(), "sha256:") {
+		t.Fatalf("ConfigurationSelection = mode %q environment %q path %q digest %q", selection.Mode(), selection.Environment(), selection.Path(), selection.Digest())
+	}
+	if address, exists := result.Manifest().HTTPAddress(); !exists || address != ":9090" {
+		t.Fatalf("effective HTTP address = %q, %t", address, exists)
+	}
+	if got := applicationRequirementIDs(result.Manifest()); !reflect.DeepEqual(got, []string{"kernel.health/v1"}) {
+		t.Fatalf("effective requirements = %v", got)
+	}
+	if !result.ConfigurationMaintenance().Changed() || result.ConfigurationMaintenancePath() != "plystra.yaml" || !bytes.Equal(result.ConfigurationMaintenanceSource(), []byte(rootConfiguration)) {
+		t.Fatalf("root maintenance = changed %t path %q source %q", result.ConfigurationMaintenance().Changed(), result.ConfigurationMaintenancePath(), result.ConfigurationMaintenanceSource())
+	}
+	if !bytes.Contains(result.RootConfigurationData(), []byte("expose:")) || !bytes.Equal(result.ConfigurationSource(), []byte(overlayConfiguration)) {
+		t.Fatal("root or overlay provenance was not preserved independently")
+	}
+	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, before) {
+		t.Fatalf("Resolve environment mutated Project:\nbefore: %#v\nafter: %#v", before, after)
+	}
+
+	ambient, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       appRoot,
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "PLYSTRA_ENV": "production"}),
+	})
+	if err != nil || ambient.ConfigurationSelection().Environment() != "production" {
+		t.Fatalf("Resolve PLYSTRA_ENV = environment %q, %v", ambient.ConfigurationSelection().Environment(), err)
+	}
+}
+
+func TestResolveRequiresSelectedEnvironmentOverlay(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModule(t, root, "example.com/app")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:           root,
+		EnvironmentName: "production",
+		Environment:     goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "plystra.production.yaml") {
+		t.Fatalf("Resolve missing environment overlay error = %v", err)
 	}
 }
 

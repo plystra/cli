@@ -5,63 +5,115 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/plystra/cli/internal/applicationgen"
 )
 
 const (
-	configurationModeDefault  = applicationgen.ConfigurationModeDefault
-	configurationModeExplicit = applicationgen.ConfigurationModeExplicit
-	configurationEnvironment  = "PLYSTRA_CONFIG"
+	configurationModeDefault     = applicationgen.ConfigurationModeDefault
+	configurationModeEnvironment = applicationgen.ConfigurationModeEnvironment
+	configurationModeExplicit    = applicationgen.ConfigurationModeExplicit
+	configurationPathEnvironment = "PLYSTRA_CONFIG"
+	configurationNameEnvironment = "PLYSTRA_ENV"
 )
 
-// ConfigurationSelection identifies the one current-project document used by
-// a resolution. Paths are stable project-relative slash paths and digests are
+// ConfigurationSelection identifies the selected current-project mode and its
+// selected document. Environment mode selects one overlay above the mandatory
+// root document. Paths are stable project-relative slash paths and digests are
 // computed from normalized YAML without retaining document values.
 type ConfigurationSelection struct {
-	mode   string
-	path   string
-	digest string
+	mode        string
+	path        string
+	environment string
+	digest      string
 }
 
-// Mode returns default or explicit-config.
+// Mode returns default, environment, or explicit-config.
 func (s ConfigurationSelection) Mode() string { return s.mode }
 
 // Path returns the stable Project-relative current-project document path.
 func (s ConfigurationSelection) Path() string { return s.path }
 
+// Environment returns the selected environment name in environment mode.
+func (s ConfigurationSelection) Environment() string { return s.environment }
+
 // Digest returns the normalized selected-document digest.
 func (s ConfigurationSelection) Digest() string { return s.digest }
 
-func (s ConfigurationSelection) explicit() bool { return s.mode == configurationModeExplicit }
-
 type configurationSelector struct {
-	mode string
-	path string
+	mode        string
+	path        string
+	environment string
 }
 
-func resolveConfigurationSelector(moduleRoot, explicit string, environment []string) (configurationSelector, error) {
-	selected := explicit
-	source := "--config"
-	if selected == "" {
-		value, exists, err := environmentValue(environment, configurationEnvironment)
+func resolveConfigurationSelector(moduleRoot, explicitConfiguration, explicitEnvironment string, environment []string) (configurationSelector, error) {
+	if explicitConfiguration != "" && explicitEnvironment != "" {
+		return configurationSelector{}, errors.New("--config and --env cannot be used together")
+	}
+	if explicitConfiguration != "" {
+		path, err := selectedConfigurationPath(moduleRoot, explicitConfiguration, "--config")
 		if err != nil {
 			return configurationSelector{}, err
 		}
-		if !exists {
-			return configurationSelector{mode: configurationModeDefault, path: applicationManifestName}, nil
-		}
-		selected = value
-		source = configurationEnvironment
+		return configurationSelector{mode: configurationModeExplicit, path: path}, nil
 	}
-	if strings.TrimSpace(selected) == "" {
-		return configurationSelector{}, fmt.Errorf("%s selects an empty configuration path", source)
+	if explicitEnvironment != "" {
+		return selectedEnvironment(explicitEnvironment, "--env")
 	}
-	path, err := projectRelativeConfigurationPath(moduleRoot, selected)
+
+	configurationPath, hasConfiguration, err := environmentValue(environment, configurationPathEnvironment)
 	if err != nil {
 		return configurationSelector{}, err
 	}
-	return configurationSelector{mode: configurationModeExplicit, path: path}, nil
+	environmentName, hasEnvironment, err := environmentValue(environment, configurationNameEnvironment)
+	if err != nil {
+		return configurationSelector{}, err
+	}
+	if hasConfiguration && hasEnvironment {
+		return configurationSelector{}, fmt.Errorf("%s and %s cannot be used together", configurationPathEnvironment, configurationNameEnvironment)
+	}
+	if hasConfiguration {
+		path, err := selectedConfigurationPath(moduleRoot, configurationPath, configurationPathEnvironment)
+		if err != nil {
+			return configurationSelector{}, err
+		}
+		return configurationSelector{mode: configurationModeExplicit, path: path}, nil
+	}
+	if hasEnvironment {
+		return selectedEnvironment(environmentName, configurationNameEnvironment)
+	}
+	return configurationSelector{mode: configurationModeDefault, path: applicationManifestName}, nil
+}
+
+func selectedConfigurationPath(moduleRoot, selected, source string) (string, error) {
+	if strings.TrimSpace(selected) == "" {
+		return "", fmt.Errorf("%s selects an empty configuration path", source)
+	}
+	path, err := projectRelativeConfigurationPath(moduleRoot, selected)
+	if err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func selectedEnvironment(value, source string) (configurationSelector, error) {
+	if strings.TrimSpace(value) == "" {
+		return configurationSelector{}, fmt.Errorf("%s selects an empty environment name", source)
+	}
+	if len(value) > 200 {
+		return configurationSelector{}, fmt.Errorf("%s environment name exceeds 200 bytes", source)
+	}
+	if value == "." || value == ".." || filepath.IsAbs(value) || filepath.VolumeName(value) != "" ||
+		strings.ContainsAny(value, `/\\<>:"|?*`) || strings.IndexFunc(value, unicode.IsControl) >= 0 ||
+		filepath.Clean(value) != value {
+		return configurationSelector{}, fmt.Errorf("%s environment %q must be one safe filename component", source, value)
+	}
+	return configurationSelector{
+		mode:        configurationModeEnvironment,
+		path:        "plystra." + value + ".yaml",
+		environment: value,
+	}, nil
 }
 
 func environmentValue(environment []string, name string) (string, bool, error) {

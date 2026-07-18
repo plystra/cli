@@ -159,6 +159,90 @@ replace github.com/plystra/kernel => %s
 	}
 }
 
+func TestRunGenerateSelectsEnvironmentOverlayThroughPublicCommand(t *testing.T) {
+	root := t.TempDir()
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	goMod := fmt.Sprintf(`module example.com/acme/environment
+
+go 1.26
+
+require (
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot))
+	writeCommandFile(t, filepath.Join(root, "go.mod"), goMod)
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("ReadFile(go.sum): %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	rootConfiguration := "# shared root\ncapabilities: {require: [kernel.health/v1]}\n"
+	overlayConfiguration := "# sparse production overlay\ncapabilities:\n  require:\n    add: [kernel.info/v1]\n    remove: [kernel.health/v1]\n"
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootConfiguration)
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayConfiguration)
+	start := filepath.Join(root, "nested")
+	if err := os.MkdirAll(start, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	environment := commandGoEnvironment()
+
+	exitCode, stdout, stderr := runCommand(t, []string{"generate", "--env", "production"}, start, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/environment in "+root+"\n" {
+		t.Fatalf("generate --env = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if got := string(readCommandFile(t, root, "plystra.yaml")); got != rootConfiguration {
+		t.Fatalf("environment generation changed root configuration:\n%s", got)
+	}
+	if got := string(readCommandFile(t, root, "plystra.production.yaml")); got != overlayConfiguration {
+		t.Fatalf("environment generation changed overlay:\n%s", got)
+	}
+	provenance, err := applicationgen.DecodeManifestProvenance(readCommandFile(t, root, "generated/manifest.json"))
+	if err != nil || provenance.Mode() != applicationgen.ConfigurationModeEnvironment || provenance.Environment() != "production" || provenance.SelectedPath() != "plystra.production.yaml" {
+		t.Fatalf("environment provenance = mode %q environment %q path %q, %v", provenance.Mode(), provenance.Environment(), provenance.SelectedPath(), err)
+	}
+
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, start, commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "production"}))
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/environment in "+root+"\n" {
+		t.Fatalf("PLYSTRA_ENV check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	explicitEnvironment := commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "missing.yaml"})
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--env", "production"}, start, explicitEnvironment)
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("explicit --env did not override ambient selectors = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+
+	beforeConflict := commandTree(t, root)
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, start, commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "production", "PLYSTRA_CONFIG": "plystra.yaml"}))
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "PLYSTRA_CONFIG and PLYSTRA_ENV cannot be used together") {
+		t.Fatalf("ambient selector conflict = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeConflict) {
+		t.Fatal("ambient selector conflict mutated the Project")
+	}
+
+	for _, test := range []struct {
+		arguments []string
+		want      string
+	}{
+		{arguments: []string{"generate", "--check", "--env", "missing"}, want: "plystra.missing.yaml"},
+		{arguments: []string{"generate", "--check", "--env", "../production"}, want: "safe filename component"},
+	} {
+		before := commandTree(t, root)
+		exitCode, stdout, stderr = runCommand(t, test.arguments, start, environment)
+		if exitCode != 1 || stdout != "" || !strings.Contains(stderr, test.want) {
+			t.Fatalf("generate %q = exit %d, stdout %q, stderr %q", test.arguments, exitCode, stdout, stderr)
+		}
+		if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+			t.Fatalf("generate %q mutated the Project", test.arguments)
+		}
+	}
+}
+
 func TestRunGenerateSelectsCompleteConfigurationThroughPublicCommand(t *testing.T) {
 	root := t.TempDir()
 	applicationRoot := filepath.Join(root, "application")

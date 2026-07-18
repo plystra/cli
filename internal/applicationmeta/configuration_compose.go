@@ -448,6 +448,61 @@ type renderedPluginConfigNode struct {
 }
 
 func renderPluginConfigurations(selected map[string]pluginConfigDecision) ([]PluginConfiguration, error) {
+	roots := renderedPluginConfigRoots(selected)
+	pluginIDs := sortedRenderedPluginIDs(roots)
+	result := make([]PluginConfiguration, 0, len(pluginIDs))
+	for _, pluginID := range pluginIDs {
+		root := roots[pluginID]
+		if root.decision == nil {
+			return nil, errors.New("composed Plugin configuration has no root decision")
+		}
+		node, present, err := renderPluginConfigNode(root, false)
+		if err != nil {
+			return nil, fmt.Errorf("config[%q]: %v", pluginID, err)
+		}
+		if !present {
+			continue
+		}
+		data, err := marshalPluginConfigNode(node)
+		if err != nil {
+			return nil, fmt.Errorf("config[%q]: %v", pluginID, err)
+		}
+		result = append(result, PluginConfiguration{pluginID: pluginID, source: root.decision.source, yaml: data})
+	}
+	return result, nil
+}
+
+func renderPluginConfigurationLayer(selected map[string]pluginConfigDecision) ([]PluginConfiguration, []pluginConfigurationRemoval, error) {
+	roots := renderedPluginConfigRoots(selected)
+	pluginIDs := sortedRenderedPluginIDs(roots)
+	configurations := make([]PluginConfiguration, 0, len(pluginIDs))
+	removals := make([]pluginConfigurationRemoval, 0)
+	for _, pluginID := range pluginIDs {
+		root := roots[pluginID]
+		if root.decision == nil {
+			return nil, nil, errors.New("overlaid Plugin configuration has no root decision")
+		}
+		if root.decision.kind == pluginConfigRemoval {
+			removals = append(removals, pluginConfigurationRemoval{pluginID: pluginID, source: root.decision.source})
+			continue
+		}
+		node, present, err := renderPluginConfigNode(root, true)
+		if err != nil {
+			return nil, nil, fmt.Errorf("config[%q]: %v", pluginID, err)
+		}
+		if !present || node.Kind != yaml.MappingNode {
+			return nil, nil, fmt.Errorf("config[%q]: overlaid configuration must remain an object", pluginID)
+		}
+		data, err := marshalPluginConfigNode(node)
+		if err != nil {
+			return nil, nil, fmt.Errorf("config[%q]: %v", pluginID, err)
+		}
+		configurations = append(configurations, PluginConfiguration{pluginID: pluginID, source: root.decision.source, yaml: data})
+	}
+	return configurations, removals, nil
+}
+
+func renderedPluginConfigRoots(selected map[string]pluginConfigDecision) map[string]*renderedPluginConfigNode {
 	roots := make(map[string]*renderedPluginConfigNode)
 	for _, decision := range selected {
 		root := roots[decision.pluginID]
@@ -467,40 +522,27 @@ func renderPluginConfigurations(selected map[string]pluginConfigDecision) ([]Plu
 		copy := clonePluginConfigDecision(decision)
 		node.decision = &copy
 	}
+	return roots
+}
 
+func sortedRenderedPluginIDs(roots map[string]*renderedPluginConfigNode) []string {
 	pluginIDs := make([]string, 0, len(roots))
 	for pluginID := range roots {
 		pluginIDs = append(pluginIDs, pluginID)
 	}
 	sort.Strings(pluginIDs)
-	result := make([]PluginConfiguration, 0, len(pluginIDs))
-	for _, pluginID := range pluginIDs {
-		root := roots[pluginID]
-		if root.decision == nil {
-			return nil, errors.New("composed Plugin configuration has no root decision")
-		}
-		node, present, err := renderPluginConfigNode(root)
-		if err != nil {
-			return nil, fmt.Errorf("config[%q]: %v", pluginID, err)
-		}
-		if !present {
-			continue
-		}
-		data, err := marshalPluginConfigNode(node)
-		if err != nil {
-			return nil, fmt.Errorf("config[%q]: %v", pluginID, err)
-		}
-		result = append(result, PluginConfiguration{pluginID: pluginID, source: root.decision.source, yaml: data})
-	}
-	return result, nil
+	return pluginIDs
 }
 
-func renderPluginConfigNode(node *renderedPluginConfigNode) (*yaml.Node, bool, error) {
+func renderPluginConfigNode(node *renderedPluginConfigNode, preserveRemoval bool) (*yaml.Node, bool, error) {
 	if node == nil || node.decision == nil {
 		return nil, false, errors.New("configuration node has no decision")
 	}
 	switch node.decision.kind {
 	case pluginConfigRemoval:
+		if preserveRemoval {
+			return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}, true, nil
+		}
 		return nil, false, nil
 	case pluginConfigValue:
 		value, err := decodeNormalizedConfigNode(node.decision.yaml)
@@ -513,7 +555,7 @@ func renderPluginConfigNode(node *renderedPluginConfigNode) (*yaml.Node, bool, e
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			child, present, err := renderPluginConfigNode(node.children[name])
+			child, present, err := renderPluginConfigNode(node.children[name], preserveRemoval)
 			if err != nil {
 				return nil, false, err
 			}

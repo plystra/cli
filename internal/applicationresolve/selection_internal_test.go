@@ -11,26 +11,34 @@ func TestResolveConfigurationSelectorPrecedenceAndNormalization(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	ambient, err := resolveConfigurationSelector(root, "", []string{"PLYSTRA_CONFIG=deploy/ambient.yaml"})
+	ambient, err := resolveConfigurationSelector(root, "", "", []string{"PLYSTRA_CONFIG=deploy/ambient.yaml"})
 	if err != nil || ambient.mode != configurationModeExplicit || ambient.path != "deploy/ambient.yaml" {
 		t.Fatalf("ambient selector = %#v, %v", ambient, err)
 	}
-	explicit, err := resolveConfigurationSelector(root, "deploy/explicit.yaml", []string{"PLYSTRA_CONFIG=deploy/ambient.yaml", "PLYSTRA_CONFIG=duplicate.yaml"})
+	explicit, err := resolveConfigurationSelector(root, "deploy/explicit.yaml", "", []string{"PLYSTRA_CONFIG=deploy/ambient.yaml", "PLYSTRA_CONFIG=duplicate.yaml", "PLYSTRA_ENV=ignored"})
 	if err != nil || explicit.mode != configurationModeExplicit || explicit.path != "deploy/explicit.yaml" {
 		t.Fatalf("explicit selector = %#v, %v", explicit, err)
 	}
 	absolute := filepath.Join(root, "deploy", "customer.yaml")
-	selected, err := resolveConfigurationSelector(root, absolute, nil)
+	selected, err := resolveConfigurationSelector(root, absolute, "", nil)
 	if err != nil || selected.path != "deploy/customer.yaml" {
 		t.Fatalf("absolute selector = %#v, %v", selected, err)
 	}
-	defaultSelection, err := resolveConfigurationSelector(root, "", []string{"UNRELATED=value"})
+	defaultSelection, err := resolveConfigurationSelector(root, "", "", []string{"UNRELATED=value"})
 	if err != nil || defaultSelection.mode != configurationModeDefault || defaultSelection.path != applicationManifestName {
 		t.Fatalf("default selector = %#v, %v", defaultSelection, err)
 	}
-	explicitRoot, err := resolveConfigurationSelector(root, applicationManifestName, nil)
+	explicitRoot, err := resolveConfigurationSelector(root, applicationManifestName, "", nil)
 	if err != nil || explicitRoot.mode != configurationModeExplicit || explicitRoot.path != applicationManifestName {
 		t.Fatalf("explicit root selector = %#v, %v", explicitRoot, err)
+	}
+	environment, err := resolveConfigurationSelector(root, "", "production", []string{"PLYSTRA_CONFIG=ignored.yaml", "PLYSTRA_ENV=ignored"})
+	if err != nil || environment.mode != configurationModeEnvironment || environment.environment != "production" || environment.path != "plystra.production.yaml" {
+		t.Fatalf("explicit environment = %#v, %v", environment, err)
+	}
+	ambientEnvironment, err := resolveConfigurationSelector(root, "", "", []string{"PLYSTRA_ENV=test"})
+	if err != nil || ambientEnvironment.mode != configurationModeEnvironment || ambientEnvironment.environment != "test" || ambientEnvironment.path != "plystra.test.yaml" {
+		t.Fatalf("ambient environment = %#v, %v", ambientEnvironment, err)
 	}
 }
 
@@ -40,13 +48,23 @@ func TestResolveConfigurationSelectorRejectsUnsafeAndAmbiguousInputs(t *testing.
 	root := t.TempDir()
 	outside := filepath.Join(filepath.Dir(root), "outside.yaml")
 	tests := []struct {
-		name        string
-		explicit    string
-		environment []string
-		want        string
+		name                string
+		explicit            string
+		explicitEnvironment string
+		environment         []string
+		want                string
 	}{
 		{name: "empty ambient", environment: []string{"PLYSTRA_CONFIG=   "}, want: "empty configuration path"},
 		{name: "duplicate ambient", environment: []string{"PLYSTRA_CONFIG=a.yaml", "PLYSTRA_CONFIG=b.yaml"}, want: "more than once"},
+		{name: "ambient selector conflict", environment: []string{"PLYSTRA_CONFIG=a.yaml", "PLYSTRA_ENV=test"}, want: "cannot be used together"},
+		{name: "explicit selector conflict", explicit: "a.yaml", explicitEnvironment: "test", want: "cannot be used together"},
+		{name: "empty environment", environment: []string{"PLYSTRA_ENV=   "}, want: "empty environment name"},
+		{name: "dot environment", explicitEnvironment: ".", want: "safe filename component"},
+		{name: "parent environment", explicitEnvironment: "..", want: "safe filename component"},
+		{name: "separated environment", explicitEnvironment: "deploy/production", want: "safe filename component"},
+		{name: "backslash environment", explicitEnvironment: `deploy\\production`, want: "safe filename component"},
+		{name: "absolute environment", explicitEnvironment: outside, want: "safe filename component"},
+		{name: "control environment", explicitEnvironment: "prod\nblue", want: "safe filename component"},
 		{name: "parent traversal", explicit: "../outside.yaml", want: "within the Project root"},
 		{name: "absolute outside", explicit: outside, want: "within the Project root"},
 		{name: "root directory", explicit: ".", want: "identify a file"},
@@ -55,7 +73,7 @@ func TestResolveConfigurationSelectorRejectsUnsafeAndAmbiguousInputs(t *testing.
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := resolveConfigurationSelector(root, test.explicit, test.environment)
+			_, err := resolveConfigurationSelector(root, test.explicit, test.explicitEnvironment, test.environment)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("resolveConfigurationSelector error = %v, want %q", err, test.want)
 			}
