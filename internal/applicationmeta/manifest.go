@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilityid"
@@ -173,6 +174,7 @@ type Manifest struct {
 	configurations         []PluginConfiguration
 	removedConfigurations  []pluginConfigurationRemoval
 	startupTimeout         time.Duration
+	hasStartupTimeout      bool
 	removeStartupTimeout   bool
 }
 
@@ -238,9 +240,18 @@ func (m Manifest) Configuration(pluginID string) (PluginConfiguration, bool) {
 	return m.configurations[index], true
 }
 
-// Parse reads one strict bounded plystra.yaml and normalizes canonical provider
-// inputs, HTTP exposure, and concise or expanded capabilities.aliases declarations.
+// Parse reads root plystra.yaml and normalizes canonical provider inputs, HTTP
+// exposure, and concise or expanded capabilities.aliases declarations.
 func Parse(data []byte) (Manifest, error) {
+	return ParseSource("plystra.yaml", data)
+}
+
+// ParseSource reads one strict bounded current-project document and retains
+// its stable Project-relative source name for diagnostics.
+func ParseSource(source string, data []byte) (Manifest, error) {
+	if source == "" || strings.TrimSpace(source) == "" || strings.IndexFunc(source, unicode.IsControl) >= 0 {
+		return Manifest{}, invalid("configuration source must be non-empty and contain no control characters")
+	}
 	root, err := decodeDocument(data)
 	if err != nil {
 		return Manifest{}, err
@@ -260,7 +271,7 @@ func Parse(data []byte) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
-	startupTimeout, removeStartupTimeout, err := parseTimeouts(values["timeouts"])
+	startupTimeout, hasStartupTimeout, removeStartupTimeout, err := parseTimeouts(values["timeouts"])
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -272,7 +283,7 @@ func Parse(data []byte) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
-	return Manifest{
+	manifest := Manifest{
 		httpAddress:            address,
 		hasHTTPAddress:         hasAddress,
 		removeHTTPAddress:      removeAddress,
@@ -287,39 +298,81 @@ func Parse(data []byte) (Manifest, error) {
 		configurations:         configurations,
 		removedConfigurations:  removedConfigurations,
 		startupTimeout:         startupTimeout,
+		hasStartupTimeout:      hasStartupTimeout,
 		removeStartupTimeout:   removeStartupTimeout,
-	}, nil
+	}
+	rewriteManifestSource(&manifest, source)
+	return manifest, nil
 }
 
-func parseTimeouts(node *yaml.Node) (time.Duration, bool, error) {
+func parseTimeouts(node *yaml.Node) (time.Duration, bool, bool, error) {
 	if node == nil {
-		return DefaultStartupTimeout, false, nil
+		return DefaultStartupTimeout, false, false, nil
 	}
 	values, err := mapping(node, "timeouts")
 	if err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	for _, key := range sortedNodeKeys(values) {
 		if key != "startup" {
-			return 0, false, invalid("timeouts contains unknown key %q", key)
+			return 0, false, false, invalid("timeouts contains unknown key %q", key)
 		}
 	}
 	startupNode, exists := values["startup"]
 	if !exists {
-		return DefaultStartupTimeout, false, nil
+		return DefaultStartupTimeout, false, false, nil
 	}
 	if isNull(startupNode) {
-		return DefaultStartupTimeout, true, nil
+		return DefaultStartupTimeout, false, true, nil
 	}
 	startup, err := strictString(startupNode)
 	if err != nil || startup == "" || len(startup) > 64 || strings.TrimSpace(startup) != startup || strings.ContainsRune(startup, '\x00') {
-		return 0, false, invalid("timeouts.startup must be a non-empty trimmed Go duration string of at most 64 bytes with no NUL or null")
+		return 0, false, false, invalid("timeouts.startup must be a non-empty trimmed Go duration string of at most 64 bytes with no NUL or null")
 	}
 	duration, err := time.ParseDuration(startup)
 	if err != nil || duration <= 0 {
-		return 0, false, invalid("timeouts.startup must be a positive Go duration")
+		return 0, false, false, invalid("timeouts.startup must be a positive Go duration")
 	}
-	return duration, false, nil
+	return duration, true, false, nil
+}
+
+func rewriteManifestSource(manifest *Manifest, source string) {
+	rewrite := func(value string) string {
+		if value == "plystra.yaml" {
+			return source
+		}
+		return source + strings.TrimPrefix(value, "plystra.yaml")
+	}
+	for index := range manifest.httpExposures {
+		manifest.httpExposures[index].source = rewrite(manifest.httpExposures[index].source)
+	}
+	for index := range manifest.removedHTTPExposures {
+		manifest.removedHTTPExposures[index].source = rewrite(manifest.removedHTTPExposures[index].source)
+	}
+	for index := range manifest.requirements {
+		manifest.requirements[index].source = rewrite(manifest.requirements[index].source)
+	}
+	for index := range manifest.removedRequirements {
+		manifest.removedRequirements[index].source = rewrite(manifest.removedRequirements[index].source)
+	}
+	for index := range manifest.providerChoices {
+		manifest.providerChoices[index].source = rewrite(manifest.providerChoices[index].source)
+	}
+	for index := range manifest.removedProviderChoices {
+		manifest.removedProviderChoices[index].source = rewrite(manifest.removedProviderChoices[index].source)
+	}
+	for index := range manifest.aliases {
+		manifest.aliases[index].source = rewrite(manifest.aliases[index].source)
+	}
+	for index := range manifest.removedAliases {
+		manifest.removedAliases[index].source = rewrite(manifest.removedAliases[index].source)
+	}
+	for index := range manifest.configurations {
+		manifest.configurations[index].source = rewrite(manifest.configurations[index].source)
+	}
+	for index := range manifest.removedConfigurations {
+		manifest.removedConfigurations[index].source = rewrite(manifest.removedConfigurations[index].source)
+	}
 }
 
 func parseConfigurations(node *yaml.Node) ([]PluginConfiguration, []pluginConfigurationRemoval, error) {

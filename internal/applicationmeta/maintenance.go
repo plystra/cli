@@ -487,6 +487,7 @@ func sameCurrentProjectProcessSettings(left, right Manifest) bool {
 	return leftAddress == rightAddress && leftHasAddress == rightHasAddress &&
 		left.removeHTTPAddress == right.removeHTTPAddress &&
 		left.StartupTimeout() == right.StartupTimeout() &&
+		left.hasStartupTimeout == right.hasStartupTimeout &&
 		left.removeStartupTimeout == right.removeStartupTimeout
 }
 
