@@ -210,6 +210,7 @@ go test -race ./...
 go vet ./...
 go run ./cmd/plystra --help
 go test ./internal/clientgen -run '^$' -bench 'BenchmarkGenerated(CanonicalInvocation|AliasForwarding)$' -benchmem
+go test ./internal/httpgen -run '^$' -bench '^BenchmarkGeneratedHTTPInvocation$' -benchmem
 ```
 
 The checked-in JavaScript golden package is validated with:
@@ -224,4 +225,4 @@ node --conditions=browser --test test/runtime.test.mjs
 npm pack --dry-run --json
 ```
 
-The two generated-client benchmarks use identical no-op canonical target work. `BenchmarkGeneratedCanonicalInvocation` measures the canonical generated client and invocation path; `BenchmarkGeneratedAliasForwarding` adds exactly the application-local Alias client layer. Raw Kernel canonical dispatch remains a separate `kernel` benchmark and is not folded into either CLI result.
+The two generated-client benchmarks use identical no-op canonical target work. `BenchmarkGeneratedCanonicalInvocation` measures the canonical generated client and invocation path; `BenchmarkGeneratedAliasForwarding` adds exactly the application-local Alias client layer. `BenchmarkGeneratedHTTPInvocation` measures the generated strict JSON transport, root context, canonical application invocation, and response serialization around a no-op in-process provider. Raw Kernel canonical dispatch remains a separate `kernel` benchmark and is not folded into these CLI results.
