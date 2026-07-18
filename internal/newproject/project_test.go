@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -52,6 +53,9 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	direct, err := newproject.Create(context.Background(), newproject.Options{
 		Parent:      directParent,
 		ModulePath:  modulePath,
+		Git:         true,
+		GitHubCI:    true,
+		Skills:      true,
 		Environment: environment,
 	})
 	if err != nil {
@@ -64,7 +68,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	commandParent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	if exitCode := command.RunIn([]string{"new", modulePath}, &stdout, &stderr, commandParent, environment); exitCode != 0 {
+	if exitCode := command.RunIn([]string{"new", modulePath, "--git", "--github-ci", "--skills"}, &stdout, &stderr, commandParent, environment); exitCode != 0 {
 		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
 	}
 	commandTarget := filepath.Join(commandParent, "my-app")
@@ -79,6 +83,8 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 		t.Fatalf("repeated creation differed:\ndirect:  %#v\ncommand: %#v", directTree, commandTree)
 	}
 	wantFiles := []string{
+		".agents/skills/plystra/SKILL.md",
+		".agents/skills/plystra/agents/openai.yaml",
 		".gitattributes",
 		".github/workflows/ci.yml",
 		".gitignore",
@@ -123,6 +129,9 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	}
 	assertReadmeUsesAvailableCommands(t, directTree["README.md"], true)
 	assertCIUsesCurrentActions(t, directTree[".github/workflows/ci.yml"])
+	assertPlystraSkill(t, direct.Path())
+	assertGitInitialized(t, direct.Path())
+	assertGitInitialized(t, commandTarget)
 	for name, content := range directTree {
 		if bytes.Contains(content, []byte(directParent)) || bytes.Contains(content, []byte(commandParent)) {
 			t.Fatalf("%s contains a local absolute path", name)
@@ -149,6 +158,9 @@ func TestCreateLibraryAndPublicCommandProduceDeterministicBuildableModules(t *te
 		Parent:      directParent,
 		ModulePath:  modulePath,
 		Library:     true,
+		Git:         true,
+		GitHubCI:    true,
+		Skills:      true,
 		Environment: environment,
 	})
 	if err != nil {
@@ -158,7 +170,7 @@ func TestCreateLibraryAndPublicCommandProduceDeterministicBuildableModules(t *te
 	commandParent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	if exitCode := command.RunIn([]string{"new", modulePath, "--library"}, &stdout, &stderr, commandParent, environment); exitCode != 0 {
+	if exitCode := command.RunIn([]string{"new", modulePath, "--library", "--git", "--github-ci", "--skills"}, &stdout, &stderr, commandParent, environment); exitCode != 0 {
 		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
 	}
 	commandTarget := filepath.Join(commandParent, "email")
@@ -173,6 +185,8 @@ func TestCreateLibraryAndPublicCommandProduceDeterministicBuildableModules(t *te
 		t.Fatalf("repeated library creation differed:\ndirect:  %#v\ncommand: %#v", directTree, commandTree)
 	}
 	wantFiles := []string{
+		".agents/skills/plystra/SKILL.md",
+		".agents/skills/plystra/agents/openai.yaml",
 		".gitattributes",
 		".github/workflows/ci.yml",
 		".gitignore",
@@ -202,6 +216,9 @@ func TestCreateLibraryAndPublicCommandProduceDeterministicBuildableModules(t *te
 	}
 	assertReadmeUsesAvailableCommands(t, directTree["README.md"], false)
 	assertCIUsesCurrentActions(t, directTree[".github/workflows/ci.yml"])
+	assertPlystraSkill(t, direct.Path())
+	assertGitInitialized(t, direct.Path())
+	assertGitInitialized(t, commandTarget)
 	assertModuleState(t, direct.Path(), modulePath)
 }
 
@@ -266,7 +283,7 @@ func TestCreateWithInitialPluginComposesRunnableAndLibraryTransactions(t *testin
 	libraryParent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	arguments := []string{"new", modulePath, "--plugin", pluginName, "--library"}
+	arguments := []string{"new", modulePath, "--plugin", pluginName, "--library", "--no-git", "--no-github-ci", "--no-skills"}
 	if exitCode := command.RunIn(arguments, &stdout, &stderr, libraryParent, environment); exitCode != 0 {
 		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
 	}
@@ -306,6 +323,83 @@ func TestCreateWithInitialPluginComposesRunnableAndLibraryTransactions(t *testin
 	if err != nil || !checked.Report().Clean() {
 		t.Fatalf("library initial-plugin generation = %#v, %v", checked.Report().Changes(), err)
 	}
+}
+
+func TestCreateHonorsOptionalProjectChoices(t *testing.T) {
+	proxy := createKernelProxy(t)
+	environment := isolatedGoEnvironment(t, proxy)
+	tests := []struct {
+		name     string
+		git      bool
+		githubCI bool
+		skills   bool
+	}{
+		{name: "minimal"},
+		{name: "git", git: true},
+		{name: "github-ci", githubCI: true},
+		{name: "skills", skills: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			parent := t.TempDir()
+			modulePath := "example.com/acme/choice-" + test.name
+			result, err := newproject.Create(t.Context(), newproject.Options{
+				Parent:      parent,
+				ModulePath:  modulePath,
+				Git:         test.git,
+				GitHubCI:    test.githubCI,
+				Skills:      test.skills,
+				Environment: environment,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			assertPathPresence(t, filepath.Join(result.Path(), ".git"), test.git)
+			assertPathPresence(t, filepath.Join(result.Path(), ".github", "workflows", "ci.yml"), test.githubCI)
+			assertPathPresence(t, filepath.Join(result.Path(), ".agents", "skills", "plystra", "SKILL.md"), test.skills)
+			if test.git {
+				assertGitInitialized(t, result.Path())
+			}
+			if test.skills {
+				assertPlystraSkill(t, result.Path())
+			}
+		})
+	}
+}
+
+func TestPublicCommandRequiresExplicitNonInteractiveChoices(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := command.RunIn([]string{"new", "example.com/acme/my-app"}, &stdout, &stderr, parent, nil)
+	if exitCode != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "--git or --no-git") || !strings.Contains(stderr.String(), "--github-ci or --no-github-ci") || !strings.Contains(stderr.String(), "--skills or --no-skills") {
+		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("non-interactive choice failure created target: %v", err)
+	}
+}
+
+func TestCreateRollsBackGitInitializationFailure(t *testing.T) {
+	proxy := createKernelProxy(t)
+	environment := isolatedGoEnvironment(t, proxy)
+	parent := t.TempDir()
+	_, err := newproject.Create(t.Context(), newproject.Options{
+		Parent:      parent,
+		ModulePath:  "example.com/acme/my-app",
+		Git:         true,
+		GitCommand:  filepath.Join(parent, "missing-git-command"),
+		Environment: environment,
+	})
+	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrGitInitialization) {
+		t.Fatalf("Create error = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists after Git failure: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
 }
 
 func TestCreateRollsBackGoValidationFailure(t *testing.T) {
@@ -554,6 +648,9 @@ func snapshotTree(t *testing.T, root string) map[string][]byte {
 			return walkErr
 		}
 		if entry.IsDir() {
+			if name == ".git" {
+				return fs.SkipDir
+			}
 			return nil
 		}
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
@@ -567,6 +664,51 @@ func snapshotTree(t *testing.T, root string) map[string][]byte {
 		t.Fatalf("WalkDir: %v", err)
 	}
 	return result
+}
+
+func assertPathPresence(t *testing.T, name string, expected bool) {
+	t.Helper()
+	_, err := os.Lstat(name)
+	if expected && err != nil {
+		t.Fatalf("expected path %s: %v", name, err)
+	}
+	if !expected && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unexpected path %s: %v", name, err)
+	}
+}
+
+func assertGitInitialized(t *testing.T, root string) {
+	t.Helper()
+	command := exec.Command("git", "-C", root, "rev-parse", "--is-inside-work-tree")
+	output, err := command.CombinedOutput()
+	if err != nil || strings.TrimSpace(string(output)) != "true" {
+		t.Fatalf("Git repository = %q, %v", output, err)
+	}
+	command = exec.Command("git", "-C", root, "symbolic-ref", "--short", "HEAD")
+	output, err = command.CombinedOutput()
+	if err != nil || strings.TrimSpace(string(output)) != "main" {
+		t.Fatalf("Git initial branch = %q, %v", output, err)
+	}
+}
+
+func assertPlystraSkill(t *testing.T, root string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "plystra", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read Plystra skill: %v", err)
+	}
+	for _, required := range []string{"name: plystra", "plystra generate --check", "dependencies.Dependencies", "type(scope): description"} {
+		if !strings.Contains(string(data), required) {
+			t.Fatalf("Plystra skill omits %q:\n%s", required, data)
+		}
+	}
+	if strings.Contains(string(data), "TODO") {
+		t.Fatalf("Plystra skill contains TODO guidance:\n%s", data)
+	}
+	metadata, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "plystra", "agents", "openai.yaml"))
+	if err != nil || !bytes.Contains(metadata, []byte("Use $plystra")) {
+		t.Fatalf("Plystra skill metadata = %q, %v", metadata, err)
+	}
 }
 
 func pluginScaffoldSnapshot(t *testing.T, root, pluginName string) map[string][]byte {

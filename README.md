@@ -141,9 +141,36 @@ authn.login.oidc.complete/v1
 
 When exactly one login method is resolved and explicitly exposed, generated Go, HTTP, and JavaScript surfaces may add the application-local `authn.login/v1` Alias with that method's exact contract. The Alias is not a canonical Capability, Kernel registry entry, provider requirement, or distributed contract. Several methods produce no implicit Alias.
 
+## Project creation
+
+Interactive creation asks whether to initialize Git, include GitHub Actions CI,
+and include the Plystra-specific development skill under
+`.agents/skills/plystra/`:
+
+```powershell
+plystra new github.com/acme/my-app
+```
+
+Each prompt defaults to yes and accepts `yes`/`y`, `no`/`n`, or Enter. Scripts
+and other non-interactive callers must choose every option explicitly:
+
+```powershell
+plystra new github.com/acme/my-app --git --github-ci --skills
+plystra new github.com/acme/email --library --no-git --no-github-ci --no-skills
+```
+
+The independent flag pairs are `--git`/`--no-git`,
+`--github-ci`/`--no-github-ci`, and `--skills`/`--no-skills`. This permits, for
+example, generating GitHub CI inside a project directory already governed by a
+parent repository without initializing a nested repository. Requested Git
+initialization creates an empty repository on branch `main`; requested CI emits
+`.github/workflows/ci.yml`; requested skills emit a complete, validated
+Plystra-specific `SKILL.md` and agent metadata rather than generic advice or
+TODO placeholders. `plystra new --help` documents the complete contract.
+
 ## Transaction safety
 
-New project trees are populated and validated in a same-parent staging directory before rename. In-place changes use same-filesystem staged replacements and backups, reject unsafe symbolic traversal, recheck source snapshots, preserve concurrent user edits, and restore original bytes and modes after validation failure or panic.
+New project trees, optional CI and skill files, and requested Git initialization are populated and validated in a same-parent staging directory before rename. A Git initialization failure leaves no target project. In-place changes use same-filesystem staged replacements and backups, reject unsafe symbolic traversal, recheck source snapshots, preserve concurrent user edits, and restore original bytes and modes after validation failure or panic.
 
 Commands below a module root use the nearest real enclosing `go.mod`; nested modules do not leak mutations into an outer module. The Module Cache remains read-only.
 

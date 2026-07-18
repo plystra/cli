@@ -8,7 +8,10 @@ import (
 	"github.com/plystra/cli/internal/command"
 )
 
-const wantUsage = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path> [--library] [--plugin <name>]\n  plystra plugin create <name>\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN\n  plystra generate [--check]\n"
+const (
+	wantUsage    = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path> [options]\n  plystra plugin create <name>\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN\n  plystra generate [--check]\n"
+	wantNewUsage = "Usage:\n  plystra new <module-path> [--library] [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]\n\nOptions:\n  --library                 Create a non-runnable plugin Go Module.\n  --plugin <name>           Create an initial root-level plugin.\n  --git, --no-git           Initialize or omit a Git repository.\n  --github-ci, --no-github-ci\n                            Include or omit GitHub Actions CI.\n  --skills, --no-skills     Include or omit Plystra agent skills.\n\nInteractive creation asks for each unspecified choice. Non-interactive creation\nmust specify one flag from every choice pair.\n"
+)
 
 func TestRunHelp(t *testing.T) {
 	t.Parallel()
@@ -29,6 +32,18 @@ func TestRunHelp(t *testing.T) {
 				t.Fatalf("Run(%q) stderr = %q, want empty", arguments, stderr.String())
 			}
 		})
+	}
+}
+
+func TestRunNewHelp(t *testing.T) {
+	t.Parallel()
+
+	for _, argument := range []string{"help", "-h", "--help"} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		if exitCode := command.Run([]string{"new", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantNewUsage || stderr.Len() != 0 {
+			t.Fatalf("Run(new %s) = exit %d, stdout %q, stderr %q", argument, exitCode, stdout.String(), stderr.String())
+		}
 	}
 }
 
@@ -90,10 +105,11 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "unknown", arguments: []string{"unknown"}, wantError: "unknown command \"unknown\"\n\n" + wantUsage},
 		{name: "help arguments", arguments: []string{"help", "extra"}, wantError: "help does not accept arguments\n"},
 		{name: "version arguments", arguments: []string{"version", "extra"}, wantError: "version does not accept arguments\n"},
-		{name: "new missing module", arguments: []string{"new"}, wantError: "usage: plystra new <module-path> [--library] [--plugin <name>]\n"},
-		{name: "new unknown option", arguments: []string{"new", "example.com/app", "--unknown"}, wantError: "usage: plystra new <module-path> [--library] [--plugin <name>]\n"},
-		{name: "new missing plugin name", arguments: []string{"new", "example.com/app", "--plugin"}, wantError: "usage: plystra new <module-path> [--library] [--plugin <name>]\n"},
-		{name: "new extra argument", arguments: []string{"new", "example.com/app", "--library", "extra"}, wantError: "usage: plystra new <module-path> [--library] [--plugin <name>]\n"},
+		{name: "new missing module", arguments: []string{"new"}, wantError: wantNewUsage},
+		{name: "new unknown option", arguments: []string{"new", "example.com/app", "--unknown"}, wantError: wantNewUsage},
+		{name: "new missing plugin name", arguments: []string{"new", "example.com/app", "--plugin"}, wantError: wantNewUsage},
+		{name: "new extra argument", arguments: []string{"new", "example.com/app", "--library", "extra"}, wantError: wantNewUsage},
+		{name: "new conflicting choice", arguments: []string{"new", "example.com/app", "--git", "--no-git"}, wantError: wantNewUsage},
 		{name: "plugin missing subcommand", arguments: []string{"plugin"}, wantError: "usage: plystra plugin create <name>\n"},
 		{name: "plugin unknown subcommand", arguments: []string{"plugin", "remove", "account"}, wantError: "usage: plystra plugin create <name>\n"},
 		{name: "plugin missing name", arguments: []string{"plugin", "create"}, wantError: "usage: plystra plugin create <name>\n"},

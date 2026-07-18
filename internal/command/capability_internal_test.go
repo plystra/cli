@@ -85,6 +85,7 @@ func TestRunCapabilityPromptsForAmbiguousPluginTarget(t *testing.T) {
 		root,
 		environment,
 		plugintarget.Prompt(strings.NewReader("2\n"), &stderr),
+		nil,
 	)
 	wantPath := filepath.Join(root, "profile", "capabilities", "profile.get", "v1", "capability.yaml")
 	wantOutput := "created capability profile.get/v1 in acme.app.profile at " + wantPath + "\n"

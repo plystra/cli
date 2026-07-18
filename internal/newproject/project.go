@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -24,8 +25,12 @@ import (
 // KernelVersion is the exact Kernel release targeted by this CLI release.
 const KernelVersion = "v0.0.0-20260718010024-34af10315d98"
 
-// ErrCreate reports a project creation failure.
-var ErrCreate = errors.New("create Plystra project")
+var (
+	// ErrCreate reports a project creation failure.
+	ErrCreate = errors.New("create Plystra project")
+	// ErrGitInitialization reports a failed requested Git repository setup.
+	ErrGitInitialization = errors.New("initialize Git repository")
+)
 
 // Options contains the explicit inputs and process environment for creation.
 type Options struct {
@@ -33,7 +38,11 @@ type Options struct {
 	ModulePath  string
 	Library     bool
 	Plugin      string
+	Git         bool
+	GitHubCI    bool
+	Skills      bool
 	GoCommand   string
+	GitCommand  string
 	Environment []string
 }
 
@@ -86,7 +95,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	}
 
 	err = atomicfs.CreateDirectory(target, func(stagingRoot string) error {
-		if err := populate(stagingRoot, options.ModulePath, name, options.Library); err != nil {
+		if err := populate(stagingRoot, options.ModulePath, name, options.Library, options.GitHubCI, options.Skills); err != nil {
 			return err
 		}
 		for _, arguments := range [][]string{{"mod", "download"}, {"mod", "tidy"}} {
@@ -106,7 +115,15 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		} else if err := gocommand.Run(ctx, gocommand.Options{Command: goCommand, Directory: stagingRoot, Environment: environment}, "test", "./..."); err != nil {
 			return err
 		}
-		return verifyModule(stagingRoot, options.ModulePath, options.Library)
+		if err := verifyModule(stagingRoot, options.ModulePath, options.Library); err != nil {
+			return err
+		}
+		if options.Git {
+			if err := initializeGit(ctx, stagingRoot, options.GitCommand, environment); err != nil {
+				return err
+			}
+		}
+		return verifyChoices(stagingRoot, options.Git, options.GitHubCI, options.Skills)
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrCreate, err)
@@ -114,7 +131,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	return Result{modulePath: options.ModulePath, path: target}, nil
 }
 
-func populate(root, modulePath, name string, library bool) error {
+func populate(root, modulePath, name string, library, githubCI, skills bool) error {
 	compatibility, err := assemblygen.RenderCompatibility("assembly")
 	if err != nil {
 		return fmt.Errorf("render Kernel compatibility source: %w", err)
@@ -175,16 +192,31 @@ func populate(root, modulePath, name string, library bool) error {
 	if library {
 		readme = libraryReadmeTemplate
 	}
+	readme = fmt.Sprintf(readme, name, modulePath)
+	if githubCI {
+		readme += githubCIReadmeTemplate
+	}
+	if skills {
+		readme += skillsReadmeTemplate
+	}
 	type projectFile struct {
 		path string
 		data []byte
 	}
 	files := []projectFile{
 		{path: "go.mod", data: []byte(fmt.Sprintf(goModuleTemplate, modulePath, KernelVersion))},
-		{path: "README.md", data: []byte(fmt.Sprintf(readme, name, modulePath))},
+		{path: "README.md", data: []byte(readme)},
 		{path: ".gitignore", data: []byte(gitignoreTemplate)},
 		{path: ".gitattributes", data: []byte(gitattributesTemplate)},
-		{path: ".github/workflows/ci.yml", data: []byte(ciTemplate)},
+	}
+	if githubCI {
+		files = append(files, projectFile{path: ".github/workflows/ci.yml", data: []byte(ciTemplate)})
+	}
+	if skills {
+		files = append(files,
+			projectFile{path: ".agents/skills/plystra/SKILL.md", data: []byte(skillTemplate)},
+			projectFile{path: ".agents/skills/plystra/agents/openai.yaml", data: []byte(skillAgentTemplate)},
+		)
 	}
 	if !library {
 		files = append(files, projectFile{path: "plystra.yaml", data: []byte(plystraTemplate)})
@@ -201,6 +233,75 @@ func populate(root, modulePath, name string, library bool) error {
 		if err := os.WriteFile(fullPath, file.data, 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", file.path, err)
 		}
+	}
+	return nil
+}
+
+func initializeGit(ctx context.Context, root, command string, environment []string) error {
+	if command == "" {
+		command = "git"
+	}
+	process := exec.CommandContext(ctx, command, "init", "--quiet", "--initial-branch=main", "--template=")
+	process.Dir = root
+	process.Env = append([]string(nil), environment...)
+	output, err := process.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("%w: %v", ErrGitInitialization, ctxErr)
+	}
+	message := gocommand.SanitizeOutput(string(output), root)
+	if len(message) > 4096 {
+		message = message[:4096] + "..."
+	}
+	if message == "" {
+		return fmt.Errorf("%w: git init failed", ErrGitInitialization)
+	}
+	return fmt.Errorf("%w: git init failed: %s", ErrGitInitialization, message)
+}
+
+func verifyChoices(root string, git, githubCI, skills bool) error {
+	if err := verifyChoicePath(root, ".git", git, true); err != nil {
+		return err
+	}
+	if err := verifyChoicePath(root, ".github/workflows/ci.yml", githubCI, false); err != nil {
+		return err
+	}
+	if err := verifyChoicePath(root, ".agents/skills/plystra/SKILL.md", skills, false); err != nil {
+		return err
+	}
+	if err := verifyChoicePath(root, ".agents/skills/plystra/agents/openai.yaml", skills, false); err != nil {
+		return err
+	}
+	if skills {
+		data, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "plystra", "SKILL.md"))
+		if err != nil {
+			return fmt.Errorf("read generated Plystra skill: %w", err)
+		}
+		if !strings.HasPrefix(string(data), "---\nname: plystra\n") || strings.Contains(string(data), "TODO") {
+			return errors.New("generated Plystra skill is incomplete")
+		}
+	}
+	return nil
+}
+
+func verifyChoicePath(root, relativePath string, expected, directory bool) error {
+	info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relativePath)))
+	if !expected {
+		if err == nil {
+			return fmt.Errorf("unrequested scaffold path %s exists", relativePath)
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect unrequested scaffold path %s: %w", relativePath, err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect requested scaffold path %s: %w", relativePath, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || directory != info.IsDir() {
+		return fmt.Errorf("requested scaffold path %s has an invalid type", relativePath)
 	}
 	return nil
 }

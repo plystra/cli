@@ -2,7 +2,9 @@
 package command
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -22,13 +24,32 @@ const (
 	usage                    = `Usage:
   plystra help
   plystra version
-  plystra new <module-path> [--library] [--plugin <name>]
+  plystra new <module-path> [options]
   plystra plugin create <name>
   plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
   plystra capability expose <capability-name>/vN
   plystra generate [--check]
 `
+	newUsage = `Usage:
+  plystra new <module-path> [--library] [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]
+
+Options:
+  --library                 Create a non-runnable plugin Go Module.
+  --plugin <name>           Create an initial root-level plugin.
+  --git, --no-git           Initialize or omit a Git repository.
+  --github-ci, --no-github-ci
+                            Include or omit GitHub Actions CI.
+  --skills, --no-skills     Include or omit Plystra agent skills.
+
+Interactive creation asks for each unspecified choice. Non-interactive creation
+must specify one flag from every choice pair.
+`
+)
+
+var (
+	errNewChoiceRequired = errors.New("new project choice is required")
+	errNewChoicePrompt   = errors.New("prompt for new project choice")
 )
 
 // Run executes one Plystra command and returns its process exit code.
@@ -41,17 +62,17 @@ func Run(arguments []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "determine working directory: %v\n", err)
 		return 1
 	}
-	return runIn(arguments, stdout, stderr, workingDirectory, os.Environ(), terminalPluginSelector(os.Stdin, stderr))
+	return runIn(arguments, stdout, stderr, workingDirectory, os.Environ(), terminalPluginSelector(os.Stdin, stderr), terminalNewProjectPrompter(os.Stdin, stderr))
 }
 
 // RunIn executes a command in an explicit environment. It exists so command
 // integration tests can isolate filesystem and Go Module state. It remains
 // non-interactive so automation never consumes an implicit input stream.
 func RunIn(arguments []string, stdout, stderr io.Writer, workingDirectory string, environment []string) int {
-	return runIn(arguments, stdout, stderr, workingDirectory, environment, nil)
+	return runIn(arguments, stdout, stderr, workingDirectory, environment, nil, nil)
 }
 
-func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string, environment []string, selectPlugin plugintarget.Selector) int {
+func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string, environment []string, selectPlugin plugintarget.Selector, promptNew newProjectPrompter) int {
 	if stdout == nil || stderr == nil {
 		return 2
 	}
@@ -74,10 +95,23 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		_, _ = fmt.Fprintf(stdout, "plystra %s\n", version.Current)
 		return 0
 	case "new":
+		if len(arguments) == 2 && (arguments[1] == "help" || arguments[1] == "-h" || arguments[1] == "--help") {
+			_, _ = io.WriteString(stdout, newUsage)
+			return 0
+		}
 		options, ok := parseNewArguments(arguments)
 		if !ok {
-			_, _ = io.WriteString(stderr, "usage: plystra new <module-path> [--library] [--plugin <name>]\n")
+			_, _ = io.WriteString(stderr, newUsage)
 			return 2
+		}
+		choices, err := resolveNewChoices(options, promptNew)
+		if err != nil {
+			if errors.Is(err, errNewChoiceRequired) {
+				_, _ = fmt.Fprintf(stderr, "%v\n\n%s", err, newUsage)
+				return 2
+			}
+			_, _ = fmt.Fprintf(stderr, "choose new project options: %v\n", err)
+			return 1
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -86,6 +120,9 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			ModulePath:  options.modulePath,
 			Library:     options.library,
 			Plugin:      options.plugin,
+			Git:         choices.git,
+			GitHubCI:    choices.githubCI,
+			Skills:      choices.skills,
 			Environment: environment,
 		})
 		if err != nil {
@@ -159,6 +196,14 @@ func terminalPluginSelector(input *os.File, output io.Writer) plugintarget.Selec
 	return plugintarget.Prompt(input, output)
 }
 
+func terminalNewProjectPrompter(input *os.File, output io.Writer) newProjectPrompter {
+	outputFile, ok := output.(*os.File)
+	if !ok || !terminalFile(input) || !terminalFile(outputFile) {
+		return nil
+	}
+	return promptNewProject(input, output)
+}
+
 func terminalFile(file *os.File) bool {
 	if file == nil {
 		return false
@@ -189,7 +234,26 @@ type newArguments struct {
 	modulePath string
 	library    bool
 	plugin     string
+	git        booleanChoice
+	githubCI   booleanChoice
+	skills     booleanChoice
 }
+
+type booleanChoice uint8
+
+const (
+	choiceUnspecified booleanChoice = iota
+	choiceYes
+	choiceNo
+)
+
+type resolvedNewChoices struct {
+	git      bool
+	githubCI bool
+	skills   bool
+}
+
+type newProjectPrompter func(question string, defaultValue bool) (bool, error)
 
 func parseNewArguments(arguments []string) (newArguments, bool) {
 	if len(arguments) < 2 || arguments[1] == "" || strings.HasPrefix(arguments[1], "--") {
@@ -211,11 +275,119 @@ func parseNewArguments(arguments []string) (newArguments, bool) {
 			pluginSet = true
 			index++
 			result.plugin = arguments[index]
+		case "--git":
+			if result.git != choiceUnspecified {
+				return newArguments{}, false
+			}
+			result.git = choiceYes
+		case "--no-git":
+			if result.git != choiceUnspecified {
+				return newArguments{}, false
+			}
+			result.git = choiceNo
+		case "--github-ci":
+			if result.githubCI != choiceUnspecified {
+				return newArguments{}, false
+			}
+			result.githubCI = choiceYes
+		case "--no-github-ci":
+			if result.githubCI != choiceUnspecified {
+				return newArguments{}, false
+			}
+			result.githubCI = choiceNo
+		case "--skills":
+			if result.skills != choiceUnspecified {
+				return newArguments{}, false
+			}
+			result.skills = choiceYes
+		case "--no-skills":
+			if result.skills != choiceUnspecified {
+				return newArguments{}, false
+			}
+			result.skills = choiceNo
 		default:
 			return newArguments{}, false
 		}
 	}
 	return result, true
+}
+
+func resolveNewChoices(arguments newArguments, prompt newProjectPrompter) (resolvedNewChoices, error) {
+	choices := []struct {
+		value    booleanChoice
+		question string
+		flags    string
+		set      func(bool)
+	}{
+		{value: arguments.git, question: "Initialize a Git repository?", flags: "--git or --no-git"},
+		{value: arguments.githubCI, question: "Include GitHub Actions CI?", flags: "--github-ci or --no-github-ci"},
+		{value: arguments.skills, question: "Include Plystra development skills?", flags: "--skills or --no-skills"},
+	}
+	var result resolvedNewChoices
+	choices[0].set = func(value bool) { result.git = value }
+	choices[1].set = func(value bool) { result.githubCI = value }
+	choices[2].set = func(value bool) { result.skills = value }
+	missing := make([]string, 0, len(choices))
+	for _, choice := range choices {
+		switch choice.value {
+		case choiceYes:
+			choice.set(true)
+		case choiceNo:
+			choice.set(false)
+		case choiceUnspecified:
+			if prompt == nil {
+				missing = append(missing, choice.flags)
+				continue
+			}
+			value, err := prompt(choice.question, true)
+			if err != nil {
+				return resolvedNewChoices{}, fmt.Errorf("%w: %s: %v", errNewChoicePrompt, choice.question, err)
+			}
+			choice.set(value)
+		default:
+			return resolvedNewChoices{}, fmt.Errorf("%w: invalid parsed choice", errNewChoicePrompt)
+		}
+	}
+	if len(missing) != 0 {
+		return resolvedNewChoices{}, fmt.Errorf("%w in non-interactive mode; specify %s", errNewChoiceRequired, strings.Join(missing, ", "))
+	}
+	return result, nil
+}
+
+func promptNewProject(input io.Reader, output io.Writer) newProjectPrompter {
+	scanner := bufio.NewScanner(input)
+	return func(question string, defaultValue bool) (bool, error) {
+		if input == nil || output == nil {
+			return false, errors.New("input and output are required")
+		}
+		suffix := " [y/N]: "
+		if defaultValue {
+			suffix = " [Y/n]: "
+		}
+		for {
+			if _, err := io.WriteString(output, question+suffix); err != nil {
+				return false, fmt.Errorf("write prompt: %v", err)
+			}
+			if !scanner.Scan() {
+				if err := scanner.Err(); err != nil {
+					return false, fmt.Errorf("read choice: %v", err)
+				}
+				return false, errors.New("input ended before a choice")
+			}
+			switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
+			case "":
+				return defaultValue, nil
+			case "y", "yes":
+				return true, nil
+			case "n", "no":
+				return false, nil
+			default:
+				if _, err := io.WriteString(output, "Please enter yes or no.\n"); err != nil {
+					return false, fmt.Errorf("write retry guidance: %v", err)
+				}
+			}
+		}
+	}
 }
 
 func rejectArguments(stderr io.Writer, command string) int {
