@@ -23,6 +23,8 @@ const (
   plystra version
   plystra new <module-path> [--library] [--plugin <name>]
   plystra plugin create <name>
+  plystra capability create <capability-name> [--plugin <plugin>] [--confirm]
+  plystra capability implement <capability-name>/vN [--plugin <plugin>]
   plystra generate [--check]
 `
 )
@@ -103,6 +105,8 @@ func RunIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		}
 		_, _ = fmt.Fprintf(stdout, "created plugin %s in %s\n", result.ID(), result.Path())
 		return 0
+	case "capability":
+		return runCapability(arguments, stdout, stderr, workingDirectory, environment)
 	case "generate":
 		check, ok := parseGenerateArguments(arguments)
 		if !ok {

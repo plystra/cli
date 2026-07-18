@@ -2,12 +2,13 @@ package command_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/command"
 )
 
-const wantUsage = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path> [--library] [--plugin <name>]\n  plystra plugin create <name>\n  plystra generate [--check]\n"
+const wantUsage = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path> [--library] [--plugin <name>]\n  plystra plugin create <name>\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra generate [--check]\n"
 
 func TestRunHelp(t *testing.T) {
 	t.Parallel()
@@ -53,6 +54,30 @@ func TestRunVersion(t *testing.T) {
 	}
 }
 
+func TestRunCapabilityHelp(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		arguments []string
+		want      string
+	}{
+		{arguments: []string{"capability", "help"}, want: "Usage:\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n"},
+		{arguments: []string{"capability", "create", "--help"}, want: "Usage:\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm]\n"},
+		{arguments: []string{"capability", "implement", "-h"}, want: "Usage:\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(strings.Join(test.arguments, "-"), func(t *testing.T) {
+			t.Parallel()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			if exitCode := command.Run(test.arguments, &stdout, &stderr); exitCode != 0 || stdout.String() != test.want || stderr.Len() != 0 {
+				t.Fatalf("Run(%q) = exit %d, stdout %q, stderr %q", test.arguments, exitCode, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
 func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 	t.Parallel()
 
@@ -72,6 +97,12 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "plugin unknown subcommand", arguments: []string{"plugin", "remove", "account"}, wantError: "usage: plystra plugin create <name>\n"},
 		{name: "plugin missing name", arguments: []string{"plugin", "create"}, wantError: "usage: plystra plugin create <name>\n"},
 		{name: "plugin extra argument", arguments: []string{"plugin", "create", "account", "extra"}, wantError: "usage: plystra plugin create <name>\n"},
+		{name: "capability missing subcommand", arguments: []string{"capability"}, wantError: "usage:\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n"},
+		{name: "capability unknown subcommand", arguments: []string{"capability", "remove", "records.create/v1"}, wantError: "usage:\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n"},
+		{name: "capability create missing reference", arguments: []string{"capability", "create"}, wantError: "usage: plystra capability create <capability-name> [--plugin <plugin>] [--confirm]\n"},
+		{name: "capability implement missing reference", arguments: []string{"capability", "implement"}, wantError: "usage: plystra capability implement <capability-name>/vN [--plugin <plugin>]\n"},
+		{name: "capability implement confirm", arguments: []string{"capability", "implement", "records.create/v1", "--confirm"}, wantError: "usage: plystra capability implement <capability-name>/vN [--plugin <plugin>]\n"},
+		{name: "capability create missing plugin", arguments: []string{"capability", "create", "records.create", "--plugin"}, wantError: "usage: plystra capability create <capability-name> [--plugin <plugin>] [--confirm]\n"},
 		{name: "generate unknown option", arguments: []string{"generate", "--write"}, wantError: "usage: plystra generate [--check]\n"},
 		{name: "generate duplicate check", arguments: []string{"generate", "--check", "--check"}, wantError: "usage: plystra generate [--check]\n"},
 	}

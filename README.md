@@ -147,11 +147,26 @@ Commands below a module root use the nearest real enclosing `go.mod`; nested mod
 
 ## Authoring behavior
 
-Plugin-target inference resolves an explicit target, the enclosing plugin, the only local plugin, an interactive choice, or an actionable non-interactive ambiguity error.
+Plugin-target inference resolves an explicit target, the enclosing plugin, or the only local plugin. When several local plugins remain, current non-interactive commands fail with every candidate and require `--plugin <directory-or-plugin-id>`.
 
 Capability identities use `<capability-name>/v<number>`. Names contain at least two dot-separated lower-case segments, may use any logical hierarchy depth, and never imply a fixed namespace/operation split.
 
 Capability creation and implementation update schemas, `plugin.yaml`, generated contracts, providers, clients, application invocation, adapters, assembly, SDKs, docs, and manifests in one transaction. Existing user implementations are never overwritten.
+
+Create a first or next version from inside the target plugin, from a single-plugin module, or with an explicit target:
+
+```powershell
+plystra capability create records.create
+plystra capability create records.archive --plugin records
+```
+
+An omitted version selects `v1` when none is visible and otherwise selects one above the highest visible version, copying that highest exact schema as an editing base. An explicit older or skipped new version is rejected without mutation until it is deliberately repeated with `--confirm`. An existing exact version is never recreated; implement it instead:
+
+```powershell
+plystra capability implement email.send/v1 --plugin mailer
+```
+
+Implementation searches local and explicit Go Module dependency contracts, requires exact provider-independent equality including normalized extension metadata, copies the canonical schema when the target plugin does not yet provide it, adds a compile-safe user-owned method only when absent, regenerates all affected module surfaces, tidies module metadata, and validates with `go test -mod=readonly ./...`. Repeating the command preserves an existing method byte-for-byte.
 
 Generation always emits the contract and provider interface for every Capability provided by a local plugin, even before the application requires that Capability. This keeps user-owned provider implementations buildable while they are being authored. Clients, invocation paths, HTTP adapters, SDK operations, documentation, provider selection, and Kernel registration remain requirement- and exposure-driven, so an unrequired local Capability does not enter the runnable application surface.
 
