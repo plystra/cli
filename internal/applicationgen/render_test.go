@@ -113,6 +113,8 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		`"configuration":{"mode":"default"`,
 		`"root":{"path":"plystra.yaml"}`,
 		`"dependency_composition_digest":"sha256:`,
+		`"path":"http.expose[\"diagnostics.internal/v1\"]"`,
+		`"removed":true`,
 		`"path":"config[\"acme.business\"][\"password\"]"`,
 		`example.com/platform@v1.2.3/plystra.yaml config[\"acme.business\"][\"password\"]`,
 	} {
@@ -382,7 +384,7 @@ func dependencyComposition(t testing.TB) applicationmeta.Composition {
 	if err != nil {
 		t.Fatalf("manifest.ParseConfig: %v", err)
 	}
-	dependency, err := applicationmeta.Parse([]byte("config: {acme.business: {password: {env: PRIVATE_APPLICATION_TOKEN}}}\n"))
+	dependency, err := applicationmeta.Parse([]byte("http: {expose: {remove: [diagnostics.internal/v1]}}\nconfig: {acme.business: {password: {env: PRIVATE_APPLICATION_TOKEN}}}\n"))
 	if err != nil {
 		t.Fatalf("applicationmeta.Parse dependency: %v", err)
 	}

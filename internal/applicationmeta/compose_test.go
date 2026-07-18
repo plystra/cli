@@ -198,6 +198,178 @@ func TestComposeRequiresExactCurrentAliasReplacement(t *testing.T) {
 	}
 }
 
+func TestComposeAppliesExactCurrentProjectDeclarationRemovals(t *testing.T) {
+	t.Parallel()
+
+	dependency := applicationmeta.Dependency{
+		ModulePath:    "example.com/platform",
+		ModuleVersion: "v1.4.0",
+		Manifest: composeManifest(t, `
+http:
+  expose: [email.send/v1]
+capabilities:
+  require: [audit.write/v1]
+  use: {email.send/v1: acme.smtp}
+  aliases: {mail.send/v1: email.send/v1}
+`),
+	}
+	current := composeManifest(t, `
+http:
+  address: null
+  expose: {remove: [email.send/v1]}
+timeouts: {startup: null}
+capabilities:
+  require: {remove: [audit.write/v1]}
+  use: {email.send/v1: null}
+  aliases: {mail.send/v1: null}
+`)
+	composed, err := applicationmeta.Compose([]applicationmeta.Dependency{dependency}, current, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatalf("Compose with removals: %v", err)
+	}
+	manifest := composed.Manifest()
+	address, hasAddress := manifest.HTTPAddress()
+	if hasAddress || address != "" || manifest.StartupTimeout() != applicationmeta.DefaultStartupTimeout {
+		t.Fatalf("removed scalars = address %q/%t timeout %s", address, hasAddress, manifest.StartupTimeout())
+	}
+	if len(manifest.HTTPExposures()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.Aliases()) != 0 {
+		t.Fatalf("removed declarations remain: exposures %#v requirements %#v choices %#v aliases %#v", manifest.HTTPExposures(), manifest.Requirements(), manifest.ProviderChoices(), manifest.Aliases())
+	}
+	for _, path := range []string{
+		`http.expose["email.send/v1"]`,
+		`capabilities.require["audit.write/v1"]`,
+		`capabilities.use["email.send/v1"]`,
+		`capabilities.aliases["mail.send/v1"]`,
+	} {
+		if records := findProvenance(t, composed.Provenance(), path); len(records) != 1 || len(records[0].Sources()) != 1 || !strings.Contains(records[0].Sources()[0], "example.com/platform@v1.4.0/plystra.yaml") {
+			t.Fatalf("provenance for %s = %#v", path, provenanceStrings(records))
+		}
+	}
+}
+
+func TestComposeRequiresCurrentDecisionForInheritedAddRemoveConflicts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		added   string
+		removed string
+		path    string
+		resolve string
+		assert  func(testing.TB, applicationmeta.Manifest)
+	}{
+		{
+			name:    "HTTP exposure",
+			added:   "http: {expose: [email.send/v1]}\n",
+			removed: "http: {expose: {remove: [email.send/v1]}}\n",
+			path:    `http.expose["email.send/v1"]`,
+			resolve: "http: {expose: {remove: [email.send/v1]}}\n",
+			assert: func(t testing.TB, manifest applicationmeta.Manifest) {
+				if len(manifest.HTTPExposures()) != 0 {
+					t.Fatalf("HTTP removal did not win: %#v", manifest.HTTPExposures())
+				}
+			},
+		},
+		{
+			name:    "requirement",
+			added:   "capabilities: {require: [audit.write/v1]}\n",
+			removed: "capabilities: {require: {remove: [audit.write/v1]}}\n",
+			path:    `capabilities.require["audit.write/v1"]`,
+			resolve: "capabilities: {require: {add: [audit.write/v1]}}\n",
+			assert: func(t testing.TB, manifest applicationmeta.Manifest) {
+				if got := requirementIDs(manifest); !slices.Equal(got, []string{"audit.write/v1"}) {
+					t.Fatalf("requirement addition did not win: %v", got)
+				}
+			},
+		},
+		{
+			name:    "Provider choice",
+			added:   "capabilities: {use: {email.send/v1: acme.smtp}}\n",
+			removed: "capabilities: {use: {email.send/v1: null}}\n",
+			path:    `capabilities.use["email.send/v1"]`,
+			resolve: "capabilities: {use: {email.send/v1: acme.local}}\n",
+			assert: func(t testing.TB, manifest applicationmeta.Manifest) {
+				if choices := manifest.ProviderChoices(); len(choices) != 1 || choices[0].PluginID() != "acme.local" {
+					t.Fatalf("Provider replacement did not win: %#v", choices)
+				}
+			},
+		},
+		{
+			name:    "Alias",
+			added:   "capabilities: {aliases: {mail.send/v1: email.send/v1}}\n",
+			removed: "capabilities: {aliases: {mail.send/v1: null}}\n",
+			path:    `capabilities.aliases["mail.send/v1"]`,
+			resolve: "capabilities: {aliases: {mail.send/v1: message.send/v1}}\n",
+			assert: func(t testing.TB, manifest applicationmeta.Manifest) {
+				if aliases := manifest.Aliases(); len(aliases) != 1 || aliases[0].Target().String() != "message.send/v1" {
+					t.Fatalf("Alias replacement did not win: %#v", aliases)
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			dependencies := []applicationmeta.Dependency{
+				{ModulePath: "example.com/add", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, test.added)},
+				{ModulePath: "example.com/remove", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, test.removed)},
+			}
+			_, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), composeSchemaLookup(nil))
+			if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), test.path) || !strings.Contains(err.Error(), "example.com/add@v1.0.0/plystra.yaml") || !strings.Contains(err.Error(), "example.com/remove@v1.0.0/plystra.yaml") {
+				t.Fatalf("inherited conflict = %v", err)
+			}
+			composed, err := applicationmeta.Compose(dependencies, composeManifest(t, test.resolve), composeSchemaLookup(nil))
+			if err != nil {
+				t.Fatalf("Compose with current decision: %v", err)
+			}
+			test.assert(t, composed.Manifest())
+			if records := findProvenance(t, composed.Provenance(), test.path); len(records) != 2 {
+				t.Fatalf("conflicting provenance = %#v", provenanceStrings(records))
+			}
+		})
+	}
+}
+
+func TestComposeDeduplicatesCompatibleInheritedRemovals(t *testing.T) {
+	t.Parallel()
+
+	source := `
+http: {expose: {remove: [email.send/v1]}}
+capabilities:
+  require: {remove: [audit.write/v1]}
+  use: {email.send/v1: null}
+  aliases: {mail.send/v1: null}
+`
+	dependencies := []applicationmeta.Dependency{
+		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, source)},
+		{ModulePath: "example.com/b", ModuleVersion: "v2.0.0", Manifest: composeManifest(t, source)},
+	}
+	first, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatalf("Compose removals: %v", err)
+	}
+	second, err := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[1], dependencies[0]}, composeManifest(t, "{}\n"), composeSchemaLookup(nil))
+	if err != nil || second.DependencyDigest() != first.DependencyDigest() {
+		t.Fatalf("reordered removal composition = %s, %v; want %s", second.DependencyDigest(), err, first.DependencyDigest())
+	}
+	manifest := first.Manifest()
+	if len(manifest.HTTPExposures()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.Aliases()) != 0 {
+		t.Fatalf("deduplicated removals produced declarations: %#v", manifest)
+	}
+	for _, path := range []string{
+		`http.expose["email.send/v1"]`,
+		`capabilities.require["audit.write/v1"]`,
+		`capabilities.use["email.send/v1"]`,
+		`capabilities.aliases["mail.send/v1"]`,
+	} {
+		records := findProvenance(t, first.Provenance(), path)
+		if len(records) != 1 || !records[0].Removed() || len(records[0].Sources()) != 2 {
+			t.Fatalf("deduplicated provenance for %s = %#v", path, provenanceStrings(records))
+		}
+	}
+}
+
 func TestComposeMergesConfigurationByDeclaredFieldAndRedactsConflicts(t *testing.T) {
 	t.Parallel()
 
@@ -343,7 +515,11 @@ func findProvenance(t testing.TB, values []applicationmeta.Provenance, path stri
 func provenanceStrings(values []applicationmeta.Provenance) []string {
 	result := make([]string, len(values))
 	for index := range values {
-		result[index] = values[index].Path() + "=" + values[index].Digest() + "@" + strings.Join(values[index].Sources(), ",")
+		kind := "value"
+		if values[index].Removed() {
+			kind = "removed"
+		}
+		result[index] = values[index].Path() + "=" + kind + ":" + values[index].Digest() + "@" + strings.Join(values[index].Sources(), ",")
 	}
 	return result
 }

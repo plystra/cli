@@ -53,9 +53,23 @@ func AddHTTPExposure(data []byte, id capabilityid.Identifier) ([]byte, bool, err
 			exposeNode,
 		)
 	}
-	exposeNode.Content = append(exposeNode.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: id.String()})
-	sort.Slice(exposeNode.Content, func(left, right int) bool {
-		return exposeNode.Content[left].Value < exposeNode.Content[right].Value
+	addNode := exposeNode
+	if exposeNode.Kind == yaml.MappingNode {
+		addNode = mappingChild(exposeNode, "add")
+		if addNode == nil {
+			addNode = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+			exposeNode.Content = append(exposeNode.Content,
+				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "add"},
+				addNode,
+			)
+		}
+		if removeNode := mappingChild(exposeNode, "remove"); removeNode != nil {
+			removeSequenceValue(removeNode, id.String())
+		}
+	}
+	addNode.Content = append(addNode.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: id.String()})
+	sort.Slice(addNode.Content, func(left, right int) bool {
+		return addNode.Content[left].Value < addNode.Content[right].Value
 	})
 
 	var output bytes.Buffer
@@ -76,10 +90,24 @@ func AddHTTPExposure(data []byte, id capabilityid.Identifier) ([]byte, bool, err
 	if difference := manifestDifferenceOutsideHTTPExposure(before, after); difference != "" {
 		return nil, false, fmt.Errorf("%w: updated application manifest changed %s", ErrAddHTTPExposure, difference)
 	}
-	if !hasExactlyOneAddedExposure(before.HTTPExposures(), after.HTTPExposures(), id) {
+	if !hasExactlyOneAddedExposure(before.HTTPExposures(), after.HTTPExposures(), id) || !preservedOtherExposureRemovals(before.removedHTTPExposures, after.removedHTTPExposures, id) {
 		return nil, false, fmt.Errorf("%w: updated application manifest did not add exactly one %s exposure", ErrAddHTTPExposure, id)
 	}
 	return append([]byte(nil), updated...), true, nil
+}
+
+func removeSequenceValue(node *yaml.Node, value string) {
+	if node == nil || node.Kind != yaml.SequenceNode {
+		return
+	}
+	filtered := node.Content[:0]
+	for _, item := range node.Content {
+		if item.Kind == yaml.ScalarNode && item.Tag == "!!str" && item.Value == value {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	node.Content = filtered
 }
 
 func mappingChild(node *yaml.Node, name string) *yaml.Node {
@@ -104,14 +132,26 @@ func manifestDifferenceOutsideHTTPExposure(left, right Manifest) string {
 	if left.StartupTimeout() != right.StartupTimeout() {
 		return "timeouts.startup"
 	}
+	if left.removeHTTPAddress != right.removeHTTPAddress || left.removeStartupTimeout != right.removeStartupTimeout {
+		return "scalar removals"
+	}
 	if !slices.Equal(left.Requirements(), right.Requirements()) {
 		return "capabilities.require"
+	}
+	if !slices.Equal(left.removedRequirements, right.removedRequirements) {
+		return "capabilities.require removals"
 	}
 	if !slices.Equal(left.ProviderChoices(), right.ProviderChoices()) {
 		return "capabilities.use"
 	}
+	if !slices.Equal(left.removedProviderChoices, right.removedProviderChoices) {
+		return "capabilities.use removals"
+	}
 	if !slices.Equal(left.Aliases(), right.Aliases()) {
 		return "capabilities.aliases"
+	}
+	if !slices.Equal(left.removedAliases, right.removedAliases) {
+		return "capabilities.aliases removals"
 	}
 	leftConfigurations := left.Configurations()
 	rightConfigurations := right.Configurations()
@@ -126,6 +166,24 @@ func manifestDifferenceOutsideHTTPExposure(left, right Manifest) string {
 		}
 	}
 	return ""
+}
+
+func preservedOtherExposureRemovals(before, after []capabilityRemoval, added capabilityid.Identifier) bool {
+	filter := func(values []capabilityRemoval) []capabilityRemoval {
+		result := make([]capabilityRemoval, 0, len(values))
+		for _, value := range values {
+			if value.id != added {
+				result = append(result, value)
+			}
+		}
+		return result
+	}
+	for _, value := range after {
+		if value.id == added {
+			return false
+		}
+	}
+	return slices.Equal(filter(before), filter(after))
 }
 
 func hasExactlyOneAddedExposure(before, after []HTTPExposure, added capabilityid.Identifier) bool {

@@ -243,8 +243,11 @@ func TestParseAllowsEmptyOptionalSections(t *testing.T) {
 		[]byte(`{}`),
 		[]byte("http: {}\n"),
 		[]byte("http: {expose: []}\n"),
+		[]byte("http: {address: null, expose: {add: [], remove: []}}\n"),
 		[]byte("capabilities: {}\n"),
 		[]byte("capabilities:\n  aliases: {}\n"),
+		[]byte("capabilities: {require: {add: [], remove: []}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n"),
+		[]byte("timeouts: {startup: null}\n"),
 	} {
 		manifest, err := applicationmeta.Parse(data)
 		address, hasAddress := manifest.HTTPAddress()
@@ -279,7 +282,10 @@ func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 		{name: "untrimmed http address", data: `http: {address: " :8080 "}` + "\n", want: "http.address must be"},
 		{name: "oversized http address", data: "http:\n  address: " + overlongAddress + "\n", want: "at most 4096 bytes"},
 		{name: "NUL http address", data: `http: {address: "bad\0address"}` + "\n", want: "no NUL"},
-		{name: "http exposure type", data: "http: {expose: {}}\n", want: "http.expose must be a sequence"},
+		{name: "http exposure sparse key", data: "http: {expose: {append: []}}\n", want: `unknown sparse-edit key "append"`},
+		{name: "http exposure sparse add type", data: "http: {expose: {add: {}}}\n", want: "http.expose.add must be a sequence"},
+		{name: "http exposure sparse remove type", data: "http: {expose: {remove: true}}\n", want: "http.expose.remove must be a sequence"},
+		{name: "http exposure ambiguous edit", data: "http: {expose: {add: [order.create/v1], remove: [order.create/v1]}}\n", want: "cannot both add and remove"},
 		{name: "http exposure item type", data: "http: {expose: [true]}\n", want: "http.expose[0] must be"},
 		{name: "invalid HTTP exposure", data: "http: {expose: [Order.Create/v1]}\n", want: "not a canonical Capability ID"},
 		{name: "duplicate HTTP exposure", data: "http: {expose: [order.create/v1, order.create/v1]}\n", want: "duplicates Capability"},
@@ -300,7 +306,8 @@ func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 		{name: "plugin config type", data: "config: {acme.plugin: []}\n", want: `config["acme.plugin"] must be a mapping`},
 		{name: "capabilities type", data: "capabilities: []\n", want: "capabilities must be a mapping"},
 		{name: "unknown capabilities key", data: "capabilities: {providers: {}}\n", want: `unknown key "providers"`},
-		{name: "require type", data: "capabilities: {require: {}}\n", want: "require must be a sequence"},
+		{name: "require sparse key", data: "capabilities: {require: {append: []}}\n", want: `unknown sparse-edit key "append"`},
+		{name: "require ambiguous edit", data: "capabilities: {require: {add: [order.create/v1], remove: [order.create/v1]}}\n", want: "cannot both add and remove"},
 		{name: "require item type", data: "capabilities: {require: [true]}\n", want: "require[0] must be"},
 		{name: "invalid requirement", data: "capabilities: {require: [Order.Create/v1]}\n", want: "not a canonical Capability ID"},
 		{name: "duplicate requirement", data: "capabilities: {require: [order.create/v1, order.create/v1]}\n", want: "duplicates Capability"},
@@ -371,7 +378,9 @@ func FuzzParseApplicationManifest(f *testing.F) {
 	for _, seed := range []string{
 		"{}\n",
 		"http: {address: \":8080\", expose: [kernel.health/v1, order.create/v1]}\n",
+		"http: {address: null, expose: {add: [kernel.health/v1], remove: [order.create/v1]}}\n",
 		"capabilities: {aliases: {}}\n",
+		"capabilities: {require: {remove: [order.create/v1]}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n",
 		"capabilities: {require: [kernel.health/v1, order.create/v1], use: {order.create/v1: acme.orders}, aliases: {}}\n",
 		aliasYAML("authn.login/v1: authn.login.password/v1"),
 		aliasYAML("account.sign-in/v1: {target: authn.login.password/v1, expose: {go: true, http: false, javascript: false}, deprecated: {message: old}}"),

@@ -343,6 +343,46 @@ replace example.com/b => ../b
 	}
 }
 
+func TestResolveCurrentProviderRemovalRestoresUniqueProviderSelection(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	dependencyRoot := filepath.Join(root, "smtp")
+	writeModule(t, dependencyRoot, "example.com/smtp")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities: {use: {email.send/v1: example.smtp}}\n")
+	writePlugin(t, dependencyRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\n")
+	writeCapability(t, dependencyRoot, "smtp", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
+
+go 1.26
+
+require example.com/smtp v1.0.0
+
+replace example.com/smtp => ../smtp
+`)
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "capabilities: {require: [email.send/v1], use: {email.send/v1: null}}\n")
+
+	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       appRoot,
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+	})
+	if err != nil {
+		t.Fatalf("Resolve with Provider removal: %v", err)
+	}
+	if len(result.Manifest().ProviderChoices()) != 0 {
+		t.Fatalf("effective explicit Provider choices = %#v", result.Manifest().ProviderChoices())
+	}
+	provider, exists := result.Resolution().Context().SelectedProvider(parseGenerationCapability(t, "email.send/v1"))
+	if !exists || provider.String() != "example.smtp" {
+		t.Fatalf("automatic unique Provider = %s, %t", provider, exists)
+	}
+	records := compositionProvenance(result.Composition().Provenance(), `capabilities.use["email.send/v1"]`)
+	if len(records) != 1 || len(records[0].Sources()) != 1 || !strings.Contains(records[0].Sources()[0], "example.com/smtp@v1.0.0/plystra.yaml") {
+		t.Fatalf("inherited Provider provenance = %#v", records)
+	}
+}
+
 func TestResolveRejectsMalformedAndUnsafeDependencyProjectManifest(t *testing.T) {
 	t.Run("malformed", func(t *testing.T) {
 		t.Parallel()

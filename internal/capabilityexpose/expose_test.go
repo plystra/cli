@@ -44,6 +44,31 @@ func TestManifestWriteUsesExactSafeSnapshot(t *testing.T) {
 	}
 }
 
+func TestManifestWriteReplacesExactSparseRemoval(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	original := []byte("# Selected environment.\nhttp:\n  expose:\n    remove:\n      - records.read/v1\n      - records.write/v1\n")
+	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), original)
+
+	write, changed, err := capabilityexpose.ManifestWrite(root, mustCapabilityID(t, "records.read/v1"))
+	if err != nil || !changed {
+		t.Fatalf("ManifestWrite = changed %t, %#v, %v", changed, write, err)
+	}
+	for _, expected := range [][]byte{
+		[]byte("# Selected environment."),
+		[]byte("add:\n      - records.read/v1"),
+		[]byte("remove:\n      - records.write/v1"),
+	} {
+		if !bytes.Contains(write.Data, expected) {
+			t.Fatalf("ManifestWrite data omits %q:\n%s", expected, write.Data)
+		}
+	}
+	if !bytes.Equal(write.ExpectedData, original) {
+		t.Fatalf("ManifestWrite ExpectedData = %q", write.ExpectedData)
+	}
+}
+
 func TestManifestWriteRejectsUnsafeOrInvalidInputWithoutSecrets(t *testing.T) {
 	t.Parallel()
 
@@ -53,7 +78,7 @@ func TestManifestWriteRejectsUnsafeOrInvalidInputWithoutSecrets(t *testing.T) {
 	}
 
 	secret := "unique-private-value"
-	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), []byte("config:\n  acme.records:\n    password: "+secret+"\nhttp: {expose: {}}\n"))
+	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), []byte("config:\n  acme.records:\n    password: "+secret+"\nhttp: {expose: {add: invalid}}\n"))
 	if _, _, err := capabilityexpose.ManifestWrite(root, mustCapabilityID(t, "records.read/v1")); !errors.Is(err, capabilityexpose.ErrManifestWrite) || strings.Contains(err.Error(), secret) {
 		t.Fatalf("invalid ManifestWrite error = %v", err)
 	}

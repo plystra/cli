@@ -317,8 +317,10 @@ dependency even when it contains a file named `plugin.yaml` below its root.
 
 Composition is typed and independent of dependency order:
 
-- `http.expose` and `capabilities.require` form canonical-ID unions.
-- Identical Provider selections and Alias declarations deduplicate.
+- `http.expose` and `capabilities.require` form canonical-ID unions. Use their
+  sparse `{add: [...], remove: [...]}` form for an exact inherited set edit.
+- Identical additions, removals, Provider selections, and Alias declarations
+  deduplicate.
 - Plugin configuration merges by fields declared in that Plugin's
   `plugin.yaml`; unknown fields and invalid types fail.
 - Dependency `http.address`, `timeouts.startup`, and other process settings do
@@ -341,6 +343,30 @@ contract validation still runs. Use the same exact-field principle for an
 Alias or Plugin configuration conflict; do not add dependency priority,
 reorder `go.mod`, or copy a dependency's Plugin locally.
 
+Record an exact inherited removal without copying the rest of the dependency
+configuration:
+
+```yaml
+http:
+  expose:
+    remove:
+      - diagnostics.internal/v1
+
+capabilities:
+  require:
+    remove:
+      - audit.legacy/v1
+  use:
+    email.send/v1: null
+  aliases:
+    mail.send/v1: null
+```
+
+The sparse set form may contain `add`, `remove`, or both, but the same
+Capability cannot occur in both lists. A keyed `null` removes only that exact
+Provider or Alias decision. When dependencies disagree between an addition
+and removal, the current Project must make that same exact decision.
+
 After changing `go.mod`, a replacement, or a dependency version, run:
 
 ```powershell
@@ -349,7 +375,8 @@ plystra generate --check
 ```
 
 Inspect `generated/manifest.json` for the non-secret dependency composition
-digest and path/digest/source baseline. It records provenance, not raw Plugin
+digest and path/digest/removal/source baseline. An explicit tombstone has
+`"removed": true`; the manifest records provenance, not raw Plugin
 configuration or Secret reference targets.
 
 ## Create and configure a Plugin

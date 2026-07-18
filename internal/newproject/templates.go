@@ -183,7 +183,9 @@ as plystra.production.yaml and plystra.test.yaml are never inherited.
 Composition uses field-specific rules:
 
 - http.expose and capabilities.require form deterministic canonical-ID unions.
-- Identical Provider selections and Alias declarations deduplicate.
+  Use their sparse add/remove mapping for exact inherited set edits.
+- Identical additions, removals, Provider selections, and Alias declarations
+  deduplicate.
 - Plugin configuration merges only by fields declared in plugin.yaml.
 - Dependency http.address and timeouts.startup never replace this Project's
   process settings.
@@ -201,8 +203,28 @@ Provider and exact contract validation still runs. Do not reorder dependencies,
 make one direct, invent priority, or copy a dependency Plugin to choose a
 winner. After go.mod, replace, or dependency-version changes, run plystra
 generate and plystra generate --check. Inspect generated/manifest.json for the
-non-secret dependency composition digest and path/digest/source baseline; it
-never contains raw Plugin configuration or Secret reference targets.
+non-secret dependency composition digest and path/digest/removal/source
+baseline. An explicit tombstone has removed: true; the manifest never contains
+raw Plugin configuration or Secret reference targets.
+
+Remove only exact inherited declarations with sparse edits and null
+tombstones:
+
+    http:
+      expose:
+        remove: [diagnostics.internal/v1]
+    capabilities:
+      require:
+        remove: [audit.legacy/v1]
+      use:
+        email.send/v1: null
+      aliases:
+        mail.send/v1: null
+
+The same Capability cannot appear in both add and remove. A null entry removes
+only that keyed Provider or Alias decision. An inherited add/remove conflict
+must be resolved by the current Project at that exact key; dependency ordering
+never resolves it.
 
 ## Naming and identity rules
 

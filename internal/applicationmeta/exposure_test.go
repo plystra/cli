@@ -83,6 +83,37 @@ func TestAddHTTPExposureSortsAndIsByteIdempotent(t *testing.T) {
 	}
 }
 
+func TestAddHTTPExposureUpdatesSparseEditWithoutLosingRemovals(t *testing.T) {
+	t.Parallel()
+
+	input := []byte(`# Environment-specific exposure decisions.
+http:
+  expose:
+    add:
+      - records.write/v1
+    remove:
+      - kernel.health/v1
+      - records.read/v1
+`)
+	updated, changed, err := applicationmeta.AddHTTPExposure(input, mustExposureID(t, "kernel.health/v1"))
+	if err != nil || !changed {
+		t.Fatalf("AddHTTPExposure = changed %t, %v", changed, err)
+	}
+	for _, retained := range [][]byte{
+		[]byte("# Environment-specific exposure decisions."),
+		[]byte("add:\n      - kernel.health/v1\n      - records.write/v1"),
+		[]byte("remove:\n      - records.read/v1"),
+	} {
+		if !bytes.Contains(updated, retained) {
+			t.Fatalf("updated sparse edit omits %q:\n%s", retained, updated)
+		}
+	}
+	manifest, err := applicationmeta.Parse(updated)
+	if err != nil || len(manifest.HTTPExposures()) != 2 {
+		t.Fatalf("Parse(updated) exposures = %#v, %v", manifest.HTTPExposures(), err)
+	}
+}
+
 func TestAddHTTPExposureRejectsInvalidInputsWithoutPartialOutput(t *testing.T) {
 	t.Parallel()
 
@@ -120,7 +151,7 @@ func TestAddHTTPExposureDoesNotRenderSecretsInErrors(t *testing.T) {
 	t.Parallel()
 
 	secret := "unique-secret-value"
-	data := []byte("config:\n  acme.mail:\n    password: " + secret + "\nhttp: {expose: {}}\n")
+	data := []byte("config:\n  acme.mail:\n    password: " + secret + "\nhttp: {expose: {add: invalid}}\n")
 	_, _, err := applicationmeta.AddHTTPExposure(data, mustExposureID(t, "kernel.health/v1"))
 	if err == nil || strings.Contains(err.Error(), secret) {
 		t.Fatalf("AddHTTPExposure error = %v", err)

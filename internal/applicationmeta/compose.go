@@ -48,6 +48,7 @@ type SchemaLookup func(pluginID string) (kernelmanifest.Config, bool)
 type Provenance struct {
 	path    string
 	digest  string
+	removed bool
 	sources []string
 }
 
@@ -56,6 +57,10 @@ func (p Provenance) Path() string { return p.path }
 
 // Digest returns the normalized value digest.
 func (p Provenance) Digest() string { return p.digest }
+
+// Removed reports whether this baseline record is an explicit typed
+// tombstone rather than a contributed value.
+func (p Provenance) Removed() bool { return p.removed }
 
 // Sources returns every contributing module and YAML field path in stable
 // lexical order.
@@ -94,6 +99,7 @@ func (c Composition) Provenance() []Provenance {
 		result[index] = Provenance{
 			path:    c.provenance[index].path,
 			digest:  c.provenance[index].digest,
+			removed: c.provenance[index].removed,
 			sources: append([]string(nil), c.provenance[index].sources...),
 		}
 	}
@@ -137,13 +143,19 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 	}
 
 	records := make(map[string]*provenanceRecord)
-	exposures := composeExposureSet(ordered, current.HTTPExposures(), records)
-	requirements := composeRequirementSet(ordered, current.Requirements(), records)
-	choices, err := composeProviderChoices(ordered, current.ProviderChoices(), records)
+	exposures, err := composeExposureSet(ordered, current.HTTPExposures(), current.removedHTTPExposures, records)
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
-	aliases, err := composeAliases(ordered, current.Aliases(), records)
+	requirements, err := composeRequirementSet(ordered, current.Requirements(), current.removedRequirements, records)
+	if err != nil {
+		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+	}
+	choices, err := composeProviderChoices(ordered, current.ProviderChoices(), current.removedProviderChoices, records)
+	if err != nil {
+		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+	}
+	aliases, err := composeAliases(ordered, current.Aliases(), current.removedAliases, records)
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
@@ -179,98 +191,208 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 type provenanceRecord struct {
 	path    string
 	digest  string
+	removed bool
 	sources map[string]struct{}
 }
 
-func addProvenance(records map[string]*provenanceRecord, path, digest, source string) {
-	key := path + "\x00" + digest
+func addProvenance(records map[string]*provenanceRecord, path, digest, source string, removed bool) {
+	key := path + "\x00" + digest + fmt.Sprintf("\x00%t", removed)
 	record, exists := records[key]
 	if !exists {
-		record = &provenanceRecord{path: path, digest: digest, sources: make(map[string]struct{})}
+		record = &provenanceRecord{path: path, digest: digest, removed: removed, sources: make(map[string]struct{})}
 		records[key] = record
 	}
 	record.sources[source] = struct{}{}
 }
 
-func composeExposureSet(dependencies []Dependency, current []HTTPExposure, records map[string]*provenanceRecord) []HTTPExposure {
-	values := make(map[capabilityid.Identifier]HTTPExposure)
+type setCandidate struct {
+	valueSources   map[string]struct{}
+	removalSources map[string]struct{}
+}
+
+func composeExposureSet(dependencies []Dependency, current []HTTPExposure, currentRemovals []capabilityRemoval, records map[string]*provenanceRecord) ([]HTTPExposure, error) {
+	inherited := make(map[capabilityid.Identifier]*setCandidate)
 	for _, dependency := range dependencies {
 		for _, exposure := range dependency.Manifest.HTTPExposures() {
 			path := fmt.Sprintf("http.expose[%q]", exposure.id.String())
 			source := dependencySource(dependency, exposure.source)
-			addProvenance(records, path, digestStrings("http.expose", exposure.id.String()), source)
-			if existing, exists := values[exposure.id]; !exists || source < existing.source {
-				values[exposure.id] = HTTPExposure{id: exposure.id, source: source}
-			}
+			addProvenance(records, path, declarationDigest("http.expose", exposure.id, false), source, false)
+			candidate := ensureSetCandidate(inherited, exposure.id)
+			candidate.valueSources[source] = struct{}{}
+		}
+		for _, removal := range dependency.Manifest.removedHTTPExposures {
+			path := fmt.Sprintf("http.expose[%q]", removal.id.String())
+			source := dependencySource(dependency, removal.source)
+			addProvenance(records, path, declarationDigest("http.expose", removal.id, true), source, true)
+			candidate := ensureSetCandidate(inherited, removal.id)
+			candidate.removalSources[source] = struct{}{}
 		}
 	}
+	values := make(map[capabilityid.Identifier]HTTPExposure)
 	for _, exposure := range current {
 		values[exposure.id] = exposure
+	}
+	removed := capabilityRemovalSet(currentRemovals)
+	ids := sortedCandidateIDs(inherited)
+	for _, id := range ids {
+		if _, replaced := values[id]; replaced {
+			continue
+		}
+		if _, explicitlyRemoved := removed[id]; explicitlyRemoved {
+			continue
+		}
+		candidate := inherited[id]
+		if len(candidate.valueSources) > 0 && len(candidate.removalSources) > 0 {
+			return nil, inheritedSetConflict("http.expose", id, candidate)
+		}
+		if len(candidate.valueSources) > 0 {
+			values[id] = HTTPExposure{id: id, source: sortedSet(candidate.valueSources)[0]}
+		}
 	}
 	result := make([]HTTPExposure, 0, len(values))
 	for _, exposure := range values {
 		result = append(result, exposure)
 	}
 	sort.Slice(result, func(left, right int) bool { return result[left].id.String() < result[right].id.String() })
-	return result
+	return result, nil
 }
 
-func composeRequirementSet(dependencies []Dependency, current []CapabilityRequirement, records map[string]*provenanceRecord) []CapabilityRequirement {
-	values := make(map[capabilityid.Identifier]CapabilityRequirement)
+func composeRequirementSet(dependencies []Dependency, current []CapabilityRequirement, currentRemovals []capabilityRemoval, records map[string]*provenanceRecord) ([]CapabilityRequirement, error) {
+	inherited := make(map[capabilityid.Identifier]*setCandidate)
 	for _, dependency := range dependencies {
 		for _, requirement := range dependency.Manifest.Requirements() {
 			path := fmt.Sprintf("capabilities.require[%q]", requirement.id.String())
 			source := dependencySource(dependency, requirement.source)
-			addProvenance(records, path, digestStrings("capabilities.require", requirement.id.String()), source)
-			if existing, exists := values[requirement.id]; !exists || source < existing.source {
-				values[requirement.id] = CapabilityRequirement{id: requirement.id, source: source}
-			}
+			addProvenance(records, path, declarationDigest("capabilities.require", requirement.id, false), source, false)
+			candidate := ensureSetCandidate(inherited, requirement.id)
+			candidate.valueSources[source] = struct{}{}
+		}
+		for _, removal := range dependency.Manifest.removedRequirements {
+			path := fmt.Sprintf("capabilities.require[%q]", removal.id.String())
+			source := dependencySource(dependency, removal.source)
+			addProvenance(records, path, declarationDigest("capabilities.require", removal.id, true), source, true)
+			candidate := ensureSetCandidate(inherited, removal.id)
+			candidate.removalSources[source] = struct{}{}
 		}
 	}
+	values := make(map[capabilityid.Identifier]CapabilityRequirement)
 	for _, requirement := range current {
 		values[requirement.id] = requirement
+	}
+	removed := capabilityRemovalSet(currentRemovals)
+	ids := sortedCandidateIDs(inherited)
+	for _, id := range ids {
+		if _, replaced := values[id]; replaced {
+			continue
+		}
+		if _, explicitlyRemoved := removed[id]; explicitlyRemoved {
+			continue
+		}
+		candidate := inherited[id]
+		if len(candidate.valueSources) > 0 && len(candidate.removalSources) > 0 {
+			return nil, inheritedSetConflict("capabilities.require", id, candidate)
+		}
+		if len(candidate.valueSources) > 0 {
+			values[id] = CapabilityRequirement{id: id, source: sortedSet(candidate.valueSources)[0]}
+		}
 	}
 	result := make([]CapabilityRequirement, 0, len(values))
 	for _, requirement := range values {
 		result = append(result, requirement)
 	}
 	sort.Slice(result, func(left, right int) bool { return result[left].id.String() < result[right].id.String() })
+	return result, nil
+}
+
+func ensureSetCandidate(values map[capabilityid.Identifier]*setCandidate, id capabilityid.Identifier) *setCandidate {
+	candidate := values[id]
+	if candidate == nil {
+		candidate = &setCandidate{valueSources: make(map[string]struct{}), removalSources: make(map[string]struct{})}
+		values[id] = candidate
+	}
+	return candidate
+}
+
+func sortedCandidateIDs(values map[capabilityid.Identifier]*setCandidate) []capabilityid.Identifier {
+	ids := make([]capabilityid.Identifier, 0, len(values))
+	for id := range values {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(left, right int) bool { return ids[left].String() < ids[right].String() })
+	return ids
+}
+
+func capabilityRemovalSet(values []capabilityRemoval) map[capabilityid.Identifier]struct{} {
+	result := make(map[capabilityid.Identifier]struct{}, len(values))
+	for _, value := range values {
+		result[value.id] = struct{}{}
+	}
 	return result
+}
+
+func inheritedSetConflict(path string, id capabilityid.Identifier, candidate *setCandidate) error {
+	return fmt.Errorf(
+		"%w: %s[%q] is added by %s and removed by %s; explicitly add or remove that exact Capability in the current Project configuration",
+		ErrInheritedConflict,
+		path,
+		id.String(),
+		strings.Join(sortedSet(candidate.valueSources), ", "),
+		strings.Join(sortedSet(candidate.removalSources), ", "),
+	)
 }
 
 type providerCandidate struct {
 	choice  ProviderChoice
+	removed bool
 	sources map[string]struct{}
 }
 
-func composeProviderChoices(dependencies []Dependency, current []ProviderChoice, records map[string]*provenanceRecord) ([]ProviderChoice, error) {
+func composeProviderChoices(dependencies []Dependency, current []ProviderChoice, currentRemovals []capabilityRemoval, records map[string]*provenanceRecord) ([]ProviderChoice, error) {
 	inherited := make(map[capabilityid.Identifier]map[string]*providerCandidate)
 	for _, dependency := range dependencies {
 		for _, choice := range dependency.Manifest.ProviderChoices() {
 			path := fmt.Sprintf("capabilities.use[%q]", choice.capability.String())
 			source := dependencySource(dependency, choice.source)
 			digest := digestStrings("capabilities.use", choice.capability.String(), choice.pluginID)
-			addProvenance(records, path, digest, source)
-			byProvider := inherited[choice.capability]
-			if byProvider == nil {
-				byProvider = make(map[string]*providerCandidate)
-				inherited[choice.capability] = byProvider
+			addProvenance(records, path, digest, source, false)
+			byDigest := inherited[choice.capability]
+			if byDigest == nil {
+				byDigest = make(map[string]*providerCandidate)
+				inherited[choice.capability] = byDigest
 			}
-			candidate := byProvider[choice.pluginID]
+			candidate := byDigest[digest]
 			if candidate == nil {
 				candidate = &providerCandidate{choice: ProviderChoice{capability: choice.capability, pluginID: choice.pluginID, source: source}, sources: make(map[string]struct{})}
-				byProvider[choice.pluginID] = candidate
+				byDigest[digest] = candidate
 			}
 			candidate.sources[source] = struct{}{}
 			if source < candidate.choice.source {
 				candidate.choice.source = source
 			}
 		}
+		for _, removal := range dependency.Manifest.removedProviderChoices {
+			path := fmt.Sprintf("capabilities.use[%q]", removal.id.String())
+			source := dependencySource(dependency, removal.source)
+			digest := declarationDigest("capabilities.use", removal.id, true)
+			addProvenance(records, path, digest, source, true)
+			byDigest := inherited[removal.id]
+			if byDigest == nil {
+				byDigest = make(map[string]*providerCandidate)
+				inherited[removal.id] = byDigest
+			}
+			candidate := byDigest[digest]
+			if candidate == nil {
+				candidate = &providerCandidate{removed: true, sources: make(map[string]struct{})}
+				byDigest[digest] = candidate
+			}
+			candidate.sources[source] = struct{}{}
+		}
 	}
 	selected := make(map[capabilityid.Identifier]ProviderChoice)
 	for _, choice := range current {
 		selected[choice.capability] = choice
 	}
+	removed := capabilityRemovalSet(currentRemovals)
 	capabilities := make([]capabilityid.Identifier, 0, len(inherited))
 	for capability := range inherited {
 		capabilities = append(capabilities, capability)
@@ -281,11 +403,16 @@ func composeProviderChoices(dependencies []Dependency, current []ProviderChoice,
 		if _, replaced := selected[capability]; replaced {
 			continue
 		}
+		if _, explicitlyRemoved := removed[capability]; explicitlyRemoved {
+			continue
+		}
 		if len(candidates) != 1 {
 			return nil, inheritedProviderConflict(capability, candidates)
 		}
 		for _, candidate := range candidates {
-			selected[capability] = candidate.choice
+			if !candidate.removed {
+				selected[capability] = candidate.choice
+			}
 		}
 	}
 	result := make([]ProviderChoice, 0, len(selected))
@@ -299,31 +426,37 @@ func composeProviderChoices(dependencies []Dependency, current []ProviderChoice,
 }
 
 func inheritedProviderConflict(capability capabilityid.Identifier, candidates map[string]*providerCandidate) error {
-	providers := make([]string, 0, len(candidates))
-	for provider := range candidates {
-		providers = append(providers, provider)
+	digests := make([]string, 0, len(candidates))
+	for digest := range candidates {
+		digests = append(digests, digest)
 	}
-	sort.Strings(providers)
-	parts := make([]string, 0, len(providers))
-	for _, provider := range providers {
-		parts = append(parts, fmt.Sprintf("%s from %s", provider, strings.Join(sortedSet(candidates[provider].sources), ", ")))
+	sort.Strings(digests)
+	parts := make([]string, 0, len(digests))
+	for _, digest := range digests {
+		candidate := candidates[digest]
+		declaration := candidate.choice.pluginID
+		if candidate.removed {
+			declaration = "<removed>"
+		}
+		parts = append(parts, fmt.Sprintf("%s from %s", declaration, strings.Join(sortedSet(candidate.sources), ", ")))
 	}
-	return fmt.Errorf("%w: capabilities.use[%q] selects different Providers: %s; set that exact key in the current Project configuration", ErrInheritedConflict, capability.String(), strings.Join(parts, "; "))
+	return fmt.Errorf("%w: capabilities.use[%q] has incompatible Provider declarations: %s; set or remove that exact key in the current Project configuration", ErrInheritedConflict, capability.String(), strings.Join(parts, "; "))
 }
 
 type aliasCandidate struct {
 	alias   Alias
+	removed bool
 	sources map[string]struct{}
 }
 
-func composeAliases(dependencies []Dependency, current []Alias, records map[string]*provenanceRecord) ([]Alias, error) {
+func composeAliases(dependencies []Dependency, current []Alias, currentRemovals []capabilityRemoval, records map[string]*provenanceRecord) ([]Alias, error) {
 	inherited := make(map[capabilityid.Identifier]map[string]*aliasCandidate)
 	for _, dependency := range dependencies {
 		for _, alias := range dependency.Manifest.Aliases() {
 			path := fmt.Sprintf("capabilities.aliases[%q]", alias.id.String())
 			source := dependencySource(dependency, alias.source)
 			digest := aliasDigest(alias)
-			addProvenance(records, path, digest, source)
+			addProvenance(records, path, digest, source, false)
 			byDigest := inherited[alias.id]
 			if byDigest == nil {
 				byDigest = make(map[string]*aliasCandidate)
@@ -340,11 +473,29 @@ func composeAliases(dependencies []Dependency, current []Alias, records map[stri
 				candidate.alias.source = source
 			}
 		}
+		for _, removal := range dependency.Manifest.removedAliases {
+			path := fmt.Sprintf("capabilities.aliases[%q]", removal.id.String())
+			source := dependencySource(dependency, removal.source)
+			digest := declarationDigest("capabilities.aliases", removal.id, true)
+			addProvenance(records, path, digest, source, true)
+			byDigest := inherited[removal.id]
+			if byDigest == nil {
+				byDigest = make(map[string]*aliasCandidate)
+				inherited[removal.id] = byDigest
+			}
+			candidate := byDigest[digest]
+			if candidate == nil {
+				candidate = &aliasCandidate{removed: true, sources: make(map[string]struct{})}
+				byDigest[digest] = candidate
+			}
+			candidate.sources[source] = struct{}{}
+		}
 	}
 	selected := make(map[capabilityid.Identifier]Alias)
 	for _, alias := range current {
 		selected[alias.id] = alias
 	}
+	removed := capabilityRemovalSet(currentRemovals)
 	ids := make([]capabilityid.Identifier, 0, len(inherited))
 	for id := range inherited {
 		ids = append(ids, id)
@@ -355,11 +506,16 @@ func composeAliases(dependencies []Dependency, current []Alias, records map[stri
 		if _, replaced := selected[id]; replaced {
 			continue
 		}
+		if _, explicitlyRemoved := removed[id]; explicitlyRemoved {
+			continue
+		}
 		if len(candidates) != 1 {
 			return nil, inheritedAliasConflict(id, candidates)
 		}
 		for _, candidate := range candidates {
-			selected[id] = candidate.alias
+			if !candidate.removed {
+				selected[id] = candidate.alias
+			}
 		}
 	}
 	result := make([]Alias, 0, len(selected))
@@ -379,7 +535,11 @@ func inheritedAliasConflict(id capabilityid.Identifier, candidates map[string]*a
 	parts := make([]string, 0, len(digests))
 	for _, digest := range digests {
 		candidate := candidates[digest]
-		parts = append(parts, fmt.Sprintf("target %s from %s", candidate.alias.target.String(), strings.Join(sortedSet(candidate.sources), ", ")))
+		declaration := "removed"
+		if !candidate.removed {
+			declaration = "target " + candidate.alias.target.String()
+		}
+		parts = append(parts, fmt.Sprintf("%s from %s", declaration, strings.Join(sortedSet(candidate.sources), ", ")))
 	}
 	return fmt.Errorf("%w: capabilities.aliases[%q] has incompatible declarations: %s; set or remove that exact key in the current Project configuration", ErrInheritedConflict, id.String(), strings.Join(parts, "; "))
 }
@@ -413,7 +573,7 @@ func composeConfigurations(dependencies []Dependency, current []PluginConfigurat
 			for _, field := range fields {
 				path := configFieldPath(field.pluginID, field.name)
 				source := dependencySource(dependency, field.source)
-				addProvenance(records, path, field.digest, source)
+				addProvenance(records, path, field.digest, source, false)
 				byDigest := inherited[path]
 				if byDigest == nil {
 					byDigest = make(map[string]*configCandidate)
@@ -612,11 +772,14 @@ func dependencyIdentity(dependency Dependency) string {
 func finalizeProvenance(records map[string]*provenanceRecord) []Provenance {
 	result := make([]Provenance, 0, len(records))
 	for _, record := range records {
-		result = append(result, Provenance{path: record.path, digest: record.digest, sources: sortedSet(record.sources)})
+		result = append(result, Provenance{path: record.path, digest: record.digest, removed: record.removed, sources: sortedSet(record.sources)})
 	}
 	sort.Slice(result, func(left, right int) bool {
 		if result[left].path != result[right].path {
 			return result[left].path < result[right].path
+		}
+		if result[left].removed != result[right].removed {
+			return !result[left].removed
 		}
 		return result[left].digest < result[right].digest
 	})
@@ -627,6 +790,7 @@ func digestProvenance(records []Provenance) (string, error) {
 	type record struct {
 		Path    string   `json:"path"`
 		Digest  string   `json:"digest"`
+		Removed bool     `json:"removed,omitempty"`
 		Sources []string `json:"sources"`
 	}
 	document := struct {
@@ -634,7 +798,7 @@ func digestProvenance(records []Provenance) (string, error) {
 		Records []record `json:"records"`
 	}{Version: 1, Records: make([]record, len(records))}
 	for index := range records {
-		document.Records[index] = record{Path: records[index].path, Digest: records[index].digest, Sources: append([]string(nil), records[index].sources...)}
+		document.Records[index] = record{Path: records[index].path, Digest: records[index].digest, Removed: records[index].removed, Sources: append([]string(nil), records[index].sources...)}
 	}
 	data, err := json.Marshal(document)
 	if err != nil {
@@ -663,6 +827,13 @@ func aliasDigest(alias Alias) string {
 		Deprecated:  alias.deprecated,
 	})
 	return digestStrings("capabilities.aliases", string(data))
+}
+
+func declarationDigest(path string, id capabilityid.Identifier, removed bool) string {
+	if removed {
+		return digestStrings(path, id.String(), "removed")
+	}
+	return digestStrings(path, id.String())
 }
 
 func digestStrings(values ...string) string {

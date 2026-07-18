@@ -387,6 +387,7 @@ func RenderManifest(aliasJSON []byte, composition applicationmeta.Composition) (
 	type provenanceRecord struct {
 		Path    string   `json:"path"`
 		Digest  string   `json:"digest"`
+		Removed bool     `json:"removed,omitempty"`
 		Sources []string `json:"sources"`
 	}
 	type documentReference struct {
@@ -398,6 +399,7 @@ func RenderManifest(aliasJSON []byte, composition applicationmeta.Composition) (
 		baseline[index] = provenanceRecord{
 			Path:    record.Path(),
 			Digest:  record.Digest(),
+			Removed: record.Removed(),
 			Sources: record.Sources(),
 		}
 	}

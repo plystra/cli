@@ -91,6 +91,13 @@ func (r CapabilityRequirement) ID() capabilityid.Identifier { return r.id }
 // Source returns stable configuration-path provenance for diagnostics.
 func (r CapabilityRequirement) Source() string { return r.source }
 
+// capabilityRemoval is one typed null or sparse-set tombstone retained on a
+// parsed configuration layer until schema-aware composition applies it.
+type capabilityRemoval struct {
+	id     capabilityid.Identifier
+	source string
+}
+
 // ProviderChoice is one explicit canonical Capability-to-Plugin selection.
 type ProviderChoice struct {
 	capability capabilityid.Identifier
@@ -147,14 +154,20 @@ func (PluginConfiguration) LogValue() slog.Value {
 // Manifest is the immutable normalized application metadata used by canonical
 // provider, HTTP exposure, and Capability Alias resolution.
 type Manifest struct {
-	httpAddress     string
-	hasHTTPAddress  bool
-	httpExposures   []HTTPExposure
-	requirements    []CapabilityRequirement
-	providerChoices []ProviderChoice
-	aliases         []Alias
-	configurations  []PluginConfiguration
-	startupTimeout  time.Duration
+	httpAddress            string
+	hasHTTPAddress         bool
+	removeHTTPAddress      bool
+	httpExposures          []HTTPExposure
+	removedHTTPExposures   []capabilityRemoval
+	requirements           []CapabilityRequirement
+	removedRequirements    []capabilityRemoval
+	providerChoices        []ProviderChoice
+	removedProviderChoices []capabilityRemoval
+	aliases                []Alias
+	removedAliases         []capabilityRemoval
+	configurations         []PluginConfiguration
+	startupTimeout         time.Duration
+	removeStartupTimeout   bool
 }
 
 // String returns only a redaction marker because the manifest can contain
@@ -237,15 +250,15 @@ func Parse(data []byte) (Manifest, error) {
 			return Manifest{}, invalid("unknown key %q", key)
 		}
 	}
-	address, hasAddress, exposures, err := parseHTTP(values["http"])
+	address, hasAddress, removeAddress, exposures, removedExposures, err := parseHTTP(values["http"])
 	if err != nil {
 		return Manifest{}, err
 	}
-	startupTimeout, err := parseTimeouts(values["timeouts"])
+	startupTimeout, removeStartupTimeout, err := parseTimeouts(values["timeouts"])
 	if err != nil {
 		return Manifest{}, err
 	}
-	requirements, choices, aliases, err := parseCapabilities(values["capabilities"])
+	requirements, removedRequirements, choices, removedChoices, aliases, removedAliases, err := parseCapabilities(values["capabilities"])
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -254,43 +267,52 @@ func Parse(data []byte) (Manifest, error) {
 		return Manifest{}, err
 	}
 	return Manifest{
-		httpAddress:     address,
-		hasHTTPAddress:  hasAddress,
-		httpExposures:   exposures,
-		requirements:    requirements,
-		providerChoices: choices,
-		aliases:         aliases,
-		configurations:  configurations,
-		startupTimeout:  startupTimeout,
+		httpAddress:            address,
+		hasHTTPAddress:         hasAddress,
+		removeHTTPAddress:      removeAddress,
+		httpExposures:          exposures,
+		removedHTTPExposures:   removedExposures,
+		requirements:           requirements,
+		removedRequirements:    removedRequirements,
+		providerChoices:        choices,
+		removedProviderChoices: removedChoices,
+		aliases:                aliases,
+		removedAliases:         removedAliases,
+		configurations:         configurations,
+		startupTimeout:         startupTimeout,
+		removeStartupTimeout:   removeStartupTimeout,
 	}, nil
 }
 
-func parseTimeouts(node *yaml.Node) (time.Duration, error) {
+func parseTimeouts(node *yaml.Node) (time.Duration, bool, error) {
 	if node == nil {
-		return DefaultStartupTimeout, nil
+		return DefaultStartupTimeout, false, nil
 	}
 	values, err := mapping(node, "timeouts")
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	for _, key := range sortedNodeKeys(values) {
 		if key != "startup" {
-			return 0, invalid("timeouts contains unknown key %q", key)
+			return 0, false, invalid("timeouts contains unknown key %q", key)
 		}
 	}
 	startupNode, exists := values["startup"]
 	if !exists {
-		return DefaultStartupTimeout, nil
+		return DefaultStartupTimeout, false, nil
+	}
+	if isNull(startupNode) {
+		return DefaultStartupTimeout, true, nil
 	}
 	startup, err := strictString(startupNode)
 	if err != nil || startup == "" || len(startup) > 64 || strings.TrimSpace(startup) != startup || strings.ContainsRune(startup, '\x00') {
-		return 0, invalid("timeouts.startup must be a non-empty trimmed Go duration string of at most 64 bytes with no NUL")
+		return 0, false, invalid("timeouts.startup must be a non-empty trimmed Go duration string of at most 64 bytes with no NUL or null")
 	}
 	duration, err := time.ParseDuration(startup)
 	if err != nil || duration <= 0 {
-		return 0, invalid("timeouts.startup must be a positive Go duration")
+		return 0, false, invalid("timeouts.startup must be a positive Go duration")
 	}
-	return duration, nil
+	return duration, false, nil
 }
 
 func parseConfigurations(node *yaml.Node) ([]PluginConfiguration, error) {
@@ -322,187 +344,242 @@ func parseConfigurations(node *yaml.Node) ([]PluginConfiguration, error) {
 	return configurations, nil
 }
 
-func parseHTTP(node *yaml.Node) (string, bool, []HTTPExposure, error) {
+func parseHTTP(node *yaml.Node) (string, bool, bool, []HTTPExposure, []capabilityRemoval, error) {
 	if node == nil {
-		return "", false, nil, nil
+		return "", false, false, nil, nil, nil
 	}
 	values, err := mapping(node, "http")
 	if err != nil {
-		return "", false, nil, err
+		return "", false, false, nil, nil, err
 	}
 	for _, key := range sortedNodeKeys(values) {
 		switch key {
 		case "address", "expose":
 		default:
-			return "", false, nil, invalid("http contains unknown key %q", key)
+			return "", false, false, nil, nil, invalid("http contains unknown key %q", key)
 		}
 	}
 	address := ""
 	hasAddress := false
+	removeAddress := false
 	if addressNode, exists := values["address"]; exists {
-		address, err = strictString(addressNode)
-		if err != nil || address == "" || len(address) > 4096 || strings.TrimSpace(address) != address || strings.ContainsRune(address, '\x00') {
-			return "", false, nil, invalid("http.address must be a non-empty trimmed string of at most 4096 bytes with no NUL")
+		if isNull(addressNode) {
+			removeAddress = true
+		} else {
+			address, err = strictString(addressNode)
+			if err != nil || address == "" || len(address) > 4096 || strings.TrimSpace(address) != address || strings.ContainsRune(address, '\x00') {
+				return "", false, false, nil, nil, invalid("http.address must be a non-empty trimmed string of at most 4096 bytes with no NUL or null")
+			}
+			hasAddress = true
 		}
-		hasAddress = true
 	}
 	exposeNode, exists := values["expose"]
 	if !exists {
-		return address, hasAddress, nil, nil
+		return address, hasAddress, removeAddress, nil, nil, nil
 	}
-	if exposeNode.Kind != yaml.SequenceNode {
-		return "", false, nil, invalid("http.expose must be a sequence of canonical Capability IDs")
-	}
-	exposures := make([]HTTPExposure, 0, len(exposeNode.Content))
-	seen := make(map[capabilityid.Identifier]int, len(exposeNode.Content))
-	for index, item := range exposeNode.Content {
-		value, valueErr := strictString(item)
-		if valueErr != nil || value == "" {
-			return "", false, nil, invalid("http.expose[%d] must be a canonical Capability ID string", index)
-		}
-		id, parseErr := capabilityid.Parse(value)
-		if parseErr != nil {
-			return "", false, nil, invalid("http.expose[%d] %q is not a canonical Capability ID", index, value)
-		}
-		if previous, duplicate := seen[id]; duplicate {
-			return "", false, nil, invalid("http.expose[%d] duplicates Capability %q from http.expose[%d]", index, id.String(), previous)
-		}
-		seen[id] = index
-		exposures = append(exposures, HTTPExposure{
-			id:     id,
-			source: fmt.Sprintf("plystra.yaml http.expose[%q]", id.String()),
-		})
-	}
-	sort.Slice(exposures, func(left, right int) bool {
-		return exposures[left].id.String() < exposures[right].id.String()
+	exposures, removals, err := parseCapabilitySet(exposeNode, "http.expose", func(id capabilityid.Identifier, source string) HTTPExposure {
+		return HTTPExposure{id: id, source: source}
 	})
-	return address, hasAddress, exposures, nil
+	if err != nil {
+		return "", false, false, nil, nil, err
+	}
+	return address, hasAddress, removeAddress, exposures, removals, nil
 }
 
-func parseCapabilities(node *yaml.Node) ([]CapabilityRequirement, []ProviderChoice, []Alias, error) {
+func parseCapabilitySet[T any](node *yaml.Node, path string, makeValue func(capabilityid.Identifier, string) T) ([]T, []capabilityRemoval, error) {
+	var addNode, removeNode *yaml.Node
+	addPath := path
+	removePath := path + ".remove"
+	switch node.Kind {
+	case yaml.SequenceNode:
+		addNode = node
+	case yaml.MappingNode:
+		values, err := mapping(node, path)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, key := range sortedNodeKeys(values) {
+			switch key {
+			case "add", "remove":
+			default:
+				return nil, nil, invalid("%s contains unknown sparse-edit key %q", path, key)
+			}
+		}
+		addNode = values["add"]
+		removeNode = values["remove"]
+		addPath = path + ".add"
+	default:
+		return nil, nil, invalid("%s must be a sequence or sparse {add, remove} mapping of canonical Capability IDs", path)
+	}
+
+	adds, err := parseCapabilityIDs(addNode, addPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	removes, err := parseCapabilityIDs(removeNode, removePath)
+	if err != nil {
+		return nil, nil, err
+	}
+	addSet := make(map[capabilityid.Identifier]struct{}, len(adds))
+	for _, id := range adds {
+		addSet[id] = struct{}{}
+	}
+	for _, id := range removes {
+		if _, ambiguous := addSet[id]; ambiguous {
+			return nil, nil, invalid("%s cannot both add and remove Capability %q", path, id.String())
+		}
+	}
+
+	values := make([]T, len(adds))
+	for index, id := range adds {
+		values[index] = makeValue(id, fmt.Sprintf("plystra.yaml %s[%q]", addPath, id.String()))
+	}
+	removals := make([]capabilityRemoval, len(removes))
+	for index, id := range removes {
+		removals[index] = capabilityRemoval{id: id, source: fmt.Sprintf("plystra.yaml %s[%q]", removePath, id.String())}
+	}
+	return values, removals, nil
+}
+
+func parseCapabilityIDs(node *yaml.Node, path string) ([]capabilityid.Identifier, error) {
 	if node == nil {
-		return nil, nil, nil, nil
+		return nil, nil
+	}
+	if node.Kind != yaml.SequenceNode {
+		return nil, invalid("%s must be a sequence of canonical Capability IDs", path)
+	}
+	values := make([]capabilityid.Identifier, 0, len(node.Content))
+	seen := make(map[capabilityid.Identifier]int, len(node.Content))
+	for index, item := range node.Content {
+		value, err := strictString(item)
+		if err != nil || value == "" {
+			return nil, invalid("%s[%d] must be a canonical Capability ID string", path, index)
+		}
+		id, err := capabilityid.Parse(value)
+		if err != nil {
+			return nil, invalid("%s[%d] %q is not a canonical Capability ID", path, index, value)
+		}
+		if previous, duplicate := seen[id]; duplicate {
+			return nil, invalid("%s[%d] duplicates Capability %q from %s[%d]", path, index, id.String(), path, previous)
+		}
+		seen[id] = index
+		values = append(values, id)
+	}
+	sort.Slice(values, func(left, right int) bool { return values[left].String() < values[right].String() })
+	return values, nil
+}
+
+func parseCapabilities(node *yaml.Node) ([]CapabilityRequirement, []capabilityRemoval, []ProviderChoice, []capabilityRemoval, []Alias, []capabilityRemoval, error) {
+	if node == nil {
+		return nil, nil, nil, nil, nil, nil, nil
 	}
 	values, err := mapping(node, "capabilities")
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	for _, key := range sortedNodeKeys(values) {
 		switch key {
 		case "require", "use", "aliases":
 		default:
-			return nil, nil, nil, invalid("capabilities contains unknown key %q", key)
+			return nil, nil, nil, nil, nil, nil, invalid("capabilities contains unknown key %q", key)
 		}
 	}
-	requirements, err := parseRequirements(values["require"])
+	requirements, removedRequirements, err := parseRequirements(values["require"])
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
-	choices, err := parseProviderChoices(values["use"])
+	choices, removedChoices, err := parseProviderChoices(values["use"])
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
-	aliases, err := parseAliases(values["aliases"])
+	aliases, removedAliases, err := parseAliases(values["aliases"])
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	if err := rejectAliasResolutionInputs(requirements, choices, aliases); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
-	return requirements, choices, aliases, nil
+	return requirements, removedRequirements, choices, removedChoices, aliases, removedAliases, nil
 }
 
-func parseRequirements(node *yaml.Node) ([]CapabilityRequirement, error) {
+func parseRequirements(node *yaml.Node) ([]CapabilityRequirement, []capabilityRemoval, error) {
 	if node == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
-	if node.Kind != yaml.SequenceNode {
-		return nil, invalid("capabilities.require must be a sequence of canonical Capability IDs")
-	}
-	requirements := make([]CapabilityRequirement, 0, len(node.Content))
-	seen := make(map[capabilityid.Identifier]int, len(node.Content))
-	for index, item := range node.Content {
-		value, err := strictString(item)
-		if err != nil || value == "" {
-			return nil, invalid("capabilities.require[%d] must be a canonical Capability ID string", index)
-		}
-		id, err := capabilityid.Parse(value)
-		if err != nil {
-			return nil, invalid("capabilities.require[%d] %q is not a canonical Capability ID", index, value)
-		}
-		if previous, duplicate := seen[id]; duplicate {
-			return nil, invalid("capabilities.require[%d] duplicates Capability %q from capabilities.require[%d]", index, id.String(), previous)
-		}
-		seen[id] = index
-		requirements = append(requirements, CapabilityRequirement{
-			id:     id,
-			source: fmt.Sprintf("plystra.yaml capabilities.require[%q]", id.String()),
-		})
-	}
-	sort.Slice(requirements, func(left, right int) bool {
-		return requirements[left].id.String() < requirements[right].id.String()
+	return parseCapabilitySet(node, "capabilities.require", func(id capabilityid.Identifier, source string) CapabilityRequirement {
+		return CapabilityRequirement{id: id, source: source}
 	})
-	return requirements, nil
 }
 
-func parseProviderChoices(node *yaml.Node) ([]ProviderChoice, error) {
+func parseProviderChoices(node *yaml.Node) ([]ProviderChoice, []capabilityRemoval, error) {
 	if node == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	values, err := mapping(node, "capabilities.use")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	choices := make([]ProviderChoice, 0, len(values))
+	removals := make([]capabilityRemoval, 0, len(values))
 	for _, value := range sortedNodeKeys(values) {
 		capability, err := capabilityid.Parse(value)
 		if err != nil {
-			return nil, invalid("capabilities.use key %q is not a canonical Capability ID", value)
+			return nil, nil, invalid("capabilities.use key %q is not a canonical Capability ID", value)
 		}
 		if strings.HasPrefix(capability.Name(), "kernel.") {
-			return nil, invalid("capabilities.use key %q selects an intrinsic kernel.* Capability", value)
+			return nil, nil, invalid("capabilities.use key %q selects an intrinsic kernel.* Capability", value)
+		}
+		source := fmt.Sprintf("plystra.yaml capabilities.use[%q]", capability.String())
+		if isNull(values[value]) {
+			removals = append(removals, capabilityRemoval{id: capability, source: source})
+			continue
 		}
 		selected, err := strictString(values[value])
 		if err != nil || pluginid.Validate(selected) != nil {
-			return nil, invalid("capabilities.use[%q] must be a canonical Plugin ID string", value)
+			return nil, nil, invalid("capabilities.use[%q] must be a canonical Plugin ID string or null", value)
 		}
 		choices = append(choices, ProviderChoice{
 			capability: capability,
 			pluginID:   selected,
-			source:     fmt.Sprintf("plystra.yaml capabilities.use[%q]", capability.String()),
+			source:     source,
 		})
 	}
-	return choices, nil
+	return choices, removals, nil
 }
 
-func parseAliases(aliasesNode *yaml.Node) ([]Alias, error) {
+func parseAliases(aliasesNode *yaml.Node) ([]Alias, []capabilityRemoval, error) {
 	if aliasesNode == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	aliasValues, err := mapping(aliasesNode, "capabilities.aliases")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	aliases := make([]Alias, 0, len(aliasValues))
+	removals := make([]capabilityRemoval, 0, len(aliasValues))
 	for _, aliasValue := range sortedNodeKeys(aliasValues) {
 		id, err := capabilityid.Parse(aliasValue)
 		if err != nil {
-			return nil, invalid("capabilities.aliases key %q is not a canonical Capability ID", aliasValue)
+			return nil, nil, invalid("capabilities.aliases key %q is not a canonical Capability ID", aliasValue)
 		}
 		if strings.HasPrefix(id.Name(), "kernel.") {
-			return nil, invalid("capabilities.aliases key %q uses the reserved kernel.* canonical namespace", aliasValue)
+			return nil, nil, invalid("capabilities.aliases key %q uses the reserved kernel.* canonical namespace", aliasValue)
 		}
 		path := fmt.Sprintf("capabilities.aliases[%q]", aliasValue)
+		if isNull(aliasValues[aliasValue]) {
+			removals = append(removals, capabilityRemoval{id: id, source: "plystra.yaml " + path})
+			continue
+		}
 		alias, err := parseAlias(path, id, aliasValues[aliasValue])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		aliases = append(aliases, alias)
 	}
 	if err := rejectAliasChains(aliases); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return aliases, nil
+	return aliases, removals, nil
 }
 
 func rejectAliasResolutionInputs(requirements []CapabilityRequirement, choices []ProviderChoice, aliases []Alias) error {
@@ -753,6 +830,10 @@ func strictBool(node *yaml.Node) (bool, error) {
 	default:
 		return false, errors.New("must be true or false")
 	}
+}
+
+func isNull(node *yaml.Node) bool {
+	return node != nil && node.Kind == yaml.ScalarNode && node.Tag == "!!null"
 }
 
 func sortedNodeKeys(values map[string]*yaml.Node) []string {
