@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/atomicfs"
@@ -18,6 +19,7 @@ import (
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/plugincreate"
+	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
@@ -176,9 +178,23 @@ func populate(root, modulePath, name string, githubCI, skills bool) error {
 		return fmt.Errorf("prepare empty selected-provider source: %w", err)
 	}
 	managed = append(managed, providersFile)
-	aliasManifest, err := generatedfiles.NewFile("generated/manifest.json", []byte("{\"capability_aliases\":[]}\n"))
+	currentManifest, err := applicationmeta.Parse([]byte(plystraTemplate))
 	if err != nil {
-		return fmt.Errorf("prepare empty Alias manifest: %w", err)
+		return fmt.Errorf("parse initial Project configuration: %w", err)
+	}
+	composition, err := applicationmeta.Compose(nil, currentManifest, func(string) (kernelmanifest.Config, bool) {
+		return kernelmanifest.Config{}, false
+	})
+	if err != nil {
+		return fmt.Errorf("compose initial Project configuration: %w", err)
+	}
+	manifestData, err := applicationgen.RenderManifest([]byte("{\"capability_aliases\":[]}"), composition)
+	if err != nil {
+		return fmt.Errorf("render initial application manifest: %w", err)
+	}
+	aliasManifest, err := generatedfiles.NewFile("generated/manifest.json", manifestData)
+	if err != nil {
+		return fmt.Errorf("prepare initial application manifest: %w", err)
 	}
 	managed = append(managed, aliasManifest)
 	generated, err := generatedfiles.NewOutput(managed)

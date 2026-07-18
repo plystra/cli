@@ -205,6 +205,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		JavaScriptPackage:   javaScriptPackage,
 		KernelModuleVersion: kernelVersion,
 		KernelBuildIdentity: kernelBuildIdentity,
+		Composition:         resolved.Composition(),
 		Configurations:      configurations,
 		Providers:           providers,
 	}, resolved.Resolution())

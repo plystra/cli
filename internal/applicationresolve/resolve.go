@@ -17,6 +17,7 @@ import (
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/projectlocate"
+	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 )
 
 var (
@@ -50,25 +51,34 @@ type Options struct {
 // Result is one immutable filesystem provenance and stable generation
 // resolution assembled from the same application snapshot.
 type Result struct {
-	module       modulelocate.Module
-	manifest     applicationmeta.Manifest
-	dependencies moduledependency.Index
-	inventory    plugininventory.Index
-	resolution   generationresolution.ExtensionResult
-	configs      configurationresolve.Result
+	module          modulelocate.Module
+	currentManifest applicationmeta.Manifest
+	composition     applicationmeta.Composition
+	dependencies    moduledependency.Index
+	inventory       plugininventory.Index
+	resolution      generationresolution.ExtensionResult
+	configs         configurationresolve.Result
 }
 
 // Module returns the nearest Plystra Project Go Module.
 func (r Result) Module() modulelocate.Module { return r.module }
 
-// Manifest returns the normalized root application declaration.
-func (r Result) Manifest() applicationmeta.Manifest { return r.manifest }
+// Manifest returns the effective dependency-composed application declaration.
+func (r Result) Manifest() applicationmeta.Manifest { return r.composition.Manifest() }
+
+// CurrentManifest returns the normalized selected current-project declaration
+// before dependency composition.
+func (r Result) CurrentManifest() applicationmeta.Manifest { return r.currentManifest }
+
+// Composition returns dependency baseline provenance and the effective
+// application declaration.
+func (r Result) Composition() applicationmeta.Composition { return r.composition }
 
 // Dependencies returns the immutable effective Go Module graph used for
 // dependency-Project discovery and generated runtime build provenance.
 func (r Result) Dependencies() moduledependency.Index { return r.dependencies }
 
-// Inventory returns every visible local and explicit-dependency plugin.
+// Inventory returns every visible local and dependency-Project plugin.
 func (r Result) Inventory() plugininventory.Index { return r.inventory }
 
 // Resolution returns the stable provider, extension, contribution, and Alias
@@ -91,7 +101,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrResolve, err)
 	}
-	manifestSnapshot, manifest, err := loadManifest(module.Path())
+	manifestSnapshot, currentManifest, err := loadManifest(module.Path())
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -103,10 +113,25 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
+	dependencySnapshots, dependencyManifests, err := loadDependencyManifests(dependencies.Projects())
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
 	inventory, err := plugininventory.Build(module, dependencies)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
+	composition, err := applicationmeta.Compose(dependencyManifests, currentManifest, func(pluginID string) (kernelmanifest.Config, bool) {
+		plugin, exists := inventory.ByID(pluginID)
+		if !exists {
+			return kernelmanifest.Config{}, false
+		}
+		return plugin.Config(), true
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	manifest := composition.Manifest()
 	input, err := applicationinput.Build(manifest, inventory, generationexec.BuildOptions{
 		GoCommand:        options.GoCommand,
 		BuildEnvironment: append([]string(nil), options.Environment...),
@@ -132,12 +157,16 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if !sameManifestSnapshot(manifestSnapshot, after) {
 		return Result{}, fmt.Errorf("%w: %w: plystra.yaml changed before resolution completed", ErrResolve, ErrConcurrentChange)
 	}
+	if err := recheckDependencyManifests(dependencySnapshots); err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
 	return Result{
-		module:       module,
-		manifest:     manifest,
-		dependencies: dependencies,
-		inventory:    inventory,
-		resolution:   resolution,
-		configs:      configs,
+		module:          module,
+		currentManifest: currentManifest,
+		composition:     composition,
+		dependencies:    dependencies,
+		inventory:       inventory,
+		resolution:      resolution,
+		configs:         configs,
 	}, nil
 }

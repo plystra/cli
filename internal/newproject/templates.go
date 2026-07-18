@@ -107,7 +107,7 @@ jobs:
 
 const skillTemplate = `---
 name: plystra
-description: Develop, structure, configure, debug, and validate Plystra Go Modules, Plugins, and versioned Capabilities. Use when creating or modifying plugin.yaml, capability.yaml, plystra.yaml, generated contracts or clients, provider selection, cross-Plugin calls, Capability Aliases, HTTP exposure, JavaScript SDK output, runtime bootstrap, or generation diagnostics.
+description: Develop, structure, configure, debug, and validate Plystra Go Modules, Plugins, and versioned Capabilities. Use when creating or modifying plugin.yaml, capability.yaml, plystra.yaml, dependency Project composition, generated contracts or clients, provider selection, cross-Plugin calls, Capability Aliases, HTTP exposure, JavaScript SDK output, runtime bootstrap, or generation diagnostics.
 ---
 
 # Plystra Module Development
@@ -171,6 +171,38 @@ The CLI currently does not create or execute database migrations. When a Plugin
 owns migrations, keep them inside that Plugin and make its runtime lifecycle or
 provider implementation apply them deliberately. Do not place migrations under
 generated.
+
+## Compose dependency Project configuration
+
+The CLI asks Go for the effective module graph. Every direct or transitive
+module with regular root plystra.yaml is a dependency Plystra Project; its
+root-level Plugins and root configuration become visible. A module without the
+root marker is an ordinary dependency and is not scanned. Dependency files such
+as plystra.production.yaml and plystra.test.yaml are never inherited.
+
+Composition uses field-specific rules:
+
+- http.expose and capabilities.require form deterministic canonical-ID unions.
+- Identical Provider selections and Alias declarations deduplicate.
+- Plugin configuration merges only by fields declared in plugin.yaml.
+- Dependency http.address and timeouts.startup never replace this Project's
+  process settings.
+- Incompatible Provider, Alias, or Plugin-field values fail with every
+  contributing module@version/plystra.yaml source.
+
+Resolve an inherited Provider conflict with one exact current-Project choice:
+
+    capabilities:
+      use:
+        email.send/v1: acme.email.smtp
+
+The current entry replaces inherited choices for email.send/v1, then normal
+Provider and exact contract validation still runs. Do not reorder dependencies,
+make one direct, invent priority, or copy a dependency Plugin to choose a
+winner. After go.mod, replace, or dependency-version changes, run plystra
+generate and plystra generate --check. Inspect generated/manifest.json for the
+non-secret dependency composition digest and path/digest/source baseline; it
+never contains raw Plugin configuration or Secret reference targets.
 
 ## Naming and identity rules
 

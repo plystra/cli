@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/moduledependency"
 )
 
 const applicationManifestName = "plystra.yaml"
@@ -37,6 +38,59 @@ func loadManifest(moduleRoot string) (ManifestSnapshot, applicationmeta.Manifest
 		return ManifestSnapshot{}, applicationmeta.Manifest{}, fmt.Errorf("%w: %w", ErrManifest, err)
 	}
 	return snapshot, manifest, nil
+}
+
+type dependencyManifestSnapshot struct {
+	identity string
+	root     string
+	snapshot ManifestSnapshot
+}
+
+func loadDependencyManifests(dependencies []moduledependency.Module) ([]dependencyManifestSnapshot, []applicationmeta.Dependency, error) {
+	snapshots := make([]dependencyManifestSnapshot, 0, len(dependencies))
+	manifests := make([]applicationmeta.Dependency, 0, len(dependencies))
+	for _, dependency := range dependencies {
+		snapshot, err := ReadManifestSnapshot(dependency.Root())
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: dependency Project %s: %w", ErrManifest, dependencyIdentity(dependency), err)
+		}
+		manifest, err := applicationmeta.Parse(snapshot.data)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: dependency Project %s: %w", ErrManifest, dependencyIdentity(dependency), err)
+		}
+		snapshots = append(snapshots, dependencyManifestSnapshot{
+			identity: dependencyIdentity(dependency),
+			root:     dependency.Root(),
+			snapshot: snapshot,
+		})
+		manifests = append(manifests, applicationmeta.Dependency{
+			ModulePath:    dependency.Path(),
+			ModuleVersion: dependency.SelectedVersion(),
+			Manifest:      manifest,
+		})
+	}
+	return snapshots, manifests, nil
+}
+
+func recheckDependencyManifests(snapshots []dependencyManifestSnapshot) error {
+	for _, before := range snapshots {
+		after, err := ReadManifestSnapshot(before.root)
+		if err != nil {
+			return fmt.Errorf("%w: dependency Project %s plystra.yaml: %v", ErrConcurrentChange, before.identity, err)
+		}
+		if !sameManifestSnapshot(before.snapshot, after) {
+			return fmt.Errorf("%w: dependency Project %s plystra.yaml changed before resolution completed", ErrConcurrentChange, before.identity)
+		}
+	}
+	return nil
+}
+
+func dependencyIdentity(dependency moduledependency.Module) string {
+	version := dependency.SelectedVersion()
+	if version == "" {
+		version = "workspace"
+	}
+	return dependency.Path() + "@" + version
 }
 
 // ReadManifestSnapshot safely reads the root plystra.yaml without following a

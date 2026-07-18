@@ -42,6 +42,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
     health.status/v1: kernel.health/v1
 `)
 	options := resolvedOptions()
+	options.Composition = dependencyComposition(t)
 	output, err := applicationgen.Render(options, resolution)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -109,12 +110,17 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		`"id":"health.status/v1"`,
 		`"target":"kernel.health/v1"`,
 		`"kind":"application"`,
+		`"configuration":{"mode":"default"`,
+		`"root":{"path":"plystra.yaml"}`,
+		`"dependency_composition_digest":"sha256:`,
+		`"path":"config[\"acme.business\"][\"password\"]"`,
+		`example.com/platform@v1.2.3/plystra.yaml config[\"acme.business\"][\"password\"]`,
 	} {
 		if !strings.Contains(manifest, required) {
 			t.Fatalf("Alias manifest omits %q:\n%s", required, manifest)
 		}
 	}
-	for _, forbidden := range []string{"acme.business", "secret", "password"} {
+	for _, forbidden := range []string{"PRIVATE_APPLICATION_TOKEN", "private-runtime-value"} {
 		if strings.Contains(manifest, forbidden) {
 			t.Fatalf("Alias manifest contains forbidden value %q:\n%s", forbidden, manifest)
 		}
@@ -198,8 +204,12 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json"}) {
 		t.Fatalf("empty output paths = %v", got)
 	}
-	if string(outputData(t, output, "generated/manifest.json")) != "{\"capability_aliases\":[]}\n" {
-		t.Fatalf("empty Alias manifest = %s", outputData(t, output, "generated/manifest.json"))
+	wantManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), testComposition())
+	if err != nil {
+		t.Fatalf("RenderManifest: %v", err)
+	}
+	if !bytes.Equal(outputData(t, output, "generated/manifest.json"), wantManifest) {
+		t.Fatalf("empty application manifest = %s", outputData(t, output, "generated/manifest.json"))
 	}
 }
 
@@ -215,6 +225,7 @@ func TestRenderGeneratesOnlyDeveloperSurfacesForUnrequiredLocalCapability(t *tes
 		ModulePath:          applicationModulePath,
 		KernelModuleVersion: "v0.0.0",
 		KernelBuildIdentity: "application-render-test",
+		Composition:         testComposition(),
 		Providers: []assemblygen.ProviderInput{{
 			PluginID:   "acme.business",
 			ModulePath: applicationModulePath,
@@ -272,6 +283,7 @@ timeout: {type: duration, default: 5s}
 		JavaScriptPackage:   applicationSDKPackage,
 		KernelModuleVersion: "v0.0.0",
 		KernelBuildIdentity: "application-render-test",
+		Composition:         testComposition(),
 		Providers:           selectedProviderInputs(),
 		Configurations: []configurationgen.Input{{
 			PluginName: "business",
@@ -340,6 +352,7 @@ func resolvedOptions() applicationgen.Options {
 		JavaScriptPackage:   applicationSDKPackage,
 		KernelModuleVersion: "v0.0.0",
 		KernelBuildIdentity: "application-render-test",
+		Composition:         testComposition(),
 		Providers:           selectedProviderInputs(),
 	}
 }
@@ -349,7 +362,41 @@ func emptyOptions(modulePath string) applicationgen.Options {
 		ModulePath:          modulePath,
 		KernelModuleVersion: "v0.0.0",
 		KernelBuildIdentity: "application-render-test",
+		Composition:         testComposition(),
 	}
+}
+
+func testComposition() applicationmeta.Composition {
+	composition, err := applicationmeta.Compose(nil, applicationmeta.Manifest{}, func(string) (manifest.Config, bool) {
+		return manifest.Config{}, false
+	})
+	if err != nil {
+		panic(err)
+	}
+	return composition
+}
+
+func dependencyComposition(t testing.TB) applicationmeta.Composition {
+	t.Helper()
+	schema, err := manifest.ParseConfig([]byte("password: {type: secret}\n"))
+	if err != nil {
+		t.Fatalf("manifest.ParseConfig: %v", err)
+	}
+	dependency, err := applicationmeta.Parse([]byte("config: {acme.business: {password: {env: PRIVATE_APPLICATION_TOKEN}}}\n"))
+	if err != nil {
+		t.Fatalf("applicationmeta.Parse dependency: %v", err)
+	}
+	composition, err := applicationmeta.Compose([]applicationmeta.Dependency{{
+		ModulePath:    "example.com/platform",
+		ModuleVersion: "v1.2.3",
+		Manifest:      dependency,
+	}}, applicationmeta.Manifest{}, func(pluginID string) (manifest.Config, bool) {
+		return schema, pluginID == "acme.business"
+	})
+	if err != nil {
+		t.Fatalf("applicationmeta.Compose: %v", err)
+	}
+	return composition
 }
 
 func selectedProviderInputs() []assemblygen.ProviderInput {

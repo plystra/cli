@@ -94,7 +94,20 @@ func TestResolveClosesLocalRequirementsThroughDependencyProvidersAndAliases(t *t
 	appRoot := filepath.Join(root, "app")
 	providerRoot := filepath.Join(root, "providers")
 	writeModule(t, providerRoot, "example.com/providers")
-	writeFile(t, filepath.Join(providerRoot, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(providerRoot, "plystra.yaml"), `http:
+  address: ":9090"
+  expose: [email.send/v1]
+timeouts: {startup: 1s}
+capabilities:
+  use: {email.send/v1: example.smtp}
+  aliases:
+    mail.send/v1: email.send/v1
+config:
+  example.smtp:
+    host: private.smtp.example.com
+    password: {env: PLYSTRA_APPLICATION_RESOLVE_PRIVATE_SECRET}
+`)
+	writeFile(t, filepath.Join(providerRoot, "plystra.production.yaml"), "not: [a valid dependency overlay\n")
 	writePlugin(t, providerRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\nconfig: {host: {type: string, required: true}, password: {type: secret, required: true}}\n")
 	writeCapability(t, providerRoot, "smtp", "email.send/v1", `id: email.send/v1
 request:
@@ -112,17 +125,9 @@ require example.com/providers v1.2.3
 replace example.com/providers => ../providers
 `)
 	writePlugin(t, appRoot, "local", "id: example.local\nrequires: [email.send/v1]\n")
-	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), `http:
-  expose: [email.send/v1]
-capabilities:
-  aliases:
-    mail.send/v1: email.send/v1
-config:
-  example.smtp:
-    host: private.smtp.example.com
-    password: {env: PLYSTRA_APPLICATION_RESOLVE_PRIVATE_SECRET}
-`)
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "http: {address: \":8080\"}\n")
 	before := snapshotTree(t, appRoot)
+	dependencyBefore := snapshotTree(t, providerRoot)
 	options := applicationresolve.Options{
 		Start:       filepath.Join(appRoot, "local"),
 		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
@@ -136,6 +141,12 @@ config:
 	dependencies := first.Dependencies().Modules()
 	if len(dependencies) != 1 || dependencies[0].Path() != "example.com/providers" || dependencies[0].SelectedVersion() != "v1.2.3" {
 		t.Fatalf("Dependencies = %#v", dependencies)
+	}
+	if !first.Composition().Valid() || first.Composition().DependencyDigest() == "" || len(first.Composition().Provenance()) == 0 {
+		t.Fatalf("Composition = %#v", first.Composition())
+	}
+	if address, exists := first.Manifest().HTTPAddress(); !exists || address != ":8080" || first.Manifest().StartupTimeout() != applicationmeta.DefaultStartupTimeout || len(first.CurrentManifest().HTTPExposures()) != 0 || len(first.Manifest().HTTPExposures()) != 1 {
+		t.Fatalf("composed/current manifests = effective %#v, current %#v", first.Manifest(), first.CurrentManifest())
 	}
 	if got := pluginSummaries(plugins); !reflect.DeepEqual(got, []string{
 		"example.local:example.com/app@local:local:true",
@@ -179,6 +190,195 @@ config:
 	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, before) {
 		t.Fatalf("Resolve mutated application tree:\nbefore: %#v\nafter:  %#v", before, after)
 	}
+	if after := snapshotTree(t, providerRoot); !reflect.DeepEqual(after, dependencyBefore) {
+		t.Fatalf("Resolve mutated dependency Project:\nbefore: %#v\nafter:  %#v", dependencyBefore, after)
+	}
+}
+
+func TestResolveComposesDirectAndTransitiveDependencyProjectDeclarations(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	directRoot := filepath.Join(root, "direct")
+	transitiveRoot := filepath.Join(root, "transitive")
+	ordinaryRoot := filepath.Join(root, "ordinary")
+
+	writeModule(t, transitiveRoot, "example.com/transitive")
+	writeFile(t, filepath.Join(transitiveRoot, "plystra.yaml"), "capabilities: {require: [audit.write/v1]}\n")
+	writePlugin(t, transitiveRoot, "audit", "id: example.audit\nprovides: [audit.write/v1]\n")
+	writeCapability(t, transitiveRoot, "audit", "audit.write/v1", "id: audit.write/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+
+	writeFile(t, filepath.Join(directRoot, "go.mod"), "module example.com/direct\n\ngo 1.26\n\nrequire example.com/transitive v1.4.0\n")
+	writeFile(t, filepath.Join(directRoot, "plystra.yaml"), `http:
+  expose: [email.send/v1]
+capabilities:
+  use: {email.send/v1: example.smtp}
+`)
+	writePlugin(t, directRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\n")
+	writeCapability(t, directRoot, "smtp", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+
+	writeModule(t, ordinaryRoot, "example.com/ordinary")
+	writeFile(t, filepath.Join(ordinaryRoot, "looks-like-plugin", "plugin.yaml"), "this is deliberately not a valid Plugin declaration\n")
+
+	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
+
+go 1.26
+
+require (
+	example.com/direct v1.2.0
+	example.com/ordinary v1.0.0
+)
+
+replace example.com/direct => ../direct
+replace example.com/transitive => ../transitive
+replace example.com/ordinary => ../ordinary
+`)
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
+
+	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       appRoot,
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	projects := result.Dependencies().Projects()
+	if len(projects) != 2 || projects[0].Path() != "example.com/direct" || projects[0].SelectedVersion() != "v1.2.0" || projects[1].Path() != "example.com/transitive" || projects[1].SelectedVersion() != "v1.4.0" || projects[1].Direct() {
+		t.Fatalf("dependency Projects = %#v", projects)
+	}
+	if got := pluginSummaries(result.Inventory().Plugins()); !reflect.DeepEqual(got, []string{
+		"example.audit:example.com/transitive@v1.4.0:audit:false",
+		"example.smtp:example.com/direct@v1.2.0:smtp:false",
+	}) {
+		t.Fatalf("visible Plugins = %v", got)
+	}
+	if got := applicationRequirementIDs(result.Manifest()); !reflect.DeepEqual(got, []string{"audit.write/v1"}) {
+		t.Fatalf("composed requirements = %v", got)
+	}
+	if got := applicationExposureIDs(result.Manifest()); !reflect.DeepEqual(got, []string{"email.send/v1"}) {
+		t.Fatalf("composed exposures = %v", got)
+	}
+	contextRequirements := result.Resolution().Context().Requirements()
+	if len(contextRequirements) != 2 || contextRequirements[0].String() != "audit.write/v1" || contextRequirements[1].String() != "email.send/v1" {
+		t.Fatalf("resolved requirements = %v", contextRequirements)
+	}
+	if provider, exists := result.Resolution().Context().SelectedProvider(parseGenerationCapability(t, "email.send/v1")); !exists || provider.String() != "example.smtp" {
+		t.Fatalf("email Provider = %s, %t", provider, exists)
+	}
+	provenance := result.Composition().Provenance()
+	for path, source := range map[string]string{
+		`http.expose["email.send/v1"]`:           "example.com/direct@v1.2.0/plystra.yaml",
+		`capabilities.require["audit.write/v1"]`: "example.com/transitive@v1.4.0/plystra.yaml",
+		`capabilities.use["email.send/v1"]`:      "example.com/direct@v1.2.0/plystra.yaml",
+	} {
+		records := compositionProvenance(provenance, path)
+		if len(records) != 1 || len(records[0].Sources()) != 1 || !strings.HasPrefix(records[0].Sources()[0], source) {
+			t.Fatalf("provenance for %s = %#v", path, records)
+		}
+	}
+}
+
+func TestResolveReportsInheritedProviderConflictAndAcceptsExactCurrentReplacement(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	moduleRoots := map[string]string{
+		"example.com/a": filepath.Join(root, "a"),
+		"example.com/b": filepath.Join(root, "b"),
+	}
+	providers := map[string]string{"example.com/a": "example.smtp-a", "example.com/b": "example.smtp-b"}
+	for modulePath, moduleRoot := range moduleRoots {
+		writeModule(t, moduleRoot, modulePath)
+		provider := providers[modulePath]
+		writeFile(t, filepath.Join(moduleRoot, "plystra.yaml"), fmt.Sprintf("capabilities: {use: {email.send/v1: %s}}\n", provider))
+		writePlugin(t, moduleRoot, "smtp", fmt.Sprintf("id: %s\nprovides: [email.send/v1]\n", provider))
+		writeCapability(t, moduleRoot, "smtp", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	}
+	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
+
+go 1.26
+
+require (
+	example.com/a v1.0.0
+	example.com/b v1.0.0
+)
+
+replace example.com/a => ../a
+replace example.com/b => ../b
+`)
+	manifestPath := filepath.Join(appRoot, "plystra.yaml")
+	writeFile(t, manifestPath, "capabilities: {require: [email.send/v1]}\n")
+	options := applicationresolve.Options{Start: appRoot, Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})}
+
+	_, err := applicationresolve.Resolve(t.Context(), options)
+	if !errors.Is(err, applicationmeta.ErrInheritedConflict) {
+		t.Fatalf("Resolve conflict error = %v", err)
+	}
+	for _, required := range []string{
+		`capabilities.use["email.send/v1"]`,
+		"example.smtp-a",
+		"example.smtp-b",
+		"example.com/a@v1.0.0/plystra.yaml",
+		"example.com/b@v1.0.0/plystra.yaml",
+	} {
+		if !strings.Contains(err.Error(), required) {
+			t.Fatalf("conflict error omits %q: %v", required, err)
+		}
+	}
+
+	writeFile(t, manifestPath, "capabilities: {require: [email.send/v1], use: {email.send/v1: example.smtp-a}}\n")
+	result, err := applicationresolve.Resolve(t.Context(), options)
+	if err != nil {
+		t.Fatalf("Resolve with current replacement: %v", err)
+	}
+	provider, exists := result.Resolution().Context().SelectedProvider(parseGenerationCapability(t, "email.send/v1"))
+	if !exists || provider.String() != "example.smtp-a" {
+		t.Fatalf("selected replacement Provider = %s, %t", provider, exists)
+	}
+	records := compositionProvenance(result.Composition().Provenance(), `capabilities.use["email.send/v1"]`)
+	if len(records) != 2 {
+		t.Fatalf("inherited conflict provenance = %#v", records)
+	}
+}
+
+func TestResolveRejectsMalformedAndUnsafeDependencyProjectManifest(t *testing.T) {
+	t.Run("malformed", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		appRoot := filepath.Join(root, "app")
+		dependencyRoot := filepath.Join(root, "dependency")
+		writeModule(t, dependencyRoot, "example.com/dependency")
+		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "unknown: true\n")
+		writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire example.com/dependency v1.2.3\n\nreplace example.com/dependency => ../dependency\n")
+		writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
+
+		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: appRoot, Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})})
+		if !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !strings.Contains(err.Error(), "example.com/dependency@v1.2.3") || !strings.Contains(err.Error(), `unknown key "unknown"`) {
+			t.Fatalf("Resolve malformed dependency error = %v", err)
+		}
+	})
+
+	t.Run("symbolic", func(t *testing.T) {
+		root := t.TempDir()
+		appRoot := filepath.Join(root, "app")
+		dependencyRoot := filepath.Join(root, "dependency")
+		writeModule(t, dependencyRoot, "example.com/dependency")
+		target := filepath.Join(root, "outside.yaml")
+		writeFile(t, target, "{}\n")
+		if err := os.Symlink(target, filepath.Join(dependencyRoot, "plystra.yaml")); err != nil {
+			t.Skipf("symbolic links unavailable: %v", err)
+		}
+		writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire example.com/dependency v1.2.3\n\nreplace example.com/dependency => ../dependency\n")
+		writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
+
+		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: appRoot, Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})})
+		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, projectlocate.ErrInvalidManifest) || !strings.Contains(err.Error(), "example.com/dependency") {
+			t.Fatalf("Resolve unsafe dependency error = %v", err)
+		}
+	})
 }
 
 func TestResolveUsesActiveGoWorkspaceDependencySource(t *testing.T) {
@@ -431,6 +631,34 @@ func configurationBindingIDs(bindings []configurationresolve.Binding) []string {
 	result := make([]string, len(bindings))
 	for index, binding := range bindings {
 		result[index] = binding.PluginID()
+	}
+	return result
+}
+
+func applicationRequirementIDs(manifest applicationmeta.Manifest) []string {
+	requirements := manifest.Requirements()
+	result := make([]string, len(requirements))
+	for index, requirement := range requirements {
+		result[index] = requirement.ID().String()
+	}
+	return result
+}
+
+func applicationExposureIDs(manifest applicationmeta.Manifest) []string {
+	exposures := manifest.HTTPExposures()
+	result := make([]string, len(exposures))
+	for index, exposure := range exposures {
+		result[index] = exposure.ID().String()
+	}
+	return result
+}
+
+func compositionProvenance(values []applicationmeta.Provenance, path string) []applicationmeta.Provenance {
+	var result []applicationmeta.Provenance
+	for _, value := range values {
+		if value.Path() == path {
+			result = append(result, value)
+		}
 	}
 	return result
 }

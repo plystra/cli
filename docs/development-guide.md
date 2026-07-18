@@ -306,6 +306,52 @@ owns migrations keeps them under that Plugin, and its lifecycle or provider
 logic applies them explicitly. Migration commands and reusable database Plugin
 workflows remain deferred; do not place migration assets under `generated/`.
 
+## Compose dependency Project configuration
+
+Every direct or transitive module in the effective Go Module graph whose root
+contains regular `plystra.yaml` is a dependency Plystra Project. The CLI scans
+its root-level Plugins and composes only that root configuration. It ignores a
+dependency's `plystra.production.yaml`, `plystra.test.yaml`, and every other
+environment-specific sibling. A markerless Go module remains an ordinary
+dependency even when it contains a file named `plugin.yaml` below its root.
+
+Composition is typed and independent of dependency order:
+
+- `http.expose` and `capabilities.require` form canonical-ID unions.
+- Identical Provider selections and Alias declarations deduplicate.
+- Plugin configuration merges by fields declared in that Plugin's
+  `plugin.yaml`; unknown fields and invalid types fail.
+- Dependency `http.address`, `timeouts.startup`, and other process settings do
+  not enter the current Project.
+- Incompatible inherited Providers, Aliases, or Plugin fields fail with every
+  contributing `module@version/plystra.yaml` source.
+
+Resolve an inherited Provider conflict in the current Project at the exact
+canonical key:
+
+```yaml
+capabilities:
+  use:
+    email.send/v1: acme.email.smtp
+```
+
+This is an explicit current-Project replacement. It does not grant priority to
+the dependency that supplies `acme.email.smtp`, and normal provider and exact
+contract validation still runs. Use the same exact-field principle for an
+Alias or Plugin configuration conflict; do not add dependency priority,
+reorder `go.mod`, or copy a dependency's Plugin locally.
+
+After changing `go.mod`, a replacement, or a dependency version, run:
+
+```powershell
+plystra generate
+plystra generate --check
+```
+
+Inspect `generated/manifest.json` for the non-secret dependency composition
+digest and path/digest/source baseline. It records provenance, not raw Plugin
+configuration or Secret reference targets.
+
 ## Create and configure a Plugin
 
 From a module root:
@@ -766,6 +812,14 @@ dependency Plystra Project anywhere in the effective Go Module graph. A
 markerless Go dependency is intentionally not scanned. If several compatible
 providers remain, add the exact `capabilities.use` entry. Do not add a priority
 or fallback.
+
+### Inherited configuration conflict
+
+Read the exact `capabilities.use`, `capabilities.aliases`, or `config` field and
+every contributing module named by the diagnostic. Add one explicit decision
+for that exact key or declared Plugin field in root `plystra.yaml`, then
+regenerate. Changing dependency order, making a module direct, or sorting
+Plugin IDs cannot resolve the conflict.
 
 ### Incompatible contract
 

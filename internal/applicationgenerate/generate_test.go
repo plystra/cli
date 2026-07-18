@@ -65,7 +65,18 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	if installed.Checked() || !installed.Report().Clean() {
 		t.Fatalf("installed result = checked %t, changes %#v", installed.Checked(), installed.Report().Changes())
 	}
-	assertFile(t, root, "generated/manifest.json", "{\"capability_aliases\":[]}\n")
+	applicationManifest := readFile(t, root, "generated/manifest.json")
+	for _, required := range []string{
+		`"capability_aliases":[]`,
+		`"configuration":{"mode":"default"`,
+		`"root":{"path":"plystra.yaml"}`,
+		`"dependency_composition_digest":"sha256:`,
+		`"dependency_baseline":[]`,
+	} {
+		if !bytes.Contains(applicationManifest, []byte(required)) {
+			t.Fatalf("generated application manifest omits %q: %s", required, applicationManifest)
+		}
+	}
 	assertFileExists(t, root, generatedfiles.ManifestPath)
 	assertFileExists(t, root, "generated/go/assembly/compatibility_gen.go")
 	assertFileExists(t, root, "generated/go/assembly/invocations_gen.go")
@@ -756,13 +767,6 @@ func readAbsoluteFile(t testing.TB, name string) []byte {
 		t.Fatalf("ReadFile(%s): %v", name, err)
 	}
 	return data
-}
-
-func assertFile(t testing.TB, root, name, want string) {
-	t.Helper()
-	if got := string(readFile(t, root, name)); got != want {
-		t.Fatalf("%s = %q, want %q", name, got, want)
-	}
 }
 
 func assertFileExists(t testing.TB, root, name string) {
