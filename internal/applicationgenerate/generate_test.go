@@ -365,6 +365,77 @@ func TestGenerateMaintainsFullReplacementSelectionsIndependently(t *testing.T) {
 	cleanupRecoveryTransactions(t, appRoot)
 }
 
+func TestGenerateDetectsDependencyPluginConfigurationSchemaDrift(t *testing.T) {
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	dependencyRoot := filepath.Join(root, "smtp")
+	writeApplicationModule(t, dependencyRoot, "example.com/smtp")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
+	writePlugin(t, dependencyRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\nconfig:\n  endpoint: {type: string}\n")
+	writeCapability(t, dependencyRoot, "smtp", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+
+	writeApplicationModule(t, appRoot, "example.com/application")
+	goModPath := filepath.Join(appRoot, "go.mod")
+	goMod := string(readAbsoluteFile(t, goModPath)) + fmt.Sprintf("\nrequire example.com/smtp v1.0.0\n\nreplace example.com/smtp => %s\n", filepath.ToSlash(dependencyRoot))
+	writeFile(t, goModPath, goMod)
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "capabilities: {require: [email.send/v1]}\n")
+	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+	validate := func(_ context.Context, _ string) error { return nil }
+
+	initial, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       appRoot,
+		Environment: environment,
+		Validate:    validate,
+	})
+	if err != nil || !initial.Report().Clean() {
+		t.Fatalf("initial Generate = changes %#v, %v", initial.Report().Changes(), err)
+	}
+	initialProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, appRoot, "generated/manifest.json"))
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance(initial): %v", err)
+	}
+
+	writeFile(t, filepath.Join(dependencyRoot, "smtp", "plugin.yaml"), "id: example.smtp\nprovides: [email.send/v1]\nconfig:\n  endpoint: {type: integer}\n")
+	applicationBeforeCheck := snapshotTree(t, appRoot)
+	dependencyBeforeCheck := snapshotTree(t, dependencyRoot)
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       appRoot,
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Generate check after dependency schema change: %v", err)
+	}
+	if checked.Report().Clean() || !strings.Contains(strings.Join(checked.Report().Changed(), "\n"), "generated/manifest.json") {
+		t.Fatalf("dependency schema change report = %#v", checked.Report().Changes())
+	}
+	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, applicationBeforeCheck) {
+		t.Fatal("dependency schema drift check mutated the application")
+	}
+	if after := snapshotTree(t, dependencyRoot); !reflect.DeepEqual(after, dependencyBeforeCheck) {
+		t.Fatal("dependency schema drift check mutated the dependency Project")
+	}
+
+	updated, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       appRoot,
+		Environment: environment,
+		Validate:    validate,
+	})
+	if err != nil || !updated.Report().Clean() {
+		t.Fatalf("updated Generate = changes %#v, %v", updated.Report().Changes(), err)
+	}
+	updatedProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, appRoot, "generated/manifest.json"))
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance(updated): %v", err)
+	}
+	if updatedProvenance.ApplicationModelDigest() == initialProvenance.ApplicationModelDigest() {
+		t.Fatal("dependency Plugin configuration schema change preserved application_model_digest")
+	}
+	if after := snapshotTree(t, dependencyRoot); !reflect.DeepEqual(after, dependencyBeforeCheck) {
+		t.Fatal("dependency schema regeneration mutated the dependency Project")
+	}
+}
+
 func TestGenerateRejectsOrdinaryGoModuleWithoutProjectMarker(t *testing.T) {
 	t.Parallel()
 

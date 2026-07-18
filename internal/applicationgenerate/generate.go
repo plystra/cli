@@ -329,11 +329,12 @@ func providerInputs(resolved applicationresolve.Result) ([]assemblygen.ProviderI
 			}
 		}
 		inputs[index] = assemblygen.ProviderInput{
-			PluginID:      binding.PluginID(),
-			ModulePath:    binding.ModulePath(),
-			ModuleVersion: binding.ModuleVersion(),
-			ImportPath:    binding.ImportPath(),
-			Dependencies:  dependencies,
+			PluginID:            binding.PluginID(),
+			ModulePath:          binding.ModulePath(),
+			ModuleVersion:       binding.ModuleVersion(),
+			ImportPath:          binding.ImportPath(),
+			ConfigurationSchema: binding.Schema(),
+			Dependencies:        dependencies,
 		}
 	}
 	return inputs, nil

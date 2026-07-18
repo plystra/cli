@@ -25,10 +25,11 @@ const (
 // with the filesystem identity needed to detect replacement during a longer
 // operation.
 type ManifestSnapshot struct {
-	path string
-	root fs.FileInfo
-	file fs.FileInfo
-	data []byte
+	path       string
+	root       fs.FileInfo
+	components []manifestPathState
+	file       fs.FileInfo
+	data       []byte
 }
 
 // Path returns the stable Project-relative slash path that was read.
@@ -188,10 +189,11 @@ func readManifestSnapshot(moduleRoot, relativePath string) (result ManifestSnaps
 		return ManifestSnapshot{}, fmt.Errorf("%w: selected configuration %s exceeds %d bytes", ErrUnsafeManifest, displayPath, applicationmeta.MaximumSize)
 	}
 	return ManifestSnapshot{
-		path: displayPath,
-		root: rootAfter,
-		file: after,
-		data: append([]byte(nil), data...),
+		path:       displayPath,
+		root:       rootAfter,
+		components: append([]manifestPathState(nil), pathAfter...),
+		file:       after,
+		data:       append([]byte(nil), data...),
 	}, nil
 }
 
@@ -309,7 +311,10 @@ func readGeneratedApplicationManifest(moduleRoot string) (result []byte, exists 
 }
 
 func sameManifestSnapshot(left, right ManifestSnapshot) bool {
-	return sameDirectory(left.root, right.root) && sameFile(left.file, right.file) && bytes.Equal(left.data, right.data)
+	return sameDirectory(left.root, right.root) &&
+		sameManifestPathStates(left.components, right.components) &&
+		sameFile(left.file, right.file) &&
+		bytes.Equal(left.data, right.data)
 }
 
 func sameDirectory(left, right fs.FileInfo) bool {

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationgen"
+	"github.com/plystra/kernel/plugin/manifest"
 )
 
 func TestConfigurationDigestUsesSemanticYAML(t *testing.T) {
@@ -167,5 +168,51 @@ func TestApplicationModelDigestIncludesAliasesAndExcludesSelectionPath(t *testin
 	}
 	if !strings.HasPrefix(withDigest, "sha256:") || len(withDigest) != 71 {
 		t.Fatalf("application-model digest = %q", withDigest)
+	}
+}
+
+func TestApplicationModelDigestIncludesDependencyConfigurationSchema(t *testing.T) {
+	t.Parallel()
+
+	stringSchema, err := manifest.ParseConfig([]byte("endpoint: {type: string}\nretries: {type: integer}\n"))
+	if err != nil {
+		t.Fatalf("ParseConfig(string schema): %v", err)
+	}
+	reorderedSchema, err := manifest.ParseConfig([]byte("retries: {type: integer}\nendpoint: {type: string}\n"))
+	if err != nil {
+		t.Fatalf("ParseConfig(reordered schema): %v", err)
+	}
+	integerSchema, err := manifest.ParseConfig([]byte("endpoint: {type: integer}\nretries: {type: integer}\n"))
+	if err != nil {
+		t.Fatalf("ParseConfig(integer schema): %v", err)
+	}
+	options := applicationgen.ApplicationModelOptions{
+		ModulePath:          applicationModulePath,
+		JavaScriptPackage:   applicationSDKPackage,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
+		Providers:           selectedProviderInputs(),
+		Resolution:          resolvedApplication(t, ""),
+	}
+	options.Providers[0].ConfigurationSchema = stringSchema
+	stringDigest, err := applicationgen.ApplicationModelDigest(options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(string schema): %v", err)
+	}
+	options.Providers[0].ConfigurationSchema = reorderedSchema
+	reorderedDigest, err := applicationgen.ApplicationModelDigest(options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(reordered schema): %v", err)
+	}
+	if reorderedDigest != stringDigest {
+		t.Fatalf("schema declaration order changed model digest: %q != %q", reorderedDigest, stringDigest)
+	}
+	options.Providers[0].ConfigurationSchema = integerSchema
+	integerDigest, err := applicationgen.ApplicationModelDigest(options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(integer schema): %v", err)
+	}
+	if integerDigest == stringDigest {
+		t.Fatal("dependency Plugin configuration schema change did not alter the application-model digest")
 	}
 }

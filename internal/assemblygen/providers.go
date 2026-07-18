@@ -15,6 +15,7 @@ import (
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/goname"
 	"github.com/plystra/cli/internal/pluginid"
+	"github.com/plystra/kernel/plugin/manifest"
 	"golang.org/x/mod/module"
 )
 
@@ -36,11 +37,12 @@ var (
 // ProviderInput is the complete public build provenance needed to import and
 // construct one selected plugin. It contains no runtime configuration values.
 type ProviderInput struct {
-	PluginID      string
-	ModulePath    string
-	ModuleVersion string
-	ImportPath    string
-	Dependencies  []DependencyInput
+	PluginID            string
+	ModulePath          string
+	ModuleVersion       string
+	ImportPath          string
+	ConfigurationSchema manifest.Config
+	Dependencies        []DependencyInput
 }
 
 // DependencyInput is one exact canonical Capability client required by a

@@ -4,6 +4,7 @@ package configurationgen
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -241,6 +242,16 @@ func Render(input Input) (File, error) {
 		typeName:   typeName,
 		decodeName: decodeName,
 	}, nil
+}
+
+// SchemaDigest returns the deterministic digest of one normalized Plugin
+// configuration declaration without including runtime values.
+func SchemaDigest(schema manifest.Config) ([sha256.Size]byte, error) {
+	encoded, err := encodeSchema(schema)
+	if err != nil {
+		return [sha256.Size]byte{}, fmt.Errorf("encode configuration schema: %w", err)
+	}
+	return sha256.Sum256(encoded), nil
 }
 
 func planFields(schema manifest.Config) ([]fieldPlan, error) {

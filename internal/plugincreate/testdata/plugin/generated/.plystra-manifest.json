@@ -23,7 +23,7 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:affcd30f571901665d2e71a5a73343a4aef3a473661f63ec12fc597384d95acb"
+      "sha256": "sha256:9dfbc3f4a7022887b8633176c7c54b330a1c208d3c8cc73f4be918fc4d3d12f7"
     }
   ],
   "application_manifest": {
@@ -47,7 +47,7 @@
           "dependency_baseline": []
         }
       ],
-      "application_model_digest": "sha256:496bbb288b74b44d23360687c267298e765cacf33b64526d7a9f014f43ed496a"
+      "application_model_digest": "sha256:ff9853fe5536292db9d6f33905ddbad39798172c9a485cd9628ff1c3e97452ef"
     }
   }
 }

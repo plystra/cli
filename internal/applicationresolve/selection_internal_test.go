@@ -128,3 +128,42 @@ func TestManifestPathStateComparisonDetectsIntermediateDirectoryReplacement(t *t
 		t.Fatal("sameManifestPathStates accepted an intermediate directory replacement")
 	}
 }
+
+func TestManifestSnapshotComparisonDetectsIntermediateDirectoryReplacement(t *testing.T) {
+	t.Parallel()
+
+	projectRoot := t.TempDir()
+	configurationDirectory := filepath.Join(projectRoot, "deploy")
+	configurationPath := filepath.Join(configurationDirectory, "customer.yaml")
+	if err := os.MkdirAll(configurationDirectory, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(configurationPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	before, _, err := loadConfiguration(projectRoot, "deploy/customer.yaml")
+	if err != nil {
+		t.Fatalf("loadConfiguration(before): %v", err)
+	}
+
+	displacedDirectory := filepath.Join(projectRoot, "deploy-before")
+	if err := os.Rename(configurationDirectory, displacedDirectory); err != nil {
+		t.Fatalf("Rename directory: %v", err)
+	}
+	if err := os.Mkdir(configurationDirectory, 0o755); err != nil {
+		t.Fatalf("Mkdir replacement directory: %v", err)
+	}
+	if err := os.Rename(filepath.Join(displacedDirectory, "customer.yaml"), configurationPath); err != nil {
+		t.Fatalf("Move original configuration into replacement directory: %v", err)
+	}
+	after, _, err := loadConfiguration(projectRoot, "deploy/customer.yaml")
+	if err != nil {
+		t.Fatalf("loadConfiguration(after): %v", err)
+	}
+	if !sameFile(before.file, after.file) {
+		t.Fatal("test setup replaced the final file identity")
+	}
+	if sameManifestSnapshot(before, after) {
+		t.Fatal("sameManifestSnapshot accepted an intermediate directory replacement")
+	}
+}

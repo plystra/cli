@@ -348,11 +348,12 @@ type applicationModelConfiguration struct {
 }
 
 type applicationModelProvider struct {
-	PluginID      string                               `json:"plugin_id"`
-	ModulePath    string                               `json:"module_path"`
-	ModuleVersion string                               `json:"module_version"`
-	ImportPath    string                               `json:"import_path"`
-	Dependencies  []applicationModelProviderDependency `json:"dependencies"`
+	PluginID                  string                               `json:"plugin_id"`
+	ModulePath                string                               `json:"module_path"`
+	ModuleVersion             string                               `json:"module_version"`
+	ImportPath                string                               `json:"import_path"`
+	ConfigurationSchemaDigest string                               `json:"configuration_schema_digest"`
+	Dependencies              []applicationModelProviderDependency `json:"dependencies"`
 }
 
 type applicationModelProviderDependency struct {
@@ -402,6 +403,10 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 	sort.Slice(providers, func(left, right int) bool { return providers[left].PluginID < providers[right].PluginID })
 	providerRecords := make([]applicationModelProvider, len(providers))
 	for index, provider := range providers {
+		configurationSchemaDigest, err := configurationgen.SchemaDigest(provider.ConfigurationSchema)
+		if err != nil {
+			return "", fmt.Errorf("configuration schema for provider %q: %w", provider.PluginID, err)
+		}
 		dependencies := append([]assemblygen.DependencyInput(nil), provider.Dependencies...)
 		sort.Slice(dependencies, func(left, right int) bool { return dependencies[left].Capability < dependencies[right].Capability })
 		dependencyRecords := make([]applicationModelProviderDependency, len(dependencies))
@@ -413,11 +418,12 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 			}
 		}
 		providerRecords[index] = applicationModelProvider{
-			PluginID:      provider.PluginID,
-			ModulePath:    provider.ModulePath,
-			ModuleVersion: provider.ModuleVersion,
-			ImportPath:    provider.ImportPath,
-			Dependencies:  dependencyRecords,
+			PluginID:                  provider.PluginID,
+			ModulePath:                provider.ModulePath,
+			ModuleVersion:             provider.ModuleVersion,
+			ImportPath:                provider.ImportPath,
+			ConfigurationSchemaDigest: "sha256:" + hex.EncodeToString(configurationSchemaDigest[:]),
+			Dependencies:              dependencyRecords,
 		}
 	}
 	outputs := options.Resolution.Outputs()
