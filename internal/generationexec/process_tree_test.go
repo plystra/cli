@@ -67,6 +67,7 @@ func TestRunCommandTerminatesDescendantProcess(t *testing.T) {
 	}()
 
 	var pid int
+	var lastReadError error
 	deadline := time.NewTimer(10 * time.Second)
 	defer deadline.Stop()
 	for pid == 0 {
@@ -76,16 +77,17 @@ func TestRunCommandTerminatesDescendantProcess(t *testing.T) {
 			t.Fatalf("process-tree harness exited before spawning a descendant: %v, stdout=%q, stderr=%q", result.err, result.stdout, result.stderr)
 		case <-deadline.C:
 			cancel()
+			if lastReadError != nil {
+				t.Fatalf("process-tree harness PID file remained unreadable: %v", lastReadError)
+			}
 			t.Fatal("process-tree harness did not spawn a descendant")
 		case <-time.After(20 * time.Millisecond):
 			data, readErr := os.ReadFile(pidFile)
 			if readErr != nil {
-				if !os.IsNotExist(readErr) {
-					cancel()
-					t.Fatalf("ReadFile(descendant pid): %v", readErr)
-				}
+				lastReadError = readErr
 				continue
 			}
+			lastReadError = nil
 			pid, err = strconv.Atoi(strings.TrimSpace(string(data)))
 			if err != nil || pid <= 0 {
 				cancel()
