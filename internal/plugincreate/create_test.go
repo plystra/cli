@@ -15,6 +15,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/command"
+	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/pluginscan"
@@ -137,6 +138,29 @@ func TestCreateRollsBackValidationFailure(t *testing.T) {
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("tree changed after rollback:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoTransactionFiles(t, root)
+}
+
+func TestCreateRejectsUnexpectedGeneratedOutputWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	root := createModule(t, "example.com/acme/my-app")
+	if err := os.MkdirAll(filepath.Join(root, "generated"), 0o755); err != nil {
+		t.Fatalf("create generated directory: %v", err)
+	}
+	writeFile(t, filepath.Join(root, "generated", "manual.txt"), "user-owned")
+	before := snapshotTree(t, root)
+	_, err := plugincreate.Create(t.Context(), plugincreate.Options{
+		Start:       root,
+		Name:        "account",
+		Environment: isolatedGoEnvironment(t),
+	})
+	if !errors.Is(err, plugincreate.ErrCreate) || !errors.Is(err, generatedfiles.ErrUnexpected) || !strings.Contains(err.Error(), "generated/manual.txt") {
+		t.Fatalf("Create unexpected-output error = %v", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("unexpected-output failure changed module:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 	assertNoTransactionFiles(t, root)
 }

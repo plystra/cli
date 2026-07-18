@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -105,6 +106,22 @@ func TestRunCapabilityCreateRegeneratesRunnableApplicationWithoutRequiringIt(t *
 	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/library in "+root+"\n" {
 		t.Fatalf("runnable post-authoring check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
+}
+
+func TestRunCapabilityRejectsUnexpectedGeneratedOutput(t *testing.T) {
+	root := writeCapabilityCommandModule(t)
+	environment := commandGoEnvironment()
+	writeCommandFile(t, filepath.Join(root, "generated", "manual.txt"), "user-owned\n")
+	before := commandTree(t, root)
+
+	exitCode, stdout, stderr := runCommand(t, []string{"capability", "create", "records.create", "--plugin", "records"}, root, environment)
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "unexpected generated output") || !strings.Contains(stderr, "generated/manual.txt") {
+		t.Fatalf("unexpected-output capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("failed command changed module:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoCommandTransactions(t, root)
 }
 
 func writeCapabilityCommandModule(t *testing.T) string {

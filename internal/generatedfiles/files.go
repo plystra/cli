@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/plystra/cli/internal/atomicfs"
 )
@@ -25,6 +26,9 @@ var (
 	ErrManifest = errors.New("invalid managed generated manifest")
 	// ErrConflict reports a desired path occupied by an unowned file.
 	ErrConflict = errors.New("managed generated path conflicts with unowned file")
+	// ErrUnexpected reports unowned output that a strict mutating workflow
+	// refuses to retain under generated/.
+	ErrUnexpected = errors.New("unexpected generated output")
 )
 
 // ChangeKind classifies one Git-visible generated-output difference.
@@ -100,6 +104,17 @@ func Check(rootPath string, output Output) (Report, error) {
 // application, and rolls back on error or panic. Unowned and modified-obsolete
 // files are preserved and remain visible as unexpected drift.
 func Install(rootPath string, output Output, validate func(root string) error) (Report, error) {
+	return install(rootPath, output, validate, false)
+}
+
+// InstallStrict behaves like Install but rejects every unexpected unowned or
+// modified-obsolete path. The path is preserved while all managed writes and
+// removals are rolled back.
+func InstallStrict(rootPath string, output Output, validate func(root string) error) (Report, error) {
+	return install(rootPath, output, validate, true)
+}
+
+func install(rootPath string, output Output, validate func(root string) error, rejectUnexpected bool) (Report, error) {
 	if validate == nil {
 		return Report{}, fmt.Errorf("%w: validation callback is nil", ErrInstall)
 	}
@@ -153,19 +168,13 @@ func Install(rootPath string, output Output, validate func(root string) error) (
 	sort.Slice(removes, func(left, right int) bool { return removes[left].Path < removes[right].Path })
 
 	validateInstalled := func(root string) error {
+		if err := validateInstalledOutput(root, output, rejectUnexpected); err != nil {
+			return err
+		}
 		if err := validate(root); err != nil {
 			return err
 		}
-		report, err := Check(root, output)
-		if err != nil {
-			return err
-		}
-		for _, change := range report.changes {
-			if change.kind != ChangeUnexpected {
-				return fmt.Errorf("%w: %s file %s after validation", atomicfs.ErrConcurrentChange, change.kind, change.path)
-			}
-		}
-		return nil
+		return validateInstalledOutput(root, output, rejectUnexpected)
 	}
 	if err := atomicfs.ApplyFiles(rootPath, writes, removes, validateInstalled); err != nil {
 		return state.report, fmt.Errorf("%w: %w", ErrInstall, err)
@@ -174,12 +183,41 @@ func Install(rootPath string, output Output, validate func(root string) error) (
 	if err != nil {
 		return Report{}, fmt.Errorf("%w: inspect committed output: %w", ErrInstall, err)
 	}
-	for _, change := range final.report.changes {
-		if change.kind != ChangeUnexpected {
-			return final.report, fmt.Errorf("%w: %w: %s file %s immediately after commit", ErrInstall, atomicfs.ErrConcurrentChange, change.kind, change.path)
-		}
+	if err := invalidInstalledReport(final.report, rejectUnexpected); err != nil {
+		return final.report, fmt.Errorf("%w: %w immediately after commit", ErrInstall, err)
 	}
 	return final.report, nil
+}
+
+func validateInstalledOutput(root string, output Output, rejectUnexpected bool) error {
+	report, err := Check(root, output)
+	if err != nil {
+		return err
+	}
+	return invalidInstalledReport(report, rejectUnexpected)
+}
+
+func invalidInstalledReport(report Report, rejectUnexpected bool) error {
+	concurrent := make([]string, 0)
+	unexpected := make([]string, 0)
+	for _, change := range report.changes {
+		description := fmt.Sprintf("%s file %s", change.kind, change.path)
+		if change.kind == ChangeUnexpected {
+			if rejectUnexpected {
+				unexpected = append(unexpected, description)
+			}
+			continue
+		}
+		concurrent = append(concurrent, description)
+	}
+	var result error
+	if len(concurrent) != 0 {
+		result = errors.Join(result, fmt.Errorf("%w: %s", atomicfs.ErrConcurrentChange, strings.Join(concurrent, ", ")))
+	}
+	if len(unexpected) != 0 {
+		result = errors.Join(result, fmt.Errorf("%w: %s", ErrUnexpected, strings.Join(unexpected, ", ")))
+	}
+	return result
 }
 
 type actualFile struct {

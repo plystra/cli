@@ -153,6 +153,8 @@ Capability identities use `<capability-name>/v<number>`. Names contain at least 
 
 Capability creation and implementation update schemas, `plugin.yaml`, generated contracts, providers, clients, application invocation, adapters, assembly, SDKs, docs, and manifests in one transaction. Existing user implementations are never overwritten.
 
+Plugin and Capability mutations reject unowned or modified-obsolete files under `generated/`. They report the conflicting paths, preserve those files, and roll back every CLI-owned declaration, source, module-metadata, and generated-output change instead of returning success beside immediate generation drift.
+
 Create a first or next version from inside the target plugin, from a single-plugin module, or with an explicit target:
 
 ```powershell

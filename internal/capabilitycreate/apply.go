@@ -163,6 +163,7 @@ func author(ctx context.Context, options AuthorOptions, expected capabilityversi
 				DependencyOutputLimit: options.DependencyOutputLimit,
 				Validate:              options.Validate,
 				MutateModule:          mutate,
+				RejectUnexpected:      true,
 			})
 			return err
 		})

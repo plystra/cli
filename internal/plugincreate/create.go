@@ -103,10 +103,11 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		}
 		return modulemutation.Tidy(ctx, updatedRoot, options.GoCommand, options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
 			_, err = applicationgenerate.Generate(ctx, applicationgenerate.Options{
-				Start:        updatedRoot,
-				GoCommand:    options.GoCommand,
-				Environment:  options.Environment,
-				MutateModule: mutate,
+				Start:            updatedRoot,
+				GoCommand:        options.GoCommand,
+				Environment:      options.Environment,
+				MutateModule:     mutate,
+				RejectUnexpected: true,
 			})
 			return err
 		})

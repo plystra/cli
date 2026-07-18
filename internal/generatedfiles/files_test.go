@@ -265,6 +265,36 @@ func TestInstallReplacesAndRemovesManagedFilesWhilePreservingUnownedFiles(t *tes
 	assertNoTransaction(t, root)
 }
 
+func TestInstallStrictRejectsUnexpectedOutputAndRollsBack(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	oldOutput := managedOutput(t, "generated/go/shared.go", "before")
+	writeOutput(t, root, oldOutput)
+	writeFile(t, root, "generated/manual.txt", "keep")
+	writeFile(t, root, "generated/notes.txt", "keep too")
+	before := snapshotFiles(t, root)
+	newOutput := managedOutput(t,
+		"generated/go/new.go", "new",
+		"generated/go/shared.go", "after",
+	)
+	validated := false
+	_, err := generatedfiles.InstallStrict(root, newOutput, func(string) error {
+		validated = true
+		return nil
+	})
+	if !errors.Is(err, generatedfiles.ErrInstall) || !errors.Is(err, generatedfiles.ErrUnexpected) || !strings.Contains(err.Error(), "generated/manual.txt") || !strings.Contains(err.Error(), "generated/notes.txt") {
+		t.Fatalf("InstallStrict error = %v", err)
+	}
+	if validated {
+		t.Fatal("strict installation validated beside unexpected output")
+	}
+	if after := snapshotFiles(t, root); !equalSnapshots(after, before) {
+		t.Fatalf("strict rollback state:\nafter: %#v\nbefore: %#v", after, before)
+	}
+	assertNoTransaction(t, root)
+}
+
 func TestInstallRollsBackOnValidationFailureAndPanic(t *testing.T) {
 	t.Parallel()
 

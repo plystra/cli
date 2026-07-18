@@ -9,10 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/capabilitycreate"
+	"github.com/plystra/cli/internal/generatedfiles"
 )
 
 func TestCreateCommitsCapabilityImplementationAndGeneratedLibrary(t *testing.T) {
@@ -175,6 +177,29 @@ func TestCreateRollsBackDeclarationsImplementationGenerationAndModuleMetadata(t 
 	}
 	if after := snapshotAuthoringTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("failed authoring changed module:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoCapabilityTransaction(t, root)
+}
+
+func TestCreateRejectsUnexpectedGeneratedOutputWithoutMutation(t *testing.T) {
+	root := createBuildableAuthoringModule(t, "example.com/acme/library", "")
+	writePlugin(t, root, "records", "id: acme.library.records\n")
+	writeAuthoringFile(t, filepath.Join(root, "records", "plugin.go"), "package records\n\ntype Plugin struct{}\n")
+	writeAuthoringFile(t, filepath.Join(root, "generated", "manual.txt"), "user-owned\n")
+	before := snapshotAuthoringTree(t, root)
+
+	_, err := capabilitycreate.Create(t.Context(), capabilitycreate.AuthorOptions{
+		Options: capabilitycreate.Options{
+			Start:       root,
+			Reference:   "records.create",
+			Environment: visiblePlanEnvironment(),
+		},
+	})
+	if !errors.Is(err, capabilitycreate.ErrCreate) || !errors.Is(err, generatedfiles.ErrUnexpected) || !strings.Contains(err.Error(), "generated/manual.txt") {
+		t.Fatalf("Create unexpected-output error = %v", err)
+	}
+	if after := snapshotAuthoringTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("unexpected-output failure changed module:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 	assertNoCapabilityTransaction(t, root)
 }

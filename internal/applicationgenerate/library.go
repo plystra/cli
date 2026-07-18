@@ -60,7 +60,11 @@ func generateLibrary(ctx context.Context, options Options, module modulelocate.M
 			}, "test", "-mod=readonly", "./...")
 		}
 	}
-	report, err := generatedfiles.Install(module.Path(), prepared.output, func(root string) error {
+	install := generatedfiles.Install
+	if options.RejectUnexpected {
+		install = generatedfiles.InstallStrict
+	}
+	report, err := install(module.Path(), prepared.output, func(root string) error {
 		return runModuleMutation(ctx, options, root, func() error {
 			if err := validate(ctx, root); err != nil {
 				return fmt.Errorf("validate generated library: %w", err)

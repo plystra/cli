@@ -52,7 +52,9 @@ type ModuleMutation func(context.Context, string, func() error) error
 
 // Options contains the application location, bounded Go helper settings, and
 // operation mode. Check performs a read-only comparison. Validate overrides
-// the default `go test -mod=readonly ./...` installation validation when non-nil.
+// the default `go test -mod=readonly ./...` installation validation when
+// non-nil. RejectUnexpected makes compound mutating commands fail and roll
+// back rather than commit beside unowned generated output.
 type Options struct {
 	Start                 string
 	Check                 bool
@@ -64,6 +66,7 @@ type Options struct {
 	TemporaryParent       string
 	Validate              Validator
 	MutateModule          ModuleMutation
+	RejectUnexpected      bool
 }
 
 // Result identifies the resolved application and its deterministic generated
@@ -131,7 +134,11 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			}, "test", "-mod=readonly", "./...")
 		}
 	}
-	report, err := generatedfiles.Install(prepared.resolved.Module().Path(), prepared.output, func(root string) error {
+	install := generatedfiles.Install
+	if options.RejectUnexpected {
+		install = generatedfiles.InstallStrict
+	}
+	report, err := install(prepared.resolved.Module().Path(), prepared.output, func(root string) error {
 		return runModuleMutation(ctx, options, root, func() error {
 			if err := validate(ctx, root); err != nil {
 				return fmt.Errorf("validate generated application: %w", err)
