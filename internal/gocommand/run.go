@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/plystra/cli/internal/modulelocate"
+	"golang.org/x/mod/modfile"
 )
 
 const (
@@ -98,10 +101,123 @@ func commandContext(ctx context.Context, options Options, arguments ...string) *
 	if environment == nil {
 		environment = os.Environ()
 	}
+	environment = isolateUnlistedWorkspace(options.Directory, environment)
 	process := exec.CommandContext(ctx, command, arguments...)
 	process.Dir = options.Directory
 	process.Env = append([]string(nil), environment...)
 	return process
+}
+
+// isolateUnlistedWorkspace prevents an automatically discovered parent
+// workspace from redirecting commands for a nearest module it does not list.
+// Explicit GOWORK selections and valid workspaces containing the module remain
+// authoritative for local multi-module development.
+func isolateUnlistedWorkspace(directory string, environment []string) []string {
+	result := append([]string(nil), environment...)
+	if directory == "" || hasEnvironmentKey(environment, "GOWORK") {
+		return result
+	}
+	module, err := modulelocate.Find(directory)
+	if err != nil {
+		return result
+	}
+	workspacePath, exists := enclosingFile(directory, "go.work")
+	if !exists {
+		return result
+	}
+	data, err := os.ReadFile(workspacePath)
+	if err != nil {
+		return result
+	}
+	workspace, err := modfile.ParseWork(workspacePath, data, nil)
+	if err != nil {
+		return result
+	}
+	workspaceRoot := filepath.Dir(workspacePath)
+	for _, use := range workspace.Use {
+		usedPath, valid := workspaceUseDirectory(workspaceRoot, use.Path)
+		if !valid {
+			return result
+		}
+		if sameDirectory(module.Path(), usedPath) {
+			return result
+		}
+	}
+	return append(result, "GOWORK=off")
+}
+
+func workspaceUseDirectory(workspaceRoot, usedPath string) (string, bool) {
+	if !filepath.IsAbs(usedPath) {
+		usedPath = filepath.Join(workspaceRoot, usedPath)
+	}
+	absolute, err := filepath.Abs(usedPath)
+	if err != nil {
+		return "", false
+	}
+	canonical, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", false
+	}
+	info, err := os.Stat(canonical)
+	if err != nil || !info.IsDir() {
+		return "", false
+	}
+	module, err := modulelocate.Find(canonical)
+	if err != nil || !sameDirectory(module.Path(), canonical) {
+		return "", false
+	}
+	return module.Path(), true
+}
+
+func hasEnvironmentKey(environment []string, wanted string) bool {
+	for _, entry := range environment {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(key, wanted) {
+			return true
+		}
+	}
+	return false
+}
+
+func enclosingFile(start, name string) (string, bool) {
+	absolute, err := filepath.Abs(start)
+	if err != nil {
+		return "", false
+	}
+	canonical, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", false
+	}
+	for directory := canonical; ; directory = filepath.Dir(directory) {
+		candidate := filepath.Join(directory, name)
+		info, err := os.Stat(candidate)
+		if err == nil && info.Mode().IsRegular() {
+			return candidate, true
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", false
+		}
+		parent := filepath.Dir(directory)
+		if parent == directory {
+			return "", false
+		}
+	}
+}
+
+func sameDirectory(left, right string) bool {
+	leftPath, leftErr := filepath.Abs(left)
+	rightPath, rightErr := filepath.Abs(right)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	leftPath, leftErr = filepath.EvalSymlinks(leftPath)
+	rightPath, rightErr = filepath.EvalSymlinks(rightPath)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	leftInfo, leftErr := os.Stat(leftPath)
+	rightInfo, rightErr := os.Stat(rightPath)
+	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
 }
 
 type limitedBuffer struct {
