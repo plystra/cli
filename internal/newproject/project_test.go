@@ -121,6 +121,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	if !bytes.Contains(directTree["plystra.yaml"], []byte("  aliases: {}")) {
 		t.Fatalf("project scaffold omits capabilities.aliases:\n%s", directTree["plystra.yaml"])
 	}
+	assertReadmeUsesAvailableCommands(t, directTree["README.md"], true)
 	for name, content := range directTree {
 		if bytes.Contains(content, []byte(directParent)) || bytes.Contains(content, []byte(commandParent)) {
 			t.Fatalf("%s contains a local absolute path", name)
@@ -198,7 +199,26 @@ func TestCreateLibraryAndPublicCommandProduceDeterministicBuildableModules(t *te
 	if _, err := os.Lstat(filepath.Join(direct.Path(), "plystra.yaml")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("library contains plystra.yaml: %v", err)
 	}
+	assertReadmeUsesAvailableCommands(t, directTree["README.md"], false)
 	assertModuleState(t, direct.Path(), modulePath)
+}
+
+func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte, runnable bool) {
+	t.Helper()
+	for _, unavailable := range [][]byte{[]byte("plystra dev"), []byte("plystra test"), []byte("plystra build")} {
+		if bytes.Contains(readme, unavailable) {
+			t.Fatalf("generated README advertises unavailable command %q:\n%s", unavailable, readme)
+		}
+	}
+	for _, available := range [][]byte{[]byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("go test ./..."), []byte("go vet ./...")} {
+		if !bytes.Contains(readme, available) {
+			t.Fatalf("generated README omits available workflow %q:\n%s", available, readme)
+		}
+	}
+	hasExposure := bytes.Contains(readme, []byte("--expose"))
+	if hasExposure != runnable {
+		t.Fatalf("generated README exposure workflow = %t, want %t:\n%s", hasExposure, runnable, readme)
+	}
 }
 
 func writeGoldenTree(t *testing.T, root string, tree map[string][]byte) {

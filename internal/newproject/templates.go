@@ -31,29 +31,39 @@ Local plugins belong in direct child directories containing ` + "`plugin.yaml`" 
 ## Development
 
 ` + "```powershell" + `
-plystra dev
-plystra test
-plystra build
+plystra plugin create records
+plystra capability create records.read --plugin records --expose
+plystra generate
+plystra generate --check
+go test ./...
+go vet ./...
 ` + "```" + `
 
-Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI and committed to Git.
+Mutating Plystra commands regenerate automatically. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate.
+
+Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 `
 
 const libraryReadmeTemplate = `# %s
 
 This is the non-runnable Plystra plugin Go Module ` + "`%s`" + `.
 
-Local plugins belong in direct child directories containing ` + "`plugin.yaml`" + `. Do not add a root ` + "`plugins/`" + ` container. Development commands create a temporary runnable host when one is required.
+Local plugins belong in direct child directories containing ` + "`plugin.yaml`" + `. Do not add a root ` + "`plugins/`" + ` container.
 
 ## Development
 
 ` + "```powershell" + `
-plystra dev
-plystra test
-plystra build
+plystra plugin create records
+plystra capability create records.read --plugin records
+plystra generate
+plystra generate --check
+go test ./...
+go vet ./...
 ` + "```" + `
 
-Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI and committed to Git.
+Mutating Plystra commands regenerate automatically. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate.
+
+Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 `
 
 const gitignoreTemplate = `/dist/
