@@ -108,6 +108,85 @@ replace github.com/plystra/kernel => %s
 	assertNoCommandTransactions(t, root)
 }
 
+func TestRunGenerateBuildsUnrequiredLocalCapabilityDeveloperSurfaces(t *testing.T) {
+	root := t.TempDir()
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	goMod := fmt.Sprintf(`module example.com/acme/authoring
+
+go 1.26
+
+require (
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot))
+	writeCommandFile(t, filepath.Join(root, "go.mod"), goMod)
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("ReadFile(go.sum): %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(root, "business", "plugin.yaml"), "id: acme.business\nprovides: [email.send/v1]\n")
+	writeCommandFile(t, filepath.Join(root, "business", "capabilities", "email.send", "v1", "capability.yaml"), `id: email.send/v1
+request:
+  to: {type: string, required: true}
+response:
+  accepted: {type: boolean, required: true}
+errors: [invalid_recipient]
+`)
+	writeCommandFile(t, filepath.Join(root, "business", "plugin.go"), `package business
+
+import (
+	"context"
+
+	configuration "example.com/acme/authoring/generated/go/configuration"
+	contract "example.com/acme/authoring/generated/go/contracts/email/send/v1"
+)
+
+type Config = configuration.BusinessConfig
+type Plugin struct{}
+
+func New(_ Config) *Plugin { return &Plugin{} }
+
+func (*Plugin) Send(_ context.Context, request contract.Request) (contract.Response, error) {
+	return contract.Response{Accepted: request.To != ""}, nil
+}
+`)
+	environment := commandGoEnvironment()
+	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, filepath.Join(root, "business"), environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/authoring in "+root+"\n" {
+		t.Fatalf("generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	for _, name := range []string{
+		"generated/go/configuration/business_gen.go",
+		"generated/go/contracts/email/send/v1/contract_gen.go",
+		"generated/go/providers/email/send/v1/provider_gen.go",
+	} {
+		assertCommandFile(t, root, name)
+	}
+	generated := commandTree(t, filepath.Join(root, "generated"))
+	for _, name := range []string{
+		"docs/api.md",
+		"go/adapters/http/email/send/v1/handler_gen.go",
+		"go/clients/email/send/v1/client_gen.go",
+		"go/invocation/email/send/v1/invocation_gen.go",
+		"sdk/javascript/package.json",
+	} {
+		if _, exists := generated[name]; exists {
+			t.Fatalf("unrequired local Capability received application surface generated/%s", name)
+		}
+	}
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/authoring in "+root+"\n" {
+		t.Fatalf("clean check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+}
+
 func runCommand(t testing.TB, arguments []string, start string, environment []string) (int, string, string) {
 	t.Helper()
 	var stdout bytes.Buffer

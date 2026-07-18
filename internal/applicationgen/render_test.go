@@ -203,6 +203,58 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	}
 }
 
+func TestRenderGeneratesOnlyDeveloperSurfacesForUnrequiredLocalCapability(t *testing.T) {
+	t.Parallel()
+
+	schema, err := manifest.ParseConfig([]byte("{}\n"))
+	if err != nil {
+		t.Fatalf("manifest.ParseConfig: %v", err)
+	}
+	resolution := unrequiredLocalApplication(t)
+	output, err := applicationgen.Render(applicationgen.Options{
+		ModulePath:          applicationModulePath,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
+		Providers: []assemblygen.ProviderInput{{
+			PluginID:   "acme.business",
+			ModulePath: applicationModulePath,
+			ImportPath: applicationModulePath + "/business",
+		}},
+		Configurations: []configurationgen.Input{{
+			PluginName: "business",
+			PluginID:   "acme.business",
+			Schema:     schema,
+		}},
+	}, resolution)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for _, filePath := range []string{
+		"generated/go/configuration/business_gen.go",
+		"generated/go/contracts/email/send/v1/contract_gen.go",
+		"generated/go/providers/email/send/v1/provider_gen.go",
+	} {
+		if _, exists := outputFile(output, filePath); !exists {
+			t.Fatalf("module-owned developer surface %s is absent", filePath)
+		}
+	}
+	for _, filePath := range []string{
+		"generated/docs/api.md",
+		"generated/go/adapters/http/email/send/v1/handler_gen.go",
+		"generated/go/clients/email/send/v1/client_gen.go",
+		"generated/go/internal/invocationcontext/context_gen.go",
+		"generated/go/invocation/email/send/v1/invocation_gen.go",
+		"generated/sdk/javascript/package.json",
+	} {
+		if _, exists := outputFile(output, filePath); exists {
+			t.Fatalf("unrequired local Capability received application surface %s", filePath)
+		}
+	}
+	if assembly := outputData(t, output, "generated/go/assembly/invocations_gen.go"); bytes.Contains(assembly, []byte("email.send/v1")) {
+		t.Fatalf("unrequired local Capability entered runtime assembly:\n%s", assembly)
+	}
+}
+
 func TestRenderManagesSchemaOnlyLocalPluginConfiguration(t *testing.T) {
 	t.Parallel()
 
@@ -316,6 +368,47 @@ func emptyApplication(t testing.TB) generationresolution.ExtensionResult {
 	}
 	resolution, err := generationresolution.ResolveExtensions(t.Context(), generationresolution.ExtensionInput{
 		Input: generationresolution.Input{Activations: catalog},
+	})
+	if err != nil {
+		t.Fatalf("ResolveExtensions: %v", err)
+	}
+	return resolution
+}
+
+func unrequiredLocalApplication(t testing.TB) generationresolution.ExtensionResult {
+	t.Helper()
+	email := normalizedContract(t, `id: email.send/v1
+request:
+  to: {type: string, required: true}
+response:
+  accepted: {type: boolean, required: true}
+errors: [invalid_recipient]
+`)
+	catalog, err := generationactivation.New(nil)
+	if err != nil {
+		t.Fatalf("generationactivation.New: %v", err)
+	}
+	resolution, err := generationresolution.ResolveExtensions(t.Context(), generationresolution.ExtensionInput{
+		Input: generationresolution.Input{
+			Candidates: []providerresolution.Candidate{{
+				PluginID: "acme.business",
+				Contract: email,
+				Source:   "business/capabilities/email.send/v1/capability.yaml",
+			}},
+			Activations: catalog,
+		},
+		Plugins: []generationresolution.Plugin{{
+			Context: generation.PluginInput{
+				ID:                "acme.business",
+				ModulePath:        applicationModulePath,
+				Provides:          []string{"email.send/v1"},
+				BuildMetadataJSON: []byte("{}"),
+			},
+			Local:      true,
+			ModuleRoot: "application-module",
+			PluginPath: "business",
+		}},
+		Capabilities: []generation.CapabilityInput{{ContractJSON: email, Exposure: generation.Exposure{Go: true}}},
 	})
 	if err != nil {
 		t.Fatalf("ResolveExtensions: %v", err)

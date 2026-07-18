@@ -119,6 +119,98 @@ func TestGenerateRequiresDirectKernelDependency(t *testing.T) {
 	}
 }
 
+func TestGenerateCompilesUnrequiredLocalCapabilityWithoutRuntimeAssembly(t *testing.T) {
+	const modulePath = "example.com/acme/unrequired-capability"
+	root := t.TempDir()
+	writeApplicationModule(t, root, modulePath)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writePlugin(t, root, "business", "id: acme.business\nprovides: [email.send/v1]\n")
+	writeCapability(t, root, "business", "email.send/v1", `id: email.send/v1
+request:
+  to: {type: string, required: true}
+response:
+  accepted: {type: boolean, required: true}
+errors: [invalid_recipient]
+`)
+	writeFile(t, filepath.Join(root, "business", "plugin.go"), `package business
+
+import (
+	"context"
+
+	configuration "example.com/acme/unrequired-capability/generated/go/configuration"
+	contract "example.com/acme/unrequired-capability/generated/go/contracts/email/send/v1"
+)
+
+type Config = configuration.BusinessConfig
+type Plugin struct{}
+
+func New(_ Config) *Plugin { return &Plugin{} }
+
+func (*Plugin) Send(_ context.Context, request contract.Request) (contract.Response, error) {
+	if request.To == "" {
+		return contract.Response{}, contract.ErrInvalidRecipient
+	}
+	return contract.Response{Accepted: true}, nil
+}
+`)
+	writeFile(t, filepath.Join(root, "unrequired_runtime_test.go"), `package unrequiredapp_test
+
+import (
+	"context"
+	"testing"
+
+	bootstrap "example.com/acme/unrequired-capability/generated/go/bootstrap"
+)
+
+func TestUnrequiredCapabilityIsNotRegistered(t *testing.T) {
+	application, err := bootstrap.New(context.Background(), "plystra.yaml")
+	if err != nil || !application.Valid() {
+		t.Fatalf("bootstrap.New = %#v, %v", application, err)
+	}
+	bindings := application.Invocations().Catalog().Bindings()
+	if len(bindings) != 2 || bindings[0].Capability().String() != "kernel.health/v1" || bindings[1].Capability().String() != "kernel.info/v1" {
+		t.Fatalf("runtime catalog bindings = %#v, want only intrinsic Kernel Capabilities", bindings)
+	}
+}
+`)
+	environment := goEnvironment(nil)
+	result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       filepath.Join(root, "business"),
+		Environment: environment,
+	})
+	if err != nil || !result.Report().Clean() {
+		t.Fatalf("Generate unrequired local Capability = %#v, %v", result.Report().Changes(), err)
+	}
+	for _, filePath := range []string{
+		"generated/go/configuration/business_gen.go",
+		"generated/go/contracts/email/send/v1/contract_gen.go",
+		"generated/go/providers/email/send/v1/provider_gen.go",
+	} {
+		assertFileExists(t, root, filePath)
+	}
+	for _, filePath := range []string{
+		"generated/docs/api.md",
+		"generated/go/adapters/http/email/send/v1/handler_gen.go",
+		"generated/go/clients/email/send/v1/client_gen.go",
+		"generated/go/internal/invocationcontext/context_gen.go",
+		"generated/go/invocation/email/send/v1/invocation_gen.go",
+		"generated/sdk/javascript/package.json",
+	} {
+		assertFileMissing(t, root, filePath)
+	}
+	if assembly := readFile(t, root, "generated/go/assembly/invocations_gen.go"); bytes.Contains(assembly, []byte("email.send/v1")) {
+		t.Fatalf("unrequired local Capability entered runtime assembly:\n%s", assembly)
+	}
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil || !checked.Report().Clean() {
+		t.Fatalf("Generate --check = %#v, %v", checked.Report().Changes(), err)
+	}
+}
+
 func TestGenerateRunsIntrinsicApplicationWithoutOrdinaryPlugins(t *testing.T) {
 	const modulePath = "example.com/acme/intrinsic-app"
 	root := t.TempDir()

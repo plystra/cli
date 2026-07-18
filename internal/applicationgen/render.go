@@ -136,6 +136,52 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 
 	requirements := context.Requirements()
+	developerSurfaceIDs := make(map[string]generation.CapabilityID, len(requirements))
+	for _, id := range requirements {
+		developerSurfaceIDs[id.String()] = id
+	}
+	for _, plugin := range context.Plugins() {
+		if plugin.Module().Path() != options.ModulePath {
+			continue
+		}
+		for _, id := range plugin.Provides() {
+			developerSurfaceIDs[id.String()] = id
+		}
+	}
+	developerSurfaceNames := make([]string, 0, len(developerSurfaceIDs))
+	for id := range developerSurfaceIDs {
+		developerSurfaceNames = append(developerSurfaceNames, id)
+	}
+	sort.Strings(developerSurfaceNames)
+	for _, name := range developerSurfaceNames {
+		id := developerSurfaceIDs[name]
+		target, exists := context.Capability(id)
+		if !exists {
+			return generatedfiles.Output{}, fmt.Errorf("%w: %w: canonical Capability %s selected for a module-owned developer surface is absent from the final context", ErrRender, ErrResolution, id)
+		}
+		var contract contractgen.File
+		if target.Intrinsic() {
+			contract, err = contractgen.RenderIntrinsic(target.ContractJSON())
+		} else {
+			contract, err = contractgen.Render(target.ContractJSON())
+		}
+		if err != nil {
+			return generatedfiles.Output{}, fmt.Errorf("%w: contract %s: %w", ErrRender, id, err)
+		}
+		if err := add(contract.Path(), contract.Data()); err != nil {
+			return generatedfiles.Output{}, fmt.Errorf("%w: contract %s: %w", ErrRender, id, err)
+		}
+		if target.Intrinsic() {
+			continue
+		}
+		provider, err := providergen.Render(options.ModulePath, target.ContractJSON())
+		if err != nil {
+			return generatedfiles.Output{}, fmt.Errorf("%w: provider %s: %w", ErrRender, id, err)
+		}
+		if err := add(provider.Path(), provider.Data()); err != nil {
+			return generatedfiles.Output{}, fmt.Errorf("%w: provider %s: %w", ErrRender, id, err)
+		}
+	}
 	if len(requirements) != 0 {
 		invocationContext, err := invocationgen.RenderContext()
 		if err != nil {
@@ -163,33 +209,12 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 			httpTargets++
 		}
 
-		var contract contractgen.File
-		if target.Intrinsic() {
-			contract, err = contractgen.RenderIntrinsic(target.ContractJSON())
-		} else {
-			contract, err = contractgen.Render(target.ContractJSON())
-		}
-		if err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: contract %s: %w", ErrRender, id, err)
-		}
-		if err := add(contract.Path(), contract.Data()); err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: contract %s: %w", ErrRender, id, err)
-		}
 		client, err := clientgen.Render(options.ModulePath, target.ContractJSON())
 		if err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: client %s: %w", ErrRender, id, err)
 		}
 		if err := add(client.Path(), client.Data()); err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: client %s: %w", ErrRender, id, err)
-		}
-		if !target.Intrinsic() {
-			provider, err := providergen.Render(options.ModulePath, target.ContractJSON())
-			if err != nil {
-				return generatedfiles.Output{}, fmt.Errorf("%w: provider %s: %w", ErrRender, id, err)
-			}
-			if err := add(provider.Path(), provider.Data()); err != nil {
-				return generatedfiles.Output{}, fmt.Errorf("%w: provider %s: %w", ErrRender, id, err)
-			}
 		}
 		invocation, err := invocationgen.RenderPlan(options.ModulePath, target.ContractJSON(), plan)
 		if err != nil {
