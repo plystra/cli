@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "path": "generated/go/assembly/compatibility_gen.go",
+      "sha256": "sha256:f3cd92d2b0829d1fd646c4bf65840d578f784ab5111c6972d3545d31fc847a42"
+    },
+    {
+      "path": "generated/go/configuration/account-profile_gen.go",
+      "sha256": "sha256:b5af2008ee440a2f7ea42e71c247967f42422f4724b6c9ba507c0e706f9b07f3"
+    }
+  ]
+}

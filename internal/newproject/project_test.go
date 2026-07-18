@@ -242,7 +242,7 @@ func TestCreateWithInitialPluginComposesRunnableAndLibraryTransactions(t *testin
 		t.Fatalf("RunIn output = stdout %q, stderr %q", stdout.String(), stderr.String())
 	}
 
-	golden := snapshotTree(t, filepath.Join("..", "plugincreate", "testdata", "plugin"))
+	golden := pluginScaffoldSnapshot(t, filepath.Join("..", "plugincreate", "testdata", "plugin"), pluginName)
 	for kind, root := range map[string]string{"runnable": runnable.Path(), "library": libraryRoot} {
 		pluginTree := pluginScaffoldSnapshot(t, root, pluginName)
 		if !reflect.DeepEqual(pluginTree, golden) {
@@ -263,6 +263,14 @@ func TestCreateWithInitialPluginComposesRunnableAndLibraryTransactions(t *testin
 	}
 	if _, err := os.Lstat(filepath.Join(libraryRoot, "plystra.yaml")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("library contains plystra.yaml: %v", err)
+	}
+	checked, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       libraryRoot,
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil || !checked.Report().Clean() {
+		t.Fatalf("library initial-plugin generation = %#v, %v", checked.Report().Changes(), err)
 	}
 }
 

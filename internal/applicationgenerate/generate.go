@@ -1,5 +1,5 @@
 // Package applicationgenerate resolves, renders, checks, and transactionally
-// installs one complete filesystem-backed application generation result.
+// installs one complete filesystem-backed Plystra module generation result.
 package applicationgenerate
 
 import (
@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -28,11 +30,11 @@ import (
 
 var (
 	// ErrGenerate reports failure to resolve, render, check, install, or
-	// validate one generated application tree.
-	ErrGenerate = errors.New("generate application")
-	// ErrConcurrentChange reports application inputs or extension output that
+	// validate one generated Plystra module tree.
+	ErrGenerate = errors.New("generate Plystra module")
+	// ErrConcurrentChange reports module inputs or extension output that
 	// changed after the transaction's desired output was prepared.
-	ErrConcurrentChange = errors.New("application changed during generation")
+	ErrConcurrentChange = errors.New("Plystra module changed during generation")
 	// ErrKernelDependency reports a runnable application that does not directly
 	// select the Kernel Go Module used by its generated runtime.
 	ErrKernelDependency = errors.New("invalid application Kernel dependency")
@@ -42,9 +44,15 @@ var (
 // are installed but still protected by the transaction rollback boundary.
 type Validator func(context.Context, string) error
 
+// ModuleMutation wraps validation and generation-input confirmation while the
+// desired generated tree is installed. It lets a higher-level mutating command
+// normalize module-owned metadata and restore that metadata if any later check
+// fails. The supplied operation must be called exactly once.
+type ModuleMutation func(context.Context, string, func() error) error
+
 // Options contains the application location, bounded Go helper settings, and
 // operation mode. Check performs a read-only comparison. Validate overrides
-// the default read-only `go test ./...` installation validation when non-nil.
+// the default `go test -mod=readonly ./...` installation validation when non-nil.
 type Options struct {
 	Start                 string
 	Check                 bool
@@ -55,6 +63,7 @@ type Options struct {
 	ExecutionTimeout      time.Duration
 	TemporaryParent       string
 	Validate              Validator
+	MutateModule          ModuleMutation
 }
 
 // Result identifies the resolved application and its deterministic generated
@@ -66,7 +75,7 @@ type Result struct {
 	checked bool
 }
 
-// Module returns the nearest runnable application Go Module.
+// Module returns the nearest enclosing Go Module.
 func (r Result) Module() modulelocate.Module { return r.module }
 
 // Report returns the final generated-output comparison.
@@ -75,13 +84,30 @@ func (r Result) Report() generatedfiles.Report { return r.report }
 // Checked reports whether the operation was the read-only check mode.
 func (r Result) Checked() bool { return r.checked }
 
-// Generate resolves and renders the nearest runnable application. Check mode
-// compares without mutation. Install mode atomically installs desired files,
-// validates the updated module, and re-resolves inside the transaction so a
-// concurrent source edit or nondeterministic extension result causes rollback.
+// Generate resolves and renders the nearest Plystra Go Module. A runnable
+// module receives application-owned output; a library module receives only
+// module-owned developer surfaces. Check mode compares without mutation.
+// Install mode atomically installs desired files, validates the updated module,
+// and re-resolves inside the transaction so a concurrent generation-input edit
+// or nondeterministic extension result causes rollback.
 func Generate(ctx context.Context, options Options) (Result, error) {
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: context is nil", ErrGenerate)
+	}
+	module, err := modulelocate.Find(options.Start)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: locate module: %w", ErrGenerate, err)
+	}
+	_, manifestErr := os.Lstat(filepath.Join(module.Path(), "plystra.yaml"))
+	if errors.Is(manifestErr, os.ErrNotExist) {
+		result, err := generateLibrary(ctx, options, module)
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
+		}
+		return result, nil
+	}
+	if manifestErr != nil {
+		return Result{}, fmt.Errorf("%w: inspect plystra.yaml: %w", ErrGenerate, manifestErr)
 	}
 	prepared, err := prepare(ctx, options, options.Start)
 	if err != nil {
@@ -106,22 +132,45 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		}
 	}
 	report, err := generatedfiles.Install(prepared.resolved.Module().Path(), prepared.output, func(root string) error {
-		if err := validate(ctx, root); err != nil {
-			return fmt.Errorf("validate generated application: %w", err)
-		}
-		confirmed, err := prepare(ctx, options, root)
-		if err != nil {
-			return fmt.Errorf("confirm generation inputs: %w", err)
-		}
-		if prepared.fingerprint != confirmed.fingerprint {
-			return fmt.Errorf("%w: resolved application or generated output no longer matches the planned snapshot", ErrConcurrentChange)
-		}
-		return nil
+		return runModuleMutation(ctx, options, root, func() error {
+			if err := validate(ctx, root); err != nil {
+				return fmt.Errorf("validate generated application: %w", err)
+			}
+			confirmed, err := prepare(ctx, options, root)
+			if err != nil {
+				return fmt.Errorf("confirm generation inputs: %w", err)
+			}
+			if prepared.fingerprint != confirmed.fingerprint {
+				return fmt.Errorf("%w: resolved application or generated output no longer matches the planned snapshot", ErrConcurrentChange)
+			}
+			return nil
+		})
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
 	}
 	return Result{module: prepared.resolved.Module(), report: report}, nil
+}
+
+func runModuleMutation(ctx context.Context, options Options, root string, operation func() error) error {
+	if options.MutateModule == nil {
+		return operation()
+	}
+	calls := 0
+	err := options.MutateModule(ctx, root, func() error {
+		calls++
+		if calls != 1 {
+			return errors.New("module mutation called generation validation more than once")
+		}
+		return operation()
+	})
+	if err != nil {
+		return err
+	}
+	if calls != 1 {
+		return errors.New("module mutation did not call generation validation")
+	}
+	return nil
 }
 
 type preparedGeneration struct {

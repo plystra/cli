@@ -186,15 +186,19 @@ plystra release
 
 Mutating commands perform all derivable generation automatically. Build and generation never publish or release as a side effect.
 
-### Application generation
+`plystra plugin create` keeps the new scaffold, generated module surfaces, and Go module metadata in one rollback boundary. It runs `go mod tidy` after generated imports exist, retains explicit pre-existing requirements and checksum entries, validates with `go test -mod=readonly ./...`, and rolls back its own `go.mod`, `go.sum`, generated-file, and scaffold changes if any later check fails. Concurrent user edits remain protected.
 
-From any directory inside a runnable application module, install the complete current managed tree with:
+### Module generation
+
+From any directory inside a Plystra Go Module, install its complete current managed tree with:
 
 ```powershell
 plystra generate
 ```
 
-The command resolves the nearest root `plystra.yaml`, explicit Go Module dependencies, canonical providers, selected generation extensions, generation-derived requirements, contributions, and Capability Aliases. It renders the application-owned Go, HTTP, JavaScript, documentation, assembly-compatibility, and manifest surfaces; installs them transactionally; runs `go test -mod=readonly ./...` before commit; and re-resolves the application before completing so changed inputs or nondeterministic extension output roll back.
+For a runnable module, the command resolves the root `plystra.yaml`, explicit Go Module dependencies, canonical providers, selected generation extensions, generation-derived requirements, contributions, and Capability Aliases. It renders the application-owned Go, HTTP, JavaScript, documentation, assembly-compatibility, and manifest surfaces. For a library module without `plystra.yaml`, it renders only module-owned Kernel compatibility, local plugin configuration, contract, and provider surfaces; it does not emit application assembly, invocation, clients, HTTP, SDK, or runtime bootstrap output.
+
+Both paths install output transactionally and run `go test -mod=readonly ./...` before commit. Runnable generation re-resolves the complete application, while library generation reindexes its declarations and rendered ownership snapshot; changed inputs or nondeterministic output roll back the transaction.
 
 Use the read-only consistency gate in local checks and CI:
 
@@ -202,7 +206,7 @@ Use the read-only consistency gate in local checks and CI:
 plystra generate --check
 ```
 
-Check mode never writes application files. Both modes report deterministic `changed`, `missing`, `unexpected`, and `obsolete` paths and return a failing exit status while any drift remains. Installation preserves an unexpected unowned file rather than overwriting or deleting it.
+Check mode never writes module files. Both modes report deterministic `changed`, `missing`, `unexpected`, and `obsolete` paths and return a failing exit status while any drift remains. Installation preserves an unexpected unowned file rather than overwriting or deleting it.
 
 ## Development
 

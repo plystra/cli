@@ -20,6 +20,35 @@ import (
 	"github.com/plystra/cli/internal/pluginscan"
 )
 
+func TestMain(main *testing.M) {
+	if os.Getenv("PLYSTRA_PLUGIN_CREATE_ROLLBACK_HELPER") == "1" {
+		os.Exit(runRollbackHelper())
+	}
+	os.Exit(main.Run())
+}
+
+func runRollbackHelper() int {
+	switch {
+	case len(os.Args) == 3 && os.Args[1] == "mod" && os.Args[2] == "tidy":
+		data, err := os.ReadFile("go.mod")
+		if err != nil {
+			return 10
+		}
+		data = append(data, []byte("\nrequire example.com/temporary v1.0.0 // indirect\n")...)
+		if err := os.WriteFile("go.mod", data, 0o644); err != nil {
+			return 11
+		}
+		if err := os.WriteFile("go.sum", []byte("temporary module metadata\n"), 0o644); err != nil {
+			return 12
+		}
+		return 0
+	case len(os.Args) == 4 && os.Args[1] == "test" && os.Args[2] == "-mod=readonly" && os.Args[3] == "./...":
+		return 9
+	default:
+		return 8
+	}
+}
+
 func TestCreateAndPublicCommandProduceDeterministicBuildablePlugins(t *testing.T) {
 	const modulePath = "example.com/acme/my-app/v2"
 	const name = "account-profile"
@@ -67,6 +96,8 @@ func TestCreateAndPublicCommandProduceDeterministicBuildablePlugins(t *testing.T
 		"account-profile/plugin.go",
 		"account-profile/plugin.yaml",
 		"account-profile/plugin_test.go",
+		"generated/.plystra-manifest.json",
+		"generated/go/assembly/compatibility_gen.go",
 		"generated/go/configuration/account-profile_gen.go",
 	}
 	gotFiles := make([]string, 0, len(directTree))
@@ -106,6 +137,99 @@ func TestCreateRollsBackValidationFailure(t *testing.T) {
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("tree changed after rollback:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoTransactionFiles(t, root)
+}
+
+func TestCreateTidiesModuleForGeneratedConfiguration(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	cliRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve CLI root: %v", err)
+	}
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	catalogRoot := filepath.Join(t.TempDir(), "catalog")
+	if err := os.MkdirAll(catalogRoot, 0o755); err != nil {
+		t.Fatalf("create catalog root: %v", err)
+	}
+	writeFile(t, filepath.Join(catalogRoot, "go.mod"), "module example.com/catalog\n\ngo 1.26\n")
+	goMod := fmt.Sprintf(`module example.com/acme/untidy
+
+go 1.26
+
+require (
+	example.com/catalog v0.0.0
+	github.com/plystra/kernel v0.0.0
+)
+
+replace example.com/catalog => %s
+
+replace github.com/plystra/kernel => %s
+	`, filepath.ToSlash(catalogRoot), filepath.ToSlash(kernelRoot))
+	writeFile(t, filepath.Join(root, "go.mod"), goMod)
+	retainedSum := "golang.org/x/mod v0.38.0 h1:MECBjubtXD7yj4HrhIUcywNaGeNVUdfVnxmPajOk4yk=\n"
+	writeFile(t, filepath.Join(root, "go.sum"), retainedSum)
+
+	result, err := plugincreate.Create(t.Context(), plugincreate.Options{
+		Start:       root,
+		Name:        "account",
+		Environment: isolatedGoEnvironment(t),
+	})
+	if err != nil {
+		t.Fatalf("Create in untidy module: %v", err)
+	}
+	if result.ID() != "acme.untidy.account" {
+		t.Fatalf("created Plugin ID = %q", result.ID())
+	}
+	normalizedMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatalf("read normalized go.mod: %v", err)
+	}
+	for _, requirement := range [][]byte{
+		[]byte("example.com/catalog v0.0.0"),
+		[]byte("go.yaml.in/yaml/v3 v3.0.4 // indirect"),
+	} {
+		if !bytes.Contains(normalizedMod, requirement) {
+			t.Fatalf("normalized go.mod omits %q:\n%s", requirement, normalizedMod)
+		}
+	}
+	if sum, err := os.ReadFile(filepath.Join(root, "go.sum")); err != nil || !bytes.Contains(sum, []byte(retainedSum)) {
+		t.Fatalf("normalized go.sum = %q, %v", sum, err)
+	}
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Check:       true,
+		Environment: isolatedGoEnvironment(t),
+	})
+	if err != nil || !checked.Report().Clean() {
+		t.Fatalf("generated library check = %#v, %v", checked.Report().Changes(), err)
+	}
+}
+
+func TestCreateRestoresModuleMetadataWhenGeneratedValidationFails(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/acme/rollback\n\ngo 1.26\n")
+	before := snapshotTree(t, root)
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatalf("Executable: %v", err)
+	}
+	environment := append(os.Environ(), "PLYSTRA_PLUGIN_CREATE_ROLLBACK_HELPER=1")
+	_, err = plugincreate.Create(t.Context(), plugincreate.Options{
+		Start:       root,
+		Name:        "account",
+		GoCommand:   command,
+		Environment: environment,
+	})
+	if !errors.Is(err, plugincreate.ErrCreate) || !errors.Is(err, plugincreate.ErrModuleTidy) || !errors.Is(err, gocommand.ErrRun) {
+		t.Fatalf("Create error = %v, want create, module-tidy, and Go command errors", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("tree changed after module-metadata rollback:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 	assertNoTransactionFiles(t, root)
 }
