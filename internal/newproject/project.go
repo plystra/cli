@@ -123,7 +123,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 				return err
 			}
 		}
-		return verifyChoices(stagingRoot, options.Git, options.GitHubCI, options.Skills)
+		return verifyChoices(stagingRoot, options.ModulePath, options.Git, options.GitHubCI, options.Skills)
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrCreate, err)
@@ -204,7 +204,7 @@ func populate(root, modulePath, name string, library, githubCI, skills bool) err
 		data []byte
 	}
 	files := []projectFile{
-		{path: "go.mod", data: []byte(fmt.Sprintf(goModuleTemplate, modulePath, KernelVersion))},
+		{path: "go.mod", data: fmt.Appendf(nil, goModuleTemplate, modulePath, KernelVersion)},
 		{path: "README.md", data: []byte(readme)},
 		{path: ".gitignore", data: []byte(gitignoreTemplate)},
 		{path: ".gitattributes", data: []byte(gitattributesTemplate)},
@@ -214,7 +214,7 @@ func populate(root, modulePath, name string, library, githubCI, skills bool) err
 	}
 	if skills {
 		files = append(files,
-			projectFile{path: ".agents/skills/plystra/SKILL.md", data: []byte(skillTemplate)},
+			projectFile{path: ".agents/skills/plystra/SKILL.md", data: fmt.Appendf(nil, skillTemplate, modulePath)},
 			projectFile{path: ".agents/skills/plystra/agents/openai.yaml", data: []byte(skillAgentTemplate)},
 		)
 	}
@@ -261,7 +261,7 @@ func initializeGit(ctx context.Context, root, command string, environment []stri
 	return fmt.Errorf("%w: git init failed: %s", ErrGitInitialization, message)
 }
 
-func verifyChoices(root string, git, githubCI, skills bool) error {
+func verifyChoices(root, modulePath string, git, githubCI, skills bool) error {
 	if err := verifyChoicePath(root, ".git", git, true); err != nil {
 		return err
 	}
@@ -279,9 +279,58 @@ func verifyChoices(root string, git, githubCI, skills bool) error {
 		if err != nil {
 			return fmt.Errorf("read generated Plystra skill: %w", err)
 		}
-		if !strings.HasPrefix(string(data), "---\nname: plystra\n") || strings.Contains(string(data), "TODO") {
-			return errors.New("generated Plystra skill is incomplete")
+		if err := validateGeneratedSkill(data, modulePath); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func validateGeneratedSkill(data []byte, modulePath string) error {
+	if len(data) == 0 || len(data) > 64<<10 {
+		return errors.New("generated Plystra skill has an invalid size")
+	}
+	text := string(data)
+	if !strings.HasPrefix(text, "---\nname: plystra\n") || strings.Contains(text, "TODO") {
+		return errors.New("generated Plystra skill is incomplete")
+	}
+	required := []string{
+		"description: Develop, structure, configure, debug, and validate Plystra Go Modules",
+		"The current Go Module path is " + modulePath,
+		"## Module and file ownership",
+		"plystra plugin create records",
+		"plystra capability create records.read --plugin records --expose",
+		"plystra capability implement email.send/v1 --plugin mailer",
+		"capabilities/records.read/v1/capability.yaml",
+		"There is no handwritten provider registration",
+		"dependencies.Dependencies",
+		"generated/go/dependencies/",
+		"bootstrap.New",
+		"npm run typecheck",
+		"plystra generate --check",
+	}
+	for _, phrase := range required {
+		if !strings.Contains(text, phrase) {
+			return fmt.Errorf("generated Plystra skill omits required guidance %q", phrase)
+		}
+	}
+	forbiddenWords := map[string]struct{}{
+		"branch": {}, "branches": {}, "checkout": {}, "checkouts": {},
+		"commit": {}, "commits": {}, "committed": {}, "committing": {},
+		"git": {}, "github": {}, "pull": {}, "pulled": {}, "pulling": {}, "pulls": {},
+		"push": {}, "pushed": {}, "pushes": {}, "pushing": {},
+		"repositories": {}, "repository": {},
+	}
+	words := strings.FieldsFunc(strings.ToLower(text), func(character rune) bool {
+		return character < 'a' || character > 'z'
+	})
+	for _, word := range words {
+		if _, forbidden := forbiddenWords[word]; forbidden {
+			return fmt.Errorf("generated Plystra skill contains unrelated development-process guidance %q", word)
+		}
+	}
+	if strings.Contains(strings.ToLower(text), "version control") {
+		return errors.New("generated Plystra skill contains unrelated development-process guidance")
 	}
 	return nil
 }

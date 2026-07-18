@@ -1,4 +1,4 @@
 interface:
   display_name: "Plystra Development"
   short_description: "Develop and validate Plystra applications"
-  default_prompt: "Use $plystra to implement and validate this Plystra application change."
+  default_prompt: "Use $plystra to implement and validate this Plystra module, Plugin, or Capability change."

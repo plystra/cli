@@ -166,7 +166,12 @@ parent repository without initializing a nested repository. Requested Git
 initialization creates an empty repository on branch `main`; requested CI emits
 `.github/workflows/ci.yml`; requested skills emit a complete, validated
 Plystra-specific `SKILL.md` and agent metadata rather than generic advice or
-TODO placeholders. `plystra new --help` documents the complete contract.
+TODO placeholders. The skill embeds the created module path and provides
+operational module layout, Plugin and Capability authoring, configuration,
+provider selection, cross-Plugin generated-client use, Alias, HTTP, JavaScript,
+runtime, validation, and troubleshooting workflows. It contains no Git,
+branch, commit, or push instructions. `plystra new --help` documents the
+complete creation contract.
 
 ## Transaction safety
 

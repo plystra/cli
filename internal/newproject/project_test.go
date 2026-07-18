@@ -129,7 +129,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	}
 	assertReadmeUsesAvailableCommands(t, directTree["README.md"], true)
 	assertCIUsesCurrentActions(t, directTree[".github/workflows/ci.yml"])
-	assertPlystraSkill(t, direct.Path())
+	assertPlystraSkill(t, direct.Path(), modulePath)
 	assertGitInitialized(t, direct.Path())
 	assertGitInitialized(t, commandTarget)
 	for name, content := range directTree {
@@ -216,7 +216,7 @@ func TestCreateLibraryAndPublicCommandProduceDeterministicBuildableModules(t *te
 	}
 	assertReadmeUsesAvailableCommands(t, directTree["README.md"], false)
 	assertCIUsesCurrentActions(t, directTree[".github/workflows/ci.yml"])
-	assertPlystraSkill(t, direct.Path())
+	assertPlystraSkill(t, direct.Path(), modulePath)
 	assertGitInitialized(t, direct.Path())
 	assertGitInitialized(t, commandTarget)
 	assertModuleState(t, direct.Path(), modulePath)
@@ -361,7 +361,7 @@ func TestCreateHonorsOptionalProjectChoices(t *testing.T) {
 				assertGitInitialized(t, result.Path())
 			}
 			if test.skills {
-				assertPlystraSkill(t, result.Path())
+				assertPlystraSkill(t, result.Path(), modulePath)
 			}
 		})
 	}
@@ -542,7 +542,7 @@ func createKernelProxy(t *testing.T) string {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	writeTestFile(t, filepath.Join(versionRoot, "list"), []byte(newproject.KernelVersion+"\n"))
-	writeTestFile(t, filepath.Join(versionRoot, escapedVersion+".info"), []byte(fmt.Sprintf("{\"Version\":%q,\"Time\":\"2026-07-15T00:00:00Z\"}\n", newproject.KernelVersion)))
+	writeTestFile(t, filepath.Join(versionRoot, escapedVersion+".info"), fmt.Appendf(nil, "{\"Version\":%q,\"Time\":\"2026-07-15T00:00:00Z\"}\n", newproject.KernelVersion))
 	moduleFile := []byte("module github.com/plystra/kernel\n\ngo 1.26\n")
 	writeTestFile(t, filepath.Join(versionRoot, escapedVersion+".mod"), moduleFile)
 
@@ -691,22 +691,41 @@ func assertGitInitialized(t *testing.T, root string) {
 	}
 }
 
-func assertPlystraSkill(t *testing.T, root string) {
+func assertPlystraSkill(t *testing.T, root, modulePath string) {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "plystra", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("read Plystra skill: %v", err)
 	}
-	for _, required := range []string{"name: plystra", "plystra generate --check", "dependencies.Dependencies", "type(scope): description"} {
+	for _, required := range []string{
+		"name: plystra",
+		"The current Go Module path is " + modulePath,
+		"## Module and file ownership",
+		"plystra plugin create records",
+		"plystra capability create records.read --plugin records --expose",
+		"plystra capability implement email.send/v1 --plugin mailer",
+		"capabilities/records.read/v1/capability.yaml",
+		"plugin.yaml",
+		"plystra.yaml",
+		"There is no handwritten provider registration",
+		"dependencies.Dependencies",
+		"generated/go/dependencies/",
+		"bootstrap.New",
+		"npm run typecheck",
+		"plystra generate --check",
+	} {
 		if !strings.Contains(string(data), required) {
 			t.Fatalf("Plystra skill omits %q:\n%s", required, data)
 		}
 	}
-	if strings.Contains(string(data), "TODO") {
-		t.Fatalf("Plystra skill contains TODO guidance:\n%s", data)
+	lower := strings.ToLower(string(data))
+	for _, forbidden := range []string{"TODO", "git", "github", "commit", "branch", "push", "pull request", "repository", "version control"} {
+		if strings.Contains(lower, strings.ToLower(forbidden)) {
+			t.Fatalf("Plystra skill contains forbidden %q guidance:\n%s", forbidden, data)
+		}
 	}
 	metadata, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "plystra", "agents", "openai.yaml"))
-	if err != nil || !bytes.Contains(metadata, []byte("Use $plystra")) {
+	if err != nil || !bytes.Contains(metadata, []byte("Use $plystra")) || !bytes.Contains(metadata, []byte("module, Plugin, or Capability")) {
 		t.Fatalf("Plystra skill metadata = %q, %v", metadata, err)
 	}
 }
