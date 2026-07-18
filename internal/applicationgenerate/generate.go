@@ -16,6 +16,7 @@ import (
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/assemblygen"
+	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/generatedfiles"
@@ -71,9 +72,10 @@ type Options struct {
 // output comparison. A successful installation can retain unexpected unowned
 // files, which remain visible in Report rather than being overwritten.
 type Result struct {
-	module  modulelocate.Module
-	report  generatedfiles.Report
-	checked bool
+	module               modulelocate.Module
+	report               generatedfiles.Report
+	checked              bool
+	configurationChanged bool
 }
 
 // Module returns the nearest enclosing Go Module.
@@ -84,6 +86,11 @@ func (r Result) Report() generatedfiles.Report { return r.report }
 
 // Checked reports whether the operation was the read-only check mode.
 func (r Result) Checked() bool { return r.checked }
+
+// ConfigurationChanged reports root plystra.yaml dependency-composition
+// drift. Check mode reports it without mutation; install mode reports that the
+// planned three-way update was committed with generated output.
+func (r Result) ConfigurationChanged() bool { return r.configurationChanged }
 
 // Generate resolves and renders the nearest Plystra Project. Check mode
 // compares without mutation. Install mode atomically installs desired files,
@@ -103,7 +110,12 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		if err != nil {
 			return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
 		}
-		return Result{module: prepared.resolved.Module(), report: report, checked: true}, nil
+		return Result{
+			module:               prepared.resolved.Module(),
+			report:               report,
+			checked:              true,
+			configurationChanged: prepared.resolved.ConfigurationMaintenance().Changed(),
+		}, nil
 	}
 
 	validate := options.Validate
@@ -116,11 +128,20 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			}, "test", "-mod=readonly", "./...")
 		}
 	}
-	install := generatedfiles.Install
-	if options.RejectUnexpected {
-		install = generatedfiles.InstallStrict
+	additional := make([]atomicfs.Write, 0, 1)
+	maintenance := prepared.resolved.ConfigurationMaintenance()
+	if maintenance.Changed() {
+		additional = append(additional, atomicfs.Write{
+			Path:         "plystra.yaml",
+			Data:         maintenance.Data(),
+			ExpectedData: prepared.resolved.ManifestSource(),
+		})
 	}
-	report, err := install(prepared.resolved.Module().Path(), prepared.output, func(root string) error {
+	install := generatedfiles.InstallWithWrites
+	if options.RejectUnexpected {
+		install = generatedfiles.InstallStrictWithWrites
+	}
+	report, err := install(prepared.resolved.Module().Path(), prepared.output, additional, func(root string) error {
 		return runModuleMutation(ctx, options, root, func() error {
 			if err := validate(ctx, root); err != nil {
 				return fmt.Errorf("validate generated application: %w", err)
@@ -132,13 +153,23 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			if prepared.fingerprint != confirmed.fingerprint {
 				return fmt.Errorf("%w: resolved application or generated output no longer matches the planned snapshot", ErrConcurrentChange)
 			}
+			if confirmed.resolved.ConfigurationMaintenance().Changed() {
+				return fmt.Errorf("%w: dependency-derived Project configuration remains stale after installation", ErrConcurrentChange)
+			}
 			return nil
 		})
 	})
 	if err != nil {
+		if errors.Is(err, atomicfs.ErrConcurrentChange) && !errors.Is(err, ErrConcurrentChange) {
+			err = errors.Join(ErrConcurrentChange, err)
+		}
 		return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
 	}
-	return Result{module: prepared.resolved.Module(), report: report}, nil
+	return Result{
+		module:               prepared.resolved.Module(),
+		report:               report,
+		configurationChanged: maintenance.Changed(),
+	}, nil
 }
 
 func runModuleMutation(ctx context.Context, options Options, root string, operation func() error) error {

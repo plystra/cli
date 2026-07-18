@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -29,7 +30,7 @@ func TestNewOutputRendersDeterministicOwnershipManifest(t *testing.T) {
 		t.Fatalf("NewOutput: %v", err)
 	}
 	wantManifest := fmt.Sprintf(`{
-  "version": 1,
+  "version": 2,
   "files": [
     {
       "path": "generated/a/first.txt",
@@ -188,14 +189,14 @@ func TestCheckRejectsInvalidOwnershipManifest(t *testing.T) {
 		data string
 	}{
 		{name: "malformed", data: `{`},
-		{name: "unknown field", data: `{"version":1,"files":[],"extra":true}`},
-		{name: "unsupported version", data: `{"version":2,"files":[]}`},
-		{name: "missing files", data: `{"version":1}`},
-		{name: "invalid path", data: fmt.Sprintf(`{"version":1,"files":[{"path":"../outside","sha256":%q}]}`, digest)},
-		{name: "manifest self record", data: fmt.Sprintf(`{"version":1,"files":[{"path":%q,"sha256":%q}]}`, generatedfiles.ManifestPath, digest)},
-		{name: "invalid digest", data: `{"version":1,"files":[{"path":"generated/file","sha256":"sha256:ABC"}]}`},
-		{name: "duplicate", data: fmt.Sprintf(`{"version":1,"files":[{"path":"generated/file","sha256":%q},{"path":"generated/file","sha256":%q}]}`, digest, digest)},
-		{name: "trailing JSON", data: `{"version":1,"files":[]} {}`},
+		{name: "unknown field", data: `{"version":2,"files":[],"extra":true}`},
+		{name: "unsupported version", data: `{"version":1,"files":[]}`},
+		{name: "missing files", data: `{"version":2}`},
+		{name: "invalid path", data: fmt.Sprintf(`{"version":2,"files":[{"path":"../outside","sha256":%q}]}`, digest)},
+		{name: "manifest self record", data: fmt.Sprintf(`{"version":2,"files":[{"path":%q,"sha256":%q}]}`, generatedfiles.ManifestPath, digest)},
+		{name: "invalid digest", data: `{"version":2,"files":[{"path":"generated/file","sha256":"sha256:ABC"}]}`},
+		{name: "duplicate", data: fmt.Sprintf(`{"version":2,"files":[{"path":"generated/file","sha256":%q},{"path":"generated/file","sha256":%q}]}`, digest, digest)},
+		{name: "trailing JSON", data: `{"version":2,"files":[]} {}`},
 	}
 	for _, test := range tests {
 		test := test
@@ -263,6 +264,163 @@ func TestInstallReplacesAndRemovesManagedFilesWhilePreservingUnownedFiles(t *tes
 		t.Fatalf("Check after Install = %#v, %v", checked.Changes(), err)
 	}
 	assertNoTransaction(t, root)
+}
+
+func TestInstallWithWritesCommitsAuthoredAndGeneratedFilesTogether(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	oldOutput := managedOutput(t, "generated/go/shared.go", "before")
+	writeOutput(t, root, oldOutput)
+	writeFile(t, root, "plystra.yaml", "before\n")
+	newOutput := managedOutput(t,
+		"generated/go/new.go", "new",
+		"generated/go/shared.go", "after",
+	)
+	validated := false
+	report, err := generatedfiles.InstallWithWrites(root, newOutput, []atomicfs.Write{{
+		Path:         "plystra.yaml",
+		Data:         []byte("after\n"),
+		ExpectedData: []byte("before\n"),
+	}}, func(updatedRoot string) error {
+		validated = true
+		assertFile(t, updatedRoot, "plystra.yaml", "after\n")
+		assertFile(t, updatedRoot, "generated/go/new.go", "new")
+		assertFile(t, updatedRoot, "generated/go/shared.go", "after")
+		return nil
+	})
+	if err != nil || !report.Clean() {
+		t.Fatalf("InstallWithWrites = %#v, %v", report.Changes(), err)
+	}
+	if !validated {
+		t.Fatal("validation callback did not observe the combined transaction")
+	}
+	assertFile(t, root, "plystra.yaml", "after\n")
+	assertFile(t, root, "generated/go/new.go", "new")
+	assertFile(t, root, "generated/go/shared.go", "after")
+	assertNoTransaction(t, root)
+}
+
+func TestInstallWithWritesRollsBackAuthoredAndGeneratedFiles(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name  string
+		panic bool
+	}{
+		{name: "error"},
+		{name: "panic", panic: true},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			oldOutput := managedOutput(t,
+				"generated/go/obsolete.go", "obsolete",
+				"generated/go/shared.go", "before",
+			)
+			writeOutput(t, root, oldOutput)
+			writeFile(t, root, "plystra.yaml", "before\n")
+			before := snapshotFiles(t, root)
+			newOutput := managedOutput(t,
+				"generated/go/new.go", "new",
+				"generated/go/shared.go", "after",
+			)
+			validationErr := errors.New("combined validation failed")
+			var installErr error
+			var recovered any
+			func() {
+				defer func() { recovered = recover() }()
+				_, installErr = generatedfiles.InstallWithWrites(root, newOutput, []atomicfs.Write{{
+					Path:         "plystra.yaml",
+					Data:         []byte("after\n"),
+					ExpectedData: []byte("before\n"),
+				}}, func(string) error {
+					if test.panic {
+						panic("combined validation panic")
+					}
+					return validationErr
+				})
+			}()
+			if test.panic {
+				if recovered != "combined validation panic" {
+					t.Fatalf("recovered = %#v", recovered)
+				}
+			} else if !errors.Is(installErr, generatedfiles.ErrInstall) || !errors.Is(installErr, validationErr) {
+				t.Fatalf("InstallWithWrites error = %v", installErr)
+			}
+			if after := snapshotFiles(t, root); !equalSnapshots(after, before) {
+				t.Fatalf("combined rollback state:\nafter: %#v\nbefore: %#v", after, before)
+			}
+			assertNoTransaction(t, root)
+		})
+	}
+}
+
+func TestInstallWithWritesPreservesEmptyExpectedDataPrecondition(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	output := managedOutput(t)
+	writeOutput(t, root, output)
+	writeFile(t, root, "plystra.yaml", "concurrent edit\n")
+	before := snapshotFiles(t, root)
+	validated := false
+	nonNilEmpty := make([]byte, 0)
+	_, err := generatedfiles.InstallWithWrites(root, output, []atomicfs.Write{{
+		Path:         "plystra.yaml",
+		Data:         []byte("replacement\n"),
+		ExpectedData: nonNilEmpty,
+	}}, func(string) error {
+		validated = true
+		return nil
+	})
+	if !errors.Is(err, generatedfiles.ErrInstall) || !errors.Is(err, atomicfs.ErrConcurrentChange) {
+		t.Fatalf("InstallWithWrites error = %v", err)
+	}
+	if validated {
+		t.Fatal("validation ran after a stale empty-file precondition")
+	}
+	if after := snapshotFiles(t, root); !equalSnapshots(after, before) {
+		t.Fatalf("stale precondition changed files:\nafter: %#v\nbefore: %#v", after, before)
+	}
+	assertNoTransaction(t, root)
+}
+
+func TestInstallWithWritesRejectsUnsafeOrGeneratedAdditionalPaths(t *testing.T) {
+	t.Parallel()
+
+	for _, filePath := range []string{
+		"generated",
+		"generated/manual.txt",
+		"../outside.yaml",
+		`nested\outside.yaml`,
+		".",
+	} {
+		filePath := filePath
+		t.Run(strings.ReplaceAll(strings.ReplaceAll(filePath, "/", "_"), `\`, "_"), func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			output := managedOutput(t)
+			writeOutput(t, root, output)
+			before := snapshotFiles(t, root)
+			validated := false
+			_, err := generatedfiles.InstallWithWrites(root, output, []atomicfs.Write{{Path: filePath, Data: []byte("unsafe")}}, func(string) error {
+				validated = true
+				return nil
+			})
+			if !errors.Is(err, generatedfiles.ErrInstall) {
+				t.Fatalf("InstallWithWrites(%q) error = %v", filePath, err)
+			}
+			if validated {
+				t.Fatalf("validation ran for rejected additional path %q", filePath)
+			}
+			if after := snapshotFiles(t, root); !equalSnapshots(after, before) {
+				t.Fatalf("rejected path %q changed files:\nafter: %#v\nbefore: %#v", filePath, after, before)
+			}
+			assertNoTransaction(t, root)
+		})
+	}
 }
 
 func TestInstallStrictRejectsUnexpectedOutputAndRollsBack(t *testing.T) {
@@ -453,6 +611,58 @@ func TestCheckRejectsZeroOutputAndInstallRequiresValidation(t *testing.T) {
 	}
 }
 
+func TestReadApplicationManifestRecoveryReturnsEmbeddedSnapshot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	applicationManifest := []byte("{\"configuration\":{\"version\":1}}\n")
+	output, err := generatedfiles.NewOutput([]generatedfiles.File{
+		managedFile(t, generatedfiles.ApplicationManifestPath, applicationManifest),
+	})
+	if err != nil {
+		t.Fatalf("NewOutput: %v", err)
+	}
+	writeOutput(t, root, output)
+	recovered, exists, err := generatedfiles.ReadApplicationManifestRecovery(root)
+	if err != nil || !exists || !bytes.Equal(compactJSON(t, recovered), compactJSON(t, applicationManifest)) {
+		t.Fatalf("ReadApplicationManifestRecovery = %q, %t, %v", recovered, exists, err)
+	}
+	recovered[0] = 'x'
+	repeated, exists, err := generatedfiles.ReadApplicationManifestRecovery(root)
+	if err != nil || !exists || !bytes.Equal(compactJSON(t, repeated), compactJSON(t, applicationManifest)) {
+		t.Fatalf("repeated ReadApplicationManifestRecovery = %q, %t, %v", repeated, exists, err)
+	}
+
+	withoutApplication := t.TempDir()
+	writeOutput(t, withoutApplication, managedOutput(t))
+	if data, exists, err := generatedfiles.ReadApplicationManifestRecovery(withoutApplication); err != nil || exists || data != nil {
+		t.Fatalf("missing recovery = %q, %t, %v", data, exists, err)
+	}
+}
+
+func TestReadApplicationManifestRecoveryRejectsMalformedOrUnsafeState(t *testing.T) {
+	t.Parallel()
+
+	t.Run("malformed", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		writeFile(t, root, generatedfiles.ManifestPath, "{\"version\":2")
+		if _, _, err := generatedfiles.ReadApplicationManifestRecovery(root); !errors.Is(err, generatedfiles.ErrManifest) {
+			t.Fatalf("ReadApplicationManifestRecovery error = %v", err)
+		}
+	})
+	t.Run("non-regular", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(generatedfiles.ManifestPath)), 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if _, _, err := generatedfiles.ReadApplicationManifestRecovery(root); !errors.Is(err, generatedfiles.ErrManifest) {
+			t.Fatalf("ReadApplicationManifestRecovery error = %v", err)
+		}
+	})
+}
+
 func managedFile(t testing.TB, filePath string, data []byte) generatedfiles.File {
 	t.Helper()
 	file, err := generatedfiles.NewFile(filePath, data)
@@ -460,6 +670,15 @@ func managedFile(t testing.TB, filePath string, data []byte) generatedfiles.File
 		t.Fatalf("NewFile(%s): %v", filePath, err)
 	}
 	return file
+}
+
+func compactJSON(t testing.TB, data []byte) []byte {
+	t.Helper()
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, data); err != nil {
+		t.Fatalf("compact JSON: %v", err)
+	}
+	return compact.Bytes()
 }
 
 func managedOutput(t testing.TB, pathData ...string) generatedfiles.Output {

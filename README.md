@@ -265,7 +265,7 @@ plystra generate
 
 The command resolves the mandatory root `plystra.yaml`, the effective Go Module graph, every dependency Project and composed root declaration in that graph, canonical providers, selected generation extensions, generation-derived requirements, contributions, and Capability Aliases. Only module roots containing `plystra.yaml` are scanned for dependency Plugins or declarations; markerless modules remain ordinary Go dependencies, and dependency environment overlays are ignored. It renders the complete Project-owned Go, HTTP, JavaScript, documentation, assembly-compatibility, configuration-provenance manifest, invocation, and runtime-bootstrap surfaces. A Go Module without root `plystra.yaml` is an ordinary dependency and is rejected as a generation target.
 
-Generation installs output transactionally, runs `go test -mod=readonly ./...`, and re-resolves the complete application before commit. Changed inputs or nondeterministic output roll back the transaction.
+Generation also maintains root `plystra.yaml` from the dependency-derived baseline recorded in the prior ownership manifest. It applies a typed three-way update, preserving comments, explicit current-Project values, and exact removal tombstones while introducing new inherited declarations and removing inherited declarations that disappeared. An inherited value deleted without an explicit typed removal is an ownership error instead of an instruction to overwrite the file. The maintained configuration and generated tree install in one transaction, run `go test -mod=readonly ./...`, and re-resolve the complete application before commit. Validation failure, changed inputs, concurrent configuration edits, or nondeterministic output roll back every CLI-owned change while preserving the concurrent user edit.
 
 Go subprocesses preserve an explicit `GOWORK` selection. An automatically discovered enclosing `go.work` remains active when it validly includes the nearest module; when it is valid but does not list that module, the CLI runs the subprocess with `GOWORK=off` so an unrelated parent workspace cannot redirect generation or validation. Malformed workspaces, missing `use` directories, and invalid used modules remain active so the Go tool reports the original workspace error instead of having it hidden.
 
@@ -275,7 +275,7 @@ Use the read-only consistency gate in local checks and CI:
 plystra generate --check
 ```
 
-Check mode never writes module files. Both modes report deterministic `changed`, `missing`, `unexpected`, and `obsolete` paths and return a failing exit status while any drift remains. Installation preserves an unexpected unowned file rather than overwriting or deleting it.
+Check mode never writes module files. It reports dependency-composition drift as `changed plystra.yaml (dependency composition)` alongside deterministic `changed`, `missing`, `unexpected`, and `obsolete` generated paths, and returns a failing exit status while any drift remains. Installation preserves an unexpected unowned file rather than overwriting or deleting it.
 
 ## Development
 

@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/configurationresolve"
+	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/moduledependency"
@@ -58,6 +60,8 @@ type Result struct {
 	inventory       plugininventory.Index
 	resolution      generationresolution.ExtensionResult
 	configs         configurationresolve.Result
+	maintenance     applicationmeta.ConfigurationMaintenance
+	manifestSource  []byte
 }
 
 // Module returns the nearest Plystra Project Go Module.
@@ -89,6 +93,16 @@ func (r Result) Resolution() generationresolution.ExtensionResult { return r.res
 // closure. Its values never enter generation-extension input.
 func (r Result) Configurations() configurationresolve.Result { return r.configs }
 
+// ConfigurationMaintenance returns the typed dependency-recomposition update
+// planned against the exact root configuration snapshot used for resolution.
+func (r Result) ConfigurationMaintenance() applicationmeta.ConfigurationMaintenance {
+	return r.maintenance
+}
+
+// ManifestSource returns defensive original root configuration bytes used as
+// the concurrency precondition for a planned maintenance write.
+func (r Result) ManifestSource() []byte { return append([]byte(nil), r.manifestSource...) }
+
 // Resolve locates the nearest Project, loads its root plystra.yaml, discovers
 // the effective Go Module graph, indexes visible Project plugins and contracts,
 // and runs the deterministic generation-resolution fixed point. It rechecks
@@ -101,7 +115,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrResolve, err)
 	}
-	manifestSnapshot, currentManifest, err := loadManifest(module.Path())
+	manifestSnapshot, _, err := loadManifest(module.Path())
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -121,13 +135,26 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	composition, err := applicationmeta.Compose(dependencyManifests, currentManifest, func(pluginID string) (kernelmanifest.Config, bool) {
+	schemaLookup := func(pluginID string) (kernelmanifest.Config, bool) {
 		plugin, exists := inventory.ByID(pluginID)
 		if !exists {
 			return kernelmanifest.Config{}, false
 		}
 		return plugin.Config(), true
-	})
+	}
+	previousBaseline, err := loadGeneratedDependencyBaseline(module.Path())
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	maintenance, err := applicationmeta.MaintainDependencyConfiguration(manifestSnapshot.data, previousBaseline, dependencyManifests, schemaLookup)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	currentManifest, err := applicationmeta.Parse(maintenance.Data())
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: maintained application manifest: %w", ErrResolve, err)
+	}
+	composition, err := applicationmeta.Compose(dependencyManifests, currentManifest, schemaLookup)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -168,5 +195,33 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		inventory:       inventory,
 		resolution:      resolution,
 		configs:         configs,
+		maintenance:     maintenance,
+		manifestSource:  manifestSnapshot.Data(),
 	}, nil
+}
+
+func loadGeneratedDependencyBaseline(moduleRoot string) (applicationmeta.DependencyBaseline, error) {
+	recovery, exists, err := generatedfiles.ReadApplicationManifestRecovery(moduleRoot)
+	if err != nil {
+		return applicationmeta.DependencyBaseline{}, fmt.Errorf("load generated dependency baseline recovery: %w", err)
+	}
+	if exists {
+		baseline, err := applicationgen.DecodeDependencyBaseline(recovery)
+		if err != nil {
+			return applicationmeta.DependencyBaseline{}, fmt.Errorf("load generated dependency baseline recovery: %w", err)
+		}
+		return baseline, nil
+	}
+	data, exists, err := readGeneratedApplicationManifest(moduleRoot)
+	if err != nil {
+		return applicationmeta.DependencyBaseline{}, fmt.Errorf("load generated dependency baseline: %w", err)
+	}
+	if !exists {
+		return applicationmeta.DependencyBaseline{}, nil
+	}
+	baseline, err := applicationgen.DecodeDependencyBaseline(data)
+	if err != nil {
+		return applicationmeta.DependencyBaseline{}, fmt.Errorf("load generated dependency baseline: %w", err)
+	}
+	return baseline, nil
 }

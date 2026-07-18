@@ -5,7 +5,6 @@ package applicationgen
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -369,58 +368,6 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		return generatedfiles.Output{}, fmt.Errorf("%w: finalize managed output: %w", ErrRender, err)
 	}
 	return output, nil
-}
-
-// RenderManifest combines the normalized Alias map with non-secret typed
-// dependency-configuration provenance. It never serializes configuration
-// values or Secret reference targets.
-func RenderManifest(aliasJSON []byte, composition applicationmeta.Composition) ([]byte, error) {
-	if !composition.Valid() {
-		return nil, fmt.Errorf("%w: dependency configuration composition is absent or invalid", ErrResolution)
-	}
-	var aliases struct {
-		CapabilityAliases json.RawMessage `json:"capability_aliases"`
-	}
-	if err := json.Unmarshal(aliasJSON, &aliases); err != nil || len(aliases.CapabilityAliases) == 0 || aliases.CapabilityAliases[0] != '[' {
-		return nil, fmt.Errorf("%w: final Alias manifest is invalid", ErrResolution)
-	}
-	type provenanceRecord struct {
-		Path    string   `json:"path"`
-		Digest  string   `json:"digest"`
-		Removed bool     `json:"removed,omitempty"`
-		Sources []string `json:"sources"`
-	}
-	type documentReference struct {
-		Path string `json:"path"`
-	}
-	records := composition.Provenance()
-	baseline := make([]provenanceRecord, len(records))
-	for index, record := range records {
-		baseline[index] = provenanceRecord{
-			Path:    record.Path(),
-			Digest:  record.Digest(),
-			Removed: record.Removed(),
-			Sources: record.Sources(),
-		}
-	}
-	document := struct {
-		CapabilityAliases json.RawMessage `json:"capability_aliases"`
-		Configuration     struct {
-			Mode                        string             `json:"mode"`
-			Root                        documentReference  `json:"root"`
-			DependencyCompositionDigest string             `json:"dependency_composition_digest"`
-			DependencyBaseline          []provenanceRecord `json:"dependency_baseline"`
-		} `json:"configuration"`
-	}{CapabilityAliases: aliases.CapabilityAliases}
-	document.Configuration.Mode = "default"
-	document.Configuration.Root = documentReference{Path: rootConfigurationPath}
-	document.Configuration.DependencyCompositionDigest = composition.DependencyDigest()
-	document.Configuration.DependencyBaseline = baseline
-	data, err := json.Marshal(document)
-	if err != nil {
-		return nil, err
-	}
-	return append(data, '\n'), nil
 }
 
 func validateAssemblyClosure(options Options, context generation.Context) error {

@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "files": [
     {
       "path": "generated/go/assembly/compatibility_gen.go",
@@ -19,7 +19,19 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:e8345e556c99ba56c4f4c6071d268cd27534832fcc67b3552031a11327157b9f"
+      "sha256": "sha256:0c943cb573d3253e89f3de0fd90b76bb610bcd367716165b336f6eca53056dca"
     }
-  ]
+  ],
+  "application_manifest": {
+    "capability_aliases": [],
+    "configuration": {
+      "version": 1,
+      "mode": "default",
+      "root": {
+        "path": "plystra.yaml"
+      },
+      "dependency_composition_digest": "sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130",
+      "dependency_baseline": []
+    }
+  }
 }

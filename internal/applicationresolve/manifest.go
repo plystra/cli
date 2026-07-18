@@ -15,6 +15,11 @@ import (
 
 const applicationManifestName = "plystra.yaml"
 
+const (
+	generatedApplicationManifestName = "generated/manifest.json"
+	maximumGeneratedManifestSize     = 16 << 20
+)
+
 // ManifestSnapshot is one bounded, non-symbolic plystra.yaml read together
 // with the filesystem identity needed to detect replacement during a longer
 // operation.
@@ -171,6 +176,74 @@ func ReadManifestSnapshot(moduleRoot string) (result ManifestSnapshot, snapshotE
 		file: after,
 		data: append([]byte(nil), data...),
 	}, nil
+}
+
+func readGeneratedApplicationManifest(moduleRoot string) (result []byte, exists bool, readErr error) {
+	absolute, err := filepath.Abs(moduleRoot)
+	if err != nil {
+		return nil, false, fmt.Errorf("resolve module root: %w", err)
+	}
+	root, err := os.OpenRoot(absolute)
+	if err != nil {
+		return nil, false, fmt.Errorf("open module root: %w", err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			readErr = errors.Join(readErr, fmt.Errorf("close module root: %w", err))
+		}
+	}()
+	generated, err := root.Lstat("generated")
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("inspect generated directory: %w", err)
+	}
+	if !generated.IsDir() || generated.Mode()&fs.ModeSymlink != 0 {
+		return nil, false, errors.New("generated directory is not a regular non-symbolic directory")
+	}
+	before, err := root.Lstat(filepath.FromSlash(generatedApplicationManifestName))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("inspect %s: %w", generatedApplicationManifestName, err)
+	}
+	if !before.Mode().IsRegular() || before.Mode()&fs.ModeSymlink != 0 {
+		return nil, false, fmt.Errorf("%s is not a regular non-symbolic file", generatedApplicationManifestName)
+	}
+	if before.Size() > maximumGeneratedManifestSize {
+		return nil, false, fmt.Errorf("%s exceeds %d bytes", generatedApplicationManifestName, maximumGeneratedManifestSize)
+	}
+	file, err := root.Open(filepath.FromSlash(generatedApplicationManifestName))
+	if err != nil {
+		return nil, false, fmt.Errorf("open %s: %w", generatedApplicationManifestName, err)
+	}
+	opened, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, false, fmt.Errorf("inspect opened %s: %w", generatedApplicationManifestName, err)
+	}
+	if !opened.Mode().IsRegular() || !sameFile(before, opened) {
+		_ = file.Close()
+		return nil, false, fmt.Errorf("%w: %s was replaced before open", ErrConcurrentChange, generatedApplicationManifestName)
+	}
+	data, dataErr := io.ReadAll(io.LimitReader(file, maximumGeneratedManifestSize+1))
+	closeErr := file.Close()
+	if dataErr != nil {
+		return nil, false, fmt.Errorf("read %s: %w", generatedApplicationManifestName, dataErr)
+	}
+	if closeErr != nil {
+		return nil, false, fmt.Errorf("close %s: %w", generatedApplicationManifestName, closeErr)
+	}
+	after, err := root.Lstat(filepath.FromSlash(generatedApplicationManifestName))
+	if err != nil || !sameFile(opened, after) {
+		return nil, false, fmt.Errorf("%w: %s changed while it was read", ErrConcurrentChange, generatedApplicationManifestName)
+	}
+	if len(data) > maximumGeneratedManifestSize {
+		return nil, false, fmt.Errorf("%s exceeds %d bytes", generatedApplicationManifestName, maximumGeneratedManifestSize)
+	}
+	return append([]byte(nil), data...), true, nil
 }
 
 func sameManifestSnapshot(left, right ManifestSnapshot) bool {

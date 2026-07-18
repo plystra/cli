@@ -71,6 +71,19 @@ type Composition struct {
 	prepared         bool
 }
 
+// DependencyBaseline returns the validated non-secret dependency provenance
+// needed for schema-aware current-project maintenance.
+func (c Composition) DependencyBaseline() DependencyBaseline {
+	if !c.Valid() {
+		return DependencyBaseline{}
+	}
+	return DependencyBaseline{
+		records:  c.Provenance(),
+		digest:   c.dependencyDigest,
+		prepared: true,
+	}
+}
+
 // Valid reports whether the value was produced by Compose.
 func (c Composition) Valid() bool {
 	return c.prepared && validCompositionDigest(c.dependencyDigest)
@@ -557,15 +570,7 @@ func finalizeProvenance(records map[string]*provenanceRecord) []Provenance {
 	for _, record := range records {
 		result = append(result, Provenance{path: record.path, digest: record.digest, removed: record.removed, sources: sortedSet(record.sources)})
 	}
-	sort.Slice(result, func(left, right int) bool {
-		if result[left].path != result[right].path {
-			return result[left].path < result[right].path
-		}
-		if result[left].removed != result[right].removed {
-			return !result[left].removed
-		}
-		return result[left].digest < result[right].digest
-	})
+	sortProvenance(result)
 	return result
 }
 

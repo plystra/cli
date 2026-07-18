@@ -68,7 +68,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	applicationManifest := readFile(t, root, "generated/manifest.json")
 	for _, required := range []string{
 		`"capability_aliases":[]`,
-		`"configuration":{"mode":"default"`,
+		`"configuration":{"version":1,"mode":"default"`,
 		`"root":{"path":"plystra.yaml"}`,
 		`"dependency_composition_digest":"sha256:`,
 		`"dependency_baseline":[]`,
@@ -112,6 +112,109 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	if err != nil || !clean.Report().Clean() {
 		t.Fatalf("clean check = %#v, %v", clean.Report().Changes(), err)
 	}
+}
+
+func TestGenerateChecksAndRepairsDependencyCompositionDriftTransactionally(t *testing.T) {
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	dependencyRoot := filepath.Join(root, "platform")
+	writeModule(t, dependencyRoot, "example.com/platform", "")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities:\n  require: [kernel.health/v1]\n")
+	writeApplicationModule(t, appRoot, "example.com/acme/composed")
+	goModPath := filepath.Join(appRoot, "go.mod")
+	goMod := string(readAbsoluteFile(t, goModPath)) + fmt.Sprintf("\nrequire example.com/platform v1.0.0\n\nreplace example.com/platform => %s\n", filepath.ToSlash(dependencyRoot))
+	writeFile(t, goModPath, goMod)
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# shared application settings\nhttp:\n  address: \":8080\" # keep process comment\ncapabilities:\n  require: []\n")
+	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+	noValidation := func(_ context.Context, _ string) error { return nil }
+
+	initial, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       appRoot,
+		Environment: environment,
+		Validate:    noValidation,
+	})
+	if err != nil || !initial.ConfigurationChanged() || !initial.Report().Clean() {
+		t.Fatalf("initial Generate = changed %t, report %#v, %v", initial.ConfigurationChanged(), initial.Report().Changes(), err)
+	}
+	initialManifest := readFile(t, appRoot, "plystra.yaml")
+	for _, required := range [][]byte{[]byte("kernel.health/v1"), []byte("# shared application settings"), []byte("# keep process comment")} {
+		if !bytes.Contains(initialManifest, required) {
+			t.Fatalf("initial maintained manifest omits %q:\n%s", required, initialManifest)
+		}
+	}
+	beforeDrift := snapshotTree(t, appRoot)
+	generatedBefore := snapshotGenerated(t, appRoot)
+
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities:\n  require: [kernel.info/v1]\n")
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       appRoot,
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil || !checked.Checked() || !checked.ConfigurationChanged() {
+		t.Fatalf("drift check = checked %t, configuration changed %t, report %#v, %v", checked.Checked(), checked.ConfigurationChanged(), checked.Report().Changes(), err)
+	}
+	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, beforeDrift) {
+		t.Fatalf("dependency-composition check mutated application:\nbefore: %#v\nafter:  %#v", beforeDrift, after)
+	}
+
+	validationFailure := errors.New("reject recomposed application")
+	_, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       appRoot,
+		Environment: environment,
+		Validate: func(_ context.Context, _ string) error {
+			return validationFailure
+		},
+	})
+	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, validationFailure) {
+		t.Fatalf("recomposition validation failure = %v", err)
+	}
+	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, beforeDrift) {
+		t.Fatalf("failed recomposition changed application:\nbefore: %#v\nafter:  %#v", beforeDrift, after)
+	}
+
+	concurrentManifest := append(append([]byte(nil), initialManifest...), []byte("# concurrent user comment\n")...)
+	_, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       appRoot,
+		Environment: environment,
+		Validate: func(_ context.Context, _ string) error {
+			writeFile(t, filepath.Join(appRoot, "plystra.yaml"), string(concurrentManifest))
+			return nil
+		},
+	})
+	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
+		t.Fatalf("concurrent recomposition edit = %v", err)
+	}
+	if current := readFile(t, appRoot, "plystra.yaml"); !bytes.Equal(current, concurrentManifest) {
+		t.Fatalf("concurrent manifest edit was overwritten:\n%s", current)
+	}
+	if after := snapshotGenerated(t, appRoot); !reflect.DeepEqual(after, generatedBefore) {
+		t.Fatalf("generated rollback after concurrent configuration edit:\nbefore: %#v\nafter:  %#v", generatedBefore, after)
+	}
+	cleanupRecoveryTransactions(t, appRoot)
+
+	installed, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       appRoot,
+		Environment: environment,
+		Validate:    noValidation,
+	})
+	if err != nil || !installed.ConfigurationChanged() || !installed.Report().Clean() {
+		t.Fatalf("install recomposition = changed %t, report %#v, %v", installed.ConfigurationChanged(), installed.Report().Changes(), err)
+	}
+	updated := readFile(t, appRoot, "plystra.yaml")
+	for _, required := range [][]byte{[]byte("kernel.info/v1"), []byte("# shared application settings"), []byte("# keep process comment"), []byte("# concurrent user comment")} {
+		if !bytes.Contains(updated, required) {
+			t.Fatalf("updated manifest omits %q:\n%s", required, updated)
+		}
+	}
+	if bytes.Contains(updated, []byte("kernel.health/v1")) {
+		t.Fatalf("updated manifest retained disappeared dependency requirement:\n%s", updated)
+	}
+	clean, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: appRoot, Check: true, Environment: environment})
+	if err != nil || clean.ConfigurationChanged() || !clean.Report().Clean() {
+		t.Fatalf("clean composed check = changed %t, report %#v, %v", clean.ConfigurationChanged(), clean.Report().Changes(), err)
+	}
+	assertNoTransactions(t, appRoot)
 }
 
 func TestGenerateRejectsOrdinaryGoModuleWithoutProjectMarker(t *testing.T) {
@@ -836,6 +939,19 @@ func assertNoTransactions(t testing.TB, root string) {
 		matches, err := filepath.Glob(filepath.Join(root, pattern))
 		if err != nil || len(matches) != 0 {
 			t.Fatalf("transaction matches for %s = %v, %v", pattern, matches, err)
+		}
+	}
+}
+
+func cleanupRecoveryTransactions(t testing.TB, root string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(root, ".plystra-files-*"))
+	if err != nil {
+		t.Fatalf("glob recovery transactions: %v", err)
+	}
+	for _, match := range matches {
+		if err := os.RemoveAll(match); err != nil {
+			t.Fatalf("remove recovery transaction %s: %v", match, err)
 		}
 	}
 }

@@ -104,17 +104,29 @@ func Check(rootPath string, output Output) (Report, error) {
 // application, and rolls back on error or panic. Unowned and modified-obsolete
 // files are preserved and remain visible as unexpected drift.
 func Install(rootPath string, output Output, validate func(root string) error) (Report, error) {
-	return install(rootPath, output, validate, false)
+	return install(rootPath, output, nil, validate, false)
 }
 
 // InstallStrict behaves like Install but rejects every unexpected unowned or
 // modified-obsolete path. The path is preserved while all managed writes and
 // removals are rolled back.
 func InstallStrict(rootPath string, output Output, validate func(root string) error) (Report, error) {
-	return install(rootPath, output, validate, true)
+	return install(rootPath, output, nil, validate, true)
 }
 
-func install(rootPath string, output Output, validate func(root string) error, rejectUnexpected bool) (Report, error) {
+// InstallWithWrites installs user-authored transaction writes together with
+// the generated tree. Additional writes must remain outside generated/ and
+// receive the same validation and rollback boundary.
+func InstallWithWrites(rootPath string, output Output, additional []atomicfs.Write, validate func(root string) error) (Report, error) {
+	return install(rootPath, output, additional, validate, false)
+}
+
+// InstallStrictWithWrites combines InstallStrict and InstallWithWrites.
+func InstallStrictWithWrites(rootPath string, output Output, additional []atomicfs.Write, validate func(root string) error) (Report, error) {
+	return install(rootPath, output, additional, validate, true)
+}
+
+func install(rootPath string, output Output, additional []atomicfs.Write, validate func(root string) error, rejectUnexpected bool) (Report, error) {
 	if validate == nil {
 		return Report{}, fmt.Errorf("%w: validation callback is nil", ErrInstall)
 	}
@@ -152,6 +164,23 @@ func install(rootPath string, output Output, validate func(root string) error, r
 		return state.report, fmt.Errorf("%w: %w: %s is not a regular file", ErrInstall, ErrManifest, ManifestPath)
 	case !bytes.Equal(manifest.data, output.manifestJSON):
 		writes = append(writes, atomicfs.Write{Path: ManifestPath, Data: output.manifestJSON, ExpectedData: manifest.data})
+	}
+	for index, write := range additional {
+		if write.Path == "generated" || strings.HasPrefix(write.Path, "generated/") {
+			return state.report, fmt.Errorf("%w: additional write[%d] targets CLI-owned path %q", ErrInstall, index, write.Path)
+		}
+		expectedData := write.ExpectedData
+		if expectedData != nil {
+			expectedData = append(make([]byte, 0, len(expectedData)), expectedData...)
+		}
+		writes = append(writes, atomicfs.Write{
+			Path:               write.Path,
+			Data:               append([]byte(nil), write.Data...),
+			Mode:               write.Mode,
+			MustNotExist:       write.MustNotExist,
+			ParentMustNotExist: write.ParentMustNotExist,
+			ExpectedData:       expectedData,
+		})
 	}
 
 	removes := make([]atomicfs.Remove, 0)
@@ -354,17 +383,9 @@ func decodePreviousManifest(actual map[string]actualFile) (map[string]string, er
 	if !file.mode.IsRegular() || file.mode&fs.ModeSymlink != 0 {
 		return nil, fmt.Errorf("%w: %s is not a regular file", ErrManifest, ManifestPath)
 	}
-	decoder := json.NewDecoder(bytes.NewReader(file.data))
-	decoder.DisallowUnknownFields()
-	var document manifestDocument
-	if err := decoder.Decode(&document); err != nil {
-		return nil, fmt.Errorf("%w: decode %s: %v", ErrManifest, ManifestPath, err)
-	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("%w: %s contains trailing JSON", ErrManifest, ManifestPath)
-	}
-	if document.Version != manifestVersion || document.Files == nil {
-		return nil, fmt.Errorf("%w: %s must use version %d with a files array", ErrManifest, ManifestPath, manifestVersion)
+	document, err := decodeManifestDocument(file.data)
+	if err != nil {
+		return nil, err
 	}
 	previous := make(map[string]string, len(document.Files))
 	for index, record := range document.Files {
@@ -380,6 +401,108 @@ func decodePreviousManifest(actual map[string]actualFile) (map[string]string, er
 		previous[record.Path] = record.SHA256
 	}
 	return previous, nil
+}
+
+func decodeManifestDocument(data []byte) (manifestDocument, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var document manifestDocument
+	if err := decoder.Decode(&document); err != nil {
+		return manifestDocument{}, fmt.Errorf("%w: decode %s: %v", ErrManifest, ManifestPath, err)
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return manifestDocument{}, fmt.Errorf("%w: %s contains trailing JSON", ErrManifest, ManifestPath)
+	}
+	if document.Version != manifestVersion || document.Files == nil {
+		return manifestDocument{}, fmt.Errorf("%w: %s must use version %d with a files array", ErrManifest, ManifestPath, manifestVersion)
+	}
+	if len(document.ApplicationManifest) != 0 && !json.Valid(document.ApplicationManifest) {
+		return manifestDocument{}, fmt.Errorf("%w: %s application_manifest is invalid JSON", ErrManifest, ManifestPath)
+	}
+	return document, nil
+}
+
+// ReadApplicationManifestRecovery returns the last generated application
+// manifest snapshot recorded in the ownership manifest. It allows ordinary
+// managed-file drift to be repaired without discarding dependency ownership
+// provenance. Missing generated ownership state is not an error.
+func ReadApplicationManifestRecovery(rootPath string) (result []byte, exists bool, readErr error) {
+	absoluteRoot, err := filepath.Abs(rootPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: resolve application root: %w", ErrManifest, err)
+	}
+	root, err := os.OpenRoot(absoluteRoot)
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: open application root: %w", ErrManifest, err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			readErr = errors.Join(readErr, fmt.Errorf("%w: close application root: %w", ErrManifest, err))
+		}
+	}()
+	generated, err := root.Lstat("generated")
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: inspect generated directory: %v", ErrManifest, err)
+	}
+	if !generated.IsDir() || generated.Mode()&fs.ModeSymlink != 0 {
+		return nil, false, fmt.Errorf("%w: generated directory is not regular and non-symbolic", ErrManifest)
+	}
+	manifestPath := filepath.FromSlash(ManifestPath)
+	before, err := root.Lstat(manifestPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: inspect %s: %v", ErrManifest, ManifestPath, err)
+	}
+	if !before.Mode().IsRegular() || before.Mode()&fs.ModeSymlink != 0 || before.Size() > maximumManifestBytes {
+		return nil, false, fmt.Errorf("%w: %s is not a bounded regular non-symbolic file", ErrManifest, ManifestPath)
+	}
+	file, err := root.Open(manifestPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: open %s: %v", ErrManifest, ManifestPath, err)
+	}
+	opened, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, false, fmt.Errorf("%w: inspect opened %s: %v", ErrManifest, ManifestPath, err)
+	}
+	if !sameManifestFile(before, opened) {
+		_ = file.Close()
+		return nil, false, fmt.Errorf("%w: %w: %s was replaced before open", ErrManifest, atomicfs.ErrConcurrentChange, ManifestPath)
+	}
+	data, dataErr := io.ReadAll(io.LimitReader(file, maximumManifestBytes+1))
+	closeErr := file.Close()
+	if dataErr != nil {
+		return nil, false, fmt.Errorf("%w: read %s: %v", ErrManifest, ManifestPath, dataErr)
+	}
+	if closeErr != nil {
+		return nil, false, fmt.Errorf("%w: close %s: %v", ErrManifest, ManifestPath, closeErr)
+	}
+	if len(data) > maximumManifestBytes {
+		return nil, false, fmt.Errorf("%w: %s exceeds %d bytes", ErrManifest, ManifestPath, maximumManifestBytes)
+	}
+	after, err := root.Lstat(manifestPath)
+	if err != nil || !sameManifestFile(opened, after) {
+		return nil, false, fmt.Errorf("%w: %w: %s changed while it was read", ErrManifest, atomicfs.ErrConcurrentChange, ManifestPath)
+	}
+	document, err := decodeManifestDocument(data)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(document.ApplicationManifest) == 0 {
+		return nil, false, nil
+	}
+	return append([]byte(nil), document.ApplicationManifest...), true, nil
+}
+
+func sameManifestFile(left, right fs.FileInfo) bool {
+	return left != nil && right != nil && left.Mode().IsRegular() && right.Mode().IsRegular() &&
+		left.Mode() == right.Mode() && left.Size() == right.Size() &&
+		left.ModTime().Equal(right.ModTime()) && os.SameFile(left, right)
 }
 
 func classify(output Output, state inspectedState) Report {

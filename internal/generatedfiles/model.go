@@ -17,8 +17,9 @@ import (
 const (
 	// ManifestPath is the application-relative ownership manifest. Its own
 	// path is implicit because a file cannot contain its own stable digest.
-	ManifestPath    = "generated/.plystra-manifest.json"
-	manifestVersion = 1
+	ManifestPath            = "generated/.plystra-manifest.json"
+	ApplicationManifestPath = "generated/manifest.json"
+	manifestVersion         = 2
 )
 
 var (
@@ -83,6 +84,12 @@ func NewOutput(files []File) (Output, error) {
 	document := manifestDocument{Version: manifestVersion, Files: make([]manifestRecord, len(owned))}
 	for index, file := range owned {
 		document.Files[index] = manifestRecord{Path: file.path, SHA256: digest(file.data)}
+		if file.path == ApplicationManifestPath {
+			if !json.Valid(file.data) {
+				return Output{}, fmt.Errorf("%w: %s is not valid JSON", ErrOutput, ApplicationManifestPath)
+			}
+			document.ApplicationManifest = append(json.RawMessage(nil), file.data...)
+		}
 	}
 	manifestJSON, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
@@ -111,8 +118,9 @@ func (o Output) ManifestJSON() []byte { return append([]byte(nil), o.manifestJSO
 func (o Output) valid() bool { return o.prepared && len(o.manifestJSON) != 0 }
 
 type manifestDocument struct {
-	Version int              `json:"version"`
-	Files   []manifestRecord `json:"files"`
+	Version             int              `json:"version"`
+	Files               []manifestRecord `json:"files"`
+	ApplicationManifest json.RawMessage  `json:"application_manifest,omitempty"`
 }
 
 type manifestRecord struct {

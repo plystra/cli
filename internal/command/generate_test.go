@@ -108,6 +108,55 @@ replace github.com/plystra/kernel => %s
 	assertNoCommandTransactions(t, root)
 }
 
+func TestRunGenerateCheckReportsDependencyCompositionDriftWithoutMutation(t *testing.T) {
+	root := t.TempDir()
+	applicationRoot := filepath.Join(root, "application")
+	dependencyRoot := filepath.Join(root, "platform")
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+
+	writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), "module example.com/platform\n\ngo 1.26\n")
+	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities:\n  require: [kernel.health/v1]\n")
+	goMod := fmt.Sprintf(`module example.com/acme/composed
+
+go 1.26
+
+require (
+	example.com/platform v0.0.0
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace example.com/platform => %s
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(dependencyRoot), filepath.ToSlash(kernelRoot))
+	writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), goMod)
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("ReadFile(go.sum): %v", err)
+	}
+	writeCommandFile(t, filepath.Join(applicationRoot, "go.sum"), string(goSum))
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "capabilities:\n  require: []\n")
+	environment := commandGoEnvironment()
+
+	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, applicationRoot, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/composed in "+applicationRoot+"\n" {
+		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities:\n  require: [kernel.info/v1]\n")
+	before := commandTree(t, applicationRoot)
+
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, applicationRoot, environment)
+	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed plystra.yaml (dependency composition)\n") {
+		t.Fatalf("composition check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, before) {
+		t.Fatalf("composition check mutated application:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
 func TestRunGenerateBuildsUnrequiredLocalCapabilityDeveloperSurfaces(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)

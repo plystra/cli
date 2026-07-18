@@ -102,6 +102,16 @@ non-secret dependency composition digest and path/digest/removal/source
 baseline. An explicit tombstone has removed: true; the manifest never contains
 raw Plugin configuration or Secret reference targets.
 
+Plystra generate maintains root plystra.yaml with a typed three-way update from
+the previous dependency baseline, the authored current file, and the newly
+resolved dependency baseline. It preserves comments, explicit current-Project
+values, and exact tombstones; introduces new inherited declarations; and
+removes inherited declarations that disappeared. A hand-deleted inherited
+value is ambiguous, so express that decision with the field's sparse removal or
+null tombstone. Configuration and generated output share one rollback boundary.
+Plystra generate --check reports dependency-composition drift without writing
+either surface.
+
 Remove only exact inherited declarations with sparse edits and null
 tombstones:
 

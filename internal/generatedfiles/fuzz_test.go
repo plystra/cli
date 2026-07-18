@@ -1,6 +1,7 @@
 package generatedfiles
 
 import (
+	"encoding/json"
 	"io/fs"
 	"testing"
 )
@@ -28,6 +29,9 @@ func FuzzManagedOutputPathsAndBytes(f *testing.F) {
 		}
 		output, err := NewOutput([]File{file})
 		if err != nil {
+			if filePath == ApplicationManifestPath && !json.Valid(data) {
+				return
+			}
 			t.Fatalf("NewOutput accepted NewFile then failed: %v", err)
 		}
 		if len(output.Files()) != 1 || output.Files()[0].Path() != filePath || len(output.ManifestJSON()) == 0 {
@@ -42,10 +46,10 @@ func FuzzManagedOutputPathsAndBytes(f *testing.F) {
 
 func FuzzOwnershipManifestDecoder(f *testing.F) {
 	for _, seed := range [][]byte{
-		[]byte(`{"version":1,"files":[]}`),
-		[]byte(`{"version":1,"files":[{"path":"generated/a","sha256":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}`),
 		[]byte(`{"version":2,"files":[]}`),
-		[]byte(`{"version":1,"files":null}`),
+		[]byte(`{"version":2,"files":[{"path":"generated/a","sha256":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}`),
+		[]byte(`{"version":1,"files":[]}`),
+		[]byte(`{"version":2,"files":null}`),
 		[]byte(`not-json`),
 	} {
 		f.Add(seed)

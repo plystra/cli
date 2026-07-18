@@ -146,7 +146,7 @@ replace example.com/providers => ../providers
 	if !first.Composition().Valid() || first.Composition().DependencyDigest() == "" || len(first.Composition().Provenance()) == 0 {
 		t.Fatalf("Composition = %#v", first.Composition())
 	}
-	if address, exists := first.Manifest().HTTPAddress(); !exists || address != ":8080" || first.Manifest().StartupTimeout() != applicationmeta.DefaultStartupTimeout || len(first.CurrentManifest().HTTPExposures()) != 0 || len(first.Manifest().HTTPExposures()) != 1 {
+	if address, exists := first.Manifest().HTTPAddress(); !exists || address != ":8080" || first.Manifest().StartupTimeout() != applicationmeta.DefaultStartupTimeout || len(first.CurrentManifest().HTTPExposures()) != 1 || len(first.Manifest().HTTPExposures()) != 1 || !first.ConfigurationMaintenance().Changed() {
 		t.Fatalf("composed/current manifests = effective %#v, current %#v", first.Manifest(), first.CurrentManifest())
 	}
 	if got := pluginSummaries(plugins); !reflect.DeepEqual(got, []string{

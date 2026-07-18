@@ -166,12 +166,16 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			_, _ = fmt.Fprintf(stderr, "%v\n", err)
 			return 1
 		}
-		if !result.Report().Clean() {
+		configurationDrift := result.Checked() && result.ConfigurationChanged()
+		if configurationDrift || !result.Report().Clean() {
 			heading := "generated output remains inconsistent after installation"
 			if result.Checked() {
 				heading = "generated output is not current"
+				if configurationDrift {
+					heading = "Project configuration or generated output is not current"
+				}
 			}
-			writeGenerationReport(stderr, heading, result.Report())
+			writeGenerationReport(stderr, heading, configurationDrift, result.Report())
 			return 1
 		}
 		if result.Checked() {
@@ -221,8 +225,11 @@ func parseGenerateArguments(arguments []string) (bool, bool) {
 	}
 }
 
-func writeGenerationReport(writer io.Writer, heading string, report generatedfiles.Report) {
+func writeGenerationReport(writer io.Writer, heading string, configurationDrift bool, report generatedfiles.Report) {
 	_, _ = fmt.Fprintf(writer, "%s:\n", heading)
+	if configurationDrift {
+		_, _ = io.WriteString(writer, "  changed plystra.yaml (dependency composition)\n")
+	}
 	for _, change := range report.Changes() {
 		_, _ = fmt.Fprintf(writer, "  %s %s\n", change.Kind(), change.Path())
 	}

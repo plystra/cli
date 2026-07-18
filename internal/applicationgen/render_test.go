@@ -110,7 +110,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		`"id":"health.status/v1"`,
 		`"target":"kernel.health/v1"`,
 		`"kind":"application"`,
-		`"configuration":{"mode":"default"`,
+		`"configuration":{"version":1,"mode":"default"`,
 		`"root":{"path":"plystra.yaml"}`,
 		`"dependency_composition_digest":"sha256:`,
 		`"path":"http.expose[\"diagnostics.internal/v1\"]"`,
@@ -127,6 +127,10 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		if strings.Contains(manifest, forbidden) {
 			t.Fatalf("Alias manifest contains forbidden value %q:\n%s", forbidden, manifest)
 		}
+	}
+	baseline, err := applicationgen.DecodeDependencyBaseline([]byte(manifest))
+	if err != nil || !baseline.Valid() || baseline.Digest() != options.Composition.DependencyDigest() || len(baseline.Records()) != len(options.Composition.Provenance()) {
+		t.Fatalf("DecodeDependencyBaseline = %#v, %v", baseline.Records(), err)
 	}
 	for _, file := range output.Files() {
 		if filepath.Ext(file.Path()) != ".go" {

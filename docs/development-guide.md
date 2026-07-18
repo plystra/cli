@@ -385,6 +385,16 @@ plystra generate
 plystra generate --check
 ```
 
+`plystra generate` compares the previous dependency baseline, the authored root
+configuration, and the newly resolved dependency baseline. The typed update
+keeps comments, explicit current-Project values, and exact removal tombstones;
+adds newly inherited declarations; and removes disappeared inherited values
+that were not retained locally. Deleting an inherited value by hand is
+ambiguous, so record the field-specific sparse removal or `null` tombstone
+instead. Configuration maintenance and generated output share one rollback
+boundary. `plystra generate --check` reports `changed plystra.yaml (dependency
+composition)` without modifying the configuration or generated tree.
+
 Inspect `generated/manifest.json` for the non-secret dependency composition
 digest and path/digest/removal/source baseline. An explicit tombstone has
 `"removed": true`; the manifest records provenance, not raw Plugin
