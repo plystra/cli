@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -104,127 +103,22 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	}
 }
 
-func TestGenerateChecksAndInstallsLibraryDeveloperSurfaces(t *testing.T) {
-	const modulePath = "example.com/acme/library"
+func TestGenerateRejectsOrdinaryGoModuleWithoutProjectMarker(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
-	writeApplicationModule(t, root, modulePath)
-	writePlugin(t, root, "business", "id: acme.library.business\nprovides: [email.send/v1]\n")
-	writeCapability(t, root, "business", "email.send/v1", `id: email.send/v1
-request:
-  to: {type: string, required: true}
-response:
-  accepted: {type: boolean, required: true}
-errors: []
-`)
-	writeFile(t, filepath.Join(root, "business", "plugin.go"), `package business
-
-import (
-	"context"
-
-	configuration "example.com/acme/library/generated/go/configuration"
-	contract "example.com/acme/library/generated/go/contracts/email/send/v1"
-)
-
-type Config = configuration.BusinessConfig
-type Plugin struct{}
-
-func New(_ Config) *Plugin { return &Plugin{} }
-
-func (*Plugin) Send(_ context.Context, request contract.Request) (contract.Response, error) {
-	return contract.Response{Accepted: request.To != ""}, nil
-}
-`)
-	verifyLibraryDeveloperSurfaces(t, root)
-}
-
-func TestGenerateLibraryDiscoversRequiredContractFromDirectDependency(t *testing.T) {
-	const (
-		modulePath     = "example.com/acme/consumer-library"
-		dependencyPath = "example.com/acme/catalog-library"
-	)
-	root := t.TempDir()
-	dependencyRoot := t.TempDir()
-	cliRoot := repositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
-	writeModule(t, dependencyRoot, dependencyPath, fmt.Sprintf(`require github.com/plystra/kernel v0.0.0
-
-replace github.com/plystra/kernel => %s
-`, filepath.ToSlash(kernelRoot)))
-	writePlugin(t, dependencyRoot, "catalog", "id: acme.catalog\nprovides: [catalog.lookup/v1]\n")
-	writeCapability(t, dependencyRoot, "catalog", "catalog.lookup/v1", `id: catalog.lookup/v1
-request:
-  key: {type: string, required: true}
-response:
-  value: {type: string, required: true}
-errors: [not_found]
-`)
-	writeModule(t, root, modulePath, fmt.Sprintf(`require (
-	%s v1.0.0
-	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/mod v0.38.0 // indirect
-)
-
-replace %s => %s
-
-replace github.com/plystra/kernel => %s
-`, dependencyPath, dependencyPath, filepath.ToSlash(dependencyRoot), filepath.ToSlash(kernelRoot)))
-	writeFile(t, filepath.Join(root, "go.sum"), string(readAbsoluteFile(t, filepath.Join(cliRoot, "go.sum"))))
-	writePlugin(t, root, "consumer", "id: acme.consumer\nrequires: [catalog.lookup/v1]\n")
-	writeFile(t, filepath.Join(root, "consumer", "plugin.go"), `package consumer
-
-import (
-	configuration "example.com/acme/consumer-library/generated/go/configuration"
-	dependencies "example.com/acme/consumer-library/generated/go/dependencies/consumer"
-)
-
-type Config = configuration.ConsumerConfig
-type Plugin struct{ dependencies dependencies.Dependencies }
-
-func New(_ Config, clients dependencies.Dependencies) *Plugin {
-	return &Plugin{dependencies: clients}
-}
-`)
-
-	environment := goEnvironment(nil)
+	writeApplicationModule(t, root, "example.com/acme/ordinary")
+	writePlugin(t, root, "business", "id: acme.ordinary.business\n")
 	before := snapshotTree(t, root)
-	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:       root,
-		Check:       true,
-		Environment: environment,
+	_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       filepath.Join(root, "business"),
+		Environment: goEnvironment(nil),
 	})
-	if err != nil {
-		t.Fatalf("Generate required dependency check: %v", err)
-	}
-	for _, filePath := range []string{
-		"generated/go/clients/catalog/lookup/v1/client_gen.go",
-		"generated/go/contracts/catalog/lookup/v1/contract_gen.go",
-		"generated/go/dependencies/consumer/dependencies_gen.go",
-	} {
-		if !slices.Contains(checked.Report().Missing(), filePath) {
-			t.Fatalf("missing files %v omit %s", checked.Report().Missing(), filePath)
-		}
+	if !errors.Is(err, applicationgenerate.ErrGenerate) || !strings.Contains(err.Error(), "has no root plystra.yaml") {
+		t.Fatalf("Generate ordinary module error = %v", err)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
-		t.Fatalf("library dependency check mutated module:\nbefore: %#v\nafter: %#v", before, after)
-	}
-	installed, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:       root,
-		Environment: environment,
-	})
-	if err != nil || !installed.Report().Clean() {
-		t.Fatalf("Generate required dependency = %#v, %v", installed.Report().Changes(), err)
-	}
-	for _, filePath := range []string{
-		"generated/go/clients/catalog/lookup/v1/client_gen.go",
-		"generated/go/contracts/catalog/lookup/v1/contract_gen.go",
-		"generated/go/dependencies/consumer/dependencies_gen.go",
-	} {
-		assertFileExists(t, root, filePath)
-	}
-	assertFileMissing(t, root, "generated/go/providers/catalog/lookup/v1/provider_gen.go")
-	if clean, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment}); err != nil || !clean.Report().Clean() {
-		t.Fatalf("required dependency Generate --check = %#v, %v", clean.Report().Changes(), err)
+		t.Fatalf("ordinary module generation mutated files:\nbefore: %#v\nafter: %#v", before, after)
 	}
 }
 
@@ -319,125 +213,6 @@ func (p *Plugin) Place(ctx context.Context, request ordercontract.Request) (orde
 	if clean, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment}); err != nil || !clean.Report().Clean() {
 		t.Fatalf("wired application Generate --check = %#v, %v", clean.Report().Changes(), err)
 	}
-}
-
-func verifyLibraryDeveloperSurfaces(t *testing.T, root string) {
-	environment := goEnvironment(nil)
-	before := snapshotTree(t, root)
-	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:       filepath.Join(root, "business"),
-		Check:       true,
-		Environment: environment,
-	})
-	if err != nil {
-		t.Fatalf("Generate library check: %v", err)
-	}
-	wantMissing := []string{
-		generatedfiles.ManifestPath,
-		"generated/go/assembly/compatibility_gen.go",
-		"generated/go/configuration/business_gen.go",
-		"generated/go/contracts/email/send/v1/contract_gen.go",
-		"generated/go/providers/email/send/v1/provider_gen.go",
-	}
-	if !reflect.DeepEqual(checked.Report().Missing(), wantMissing) {
-		t.Fatalf("library missing files = %v, want %v", checked.Report().Missing(), wantMissing)
-	}
-	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
-		t.Fatalf("library check mutated module:\nbefore: %#v\nafter:  %#v", before, after)
-	}
-
-	installed, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:       root,
-		Environment: environment,
-	})
-	if err != nil || !installed.Report().Clean() {
-		t.Fatalf("Generate library = %#v, %v", installed.Report().Changes(), err)
-	}
-	for _, filePath := range wantMissing {
-		assertFileExists(t, root, filePath)
-	}
-	for _, filePath := range []string{
-		"generated/manifest.json",
-		"generated/go/assembly/providers_gen.go",
-		"generated/go/bootstrap/bootstrap_gen.go",
-		"generated/go/clients/email/send/v1/client_gen.go",
-		"generated/go/invocation/email/send/v1/invocation_gen.go",
-	} {
-		assertFileMissing(t, root, filePath)
-	}
-	clean, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:       root,
-		Check:       true,
-		Environment: environment,
-	})
-	if err != nil || !clean.Report().Clean() {
-		t.Fatalf("clean library check = %#v, %v", clean.Report().Changes(), err)
-	}
-}
-
-func TestGenerateRejectsConflictingLibraryProviderContractsWithoutMutation(t *testing.T) {
-	t.Parallel()
-
-	root := t.TempDir()
-	writeApplicationModule(t, root, "example.com/acme/conflicting-library")
-	writePlugin(t, root, "first", "id: acme.library.first\nprovides: [email.send/v1]\n")
-	writePlugin(t, root, "second", "id: acme.library.second\nprovides: [email.send/v1]\n")
-	writeCapability(t, root, "first", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
-	writeCapability(t, root, "second", "email.send/v1", "id: email.send/v1\nrequest: {to: {type: string}}\nresponse: {}\nerrors: []\n")
-	before := snapshotTree(t, root)
-	_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:       root,
-		Check:       true,
-		Environment: goEnvironment(nil),
-	})
-	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, applicationgenerate.ErrLibraryGeneration) || !errors.Is(err, applicationgenerate.ErrLibraryContractConflict) {
-		t.Fatalf("Generate conflicting library = %v", err)
-	}
-	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
-		t.Fatalf("conflicting library generation mutated module:\nbefore: %#v\nafter:  %#v", before, after)
-	}
-}
-
-func TestGenerateLibraryRollsBackConcurrentDeclarationChange(t *testing.T) {
-	t.Parallel()
-
-	root := t.TempDir()
-	writeApplicationModule(t, root, "example.com/acme/concurrent-library")
-	manifestPath := filepath.Join(root, "business", "plugin.yaml")
-	initial := "id: acme.library.business\nconfig: {label: {type: string}}\n"
-	prepared := "id: acme.library.business\nconfig: {label: {type: integer}}\n"
-	concurrent := "id: acme.library.business\nconfig: {label: {type: boolean}}\n"
-	writePlugin(t, root, "business", initial)
-	environment := goEnvironment(nil)
-	noValidation := func(_ context.Context, _ string) error { return nil }
-	if result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:       root,
-		Environment: environment,
-		Validate:    noValidation,
-	}); err != nil || !result.Report().Clean() {
-		t.Fatalf("initial library Generate = %#v, %v", result.Report().Changes(), err)
-	}
-	generatedBefore := snapshotGenerated(t, root)
-
-	writeFile(t, manifestPath, prepared)
-	_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:       root,
-		Environment: environment,
-		Validate: func(_ context.Context, _ string) error {
-			writeFile(t, manifestPath, concurrent)
-			return nil
-		},
-	})
-	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
-		t.Fatalf("concurrent library declaration edit = %v", err)
-	}
-	if got := string(readAbsoluteFile(t, manifestPath)); got != concurrent {
-		t.Fatalf("concurrent library declaration edit was not preserved: %q", got)
-	}
-	if after := snapshotGenerated(t, root); !reflect.DeepEqual(after, generatedBefore) {
-		t.Fatalf("generated library tree changed after concurrent-edit rollback:\nbefore: %#v\nafter:  %#v", generatedBefore, after)
-	}
-	assertNoTransactions(t, root)
 }
 
 func TestGenerateRequiresDirectKernelDependency(t *testing.T) {

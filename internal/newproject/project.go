@@ -36,7 +36,6 @@ var (
 type Options struct {
 	Parent      string
 	ModulePath  string
-	Library     bool
 	Plugin      string
 	Git         bool
 	GitHubCI    bool
@@ -95,7 +94,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	}
 
 	err = atomicfs.CreateDirectory(target, func(stagingRoot string) error {
-		if err := populate(stagingRoot, options.ModulePath, name, options.Library, options.GitHubCI, options.Skills); err != nil {
+		if err := populate(stagingRoot, options.ModulePath, name, options.GitHubCI, options.Skills); err != nil {
 			return err
 		}
 		for _, arguments := range [][]string{{"mod", "download"}, {"mod", "tidy"}} {
@@ -115,7 +114,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		} else if err := gocommand.Run(ctx, gocommand.Options{Command: goCommand, Directory: stagingRoot, Environment: environment}, "test", "./..."); err != nil {
 			return err
 		}
-		if err := verifyModule(stagingRoot, options.ModulePath, options.Library); err != nil {
+		if err := verifyModule(stagingRoot, options.ModulePath); err != nil {
 			return err
 		}
 		if options.Git {
@@ -131,7 +130,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	return Result{modulePath: options.ModulePath, path: target}, nil
 }
 
-func populate(root, modulePath, name string, library, githubCI, skills bool) error {
+func populate(root, modulePath, name string, githubCI, skills bool) error {
 	compatibility, err := assemblygen.RenderCompatibility("assembly")
 	if err != nil {
 		return fmt.Errorf("render Kernel compatibility source: %w", err)
@@ -142,57 +141,51 @@ func populate(root, modulePath, name string, library, githubCI, skills bool) err
 		return fmt.Errorf("prepare Kernel compatibility source: %w", err)
 	}
 	managed = append(managed, compatibilityFile)
-	if !library {
-		invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
-			ModulePath:               modulePath,
-			ApplicationBuildIdentity: "initial-scaffold",
-			KernelModuleVersion:      KernelVersion,
-			DefaultTimeout:           applicationmeta.DefaultInvocationTimeout,
-		})
-		if err != nil {
-			return fmt.Errorf("render intrinsic-only canonical invocation source: %w", err)
-		}
-		invocationsFile, err := generatedfiles.NewFile(assemblygen.InvocationsPath, invocations)
-		if err != nil {
-			return fmt.Errorf("prepare intrinsic-only canonical invocation source: %w", err)
-		}
-		managed = append(managed, invocationsFile)
-		bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
-			ModulePath:            modulePath,
-			DefaultStartupTimeout: applicationmeta.DefaultStartupTimeout,
-		})
-		if err != nil {
-			return fmt.Errorf("render runtime bootstrap source: %w", err)
-		}
-		bootstrapFile, err := generatedfiles.NewFile(bootstrapgen.Path, bootstrap)
-		if err != nil {
-			return fmt.Errorf("prepare runtime bootstrap source: %w", err)
-		}
-		managed = append(managed, bootstrapFile)
-		providers, err := assemblygen.RenderProviders(modulePath, nil)
-		if err != nil {
-			return fmt.Errorf("render empty selected-provider source: %w", err)
-		}
-		providersFile, err := generatedfiles.NewFile(assemblygen.ProvidersPath, providers)
-		if err != nil {
-			return fmt.Errorf("prepare empty selected-provider source: %w", err)
-		}
-		managed = append(managed, providersFile)
-		aliasManifest, err := generatedfiles.NewFile("generated/manifest.json", []byte("{\"capability_aliases\":[]}\n"))
-		if err != nil {
-			return fmt.Errorf("prepare empty Alias manifest: %w", err)
-		}
-		managed = append(managed, aliasManifest)
+	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
+		ModulePath:               modulePath,
+		ApplicationBuildIdentity: "initial-scaffold",
+		KernelModuleVersion:      KernelVersion,
+		DefaultTimeout:           applicationmeta.DefaultInvocationTimeout,
+	})
+	if err != nil {
+		return fmt.Errorf("render intrinsic-only canonical invocation source: %w", err)
 	}
+	invocationsFile, err := generatedfiles.NewFile(assemblygen.InvocationsPath, invocations)
+	if err != nil {
+		return fmt.Errorf("prepare intrinsic-only canonical invocation source: %w", err)
+	}
+	managed = append(managed, invocationsFile)
+	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
+		ModulePath:            modulePath,
+		DefaultStartupTimeout: applicationmeta.DefaultStartupTimeout,
+	})
+	if err != nil {
+		return fmt.Errorf("render runtime bootstrap source: %w", err)
+	}
+	bootstrapFile, err := generatedfiles.NewFile(bootstrapgen.Path, bootstrap)
+	if err != nil {
+		return fmt.Errorf("prepare runtime bootstrap source: %w", err)
+	}
+	managed = append(managed, bootstrapFile)
+	providers, err := assemblygen.RenderProviders(modulePath, nil)
+	if err != nil {
+		return fmt.Errorf("render empty selected-provider source: %w", err)
+	}
+	providersFile, err := generatedfiles.NewFile(assemblygen.ProvidersPath, providers)
+	if err != nil {
+		return fmt.Errorf("prepare empty selected-provider source: %w", err)
+	}
+	managed = append(managed, providersFile)
+	aliasManifest, err := generatedfiles.NewFile("generated/manifest.json", []byte("{\"capability_aliases\":[]}\n"))
+	if err != nil {
+		return fmt.Errorf("prepare empty Alias manifest: %w", err)
+	}
+	managed = append(managed, aliasManifest)
 	generated, err := generatedfiles.NewOutput(managed)
 	if err != nil {
 		return fmt.Errorf("prepare initial generated output: %w", err)
 	}
-	readme := readmeTemplate
-	if library {
-		readme = libraryReadmeTemplate
-	}
-	readme = fmt.Sprintf(readme, name, modulePath)
+	readme := fmt.Sprintf(readmeTemplate, name, modulePath)
 	if githubCI {
 		readme += githubCIReadmeTemplate
 	}
@@ -218,9 +211,7 @@ func populate(root, modulePath, name string, library, githubCI, skills bool) err
 			projectFile{path: ".agents/skills/plystra/agents/openai.yaml", data: []byte(skillAgentTemplate)},
 		)
 	}
-	if !library {
-		files = append(files, projectFile{path: "plystra.yaml", data: []byte(plystraTemplate)})
-	}
+	files = append(files, projectFile{path: "plystra.yaml", data: []byte(plystraTemplate)})
 	for _, file := range generated.Files() {
 		files = append(files, projectFile{path: file.Path(), data: file.Data()})
 	}
@@ -356,7 +347,7 @@ func verifyChoicePath(root, relativePath string, expected, directory bool) error
 	return nil
 }
 
-func verifyModule(root, modulePath string, library bool) error {
+func verifyModule(root, modulePath string) error {
 	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
 		return fmt.Errorf("read generated go.mod: %w", err)
@@ -386,15 +377,6 @@ func verifyModule(root, modulePath string, library bool) error {
 		return errors.New("generated go.sum is empty or not a regular file")
 	}
 	configuration, err := os.Lstat(filepath.Join(root, "plystra.yaml"))
-	if library {
-		if err == nil {
-			return errors.New("library module contains plystra.yaml")
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("inspect library plystra.yaml: %w", err)
-		}
-		return nil
-	}
 	if err != nil {
 		return fmt.Errorf("inspect generated plystra.yaml: %w", err)
 	}

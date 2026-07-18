@@ -74,7 +74,7 @@ package. Important entry points are:
 | `internal/capabilityexpose/` | comment-preserving `plystra.yaml` exposure mutation |
 | `internal/applicationinput/` | bounded, immutable application inputs |
 | `internal/applicationresolve/` | complete provider and extension fixed point |
-| `internal/applicationgenerate/` | runnable and library generation transactions |
+| `internal/applicationgenerate/` | complete Plystra Project generation transactions |
 | `internal/aliasresolution/` | final application-local Alias map |
 | `internal/generation*` | extension activation, execution, lowering, and ordering |
 | `internal/*gen/` | typed generated surfaces |
@@ -235,7 +235,7 @@ Automation must answer all three choices explicitly:
 
 ```powershell
 plystra new example.com/acme/orders --no-git --no-github-ci --skills
-plystra new example.com/acme/contracts --library --no-git --no-github-ci --no-skills
+plystra new example.com/acme/contracts --no-git --no-github-ci --no-skills
 plystra new example.com/acme/orders --plugin catalog --git --github-ci --skills
 ```
 
@@ -245,18 +245,20 @@ Success is reported as:
 created example.com/acme/orders in <absolute-path>/orders
 ```
 
-A runnable module contains `plystra.yaml`; a library module does not. A new
-runnable module may validly contain zero local Plugins. Project creation also
-emits `.gitignore`, `.gitattributes`, a generated foundation, and the optional
-files selected by the user. It pins the exact Kernel version supported by that
-CLI build.
+Every Plystra Project contains mandatory root `plystra.yaml` and is
+independently runnable. A new Project may validly contain zero local Plugins,
+primarily distribute reusable Plugins, or obtain selected Providers from
+dependency Projects. Project creation also emits `.gitignore`,
+`.gitattributes`, a complete generated foundation, and the optional files
+selected by the user. It pins the exact Kernel version supported by that CLI
+build.
 
 If a non-interactive caller omits any choice, the command fails before creating
 the target. Repeated or contradictory choice flags also fail without mutation.
 
 ## Understand authored and CLI-owned files
 
-A populated runnable module normally looks like:
+A populated Plystra Project normally looks like:
 
 ```text
 orders/

@@ -187,7 +187,7 @@ func (*Plugin) Send(_ context.Context, request contract.Request) (contract.Respo
 	}
 }
 
-func TestRunGenerateSupportsNonRunnableLibraryModules(t *testing.T) {
+func TestRunGenerateBuildsCompleteProjectAssembly(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
 	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
@@ -209,6 +209,7 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("ReadFile(go.sum): %v", err)
 	}
 	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	writeCommandFile(t, filepath.Join(root, "email", "plugin.yaml"), "id: acme.library.email\nprovides: [email.send/v1]\n")
 	writeCommandFile(t, filepath.Join(root, "email", "capabilities", "email.send", "v1", "capability.yaml"), "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 	writeCommandFile(t, filepath.Join(root, "email", "plugin.go"), `package email
@@ -232,26 +233,23 @@ func (*Plugin) Send(_ context.Context, _ contract.Request) (contract.Response, e
 	environment := commandGoEnvironment()
 	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, filepath.Join(root, "email"), environment)
 	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/library in "+root+"\n" {
-		t.Fatalf("generate library = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+		t.Fatalf("generate Project = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	for _, name := range []string{
 		"generated/.plystra-manifest.json",
 		"generated/go/assembly/compatibility_gen.go",
+		"generated/go/assembly/providers_gen.go",
+		"generated/go/bootstrap/bootstrap_gen.go",
 		"generated/go/configuration/email_gen.go",
 		"generated/go/contracts/email/send/v1/contract_gen.go",
 		"generated/go/providers/email/send/v1/provider_gen.go",
+		"generated/manifest.json",
 	} {
 		assertCommandFile(t, root, name)
 	}
-	generated := commandTree(t, filepath.Join(root, "generated"))
-	for _, name := range []string{"manifest.json", "go/assembly/providers_gen.go", "go/bootstrap/bootstrap_gen.go"} {
-		if _, exists := generated[name]; exists {
-			t.Fatalf("library generation emitted runnable application surface generated/%s", name)
-		}
-	}
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
 	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/library in "+root+"\n" {
-		t.Fatalf("clean library check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+		t.Fatalf("clean Project check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 }
 

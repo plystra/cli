@@ -1,5 +1,5 @@
 // Package applicationgenerate resolves, renders, checks, and transactionally
-// installs one complete filesystem-backed Plystra module generation result.
+// installs one complete filesystem-backed Plystra Project generation result.
 package applicationgenerate
 
 import (
@@ -9,8 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,12 +28,12 @@ import (
 
 var (
 	// ErrGenerate reports failure to resolve, render, check, install, or
-	// validate one generated Plystra module tree.
-	ErrGenerate = errors.New("generate Plystra module")
+	// validate one generated Plystra Project tree.
+	ErrGenerate = errors.New("generate Plystra Project")
 	// ErrConcurrentChange reports module inputs or extension output that
 	// changed after the transaction's desired output was prepared.
 	ErrConcurrentChange = errors.New("plystra module changed during generation")
-	// ErrKernelDependency reports a runnable application that does not directly
+	// ErrKernelDependency reports a Plystra Project that does not directly
 	// select the Kernel Go Module used by its generated runtime.
 	ErrKernelDependency = errors.New("invalid application Kernel dependency")
 )
@@ -87,30 +85,14 @@ func (r Result) Report() generatedfiles.Report { return r.report }
 // Checked reports whether the operation was the read-only check mode.
 func (r Result) Checked() bool { return r.checked }
 
-// Generate resolves and renders the nearest Plystra Go Module. A runnable
-// module receives application-owned output; a library module receives only
-// module-owned developer surfaces. Check mode compares without mutation.
-// Install mode atomically installs desired files, validates the updated module,
-// and re-resolves inside the transaction so a concurrent generation-input edit
-// or nondeterministic extension result causes rollback.
+// Generate resolves and renders the nearest Plystra Project. Check mode
+// compares without mutation. Install mode atomically installs desired files,
+// validates the updated Project, and re-resolves inside the transaction so a
+// concurrent generation-input edit or nondeterministic extension result causes
+// rollback.
 func Generate(ctx context.Context, options Options) (Result, error) {
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: context is nil", ErrGenerate)
-	}
-	module, err := modulelocate.Find(options.Start)
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: locate module: %w", ErrGenerate, err)
-	}
-	_, manifestErr := os.Lstat(filepath.Join(module.Path(), "plystra.yaml"))
-	if errors.Is(manifestErr, os.ErrNotExist) {
-		result, err := generateLibrary(ctx, options, module)
-		if err != nil {
-			return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
-		}
-		return result, nil
-	}
-	if manifestErr != nil {
-		return Result{}, fmt.Errorf("%w: inspect plystra.yaml: %w", ErrGenerate, manifestErr)
 	}
 	prepared, err := prepare(ctx, options, options.Start)
 	if err != nil {

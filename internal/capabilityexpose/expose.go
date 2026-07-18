@@ -13,8 +13,8 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/capabilityid"
-	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/modulemutation"
+	"github.com/plystra/cli/internal/projectlocate"
 )
 
 var (
@@ -93,9 +93,9 @@ func Expose(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: parse exact Capability ID: %w", ErrExpose, err)
 	}
-	module, err := modulelocate.Find(options.Start)
+	module, err := projectlocate.Find(options.Start)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: locate application module: %w", ErrExpose, err)
+		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrExpose, err)
 	}
 	write, changed, err := ManifestWrite(module.Path(), id)
 	if err != nil {

@@ -21,6 +21,9 @@ func TestPrepareVisibleUsesExplicitDependencyCapabilitySources(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dependencyRoot, "go.mod"), []byte("module example.com/catalog\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(dependency go.mod): %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(dependencyRoot, "plystra.yaml"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(dependency plystra.yaml): %v", err)
+	}
 	writePlugin(t, dependencyRoot, "email", "id: catalog.email\nprovides: [email.send/v3]\n")
 	identifier := mustCapabilityID(t, "email.send/v3")
 	writeCapabilitySource(t, filepath.Join(dependencyRoot, "email"), identifier, []byte("id: email.send/v3\nrequest: {to: {type: string, required: true}}\nresponse: {}\nerrors: []\n"))
@@ -185,6 +188,9 @@ func createModule(t *testing.T) string {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/acme/app\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(go.mod): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "plystra.yaml"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(plystra.yaml): %v", err)
 	}
 	canonical, err := filepath.EvalSymlinks(root)
 	if err != nil {

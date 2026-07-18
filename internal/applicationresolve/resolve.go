@@ -1,5 +1,5 @@
 // Package applicationresolve constructs one complete resolved application from
-// the nearest runnable Plystra Go Module without mutating application input.
+// the nearest Plystra Project without mutating application input.
 package applicationresolve
 
 import (
@@ -16,6 +16,7 @@ import (
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/plugininventory"
+	"github.com/plystra/cli/internal/projectlocate"
 )
 
 var (
@@ -57,7 +58,7 @@ type Result struct {
 	configs      configurationresolve.Result
 }
 
-// Module returns the nearest runnable application Go Module.
+// Module returns the nearest Plystra Project Go Module.
 func (r Result) Module() modulelocate.Module { return r.module }
 
 // Manifest returns the normalized root application declaration.
@@ -86,9 +87,9 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: context is nil", ErrResolve)
 	}
-	module, err := modulelocate.Find(options.Start)
+	module, err := projectlocate.Find(options.Start)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: locate application module: %w", ErrResolve, err)
+		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrResolve, err)
 	}
 	manifestSnapshot, manifest, err := loadManifest(module.Path())
 	if err != nil {

@@ -17,10 +17,10 @@ import (
 	"github.com/plystra/cli/internal/generatedfiles"
 )
 
-func TestCreateCommitsCapabilityImplementationAndGeneratedLibrary(t *testing.T) {
+func TestCreateCommitsCapabilityImplementationAndGeneratedProject(t *testing.T) {
 	root := createBuildableAuthoringModule(t, "example.com/acme/library", "")
 	writePlugin(t, root, "records", "id: acme.library.records\n")
-	writeAuthoringFile(t, filepath.Join(root, "records", "plugin.go"), "package records\n\ntype Plugin struct{}\n")
+	writeAuthoringFile(t, filepath.Join(root, "records", "plugin.go"), "package records\n\ntype Plugin struct{}\n\nfunc New(_ ...any) *Plugin { return &Plugin{} }\n")
 	environment := visiblePlanEnvironment()
 
 	result, err := capabilitycreate.Create(t.Context(), capabilitycreate.AuthorOptions{
@@ -93,13 +93,14 @@ func TestCreateCommitsCapabilityImplementationAndGeneratedLibrary(t *testing.T) 
 func TestImplementCopiesVisibleDependencyContract(t *testing.T) {
 	catalogRoot := t.TempDir()
 	writeAuthoringFile(t, filepath.Join(catalogRoot, "go.mod"), "module example.com/catalog\n\ngo 1.26\n")
+	writeAuthoringFile(t, filepath.Join(catalogRoot, "plystra.yaml"), "{}\n")
 	writePlugin(t, catalogRoot, "email", "id: catalog.email\nprovides: [email.send/v1]\n")
 	schema := "id: email.send/v1\nextensions: {delivery: {idempotent: true}}\nrequest: {to: {type: string, required: true}}\nresponse: {accepted: {type: boolean, required: true}}\nerrors: [invalid_recipient]\n"
 	writeAuthoringFile(t, filepath.Join(catalogRoot, "email", "capabilities", "email.send", "v1", "capability.yaml"), schema)
 
 	root := createBuildableAuthoringModule(t, "example.com/acme/app", catalogRoot)
 	writePlugin(t, root, "mailer", "id: acme.app.mailer\n")
-	writeAuthoringFile(t, filepath.Join(root, "mailer", "plugin.go"), "package mailer\n\ntype Plugin struct{}\n")
+	writeAuthoringFile(t, filepath.Join(root, "mailer", "plugin.go"), "package mailer\n\ntype Plugin struct{}\n\nfunc New(_ ...any) *Plugin { return &Plugin{} }\n")
 	environment := visiblePlanEnvironment()
 	result, err := capabilitycreate.Implement(t.Context(), capabilitycreate.AuthorOptions{
 		Options: capabilitycreate.Options{
@@ -130,7 +131,7 @@ func TestImplementCopiesVisibleDependencyContract(t *testing.T) {
 func TestAuthoringEnforcesActionAndExplicitVersionConfirmation(t *testing.T) {
 	root := createBuildableAuthoringModule(t, "example.com/acme/library", "")
 	writePlugin(t, root, "records", "id: acme.library.records\n")
-	writeAuthoringFile(t, filepath.Join(root, "records", "plugin.go"), "package records\n\ntype Plugin struct{}\n")
+	writeAuthoringFile(t, filepath.Join(root, "records", "plugin.go"), "package records\n\ntype Plugin struct{}\n\nfunc New(_ ...any) *Plugin { return &Plugin{} }\n")
 	environment := visiblePlanEnvironment()
 	base := capabilitycreate.Options{Start: root, Plugin: "records", Environment: environment}
 
@@ -161,7 +162,7 @@ func TestAuthoringEnforcesActionAndExplicitVersionConfirmation(t *testing.T) {
 func TestCreateRollsBackDeclarationsImplementationGenerationAndModuleMetadata(t *testing.T) {
 	root := createBuildableAuthoringModule(t, "example.com/acme/library", "")
 	writePlugin(t, root, "records", "id: acme.library.records\n")
-	writeAuthoringFile(t, filepath.Join(root, "records", "plugin.go"), "package records\n\ntype Plugin struct{}\n")
+	writeAuthoringFile(t, filepath.Join(root, "records", "plugin.go"), "package records\n\ntype Plugin struct{}\n\nfunc New(_ ...any) *Plugin { return &Plugin{} }\n")
 	before := snapshotAuthoringTree(t, root)
 	validationErr := errors.New("injected generated validation failure")
 	_, err := capabilitycreate.Create(t.Context(), capabilitycreate.AuthorOptions{
@@ -184,7 +185,7 @@ func TestCreateRollsBackDeclarationsImplementationGenerationAndModuleMetadata(t 
 func TestCreateRejectsUnexpectedGeneratedOutputWithoutMutation(t *testing.T) {
 	root := createBuildableAuthoringModule(t, "example.com/acme/library", "")
 	writePlugin(t, root, "records", "id: acme.library.records\n")
-	writeAuthoringFile(t, filepath.Join(root, "records", "plugin.go"), "package records\n\ntype Plugin struct{}\n")
+	writeAuthoringFile(t, filepath.Join(root, "records", "plugin.go"), "package records\n\ntype Plugin struct{}\n\nfunc New(_ ...any) *Plugin { return &Plugin{} }\n")
 	writeAuthoringFile(t, filepath.Join(root, "generated", "manual.txt"), "user-owned\n")
 	before := snapshotAuthoringTree(t, root)
 
@@ -229,6 +230,7 @@ require (
 replace github.com/plystra/kernel => %s
 %s`, modulePath, requireCatalog, filepath.ToSlash(kernelRoot), replaceCatalog)
 	writeAuthoringFile(t, filepath.Join(root, "go.mod"), goMod)
+	writeAuthoringFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
 	if err != nil {
 		t.Fatalf("read CLI go.sum: %v", err)

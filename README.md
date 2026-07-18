@@ -158,7 +158,7 @@ and other non-interactive callers must choose every option explicitly:
 
 ```powershell
 plystra new github.com/acme/my-app --git --github-ci --skills
-plystra new github.com/acme/email --library --no-git --no-github-ci --no-skills
+plystra new github.com/acme/email --no-git --no-github-ci --no-skills
 ```
 
 The independent flag pairs are `--git`/`--no-git`,
@@ -209,14 +209,14 @@ For a genuinely new name, creation reports conservative typo-like visible exact 
 
 Implementation searches local and explicit Go Module dependency contracts, requires exact provider-independent equality including normalized extension metadata, copies the canonical schema when the target plugin does not yet provide it, adds a compile-safe user-owned method only when absent, regenerates all affected module surfaces, tidies module metadata, and validates with `go test -mod=readonly ./...`. Repeating the command preserves an existing method byte-for-byte.
 
-In a runnable application, expose an existing exact canonical Capability or create and expose a new one in the same transaction:
+In a Plystra Project, expose an existing exact canonical Capability or create and expose a new one in the same transaction:
 
 ```powershell
 plystra capability expose records.create/v1
 plystra capability create records.update --plugin records --expose
 ```
 
-`capability expose` requires an exact `<capability-name>/vN` and updates the root `plystra.yaml` `http.expose` list before regenerating every affected Go, HTTP, JavaScript, documentation, assembly, and manifest surface. Repeating it is byte-idempotent when generated output is current. A library module without `plystra.yaml`, an absent visible contract or provider, unsafe or concurrently changed configuration, unexpected generated output, generation failure, untidy module state, or validation failure leaves the configuration and every generated or module-owned file unchanged. `capability create --expose` uses the same rollback boundary for the new schema, plugin declaration, implementation scaffold, application exposure, module metadata, and generated output.
+`capability expose` requires an exact `<capability-name>/vN` and updates the root `plystra.yaml` `http.expose` list before regenerating every affected Go, HTTP, JavaScript, documentation, assembly, and manifest surface. Repeating it is byte-idempotent when generated output is current. An ordinary Go Module without root `plystra.yaml`, an absent visible contract or provider, unsafe or concurrently changed configuration, unexpected generated output, generation failure, untidy module state, or validation failure leaves the configuration and every generated or module-owned file unchanged. `capability create --expose` uses the same rollback boundary for the new schema, plugin declaration, implementation scaffold, application exposure, module metadata, and generated output.
 
 Generation always emits the contract and provider interface for every Capability provided by a local plugin, even before the application requires that Capability. This keeps user-owned provider implementations buildable while they are being authored. Clients, invocation paths, HTTP adapters, SDK operations, documentation, provider selection, and Kernel registration remain requirement- and exposure-driven, so an unrequired local Capability does not enter the runnable application surface.
 
@@ -255,15 +255,15 @@ Mutating commands perform all derivable generation automatically. Build and gene
 
 ### Module generation
 
-From any directory inside a Plystra Go Module, install its complete current managed tree with:
+From any directory inside a Plystra Project, install its complete current managed tree with:
 
 ```powershell
 plystra generate
 ```
 
-For a runnable module, the command resolves the root `plystra.yaml`, explicit Go Module dependencies, canonical providers, selected generation extensions, generation-derived requirements, contributions, and Capability Aliases. It renders the application-owned Go, HTTP, JavaScript, documentation, assembly-compatibility, and manifest surfaces. For a library module without `plystra.yaml`, it renders module-owned Kernel compatibility, local plugin configuration, contracts and provider interfaces for locally provided Capabilities, plus contracts, clients, and immutable dependency sets for exact requirements visible through the module or its direct Go Module dependencies. Library generation does not emit application assembly, invocation paths, HTTP, SDK, or runtime bootstrap output.
+The command resolves the mandatory root `plystra.yaml`, explicit Go Module dependencies, canonical providers, selected generation extensions, generation-derived requirements, contributions, and Capability Aliases. It renders the complete Project-owned Go, HTTP, JavaScript, documentation, assembly-compatibility, manifest, invocation, and runtime-bootstrap surfaces. A Go Module without root `plystra.yaml` is an ordinary dependency and is rejected as a generation target.
 
-Both paths install output transactionally and run `go test -mod=readonly ./...` before commit. Runnable generation re-resolves the complete application, while library generation reindexes its declarations and rendered ownership snapshot; changed inputs or nondeterministic output roll back the transaction.
+Generation installs output transactionally, runs `go test -mod=readonly ./...`, and re-resolves the complete application before commit. Changed inputs or nondeterministic output roll back the transaction.
 
 Go subprocesses preserve an explicit `GOWORK` selection. An automatically discovered enclosing `go.work` remains active when it validly includes the nearest module; when it is valid but does not list that module, the CLI runs the subprocess with `GOWORK=off` so an unrelated parent workspace cannot redirect generation or validation. Malformed workspaces, missing `use` directories, and invalid used modules remain active so the Go tool reports the original workspace error instead of having it hidden.
 

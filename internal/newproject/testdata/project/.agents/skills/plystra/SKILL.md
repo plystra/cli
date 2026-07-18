@@ -12,19 +12,19 @@ The current Go Module path is example.com/acme/my-app. Read its go.mod before wr
 Inspect these authored inputs first:
 
 - go.mod and go.sum define module dependencies and versions.
-- plystra.yaml exists only in a runnable application module.
+- Root plystra.yaml is mandatory and identifies this Go Module as a Plystra Project.
 - Each direct child directory containing plugin.yaml is one local Plugin.
 - Each provided Capability declaration lives below its implementing Plugin.
 - README.md and Plugin README files may add module-specific instructions.
 
 Do not add a root plugins directory. Do not infer a Plugin from a Capability
-name. A runnable module may contain zero local Plugins. A library module has no
-plystra.yaml and generates reusable module surfaces without application
-assembly, HTTP adapters, runtime bootstrap, or a JavaScript application SDK.
+name. Every Plystra Project is independently runnable and may contain zero
+local Plugins, primarily distribute reusable Plugins, or obtain selected
+Providers from dependency Projects.
 
 ## Module and file ownership
 
-A typical runnable module evolves into this layout:
+A typical Plystra Project evolves into this layout:
 
     go.mod
     go.sum
@@ -84,13 +84,9 @@ generated.
 
 ## Create a module and a Plugin
 
-From the desired parent directory, create a runnable module interactively:
+From the desired parent directory, create a Plystra Project interactively:
 
     plystra new example.com/acme/app
-
-Create a non-runnable Plugin library with:
-
-    plystra new example.com/acme/plugins --library
 
 Inside an existing module, create a root-level Plugin:
 
@@ -102,11 +98,11 @@ Expected effects:
 - records/plugin.go receives Config, Plugin, and New(Config) declarations.
 - records/plugin_test.go and records/README.md are created.
 - generated/go/configuration/records_gen.go is created.
-- Runnable application assembly is regenerated when plystra.yaml exists.
+- Complete application assembly is regenerated for the Project.
 - The command formats, tidies, tests, and rolls back its own changes on failure.
 
 Do not expose a Plugin. Applications expose exact Capabilities. All local
-root-level Plugins in a runnable module participate in application resolution;
+root-level Plugins in a Plystra Project participate in application resolution;
 dependency-module Plugins are selected only when exact requirements need them.
 
 ## Create and implement a new Capability

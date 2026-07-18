@@ -32,10 +32,9 @@ const (
   plystra generate [--check]
 `
 	newUsage = `Usage:
-  plystra new <module-path> [--library] [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]
+  plystra new <module-path> [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]
 
 Options:
-  --library                 Create a non-runnable plugin Go Module.
   --plugin <name>           Create an initial root-level plugin.
   --git, --no-git           Initialize or omit a Git repository.
   --github-ci, --no-github-ci
@@ -118,7 +117,6 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		result, err := newproject.Create(ctx, newproject.Options{
 			Parent:      workingDirectory,
 			ModulePath:  options.modulePath,
-			Library:     options.library,
 			Plugin:      options.plugin,
 			Git:         choices.git,
 			GitHubCI:    choices.githubCI,
@@ -232,7 +230,6 @@ func writeGenerationReport(writer io.Writer, heading string, report generatedfil
 
 type newArguments struct {
 	modulePath string
-	library    bool
 	plugin     string
 	git        booleanChoice
 	githubCI   booleanChoice
@@ -263,11 +260,6 @@ func parseNewArguments(arguments []string) (newArguments, bool) {
 	pluginSet := false
 	for index := 2; index < len(arguments); index++ {
 		switch arguments[index] {
-		case "--library":
-			if result.library {
-				return newArguments{}, false
-			}
-			result.library = true
 		case "--plugin":
 			if pluginSet || index+1 >= len(arguments) || arguments[index+1] == "" || strings.HasPrefix(arguments[index+1], "--") {
 				return newArguments{}, false

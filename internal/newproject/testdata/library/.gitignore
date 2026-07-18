@@ -1,7 +1,0 @@
-/dist/
-/generated/sdk/javascript/node_modules/
-/generated/sdk/javascript/dist/
-.env
-.env.local
-go.work
-go.work.sum

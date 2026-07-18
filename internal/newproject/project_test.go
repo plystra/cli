@@ -127,7 +127,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	if !bytes.Contains(directTree["plystra.yaml"], []byte("  aliases: {}")) {
 		t.Fatalf("project scaffold omits capabilities.aliases:\n%s", directTree["plystra.yaml"])
 	}
-	assertReadmeUsesAvailableCommands(t, directTree["README.md"], true)
+	assertReadmeUsesAvailableCommands(t, directTree["README.md"])
 	assertCIUsesCurrentActions(t, directTree[".github/workflows/ci.yml"])
 	assertPlystraSkill(t, direct.Path(), modulePath)
 	assertGitInitialized(t, direct.Path())
@@ -148,80 +148,6 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	}
 }
 
-func TestCreateLibraryAndPublicCommandProduceDeterministicBuildableModules(t *testing.T) {
-	proxy := createKernelProxy(t)
-	environment := isolatedGoEnvironment(t, proxy)
-	const modulePath = "example.com/acme/email"
-
-	directParent := t.TempDir()
-	direct, err := newproject.Create(context.Background(), newproject.Options{
-		Parent:      directParent,
-		ModulePath:  modulePath,
-		Library:     true,
-		Git:         true,
-		GitHubCI:    true,
-		Skills:      true,
-		Environment: environment,
-	})
-	if err != nil {
-		t.Fatalf("Create library: %v", err)
-	}
-
-	commandParent := t.TempDir()
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	if exitCode := command.RunIn([]string{"new", modulePath, "--library", "--git", "--github-ci", "--skills"}, &stdout, &stderr, commandParent, environment); exitCode != 0 {
-		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
-	}
-	commandTarget := filepath.Join(commandParent, "email")
-	wantOutput := fmt.Sprintf("created %s in %s\n", modulePath, commandTarget)
-	if stdout.String() != wantOutput || stderr.Len() != 0 {
-		t.Fatalf("RunIn output = stdout %q, stderr %q", stdout.String(), stderr.String())
-	}
-
-	directTree := snapshotTree(t, direct.Path())
-	commandTree := snapshotTree(t, commandTarget)
-	if !reflect.DeepEqual(directTree, commandTree) {
-		t.Fatalf("repeated library creation differed:\ndirect:  %#v\ncommand: %#v", directTree, commandTree)
-	}
-	wantFiles := []string{
-		".agents/skills/plystra/SKILL.md",
-		".agents/skills/plystra/agents/openai.yaml",
-		".gitattributes",
-		".github/workflows/ci.yml",
-		".gitignore",
-		"README.md",
-		"generated/.plystra-manifest.json",
-		"generated/go/assembly/compatibility_gen.go",
-		"go.mod",
-		"go.sum",
-	}
-	var gotFiles []string
-	for name := range directTree {
-		gotFiles = append(gotFiles, name)
-	}
-	sort.Strings(gotFiles)
-	if !reflect.DeepEqual(gotFiles, wantFiles) {
-		t.Fatalf("library files = %v, want %v", gotFiles, wantFiles)
-	}
-	delete(directTree, "go.sum")
-	if *updateProjectGolden {
-		writeGoldenTree(t, "testdata/library", directTree)
-	}
-	if goldenTree := snapshotTree(t, "testdata/library"); !reflect.DeepEqual(directTree, goldenTree) {
-		t.Fatalf("library scaffold differs from golden files:\n got: %#v\nwant: %#v", directTree, goldenTree)
-	}
-	if _, err := os.Lstat(filepath.Join(direct.Path(), "plystra.yaml")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("library contains plystra.yaml: %v", err)
-	}
-	assertReadmeUsesAvailableCommands(t, directTree["README.md"], false)
-	assertCIUsesCurrentActions(t, directTree[".github/workflows/ci.yml"])
-	assertPlystraSkill(t, direct.Path(), modulePath)
-	assertGitInitialized(t, direct.Path())
-	assertGitInitialized(t, commandTarget)
-	assertModuleState(t, direct.Path(), modulePath)
-}
-
 func assertCIUsesCurrentActions(t *testing.T, workflow []byte) {
 	t.Helper()
 	for _, action := range [][]byte{[]byte("actions/checkout@v7"), []byte("actions/setup-go@v6")} {
@@ -234,7 +160,7 @@ func assertCIUsesCurrentActions(t *testing.T, workflow []byte) {
 	}
 }
 
-func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte, runnable bool) {
+func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 	t.Helper()
 	for _, unavailable := range [][]byte{[]byte("plystra dev"), []byte("plystra test"), []byte("plystra build")} {
 		if bytes.Contains(readme, unavailable) {
@@ -246,9 +172,8 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte, runnable boo
 			t.Fatalf("generated README omits available workflow %q:\n%s", available, readme)
 		}
 	}
-	hasExposure := bytes.Contains(readme, []byte("--expose"))
-	if hasExposure != runnable {
-		t.Fatalf("generated README exposure workflow = %t, want %t:\n%s", hasExposure, runnable, readme)
+	if !bytes.Contains(readme, []byte("--expose")) {
+		t.Fatalf("generated README omits exposure workflow:\n%s", readme)
 	}
 }
 
@@ -263,15 +188,15 @@ func writeGoldenTree(t *testing.T, root string, tree map[string][]byte) {
 	}
 }
 
-func TestCreateWithInitialPluginComposesRunnableAndLibraryTransactions(t *testing.T) {
+func TestCreateWithInitialPluginComposesProjectTransactions(t *testing.T) {
 	proxy := createKernelProxy(t)
 	environment := isolatedGoEnvironment(t, proxy)
 	const modulePath = "example.com/acme/my-app/v2"
 	const pluginName = "account-profile"
 
-	runnableParent := t.TempDir()
-	runnable, err := newproject.Create(context.Background(), newproject.Options{
-		Parent:      runnableParent,
+	directParent := t.TempDir()
+	direct, err := newproject.Create(context.Background(), newproject.Options{
+		Parent:      directParent,
 		ModulePath:  modulePath,
 		Plugin:      pluginName,
 		Environment: environment,
@@ -280,48 +205,54 @@ func TestCreateWithInitialPluginComposesRunnableAndLibraryTransactions(t *testin
 		t.Fatalf("Create with plugin: %v", err)
 	}
 
-	libraryParent := t.TempDir()
+	commandParent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	arguments := []string{"new", modulePath, "--plugin", pluginName, "--library", "--no-git", "--no-github-ci", "--no-skills"}
-	if exitCode := command.RunIn(arguments, &stdout, &stderr, libraryParent, environment); exitCode != 0 {
+	arguments := []string{"new", modulePath, "--plugin", pluginName, "--no-git", "--no-github-ci", "--no-skills"}
+	if exitCode := command.RunIn(arguments, &stdout, &stderr, commandParent, environment); exitCode != 0 {
 		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
 	}
-	libraryRoot := filepath.Join(libraryParent, "my-app")
-	wantOutput := fmt.Sprintf("created %s in %s\n", modulePath, libraryRoot)
+	commandRoot := filepath.Join(commandParent, "my-app")
+	wantOutput := fmt.Sprintf("created %s in %s\n", modulePath, commandRoot)
 	if stdout.String() != wantOutput || stderr.Len() != 0 {
 		t.Fatalf("RunIn output = stdout %q, stderr %q", stdout.String(), stderr.String())
 	}
 
 	golden := pluginScaffoldSnapshot(t, filepath.Join("..", "plugincreate", "testdata", "plugin"), pluginName)
-	for kind, root := range map[string]string{"runnable": runnable.Path(), "library": libraryRoot} {
+	for kind, root := range map[string]string{"direct": direct.Path(), "command": commandRoot} {
 		pluginTree := pluginScaffoldSnapshot(t, root, pluginName)
 		if !reflect.DeepEqual(pluginTree, golden) {
 			t.Fatalf("%s initial plugin differs from plugin-create golden:\n got: %#v\nwant: %#v", kind, pluginTree, golden)
 		}
 		assertModuleState(t, root, modulePath)
 	}
-	if info, err := os.Stat(filepath.Join(runnable.Path(), "plystra.yaml")); err != nil || !info.Mode().IsRegular() {
-		t.Fatalf("runnable plystra.yaml = %#v, %v", info, err)
+	for _, root := range []string{direct.Path(), commandRoot} {
+		if info, err := os.Stat(filepath.Join(root, "plystra.yaml")); err != nil || !info.Mode().IsRegular() {
+			t.Fatalf("Project plystra.yaml = %#v, %v", info, err)
+		}
+		checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+			Start:       root,
+			Check:       true,
+			Environment: environment,
+		})
+		if err != nil || !checked.Report().Clean() {
+			t.Fatalf("initial-plugin generation = %#v, %v", checked.Report().Changes(), err)
+		}
 	}
-	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:       runnable.Path(),
-		Check:       true,
-		Environment: environment,
-	})
-	if err != nil || !checked.Report().Clean() {
-		t.Fatalf("runnable initial-plugin generation = %#v, %v", checked.Report().Changes(), err)
+}
+
+func TestPublicCommandRejectsRemovedLibraryFlagWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := command.RunIn([]string{"new", "example.com/acme/my-app", "--library", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
+	if exitCode != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "plystra new <module-path>") || strings.Contains(stderr.String(), "Create a non-runnable") {
+		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
 	}
-	if _, err := os.Lstat(filepath.Join(libraryRoot, "plystra.yaml")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("library contains plystra.yaml: %v", err)
-	}
-	checked, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:       libraryRoot,
-		Check:       true,
-		Environment: environment,
-	})
-	if err != nil || !checked.Report().Clean() {
-		t.Fatalf("library initial-plugin generation = %#v, %v", checked.Report().Changes(), err)
+	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
+		t.Fatalf("removed flag mutated parent: %v, %v", entries, err)
 	}
 }
 

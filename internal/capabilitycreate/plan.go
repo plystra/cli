@@ -15,6 +15,7 @@ import (
 	"github.com/plystra/cli/internal/pluginindex"
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/plugintarget"
+	"github.com/plystra/cli/internal/projectlocate"
 )
 
 // ErrPlan reports that a coherent Capability authoring plan could not be
@@ -107,9 +108,9 @@ func Prepare(options Options) (Plan, error) {
 	if err != nil {
 		return Plan{}, fmt.Errorf("%w: parse reference: %w", ErrPlan, err)
 	}
-	module, err := modulelocate.Find(options.Start)
+	module, err := projectlocate.Find(options.Start)
 	if err != nil {
-		return Plan{}, fmt.Errorf("%w: locate module: %w", ErrPlan, err)
+		return Plan{}, fmt.Errorf("%w: locate Project: %w", ErrPlan, err)
 	}
 	index, err := pluginindex.Scan(module.Path())
 	if err != nil {
@@ -156,9 +157,9 @@ func PrepareVisible(ctx context.Context, options Options) (Plan, error) {
 	if err != nil {
 		return Plan{}, fmt.Errorf("%w: parse reference: %w", ErrPlan, err)
 	}
-	module, err := modulelocate.Find(options.Start)
+	module, err := projectlocate.Find(options.Start)
 	if err != nil {
-		return Plan{}, fmt.Errorf("%w: locate module: %w", ErrPlan, err)
+		return Plan{}, fmt.Errorf("%w: locate Project: %w", ErrPlan, err)
 	}
 	local, err := pluginindex.Scan(module.Path())
 	if err != nil {

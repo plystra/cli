@@ -11,10 +11,10 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/atomicfs"
-	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/modulemutation"
 	"github.com/plystra/cli/internal/pluginid"
 	"github.com/plystra/cli/internal/pluginscan"
+	"github.com/plystra/cli/internal/projectlocate"
 	"golang.org/x/mod/module"
 )
 
@@ -67,9 +67,9 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	if err := validateName(options.Name); err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrCreate, err)
 	}
-	located, err := modulelocate.Find(options.Start)
+	located, err := projectlocate.Find(options.Start)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: locate module: %w", ErrCreate, err)
+		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrCreate, err)
 	}
 	id, err := deriveID(located.ModulePath(), options.Name)
 	if err != nil {

@@ -135,6 +135,7 @@ func createModule(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/acme/app\n\ngo 1.26\n")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	canonical, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		t.Fatalf("EvalSymlinks: %v", err)

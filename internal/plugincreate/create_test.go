@@ -3,7 +3,9 @@ package plugincreate_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io/fs"
 	"os"
@@ -21,6 +23,8 @@ import (
 	"github.com/plystra/cli/internal/pluginscan"
 )
 
+var updatePluginGolden = flag.Bool("update", false, "update generated plugin scaffold golden files")
+
 func TestMain(main *testing.M) {
 	if os.Getenv("PLYSTRA_PLUGIN_CREATE_ROLLBACK_HELPER") == "1" {
 		os.Exit(runRollbackHelper())
@@ -30,6 +34,26 @@ func TestMain(main *testing.M) {
 
 func runRollbackHelper() int {
 	switch {
+	case len(os.Args) == 6 && os.Args[1] == "list" && os.Args[2] == "-m" && os.Args[3] == "-json" && os.Args[4] == "-mod=readonly" && os.Args[5] == "github.com/plystra/kernel":
+		kernelRoot := os.Getenv("PLYSTRA_TEST_KERNEL_ROOT")
+		if kernelRoot == "" {
+			return 13
+		}
+		listed := map[string]any{
+			"Path":    "github.com/plystra/kernel",
+			"Version": "v0.0.0",
+			"Dir":     kernelRoot,
+			"GoMod":   filepath.Join(kernelRoot, "go.mod"),
+			"Replace": map[string]any{
+				"Path":  kernelRoot,
+				"Dir":   kernelRoot,
+				"GoMod": filepath.Join(kernelRoot, "go.mod"),
+			},
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(listed); err != nil {
+			return 14
+		}
+		return 0
 	case len(os.Args) == 3 && os.Args[1] == "mod" && os.Args[2] == "tidy":
 		data, err := os.ReadFile("go.mod")
 		if err != nil {
@@ -109,7 +133,12 @@ func TestCreateAndPublicCommandProduceDeterministicBuildablePlugins(t *testing.T
 	if !reflect.DeepEqual(gotFiles, wantFiles) {
 		t.Fatalf("plugin files = %v, want %v", gotFiles, wantFiles)
 	}
-	if golden := snapshotTree(t, "testdata/plugin"); !reflect.DeepEqual(directTree, golden) {
+	golden := snapshotTree(t, "testdata/plugin")
+	if *updatePluginGolden {
+		writePluginGoldenTree(t, "testdata/plugin", directTree)
+		golden = snapshotTree(t, "testdata/plugin")
+	}
+	if !reflect.DeepEqual(directTree, golden) {
 		t.Fatalf("plugin scaffold differs from golden files:\n got: %#v\nwant: %#v", directTree, golden)
 	}
 	for path, content := range directTree {
@@ -195,6 +224,7 @@ replace github.com/plystra/kernel => %s
 	writeFile(t, filepath.Join(root, "go.mod"), goMod)
 	retainedSum := "golang.org/x/mod v0.38.0 h1:MECBjubtXD7yj4HrhIUcywNaGeNVUdfVnxmPajOk4yk=\n"
 	writeFile(t, filepath.Join(root, "go.sum"), retainedSum)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 
 	result, err := plugincreate.Create(t.Context(), plugincreate.Options{
 		Start:       root,
@@ -228,7 +258,7 @@ replace github.com/plystra/kernel => %s
 		Environment: isolatedGoEnvironment(t),
 	})
 	if err != nil || !checked.Report().Clean() {
-		t.Fatalf("generated library check = %#v, %v", checked.Report().Changes(), err)
+		t.Fatalf("generated Project check = %#v, %v", checked.Report().Changes(), err)
 	}
 }
 
@@ -236,13 +266,26 @@ func TestCreateRestoresModuleMetadataWhenGeneratedValidationFails(t *testing.T) 
 	t.Parallel()
 
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/acme/rollback\n\ngo 1.26\n")
+	cliRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve CLI root: %v", err)
+	}
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	writeFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module example.com/acme/rollback
+
+go 1.26
+
+require github.com/plystra/kernel v0.0.0
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot)))
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	before := snapshotTree(t, root)
 	command, err := os.Executable()
 	if err != nil {
 		t.Fatalf("Executable: %v", err)
 	}
-	environment := append(os.Environ(), "PLYSTRA_PLUGIN_CREATE_ROLLBACK_HELPER=1")
+	environment := append(os.Environ(), "PLYSTRA_PLUGIN_CREATE_ROLLBACK_HELPER=1", "PLYSTRA_TEST_KERNEL_ROOT="+kernelRoot)
 	_, err = plugincreate.Create(t.Context(), plugincreate.Options{
 		Start:       root,
 		Name:        "account",
@@ -258,11 +301,10 @@ func TestCreateRestoresModuleMetadataWhenGeneratedValidationFails(t *testing.T) 
 	assertNoTransactionFiles(t, root)
 }
 
-func TestCreateRegeneratesRunnableApplicationAssembly(t *testing.T) {
+func TestCreateRegeneratesProjectAssembly(t *testing.T) {
 	t.Parallel()
 
 	root := createModule(t, "example.com/acme/my-app")
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	environment := isolatedGoEnvironment(t)
 	result, err := plugincreate.Create(t.Context(), plugincreate.Options{
 		Start:       root,
@@ -270,7 +312,7 @@ func TestCreateRegeneratesRunnableApplicationAssembly(t *testing.T) {
 		Environment: environment,
 	})
 	if err != nil {
-		t.Fatalf("Create runnable plugin: %v", err)
+		t.Fatalf("Create Project plugin: %v", err)
 	}
 	if result.ID() != "acme.my-app.account" {
 		t.Fatalf("created Plugin ID = %q", result.ID())
@@ -360,6 +402,21 @@ func TestCreateRejectsInvalidNamesBeforeFilesystemInspection(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsOrdinaryGoModuleWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/acme/ordinary\n\ngo 1.26\n")
+	before := snapshotTree(t, root)
+	_, err := plugincreate.Create(t.Context(), plugincreate.Options{Start: root, Name: "account"})
+	if !errors.Is(err, plugincreate.ErrCreate) || !strings.Contains(err.Error(), "has no root plystra.yaml") {
+		t.Fatalf("Create error = %v", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("ordinary module changed:\nbefore: %#v\nafter: %#v", before, after)
+	}
+}
+
 func createModule(t *testing.T, modulePath string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -388,6 +445,7 @@ replace github.com/plystra/kernel => %s
 	if err := os.WriteFile(filepath.Join(root, "go.sum"), goSum, 0o644); err != nil {
 		t.Fatalf("write go.sum: %v", err)
 	}
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	canonical, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		t.Fatalf("EvalSymlinks: %v", err)
@@ -422,9 +480,13 @@ func isolatedGoEnvironment(t *testing.T) []string {
 func scaffoldSnapshot(t *testing.T, root string) map[string][]byte {
 	t.Helper()
 	tree := snapshotTree(t, root)
-	delete(tree, "go.mod")
-	delete(tree, "go.sum")
-	return tree
+	result := make(map[string][]byte)
+	for name, data := range tree {
+		if strings.HasPrefix(name, "account-profile/") || name == "generated/.plystra-manifest.json" || name == "generated/go/assembly/compatibility_gen.go" || name == "generated/go/configuration/account-profile_gen.go" {
+			result[name] = data
+		}
+	}
+	return result
 }
 
 func snapshotTree(t *testing.T, root string) map[string][]byte {
@@ -448,6 +510,19 @@ func snapshotTree(t *testing.T, root string) map[string][]byte {
 		t.Fatalf("WalkDir: %v", err)
 	}
 	return result
+}
+
+func writePluginGoldenTree(t *testing.T, root string, tree map[string][]byte) {
+	t.Helper()
+	for name, data := range tree {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create golden directory for %s: %v", name, err)
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatalf("write golden %s: %v", name, err)
+		}
+	}
 }
 
 func writeFile(t *testing.T, name, content string) {

@@ -214,6 +214,7 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("read CLI go.sum: %v", err)
 	}
 	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	writeCommandFile(t, filepath.Join(root, "records", "plugin.yaml"), "id: acme.library.records\n")
 	writeCommandFile(t, filepath.Join(root, "records", "plugin.go"), `package records
 

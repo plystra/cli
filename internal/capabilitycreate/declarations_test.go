@@ -106,6 +106,9 @@ func TestWriteDeclarationsRollsBackWhenDependencySourceChanges(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dependencyRoot, "go.mod"), []byte("module example.com/catalog\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(dependency go.mod): %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(dependencyRoot, "plystra.yaml"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(dependency plystra.yaml): %v", err)
+	}
 	writePlugin(t, dependencyRoot, "email", "id: catalog.email\nprovides: [email.send/v1]\n")
 	identifier := mustCapabilityID(t, "email.send/v1")
 	sourcePath := filepath.Join(dependencyRoot, "email")

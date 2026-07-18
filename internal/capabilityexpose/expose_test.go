@@ -12,6 +12,7 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/capabilityexpose"
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/projectlocate"
 )
 
 func TestManifestWriteUsesExactSafeSnapshot(t *testing.T) {
@@ -62,7 +63,7 @@ func TestManifestWriteRejectsUnsafeOrInvalidInputWithoutSecrets(t *testing.T) {
 	}
 }
 
-func TestExposeRequiresExactCapabilityAndRunnableModule(t *testing.T) {
+func TestExposeRequiresExactCapabilityAndPlystraProject(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -70,8 +71,8 @@ func TestExposeRequiresExactCapabilityAndRunnableModule(t *testing.T) {
 		t.Fatalf("unversioned Expose error = %v", err)
 	}
 	writeExposureFile(t, filepath.Join(root, "go.mod"), []byte("module example.com/acme/app\n\ngo 1.26\n"))
-	if _, err := capabilityexpose.Expose(t.Context(), capabilityexpose.Options{Start: root, Reference: "records.read/v1"}); !errors.Is(err, capabilityexpose.ErrExpose) || !errors.Is(err, capabilityexpose.ErrManifestWrite) || !strings.Contains(err.Error(), "plystra.yaml") {
-		t.Fatalf("library Expose error = %v", err)
+	if _, err := capabilityexpose.Expose(t.Context(), capabilityexpose.Options{Start: root, Reference: "records.read/v1"}); !errors.Is(err, capabilityexpose.ErrExpose) || !errors.Is(err, projectlocate.ErrNotFound) || !strings.Contains(err.Error(), "plystra.yaml") {
+		t.Fatalf("ordinary module Expose error = %v", err)
 	}
 	var nilContext context.Context
 	if _, err := capabilityexpose.Expose(nilContext, capabilityexpose.Options{}); !errors.Is(err, capabilityexpose.ErrExpose) {

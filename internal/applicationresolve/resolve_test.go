@@ -22,6 +22,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/plugininventory"
+	"github.com/plystra/cli/internal/projectlocate"
 )
 
 func TestMain(main *testing.M) {
@@ -280,7 +281,7 @@ func TestResolveRejectsMissingUnsafeAndChangingManifest(t *testing.T) {
 		root := t.TempDir()
 		writeModule(t, root, "example.com/missing")
 		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: root})
-		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, os.ErrNotExist) {
+		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, projectlocate.ErrNotFound) {
 			t.Fatalf("Resolve error = %v", err)
 		}
 	})
@@ -292,7 +293,7 @@ func TestResolveRejectsMissingUnsafeAndChangingManifest(t *testing.T) {
 			t.Fatalf("Mkdir(plystra.yaml): %v", err)
 		}
 		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: root})
-		if !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationresolve.ErrUnsafeManifest) {
+		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, projectlocate.ErrInvalidManifest) {
 			t.Fatalf("Resolve error = %v", err)
 		}
 	})
@@ -306,7 +307,7 @@ func TestResolveRejectsMissingUnsafeAndChangingManifest(t *testing.T) {
 			t.Skipf("symbolic links unavailable: %v", err)
 		}
 		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: root})
-		if !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationresolve.ErrUnsafeManifest) {
+		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, projectlocate.ErrInvalidManifest) {
 			t.Fatalf("Resolve error = %v", err)
 		}
 	})

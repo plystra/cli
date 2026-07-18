@@ -134,9 +134,10 @@ func writeInteractiveCapabilityModule(t *testing.T) string {
 		t.Fatalf("read CLI go.sum: %v", err)
 	}
 	writeInteractiveCapabilityFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	writeInteractiveCapabilityFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	for _, plugin := range []string{"account", "profile"} {
 		writeInteractiveCapabilityFile(t, filepath.Join(root, plugin, "plugin.yaml"), "id: acme.app."+plugin+"\n")
-		writeInteractiveCapabilityFile(t, filepath.Join(root, plugin, "plugin.go"), "package "+plugin+"\n\ntype Plugin struct{}\n")
+		writeInteractiveCapabilityFile(t, filepath.Join(root, plugin, "plugin.go"), "package "+plugin+"\n\ntype Plugin struct{}\n\nfunc New(_ ...any) *Plugin { return &Plugin{} }\n")
 	}
 	canonical, err := filepath.EvalSymlinks(root)
 	if err != nil {

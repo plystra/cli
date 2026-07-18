@@ -6,8 +6,24 @@
       "sha256": "sha256:f3cd92d2b0829d1fd646c4bf65840d578f784ab5111c6972d3545d31fc847a42"
     },
     {
+      "path": "generated/go/assembly/invocations_gen.go",
+      "sha256": "sha256:d0cc25698ec32787edc60b7f6d5b6a0bb783f5e0d4afbf66963ec56a1ae938e4"
+    },
+    {
+      "path": "generated/go/assembly/providers_gen.go",
+      "sha256": "sha256:8504bb21c5db8ef601711d4638dbc4e2cba49a3fe4937b298efc2ec5d22d945a"
+    },
+    {
+      "path": "generated/go/bootstrap/bootstrap_gen.go",
+      "sha256": "sha256:b12328fbcac918ca09dfdd6fd711ab93ae0dae06914492adbe3655b629e81699"
+    },
+    {
       "path": "generated/go/configuration/account-profile_gen.go",
       "sha256": "sha256:b5af2008ee440a2f7ea42e71c247967f42422f4724b6c9ba507c0e706f9b07f3"
+    },
+    {
+      "path": "generated/manifest.json",
+      "sha256": "sha256:60e7d36f3d5026d53797748f55dc22cfb2e0ebc7c2d0245afbf9453daf2657e9"
     }
   ]
 }

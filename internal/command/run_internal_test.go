@@ -16,16 +16,14 @@ func TestParseNewArguments(t *testing.T) {
 		want      newArguments
 		ok        bool
 	}{
-		{name: "runnable", arguments: []string{"new", "example.com/acme/app"}, want: newArguments{modulePath: "example.com/acme/app"}, ok: true},
-		{name: "library", arguments: []string{"new", "example.com/acme/app", "--library"}, want: newArguments{modulePath: "example.com/acme/app", library: true}, ok: true},
+		{name: "project", arguments: []string{"new", "example.com/acme/app"}, want: newArguments{modulePath: "example.com/acme/app"}, ok: true},
 		{name: "plugin", arguments: []string{"new", "example.com/acme/app", "--plugin", "account"}, want: newArguments{modulePath: "example.com/acme/app", plugin: "account"}, ok: true},
-		{name: "combined", arguments: []string{"new", "example.com/acme/app", "--plugin", "account", "--library"}, want: newArguments{modulePath: "example.com/acme/app", library: true, plugin: "account"}, ok: true},
 		{name: "all choices enabled", arguments: []string{"new", "example.com/acme/app", "--git", "--github-ci", "--skills"}, want: newArguments{modulePath: "example.com/acme/app", git: choiceYes, githubCI: choiceYes, skills: choiceYes}, ok: true},
 		{name: "all choices disabled", arguments: []string{"new", "example.com/acme/app", "--no-skills", "--no-git", "--no-github-ci"}, want: newArguments{modulePath: "example.com/acme/app", git: choiceNo, githubCI: choiceNo, skills: choiceNo}, ok: true},
-		{name: "mixed choices", arguments: []string{"new", "example.com/acme/app", "--no-git", "--github-ci", "--no-skills", "--library"}, want: newArguments{modulePath: "example.com/acme/app", library: true, git: choiceNo, githubCI: choiceYes, skills: choiceNo}, ok: true},
+		{name: "mixed choices", arguments: []string{"new", "example.com/acme/app", "--no-git", "--github-ci", "--no-skills"}, want: newArguments{modulePath: "example.com/acme/app", git: choiceNo, githubCI: choiceYes, skills: choiceNo}, ok: true},
 		{name: "missing module", arguments: []string{"new"}},
+		{name: "removed library option", arguments: []string{"new", "example.com/acme/app", "--library"}},
 		{name: "option as module", arguments: []string{"new", "--library"}},
-		{name: "duplicate library", arguments: []string{"new", "example.com/acme/app", "--library", "--library"}},
 		{name: "missing plugin", arguments: []string{"new", "example.com/acme/app", "--plugin"}},
 		{name: "option as plugin", arguments: []string{"new", "example.com/acme/app", "--plugin", "--library"}},
 		{name: "duplicate plugin", arguments: []string{"new", "example.com/acme/app", "--plugin", "account", "--plugin", "profile"}},

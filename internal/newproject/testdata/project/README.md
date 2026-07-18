@@ -1,6 +1,6 @@
 # my-app
 
-This is the runnable Plystra Go Module `example.com/acme/my-app`.
+This is the Plystra Project `example.com/acme/my-app`.
 
 Local plugins belong in direct child directories containing `plugin.yaml`. Do not add a root `plugins/` container.
 

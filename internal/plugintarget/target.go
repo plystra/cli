@@ -9,6 +9,7 @@ import (
 
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/pluginindex"
+	"github.com/plystra/cli/internal/projectlocate"
 )
 
 var (
@@ -61,9 +62,9 @@ func (t Target) ManifestData() []byte { return append([]byte(nil), t.manifest...
 // Infer selects an explicit reference, enclosing plugin, sole local plugin, or
 // selector result in that exact order.
 func Infer(options Options) (Target, error) {
-	module, err := modulelocate.Find(options.Start)
+	module, err := projectlocate.Find(options.Start)
 	if err != nil {
-		return Target{}, fmt.Errorf("%w: locate module: %w", ErrInfer, err)
+		return Target{}, fmt.Errorf("%w: locate Project: %w", ErrInfer, err)
 	}
 	index, err := pluginindex.Scan(module.Path())
 	if err != nil {
