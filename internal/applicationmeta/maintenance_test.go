@@ -215,6 +215,38 @@ func TestMaintainDependencyConfigurationRequiresExplicitRemovalAndConflictResolu
 	}
 }
 
+func TestMaintainDependencyConfigurationUsesOverlayOnlyAsConflictResolution(t *testing.T) {
+	t.Parallel()
+
+	lookup := composeSchemaLookup(nil)
+	dependencies := []applicationmeta.Dependency{
+		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {use: {email.send/v1: acme.smtp}}\n")},
+		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {use: {email.send/v1: acme.local}}\n")},
+	}
+	overlay := parseOverlayManifest(t, "plystra.production.yaml", "capabilities: {use: {email.send/v1: acme.production}}\n")
+	root := []byte("# shared root\n{}\n")
+
+	maintained, err := applicationmeta.MaintainDependencyConfigurationWithOverlay(root, overlay, applicationmeta.DependencyBaseline{}, dependencies, lookup)
+	if err != nil {
+		t.Fatalf("MaintainDependencyConfigurationWithOverlay: %v", err)
+	}
+	if maintained.Changed() || !bytes.Equal(maintained.Data(), root) || bytes.Contains(maintained.Data(), []byte("acme.production")) {
+		t.Fatalf("overlay decision was materialized into root:\n%s", maintained.Data())
+	}
+	composition, err := applicationmeta.Compose(dependencies, overlay, lookup)
+	if err != nil {
+		t.Fatalf("Compose resolved overlay: %v", err)
+	}
+	repeated, err := applicationmeta.MaintainDependencyConfigurationWithOverlay(root, overlay, composition.DependencyBaseline(), dependencies, lookup)
+	if err != nil || repeated.Changed() || !bytes.Equal(repeated.Data(), root) {
+		t.Fatalf("repeat overlay maintenance = changed %t, error %v\n%s", repeated.Changed(), err, repeated.Data())
+	}
+	_, err = applicationmeta.MaintainDependencyConfiguration(root, composition.DependencyBaseline(), dependencies, lookup)
+	if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), `capabilities.use["email.send/v1"]`) {
+		t.Fatalf("unselected overlay conflict error = %v", err)
+	}
+}
+
 func TestRestoreDependencyBaselineRejectsTampering(t *testing.T) {
 	t.Parallel()
 

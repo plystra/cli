@@ -58,6 +58,7 @@ type Options struct {
 	Start                 string
 	Check                 bool
 	ConfigurationPath     string
+	EnvironmentName       string
 	GoCommand             string
 	Environment           []string
 	DependencyOutputLimit int
@@ -78,6 +79,7 @@ type Result struct {
 	checked              bool
 	configurationChanged bool
 	configurationPath    string
+	maintenancePath      string
 }
 
 // Module returns the nearest enclosing Go Module.
@@ -89,14 +91,19 @@ func (r Result) Report() generatedfiles.Report { return r.report }
 // Checked reports whether the operation was the read-only check mode.
 func (r Result) Checked() bool { return r.checked }
 
-// ConfigurationChanged reports root plystra.yaml dependency-composition
-// drift. Check mode reports it without mutation; install mode reports that the
-// planned three-way update was committed with generated output.
+// ConfigurationChanged reports dependency-composition drift in the maintained
+// current-project document. Check mode reports it without mutation; install
+// mode reports that the planned three-way update was committed with generated
+// output.
 func (r Result) ConfigurationChanged() bool { return r.configurationChanged }
 
 // ConfigurationPath returns the stable Project-relative current-project
 // document selected for this operation.
 func (r Result) ConfigurationPath() string { return r.configurationPath }
+
+// ConfigurationMaintenancePath returns the dependency-baseline-owned document
+// that changed or would change during this operation.
+func (r Result) ConfigurationMaintenancePath() string { return r.maintenancePath }
 
 // Generate resolves and renders the nearest Plystra Project. Check mode
 // compares without mutation. Install mode atomically installs desired files,
@@ -122,6 +129,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			checked:              true,
 			configurationChanged: prepared.resolved.ConfigurationMaintenance().Changed(),
 			configurationPath:    prepared.resolved.ConfigurationSelection().Path(),
+			maintenancePath:      prepared.resolved.ConfigurationMaintenancePath(),
 		}, nil
 	}
 
@@ -139,9 +147,9 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 	maintenance := prepared.resolved.ConfigurationMaintenance()
 	if maintenance.Changed() {
 		additional = append(additional, atomicfs.Write{
-			Path:         prepared.resolved.ConfigurationSelection().Path(),
+			Path:         prepared.resolved.ConfigurationMaintenancePath(),
 			Data:         maintenance.Data(),
-			ExpectedData: prepared.resolved.ConfigurationSource(),
+			ExpectedData: prepared.resolved.ConfigurationMaintenanceSource(),
 		})
 	}
 	install := generatedfiles.InstallWithWrites
@@ -177,6 +185,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		report:               report,
 		configurationChanged: maintenance.Changed(),
 		configurationPath:    prepared.resolved.ConfigurationSelection().Path(),
+		maintenancePath:      prepared.resolved.ConfigurationMaintenancePath(),
 	}, nil
 }
 
@@ -211,6 +220,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	resolved, err := applicationresolve.Resolve(ctx, applicationresolve.Options{
 		Start:                 start,
 		ConfigurationPath:     options.ConfigurationPath,
+		EnvironmentName:       options.EnvironmentName,
 		GoCommand:             options.GoCommand,
 		Environment:           append([]string(nil), options.Environment...),
 		DependencyOutputLimit: options.DependencyOutputLimit,
@@ -253,12 +263,17 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		return preparedGeneration{}, fmt.Errorf("digest final application model: %w", err)
 	}
 	selection := resolved.ConfigurationSelection()
+	selectedData := resolved.ConfigurationMaintenance().Data()
+	if selection.Mode() == applicationgen.ConfigurationModeEnvironment {
+		selectedData = resolved.ConfigurationSource()
+	}
 	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
 		Mode:                   selection.Mode(),
+		Environment:            selection.Environment(),
 		RootPath:               "plystra.yaml",
 		RootData:               resolved.RootConfigurationData(),
 		SelectedPath:           selection.Path(),
-		SelectedData:           resolved.ConfigurationMaintenance().Data(),
+		SelectedData:           selectedData,
 		Composition:            resolved.Composition(),
 		ApplicationModelDigest: modelDigest,
 		Previous:               resolved.PreviousManifestProvenance(),
@@ -373,6 +388,7 @@ func exposesJavaScript(context generation.Context) bool {
 type fingerprintDocument struct {
 	ModulePath                  string                 `json:"module_path"`
 	ConfigurationMode           string                 `json:"configuration_mode"`
+	ConfigurationEnvironment    string                 `json:"configuration_environment,omitempty"`
 	ConfigurationPath           string                 `json:"configuration_path"`
 	SelectedConfigurationDigest string                 `json:"selected_configuration_digest"`
 	PrivateConfigurationDigest  string                 `json:"private_configuration_digest"`
@@ -407,6 +423,7 @@ func generationFingerprint(resolved applicationresolve.Result, output generatedf
 	document := fingerprintDocument{
 		ModulePath:                  resolved.Module().ModulePath(),
 		ConfigurationMode:           resolved.ConfigurationSelection().Mode(),
+		ConfigurationEnvironment:    resolved.ConfigurationSelection().Environment(),
 		ConfigurationPath:           resolved.ConfigurationSelection().Path(),
 		SelectedConfigurationDigest: resolved.ConfigurationSelection().Digest(),
 		PrivateConfigurationDigest:  resolved.Configurations().Digest(),

@@ -69,9 +69,8 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	applicationManifest := readFile(t, root, "generated/manifest.json")
 	for _, required := range []string{
 		`"capability_aliases":[]`,
-		`"configuration":{"version":2,"mode":"default"`,
+		`"configuration":{"version":3,"mode":"default"`,
 		`"root":{"path":"plystra.yaml","digest":"sha256:`,
-		`"selected":{"path":"plystra.yaml","digest":"sha256:`,
 		`"dependency_baselines":[{"mode":"default","path":"plystra.yaml"`,
 		`"dependency_composition_digest":"sha256:`,
 		`"dependency_baseline":[]`,
@@ -434,6 +433,102 @@ func TestGenerateDetectsDependencyPluginConfigurationSchemaDrift(t *testing.T) {
 	if after := snapshotTree(t, dependencyRoot); !reflect.DeepEqual(after, dependencyBeforeCheck) {
 		t.Fatal("dependency schema regeneration mutated the dependency Project")
 	}
+}
+
+func TestGenerateMaintainsRootAndTracksSelectedEnvironmentOverlay(t *testing.T) {
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	dependencyRoot := filepath.Join(root, "platform")
+	writeModule(t, dependencyRoot, "example.com/platform", "")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities: {require: [kernel.health/v1]}\n")
+	writeApplicationModule(t, appRoot, "example.com/acme/environment")
+	goModPath := filepath.Join(appRoot, "go.mod")
+	goMod := string(readAbsoluteFile(t, goModPath)) + fmt.Sprintf("\nrequire example.com/platform v1.0.0\n\nreplace example.com/platform => %s\n", filepath.ToSlash(dependencyRoot))
+	writeFile(t, goModPath, goMod)
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# shared root\ncapabilities: {require: [kernel.info/v1]}\n")
+	overlayPath := filepath.Join(appRoot, "plystra.production.yaml")
+	overlayData := []byte("# sparse production overlay\ncapabilities:\n  require: {remove: [kernel.info/v1]}\n")
+	writeFile(t, overlayPath, string(overlayData))
+	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+	validate := func(_ context.Context, _ string) error { return nil }
+
+	generated, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:           appRoot,
+		EnvironmentName: "production",
+		Environment:     environment,
+		Validate:        validate,
+	})
+	if err != nil || !generated.ConfigurationChanged() || generated.ConfigurationPath() != "plystra.production.yaml" || generated.ConfigurationMaintenancePath() != "plystra.yaml" || !generated.Report().Clean() {
+		t.Fatalf("Generate environment = selection %q maintenance %q changed %t report %#v, %v", generated.ConfigurationPath(), generated.ConfigurationMaintenancePath(), generated.ConfigurationChanged(), generated.Report().Changes(), err)
+	}
+	if current := readAbsoluteFile(t, overlayPath); !bytes.Equal(current, overlayData) {
+		t.Fatalf("environment generation rewrote sparse overlay:\n%s", current)
+	}
+	if current := readFile(t, appRoot, "plystra.yaml"); !bytes.Contains(current, []byte("kernel.health/v1")) || !bytes.Contains(current, []byte("# shared root")) {
+		t.Fatalf("environment generation did not maintain root baseline:\n%s", current)
+	}
+	provenance, err := applicationgen.DecodeManifestProvenance(readFile(t, appRoot, "generated/manifest.json"))
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance: %v", err)
+	}
+	if provenance.Mode() != applicationgen.ConfigurationModeEnvironment || provenance.Environment() != "production" || provenance.RootPath() != "plystra.yaml" || provenance.SelectedPath() != "plystra.production.yaml" {
+		t.Fatalf("environment provenance = mode %q environment %q root %q selected %q", provenance.Mode(), provenance.Environment(), provenance.RootPath(), provenance.SelectedPath())
+	}
+	environmentBaseline, environmentExists := provenance.BaselineForSelection(applicationgen.ConfigurationModeEnvironment, "plystra.production.yaml")
+	defaultBaseline, defaultExists := provenance.BaselineForSelection(applicationgen.ConfigurationModeDefault, "plystra.yaml")
+	if !environmentExists || !defaultExists || environmentBaseline.Digest() != defaultBaseline.Digest() {
+		t.Fatalf("environment baseline = %q/%t default %q/%t", environmentBaseline.Digest(), environmentExists, defaultBaseline.Digest(), defaultExists)
+	}
+
+	beforeCheck := snapshotTree(t, appRoot)
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:           appRoot,
+		Check:           true,
+		EnvironmentName: "production",
+		Environment:     environment,
+	})
+	if err != nil || checked.ConfigurationChanged() || !checked.Report().Clean() {
+		t.Fatalf("clean environment check = changed %t report %#v, %v", checked.ConfigurationChanged(), checked.Report().Changes(), err)
+	}
+	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, beforeCheck) {
+		t.Fatal("environment generate --check mutated the Project")
+	}
+
+	changedOverlay := []byte("# sparse production overlay\ncapabilities:\n  require: {add: [kernel.info/v1]}\n")
+	writeFile(t, overlayPath, string(changedOverlay))
+	beforeDriftCheck := snapshotTree(t, appRoot)
+	drift, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:           appRoot,
+		Check:           true,
+		EnvironmentName: "production",
+		Environment:     environment,
+	})
+	if err != nil || drift.Report().Clean() {
+		t.Fatalf("changed environment check = report %#v, %v", drift.Report().Changes(), err)
+	}
+	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, beforeDriftCheck) {
+		t.Fatal("environment drift check mutated the Project")
+	}
+
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
+	rollbackBefore := snapshotTree(t, appRoot)
+	validationFailure := errors.New("reject environment root maintenance")
+	_, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:           appRoot,
+		EnvironmentName: "production",
+		Environment:     environment,
+		Validate:        func(_ context.Context, _ string) error { return validationFailure },
+	})
+	if !errors.Is(err, validationFailure) {
+		t.Fatalf("environment validation failure = %v", err)
+	}
+	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, rollbackBefore) {
+		t.Fatal("environment validation failure did not roll back root and generated output")
+	}
+	if current := readAbsoluteFile(t, overlayPath); !bytes.Equal(current, changedOverlay) {
+		t.Fatalf("environment rollback rewrote sparse overlay:\n%s", current)
+	}
+	cleanupRecoveryTransactions(t, appRoot)
 }
 
 func TestGenerateRejectsOrdinaryGoModuleWithoutProjectMarker(t *testing.T) {

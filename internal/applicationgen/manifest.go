@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/assemblygen"
@@ -22,10 +23,13 @@ import (
 )
 
 const (
-	applicationManifestConfigurationVersion = 2
+	applicationManifestConfigurationVersion = 3
 	// ConfigurationModeDefault identifies the mandatory root plystra.yaml as
 	// the current-project document.
 	ConfigurationModeDefault = "default"
+	// ConfigurationModeEnvironment identifies root plystra.yaml plus one sparse
+	// current-project environment overlay.
+	ConfigurationModeEnvironment = "environment"
 	// ConfigurationModeExplicit identifies one complete explicitly selected
 	// current-project document.
 	ConfigurationModeExplicit = "explicit-config"
@@ -46,8 +50,10 @@ type applicationManifestDocumentReference struct {
 type applicationManifestConfiguration struct {
 	Version                int                                    `json:"version"`
 	Mode                   string                                 `json:"mode"`
+	Environment            string                                 `json:"environment,omitempty"`
 	Root                   applicationManifestDocumentReference   `json:"root"`
-	Selected               applicationManifestDocumentReference   `json:"selected"`
+	Overlay                *applicationManifestDocumentReference  `json:"overlay,omitempty"`
+	Selected               *applicationManifestDocumentReference  `json:"selected,omitempty"`
 	DependencyBaselines    []applicationManifestSelectionBaseline `json:"dependency_baselines"`
 	ApplicationModelDigest string                                 `json:"application_model_digest"`
 }
@@ -69,6 +75,7 @@ type applicationManifestDocument struct {
 // values and Secret reference targets are never retained.
 type ManifestProvenanceOptions struct {
 	Mode                   string
+	Environment            string
 	RootPath               string
 	RootData               []byte
 	SelectedPath           string
@@ -82,6 +89,7 @@ type ManifestProvenanceOptions struct {
 // configuration record.
 type ManifestProvenance struct {
 	mode                   string
+	environment            string
 	rootPath               string
 	rootDigest             string
 	selectedPath           string
@@ -111,9 +119,10 @@ func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenanc
 	if validateManifestProvenance(options.Previous) == nil {
 		baselines = cloneSelectionBaselines(options.Previous.baselines)
 	}
+	baselineMode, baselinePath := dependencyBaselineSelection(options.Mode, options.RootPath, options.SelectedPath)
 	current := manifestSelectionBaseline{
-		mode:     options.Mode,
-		path:     options.SelectedPath,
+		mode:     baselineMode,
+		path:     baselinePath,
 		baseline: options.Composition.DependencyBaseline(),
 	}
 	replaced := false
@@ -135,6 +144,7 @@ func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenanc
 	})
 	provenance := ManifestProvenance{
 		mode:                   options.Mode,
+		environment:            options.Environment,
 		rootPath:               options.RootPath,
 		rootDigest:             rootDigest,
 		selectedPath:           options.SelectedPath,
@@ -148,8 +158,11 @@ func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenanc
 	return provenance, nil
 }
 
-// Mode returns default or explicit-config.
+// Mode returns default, environment, or explicit-config.
 func (p ManifestProvenance) Mode() string { return p.mode }
+
+// Environment returns the selected environment name in environment mode.
+func (p ManifestProvenance) Environment() string { return p.environment }
 
 // RootPath returns the stable Project-relative root marker path.
 func (p ManifestProvenance) RootPath() string { return p.rootPath }
@@ -172,6 +185,7 @@ func (p ManifestProvenance) DependencyBaseline() applicationmeta.DependencyBasel
 // BaselineForSelection returns retained dependency ownership for one exact
 // selection mode and Project-relative path.
 func (p ManifestProvenance) BaselineForSelection(mode, selectedPath string) (applicationmeta.DependencyBaseline, bool) {
+	mode, selectedPath = dependencyBaselineSelection(mode, p.rootPath, selectedPath)
 	index := sort.Search(len(p.baselines), func(index int) bool {
 		return p.baselines[index].mode > mode ||
 			(p.baselines[index].mode == mode && p.baselines[index].path >= selectedPath)
@@ -236,19 +250,23 @@ func RenderManifest(aliasJSON []byte, provenance ManifestProvenance) ([]byte, er
 	document := applicationManifestDocument{
 		CapabilityAliases: aliases.CapabilityAliases,
 		Configuration: applicationManifestConfiguration{
-			Version: applicationManifestConfigurationVersion,
-			Mode:    provenance.mode,
+			Version:     applicationManifestConfigurationVersion,
+			Mode:        provenance.mode,
+			Environment: provenance.environment,
 			Root: applicationManifestDocumentReference{
 				Path:   provenance.rootPath,
 				Digest: provenance.rootDigest,
 			},
-			Selected: applicationManifestDocumentReference{
-				Path:   provenance.selectedPath,
-				Digest: provenance.selectedDigest,
-			},
 			DependencyBaselines:    baselines,
 			ApplicationModelDigest: provenance.applicationModelDigest,
 		},
+	}
+	selectedReference := &applicationManifestDocumentReference{Path: provenance.selectedPath, Digest: provenance.selectedDigest}
+	switch provenance.mode {
+	case ConfigurationModeEnvironment:
+		document.Configuration.Overlay = selectedReference
+	case ConfigurationModeExplicit:
+		document.Configuration.Selected = selectedReference
 	}
 	data, err := json.Marshal(document)
 	if err != nil {
@@ -276,6 +294,22 @@ func DecodeManifestProvenance(data []byte) (ManifestProvenance, error) {
 	if configuration.Version != applicationManifestConfigurationVersion {
 		return ManifestProvenance{}, fmt.Errorf("generated application manifest configuration must use version %d", applicationManifestConfigurationVersion)
 	}
+	switch configuration.Mode {
+	case ConfigurationModeDefault:
+		if configuration.Environment != "" || configuration.Overlay != nil || configuration.Selected != nil {
+			return ManifestProvenance{}, errors.New("generated application manifest default configuration must contain only the root document")
+		}
+	case ConfigurationModeEnvironment:
+		if configuration.Environment == "" || configuration.Overlay == nil || configuration.Selected != nil {
+			return ManifestProvenance{}, errors.New("generated application manifest environment configuration must contain one environment and overlay")
+		}
+	case ConfigurationModeExplicit:
+		if configuration.Environment != "" || configuration.Overlay != nil || configuration.Selected == nil {
+			return ManifestProvenance{}, errors.New("generated application manifest explicit configuration must contain one selected document")
+		}
+	default:
+		return ManifestProvenance{}, errors.New("generated application manifest configuration mode is invalid")
+	}
 	if configuration.DependencyBaselines == nil {
 		return ManifestProvenance{}, errors.New("generated application manifest configuration dependency_baselines must be an array")
 	}
@@ -299,12 +333,27 @@ func DecodeManifestProvenance(data []byte) (ManifestProvenance, error) {
 		}
 		baselines[baselineIndex] = manifestSelectionBaseline{mode: selection.Mode, path: selection.Path, baseline: baseline}
 	}
+	selectedPath := configuration.Root.Path
+	selectedDigest := configuration.Root.Digest
+	switch configuration.Mode {
+	case ConfigurationModeEnvironment:
+		if configuration.Overlay != nil {
+			selectedPath = configuration.Overlay.Path
+			selectedDigest = configuration.Overlay.Digest
+		}
+	case ConfigurationModeExplicit:
+		if configuration.Selected != nil {
+			selectedPath = configuration.Selected.Path
+			selectedDigest = configuration.Selected.Digest
+		}
+	}
 	provenance := ManifestProvenance{
 		mode:                   configuration.Mode,
+		environment:            configuration.Environment,
 		rootPath:               configuration.Root.Path,
 		rootDigest:             configuration.Root.Digest,
-		selectedPath:           configuration.Selected.Path,
-		selectedDigest:         configuration.Selected.Digest,
+		selectedPath:           selectedPath,
+		selectedDigest:         selectedDigest,
 		baselines:              baselines,
 		applicationModelDigest: configuration.ApplicationModelDigest,
 	}
@@ -492,8 +541,8 @@ func ConfigurationDigest(data []byte) (string, error) {
 }
 
 func validateManifestProvenance(provenance ManifestProvenance) error {
-	if provenance.mode != ConfigurationModeDefault && provenance.mode != ConfigurationModeExplicit {
-		return fmt.Errorf("mode must be %q or %q", ConfigurationModeDefault, ConfigurationModeExplicit)
+	if provenance.mode != ConfigurationModeDefault && provenance.mode != ConfigurationModeEnvironment && provenance.mode != ConfigurationModeExplicit {
+		return fmt.Errorf("mode must be %q, %q, or %q", ConfigurationModeDefault, ConfigurationModeEnvironment, ConfigurationModeExplicit)
 	}
 	if provenance.rootPath != rootConfigurationPath || !safeManifestPath(provenance.rootPath) {
 		return fmt.Errorf("root path must be %q", rootConfigurationPath)
@@ -504,6 +553,16 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 	if provenance.mode == ConfigurationModeDefault && provenance.selectedPath != provenance.rootPath {
 		return errors.New("default selection must use the root configuration path")
 	}
+	if provenance.mode == ConfigurationModeEnvironment {
+		if !validEnvironmentName(provenance.environment) {
+			return errors.New("environment selection must use one safe environment name")
+		}
+		if provenance.selectedPath != "plystra."+provenance.environment+".yaml" {
+			return errors.New("environment selection path does not match its environment name")
+		}
+	} else if provenance.environment != "" {
+		return errors.New("environment name is only valid in environment mode")
+	}
 	if !validSHA256(provenance.rootDigest) || !validSHA256(provenance.selectedDigest) {
 		return errors.New("root and selected document digests must be lower-case SHA-256 digests")
 	}
@@ -513,6 +572,7 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 	if len(provenance.baselines) == 0 {
 		return errors.New("dependency configuration baseline history is absent")
 	}
+	activeMode, activePath := dependencyBaselineSelection(provenance.mode, provenance.rootPath, provenance.selectedPath)
 	active := 0
 	for index, selection := range provenance.baselines {
 		if selection.mode != ConfigurationModeDefault && selection.mode != ConfigurationModeExplicit {
@@ -530,7 +590,7 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 				return errors.New("dependency baseline selections must be unique and canonically ordered")
 			}
 		}
-		if selection.mode == provenance.mode && selection.path == provenance.selectedPath {
+		if selection.mode == activeMode && selection.path == activePath {
 			active++
 		}
 	}
@@ -541,6 +601,19 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 		return errors.New("application-model digest must be a lower-case SHA-256 digest")
 	}
 	return nil
+}
+
+func dependencyBaselineSelection(mode, rootPath, selectedPath string) (string, string) {
+	if mode == ConfigurationModeEnvironment {
+		return ConfigurationModeDefault, rootPath
+	}
+	return mode, selectedPath
+}
+
+func validEnvironmentName(value string) bool {
+	return value != "" && len(value) <= 200 && value != "." && value != ".." &&
+		!strings.ContainsAny(value, `/\\<>:"|?*`) && strings.IndexFunc(value, unicode.IsControl) < 0 &&
+		path.Base(value) == value
 }
 
 func cloneSelectionBaselines(values []manifestSelectionBaseline) []manifestSelectionBaseline {

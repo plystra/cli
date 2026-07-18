@@ -29,7 +29,7 @@ const (
   plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
   plystra capability expose <capability-name>/vN
-  plystra generate [--check] [--config <yaml-path>]
+  plystra generate [--check] [--env <environment>|--config <yaml-path>]
 `
 	newUsage = `Usage:
   plystra new <module-path> [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]
@@ -45,16 +45,18 @@ Interactive creation asks for each unspecified choice. Non-interactive creation
 must specify one flag from every choice pair.
 `
 	generateUsage = `Usage:
-  plystra generate [--check] [--config <yaml-path>]
+  plystra generate [--check] [--env <environment>|--config <yaml-path>]
 
 Options:
   --check                Report drift without modifying configuration or generated files.
+  --env <environment>    Overlay root plystra.yaml with plystra.<environment>.yaml.
   --config <yaml-path>   Use one complete current-project configuration instead of root plystra.yaml.
 
-PLYSTRA_CONFIG supplies the configuration path when --config is omitted.
-Relative paths are resolved from the detected Plystra Project root. Root
-plystra.yaml remains mandatory as the Project marker and is not merged beneath
-an explicitly selected configuration.
+PLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit
+selector is present; setting both is an error. Explicit --env or --config
+overrides both variables, and the two flags cannot be combined. Relative
+configuration paths are resolved from the detected Plystra Project root. Root
+plystra.yaml remains mandatory and is not merged beneath --config.
 `
 )
 
@@ -177,6 +179,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			Start:             workingDirectory,
 			Check:             generate.check,
 			ConfigurationPath: generate.configurationPath,
+			EnvironmentName:   generate.environmentName,
 			Environment:       environment,
 		})
 		if err != nil {
@@ -192,7 +195,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 					heading = "Project configuration or generated output is not current"
 				}
 			}
-			writeGenerationReport(stderr, heading, configurationDrift, result.ConfigurationPath(), result.Report())
+			writeGenerationReport(stderr, heading, configurationDrift, result.ConfigurationMaintenancePath(), result.Report())
 			return 1
 		}
 		if result.Checked() {
@@ -234,6 +237,7 @@ func terminalFile(file *os.File) bool {
 type generateArguments struct {
 	check             bool
 	configurationPath string
+	environmentName   string
 }
 
 func parseGenerateArguments(arguments []string) (generateArguments, bool) {
@@ -242,6 +246,7 @@ func parseGenerateArguments(arguments []string) (generateArguments, bool) {
 	}
 	var result generateArguments
 	configurationSet := false
+	environmentSet := false
 	for index := 1; index < len(arguments); index++ {
 		switch arguments[index] {
 		case "--check":
@@ -250,12 +255,19 @@ func parseGenerateArguments(arguments []string) (generateArguments, bool) {
 			}
 			result.check = true
 		case "--config":
-			if configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+			if configurationSet || environmentSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
 				return generateArguments{}, false
 			}
 			configurationSet = true
 			index++
 			result.configurationPath = arguments[index]
+		case "--env":
+			if environmentSet || configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+				return generateArguments{}, false
+			}
+			environmentSet = true
+			index++
+			result.environmentName = arguments[index]
 		default:
 			return generateArguments{}, false
 		}

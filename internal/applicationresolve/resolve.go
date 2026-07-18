@@ -43,6 +43,7 @@ var (
 type Options struct {
 	Start                 string
 	ConfigurationPath     string
+	EnvironmentName       string
 	GoCommand             string
 	Environment           []string
 	DependencyOutputLimit int
@@ -65,6 +66,8 @@ type Result struct {
 	selection           ConfigurationSelection
 	rootData            []byte
 	configurationSource []byte
+	maintenancePath     string
+	maintenanceSource   []byte
 	previousProvenance  applicationgen.ManifestProvenance
 }
 
@@ -74,8 +77,8 @@ func (r Result) Module() modulelocate.Module { return r.module }
 // Manifest returns the effective dependency-composed application declaration.
 func (r Result) Manifest() applicationmeta.Manifest { return r.composition.Manifest() }
 
-// CurrentManifest returns the normalized selected current-project declaration
-// before dependency composition.
+// CurrentManifest returns the normalized selected current-project layer before
+// dependency composition. Environment mode includes root plus its overlay.
 func (r Result) CurrentManifest() applicationmeta.Manifest { return r.currentManifest }
 
 // Composition returns dependency baseline provenance and the effective
@@ -98,7 +101,7 @@ func (r Result) Resolution() generationresolution.ExtensionResult { return r.res
 func (r Result) Configurations() configurationresolve.Result { return r.configs }
 
 // ConfigurationMaintenance returns the typed dependency-recomposition update
-// planned against the exact root configuration snapshot used for resolution.
+// planned against the exact owned configuration snapshot used for resolution.
 func (r Result) ConfigurationMaintenance() applicationmeta.ConfigurationMaintenance {
 	return r.maintenance
 }
@@ -108,14 +111,23 @@ func (r Result) ConfigurationMaintenance() applicationmeta.ConfigurationMaintena
 func (r Result) ConfigurationSelection() ConfigurationSelection { return r.selection }
 
 // RootConfigurationData returns the final root marker document represented by
-// generated provenance. It includes planned maintenance only when root
-// plystra.yaml is the selected current-project document.
+// generated provenance. It includes planned root maintenance in default and
+// environment modes.
 func (r Result) RootConfigurationData() []byte { return append([]byte(nil), r.rootData...) }
 
-// ConfigurationSource returns defensive original selected-document bytes used
-// as the concurrency precondition for a planned maintenance write.
+// ConfigurationSource returns defensive original selected-document bytes.
 func (r Result) ConfigurationSource() []byte {
 	return append([]byte(nil), r.configurationSource...)
+}
+
+// ConfigurationMaintenancePath returns the Project-relative document owned by
+// dependency-baseline maintenance for this selection.
+func (r Result) ConfigurationMaintenancePath() string { return r.maintenancePath }
+
+// ConfigurationMaintenanceSource returns defensive original maintenance-target
+// bytes used as the concurrency precondition for a planned write.
+func (r Result) ConfigurationMaintenanceSource() []byte {
+	return append([]byte(nil), r.maintenanceSource...)
 }
 
 // PreviousManifestProvenance returns validated generated-manifest state used
@@ -137,17 +149,18 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrResolve, err)
 	}
-	rootSnapshot, _, err := loadConfiguration(module.Path(), applicationManifestName)
+	rootSnapshot, rootManifest, err := loadConfiguration(module.Path(), applicationManifestName)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	selector, err := resolveConfigurationSelector(module.Path(), options.ConfigurationPath, options.Environment)
+	selector, err := resolveConfigurationSelector(module.Path(), options.ConfigurationPath, options.EnvironmentName, options.Environment)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: select current-project configuration: %w", ErrResolve, err)
 	}
 	configurationSnapshot := rootSnapshot
+	selectedManifest := rootManifest
 	if selector.path != applicationManifestName {
-		configurationSnapshot, _, err = loadConfiguration(module.Path(), selector.path)
+		configurationSnapshot, selectedManifest, err = loadConfiguration(module.Path(), selector.path)
 		if err != nil {
 			return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 		}
@@ -179,13 +192,29 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	maintenance, err := applicationmeta.MaintainDependencyConfiguration(configurationSnapshot.data, previousBaseline, dependencyManifests, schemaLookup)
+	maintenanceSnapshot := configurationSnapshot
+	if selector.mode == configurationModeEnvironment {
+		maintenanceSnapshot = rootSnapshot
+	}
+	var maintenance applicationmeta.ConfigurationMaintenance
+	if selector.mode == configurationModeEnvironment {
+		maintenance, err = applicationmeta.MaintainDependencyConfigurationWithOverlay(maintenanceSnapshot.data, selectedManifest, previousBaseline, dependencyManifests, schemaLookup)
+	} else {
+		maintenance, err = applicationmeta.MaintainDependencyConfiguration(maintenanceSnapshot.data, previousBaseline, dependencyManifests, schemaLookup)
+	}
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	currentManifest, err := applicationmeta.Parse(maintenance.Data())
+	maintainedManifest, err := applicationmeta.ParseSource(maintenanceSnapshot.path, maintenance.Data())
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: maintained application manifest: %w", ErrResolve, err)
+	}
+	currentManifest := maintainedManifest
+	if selector.mode == configurationModeEnvironment {
+		currentManifest, err = applicationmeta.ApplyOverlay(maintainedManifest, selectedManifest, schemaLookup)
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: environment %q: %w", ErrResolve, selector.environment, err)
+		}
 	}
 	composition, err := applicationmeta.Compose(dependencyManifests, currentManifest, schemaLookup)
 	if err != nil {
@@ -210,12 +239,16 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	selectedDigest, err := applicationgen.ConfigurationDigest(maintenance.Data())
+	selectedData := maintenance.Data()
+	if selector.mode == configurationModeEnvironment {
+		selectedData = configurationSnapshot.Data()
+	}
+	selectedDigest, err := applicationgen.ConfigurationDigest(selectedData)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: digest selected configuration %s: %w", ErrResolve, selector.path, err)
 	}
 	rootData := rootSnapshot.Data()
-	if selector.path == applicationManifestName {
+	if maintenanceSnapshot.path == applicationManifestName {
 		rootData = maintenance.Data()
 	}
 	after, err := ReadManifestSnapshot(module.Path())
@@ -247,12 +280,15 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		configs:         configs,
 		maintenance:     maintenance,
 		selection: ConfigurationSelection{
-			mode:   selector.mode,
-			path:   selector.path,
-			digest: selectedDigest,
+			mode:        selector.mode,
+			path:        selector.path,
+			environment: selector.environment,
+			digest:      selectedDigest,
 		},
 		rootData:            append([]byte(nil), rootData...),
 		configurationSource: configurationSnapshot.Data(),
+		maintenancePath:     maintenanceSnapshot.path,
+		maintenanceSource:   maintenanceSnapshot.Data(),
 		previousProvenance:  previousProvenance,
 	}, nil
 }

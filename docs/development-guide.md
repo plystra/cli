@@ -400,11 +400,50 @@ digest and path/digest/removal/source baseline. An explicit tombstone has
 `"removed": true`; the manifest records provenance, not raw Plugin
 configuration or Secret reference targets.
 
-## Select a complete alternative configuration
+## Select an environment or complete alternative configuration
 
 Root `plystra.yaml` is mandatory and is the default current-Project
-configuration. To generate against one complete alternative document, select
-it explicitly:
+configuration. A named environment adds one sparse project-root overlay above
+that shared root. For example, create only the differences needed by production
+in `plystra.production.yaml`:
+
+```yaml
+capabilities:
+  use:
+    email.send/v1: acme.email.smtp
+
+config:
+  acme.email.smtp:
+    endpoint: https://smtp.production.example
+    token:
+      env: SMTP_PRODUCTION_TOKEN
+```
+
+Generate and check with the same selector:
+
+```powershell
+plystra generate --env production
+plystra generate --check --env production
+```
+
+The file must exist; the CLI never creates common environment files or loads
+an unselected `plystra.*.yaml`. The effective declarative order is dependency
+Project composition, root `plystra.yaml`, then the selected sparse overlay.
+Omitted fields inherit. Scalars and declared arrays replace at their typed
+field, keyed objects merge by declared field path, set fields use their sparse
+`add` and `remove` form, and `null` keeps its existing exact tombstone meaning.
+Unknown fields and type mismatches remain errors. A dependency Project's own
+environment files are never inherited.
+
+For automation, select the same environment name with:
+
+```powershell
+$env:PLYSTRA_ENV = "production"
+plystra generate --check
+```
+
+To generate against one complete alternative document instead, select it
+explicitly:
 
 ```powershell
 plystra generate --config deploy/customer-a.yaml
@@ -426,23 +465,29 @@ $env:PLYSTRA_CONFIG = "deploy/customer-a.yaml"
 plystra generate --check
 ```
 
-An explicit `--config` overrides `PLYSTRA_CONFIG`. Generation maintains only
-the selected document, preserving its comments, explicit edits, and typed
-removals; it never copies the same edit into root or another alternative file.
-Dependency baseline history is retained independently for each selection, so
-switching back to the default does not transfer ownership decisions from an
-alternative. Configuration maintenance and generated output share one
-transaction. Check mode reports the selected path, such as
+`--env` and `--config` cannot be combined. Setting both `PLYSTRA_ENV` and
+`PLYSTRA_CONFIG` is also an error. Either explicit CLI selector overrides both
+ambient variables, so a stale variable cannot change an explicit invocation.
+Environment generation maintains dependency-derived changes in root
+`plystra.yaml` and preserves the selected overlay as a sparse user-authored
+document. Explicit-config generation maintains only the selected complete
+document; it never copies the same edit into root or another alternative file.
+Dependency baseline history is retained independently for each maintained
+selection, so switching modes does not transfer ownership decisions.
+Configuration maintenance and generated output share one transaction. Check
+mode reports the maintained path, such as
 `changed deploy/customer-a.yaml (dependency composition)`, and does not write
 either surface.
 
-`generated/manifest.json` configuration schema v2 records `default` or
-`explicit-config` mode, project-relative root and selected paths, normalized
-document digests, per-selection dependency baselines, and the final
-build-affecting application-model digest. It excludes raw configuration,
-Secret reference targets, resolved Secrets, and machine-specific absolute
-paths. Use the same selection for generation and its check; selecting another
-build-affecting model correctly reports generated drift.
+`generated/manifest.json` configuration schema v3 records `default`,
+`environment`, or `explicit-config` mode; the environment name and overlay
+reference when applicable; project-relative paths; normalized document
+digests; dependency baseline history; and the final build-affecting
+application-model digest. Environment mode reuses the root dependency baseline
+because overlays do not own dependency maintenance. The manifest excludes raw
+configuration, Secret reference targets, resolved Secrets, and machine-specific
+absolute paths. Use the same selection for generation and its check; selecting
+another build-affecting model correctly reports generated drift.
 
 ## Create and configure a Plugin
 
@@ -873,6 +918,8 @@ selection:
 ```powershell
 plystra generate
 plystra generate --check
+plystra generate --env production
+plystra generate --check --env production
 plystra generate --config deploy/customer-a.yaml
 plystra generate --check --config deploy/customer-a.yaml
 ```
@@ -920,11 +967,12 @@ Plugin IDs cannot resolve the conflict.
 ### Wrong configuration selection
 
 If drift or a Provider choice does not match the intended deployment, inspect
-the configuration mode and selected project-relative path in
-`generated/manifest.json`. Run generation and check with the same explicit
-`--config`, or set one `PLYSTRA_CONFIG` value for automation. Remember that an
-explicit file is complete: root `plystra.yaml` is not merged beneath it. A
-missing root marker remains an error even when the selected file exists.
+the configuration mode, environment, and project-relative document references
+in `generated/manifest.json`. Run generation and check with the same `--env` or
+`--config`; for automation, set exactly one of `PLYSTRA_ENV` or
+`PLYSTRA_CONFIG`. An environment is a sparse overlay above root, while an
+explicit file is complete and root `plystra.yaml` is not merged beneath it. A
+missing selected overlay or root Project marker is an error.
 
 ### Incompatible contract
 

@@ -44,7 +44,7 @@ func loadConfiguration(moduleRoot, relativePath string) (ManifestSnapshot, appli
 	if err != nil {
 		return ManifestSnapshot{}, applicationmeta.Manifest{}, fmt.Errorf("%w: %w", ErrManifest, err)
 	}
-	manifest, err := applicationmeta.Parse(snapshot.data)
+	manifest, err := applicationmeta.ParseSource(snapshot.path, snapshot.data)
 	if err != nil {
 		return ManifestSnapshot{}, applicationmeta.Manifest{}, fmt.Errorf("%w: %w", ErrManifest, err)
 	}
@@ -65,7 +65,7 @@ func loadDependencyManifests(dependencies []moduledependency.Module) ([]dependen
 		if err != nil {
 			return nil, nil, fmt.Errorf("%w: dependency Project %s: %w", ErrManifest, dependencyIdentity(dependency), err)
 		}
-		manifest, err := applicationmeta.Parse(snapshot.data)
+		manifest, err := applicationmeta.ParseSource(snapshot.path, snapshot.data)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%w: dependency Project %s: %w", ErrManifest, dependencyIdentity(dependency), err)
 		}

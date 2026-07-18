@@ -113,22 +113,6 @@ func (b DependencyBaseline) Records() []BaselineRecord {
 	return result
 }
 
-func (b DependencyBaseline) provenance() []Provenance {
-	if !b.Valid() {
-		return nil
-	}
-	result := make([]Provenance, len(b.records))
-	for index, record := range b.records {
-		result[index] = Provenance{
-			path:    record.path,
-			digest:  record.digest,
-			removed: record.removed,
-			sources: append([]string(nil), record.sources...),
-		}
-	}
-	return result
-}
-
 func provenanceKey(path, digest string, removed bool) string {
 	return fmt.Sprintf("%s\x00%s\x00%t", path, digest, removed)
 }

@@ -119,6 +119,7 @@ func TestParseGenerateArguments(t *testing.T) {
 		arguments         []string
 		check             bool
 		configurationPath string
+		environmentName   string
 		ok                bool
 	}{
 		{arguments: []string{"generate"}, ok: true},
@@ -126,17 +127,23 @@ func TestParseGenerateArguments(t *testing.T) {
 		{arguments: []string{"generate", "--config", "deploy/customer.yaml"}, configurationPath: "deploy/customer.yaml", ok: true},
 		{arguments: []string{"generate", "--check", "--config", "deploy/customer.yaml"}, check: true, configurationPath: "deploy/customer.yaml", ok: true},
 		{arguments: []string{"generate", "--config", "deploy/customer.yaml", "--check"}, check: true, configurationPath: "deploy/customer.yaml", ok: true},
+		{arguments: []string{"generate", "--env", "test"}, environmentName: "test", ok: true},
+		{arguments: []string{"generate", "--check", "--env", "production"}, check: true, environmentName: "production", ok: true},
 		{arguments: nil},
 		{arguments: []string{"generate", "--write"}},
 		{arguments: []string{"generate", "--check", "--check"}},
 		{arguments: []string{"generate", "--config"}},
 		{arguments: []string{"generate", "--config", ""}},
 		{arguments: []string{"generate", "--config", "a.yaml", "--config", "b.yaml"}},
+		{arguments: []string{"generate", "--env"}},
+		{arguments: []string{"generate", "--env", ""}},
+		{arguments: []string{"generate", "--env", "test", "--env", "production"}},
+		{arguments: []string{"generate", "--env", "test", "--config", "deploy.yaml"}},
 	}
 	for _, test := range tests {
 		result, ok := parseGenerateArguments(test.arguments)
-		if result.check != test.check || result.configurationPath != test.configurationPath || ok != test.ok {
-			t.Errorf("parseGenerateArguments(%q) = %#v, %t; want check %t, path %q, ok %t", test.arguments, result, ok, test.check, test.configurationPath, test.ok)
+		if result.check != test.check || result.configurationPath != test.configurationPath || result.environmentName != test.environmentName || ok != test.ok {
+			t.Errorf("parseGenerateArguments(%q) = %#v, %t; want check %t, path %q, environment %q, ok %t", test.arguments, result, ok, test.check, test.configurationPath, test.environmentName, test.ok)
 		}
 	}
 }
