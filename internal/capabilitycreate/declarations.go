@@ -70,11 +70,23 @@ func validateDeclarations(root string, plan Plan, sources []ResolvedSource) erro
 
 	for position, resolved := range sources {
 		provider := resolved.Provider()
-		indexedProvider, ok := index.ByName(provider.Directory())
+		providerRoot := root
+		providerIndex := index
+		if !provider.Local() {
+			providerRoot = provider.ModuleRoot()
+			if providerRoot == "" {
+				return fmt.Errorf("source provider %s has no module root provenance", provider.PluginID())
+			}
+			providerIndex, err = pluginindex.Scan(providerRoot)
+			if err != nil {
+				return fmt.Errorf("index source provider %s module: %w", provider.PluginID(), err)
+			}
+		}
+		indexedProvider, ok := providerIndex.ByName(provider.Directory())
 		if !ok || indexedProvider.ID() != provider.PluginID() || !declares(indexedProvider, resolved.Source().ID()) {
 			return fmt.Errorf("%w: source provider %s declaration changed after planning", atomicfs.ErrConcurrentChange, provider.PluginID())
 		}
-		current, err := capabilitysource.Load(filepath.Join(root, filepath.FromSlash(indexedProvider.Path())), resolved.Source().ID())
+		current, err := capabilitysource.Load(filepath.Join(providerRoot, filepath.FromSlash(indexedProvider.Path())), resolved.Source().ID())
 		if err != nil {
 			return fmt.Errorf("load source provider %s: %w", provider.PluginID(), err)
 		}

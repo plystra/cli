@@ -2,8 +2,10 @@ package capabilitycreate_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/capabilitycreate"
@@ -11,6 +13,56 @@ import (
 	"github.com/plystra/cli/internal/capabilityversion"
 	"github.com/plystra/cli/internal/plugintarget"
 )
+
+func TestPrepareVisibleUsesExplicitDependencyCapabilitySources(t *testing.T) {
+	t.Parallel()
+
+	dependencyRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dependencyRoot, "go.mod"), []byte("module example.com/catalog\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(dependency go.mod): %v", err)
+	}
+	writePlugin(t, dependencyRoot, "email", "id: catalog.email\nprovides: [email.send/v3]\n")
+	identifier := mustCapabilityID(t, "email.send/v3")
+	writeCapabilitySource(t, filepath.Join(dependencyRoot, "email"), identifier, []byte("id: email.send/v3\nrequest: {to: {type: string, required: true}}\nresponse: {}\nerrors: []\n"))
+
+	root := createModule(t)
+	goMod := fmt.Sprintf("module example.com/acme/app\n\ngo 1.26\n\nrequire example.com/catalog v0.0.0\n\nreplace example.com/catalog => %s\n", filepath.ToSlash(dependencyRoot))
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("WriteFile(application go.mod): %v", err)
+	}
+	writePlugin(t, root, "profile", "id: acme.app.profile\n")
+	options := capabilitycreate.Options{
+		Start:       root,
+		Reference:   "email.send/v3",
+		Plugin:      "profile",
+		Environment: visiblePlanEnvironment(),
+	}
+	plan, err := capabilitycreate.PrepareVisible(t.Context(), options)
+	if err != nil {
+		t.Fatalf("PrepareVisible: %v", err)
+	}
+	if plan.Version().Action() != capabilityversion.ActionImplement || plan.Version().Target().String() != "email.send/v3" {
+		t.Fatalf("Version = target %s, action %s", plan.Version().Target(), plan.Version().Action())
+	}
+	providers := plan.SourceProviders()
+	if len(providers) != 1 {
+		t.Fatalf("SourceProviders = %#v", providers)
+	}
+	provider := providers[0]
+	if provider.PluginID() != "catalog.email" || provider.Directory() != "email" || provider.Path() != filepath.Join(dependencyRoot, "email") || provider.ModulePath() != "example.com/catalog" || provider.ModuleVersion() != "v0.0.0" || provider.ModuleRoot() != dependencyRoot || provider.Local() || provider.Capability() != identifier {
+		t.Fatalf("dependency Provider = ID %q, directory %q, path %q, module %s@%s at %q, local %t, capability %s", provider.PluginID(), provider.Directory(), provider.Path(), provider.ModulePath(), provider.ModuleVersion(), provider.ModuleRoot(), provider.Local(), provider.Capability())
+	}
+	resolved, err := capabilitycreate.ResolveSources(plan)
+	if err != nil || len(resolved) != 1 || resolved[0].Source().ID() != identifier {
+		t.Fatalf("ResolveSources = %#v, %v", resolved, err)
+	}
+
+	options.Reference = "email.send"
+	next, err := capabilitycreate.PrepareVisible(t.Context(), options)
+	if err != nil || next.Version().Target().String() != "email.send/v4" {
+		t.Fatalf("PrepareVisible(next) = target %s, %v", next.Version().Target(), err)
+	}
+}
 
 func TestPrepareInfersTargetVersionAndAllLocalSources(t *testing.T) {
 	t.Parallel()
@@ -141,7 +193,29 @@ func writePlugin(t *testing.T, root, name, declaration string) {
 
 func assertProvider(t *testing.T, provider capabilitycreate.Provider, pluginID, directory, path, identifier string) {
 	t.Helper()
-	if provider.PluginID() != pluginID || provider.Directory() != directory || provider.Path() != path || provider.Capability().String() != identifier {
-		t.Fatalf("Provider = ID %q, directory %q, path %q, capability %q", provider.PluginID(), provider.Directory(), provider.Path(), provider.Capability())
+	if provider.PluginID() != pluginID || provider.Directory() != directory || provider.Path() != path || provider.ModulePath() != "example.com/acme/app" || provider.ModuleVersion() != "" || provider.ModuleRoot() != filepath.Dir(path) || !provider.Local() || provider.Capability().String() != identifier {
+		t.Fatalf("Provider = ID %q, directory %q, path %q, module %s@%s at %q, local %t, capability %q", provider.PluginID(), provider.Directory(), provider.Path(), provider.ModulePath(), provider.ModuleVersion(), provider.ModuleRoot(), provider.Local(), provider.Capability())
 	}
+}
+
+func visiblePlanEnvironment() []string {
+	overrides := map[string]string{
+		"GOENV":       "off",
+		"GOFLAGS":     "",
+		"GOPROXY":     "off",
+		"GOSUMDB":     "off",
+		"GOTOOLCHAIN": "local",
+		"GOWORK":      "off",
+	}
+	environment := make([]string, 0, len(os.Environ())+len(overrides))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, replaced := overrides[strings.ToUpper(key)]; !replaced {
+			environment = append(environment, entry)
+		}
+	}
+	for key, value := range overrides {
+		environment = append(environment, key+"="+value)
+	}
+	return environment
 }

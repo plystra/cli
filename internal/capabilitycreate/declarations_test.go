@@ -99,6 +99,52 @@ func TestWriteDeclarationsCommitsRetainedSourceCopy(t *testing.T) {
 	assertNoCapabilityTransaction(t, root)
 }
 
+func TestWriteDeclarationsRollsBackWhenDependencySourceChanges(t *testing.T) {
+	t.Parallel()
+
+	dependencyRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dependencyRoot, "go.mod"), []byte("module example.com/catalog\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(dependency go.mod): %v", err)
+	}
+	writePlugin(t, dependencyRoot, "email", "id: catalog.email\nprovides: [email.send/v1]\n")
+	identifier := mustCapabilityID(t, "email.send/v1")
+	sourcePath := filepath.Join(dependencyRoot, "email")
+	writeCapabilitySource(t, sourcePath, identifier, []byte("id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n"))
+
+	root := createModule(t)
+	goMod := "module example.com/acme/app\n\ngo 1.26\n\nrequire example.com/catalog v0.0.0\n\nreplace example.com/catalog => " + filepath.ToSlash(dependencyRoot) + "\n"
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("WriteFile(application go.mod): %v", err)
+	}
+	writePlugin(t, root, "profile", "id: acme.app.profile\n")
+	plan, err := capabilitycreate.PrepareVisible(t.Context(), capabilitycreate.Options{
+		Start:       root,
+		Reference:   "email.send/v1",
+		Plugin:      "profile",
+		Environment: visiblePlanEnvironment(),
+	})
+	if err != nil {
+		t.Fatalf("PrepareVisible: %v", err)
+	}
+	sources, err := capabilitycreate.ResolveSources(plan)
+	if err != nil {
+		t.Fatalf("ResolveSources: %v", err)
+	}
+	writeCapabilitySource(t, sourcePath, identifier, []byte("id: email.send/v1\nrequest: {to: {type: string}}\nresponse: {}\nerrors: []\n"))
+
+	err = capabilitycreate.WriteDeclarations(plan, sources)
+	if !errors.Is(err, capabilitycreate.ErrWriteDeclarations) || !errors.Is(err, atomicfs.ErrConcurrentChange) {
+		t.Fatalf("WriteDeclarations error = %v", err)
+	}
+	if manifest, readErr := os.ReadFile(filepath.Join(root, "profile", "plugin.yaml")); readErr != nil || string(manifest) != "id: acme.app.profile\n" {
+		t.Fatalf("target manifest after rollback = %q, %v", manifest, readErr)
+	}
+	if _, statErr := os.Lstat(filepath.Join(root, "profile", "capabilities", "email.send", "v1")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("target capability remains after rollback: %v", statErr)
+	}
+	assertNoCapabilityTransaction(t, root)
+}
+
 func TestWriteDeclarationsRollsBackBothFilesWhenValidationFails(t *testing.T) {
 	t.Parallel()
 
