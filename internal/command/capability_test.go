@@ -57,6 +57,14 @@ func TestRunCapabilityCreateAndImplementUsePublicTransactionalSurface(t *testing
 		t.Fatalf("confirmed capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "record.create", "--plugin", "records"}, root, environment)
+	wantRelatedPath := filepath.Join(root, "records", "capabilities", "record.create", "v1", "capability.yaml")
+	wantOutput = "created capability record.create/v1 in acme.library.records at " + wantRelatedPath + "\n"
+	wantRecommendation := "recommendation: review visible Capability records.create/v1 before keeping custom record.create/v1\n"
+	if exitCode != 0 || stdout != wantOutput || stderr != wantRecommendation {
+		t.Fatalf("near-name capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
 	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/library in "+root+"\n" {
 		t.Fatalf("post-authoring generate check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)

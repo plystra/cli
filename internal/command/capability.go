@@ -70,7 +70,24 @@ func runCapability(arguments []string, stdout, stderr io.Writer, workingDirector
 		return 1
 	}
 	_, _ = fmt.Fprintf(stdout, "%s capability %s in %s at %s\n", pastTense(parsed.action), result.Capability(), result.PluginID(), result.CapabilityPath())
+	writeCapabilityRecommendations(stderr, result)
 	return 0
+}
+
+func writeCapabilityRecommendations(writer io.Writer, result capabilitycreate.Result) {
+	recommendations := result.Recommendations()
+	if len(recommendations) == 0 {
+		return
+	}
+	values := make([]string, len(recommendations))
+	for index, recommendation := range recommendations {
+		values[index] = recommendation.String()
+	}
+	label := "Capability"
+	if len(values) != 1 {
+		label = "Capabilities"
+	}
+	_, _ = fmt.Fprintf(writer, "recommendation: review visible %s %s before keeping custom %s\n", label, strings.Join(values, ", "), result.Capability())
 }
 
 func parseCapabilityArguments(arguments []string) (capabilityArguments, bool) {

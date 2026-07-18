@@ -45,6 +45,7 @@ type Result struct {
 	pluginID              string
 	pluginPath            string
 	capabilityPath        string
+	recommendations       []capabilityid.Identifier
 	declarationCreated    bool
 	implementationCreated bool
 }
@@ -60,6 +61,13 @@ func (r Result) PluginPath() string { return r.pluginPath }
 
 // CapabilityPath returns the canonical absolute capability.yaml path.
 func (r Result) CapabilityPath() string { return r.capabilityPath }
+
+// Recommendations returns exact visible Capabilities with conservative
+// typo-like names that the developer may choose to review. They are advisory
+// and never redirect the authored Capability.
+func (r Result) Recommendations() []capabilityid.Identifier {
+	return append([]capabilityid.Identifier(nil), r.recommendations...)
+}
 
 // DeclarationCreated reports whether the transaction copied or created the
 // target schema and added its provider declaration.
@@ -176,6 +184,7 @@ func author(ctx context.Context, options AuthorOptions, expected capabilityversi
 		pluginID:              target.ID(),
 		pluginPath:            target.Path(),
 		capabilityPath:        capabilityPath,
+		recommendations:       plan.Recommendations(),
 		declarationCreated:    declarationCreated,
 		implementationCreated: implementationCreated,
 	}, nil

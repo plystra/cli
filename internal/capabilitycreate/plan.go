@@ -72,10 +72,11 @@ func (p Provider) Capability() capabilityid.Identifier { return p.capability }
 // Plan is one deterministic target, version decision, and set of local source
 // provider candidates derived from a single plugin snapshot.
 type Plan struct {
-	modulePath string
-	target     plugintarget.Target
-	version    capabilityversion.Plan
-	providers  []Provider
+	modulePath      string
+	target          plugintarget.Target
+	version         capabilityversion.Plan
+	providers       []Provider
+	recommendations []capabilityid.Identifier
 }
 
 // ModulePath returns the exact Go Module identity that owns the target plugin.
@@ -91,6 +92,12 @@ func (p Plan) Version() capabilityversion.Plan { return p.version }
 // Every provider is retained so later schema loading can enforce equality.
 func (p Plan) SourceProviders() []Provider {
 	return append([]Provider(nil), p.providers...)
+}
+
+// Recommendations returns conservative advisory near-name matches for a
+// genuinely new Capability identity. They never change the planned target.
+func (p Plan) Recommendations() []capabilityid.Identifier {
+	return append([]capabilityid.Identifier(nil), p.recommendations...)
 }
 
 // Prepare creates a non-mutating plan from capabilities declared by local
@@ -128,7 +135,13 @@ func Prepare(options Options) (Plan, error) {
 	}
 
 	providers := sourceProviders(module, plugins, version)
-	return Plan{modulePath: module.ModulePath(), target: target, version: version, providers: providers}, nil
+	return Plan{
+		modulePath:      module.ModulePath(),
+		target:          target,
+		version:         version,
+		providers:       providers,
+		recommendations: nearbyCapabilities(reference, visible),
+	}, nil
 }
 
 // PrepareVisible creates a non-mutating plan from the selected local plugin
@@ -181,10 +194,11 @@ func PrepareVisible(ctx context.Context, options Options) (Plan, error) {
 		return Plan{}, fmt.Errorf("%w: %w", ErrPlan, err)
 	}
 	return Plan{
-		modulePath: module.ModulePath(),
-		target:     target,
-		version:    version,
-		providers:  visibleSourceProviders(plugins, version),
+		modulePath:      module.ModulePath(),
+		target:          target,
+		version:         version,
+		providers:       visibleSourceProviders(plugins, version),
+		recommendations: nearbyCapabilities(reference, visible),
 	}, nil
 }
 

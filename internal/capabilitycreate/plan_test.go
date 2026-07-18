@@ -62,6 +62,19 @@ func TestPrepareVisibleUsesExplicitDependencyCapabilitySources(t *testing.T) {
 	if err != nil || next.Version().Target().String() != "email.send/v4" {
 		t.Fatalf("PrepareVisible(next) = target %s, %v", next.Version().Target(), err)
 	}
+	if recommendations := next.Recommendations(); len(recommendations) != 0 {
+		t.Fatalf("same-name version progression recommendations = %v", recommendations)
+	}
+
+	options.Reference = "email.sned"
+	nearby, err := capabilitycreate.PrepareVisible(t.Context(), options)
+	if err != nil || nearby.Version().Target().String() != "email.sned/v1" {
+		t.Fatalf("PrepareVisible(nearby) = target %s, %v", nearby.Version().Target(), err)
+	}
+	recommendations := nearby.Recommendations()
+	if len(recommendations) != 1 || recommendations[0].String() != "email.send/v3" {
+		t.Fatalf("PrepareVisible(nearby) recommendations = %v", recommendations)
+	}
 }
 
 func TestPrepareInfersTargetVersionAndAllLocalSources(t *testing.T) {

@@ -166,6 +166,8 @@ An omitted version selects `v1` when none is visible and otherwise selects one a
 plystra capability implement email.send/v1 --plugin mailer
 ```
 
+For a genuinely new name, creation reports conservative typo-like visible exact Capabilities as advisory recommendations. It never redirects or blocks the requested custom identity based only on similar spelling.
+
 Implementation searches local and explicit Go Module dependency contracts, requires exact provider-independent equality including normalized extension metadata, copies the canonical schema when the target plugin does not yet provide it, adds a compile-safe user-owned method only when absent, regenerates all affected module surfaces, tidies module metadata, and validates with `go test -mod=readonly ./...`. Repeating the command preserves an existing method byte-for-byte.
 
 Generation always emits the contract and provider interface for every Capability provided by a local plugin, even before the application requires that Capability. This keeps user-owned provider implementations buildable while they are being authored. Clients, invocation paths, HTTP adapters, SDK operations, documentation, provider selection, and Kernel registration remain requirement- and exposure-driven, so an unrequired local Capability does not enter the runnable application surface.
