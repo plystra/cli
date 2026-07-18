@@ -84,7 +84,7 @@ func ManifestWrite(moduleRoot string, id capabilityid.Identifier) (atomicfs.Writ
 }
 
 // Expose adds one exact canonical Capability to http.expose and regenerates,
-// tidies, and validates the runnable application in one rollback boundary.
+// tidies, and validates the Plystra Project in one rollback boundary.
 func Expose(ctx context.Context, options Options) (Result, error) {
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: context is nil", ErrExpose)

@@ -761,9 +761,11 @@ error. An explicit `GOWORK` value is preserved.
 
 ### No provider or ambiguous provider
 
-Confirm the exact canonical ID is visible and provided by a local Plugin or
-direct Go Module dependency. If several compatible providers remain, add the
-exact `capabilities.use` entry. Do not add a priority or fallback.
+Confirm the exact canonical ID is visible and provided by a local Plugin or a
+dependency Plystra Project anywhere in the effective Go Module graph. A
+markerless Go dependency is intentionally not scanned. If several compatible
+providers remain, add the exact `capabilities.use` entry. Do not add a priority
+or fallback.
 
 ### Incompatible contract
 

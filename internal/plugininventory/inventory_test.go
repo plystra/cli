@@ -18,7 +18,7 @@ import (
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 )
 
-func TestBuildIndexesLocalAndExplicitDependencyPlugins(t *testing.T) {
+func TestBuildIndexesLocalAndDependencyProjectPlugins(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -152,6 +152,63 @@ func TestBuildAllowsModulesWithoutPlugins(t *testing.T) {
 	}
 }
 
+func TestBuildIgnoresOrdinaryGraphModulePlugins(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	ordinaryRoot := filepath.Join(root, "ordinary")
+	writeModule(t, ordinaryRoot, "example.com/ordinary")
+	writePlugin(t, ordinaryRoot, "hidden", "id: acme.hidden\n")
+	writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire example.com/ordinary v1.0.0\n\nreplace example.com/ordinary => ../ordinary\n")
+	application, err := modulelocate.Find(appRoot)
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	dependencies, err := moduledependency.Discover(t.Context(), application, moduledependency.Options{Environment: isolatedGoEnvironment()})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(dependencies.Modules()) != 1 || dependencies.Modules()[0].Project() || len(dependencies.Projects()) != 0 {
+		t.Fatalf("dependency graph = %#v, Projects %#v", dependencies.Modules(), dependencies.Projects())
+	}
+	index, err := plugininventory.Build(application, dependencies)
+	if err != nil || len(index.Plugins()) != 0 {
+		t.Fatalf("Build = %#v, %v", index.Plugins(), err)
+	}
+}
+
+func TestBuildIncludesTransitiveDependencyProjectPlugins(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	directRoot := filepath.Join(root, "direct")
+	transitiveRoot := filepath.Join(root, "transitive")
+	writeFile(t, filepath.Join(directRoot, "go.mod"), "module example.com/direct\n\ngo 1.26\n\nrequire example.com/transitive v1.0.0\n")
+	writeFile(t, filepath.Join(directRoot, "plystra.yaml"), "{}\n")
+	writePlugin(t, directRoot, "direct", "id: acme.direct\n")
+	writeModule(t, transitiveRoot, "example.com/transitive")
+	writeFile(t, filepath.Join(transitiveRoot, "plystra.yaml"), "{}\n")
+	writePlugin(t, transitiveRoot, "transitive", "id: acme.transitive\n")
+	writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire example.com/direct v1.0.0\n\nreplace example.com/direct => ../direct\n\nreplace example.com/transitive => ../transitive\n")
+	application, err := modulelocate.Find(appRoot)
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	dependencies, err := moduledependency.Discover(t.Context(), application, moduledependency.Options{Environment: isolatedGoEnvironment()})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(dependencies.Projects()) != 2 || !dependencies.Projects()[0].Direct() || dependencies.Projects()[1].Direct() {
+		t.Fatalf("Projects = %#v", dependencies.Projects())
+	}
+	index, err := plugininventory.Build(application, dependencies)
+	if err != nil || !reflect.DeepEqual(pluginIDs(index.Plugins()), []string{"acme.direct", "acme.transitive"}) {
+		t.Fatalf("Build = %#v, %v", pluginIDs(index.Plugins()), err)
+	}
+}
+
 func TestBuildRejectsPluginWithInvalidImportPath(t *testing.T) {
 	t.Parallel()
 
@@ -186,6 +243,7 @@ func configureApplication(t *testing.T, appRoot string, dependencies ...dependen
 		}
 		goMod.WriteString(")\n")
 		for _, dependency := range dependencies {
+			writeFile(t, filepath.Join(dependency.root, "plystra.yaml"), "{}\n")
 			relative, err := filepath.Rel(appRoot, dependency.root)
 			if err != nil {
 				t.Fatalf("Rel: %v", err)

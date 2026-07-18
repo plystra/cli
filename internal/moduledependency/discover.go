@@ -1,5 +1,5 @@
-// Package moduledependency discovers explicit application Go Module
-// dependencies without traversing the transitive module graph.
+// Package moduledependency discovers the complete effective Go Module graph
+// and recognizes dependency Plystra Projects without mutating module state.
 package moduledependency
 
 import (
@@ -17,6 +17,7 @@ import (
 
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/modulelocate"
+	"github.com/plystra/cli/internal/projectlocate"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
@@ -24,10 +25,7 @@ import (
 
 const maximumGoModSize = 1 << 20
 
-const (
-	defaultOutputLimit       = 16 << 20
-	maximumArgumentListBytes = 16 << 10
-)
+const defaultOutputLimit = 16 << 20
 
 var (
 	// ErrDiscover reports that dependency-module discovery failed.
@@ -69,22 +67,26 @@ func (r Replacement) Version() string { return r.version }
 // Local reports whether the replacement is a local filesystem source.
 func (r Replacement) Local() bool { return r.path != "" && r.version == "" }
 
-// Module is one explicit application requirement resolved to its selected
+// Module is one dependency in the effective graph resolved to its selected
 // read-only source root.
 type Module struct {
 	path            string
 	requiredVersion string
 	selectedVersion string
 	root            string
+	sourcePath      string
+	direct          bool
 	indirect        bool
 	workspace       bool
+	project         bool
 	replacement     Replacement
 }
 
 // Path returns the required module path.
 func (m Module) Path() string { return m.path }
 
-// RequiredVersion returns the version written in the application go.mod.
+// RequiredVersion returns the version written in the current Project's
+// go.mod, or empty for a transitive or workspace-only dependency.
 func (m Module) RequiredVersion() string { return m.requiredVersion }
 
 // SelectedVersion returns the version selected by Go. It is empty for a
@@ -95,19 +97,27 @@ func (m Module) SelectedVersion() string { return m.selectedVersion }
 // generation-extension input or generated manifest data.
 func (m Module) Root() string { return m.root }
 
-// Indirect reports whether the explicit go.mod requirement carries the
-// indirect marker.
+// Direct reports whether the current Project's go.mod explicitly requires the
+// module. It does not grant resolution or composition precedence.
+func (m Module) Direct() bool { return m.direct }
+
+// Indirect reports whether a direct go.mod requirement carries the indirect
+// marker. It is false for transitive and workspace-only dependencies.
 func (m Module) Indirect() bool { return m.indirect }
 
 // Workspace reports whether the selected source is an active go.work module.
 func (m Module) Workspace() bool { return m.workspace }
+
+// Project reports whether the selected module root contains a regular
+// non-symbolic plystra.yaml and is therefore a dependency Plystra Project.
+func (m Module) Project() bool { return m.project }
 
 // Replacement returns replacement provenance when Go selected one.
 func (m Module) Replacement() (Replacement, bool) {
 	return m.replacement, m.replacement.path != ""
 }
 
-// Index is an immutable deterministic collection of explicit dependency
+// Index is an immutable deterministic collection of effective dependency
 // modules.
 type Index struct {
 	modules []Module
@@ -118,7 +128,20 @@ func (i Index) Modules() []Module {
 	return append([]Module(nil), i.modules...)
 }
 
-// ByPath returns one exact required module.
+// Projects returns every direct and transitive dependency Plystra Project in
+// module-path order. Ordinary graph modules remain available through Modules
+// and ByPath but are not scanned as Plystra sources.
+func (i Index) Projects() []Module {
+	projects := make([]Module, 0, len(i.modules))
+	for _, dependency := range i.modules {
+		if dependency.project {
+			projects = append(projects, dependency)
+		}
+	}
+	return projects
+}
+
+// ByPath returns one exact dependency module from the effective graph.
 func (i Index) ByPath(modulePath string) (Module, bool) {
 	for _, dependency := range i.modules {
 		if dependency.path == modulePath {
@@ -128,8 +151,9 @@ func (i Index) ByPath(modulePath string) (Module, bool) {
 	return Module{}, false
 }
 
-// Discover resolves every module explicitly required by application go.mod.
-// It never asks Go to enumerate the transitive module graph.
+// Discover asks standard Go tooling for the complete effective module graph,
+// validates every selected source root, and recognizes dependency Projects by
+// root plystra.yaml. It writes neither Project files nor dependency sources.
 func Discover(ctx context.Context, application modulelocate.Module, options Options) (Index, error) {
 	if application.Path() == "" || application.ModulePath() == "" {
 		return Index{}, fmt.Errorf("%w: application module is empty", ErrDiscover)
@@ -143,31 +167,19 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 	if err != nil {
 		return Index{}, fmt.Errorf("%w: %w", ErrDiscover, err)
 	}
-	if len(requirements) == 0 {
-		return Index{}, nil
-	}
 
 	outputLimit := options.OutputLimit
 	if outputLimit <= 0 {
 		outputLimit = defaultOutputLimit
 	}
-	var output bytes.Buffer
-	for _, batch := range requirementBatches(requirements) {
-		remaining := outputLimit - output.Len()
-		if remaining <= 0 {
-			return Index{}, fmt.Errorf("%w: resolve selected modules: %w: limit %d bytes", ErrDiscover, gocommand.ErrOutputTooLarge, outputLimit)
-		}
-		arguments := append([]string{"list", "-m", "-json", "-mod=readonly"}, batch...)
-		batchOutput, err := gocommand.Output(ctx, gocommand.Options{
-			Command:     options.GoCommand,
-			Directory:   application.Path(),
-			Environment: options.Environment,
-			OutputLimit: remaining,
-		}, arguments...)
-		if err != nil {
-			return Index{}, fmt.Errorf("%w: resolve selected modules: %w", ErrDiscover, err)
-		}
-		_, _ = output.Write(batchOutput)
+	output, err := gocommand.Output(ctx, gocommand.Options{
+		Command:     options.GoCommand,
+		Directory:   application.Path(),
+		Environment: options.Environment,
+		OutputLimit: outputLimit,
+	}, "list", "-m", "-json", "-mod=readonly", "all")
+	if err != nil {
+		return Index{}, fmt.Errorf("%w: resolve effective module graph: %w", ErrDiscover, err)
 	}
 	after, err := readGoMod(goModPath)
 	if err != nil || !sameSnapshot(before, after) {
@@ -177,32 +189,21 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		return Index{}, fmt.Errorf("%w: %w: application go.mod changed: %v", ErrDiscover, ErrConcurrentChange, err)
 	}
 
-	modules, err := decodeModules(output.Bytes(), requirements)
+	modules, err := decodeModules(output, application, requirements)
 	if err != nil {
 		return Index{}, fmt.Errorf("%w: %w", ErrDiscover, err)
 	}
-	return Index{modules: modules}, nil
-}
-
-func requirementBatches(requirements []requirement) [][]string {
-	const baseBytes = len("list -m -json -mod=readonly ")
-	batches := make([][]string, 0, 1)
-	current := make([]string, 0, len(requirements))
-	used := baseBytes
-	for _, declared := range requirements {
-		additional := len(declared.path) + 1
-		if len(current) != 0 && used+additional > maximumArgumentListBytes {
-			batches = append(batches, current)
-			current = make([]string, 0, len(requirements)-len(current))
-			used = baseBytes
+	if err := resolveMissingSources(ctx, application.Path(), before, modules, options, outputLimit); err != nil {
+		return Index{}, fmt.Errorf("%w: %w", ErrDiscover, err)
+	}
+	for index := range modules {
+		project, err := projectlocate.Recognize(modules[index].root)
+		if err != nil {
+			return Index{}, fmt.Errorf("%w: inspect dependency Project marker for %q: %w", ErrDiscover, modules[index].path, err)
 		}
-		current = append(current, declared.path)
-		used += additional
+		modules[index].project = project
 	}
-	if len(current) != 0 {
-		batches = append(batches, current)
-	}
-	return batches
+	return Index{modules: modules}, nil
 }
 
 type requirement struct {
@@ -265,12 +266,14 @@ type listedError struct {
 	Err string `json:"Err"`
 }
 
-func decodeModules(data []byte, requirements []requirement) ([]Module, error) {
-	expected := make(map[string]requirement, len(requirements))
+func decodeModules(data []byte, application modulelocate.Module, requirements []requirement) ([]Module, error) {
+	direct := make(map[string]requirement, len(requirements))
 	for _, declared := range requirements {
-		expected[declared.path] = declared
+		direct[declared.path] = declared
 	}
-	resolved := make(map[string]Module, len(requirements))
+	resolved := make(map[string]Module)
+	seen := make(map[string]struct{})
+	applicationFound := false
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	for {
 		var listed listedModule
@@ -281,16 +284,18 @@ func decodeModules(data []byte, requirements []requirement) ([]Module, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: decode JSON: %v", ErrInvalidOutput, err)
 		}
-		declared, intended := expected[listed.Path]
-		if !intended {
-			return nil, fmt.Errorf("%w: Go returned unrequested module %q", ErrInvalidOutput, listed.Path)
+		if err := module.CheckPath(listed.Path); err != nil {
+			return nil, fmt.Errorf("%w: Go returned invalid module path %q: %v", ErrInvalidOutput, listed.Path, err)
 		}
-		if _, duplicate := resolved[listed.Path]; duplicate {
+		if _, duplicate := seen[listed.Path]; duplicate {
 			return nil, fmt.Errorf("%w: Go returned module %q more than once", ErrInvalidOutput, listed.Path)
 		}
+		seen[listed.Path] = struct{}{}
 		if listed.Error != nil {
 			return nil, fmt.Errorf("%w: Go reported an error for module %q", ErrInvalidOutput, listed.Path)
 		}
+
+		declared, isDirect := direct[listed.Path]
 		if listed.Main {
 			if listed.Version != "" || listed.Replace != nil {
 				return nil, fmt.Errorf("%w: workspace module %q has version or replacement provenance", ErrInvalidOutput, listed.Path)
@@ -302,7 +307,7 @@ func decodeModules(data []byte, requirements []requirement) ([]Module, error) {
 			if err := module.Check(listed.Path, listed.Version); err != nil {
 				return nil, fmt.Errorf("%w: selected module %s@%s: %v", ErrInvalidOutput, listed.Path, listed.Version, err)
 			}
-			if semver.Compare(listed.Version, declared.version) < 0 {
+			if isDirect && semver.Compare(listed.Version, declared.version) < 0 {
 				return nil, fmt.Errorf("%w: selected module %s@%s is older than required %s", ErrInvalidOutput, listed.Path, listed.Version, declared.version)
 			}
 		}
@@ -312,8 +317,8 @@ func decodeModules(data []byte, requirements []requirement) ([]Module, error) {
 		var replacement Replacement
 		expectedSourcePath := listed.Path
 		if listed.Replace != nil {
-			if listed.Replace.Path == "" || strings.ContainsRune(listed.Replace.Path, 0) {
-				return nil, fmt.Errorf("%w: module %q has invalid replacement path", ErrInvalidOutput, listed.Path)
+			if listed.Main || listed.Replace.Path == "" || strings.ContainsRune(listed.Replace.Path, 0) {
+				return nil, fmt.Errorf("%w: module %q has invalid replacement provenance", ErrInvalidOutput, listed.Path)
 			}
 			if listed.Replace.Version != "" {
 				if err := module.Check(listed.Replace.Path, listed.Replace.Version); err != nil {
@@ -331,30 +336,163 @@ func decodeModules(data []byte, requirements []requirement) ([]Module, error) {
 			}
 			replacement = Replacement{path: listed.Replace.Path, version: listed.Replace.Version}
 		}
-		root, err := validateModuleRoot(listed.Path, directory, goModPath, expectedSourcePath)
-		if err != nil {
-			return nil, err
+		root := ""
+		if (directory == "" || goModPath == "") && !listed.Main && (listed.Replace == nil || listed.Replace.Version != "") {
+			// go list may report only graph metadata when a selected source
+			// archive has not been extracted yet. Resolve that exact selected
+			// version later, outside the Project directory.
+		} else {
+			var err error
+			root, err = validateModuleRoot(listed.Path, directory, goModPath, expectedSourcePath)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if listed.Path == application.ModulePath() {
+			if !listed.Main || isDirect || !sameDirectory(root, application.Path()) {
+				return nil, fmt.Errorf("%w: current module %q has inconsistent main-module provenance", ErrInvalidOutput, listed.Path)
+			}
+			applicationFound = true
+			continue
 		}
 		resolved[listed.Path] = Module{
 			path:            listed.Path,
 			requiredVersion: declared.version,
 			selectedVersion: listed.Version,
 			root:            root,
-			indirect:        declared.indirect,
+			sourcePath:      expectedSourcePath,
+			direct:          isDirect,
+			indirect:        isDirect && declared.indirect,
 			workspace:       listed.Main,
 			replacement:     replacement,
 		}
 	}
-
-	modules := make([]Module, 0, len(requirements))
-	for _, declared := range requirements {
-		resolvedModule, ok := resolved[declared.path]
-		if !ok {
-			return nil, fmt.Errorf("%w: Go omitted requested module %q", ErrInvalidOutput, declared.path)
-		}
-		modules = append(modules, resolvedModule)
+	if !applicationFound {
+		return nil, fmt.Errorf("%w: Go omitted current module %q", ErrInvalidOutput, application.ModulePath())
 	}
+	for _, declared := range requirements {
+		if _, ok := resolved[declared.path]; !ok {
+			return nil, fmt.Errorf("%w: Go omitted directly required module %q", ErrInvalidOutput, declared.path)
+		}
+	}
+	modules := make([]Module, 0, len(resolved))
+	for _, dependency := range resolved {
+		modules = append(modules, dependency)
+	}
+	sort.Slice(modules, func(left, right int) bool { return modules[left].path < modules[right].path })
 	return modules, nil
+}
+
+type downloadedModule struct {
+	Path    string `json:"Path"`
+	Version string `json:"Version"`
+	Dir     string `json:"Dir"`
+	GoMod   string `json:"GoMod"`
+}
+
+func resolveMissingSources(ctx context.Context, applicationRoot string, expectedGoMod fileSnapshot, modules []Module, options Options, outputLimit int) error {
+	missing := false
+	for _, dependency := range modules {
+		if dependency.root == "" {
+			missing = true
+			break
+		}
+	}
+	if !missing {
+		return nil
+	}
+
+	downloadRoot, err := os.MkdirTemp("", "plystra-module-download-")
+	if err != nil {
+		return fmt.Errorf("%w: create isolated download directory: %v", ErrModuleUnavailable, err)
+	}
+	defer os.RemoveAll(downloadRoot)
+
+	environment := environmentWith(options.Environment, "GOWORK", "off")
+	for index := range modules {
+		if modules[index].root != "" {
+			continue
+		}
+		queryPath := modules[index].sourcePath
+		queryVersion := modules[index].selectedVersion
+		if replacement, exists := modules[index].Replacement(); exists {
+			if replacement.Local() {
+				return fmt.Errorf("%w: local replacement source for module %q is unavailable", ErrModuleUnavailable, modules[index].path)
+			}
+			queryPath = replacement.Path()
+			queryVersion = replacement.Version()
+		}
+		query := queryPath + "@" + queryVersion
+		output, err := gocommand.Output(ctx, gocommand.Options{
+			Command:     options.GoCommand,
+			Directory:   downloadRoot,
+			Environment: environment,
+			OutputLimit: outputLimit,
+		}, "mod", "download", "-json", query)
+		if err != nil {
+			return fmt.Errorf("%w: download selected source for module %q: %w", ErrModuleUnavailable, modules[index].path, err)
+		}
+		var downloaded downloadedModule
+		decoder := json.NewDecoder(bytes.NewReader(output))
+		if err := decoder.Decode(&downloaded); err != nil {
+			return fmt.Errorf("%w: decode downloaded source for module %q: %v", ErrInvalidOutput, modules[index].path, err)
+		}
+		if err := ensureJSONEnd(decoder); err != nil {
+			return fmt.Errorf("%w: downloaded source for module %q: %v", ErrInvalidOutput, modules[index].path, err)
+		}
+		if downloaded.Path != queryPath || downloaded.Version != queryVersion {
+			return fmt.Errorf("%w: downloaded source for module %q returned %s@%s, expected %s", ErrInvalidOutput, modules[index].path, downloaded.Path, downloaded.Version, query)
+		}
+		root, err := validateModuleRoot(modules[index].path, downloaded.Dir, downloaded.GoMod, queryPath)
+		if err != nil {
+			return err
+		}
+		modules[index].root = root
+	}
+
+	// Downloads run outside the Project directory. Recheck the Project module
+	// file anyway so a concurrent dependency edit cannot be mistaken for the
+	// graph whose sources were just inspected.
+	currentGoMod, err := readGoMod(filepath.Join(applicationRoot, "go.mod"))
+	if err != nil || !sameSnapshot(expectedGoMod, currentGoMod) {
+		if err == nil {
+			err = ErrConcurrentChange
+		}
+		return fmt.Errorf("%w: application go.mod changed while resolving sources: %v", ErrConcurrentChange, err)
+	}
+	return nil
+}
+
+func ensureJSONEnd(decoder *json.Decoder) error {
+	var extra any
+	err := decoder.Decode(&extra)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return errors.New("go returned more than one JSON document")
+}
+
+func environmentWith(environment []string, key, value string) []string {
+	if environment == nil {
+		environment = os.Environ()
+	}
+	result := make([]string, 0, len(environment)+1)
+	for _, entry := range environment {
+		name, _, _ := strings.Cut(entry, "=")
+		if !strings.EqualFold(name, key) {
+			result = append(result, entry)
+		}
+	}
+	return append(result, key+"="+value)
+}
+
+func sameDirectory(left, right string) bool {
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
 }
 
 func validateModuleRoot(modulePath, directory, goModPath, expectedSourcePath string) (string, error) {
@@ -372,16 +510,22 @@ func validateModuleRoot(modulePath, directory, goModPath, expectedSourcePath str
 	if err != nil || !rootInfo.IsDir() || rootInfo.Mode()&fs.ModeSymlink != 0 {
 		return "", fmt.Errorf("%w: %w: source for module %q is not a directory", ErrInvalidOutput, ErrModuleUnavailable, modulePath)
 	}
-	expectedGoMod := filepath.Join(canonicalRoot, "go.mod")
-	expectedInfo, err := os.Lstat(expectedGoMod)
-	if err != nil || !expectedInfo.Mode().IsRegular() || expectedInfo.Mode()&fs.ModeSymlink != 0 {
-		return "", fmt.Errorf("%w: %w: module %q has no regular non-symbolic go.mod", ErrInvalidOutput, ErrModuleUnavailable, modulePath)
-	}
 	reportedInfo, err := os.Lstat(goModPath)
 	if err != nil || !reportedInfo.Mode().IsRegular() || reportedInfo.Mode()&fs.ModeSymlink != 0 {
 		return "", fmt.Errorf("%w: module %q reported invalid go.mod provenance", ErrInvalidOutput, modulePath)
 	}
-	snapshot, err := readGoMod(expectedGoMod)
+	manifestPath := goModPath
+	rootGoMod := filepath.Join(canonicalRoot, "go.mod")
+	rootInfo, rootErr := os.Lstat(rootGoMod)
+	switch {
+	case rootErr == nil && rootInfo.Mode().IsRegular() && rootInfo.Mode()&fs.ModeSymlink == 0:
+		manifestPath = rootGoMod
+	case rootErr == nil:
+		return "", fmt.Errorf("%w: module %q source has unsafe go.mod", ErrInvalidOutput, modulePath)
+	case !errors.Is(rootErr, fs.ErrNotExist):
+		return "", fmt.Errorf("%w: inspect source go.mod for module %q: %v", ErrInvalidOutput, modulePath, rootErr)
+	}
+	snapshot, err := readGoMod(manifestPath)
 	if err != nil {
 		return "", fmt.Errorf("%w: %w: inspect go.mod for module %q: %v", ErrInvalidOutput, ErrModuleUnavailable, modulePath, err)
 	}

@@ -30,16 +30,33 @@ func Find(start string) (modulelocate.Module, error) {
 	if err != nil {
 		return modulelocate.Module{}, fmt.Errorf("%w: %w", ErrLocate, err)
 	}
-	manifestPath := filepath.Join(module.Path(), ManifestName)
+	recognized, err := Recognize(module.Path())
+	if err != nil {
+		return modulelocate.Module{}, fmt.Errorf("%w: %w", ErrLocate, err)
+	}
+	if !recognized {
+		return modulelocate.Module{}, fmt.Errorf("%w: %w: nearest Go Module %q has no root %s", ErrLocate, ErrNotFound, module.ModulePath(), ManifestName)
+	}
+	return module, nil
+}
+
+// Recognize reports whether root contains the regular non-symbolic marker
+// required of every Plystra Project. A missing marker identifies an ordinary
+// Go Module and is not an error.
+func Recognize(root string) (bool, error) {
+	if root == "" {
+		return false, fmt.Errorf("%w: root path is empty", ErrInvalidManifest)
+	}
+	manifestPath := filepath.Join(root, ManifestName)
 	info, err := os.Lstat(manifestPath)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return modulelocate.Module{}, fmt.Errorf("%w: %w: nearest Go Module %q has no root %s", ErrLocate, ErrNotFound, module.ModulePath(), ManifestName)
+		return false, nil
 	case err != nil:
-		return modulelocate.Module{}, fmt.Errorf("%w: inspect %s: %w", ErrLocate, manifestPath, err)
+		return false, fmt.Errorf("inspect %s: %w", manifestPath, err)
 	case !info.Mode().IsRegular() || info.Mode()&fs.ModeSymlink != 0:
-		return modulelocate.Module{}, fmt.Errorf("%w: %w: %s must be a regular non-symbolic file", ErrLocate, ErrInvalidManifest, manifestPath)
+		return false, fmt.Errorf("%w: %s must be a regular non-symbolic file", ErrInvalidManifest, manifestPath)
 	default:
-		return module, nil
+		return true, nil
 	}
 }

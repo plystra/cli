@@ -34,10 +34,23 @@ func TestMain(main *testing.M) {
 
 func runRollbackHelper() int {
 	switch {
-	case len(os.Args) == 6 && os.Args[1] == "list" && os.Args[2] == "-m" && os.Args[3] == "-json" && os.Args[4] == "-mod=readonly" && os.Args[5] == "github.com/plystra/kernel":
+	case len(os.Args) == 6 && os.Args[1] == "list" && os.Args[2] == "-m" && os.Args[3] == "-json" && os.Args[4] == "-mod=readonly" && os.Args[5] == "all":
 		kernelRoot := os.Getenv("PLYSTRA_TEST_KERNEL_ROOT")
 		if kernelRoot == "" {
 			return 13
+		}
+		applicationRoot, err := os.Getwd()
+		if err != nil {
+			return 14
+		}
+		encoder := json.NewEncoder(os.Stdout)
+		if err := encoder.Encode(map[string]any{
+			"Path":  "example.com/acme/rollback",
+			"Main":  true,
+			"Dir":   applicationRoot,
+			"GoMod": filepath.Join(applicationRoot, "go.mod"),
+		}); err != nil {
+			return 15
 		}
 		listed := map[string]any{
 			"Path":    "github.com/plystra/kernel",
@@ -50,8 +63,8 @@ func runRollbackHelper() int {
 				"GoMod": filepath.Join(kernelRoot, "go.mod"),
 			},
 		}
-		if err := json.NewEncoder(os.Stdout).Encode(listed); err != nil {
-			return 14
+		if err := encoder.Encode(listed); err != nil {
+			return 16
 		}
 		return 0
 	case len(os.Args) == 3 && os.Args[1] == "mod" && os.Args[2] == "tidy":

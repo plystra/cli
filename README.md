@@ -9,7 +9,7 @@ The CLI is a separate Go Module from `github.com/plystra/kernel`. It completes b
 The CLI owns:
 
 - Go Module, Plugin, and Capability creation.
-- Root-level plugin and intended dependency-module scanning.
+- Root-level Plugin and effective-graph dependency-Project scanning.
 - The complete normalized application model.
 - Official and intrinsic Capability discovery.
 - Exact requirement closure and ordinary provider resolution.
@@ -27,7 +27,7 @@ Capability inspection strictly parses the optional `extensions` mapping within t
 
 The CLI derives one statically resolved application from local plugins, explicit public exposure, generated client use, non-inferable declared requirements, namespaced build-time metadata, selected plugin rules, and explicit provider choices only when several ordinary providers exist.
 
-Reserved `kernel.*` Capabilities are always available outside ordinary provider selection. Their exact schemas and digests come from the versioned `github.com/plystra/kernel/capability/catalog` API and are revalidated against the CLI contract model at startup; the CLI does not maintain a second intrinsic schema copy. A runnable application directly requires `github.com/plystra/kernel` in `go.mod`, and generation retains that selected module version or a deterministic local-workspace build identity for intrinsic runtime provenance. Ordinary providers are never chosen by priority, official status, discovery order, or filesystem order.
+Reserved `kernel.*` Capabilities are always available outside ordinary provider selection. Their exact schemas and digests come from the versioned `github.com/plystra/kernel/capability/catalog` API and are revalidated against the CLI contract model at startup; the CLI does not maintain a second intrinsic schema copy. A Plystra Project directly requires `github.com/plystra/kernel` in `go.mod`, and generation retains that selected module version or a deterministic local-workspace build identity for intrinsic runtime provenance. Ordinary providers are never chosen by priority, official status, discovery order, or filesystem order.
 
 The CLI strictly normalizes `plystra.yaml` `http.address` and the unordered `http.expose` list. Every exposed exact canonical ID becomes a root requirement with stable configuration provenance and enters the generation model with HTTP and JavaScript exposure; duplicates, malformed IDs, unknown configuration keys, and IDs absent from the visible canonical catalog fail before extension execution or generated output. Internal availability alone never creates a public surface, while intrinsic `kernel.*` targets still require explicit exposure.
 
@@ -207,7 +207,7 @@ plystra capability implement email.send/v1 --plugin mailer
 
 For a genuinely new name, creation reports conservative typo-like visible exact Capabilities as advisory recommendations. It never redirects or blocks the requested custom identity based only on similar spelling.
 
-Implementation searches local and explicit Go Module dependency contracts, requires exact provider-independent equality including normalized extension metadata, copies the canonical schema when the target plugin does not yet provide it, adds a compile-safe user-owned method only when absent, regenerates all affected module surfaces, tidies module metadata, and validates with `go test -mod=readonly ./...`. Repeating the command preserves an existing method byte-for-byte.
+Implementation searches local and effective-graph dependency Project contracts, requires exact provider-independent equality including normalized extension metadata, copies the canonical schema when the target plugin does not yet provide it, adds a compile-safe user-owned method only when absent, regenerates all affected module surfaces, tidies module metadata, and validates with `go test -mod=readonly ./...`. Repeating the command preserves an existing method byte-for-byte.
 
 In a Plystra Project, expose an existing exact canonical Capability or create and expose a new one in the same transaction:
 
@@ -261,7 +261,7 @@ From any directory inside a Plystra Project, install its complete current manage
 plystra generate
 ```
 
-The command resolves the mandatory root `plystra.yaml`, explicit Go Module dependencies, canonical providers, selected generation extensions, generation-derived requirements, contributions, and Capability Aliases. It renders the complete Project-owned Go, HTTP, JavaScript, documentation, assembly-compatibility, manifest, invocation, and runtime-bootstrap surfaces. A Go Module without root `plystra.yaml` is an ordinary dependency and is rejected as a generation target.
+The command resolves the mandatory root `plystra.yaml`, the effective Go Module graph, every dependency Project in that graph, canonical providers, selected generation extensions, generation-derived requirements, contributions, and Capability Aliases. Only module roots containing `plystra.yaml` are scanned for dependency Plugins; markerless modules remain ordinary Go dependencies. It renders the complete Project-owned Go, HTTP, JavaScript, documentation, assembly-compatibility, manifest, invocation, and runtime-bootstrap surfaces. A Go Module without root `plystra.yaml` is an ordinary dependency and is rejected as a generation target.
 
 Generation installs output transactionally, runs `go test -mod=readonly ./...`, and re-resolves the complete application before commit. Changed inputs or nondeterministic output roll back the transaction.
 

@@ -1,5 +1,5 @@
 // Package applicationmeta parses the bounded CLI-owned configuration envelope
-// of a runnable application's plystra.yaml.
+// of a Plystra Project's root plystra.yaml.
 package applicationmeta
 
 import (

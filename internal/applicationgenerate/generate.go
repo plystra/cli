@@ -220,7 +220,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 
 func kernelBuildProvenance(resolved applicationresolve.Result) (string, string, error) {
 	dependency, exists := resolved.Dependencies().ByPath(kernelintrinsic.ModulePath)
-	if !exists {
+	if !exists || !dependency.Direct() {
 		return "", "", fmt.Errorf("%w: go.mod must directly require %s", ErrKernelDependency, kernelintrinsic.ModulePath)
 	}
 	identity := ""

@@ -91,6 +91,24 @@ func TestFindPreservesModuleLocationErrors(t *testing.T) {
 	}
 }
 
+func TestRecognizeDistinguishesOrdinaryAndPlystraModules(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	recognized, err := projectlocate.Recognize(root)
+	if err != nil || recognized {
+		t.Fatalf("Recognize ordinary module = %t, %v", recognized, err)
+	}
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	recognized, err = projectlocate.Recognize(root)
+	if err != nil || !recognized {
+		t.Fatalf("Recognize Project = %t, %v", recognized, err)
+	}
+	if recognized, err = projectlocate.Recognize(""); recognized || !errors.Is(err, projectlocate.ErrInvalidManifest) {
+		t.Fatalf("Recognize empty root = %t, %v", recognized, err)
+	}
+}
+
 func writeFile(t *testing.T, name, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {

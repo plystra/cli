@@ -64,8 +64,8 @@ func (r Result) Module() modulelocate.Module { return r.module }
 // Manifest returns the normalized root application declaration.
 func (r Result) Manifest() applicationmeta.Manifest { return r.manifest }
 
-// Dependencies returns the immutable explicit Go Module dependency index used
-// for plugin discovery and generated runtime build provenance.
+// Dependencies returns the immutable effective Go Module graph used for
+// dependency-Project discovery and generated runtime build provenance.
 func (r Result) Dependencies() moduledependency.Index { return r.dependencies }
 
 // Inventory returns every visible local and explicit-dependency plugin.
@@ -79,10 +79,10 @@ func (r Result) Resolution() generationresolution.ExtensionResult { return r.res
 // closure. Its values never enter generation-extension input.
 func (r Result) Configurations() configurationresolve.Result { return r.configs }
 
-// Resolve locates the nearest module, loads its root plystra.yaml, discovers
-// only explicit Go Module dependencies, indexes visible plugins and contracts,
-// and runs the deterministic generation-resolution fixed point. It rechecks the
-// application manifest before returning and writes no application files.
+// Resolve locates the nearest Project, loads its root plystra.yaml, discovers
+// the effective Go Module graph, indexes visible Project plugins and contracts,
+// and runs the deterministic generation-resolution fixed point. It rechecks
+// the application manifest before returning and writes no application files.
 func Resolve(ctx context.Context, options Options) (Result, error) {
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: context is nil", ErrResolve)

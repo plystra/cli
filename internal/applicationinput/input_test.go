@@ -33,6 +33,7 @@ func TestBuildLoadsDeterministicFilesystemResolutionInput(t *testing.T) {
 	providersRoot := filepath.Join(root, "providers")
 	writeModule(t, appRoot, "example.com/app")
 	writeModule(t, providersRoot, "example.com/providers")
+	writeFile(t, filepath.Join(providersRoot, "plystra.yaml"), "{}\n")
 	writePlugin(t, appRoot, "local", "id: example.local\nrequires: [order.create/v1]\n")
 	writePlugin(t, providersRoot, "business", "id: example.business\nprovides: [order.create/v1]\nrequires: [audit.write/v1]\ngeneration: {api: v1, package: ./generation, activations: [{namespace: authz, capability: order.create/v1}]}\n")
 	if err := os.MkdirAll(filepath.Join(providersRoot, "business", "generation"), 0o755); err != nil {

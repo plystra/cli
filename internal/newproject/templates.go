@@ -571,8 +571,9 @@ build and distribution boundary for every Plystra module.
 ## Diagnose common failures
 
 - Missing provider: require or expose the intended canonical ID and make a
-  compatible provider visible through a local Plugin or direct module
-  dependency.
+  compatible provider visible through a local Plugin or a dependency Plystra
+  Project in the effective Go Module graph. Markerless dependencies are not
+  scanned for Plugins.
 - Ambiguous provider: set plystra.yaml capabilities.use for the canonical ID.
   Do not add priorities or rely on discovery order.
 - Incompatible contract: compare exact request, response, semantic errors,

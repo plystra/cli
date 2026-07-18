@@ -1,5 +1,5 @@
 // Package plugininventory builds one deterministic visible plugin inventory
-// from the application module and its explicit dependency modules.
+// from the current Project and every dependency Plystra Project.
 package plugininventory
 
 import (
@@ -76,8 +76,8 @@ func (p Plugin) PluginRoot() string {
 	return filepath.Join(p.moduleRoot, filepath.FromSlash(p.indexed.Path()))
 }
 
-// Local reports whether this is a root-level plugin in the runnable
-// application module and therefore selected independently of provider use.
+// Local reports whether this is a root-level plugin in the current Project and
+// therefore selected independently of provider use.
 func (p Plugin) Local() bool { return p.local }
 
 // Provides returns a defensive copy of declared canonical Capabilities.
@@ -119,20 +119,20 @@ func (i Index) ByID(pluginID string) (Plugin, bool) {
 	return i.plugins[position], true
 }
 
-// Build scans the application module and every explicit dependency source.
-// Dependency plugins remain candidates; Local marks the plugins included by
-// default in the runnable application.
+// Build scans the current Project and every direct or transitive dependency
+// Project. Ordinary Go dependencies are never scanned. Dependency plugins
+// remain candidates; Local marks the plugins included by default.
 func Build(application modulelocate.Module, dependencies moduledependency.Index) (Index, error) {
 	if application.Path() == "" || application.ModulePath() == "" {
 		return Index{}, fmt.Errorf("%w: application module is empty", ErrBuild)
 	}
-	sources := make([]moduleSource, 0, len(dependencies.Modules())+1)
+	sources := make([]moduleSource, 0, len(dependencies.Projects())+1)
 	sources = append(sources, moduleSource{
 		path:  application.ModulePath(),
 		root:  application.Path(),
 		local: true,
 	})
-	for _, dependency := range dependencies.Modules() {
+	for _, dependency := range dependencies.Projects() {
 		sources = append(sources, moduleSource{
 			path:    dependency.Path(),
 			version: dependency.SelectedVersion(),

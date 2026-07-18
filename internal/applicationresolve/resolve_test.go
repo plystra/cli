@@ -94,6 +94,7 @@ func TestResolveClosesLocalRequirementsThroughDependencyProvidersAndAliases(t *t
 	appRoot := filepath.Join(root, "app")
 	providerRoot := filepath.Join(root, "providers")
 	writeModule(t, providerRoot, "example.com/providers")
+	writeFile(t, filepath.Join(providerRoot, "plystra.yaml"), "{}\n")
 	writePlugin(t, providerRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\nconfig: {host: {type: string, required: true}, password: {type: secret, required: true}}\n")
 	writeCapability(t, providerRoot, "smtp", "email.send/v1", `id: email.send/v1
 request:
@@ -187,9 +188,10 @@ func TestResolveUsesActiveGoWorkspaceDependencySource(t *testing.T) {
 	appRoot := filepath.Join(root, "app")
 	providerRoot := filepath.Join(root, "providers")
 	writeModule(t, providerRoot, "example.com/providers")
+	writeFile(t, filepath.Join(providerRoot, "plystra.yaml"), "{}\n")
 	writePlugin(t, providerRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\n")
 	writeCapability(t, providerRoot, "smtp", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
-	writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/workspace-app\n\ngo 1.26\n\nrequire example.com/providers v1.2.3\n")
+	writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/workspace-app\n\ngo 1.26\n")
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "capabilities:\n  require: [email.send/v1]\n")
 	goWork := filepath.Join(root, "go.work")
 	writeFile(t, goWork, "go 1.26\n\nuse (\n\t./app\n\t./providers\n)\n")
@@ -350,7 +352,7 @@ func runResolveHelper(mode string) int {
 	if mode != "change-manifest" {
 		return 9
 	}
-	want := []string{"list", "-m", "-json", "-mod=readonly", "example.com/dependency"}
+	want := []string{"list", "-m", "-json", "-mod=readonly", "all"}
 	if len(os.Args) != len(want)+1 {
 		return 10
 	}
@@ -362,14 +364,27 @@ func runResolveHelper(mode string) int {
 	if err := os.WriteFile(os.Getenv("PLYSTRA_APPLICATION_MANIFEST"), []byte("timeouts: {}\n"), 0o644); err != nil {
 		return 12
 	}
+	applicationRoot, err := os.Getwd()
+	if err != nil {
+		return 13
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	if err := encoder.Encode(map[string]any{
+		"Path":  "example.com/changing",
+		"Main":  true,
+		"Dir":   applicationRoot,
+		"GoMod": filepath.Join(applicationRoot, "go.mod"),
+	}); err != nil {
+		return 14
+	}
 	root := os.Getenv("PLYSTRA_APPLICATION_MODULE_ROOT")
-	if err := json.NewEncoder(os.Stdout).Encode(map[string]any{
+	if err := encoder.Encode(map[string]any{
 		"Path":    "example.com/dependency",
 		"Version": "v1.2.3",
 		"Dir":     root,
 		"GoMod":   filepath.Join(root, "go.mod"),
 	}); err != nil {
-		return 13
+		return 15
 	}
 	return 0
 }

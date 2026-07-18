@@ -146,8 +146,8 @@ func Prepare(options Options) (Plan, error) {
 }
 
 // PrepareVisible creates a non-mutating plan from the selected local plugin
-// and every plugin in the module's explicit Go Module dependency inventory.
-// Dependency source remains read-only and is retained only as schema
+// and every plugin visible from dependency Projects in the effective Go Module
+// graph. Dependency source remains read-only and is retained only as schema
 // provenance for version inference and exact contract copying.
 func PrepareVisible(ctx context.Context, options Options) (Plan, error) {
 	if ctx == nil {

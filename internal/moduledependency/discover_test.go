@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -30,22 +31,33 @@ func TestMain(main *testing.M) {
 	os.Exit(main.Run())
 }
 
-func TestDiscoverUsesOnlySortedExplicitRequirements(t *testing.T) {
+func TestDiscoverUsesSortedEffectiveGraphAndRecognizesProjects(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	appRoot := filepath.Join(root, "app")
 	aRoot := filepath.Join(root, "a")
+	ordinaryRoot := filepath.Join(root, "ordinary")
+	transitiveRoot := filepath.Join(root, "transitive")
 	zRoot := filepath.Join(root, "z")
+	writeModule(t, appRoot, "example.com/app")
 	writeModule(t, aRoot, "example.com/a")
+	writeModule(t, ordinaryRoot, "example.com/ordinary")
+	writeModule(t, transitiveRoot, "example.com/transitive")
 	writeModule(t, zRoot, "example.com/z")
+	for _, projectRoot := range []string{aRoot, transitiveRoot, zRoot} {
+		writeFile(t, filepath.Join(projectRoot, "plystra.yaml"), "{}\n")
+	}
 	writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire (\n\texample.com/z v1.4.0 // indirect\n\texample.com/a v1.2.0\n)\n")
 
 	index, err := moduledependency.Discover(context.Background(), locate(t, appRoot), moduledependency.Options{
 		GoCommand: os.Args[0],
 		Environment: append(os.Environ(),
 			"PLYSTRA_MODULE_DEPENDENCY_HELPER=valid",
+			"PLYSTRA_MODULE_APP_ROOT="+appRoot,
 			"PLYSTRA_MODULE_A_ROOT="+aRoot,
+			"PLYSTRA_MODULE_ORDINARY_ROOT="+ordinaryRoot,
+			"PLYSTRA_MODULE_TRANSITIVE_ROOT="+transitiveRoot,
 			"PLYSTRA_MODULE_Z_ROOT="+zRoot,
 		),
 	})
@@ -53,14 +65,20 @@ func TestDiscoverUsesOnlySortedExplicitRequirements(t *testing.T) {
 		t.Fatalf("Discover: %v", err)
 	}
 	modules := index.Modules()
-	if len(modules) != 2 || modules[0].Path() != "example.com/a" || modules[1].Path() != "example.com/z" {
+	if len(modules) != 4 || modules[0].Path() != "example.com/a" || modules[1].Path() != "example.com/ordinary" || modules[2].Path() != "example.com/transitive" || modules[3].Path() != "example.com/z" {
 		t.Fatalf("Modules() = %#v", modules)
 	}
-	if modules[0].RequiredVersion() != "v1.2.0" || modules[0].SelectedVersion() != "v1.3.0" || modules[0].Indirect() || modules[0].Workspace() {
+	if modules[0].RequiredVersion() != "v1.2.0" || modules[0].SelectedVersion() != "v1.3.0" || !modules[0].Direct() || modules[0].Indirect() || modules[0].Workspace() || !modules[0].Project() {
 		t.Fatalf("a module provenance = %#v", modules[0])
 	}
-	if modules[1].RequiredVersion() != "v1.4.0" || modules[1].SelectedVersion() != "v1.5.0" || !modules[1].Indirect() || modules[1].Workspace() {
-		t.Fatalf("z module provenance = %#v", modules[1])
+	if modules[1].RequiredVersion() != "" || modules[1].Direct() || modules[1].Project() {
+		t.Fatalf("ordinary transitive module provenance = %#v", modules[1])
+	}
+	if modules[2].RequiredVersion() != "" || modules[2].Direct() || !modules[2].Project() {
+		t.Fatalf("transitive Project provenance = %#v", modules[2])
+	}
+	if modules[3].RequiredVersion() != "v1.4.0" || modules[3].SelectedVersion() != "v1.5.0" || !modules[3].Direct() || !modules[3].Indirect() || modules[3].Workspace() || !modules[3].Project() {
+		t.Fatalf("z module provenance = %#v", modules[3])
 	}
 	if _, ok := modules[0].Replacement(); ok {
 		t.Fatal("a module unexpectedly has replacement provenance")
@@ -70,6 +88,14 @@ func TestDiscoverUsesOnlySortedExplicitRequirements(t *testing.T) {
 	}
 	if _, ok := index.ByPath("example.com/missing"); ok {
 		t.Fatal("ByPath(missing) succeeded")
+	}
+	projects := index.Projects()
+	if len(projects) != 3 || projects[0].Path() != "example.com/a" || projects[1].Path() != "example.com/transitive" || projects[2].Path() != "example.com/z" {
+		t.Fatalf("Projects() = %#v", projects)
+	}
+	projects[0] = moduledependency.Module{}
+	if index.Projects()[0].Path() != "example.com/a" {
+		t.Fatal("Projects exposed mutable index storage")
 	}
 	modules[0] = moduledependency.Module{}
 	if index.Modules()[0].Path() != "example.com/a" {
@@ -84,6 +110,7 @@ func TestDiscoverAcceptsLocalReplacement(t *testing.T) {
 	appRoot := filepath.Join(root, "app")
 	pluginRoot := filepath.Join(root, "plugin")
 	writeModule(t, pluginRoot, "example.com/plugin")
+	writeFile(t, filepath.Join(pluginRoot, "plystra.yaml"), "{}\n")
 	writeFile(t, filepath.Join(pluginRoot, "smtp", "plugin.yaml"), "id: example.smtp\n")
 	goMod := "module example.com/app\n\ngo 1.26\n\nrequire example.com/plugin v1.2.3\n\nreplace example.com/plugin => ../plugin\n"
 	writeFile(t, filepath.Join(appRoot, "go.mod"), goMod)
@@ -101,7 +128,7 @@ func TestDiscoverAcceptsLocalReplacement(t *testing.T) {
 		t.Fatalf("Discover: %v", err)
 	}
 	modules := index.Modules()
-	if len(modules) != 1 || modules[0].Path() != "example.com/plugin" || modules[0].SelectedVersion() != "v1.2.3" || modules[0].Root() != canonicalPath(t, pluginRoot) {
+	if len(modules) != 1 || modules[0].Path() != "example.com/plugin" || modules[0].SelectedVersion() != "v1.2.3" || modules[0].Root() != canonicalPath(t, pluginRoot) || !modules[0].Direct() || !modules[0].Project() || len(index.Projects()) != 1 {
 		t.Fatalf("Modules() = %#v", modules)
 	}
 	replacement, ok := modules[0].Replacement()
@@ -116,31 +143,62 @@ func TestDiscoverAcceptsLocalReplacement(t *testing.T) {
 	}
 }
 
-func TestDiscoverAcceptsGoWorkspaceModule(t *testing.T) {
+func TestDiscoverAcceptsSyntheticGoModForOrdinaryLegacyModule(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	sourceRoot := filepath.Join(root, "legacy-source")
+	metadataRoot := filepath.Join(root, "metadata")
+	writeFile(t, filepath.Join(sourceRoot, "legacy.go"), "package legacy\n")
+	writeModule(t, metadataRoot, "example.com/legacy")
+	writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire example.com/legacy v1.2.3\n")
+
+	index, err := moduledependency.Discover(context.Background(), locate(t, appRoot), moduledependency.Options{
+		GoCommand: os.Args[0],
+		Environment: append(os.Environ(),
+			"PLYSTRA_MODULE_DEPENDENCY_HELPER=synthetic",
+			"PLYSTRA_MODULE_APP_ROOT="+appRoot,
+			"PLYSTRA_MODULE_SOURCE_ROOT="+sourceRoot,
+			"PLYSTRA_MODULE_METADATA_ROOT="+metadataRoot,
+		),
+	})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	modules := index.Modules()
+	if len(modules) != 1 || modules[0].Path() != "example.com/legacy" || modules[0].Root() != canonicalPath(t, sourceRoot) || !modules[0].Direct() || modules[0].Project() || len(index.Projects()) != 0 {
+		t.Fatalf("Modules() = %#v, Projects() = %#v", modules, index.Projects())
+	}
+}
+
+func TestDiscoverAcceptsImplicitGoWorkspaceModule(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	appRoot := filepath.Join(root, "app")
 	pluginRoot := filepath.Join(root, "plugin")
 	writeModule(t, pluginRoot, "example.com/plugin")
-	writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire example.com/plugin v0.0.0\n")
+	writeFile(t, filepath.Join(pluginRoot, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n")
 	goWork := filepath.Join(root, "go.work")
 	writeFile(t, goWork, "go 1.26\n\nuse (\n\t./app\n\t./plugin\n)\n")
 
-	index, err := moduledependency.Discover(context.Background(), locate(t, appRoot), moduledependency.Options{Environment: goEnvironment(map[string]string{
+	environment := goEnvironment(map[string]string{
 		"GOENV":       "off",
 		"GONOSUMDB":   "",
 		"GOPRIVATE":   "",
 		"GOPROXY":     "off",
 		"GOSUMDB":     "off",
 		"GOTOOLCHAIN": "local",
-		"GOWORK":      goWork,
-	})})
+	})
+	environment = withoutEnvironmentKey(environment, "GOWORK")
+	index, err := moduledependency.Discover(context.Background(), locate(t, appRoot), moduledependency.Options{Environment: environment})
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 	modules := index.Modules()
-	if len(modules) != 1 || !modules[0].Workspace() || modules[0].SelectedVersion() != "" || modules[0].Root() != canonicalPath(t, pluginRoot) {
+	if len(modules) != 1 || !modules[0].Workspace() || modules[0].SelectedVersion() != "" || modules[0].Root() != canonicalPath(t, pluginRoot) || modules[0].Direct() || !modules[0].Project() {
 		t.Fatalf("Modules() = %#v", modules)
 	}
 	if _, ok := modules[0].Replacement(); ok {
@@ -169,7 +227,7 @@ func TestDiscoverAcceptsDownloadedSelectedVersionWithoutMutation(t *testing.T) {
 		t.Fatalf("Discover: %v", err)
 	}
 	modules := index.Modules()
-	if len(modules) != 1 || modules[0].Path() != modulePath || modules[0].RequiredVersion() != version || modules[0].SelectedVersion() != version || modules[0].Workspace() {
+	if len(modules) != 1 || modules[0].Path() != modulePath || modules[0].RequiredVersion() != version || modules[0].SelectedVersion() != version || modules[0].Workspace() || !modules[0].Direct() || !modules[0].Project() || len(index.Projects()) != 1 {
 		t.Fatalf("Modules() = %#v", modules)
 	}
 	if _, ok := modules[0].Replacement(); ok {
@@ -186,24 +244,142 @@ func TestDiscoverAcceptsDownloadedSelectedVersionWithoutMutation(t *testing.T) {
 	}
 }
 
-func TestDiscoverSkipsGoCommandWithoutExplicitRequirements(t *testing.T) {
+func TestDiscoverMaterializesMissingSelectedSourceWithoutProjectMutation(t *testing.T) {
 	t.Parallel()
 
+	const (
+		modulePath = "example.com/plugin"
+		version    = "v1.2.3"
+	)
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/app\n\ngo 1.26\n")
-	index, err := moduledependency.Discover(context.Background(), locate(t, root), moduledependency.Options{GoCommand: filepath.Join(root, "missing-go")})
-	if err != nil || len(index.Modules()) != 0 {
-		t.Fatalf("Discover = %#v, %v", index.Modules(), err)
+	proxyRoot := writeModuleProxy(t, root, modulePath, version)
+	appRoot := filepath.Join(root, "app")
+	writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire "+modulePath+" "+version+"\n")
+	environment := isolatedGoEnvironment(t, proxyRoot)
+	runGo(t, appRoot, environment, "mod", "download", modulePath+"@"+version)
+
+	escapedPath, err := module.EscapePath(modulePath)
+	if err != nil {
+		t.Fatalf("EscapePath: %v", err)
+	}
+	escapedVersion, err := module.EscapeVersion(version)
+	if err != nil {
+		t.Fatalf("EscapeVersion: %v", err)
+	}
+	extractedRoot := filepath.Join(environmentValue(t, environment, "GOMODCACHE"), filepath.FromSlash(escapedPath)+"@"+escapedVersion)
+	if err := os.RemoveAll(extractedRoot); err != nil {
+		t.Fatalf("RemoveAll(extracted source): %v", err)
+	}
+	if _, err := os.Stat(extractedRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("source remained before discovery: %v", err)
+	}
+	goModBefore := readFile(t, filepath.Join(appRoot, "go.mod"))
+	goSumBefore := readFile(t, filepath.Join(appRoot, "go.sum"))
+
+	index, err := moduledependency.Discover(context.Background(), locate(t, appRoot), moduledependency.Options{Environment: environment})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	projects := index.Projects()
+	if len(projects) != 1 || projects[0].Path() != modulePath || projects[0].Root() != canonicalPath(t, extractedRoot) {
+		t.Fatalf("Projects() = %#v", projects)
+	}
+	if got := readFile(t, filepath.Join(appRoot, "go.mod")); !bytes.Equal(got, goModBefore) {
+		t.Fatalf("Discover changed go.mod from %q to %q", goModBefore, got)
+	}
+	if got := readFile(t, filepath.Join(appRoot, "go.sum")); !bytes.Equal(got, goSumBefore) {
+		t.Fatalf("Discover changed go.sum from %q to %q", goSumBefore, got)
 	}
 }
 
-func TestDiscoverBatchesLargeExplicitRequirementSets(t *testing.T) {
+func TestDiscoverMaterializesVersionedReplacementSource(t *testing.T) {
+	t.Parallel()
+
+	const (
+		modulePath         = "example.com/original"
+		requiredVersion    = "v1.2.3"
+		replacementPath    = "example.com/replacement"
+		replacementVersion = "v1.4.0"
+	)
+	root := t.TempDir()
+	proxyRoot := writeModuleProxy(t, root, replacementPath, replacementVersion)
+	appRoot := filepath.Join(root, "app")
+	writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire "+modulePath+" "+requiredVersion+"\n\nreplace "+modulePath+" "+requiredVersion+" => "+replacementPath+" "+replacementVersion+"\n")
+	environment := isolatedGoEnvironment(t, proxyRoot)
+	runGo(t, appRoot, environment, "mod", "download", replacementPath+"@"+replacementVersion)
+
+	escapedPath, err := module.EscapePath(replacementPath)
+	if err != nil {
+		t.Fatalf("EscapePath: %v", err)
+	}
+	escapedVersion, err := module.EscapeVersion(replacementVersion)
+	if err != nil {
+		t.Fatalf("EscapeVersion: %v", err)
+	}
+	extractedRoot := filepath.Join(environmentValue(t, environment, "GOMODCACHE"), filepath.FromSlash(escapedPath)+"@"+escapedVersion)
+	if err := os.RemoveAll(extractedRoot); err != nil {
+		t.Fatalf("RemoveAll(extracted source): %v", err)
+	}
+	goModBefore := readFile(t, filepath.Join(appRoot, "go.mod"))
+	goSumBefore := readFile(t, filepath.Join(appRoot, "go.sum"))
+
+	index, err := moduledependency.Discover(context.Background(), locate(t, appRoot), moduledependency.Options{Environment: environment})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	modules := index.Modules()
+	if len(modules) != 1 || modules[0].Path() != modulePath || modules[0].SelectedVersion() != requiredVersion || modules[0].Root() != canonicalPath(t, extractedRoot) || !modules[0].Project() {
+		t.Fatalf("Modules() = %#v", modules)
+	}
+	replacement, exists := modules[0].Replacement()
+	if !exists || replacement.Path() != replacementPath || replacement.Version() != replacementVersion || replacement.Local() {
+		t.Fatalf("Replacement() = %#v, %t", replacement, exists)
+	}
+	if got := readFile(t, filepath.Join(appRoot, "go.mod")); !bytes.Equal(got, goModBefore) {
+		t.Fatalf("Discover changed go.mod from %q to %q", goModBefore, got)
+	}
+	if got := readFile(t, filepath.Join(appRoot, "go.sum")); !bytes.Equal(got, goSumBefore) {
+		t.Fatalf("Discover changed go.sum from %q to %q", goSumBefore, got)
+	}
+}
+
+func TestDiscoverRecognizesWorkspaceProjectWithoutDirectRequirement(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	workspaceRoot := filepath.Join(root, "workspace-project")
+	writeModule(t, appRoot, "example.com/app")
+	writeModule(t, workspaceRoot, "example.com/workspace-project")
+	writeFile(t, filepath.Join(workspaceRoot, "plystra.yaml"), "{}\n")
+	goWork := filepath.Join(root, "go.work")
+	writeFile(t, goWork, "go 1.26\n\nuse (\n\t./app\n\t./workspace-project\n)\n")
+	index, err := moduledependency.Discover(context.Background(), locate(t, appRoot), moduledependency.Options{Environment: goEnvironment(map[string]string{
+		"GOENV":       "off",
+		"GONOSUMDB":   "",
+		"GOPRIVATE":   "",
+		"GOPROXY":     "off",
+		"GOSUMDB":     "off",
+		"GOTOOLCHAIN": "local",
+		"GOWORK":      goWork,
+	})})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	modules := index.Modules()
+	if len(modules) != 1 || modules[0].Path() != "example.com/workspace-project" || modules[0].Direct() || !modules[0].Workspace() || !modules[0].Project() {
+		t.Fatalf("Modules() = %#v", modules)
+	}
+}
+
+func TestDiscoverHandlesLargeEffectiveGraphWithOneBoundedQuery(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	appRoot := filepath.Join(root, "app")
 	sourceRoot := filepath.Join(root, "source")
 	writeModule(t, sourceRoot, "example.com/source")
+	writeFile(t, filepath.Join(sourceRoot, "plystra.yaml"), "{}\n")
 	var goMod strings.Builder
 	goMod.WriteString("module example.com/app\n\ngo 1.26\n\nrequire (\n")
 	const count = 200
@@ -217,7 +393,9 @@ func TestDiscoverBatchesLargeExplicitRequirementSets(t *testing.T) {
 		GoCommand: os.Args[0],
 		Environment: append(os.Environ(),
 			"PLYSTRA_MODULE_DEPENDENCY_HELPER=batch",
+			"PLYSTRA_MODULE_APP_ROOT="+appRoot,
 			"PLYSTRA_MODULE_SOURCE_ROOT="+sourceRoot,
+			"PLYSTRA_MODULE_COUNT=200",
 		),
 	})
 	if err != nil {
@@ -229,6 +407,9 @@ func TestDiscoverBatchesLargeExplicitRequirementSets(t *testing.T) {
 	}
 	if modules[0].Path() != "example.com/000/"+strings.Repeat("segment", 12) || modules[count-1].Path() != "example.com/199/"+strings.Repeat("segment", 12) {
 		t.Fatalf("Modules() contains %d dependencies from %q through %q", len(modules), modules[0].Path(), modules[len(modules)-1].Path())
+	}
+	if len(index.Projects()) != count {
+		t.Fatalf("Projects() contains %d dependencies, want %d", len(index.Projects()), count)
 	}
 }
 
@@ -246,7 +427,8 @@ func TestDiscoverRejectsInvalidGoListOutput(t *testing.T) {
 		want error
 	}{
 		{mode: "missing", want: moduledependency.ErrInvalidOutput},
-		{mode: "extra", want: moduledependency.ErrInvalidOutput},
+		{mode: "missing-main", want: moduledependency.ErrInvalidOutput},
+		{mode: "duplicate", want: moduledependency.ErrInvalidOutput},
 		{mode: "malformed", want: moduledependency.ErrInvalidOutput},
 		{mode: "older", want: moduledependency.ErrInvalidOutput},
 		{mode: "unavailable", want: moduledependency.ErrModuleUnavailable},
@@ -260,6 +442,7 @@ func TestDiscoverRejectsInvalidGoListOutput(t *testing.T) {
 				GoCommand: os.Args[0],
 				Environment: append(os.Environ(),
 					"PLYSTRA_MODULE_DEPENDENCY_HELPER="+test.mode,
+					"PLYSTRA_MODULE_APP_ROOT="+appRoot,
 					"PLYSTRA_MODULE_SOURCE_ROOT="+sourceRoot,
 				),
 				OutputLimit: 1024,
@@ -271,28 +454,39 @@ func TestDiscoverRejectsInvalidGoListOutput(t *testing.T) {
 	}
 }
 
+func TestDiscoverRejectsUnsafeDependencyProjectMarker(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	dependencyRoot := filepath.Join(root, "dependency")
+	writeModule(t, dependencyRoot, "example.com/dependency")
+	if err := os.Mkdir(filepath.Join(dependencyRoot, "plystra.yaml"), 0o755); err != nil {
+		t.Fatalf("Mkdir(plystra.yaml): %v", err)
+	}
+	writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire example.com/dependency v1.0.0\n\nreplace example.com/dependency => ../dependency\n")
+	_, err := moduledependency.Discover(context.Background(), locate(t, appRoot), moduledependency.Options{Environment: goEnvironment(map[string]string{
+		"GOENV":       "off",
+		"GONOSUMDB":   "",
+		"GOPRIVATE":   "",
+		"GOPROXY":     "off",
+		"GOSUMDB":     "off",
+		"GOTOOLCHAIN": "local",
+		"GOWORK":      "off",
+	})})
+	if !errors.Is(err, moduledependency.ErrDiscover) || !strings.Contains(err.Error(), "regular non-symbolic") {
+		t.Fatalf("Discover unsafe marker error = %v", err)
+	}
+}
+
 func runHelper(mode string) int {
-	want := []string{"list", "-m", "-json", "-mod=readonly"}
+	want := []string{"list", "-m", "-json", "-mod=readonly", "all"}
 	switch mode {
-	case "valid":
-		want = append(want, "example.com/a", "example.com/z")
-	case "batch":
-		if len(os.Args) < len(want)+2 {
-			return 10
-		}
-		used := len("list -m -json -mod=readonly ")
-		for _, argument := range os.Args[len(want)+1:] {
-			used += len(argument) + 1
-		}
-		if used > 16<<10 {
-			return 13
-		}
-	case "missing", "extra", "malformed", "older", "unavailable", "oversized":
-		want = append(want, "example.com/plugin")
+	case "valid", "batch", "synthetic", "missing", "missing-main", "duplicate", "malformed", "older", "unavailable", "oversized":
 	default:
 		return 9
 	}
-	if mode != "batch" && len(os.Args) != len(want)+1 {
+	if len(os.Args) != len(want)+1 {
 		return 10
 	}
 	for index := range want {
@@ -303,13 +497,18 @@ func runHelper(mode string) int {
 	switch mode {
 	case "valid":
 		encoder := json.NewEncoder(os.Stdout)
+		if err := encodeMainModule(encoder); err != nil {
+			return 12
+		}
 		for _, value := range []struct {
 			Path    string
 			Version string
 			Root    string
 		}{
 			{Path: "example.com/z", Version: "v1.5.0", Root: os.Getenv("PLYSTRA_MODULE_Z_ROOT")},
+			{Path: "example.com/ordinary", Version: "v0.9.0", Root: os.Getenv("PLYSTRA_MODULE_ORDINARY_ROOT")},
 			{Path: "example.com/a", Version: "v1.3.0", Root: os.Getenv("PLYSTRA_MODULE_A_ROOT")},
+			{Path: "example.com/transitive", Version: "v1.8.0", Root: os.Getenv("PLYSTRA_MODULE_TRANSITIVE_ROOT")},
 		} {
 			if err := encoder.Encode(map[string]any{
 				"Path":    value.Path,
@@ -320,12 +519,18 @@ func runHelper(mode string) int {
 				return 12
 			}
 		}
-	case "missing":
-		return 0
 	case "batch":
 		root := os.Getenv("PLYSTRA_MODULE_SOURCE_ROOT")
 		encoder := json.NewEncoder(os.Stdout)
-		for _, modulePath := range os.Args[len(want)+1:] {
+		if err := encodeMainModule(encoder); err != nil {
+			return 12
+		}
+		count, err := strconv.Atoi(os.Getenv("PLYSTRA_MODULE_COUNT"))
+		if err != nil || count <= 0 {
+			return 13
+		}
+		for index := 0; index < count; index++ {
+			modulePath := fmt.Sprintf("example.com/%03d/%s", index, strings.Repeat("segment", 12))
 			if err := encoder.Encode(map[string]any{
 				"Path":    modulePath,
 				"Version": "v1.0.0",
@@ -340,20 +545,68 @@ func runHelper(mode string) int {
 				return 12
 			}
 		}
-	case "extra":
+	case "synthetic":
+		encoder := json.NewEncoder(os.Stdout)
+		if err := encodeMainModule(encoder); err != nil {
+			return 12
+		}
+		root := os.Getenv("PLYSTRA_MODULE_SOURCE_ROOT")
+		metadataRoot := os.Getenv("PLYSTRA_MODULE_METADATA_ROOT")
+		if err := encoder.Encode(map[string]any{
+			"Path":    "example.com/legacy",
+			"Version": "v1.2.3",
+			"Dir":     root,
+			"GoMod":   filepath.Join(metadataRoot, "go.mod"),
+		}); err != nil {
+			return 12
+		}
+	case "missing":
+		return encodeMainExitCode()
+	case "missing-main":
+		root := os.Getenv("PLYSTRA_MODULE_SOURCE_ROOT")
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"Path": "example.com/plugin", "Version": "v1.2.3", "Dir": root, "GoMod": filepath.Join(root, "go.mod")})
+	case "duplicate":
 		root := os.Getenv("PLYSTRA_MODULE_SOURCE_ROOT")
 		encoder := json.NewEncoder(os.Stdout)
+		if err := encodeMainModule(encoder); err != nil {
+			return 12
+		}
 		_ = encoder.Encode(map[string]any{"Path": "example.com/plugin", "Version": "v1.2.3", "Dir": root, "GoMod": filepath.Join(root, "go.mod")})
-		_ = encoder.Encode(map[string]any{"Path": "example.com/extra", "Version": "v1.0.0", "Dir": root, "GoMod": filepath.Join(root, "go.mod")})
+		_ = encoder.Encode(map[string]any{"Path": "example.com/plugin", "Version": "v1.2.3", "Dir": root, "GoMod": filepath.Join(root, "go.mod")})
 	case "malformed":
 		_, _ = fmt.Fprint(os.Stdout, "{")
 	case "older":
 		root := os.Getenv("PLYSTRA_MODULE_SOURCE_ROOT")
-		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"Path": "example.com/plugin", "Version": "v1.0.0", "Dir": root, "GoMod": filepath.Join(root, "go.mod")})
+		encoder := json.NewEncoder(os.Stdout)
+		if err := encodeMainModule(encoder); err != nil {
+			return 12
+		}
+		_ = encoder.Encode(map[string]any{"Path": "example.com/plugin", "Version": "v1.0.0", "Dir": root, "GoMod": filepath.Join(root, "go.mod")})
 	case "unavailable":
-		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"Path": "example.com/plugin", "Version": "v1.2.3"})
+		encoder := json.NewEncoder(os.Stdout)
+		if err := encodeMainModule(encoder); err != nil {
+			return 12
+		}
+		_ = encoder.Encode(map[string]any{"Path": "example.com/plugin", "Version": "v1.2.3"})
 	case "oversized":
 		_, _ = fmt.Fprint(os.Stdout, strings.Repeat("x", 1025))
+	}
+	return 0
+}
+
+func encodeMainModule(encoder *json.Encoder) error {
+	root := os.Getenv("PLYSTRA_MODULE_APP_ROOT")
+	return encoder.Encode(map[string]any{
+		"Path":  "example.com/app",
+		"Main":  true,
+		"Dir":   root,
+		"GoMod": filepath.Join(root, "go.mod"),
+	})
+}
+
+func encodeMainExitCode() int {
+	if err := encodeMainModule(json.NewEncoder(os.Stdout)); err != nil {
+		return 12
 	}
 	return 0
 }
@@ -394,6 +647,7 @@ func writeModuleProxy(t *testing.T, root, modulePath, version string) string {
 		data []byte
 	}{
 		{name: "go.mod", data: goMod},
+		{name: "plystra.yaml", data: []byte("{}\n")},
 		{name: "smtp/plugin.yaml", data: []byte("id: example.smtp\n")},
 	} {
 		header := &zip.FileHeader{Name: prefix + file.name, Method: zip.Deflate}
@@ -454,6 +708,29 @@ func goEnvironment(overrides map[string]string) []string {
 		environment = append(environment, key+"="+overrides[key])
 	}
 	return environment
+}
+
+func withoutEnvironmentKey(environment []string, unwanted string) []string {
+	result := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		key, _, _ := strings.Cut(entry, "=")
+		if !strings.EqualFold(key, unwanted) {
+			result = append(result, entry)
+		}
+	}
+	return result
+}
+
+func environmentValue(t *testing.T, environment []string, wanted string) string {
+	t.Helper()
+	for _, entry := range environment {
+		key, value, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(key, wanted) {
+			return value
+		}
+	}
+	t.Fatalf("environment has no %s", wanted)
+	return ""
 }
 
 func runGo(t *testing.T, root string, environment []string, arguments ...string) {
