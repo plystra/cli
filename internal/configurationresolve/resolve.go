@@ -37,13 +37,14 @@ var (
 // Binding joins one selected Plugin ID and import path to its validated schema
 // and private runtime values. Formatting never exposes the values.
 type Binding struct {
-	pluginID   string
-	modulePath string
-	importPath string
-	source     string
-	schema     manifest.Config
-	yaml       []byte
-	explicit   bool
+	pluginID      string
+	modulePath    string
+	moduleVersion string
+	importPath    string
+	source        string
+	schema        manifest.Config
+	yaml          []byte
+	explicit      bool
 }
 
 // PluginID returns the selected concrete Plugin ID.
@@ -51,6 +52,10 @@ func (b Binding) PluginID() string { return b.pluginID }
 
 // ModulePath returns the selected plugin's owning Go Module path.
 func (b Binding) ModulePath() string { return b.modulePath }
+
+// ModuleVersion returns the selected canonical Go Module version, or empty for
+// local and active workspace source.
+func (b Binding) ModuleVersion() string { return b.moduleVersion }
 
 // ImportPath returns the selected plugin package import path.
 func (b Binding) ImportPath() string { return b.importPath }
@@ -178,13 +183,14 @@ func Resolve(application applicationmeta.Manifest, inventory plugininventory.Ind
 			return Result{}, fmt.Errorf("%w: %w for plugin %q at %s: %w", ErrResolve, ErrInvalidConfiguration, pluginID, source, err)
 		}
 		binding := Binding{
-			pluginID:   pluginID,
-			modulePath: plugin.ModulePath(),
-			importPath: plugin.ImportPath(),
-			source:     source,
-			schema:     plugin.Config(),
-			yaml:       append([]byte(nil), data...),
-			explicit:   explicit,
+			pluginID:      pluginID,
+			modulePath:    plugin.ModulePath(),
+			moduleVersion: plugin.ModuleVersion(),
+			importPath:    plugin.ImportPath(),
+			source:        source,
+			schema:        plugin.Config(),
+			yaml:          append([]byte(nil), data...),
+			explicit:      explicit,
 		}
 		bindings = append(bindings, binding)
 		writeDigestRecord(hash, []byte(pluginID))

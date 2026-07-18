@@ -131,6 +131,7 @@ require (
 	example.com/assemblydependency v0.0.0
 	github.com/plystra/kernel v0.0.0
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
 )
 
 replace example.com/assemblydependency => %s
@@ -174,12 +175,22 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 	writeFile(t, filepath.Join(dependencyRoot, "remote-store", "plugin.go"), remotePluginSource)
 	writeFile(t, filepath.Join(dependencyRoot, "lifecycleevents", "events.go"), lifecycleEventsSource)
 
-	providers, err := assemblygen.RenderProviders([]assemblygen.ProviderInput{
+	providerInputs := []assemblygen.ProviderInput{
 		{PluginID: "zeta.remote-store", ModulePath: "example.com/assemblydependency", ImportPath: "example.com/assemblydependency/remote-store"},
 		{PluginID: "acme.local-service", ModulePath: "example.com/assemblyapp", ImportPath: "example.com/assemblyapp/local-service"},
-	})
+	}
+	providers, err := assemblygen.RenderProviders(providerInputs)
 	if err != nil {
 		t.Fatalf("RenderProviders: %v", err)
+	}
+	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
+		ModulePath:               "example.com/assemblyapp",
+		ApplicationBuildIdentity: "test-build",
+		DefaultTimeout:           30 * time.Second,
+		Providers:                providerInputs,
+	})
+	if err != nil {
+		t.Fatalf("RenderInvocations: %v", err)
 	}
 	for _, forbidden := range []string{"runtime-private-endpoint", "PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value"} {
 		if bytes.Contains(providers, []byte(forbidden)) || bytes.Contains(localConfiguration.Data(), []byte(forbidden)) || bytes.Contains(remoteConfiguration.Data(), []byte(forbidden)) {
@@ -198,6 +209,7 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 		t.Fatalf("Render bootstrap: %v", err)
 	}
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(assemblygen.ProvidersPath)), providers)
+	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(assemblygen.InvocationsPath)), invocations)
 	writeBytes(t, filepath.Join(applicationRoot, "generated", "go", "assembly", "compatibility_gen.go"), compatibility)
 	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "assembly", "providers_gen_test.go"), generatedProvidersRuntimeTest)
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(bootstrapgen.Path)), bootstrap)
@@ -226,6 +238,7 @@ go 1.26
 require (
 	github.com/plystra/kernel v0.0.0
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
 )
 
 replace github.com/plystra/kernel => %s
@@ -240,6 +253,14 @@ replace github.com/plystra/kernel => %s
 	if err != nil {
 		t.Fatalf("RenderProviders: %v", err)
 	}
+	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
+		ModulePath:               "example.com/emptyapp",
+		ApplicationBuildIdentity: "test-build",
+		DefaultTimeout:           30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("RenderInvocations: %v", err)
+	}
 	compatibility, err := assemblygen.RenderCompatibility("assembly")
 	if err != nil {
 		t.Fatalf("RenderCompatibility: %v", err)
@@ -252,6 +273,7 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("Render bootstrap: %v", err)
 	}
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(assemblygen.ProvidersPath)), providers)
+	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(assemblygen.InvocationsPath)), invocations)
 	writeBytes(t, filepath.Join(applicationRoot, "generated", "go", "assembly", "compatibility_gen.go"), compatibility)
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(bootstrapgen.Path)), bootstrap)
 	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "bootstrap", "bootstrap_gen_test.go"), emptyGeneratedBootstrapRuntimeTest)

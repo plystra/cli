@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -152,6 +153,14 @@ func TestRenderPlanGoldenAndRuntimeOrder(t *testing.T) {
 	}
 	if file.Path() != "generated/go/invocation/order/create/v1/invocation_gen.go" || file.PackageName() != "ordercreatev1" || !bytes.Equal(file.Data(), want) {
 		t.Fatalf("generated plan = path %q, package %q\n%s\nwant:\n%s", file.Path(), file.PackageName(), file.Data(), want)
+	}
+	dependencies := file.Dependencies()
+	if !slices.Equal(dependencies, []string{"policy.check/v1"}) {
+		t.Fatalf("Dependencies = %q", dependencies)
+	}
+	dependencies[0] = "changed.invalid/v1"
+	if !slices.Equal(file.Dependencies(), []string{"policy.check/v1"}) {
+		t.Fatalf("Dependencies returned mutable state: %q", file.Dependencies())
 	}
 	assertGeneratedPrepareInvocationRuns(t, file)
 

@@ -2,12 +2,17 @@ package clientgen_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"testing"
+	"time"
+
+	"github.com/plystra/kernel/capability"
+	kernelinvocation "github.com/plystra/kernel/invocation"
+	"github.com/plystra/kernel/plugin"
 )
 
-// These benchmark-only types mirror the emitted canonical invocation, client,
-// and Alias method call graph. Golden and generated-module runtime tests in
-// this package verify the production output that this harness measures.
+// These benchmark-only wrappers mirror the emitted application invocation,
+// client, and Alias method call graph around a real published Kernel catalog.
 type benchmarkGeneratedRequest struct {
 	value uint64
 }
@@ -16,14 +21,12 @@ type benchmarkGeneratedResponse struct {
 	value uint64
 }
 
-type benchmarkCanonicalTarget func(context.Context, benchmarkGeneratedRequest) (benchmarkGeneratedResponse, error)
-
 type benchmarkGeneratedInvocation struct {
-	target benchmarkCanonicalTarget
+	target kernelinvocation.Handle[benchmarkGeneratedRequest, benchmarkGeneratedResponse]
 }
 
 func (h benchmarkGeneratedInvocation) Invoke(ctx context.Context, request benchmarkGeneratedRequest) (benchmarkGeneratedResponse, error) {
-	return h.target(ctx, request)
+	return h.target.Invoke(ctx, request)
 }
 
 type benchmarkGeneratedCanonicalClient struct {
@@ -44,7 +47,7 @@ func (c benchmarkGeneratedAliasClient) Deliver(ctx context.Context, request benc
 
 func BenchmarkGeneratedCanonicalInvocation(b *testing.B) {
 	client := benchmarkGeneratedCanonicalClient{
-		handle: benchmarkGeneratedInvocation{target: benchmarkNoopCanonicalTarget},
+		handle: benchmarkGeneratedInvocation{target: benchmarkHandle(b)},
 	}
 	ctx := context.Background()
 	request := benchmarkGeneratedRequest{value: 42}
@@ -64,7 +67,7 @@ func BenchmarkGeneratedCanonicalInvocation(b *testing.B) {
 func BenchmarkGeneratedAliasForwarding(b *testing.B) {
 	client := benchmarkGeneratedAliasClient{
 		target: benchmarkGeneratedCanonicalClient{
-			handle: benchmarkGeneratedInvocation{target: benchmarkNoopCanonicalTarget},
+			handle: benchmarkGeneratedInvocation{target: benchmarkHandle(b)},
 		},
 	}
 	ctx := context.Background()
@@ -84,6 +87,50 @@ func BenchmarkGeneratedAliasForwarding(b *testing.B) {
 
 func benchmarkNoopCanonicalTarget(_ context.Context, request benchmarkGeneratedRequest) (benchmarkGeneratedResponse, error) {
 	return benchmarkGeneratedResponse(request), nil
+}
+
+func benchmarkHandle(b testing.TB) kernelinvocation.Handle[benchmarkGeneratedRequest, benchmarkGeneratedResponse] {
+	b.Helper()
+	contract := capability.MustParseContract[benchmarkGeneratedRequest, benchmarkGeneratedResponse]("benchmark.send/v1")
+	endpoint, err := kernelinvocation.NewEndpoint(contract, benchmarkNoopCanonicalTarget)
+	if err != nil {
+		b.Fatalf("NewEndpoint: %v", err)
+	}
+	providerID, err := plugin.ParseID("benchmark.provider")
+	if err != nil {
+		b.Fatalf("ParseID: %v", err)
+	}
+	providerBuild, err := kernelinvocation.NewModuleBuild("example.com/benchmark", "v1.0.0", "")
+	if err != nil {
+		b.Fatalf("NewModuleBuild: %v", err)
+	}
+	binding, err := kernelinvocation.NewBinding(kernelinvocation.BindingOptions{
+		ProviderKind:    kernelinvocation.ProviderKindPlugin,
+		ProviderID:      providerID,
+		ProviderPackage: "example.com/benchmark/provider",
+		ProviderBuild:   providerBuild,
+		SelectionReason: kernelinvocation.SelectionReasonSoleProvider,
+		SchemaDigest:    sha256.Sum256([]byte("benchmark.send/v1")),
+	}, endpoint)
+	if err != nil {
+		b.Fatalf("NewBinding: %v", err)
+	}
+	catalog, err := kernelinvocation.NewCatalog([]kernelinvocation.Binding{binding})
+	if err != nil {
+		b.Fatalf("NewCatalog: %v", err)
+	}
+	dispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{DefaultTimeout: 30 * time.Second})
+	if err != nil {
+		b.Fatalf("NewDispatcher: %v", err)
+	}
+	if err := dispatcher.Publish(catalog); err != nil {
+		b.Fatalf("Publish: %v", err)
+	}
+	handle, err := kernelinvocation.NewHandle(dispatcher, contract, true)
+	if err != nil {
+		b.Fatalf("NewHandle: %v", err)
+	}
+	return handle
 }
 
 var benchmarkForwardingResponse benchmarkGeneratedResponse

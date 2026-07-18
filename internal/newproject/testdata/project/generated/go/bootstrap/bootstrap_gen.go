@@ -36,6 +36,7 @@ var (
 // Provider instances and their resolved runtime configuration remain private.
 type Application struct {
 	providers      applicationassembly.Providers
+	invocations    applicationassembly.Invocations
 	lifecycle      *kernellifecycle.Manager
 	startupTimeout time.Duration
 }
@@ -66,16 +67,28 @@ func New(ctx context.Context, documentPath string) (*Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: construct providers: %w", ErrBootstrap, err)
 	}
+	invocations, err := applicationassembly.NewInvocations(providers)
+	if err != nil {
+		return nil, fmt.Errorf("%w: bind canonical invocations: %w", ErrBootstrap, err)
+	}
 	manager, err := applicationassembly.NewProviderLifecycle(providers, startupTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("%w: bind provider lifecycle: %w", ErrBootstrap, err)
 	}
-	return &Application{providers: providers, lifecycle: manager, startupTimeout: startupTimeout}, nil
+	return &Application{providers: providers, invocations: invocations, lifecycle: manager, startupTimeout: startupTimeout}, nil
 }
 
 // Valid reports whether provider construction and lifecycle binding completed.
 func (a *Application) Valid() bool {
-	return a != nil && a.providers.Valid() && a.lifecycle != nil && a.startupTimeout > 0
+	return a != nil && a.providers.Valid() && a.invocations.Valid() && a.lifecycle != nil && a.startupTimeout > 0
+}
+
+// Invocations returns the immutable typed canonical application runtime.
+func (a *Application) Invocations() applicationassembly.Invocations {
+	if !a.Valid() {
+		return applicationassembly.Invocations{}
+	}
+	return a.invocations
 }
 
 // State returns the current provider lifecycle state.

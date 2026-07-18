@@ -46,7 +46,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	if !checked.Checked() || checked.Module().Path() != root || checked.Module().ModulePath() != "example.com/Acme/empty" {
 		t.Fatalf("checked result = %#v", checked)
 	}
-	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json"}; !reflect.DeepEqual(got, want) {
+	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("missing files = %v, want %v", got, want)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
@@ -67,6 +67,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	assertFile(t, root, "generated/manifest.json", "{\"capability_aliases\":[]}\n")
 	assertFileExists(t, root, generatedfiles.ManifestPath)
 	assertFileExists(t, root, "generated/go/assembly/compatibility_gen.go")
+	assertFileExists(t, root, "generated/go/assembly/invocations_gen.go")
 	assertFileExists(t, root, "generated/go/assembly/providers_gen.go")
 	assertFileExists(t, root, "generated/go/bootstrap/bootstrap_gen.go")
 	if bootstrap := readFile(t, root, "generated/go/bootstrap/bootstrap_gen.go"); bytes.Contains(bootstrap, []byte("17s")) {
@@ -112,6 +113,27 @@ response:
   accepted: {type: boolean, required: true}
 errors: [invalid_recipient]
 `)
+	writeFile(t, filepath.Join(root, "business", "plugin.go"), `package business
+
+import (
+	"context"
+
+	configuration "github.com/acme/my-app/generated/go/configuration"
+	contract "github.com/acme/my-app/generated/go/contracts/email/send/v1"
+)
+
+type Config = configuration.BusinessConfig
+type Plugin struct{}
+
+func New(_ Config) *Plugin { return &Plugin{} }
+
+func (*Plugin) Send(_ context.Context, request contract.Request) (contract.Response, error) {
+	if request.To == "" {
+		return contract.Response{}, contract.ErrInvalidRecipient
+	}
+	return contract.Response{Accepted: true}, nil
+}
+`)
 	withAlias := `http:
   expose: [email.send/v1]
 capabilities:
@@ -140,6 +162,7 @@ capabilities:
 		"generated/go/adapters/http/email/send/v1/handler_gen.go",
 		"generated/go/adapters/http/mail/deliver/v1/handler_gen.go",
 		"generated/go/assembly/compatibility_gen.go",
+		"generated/go/assembly/invocations_gen.go",
 		"generated/go/assembly/providers_gen.go",
 		"generated/go/bootstrap/bootstrap_gen.go",
 		"generated/go/clients/email/send/v1/client_gen.go",

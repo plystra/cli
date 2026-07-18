@@ -119,13 +119,26 @@ func populate(root, modulePath, name string, library bool) error {
 	if err != nil {
 		return fmt.Errorf("render Kernel compatibility source: %w", err)
 	}
-	managed := make([]generatedfiles.File, 0, 4)
+	managed := make([]generatedfiles.File, 0, 5)
 	compatibilityFile, err := generatedfiles.NewFile("generated/go/assembly/compatibility_gen.go", compatibility)
 	if err != nil {
 		return fmt.Errorf("prepare Kernel compatibility source: %w", err)
 	}
 	managed = append(managed, compatibilityFile)
 	if !library {
+		invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
+			ModulePath:               modulePath,
+			ApplicationBuildIdentity: "initial-scaffold",
+			DefaultTimeout:           applicationmeta.DefaultInvocationTimeout,
+		})
+		if err != nil {
+			return fmt.Errorf("render empty canonical invocation source: %w", err)
+		}
+		invocationsFile, err := generatedfiles.NewFile(assemblygen.InvocationsPath, invocations)
+		if err != nil {
+			return fmt.Errorf("prepare empty canonical invocation source: %w", err)
+		}
+		managed = append(managed, invocationsFile)
 		bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
 			ModulePath:            modulePath,
 			DefaultStartupTimeout: applicationmeta.DefaultStartupTimeout,

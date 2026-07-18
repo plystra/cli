@@ -24,6 +24,9 @@ const (
 	// DefaultStartupTimeout is the runtime provider-startup bound used when
 	// timeouts.startup is omitted.
 	DefaultStartupTimeout = 2 * time.Minute
+	// DefaultInvocationTimeout bounds one raw canonical Kernel dispatch when
+	// the caller and generated application path provide no earlier deadline.
+	DefaultInvocationTimeout = 30 * time.Second
 )
 
 // ErrInvalidManifest reports unsafe or invalid plystra.yaml metadata.

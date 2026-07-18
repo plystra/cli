@@ -170,9 +170,10 @@ func providerInputs(resolved configurationresolve.Result) []assemblygen.Provider
 	inputs := make([]assemblygen.ProviderInput, len(bindings))
 	for index, binding := range bindings {
 		inputs[index] = assemblygen.ProviderInput{
-			PluginID:   binding.PluginID(),
-			ModulePath: binding.ModulePath(),
-			ImportPath: binding.ImportPath(),
+			PluginID:      binding.PluginID(),
+			ModulePath:    binding.ModulePath(),
+			ModuleVersion: binding.ModuleVersion(),
+			ImportPath:    binding.ImportPath(),
 		}
 	}
 	return inputs

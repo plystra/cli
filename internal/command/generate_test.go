@@ -52,6 +52,7 @@ replace github.com/plystra/kernel => %s
 	wantMissing := "generated output is not current:\n" +
 		"  missing generated/.plystra-manifest.json\n" +
 		"  missing generated/go/assembly/compatibility_gen.go\n" +
+		"  missing generated/go/assembly/invocations_gen.go\n" +
 		"  missing generated/go/assembly/providers_gen.go\n" +
 		"  missing generated/go/bootstrap/bootstrap_gen.go\n" +
 		"  missing generated/manifest.json\n"
@@ -69,6 +70,7 @@ replace github.com/plystra/kernel => %s
 	for _, name := range []string{
 		"generated/.plystra-manifest.json",
 		"generated/go/assembly/compatibility_gen.go",
+		"generated/go/assembly/invocations_gen.go",
 		"generated/go/assembly/providers_gen.go",
 		"generated/go/bootstrap/bootstrap_gen.go",
 		"generated/manifest.json",

@@ -31,9 +31,10 @@ var (
 
 // File is one immutable generated canonical application-invocation output.
 type File struct {
-	path        string
-	packageName string
-	data        []byte
+	path         string
+	packageName  string
+	data         []byte
+	dependencies []string
 }
 
 // Path returns the slash-separated module-relative generated file path.
@@ -44,6 +45,12 @@ func (f File) PackageName() string { return f.packageName }
 
 // Data returns a defensive copy of the formatted generated source.
 func (f File) Data() []byte { return append([]byte(nil), f.data...) }
+
+// Dependencies returns the ordered canonical application clients required by
+// this invocation constructor.
+func (f File) Dependencies() []string {
+	return append([]string(nil), f.dependencies...)
+}
 
 type canonicalContract struct {
 	ID       string                    `json:"id"`
@@ -302,10 +309,15 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	if err != nil {
 		return File{}, fmt.Errorf("%w: format generated source: %w", ErrRender, err)
 	}
+	dependencies := make([]string, len(prepared.dependencies))
+	for index, dependency := range prepared.dependencies {
+		dependencies[index] = dependency.reference.Capability().String()
+	}
 	return File{
-		path:        path.Join(generatedDirectory("invocation", identifier), "invocation_gen.go"),
-		packageName: packageName,
-		data:        append([]byte(nil), formatted...),
+		path:         path.Join(generatedDirectory("invocation", identifier), "invocation_gen.go"),
+		packageName:  packageName,
+		data:         append([]byte(nil), formatted...),
+		dependencies: dependencies,
 	}, nil
 }
 

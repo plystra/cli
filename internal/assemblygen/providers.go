@@ -32,9 +32,10 @@ var (
 // ProviderInput is the complete public build provenance needed to import and
 // construct one selected plugin. It contains no runtime configuration values.
 type ProviderInput struct {
-	PluginID   string
-	ModulePath string
-	ImportPath string
+	PluginID      string
+	ModulePath    string
+	ModuleVersion string
+	ImportPath    string
 }
 
 type plannedProvider struct {
@@ -273,6 +274,11 @@ func planProviders(inputs []ProviderInput) ([]plannedProvider, []importSpec, err
 		if err := module.CheckPath(input.ModulePath); err != nil {
 			return nil, nil, fmt.Errorf("%w: plugin %q has invalid Go Module path %q: %v", ErrInvalidProvider, input.PluginID, input.ModulePath, err)
 		}
+		if input.ModuleVersion != "" {
+			if err := module.Check(input.ModulePath, input.ModuleVersion); err != nil {
+				return nil, nil, fmt.Errorf("%w: plugin %q has invalid Go Module version %q: %v", ErrInvalidProvider, input.PluginID, input.ModuleVersion, err)
+			}
+		}
 		if err := module.CheckImportPath(input.ImportPath); err != nil {
 			return nil, nil, fmt.Errorf("%w: plugin %q has invalid import path %q: %v", ErrInvalidProvider, input.PluginID, input.ImportPath, err)
 		}
@@ -292,6 +298,9 @@ func planProviders(inputs []ProviderInput) ([]plannedProvider, []importSpec, err
 		}
 		if providers[left].ModulePath != providers[right].ModulePath {
 			return providers[left].ModulePath < providers[right].ModulePath
+		}
+		if providers[left].ModuleVersion != providers[right].ModuleVersion {
+			return providers[left].ModuleVersion < providers[right].ModuleVersion
 		}
 		return providers[left].ImportPath < providers[right].ImportPath
 	})

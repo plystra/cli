@@ -16,6 +16,7 @@ import (
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/bootstrapgen"
+	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/clientgen"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/contractgen"
@@ -27,6 +28,7 @@ import (
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/providergen"
 	"github.com/plystra/cli/internal/sdkmodel"
+	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
 const (
@@ -143,6 +145,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 
 	targets := make(map[generation.CapabilityID]generation.CapabilityView, len(requirements))
+	invocationInputs := make([]assemblygen.InvocationInput, 0, len(requirements))
 	javaScriptTargets := make([]sdkmodel.CanonicalTargetView, 0)
 	httpTargets := 0
 	for _, id := range requirements {
@@ -188,6 +191,26 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		if err := add(invocation.Path(), invocation.Data()); err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: invocation %s: %w", ErrRender, id, err)
 		}
+		if !target.Intrinsic() {
+			identifier, err := capabilityid.Parse(id.String())
+			if err != nil {
+				return generatedfiles.Output{}, fmt.Errorf("%w: %w: required canonical Capability %s cannot enter runtime assembly", ErrRender, ErrResolution, id)
+			}
+			selection, exists := resolution.ActivationResolution().ProviderResolution().SelectedProvider(identifier)
+			if !exists {
+				return generatedfiles.Output{}, fmt.Errorf("%w: %w: required ordinary Capability %s has no selected provider", ErrRender, ErrResolution, id)
+			}
+			reason := kernelinvocation.SelectionReasonSoleProvider
+			if selection.Explicit() {
+				reason = kernelinvocation.SelectionReasonExplicit
+			}
+			invocationInputs = append(invocationInputs, assemblygen.InvocationInput{
+				ContractJSON:    target.ContractJSON(),
+				ProviderID:      selection.PluginID(),
+				SelectionReason: reason,
+				Dependencies:    invocation.Dependencies(),
+			})
+		}
 		if target.Exposure().HTTP {
 			handler, err := httpgen.RenderPlan(options.ModulePath, target, plan)
 			if err != nil {
@@ -197,6 +220,19 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 				return generatedfiles.Output{}, fmt.Errorf("%w: HTTP adapter %s: %w", ErrRender, id, err)
 			}
 		}
+	}
+	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
+		ModulePath:               options.ModulePath,
+		ApplicationBuildIdentity: context.Digest(),
+		DefaultTimeout:           applicationmeta.DefaultInvocationTimeout,
+		Providers:                options.Providers,
+		Invocations:              invocationInputs,
+	})
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: canonical invocation assembly: %w", ErrRender, err)
+	}
+	if err := add(assemblygen.InvocationsPath, invocations); err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: canonical invocation assembly: %w", ErrRender, err)
 	}
 
 	resolvedAliases := aliases.Aliases()
@@ -285,6 +321,9 @@ func validateAssemblyClosure(options Options, context generation.Context) error 
 		}
 		if provider.ModulePath != plugin.Module().Path() {
 			return fmt.Errorf("selected plugin %q module %q does not match provider input module %q", pluginID, plugin.Module().Path(), provider.ModulePath)
+		}
+		if provider.ModuleVersion != plugin.Module().Version() {
+			return fmt.Errorf("selected plugin %q module version %q does not match provider input version %q", pluginID, plugin.Module().Version(), provider.ModuleVersion)
 		}
 	}
 
