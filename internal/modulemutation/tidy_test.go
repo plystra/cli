@@ -1,4 +1,4 @@
-package plugincreate
+package modulemutation
 
 import (
 	"errors"
@@ -10,7 +10,32 @@ import (
 	"github.com/plystra/cli/internal/applicationgenerate"
 )
 
-func TestTidyModuleRestoresMetadataWhenGenerationFailsAfterMutation(t *testing.T) {
+func TestMain(main *testing.M) {
+	if os.Getenv("PLYSTRA_MODULE_MUTATION_HELPER") == "1" {
+		os.Exit(runTidyHelper())
+	}
+	os.Exit(main.Run())
+}
+
+func runTidyHelper() int {
+	if len(os.Args) != 3 || os.Args[1] != "mod" || os.Args[2] != "tidy" {
+		return 8
+	}
+	data, err := os.ReadFile("go.mod")
+	if err != nil {
+		return 10
+	}
+	data = append(data, []byte("\nrequire example.com/temporary v1.0.0 // indirect\n")...)
+	if err := os.WriteFile("go.mod", data, 0o644); err != nil {
+		return 11
+	}
+	if err := os.WriteFile("go.sum", []byte("temporary module metadata\n"), 0o644); err != nil {
+		return 12
+	}
+	return 0
+}
+
+func TestTidyRestoresMetadataWhenGenerationFailsAfterMutation(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -27,7 +52,7 @@ func TestTidyModuleRestoresMetadataWhenGenerationFailsAfterMutation(t *testing.T
 	}
 	laterErr := errors.New("generation failed after module mutation")
 	mutated := false
-	err = tidyModule(t.Context(), root, command, append(os.Environ(), "PLYSTRA_PLUGIN_CREATE_ROLLBACK_HELPER=1"), func(mutate applicationgenerate.ModuleMutation) error {
+	err = Tidy(t.Context(), root, command, append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=1"), func(mutate applicationgenerate.ModuleMutation) error {
 		if err := mutate(t.Context(), root, func() error { return nil }); err != nil {
 			return err
 		}
@@ -39,7 +64,7 @@ func TestTidyModuleRestoresMetadataWhenGenerationFailsAfterMutation(t *testing.T
 		return laterErr
 	})
 	if !errors.Is(err, laterErr) {
-		t.Fatalf("tidyModule error = %v, want later generation error", err)
+		t.Fatalf("Tidy error = %v, want later generation error", err)
 	}
 	if !mutated {
 		t.Fatal("module helper did not mutate metadata before the later failure")

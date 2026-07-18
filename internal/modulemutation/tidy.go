@@ -1,4 +1,6 @@
-package plugincreate
+// Package modulemutation normalizes Go module metadata inside a larger CLI
+// transaction without weakening rollback or concurrent-edit protection.
+package modulemutation
 
 import (
 	"bytes"
@@ -16,9 +18,9 @@ import (
 	"golang.org/x/mod/modfile"
 )
 
-// ErrModuleTidy reports failure to normalize or restore module metadata while
-// creating a plugin.
-var ErrModuleTidy = errors.New("tidy plugin module")
+// ErrTidy reports failure to normalize or restore module metadata inside a
+// compound CLI transaction.
+var ErrTidy = errors.New("tidy Plystra module")
 
 type moduleFile struct {
 	exists bool
@@ -28,13 +30,18 @@ type moduleFile struct {
 
 type moduleFiles map[string]moduleFile
 
-func tidyModule(ctx context.Context, root, goCommand string, environment []string, operation func(applicationgenerate.ModuleMutation) error) (operationErr error) {
+// Tidy runs operation with a generation mutation that tidies Go module
+// metadata after generated imports are installed. Existing explicit
+// requirements and checksum entries are retained. Metadata is restored when
+// operation fails after the mutation, including by panic, and concurrent edits
+// are never overwritten during restoration.
+func Tidy(ctx context.Context, root, goCommand string, environment []string, operation func(applicationgenerate.ModuleMutation) error) (operationErr error) {
 	if operation == nil {
-		return fmt.Errorf("%w: generation operation is nil", ErrModuleTidy)
+		return fmt.Errorf("%w: generation operation is nil", ErrTidy)
 	}
 	before, err := captureModuleFiles(root)
 	if err != nil {
-		return fmt.Errorf("%w: capture module metadata: %w", ErrModuleTidy, err)
+		return fmt.Errorf("%w: capture module metadata: %w", ErrTidy, err)
 	}
 	var normalized moduleFiles
 	committed := false
@@ -43,16 +50,16 @@ func tidyModule(ctx context.Context, root, goCommand string, environment []strin
 			return
 		}
 		if err := restoreModuleFiles(root, before, normalized); err != nil {
-			operationErr = errors.Join(operationErr, fmt.Errorf("%w: restore module metadata: %w", ErrModuleTidy, err))
+			operationErr = errors.Join(operationErr, fmt.Errorf("%w: restore module metadata: %w", ErrTidy, err))
 		}
 	}()
 
 	mutate := func(_ context.Context, mutationRoot string, validate func() error) error {
 		if validate == nil {
-			return fmt.Errorf("%w: validation callback is nil", ErrModuleTidy)
+			return fmt.Errorf("%w: validation callback is nil", ErrTidy)
 		}
 		if mutationRoot != root {
-			return fmt.Errorf("%w: generation changed module root from %q to %q", ErrModuleTidy, root, mutationRoot)
+			return fmt.Errorf("%w: generation changed module root from %q to %q", ErrTidy, root, mutationRoot)
 		}
 		tidyErr := gocommand.Run(ctx, gocommand.Options{
 			Command:     goCommand,
@@ -64,13 +71,13 @@ func tidyModule(ctx context.Context, root, goCommand string, environment []strin
 		}
 		normalized, err = captureModuleFiles(root)
 		if err != nil {
-			return errors.Join(tidyErr, fmt.Errorf("%w: capture normalized module metadata: %w", ErrModuleTidy, err))
+			return errors.Join(tidyErr, fmt.Errorf("%w: capture normalized module metadata: %w", ErrTidy, err))
 		}
 		if tidyErr != nil {
-			return fmt.Errorf("%w: %w", ErrModuleTidy, tidyErr)
+			return fmt.Errorf("%w: %w", ErrTidy, tidyErr)
 		}
 		if err := validate(); err != nil {
-			return fmt.Errorf("%w: validate normalized module: %w", ErrModuleTidy, err)
+			return fmt.Errorf("%w: validate normalized module: %w", ErrTidy, err)
 		}
 		return nil
 	}
@@ -84,11 +91,11 @@ func tidyModule(ctx context.Context, root, goCommand string, environment []strin
 func mergeOriginalModuleMetadata(root string, original moduleFiles) error {
 	tidied, err := captureModuleFiles(root)
 	if err != nil {
-		return fmt.Errorf("%w: capture tidied module metadata: %w", ErrModuleTidy, err)
+		return fmt.Errorf("%w: capture tidied module metadata: %w", ErrTidy, err)
 	}
 	mergedMod, err := mergeGoMod(original["go.mod"].data, tidied["go.mod"].data)
 	if err != nil {
-		return fmt.Errorf("%w: preserve original requirements: %w", ErrModuleTidy, err)
+		return fmt.Errorf("%w: preserve original requirements: %w", ErrTidy, err)
 	}
 	mergedSum := mergeGoSum(original["go.sum"], tidied["go.sum"])
 	writes := make([]atomicfs.Write, 0, 2)
@@ -113,7 +120,7 @@ func mergeOriginalModuleMetadata(root string, original moduleFiles) error {
 		return nil
 	}
 	if err := atomicfs.WriteFiles(root, writes, func(string) error { return nil }); err != nil {
-		return fmt.Errorf("%w: install preserved module metadata: %w", ErrModuleTidy, err)
+		return fmt.Errorf("%w: install preserved module metadata: %w", ErrTidy, err)
 	}
 	return nil
 }

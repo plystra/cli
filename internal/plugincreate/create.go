@@ -12,6 +12,7 @@ import (
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/modulelocate"
+	"github.com/plystra/cli/internal/modulemutation"
 	"github.com/plystra/cli/internal/pluginid"
 	"github.com/plystra/cli/internal/pluginscan"
 	"golang.org/x/mod/module"
@@ -24,6 +25,9 @@ var (
 	ErrInvalidName = errors.New("invalid plugin name")
 	// ErrDeriveID reports a module path that cannot form a canonical Plugin ID.
 	ErrDeriveID = errors.New("derive plugin ID")
+	// ErrModuleTidy preserves the plugin-creation error identity for callers
+	// while module normalization is shared with other compound CLI commands.
+	ErrModuleTidy = modulemutation.ErrTidy
 )
 
 // Options contains the explicit inputs and process environment for creation.
@@ -97,7 +101,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		if !found {
 			return fmt.Errorf("created plugin %q is not discoverable", options.Name)
 		}
-		return tidyModule(ctx, updatedRoot, options.GoCommand, options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
+		return modulemutation.Tidy(ctx, updatedRoot, options.GoCommand, options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
 			_, err = applicationgenerate.Generate(ctx, applicationgenerate.Options{
 				Start:        updatedRoot,
 				GoCommand:    options.GoCommand,
