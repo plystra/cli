@@ -122,6 +122,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 		t.Fatalf("project scaffold omits capabilities.aliases:\n%s", directTree["plystra.yaml"])
 	}
 	assertReadmeUsesAvailableCommands(t, directTree["README.md"], true)
+	assertCIUsesCurrentActions(t, directTree[".github/workflows/ci.yml"])
 	for name, content := range directTree {
 		if bytes.Contains(content, []byte(directParent)) || bytes.Contains(content, []byte(commandParent)) {
 			t.Fatalf("%s contains a local absolute path", name)
@@ -200,7 +201,20 @@ func TestCreateLibraryAndPublicCommandProduceDeterministicBuildableModules(t *te
 		t.Fatalf("library contains plystra.yaml: %v", err)
 	}
 	assertReadmeUsesAvailableCommands(t, directTree["README.md"], false)
+	assertCIUsesCurrentActions(t, directTree[".github/workflows/ci.yml"])
 	assertModuleState(t, direct.Path(), modulePath)
+}
+
+func assertCIUsesCurrentActions(t *testing.T, workflow []byte) {
+	t.Helper()
+	for _, action := range [][]byte{[]byte("actions/checkout@v7"), []byte("actions/setup-go@v6")} {
+		if !bytes.Contains(workflow, action) {
+			t.Fatalf("generated CI omits %q:\n%s", action, workflow)
+		}
+	}
+	if bytes.Contains(workflow, []byte("actions/checkout@v4")) {
+		t.Fatalf("generated CI retains obsolete checkout action:\n%s", workflow)
+	}
 }
 
 func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte, runnable bool) {
