@@ -166,7 +166,12 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// Available reports whether assembly selected the canonical provider.")
 	fmt.Fprintln(&source, "func Available(handle Handle) bool {")
-	fmt.Fprintln(&source, "\treturn handle.target.Available()")
+	fmt.Fprintln(&source, "\treturn handle.Available()")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "// Available reports whether assembly selected the canonical provider.")
+	fmt.Fprintln(&source, "func (h Handle) Available() bool {")
+	fmt.Fprintln(&source, "\treturn h.target.Available()")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
 	if prepared.hasHTTPPath {

@@ -152,7 +152,7 @@ func populate(root, modulePath, name string, library bool) error {
 			return fmt.Errorf("prepare runtime bootstrap source: %w", err)
 		}
 		managed = append(managed, bootstrapFile)
-		providers, err := assemblygen.RenderProviders(nil)
+		providers, err := assemblygen.RenderProviders(modulePath, nil)
 		if err != nil {
 			return fmt.Errorf("render empty selected-provider source: %w", err)
 		}

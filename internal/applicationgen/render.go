@@ -20,6 +20,7 @@ import (
 	"github.com/plystra/cli/internal/clientgen"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/contractgen"
+	"github.com/plystra/cli/internal/dependencygen"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/generationresolution"
@@ -68,7 +69,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	if !validAliases(aliases) {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: final Alias map is absent or has an invalid digest", ErrRender, ErrResolution)
 	}
-	providers, err := assemblygen.RenderProviders(options.Providers)
+	providers, err := assemblygen.RenderProviders(options.ModulePath, options.Providers)
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: selected providers: %w", ErrRender, err)
 	}
@@ -108,6 +109,28 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		configurationTypes[configuration.TypeName()] = input.PluginID
 		if err := add(configuration.Path(), configuration.Data()); err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: configuration for plugin %q: %w", ErrRender, input.PluginID, err)
+		}
+	}
+	providerInputs := append([]assemblygen.ProviderInput(nil), options.Providers...)
+	sort.Slice(providerInputs, func(left, right int) bool { return providerInputs[left].PluginID < providerInputs[right].PluginID })
+	for _, provider := range providerInputs {
+		if provider.ModulePath != options.ModulePath || len(provider.Dependencies) == 0 {
+			continue
+		}
+		pluginName, found := strings.CutPrefix(provider.ImportPath, options.ModulePath+"/")
+		if !found || pluginName == "" || strings.Contains(pluginName, "/") {
+			return generatedfiles.Output{}, fmt.Errorf("%w: local plugin %q has invalid import path %q", ErrRender, provider.PluginID, provider.ImportPath)
+		}
+		required := make([]string, len(provider.Dependencies))
+		for index, dependency := range provider.Dependencies {
+			required[index] = dependency.Capability
+		}
+		dependencies, err := dependencygen.Render(options.ModulePath, pluginName, provider.PluginID, required)
+		if err != nil {
+			return generatedfiles.Output{}, fmt.Errorf("%w: dependencies for plugin %q: %w", ErrRender, provider.PluginID, err)
+		}
+		if err := add(dependencies.Path(), dependencies.Data()); err != nil {
+			return generatedfiles.Output{}, fmt.Errorf("%w: dependencies for plugin %q: %w", ErrRender, provider.PluginID, err)
 		}
 	}
 	aliasManifest := append(aliases.CanonicalJSON(), '\n')

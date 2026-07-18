@@ -234,11 +234,80 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	fmt.Fprintln(&source, "\treturn slog.StringValue(\"<generated-canonical-invocations>\")")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
-	fmt.Fprintln(&source, "// NewInvocations adapts selected providers, publishes one immutable canonical")
-	fmt.Fprintln(&source, "// Kernel catalog, and binds every generated application invocation path.")
-	fmt.Fprintln(&source, "func NewInvocations(providers Providers) (Invocations, error) {")
+	fmt.Fprintln(&source, "// pendingInvocations owns typed application handles while the canonical")
+	fmt.Fprintln(&source, "// dispatcher is deliberately unpublished during plugin construction.")
+	fmt.Fprintln(&source, "type pendingInvocations struct {")
+	fmt.Fprintln(&source, "\tdispatcher *kernelinvocation.Dispatcher")
+	for _, invocation := range invocations {
+		fmt.Fprintf(&source, "\thandle%d applicationinvocation%d.Handle\n", invocation.index, invocation.index)
+	}
+	fmt.Fprintln(&source, "\tinitialized bool")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "func (p pendingInvocations) valid() bool {")
+	fmt.Fprintln(&source, "\tif !p.initialized || p.dispatcher == nil || p.dispatcher.Published() {")
+	fmt.Fprintln(&source, "\t\treturn false")
+	fmt.Fprintln(&source, "\t}")
+	if len(invocations) == 0 {
+		fmt.Fprintln(&source, "\treturn true")
+	} else {
+		fmt.Fprint(&source, "\treturn ")
+		for index, invocation := range invocations {
+			if index != 0 {
+				fmt.Fprint(&source, " && ")
+			}
+			fmt.Fprintf(&source, "p.handle%d.Available()", invocation.index)
+		}
+		fmt.Fprintln(&source)
+	}
+	fmt.Fprintln(&source, "}")
+	for _, invocation := range invocations {
+		fmt.Fprintln(&source)
+		fmt.Fprintf(&source, "func (p pendingInvocations) dependency%s() applicationinvocation%d.Handle {\n", invocation.accessor, invocation.index)
+		fmt.Fprintln(&source, "\tif !p.valid() {")
+		fmt.Fprintf(&source, "\t\treturn applicationinvocation%d.Handle{}\n", invocation.index)
+		fmt.Fprintln(&source, "\t}")
+		fmt.Fprintf(&source, "\treturn p.handle%d\n", invocation.index)
+		fmt.Fprintln(&source, "}")
+	}
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "func newPendingInvocations() (pendingInvocations, error) {")
 	fmt.Fprintln(&source, "\tif err := RequireKernelCompatibility(); err != nil {")
-	fmt.Fprintln(&source, "\t\treturn Invocations{}, fmt.Errorf(\"%w: Kernel compatibility: %w\", ErrInvocationAssembly, err)")
+	fmt.Fprintln(&source, "\t\treturn pendingInvocations{}, fmt.Errorf(\"%w: Kernel compatibility: %w\", ErrInvocationAssembly, err)")
+	fmt.Fprintln(&source, "\t}")
+	fmt.Fprintln(&source, "\tdispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{DefaultTimeout: defaultInvocationTimeout})")
+	fmt.Fprintln(&source, "\tif err != nil {")
+	fmt.Fprintln(&source, "\t\treturn pendingInvocations{}, fmt.Errorf(\"%w: canonical dispatcher: %w\", ErrInvocationAssembly, err)")
+	fmt.Fprintln(&source, "\t}")
+	for _, invocation := range invocations {
+		fmt.Fprintf(&source, "\trawHandle%d, err := kernelinvocation.NewHandle(dispatcher, plystraContract%d, true)\n", invocation.index, invocation.index)
+		fmt.Fprintln(&source, "\tif err != nil {")
+		fmt.Fprintf(&source, "\t\treturn pendingInvocations{}, fmt.Errorf(\"%%w: canonical handle %s: %%w\", ErrInvocationAssembly, err)\n", invocation.id)
+		fmt.Fprintln(&source, "\t}")
+	}
+	for _, invocationIndex := range order {
+		invocation := invocations[invocationIndex]
+		fmt.Fprintf(&source, "\thandle%d := applicationinvocation%d.New(rawHandle%d", invocation.index, invocation.index, invocation.index)
+		for _, dependencyID := range invocation.dependencies {
+			dependency := invocations[indexOfInvocation(invocations, dependencyID)]
+			fmt.Fprintf(&source, ", applicationclient%d.New(handle%d)", dependency.index, dependency.index)
+		}
+		fmt.Fprintln(&source, ")")
+	}
+	fmt.Fprintln(&source, "\treturn pendingInvocations{")
+	fmt.Fprintln(&source, "\t\tdispatcher:  dispatcher,")
+	for _, invocation := range invocations {
+		fmt.Fprintf(&source, "\t\thandle%d:     handle%d,\n", invocation.index, invocation.index)
+	}
+	fmt.Fprintln(&source, "\t\tinitialized: true,")
+	fmt.Fprintln(&source, "\t}, nil")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "// publishInvocations adapts selected providers and atomically publishes the")
+	fmt.Fprintln(&source, "// complete immutable canonical catalog behind every prepared client.")
+	fmt.Fprintln(&source, "func publishInvocations(pending pendingInvocations, providers Providers) (Invocations, error) {")
+	fmt.Fprintln(&source, "\tif !pending.valid() {")
+	fmt.Fprintln(&source, "\t\treturn Invocations{}, fmt.Errorf(\"%w: pending invocation clients are invalid\", ErrInvocationAssembly)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\tif !providers.Valid() {")
 	fmt.Fprintln(&source, "\t\treturn Invocations{}, fmt.Errorf(\"%w: selected providers are invalid\", ErrInvocationAssembly)")
@@ -280,33 +349,14 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn Invocations{}, fmt.Errorf(\"%w: canonical catalog: %w\", ErrInvocationAssembly, err)")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\tdispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{DefaultTimeout: defaultInvocationTimeout})")
-	fmt.Fprintln(&source, "\tif err != nil {")
-	fmt.Fprintln(&source, "\t\treturn Invocations{}, fmt.Errorf(\"%w: canonical dispatcher: %w\", ErrInvocationAssembly, err)")
-	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\tif err := dispatcher.Publish(catalog); err != nil {")
+	fmt.Fprintln(&source, "\tif err := pending.dispatcher.Publish(catalog); err != nil {")
 	fmt.Fprintln(&source, "\t\treturn Invocations{}, fmt.Errorf(\"%w: publish canonical catalog: %w\", ErrInvocationAssembly, err)")
 	fmt.Fprintln(&source, "\t}")
-	for _, invocation := range invocations {
-		fmt.Fprintf(&source, "\trawHandle%d, err := kernelinvocation.NewHandle(dispatcher, plystraContract%d, true)\n", invocation.index, invocation.index)
-		fmt.Fprintln(&source, "\tif err != nil {")
-		fmt.Fprintf(&source, "\t\treturn Invocations{}, fmt.Errorf(\"%%w: canonical handle %s: %%w\", ErrInvocationAssembly, err)\n", invocation.id)
-		fmt.Fprintln(&source, "\t}")
-	}
-	for _, invocationIndex := range order {
-		invocation := invocations[invocationIndex]
-		fmt.Fprintf(&source, "\thandle%d := applicationinvocation%d.New(rawHandle%d", invocation.index, invocation.index, invocation.index)
-		for _, dependencyID := range invocation.dependencies {
-			dependency := invocations[indexOfInvocation(invocations, dependencyID)]
-			fmt.Fprintf(&source, ", applicationclient%d.New(handle%d)", dependency.index, dependency.index)
-		}
-		fmt.Fprintln(&source, ")")
-	}
 	fmt.Fprintln(&source, "\treturn Invocations{")
 	fmt.Fprintln(&source, "\t\tcatalog:     catalog,")
-	fmt.Fprintln(&source, "\t\tdispatcher:  dispatcher,")
+	fmt.Fprintln(&source, "\t\tdispatcher:  pending.dispatcher,")
 	for _, invocation := range invocations {
-		fmt.Fprintf(&source, "\t\thandle%d:     handle%d,\n", invocation.index, invocation.index)
+		fmt.Fprintf(&source, "\t\thandle%d:     pending.handle%d,\n", invocation.index, invocation.index)
 	}
 	fmt.Fprintln(&source, "\t\tinitialized: true,")
 	fmt.Fprintln(&source, "\t}, nil")
@@ -422,6 +472,13 @@ func planInvocations(options InvocationOptions) ([]plannedInvocation, []int, err
 			return nil, nil, fmt.Errorf("%w: Capabilities %s and %s both generate accessor %s", ErrDuplicateInvocation, previous, invocations[index].id, invocations[index].accessor)
 		}
 		accessors[invocations[index].accessor] = invocations[index].id
+	}
+	for _, provider := range providers {
+		for _, dependency := range provider.dependencies {
+			if _, exists := byID[dependency.id]; !exists {
+				return nil, nil, fmt.Errorf("%w: plugin %q dependency %s is not an assembled canonical invocation", ErrInvocationDependency, provider.PluginID, dependency.id)
+			}
+		}
 	}
 	for _, invocation := range invocations {
 		seen := make(map[capabilityid.Identifier]struct{}, len(invocation.dependencies))

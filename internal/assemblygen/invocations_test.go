@@ -332,7 +332,7 @@ replace github.com/plystra/kernel => %s
 		ModuleVersion: "v1.2.3",
 		ImportPath:    "example.com/runtime-dependency/remote-service",
 	}
-	providers, err := assemblygen.RenderProviders([]assemblygen.ProviderInput{provider})
+	providers, err := assemblygen.RenderProviders("example.com/runtime-application", []assemblygen.ProviderInput{provider})
 	if err != nil {
 		t.Fatalf("RenderProviders: %v", err)
 	}
@@ -645,19 +645,15 @@ func TestCanonicalInvocationRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
-	providers, err := NewProviders(context.Background(), resolver, []byte("config: {}\n"))
+	if invocations, err := publishInvocations(pendingInvocations{}, Providers{}); invocations.Valid() || !errors.Is(err, ErrInvocationAssembly) {
+		t.Fatalf("publishInvocations(invalid) = %v, %v", invocations, err)
+	}
+	providers, invocations, err := NewRuntime(context.Background(), resolver, []byte("config: {}\n"))
 	if err != nil {
-		t.Fatalf("NewProviders: %v", err)
+		t.Fatalf("NewRuntime: %v", err)
 	}
-	if invocations, err := NewInvocations(Providers{}); invocations.Valid() || !errors.Is(err, ErrInvocationAssembly) {
-		t.Fatalf("NewInvocations(invalid) = %v, %v", invocations, err)
-	}
-	invocations, err := NewInvocations(providers)
-	if err != nil {
-		t.Fatalf("NewInvocations: %v", err)
-	}
-	if !invocations.Valid() {
-		t.Fatalf("invocation runtime is invalid")
+	if !providers.Valid() || !invocations.Valid() {
+		t.Fatalf("generated runtime is invalid")
 	}
 
 	bindings := invocations.Catalog().Bindings()

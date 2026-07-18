@@ -3,6 +3,7 @@ package clientgen_test
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"testing"
 	"time"
 
@@ -25,17 +26,29 @@ type benchmarkGeneratedInvocation struct {
 	target kernelinvocation.Handle[benchmarkGeneratedRequest, benchmarkGeneratedResponse]
 }
 
+func (h benchmarkGeneratedInvocation) Available() bool { return h.target.Available() }
+
 func (h benchmarkGeneratedInvocation) Invoke(ctx context.Context, request benchmarkGeneratedRequest) (benchmarkGeneratedResponse, error) {
 	return h.target.Invoke(ctx, request)
 }
 
+type benchmarkGeneratedHandle interface {
+	Available() bool
+	Invoke(context.Context, benchmarkGeneratedRequest) (benchmarkGeneratedResponse, error)
+}
+
 type benchmarkGeneratedCanonicalClient struct {
-	handle benchmarkGeneratedInvocation
+	handle benchmarkGeneratedHandle
 }
 
 func (c benchmarkGeneratedCanonicalClient) Send(ctx context.Context, request benchmarkGeneratedRequest) (benchmarkGeneratedResponse, error) {
+	if c.handle == nil || !c.handle.Available() {
+		return benchmarkGeneratedResponse{}, errBenchmarkUnavailable
+	}
 	return c.handle.Invoke(ctx, request)
 }
+
+var errBenchmarkUnavailable = errors.New("generated Capability client is unavailable")
 
 type benchmarkGeneratedAliasClient struct {
 	target benchmarkGeneratedCanonicalClient

@@ -7,19 +7,22 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/capabilitysource"
+	"github.com/plystra/cli/internal/clientgen"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/contractgen"
+	"github.com/plystra/cli/internal/dependencygen"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/intrinsiccatalog"
+	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
-	"github.com/plystra/cli/internal/pluginindex"
+	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/providergen"
 )
 
@@ -38,7 +41,7 @@ type preparedLibrary struct {
 }
 
 func generateLibrary(ctx context.Context, options Options, module modulelocate.Module) (Result, error) {
-	prepared, err := prepareLibrary(module)
+	prepared, err := prepareLibrary(ctx, options, module)
 	if err != nil {
 		return Result{}, err
 	}
@@ -73,7 +76,7 @@ func generateLibrary(ctx context.Context, options Options, module modulelocate.M
 			if err != nil {
 				return fmt.Errorf("confirm library module: %w", err)
 			}
-			confirmed, err := prepareLibrary(confirmedModule)
+			confirmed, err := prepareLibrary(ctx, options, confirmedModule)
 			if err != nil {
 				return fmt.Errorf("confirm library generation inputs: %w", err)
 			}
@@ -89,8 +92,8 @@ func generateLibrary(ctx context.Context, options Options, module modulelocate.M
 	return Result{module: module, report: report}, nil
 }
 
-func prepareLibrary(module modulelocate.Module) (preparedLibrary, error) {
-	output, err := renderLibrary(module)
+func prepareLibrary(ctx context.Context, options Options, module modulelocate.Module) (preparedLibrary, error) {
+	output, err := renderLibrary(ctx, options, module)
 	if err != nil {
 		return preparedLibrary{}, err
 	}
@@ -101,13 +104,25 @@ func prepareLibrary(module modulelocate.Module) (preparedLibrary, error) {
 	}, nil
 }
 
-func renderLibrary(module modulelocate.Module) (generatedfiles.Output, error) {
+func renderLibrary(ctx context.Context, options Options, module modulelocate.Module) (generatedfiles.Output, error) {
 	if module.Path() == "" || module.ModulePath() == "" {
 		return generatedfiles.Output{}, fmt.Errorf("%w: module is empty", ErrLibraryGeneration)
 	}
-	index, err := pluginindex.Scan(module.Path())
+	dependencies, err := moduledependency.Discover(ctx, module, moduledependency.Options{
+		GoCommand:   options.GoCommand,
+		Environment: append([]string(nil), options.Environment...),
+		OutputLimit: options.DependencyOutputLimit,
+	})
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: index local plugins: %w", ErrLibraryGeneration, err)
+		return generatedfiles.Output{}, fmt.Errorf("%w: discover dependency modules: %w", ErrLibraryGeneration, err)
+	}
+	inventory, err := plugininventory.Build(module, dependencies)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: index visible plugins: %w", ErrLibraryGeneration, err)
+	}
+	contracts, err := visibleLibraryContracts(inventory)
+	if err != nil {
+		return generatedfiles.Output{}, err
 	}
 	files := make([]generatedfiles.File, 0)
 	add := func(filePath string, data []byte) error {
@@ -126,9 +141,13 @@ func renderLibrary(module modulelocate.Module) (generatedfiles.Output, error) {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Kernel assembly compatibility: %w", ErrLibraryGeneration, err)
 	}
 
-	contracts := make(map[string]libraryContract)
 	configurationTypes := make(map[string]string)
-	for _, plugin := range index.Plugins() {
+	provided := make(map[string]string)
+	required := make(map[string]string)
+	for _, plugin := range inventory.Plugins() {
+		if !plugin.Local() {
+			continue
+		}
 		configuration, err := configurationgen.Render(configurationgen.Input{
 			PluginName: plugin.Name(),
 			PluginID:   plugin.ID(),
@@ -145,50 +164,85 @@ func renderLibrary(module modulelocate.Module) (generatedfiles.Output, error) {
 			return generatedfiles.Output{}, fmt.Errorf("%w: configuration for plugin %q: %w", ErrLibraryGeneration, plugin.ID(), err)
 		}
 
-		pluginRoot := filepath.Join(module.Path(), filepath.FromSlash(plugin.Path()))
 		for _, identifier := range plugin.Provides() {
 			if strings.HasPrefix(identifier.Name(), "kernel.") {
 				return generatedfiles.Output{}, fmt.Errorf("%w: plugin %q cannot provide intrinsic Capability %s", ErrLibraryGeneration, plugin.ID(), identifier)
 			}
-			source, err := capabilitysource.Load(pluginRoot, identifier)
-			if err != nil {
-				return generatedfiles.Output{}, fmt.Errorf("%w: plugin %q Capability %s: %w", ErrLibraryGeneration, plugin.ID(), identifier, err)
-			}
-			canonical, err := capabilitymeta.NormalizeSchema(source.Data())
-			if err != nil {
-				return generatedfiles.Output{}, fmt.Errorf("%w: plugin %q Capability %s: %w", ErrLibraryGeneration, plugin.ID(), identifier, err)
-			}
 			key := identifier.String()
-			if previous, exists := contracts[key]; exists {
-				if !bytes.Equal(previous.schema, canonical) {
-					return generatedfiles.Output{}, fmt.Errorf("%w: %w: %s differs between plugins %q and %q", ErrLibraryGeneration, ErrLibraryContractConflict, identifier, previous.pluginID, plugin.ID())
-				}
-				continue
+			if _, exists := contracts[key]; !exists {
+				return generatedfiles.Output{}, fmt.Errorf("%w: local plugin %q Capability %s has no visible canonical contract", ErrLibraryGeneration, plugin.ID(), identifier)
 			}
-			contracts[key] = libraryContract{pluginID: plugin.ID(), schema: canonical}
+			if previous, exists := provided[key]; !exists {
+				provided[key] = plugin.ID()
+			} else if previous == "" {
+				provided[key] = plugin.ID()
+			}
+		}
+
+		pluginRequirements := plugin.Requires()
+		if len(pluginRequirements) != 0 {
+			identifiers := make([]string, len(pluginRequirements))
+			for index, identifier := range pluginRequirements {
+				key := identifier.String()
+				if _, exists := contracts[key]; !exists {
+					return generatedfiles.Output{}, fmt.Errorf("%w: plugin %q requires %s, but no exact contract is visible through this module or its direct dependencies", ErrLibraryGeneration, plugin.ID(), identifier)
+				}
+				required[key] = plugin.ID()
+				identifiers[index] = key
+			}
+			dependenciesFile, err := dependencygen.Render(module.ModulePath(), plugin.Name(), plugin.ID(), identifiers)
+			if err != nil {
+				return generatedfiles.Output{}, fmt.Errorf("%w: dependencies for plugin %q: %w", ErrLibraryGeneration, plugin.ID(), err)
+			}
+			if err := add(dependenciesFile.Path(), dependenciesFile.Data()); err != nil {
+				return generatedfiles.Output{}, fmt.Errorf("%w: dependencies for plugin %q: %w", ErrLibraryGeneration, plugin.ID(), err)
+			}
 		}
 	}
 
-	identifiers := make([]string, 0, len(contracts))
-	for identifier := range contracts {
+	identifiers := make([]string, 0, len(provided)+len(required))
+	seenIdentifiers := make(map[string]struct{}, len(provided)+len(required))
+	for identifier := range provided {
+		seenIdentifiers[identifier] = struct{}{}
+	}
+	for identifier := range required {
+		seenIdentifiers[identifier] = struct{}{}
+	}
+	for identifier := range seenIdentifiers {
 		identifiers = append(identifiers, identifier)
 	}
 	sort.Strings(identifiers)
 	for _, identifier := range identifiers {
 		contractInput := contracts[identifier]
-		contract, err := contractgen.Render(contractInput.schema)
+		var contract contractgen.File
+		if strings.HasPrefix(identifier, "kernel.") {
+			contract, err = contractgen.RenderIntrinsic(contractInput.schema)
+		} else {
+			contract, err = contractgen.Render(contractInput.schema)
+		}
 		if err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: contract %s: %w", ErrLibraryGeneration, identifier, err)
 		}
 		if err := add(contract.Path(), contract.Data()); err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: contract %s: %w", ErrLibraryGeneration, identifier, err)
 		}
-		provider, err := providergen.Render(module.ModulePath(), contractInput.schema)
-		if err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: provider %s: %w", ErrLibraryGeneration, identifier, err)
+		if _, exists := provided[identifier]; exists {
+			provider, err := providergen.Render(module.ModulePath(), contractInput.schema)
+			if err != nil {
+				return generatedfiles.Output{}, fmt.Errorf("%w: provider %s: %w", ErrLibraryGeneration, identifier, err)
+			}
+			if err := add(provider.Path(), provider.Data()); err != nil {
+				return generatedfiles.Output{}, fmt.Errorf("%w: provider %s: %w", ErrLibraryGeneration, identifier, err)
+			}
 		}
-		if err := add(provider.Path(), provider.Data()); err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: provider %s: %w", ErrLibraryGeneration, identifier, err)
+		if _, exists := required[identifier]; exists {
+			client, err := clientgen.Render(module.ModulePath(), contractInput.schema)
+			if err != nil {
+				return generatedfiles.Output{}, fmt.Errorf("%w: client %s: %w", ErrLibraryGeneration, identifier, err)
+			}
+			if err := add(client.Path(), client.Data()); err != nil {
+				return generatedfiles.Output{}, fmt.Errorf("%w: client %s: %w", ErrLibraryGeneration, identifier, err)
+			}
 		}
 	}
 	output, err := generatedfiles.NewOutput(files)
@@ -199,6 +253,43 @@ func renderLibrary(module modulelocate.Module) (generatedfiles.Output, error) {
 }
 
 type libraryContract struct {
-	pluginID string
-	schema   []byte
+	schema  []byte
+	sources []string
+}
+
+func visibleLibraryContracts(inventory plugininventory.Index) (map[string]libraryContract, error) {
+	contracts := make(map[string]libraryContract)
+	for _, definition := range intrinsiccatalog.Definitions() {
+		contracts[definition.ID().String()] = libraryContract{
+			schema:  definition.ContractJSON(),
+			sources: []string{definition.Source()},
+		}
+	}
+	for _, plugin := range inventory.Plugins() {
+		for _, identifier := range plugin.Provides() {
+			if strings.HasPrefix(identifier.Name(), "kernel.") {
+				return nil, fmt.Errorf("%w: plugin %q cannot provide intrinsic Capability %s", ErrLibraryGeneration, plugin.ID(), identifier)
+			}
+			source, err := capabilitysource.Load(plugin.PluginRoot(), identifier)
+			if err != nil {
+				return nil, fmt.Errorf("%w: plugin %q Capability %s: %w", ErrLibraryGeneration, plugin.ID(), identifier, err)
+			}
+			canonical, err := capabilitymeta.NormalizeSchema(source.Data())
+			if err != nil {
+				return nil, fmt.Errorf("%w: plugin %q Capability %s: %w", ErrLibraryGeneration, plugin.ID(), identifier, err)
+			}
+			key := identifier.String()
+			provenance := plugin.Source() + ":" + source.RelativePath()
+			if previous, exists := contracts[key]; exists {
+				if !bytes.Equal(previous.schema, canonical) {
+					return nil, fmt.Errorf("%w: %w: %s differs between [%s] and %s", ErrLibraryGeneration, ErrLibraryContractConflict, identifier, strings.Join(previous.sources, ", "), provenance)
+				}
+				previous.sources = append(previous.sources, provenance)
+				contracts[key] = previous
+				continue
+			}
+			contracts[key] = libraryContract{schema: canonical, sources: []string{provenance}}
+		}
+	}
+	return contracts, nil
 }

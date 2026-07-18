@@ -1,6 +1,7 @@
 package assemblygen
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"go/format"
@@ -9,7 +10,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/configurationgen"
+	"github.com/plystra/cli/internal/goname"
 	"github.com/plystra/cli/internal/pluginid"
 	"golang.org/x/mod/module"
 )
@@ -36,6 +40,26 @@ type ProviderInput struct {
 	ModulePath    string
 	ModuleVersion string
 	ImportPath    string
+	Dependencies  []DependencyInput
+}
+
+// DependencyInput is one exact canonical Capability client required by a
+// selected plugin constructor. ContractJSON is the final resolved contract
+// used to generate safe cross-module adapters.
+type DependencyInput struct {
+	Capability   string
+	ContractJSON []byte
+}
+
+type plannedDependency struct {
+	id                  capabilityid.Identifier
+	contract            runtimeContract
+	accessor            string
+	dependenciesAlias   string
+	clientAlias         string
+	providerContract    string
+	applicationContract string
+	local               bool
 }
 
 type plannedProvider struct {
@@ -43,6 +67,7 @@ type plannedProvider struct {
 	configurationNames configurationgen.GoNames
 	pluginAlias        string
 	configurationAlias string
+	dependencies       []plannedDependency
 }
 
 type importSpec struct {
@@ -54,8 +79,15 @@ type importSpec struct {
 // selected plugin. The generated source extracts private values only at
 // startup, rejects stale configuration before invoking constructors, and
 // never embeds application runtime values or Secret reference targets.
-func RenderProviders(inputs []ProviderInput) ([]byte, error) {
+func RenderProviders(applicationModulePath string, inputs []ProviderInput) ([]byte, error) {
+	if err := module.CheckPath(applicationModulePath); err != nil {
+		return nil, fmt.Errorf("%w: %w: invalid application Go Module path %q: %v", ErrRenderProviders, ErrInvalidProvider, applicationModulePath, err)
+	}
 	providers, imports, err := planProviders(inputs)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrRenderProviders, err)
+	}
+	imports, err = planDependencyImports(applicationModulePath, providers, imports)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrRenderProviders, err)
 	}
@@ -91,6 +123,8 @@ func RenderProviders(inputs []ProviderInput) ([]byte, error) {
 	fmt.Fprintln(&source, "\tErrPluginConstructor = errors.New(\"plugin constructor failed\")")
 	fmt.Fprintln(&source, "\t// ErrProviderLifecycle reports invalid generated lifecycle binding or manager options.")
 	fmt.Fprintln(&source, "\tErrProviderLifecycle = errors.New(\"assemble selected provider lifecycle\")")
+	fmt.Fprintln(&source, "\t// ErrRuntimeAssembly reports a failure before one complete generated runtime is published.")
+	fmt.Fprintln(&source, "\tErrRuntimeAssembly = errors.New(\"assemble generated application runtime\")")
 	fmt.Fprintln(&source, ")")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// Providers is the immutable set of selected in-process plugin providers.")
@@ -160,12 +194,34 @@ func RenderProviders(inputs []ProviderInput) ([]byte, error) {
 	fmt.Fprintln(&source, "\treturn nil, kernelconfiguration.ErrSecretExposure")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
-	fmt.Fprintln(&source, "// NewProviders validates the generated Kernel boundary, decodes exactly one")
+	fmt.Fprintln(&source, "// NewRuntime prepares typed application clients before constructors, decodes")
+	fmt.Fprintln(&source, "// exactly one private configuration object per selected Plugin ID, constructs")
+	fmt.Fprintln(&source, "// every provider, and only then publishes the complete canonical runtime.")
+	fmt.Fprintln(&source, "func NewRuntime(ctx context.Context, resolver *kernelconfiguration.Resolver, document []byte) (Providers, Invocations, error) {")
+	fmt.Fprintln(&source, "\tpending, err := newPendingInvocations()")
+	fmt.Fprintln(&source, "\tif err != nil {")
+	fmt.Fprintln(&source, "\t\treturn Providers{}, Invocations{}, fmt.Errorf(\"%w: prepare invocation clients: %w\", ErrRuntimeAssembly, err)")
+	fmt.Fprintln(&source, "\t}")
+	fmt.Fprintln(&source, "\tproviders, err := newProviders(ctx, resolver, document, pending)")
+	fmt.Fprintln(&source, "\tif err != nil {")
+	fmt.Fprintln(&source, "\t\treturn Providers{}, Invocations{}, fmt.Errorf(\"%w: %w\", ErrRuntimeAssembly, err)")
+	fmt.Fprintln(&source, "\t}")
+	fmt.Fprintln(&source, "\tinvocations, err := publishInvocations(pending, providers)")
+	fmt.Fprintln(&source, "\tif err != nil {")
+	fmt.Fprintln(&source, "\t\treturn Providers{}, Invocations{}, fmt.Errorf(\"%w: %w\", ErrRuntimeAssembly, err)")
+	fmt.Fprintln(&source, "\t}")
+	fmt.Fprintln(&source, "\treturn providers, invocations, nil")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "// newProviders validates the generated Kernel boundary, decodes exactly one")
 	fmt.Fprintln(&source, "// private configuration object per selected Plugin ID, and invokes each")
 	fmt.Fprintln(&source, "// selected plugin constructor exactly once.")
-	fmt.Fprintln(&source, "func NewProviders(ctx context.Context, resolver *kernelconfiguration.Resolver, document []byte) (Providers, error) {")
+	fmt.Fprintln(&source, "func newProviders(ctx context.Context, resolver *kernelconfiguration.Resolver, document []byte, pending pendingInvocations) (Providers, error) {")
 	fmt.Fprintln(&source, "\tif err := RequireKernelCompatibility(); err != nil {")
 	fmt.Fprintln(&source, "\t\treturn Providers{}, fmt.Errorf(\"%w: Kernel compatibility: %w\", ErrProviderAssembly, err)")
+	fmt.Fprintln(&source, "\t}")
+	fmt.Fprintln(&source, "\tif !pending.valid() {")
+	fmt.Fprintln(&source, "\t\treturn Providers{}, fmt.Errorf(\"%w: pending invocation clients are invalid\", ErrProviderAssembly)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\tconfigurations, err := kernelconfiguration.ExtractObjectMap(document, \"config\")")
 	fmt.Fprintln(&source, "\tif err != nil {")
@@ -190,18 +246,18 @@ func RenderProviders(inputs []ProviderInput) ([]byte, error) {
 	}
 	fmt.Fprintln(&source, "\t}")
 	for index, provider := range providers {
-		fmt.Fprintf(&source, "\tconfigurationData%d, exists := configurations.YAML(%s)\n", index, strconv.Quote(provider.PluginID))
+		fmt.Fprintf(&source, "\tpluginConfigurationData%d, exists := configurations.YAML(%s)\n", index, strconv.Quote(provider.PluginID))
 		fmt.Fprintln(&source, "\tif !exists {")
-		fmt.Fprintf(&source, "\t\tconfigurationData%d = []byte(\"{}\\n\")\n", index)
+		fmt.Fprintf(&source, "\t\tpluginConfigurationData%d = []byte(\"{}\\n\")\n", index)
 		fmt.Fprintln(&source, "\t}")
-		fmt.Fprintf(&source, "\tconfiguration%d, err := %s.%s(ctx, resolver, configurationData%d)\n", index, provider.configurationAlias, provider.configurationNames.DecodeName(), index)
-		fmt.Fprintf(&source, "\tclear(configurationData%d)\n", index)
+		fmt.Fprintf(&source, "\tpluginConfiguration%d, err := %s.%s(ctx, resolver, pluginConfigurationData%d)\n", index, provider.configurationAlias, provider.configurationNames.DecodeName(), index)
+		fmt.Fprintf(&source, "\tclear(pluginConfigurationData%d)\n", index)
 		fmt.Fprintln(&source, "\tif err != nil {")
 		fmt.Fprintf(&source, "\t\treturn Providers{}, fmt.Errorf(\"%%w: decode plugin %%q configuration: %%w\", ErrProviderAssembly, %s, err)\n", strconv.Quote(provider.PluginID))
 		fmt.Fprintln(&source, "\t}")
 	}
 	for index := range providers {
-		fmt.Fprintf(&source, "\tplugin%d, err := constructPlugin%d(configuration%d)\n", index, index, index)
+		fmt.Fprintf(&source, "\tplugin%d, err := constructPlugin%d(pluginConfiguration%d, pending)\n", index, index, index)
 		fmt.Fprintln(&source, "\tif err != nil {")
 		fmt.Fprintln(&source, "\t\treturn Providers{}, fmt.Errorf(\"%w: %w\", ErrProviderAssembly, err)")
 		fmt.Fprintln(&source, "\t}")
@@ -243,19 +299,39 @@ func RenderProviders(inputs []ProviderInput) ([]byte, error) {
 
 	for index, provider := range providers {
 		fmt.Fprintln(&source)
-		fmt.Fprintf(&source, "func constructPlugin%d(configuration %s.%s) (plugin *%s.Plugin, err error) {\n", index, provider.configurationAlias, provider.configurationNames.TypeName(), provider.pluginAlias)
+		fmt.Fprintf(&source, "func constructPlugin%d(configuration %s.%s, pending pendingInvocations) (plugin *%s.Plugin, err error) {\n", index, provider.configurationAlias, provider.configurationNames.TypeName(), provider.pluginAlias)
 		fmt.Fprintln(&source, "\tdefer func() {")
 		fmt.Fprintln(&source, "\t\tif recover() != nil {")
 		fmt.Fprintln(&source, "\t\t\tplugin = nil")
 		fmt.Fprintf(&source, "\t\t\terr = fmt.Errorf(\"%%w: plugin %%q panicked\", ErrPluginConstructor, %s)\n", strconv.Quote(provider.PluginID))
 		fmt.Fprintln(&source, "\t\t}")
 		fmt.Fprintln(&source, "\t}()")
-		fmt.Fprintf(&source, "\tplugin = %s.New(configuration)\n", provider.pluginAlias)
+		if len(provider.dependencies) == 0 {
+			fmt.Fprintf(&source, "\tplugin = %s.New(configuration)\n", provider.pluginAlias)
+		} else {
+			fmt.Fprintf(&source, "\tdependencies, dependencyError := %s.New(\n", provider.dependencies[0].dependenciesAlias)
+			for depIndex, dependency := range provider.dependencies {
+				renderDependencyClient(&source, index, depIndex, dependency)
+			}
+			fmt.Fprintln(&source, "\t)")
+			fmt.Fprintln(&source, "\tif dependencyError != nil {")
+			fmt.Fprintf(&source, "\t\treturn nil, fmt.Errorf(\"%%w: plugin %%q dependencies\", ErrPluginConstructor, %s)\n", strconv.Quote(provider.PluginID))
+			fmt.Fprintln(&source, "\t}")
+			fmt.Fprintf(&source, "\tplugin = %s.New(configuration, dependencies)\n", provider.pluginAlias)
+		}
 		fmt.Fprintln(&source, "\tif plugin == nil {")
 		fmt.Fprintf(&source, "\t\treturn nil, fmt.Errorf(\"%%w: plugin %%q returned nil\", ErrPluginConstructor, %s)\n", strconv.Quote(provider.PluginID))
 		fmt.Fprintln(&source, "\t}")
 		fmt.Fprintln(&source, "\treturn plugin, nil")
 		fmt.Fprintln(&source, "}")
+	}
+	for providerIndex, provider := range providers {
+		for dependencyIndex, dependency := range provider.dependencies {
+			if dependency.local {
+				continue
+			}
+			renderDependencyAdapter(&source, providerIndex, dependencyIndex, dependency)
+		}
 	}
 
 	formatted, err := format.Source([]byte(source.String()))
@@ -263,6 +339,180 @@ func RenderProviders(inputs []ProviderInput) ([]byte, error) {
 		return nil, fmt.Errorf("%w: format generated source: %v", ErrRenderProviders, err)
 	}
 	return append([]byte(nil), formatted...), nil
+}
+
+func planProviderDependencies(pluginID string, inputs []DependencyInput) ([]plannedDependency, error) {
+	dependencies := make([]plannedDependency, len(inputs))
+	seen := make(map[capabilityid.Identifier]struct{}, len(inputs))
+	accessors := make(map[string]capabilityid.Identifier, len(inputs))
+	for index, input := range inputs {
+		canonical, err := capabilitymeta.NormalizeSchema(input.ContractJSON)
+		if err != nil {
+			return nil, fmt.Errorf("%w: plugin %q dependency %q contract: %v", ErrInvalidProvider, pluginID, input.Capability, err)
+		}
+		var contract runtimeContract
+		if err := json.Unmarshal(canonical, &contract); err != nil {
+			return nil, fmt.Errorf("%w: plugin %q dependency %q contract: %v", ErrInvalidProvider, pluginID, input.Capability, err)
+		}
+		identifier, err := capabilityid.Parse(contract.ID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: plugin %q dependency %q contract identity: %v", ErrInvalidProvider, pluginID, input.Capability, err)
+		}
+		if input.Capability != identifier.String() {
+			return nil, fmt.Errorf("%w: plugin %q dependency %q carries contract %s", ErrInvalidProvider, pluginID, input.Capability, identifier)
+		}
+		if _, duplicate := seen[identifier]; duplicate {
+			return nil, fmt.Errorf("%w: plugin %q duplicates dependency %s", ErrDuplicateProvider, pluginID, identifier)
+		}
+		seen[identifier] = struct{}{}
+		if err := validateRuntimeFields(contract.Request, "request", identifier); err != nil {
+			return nil, fmt.Errorf("%w: plugin %q dependency: %v", ErrInvalidProvider, pluginID, err)
+		}
+		if err := validateRuntimeFields(contract.Response, "response", identifier); err != nil {
+			return nil, fmt.Errorf("%w: plugin %q dependency: %v", ErrInvalidProvider, pluginID, err)
+		}
+		accessor := invocationAccessor(identifier)
+		if previous, collision := accessors[accessor]; collision {
+			return nil, fmt.Errorf("%w: plugin %q dependencies %s and %s both generate accessor %s", ErrDuplicateProvider, pluginID, previous, identifier, accessor)
+		}
+		accessors[accessor] = identifier
+		dependencies[index] = plannedDependency{id: identifier, contract: contract, accessor: accessor}
+	}
+	sort.Slice(dependencies, func(left, right int) bool {
+		return dependencies[left].id.String() < dependencies[right].id.String()
+	})
+	return dependencies, nil
+}
+
+func planDependencyImports(applicationModulePath string, providers []plannedProvider, imports []importSpec) ([]importSpec, error) {
+	byPath := make(map[string]string, len(imports))
+	usedAliases := make(map[string]string, len(imports))
+	for _, imported := range imports {
+		byPath[imported.path] = imported.alias
+		usedAliases[imported.alias] = imported.path
+	}
+	add := func(importPath, preferredAlias string) (string, error) {
+		if err := module.CheckImportPath(importPath); err != nil {
+			return "", fmt.Errorf("%w: generated dependency import path %q: %v", ErrInvalidProvider, importPath, err)
+		}
+		if alias, exists := byPath[importPath]; exists {
+			return alias, nil
+		}
+		alias := preferredAlias
+		for suffix := 1; ; suffix++ {
+			if previous, collision := usedAliases[alias]; !collision {
+				break
+			} else if previous == importPath {
+				return alias, nil
+			}
+			alias = preferredAlias + strconv.Itoa(suffix)
+		}
+		byPath[importPath] = alias
+		usedAliases[alias] = importPath
+		imports = append(imports, importSpec{alias: alias, path: importPath})
+		return alias, nil
+	}
+
+	for providerIndex := range providers {
+		provider := &providers[providerIndex]
+		if len(provider.dependencies) == 0 {
+			continue
+		}
+		pluginName := path.Base(provider.ImportPath)
+		dependenciesAlias, err := add(path.Join(provider.ModulePath, "generated/go/dependencies", pluginName), fmt.Sprintf("dependencies%d", providerIndex))
+		if err != nil {
+			return nil, err
+		}
+		for dependencyIndex := range provider.dependencies {
+			dependency := &provider.dependencies[dependencyIndex]
+			dependency.dependenciesAlias = dependenciesAlias
+			dependency.local = provider.ModulePath == applicationModulePath
+			dependency.clientAlias, err = add(applicationClientPath(provider.ModulePath, dependency.id), fmt.Sprintf("providerclient%d_%d", providerIndex, dependencyIndex))
+			if err != nil {
+				return nil, err
+			}
+			if dependency.local {
+				continue
+			}
+			dependency.providerContract, err = add(applicationContractPath(provider.ModulePath, dependency.id), fmt.Sprintf("providerdependencycontract%d_%d", providerIndex, dependencyIndex))
+			if err != nil {
+				return nil, err
+			}
+			dependency.applicationContract, err = add(applicationContractPath(applicationModulePath, dependency.id), fmt.Sprintf("applicationdependencycontract%d_%d", providerIndex, dependencyIndex))
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	sort.Slice(imports, func(left, right int) bool { return imports[left].path < imports[right].path })
+	return imports, nil
+}
+
+func renderDependencyClient(source *strings.Builder, providerIndex, dependencyIndex int, dependency plannedDependency) {
+	if dependency.local {
+		fmt.Fprintf(source, "\t\t%s.New(pending.dependency%s()),\n", dependency.clientAlias, dependency.accessor)
+		return
+	}
+	fmt.Fprintf(source, "\t\t%s.New(provider%dDependency%d{\n", dependency.clientAlias, providerIndex, dependencyIndex)
+	fmt.Fprintf(source, "\t\t\tavailable: pending.dependency%s().Available,\n", dependency.accessor)
+	fmt.Fprintf(source, "\t\t\tinvoke:    pending.dependency%s().Invoke,\n", dependency.accessor)
+	fmt.Fprintln(source, "\t\t}),")
+}
+
+func renderDependencyAdapter(source *strings.Builder, providerIndex, dependencyIndex int, dependency plannedDependency) {
+	typeName := fmt.Sprintf("provider%dDependency%d", providerIndex, dependencyIndex)
+	fmt.Fprintln(source)
+	fmt.Fprintf(source, "type %s struct {\n", typeName)
+	fmt.Fprintln(source, "\tavailable func() bool")
+	fmt.Fprintf(source, "\tinvoke func(context.Context, %s.Request) (%s.Response, error)\n", dependency.applicationContract, dependency.applicationContract)
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintf(source, "func (d %s) Available() bool {\n", typeName)
+	fmt.Fprintln(source, "\treturn d.available != nil && d.invoke != nil && d.available()")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintf(source, "func (d %s) Invoke(ctx context.Context, request %s.Request) (%s.Response, error) {\n", typeName, dependency.providerContract, dependency.providerContract)
+	fmt.Fprintln(source, "\tif !d.Available() {")
+	fmt.Fprintf(source, "\t\treturn %s.Response{}, ErrPluginConstructor\n", dependency.providerContract)
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintf(source, "\tresponse, err := d.invoke(ctx, provider%dDependency%dApplicationRequest(request))\n", providerIndex, dependencyIndex)
+	fmt.Fprintln(source, "\tif err != nil {")
+	fmt.Fprintf(source, "\t\treturn %s.Response{}, err\n", dependency.providerContract)
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintf(source, "\treturn provider%dDependency%dProviderResponse(response), nil\n", providerIndex, dependencyIndex)
+	fmt.Fprintln(source, "}")
+	renderDependencyConversion(source, fmt.Sprintf("provider%dDependency%dApplicationRequest", providerIndex, dependencyIndex), dependency.providerContract, dependency.applicationContract, "Request", dependency.contract.Request)
+	renderDependencyConversion(source, fmt.Sprintf("provider%dDependency%dProviderResponse", providerIndex, dependencyIndex), dependency.applicationContract, dependency.providerContract, "Response", dependency.contract.Response)
+}
+
+func renderDependencyConversion(source *strings.Builder, functionName, sourceAlias, targetAlias, section string, fields map[string]runtimeField) {
+	fmt.Fprintln(source)
+	fmt.Fprintf(source, "func %s(value %s.%s) %s.%s {\n", functionName, sourceAlias, section, targetAlias, section)
+	fmt.Fprintf(source, "\tvar result %s.%s\n", targetAlias, section)
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		field := fields[name]
+		goName := goname.Field(name)
+		if len(field.Enum) == 0 {
+			fmt.Fprintf(source, "\tresult.%s = value.%s\n", goName, goName)
+			continue
+		}
+		targetType := targetAlias + "." + section + goName
+		if field.Required {
+			fmt.Fprintf(source, "\tresult.%s = %s(value.%s)\n", goName, targetType, goName)
+			continue
+		}
+		fmt.Fprintf(source, "\tif value.%s != nil {\n", goName)
+		fmt.Fprintf(source, "\t\tconverted := %s(*value.%s)\n", targetType, goName)
+		fmt.Fprintf(source, "\t\tresult.%s = &converted\n", goName)
+		fmt.Fprintln(source, "\t}")
+	}
+	fmt.Fprintln(source, "\treturn result")
+	fmt.Fprintln(source, "}")
 }
 
 func planProviders(inputs []ProviderInput) ([]plannedProvider, []importSpec, error) {
@@ -290,7 +540,12 @@ func planProviders(inputs []ProviderInput) ([]plannedProvider, []importSpec, err
 		if err != nil {
 			return nil, nil, fmt.Errorf("%w: plugin %q import path %q: %v", ErrInvalidProvider, input.PluginID, input.ImportPath, err)
 		}
-		providers[index] = plannedProvider{ProviderInput: input, configurationNames: names}
+		dependencies, err := planProviderDependencies(input.PluginID, input.Dependencies)
+		if err != nil {
+			return nil, nil, err
+		}
+		input.Dependencies = append([]DependencyInput(nil), input.Dependencies...)
+		providers[index] = plannedProvider{ProviderInput: input, configurationNames: names, dependencies: dependencies}
 	}
 	sort.Slice(providers, func(left, right int) bool {
 		if providers[left].PluginID != providers[right].PluginID {

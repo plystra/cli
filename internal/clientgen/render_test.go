@@ -208,11 +208,14 @@ func TestRenderDerivesOperationNameAndVersionedImport(t *testing.T) {
 	}
 	got := strings.Join(strings.Fields(string(file.Data())), " ")
 	for _, required := range []string{
-		`applicationinvocation "example.com/acme/project/v3/generated/go/invocation/gateway/send-http/v12"`,
 		`contract "example.com/acme/project/v3/generated/go/contracts/gateway/send-http/v12"`,
-		`handle applicationinvocation.Handle`,
-		`func New(handle applicationinvocation.Handle) Client`,
+		`type Handle interface`,
+		`Available() bool`,
+		`Invoke(context.Context, contract.Request) (contract.Response, error)`,
+		`handle Handle`,
+		`func New(handle Handle) Client`,
 		`func (c Client) SendHTTP(ctx context.Context, request contract.Request) (contract.Response, error)`,
+		`return contract.Response{}, ErrUnavailable`,
 		`return c.handle.Invoke(ctx, request)`,
 	} {
 		if !strings.Contains(got, required) {

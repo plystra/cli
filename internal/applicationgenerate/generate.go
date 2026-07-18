@@ -214,13 +214,17 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
+	providers, err := providerInputs(resolved)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
 	output, err := applicationgen.Render(applicationgen.Options{
 		ModulePath:          resolved.Module().ModulePath(),
 		JavaScriptPackage:   javaScriptPackage,
 		KernelModuleVersion: kernelVersion,
 		KernelBuildIdentity: kernelBuildIdentity,
 		Configurations:      configurations,
-		Providers:           providerInputs(resolved.Configurations()),
+		Providers:           providers,
 	}, resolved.Resolution())
 	if err != nil {
 		return preparedGeneration{}, err
@@ -249,18 +253,40 @@ func kernelBuildProvenance(resolved applicationresolve.Result) (string, string, 
 	return dependency.SelectedVersion(), identity, nil
 }
 
-func providerInputs(resolved configurationresolve.Result) []assemblygen.ProviderInput {
-	bindings := resolved.Bindings()
+func providerInputs(resolved applicationresolve.Result) ([]assemblygen.ProviderInput, error) {
+	bindings := resolved.Configurations().Bindings()
 	inputs := make([]assemblygen.ProviderInput, len(bindings))
+	context := resolved.Resolution().Context()
 	for index, binding := range bindings {
+		plugin, exists := resolved.Inventory().ByID(binding.PluginID())
+		if !exists {
+			return nil, fmt.Errorf("selected plugin %q is absent from the visible inventory", binding.PluginID())
+		}
+		required := plugin.Requires()
+		dependencies := make([]assemblygen.DependencyInput, len(required))
+		for dependencyIndex, identifier := range required {
+			generationID, err := generation.ParseCapabilityID(identifier.String())
+			if err != nil {
+				return nil, fmt.Errorf("selected plugin %q dependency %s: %v", binding.PluginID(), identifier, err)
+			}
+			capability, exists := context.Capability(generationID)
+			if !exists {
+				return nil, fmt.Errorf("selected plugin %q dependency %s has no resolved canonical contract", binding.PluginID(), identifier)
+			}
+			dependencies[dependencyIndex] = assemblygen.DependencyInput{
+				Capability:   identifier.String(),
+				ContractJSON: capability.ContractJSON(),
+			}
+		}
 		inputs[index] = assemblygen.ProviderInput{
 			PluginID:      binding.PluginID(),
 			ModulePath:    binding.ModulePath(),
 			ModuleVersion: binding.ModuleVersion(),
 			ImportPath:    binding.ImportPath(),
+			Dependencies:  dependencies,
 		}
 	}
-	return inputs
+	return inputs, nil
 }
 
 func localConfigurationInputs(modulePath string, resolved configurationresolve.Result) ([]configurationgen.Input, error) {

@@ -57,11 +57,39 @@ func (Invocations) LogValue() slog.Value {
 	return slog.StringValue("<generated-canonical-invocations>")
 }
 
-// NewInvocations adapts selected providers, publishes one immutable canonical
-// Kernel catalog, and binds every generated application invocation path.
-func NewInvocations(providers Providers) (Invocations, error) {
+// pendingInvocations owns typed application handles while the canonical
+// dispatcher is deliberately unpublished during plugin construction.
+type pendingInvocations struct {
+	dispatcher  *kernelinvocation.Dispatcher
+	initialized bool
+}
+
+func (p pendingInvocations) valid() bool {
+	if !p.initialized || p.dispatcher == nil || p.dispatcher.Published() {
+		return false
+	}
+	return true
+}
+
+func newPendingInvocations() (pendingInvocations, error) {
 	if err := RequireKernelCompatibility(); err != nil {
-		return Invocations{}, fmt.Errorf("%w: Kernel compatibility: %w", ErrInvocationAssembly, err)
+		return pendingInvocations{}, fmt.Errorf("%w: Kernel compatibility: %w", ErrInvocationAssembly, err)
+	}
+	dispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{DefaultTimeout: defaultInvocationTimeout})
+	if err != nil {
+		return pendingInvocations{}, fmt.Errorf("%w: canonical dispatcher: %w", ErrInvocationAssembly, err)
+	}
+	return pendingInvocations{
+		dispatcher:  dispatcher,
+		initialized: true,
+	}, nil
+}
+
+// publishInvocations adapts selected providers and atomically publishes the
+// complete immutable canonical catalog behind every prepared client.
+func publishInvocations(pending pendingInvocations, providers Providers) (Invocations, error) {
+	if !pending.valid() {
+		return Invocations{}, fmt.Errorf("%w: pending invocation clients are invalid", ErrInvocationAssembly)
 	}
 	if !providers.Valid() {
 		return Invocations{}, fmt.Errorf("%w: selected providers are invalid", ErrInvocationAssembly)
@@ -80,16 +108,12 @@ func NewInvocations(providers Providers) (Invocations, error) {
 	if err != nil {
 		return Invocations{}, fmt.Errorf("%w: canonical catalog: %w", ErrInvocationAssembly, err)
 	}
-	dispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{DefaultTimeout: defaultInvocationTimeout})
-	if err != nil {
-		return Invocations{}, fmt.Errorf("%w: canonical dispatcher: %w", ErrInvocationAssembly, err)
-	}
-	if err := dispatcher.Publish(catalog); err != nil {
+	if err := pending.dispatcher.Publish(catalog); err != nil {
 		return Invocations{}, fmt.Errorf("%w: publish canonical catalog: %w", ErrInvocationAssembly, err)
 	}
 	return Invocations{
 		catalog:     catalog,
-		dispatcher:  dispatcher,
+		dispatcher:  pending.dispatcher,
 		initialized: true,
 	}, nil
 }

@@ -18,7 +18,6 @@ import (
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationactivation"
-	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/providerresolution"
@@ -319,7 +318,7 @@ func TestRenderRejectsInvalidResolutionModuleAndPackage(t *testing.T) {
 	resolution := resolvedApplication(t, "")
 	invalidModule := resolvedOptions()
 	invalidModule.ModulePath = "not a module path"
-	if _, err := applicationgen.Render(invalidModule, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, generationlowering.ErrLower) {
+	if _, err := applicationgen.Render(invalidModule, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, assemblygen.ErrRenderProviders) {
 		t.Fatalf("Render invalid module error = %v", err)
 	}
 	missingPackage := resolvedOptions()

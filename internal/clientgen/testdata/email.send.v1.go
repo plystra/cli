@@ -4,27 +4,40 @@ package emailsendv1
 
 import (
 	"context"
+	"errors"
 
 	contract "example.com/acme/project/generated/go/contracts/email/send/v1"
-	applicationinvocation "example.com/acme/project/generated/go/invocation/email/send/v1"
 )
+
+// ErrUnavailable reports an unbound generated Capability client.
+var ErrUnavailable = errors.New("generated Capability client is unavailable")
+
+// Handle is the typed generated-application boundary required by this client.
+// Application assembly may adapt an exact contract across Go Module boundaries.
+type Handle interface {
+	Available() bool
+	Invoke(context.Context, contract.Request) (contract.Response, error)
+}
 
 // Client invokes one exact Capability through its generated application path.
 type Client struct {
-	handle applicationinvocation.Handle
+	handle Handle
 }
 
 // New binds a generated client to the canonical application invocation path.
-func New(handle applicationinvocation.Handle) Client {
+func New(handle Handle) Client {
 	return Client{handle: handle}
 }
 
 // Available reports whether assembly selected a provider for this client.
 func Available(c Client) bool {
-	return applicationinvocation.Available(c.handle)
+	return c.handle != nil && c.handle.Available()
 }
 
 // Send invokes email.send/v1 through the generated application path.
 func (c Client) Send(ctx context.Context, request contract.Request) (contract.Response, error) {
+	if !Available(c) {
+		return contract.Response{}, ErrUnavailable
+	}
 	return c.handle.Invoke(ctx, request)
 }

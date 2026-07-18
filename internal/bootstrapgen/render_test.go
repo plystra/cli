@@ -31,7 +31,7 @@ func TestRenderProducesDeterministicRedactedRuntimeBoundary(t *testing.T) {
 		"defer clear(document)",
 		"kernelconfiguration.ExtractStringMap(document, \"timeouts\")",
 		"kernelconfiguration.NewResolver",
-		"applicationassembly.NewProviders",
+		"applicationassembly.NewRuntime",
 		"applicationassembly.NewProviderLifecycle",
 		"context.WithTimeout(ctx, a.startupTimeout)",
 		"<redacted-generated-application>",

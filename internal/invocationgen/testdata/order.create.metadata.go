@@ -22,7 +22,12 @@ func New(target kernelinvocation.Handle[contract.Request, contract.Response]) Ha
 
 // Available reports whether assembly selected the canonical provider.
 func Available(handle Handle) bool {
-	return handle.target.Available()
+	return handle.Available()
+}
+
+// Available reports whether assembly selected the canonical provider.
+func (h Handle) Available() bool {
+	return h.target.Available()
 }
 
 // Invoke runs the application path for order.create/v1 and dispatches its canonical ID.

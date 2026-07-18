@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -133,6 +134,194 @@ func (*Plugin) Send(_ context.Context, request contract.Request) (contract.Respo
 	return contract.Response{Accepted: request.To != ""}, nil
 }
 `)
+	verifyLibraryDeveloperSurfaces(t, root)
+}
+
+func TestGenerateLibraryDiscoversRequiredContractFromDirectDependency(t *testing.T) {
+	const (
+		modulePath     = "example.com/acme/consumer-library"
+		dependencyPath = "example.com/acme/catalog-library"
+	)
+	root := t.TempDir()
+	dependencyRoot := t.TempDir()
+	cliRoot := repositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	writeModule(t, dependencyRoot, dependencyPath, fmt.Sprintf(`require github.com/plystra/kernel v0.0.0
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot)))
+	writePlugin(t, dependencyRoot, "catalog", "id: acme.catalog\nprovides: [catalog.lookup/v1]\n")
+	writeCapability(t, dependencyRoot, "catalog", "catalog.lookup/v1", `id: catalog.lookup/v1
+request:
+  key: {type: string, required: true}
+response:
+  value: {type: string, required: true}
+errors: [not_found]
+`)
+	writeModule(t, root, modulePath, fmt.Sprintf(`require (
+	%s v1.0.0
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace %s => %s
+
+replace github.com/plystra/kernel => %s
+`, dependencyPath, dependencyPath, filepath.ToSlash(dependencyRoot), filepath.ToSlash(kernelRoot)))
+	writeFile(t, filepath.Join(root, "go.sum"), string(readAbsoluteFile(t, filepath.Join(cliRoot, "go.sum"))))
+	writePlugin(t, root, "consumer", "id: acme.consumer\nrequires: [catalog.lookup/v1]\n")
+	writeFile(t, filepath.Join(root, "consumer", "plugin.go"), `package consumer
+
+import (
+	configuration "example.com/acme/consumer-library/generated/go/configuration"
+	dependencies "example.com/acme/consumer-library/generated/go/dependencies/consumer"
+)
+
+type Config = configuration.ConsumerConfig
+type Plugin struct{ dependencies dependencies.Dependencies }
+
+func New(_ Config, clients dependencies.Dependencies) *Plugin {
+	return &Plugin{dependencies: clients}
+}
+`)
+
+	environment := goEnvironment(nil)
+	before := snapshotTree(t, root)
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Generate required dependency check: %v", err)
+	}
+	for _, filePath := range []string{
+		"generated/go/clients/catalog/lookup/v1/client_gen.go",
+		"generated/go/contracts/catalog/lookup/v1/contract_gen.go",
+		"generated/go/dependencies/consumer/dependencies_gen.go",
+	} {
+		if !slices.Contains(checked.Report().Missing(), filePath) {
+			t.Fatalf("missing files %v omit %s", checked.Report().Missing(), filePath)
+		}
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("library dependency check mutated module:\nbefore: %#v\nafter: %#v", before, after)
+	}
+	installed, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: environment,
+	})
+	if err != nil || !installed.Report().Clean() {
+		t.Fatalf("Generate required dependency = %#v, %v", installed.Report().Changes(), err)
+	}
+	for _, filePath := range []string{
+		"generated/go/clients/catalog/lookup/v1/client_gen.go",
+		"generated/go/contracts/catalog/lookup/v1/contract_gen.go",
+		"generated/go/dependencies/consumer/dependencies_gen.go",
+	} {
+		assertFileExists(t, root, filePath)
+	}
+	assertFileMissing(t, root, "generated/go/providers/catalog/lookup/v1/provider_gen.go")
+	if clean, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment}); err != nil || !clean.Report().Clean() {
+		t.Fatalf("required dependency Generate --check = %#v, %v", clean.Report().Changes(), err)
+	}
+}
+
+func TestGenerateWiresLocalPluginRequirementsThroughPublicRuntime(t *testing.T) {
+	const modulePath = "example.com/acme/wired-application"
+	root := t.TempDir()
+	writeApplicationModule(t, root, modulePath)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "capabilities:\n  require: [order.place/v1]\n")
+	writePlugin(t, root, "catalog", "id: acme.catalog\nprovides: [catalog.lookup/v1]\n")
+	writeCapability(t, root, "catalog", "catalog.lookup/v1", `id: catalog.lookup/v1
+request:
+  key: {type: string, required: true}
+response:
+  value: {type: string, required: true}
+errors: []
+`)
+	writePlugin(t, root, "orders", "id: acme.orders\nprovides: [order.place/v1]\nrequires: [catalog.lookup/v1]\n")
+	writeCapability(t, root, "orders", "order.place/v1", `id: order.place/v1
+request:
+  key: {type: string, required: true}
+response:
+  value: {type: string, required: true}
+errors: []
+`)
+	writeFile(t, filepath.Join(root, "catalog", "plugin.go"), `package catalog
+
+import (
+	"context"
+
+	configuration "example.com/acme/wired-application/generated/go/configuration"
+	contract "example.com/acme/wired-application/generated/go/contracts/catalog/lookup/v1"
+)
+
+type Config = configuration.CatalogConfig
+type Plugin struct{}
+
+func New(Config) *Plugin { return &Plugin{} }
+
+func (*Plugin) Lookup(_ context.Context, request contract.Request) (contract.Response, error) {
+	return contract.Response{Value: "catalog:" + request.Key}, nil
+}
+`)
+	writeFile(t, filepath.Join(root, "orders", "plugin.go"), `package orders
+
+import (
+	"context"
+
+	lookupcontract "example.com/acme/wired-application/generated/go/contracts/catalog/lookup/v1"
+	ordercontract "example.com/acme/wired-application/generated/go/contracts/order/place/v1"
+	configuration "example.com/acme/wired-application/generated/go/configuration"
+	dependencies "example.com/acme/wired-application/generated/go/dependencies/orders"
+)
+
+type Config = configuration.OrdersConfig
+type Plugin struct{ clients dependencies.Dependencies }
+
+func New(_ Config, clients dependencies.Dependencies) *Plugin {
+	return &Plugin{clients: clients}
+}
+
+func (p *Plugin) Place(ctx context.Context, request ordercontract.Request) (ordercontract.Response, error) {
+	response, err := p.clients.CatalogLookupV1().Lookup(ctx, lookupcontract.Request{Key: request.Key})
+	if err != nil {
+		return ordercontract.Response{}, err
+	}
+	return ordercontract.Response{Value: "order:" + response.Value}, nil
+}
+`)
+	environment := goEnvironment(nil)
+	result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: environment,
+	})
+	if err != nil || !result.Report().Clean() {
+		t.Fatalf("Generate wired application = %#v, %v", result.Report().Changes(), err)
+	}
+	for _, filePath := range []string{
+		"generated/go/clients/catalog/lookup/v1/client_gen.go",
+		"generated/go/dependencies/orders/dependencies_gen.go",
+		"generated/go/invocation/catalog/lookup/v1/invocation_gen.go",
+		"generated/go/invocation/order/place/v1/invocation_gen.go",
+	} {
+		assertFileExists(t, root, filePath)
+	}
+	writeFile(t, filepath.Join(root, "wiring_runtime_test.go"), wiredApplicationRuntimeTest)
+	command := exec.CommandContext(t.Context(), "go", "test", "-mod=readonly", "-count=1", "./...")
+	command.Dir = root
+	command.Env = environment
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("generated wired application runtime: %v\n%s", err, output)
+	}
+	if clean, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment}); err != nil || !clean.Report().Clean() {
+		t.Fatalf("wired application Generate --check = %#v, %v", clean.Report().Changes(), err)
+	}
+}
+
+func verifyLibraryDeveloperSurfaces(t *testing.T, root string) {
 	environment := goEnvironment(nil)
 	before := snapshotTree(t, root)
 	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
@@ -982,6 +1171,33 @@ func TestIntrinsicApplicationRuntime(t *testing.T) {
 		if strings.Contains(strings.ToLower(formatted), strings.ToLower(forbidden)) {
 			t.Fatalf("kernel.info/v1 exposed %q in %s", forbidden, formatted)
 		}
+	}
+}
+`
+
+const wiredApplicationRuntimeTest = `package wiredapplication_test
+
+import (
+	"context"
+	"testing"
+
+	bootstrap "example.com/acme/wired-application/generated/go/bootstrap"
+	ordercontract "example.com/acme/wired-application/generated/go/contracts/order/place/v1"
+)
+
+func TestGeneratedCrossPluginCall(t *testing.T) {
+	application, err := bootstrap.New(context.Background(), "plystra.yaml")
+	if err != nil || !application.Valid() {
+		t.Fatalf("bootstrap.New = %#v, %v", application, err)
+	}
+	invocations := application.Invocations()
+	response, err := invocations.OrderPlaceV1().Invoke(context.Background(), ordercontract.Request{Key: "item"})
+	if err != nil || response.Value != "order:catalog:item" {
+		t.Fatalf("OrderPlaceV1.Invoke = %#v, %v", response, err)
+	}
+	bindings := invocations.Catalog().Bindings()
+	if len(bindings) != 4 {
+		t.Fatalf("catalog bindings = %#v", bindings)
 	}
 }
 `

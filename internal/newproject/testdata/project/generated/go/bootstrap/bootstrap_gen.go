@@ -63,13 +63,9 @@ func New(ctx context.Context, documentPath string) (*Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: initialize Secret resolver: %w", ErrBootstrap, err)
 	}
-	providers, err := applicationassembly.NewProviders(ctx, resolver, document)
+	providers, invocations, err := applicationassembly.NewRuntime(ctx, resolver, document)
 	if err != nil {
-		return nil, fmt.Errorf("%w: construct providers: %w", ErrBootstrap, err)
-	}
-	invocations, err := applicationassembly.NewInvocations(providers)
-	if err != nil {
-		return nil, fmt.Errorf("%w: bind canonical invocations: %w", ErrBootstrap, err)
+		return nil, fmt.Errorf("%w: construct application runtime: %w", ErrBootstrap, err)
 	}
 	manager, err := applicationassembly.NewProviderLifecycle(providers, startupTimeout)
 	if err != nil {

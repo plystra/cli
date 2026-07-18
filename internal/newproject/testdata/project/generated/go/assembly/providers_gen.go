@@ -22,6 +22,8 @@ var (
 	ErrPluginConstructor = errors.New("plugin constructor failed")
 	// ErrProviderLifecycle reports invalid generated lifecycle binding or manager options.
 	ErrProviderLifecycle = errors.New("assemble selected provider lifecycle")
+	// ErrRuntimeAssembly reports a failure before one complete generated runtime is published.
+	ErrRuntimeAssembly = errors.New("assemble generated application runtime")
 )
 
 // Providers is the immutable set of selected in-process plugin providers.
@@ -77,12 +79,34 @@ func (Providers) MarshalYAML() (any, error) {
 	return nil, kernelconfiguration.ErrSecretExposure
 }
 
-// NewProviders validates the generated Kernel boundary, decodes exactly one
+// NewRuntime prepares typed application clients before constructors, decodes
+// exactly one private configuration object per selected Plugin ID, constructs
+// every provider, and only then publishes the complete canonical runtime.
+func NewRuntime(ctx context.Context, resolver *kernelconfiguration.Resolver, document []byte) (Providers, Invocations, error) {
+	pending, err := newPendingInvocations()
+	if err != nil {
+		return Providers{}, Invocations{}, fmt.Errorf("%w: prepare invocation clients: %w", ErrRuntimeAssembly, err)
+	}
+	providers, err := newProviders(ctx, resolver, document, pending)
+	if err != nil {
+		return Providers{}, Invocations{}, fmt.Errorf("%w: %w", ErrRuntimeAssembly, err)
+	}
+	invocations, err := publishInvocations(pending, providers)
+	if err != nil {
+		return Providers{}, Invocations{}, fmt.Errorf("%w: %w", ErrRuntimeAssembly, err)
+	}
+	return providers, invocations, nil
+}
+
+// newProviders validates the generated Kernel boundary, decodes exactly one
 // private configuration object per selected Plugin ID, and invokes each
 // selected plugin constructor exactly once.
-func NewProviders(ctx context.Context, resolver *kernelconfiguration.Resolver, document []byte) (Providers, error) {
+func newProviders(ctx context.Context, resolver *kernelconfiguration.Resolver, document []byte, pending pendingInvocations) (Providers, error) {
 	if err := RequireKernelCompatibility(); err != nil {
 		return Providers{}, fmt.Errorf("%w: Kernel compatibility: %w", ErrProviderAssembly, err)
+	}
+	if !pending.valid() {
+		return Providers{}, fmt.Errorf("%w: pending invocation clients are invalid", ErrProviderAssembly)
 	}
 	configurations, err := kernelconfiguration.ExtractObjectMap(document, "config")
 	if err != nil {
