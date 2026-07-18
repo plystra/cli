@@ -321,7 +321,8 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"push": {}, "pushed": {}, "pushes": {}, "pushing": {},
 		"repositories": {}, "repository": {},
 	}
-	words := strings.FieldsFunc(strings.ToLower(text), func(character rune) bool {
+	processGuidance := strings.ReplaceAll(text, modulePath, "module-path")
+	words := strings.FieldsFunc(strings.ToLower(processGuidance), func(character rune) bool {
 		return character < 'a' || character > 'z'
 	})
 	for _, word := range words {
@@ -329,7 +330,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 			return fmt.Errorf("generated Plystra skill contains unrelated development-process guidance %q", word)
 		}
 	}
-	if strings.Contains(strings.ToLower(text), "version control") {
+	if strings.Contains(strings.ToLower(processGuidance), "version control") {
 		return errors.New("generated Plystra skill contains unrelated development-process guidance")
 	}
 	return nil

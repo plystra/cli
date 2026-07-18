@@ -329,20 +329,25 @@ func TestCreateHonorsOptionalProjectChoices(t *testing.T) {
 	proxy := createKernelProxy(t)
 	environment := isolatedGoEnvironment(t, proxy)
 	tests := []struct {
-		name     string
-		git      bool
-		githubCI bool
-		skills   bool
+		name       string
+		modulePath string
+		git        bool
+		githubCI   bool
+		skills     bool
 	}{
 		{name: "minimal"},
 		{name: "git", git: true},
 		{name: "github-ci", githubCI: true},
 		{name: "skills", skills: true},
+		{name: "github-module", modulePath: "github.com/plystra/core-example", skills: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			parent := t.TempDir()
 			modulePath := "example.com/acme/choice-" + test.name
+			if test.modulePath != "" {
+				modulePath = test.modulePath
+			}
 			result, err := newproject.Create(t.Context(), newproject.Options{
 				Parent:      parent,
 				ModulePath:  modulePath,
@@ -718,7 +723,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 			t.Fatalf("Plystra skill omits %q:\n%s", required, data)
 		}
 	}
-	lower := strings.ToLower(string(data))
+	processGuidance := strings.ReplaceAll(string(data), modulePath, "module-path")
+	lower := strings.ToLower(processGuidance)
 	for _, forbidden := range []string{"TODO", "git", "github", "commit", "branch", "push", "pull request", "repository", "version control"} {
 		if strings.Contains(lower, strings.ToLower(forbidden)) {
 			t.Fatalf("Plystra skill contains forbidden %q guidance:\n%s", forbidden, data)
