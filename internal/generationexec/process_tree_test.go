@@ -31,8 +31,13 @@ func TestProcessTreeHarness(t *testing.T) {
 			os.Exit(71)
 		}
 		pidFile := os.Getenv(processTreePIDFileEnvironment)
-		if err := os.WriteFile(pidFile, []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
+		temporaryPIDFile := pidFile + ".tmp"
+		if err := os.WriteFile(temporaryPIDFile, []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "write descendant pid: %v", err)
+			os.Exit(72)
+		}
+		if err := os.Rename(temporaryPIDFile, pidFile); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "publish descendant pid: %v", err)
 			os.Exit(72)
 		}
 		for {
