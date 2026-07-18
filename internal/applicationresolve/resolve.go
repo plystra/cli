@@ -42,6 +42,7 @@ var (
 // extension compilation so both observe the same Go workspace state.
 type Options struct {
 	Start                 string
+	ConfigurationPath     string
 	GoCommand             string
 	Environment           []string
 	DependencyOutputLimit int
@@ -53,15 +54,18 @@ type Options struct {
 // Result is one immutable filesystem provenance and stable generation
 // resolution assembled from the same application snapshot.
 type Result struct {
-	module          modulelocate.Module
-	currentManifest applicationmeta.Manifest
-	composition     applicationmeta.Composition
-	dependencies    moduledependency.Index
-	inventory       plugininventory.Index
-	resolution      generationresolution.ExtensionResult
-	configs         configurationresolve.Result
-	maintenance     applicationmeta.ConfigurationMaintenance
-	manifestSource  []byte
+	module              modulelocate.Module
+	currentManifest     applicationmeta.Manifest
+	composition         applicationmeta.Composition
+	dependencies        moduledependency.Index
+	inventory           plugininventory.Index
+	resolution          generationresolution.ExtensionResult
+	configs             configurationresolve.Result
+	maintenance         applicationmeta.ConfigurationMaintenance
+	selection           ConfigurationSelection
+	rootData            []byte
+	configurationSource []byte
+	previousProvenance  applicationgen.ManifestProvenance
 }
 
 // Module returns the nearest Plystra Project Go Module.
@@ -99,9 +103,27 @@ func (r Result) ConfigurationMaintenance() applicationmeta.ConfigurationMaintena
 	return r.maintenance
 }
 
-// ManifestSource returns defensive original root configuration bytes used as
-// the concurrency precondition for a planned maintenance write.
-func (r Result) ManifestSource() []byte { return append([]byte(nil), r.manifestSource...) }
+// ConfigurationSelection returns the immutable current-project document
+// selection and normalized semantic digest used by this resolution.
+func (r Result) ConfigurationSelection() ConfigurationSelection { return r.selection }
+
+// RootConfigurationData returns the final root marker document represented by
+// generated provenance. It includes planned maintenance only when root
+// plystra.yaml is the selected current-project document.
+func (r Result) RootConfigurationData() []byte { return append([]byte(nil), r.rootData...) }
+
+// ConfigurationSource returns defensive original selected-document bytes used
+// as the concurrency precondition for a planned maintenance write.
+func (r Result) ConfigurationSource() []byte {
+	return append([]byte(nil), r.configurationSource...)
+}
+
+// PreviousManifestProvenance returns validated generated-manifest state used
+// to preserve dependency ownership independently for every configuration
+// selection.
+func (r Result) PreviousManifestProvenance() applicationgen.ManifestProvenance {
+	return r.previousProvenance
+}
 
 // Resolve locates the nearest Project, loads its root plystra.yaml, discovers
 // the effective Go Module graph, indexes visible Project plugins and contracts,
@@ -115,9 +137,20 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrResolve, err)
 	}
-	manifestSnapshot, _, err := loadManifest(module.Path())
+	rootSnapshot, _, err := loadConfiguration(module.Path(), applicationManifestName)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	selector, err := resolveConfigurationSelector(module.Path(), options.ConfigurationPath, options.Environment)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: select current-project configuration: %w", ErrResolve, err)
+	}
+	configurationSnapshot := rootSnapshot
+	if selector.path != applicationManifestName {
+		configurationSnapshot, _, err = loadConfiguration(module.Path(), selector.path)
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+		}
 	}
 	dependencies, err := moduledependency.Discover(ctx, module, moduledependency.Options{
 		GoCommand:   options.GoCommand,
@@ -142,11 +175,11 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		}
 		return plugin.Config(), true
 	}
-	previousBaseline, err := loadGeneratedDependencyBaseline(module.Path())
+	previousBaseline, previousProvenance, err := loadGeneratedDependencyBaseline(module.Path(), selector)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	maintenance, err := applicationmeta.MaintainDependencyConfiguration(manifestSnapshot.data, previousBaseline, dependencyManifests, schemaLookup)
+	maintenance, err := applicationmeta.MaintainDependencyConfiguration(configurationSnapshot.data, previousBaseline, dependencyManifests, schemaLookup)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -177,12 +210,29 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
+	selectedDigest, err := applicationgen.ConfigurationDigest(maintenance.Data())
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: digest selected configuration %s: %w", ErrResolve, selector.path, err)
+	}
+	rootData := rootSnapshot.Data()
+	if selector.path == applicationManifestName {
+		rootData = maintenance.Data()
+	}
 	after, err := ReadManifestSnapshot(module.Path())
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w: recheck plystra.yaml: %v", ErrResolve, ErrConcurrentChange, err)
 	}
-	if !sameManifestSnapshot(manifestSnapshot, after) {
+	if !sameManifestSnapshot(rootSnapshot, after) {
 		return Result{}, fmt.Errorf("%w: %w: plystra.yaml changed before resolution completed", ErrResolve, ErrConcurrentChange)
+	}
+	if selector.path != applicationManifestName {
+		after, err := readManifestSnapshot(module.Path(), selector.path)
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: %w: recheck selected configuration %s: %v", ErrResolve, ErrConcurrentChange, selector.path, err)
+		}
+		if !sameManifestSnapshot(configurationSnapshot, after) {
+			return Result{}, fmt.Errorf("%w: %w: selected configuration %s changed before resolution completed", ErrResolve, ErrConcurrentChange, selector.path)
+		}
 	}
 	if err := recheckDependencyManifests(dependencySnapshots); err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
@@ -196,32 +246,41 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		resolution:      resolution,
 		configs:         configs,
 		maintenance:     maintenance,
-		manifestSource:  manifestSnapshot.Data(),
+		selection: ConfigurationSelection{
+			mode:   selector.mode,
+			path:   selector.path,
+			digest: selectedDigest,
+		},
+		rootData:            append([]byte(nil), rootData...),
+		configurationSource: configurationSnapshot.Data(),
+		previousProvenance:  previousProvenance,
 	}, nil
 }
 
-func loadGeneratedDependencyBaseline(moduleRoot string) (applicationmeta.DependencyBaseline, error) {
+func loadGeneratedDependencyBaseline(moduleRoot string, selector configurationSelector) (applicationmeta.DependencyBaseline, applicationgen.ManifestProvenance, error) {
 	recovery, exists, err := generatedfiles.ReadApplicationManifestRecovery(moduleRoot)
 	if err != nil {
-		return applicationmeta.DependencyBaseline{}, fmt.Errorf("load generated dependency baseline recovery: %w", err)
+		return applicationmeta.DependencyBaseline{}, applicationgen.ManifestProvenance{}, fmt.Errorf("load generated dependency baseline recovery: %w", err)
 	}
 	if exists {
-		baseline, err := applicationgen.DecodeDependencyBaseline(recovery)
+		provenance, err := applicationgen.DecodeManifestProvenance(recovery)
 		if err != nil {
-			return applicationmeta.DependencyBaseline{}, fmt.Errorf("load generated dependency baseline recovery: %w", err)
+			return applicationmeta.DependencyBaseline{}, applicationgen.ManifestProvenance{}, fmt.Errorf("load generated dependency baseline recovery: %w", err)
 		}
-		return baseline, nil
+		baseline, _ := provenance.BaselineForSelection(selector.mode, selector.path)
+		return baseline, provenance, nil
 	}
 	data, exists, err := readGeneratedApplicationManifest(moduleRoot)
 	if err != nil {
-		return applicationmeta.DependencyBaseline{}, fmt.Errorf("load generated dependency baseline: %w", err)
+		return applicationmeta.DependencyBaseline{}, applicationgen.ManifestProvenance{}, fmt.Errorf("load generated dependency baseline: %w", err)
 	}
 	if !exists {
-		return applicationmeta.DependencyBaseline{}, nil
+		return applicationmeta.DependencyBaseline{}, applicationgen.ManifestProvenance{}, nil
 	}
-	baseline, err := applicationgen.DecodeDependencyBaseline(data)
+	provenance, err := applicationgen.DecodeManifestProvenance(data)
 	if err != nil {
-		return applicationmeta.DependencyBaseline{}, fmt.Errorf("load generated dependency baseline: %w", err)
+		return applicationmeta.DependencyBaseline{}, applicationgen.ManifestProvenance{}, fmt.Errorf("load generated dependency baseline: %w", err)
 	}
-	return baseline, nil
+	baseline, _ := provenance.BaselineForSelection(selector.mode, selector.path)
+	return baseline, provenance, nil
 }

@@ -17,6 +17,8 @@ go vet ./...
 
 Mutating Plystra commands regenerate automatically. Run `plystra generate` after manual declaration edits and use `plystra generate --check` as the read-only consistency gate.
 
+Root `plystra.yaml` is the mandatory Project marker and default configuration. To use one complete alternative current-Project document, run `plystra generate --config deploy/customer-a.yaml` and check it with the same option. Root configuration is not merged beneath an explicitly selected file. `PLYSTRA_CONFIG` supplies the path for automation when `--config` is omitted.
+
 Generated source under `generated/` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
 ## Continuous integration

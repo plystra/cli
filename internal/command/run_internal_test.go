@@ -116,20 +116,27 @@ func TestParseGenerateArguments(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		arguments []string
-		check     bool
-		ok        bool
+		arguments         []string
+		check             bool
+		configurationPath string
+		ok                bool
 	}{
 		{arguments: []string{"generate"}, ok: true},
 		{arguments: []string{"generate", "--check"}, check: true, ok: true},
+		{arguments: []string{"generate", "--config", "deploy/customer.yaml"}, configurationPath: "deploy/customer.yaml", ok: true},
+		{arguments: []string{"generate", "--check", "--config", "deploy/customer.yaml"}, check: true, configurationPath: "deploy/customer.yaml", ok: true},
+		{arguments: []string{"generate", "--config", "deploy/customer.yaml", "--check"}, check: true, configurationPath: "deploy/customer.yaml", ok: true},
 		{arguments: nil},
 		{arguments: []string{"generate", "--write"}},
 		{arguments: []string{"generate", "--check", "--check"}},
+		{arguments: []string{"generate", "--config"}},
+		{arguments: []string{"generate", "--config", ""}},
+		{arguments: []string{"generate", "--config", "a.yaml", "--config", "b.yaml"}},
 	}
 	for _, test := range tests {
-		check, ok := parseGenerateArguments(test.arguments)
-		if check != test.check || ok != test.ok {
-			t.Errorf("parseGenerateArguments(%q) = %t, %t; want %t, %t", test.arguments, check, ok, test.check, test.ok)
+		result, ok := parseGenerateArguments(test.arguments)
+		if result.check != test.check || result.configurationPath != test.configurationPath || ok != test.ok {
+			t.Errorf("parseGenerateArguments(%q) = %#v, %t; want check %t, path %q, ok %t", test.arguments, result, ok, test.check, test.configurationPath, test.ok)
 		}
 	}
 }

@@ -88,6 +88,86 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestResolveUsesCompleteSelectedConfigurationAboveDependencyProjects(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	dependencyRoot := filepath.Join(root, "platform")
+	writeModule(t, dependencyRoot, "example.com/platform")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities: {require: [kernel.health/v1]}\n")
+	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
+
+go 1.26
+
+require example.com/platform v1.0.0
+
+replace example.com/platform => ../platform
+`)
+	rootConfiguration := "http: {address: \":8080\"}\ncapabilities: {require: [kernel.health/v1]}\n"
+	selectedConfiguration := "# selected file remains independently authored\nhttp: {address: \":9090\"}\ncapabilities: {require: [kernel.info/v1]}\n"
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), rootConfiguration)
+	writeFile(t, filepath.Join(appRoot, "deploy", "customer.yaml"), selectedConfiguration)
+	before := snapshotTree(t, appRoot)
+
+	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:             filepath.Join(appRoot, "deploy"),
+		ConfigurationPath: "deploy/customer.yaml",
+		Environment:       goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "PLYSTRA_CONFIG": "ignored.yaml"}),
+	})
+	if err != nil {
+		t.Fatalf("Resolve explicit configuration: %v", err)
+	}
+	selection := result.ConfigurationSelection()
+	if selection.Mode() != "explicit-config" || selection.Path() != "deploy/customer.yaml" || !strings.HasPrefix(selection.Digest(), "sha256:") {
+		t.Fatalf("ConfigurationSelection = mode %q path %q digest %q", selection.Mode(), selection.Path(), selection.Digest())
+	}
+	if address, exists := result.Manifest().HTTPAddress(); !exists || address != ":9090" {
+		t.Fatalf("effective HTTP address = %q, %t; root replacement leaked", address, exists)
+	}
+	if got := applicationRequirementIDs(result.Manifest()); !reflect.DeepEqual(got, []string{"kernel.health/v1", "kernel.info/v1"}) {
+		t.Fatalf("effective requirements = %v", got)
+	}
+	if !result.ConfigurationMaintenance().Changed() || !bytes.Contains(result.ConfigurationMaintenance().Data(), []byte("kernel.health/v1")) {
+		t.Fatalf("selected maintenance = changed %t, data %q", result.ConfigurationMaintenance().Changed(), result.ConfigurationMaintenance().Data())
+	}
+	if !bytes.Equal(result.RootConfigurationData(), []byte(rootConfiguration)) || !bytes.Equal(result.ConfigurationSource(), []byte(selectedConfiguration)) {
+		t.Fatal("root or selected source provenance was not preserved independently")
+	}
+	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, before) {
+		t.Fatalf("Resolve mutated selected configuration:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+
+	ambient, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       appRoot,
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "PLYSTRA_CONFIG": "deploy/customer.yaml"}),
+	})
+	if err != nil || ambient.ConfigurationSelection().Path() != "deploy/customer.yaml" {
+		t.Fatalf("Resolve ambient configuration = path %q, error %v", ambient.ConfigurationSelection().Path(), err)
+	}
+}
+
+func TestResolveRequiresRootMarkerAndSelectedFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModule(t, root, "example.com/app")
+	writeFile(t, filepath.Join(root, "deploy.yaml"), "{}\n")
+	options := applicationresolve.Options{
+		Start:             root,
+		ConfigurationPath: "deploy.yaml",
+		Environment:       goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+	}
+	if _, err := applicationresolve.Resolve(t.Context(), options); err == nil || !errors.Is(err, projectlocate.ErrNotFound) {
+		t.Fatalf("Resolve without root marker error = %v", err)
+	}
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	options.ConfigurationPath = "missing.yaml"
+	if _, err := applicationresolve.Resolve(t.Context(), options); err == nil || !strings.Contains(err.Error(), "missing.yaml") {
+		t.Fatalf("Resolve missing selected file error = %v", err)
+	}
+}
+
 func TestResolveClosesLocalRequirementsThroughDependencyProvidersAndAliases(t *testing.T) {
 	t.Parallel()
 

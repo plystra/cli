@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/moduledependency"
@@ -24,17 +25,22 @@ const (
 // with the filesystem identity needed to detect replacement during a longer
 // operation.
 type ManifestSnapshot struct {
-	root fs.FileInfo
-	file fs.FileInfo
-	data []byte
+	path       string
+	root       fs.FileInfo
+	components []manifestPathState
+	file       fs.FileInfo
+	data       []byte
 }
+
+// Path returns the stable Project-relative slash path that was read.
+func (s ManifestSnapshot) Path() string { return s.path }
 
 // Data returns defensive manifest bytes suitable for an ExpectedData write
 // precondition.
 func (s ManifestSnapshot) Data() []byte { return append([]byte(nil), s.data...) }
 
-func loadManifest(moduleRoot string) (ManifestSnapshot, applicationmeta.Manifest, error) {
-	snapshot, err := ReadManifestSnapshot(moduleRoot)
+func loadConfiguration(moduleRoot, relativePath string) (ManifestSnapshot, applicationmeta.Manifest, error) {
+	snapshot, err := readManifestSnapshot(moduleRoot, relativePath)
 	if err != nil {
 		return ManifestSnapshot{}, applicationmeta.Manifest{}, fmt.Errorf("%w: %w", ErrManifest, err)
 	}
@@ -101,9 +107,21 @@ func dependencyIdentity(dependency moduledependency.Module) string {
 // ReadManifestSnapshot safely reads the root plystra.yaml without following a
 // symbolic module root or manifest and rejects replacement during the read.
 func ReadManifestSnapshot(moduleRoot string) (result ManifestSnapshot, snapshotErr error) {
+	return readManifestSnapshot(moduleRoot, applicationManifestName)
+}
+
+// readManifestSnapshot safely reads one Project-relative configuration path
+// without following symbolic path components and rejects replacement during
+// the read.
+func readManifestSnapshot(moduleRoot, relativePath string) (result ManifestSnapshot, snapshotErr error) {
 	if moduleRoot == "" {
 		return ManifestSnapshot{}, fmt.Errorf("%w: module root is empty", ErrUnsafeManifest)
 	}
+	relativePath = filepath.Clean(filepath.FromSlash(relativePath))
+	if relativePath == "." || filepath.IsAbs(relativePath) || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return ManifestSnapshot{}, fmt.Errorf("%w: configuration path %q is not a safe Project-relative file", ErrUnsafeManifest, filepath.ToSlash(relativePath))
+	}
+	displayPath := filepath.ToSlash(relativePath)
 	absolute, err := filepath.Abs(moduleRoot)
 	if err != nil {
 		return ManifestSnapshot{}, fmt.Errorf("resolve module root: %w", err)
@@ -132,50 +150,96 @@ func ReadManifestSnapshot(moduleRoot string) (result ManifestSnapshot, snapshotE
 		return ManifestSnapshot{}, fmt.Errorf("%w: %w: module root was replaced before open", ErrUnsafeManifest, ErrConcurrentChange)
 	}
 
-	before, err := root.Lstat(applicationManifestName)
+	pathBefore, err := inspectManifestPath(root, relativePath)
 	if err != nil {
-		return ManifestSnapshot{}, fmt.Errorf("inspect %s: %w", applicationManifestName, err)
+		return ManifestSnapshot{}, fmt.Errorf("inspect selected configuration %s: %w", displayPath, err)
 	}
-	if !before.Mode().IsRegular() || before.Mode()&fs.ModeSymlink != 0 {
-		return ManifestSnapshot{}, fmt.Errorf("%w: %s must be a regular non-symbolic file", ErrUnsafeManifest, applicationManifestName)
-	}
+	before := pathBefore[len(pathBefore)-1].info
 	if before.Size() > applicationmeta.MaximumSize {
-		return ManifestSnapshot{}, fmt.Errorf("%w: %s exceeds %d bytes", ErrUnsafeManifest, applicationManifestName, applicationmeta.MaximumSize)
+		return ManifestSnapshot{}, fmt.Errorf("%w: selected configuration %s exceeds %d bytes", ErrUnsafeManifest, displayPath, applicationmeta.MaximumSize)
 	}
-	file, err := root.Open(applicationManifestName)
+	file, err := root.Open(relativePath)
 	if err != nil {
-		return ManifestSnapshot{}, fmt.Errorf("open %s: %w", applicationManifestName, err)
+		return ManifestSnapshot{}, fmt.Errorf("open selected configuration %s: %w", displayPath, err)
 	}
 	opened, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		return ManifestSnapshot{}, fmt.Errorf("inspect opened %s: %w", applicationManifestName, err)
+		return ManifestSnapshot{}, fmt.Errorf("inspect opened selected configuration %s: %w", displayPath, err)
 	}
 	if !opened.Mode().IsRegular() || !sameFile(before, opened) {
 		_ = file.Close()
-		return ManifestSnapshot{}, fmt.Errorf("%w: %s was replaced before open", ErrConcurrentChange, applicationManifestName)
+		return ManifestSnapshot{}, fmt.Errorf("%w: selected configuration %s was replaced before open", ErrConcurrentChange, displayPath)
 	}
 	data, readErr := io.ReadAll(io.LimitReader(file, applicationmeta.MaximumSize+1))
 	closeErr := file.Close()
 	if readErr != nil {
-		return ManifestSnapshot{}, fmt.Errorf("read %s: %w", applicationManifestName, readErr)
+		return ManifestSnapshot{}, fmt.Errorf("read selected configuration %s: %w", displayPath, readErr)
 	}
 	if closeErr != nil {
-		return ManifestSnapshot{}, fmt.Errorf("close %s: %w", applicationManifestName, closeErr)
+		return ManifestSnapshot{}, fmt.Errorf("close selected configuration %s: %w", displayPath, closeErr)
 	}
 	rootAfter, rootErr := root.Lstat(".")
-	after, fileErr := root.Lstat(applicationManifestName)
-	if rootErr != nil || fileErr != nil || !sameDirectory(openedRoot, rootAfter) || !after.Mode().IsRegular() || after.Mode()&fs.ModeSymlink != 0 || !sameFile(opened, after) {
-		return ManifestSnapshot{}, fmt.Errorf("%w: %s or its module root changed while it was read", ErrConcurrentChange, applicationManifestName)
+	pathAfter, pathErr := inspectManifestPath(root, relativePath)
+	if rootErr != nil || pathErr != nil || !sameDirectory(openedRoot, rootAfter) || !sameManifestPathStates(pathBefore, pathAfter) {
+		return ManifestSnapshot{}, fmt.Errorf("%w: selected configuration %s or its Project root changed while it was read", ErrConcurrentChange, displayPath)
 	}
+	after := pathAfter[len(pathAfter)-1].info
 	if len(data) > applicationmeta.MaximumSize {
-		return ManifestSnapshot{}, fmt.Errorf("%w: %s exceeds %d bytes", ErrUnsafeManifest, applicationManifestName, applicationmeta.MaximumSize)
+		return ManifestSnapshot{}, fmt.Errorf("%w: selected configuration %s exceeds %d bytes", ErrUnsafeManifest, displayPath, applicationmeta.MaximumSize)
 	}
 	return ManifestSnapshot{
-		root: rootAfter,
-		file: after,
-		data: append([]byte(nil), data...),
+		path:       displayPath,
+		root:       rootAfter,
+		components: append([]manifestPathState(nil), pathAfter...),
+		file:       after,
+		data:       append([]byte(nil), data...),
 	}, nil
+}
+
+type manifestPathState struct {
+	name string
+	info fs.FileInfo
+}
+
+func inspectManifestPath(root *os.Root, relativePath string) ([]manifestPathState, error) {
+	components := strings.Split(relativePath, string(filepath.Separator))
+	states := make([]manifestPathState, 0, len(components))
+	current := ""
+	for index, component := range components {
+		current = filepath.Join(current, component)
+		info, err := root.Lstat(current)
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return nil, fmt.Errorf("%w: %s contains a symbolic path component", ErrUnsafeManifest, filepath.ToSlash(relativePath))
+		}
+		if index < len(components)-1 {
+			if !info.IsDir() {
+				return nil, fmt.Errorf("%w: %s has a non-directory path component", ErrUnsafeManifest, filepath.ToSlash(relativePath))
+			}
+		} else if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("%w: %s must be a regular non-symbolic file", ErrUnsafeManifest, filepath.ToSlash(relativePath))
+		}
+		states = append(states, manifestPathState{name: current, info: info})
+	}
+	return states, nil
+}
+
+func sameManifestPathStates(left, right []manifestPathState) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index].name != right[index].name || left[index].info.Mode() != right[index].info.Mode() || !os.SameFile(left[index].info, right[index].info) {
+			return false
+		}
+		if index == len(left)-1 && !sameFile(left[index].info, right[index].info) {
+			return false
+		}
+	}
+	return true
 }
 
 func readGeneratedApplicationManifest(moduleRoot string) (result []byte, exists bool, readErr error) {
@@ -247,7 +311,10 @@ func readGeneratedApplicationManifest(moduleRoot string) (result []byte, exists 
 }
 
 func sameManifestSnapshot(left, right ManifestSnapshot) bool {
-	return sameDirectory(left.root, right.root) && sameFile(left.file, right.file) && bytes.Equal(left.data, right.data)
+	return sameDirectory(left.root, right.root) &&
+		sameManifestPathStates(left.components, right.components) &&
+		sameFile(left.file, right.file) &&
+		bytes.Equal(left.data, right.data)
 }
 
 func sameDirectory(left, right fs.FileInfo) bool {

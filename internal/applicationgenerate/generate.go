@@ -57,6 +57,7 @@ type ModuleMutation func(context.Context, string, func() error) error
 type Options struct {
 	Start                 string
 	Check                 bool
+	ConfigurationPath     string
 	GoCommand             string
 	Environment           []string
 	DependencyOutputLimit int
@@ -76,6 +77,7 @@ type Result struct {
 	report               generatedfiles.Report
 	checked              bool
 	configurationChanged bool
+	configurationPath    string
 }
 
 // Module returns the nearest enclosing Go Module.
@@ -91,6 +93,10 @@ func (r Result) Checked() bool { return r.checked }
 // drift. Check mode reports it without mutation; install mode reports that the
 // planned three-way update was committed with generated output.
 func (r Result) ConfigurationChanged() bool { return r.configurationChanged }
+
+// ConfigurationPath returns the stable Project-relative current-project
+// document selected for this operation.
+func (r Result) ConfigurationPath() string { return r.configurationPath }
 
 // Generate resolves and renders the nearest Plystra Project. Check mode
 // compares without mutation. Install mode atomically installs desired files,
@@ -115,6 +121,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			report:               report,
 			checked:              true,
 			configurationChanged: prepared.resolved.ConfigurationMaintenance().Changed(),
+			configurationPath:    prepared.resolved.ConfigurationSelection().Path(),
 		}, nil
 	}
 
@@ -132,9 +139,9 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 	maintenance := prepared.resolved.ConfigurationMaintenance()
 	if maintenance.Changed() {
 		additional = append(additional, atomicfs.Write{
-			Path:         "plystra.yaml",
+			Path:         prepared.resolved.ConfigurationSelection().Path(),
 			Data:         maintenance.Data(),
-			ExpectedData: prepared.resolved.ManifestSource(),
+			ExpectedData: prepared.resolved.ConfigurationSource(),
 		})
 	}
 	install := generatedfiles.InstallWithWrites
@@ -169,6 +176,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		module:               prepared.resolved.Module(),
 		report:               report,
 		configurationChanged: maintenance.Changed(),
+		configurationPath:    prepared.resolved.ConfigurationSelection().Path(),
 	}, nil
 }
 
@@ -202,6 +210,7 @@ type preparedGeneration struct {
 func prepare(ctx context.Context, options Options, start string) (preparedGeneration, error) {
 	resolved, err := applicationresolve.Resolve(ctx, applicationresolve.Options{
 		Start:                 start,
+		ConfigurationPath:     options.ConfigurationPath,
 		GoCommand:             options.GoCommand,
 		Environment:           append([]string(nil), options.Environment...),
 		DependencyOutputLimit: options.DependencyOutputLimit,
@@ -231,12 +240,39 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
+	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
+		ModulePath:          resolved.Module().ModulePath(),
+		JavaScriptPackage:   javaScriptPackage,
+		KernelModuleVersion: kernelVersion,
+		KernelBuildIdentity: kernelBuildIdentity,
+		Configurations:      configurations,
+		Providers:           providers,
+		Resolution:          resolved.Resolution(),
+	})
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("digest final application model: %w", err)
+	}
+	selection := resolved.ConfigurationSelection()
+	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
+		Mode:                   selection.Mode(),
+		RootPath:               "plystra.yaml",
+		RootData:               resolved.RootConfigurationData(),
+		SelectedPath:           selection.Path(),
+		SelectedData:           resolved.ConfigurationMaintenance().Data(),
+		Composition:            resolved.Composition(),
+		ApplicationModelDigest: modelDigest,
+		Previous:               resolved.PreviousManifestProvenance(),
+	})
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("construct application manifest provenance: %w", err)
+	}
 	output, err := applicationgen.Render(applicationgen.Options{
 		ModulePath:          resolved.Module().ModulePath(),
 		JavaScriptPackage:   javaScriptPackage,
 		KernelModuleVersion: kernelVersion,
 		KernelBuildIdentity: kernelBuildIdentity,
 		Composition:         resolved.Composition(),
+		ManifestProvenance:  provenance,
 		Configurations:      configurations,
 		Providers:           providers,
 	}, resolved.Resolution())
@@ -293,11 +329,12 @@ func providerInputs(resolved applicationresolve.Result) ([]assemblygen.ProviderI
 			}
 		}
 		inputs[index] = assemblygen.ProviderInput{
-			PluginID:      binding.PluginID(),
-			ModulePath:    binding.ModulePath(),
-			ModuleVersion: binding.ModuleVersion(),
-			ImportPath:    binding.ImportPath(),
-			Dependencies:  dependencies,
+			PluginID:            binding.PluginID(),
+			ModulePath:          binding.ModulePath(),
+			ModuleVersion:       binding.ModuleVersion(),
+			ImportPath:          binding.ImportPath(),
+			ConfigurationSchema: binding.Schema(),
+			Dependencies:        dependencies,
 		}
 	}
 	return inputs, nil
@@ -334,13 +371,16 @@ func exposesJavaScript(context generation.Context) bool {
 }
 
 type fingerprintDocument struct {
-	ModulePath      string                 `json:"module_path"`
-	ContextDigest   string                 `json:"context_digest"`
-	AliasDigest     string                 `json:"alias_digest"`
-	ConfigDigest    string                 `json:"configuration_digest"`
-	Passes          int                    `json:"passes"`
-	Extensions      []extensionFingerprint `json:"extensions"`
-	OutputOwnership json.RawMessage        `json:"output_ownership"`
+	ModulePath                  string                 `json:"module_path"`
+	ConfigurationMode           string                 `json:"configuration_mode"`
+	ConfigurationPath           string                 `json:"configuration_path"`
+	SelectedConfigurationDigest string                 `json:"selected_configuration_digest"`
+	PrivateConfigurationDigest  string                 `json:"private_configuration_digest"`
+	ContextDigest               string                 `json:"context_digest"`
+	AliasDigest                 string                 `json:"alias_digest"`
+	Passes                      int                    `json:"passes"`
+	Extensions                  []extensionFingerprint `json:"extensions"`
+	OutputOwnership             json.RawMessage        `json:"output_ownership"`
 }
 
 type extensionFingerprint struct {
@@ -365,13 +405,16 @@ func generationFingerprint(resolved applicationresolve.Result, output generatedf
 		}
 	}
 	document := fingerprintDocument{
-		ModulePath:      resolved.Module().ModulePath(),
-		ContextDigest:   resolution.Context().Digest(),
-		AliasDigest:     resolution.AliasResolution().Digest(),
-		ConfigDigest:    resolved.Configurations().Digest(),
-		Passes:          resolution.Passes(),
-		Extensions:      extensions,
-		OutputOwnership: output.ManifestJSON(),
+		ModulePath:                  resolved.Module().ModulePath(),
+		ConfigurationMode:           resolved.ConfigurationSelection().Mode(),
+		ConfigurationPath:           resolved.ConfigurationSelection().Path(),
+		SelectedConfigurationDigest: resolved.ConfigurationSelection().Digest(),
+		PrivateConfigurationDigest:  resolved.Configurations().Digest(),
+		ContextDigest:               resolution.Context().Digest(),
+		AliasDigest:                 resolution.AliasResolution().Digest(),
+		Passes:                      resolution.Passes(),
+		Extensions:                  extensions,
+		OutputOwnership:             output.ManifestJSON(),
 	}
 	canonical, err := json.Marshal(document)
 	if err != nil {
