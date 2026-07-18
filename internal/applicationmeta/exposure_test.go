@@ -14,6 +14,10 @@ func TestAddHTTPExposurePreservesApplicationSemantics(t *testing.T) {
 	t.Parallel()
 
 	input := []byte(`# Application settings.
+http:
+  transports:
+    connect: false # keep the selected transport decision
+    rest: true
 timeouts:
   startup: 45s
 capabilities:
@@ -35,6 +39,7 @@ config:
 	}
 	for _, retained := range [][]byte{
 		[]byte("# Application settings."),
+		[]byte("# keep the selected transport decision"),
 		[]byte("startup: 45s"),
 		[]byte("health.status/v1:"),
 		[]byte("env: SMTP_PASSWORD"),
@@ -47,6 +52,9 @@ config:
 	manifest, err := applicationmeta.Parse(updated)
 	if err != nil || len(manifest.HTTPExposures()) != 1 || manifest.HTTPExposures()[0].ID() != id {
 		t.Fatalf("updated manifest exposures = %#v, %v", manifest.HTTPExposures(), err)
+	}
+	if transports := manifest.HTTPTransports(); transports != (applicationmeta.HTTPTransports{REST: true}) {
+		t.Fatalf("updated HTTP transports = %#v", transports)
 	}
 	updated[0] = 'x'
 	repeated, repeatedChanged, err := applicationmeta.AddHTTPExposure(input, id)

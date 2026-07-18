@@ -39,6 +39,9 @@ config:
 	current := []byte(`# Shared application configuration.
 http:
   address: ":9090" # local process setting
+  transports:
+    connect: false # local Connect decision
+    rest: true # local REST decision
   expose:
     - local.health/v1 # explicit local exposure
 capabilities:
@@ -62,6 +65,8 @@ config:
 	for _, expected := range [][]byte{
 		[]byte("# Shared application configuration."),
 		[]byte("# local process setting"),
+		[]byte("# local Connect decision"),
+		[]byte("# local REST decision"),
 		[]byte("# explicit local exposure"),
 		[]byte("# explicit local Provider"),
 		[]byte("# explicit local value"),
@@ -78,6 +83,9 @@ config:
 		}
 	}
 	manifest := composeManifest(t, string(data))
+	if transports := manifest.HTTPTransports(); transports != (applicationmeta.HTTPTransports{REST: true}) {
+		t.Fatalf("maintained HTTP transports = %#v", transports)
+	}
 	composition, err := applicationmeta.Compose(dependencies, manifest, lookup)
 	if err != nil {
 		t.Fatalf("Compose maintained configuration: %v", err)

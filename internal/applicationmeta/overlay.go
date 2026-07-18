@@ -25,6 +25,7 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (Manifest, error
 	} else if overlay.hasHTTPAddress {
 		httpAddress, hasHTTPAddress, removeHTTPAddress = overlay.httpAddress, true, false
 	}
+	httpTransports := overlayHTTPTransports(base.httpTransports, overlay.httpTransports)
 	startupTimeout, hasStartupTimeout, removeStartupTimeout := base.startupTimeout, base.hasStartupTimeout, base.removeStartupTimeout
 	if overlay.removeStartupTimeout {
 		startupTimeout, hasStartupTimeout, removeStartupTimeout = DefaultStartupTimeout, false, true
@@ -51,6 +52,7 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (Manifest, error
 		httpAddress:            httpAddress,
 		hasHTTPAddress:         hasHTTPAddress,
 		removeHTTPAddress:      removeHTTPAddress,
+		httpTransports:         httpTransports,
 		httpExposures:          exposures,
 		removedHTTPExposures:   removedExposures,
 		requirements:           requirements,
@@ -65,6 +67,21 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (Manifest, error
 		hasStartupTimeout:      hasStartupTimeout,
 		removeStartupTimeout:   removeStartupTimeout,
 	}, nil
+}
+
+func overlayHTTPTransports(base, overlay httpTransportLayer) httpTransportLayer {
+	result := base
+	if overlay.removeConnect {
+		result.connect, result.hasConnect, result.removeConnect = false, false, true
+	} else if overlay.hasConnect {
+		result.connect, result.hasConnect, result.removeConnect = overlay.connect, true, false
+	}
+	if overlay.removeREST {
+		result.rest, result.hasREST, result.removeREST = false, false, true
+	} else if overlay.hasREST {
+		result.rest, result.hasREST, result.removeREST = overlay.rest, true, false
+	}
+	return result
 }
 
 func overlayExposureSet(base, overlay Manifest) ([]HTTPExposure, []capabilityRemoval) {

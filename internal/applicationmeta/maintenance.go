@@ -513,6 +513,7 @@ func sameCurrentProjectProcessSettings(left, right Manifest) bool {
 	rightAddress, rightHasAddress := right.HTTPAddress()
 	return leftAddress == rightAddress && leftHasAddress == rightHasAddress &&
 		left.removeHTTPAddress == right.removeHTTPAddress &&
+		left.httpTransports == right.httpTransports &&
 		left.StartupTimeout() == right.StartupTimeout() &&
 		left.hasStartupTimeout == right.hasStartupTimeout &&
 		left.removeStartupTimeout == right.removeStartupTimeout

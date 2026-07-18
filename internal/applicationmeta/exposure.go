@@ -129,6 +129,9 @@ func manifestDifferenceOutsideHTTPExposure(left, right Manifest) string {
 	if leftAddress != rightAddress || leftHasAddress != rightHasAddress {
 		return "http.address"
 	}
+	if left.httpTransports != right.httpTransports {
+		return "http.transports"
+	}
 	if left.StartupTimeout() != right.StartupTimeout() || left.hasStartupTimeout != right.hasStartupTimeout {
 		return "timeouts.startup"
 	}
