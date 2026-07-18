@@ -201,9 +201,11 @@ dependency module with:
 
 That workflow materializes the visible exact contract and adds the local
 provider. It does not create a similar private contract. Never recreate an
-already visible exact version and never change a released contract in place.
-Create a new /vN for an incompatible request, response, semantic-error, or
-extension-metadata change.
+already visible exact version. Before v0.0.1, rewrite unreleased contracts and
+regenerate local fixtures directly instead of adding a compatibility wrapper,
+decoder, fallback, or parallel old version. After a public release, never
+change a released contract in place; create a new /vN for an incompatible
+request, response, semantic-error, or extension-metadata change.
 
 ## Declare and register providers
 
@@ -367,7 +369,7 @@ target. Add them under plystra.yaml capabilities.aliases:
       aliases:
         records.fetch/v1:
           target: records.read/v1
-        records.legacy-read/v1:
+        records.lookup/v1:
           target: records.read/v1
           expose:
             go: true

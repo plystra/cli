@@ -102,7 +102,7 @@ Required or explicitly exposed intrinsic Capabilities receive normal typed appli
 
 For each local plugin that declares exact `requires`, generation emits an immutable client set at `generated/go/dependencies/<plugin-directory>/dependencies_gen.go`. Its authored constructor receives `func New(Config, dependencies.Dependencies) *Plugin`; a plugin with no requirements keeps `func New(Config) *Plugin`. Dependency-module plugins use the equivalent generated package from their own module. Constructors may validate and retain these clients but cannot invoke them successfully until construction completes and assembly publishes the catalog. Every later cross-plugin call therefore follows the same generated application invocation path and contributions as an external adapter. A missing contract, unbound client, constructor panic or nil result, cross-module type mismatch, or publication failure leaves the runtime unpublished.
 
-Each application-local Capability Alias exposed to Go generates only a thin Alias-named client package. It reuses the canonical target's request, response, and errors and forwards to the target's generated client, so every target contribution runs before the Kernel receives the canonical ID. Alias clients create no Alias contract, invocation handle, provider, or Kernel registration. Several Alias clients may forward to one canonical target, and native Go deprecation comments carry application-local compatibility guidance.
+Each application-local Capability Alias exposed to Go generates only a thin Alias-named client package. It reuses the canonical target's request, response, and errors and forwards to the target's generated client, so every target contribution runs before the Kernel receives the canonical ID. Alias clients create no Alias contract, invocation handle, provider, or Kernel registration. Several Alias clients may forward to one canonical target, and native Go deprecation comments carry application-local replacement guidance.
 
 For `extensions.authn.authenticated: true`, an AuthN rule adds `authn.session.verify/v1` and generated verification before target dispatch. For `extensions.authz.permission`, an AuthZ rule adds `authz.check/v1`, generates the decision using permission and Space/resource data, and rejects denial. These are static application calls, not Kernel behavior.
 
@@ -122,7 +122,7 @@ Explicitly JavaScript-exposed canonical Capabilities lower into one immutable pr
 
 The generated browser transport uses the matching strict HTTP route, preserves an application base-path prefix, bounds JSON to 1 MiB, accepts an optional access-token callback and `AbortSignal`, and exposes only stable error status/code/detail fields. It validates exact fields, enums, finite numbers, safe integers, plain JSON objects, response media types, and unexpected response data. Credentials are attached only as one bounded `Authorization` header and callback, network, cancellation, malformed-response, and schema failures are normalized without copying provider text.
 
-Every final Alias whose normalized exposure includes JavaScript generates a nested method and tree-shakable factory under its Alias ID. The Alias module imports the canonical target's exact request, response, semantic errors, validators, and contract digest, then changes only the HTTP route identity so the generated Alias handler forwards into the canonical application invocation path. Several aliases may reuse one target without copying its schema or provider details. Alias exposure cannot broaden the target, and compatibility aliases emit native TypeScript `@deprecated` declarations without deprecating the target.
+Every final Alias whose normalized exposure includes JavaScript generates a nested method and tree-shakable factory under its Alias ID. The Alias module imports the canonical target's exact request, response, semantic errors, validators, and contract digest, then changes only the HTTP route identity so the generated Alias handler forwards into the canonical application invocation path. Several aliases may reuse one target without copying its schema or provider details. Alias exposure cannot broaden the target, and deprecated aliases emit native TypeScript `@deprecated` declarations without deprecating the target.
 
 ## Generated application API documentation
 
@@ -274,6 +274,11 @@ plystra generate --check
 Check mode never writes module files. Both modes report deterministic `changed`, `missing`, `unexpected`, and `obsolete` paths and return a failing exit status while any drift remains. Installation preserves an unexpected unowned file rather than overwriting or deleting it.
 
 ## Development
+
+The complete contributor and Plystra-module workflow is in
+[`docs/development-guide.md`](docs/development-guide.md). It records the actual
+end-of-Gate-9 command surface, generated ownership rules, operational examples,
+troubleshooting, and intentionally deferred roadmap work.
 
 ```powershell
 go test ./...
