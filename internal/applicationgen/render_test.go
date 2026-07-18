@@ -85,6 +85,22 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 	if slices.Contains(outputPaths(output), "generated/go/providers/kernel/health/v1/provider_gen.go") {
 		t.Fatal("intrinsic Kernel Capability received an ordinary provider surface")
 	}
+	healthContract := string(outputData(t, output, "generated/go/contracts/kernel/health/v1/contract_gen.go"))
+	for _, required := range []string{
+		"type Request = kernelintrinsic.HealthRequest",
+		"type Response = kernelintrinsic.HealthResponse",
+		"type ResponseStatus = kernelintrinsic.HealthStatus",
+	} {
+		if !strings.Contains(healthContract, required) {
+			t.Fatalf("intrinsic contract omits %q:\n%s", required, healthContract)
+		}
+	}
+	assembly := string(outputData(t, output, "generated/go/assembly/invocations_gen.go"))
+	for _, required := range []string{"kernelintrinsic.NewBindings", "kernelintrinsic.HealthContract()", "func (i Invocations) KernelHealthV1()"} {
+		if !strings.Contains(assembly, required) {
+			t.Fatalf("intrinsic assembly omits %q:\n%s", required, assembly)
+		}
+	}
 	manifest := string(outputData(t, output, "generated/manifest.json"))
 	for _, required := range []string{
 		`"id":"compat.send/v1"`,
@@ -175,7 +191,7 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	t.Parallel()
 
 	resolution := emptyApplication(t)
-	output, err := applicationgen.Render(applicationgen.Options{ModulePath: applicationModulePath}, resolution)
+	output, err := applicationgen.Render(emptyOptions(applicationModulePath), resolution)
 	if err != nil {
 		t.Fatalf("Render empty: %v", err)
 	}
@@ -200,9 +216,11 @@ timeout: {type: duration, default: 5s}
 	}
 	resolution := resolvedApplication(t, "")
 	options := applicationgen.Options{
-		ModulePath:        businessModulePath,
-		JavaScriptPackage: applicationSDKPackage,
-		Providers:         selectedProviderInputs(),
+		ModulePath:          businessModulePath,
+		JavaScriptPackage:   applicationSDKPackage,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
+		Providers:           selectedProviderInputs(),
 		Configurations: []configurationgen.Input{{
 			PluginName: "business",
 			PluginID:   "acme.business",
@@ -226,7 +244,7 @@ timeout: {type: duration, default: 5s}
 		}
 	}
 
-	withoutConfiguration, err := applicationgen.Render(applicationgen.Options{ModulePath: businessModulePath}, emptyApplication(t))
+	withoutConfiguration, err := applicationgen.Render(emptyOptions(businessModulePath), emptyApplication(t))
 	if err != nil {
 		t.Fatalf("Render without configuration: %v", err)
 	}
@@ -266,9 +284,19 @@ func TestRenderRejectsInvalidResolutionModuleAndPackage(t *testing.T) {
 
 func resolvedOptions() applicationgen.Options {
 	return applicationgen.Options{
-		ModulePath:        applicationModulePath,
-		JavaScriptPackage: applicationSDKPackage,
-		Providers:         selectedProviderInputs(),
+		ModulePath:          applicationModulePath,
+		JavaScriptPackage:   applicationSDKPackage,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
+		Providers:           selectedProviderInputs(),
+	}
+}
+
+func emptyOptions(modulePath string) applicationgen.Options {
+	return applicationgen.Options{
+		ModulePath:          modulePath,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
 	}
 }
 
@@ -305,8 +333,14 @@ response:
 errors: [invalid_recipient]
 `)
 	health := normalizedContract(t, `id: kernel.health/v1
+description: Reports intrinsic Kernel liveness.
+request: {}
 response:
-  healthy: {type: boolean, required: true}
+  status:
+    type: string
+    enum: [healthy]
+    required: true
+errors: []
 `)
 	var aliases []applicationmeta.Alias
 	if applicationYAML != "" {

@@ -22,6 +22,7 @@ import (
 	"github.com/plystra/cli/internal/contractgen"
 	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/invocationgen"
+	kernelcatalog "github.com/plystra/kernel/capability/catalog"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
@@ -79,6 +80,8 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 	options := assemblygen.InvocationOptions{
 		ModulePath:               "example.com/runtime-application",
 		ApplicationBuildIdentity: "sha256:0123456789abcdef",
+		KernelModuleVersion:      "v0.1.0",
+		KernelBuildIdentity:      "sha256:0123456789abcdef",
 		DefaultTimeout:           30 * time.Second,
 		Providers:                []assemblygen.ProviderInput{provider},
 		Invocations:              invocations,
@@ -91,6 +94,8 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 		t.Fatalf("parse generated invocations: %v\n%s", err, generated)
 	}
 	for _, required := range []string{
+		`kernelintrinsic.NewBindings`,
+		`len(i.catalog.Bindings()) != 4`,
 		`kernelinvocation.NewModuleBuild("example.com/runtime-dependency", "v1.2.3", "sha256:0123456789abcdef")`,
 		`kernelinvocation.SelectionReasonExplicit`,
 		`kernelinvocation.SelectionReasonSoleProvider`,
@@ -126,6 +131,8 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 	empty, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
 		ModulePath:               options.ModulePath,
 		ApplicationBuildIdentity: options.ApplicationBuildIdentity,
+		KernelModuleVersion:      options.KernelModuleVersion,
+		KernelBuildIdentity:      options.KernelBuildIdentity,
 		DefaultTimeout:           options.DefaultTimeout,
 	})
 	if err != nil {
@@ -134,7 +141,7 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 	if _, err := parser.ParseFile(token.NewFileSet(), assemblygen.InvocationsPath, empty, parser.AllErrors); err != nil {
 		t.Fatalf("parse empty generated invocations: %v\n%s", err, empty)
 	}
-	if !bytes.Contains(empty, []byte("return true")) || bytes.Contains(empty, []byte("kernelcapability")) {
+	if !bytes.Contains(empty, []byte("return true")) || !bytes.Contains(empty, []byte("len(i.catalog.Bindings()) != 2")) || !bytes.Contains(empty, []byte("kernelintrinsic.NewBindings")) || bytes.Contains(empty, []byte("kernelcapability")) {
 		t.Fatalf("empty runtime is not a valid zero-provider assembly:\n%s", empty)
 	}
 }
@@ -151,6 +158,8 @@ func TestRenderInvocationsRejectsInvalidRuntimePlans(t *testing.T) {
 	valid := assemblygen.InvocationOptions{
 		ModulePath:               "example.com/runtime-application",
 		ApplicationBuildIdentity: "test-build",
+		KernelModuleVersion:      "v0.1.0",
+		KernelBuildIdentity:      "test-build",
 		DefaultTimeout:           time.Second,
 		Providers:                []assemblygen.ProviderInput{provider},
 		Invocations: []assemblygen.InvocationInput{
@@ -166,6 +175,10 @@ func TestRenderInvocationsRejectsInvalidRuntimePlans(t *testing.T) {
 	}{
 		{name: "invalid application module", edit: func(value *assemblygen.InvocationOptions) { value.ModulePath = "../application" }, reason: assemblygen.ErrInvalidInvocation},
 		{name: "invalid timeout", edit: func(value *assemblygen.InvocationOptions) { value.DefaultTimeout = 0 }, reason: assemblygen.ErrInvalidInvocation},
+		{name: "missing Kernel provenance", edit: func(value *assemblygen.InvocationOptions) {
+			value.KernelModuleVersion = ""
+			value.KernelBuildIdentity = ""
+		}, reason: assemblygen.ErrInvalidInvocation, text: "intrinsic Kernel build provenance"},
 		{name: "missing build provenance", edit: func(value *assemblygen.InvocationOptions) {
 			value.ApplicationBuildIdentity = ""
 			value.Providers[0].ModuleVersion = ""
@@ -259,6 +272,12 @@ replace github.com/plystra/kernel => %s
 		writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(file.Path())), file.Data())
 		writeBytes(t, filepath.Join(dependencyRoot, filepath.FromSlash(file.Path())), file.Data())
 	}
+	healthSchema := intrinsicSchema(t, "kernel.health/v1")
+	healthContract, err := contractgen.RenderIntrinsic(healthSchema)
+	if err != nil {
+		t.Fatalf("render health contract: %v", err)
+	}
+	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(healthContract.Path())), healthContract.Data())
 	policyInvocation, err := invocationgen.Render("example.com/runtime-application", []byte(runtimePolicySchema))
 	if err != nil {
 		t.Fatalf("render policy invocation: %v", err)
@@ -271,9 +290,17 @@ replace github.com/plystra/kernel => %s
 	if err != nil {
 		t.Fatalf("render message invocation: %v", err)
 	}
+	healthInvocation, err := invocationgen.Render("example.com/runtime-application", healthSchema)
+	if err != nil {
+		t.Fatalf("render health invocation: %v", err)
+	}
 	policyClient, err := clientgen.Render("example.com/runtime-application", []byte(runtimePolicySchema))
 	if err != nil {
 		t.Fatalf("render policy client: %v", err)
+	}
+	healthClient, err := clientgen.Render("example.com/runtime-application", healthSchema)
+	if err != nil {
+		t.Fatalf("render health client: %v", err)
 	}
 	for _, file := range []struct {
 		path string
@@ -281,11 +308,13 @@ replace github.com/plystra/kernel => %s
 	}{
 		{policyInvocation.Path(), policyInvocation.Data()},
 		{messageInvocation.Path(), messageInvocation.Data()},
+		{healthInvocation.Path(), healthInvocation.Data()},
 		{policyClient.Path(), policyClient.Data()},
+		{healthClient.Path(), healthClient.Data()},
 	} {
 		writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(file.path)), file.data)
 	}
-	if got := messageInvocation.Dependencies(); len(got) != 1 || got[0] != "policy.check/v1" {
+	if got := messageInvocation.Dependencies(); len(got) != 2 || got[0] != "kernel.health/v1" || got[1] != "policy.check/v1" {
 		t.Fatalf("message invocation dependencies = %q", got)
 	}
 
@@ -310,6 +339,8 @@ replace github.com/plystra/kernel => %s
 	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
 		ModulePath:               "example.com/runtime-application",
 		ApplicationBuildIdentity: "runtime-build-123",
+		KernelModuleVersion:      "v0.0.0",
+		KernelBuildIdentity:      "runtime-build-123",
 		DefaultTimeout:           30 * time.Second,
 		Providers:                []assemblygen.ProviderInput{provider},
 		Invocations: []assemblygen.InvocationInput{
@@ -318,6 +349,11 @@ replace github.com/plystra/kernel => %s
 				ProviderID:      provider.PluginID,
 				SelectionReason: kernelinvocation.SelectionReasonExplicit,
 				Dependencies:    messageInvocation.Dependencies(),
+			},
+			{
+				ContractJSON:    healthSchema,
+				Intrinsic:       true,
+				SelectionReason: kernelinvocation.SelectionReasonIntrinsic,
 			},
 			{
 				ContractJSON:    []byte(runtimePolicySchema),
@@ -371,6 +407,8 @@ func FuzzRenderInvocations(f *testing.F) {
 		options := assemblygen.InvocationOptions{
 			ModulePath:               "example.com/runtime-application",
 			ApplicationBuildIdentity: "fuzz-build",
+			KernelModuleVersion:      "v0.1.0",
+			KernelBuildIdentity:      "fuzz-build",
 			DefaultTimeout:           time.Second,
 			Providers:                []assemblygen.ProviderInput{provider},
 			Invocations: []assemblygen.InvocationInput{{
@@ -421,8 +459,10 @@ func runtimeDependencyPlan(t testing.TB) generationlowering.Plan {
 	t.Helper()
 	messageID := runtimeCapabilityID(t, "message.send/v1")
 	policyID := runtimeCapabilityID(t, "policy.check/v1")
+	healthID := runtimeCapabilityID(t, "kernel.health/v1")
 	messageContract := runtimeCanonicalContract(t, runtimeMessageSchema)
 	policyContract := runtimeCanonicalContract(t, runtimePolicySchema)
+	healthContract := intrinsicSchema(t, "kernel.health/v1")
 	context, err := generation.NewContext(generation.Input{
 		Plugins: []generation.PluginInput{{
 			ID:                "acme.remote-service",
@@ -431,8 +471,8 @@ func runtimeDependencyPlan(t testing.TB) generationlowering.Plan {
 			Provides:          []string{messageID.String(), policyID.String()},
 			BuildMetadataJSON: []byte("{}"),
 		}},
-		Capabilities: []generation.CapabilityInput{{ContractJSON: messageContract}, {ContractJSON: policyContract}},
-		Requirements: []string{messageID.String(), policyID.String()},
+		Capabilities: []generation.CapabilityInput{{ContractJSON: messageContract}, {ContractJSON: policyContract}, {ContractJSON: healthContract, Intrinsic: true}},
+		Requirements: []string{messageID.String(), policyID.String(), healthID.String()},
 		Providers: []generation.ProviderInput{
 			{Capability: messageID.String(), Plugin: "acme.remote-service"},
 			{Capability: policyID.String(), Plugin: "acme.remote-service"},
@@ -460,6 +500,13 @@ func runtimeDependencyPlan(t testing.TB) generationlowering.Plan {
 				TimeoutMilliseconds: 250,
 				OnError:             generation.GeneratedCallFailClosed,
 			},
+		}, {
+			ID: "health",
+			CapabilityCall: &generation.GeneratedCapabilityCall{
+				Capability:          healthID,
+				TimeoutMilliseconds: 250,
+				OnError:             generation.GeneratedCallFailClosed,
+			},
 		}},
 	}}})
 	if err != nil {
@@ -470,6 +517,18 @@ func runtimeDependencyPlan(t testing.TB) generationlowering.Plan {
 		t.Fatalf("generationlowering.Lower: %v", err)
 	}
 	return plan
+}
+
+func intrinsicSchema(t testing.TB, value string) []byte {
+	t.Helper()
+	for _, definition := range kernelcatalog.Definitions() {
+		if definition.ID().String() != value {
+			continue
+		}
+		return runtimeCanonicalContract(t, string(definition.Source()))
+	}
+	t.Fatalf("Kernel catalog omits %s", value)
+	return nil
 }
 
 func runtimeCanonicalContract(t testing.TB, schema string) []byte {
@@ -574,6 +633,7 @@ import (
 	"strings"
 	"testing"
 
+	healthcontract "example.com/runtime-application/generated/go/contracts/kernel/health/v1"
 	messagecontract "example.com/runtime-application/generated/go/contracts/message/send/v1"
 	remoteservice "example.com/runtime-dependency/remote-service"
 	kernelconfiguration "github.com/plystra/kernel/configuration"
@@ -601,7 +661,7 @@ func TestCanonicalInvocationRuntime(t *testing.T) {
 	}
 
 	bindings := invocations.Catalog().Bindings()
-	if len(bindings) != 2 {
+	if len(bindings) != 4 {
 		t.Fatalf("catalog bindings = %d", len(bindings))
 	}
 	reasons := map[string]kernelinvocation.SelectionReason{
@@ -609,7 +669,22 @@ func TestCanonicalInvocationRuntime(t *testing.T) {
 		"policy.check/v1": kernelinvocation.SelectionReasonSoleProvider,
 	}
 	for _, binding := range bindings {
-		wantReason, exists := reasons[binding.Capability().String()]
+		capabilityID := binding.Capability().String()
+		if capabilityID == "kernel.health/v1" || capabilityID == "kernel.info/v1" {
+			build := binding.ProviderBuild()
+			if binding.ProviderKind() != kernelinvocation.ProviderKindKernel ||
+				binding.ProviderID().String() != "" ||
+				binding.ProviderPackage() != "github.com/plystra/kernel/intrinsic" ||
+				binding.SelectionReason() != kernelinvocation.SelectionReasonIntrinsic ||
+				build.ModulePath() != "github.com/plystra/kernel" ||
+				build.ModuleVersion() != "v0.0.0" ||
+				build.BuildIdentity() != "runtime-build-123" ||
+				binding.SchemaDigest() == [32]byte{} {
+				t.Fatalf("intrinsic binding provenance for %s is incomplete", binding.Capability())
+			}
+			continue
+		}
+		wantReason, exists := reasons[capabilityID]
 		if !exists {
 			t.Fatalf("catalog contains non-canonical ID %q", binding.Capability())
 		}
@@ -626,8 +701,12 @@ func TestCanonicalInvocationRuntime(t *testing.T) {
 		}
 	}
 	bindings[0] = kernelinvocation.Binding{}
-	if fresh := invocations.Catalog().Bindings(); len(fresh) != 2 || fresh[0].Capability().String() == "" {
+	if fresh := invocations.Catalog().Bindings(); len(fresh) != 4 || fresh[0].Capability().String() == "" {
 		t.Fatalf("catalog bindings were mutable: %#v", fresh)
+	}
+	health, err := invocations.KernelHealthV1().Invoke(context.Background(), healthcontract.Request{})
+	if err != nil || health.Status != healthcontract.ResponseStatusHealthy {
+		t.Fatalf("KernelHealthV1.Invoke = %#v, %v", health, err)
 	}
 
 	channel := messagecontract.RequestChannel("sms")

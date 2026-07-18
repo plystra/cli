@@ -22,7 +22,7 @@ import (
 )
 
 // KernelVersion is the exact Kernel release targeted by this CLI release.
-const KernelVersion = "v0.1.0"
+const KernelVersion = "v0.0.0-20260718010024-34af10315d98"
 
 // ErrCreate reports a project creation failure.
 var ErrCreate = errors.New("create Plystra project")
@@ -129,14 +129,15 @@ func populate(root, modulePath, name string, library bool) error {
 		invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
 			ModulePath:               modulePath,
 			ApplicationBuildIdentity: "initial-scaffold",
+			KernelModuleVersion:      KernelVersion,
 			DefaultTimeout:           applicationmeta.DefaultInvocationTimeout,
 		})
 		if err != nil {
-			return fmt.Errorf("render empty canonical invocation source: %w", err)
+			return fmt.Errorf("render intrinsic-only canonical invocation source: %w", err)
 		}
 		invocationsFile, err := generatedfiles.NewFile(assemblygen.InvocationsPath, invocations)
 		if err != nil {
-			return fmt.Errorf("prepare empty canonical invocation source: %w", err)
+			return fmt.Errorf("prepare intrinsic-only canonical invocation source: %w", err)
 		}
 		managed = append(managed, invocationsFile)
 		bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{

@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -30,7 +31,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	t.Parallel()
 
 	root := t.TempDir()
-	writeModule(t, root, "example.com/Acme/empty", "")
+	writeApplicationModule(t, root, "example.com/Acme/empty")
 	writeFile(t, filepath.Join(root, "plystra.yaml"), "timeouts:\n  startup: 17s\n")
 	environment := goEnvironment(nil)
 	before := snapshotTree(t, root)
@@ -99,6 +100,92 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	})
 	if err != nil || !clean.Report().Clean() {
 		t.Fatalf("clean check = %#v, %v", clean.Report().Changes(), err)
+	}
+}
+
+func TestGenerateRequiresDirectKernelDependency(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModule(t, root, "example.com/acme/missing-kernel", "")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Check:       true,
+		Environment: goEnvironment(nil),
+	})
+	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, applicationgenerate.ErrKernelDependency) || !strings.Contains(err.Error(), "go.mod must directly require github.com/plystra/kernel") {
+		t.Fatalf("Generate without Kernel dependency = %v", err)
+	}
+}
+
+func TestGenerateRunsIntrinsicApplicationWithoutOrdinaryPlugins(t *testing.T) {
+	const modulePath = "example.com/acme/intrinsic-app"
+	root := t.TempDir()
+	writeApplicationModule(t, root, modulePath)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
+  expose: [kernel.health/v1]
+capabilities:
+  require: [kernel.info/v1]
+  aliases:
+    health.status/v1: kernel.health/v1
+`)
+	environment := goEnvironment(nil)
+	result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: environment,
+	})
+	if err != nil || !result.Report().Clean() {
+		t.Fatalf("Generate intrinsic application = %#v, %v", result.Report().Changes(), err)
+	}
+
+	for _, filePath := range []string{
+		"generated/go/adapters/http/kernel/health/v1/handler_gen.go",
+		"generated/go/adapters/http/health/status/v1/handler_gen.go",
+		"generated/go/clients/kernel/health/v1/client_gen.go",
+		"generated/go/clients/kernel/info/v1/client_gen.go",
+		"generated/go/contracts/kernel/health/v1/contract_gen.go",
+		"generated/go/contracts/kernel/info/v1/contract_gen.go",
+		"generated/go/invocation/kernel/health/v1/invocation_gen.go",
+		"generated/go/invocation/kernel/info/v1/invocation_gen.go",
+		"generated/sdk/javascript/src/operations/kernel/health/v1.ts",
+	} {
+		assertFileExists(t, root, filePath)
+	}
+	for _, filePath := range []string{
+		"generated/go/adapters/http/kernel/info/v1/handler_gen.go",
+		"generated/sdk/javascript/src/operations/kernel/info/v1.ts",
+	} {
+		assertFileMissing(t, root, filePath)
+	}
+
+	healthContract := readFile(t, root, "generated/go/contracts/kernel/health/v1/contract_gen.go")
+	for _, required := range [][]byte{
+		[]byte("type Request = kernelintrinsic.HealthRequest"),
+		[]byte("type Response = kernelintrinsic.HealthResponse"),
+		[]byte("type ResponseStatus = kernelintrinsic.HealthStatus"),
+	} {
+		if !bytes.Contains(healthContract, required) {
+			t.Fatalf("generated health contract omits %q:\n%s", required, healthContract)
+		}
+	}
+	assembly := readFile(t, root, "generated/go/assembly/invocations_gen.go")
+	for _, required := range [][]byte{
+		[]byte("kernelintrinsic.NewBindings"),
+		[]byte("kernelintrinsic.HealthContract()"),
+		[]byte("kernelintrinsic.InfoContract()"),
+	} {
+		if !bytes.Contains(assembly, required) {
+			t.Fatalf("generated intrinsic assembly omits %q:\n%s", required, assembly)
+		}
+	}
+
+	writeFile(t, filepath.Join(root, "intrinsic_runtime_test.go"), intrinsicApplicationRuntimeTest)
+	command := exec.CommandContext(t.Context(), "go", "test", "-mod=readonly", "-count=1", "./...")
+	command.Dir = root
+	command.Env = environment
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("generated intrinsic application runtime: %v\n%s", err, output)
 	}
 }
 
@@ -601,5 +688,60 @@ func Generate(context generation.GenerationContext) (generation.Output, error) {
 	return generation.Output{Requirements: []generation.Requirement{{
 		RuleID: "authn.require-audit", Namespace: "authn", Source: order, Capability: audit,
 	}}}, nil
+}
+`
+
+const intrinsicApplicationRuntimeTest = `package intrinsicapp_test
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+
+	bootstrap "example.com/acme/intrinsic-app/generated/go/bootstrap"
+	healthcontract "example.com/acme/intrinsic-app/generated/go/contracts/kernel/health/v1"
+	infocontract "example.com/acme/intrinsic-app/generated/go/contracts/kernel/info/v1"
+	kernelintrinsic "github.com/plystra/kernel/intrinsic"
+	kernelinvocation "github.com/plystra/kernel/invocation"
+)
+
+func TestIntrinsicApplicationRuntime(t *testing.T) {
+	application, err := bootstrap.New(context.Background(), "plystra.yaml")
+	if err != nil || !application.Valid() {
+		t.Fatalf("bootstrap.New = %#v, %v", application, err)
+	}
+	invocations := application.Invocations()
+	bindings := invocations.Catalog().Bindings()
+	if len(bindings) != 2 || bindings[0].Capability().String() != "kernel.health/v1" || bindings[1].Capability().String() != "kernel.info/v1" {
+		t.Fatalf("intrinsic catalog = %#v", bindings)
+	}
+	for _, binding := range bindings {
+		build := binding.ProviderBuild()
+		if binding.ProviderKind() != kernelinvocation.ProviderKindKernel ||
+			binding.ProviderID().String() != "" ||
+			binding.ProviderPackage() != kernelintrinsic.ProviderPackage ||
+			binding.SelectionReason() != kernelinvocation.SelectionReasonIntrinsic ||
+			build.ModulePath() != kernelintrinsic.ModulePath ||
+			build.ModuleVersion() != "v0.0.0" ||
+			build.BuildIdentity() == "" || binding.SchemaDigest() == [32]byte{} {
+			t.Fatalf("intrinsic provenance for %s is incomplete", binding.Capability())
+		}
+	}
+
+	health, err := invocations.KernelHealthV1().Invoke(context.Background(), healthcontract.Request{})
+	if err != nil || health.Status != healthcontract.ResponseStatusHealthy {
+		t.Fatalf("kernel.health/v1 = %#v, %v", health, err)
+	}
+	info, err := invocations.KernelInfoV1().Invoke(context.Background(), infocontract.Request{})
+	if err != nil || info.AssemblyAPI != "v1" || info.KernelModule != kernelintrinsic.ModulePath || info.KernelVersion != "v0.0.0" {
+		t.Fatalf("kernel.info/v1 = %#v, %v", info, err)
+	}
+	formatted := fmt.Sprintf("%+v", info)
+	for _, forbidden := range []string{"sha256:", "plystra.yaml", "intrinsic-app", "secret"} {
+		if strings.Contains(strings.ToLower(formatted), strings.ToLower(forbidden)) {
+			t.Fatalf("kernel.info/v1 exposed %q in %s", forbidden, formatted)
+		}
+	}
 }
 `

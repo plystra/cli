@@ -56,6 +56,9 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if len(first.Inventory().Plugins()) != 0 {
 		t.Fatalf("Inventory = %#v", first.Inventory().Plugins())
 	}
+	if len(first.Dependencies().Modules()) != 0 {
+		t.Fatalf("Dependencies = %#v", first.Dependencies().Modules())
+	}
 	resolved := first.Resolution()
 	if resolved.Passes() != 1 || len(resolved.Context().Plugins()) != 0 || len(resolved.Context().Requirements()) != 0 || len(resolved.Context().Providers()) != 0 {
 		t.Fatalf("empty resolution = passes %d, plugins %#v, requirements %#v, providers %#v", resolved.Passes(), resolved.Context().Plugins(), resolved.Context().Requirements(), resolved.Context().Providers())
@@ -128,6 +131,10 @@ config:
 		t.Fatalf("Resolve: %v", err)
 	}
 	plugins := first.Inventory().Plugins()
+	dependencies := first.Dependencies().Modules()
+	if len(dependencies) != 1 || dependencies[0].Path() != "example.com/providers" || dependencies[0].SelectedVersion() != "v1.2.3" {
+		t.Fatalf("Dependencies = %#v", dependencies)
+	}
 	if got := pluginSummaries(plugins); !reflect.DeepEqual(got, []string{
 		"example.local:example.com/app@local:local:true",
 		"example.smtp:example.com/providers@v1.2.3:smtp:false",

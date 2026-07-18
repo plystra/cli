@@ -186,6 +186,8 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
 		ModulePath:               "example.com/assemblyapp",
 		ApplicationBuildIdentity: "test-build",
+		KernelModuleVersion:      "v0.0.0",
+		KernelBuildIdentity:      "test-build",
 		DefaultTimeout:           30 * time.Second,
 		Providers:                providerInputs,
 	})
@@ -256,6 +258,8 @@ replace github.com/plystra/kernel => %s
 	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
 		ModulePath:               "example.com/emptyapp",
 		ApplicationBuildIdentity: "test-build",
+		KernelModuleVersion:      "v0.0.0",
+		KernelBuildIdentity:      "test-build",
 		DefaultTimeout:           30 * time.Second,
 	})
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/contractgen"
+	kernelcatalog "github.com/plystra/kernel/capability/catalog"
 )
 
 const emailSendSchema = `id: email.send/v1
@@ -100,6 +101,45 @@ func TestRenderDerivesHierarchicalCapabilityPath(t *testing.T) {
 		t.Fatalf("hierarchical generated file = path %q, package %q\n%s", file.Path(), file.PackageName(), file.Data())
 	}
 	assertGeneratedCompiles(t, file)
+}
+
+func TestRenderIntrinsicAliasesAuthoritativeKernelTypes(t *testing.T) {
+	t.Parallel()
+
+	definitions := kernelcatalog.Definitions()
+	if len(definitions) != 2 {
+		t.Fatalf("Kernel intrinsic definitions = %d", len(definitions))
+	}
+	for _, definition := range definitions {
+		canonical, err := capabilitymeta.NormalizeSchema(definition.Source())
+		if err != nil {
+			t.Fatalf("NormalizeSchema(%s): %v", definition.ID(), err)
+		}
+		file, err := contractgen.RenderIntrinsic(canonical)
+		if err != nil {
+			t.Fatalf("RenderIntrinsic(%s): %v", definition.ID(), err)
+		}
+		if _, err := parser.ParseFile(token.NewFileSet(), file.Path(), file.Data(), parser.AllErrors); err != nil {
+			t.Fatalf("parse intrinsic contract %s: %v\n%s", definition.ID(), err, file.Data())
+		}
+		for _, required := range []string{"type Request = kernelintrinsic.", "type Response = kernelintrinsic."} {
+			if !strings.Contains(string(file.Data()), required) {
+				t.Fatalf("intrinsic contract %s omits %q:\n%s", definition.ID(), required, file.Data())
+			}
+		}
+		repeated, err := contractgen.RenderIntrinsic(canonical)
+		if err != nil || !bytes.Equal(file.Data(), repeated.Data()) {
+			t.Fatalf("RenderIntrinsic(%s) is not deterministic: %v", definition.ID(), err)
+		}
+	}
+
+	tampered := []byte("id: kernel.health/v1\nrequest: {}\nresponse:\n  status: {type: string, enum: [healthy, unknown], required: true}\nerrors: []\n")
+	if file, err := contractgen.RenderIntrinsic(tampered); !errors.Is(err, contractgen.ErrRender) || file.Data() != nil || !strings.Contains(err.Error(), "differs from the Kernel catalog") {
+		t.Fatalf("RenderIntrinsic(tampered) = %#v, %v", file, err)
+	}
+	if file, err := contractgen.RenderIntrinsic([]byte(emailSendSchema)); !errors.Is(err, contractgen.ErrRender) || file.Data() != nil {
+		t.Fatalf("RenderIntrinsic(ordinary) = %#v, %v", file, err)
+	}
 }
 
 func TestRenderDisambiguatesEnumValueNames(t *testing.T) {

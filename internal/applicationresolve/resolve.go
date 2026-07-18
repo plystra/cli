@@ -49,11 +49,12 @@ type Options struct {
 // Result is one immutable filesystem provenance and stable generation
 // resolution assembled from the same application snapshot.
 type Result struct {
-	module     modulelocate.Module
-	manifest   applicationmeta.Manifest
-	inventory  plugininventory.Index
-	resolution generationresolution.ExtensionResult
-	configs    configurationresolve.Result
+	module       modulelocate.Module
+	manifest     applicationmeta.Manifest
+	dependencies moduledependency.Index
+	inventory    plugininventory.Index
+	resolution   generationresolution.ExtensionResult
+	configs      configurationresolve.Result
 }
 
 // Module returns the nearest runnable application Go Module.
@@ -61,6 +62,10 @@ func (r Result) Module() modulelocate.Module { return r.module }
 
 // Manifest returns the normalized root application declaration.
 func (r Result) Manifest() applicationmeta.Manifest { return r.manifest }
+
+// Dependencies returns the immutable explicit Go Module dependency index used
+// for plugin discovery and generated runtime build provenance.
+func (r Result) Dependencies() moduledependency.Index { return r.dependencies }
 
 // Inventory returns every visible local and explicit-dependency plugin.
 func (r Result) Inventory() plugininventory.Index { return r.inventory }
@@ -127,10 +132,11 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %w: plystra.yaml changed before resolution completed", ErrResolve, ErrConcurrentChange)
 	}
 	return Result{
-		module:     module,
-		manifest:   manifest,
-		inventory:  inventory,
-		resolution: resolution,
-		configs:    configs,
+		module:       module,
+		manifest:     manifest,
+		dependencies: dependencies,
+		inventory:    inventory,
+		resolution:   resolution,
+		configs:      configs,
 	}, nil
 }

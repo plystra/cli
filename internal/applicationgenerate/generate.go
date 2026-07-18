@@ -22,6 +22,8 @@ import (
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/modulelocate"
+	kernelintrinsic "github.com/plystra/kernel/intrinsic"
+	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
 var (
@@ -31,6 +33,9 @@ var (
 	// ErrConcurrentChange reports application inputs or extension output that
 	// changed after the transaction's desired output was prepared.
 	ErrConcurrentChange = errors.New("application changed during generation")
+	// ErrKernelDependency reports a runnable application that does not directly
+	// select the Kernel Go Module used by its generated runtime.
+	ErrKernelDependency = errors.New("invalid application Kernel dependency")
 )
 
 // Validator validates the complete application while desired generated files
@@ -149,11 +154,17 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
+	kernelVersion, kernelBuildIdentity, err := kernelBuildProvenance(resolved)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
 	output, err := applicationgen.Render(applicationgen.Options{
-		ModulePath:        resolved.Module().ModulePath(),
-		JavaScriptPackage: javaScriptPackage,
-		Configurations:    configurations,
-		Providers:         providerInputs(resolved.Configurations()),
+		ModulePath:          resolved.Module().ModulePath(),
+		JavaScriptPackage:   javaScriptPackage,
+		KernelModuleVersion: kernelVersion,
+		KernelBuildIdentity: kernelBuildIdentity,
+		Configurations:      configurations,
+		Providers:           providerInputs(resolved.Configurations()),
 	}, resolved.Resolution())
 	if err != nil {
 		return preparedGeneration{}, err
@@ -163,6 +174,23 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		return preparedGeneration{}, err
 	}
 	return preparedGeneration{resolved: resolved, output: output, fingerprint: fingerprint}, nil
+}
+
+func kernelBuildProvenance(resolved applicationresolve.Result) (string, string, error) {
+	dependency, exists := resolved.Dependencies().ByPath(kernelintrinsic.ModulePath)
+	if !exists {
+		return "", "", fmt.Errorf("%w: go.mod must directly require %s", ErrKernelDependency, kernelintrinsic.ModulePath)
+	}
+	identity := ""
+	if dependency.SelectedVersion() == "" {
+		identity = resolved.Resolution().Context().Digest()
+	} else if _, replaced := dependency.Replacement(); replaced {
+		identity = resolved.Resolution().Context().Digest()
+	}
+	if _, err := kernelinvocation.NewModuleBuild(kernelintrinsic.ModulePath, dependency.SelectedVersion(), identity); err != nil {
+		return "", "", fmt.Errorf("%w: selected %s build provenance: %v", ErrKernelDependency, kernelintrinsic.ModulePath, err)
+	}
+	return dependency.SelectedVersion(), identity, nil
 }
 
 func providerInputs(resolved configurationresolve.Result) []assemblygen.ProviderInput {

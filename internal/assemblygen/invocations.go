@@ -15,6 +15,8 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/goname"
+	kernelcatalog "github.com/plystra/kernel/capability/catalog"
+	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 	"golang.org/x/mod/module"
 )
@@ -37,22 +39,27 @@ var (
 	ErrInvocationDependency = errors.New("invalid canonical invocation dependency")
 )
 
-// InvocationInput binds one exact ordinary canonical contract to its selected
-// provider and ordered generated application dependencies. ContractJSON is the
-// complete normalized contract and contains no runtime values.
+// InvocationInput binds one exact required canonical contract to either its
+// selected ordinary provider or the Kernel intrinsic implementation, plus its
+// ordered generated application dependencies. ContractJSON is the complete
+// normalized contract and contains no runtime values.
 type InvocationInput struct {
 	ContractJSON    []byte
+	Intrinsic       bool
 	ProviderID      string
 	SelectionReason kernelinvocation.SelectionReason
 	Dependencies    []string
 }
 
-// InvocationOptions contains the complete selected ordinary runtime plan.
+// InvocationOptions contains the complete canonical runtime plan and selected
+// Kernel module provenance.
 // ApplicationBuildIdentity is deterministic non-secret build provenance, not
 // a dependency lock or runtime application identity.
 type InvocationOptions struct {
 	ModulePath               string
 	ApplicationBuildIdentity string
+	KernelModuleVersion      string
+	KernelBuildIdentity      string
 	DefaultTimeout           time.Duration
 	Providers                []ProviderInput
 	Invocations              []InvocationInput
@@ -79,6 +86,7 @@ type plannedInvocation struct {
 	id              capabilityid.Identifier
 	contract        runtimeContract
 	digest          [sha256.Size]byte
+	intrinsic       bool
 	provider        indexedProvider
 	selectionReason kernelinvocation.SelectionReason
 	dependencies    []capabilityid.Identifier
@@ -87,8 +95,8 @@ type plannedInvocation struct {
 }
 
 // RenderInvocations emits one immutable canonical catalog, one shared Kernel
-// dispatcher, typed provider endpoint adapters, raw handles, and generated
-// application invocation handles for every selected ordinary Capability.
+// dispatcher, typed ordinary-provider endpoint adapters, raw handles, and
+// generated application invocation handles for every required Capability.
 func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	invocations, order, err := planInvocations(options)
 	if err != nil {
@@ -101,7 +109,9 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	fmt.Fprintln(&source, "package assembly")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "import (")
-	if len(invocations) != 0 {
+	ordinaryCount := ordinaryInvocationCount(invocations)
+	intrinsicCount := len(kernelcatalog.Definitions())
+	if ordinaryCount != 0 {
 		fmt.Fprintln(&source, "\t\"context\"")
 	}
 	fmt.Fprintln(&source, "\t\"errors\"")
@@ -110,9 +120,11 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	fmt.Fprintln(&source, "\t\"time\"")
 	fmt.Fprintln(&source)
 	for _, invocation := range invocations {
-		fmt.Fprintf(&source, "\tcontract%d %s\n", invocation.index, strconv.Quote(applicationContractPath(options.ModulePath, invocation.id)))
 		fmt.Fprintf(&source, "\tapplicationinvocation%d %s\n", invocation.index, strconv.Quote(applicationInvocationPath(options.ModulePath, invocation.id)))
-		if invocation.provider.ModulePath != options.ModulePath {
+		if !invocation.intrinsic {
+			fmt.Fprintf(&source, "\tcontract%d %s\n", invocation.index, strconv.Quote(applicationContractPath(options.ModulePath, invocation.id)))
+		}
+		if !invocation.intrinsic && invocation.provider.ModulePath != options.ModulePath {
 			fmt.Fprintf(&source, "\tprovidercontract%d %s\n", invocation.index, strconv.Quote(applicationContractPath(invocation.provider.ModulePath, invocation.id)))
 		}
 	}
@@ -120,11 +132,12 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 		dependency := invocations[dependencyIndex]
 		fmt.Fprintf(&source, "\tapplicationclient%d %s\n", dependency.index, strconv.Quote(applicationClientPath(options.ModulePath, dependency.id)))
 	}
-	if len(invocations) != 0 {
+	if ordinaryCount != 0 {
 		fmt.Fprintln(&source, "\tkernelcapability \"github.com/plystra/kernel/capability\"")
 	}
+	fmt.Fprintln(&source, "\tkernelintrinsic \"github.com/plystra/kernel/intrinsic\"")
 	fmt.Fprintln(&source, "\tkernelinvocation \"github.com/plystra/kernel/invocation\"")
-	if len(invocations) != 0 {
+	if ordinaryCount != 0 {
 		fmt.Fprintln(&source, "\tkernelplugin \"github.com/plystra/kernel/plugin\"")
 	}
 	fmt.Fprintln(&source, ")")
@@ -137,6 +150,10 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 		fmt.Fprintln(&source)
 		fmt.Fprintln(&source, "var (")
 		for _, invocation := range invocations {
+			if invocation.intrinsic {
+				fmt.Fprintf(&source, "\tplystraContract%d = %s\n", invocation.index, intrinsicContractExpression(invocation.id))
+				continue
+			}
 			fmt.Fprintf(
 				&source,
 				"\tplystraContract%d = kernelcapability.MustParseContractWithSemanticErrors[contract%d.Request, contract%d.Response](contract%d.CapabilityID",
@@ -166,7 +183,7 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// Valid reports whether the complete canonical catalog was published and every typed handle was bound.")
 	fmt.Fprintln(&source, "func (i Invocations) Valid() bool {")
-	fmt.Fprintf(&source, "\tif !i.initialized || i.dispatcher == nil || !i.dispatcher.Published() || len(i.catalog.Bindings()) != %d {\n", len(invocations))
+	fmt.Fprintf(&source, "\tif !i.initialized || i.dispatcher == nil || !i.dispatcher.Published() || len(i.catalog.Bindings()) != %d {\n", intrinsicCount+ordinaryCount)
 	fmt.Fprintln(&source, "\t\treturn false")
 	fmt.Fprintln(&source, "\t}")
 	if len(invocations) == 0 {
@@ -226,6 +243,16 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	fmt.Fprintln(&source, "\tif !providers.Valid() {")
 	fmt.Fprintln(&source, "\t\treturn Invocations{}, fmt.Errorf(\"%w: selected providers are invalid\", ErrInvocationAssembly)")
 	fmt.Fprintln(&source, "\t}")
+	fmt.Fprintln(&source, "\tbindings, err := kernelintrinsic.NewBindings(kernelintrinsic.BindingOptions{")
+	fmt.Fprintf(&source, "\t\tModuleVersion: %s,\n", strconv.Quote(options.KernelModuleVersion))
+	fmt.Fprintf(&source, "\t\tBuildIdentity: %s,\n", strconv.Quote(options.KernelBuildIdentity))
+	fmt.Fprintln(&source, "\t})")
+	fmt.Fprintln(&source, "\tif err != nil {")
+	fmt.Fprintln(&source, "\t\treturn Invocations{}, fmt.Errorf(\"%w: intrinsic Kernel bindings: %w\", ErrInvocationAssembly, err)")
+	fmt.Fprintln(&source, "\t}")
+	fmt.Fprintf(&source, "\tif len(bindings) != %d {\n", intrinsicCount)
+	source.WriteString("\t\treturn Invocations{}, fmt.Errorf(\"%w: intrinsic Kernel binding count %d is incompatible\", ErrInvocationAssembly, len(bindings))\n")
+	fmt.Fprintln(&source, "\t}")
 	for _, provider := range usedProviders(invocations) {
 		fmt.Fprintf(
 			&source,
@@ -243,8 +270,10 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 		fmt.Fprintf(&source, "\t\treturn Invocations{}, fmt.Errorf(\"%%w: generated Plugin ID %%q: %%w\", ErrInvocationAssembly, %s, err)\n", strconv.Quote(provider.PluginID))
 		fmt.Fprintln(&source, "\t}")
 	}
-	fmt.Fprintf(&source, "\tbindings := make([]kernelinvocation.Binding, 0, %d)\n", len(invocations))
 	for _, invocation := range invocations {
+		if invocation.intrinsic {
+			continue
+		}
 		renderEndpointBinding(&source, options, invocation)
 	}
 	fmt.Fprintln(&source, "\tcatalog, err := kernelinvocation.NewCatalog(bindings)")
@@ -283,7 +312,7 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	fmt.Fprintln(&source, "\t}, nil")
 	fmt.Fprintln(&source, "}")
 	for _, invocation := range invocations {
-		if invocation.provider.ModulePath == options.ModulePath {
+		if invocation.intrinsic || invocation.provider.ModulePath == options.ModulePath {
 			continue
 		}
 		renderProviderConversion(&source, invocation, "Request", invocation.contract.Request, true)
@@ -303,6 +332,9 @@ func planInvocations(options InvocationOptions) ([]plannedInvocation, []int, err
 	}
 	if options.DefaultTimeout <= 0 {
 		return nil, nil, fmt.Errorf("%w: default invocation timeout must be positive", ErrInvalidInvocation)
+	}
+	if _, err := kernelinvocation.NewModuleBuild(kernelintrinsic.ModulePath, options.KernelModuleVersion, options.KernelBuildIdentity); err != nil {
+		return nil, nil, fmt.Errorf("%w: intrinsic Kernel build provenance: %v", ErrInvalidInvocation, err)
 	}
 	providers, _, err := planProviders(options.Providers)
 	if err != nil {
@@ -327,15 +359,30 @@ func planInvocations(options InvocationOptions) ([]plannedInvocation, []int, err
 		if err != nil {
 			return nil, nil, fmt.Errorf("%w: invocation %d Capability ID: %v", ErrInvalidInvocation, index, err)
 		}
-		provider, exists := providerByID[input.ProviderID]
-		if !exists {
-			return nil, nil, fmt.Errorf("%w: Capability %s selects absent plugin %q", ErrInvalidInvocation, identifier, input.ProviderID)
+		reservedIntrinsic := strings.HasPrefix(identifier.Name(), "kernel.")
+		if input.Intrinsic != reservedIntrinsic {
+			return nil, nil, fmt.Errorf("%w: Capability %s must be intrinsic exactly when it uses the reserved kernel.* namespace", ErrInvalidInvocation, identifier)
 		}
-		if input.SelectionReason != kernelinvocation.SelectionReasonSoleProvider && input.SelectionReason != kernelinvocation.SelectionReasonExplicit {
-			return nil, nil, fmt.Errorf("%w: Capability %s has invalid ordinary selection reason %q", ErrInvalidInvocation, identifier, input.SelectionReason)
-		}
-		if _, err := kernelinvocation.NewModuleBuild(provider.ModulePath, provider.ModuleVersion, options.ApplicationBuildIdentity); err != nil {
-			return nil, nil, fmt.Errorf("%w: plugin %q build provenance: %v", ErrInvalidInvocation, provider.PluginID, err)
+		var provider indexedProvider
+		if input.Intrinsic {
+			if input.ProviderID != "" || input.SelectionReason != kernelinvocation.SelectionReasonIntrinsic {
+				return nil, nil, fmt.Errorf("%w: intrinsic Capability %s cannot select an ordinary provider", ErrInvalidInvocation, identifier)
+			}
+			if err := validateIntrinsicContract(identifier, canonical); err != nil {
+				return nil, nil, fmt.Errorf("%w: %v", ErrInvalidInvocation, err)
+			}
+		} else {
+			var exists bool
+			provider, exists = providerByID[input.ProviderID]
+			if !exists {
+				return nil, nil, fmt.Errorf("%w: Capability %s selects absent plugin %q", ErrInvalidInvocation, identifier, input.ProviderID)
+			}
+			if input.SelectionReason != kernelinvocation.SelectionReasonSoleProvider && input.SelectionReason != kernelinvocation.SelectionReasonExplicit {
+				return nil, nil, fmt.Errorf("%w: Capability %s has invalid ordinary selection reason %q", ErrInvalidInvocation, identifier, input.SelectionReason)
+			}
+			if _, err := kernelinvocation.NewModuleBuild(provider.ModulePath, provider.ModuleVersion, options.ApplicationBuildIdentity); err != nil {
+				return nil, nil, fmt.Errorf("%w: plugin %q build provenance: %v", ErrInvalidInvocation, provider.PluginID, err)
+			}
 		}
 		if err := validateRuntimeFields(contract.Request, "request", identifier); err != nil {
 			return nil, nil, err
@@ -355,6 +402,7 @@ func planInvocations(options InvocationOptions) ([]plannedInvocation, []int, err
 			id:              identifier,
 			contract:        contract,
 			digest:          sha256.Sum256(canonical),
+			intrinsic:       input.Intrinsic,
 			provider:        provider,
 			selectionReason: input.SelectionReason,
 			dependencies:    dependencies,
@@ -386,7 +434,7 @@ func planInvocations(options InvocationOptions) ([]plannedInvocation, []int, err
 			}
 			seen[dependency] = struct{}{}
 			if _, exists := byID[dependency]; !exists {
-				return nil, nil, fmt.Errorf("%w: Capability %s dependency %s is not an assembled ordinary invocation", ErrInvocationDependency, invocation.id, dependency)
+				return nil, nil, fmt.Errorf("%w: Capability %s dependency %s is not an assembled canonical invocation", ErrInvocationDependency, invocation.id, dependency)
 			}
 		}
 	}
@@ -544,6 +592,9 @@ func dependencyImportIndexes(invocations []plannedInvocation) []int {
 func usedProviders(invocations []plannedInvocation) []indexedProvider {
 	values := make(map[int]indexedProvider)
 	for _, invocation := range invocations {
+		if invocation.intrinsic {
+			continue
+		}
 		values[invocation.provider.index] = invocation.provider
 	}
 	indexes := make([]int, 0, len(values))
@@ -556,6 +607,44 @@ func usedProviders(invocations []plannedInvocation) []indexedProvider {
 		result[index] = values[providerIndex]
 	}
 	return result
+}
+
+func ordinaryInvocationCount(invocations []plannedInvocation) int {
+	count := 0
+	for _, invocation := range invocations {
+		if !invocation.intrinsic {
+			count++
+		}
+	}
+	return count
+}
+
+func validateIntrinsicContract(identifier capabilityid.Identifier, canonical []byte) error {
+	if intrinsicContractExpression(identifier) == "" {
+		return fmt.Errorf("intrinsic Capability %s has no supported typed Kernel contract", identifier)
+	}
+	digest := sha256.Sum256(canonical)
+	for _, definition := range kernelcatalog.Definitions() {
+		if definition.ID().String() != identifier.String() {
+			continue
+		}
+		if definition.SchemaDigest() != digest {
+			return fmt.Errorf("intrinsic Capability %s differs from the Kernel catalog", identifier)
+		}
+		return nil
+	}
+	return fmt.Errorf("intrinsic Capability %s is absent from the Kernel catalog", identifier)
+}
+
+func intrinsicContractExpression(identifier capabilityid.Identifier) string {
+	switch identifier.String() {
+	case "kernel.health/v1":
+		return "kernelintrinsic.HealthContract()"
+	case "kernel.info/v1":
+		return "kernelintrinsic.InfoContract()"
+	default:
+		return ""
+	}
 }
 
 func indexOfInvocation(invocations []plannedInvocation, identifier capabilityid.Identifier) int {

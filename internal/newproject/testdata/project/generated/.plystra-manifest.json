@@ -7,7 +7,7 @@
     },
     {
       "path": "generated/go/assembly/invocations_gen.go",
-      "sha256": "sha256:4b6eae9e3893352805f81b88c8748de0ea327d15ca5fe792c22cd77bbde99101"
+      "sha256": "sha256:258dbcf27e50262810c12bc6170c64844a08c5d6434d5660c8d738ec92f3de6b"
     },
     {
       "path": "generated/go/assembly/providers_gen.go",

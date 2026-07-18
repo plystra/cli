@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
@@ -26,7 +27,7 @@ type Invocations struct {
 
 // Valid reports whether the complete canonical catalog was published and every typed handle was bound.
 func (i Invocations) Valid() bool {
-	if !i.initialized || i.dispatcher == nil || !i.dispatcher.Published() || len(i.catalog.Bindings()) != 0 {
+	if !i.initialized || i.dispatcher == nil || !i.dispatcher.Published() || len(i.catalog.Bindings()) != 2 {
 		return false
 	}
 	return true
@@ -65,7 +66,16 @@ func NewInvocations(providers Providers) (Invocations, error) {
 	if !providers.Valid() {
 		return Invocations{}, fmt.Errorf("%w: selected providers are invalid", ErrInvocationAssembly)
 	}
-	bindings := make([]kernelinvocation.Binding, 0, 0)
+	bindings, err := kernelintrinsic.NewBindings(kernelintrinsic.BindingOptions{
+		ModuleVersion: "v0.0.0-20260718010024-34af10315d98",
+		BuildIdentity: "",
+	})
+	if err != nil {
+		return Invocations{}, fmt.Errorf("%w: intrinsic Kernel bindings: %w", ErrInvocationAssembly, err)
+	}
+	if len(bindings) != 2 {
+		return Invocations{}, fmt.Errorf("%w: intrinsic Kernel binding count %d is incompatible", ErrInvocationAssembly, len(bindings))
+	}
 	catalog, err := kernelinvocation.NewCatalog(bindings)
 	if err != nil {
 		return Invocations{}, fmt.Errorf("%w: canonical catalog: %w", ErrInvocationAssembly, err)

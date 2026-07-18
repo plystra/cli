@@ -46,10 +46,12 @@ var (
 
 // Options carries application-owned generated package identities.
 type Options struct {
-	ModulePath        string
-	JavaScriptPackage string
-	Configurations    []configurationgen.Input
-	Providers         []assemblygen.ProviderInput
+	ModulePath          string
+	JavaScriptPackage   string
+	KernelModuleVersion string
+	KernelBuildIdentity string
+	Configurations      []configurationgen.Input
+	Providers           []assemblygen.ProviderInput
 }
 
 // Render lowers final selected contributions once and renders the Kernel
@@ -161,7 +163,12 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 			httpTargets++
 		}
 
-		contract, err := contractgen.Render(target.ContractJSON())
+		var contract contractgen.File
+		if target.Intrinsic() {
+			contract, err = contractgen.RenderIntrinsic(target.ContractJSON())
+		} else {
+			contract, err = contractgen.Render(target.ContractJSON())
+		}
 		if err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: contract %s: %w", ErrRender, id, err)
 		}
@@ -191,11 +198,18 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		if err := add(invocation.Path(), invocation.Data()); err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: invocation %s: %w", ErrRender, id, err)
 		}
-		if !target.Intrinsic() {
-			identifier, err := capabilityid.Parse(id.String())
-			if err != nil {
-				return generatedfiles.Output{}, fmt.Errorf("%w: %w: required canonical Capability %s cannot enter runtime assembly", ErrRender, ErrResolution, id)
-			}
+		identifier, err := capabilityid.Parse(id.String())
+		if err != nil {
+			return generatedfiles.Output{}, fmt.Errorf("%w: %w: required canonical Capability %s cannot enter runtime assembly", ErrRender, ErrResolution, id)
+		}
+		invocationInput := assemblygen.InvocationInput{
+			ContractJSON: target.ContractJSON(),
+			Intrinsic:    target.Intrinsic(),
+			Dependencies: invocation.Dependencies(),
+		}
+		if target.Intrinsic() {
+			invocationInput.SelectionReason = kernelinvocation.SelectionReasonIntrinsic
+		} else {
 			selection, exists := resolution.ActivationResolution().ProviderResolution().SelectedProvider(identifier)
 			if !exists {
 				return generatedfiles.Output{}, fmt.Errorf("%w: %w: required ordinary Capability %s has no selected provider", ErrRender, ErrResolution, id)
@@ -204,13 +218,10 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 			if selection.Explicit() {
 				reason = kernelinvocation.SelectionReasonExplicit
 			}
-			invocationInputs = append(invocationInputs, assemblygen.InvocationInput{
-				ContractJSON:    target.ContractJSON(),
-				ProviderID:      selection.PluginID(),
-				SelectionReason: reason,
-				Dependencies:    invocation.Dependencies(),
-			})
+			invocationInput.ProviderID = selection.PluginID()
+			invocationInput.SelectionReason = reason
 		}
+		invocationInputs = append(invocationInputs, invocationInput)
 		if target.Exposure().HTTP {
 			handler, err := httpgen.RenderPlan(options.ModulePath, target, plan)
 			if err != nil {
@@ -224,6 +235,8 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
 		ModulePath:               options.ModulePath,
 		ApplicationBuildIdentity: context.Digest(),
+		KernelModuleVersion:      options.KernelModuleVersion,
+		KernelBuildIdentity:      options.KernelBuildIdentity,
 		DefaultTimeout:           applicationmeta.DefaultInvocationTimeout,
 		Providers:                options.Providers,
 		Invocations:              invocationInputs,
