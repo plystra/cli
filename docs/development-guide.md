@@ -631,6 +631,7 @@ generated browser package unless Alias exposure narrows it:
 
 ```text
 generated/sdk/javascript/
+  .npmrc
   package.json
   README.md
   src/index.ts
@@ -638,11 +639,12 @@ generated/sdk/javascript/
   src/operations/catalog/item/get/v1.ts
 ```
 
-Validate a generated project without creating a lockfile:
+Validate a generated project. The CLI-owned `.npmrc` prevents `npm install`
+from creating an unmanaged lockfile:
 
 ```powershell
 cd generated/sdk/javascript
-npm install --ignore-scripts --no-audit --no-fund --package-lock=false
+npm install --ignore-scripts --no-audit --no-fund
 npm run typecheck
 npm run build
 npm pack --dry-run --json

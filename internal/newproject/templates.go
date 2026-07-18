@@ -551,10 +551,14 @@ The provider-independent TypeScript package is under
 generated/sdk/javascript. Validate it with:
 
     cd generated/sdk/javascript
-    npm install --ignore-scripts --no-audit --no-fund --package-lock=false
+    npm install --ignore-scripts --no-audit --no-fund
     npm run typecheck
     npm run build
     npm pack --dry-run --json
+
+The generated .npmrc disables lockfile creation. A package-lock.json below
+generated/sdk/javascript is unexpected generated drift; remove it and rerun
+the documented install command.
 
 Use createPlystraClient from the generated package and call the nested exact
 version method, for example client.records.read.v1({record_id: "demo"}). Only

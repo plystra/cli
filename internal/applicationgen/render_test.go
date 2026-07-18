@@ -68,6 +68,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		"generated/go/invocation/kernel/health/v1/invocation_gen.go",
 		"generated/go/providers/email/send/v1/provider_gen.go",
 		"generated/manifest.json",
+		"generated/sdk/javascript/.npmrc",
 		"generated/sdk/javascript/README.md",
 		"generated/sdk/javascript/package.json",
 		"generated/sdk/javascript/src/index.ts",

@@ -59,6 +59,7 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 	wantPaths := []string{
+		"generated/sdk/javascript/.npmrc",
 		"generated/sdk/javascript/README.md",
 		"generated/sdk/javascript/package.json",
 		"generated/sdk/javascript/src/index.ts",
@@ -92,6 +93,8 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		`Number.isSafeInteger`,
 		`getAccessToken`,
 		`"typescript": "7.0.2"`,
+		`package-lock=false`,
+		`npm install --ignore-scripts --no-audit --no-fund`,
 	} {
 		if !bytes.Contains(combined, []byte(required)) {
 			t.Fatalf("generated package omits %q", required)
@@ -208,7 +211,7 @@ func TestRenderCanonicalJavaScriptSupportsEmptySDK(t *testing.T) {
 	if !bytes.Contains(index, []byte("Readonly<Record<string, never>>")) || bytes.Contains(index, []byte("src/operations")) {
 		t.Fatalf("empty index:\n%s", index)
 	}
-	if len(files) != 5 {
+	if len(files) != 6 {
 		t.Fatalf("empty package file count = %d", len(files))
 	}
 }

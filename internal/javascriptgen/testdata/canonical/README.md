@@ -2,6 +2,17 @@
 
 Generated Plystra application SDK. Do not edit generated files.
 
+## Validate
+
+```sh
+npm install --ignore-scripts --no-audit --no-fund
+npm run typecheck
+npm run build
+npm pack --dry-run --json
+```
+
+The generated `.npmrc` disables lockfile creation because this package is CLI-owned. Installation may create only the ignored `node_modules/` and `dist/` validation outputs.
+
 ## Usage
 
 ```ts

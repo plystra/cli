@@ -77,6 +77,7 @@ func Render(options Options, model sdkmodel.Model) ([]File, error) {
 		return nil, err
 	}
 	files := []File{
+		newFile(path.Join(generatedRoot, ".npmrc"), []byte(npmrcSource)),
 		newFile(path.Join(generatedRoot, "package.json"), renderPackageJSON(options.PackageName)),
 		newFile(path.Join(generatedRoot, "tsconfig.json"), []byte(tsconfigSource)),
 		newFile(path.Join(generatedRoot, "src", "runtime.ts"), []byte(runtimeSource)),
@@ -111,6 +112,8 @@ func Render(options Options, model sdkmodel.Model) ([]File, error) {
 	}
 	return files, nil
 }
+
+const npmrcSource = "package-lock=false\n"
 
 func prepareOperations(values []sdkmodel.Operation, aliases []sdkmodel.Alias) ([]renderedOperation, error) {
 	operations := make([]renderedOperation, 0, len(values)+len(aliases))
@@ -553,6 +556,17 @@ func renderREADME(packageName string, operations []renderedOperation) []byte {
 	var readme strings.Builder
 	fmt.Fprintf(&readme, "# %s\n\n", packageName)
 	fmt.Fprintln(&readme, "Generated Plystra application SDK. Do not edit generated files.")
+	fmt.Fprintln(&readme)
+	fmt.Fprintln(&readme, "## Validate")
+	fmt.Fprintln(&readme)
+	fmt.Fprintln(&readme, "```sh")
+	fmt.Fprintln(&readme, "npm install --ignore-scripts --no-audit --no-fund")
+	fmt.Fprintln(&readme, "npm run typecheck")
+	fmt.Fprintln(&readme, "npm run build")
+	fmt.Fprintln(&readme, "npm pack --dry-run --json")
+	fmt.Fprintln(&readme, "```")
+	fmt.Fprintln(&readme)
+	fmt.Fprintln(&readme, "The generated `.npmrc` disables lockfile creation because this package is CLI-owned. Installation may create only the ignored `node_modules/` and `dist/` validation outputs.")
 	fmt.Fprintln(&readme)
 	if len(operations) == 0 {
 		fmt.Fprintln(&readme, "This application currently exposes no JavaScript Capability operations.")
