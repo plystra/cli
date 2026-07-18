@@ -48,10 +48,14 @@ func (p Provider) Capability() capabilityid.Identifier { return p.capability }
 // Plan is one deterministic target, version decision, and set of local source
 // provider candidates derived from a single plugin snapshot.
 type Plan struct {
-	target    plugintarget.Target
-	version   capabilityversion.Plan
-	providers []Provider
+	modulePath string
+	target     plugintarget.Target
+	version    capabilityversion.Plan
+	providers  []Provider
 }
+
+// ModulePath returns the exact Go Module identity that owns the target plugin.
+func (p Plan) ModulePath() string { return p.modulePath }
 
 // Target returns the selected plugin that will implement the capability.
 func (p Plan) Target() plugintarget.Target { return p.target }
@@ -100,7 +104,7 @@ func Prepare(options Options) (Plan, error) {
 	}
 
 	providers := sourceProviders(module.Path(), plugins, version)
-	return Plan{target: target, version: version, providers: providers}, nil
+	return Plan{modulePath: module.ModulePath(), target: target, version: version, providers: providers}, nil
 }
 
 func sourceProviders(moduleRoot string, plugins []pluginindex.Plugin, version capabilityversion.Plan) []Provider {
