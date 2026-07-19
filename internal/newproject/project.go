@@ -353,6 +353,10 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 			return fmt.Errorf("generated Plystra skill omits required guidance %q", phrase)
 		}
 	}
+	return validateSkillProcessGuidance(text, modulePath)
+}
+
+func validateSkillProcessGuidance(text, modulePath string) error {
 	forbiddenWords := map[string]struct{}{
 		"branch": {}, "branches": {}, "checkout": {}, "checkouts": {},
 		"commit": {}, "commits": {}, "committed": {}, "committing": {},
@@ -361,6 +365,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"repositories": {}, "repository": {},
 	}
 	processGuidance := strings.ReplaceAll(text, modulePath, "module-path")
+	processGuidance = redactGoModuleReferences(processGuidance)
 	words := strings.FieldsFunc(strings.ToLower(processGuidance), func(character rune) bool {
 		return character < 'a' || character > 'z'
 	})
@@ -373,6 +378,46 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		return errors.New("generated Plystra skill contains unrelated development-process guidance")
 	}
 	return nil
+}
+
+func redactGoModuleReferences(text string) string {
+	redacted := []byte(text)
+	for start := 0; start < len(text); {
+		if !isModuleReferenceStart(text[start]) {
+			start++
+			continue
+		}
+		end := start + 1
+		for end < len(text) && isModuleReferenceByte(text[end]) {
+			end++
+		}
+		candidate := text[start:end]
+		path := candidate
+		if separator := strings.LastIndexByte(candidate, '@'); separator >= 0 {
+			path = candidate[:separator]
+			if separator == len(candidate)-1 {
+				start = end
+				continue
+			}
+		}
+		if strings.Contains(path, "/") && module.CheckPath(path) == nil {
+			for index := start; index < end; index++ {
+				redacted[index] = ' '
+			}
+		}
+		start = end
+	}
+	return string(redacted)
+}
+
+func isModuleReferenceStart(character byte) bool {
+	return character >= 'a' && character <= 'z' ||
+		character >= 'A' && character <= 'Z' ||
+		character >= '0' && character <= '9'
+}
+
+func isModuleReferenceByte(character byte) bool {
+	return isModuleReferenceStart(character) || strings.ContainsRune("-._~+/@", rune(character))
 }
 
 func verifyChoicePath(root, relativePath string, expected, directory bool) error {

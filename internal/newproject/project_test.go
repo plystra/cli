@@ -167,7 +167,7 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 			t.Fatalf("generated README advertises unavailable command %q:\n%s", unavailable, readme)
 		}
 	}
-	for _, available := range [][]byte{[]byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("plystra generate --env"), []byte("PLYSTRA_ENV"), []byte("plystra generate --config"), []byte("PLYSTRA_CONFIG"), []byte("go test ./..."), []byte("go vet ./...")} {
+	for _, available := range [][]byte{[]byte("plystra add github.com/acme/platform@v1.0.0"), []byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("plystra generate --env"), []byte("PLYSTRA_ENV"), []byte("plystra generate --config"), []byte("PLYSTRA_CONFIG"), []byte("go test ./..."), []byte("go vet ./...")} {
 		if !bytes.Contains(readme, available) {
 			t.Fatalf("generated README omits available workflow %q:\n%s", available, readme)
 		}
@@ -654,6 +654,9 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"legacy_host: null",
 		"Declared objects merge recursively",
 		"Dependency http.address, http.transports, http.cors, and timeouts.startup",
+		"plystra add github.com/acme/email@v1.4.2",
+		"retains the selected module as a direct",
+		"restores every transaction-owned module",
 		"dependency composition digest",
 		"## Select an environment or one complete current-Project configuration",
 		"plystra generate --env production",
@@ -692,7 +695,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 	}
 	processGuidance := strings.ReplaceAll(string(data), modulePath, "module-path")
 	lower := strings.ToLower(processGuidance)
-	for _, forbidden := range []string{"TODO", "git", "github", "commit", "branch", "push", "pull request", "repository", "version control"} {
+	for _, forbidden := range []string{"TODO", "commit", "branch", "push", "pull request", "repository", "version control"} {
 		if strings.Contains(lower, strings.ToLower(forbidden)) {
 			t.Fatalf("Plystra skill contains forbidden %q guidance:\n%s", forbidden, data)
 		}

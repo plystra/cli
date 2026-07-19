@@ -67,6 +67,19 @@ generated.
 
 ## Compose dependency Project configuration
 
+Add one ordinary Go Module dependency through the public transaction:
+
+    plystra add github.com/acme/email@v1.4.2
+
+The command may start at the Project root or inside a Plugin. It resolves the
+query through ordinary Go tooling, retains the selected module as a direct
+go.mod requirement, recomposes root plystra.yaml, regenerates, tidies, and
+validates the complete Project. The current add surface uses the default root
+configuration and never rewrites unselected environment overlays or alternative
+YAML files. A failed Go command, resolution, composition, generation, tidy, or
+validation step restores every transaction-owned module, root-configuration,
+and generated file.
+
 The CLI asks Go for the effective module graph. Every direct or transitive
 module with regular root plystra.yaml is a dependency Plystra Project; its
 root-level Plugins and root configuration become visible. A module without the
@@ -96,7 +109,7 @@ Resolve an inherited Provider conflict with one exact current-Project choice:
 The current entry replaces inherited choices for email.send/v1, then normal
 Provider and exact contract validation still runs. Do not reorder dependencies,
 make one direct, invent priority, or copy a dependency Plugin to choose a
-winner. After go.mod, replace, or dependency-version changes, run plystra
+winner. After manual replace or dependency-version changes, run plystra
 generate and plystra generate --check. Inspect generated/manifest.json for the
 non-secret dependency composition digest and path/digest/removal/source
 baseline. An explicit tombstone has removed: true; the manifest never contains

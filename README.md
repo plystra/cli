@@ -230,6 +230,14 @@ An ordinary Go Module without root `plystra.yaml`, an absent visible contract or
 
 Generation always emits the contract and provider interface for every Capability provided by a local plugin, even before the application requires that Capability. This keeps user-owned provider implementations buildable while they are being authored. Clients, invocation paths, HTTP adapters, SDK operations, documentation, provider selection, and Kernel registration remain requirement- and exposure-driven, so an unrequired local Capability does not enter the runnable application surface.
 
+Add one ordinary Go Module dependency from the Project root or any nested Plugin directory:
+
+```powershell
+plystra add github.com/acme/email@v1.4.2
+```
+
+`plystra add` validates one module query, resolves it through ordinary Go tooling, records the selected module as a direct requirement, recomposes the dependency-derived root `plystra.yaml` baseline, regenerates, tidies, and validates the complete Project. This initial public add workflow uses the default root configuration and never scans for or rewrites environment overlays or alternative YAML files. A failed Go command, resolution, composition, generation, tidy, or validation step restores `go.mod`, `go.sum`, root configuration, generated artifacts, and every other transaction-owned file without overwriting a concurrent user edit. The Go Module proxy and cache remain ordinary Go-tool boundaries; the CLI never copies or modifies dependency source.
+
 ## Public command surface
 
 The intended command set includes:
