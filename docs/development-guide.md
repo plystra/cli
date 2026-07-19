@@ -25,6 +25,7 @@ The public command surface currently implemented by the `plystra` binary is:
 plystra help
 plystra version
 plystra new <module-path> [options]
+plystra add <go-module-query>
 plystra plugin create <name>
 plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
 plystra capability implement <capability-name>/vN [--plugin <plugin>]
@@ -33,9 +34,9 @@ plystra generate [--check] [--env <environment>|--config <yaml-path>]
 ```
 
 Commands documented in the roadmap but absent from `plystra --help` are not
-implemented. In particular, do not tell users to rely on `add`, `remove`,
-`update`, `use`, `dev`, `test`, `build`, `check`, `fix`, `doctor`, SDK packaging,
-or `release` yet. Use the Go, npm, and public generation commands in this guide.
+implemented. In particular, do not tell users to rely on `remove`, `update`,
+`use`, `dev`, `test`, `build`, `check`, `fix`, `doctor`, SDK packaging, or
+`release` yet. Use the Go, npm, and public generation commands in this guide.
 
 ## Workspace and repository layout
 
@@ -308,6 +309,22 @@ workflows remain deferred; do not place migration assets under `generated/`.
 
 ## Compose dependency Project configuration
 
+Add one ordinary Go Module query through the public transaction:
+
+```powershell
+plystra add github.com/acme/email@v1.4.2
+```
+
+The command may start at the Project root or inside a Plugin. It resolves the
+query through ordinary Go tooling, retains the module as a direct `go.mod`
+requirement even when its declarations do not create a Go import, recomposes
+the dependency-derived root `plystra.yaml` baseline, regenerates, tidies, and
+runs `go test -mod=readonly ./...`. The current add surface uses the default
+root configuration; environment and full-replacement validation for dependency
+mutations remains incomplete. It never rewrites an unselected overlay or
+alternative YAML file. Any later failure restores `go.mod`, `go.sum`, root
+configuration, generated output, and every other transaction-owned file.
+
 Every direct or transitive module in the effective Go Module graph whose root
 contains regular `plystra.yaml` is a dependency Plystra Project. The CLI scans
 its root-level Plugins and composes only that root configuration. It ignores a
@@ -379,7 +396,7 @@ removal, the current Project must make that same exact decision. Removing a
 required Plugin field still fails final configuration validation unless a
 valid default supplies it.
 
-After changing `go.mod`, a replacement, or a dependency version, run:
+After manually changing a replacement or dependency version, run:
 
 ```powershell
 plystra generate

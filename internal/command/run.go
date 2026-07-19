@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/dependencyadd"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/newproject"
 	"github.com/plystra/cli/internal/plugincreate"
@@ -25,11 +26,18 @@ const (
   plystra help
   plystra version
   plystra new <module-path> [options]
+  plystra add <go-module-query>
   plystra plugin create <name>
   plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
   plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
   plystra generate [--check] [--env <environment>|--config <yaml-path>]
+`
+	addUsage = `Usage:
+  plystra add <go-module-query>
+
+Adds one ordinary Go Module dependency, recomposes root plystra.yaml, regenerates,
+tidies, and validates the complete Project in one rollback boundary.
 `
 	newUsage = `Usage:
   plystra new <module-path> [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]
@@ -142,6 +150,28 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			return 1
 		}
 		_, _ = fmt.Fprintf(stdout, "created %s in %s\n", result.ModulePath(), result.Path())
+		return 0
+	case "add":
+		if len(arguments) == 2 && isHelp(arguments[1]) {
+			_, _ = io.WriteString(stdout, addUsage)
+			return 0
+		}
+		if len(arguments) != 2 || strings.TrimSpace(arguments[1]) == "" || strings.HasPrefix(arguments[1], "--") {
+			_, _ = io.WriteString(stderr, addUsage)
+			return 2
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
+		defer cancel()
+		result, err := dependencyadd.Add(ctx, dependencyadd.Options{
+			Start:       workingDirectory,
+			Query:       arguments[1],
+			Environment: environment,
+		})
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "%v\n", err)
+			return 1
+		}
+		_, _ = fmt.Fprintf(stdout, "added dependency %s to %s in %s\n", result.Query(), result.Module().ModulePath(), result.Module().Path())
 		return 0
 	case "plugin":
 		if len(arguments) != 3 || arguments[1] != "create" {

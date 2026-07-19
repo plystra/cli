@@ -18,9 +18,14 @@ import (
 	"golang.org/x/mod/modfile"
 )
 
-// ErrTidy reports failure to normalize or restore module metadata inside a
-// compound CLI transaction.
-var ErrTidy = errors.New("tidy Plystra module")
+var (
+	// ErrTidy reports failure to normalize or restore module metadata inside a
+	// compound CLI transaction.
+	ErrTidy = errors.New("tidy Plystra module")
+	// ErrChange reports failure to apply or restore one explicit Go Module
+	// dependency mutation inside a compound CLI transaction.
+	ErrChange = errors.New("change Plystra module dependencies")
+)
 
 type moduleFile struct {
 	exists bool
@@ -29,6 +34,140 @@ type moduleFile struct {
 }
 
 type moduleFiles map[string]moduleFile
+
+// ChangeOptions describes one explicit Go Module dependency command and any
+// requirements that command must leave as direct project dependencies.
+type ChangeOptions struct {
+	GoCommand          string
+	Environment        []string
+	Arguments          []string
+	DirectRequirements []string
+}
+
+// Change runs one explicit Go Module dependency command, then operation with a
+// generation mutation that tidies metadata while preserving the dependency
+// command's selected requirements. Any failure or panic restores the original
+// go.mod and go.sum bytes and modes. A concurrent edit is never overwritten;
+// unaffected module files are still restored under independent exact-byte
+// preconditions.
+func Change(ctx context.Context, root string, options ChangeOptions, operation func(applicationgenerate.ModuleMutation) error) (operationErr error) {
+	if ctx == nil {
+		return fmt.Errorf("%w: context is nil", ErrChange)
+	}
+	if len(options.Arguments) == 0 {
+		return fmt.Errorf("%w: Go dependency command is empty", ErrChange)
+	}
+	if operation == nil {
+		return fmt.Errorf("%w: generation operation is nil", ErrChange)
+	}
+	before, err := captureModuleFiles(root)
+	if err != nil {
+		return fmt.Errorf("%w: capture module metadata: %w", ErrChange, err)
+	}
+	var installed moduleFiles
+	committed := false
+	defer func() {
+		if committed || installed == nil {
+			return
+		}
+		if err := restoreModuleFiles(root, before, installed); err != nil {
+			operationErr = errors.Join(operationErr, fmt.Errorf("%w: restore module metadata: %w", ErrChange, err))
+		}
+	}()
+
+	changeErr := gocommand.Run(ctx, gocommand.Options{
+		Command:     options.GoCommand,
+		Directory:   root,
+		Environment: options.Environment,
+	}, options.Arguments...)
+	if changeErr == nil && len(options.DirectRequirements) != 0 {
+		changeErr = markDirectRequirements(root, options.DirectRequirements)
+	}
+	installed, err = captureModuleFiles(root)
+	if err != nil {
+		return errors.Join(changeErr, fmt.Errorf("%w: capture changed module metadata: %w", ErrChange, err))
+	}
+	if changeErr != nil {
+		return fmt.Errorf("%w: %w", ErrChange, changeErr)
+	}
+	preserved := installed
+
+	mutate := func(_ context.Context, mutationRoot string, validate func() error) error {
+		if validate == nil {
+			return fmt.Errorf("%w: validation callback is nil", ErrChange)
+		}
+		if mutationRoot != root {
+			return fmt.Errorf("%w: generation changed module root from %q to %q", ErrChange, root, mutationRoot)
+		}
+		normalized, normalizeErr := normalizeModuleMetadata(ctx, root, options.GoCommand, options.Environment, preserved)
+		if normalized != nil {
+			installed = normalized
+		}
+		if normalizeErr != nil {
+			return fmt.Errorf("%w: %w", ErrChange, normalizeErr)
+		}
+		if err := validate(); err != nil {
+			return fmt.Errorf("%w: validate normalized module: %w", ErrChange, err)
+		}
+		return nil
+	}
+	if err := operation(mutate); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func markDirectRequirements(root string, direct []string) error {
+	files, err := captureModuleFiles(root)
+	if err != nil {
+		return fmt.Errorf("capture dependency command metadata: %w", err)
+	}
+	current := files["go.mod"]
+	parsed, err := modfile.Parse("go.mod", current.data, nil)
+	if err != nil {
+		return fmt.Errorf("parse changed go.mod: %w", err)
+	}
+	wanted := make(map[string]struct{}, len(direct))
+	for _, path := range direct {
+		if path == "" {
+			return errors.New("direct requirement path is empty")
+		}
+		wanted[path] = struct{}{}
+	}
+	requirements := make([]*modfile.Require, 0, len(parsed.Require))
+	for _, requirement := range parsed.Require {
+		copy := &modfile.Require{Mod: requirement.Mod, Indirect: requirement.Indirect}
+		if _, exists := wanted[copy.Mod.Path]; exists {
+			copy.Indirect = false
+			delete(wanted, copy.Mod.Path)
+		}
+		requirements = append(requirements, copy)
+	}
+	if len(wanted) != 0 {
+		missing := make([]string, 0, len(wanted))
+		for path := range wanted {
+			missing = append(missing, path)
+		}
+		sort.Strings(missing)
+		return fmt.Errorf("dependency command did not select direct requirement %s", strings.Join(missing, ", "))
+	}
+	parsed.SetRequire(requirements)
+	parsed.Cleanup()
+	updated, err := parsed.Format()
+	if err != nil {
+		return fmt.Errorf("format direct requirements: %w", err)
+	}
+	if bytes.Equal(updated, current.data) {
+		return nil
+	}
+	return atomicfs.WriteFiles(root, []atomicfs.Write{{
+		Path:         "go.mod",
+		Data:         updated,
+		Mode:         current.mode,
+		ExpectedData: current.data,
+	}}, func(string) error { return nil })
+}
 
 // Tidy runs operation with a generation mutation that tidies Go module
 // metadata after generated imports are installed. Existing explicit
@@ -61,20 +200,9 @@ func Tidy(ctx context.Context, root, goCommand string, environment []string, ope
 		if mutationRoot != root {
 			return fmt.Errorf("%w: generation changed module root from %q to %q", ErrTidy, root, mutationRoot)
 		}
-		tidyErr := gocommand.Run(ctx, gocommand.Options{
-			Command:     goCommand,
-			Directory:   root,
-			Environment: environment,
-		}, "mod", "tidy")
-		if tidyErr == nil {
-			tidyErr = mergeOriginalModuleMetadata(root, before)
-		}
-		normalized, err = captureModuleFiles(root)
+		normalized, err = normalizeModuleMetadata(ctx, root, goCommand, environment, before)
 		if err != nil {
-			return errors.Join(tidyErr, fmt.Errorf("%w: capture normalized module metadata: %w", ErrTidy, err))
-		}
-		if tidyErr != nil {
-			return fmt.Errorf("%w: %w", ErrTidy, tidyErr)
+			return fmt.Errorf("%w: %w", ErrTidy, err)
 		}
 		if err := validate(); err != nil {
 			return fmt.Errorf("%w: validate normalized module: %w", ErrTidy, err)
@@ -86,6 +214,25 @@ func Tidy(ctx context.Context, root, goCommand string, environment []string, ope
 	}
 	committed = true
 	return nil
+}
+
+func normalizeModuleMetadata(ctx context.Context, root, goCommand string, environment []string, preserved moduleFiles) (moduleFiles, error) {
+	tidyErr := gocommand.Run(ctx, gocommand.Options{
+		Command:     goCommand,
+		Directory:   root,
+		Environment: environment,
+	}, "mod", "tidy")
+	if tidyErr == nil {
+		tidyErr = mergeOriginalModuleMetadata(root, preserved)
+	}
+	normalized, captureErr := captureModuleFiles(root)
+	if captureErr != nil {
+		return nil, errors.Join(tidyErr, fmt.Errorf("capture normalized module metadata: %w", captureErr))
+	}
+	if tidyErr != nil {
+		return normalized, tidyErr
+	}
+	return normalized, nil
 }
 
 func mergeOriginalModuleMetadata(root string, original moduleFiles) error {
@@ -230,25 +377,26 @@ func captureModuleFiles(rootPath string) (result moduleFiles, captureErr error) 
 }
 
 func restoreModuleFiles(root string, before, normalized moduleFiles) error {
-	writes := make([]atomicfs.Write, 0, 2)
-	removes := make([]atomicfs.Remove, 0, 1)
+	var restoreErr error
 	for _, name := range []string{"go.mod", "go.sum"} {
 		original := before[name]
 		installed := normalized[name]
 		if original.exists == installed.exists && original.mode == installed.mode && bytes.Equal(original.data, installed.data) {
 			continue
 		}
+		var writes []atomicfs.Write
+		var removes []atomicfs.Remove
 		switch {
 		case original.exists && installed.exists:
-			writes = append(writes, atomicfs.Write{Path: name, Data: original.data, Mode: original.mode, ExpectedData: installed.data})
+			writes = []atomicfs.Write{{Path: name, Data: original.data, Mode: original.mode, ExpectedData: installed.data}}
 		case original.exists:
-			writes = append(writes, atomicfs.Write{Path: name, Data: original.data, Mode: original.mode, MustNotExist: true})
+			writes = []atomicfs.Write{{Path: name, Data: original.data, Mode: original.mode, MustNotExist: true}}
 		case installed.exists:
-			removes = append(removes, atomicfs.Remove{Path: name, ExpectedData: installed.data})
+			removes = []atomicfs.Remove{{Path: name, ExpectedData: installed.data}}
+		}
+		if err := atomicfs.ApplyFiles(root, writes, removes, func(string) error { return nil }); err != nil {
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("restore %s: %w", name, err))
 		}
 	}
-	if len(writes) == 0 && len(removes) == 0 {
-		return nil
-	}
-	return atomicfs.ApplyFiles(root, writes, removes, func(string) error { return nil })
+	return restoreErr
 }

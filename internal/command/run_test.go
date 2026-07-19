@@ -9,7 +9,8 @@ import (
 )
 
 const (
-	wantUsage                 = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path> [options]\n  plystra plugin create <name>\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]\n"
+	wantUsage                 = "Usage:\n  plystra help\n  plystra version\n  plystra new <module-path> [options]\n  plystra add <go-module-query>\n  plystra plugin create <name>\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]\n"
+	wantAddUsage              = "Usage:\n  plystra add <go-module-query>\n\nAdds one ordinary Go Module dependency, recomposes root plystra.yaml, regenerates,\ntidies, and validates the complete Project in one rollback boundary.\n"
 	wantNewUsage              = "Usage:\n  plystra new <module-path> [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]\n\nOptions:\n  --plugin <name>           Create an initial root-level plugin.\n  --git, --no-git           Initialize or omit a Git repository.\n  --github-ci, --no-github-ci\n                            Include or omit GitHub Actions CI.\n  --skills, --no-skills     Include or omit Plystra agent skills.\n\nInteractive creation asks for each unspecified choice. Non-interactive creation\nmust specify one flag from every choice pair.\n"
 	wantGenerateUsage         = "Usage:\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]\n\nOptions:\n  --check                Report drift without modifying configuration or generated files.\n  --env <environment>    Overlay root plystra.yaml with plystra.<environment>.yaml.\n  --config <yaml-path>   Use one complete current-project configuration instead of root plystra.yaml.\n\nPLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit\nselector is present; setting both is an error. Explicit --env or --config\noverrides both variables, and the two flags cannot be combined. Relative\nconfiguration paths are resolved from the detected Plystra Project root. Root\nplystra.yaml remains mandatory and is not merged beneath --config.\n"
 	wantCapabilityExposeUsage = "Usage:\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n\nOptions:\n  --env <environment>    Write exposure to plystra.<environment>.yaml.\n  --config <yaml-path>   Write exposure to one complete replacement configuration.\n\nPLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit\nselector is present; setting both is an error. Explicit --env or --config\noverrides both variables, and the two flags cannot be combined. Relative\nconfiguration paths are resolved from the detected Plystra Project root.\n"
@@ -57,6 +58,18 @@ func TestRunNewHelp(t *testing.T) {
 		var stderr bytes.Buffer
 		if exitCode := command.Run([]string{"new", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantNewUsage || stderr.Len() != 0 {
 			t.Fatalf("Run(new %s) = exit %d, stdout %q, stderr %q", argument, exitCode, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestRunAddHelp(t *testing.T) {
+	t.Parallel()
+
+	for _, argument := range []string{"help", "-h", "--help"} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		if exitCode := command.Run([]string{"add", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantAddUsage || stderr.Len() != 0 {
+			t.Fatalf("Run(add %s) = exit %d, stdout %q, stderr %q", argument, exitCode, stdout.String(), stderr.String())
 		}
 	}
 }
@@ -125,6 +138,9 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "new removed library option", arguments: []string{"new", "example.com/app", "--library"}, wantError: wantNewUsage},
 		{name: "new extra argument", arguments: []string{"new", "example.com/app", "extra"}, wantError: wantNewUsage},
 		{name: "new conflicting choice", arguments: []string{"new", "example.com/app", "--git", "--no-git"}, wantError: wantNewUsage},
+		{name: "add missing query", arguments: []string{"add"}, wantError: wantAddUsage},
+		{name: "add option", arguments: []string{"add", "--upgrade"}, wantError: wantAddUsage},
+		{name: "add extra argument", arguments: []string{"add", "example.com/platform", "extra"}, wantError: wantAddUsage},
 		{name: "plugin missing subcommand", arguments: []string{"plugin"}, wantError: "usage: plystra plugin create <name>\n"},
 		{name: "plugin unknown subcommand", arguments: []string{"plugin", "remove", "account"}, wantError: "usage: plystra plugin create <name>\n"},
 		{name: "plugin missing name", arguments: []string{"plugin", "create"}, wantError: "usage: plystra plugin create <name>\n"},
