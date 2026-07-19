@@ -3,6 +3,7 @@
 package assembly
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -39,6 +40,18 @@ func (i Invocations) Catalog() kernelinvocation.Catalog {
 		return kernelinvocation.Catalog{}
 	}
 	return i.catalog
+}
+
+// IntrinsicHealth invokes the always-published kernel.health/v1 endpoint through the shared dispatcher.
+func (i Invocations) IntrinsicHealth(ctx context.Context) (kernelintrinsic.HealthResponse, error) {
+	if !i.Valid() {
+		return kernelintrinsic.HealthResponse{}, fmt.Errorf("%w: intrinsic health runtime is invalid", ErrInvocationAssembly)
+	}
+	handle, err := kernelinvocation.NewHandle(i.dispatcher, kernelintrinsic.HealthContract(), true)
+	if err != nil {
+		return kernelintrinsic.HealthResponse{}, fmt.Errorf("%w: intrinsic health handle: %w", ErrInvocationAssembly, err)
+	}
+	return handle.Invoke(ctx, kernelintrinsic.HealthRequest{})
 }
 
 // String redacts runtime internals.

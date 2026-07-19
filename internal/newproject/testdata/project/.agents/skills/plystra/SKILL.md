@@ -45,6 +45,7 @@ A typical Plystra Project evolves into this layout:
       docs/
       go/
         adapters/
+        application/
         assembly/
         bootstrap/
         clients/
@@ -135,11 +136,13 @@ creation transaction and leaves no target Project. The publisher must make that
 public check pass in a fresh Project directory before publishing a corrected
 version.
 
-Template creation then builds every staged Go package with -mod=readonly. Build
-failure restores the creation transaction and leaves no target Project. The
-publisher must make that read-only package build pass in a fresh Project
-directory before publishing a corrected version. Package compilation does not
-yet produce or start a runnable executable.
+Template creation then builds every staged Go package with -mod=readonly. It
+next builds generated/go/application with GOWORK=off into isolated temporary
+output, starts the real assembled runtime, invokes intrinsic kernel.health/v1,
+and stops lifecycle providers cleanly. Child output is suppressed and temporary
+smoke output is removed after success, failure, timeout, or cancellation. Any
+failure restores the creation transaction and leaves no target Project. This
+private qualification executable does not create public distribution output.
 
 Add one ordinary Go Module dependency through the public transaction:
 
@@ -731,20 +734,13 @@ behavior remains deferred to the later HTTP transport gate.
 Generated handlers enforce the exact route, application/json, bounded bodies,
 required and unknown fields, enums, response validation, safe errors, and
 no-store headers. They require a trusted RootContext function and the generated
-application invocation handle. They do not start an HTTP server automatically.
-
-A user-authored entry point typically constructs the runtime with:
-
-    application, err := bootstrap.New(ctx, "plystra.yaml")
-    if err != nil { /* handle safe startup error */ }
-    if err := application.Start(ctx); err != nil { /* handle safe startup error */ }
-    defer application.Stop(shutdownContext)
-
-Bind each generated handler to its matching handle from
-application.Invocations(). Use the generated RoutePattern or RoutePath constant
-instead of spelling a route again. Test the real generated handler with
-httptest, including success, every semantic error, malformed JSON, unknown
-fields, wrong media type, and oversized input where relevant.
+application invocation handle. The CLI-owned generated/go/application entrypoint
+owns default lifecycle startup, signal-driven shutdown, and template health
+smoke, but it does not yet mount an HTTP server. Do not edit that generated main
+or add a competing startup workaround. Connect serving and generated handler
+binding remain deferred to the HTTP transport gate. Test the real generated
+handler with httptest, including success, every semantic error, malformed JSON,
+unknown fields, wrong media type, and oversized input where relevant.
 
 The provider-independent TypeScript package is under
 generated/sdk/javascript. Validate it with:

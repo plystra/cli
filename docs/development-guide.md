@@ -289,11 +289,17 @@ the selected configuration and generated output again, then runs
 the creation transaction; the publisher must make the public check pass in a
 fresh Project directory before publishing a corrected version.
 
-Finally, the current qualification stage runs
-`go build -mod=readonly ./...` from the staged Project root. Every generated and
-authored Go package must compile without changing module metadata. This is not
-the later `plystra build` executable and `dist/` workflow; executable output,
-runtime selection, startup, health, and shutdown remain deferred.
+The qualification stage then runs `go build -mod=readonly ./...` from the staged
+Project root. Every generated and authored Go package must compile without
+changing module metadata. The CLI next builds
+`./generated/go/application` with `GOWORK=off` into a temporary
+`.plystra-smoke` directory, starts the real assembled runtime through its private
+`--smoke` path, invokes intrinsic `kernel.health/v1`, and stops lifecycle
+providers in generated reverse order. Smoke stdout and stderr are suppressed so
+runtime values cannot enter creation diagnostics, and the temporary executable
+is removed after success, failure, timeout, or cancellation. Any failure rolls
+back the complete target. This is not the later public `plystra build`
+executable, `dist/` output, or selector-aware runtime startup contract.
 
 The template's root configuration is also the source of its verified local
 operational inputs. Typed values and Secret-reference placeholders declared
@@ -322,10 +328,11 @@ created example.com/acme/orders from example.com/acme/platform@v1.2.3 in <absolu
 ```
 
 The second form is template creation. It now proves read-only Go package tests
-and builds. The complete qualified-template acceptance suite still needs the
-public `plystra build` executable and `dist/` workflow, isolated startup,
-intrinsic health, and clean shutdown. Do not describe a template as qualified
-until that complete automated suite exists.
+and builds, isolated runtime startup, intrinsic health, and clean shutdown. The
+complete qualified-template acceptance suite still needs the public
+`plystra build` executable and `dist/` workflow, applicable JavaScript SDK
+qualification, and concise Level 0 success output. Do not describe a template as
+qualified until that complete automated suite exists.
 
 Every Plystra Project contains mandatory root `plystra.yaml` and is
 independently runnable. A new Project may validly contain zero local Plugins,
@@ -363,6 +370,7 @@ orders/
     docs/
     go/
       adapters/
+      application/                         CLI-owned process entrypoint
       assembly/
       bootstrap/
       clients/
@@ -967,35 +975,17 @@ Its route is:
 POST /api/v1/capabilities/catalog.item.get/v1/invoke
 ```
 
-The CLI generates handlers, not an HTTP server. A user-authored entry point
-constructs the runtime and binds each generated handler:
+The CLI generates handlers, but the current CLI-owned
+`generated/go/application/main_gen.go` entrypoint does not yet mount an HTTP
+server. It owns default runtime startup, signal-driven shutdown, and the private
+template-qualification health smoke. Do not edit that generated entrypoint or
+add a competing application startup workaround. Connect serving and generated
+handler binding remain deferred to the HTTP transport gate; validate the real
+handler directly with `httptest` until that gate lands.
 
-```go
-application, err := bootstrap.New(ctx, "plystra.yaml")
-if err != nil {
-    return err
-}
-if err := application.Start(ctx); err != nil {
-    return err
-}
-defer application.Stop(shutdownContext)
-
-handler, err := httpcatalogitemgetv1.New(
-    func(request *http.Request) (context.Context, error) {
-        return request.Context(), nil
-    },
-    application.Invocations().CatalogItemGetV1(),
-)
-if err != nil {
-    return err
-}
-mux := http.NewServeMux()
-mux.Handle(httpcatalogitemgetv1.RoutePattern, handler)
-```
-
-The root-context function is a trusted adapter boundary. Do not convert raw
-headers into verified internal AuthN state there. Official AuthN behavior is
-deferred until Gate 10.
+The handler's root-context function is a trusted adapter boundary. Do not
+convert raw headers into verified internal AuthN state there. Official AuthN
+behavior is deferred until Gate 10.
 
 Use `httptest` against the generated handler. Cover success, every declared
 semantic error, unknown and missing fields, invalid JSON, wrong media type,

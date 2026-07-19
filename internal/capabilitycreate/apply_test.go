@@ -44,6 +44,7 @@ func TestCreateCommitsCapabilityImplementationAndGeneratedProject(t *testing.T) 
 		"records/capabilities/records.create/v1/capability.yaml",
 		"records/capability_records.create_v1.go",
 		"generated/.plystra-manifest.json",
+		"generated/go/application/main_gen.go",
 		"generated/go/assembly/compatibility_gen.go",
 		"generated/go/configuration/records_gen.go",
 		"generated/go/contracts/records/create/v1/contract_gen.go",

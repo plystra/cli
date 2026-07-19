@@ -65,6 +65,7 @@ func TestRunAddComposesDependencyProjectAndPreservesUnselectedConfiguration(t *t
 	}
 	for _, generated := range []string{
 		"generated/.plystra-manifest.json",
+		"generated/go/application/main_gen.go",
 		"generated/go/bootstrap/bootstrap_gen.go",
 		"generated/go/clients/kernel/health/v1/client_gen.go",
 		"generated/go/invocation/kernel/health/v1/invocation_gen.go",

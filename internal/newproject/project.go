@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/plystra/cli/internal/applicationentrygen"
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationinput"
@@ -30,6 +31,7 @@ import (
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/projectcheck"
 	"github.com/plystra/cli/internal/projectlocate"
+	"github.com/plystra/cli/internal/projectsmoke"
 	"github.com/plystra/cli/internal/providerresolution"
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 	"golang.org/x/mod/modfile"
@@ -272,6 +274,18 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 				err,
 			)
 		}
+		if err := projectsmoke.Run(ctx, projectsmoke.Options{
+			Root:        root,
+			GoCommand:   goCommand,
+			Environment: environment,
+		}); err != nil {
+			return fmt.Errorf(
+				"%w: template %q cannot qualify because the staged Project lifecycle smoke failed: %w; correction: the template publisher must make the generated application start, return healthy from kernel.health/v1, and stop cleanly in a fresh Project directory without go.work, then publish a corrected module version",
+				ErrInvalidTemplate,
+				query,
+				err,
+			)
+		}
 		return nil
 	})
 }
@@ -380,7 +394,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if err != nil {
 		return fmt.Errorf("render Kernel compatibility source: %w", err)
 	}
-	managed := make([]generatedfiles.File, 0, 5)
+	managed := make([]generatedfiles.File, 0, 6)
 	compatibilityFile, err := generatedfiles.NewFile("generated/go/assembly/compatibility_gen.go", compatibility)
 	if err != nil {
 		return fmt.Errorf("prepare Kernel compatibility source: %w", err)
@@ -438,6 +452,18 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 		return fmt.Errorf("prepare runtime bootstrap source: %w", err)
 	}
 	managed = append(managed, bootstrapFile)
+	entrypoint, err := applicationentrygen.Render(applicationentrygen.Options{
+		ModulePath:      modulePath,
+		ShutdownTimeout: applicationentrygen.DefaultShutdownTimeout,
+	})
+	if err != nil {
+		return fmt.Errorf("render application entrypoint source: %w", err)
+	}
+	entrypointFile, err := generatedfiles.NewFile(applicationentrygen.Path, entrypoint)
+	if err != nil {
+		return fmt.Errorf("prepare application entrypoint source: %w", err)
+	}
+	managed = append(managed, entrypointFile)
 	providers, err := assemblygen.RenderProviders(modulePath, nil)
 	if err != nil {
 		return fmt.Errorf("render empty selected-provider source: %w", err)
@@ -595,7 +621,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"plystra add github.com/acme/email@v1.4.2",
 		"plystra remove github.com/acme/email",
 		"plystra update github.com/acme/email@v1.5.0",
-		"bootstrap.New",
+		"generated/go/application entrypoint",
 		"npm run typecheck",
 		"plystra generate --check",
 	}

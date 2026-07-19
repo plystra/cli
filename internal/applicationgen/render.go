@@ -13,6 +13,7 @@ import (
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/aliasresolution"
 	"github.com/plystra/cli/internal/apidocgen"
+	"github.com/plystra/cli/internal/applicationentrygen"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/bootstrapgen"
@@ -180,6 +181,16 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	if err := add(bootstrapgen.Path, bootstrap); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: runtime bootstrap: %w", ErrRender, err)
+	}
+	entrypoint, err := applicationentrygen.Render(applicationentrygen.Options{
+		ModulePath:      options.ModulePath,
+		ShutdownTimeout: applicationentrygen.DefaultShutdownTimeout,
+	})
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: application entrypoint: %w", ErrRender, err)
+	}
+	if err := add(applicationentrygen.Path, entrypoint); err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: application entrypoint: %w", ErrRender, err)
 	}
 
 	requirements := context.Requirements()

@@ -55,6 +55,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		"generated/go/adapters/http/email/send/v1/handler_gen.go",
 		"generated/go/adapters/http/health/status/v1/handler_gen.go",
 		"generated/go/adapters/http/kernel/health/v1/handler_gen.go",
+		"generated/go/application/main_gen.go",
 		"generated/go/assembly/compatibility_gen.go",
 		"generated/go/assembly/invocations_gen.go",
 		"generated/go/assembly/providers_gen.go",
@@ -214,7 +215,7 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render empty: %v", err)
 	}
-	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json"}) {
+	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json"}) {
 		t.Fatalf("empty output paths = %v", got)
 	}
 	wantManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), options.ManifestProvenance)

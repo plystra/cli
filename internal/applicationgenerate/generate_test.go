@@ -48,7 +48,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	if !checked.Checked() || checked.Module().Path() != root || checked.Module().ModulePath() != "example.com/Acme/empty" {
 		t.Fatalf("checked result = %#v", checked)
 	}
-	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json"}; !reflect.DeepEqual(got, want) {
+	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("missing files = %v, want %v", got, want)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
@@ -81,6 +81,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 		}
 	}
 	assertFileExists(t, root, generatedfiles.ManifestPath)
+	assertFileExists(t, root, "generated/go/application/main_gen.go")
 	assertFileExists(t, root, "generated/go/assembly/compatibility_gen.go")
 	assertFileExists(t, root, "generated/go/assembly/invocations_gen.go")
 	assertFileExists(t, root, "generated/go/assembly/providers_gen.go")
@@ -880,6 +881,7 @@ capabilities:
 		"generated/docs/openapi.json",
 		"generated/go/adapters/http/email/send/v1/handler_gen.go",
 		"generated/go/adapters/http/mail/deliver/v1/handler_gen.go",
+		"generated/go/application/main_gen.go",
 		"generated/go/assembly/compatibility_gen.go",
 		"generated/go/assembly/invocations_gen.go",
 		"generated/go/assembly/providers_gen.go",

@@ -75,7 +75,7 @@ must specify one flag from every choice pair.
 
 Template dependencies must be public, portable, and generation-stable. Creation
 rejects the staged Project unless immediate generation checking, Project checks,
-and a read-only Go package build all succeed.
+the read-only Go package build, and an isolated lifecycle health smoke all succeed.
 `
 	generateUsage = `Usage:
   plystra generate [--check] [--env <environment>|--config <yaml-path>]

@@ -110,6 +110,8 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 		`handle0 := applicationinvocation0.New(rawHandle0, applicationclient1.New(handle1))`,
 		`func (i Invocations) MessageSendV1()`,
 		`func (i Invocations) PolicyCheckV1()`,
+		`func (i Invocations) IntrinsicHealth(ctx context.Context) (kernelintrinsic.HealthResponse, error)`,
+		`kernelinvocation.NewHandle(i.dispatcher, kernelintrinsic.HealthContract(), true)`,
 	} {
 		if !bytes.Contains(generated, []byte(required)) {
 			t.Fatalf("generated source omits %q:\n%s", required, generated)
@@ -141,7 +143,7 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 	if _, err := parser.ParseFile(token.NewFileSet(), assemblygen.InvocationsPath, empty, parser.AllErrors); err != nil {
 		t.Fatalf("parse empty generated invocations: %v\n%s", err, empty)
 	}
-	if !bytes.Contains(empty, []byte("return true")) || !bytes.Contains(empty, []byte("len(i.catalog.Bindings()) != 2")) || !bytes.Contains(empty, []byte("kernelintrinsic.NewBindings")) || bytes.Contains(empty, []byte("kernelcapability")) {
+	if !bytes.Contains(empty, []byte("return true")) || !bytes.Contains(empty, []byte("len(i.catalog.Bindings()) != 2")) || !bytes.Contains(empty, []byte("kernelintrinsic.NewBindings")) || !bytes.Contains(empty, []byte("func (i Invocations) IntrinsicHealth")) || bytes.Contains(empty, []byte("kernelcapability")) {
 		t.Fatalf("empty runtime is not a valid zero-provider assembly:\n%s", empty)
 	}
 }
@@ -637,6 +639,7 @@ import (
 	messagecontract "example.com/runtime-application/generated/go/contracts/message/send/v1"
 	remoteservice "example.com/runtime-dependency/remote-service"
 	kernelconfiguration "github.com/plystra/kernel/configuration"
+	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
@@ -703,6 +706,10 @@ func TestCanonicalInvocationRuntime(t *testing.T) {
 	health, err := invocations.KernelHealthV1().Invoke(context.Background(), healthcontract.Request{})
 	if err != nil || health.Status != healthcontract.ResponseStatusHealthy {
 		t.Fatalf("KernelHealthV1.Invoke = %#v, %v", health, err)
+	}
+	intrinsicHealth, err := invocations.IntrinsicHealth(context.Background())
+	if err != nil || intrinsicHealth.Status != kernelintrinsic.HealthStatusHealthy {
+		t.Fatalf("IntrinsicHealth = %#v, %v", intrinsicHealth, err)
 	}
 
 	channel := messagecontract.RequestChannel("sms")
