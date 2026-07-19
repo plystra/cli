@@ -260,6 +260,18 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 				strings.Join(templateGenerationDrift(qualified.ConfigurationChanged(), qualified.ConfigurationMaintenancePath(), qualified.Report()), ", "),
 			)
 		}
+		if err := gocommand.Run(ctx, gocommand.Options{
+			Command:     goCommand,
+			Directory:   root,
+			Environment: environment,
+		}, "build", "-mod=readonly", "./..."); err != nil {
+			return fmt.Errorf(
+				"%w: template %q cannot qualify because the staged Project build failed: %w; correction: the template publisher must make go build -mod=readonly ./... pass in a fresh Project directory and publish a corrected module version",
+				ErrInvalidTemplate,
+				query,
+				err,
+			)
+		}
 		return nil
 	})
 }

@@ -38,6 +38,7 @@ const (
 	templateDriftCountEnvironment  = "PLYSTRA_TEMPLATE_DRIFT_COUNT"
 	templateDriftFailEnvironment   = "PLYSTRA_TEMPLATE_DRIFT_FAIL"
 	templateCheckFailEnvironment   = "PLYSTRA_TEMPLATE_CHECK_FAIL"
+	templateBuildFailEnvironment   = "PLYSTRA_TEMPLATE_BUILD_FAIL"
 )
 
 func TestMain(main *testing.M) {
@@ -75,7 +76,7 @@ func runTemplateDriftGoHelper() int {
 			_, _ = fmt.Fprintf(os.Stderr, "write template drift count: %v\n", err)
 			return 125
 		}
-		if count == 4 && os.Getenv(templateCheckFailEnvironment) != "1" {
+		if count == 4 && os.Getenv(templateCheckFailEnvironment) != "1" && os.Getenv(templateBuildFailEnvironment) != "1" {
 			if os.Getenv(templateDriftFailEnvironment) == "1" {
 				_, _ = fmt.Fprintln(os.Stderr, "injected generated stability check failure")
 				return 124
@@ -107,6 +108,17 @@ func runTemplateDriftGoHelper() int {
 		if string(data) == "5" {
 			_, _ = fmt.Fprintln(os.Stderr, "injected qualified-template plystra check failure")
 			return 123
+		}
+	}
+	if os.Getenv(templateBuildFailEnvironment) == "1" && len(os.Args) == 4 && reflect.DeepEqual(os.Args[1:], []string{"build", "-mod=readonly", "./..."}) {
+		data, err := os.ReadFile(os.Getenv(templateDriftCountEnvironment))
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "read template build count: %v\n", err)
+			return 125
+		}
+		if string(data) == "5" {
+			_, _ = fmt.Fprintln(os.Stderr, "injected qualified-template build failure")
+			return 122
 		}
 	}
 
@@ -738,6 +750,58 @@ func TestCreateRunsPlystraCheckAndRollsBackItsFailure(t *testing.T) {
 	assertNoTransactionFiles(t, parent)
 }
 
+func TestCreateBuildsTemplateProjectAndRollsBackFailure(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/build-failing-platform"
+	const templateVersion = "v1.0.0"
+	const templateQuery = templatePath + "@" + templateVersion
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"template.go":  []byte("package platform\n"),
+		"plystra.yaml": []byte("{}\n"),
+	})
+	realGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("LookPath(go): %v", err)
+	}
+	countFile := filepath.Join(t.TempDir(), "module-discovery-count")
+	environment := isolatedGoEnvironment(t, proxy)
+	environment = setEnvironmentValue(environment, templateDriftHelperEnvironment, "1")
+	environment = setEnvironmentValue(environment, templateDriftGoEnvironment, realGo)
+	environment = setEnvironmentValue(environment, templateDriftCountEnvironment, countFile)
+	environment = setEnvironmentValue(environment, templateBuildFailEnvironment, "1")
+	parent := t.TempDir()
+
+	_, err = newproject.Create(t.Context(), newproject.Options{
+		Parent:      parent,
+		ProjectName: "my-app",
+		ModulePath:  "example.com/acme/my-app",
+		Template:    templateQuery,
+		GoCommand:   os.Args[0],
+		Environment: environment,
+	})
+	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrInvalidTemplate) || !errors.Is(err, gocommand.ErrRun) {
+		t.Fatalf("Create error = %v", err)
+	}
+	for _, detail := range []string{
+		templateQuery,
+		"staged Project build failed",
+		"injected qualified-template build failure",
+		"go build -mod=readonly ./...",
+		"publish a corrected module version",
+	} {
+		if !strings.Contains(err.Error(), detail) {
+			t.Fatalf("Create error omits %q: %v", detail, err)
+		}
+	}
+	if data, readErr := os.ReadFile(countFile); readErr != nil || string(data) != "5" {
+		t.Fatalf("module discovery count = %q, %v; qualified-template build did not run at the expected boundary", data, readErr)
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists after qualified-template build failure: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
+}
+
 func TestCreateRollsBackTemplateGenerationFailure(t *testing.T) {
 	proxy := createKernelProxy(t)
 	const templatePath = "example.com/acme/incomplete"
@@ -801,7 +865,7 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 			t.Fatalf("generated README advertises unavailable command %q:\n%s", unavailable, readme)
 		}
 	}
-	for _, available := range [][]byte{[]byte("plystra add github.com/acme/platform@v1.0.0"), []byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("plystra generate --env"), []byte("PLYSTRA_ENV"), []byte("plystra generate --config"), []byte("PLYSTRA_CONFIG"), []byte("plystra check"), []byte("go test ./..."), []byte("go vet ./...")} {
+	for _, available := range [][]byte{[]byte("plystra add github.com/acme/platform@v1.0.0"), []byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("plystra generate --env"), []byte("PLYSTRA_ENV"), []byte("plystra generate --config"), []byte("PLYSTRA_CONFIG"), []byte("plystra check"), []byte("go test ./..."), []byte("go build ./..."), []byte("go vet ./...")} {
 		if !bytes.Contains(readme, available) {
 			t.Fatalf("generated README omits available workflow %q:\n%s", available, readme)
 		}
@@ -1466,6 +1530,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"Template-declared operational values and Secret-reference placeholders",
 		"immediate plystra generate --check equivalent",
 		"runs the same read-only workflow as plystra check",
+		"builds every staged Go package with -mod=readonly",
 		"does not read PLATFORM_SMTP_PASSWORD",
 		"invent values for required fields omitted by the template",
 		"plystra plugin create records",

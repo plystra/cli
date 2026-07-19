@@ -135,6 +135,12 @@ creation transaction and leaves no target Project. The publisher must make that
 public check pass in a fresh Project directory before publishing a corrected
 version.
 
+Template creation then builds every staged Go package with -mod=readonly. Build
+failure restores the creation transaction and leaves no target Project. The
+publisher must make that read-only package build pass in a fresh Project
+directory before publishing a corrected version. Package compilation does not
+yet produce or start a runnable executable.
+
 Add one ordinary Go Module dependency through the public transaction:
 
     plystra add github.com/acme/email@v1.4.2

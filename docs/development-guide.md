@@ -289,6 +289,12 @@ the selected configuration and generated output again, then runs
 the creation transaction; the publisher must make the public check pass in a
 fresh Project directory before publishing a corrected version.
 
+Finally, the current qualification stage runs
+`go build -mod=readonly ./...` from the staged Project root. Every generated and
+authored Go package must compile without changing module metadata. This is not
+the later `plystra build` executable and `dist/` workflow; executable output,
+runtime selection, startup, health, and shutdown remain deferred.
+
 The template's root configuration is also the source of its verified local
 operational inputs. Typed values and Secret-reference placeholders declared
 there are composed into the new Project's root `plystra.yaml` and validated
@@ -315,10 +321,11 @@ created example.com/acme/orders in <absolute-path>/orders
 created example.com/acme/orders from example.com/acme/platform@v1.2.3 in <absolute-path>/orders
 ```
 
-The second form is template creation. This implementation does not yet provide
-the later qualified-template acceptance suite that also proves build, isolated
-startup, intrinsic health, and clean shutdown. Do not describe a template as
-qualified until that complete automated suite exists.
+The second form is template creation. It now proves read-only Go package tests
+and builds. The complete qualified-template acceptance suite still needs the
+public `plystra build` executable and `dist/` workflow, isolated startup,
+intrinsic health, and clean shutdown. Do not describe a template as qualified
+until that complete automated suite exists.
 
 Every Plystra Project contains mandatory root `plystra.yaml` and is
 independently runnable. A new Project may validly contain zero local Plugins,
