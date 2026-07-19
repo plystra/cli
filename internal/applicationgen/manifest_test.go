@@ -251,6 +251,28 @@ func TestApplicationModelDigestIncludesHTTPTransportsDeterministically(t *testin
 	}
 }
 
+func TestApplicationModelDigestPinsConnectProtobufSurfaceProjection(t *testing.T) {
+	t.Parallel()
+
+	options := applicationgen.ApplicationModelOptions{
+		ModulePath:          applicationModulePath,
+		JavaScriptPackage:   applicationSDKPackage,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
+		HTTPTransports:      applicationmeta.HTTPTransports{Connect: true},
+		Providers:           selectedProviderInputs(),
+		Resolution:          resolvedApplication(t, "capabilities:\n  aliases: {billing.tax-rate/v1: email.send/v1}\n"),
+	}
+	digest, err := applicationgen.ApplicationModelDigest(options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(Connect Protobuf surfaces): %v", err)
+	}
+	const expected = "sha256:e5c4942cb65d7ee7c5c9c876ed1a07e5e9674908ca008c4cb7c7d1f693cd99ad"
+	if digest != expected {
+		t.Fatalf("Connect Protobuf surface application-model digest = %q; want %q", digest, expected)
+	}
+}
+
 func TestApplicationModelDigestIncludesDependencyConfigurationSchema(t *testing.T) {
 	t.Parallel()
 
