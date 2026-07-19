@@ -11,14 +11,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/plystra/cli/internal/applicationentrygen"
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
-	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/atomicfs"
-	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
@@ -32,6 +29,7 @@ import (
 	"github.com/plystra/cli/internal/projectcheck"
 	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/projectsmoke"
+	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 	"golang.org/x/mod/modfile"
@@ -390,16 +388,6 @@ func relativeReplacementPath(value string) bool {
 }
 
 func populate(ctx context.Context, root, modulePath, name string, githubCI, skills bool) error {
-	compatibility, err := assemblygen.RenderCompatibility("assembly")
-	if err != nil {
-		return fmt.Errorf("render Kernel compatibility source: %w", err)
-	}
-	managed := make([]generatedfiles.File, 0, 6)
-	compatibilityFile, err := generatedfiles.NewFile("generated/go/assembly/compatibility_gen.go", compatibility)
-	if err != nil {
-		return fmt.Errorf("prepare Kernel compatibility source: %w", err)
-	}
-	managed = append(managed, compatibilityFile)
 	currentManifest, err := applicationmeta.Parse([]byte(plystraTemplate))
 	if err != nil {
 		return fmt.Errorf("parse initial Project configuration: %w", err)
@@ -418,62 +406,24 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if err != nil {
 		return fmt.Errorf("resolve initial application model: %w", err)
 	}
+	protobufProjection, err := applicationgen.ProtobufProjection(currentManifest.HTTPTransports(), resolution)
+	if err != nil {
+		return fmt.Errorf("build initial Protobuf projection: %w", err)
+	}
+	wireMap, err := protobufwiremap.Build(protobufProjection, nil, false, "")
+	if err != nil {
+		return fmt.Errorf("build initial Protobuf wire map: %w", err)
+	}
 	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
 		ModulePath:          modulePath,
 		KernelModuleVersion: KernelVersion,
 		HTTPTransports:      currentManifest.HTTPTransports(),
 		Resolution:          resolution,
+		ProtobufWireMap:     wireMap,
 	})
 	if err != nil {
 		return fmt.Errorf("digest initial application model: %w", err)
 	}
-	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
-		ModulePath:               modulePath,
-		ApplicationBuildIdentity: resolution.Context().Digest(),
-		KernelModuleVersion:      KernelVersion,
-		DefaultTimeout:           applicationmeta.DefaultInvocationTimeout,
-	})
-	if err != nil {
-		return fmt.Errorf("render intrinsic-only canonical invocation source: %w", err)
-	}
-	invocationsFile, err := generatedfiles.NewFile(assemblygen.InvocationsPath, invocations)
-	if err != nil {
-		return fmt.Errorf("prepare intrinsic-only canonical invocation source: %w", err)
-	}
-	managed = append(managed, invocationsFile)
-	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
-		ModulePath:            modulePath,
-		DefaultStartupTimeout: applicationmeta.DefaultStartupTimeout,
-	})
-	if err != nil {
-		return fmt.Errorf("render runtime bootstrap source: %w", err)
-	}
-	bootstrapFile, err := generatedfiles.NewFile(bootstrapgen.Path, bootstrap)
-	if err != nil {
-		return fmt.Errorf("prepare runtime bootstrap source: %w", err)
-	}
-	managed = append(managed, bootstrapFile)
-	entrypoint, err := applicationentrygen.Render(applicationentrygen.Options{
-		ModulePath:      modulePath,
-		ShutdownTimeout: applicationentrygen.DefaultShutdownTimeout,
-	})
-	if err != nil {
-		return fmt.Errorf("render application entrypoint source: %w", err)
-	}
-	entrypointFile, err := generatedfiles.NewFile(applicationentrygen.Path, entrypoint)
-	if err != nil {
-		return fmt.Errorf("prepare application entrypoint source: %w", err)
-	}
-	managed = append(managed, entrypointFile)
-	providers, err := assemblygen.RenderProviders(modulePath, nil)
-	if err != nil {
-		return fmt.Errorf("render empty selected-provider source: %w", err)
-	}
-	providersFile, err := generatedfiles.NewFile(assemblygen.ProvidersPath, providers)
-	if err != nil {
-		return fmt.Errorf("prepare empty selected-provider source: %w", err)
-	}
-	managed = append(managed, providersFile)
 	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
 		Mode:                   applicationgen.ConfigurationModeDefault,
 		RootPath:               "plystra.yaml",
@@ -481,23 +431,22 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 		SelectedPath:           "plystra.yaml",
 		SelectedData:           []byte(plystraTemplate),
 		Composition:            composition,
+		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: modelDigest,
 	})
 	if err != nil {
 		return fmt.Errorf("construct initial application manifest provenance: %w", err)
 	}
-	manifestData, err := applicationgen.RenderManifest(resolution.AliasResolution().CanonicalJSON(), provenance)
+	generated, err := applicationgen.Render(applicationgen.Options{
+		ModulePath:          modulePath,
+		KernelModuleVersion: KernelVersion,
+		HTTPTransports:      currentManifest.HTTPTransports(),
+		Composition:         composition,
+		ManifestProvenance:  provenance,
+		ProtobufWireMap:     wireMap,
+	}, resolution)
 	if err != nil {
-		return fmt.Errorf("render initial application manifest: %w", err)
-	}
-	aliasManifest, err := generatedfiles.NewFile("generated/manifest.json", manifestData)
-	if err != nil {
-		return fmt.Errorf("prepare initial application manifest: %w", err)
-	}
-	managed = append(managed, aliasManifest)
-	generated, err := generatedfiles.NewOutput(managed)
-	if err != nil {
-		return fmt.Errorf("prepare initial generated output: %w", err)
+		return fmt.Errorf("render initial generated output: %w", err)
 	}
 	readme := fmt.Sprintf(readmeTemplate, name, modulePath)
 	if githubCI {

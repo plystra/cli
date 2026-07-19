@@ -7,6 +7,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/kernel/plugin/manifest"
 )
 
@@ -85,12 +86,22 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 
 	defaultResolution := emptyApplication(t)
 	defaultOptions := emptyOptions(applicationModulePath)
-	defaultModel, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
+	defaultModelOptions := applicationgen.ApplicationModelOptions{
 		ModulePath:          defaultOptions.ModulePath,
 		KernelModuleVersion: defaultOptions.KernelModuleVersion,
 		KernelBuildIdentity: defaultOptions.KernelBuildIdentity,
 		Resolution:          defaultResolution,
-	})
+	}
+	projection, err := applicationgen.ProtobufProjection(defaultModelOptions.HTTPTransports, defaultModelOptions.Resolution)
+	if err != nil {
+		t.Fatalf("ProtobufProjection(default): %v", err)
+	}
+	wireMap, err := protobufwiremap.Build(projection, nil, false, "")
+	if err != nil {
+		t.Fatalf("protobufwiremap.Build(default): %v", err)
+	}
+	defaultModelOptions.ProtobufWireMap = wireMap
+	defaultModel, err := applicationgen.ApplicationModelDigest(defaultModelOptions)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(default): %v", err)
 	}
@@ -101,6 +112,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 		SelectedPath:           "plystra.yaml",
 		SelectedData:           []byte("config: {acme.business: {legacy: 'C:/private/root-config', password: {env: ROOT_PRIVATE_TOKEN}}}\n"),
 		Composition:            dependencyComposition(t),
+		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,
 	})
 	if err != nil {
@@ -114,6 +126,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 		SelectedPath:           "plystra.production.yaml",
 		SelectedData:           []byte("config: {acme.business: {password: {env: PRODUCTION_PRIVATE_TOKEN}}}\n"),
 		Composition:            dependencyComposition(t),
+		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,
 		Previous:               defaultProvenance,
 	})
@@ -145,6 +158,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 		SelectedPath:           "deploy/customer-a.yaml",
 		SelectedData:           []byte("# independent complete configuration\nconfig: {acme.business: {legacy: customer-runtime-value, password: {env: CUSTOMER_PRIVATE_TOKEN}}}\n"),
 		Composition:            testComposition(),
+		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,
 		Previous:               environmentProvenance,
 	})
@@ -177,8 +191,8 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 			t.Fatalf("generated manifest leaked %q: %s", forbidden, data)
 		}
 	}
-	oldSchema := bytes.Replace(data, []byte(`"version":3`), []byte(`"version":2`), 1)
-	if _, err := applicationgen.DecodeManifestProvenance(oldSchema); err == nil || !strings.Contains(err.Error(), "must use version 3") {
+	oldSchema := bytes.Replace(data, []byte(`"version":4`), []byte(`"version":3`), 1)
+	if _, err := applicationgen.DecodeManifestProvenance(oldSchema); err == nil || !strings.Contains(err.Error(), "must use version 4") {
 		t.Fatalf("DecodeManifestProvenance(old schema) error = %v", err)
 	}
 	unknown := bytes.Replace(data, []byte(`"mode":"explicit-config"`), []byte(`"unknown":true,"mode":"explicit-config"`), 1)
@@ -200,12 +214,12 @@ func TestApplicationModelDigestIncludesAliasesAndExcludesSelectionPath(t *testin
 		Providers:           selectedProviderInputs(),
 	}
 	base.Resolution = withoutAliases
-	withoutDigest, err := applicationgen.ApplicationModelDigest(base)
+	withoutDigest, err := applicationModelDigest(t, base)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(without Aliases): %v", err)
 	}
 	base.Resolution = withAliases
-	withDigest, err := applicationgen.ApplicationModelDigest(base)
+	withDigest, err := applicationModelDigest(t, base)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(with Aliases): %v", err)
 	}
@@ -229,11 +243,11 @@ func TestApplicationModelDigestIncludesHTTPTransportsDeterministically(t *testin
 		Providers:           selectedProviderInputs(),
 		Resolution:          resolvedApplication(t, ""),
 	}
-	connectDigest, err := applicationgen.ApplicationModelDigest(options)
+	connectDigest, err := applicationModelDigest(t, options)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(Connect): %v", err)
 	}
-	repeatedDigest, err := applicationgen.ApplicationModelDigest(options)
+	repeatedDigest, err := applicationModelDigest(t, options)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(repeated Connect): %v", err)
 	}
@@ -242,7 +256,7 @@ func TestApplicationModelDigestIncludesHTTPTransportsDeterministically(t *testin
 	}
 
 	options.HTTPTransports = applicationmeta.HTTPTransports{REST: true}
-	restDigest, err := applicationgen.ApplicationModelDigest(options)
+	restDigest, err := applicationModelDigest(t, options)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(REST): %v", err)
 	}
@@ -263,13 +277,73 @@ func TestApplicationModelDigestPinsNormalizedConnectProtobufProjection(t *testin
 		Providers:           selectedProviderInputs(),
 		Resolution:          resolvedApplication(t, "capabilities:\n  aliases: {billing.tax-rate/v1: email.send/v1}\n"),
 	}
-	digest, err := applicationgen.ApplicationModelDigest(options)
+	digest, err := applicationModelDigest(t, options)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(Connect Protobuf projection): %v", err)
 	}
-	const expected = "sha256:d2829188d698462bf1fbbd9d0345aaecead348313c1322f0a4864d3d05b83b23"
+	const expected = "sha256:d9b795fbc7f7b50b51829f4becc46ea88db2f1303dee69dab9f12c8ee8f30a61"
 	if digest != expected {
 		t.Fatalf("Connect Protobuf projection application-model digest = %q; want %q", digest, expected)
+	}
+}
+
+func TestApplicationModelDigestIncludesActiveWireHistory(t *testing.T) {
+	t.Parallel()
+
+	currentResolution := resolvedApplication(t, "")
+	options := applicationgen.ApplicationModelOptions{
+		ModulePath:          applicationModulePath,
+		JavaScriptPackage:   applicationSDKPackage,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
+		HTTPTransports:      applicationmeta.HTTPTransports{Connect: true},
+		Providers:           selectedProviderInputs(),
+		Resolution:          currentResolution,
+	}
+	currentProjection, err := applicationgen.ProtobufProjection(options.HTTPTransports, currentResolution)
+	if err != nil {
+		t.Fatalf("ProtobufProjection(current): %v", err)
+	}
+	cleanMap, err := protobufwiremap.Build(currentProjection, nil, false, "")
+	if err != nil {
+		t.Fatalf("Build(clean): %v", err)
+	}
+	options.ProtobufWireMap = cleanMap
+	cleanDigest, err := applicationgen.ApplicationModelDigest(options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(clean): %v", err)
+	}
+
+	historicalResolution := resolvedApplicationWithEmail(t, "", `id: email.send/v1
+request:
+  alpha: {type: string}
+  to: {type: string, required: true}
+response:
+  accepted: {type: boolean, required: true}
+errors: [invalid_recipient]
+`)
+	historicalProjection, err := applicationgen.ProtobufProjection(options.HTTPTransports, historicalResolution)
+	if err != nil {
+		t.Fatalf("ProtobufProjection(historical): %v", err)
+	}
+	history, err := protobufwiremap.Build(historicalProjection, nil, false, "")
+	if err != nil {
+		t.Fatalf("Build(history): %v", err)
+	}
+	reconciled, err := protobufwiremap.Build(currentProjection, history.CanonicalJSON(), true, history.Digest())
+	if err != nil {
+		t.Fatalf("Build(reconciled): %v", err)
+	}
+	if bytes.Equal(cleanMap.ActiveJSON(), reconciled.ActiveJSON()) || cleanMap.Digest() == reconciled.Digest() {
+		t.Fatal("historical assignment did not alter active or committed wire-map evidence")
+	}
+	options.ProtobufWireMap = reconciled
+	historicalDigest, err := applicationgen.ApplicationModelDigest(options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(historical): %v", err)
+	}
+	if historicalDigest == cleanDigest {
+		t.Fatal("different active Protobuf field assignments produced the same application-model digest")
 	}
 }
 
@@ -292,7 +366,7 @@ response:
   accepted: {type: boolean, required: true}
 errors: [invalid_recipient]
 `)
-	first, err := applicationgen.ApplicationModelDigest(options)
+	first, err := applicationModelDigest(t, options)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(first contract): %v", err)
 	}
@@ -304,7 +378,7 @@ request:
   to: {required: true, type: string}
 id: email.send/v1
 `)
-	reordered, err := applicationgen.ApplicationModelDigest(options)
+	reordered, err := applicationModelDigest(t, options)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(reordered contract): %v", err)
 	}
@@ -319,7 +393,7 @@ response:
   accepted: {type: boolean, required: true}
 errors: [invalid_recipient]
 `)
-	changed, err := applicationgen.ApplicationModelDigest(options)
+	changed, err := applicationModelDigest(t, options)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(changed contract): %v", err)
 	}
@@ -352,12 +426,12 @@ func TestApplicationModelDigestIncludesDependencyConfigurationSchema(t *testing.
 		Resolution:          resolvedApplication(t, ""),
 	}
 	options.Providers[0].ConfigurationSchema = stringSchema
-	stringDigest, err := applicationgen.ApplicationModelDigest(options)
+	stringDigest, err := applicationModelDigest(t, options)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(string schema): %v", err)
 	}
 	options.Providers[0].ConfigurationSchema = reorderedSchema
-	reorderedDigest, err := applicationgen.ApplicationModelDigest(options)
+	reorderedDigest, err := applicationModelDigest(t, options)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(reordered schema): %v", err)
 	}
@@ -365,7 +439,7 @@ func TestApplicationModelDigestIncludesDependencyConfigurationSchema(t *testing.
 		t.Fatalf("schema declaration order changed model digest: %q != %q", reorderedDigest, stringDigest)
 	}
 	options.Providers[0].ConfigurationSchema = integerSchema
-	integerDigest, err := applicationgen.ApplicationModelDigest(options)
+	integerDigest, err := applicationModelDigest(t, options)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(integer schema): %v", err)
 	}

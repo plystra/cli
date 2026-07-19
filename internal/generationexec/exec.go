@@ -527,6 +527,7 @@ func inputFromContext(context generation.Context) generation.Input {
 	for index, capability := range capabilityViews {
 		capabilities[index] = generation.CapabilityInput{
 			ContractJSON: json.RawMessage(capability.ContractJSON()),
+			Sources:      capability.Sources(),
 			Intrinsic:    capability.Intrinsic(),
 			Exposure:     capability.Exposure(),
 		}

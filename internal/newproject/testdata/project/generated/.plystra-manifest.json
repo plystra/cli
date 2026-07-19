@@ -23,13 +23,17 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:430e9953a1dd83e0bb4e421d94f6486bcb3853d2dd440a66a88c392b3c091071"
+      "sha256": "sha256:7616ad62c17cf176475b7fcbb5c408b8303d78054680af2c0c76ac60299e2cba"
+    },
+    {
+      "path": "generated/proto/wire-map.json",
+      "sha256": "sha256:5429be97f5d0e2093f13a69ae9524c2ba170b1cbe61ad593da678e9df42cec83"
     }
   ],
   "application_manifest": {
     "capability_aliases": [],
     "configuration": {
-      "version": 3,
+      "version": 4,
       "mode": "default",
       "root": {
         "path": "plystra.yaml",
@@ -43,7 +47,8 @@
           "dependency_baseline": []
         }
       ],
-      "application_model_digest": "sha256:0d85947e828820756a872a824976bd8dd389067ba0d2cde481de3bd98296acf4"
+      "protobuf_wire_map_digest": "sha256:5429be97f5d0e2093f13a69ae9524c2ba170b1cbe61ad593da678e9df42cec83",
+      "application_model_digest": "sha256:c635b58f50beb2e9dc4ba33fb860765e8f48c17ff8f9dec4f6a18695448f5945"
     }
   }
 }

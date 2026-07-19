@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -387,6 +388,10 @@ func decodePreviousManifest(actual map[string]actualFile) (map[string]string, er
 	if err != nil {
 		return nil, err
 	}
+	return manifestFiles(document)
+}
+
+func manifestFiles(document manifestDocument) (map[string]string, error) {
 	previous := make(map[string]string, len(document.Files))
 	for index, record := range document.Files {
 		if !validManagedPath(record.Path) {
@@ -420,6 +425,141 @@ func decodeManifestDocument(data []byte) (manifestDocument, error) {
 		return manifestDocument{}, fmt.Errorf("%w: %s application_manifest is invalid JSON", ErrManifest, ManifestPath)
 	}
 	return document, nil
+}
+
+// ReadOwnedFile returns one bounded managed file only when the ownership
+// manifest records its exact current digest. A missing never-owned path is a
+// valid initial state. Missing owned content, unowned content, symbolic paths,
+// digest drift, and concurrent replacement are errors.
+func ReadOwnedFile(rootPath, filePath string, maximumBytes int64) (result []byte, exists bool, readErr error) {
+	if !validManagedPath(filePath) || maximumBytes <= 0 {
+		return nil, false, fmt.Errorf("%w: invalid owned-file request for %q", ErrManifest, filePath)
+	}
+	absoluteRoot, err := filepath.Abs(rootPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: resolve application root: %w", ErrManifest, err)
+	}
+	root, err := os.OpenRoot(absoluteRoot)
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: open application root: %w", ErrManifest, err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			readErr = errors.Join(readErr, fmt.Errorf("%w: close application root: %w", ErrManifest, err))
+		}
+	}()
+	generated, err := root.Lstat("generated")
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: inspect generated directory: %v", ErrManifest, err)
+	}
+	if !generated.IsDir() || generated.Mode()&fs.ModeSymlink != 0 {
+		return nil, false, fmt.Errorf("%w: generated directory is not regular and non-symbolic", ErrManifest)
+	}
+	if err := validateOwnedParents(root, filePath); err != nil {
+		return nil, false, err
+	}
+
+	targetInfo, targetErr := root.Lstat(filepath.FromSlash(filePath))
+	targetExists := targetErr == nil
+	if targetErr != nil && !errors.Is(targetErr, fs.ErrNotExist) {
+		return nil, false, fmt.Errorf("%w: inspect %s: %v", ErrManifest, filePath, targetErr)
+	}
+	manifestInfo, manifestErr := root.Lstat(filepath.FromSlash(ManifestPath))
+	if errors.Is(manifestErr, fs.ErrNotExist) {
+		if targetExists {
+			return nil, false, fmt.Errorf("%w: %s exists without ownership in %s", ErrManifest, filePath, ManifestPath)
+		}
+		return nil, false, nil
+	}
+	if manifestErr != nil {
+		return nil, false, fmt.Errorf("%w: inspect %s: %v", ErrManifest, ManifestPath, manifestErr)
+	}
+	manifestData, err := readStableRootFile(root, ManifestPath, manifestInfo, maximumManifestBytes)
+	if err != nil {
+		return nil, false, err
+	}
+	document, err := decodeManifestDocument(manifestData)
+	if err != nil {
+		return nil, false, err
+	}
+	owned, err := manifestFiles(document)
+	if err != nil {
+		return nil, false, err
+	}
+	expectedDigest, recorded := owned[filePath]
+	if !recorded {
+		if targetExists {
+			return nil, false, fmt.Errorf("%w: %s exists but is not owned by %s", ErrManifest, filePath, ManifestPath)
+		}
+		return nil, false, nil
+	}
+	if !targetExists {
+		return nil, false, fmt.Errorf("%w: owned file %s is missing", ErrManifest, filePath)
+	}
+	data, err := readStableRootFile(root, filePath, targetInfo, maximumBytes)
+	if err != nil {
+		return nil, false, err
+	}
+	if actualDigest := digest(data); actualDigest != expectedDigest {
+		return nil, false, fmt.Errorf("%w: owned file %s digest %s does not match recorded %s", ErrManifest, filePath, actualDigest, expectedDigest)
+	}
+	return data, true, nil
+}
+
+func validateOwnedParents(root *os.Root, filePath string) error {
+	parts := strings.Split(path.Dir(filePath), "/")
+	for index := 2; index <= len(parts); index++ {
+		parent := strings.Join(parts[:index], "/")
+		info, err := root.Lstat(filepath.FromSlash(parent))
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("%w: inspect managed parent %s: %v", ErrManifest, parent, err)
+		}
+		if !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("%w: managed parent %s is not a regular non-symbolic directory", ErrManifest, parent)
+		}
+	}
+	return nil
+}
+
+func readStableRootFile(root *os.Root, filePath string, before fs.FileInfo, maximumBytes int64) ([]byte, error) {
+	if before == nil || !before.Mode().IsRegular() || before.Mode()&fs.ModeSymlink != 0 || before.Size() > maximumBytes {
+		return nil, fmt.Errorf("%w: %s is not a bounded regular non-symbolic file", ErrManifest, filePath)
+	}
+	file, err := root.Open(filepath.FromSlash(filePath))
+	if err != nil {
+		return nil, fmt.Errorf("%w: open %s: %v", ErrManifest, filePath, err)
+	}
+	opened, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("%w: inspect opened %s: %v", ErrManifest, filePath, err)
+	}
+	if !sameManifestFile(before, opened) {
+		_ = file.Close()
+		return nil, fmt.Errorf("%w: %w: %s was replaced before open", ErrManifest, atomicfs.ErrConcurrentChange, filePath)
+	}
+	data, dataErr := io.ReadAll(io.LimitReader(file, maximumBytes+1))
+	closeErr := file.Close()
+	if dataErr != nil {
+		return nil, fmt.Errorf("%w: read %s: %v", ErrManifest, filePath, dataErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("%w: close %s: %v", ErrManifest, filePath, closeErr)
+	}
+	if int64(len(data)) > maximumBytes {
+		return nil, fmt.Errorf("%w: %s exceeds %d bytes", ErrManifest, filePath, maximumBytes)
+	}
+	after, err := root.Lstat(filepath.FromSlash(filePath))
+	if err != nil || !sameManifestFile(opened, after) {
+		return nil, fmt.Errorf("%w: %w: %s changed while it was read", ErrManifest, atomicfs.ErrConcurrentChange, filePath)
+	}
+	return data, nil
 }
 
 // ReadApplicationManifestRecovery returns the last generated application

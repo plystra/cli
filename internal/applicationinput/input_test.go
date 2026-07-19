@@ -66,6 +66,9 @@ capabilities:
 		if !capability.Exposure.Go || capability.Exposure.HTTP || capability.Exposure.JavaScript {
 			t.Fatalf("base exposure = %#v", capability.Exposure)
 		}
+		if len(capability.Sources) == 0 {
+			t.Fatalf("Capability contract has no provenance: %#v", capability)
+		}
 	}
 	if got := candidateStrings(t, input.Candidates); !reflect.DeepEqual(got, []string{
 		"example.audit:audit.write/v1:example.com/providers@v1.2.0/audit/capabilities/audit.write/v1/capability.yaml",
@@ -220,6 +223,12 @@ func TestBuildMergesIdenticalContractsFromSeveralProviders(t *testing.T) {
 	}
 	if !bytes.Equal(input.Candidates[0].Contract, input.Candidates[1].Contract) {
 		t.Fatalf("provider contracts differ: %s != %s", input.Candidates[0].Contract, input.Candidates[1].Contract)
+	}
+	if got := input.Capabilities[0].Sources; !reflect.DeepEqual(got, []string{
+		"example.com/app@local/mock/capabilities/email.send/v1/capability.yaml",
+		"example.com/app@local/smtp/capabilities/email.send/v1/capability.yaml",
+	}) {
+		t.Fatalf("merged contract sources = %v", got)
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/plystra/cli/internal/generationactivation"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/javascriptgen"
+	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
 	"github.com/plystra/kernel/plugin/manifest"
 )
@@ -71,6 +72,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		"generated/go/invocation/kernel/health/v1/invocation_gen.go",
 		"generated/go/providers/email/send/v1/provider_gen.go",
 		"generated/manifest.json",
+		"generated/proto/wire-map.json",
 		"generated/sdk/javascript/.npmrc",
 		"generated/sdk/javascript/README.md",
 		"generated/sdk/javascript/package.json",
@@ -112,10 +114,11 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		`"id":"health.status/v1"`,
 		`"target":"kernel.health/v1"`,
 		`"kind":"application"`,
-		`"configuration":{"version":3,"mode":"default"`,
+		`"configuration":{"version":4,"mode":"default"`,
 		`"root":{"path":"plystra.yaml","digest":"sha256:`,
 		`"dependency_composition_digest":"sha256:`,
 		`"application_model_digest":"` + options.ManifestProvenance.ApplicationModelDigest() + `"`,
+		`"protobuf_wire_map_digest":"` + options.ManifestProvenance.ProtobufWireMapDigest() + `"`,
 		`"path":"http.expose[\"diagnostics.internal/v1\"]"`,
 		`"removed":true`,
 		`"path":"config[\"acme.business\"][\"password\"]"`,
@@ -215,7 +218,7 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render empty: %v", err)
 	}
-	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json"}) {
+	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/wire-map.json"}) {
 		t.Fatalf("empty output paths = %v", got)
 	}
 	wantManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), options.ManifestProvenance)
@@ -428,6 +431,15 @@ func emptyOptions(modulePath string) applicationgen.Options {
 
 func withManifestProvenance(t testing.TB, options applicationgen.Options, resolution generationresolution.ExtensionResult) applicationgen.Options {
 	t.Helper()
+	projection, err := applicationgen.ProtobufProjection(options.HTTPTransports, resolution)
+	if err != nil {
+		t.Fatalf("ProtobufProjection: %v", err)
+	}
+	wireMap, err := protobufwiremap.Build(projection, nil, false, "")
+	if err != nil {
+		t.Fatalf("protobufwiremap.Build: %v", err)
+	}
+	options.ProtobufWireMap = wireMap
 	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
 		ModulePath:          options.ModulePath,
 		JavaScriptPackage:   options.JavaScriptPackage,
@@ -437,6 +449,7 @@ func withManifestProvenance(t testing.TB, options applicationgen.Options, resolu
 		Configurations:      options.Configurations,
 		Providers:           options.Providers,
 		Resolution:          resolution,
+		ProtobufWireMap:     wireMap,
 	})
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest: %v", err)
@@ -448,6 +461,7 @@ func withManifestProvenance(t testing.TB, options applicationgen.Options, resolu
 		SelectedPath:           "plystra.yaml",
 		SelectedData:           []byte("{}\n"),
 		Composition:            options.Composition,
+		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: modelDigest,
 	})
 	if err != nil {
@@ -455,6 +469,20 @@ func withManifestProvenance(t testing.TB, options applicationgen.Options, resolu
 	}
 	options.ManifestProvenance = provenance
 	return options
+}
+
+func applicationModelDigest(t testing.TB, options applicationgen.ApplicationModelOptions) (string, error) {
+	t.Helper()
+	projection, err := applicationgen.ProtobufProjection(options.HTTPTransports, options.Resolution)
+	if err != nil {
+		return "", err
+	}
+	wireMap, err := protobufwiremap.Build(projection, nil, false, "")
+	if err != nil {
+		return "", err
+	}
+	options.ProtobufWireMap = wireMap
+	return applicationgen.ApplicationModelDigest(options)
 }
 
 func testComposition() applicationmeta.Composition {
@@ -546,7 +574,7 @@ errors: [invalid_recipient]
 			ModuleRoot: "application-module",
 			PluginPath: "business",
 		}},
-		Capabilities: []generation.CapabilityInput{{ContractJSON: email, Exposure: generation.Exposure{Go: true}}},
+		Capabilities: []generation.CapabilityInput{{ContractJSON: email, Sources: []string{"application-module/business/capabilities/email.send/v1/capability.yaml"}, Exposure: generation.Exposure{Go: true}}},
 	})
 	if err != nil {
 		t.Fatalf("ResolveExtensions: %v", err)
@@ -613,8 +641,8 @@ errors: []
 			PluginPath: "business",
 		}},
 		Capabilities: []generation.CapabilityInput{
-			{ContractJSON: email, Exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: true}},
-			{ContractJSON: health, Intrinsic: true, Exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: true}},
+			{ContractJSON: email, Sources: []string{"business-module/business/capabilities/email.send/v1/capability.yaml"}, Exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: true}},
+			{ContractJSON: health, Sources: []string{"github.com/plystra/kernel/capability/catalog kernel.health/v1"}, Intrinsic: true, Exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: true}},
 		},
 		ApplicationAliases: aliases,
 	})

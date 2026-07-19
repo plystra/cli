@@ -28,6 +28,7 @@ import (
 	"github.com/plystra/cli/internal/httpgen"
 	"github.com/plystra/cli/internal/invocationgen"
 	"github.com/plystra/cli/internal/javascriptgen"
+	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providergen"
 	"github.com/plystra/cli/internal/sdkmodel"
 	kernelinvocation "github.com/plystra/kernel/invocation"
@@ -61,6 +62,7 @@ type Options struct {
 	ManifestProvenance  ManifestProvenance
 	Configurations      []configurationgen.Input
 	Providers           []assemblygen.ProviderInput
+	ProtobufWireMap     protobufwiremap.Map
 }
 
 // Render lowers final selected contributions once and renders the Kernel
@@ -89,11 +91,12 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		Configurations:      options.Configurations,
 		Providers:           options.Providers,
 		Resolution:          resolution,
+		ProtobufWireMap:     options.ProtobufWireMap,
 	})
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: application model: %v", ErrRender, ErrResolution, err)
 	}
-	if !options.ManifestProvenance.matches(options.Composition, modelDigest) {
+	if !options.ManifestProvenance.matches(options.Composition, options.ProtobufWireMap.Digest(), modelDigest) {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: application manifest provenance is absent or inconsistent", ErrRender, ErrResolution)
 	}
 	if err := validateJavaScriptTransport(options, context, aliases); err != nil {
@@ -119,6 +122,9 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		}
 		files = append(files, file)
 		return nil
+	}
+	if err := add(protobufwiremap.Path, options.ProtobufWireMap.CanonicalJSON()); err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf wire map: %w", ErrRender, err)
 	}
 	configurationInputs := append([]configurationgen.Input(nil), options.Configurations...)
 	sort.Slice(configurationInputs, func(left, right int) bool {

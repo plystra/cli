@@ -93,6 +93,7 @@ func TestRunCapabilityCreateAndExposeRegenerateRunnableApplication(t *testing.T)
 		"generated/go/contracts/records/list/v1/contract_gen.go",
 		"generated/go/providers/records/list/v1/provider_gen.go",
 		"generated/manifest.json",
+		"generated/proto/wire-map.json",
 	} {
 		assertCommandFile(t, root, filePath)
 	}

@@ -131,6 +131,7 @@ func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, b
 		}
 		capabilities = append(capabilities, generation.CapabilityInput{
 			ContractJSON: append([]byte(nil), group.variants[0].contract...),
+			Sources:      append([]string(nil), group.variants[0].sources...),
 			Intrinsic:    group.intrinsic,
 			Exposure:     generation.Exposure{Go: true},
 		})

@@ -152,6 +152,7 @@ type canonicalModule struct {
 
 type canonicalCapability struct {
 	ID             string          `json:"id"`
+	Sources        []string        `json:"sources"`
 	Intrinsic      bool            `json:"intrinsic"`
 	Exposure       Exposure        `json:"exposure"`
 	ContractDigest string          `json:"contract_digest"`
@@ -197,6 +198,7 @@ func encodeContext(plugins []PluginView, capabilities []CapabilityView, requirem
 	for index, capability := range capabilities {
 		canonical.Capabilities[index] = canonicalCapability{
 			ID:             capability.id.String(),
+			Sources:        append([]string(nil), capability.sources...),
 			Intrinsic:      capability.intrinsic,
 			Exposure:       capability.exposure,
 			ContractDigest: capability.contractDigest,

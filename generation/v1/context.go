@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/modulepath"
@@ -64,6 +65,7 @@ type PluginInput struct {
 // and namespaced extension metadata are read from ContractJSON.
 type CapabilityInput struct {
 	ContractJSON json.RawMessage `json:"contract"`
+	Sources      []string        `json:"sources"`
 	Intrinsic    bool            `json:"intrinsic"`
 	Exposure     Exposure        `json:"exposure"`
 }
@@ -289,6 +291,7 @@ type CapabilityView struct {
 	id             CapabilityID
 	contractJSON   []byte
 	contractDigest string
+	sources        []string
 	extensions     []ExtensionView
 	intrinsic      bool
 	exposure       Exposure
@@ -304,6 +307,13 @@ func (c CapabilityView) ContractJSON() []byte {
 
 // ContractDigest returns the sha256 digest of ContractJSON.
 func (c CapabilityView) ContractDigest() string { return c.contractDigest }
+
+// Sources returns immutable canonical-contract provenance in deterministic
+// order. Filesystem-backed application resolution always supplies at least one
+// source; synthetic generation contexts may omit provenance.
+func (c CapabilityView) Sources() []string {
+	return append([]string(nil), c.sources...)
+}
 
 // Extensions returns normalized values sorted by namespace.
 func (c CapabilityView) Extensions() []ExtensionView {
@@ -473,11 +483,16 @@ func normalizeCapabilities(inputs []CapabilityInput) ([]CapabilityView, map[Capa
 		if input.Intrinsic != reservedIntrinsic {
 			return nil, nil, invalidContext("%s.id %q must be intrinsic exactly when it uses the reserved kernel.* namespace", field, id.String())
 		}
+		sources, err := normalizeCapabilitySources(fmt.Sprintf("capabilities[%d].sources", index), input.Sources)
+		if err != nil {
+			return nil, nil, err
+		}
 		seen[id] = struct{}{}
 		capabilities = append(capabilities, CapabilityView{
 			id:             id,
 			contractJSON:   contract,
 			contractDigest: sha256Digest(contract),
+			sources:        sources,
 			extensions:     extensions,
 			intrinsic:      input.Intrinsic,
 			exposure:       input.Exposure,
@@ -491,6 +506,22 @@ func normalizeCapabilities(inputs []CapabilityInput) ([]CapabilityView, map[Capa
 		index[capability.id] = position
 	}
 	return capabilities, index, nil
+}
+
+func normalizeCapabilitySources(field string, values []string) ([]string, error) {
+	result := append([]string(nil), values...)
+	for index, value := range result {
+		if value == "" || len(value) > 1024 || !utf8.ValidString(value) || strings.ContainsRune(value, '\x00') {
+			return nil, invalidContext("%s[%d] is not a bounded non-empty source", field, index)
+		}
+	}
+	sort.Strings(result)
+	for index := 1; index < len(result); index++ {
+		if result[index] == result[index-1] {
+			return nil, invalidContext("%s duplicates %q", field, result[index])
+		}
+	}
+	return result, nil
 }
 
 func normalizeCapabilityContract(field string, input []byte) ([]byte, CapabilityID, []ExtensionView, error) {

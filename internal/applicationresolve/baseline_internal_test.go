@@ -117,6 +117,7 @@ func renderDependencyBaseline(t testing.TB, capability string) ([]byte, applicat
 		SelectedPath:           applicationManifestName,
 		SelectedData:           []byte("{}\n"),
 		Composition:            composition,
+		ProtobufWireMapDigest:  "sha256:" + strings.Repeat("2", 64),
 		ApplicationModelDigest: "sha256:" + strings.Repeat("1", 64),
 	})
 	if err != nil {
