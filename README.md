@@ -196,6 +196,14 @@ validated `go.mod` snapshots, reports each `module@version/go.mod` directive,
 and rolls back. Publish the referenced module versions and remove the relative
 replacements before publishing a corrected template.
 
+Creation then requires the generated application to be a fixed point. After
+installing generated output, the CLI immediately performs the equivalent of
+`plystra generate --check`. Dependency-composition drift or any changed,
+missing, unexpected, or obsolete generated path rejects the template and rolls
+back the target. The template publisher must make generation deterministic,
+run `plystra generate` followed by `plystra generate --check` in a fresh
+Project directory, and publish a corrected module version.
+
 Typed operational values and Secret-reference placeholders declared by the
 template's root configuration are materialized in the new root `plystra.yaml`
 through that same dependency composition. Creation validates them against the

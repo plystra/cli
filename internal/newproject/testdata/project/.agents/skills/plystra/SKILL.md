@@ -120,6 +120,14 @@ version. Creation checks the template and every transitive dependency Project,
 reports stable module@version/go.mod provenance, and leaves no target when a
 relative replacement remains.
 
+The staged generated application must be a fixed point. Creation installs the
+generated output and then runs an immediate plystra generate --check equivalent.
+Dependency-composition drift or any changed, missing, unexpected, or obsolete
+generated path rejects the template and restores the transaction. The
+publisher must make generation deterministic, run plystra generate followed by
+plystra generate --check in a fresh Project directory, and publish a corrected
+module version.
+
 Add one ordinary Go Module dependency through the public transaction:
 
     plystra add github.com/acme/email@v1.4.2

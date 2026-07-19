@@ -274,6 +274,15 @@ version. Creation checks the template and every transitive dependency Project,
 reports stable `module@version/go.mod` provenance, and leaves no target when a
 relative replacement remains.
 
+The staged generated application must also be a fixed point. Creation installs
+the generated output and immediately runs the equivalent of
+`plystra generate --check`. Dependency-composition drift or any changed,
+missing, unexpected, or obsolete generated path rejects the template and
+restores the transaction. The publisher must make generation deterministic,
+run `plystra generate` followed
+by `plystra generate --check` in a fresh Project directory, and publish a
+corrected module version.
+
 The template's root configuration is also the source of its verified local
 operational inputs. Typed values and Secret-reference placeholders declared
 there are composed into the new Project's root `plystra.yaml` and validated

@@ -31,7 +31,17 @@ import (
 
 var updateProjectGolden = flag.Bool("update", false, "update generated project scaffold golden files")
 
+const (
+	templateDriftHelperEnvironment = "PLYSTRA_TEMPLATE_DRIFT_HELPER"
+	templateDriftGoEnvironment     = "PLYSTRA_TEMPLATE_DRIFT_REAL_GO"
+	templateDriftCountEnvironment  = "PLYSTRA_TEMPLATE_DRIFT_COUNT"
+	templateDriftFailEnvironment   = "PLYSTRA_TEMPLATE_DRIFT_FAIL"
+)
+
 func TestMain(main *testing.M) {
+	if os.Getenv(templateDriftHelperEnvironment) == "1" {
+		os.Exit(runTemplateDriftGoHelper())
+	}
 	if os.Getenv("PLYSTRA_NEW_PLUGIN_ROLLBACK_HELPER") == "1" {
 		switch {
 		case len(os.Args) == 3 && os.Args[1] == "mod" && (os.Args[2] == "download" || os.Args[2] == "tidy"):
@@ -43,6 +53,64 @@ func TestMain(main *testing.M) {
 		}
 	}
 	os.Exit(main.Run())
+}
+
+func runTemplateDriftGoHelper() int {
+	if len(os.Args) == 6 && reflect.DeepEqual(os.Args[1:], []string{"list", "-m", "-json", "-mod=readonly", "all"}) {
+		countFile := os.Getenv(templateDriftCountEnvironment)
+		count := 0
+		if data, err := os.ReadFile(countFile); err == nil {
+			if _, err := fmt.Sscanf(string(data), "%d", &count); err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "parse template drift count: %v\n", err)
+				return 125
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			_, _ = fmt.Fprintf(os.Stderr, "read template drift count: %v\n", err)
+			return 125
+		}
+		count++
+		if err := os.WriteFile(countFile, fmt.Appendf(nil, "%d", count), 0o600); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "write template drift count: %v\n", err)
+			return 125
+		}
+		if count == 4 {
+			if os.Getenv(templateDriftFailEnvironment) == "1" {
+				_, _ = fmt.Fprintln(os.Stderr, "injected generated stability check failure")
+				return 124
+			}
+			root, err := os.Getwd()
+			if err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "locate staged template: %v\n", err)
+				return 125
+			}
+			path := filepath.Join(root, "generated", "go", "assembly", "compatibility_gen.go")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "read generated template file: %v\n", err)
+				return 125
+			}
+			data = append(data, []byte("\n// injected drift during qualified-template checking\n")...)
+			if err := os.WriteFile(path, data, 0o644); err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "change generated template file: %v\n", err)
+				return 125
+			}
+		}
+	}
+
+	command := exec.Command(os.Getenv(templateDriftGoEnvironment), os.Args[1:]...)
+	command.Stdin = os.Stdin
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	command.Env = os.Environ()
+	if err := command.Run(); err != nil {
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) {
+			return exitError.ExitCode()
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "run real Go command: %v\n", err)
+		return 125
+	}
+	return 0
 }
 
 func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.T) {
@@ -496,6 +564,111 @@ func TestPublicCommandRejectsRelativeReplacementsAcrossTemplateProjectsAndRollsB
 	}
 	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("target exists after relative replace failure: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
+}
+
+func TestCreateRejectsImmediateGeneratedDriftAndRollsBack(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/unstable-platform"
+	const templateVersion = "v1.0.0"
+	const templateQuery = templatePath + "@" + templateVersion
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"template.go":  []byte("package platform\n"),
+		"plystra.yaml": []byte("{}\n"),
+	})
+	realGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("LookPath(go): %v", err)
+	}
+	countFile := filepath.Join(t.TempDir(), "module-discovery-count")
+	environment := isolatedGoEnvironment(t, proxy)
+	environment = setEnvironmentValue(environment, templateDriftHelperEnvironment, "1")
+	environment = setEnvironmentValue(environment, templateDriftGoEnvironment, realGo)
+	environment = setEnvironmentValue(environment, templateDriftCountEnvironment, countFile)
+	parent := t.TempDir()
+
+	_, err = newproject.Create(t.Context(), newproject.Options{
+		Parent:      parent,
+		ProjectName: "my-app",
+		ModulePath:  "example.com/acme/my-app",
+		Template:    templateQuery,
+		GoCommand:   os.Args[0],
+		Environment: environment,
+	})
+	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrInvalidTemplate) {
+		t.Fatalf("Create error = %v", err)
+	}
+	for _, detail := range []string{
+		templateQuery,
+		"generated output is not stable immediately after installation",
+		"changed generated/go/assembly/compatibility_gen.go",
+		"template publisher must make generation deterministic",
+		"plystra generate --check",
+		"publish a corrected module version",
+	} {
+		if !strings.Contains(err.Error(), detail) {
+			t.Fatalf("Create error omits %q: %v", detail, err)
+		}
+	}
+	if data, readErr := os.ReadFile(countFile); readErr != nil || string(data) != "4" {
+		t.Fatalf("module discovery count = %q, %v; immediate check did not run exactly once", data, readErr)
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists after generated drift failure: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
+}
+
+func TestCreateClassifiesImmediateGeneratedCheckFailureAndRollsBack(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/uncheckable-platform"
+	const templateVersion = "v1.0.0"
+	const templateQuery = templatePath + "@" + templateVersion
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"template.go":  []byte("package platform\n"),
+		"plystra.yaml": []byte("{}\n"),
+	})
+	realGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("LookPath(go): %v", err)
+	}
+	countFile := filepath.Join(t.TempDir(), "module-discovery-count")
+	environment := isolatedGoEnvironment(t, proxy)
+	environment = setEnvironmentValue(environment, templateDriftHelperEnvironment, "1")
+	environment = setEnvironmentValue(environment, templateDriftGoEnvironment, realGo)
+	environment = setEnvironmentValue(environment, templateDriftCountEnvironment, countFile)
+	environment = setEnvironmentValue(environment, templateDriftFailEnvironment, "1")
+	parent := t.TempDir()
+
+	_, err = newproject.Create(t.Context(), newproject.Options{
+		Parent:      parent,
+		ProjectName: "my-app",
+		ModulePath:  "example.com/acme/my-app",
+		Template:    templateQuery,
+		GoCommand:   os.Args[0],
+		Environment: environment,
+	})
+	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrInvalidTemplate) || !errors.Is(err, applicationgenerate.ErrGenerate) {
+		t.Fatalf("Create error = %v", err)
+	}
+	for _, detail := range []string{
+		templateQuery,
+		"generated stability checking failed immediately after installation",
+		"injected generated stability check failure",
+		"template publisher must make generation deterministic",
+		"plystra generate --check",
+		"publish a corrected module version",
+	} {
+		if !strings.Contains(err.Error(), detail) {
+			t.Fatalf("Create error omits %q: %v", detail, err)
+		}
+	}
+	if data, readErr := os.ReadFile(countFile); readErr != nil || string(data) != "4" {
+		t.Fatalf("module discovery count = %q, %v; immediate check did not run exactly once", data, readErr)
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists after generated stability check failure: %v", err)
 	}
 	assertNoTransactionFiles(t, parent)
 }
@@ -1226,6 +1399,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra new app --module github.com/acme/app",
 		"plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3",
 		"Template-declared operational values and Secret-reference placeholders",
+		"immediate plystra generate --check equivalent",
 		"does not read PLATFORM_SMTP_PASSWORD",
 		"invent values for required fields omitted by the template",
 		"plystra plugin create records",
