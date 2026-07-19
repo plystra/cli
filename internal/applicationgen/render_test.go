@@ -52,6 +52,10 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 	wantPaths := []string{
 		"generated/docs/api.md",
 		"generated/docs/openapi.json",
+		"generated/go/adapters/connect/compat/send/v1/handler_gen.go",
+		"generated/go/adapters/connect/email/send/v1/handler_gen.go",
+		"generated/go/adapters/connect/health/status/v1/handler_gen.go",
+		"generated/go/adapters/connect/kernel/health/v1/handler_gen.go",
 		"generated/go/adapters/http/compat/send/v1/handler_gen.go",
 		"generated/go/adapters/http/email/send/v1/handler_gen.go",
 		"generated/go/adapters/http/health/status/v1/handler_gen.go",
@@ -67,6 +71,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		"generated/go/clients/kernel/health/v1/client_gen.go",
 		"generated/go/contracts/email/send/v1/contract_gen.go",
 		"generated/go/contracts/kernel/health/v1/contract_gen.go",
+		"generated/go/internal/connectschema/schema_gen.go",
 		"generated/go/internal/invocationcontext/context_gen.go",
 		"generated/go/invocation/email/send/v1/invocation_gen.go",
 		"generated/go/invocation/kernel/health/v1/invocation_gen.go",
@@ -110,6 +115,21 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		if !strings.Contains(assembly, required) {
 			t.Fatalf("intrinsic assembly omits %q:\n%s", required, assembly)
 		}
+	}
+	connectHandler := string(outputData(t, output, "generated/go/adapters/connect/email/send/v1/handler_gen.go"))
+	for _, required := range []string{"applicationinvocation.Handle", "return target.Invoke(ctx, request)", "connect.NewUnaryHandler("} {
+		if !strings.Contains(connectHandler, required) {
+			t.Fatalf("canonical Connect handler omits %q:\n%s", required, connectHandler)
+		}
+	}
+	for _, forbidden := range []string{"generated/go/providers", "kernelinvocation.Handle", "Provider"} {
+		if strings.Contains(connectHandler, forbidden) {
+			t.Fatalf("canonical Connect handler contains forbidden provider boundary %q:\n%s", forbidden, connectHandler)
+		}
+	}
+	connectAlias := string(outputData(t, output, "generated/go/adapters/connect/compat/send/v1/handler_gen.go"))
+	if !strings.Contains(connectAlias, "canonicaladapter.Handler") || strings.Contains(connectAlias, "applicationinvocation") {
+		t.Fatalf("Alias Connect handler does not reuse the canonical handler:\n%s", connectAlias)
 	}
 	manifest := string(outputData(t, output, "generated/manifest.json"))
 	for _, required := range []string{
@@ -194,6 +214,8 @@ func TestRenderRemovesAliasSurfacesWhenFinalMapChanges(t *testing.T) {
 		t.Fatalf("Check without Aliases: %v", err)
 	}
 	wantObsolete := []string{
+		"generated/go/adapters/connect/compat/send/v1/handler_gen.go",
+		"generated/go/adapters/connect/health/status/v1/handler_gen.go",
 		"generated/go/adapters/http/compat/send/v1/handler_gen.go",
 		"generated/go/adapters/http/health/status/v1/handler_gen.go",
 		"generated/go/clients/compat/send/v1/client_gen.go",

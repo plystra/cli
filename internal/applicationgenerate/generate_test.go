@@ -126,6 +126,59 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	}
 }
 
+func TestModuleRequirementRejectsInvalidPathOrMinimumVersion(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		modulePath string
+		version    string
+		valid      bool
+	}{
+		{modulePath: "connectrpc.com/connect", version: "v1.20.0", valid: true},
+		{modulePath: "example.com/runtime/v2", version: "v2.1.0", valid: true},
+		{modulePath: "", version: "v1.0.0"},
+		{modulePath: "example.com/runtime", version: "1.0.0"},
+		{modulePath: "example.com/runtime/v2", version: "v1.0.0"},
+		{modulePath: "example.com/runtime", version: "v1.0.0+metadata"},
+	} {
+		requirement, err := applicationgenerate.NewModuleRequirement(test.modulePath, test.version)
+		if test.valid {
+			if err != nil || requirement.Path() != test.modulePath || requirement.MinimumVersion() != test.version {
+				t.Fatalf("NewModuleRequirement(%q, %q) = %#v, %v", test.modulePath, test.version, requirement, err)
+			}
+			continue
+		}
+		if !errors.Is(err, applicationgenerate.ErrRuntimeDependency) {
+			t.Fatalf("NewModuleRequirement(%q, %q) error = %v", test.modulePath, test.version, err)
+		}
+	}
+}
+
+func TestGenerateCheckReportsMissingConnectRuntimeRequirementsWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeApplicationModule(t, root, "example.com/acme/missing-connect-runtime")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: [kernel.health/v1]}\n")
+	before := snapshotTree(t, root)
+	_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Check:       true,
+		Environment: goEnvironment(nil),
+	})
+	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, applicationgenerate.ErrRuntimeDependency) {
+		t.Fatalf("Generate check error = %v", err)
+	}
+	for _, want := range []string{"connectrpc.com/connect", "v1.20.0", "run plystra generate"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Generate check error %q omits %q", err, want)
+		}
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("Generate check mutated missing-runtime Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
 func TestGenerateDetectsDescriptorEvidenceDriftWithoutMutation(t *testing.T) {
 	t.Parallel()
 
@@ -172,7 +225,7 @@ func TestGenerateMaintainsStableOwnedProtobufFieldHistoryTransactionally(t *test
 	t.Parallel()
 
 	root := t.TempDir()
-	writeApplicationModule(t, root, "example.com/acme/wire-history")
+	writeConnectApplicationModule(t, root, "example.com/acme/wire-history")
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
   transports: {connect: true, rest: false}
   expose: [customer.enroll/v1]
@@ -293,7 +346,7 @@ func TestGenerateMaintainsStableOwnedProtobufEnumHistoryTransactionally(t *testi
 	t.Parallel()
 
 	root := t.TempDir()
-	writeApplicationModule(t, root, "example.com/acme/enum-wire-history")
+	writeConnectApplicationModule(t, root, "example.com/acme/enum-wire-history")
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
   transports: {connect: true, rest: false}
   expose: [delivery.route/v1]
@@ -1022,7 +1075,7 @@ func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeApplicationModule(t, root, "example.com/acme/exposure-"+strings.ReplaceAll(test.name, " ", "-"))
+			writeConnectApplicationModule(t, root, "example.com/acme/exposure-"+strings.ReplaceAll(test.name, " ", "-"))
 			rootData := test.rootData
 			if test.selectedPath == "plystra.yaml" {
 				rootData = test.selectedData
@@ -1543,7 +1596,7 @@ func TestUnrequiredCapabilityIsNotRegistered(t *testing.T) {
 func TestGenerateRunsIntrinsicApplicationWithoutOrdinaryPlugins(t *testing.T) {
 	const modulePath = "example.com/acme/intrinsic-app"
 	root := t.TempDir()
-	writeApplicationModule(t, root, modulePath)
+	writeConnectApplicationModule(t, root, modulePath)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
   expose: [kernel.health/v1]
 capabilities:
@@ -1612,7 +1665,7 @@ capabilities:
 
 func TestGenerateRendersValidatesAndCleansCanonicalAliasSurfaces(t *testing.T) {
 	root := t.TempDir()
-	writeApplicationModule(t, root, "github.com/acme/my-app")
+	writeConnectApplicationModule(t, root, "github.com/acme/my-app")
 	writePlugin(t, root, "business", "id: acme.business\nprovides: [email.send/v1]\n")
 	writeCapability(t, root, "business", "email.send/v1", `id: email.send/v1
 request:
@@ -1935,6 +1988,23 @@ replace github.com/plystra/kernel => %s
 `, filepath.ToSlash(kernelRoot))
 	writeModule(t, root, modulePath, extra)
 	writeFile(t, filepath.Join(root, "go.sum"), string(readAbsoluteFile(t, filepath.Join(cliRoot, "go.sum"))))
+}
+
+func writeConnectApplicationModule(t testing.TB, root, modulePath string) {
+	t.Helper()
+	writeApplicationModule(t, root, modulePath)
+	legacyProtobufRoot := filepath.Join(t.TempDir(), "legacy-protobuf")
+	writeModule(t, legacyProtobufRoot, "github.com/golang/protobuf", "")
+	goModPath := filepath.Join(root, "go.mod")
+	data := string(readAbsoluteFile(t, goModPath)) + fmt.Sprintf(`
+require (
+	connectrpc.com/connect v1.20.0
+	google.golang.org/protobuf v1.36.11
+)
+
+replace github.com/golang/protobuf => %s
+`, filepath.ToSlash(legacyProtobufRoot))
+	writeFile(t, goModPath, data)
 }
 
 func writeModule(t testing.TB, root, modulePath, extra string) {

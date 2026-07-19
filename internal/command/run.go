@@ -16,10 +16,12 @@ import (
 	"github.com/plystra/cli/internal/dependencyremove"
 	"github.com/plystra/cli/internal/dependencyupdate"
 	"github.com/plystra/cli/internal/generatedfiles"
+	"github.com/plystra/cli/internal/modulemutation"
 	"github.com/plystra/cli/internal/newproject"
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/plugintarget"
 	"github.com/plystra/cli/internal/projectcheck"
+	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/version"
 )
 
@@ -335,13 +337,30 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
 		defer cancel()
-		result, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
+		options := applicationgenerate.Options{
 			Start:             workingDirectory,
 			Check:             generate.check,
 			ConfigurationPath: generate.configurationPath,
 			EnvironmentName:   generate.environmentName,
 			Environment:       environment,
-		})
+		}
+		var result applicationgenerate.Result
+		var err error
+		if generate.check {
+			result, err = applicationgenerate.Generate(ctx, options)
+		} else {
+			project, locateErr := projectlocate.Find(workingDirectory)
+			if locateErr != nil {
+				err = fmt.Errorf("locate Project: %w", locateErr)
+			} else {
+				err = modulemutation.Tidy(ctx, project.Path(), options.GoCommand, environment, func(mutate applicationgenerate.ModuleMutation) error {
+					options.MutateModule = mutate
+					var generateErr error
+					result, generateErr = applicationgenerate.Generate(ctx, options)
+					return generateErr
+				})
+			}
+		}
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "%v\n", err)
 			return 1

@@ -22,6 +22,7 @@ import (
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/command"
+	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/newproject"
 	"github.com/plystra/cli/internal/plugincreate"
@@ -945,7 +946,7 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("rename one field in `capability.yaml`"),
 		[]byte("generated/proto/descriptor-set.pb"),
 		[]byte("self-contained"),
-		[]byte("Connect runtime bindings remain later transport work"),
+		[]byte("A selected Connect surface also emits a Go handler"),
 	} {
 		if !bytes.Contains(readme, wireHistory) {
 			t.Fatalf("generated README omits Protobuf wire-history guidance %q:\n%s", wireHistory, readme)
@@ -1369,7 +1370,49 @@ func createKernelProxy(t *testing.T) string {
 	if err := archiveFile.Close(); err != nil {
 		t.Fatalf("close zip file: %v", err)
 	}
+	for _, dependency := range []struct {
+		path    string
+		version string
+	}{
+		{path: connectgen.ConnectModulePath, version: connectgen.ConnectModuleVersion},
+		{path: connectgen.ProtobufModulePath, version: connectgen.ProtobufModuleVersion},
+		{path: "github.com/golang/protobuf", version: "v1.5.0"},
+		{path: "github.com/google/go-cmp", version: "v0.7.0"},
+	} {
+		copyCachedProxyModule(t, root, dependency.path, dependency.version)
+	}
 	return root
+}
+
+func copyCachedProxyModule(t *testing.T, proxyRoot, modulePath, version string) {
+	t.Helper()
+	escapedPath, err := module.EscapePath(modulePath)
+	if err != nil {
+		t.Fatalf("EscapePath(%s): %v", modulePath, err)
+	}
+	escapedVersion, err := module.EscapeVersion(version)
+	if err != nil {
+		t.Fatalf("EscapeVersion(%s): %v", version, err)
+	}
+	cacheData, err := gocommand.Output(context.Background(), gocommand.Options{
+		Environment: setEnvironmentValue(os.Environ(), "GOWORK", "off"),
+	}, "env", "GOMODCACHE")
+	if err != nil {
+		t.Fatalf("locate Go Module Cache: %v", err)
+	}
+	cacheRoot := strings.TrimSpace(string(cacheData))
+	sourceRoot := filepath.Join(cacheRoot, "cache", "download", filepath.FromSlash(escapedPath), "@v")
+	targetRoot := filepath.Join(proxyRoot, filepath.FromSlash(escapedPath), "@v")
+	if err := os.MkdirAll(targetRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", targetRoot, err)
+	}
+	for _, suffix := range []string{"list", escapedVersion + ".info", escapedVersion + ".mod", escapedVersion + ".zip", escapedVersion + ".ziphash"} {
+		data, err := os.ReadFile(filepath.Join(sourceRoot, suffix))
+		if err != nil {
+			t.Fatalf("read cached %s@%s %s: %v", modulePath, version, suffix, err)
+		}
+		writeTestFile(t, filepath.Join(targetRoot, suffix), data)
+	}
 }
 
 func writeProxyModule(t *testing.T, root, modulePath, version string, source map[string][]byte) {
@@ -1698,7 +1741,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"http_status and h_t_t_p_status both derive one HTTPStatusEnum type",
 		"Protobuf naming collision",
 		"generated/proto/descriptor-set.pb is the self-contained deterministic",
-		"Connect runtime bindings remain later transport work",
+		"A selected Connect surface also emits a Go handler",
 		"configuration schema v4",
 		"Protobuf wire-map digest",
 		"environment, or explicit-config mode",

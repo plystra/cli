@@ -16,6 +16,8 @@ import (
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/gocommand"
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 )
 
 var (
@@ -92,14 +94,14 @@ func Change(ctx context.Context, root string, options ChangeOptions, operation f
 	}
 	preserved := installed
 
-	mutate := func(_ context.Context, mutationRoot string, validate func() error) error {
+	mutate := func(_ context.Context, mutationRoot string, requirements []applicationgenerate.ModuleRequirement, validate func() error) error {
 		if validate == nil {
 			return fmt.Errorf("%w: validation callback is nil", ErrChange)
 		}
 		if mutationRoot != root {
 			return fmt.Errorf("%w: generation changed module root from %q to %q", ErrChange, root, mutationRoot)
 		}
-		normalized, normalizeErr := normalizeModuleMetadata(ctx, root, options.GoCommand, options.Environment, preserved)
+		normalized, normalizeErr := normalizeModuleMetadata(ctx, root, options.GoCommand, options.Environment, preserved, requirements)
 		if normalized != nil {
 			installed = normalized
 		}
@@ -193,14 +195,14 @@ func Tidy(ctx context.Context, root, goCommand string, environment []string, ope
 		}
 	}()
 
-	mutate := func(_ context.Context, mutationRoot string, validate func() error) error {
+	mutate := func(_ context.Context, mutationRoot string, requirements []applicationgenerate.ModuleRequirement, validate func() error) error {
 		if validate == nil {
 			return fmt.Errorf("%w: validation callback is nil", ErrTidy)
 		}
 		if mutationRoot != root {
 			return fmt.Errorf("%w: generation changed module root from %q to %q", ErrTidy, root, mutationRoot)
 		}
-		normalized, err = normalizeModuleMetadata(ctx, root, goCommand, environment, before)
+		normalized, err = normalizeModuleMetadata(ctx, root, goCommand, environment, before, requirements)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrTidy, err)
 		}
@@ -216,23 +218,125 @@ func Tidy(ctx context.Context, root, goCommand string, environment []string, ope
 	return nil
 }
 
-func normalizeModuleMetadata(ctx context.Context, root, goCommand string, environment []string, preserved moduleFiles) (moduleFiles, error) {
-	tidyErr := gocommand.Run(ctx, gocommand.Options{
-		Command:     goCommand,
-		Directory:   root,
-		Environment: environment,
-	}, "mod", "tidy")
-	if tidyErr == nil {
-		tidyErr = mergeOriginalModuleMetadata(root, preserved)
+func normalizeModuleMetadata(
+	ctx context.Context,
+	root, goCommand string,
+	environment []string,
+	preserved moduleFiles,
+	requirements []applicationgenerate.ModuleRequirement,
+) (moduleFiles, error) {
+	normalizedRequirements, operationErr := normalizeRuntimeRequirements(requirements)
+	selected := preserved
+	if operationErr == nil {
+		operationErr = selectRuntimeRequirements(ctx, root, goCommand, environment, normalizedRequirements)
+	}
+	if operationErr == nil && len(normalizedRequirements) != 0 {
+		var captureErr error
+		selected, captureErr = captureModuleFiles(root)
+		if captureErr != nil {
+			operationErr = fmt.Errorf("capture selected runtime requirements: %w", captureErr)
+		}
+	}
+	if operationErr == nil {
+		operationErr = gocommand.Run(ctx, gocommand.Options{
+			Command:     goCommand,
+			Directory:   root,
+			Environment: environment,
+		}, "mod", "tidy")
+	}
+	if operationErr == nil {
+		operationErr = mergeOriginalModuleMetadata(root, selected)
+	}
+	if operationErr == nil {
+		paths := make([]string, len(normalizedRequirements))
+		for index, requirement := range normalizedRequirements {
+			paths[index] = requirement.Path()
+		}
+		operationErr = markDirectRequirements(root, paths)
 	}
 	normalized, captureErr := captureModuleFiles(root)
 	if captureErr != nil {
-		return nil, errors.Join(tidyErr, fmt.Errorf("capture normalized module metadata: %w", captureErr))
+		return nil, errors.Join(operationErr, fmt.Errorf("capture normalized module metadata: %w", captureErr))
 	}
-	if tidyErr != nil {
-		return normalized, tidyErr
+	if operationErr != nil {
+		return normalized, operationErr
 	}
 	return normalized, nil
+}
+
+func normalizeRuntimeRequirements(requirements []applicationgenerate.ModuleRequirement) ([]applicationgenerate.ModuleRequirement, error) {
+	byPath := make(map[string]applicationgenerate.ModuleRequirement, len(requirements))
+	for _, requirement := range requirements {
+		modulePath := requirement.Path()
+		minimumVersion := requirement.MinimumVersion()
+		_, pathMajor, pathOK := module.SplitPathVersion(modulePath)
+		if module.CheckPath(modulePath) != nil || !pathOK || !semver.IsValid(minimumVersion) || semver.Canonical(minimumVersion) != minimumVersion || module.CheckPathMajor(minimumVersion, pathMajor) != nil {
+			return nil, fmt.Errorf("invalid generated runtime requirement %q@%q", modulePath, minimumVersion)
+		}
+		if previous, exists := byPath[modulePath]; !exists || semver.Compare(minimumVersion, previous.MinimumVersion()) > 0 {
+			byPath[modulePath] = requirement
+		}
+	}
+	paths := make([]string, 0, len(byPath))
+	for modulePath := range byPath {
+		paths = append(paths, modulePath)
+	}
+	sort.Strings(paths)
+	result := make([]applicationgenerate.ModuleRequirement, len(paths))
+	for index, modulePath := range paths {
+		result[index] = byPath[modulePath]
+	}
+	return result, nil
+}
+
+func selectRuntimeRequirements(
+	ctx context.Context,
+	root, goCommand string,
+	environment []string,
+	requirements []applicationgenerate.ModuleRequirement,
+) error {
+	if len(requirements) == 0 {
+		return nil
+	}
+	files, err := captureModuleFiles(root)
+	if err != nil {
+		return fmt.Errorf("capture runtime dependency metadata: %w", err)
+	}
+	parsed, err := modfile.Parse("go.mod", files["go.mod"].data, nil)
+	if err != nil {
+		return fmt.Errorf("parse go.mod for generated runtime requirements: %w", err)
+	}
+	selected := make(map[string]string, len(parsed.Require))
+	for _, requirement := range parsed.Require {
+		selected[requirement.Mod.Path] = requirement.Mod.Version
+	}
+	queries := make([]string, 0, len(requirements))
+	for _, requirement := range requirements {
+		version, exists := selected[requirement.Path()]
+		if !exists || !semver.IsValid(version) || semver.Compare(version, requirement.MinimumVersion()) < 0 {
+			queries = append(queries, requirement.Path()+"@"+requirement.MinimumVersion())
+		}
+	}
+	if len(queries) != 0 {
+		arguments := append([]string{"get"}, queries...)
+		if err := gocommand.Run(ctx, gocommand.Options{
+			Command:     goCommand,
+			Directory:   root,
+			Environment: environment,
+		}, arguments...); err != nil {
+			return fmt.Errorf("select generated runtime requirements %s: %w", strings.Join(queries, ", "), err)
+		}
+	}
+	for _, requirement := range requirements {
+		selected, exists, err := FindRequirement(root, requirement.Path())
+		if err != nil {
+			return fmt.Errorf("confirm generated runtime requirement %s: %w", requirement.Path(), err)
+		}
+		if !exists || !semver.IsValid(selected.Version()) || semver.Compare(selected.Version(), requirement.MinimumVersion()) < 0 {
+			return fmt.Errorf("generated runtime requirement %s must resolve to %s or newer", requirement.Path(), requirement.MinimumVersion())
+		}
+	}
+	return nil
 }
 
 func mergeOriginalModuleMetadata(root string, original moduleFiles) error {

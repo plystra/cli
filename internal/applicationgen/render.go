@@ -20,6 +20,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/clientgen"
 	"github.com/plystra/cli/internal/configurationgen"
+	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/contractgen"
 	"github.com/plystra/cli/internal/dependencygen"
 	"github.com/plystra/cli/internal/generatedfiles"
@@ -138,6 +139,21 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	for _, file := range descriptorEvidence.Files() {
 		if err := add(file.Path(), file.Data()); err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf descriptor evidence: %w", ErrRender, err)
+		}
+	}
+	connectFiles, err := connectgen.Render(
+		options.ModulePath,
+		protobufProjection,
+		options.ProtobufWireMap,
+		descriptorEvidence.DescriptorSet(),
+		plan,
+	)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: Connect handlers: %w", ErrRender, err)
+	}
+	for _, file := range connectFiles {
+		if err := add(file.Path(), file.Data()); err != nil {
+			return generatedfiles.Output{}, fmt.Errorf("%w: Connect handlers: %w", ErrRender, err)
 		}
 	}
 	configurationInputs := append([]configurationgen.Input(nil), options.Configurations...)
