@@ -284,6 +284,43 @@ func TestRunCapabilityExposeRejectsUnsafeOrMissingSelectionWithoutMutation(t *te
 	}
 }
 
+func TestRunCapabilityExposeRejectsMissingHTTPTransportAndRollsBack(t *testing.T) {
+	root := writeCapabilityCommandModule(t)
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {transports: {connect: false, rest: false}}\n")
+	before := commandTree(t, root)
+
+	for _, test := range []struct {
+		name       string
+		arguments  []string
+		capability string
+	}{
+		{name: "standalone exposure", arguments: []string{"capability", "expose", "kernel.health/v1"}, capability: "kernel.health/v1"},
+		{name: "authored exposure", arguments: []string{"capability", "create", "records.disabled", "--expose", "--plugin", "records"}, capability: "records.disabled/v1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			exitCode, stdout, stderr := runCommand(t, test.arguments, filepath.Join(root, "records"), commandGoEnvironment())
+			if exitCode != 1 || stdout != "" {
+				t.Fatalf("command = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			for _, want := range []string{
+				"invalid HTTP transport selection",
+				"http.expose is nonempty",
+				"http.transports.connect and http.transports.rest are both false",
+				"enable at least one transport in the selected current-project configuration",
+				test.capability + ` at plystra.yaml http.expose["` + test.capability + `"]`,
+			} {
+				if !strings.Contains(stderr, want) {
+					t.Fatalf("stderr %q does not contain %q", stderr, want)
+				}
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed command changed Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func TestRunCapabilityRejectsUnexpectedGeneratedOutput(t *testing.T) {
 	root := writeCapabilityCommandModule(t)
 	environment := commandGoEnvironment()

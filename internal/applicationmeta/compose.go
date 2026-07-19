@@ -17,6 +17,9 @@ import (
 var (
 	// ErrCompose reports that typed Project configuration composition failed.
 	ErrCompose = errors.New("compose Project configuration")
+	// ErrHTTPTransportSelection reports an effective public HTTP surface with
+	// no selected external transport.
+	ErrHTTPTransportSelection = errors.New("invalid HTTP transport selection")
 	// ErrInheritedConflict reports incompatible dependency declarations that
 	// the current Project did not explicitly replace.
 	ErrInheritedConflict = errors.New("inherited Project configuration conflict")
@@ -196,7 +199,31 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 		configurations:  configurations,
 		startupTimeout:  current.startupTimeout,
 	}
+	if err := validateHTTPTransportSelection(manifest); err != nil {
+		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+	}
 	return Composition{manifest: manifest, provenance: provenance, dependencyDigest: digest, prepared: true}, nil
+}
+
+func validateHTTPTransportSelection(manifest Manifest) error {
+	exposures := manifest.HTTPExposures()
+	if len(exposures) == 0 {
+		return nil
+	}
+	transports := manifest.HTTPTransports()
+	if transports.Connect || transports.REST {
+		return nil
+	}
+
+	declared := make([]string, len(exposures))
+	for index, exposure := range exposures {
+		declared[index] = fmt.Sprintf("%s at %s", exposure.ID(), exposure.Source())
+	}
+	return fmt.Errorf(
+		"%w: http.expose is nonempty while http.transports.connect and http.transports.rest are both false; enable at least one transport in the selected current-project configuration; exposed Capabilities: %s",
+		ErrHTTPTransportSelection,
+		strings.Join(declared, ", "),
+	)
 }
 
 type provenanceRecord struct {

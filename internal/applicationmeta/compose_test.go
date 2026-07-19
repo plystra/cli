@@ -204,6 +204,74 @@ func TestComposeKeepsDependencyHTTPTransportsOutsideInheritance(t *testing.T) {
 	}
 }
 
+func TestComposeRequiresSelectedHTTPTransportForEffectiveExposure(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name         string
+		dependencies []applicationmeta.Dependency
+		current      string
+		want         []string
+	}{
+		{
+			name:    "empty exposure permits every transport disabled",
+			current: "http: {transports: {connect: false, rest: false}}\n",
+		},
+		{
+			name:    "Connect carries exposure",
+			current: "http: {transports: {connect: true, rest: false}, expose: [kernel.health/v1]}\n",
+		},
+		{
+			name:    "REST carries exposure",
+			current: "http: {transports: {connect: false, rest: true}, expose: [kernel.health/v1]}\n",
+		},
+		{
+			name:    "local exposure without transport",
+			current: "http: {transports: {connect: false, rest: false}, expose: [kernel.health/v1]}\n",
+			want: []string{
+				applicationmeta.ErrHTTPTransportSelection.Error(),
+				"http.expose is nonempty",
+				"http.transports.connect and http.transports.rest are both false",
+				"enable at least one transport in the selected current-project configuration",
+				`kernel.health/v1 at plystra.yaml http.expose["kernel.health/v1"]`,
+			},
+		},
+		{
+			name: "dependency exposure without transport",
+			dependencies: []applicationmeta.Dependency{{
+				ModulePath:    "example.com/platform",
+				ModuleVersion: "v1.2.0",
+				Manifest:      composeManifest(t, "http: {expose: [kernel.info/v1]}\n"),
+			}},
+			current: "http: {transports: {connect: false, rest: false}}\n",
+			want: []string{
+				applicationmeta.ErrHTTPTransportSelection.Error(),
+				`kernel.info/v1 at example.com/platform@v1.2.0/plystra.yaml http.expose["kernel.info/v1"]`,
+			},
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			composition, err := applicationmeta.Compose(test.dependencies, composeManifest(t, test.current), composeSchemaLookup(nil))
+			if len(test.want) == 0 {
+				if err != nil || !composition.Valid() {
+					t.Fatalf("Compose = %#v, %v", composition, err)
+				}
+				return
+			}
+			if !errors.Is(err, applicationmeta.ErrCompose) || !errors.Is(err, applicationmeta.ErrHTTPTransportSelection) || composition.Valid() {
+				t.Fatalf("Compose = %#v, %v", composition, err)
+			}
+			for _, want := range test.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("Compose error %q does not contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 func TestComposeKeepsDependencyHTTPCORSOutsideInheritance(t *testing.T) {
 	t.Parallel()
 
