@@ -26,6 +26,7 @@ plystra help
 plystra version
 plystra new <module-path> [options]
 plystra add <go-module-query>
+plystra remove <go-module-path>
 plystra plugin create <name>
 plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
 plystra capability implement <capability-name>/vN [--plugin <plugin>]
@@ -315,13 +316,22 @@ Add one ordinary Go Module query through the public transaction:
 plystra add github.com/acme/email@v1.4.2
 ```
 
-The command may start at the Project root or inside a Plugin. It resolves the
-query through ordinary Go tooling, retains the module as a direct `go.mod`
-requirement even when its declarations do not create a Go import, recomposes
-the dependency-derived root `plystra.yaml` baseline, regenerates, tidies, and
-runs `go test -mod=readonly ./...`. The current add surface uses the default
+Remove a selected module by exact path without a version query:
+
+```powershell
+plystra remove github.com/acme/email
+```
+
+Both commands may start at the Project root or inside a Plugin. Add resolves
+the query through ordinary Go tooling and retains the module as a direct
+`go.mod` requirement even when its declarations do not create a Go import.
+Remove requires the exact module path to be selected in `go.mod`, removes it
+through ordinary Go tooling, and verifies that regeneration plus tidy did not
+select it again. Each command recomposes the dependency-derived root
+`plystra.yaml` baseline, regenerates, tidies, and runs
+`go test -mod=readonly ./...`. The current dependency surfaces use the default
 root configuration; environment and full-replacement validation for dependency
-mutations remains incomplete. It never rewrites an unselected overlay or
+mutations remains incomplete. They never rewrite an unselected overlay or
 alternative YAML file. Any later failure restores `go.mod`, `go.sum`, root
 configuration, generated output, and every other transaction-owned file.
 
