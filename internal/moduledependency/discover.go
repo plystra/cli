@@ -17,6 +17,7 @@ import (
 
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/modulelocate"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/projectlocate"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -284,8 +285,14 @@ func decodeModules(data []byte, application modulelocate.Module, requirements []
 		if err != nil {
 			return nil, fmt.Errorf("%w: decode JSON: %v", ErrInvalidOutput, err)
 		}
-		if err := module.CheckPath(listed.Path); err != nil {
-			return nil, fmt.Errorf("%w: Go returned invalid module path %q: %v", ErrInvalidOutput, listed.Path, err)
+		var pathErr error
+		if listed.Main {
+			pathErr = modulepath.CheckProject(listed.Path)
+		} else {
+			pathErr = module.CheckPath(listed.Path)
+		}
+		if pathErr != nil {
+			return nil, fmt.Errorf("%w: Go returned invalid module path %q: %v", ErrInvalidOutput, listed.Path, pathErr)
 		}
 		if _, duplicate := seen[listed.Path]; duplicate {
 			return nil, fmt.Errorf("%w: Go returned module %q more than once", ErrInvalidOutput, listed.Path)
@@ -343,7 +350,7 @@ func decodeModules(data []byte, application modulelocate.Module, requirements []
 			// version later, outside the Project directory.
 		} else {
 			var err error
-			root, err = validateModuleRoot(listed.Path, directory, goModPath, expectedSourcePath)
+			root, err = validateModuleRoot(listed.Path, directory, goModPath, expectedSourcePath, listed.Main)
 			if err != nil {
 				return nil, err
 			}
@@ -443,7 +450,7 @@ func resolveMissingSources(ctx context.Context, applicationRoot string, expected
 		if downloaded.Path != queryPath || downloaded.Version != queryVersion {
 			return fmt.Errorf("%w: downloaded source for module %q returned %s@%s, expected %s", ErrInvalidOutput, modules[index].path, downloaded.Path, downloaded.Version, query)
 		}
-		root, err := validateModuleRoot(modules[index].path, downloaded.Dir, downloaded.GoMod, queryPath)
+		root, err := validateModuleRoot(modules[index].path, downloaded.Dir, downloaded.GoMod, queryPath, false)
 		if err != nil {
 			return err
 		}
@@ -495,7 +502,7 @@ func sameDirectory(left, right string) bool {
 	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
 }
 
-func validateModuleRoot(modulePath, directory, goModPath, expectedSourcePath string) (string, error) {
+func validateModuleRoot(modulePath, directory, goModPath, expectedSourcePath string, project bool) (string, error) {
 	if directory == "" || goModPath == "" {
 		return "", fmt.Errorf("%w: %w: module %q must be downloaded before generation", ErrInvalidOutput, ErrModuleUnavailable, modulePath)
 	}
@@ -533,7 +540,13 @@ func validateModuleRoot(modulePath, directory, goModPath, expectedSourcePath str
 	if err != nil || parsed.Module == nil {
 		return "", fmt.Errorf("%w: module %q source has invalid go.mod", ErrInvalidOutput, modulePath)
 	}
-	if err := module.CheckPath(parsed.Module.Mod.Path); err != nil {
+	var pathErr error
+	if project {
+		pathErr = modulepath.CheckProject(parsed.Module.Mod.Path)
+	} else {
+		pathErr = module.CheckPath(parsed.Module.Mod.Path)
+	}
+	if pathErr != nil {
 		return "", fmt.Errorf("%w: module %q source declares invalid path %q", ErrInvalidOutput, modulePath, parsed.Module.Mod.Path)
 	}
 	if expectedSourcePath != "" && parsed.Module.Mod.Path != expectedSourcePath {

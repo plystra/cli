@@ -17,6 +17,7 @@ func TestInferPackageNameFromGoModuleIdentity(t *testing.T) {
 		want       string
 	}{
 		{modulePath: "github.com/acme/my-app", want: "@acme/my-app-sdk"},
+		{modulePath: "my-app", want: "my-app-sdk"},
 		{modulePath: "example.com/my-app", want: "my-app-sdk"},
 		{modulePath: "example.com/acme/platform/my-app/v2", want: "@acme/platform-my-app-sdk"},
 		{modulePath: "gopkg.in/yaml.v3", want: "yaml-sdk"},
@@ -45,7 +46,7 @@ func TestInferPackageNameRejectsInvalidAndOversizedModuleIdentity(t *testing.T) 
 
 	for _, modulePath := range []string{
 		"",
-		"not-a-module",
+		"not a module",
 		"example.com",
 		"github.com/Acme/My-App",
 		"example.com/acme/package~tools",

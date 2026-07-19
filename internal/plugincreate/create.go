@@ -12,6 +12,7 @@ import (
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/modulemutation"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/pluginid"
 	"github.com/plystra/cli/internal/pluginscan"
 	"github.com/plystra/cli/internal/projectlocate"
@@ -129,7 +130,7 @@ func validateName(name string) error {
 }
 
 func deriveID(modulePath, name string) (string, error) {
-	if err := module.CheckPath(modulePath); err != nil {
+	if err := modulepath.CheckProject(modulePath); err != nil {
 		return "", fmt.Errorf("%w: invalid Go Module path %q: %v", ErrDeriveID, modulePath, err)
 	}
 	prefix, _, ok := module.SplitPathVersion(modulePath)
@@ -137,10 +138,16 @@ func deriveID(modulePath, name string) (string, error) {
 		return "", fmt.Errorf("%w: invalid semantic import version in %q", ErrDeriveID, modulePath)
 	}
 	components := strings.Split(prefix, "/")
-	if len(components) < 2 {
+	if strings.Contains(components[0], ".") {
+		if len(components) < 2 {
+			return "", fmt.Errorf("%w: module path %q has no namespace below its host", ErrDeriveID, modulePath)
+		}
+		components = components[1:]
+	}
+	if len(components) == 0 {
 		return "", fmt.Errorf("%w: module path %q has no namespace below its host", ErrDeriveID, modulePath)
 	}
-	id := strings.Join(components[1:], ".") + "." + name
+	id := strings.Join(components, ".") + "." + name
 	if err := pluginid.Validate(id); err != nil {
 		return "", fmt.Errorf("%w: module path %q produces %q: %v", ErrDeriveID, modulePath, id, err)
 	}

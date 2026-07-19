@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/mod/module"
+	"github.com/plystra/cli/internal/modulepath"
 )
 
 // Path is the application-relative generated bootstrap source path.
@@ -34,7 +34,7 @@ type Options struct {
 // Render emits the redacted runtime boundary that safely loads the application
 // document, constructs selected providers, and owns their lifecycle.
 func Render(options Options) ([]byte, error) {
-	if err := module.CheckPath(options.ModulePath); err != nil {
+	if err := modulepath.CheckProject(options.ModulePath); err != nil {
 		return nil, fmt.Errorf("%w: %w: invalid Go Module path %q", ErrRender, ErrInvalidOptions, options.ModulePath)
 	}
 	if options.DefaultStartupTimeout <= 0 {

@@ -23,6 +23,7 @@ import (
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/modulelocate"
+	"github.com/plystra/cli/internal/modulepath"
 	"golang.org/x/mod/module"
 )
 
@@ -354,7 +355,7 @@ func normalizeSpec(spec Spec) (normalizedSpec, error) {
 	if spec.API != generation.Version {
 		return normalizedSpec{}, fmt.Errorf("%w: plugin %q generation api %q is not supported; supported API is %q", ErrUnsupportedAPI, spec.PluginID, spec.API, generation.Version)
 	}
-	if err := module.CheckPath(spec.ModulePath); err != nil {
+	if err := modulepath.CheckProject(spec.ModulePath); err != nil {
 		return normalizedSpec{}, fmt.Errorf("plugin %q module path %q is not canonical: %w", spec.PluginID, spec.ModulePath, err)
 	}
 	if !validRelativeSlashPath(spec.PluginPath) {

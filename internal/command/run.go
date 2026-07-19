@@ -27,7 +27,7 @@ const (
 	usage                    = `Usage:
   plystra help
   plystra version
-  plystra new <module-path> [options]
+  plystra new <project-name> [options]
   plystra add <go-module-query>
   plystra remove <go-module-path>
   plystra update <go-module-query>
@@ -57,9 +57,10 @@ Updates one selected ordinary Go Module dependency, recomposes root plystra.yaml
 regenerates, tidies, and validates the complete Project in one rollback boundary.
 `
 	newUsage = `Usage:
-  plystra new <module-path> [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]
+  plystra new <project-name> [--module <go-module-path>] [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]
 
 Options:
+  --module <go-module-path> Set the Go Module path; defaults to the project name.
   --plugin <name>           Create an initial root-level plugin.
   --git, --no-git           Initialize or omit a Git repository.
   --github-ci, --no-github-ci
@@ -155,6 +156,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		defer cancel()
 		result, err := newproject.Create(ctx, newproject.Options{
 			Parent:      workingDirectory,
+			ProjectName: options.projectName,
 			ModulePath:  options.modulePath,
 			Plugin:      options.plugin,
 			Git:         choices.git,
@@ -379,11 +381,12 @@ func writeGenerationReport(writer io.Writer, heading string, configurationDrift 
 }
 
 type newArguments struct {
-	modulePath string
-	plugin     string
-	git        booleanChoice
-	githubCI   booleanChoice
-	skills     booleanChoice
+	projectName string
+	modulePath  string
+	plugin      string
+	git         booleanChoice
+	githubCI    booleanChoice
+	skills      booleanChoice
 }
 
 type booleanChoice uint8
@@ -406,10 +409,18 @@ func parseNewArguments(arguments []string) (newArguments, bool) {
 	if len(arguments) < 2 || arguments[1] == "" || strings.HasPrefix(arguments[1], "--") {
 		return newArguments{}, false
 	}
-	result := newArguments{modulePath: arguments[1]}
+	result := newArguments{projectName: arguments[1]}
+	moduleSet := false
 	pluginSet := false
 	for index := 2; index < len(arguments); index++ {
 		switch arguments[index] {
+		case "--module":
+			if moduleSet || index+1 >= len(arguments) || arguments[index+1] == "" || strings.HasPrefix(arguments[index+1], "--") {
+				return newArguments{}, false
+			}
+			moduleSet = true
+			index++
+			result.modulePath = arguments[index]
 		case "--plugin":
 			if pluginSet || index+1 >= len(arguments) || arguments[index+1] == "" || strings.HasPrefix(arguments[index+1], "--") {
 				return newArguments{}, false

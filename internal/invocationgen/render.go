@@ -17,7 +17,7 @@ import (
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/goname"
-	"golang.org/x/mod/module"
+	"github.com/plystra/cli/internal/modulepath"
 )
 
 var (
@@ -82,7 +82,7 @@ func RenderPlan(modulePath string, schema []byte, plan generationlowering.Plan) 
 }
 
 func render(modulePath string, schema []byte, plan *generationlowering.Plan) (File, error) {
-	if err := module.CheckPath(modulePath); err != nil {
+	if err := modulepath.CheckProject(modulePath); err != nil {
 		return File{}, fmt.Errorf("%w: invalid Go Module path %q: %v", ErrRender, modulePath, err)
 	}
 	canonical, err := capabilitymeta.NormalizeSchema(schema)

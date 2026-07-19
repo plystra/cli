@@ -14,8 +14,8 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/goname"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/pluginid"
-	"golang.org/x/mod/module"
 )
 
 var (
@@ -51,7 +51,7 @@ type requirement struct {
 // Render emits one plugin-specific immutable set of exact generated clients.
 // Requirements are sorted by canonical identity, never by declaration order.
 func Render(modulePath, pluginName, pluginID string, required []string) (File, error) {
-	if err := module.CheckPath(modulePath); err != nil {
+	if err := modulepath.CheckProject(modulePath); err != nil {
 		return File{}, fmt.Errorf("%w: %w: invalid Go Module path %q: %v", ErrRender, ErrInvalidInput, modulePath, err)
 	}
 	if _, err := configurationgen.DeriveGoNames(pluginName); err != nil {

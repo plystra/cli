@@ -368,7 +368,7 @@ func TestNormalizeSpecRejectsUnsafeOrAmbiguousDeclarations(t *testing.T) {
 	tests := map[string]Spec{
 		"invalid plugin":      withSpec(valid, func(spec *Spec) { spec.PluginID = "Example" }),
 		"unsupported API":     withSpec(valid, func(spec *Spec) { spec.API = "v2" }),
-		"invalid module":      withSpec(valid, func(spec *Spec) { spec.ModulePath = "local" }),
+		"invalid module":      withSpec(valid, func(spec *Spec) { spec.ModulePath = "local/module" }),
 		"escaping plugin":     withSpec(valid, func(spec *Spec) { spec.PluginPath = "../plugin" }),
 		"escaping package":    withSpec(valid, func(spec *Spec) { spec.Package = "./../generation" }),
 		"absolute package":    withSpec(valid, func(spec *Spec) { spec.Package = "/generation" }),

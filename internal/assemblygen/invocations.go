@@ -15,10 +15,10 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/goname"
+	"github.com/plystra/cli/internal/modulepath"
 	kernelcatalog "github.com/plystra/kernel/capability/catalog"
 	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 	kernelinvocation "github.com/plystra/kernel/invocation"
-	"golang.org/x/mod/module"
 )
 
 // InvocationsPath is the application-relative canonical runtime source path.
@@ -377,7 +377,7 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 }
 
 func planInvocations(options InvocationOptions) ([]plannedInvocation, []int, error) {
-	if err := module.CheckPath(options.ModulePath); err != nil {
+	if err := modulepath.CheckProject(options.ModulePath); err != nil {
 		return nil, nil, fmt.Errorf("%w: application Go Module path %q: %v", ErrInvalidInvocation, options.ModulePath, err)
 	}
 	if options.DefaultTimeout <= 0 {

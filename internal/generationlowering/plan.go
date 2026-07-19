@@ -10,7 +10,7 @@ import (
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/goname"
-	"golang.org/x/mod/module"
+	"github.com/plystra/cli/internal/modulepath"
 )
 
 var (
@@ -230,7 +230,7 @@ func (p Plan) RequiresHTTPPath(source generation.CapabilityID) bool {
 // order into immutable render-ready references and identifiers. It never uses
 // discovery order to reorder semantic work.
 func Lower[C ContributionView](modulePath string, inputs []C) (Plan, error) {
-	if err := module.CheckPath(modulePath); err != nil {
+	if err := modulepath.CheckProject(modulePath); err != nil {
 		return Plan{}, fmt.Errorf("%w: invalid application Go Module path %q: %v", ErrLower, modulePath, err)
 	}
 
