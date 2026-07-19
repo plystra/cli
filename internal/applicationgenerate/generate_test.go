@@ -535,6 +535,87 @@ func TestGenerateSelectedHTTPTransportsCauseApplicationModelDrift(t *testing.T) 
 	}
 }
 
+func TestGenerateRequiresConnectForSelectedJavaScriptSDK(t *testing.T) {
+	tests := []struct {
+		name         string
+		rootData     string
+		selectedPath string
+		selectedData string
+		configure    func(*applicationgenerate.Options)
+	}{
+		{
+			name:         "default",
+			selectedPath: "plystra.yaml",
+			selectedData: "http: {transports: {connect: false, rest: true}, expose: [kernel.health/v1]}\n",
+		},
+		{
+			name:         "environment",
+			rootData:     "http: {expose: [kernel.health/v1]}\n",
+			selectedPath: "plystra.production.yaml",
+			selectedData: "http: {transports: {connect: false, rest: true}}\n",
+			configure: func(options *applicationgenerate.Options) {
+				options.EnvironmentName = "production"
+			},
+		},
+		{
+			name:         "full replacement",
+			rootData:     "{}\n",
+			selectedPath: "deploy/customer-a.yaml",
+			selectedData: "http: {transports: {connect: false, rest: true}, expose: [kernel.health/v1]}\n",
+			configure: func(options *applicationgenerate.Options) {
+				options.ConfigurationPath = "deploy/customer-a.yaml"
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeApplicationModule(t, root, "example.com/acme/javascript-connect-"+strings.ReplaceAll(test.name, " ", "-"))
+			rootData := test.rootData
+			if test.selectedPath == "plystra.yaml" {
+				rootData = test.selectedData
+			}
+			writeFile(t, filepath.Join(root, "plystra.yaml"), rootData)
+			if test.selectedPath != "plystra.yaml" {
+				writeFile(t, filepath.Join(root, filepath.FromSlash(test.selectedPath)), test.selectedData)
+			}
+			options := applicationgenerate.Options{
+				Start:       root,
+				Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+				Validate:    func(_ context.Context, _ string) error { return nil },
+			}
+			if test.configure != nil {
+				test.configure(&options)
+			}
+
+			for _, check := range []bool{true, false} {
+				before := snapshotTree(t, root)
+				selectedOptions := options
+				selectedOptions.Check = check
+				if check {
+					selectedOptions.Validate = nil
+				}
+				result, err := applicationgenerate.Generate(t.Context(), selectedOptions)
+				if !errors.Is(err, applicationgen.ErrJavaScriptTransport) || result.Module().Path() != "" {
+					t.Fatalf("Generate(check=%t) = %#v, %v", check, result, err)
+				}
+				for _, want := range []string{
+					`http.transports.connect is false for selected configuration "` + test.selectedPath + `"`,
+					"official generated JavaScript SDK requires Connect for Capability kernel.health/v1",
+					"enable http.transports.connect",
+				} {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("Generate(check=%t) error %q does not contain %q", check, err, want)
+					}
+				}
+				if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+					t.Fatalf("Generate(check=%t) mutated rejected Project:\nbefore: %#v\nafter:  %#v", check, before, after)
+				}
+			}
+		})
+	}
+}
+
 func TestGenerateApplicationModelDigestExcludesRuntimeValuesAndMachinePaths(t *testing.T) {
 	root := t.TempDir()
 	writeApplicationModule(t, root, "example.com/acme/private-runtime-values")

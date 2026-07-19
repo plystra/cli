@@ -227,6 +227,43 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	}
 }
 
+func TestRenderRequiresConnectForJavaScriptSDK(t *testing.T) {
+	t.Parallel()
+
+	resolution := resolvedApplication(t, `capabilities:
+  aliases:
+    compat.send/v1: email.send/v1
+`)
+	options := resolvedOptions()
+	options.HTTPTransports = applicationmeta.HTTPTransports{REST: true}
+	options = withManifestProvenance(t, options, resolution)
+	output, err := applicationgen.Render(options, resolution)
+	if !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, applicationgen.ErrJavaScriptTransport) || len(output.Files()) != 0 || len(output.ManifestJSON()) != 0 {
+		t.Fatalf("Render = %#v, %v", output, err)
+	}
+	for _, want := range []string{
+		`http.transports.connect is false for selected configuration "plystra.yaml"`,
+		"official generated JavaScript SDK requires Connect",
+		"Alias compat.send/v1 -> email.send/v1",
+		"Capability email.send/v1",
+		"Capability kernel.health/v1",
+		"enable http.transports.connect",
+		"http.expose and capabilities.aliases",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Render error %q does not contain %q", err, want)
+		}
+	}
+
+	emptyResolution := emptyApplication(t)
+	emptyOptions := emptyOptions("example.com/acme/rest-only-internal")
+	emptyOptions.HTTPTransports = applicationmeta.HTTPTransports{REST: true}
+	emptyOptions = withManifestProvenance(t, emptyOptions, emptyResolution)
+	if output, err := applicationgen.Render(emptyOptions, emptyResolution); err != nil || len(output.Files()) == 0 || len(output.ManifestJSON()) == 0 {
+		t.Fatalf("Render REST-only internal application = %#v, %v", output, err)
+	}
+}
+
 func TestRenderGeneratesOnlyDeveloperSurfacesForUnrequiredLocalCapability(t *testing.T) {
 	t.Parallel()
 
@@ -239,6 +276,7 @@ func TestRenderGeneratesOnlyDeveloperSurfacesForUnrequiredLocalCapability(t *tes
 		ModulePath:          applicationModulePath,
 		KernelModuleVersion: "v0.0.0",
 		KernelBuildIdentity: "application-render-test",
+		HTTPTransports:      applicationmeta.HTTPTransports{Connect: true},
 		Composition:         testComposition(),
 		Providers: []assemblygen.ProviderInput{{
 			PluginID:   "acme.business",
@@ -298,6 +336,7 @@ timeout: {type: duration, default: 5s}
 		JavaScriptPackage:   applicationSDKPackage,
 		KernelModuleVersion: "v0.0.0",
 		KernelBuildIdentity: "application-render-test",
+		HTTPTransports:      applicationmeta.HTTPTransports{Connect: true},
 		Composition:         testComposition(),
 		Providers:           selectedProviderInputs(),
 		Configurations: []configurationgen.Input{{
@@ -371,6 +410,7 @@ func resolvedOptions() applicationgen.Options {
 		JavaScriptPackage:   applicationSDKPackage,
 		KernelModuleVersion: "v0.0.0",
 		KernelBuildIdentity: "application-render-test",
+		HTTPTransports:      applicationmeta.HTTPTransports{Connect: true},
 		Composition:         testComposition(),
 		Providers:           selectedProviderInputs(),
 	}
@@ -381,6 +421,7 @@ func emptyOptions(modulePath string) applicationgen.Options {
 		ModulePath:          modulePath,
 		KernelModuleVersion: "v0.0.0",
 		KernelBuildIdentity: "application-render-test",
+		HTTPTransports:      applicationmeta.HTTPTransports{Connect: true},
 		Composition:         testComposition(),
 	}
 }
@@ -392,6 +433,7 @@ func withManifestProvenance(t testing.TB, options applicationgen.Options, resolu
 		JavaScriptPackage:   options.JavaScriptPackage,
 		KernelModuleVersion: options.KernelModuleVersion,
 		KernelBuildIdentity: options.KernelBuildIdentity,
+		HTTPTransports:      options.HTTPTransports,
 		Configurations:      options.Configurations,
 		Providers:           options.Providers,
 		Resolution:          resolution,

@@ -60,7 +60,7 @@ Template creation then builds every staged Go package with ` + "`go build -mod=r
 
 Root ` + "`plystra.yaml`" + ` is the mandatory Project marker and shared default configuration. A sparse project-root ` + "`plystra.production.yaml`" + ` can be selected with ` + "`plystra generate --env production`" + ` and checked with the same selector; it is never created or loaded implicitly. To use one complete alternative current-Project document, run ` + "`plystra generate --config deploy/customer-a.yaml`" + `. Root configuration is not merged beneath an explicitly selected file. ` + "`PLYSTRA_ENV`" + ` and ` + "`PLYSTRA_CONFIG`" + ` supply the corresponding selector for automation; select exactly one mode.
 
-New Projects record ` + "`http.transports.connect: true`" + ` and ` + "`http.transports.rest: false`" + ` explicitly in root configuration. Keep those current-Project transport choices explicit when changing them.
+New Projects record ` + "`http.transports.connect: true`" + ` and ` + "`http.transports.rest: false`" + ` explicitly in root configuration. Keep those current-Project transport choices explicit when changing them. A nonempty public exposure requires at least one enabled transport, and JavaScript SDK generation requires Connect. If a selected default, environment, or full-replacement model has JavaScript Capability or Alias surfaces with Connect disabled, generation fails and identifies every affected surface; enable Connect in that selected current-Project configuration or remove those surfaces.
 
 When several compatible Plugins provide one required Capability, select one with ` + "`plystra use <capability-name>/vN <plugin-id>`" + `. Add ` + "`--env <environment>`" + ` to write only that sparse overlay or ` + "`--config <yaml-path>`" + ` to write only one complete replacement configuration; the command regenerates and validates with the same selection.
 
@@ -433,9 +433,14 @@ schema default. A complete --config document does not inherit root transport
 choices; omitted fields use the same defaults. Dependency Project transport
 settings are ignored.
 
-The current CLI validates and composes this selection. Connect/REST projection
-from the selected transport model is a later roadmap feature, so rest: true
-does not yet create a REST adapter.
+The selected transport values participate in the generated application-model
+digest. A nonempty http.expose set requires at least one enabled transport.
+The official generated JavaScript SDK requires connect: true whenever the
+selected model contains JavaScript Capability or Alias surfaces. Generation
+fails before output with the selected configuration path and every affected
+surface when Connect is disabled. Enable Connect in that current-Project
+selection or remove those surfaces. Real Connect/REST projection remains a
+later roadmap feature, so rest: true does not yet create a REST adapter.
 
 http.cors is an optional closed current-Project object. When present it
 requires one nonempty allowed_origins list and accepts only optional boolean
@@ -852,6 +857,10 @@ connect and rest are valid keys. New Project scaffolds record connect: true and
 rest: false; omitted values in another selected document use those same schema
 defaults. Environment overlays replace the two booleans independently, and
 dependency Project transport choices never override the current Project.
+JavaScript SDK generation requires Connect. A REST-only selected model with
+JavaScript Capability or Alias surfaces fails before output and names every
+affected surface; enable connect: true in the selected current-Project
+configuration or remove those surfaces.
 The current generated handler remains the implemented HTTP surface until the
 later Connect and optional REST projection gates consume this selection.
 

@@ -33,7 +33,7 @@ Template creation then builds every staged Go package with `go build -mod=readon
 
 Root `plystra.yaml` is the mandatory Project marker and shared default configuration. A sparse project-root `plystra.production.yaml` can be selected with `plystra generate --env production` and checked with the same selector; it is never created or loaded implicitly. To use one complete alternative current-Project document, run `plystra generate --config deploy/customer-a.yaml`. Root configuration is not merged beneath an explicitly selected file. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` supply the corresponding selector for automation; select exactly one mode.
 
-New Projects record `http.transports.connect: true` and `http.transports.rest: false` explicitly in root configuration. Keep those current-Project transport choices explicit when changing them.
+New Projects record `http.transports.connect: true` and `http.transports.rest: false` explicitly in root configuration. Keep those current-Project transport choices explicit when changing them. A nonempty public exposure requires at least one enabled transport, and JavaScript SDK generation requires Connect. If a selected default, environment, or full-replacement model has JavaScript Capability or Alias surfaces with Connect disabled, generation fails and identifies every affected surface; enable Connect in that selected current-Project configuration or remove those surfaces.
 
 When several compatible Plugins provide one required Capability, select one with `plystra use <capability-name>/vN <plugin-id>`. Add `--env <environment>` to write only that sparse overlay or `--config <yaml-path>` to write only one complete replacement configuration; the command regenerates and validates with the same selection.
 

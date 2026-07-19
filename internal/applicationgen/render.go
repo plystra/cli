@@ -45,6 +45,9 @@ var (
 	ErrRender = errors.New("render generated application")
 	// ErrResolution reports absent or internally inconsistent final resolution.
 	ErrResolution = errors.New("invalid generation resolution result")
+	// ErrJavaScriptTransport reports JavaScript SDK surfaces selected without
+	// the Connect transport required by the official SDK.
+	ErrJavaScriptTransport = errors.New("invalid JavaScript SDK transport selection")
 )
 
 // Options carries application-owned generated package identities.
@@ -92,6 +95,9 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	if !options.ManifestProvenance.matches(options.Composition, modelDigest) {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: application manifest provenance is absent or inconsistent", ErrRender, ErrResolution)
+	}
+	if err := validateJavaScriptTransport(options, context, aliases); err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: %w", ErrRender, err)
 	}
 	providers, err := assemblygen.RenderProviders(options.ModulePath, options.Providers)
 	if err != nil {
@@ -397,6 +403,42 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		return generatedfiles.Output{}, fmt.Errorf("%w: finalize managed output: %w", ErrRender, err)
 	}
 	return output, nil
+}
+
+func validateJavaScriptTransport(options Options, context generation.Context, aliases aliasresolution.Result) error {
+	if options.HTTPTransports.Connect {
+		return nil
+	}
+
+	surfaces := make([]string, 0)
+	for _, id := range context.Requirements() {
+		target, exists := context.Capability(id)
+		if exists && target.Exposure().JavaScript {
+			surfaces = append(surfaces, "Capability "+id.String())
+		}
+	}
+	for _, alias := range aliases.Aliases() {
+		if alias.Exposure().JavaScript {
+			surfaces = append(surfaces, fmt.Sprintf("Alias %s -> %s", alias.ID(), alias.Target()))
+		}
+	}
+	if len(surfaces) == 0 {
+		return nil
+	}
+	sort.Strings(surfaces)
+	selectedPath := options.ManifestProvenance.SelectedPath()
+	if selectedPath == "" {
+		selectedPath = options.ManifestProvenance.RootPath()
+	}
+	if selectedPath == "" {
+		selectedPath = rootConfigurationPath
+	}
+	return fmt.Errorf(
+		"%w: http.transports.connect is false for selected configuration %q, but the official generated JavaScript SDK requires Connect for %s; enable http.transports.connect in the selected current-project configuration or remove those JavaScript surfaces from http.expose and capabilities.aliases",
+		ErrJavaScriptTransport,
+		selectedPath,
+		strings.Join(surfaces, ", "),
+	)
 }
 
 func validateAssemblyClosure(options Options, context generation.Context) error {
