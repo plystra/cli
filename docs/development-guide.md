@@ -253,6 +253,15 @@ source repository, copy Plugin directories, inspect dependency environment
 overlays, modify Module Cache source, generate `go.work`, or assign the template
 special Provider or configuration precedence after creation.
 
+The template's root configuration is also the source of its verified local
+operational inputs. Typed values and Secret-reference placeholders declared
+there are composed into the new Project's root `plystra.yaml` and validated
+against the selected Plugin schemas. Creation never resolves an `env` or
+`file` reference, so neither its target nor a value present in the process
+environment enters generated source or manifest provenance. The CLI does not
+guess a value for an undeclared required field; that omission fails the
+creation transaction and the target directory is not installed.
+
 Automation must answer all three choices explicitly:
 
 ```powershell

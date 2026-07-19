@@ -182,13 +182,21 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
 	const templatePath = "example.com/acme/platform"
 	const templateVersion = "v1.2.3"
 	const templateQuery = templatePath + "@" + templateVersion
+	const secretReference = "PLYSTRA_TEMPLATE_SMTP_PASSWORD"
+	const resolvedSecret = "resolved-template-secret-must-not-leak"
 	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
 		"template.go":             []byte("package platform\n\nconst Identity = \"template-source-only\"\n"),
 		"TEMPLATE_ONLY.md":        []byte("This file must remain in the dependency source.\n"),
-		"plystra.yaml":            []byte("http:\n  expose:\n    - kernel.health/v1\n\ncapabilities:\n  require:\n    - kernel.info/v1\n  use: {}\n  aliases: {}\n\nconfig: {}\n"),
+		"plystra.yaml":            []byte("http:\n  expose:\n    - kernel.health/v1\n\ncapabilities:\n  require:\n    - email.send/v1\n    - kernel.info/v1\n  use:\n    email.send/v1: acme.platform.mailer\n  aliases: {}\n\nconfig:\n  acme.platform.mailer:\n    host: smtp.localhost\n    password:\n      env: " + secretReference + "\n"),
 		"plystra.production.yaml": []byte("capabilities:\n  require:\n    - missing.overlay/v1\n"),
+		"mailer/plugin.yaml":      []byte("id: acme.platform.mailer\nprovides: [email.send/v1]\nconfig:\n  host: {type: string, required: true}\n  password: {type: secret, required: true}\n"),
+		"mailer/capabilities/email.send/v1/capability.yaml": []byte("id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n"),
+		"mailer/plugin.go":                                     []byte("package mailer\n\nimport (\n\t\"context\"\n\n\tconfiguration \"example.com/acme/platform/generated/go/configuration\"\n\tcontract \"example.com/acme/platform/generated/go/contracts/email/send/v1\"\n)\n\ntype Config = configuration.MailerConfig\ntype Plugin struct{}\nfunc New(Config) *Plugin { return &Plugin{} }\nfunc (*Plugin) Send(context.Context, contract.Request) (contract.Response, error) { return contract.Response{}, nil }\n"),
+		"generated/go/configuration/mailer_gen.go":             []byte("package configuration\n\nimport (\n\t\"context\"\n\n\tkernelconfiguration \"github.com/plystra/kernel/configuration\"\n)\n\ntype MailerConfig struct { Host string; Password kernelconfiguration.Secret }\nfunc DecodeMailer(context.Context, *kernelconfiguration.Resolver, []byte) (MailerConfig, error) { return MailerConfig{}, nil }\n"),
+		"generated/go/contracts/email/send/v1/contract_gen.go": []byte("package emailsendv1\n\nconst CapabilityID = \"email.send/v1\"\ntype Request struct{}\ntype Response struct{}\n"),
 	})
 	environment := isolatedGoEnvironment(t, proxy)
+	environment = append(environment, secretReference+"="+resolvedSecret)
 	if err := gocommand.Run(t.Context(), gocommand.Options{
 		Directory:   t.TempDir(),
 		Environment: environment,
@@ -231,8 +239,20 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
 		t.Fatalf("composed HTTP exposures = %#v, want kernel.health/v1", exposures)
 	}
 	requirements := model.Requirements()
-	if len(requirements) != 1 || requirements[0].ID().String() != "kernel.info/v1" {
-		t.Fatalf("composed requirements = %#v, want kernel.info/v1", requirements)
+	if len(requirements) != 2 || requirements[0].ID().String() != "email.send/v1" || requirements[1].ID().String() != "kernel.info/v1" {
+		t.Fatalf("composed requirements = %#v, want email.send/v1 and kernel.info/v1", requirements)
+	}
+	choices := model.ProviderChoices()
+	if len(choices) != 1 || choices[0].Capability().String() != "email.send/v1" || choices[0].PluginID() != "acme.platform.mailer" {
+		t.Fatalf("composed Provider choices = %#v, want email.send/v1 -> acme.platform.mailer", choices)
+	}
+	pluginConfiguration, exists := model.Configuration("acme.platform.mailer")
+	if !exists {
+		t.Fatal("composed configuration omits acme.platform.mailer")
+	}
+	privateConfiguration := pluginConfiguration.YAML()
+	if !bytes.Contains(privateConfiguration, []byte("smtp.localhost")) || !bytes.Contains(privateConfiguration, []byte(secretReference)) || bytes.Contains(privateConfiguration, []byte(resolvedSecret)) {
+		t.Fatalf("composed Plugin configuration did not preserve unresolved local inputs: %s", privateConfiguration)
 	}
 	if bytes.Contains(configuration, []byte("missing.overlay/v1")) {
 		t.Fatalf("dependency environment overlay was inherited:\n%s", configuration)
@@ -245,6 +265,14 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
 	manifest, err := os.ReadFile(filepath.Join(target, "generated", "manifest.json"))
 	if err != nil || !bytes.Contains(manifest, []byte(templatePath)) {
 		t.Fatalf("generated manifest template provenance = %q, %v", manifest, err)
+	}
+	if bytes.Contains(manifest, []byte(secretReference)) || bytes.Contains(manifest, []byte(resolvedSecret)) {
+		t.Fatalf("generated manifest leaked a Secret reference or resolved value: %s", manifest)
+	}
+	for name, data := range snapshotTree(t, filepath.Join(target, "generated")) {
+		if bytes.Contains(data, []byte(secretReference)) || bytes.Contains(data, []byte(resolvedSecret)) {
+			t.Fatalf("generated path %s leaked a Secret reference or resolved value", name)
+		}
 	}
 	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       target,
@@ -747,11 +775,11 @@ func createKernelProxy(t *testing.T) string {
 		data []byte
 	}{
 		{name: "assembly/version.go", data: []byte("package assembly\n\nimport \"fmt\"\n\ntype Version uint32\n\nconst V1 Version = 1\n\nfunc RequireVersion(version Version) error {\n\tif version != V1 { return fmt.Errorf(\"unsupported assembly API version %d\", version) }\n\treturn nil\n}\n")},
-		{name: "capability/capability.go", data: []byte("package capability\n\nimport \"context\"\n\ntype Contract[Request, Response any] struct{}\ntype Handler[Request, Response any] func(context.Context, Request) (Response, error)\n")},
-		{name: "configuration/configuration.go", data: []byte("package configuration\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"os\"\n\n\t\"github.com/plystra/kernel/plugin/manifest\"\n)\n\nconst MaximumSecretValueBytes = 1 << 20\n\nvar ErrSecretExposure = errors.New(\"Secret serialization is prohibited\")\n\ntype ResolverOptions struct { MaximumValueBytes int }\ntype Resolver struct{}\ntype Values struct{}\ntype ObjectMap struct{}\ntype StringMap struct{}\n\nfunc NewResolver(ResolverOptions) (*Resolver, error) { return &Resolver{}, nil }\nfunc LoadDocument(path string) ([]byte, error) { return os.ReadFile(path) }\nfunc (ObjectMap) Names() []string { return nil }\nfunc (ObjectMap) YAML(string) ([]byte, bool) { return nil, false }\nfunc (StringMap) Names() []string { return nil }\nfunc (StringMap) Value(string) (string, bool) { return \"\", false }\nfunc ExtractObjectMap([]byte, string) (ObjectMap, error) { return ObjectMap{}, nil }\nfunc ExtractStringMap([]byte, string) (StringMap, error) { return StringMap{}, nil }\nfunc Decode(context.Context, *Resolver, manifest.Config, []byte) (Values, error) { return Values{}, nil }\n")},
+		{name: "capability/capability.go", data: []byte("package capability\n\nimport \"context\"\n\ntype Contract[Request, Response any] struct{}\ntype Handler[Request, Response any] func(context.Context, Request) (Response, error)\n\nfunc MustParseContractWithSemanticErrors[Request, Response any](string, ...string) Contract[Request, Response] {\n\treturn Contract[Request, Response]{}\n}\n")},
+		{name: "configuration/configuration.go", data: []byte("package configuration\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"os\"\n\n\t\"github.com/plystra/kernel/plugin/manifest\"\n)\n\nconst MaximumSecretValueBytes = 1 << 20\n\nvar ErrSecretExposure = errors.New(\"Secret serialization is prohibited\")\n\ntype ResolverOptions struct { MaximumValueBytes int }\ntype Resolver struct{}\ntype Secret struct{}\ntype Values struct{}\ntype ObjectMap struct{}\ntype StringMap struct{}\n\nfunc NewResolver(ResolverOptions) (*Resolver, error) { return &Resolver{}, nil }\nfunc LoadDocument(path string) ([]byte, error) { return os.ReadFile(path) }\nfunc (ObjectMap) Names() []string { return nil }\nfunc (ObjectMap) YAML(string) ([]byte, bool) { return nil, false }\nfunc (StringMap) Names() []string { return nil }\nfunc (StringMap) Value(string) (string, bool) { return \"\", false }\nfunc ExtractObjectMap([]byte, string) (ObjectMap, error) { return ObjectMap{}, nil }\nfunc ExtractStringMap([]byte, string) (StringMap, error) { return StringMap{}, nil }\nfunc Decode(context.Context, *Resolver, manifest.Config, []byte) (Values, error) { return Values{}, nil }\n")},
 		{name: "go.mod", data: moduleFile},
 		{name: "intrinsic/intrinsic.go", data: []byte("package intrinsic\n\nimport (\n\t\"github.com/plystra/kernel/capability\"\n\t\"github.com/plystra/kernel/invocation\"\n)\n\ntype BindingOptions struct { ModuleVersion, BuildIdentity string }\n\ntype HealthRequest struct{}\ntype HealthStatus string\nconst HealthStatusHealthy HealthStatus = \"healthy\"\ntype HealthResponse struct { Status HealthStatus `json:\"status\"` }\ntype InfoRequest struct{}\ntype InfoResponse struct { AssemblyAPI string `json:\"assembly_api\"`; KernelModule string `json:\"kernel_module\"`; KernelVersion string `json:\"kernel_version\"` }\n\nfunc HealthContract() capability.Contract[HealthRequest, HealthResponse] { return capability.Contract[HealthRequest, HealthResponse]{} }\nfunc InfoContract() capability.Contract[InfoRequest, InfoResponse] { return capability.Contract[InfoRequest, InfoResponse]{} }\nfunc NewBindings(BindingOptions) ([]invocation.Binding, error) { return make([]invocation.Binding, 2), nil }\n")},
-		{name: "invocation/invocation.go", data: []byte("package invocation\n\nimport (\n\t\"context\"\n\t\"time\"\n\n\t\"github.com/plystra/kernel/capability\"\n)\n\ntype Binding struct{}\ntype Catalog struct { bindings []Binding }\nfunc NewCatalog(bindings []Binding) (Catalog, error) { return Catalog{bindings: append([]Binding(nil), bindings...)}, nil }\nfunc (c Catalog) Bindings() []Binding { return append([]Binding(nil), c.bindings...) }\ntype DispatcherOptions struct { DefaultTimeout time.Duration }\ntype Dispatcher struct { published bool }\nfunc NewDispatcher(DispatcherOptions) (*Dispatcher, error) { return &Dispatcher{}, nil }\nfunc (d *Dispatcher) Publish(Catalog) error { d.published = true; return nil }\nfunc (d *Dispatcher) Published() bool { return d != nil && d.published }\ntype Handle[Request, Response any] struct { available bool }\nfunc NewHandle[Request, Response any](_ *Dispatcher, _ capability.Contract[Request, Response], available bool) (Handle[Request, Response], error) { return Handle[Request, Response]{available: available}, nil }\nfunc (h Handle[Request, Response]) Available() bool { return h.available }\nfunc (Handle[Request, Response]) Invoke(context.Context, Request) (Response, error) { var response Response; return response, nil }\ntype ErrorCode string\nconst (\n\tErrorInvalidArgument ErrorCode = \"invalid_argument\"\n\tErrorUnauthenticated ErrorCode = \"unauthenticated\"\n\tErrorDenied ErrorCode = \"denied\"\n\tErrorNotFound ErrorCode = \"not_found\"\n\tErrorConflict ErrorCode = \"conflict\"\n\tErrorVersionIncompatible ErrorCode = \"version_incompatible\"\n\tErrorTimeout ErrorCode = \"timeout\"\n\tErrorUnavailable ErrorCode = \"unavailable\"\n\tErrorResultUnknown ErrorCode = \"result_unknown\"\n\tErrorCancelled ErrorCode = \"cancelled\"\n)\nfunc (code ErrorCode) String() string { return string(code) }\nfunc (code ErrorCode) Valid() bool { return code != \"\" }\ntype Error struct { code ErrorCode; detailCode string }\nfunc (*Error) Error() string { return \"invocation error\" }\nfunc (err *Error) Code() ErrorCode { if err == nil { return \"\" }; return err.code }\nfunc (err *Error) DetailCode() string { if err == nil { return \"\" }; return err.detailCode }\nfunc ValidDetailCode(string) bool { return true }\n")},
+		{name: "invocation/invocation.go", data: []byte("package invocation\n\nimport (\n\t\"context\"\n\t\"time\"\n\n\t\"github.com/plystra/kernel/capability\"\n\t\"github.com/plystra/kernel/plugin\"\n)\n\ntype Endpoint struct{}\ntype ModuleBuild struct{}\ntype ProviderKind string\ntype SelectionReason string\ntype BindingOptions struct {\n\tProviderKind ProviderKind\n\tProviderID plugin.ID\n\tProviderPackage string\n\tProviderBuild ModuleBuild\n\tSelectionReason SelectionReason\n\tSchemaDigest [32]byte\n}\ntype Binding struct{}\ntype Catalog struct { bindings []Binding }\nconst (\n\tProviderKindKernel ProviderKind = \"kernel\"\n\tProviderKindPlugin ProviderKind = \"plugin\"\n\tSelectionReasonIntrinsic SelectionReason = \"intrinsic\"\n\tSelectionReasonSoleProvider SelectionReason = \"sole-provider\"\n\tSelectionReasonExplicit SelectionReason = \"explicit\"\n)\nfunc NewModuleBuild(string, string, string) (ModuleBuild, error) { return ModuleBuild{}, nil }\nfunc NewEndpoint[Request, Response any](capability.Contract[Request, Response], capability.Handler[Request, Response]) (Endpoint, error) { return Endpoint{}, nil }\nfunc NewBinding(BindingOptions, Endpoint) (Binding, error) { return Binding{}, nil }\nfunc NewCatalog(bindings []Binding) (Catalog, error) { return Catalog{bindings: append([]Binding(nil), bindings...)}, nil }\nfunc (c Catalog) Bindings() []Binding { return append([]Binding(nil), c.bindings...) }\ntype DispatcherOptions struct { DefaultTimeout time.Duration }\ntype Dispatcher struct { published bool }\nfunc NewDispatcher(DispatcherOptions) (*Dispatcher, error) { return &Dispatcher{}, nil }\nfunc (d *Dispatcher) Publish(Catalog) error { d.published = true; return nil }\nfunc (d *Dispatcher) Published() bool { return d != nil && d.published }\ntype Handle[Request, Response any] struct { available bool }\nfunc NewHandle[Request, Response any](_ *Dispatcher, _ capability.Contract[Request, Response], available bool) (Handle[Request, Response], error) { return Handle[Request, Response]{available: available}, nil }\nfunc (h Handle[Request, Response]) Available() bool { return h.available }\nfunc (Handle[Request, Response]) Invoke(context.Context, Request) (Response, error) { var response Response; return response, nil }\ntype ErrorCode string\nconst (\n\tErrorInvalidArgument ErrorCode = \"invalid_argument\"\n\tErrorUnauthenticated ErrorCode = \"unauthenticated\"\n\tErrorDenied ErrorCode = \"denied\"\n\tErrorNotFound ErrorCode = \"not_found\"\n\tErrorConflict ErrorCode = \"conflict\"\n\tErrorVersionIncompatible ErrorCode = \"version_incompatible\"\n\tErrorTimeout ErrorCode = \"timeout\"\n\tErrorUnavailable ErrorCode = \"unavailable\"\n\tErrorResultUnknown ErrorCode = \"result_unknown\"\n\tErrorCancelled ErrorCode = \"cancelled\"\n)\nfunc (code ErrorCode) String() string { return string(code) }\nfunc (code ErrorCode) Valid() bool { return code != \"\" }\ntype Error struct { code ErrorCode; detailCode string }\nfunc (*Error) Error() string { return \"invocation error\" }\nfunc (err *Error) Code() ErrorCode { if err == nil { return \"\" }; return err.code }\nfunc (err *Error) DetailCode() string { if err == nil { return \"\" }; return err.detailCode }\nfunc ValidDetailCode(string) bool { return true }\n")},
 		{name: "lifecycle/lifecycle.go", data: []byte("package lifecycle\n\nimport (\n\t\"context\"\n\t\"time\"\n\n\t\"github.com/plystra/kernel/plugin\"\n)\n\ntype Provider interface {\n\tStart(context.Context) error\n\tStop(context.Context) error\n}\n\ntype State string\ntype Binding struct{}\ntype Manager struct{}\ntype ManagerOptions struct { RollbackTimeout time.Duration }\n\nfunc NewBinding(plugin.ID, Provider) (Binding, error) { return Binding{}, nil }\nfunc NewManager(ManagerOptions, []Binding) (*Manager, error) { return &Manager{}, nil }\nfunc (*Manager) State() State { return \"new\" }\nfunc (*Manager) Start(context.Context) error { return nil }\nfunc (*Manager) Stop(context.Context) error { return nil }\n")},
 		{name: "plugin/id.go", data: []byte("package plugin\n\ntype ID struct{}\n\nfunc ParseID(string) (ID, error) { return ID{}, nil }\n")},
 		{name: "plugin/manifest/config.go", data: []byte("package manifest\n\ntype Config struct{}\n\nfunc ParseConfig([]byte) (Config, error) { return Config{}, nil }\n")},
@@ -996,6 +1024,9 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra new app",
 		"plystra new app --module github.com/acme/app",
 		"plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3",
+		"Template-declared operational values and Secret-reference placeholders",
+		"does not read PLATFORM_SMTP_PASSWORD",
+		"invent values for required fields omitted by the template",
 		"plystra plugin create records",
 		"plystra capability create records.read --plugin records --expose",
 		"plystra capability implement email.send/v1 --plugin mailer",

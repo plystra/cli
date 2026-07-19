@@ -79,6 +79,22 @@ Module Cache source, create go.work, inherit dependency environment overlays,
 or give template origin Provider or configuration priority. A failure leaves no
 target Project.
 
+Template-declared operational values and Secret-reference placeholders are
+composed into the new root plystra.yaml through the same typed field rules. For
+example, a template may declare:
+
+    config:
+      acme.platform.mailer:
+        host: smtp.localhost
+        password:
+          env: PLATFORM_SMTP_PASSWORD
+
+Creation validates this object against acme.platform.mailer's plugin.yaml but
+does not read PLATFORM_SMTP_PASSWORD. Generated source and manifest provenance
+contain neither that reference target nor its resolved value. The CLI does not
+invent values for required fields omitted by the template; an incomplete
+declaration fails the creation transaction.
+
 Add one ordinary Go Module dependency through the public transaction:
 
     plystra add github.com/acme/email@v1.4.2
