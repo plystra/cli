@@ -253,6 +253,13 @@ source repository, copy Plugin directories, inspect dependency environment
 overlays, modify Module Cache source, generate `go.work`, or assign the template
 special Provider or configuration precedence after creation.
 
+The template's default application model must resolve without Provider
+ambiguity. When several compatible Plugins provide one required Capability,
+the template publisher must select one under `capabilities.use` in the
+template's root `plystra.yaml` and publish that corrected module version.
+Creation otherwise reports every candidate and leaves no target directory for
+the consumer to repair.
+
 The template's root configuration is also the source of its verified local
 operational inputs. Typed values and Secret-reference placeholders declared
 there are composed into the new Project's root `plystra.yaml` and validated
