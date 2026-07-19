@@ -66,7 +66,7 @@ When several compatible Plugins provide one required Capability, select one with
 
 Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
-` + "`generated/proto/wire-map.json`" + ` is committed compatibility history for canonical Capability request and response messages selected for Connect. Generation preserves field numbers across declaration reordering, allocates new fields without renumbering existing fields, permanently reserves removed field names and numbers, and retains inactive canonical history when exposure or Connect is disabled. Capability Aliases reuse their canonical target messages and have no separate ledger entry. Never edit or delete the ledger; restore its exact last committed content before regenerating. The current ledger does not emit ` + "`.proto`" + ` source or descriptors, assign enum numbers, or provide Connect runtime bindings; those remain later transport work.
+` + "`generated/proto/wire-map.json`" + ` is committed compatibility history for canonical Capability request and response messages selected for Connect. Generation preserves field numbers across declaration reordering, allocates new fields without renumbering existing fields, and permanently reserves removed field names and numbers. Scalar contract enums receive a numeric zero ` + "`*_UNSPECIFIED`" + ` sentinel and stable positive member numbers; reordering and additions preserve existing assignments, while removed member names and numbers remain permanently reserved. Inactive field and enum history remains when exposure, Connect, or an enum is disabled. Capability Aliases reuse their canonical target messages and enums and have no separate ledger entry. Never edit or delete the ledger; restore its exact last committed content before regenerating. The current ledger does not emit ` + "`.proto`" + ` source, descriptor sets, or Connect runtime bindings; those remain later transport work.
 `
 
 const githubCIReadmeTemplate = `
@@ -200,12 +200,15 @@ canonical Capability request and response messages selected for Connect. It
 keeps field assignments stable across declaration reordering, allocates new
 fields without renumbering existing fields, permanently reserves removed field
 names and numbers, and retains inactive canonical history when exposure or
-Connect is disabled. An application Alias reuses its canonical target messages
-and never owns a separate ledger entry. Never edit or delete the ledger. If it
-drifts, recover the exact previously generated content before running plystra
-generate. The current ledger does not emit .proto source or descriptors,
-assign enum numbers, or provide Connect runtime bindings; those remain later
-transport work.
+Connect is disabled. Scalar contract enums use a numeric zero UNSPECIFIED
+sentinel and stable positive member numbers. Reordering and additions preserve
+existing assignments; removed member names and numbers remain permanently
+reserved, and enum history becomes inactive when the field stops using it. An
+application Alias reuses its canonical target messages and enums and never owns
+a separate ledger entry. Never edit or delete the ledger. If it drifts, recover
+the exact previously generated content before running plystra generate. The
+current ledger does not emit .proto source, descriptor sets, or Connect runtime
+bindings; those remain later transport work.
 
 The CLI currently does not create or execute database migrations. When a Plugin
 owns migrations, keep them inside that Plugin and make its runtime lifecycle or
@@ -991,8 +994,8 @@ build and distribution boundary for every Plystra module.
   regenerate. Do not overwrite the reported path manually.
 - Protobuf wire-history drift: recover the exact previously generated
   generated/proto/wire-map.json. Never edit or delete it to force new field
-  numbers; generation rejects missing, modified, corrupt, or inconsistent
-  history instead of guessing.
+  or enum-member numbers; generation rejects missing, modified, corrupt, reused,
+  or inconsistent history instead of guessing.
 - Stale output after removal: run plystra generate so the managed-file manifest
   can remove obsolete contracts, clients, adapters, Alias surfaces, docs, and
   SDK operations transactionally.

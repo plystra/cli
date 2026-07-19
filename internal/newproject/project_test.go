@@ -937,8 +937,10 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 	for _, wireHistory := range [][]byte{
 		[]byte("generated/proto/wire-map.json"),
 		[]byte("permanently reserves removed field names and numbers"),
-		[]byte("Capability Aliases reuse their canonical target messages"),
-		[]byte("does not emit `.proto` source or descriptors"),
+		[]byte("numeric zero `*_UNSPECIFIED` sentinel"),
+		[]byte("removed member names and numbers remain permanently reserved"),
+		[]byte("Capability Aliases reuse their canonical target messages and enums"),
+		[]byte("does not emit `.proto` source, descriptor sets"),
 	} {
 		if !bytes.Contains(readme, wireHistory) {
 			t.Fatalf("generated README omits Protobuf wire-history guidance %q:\n%s", wireHistory, readme)
@@ -1671,8 +1673,11 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"generated/proto/wire-map.json is durable CLI-owned compatibility history",
 		"permanently reserves removed field",
 		"names and numbers, and retains inactive canonical history",
-		"application Alias reuses its canonical target messages",
-		"does not emit .proto source or descriptors",
+		"numeric zero UNSPECIFIED",
+		"sentinel and stable positive member numbers",
+		"removed member names and numbers remain permanently",
+		"application Alias reuses its canonical target messages and enums",
+		"does not emit .proto source, descriptor sets",
 		"configuration schema v4",
 		"Protobuf wire-map digest",
 		"environment, or explicit-config mode",

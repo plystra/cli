@@ -667,7 +667,7 @@ func TestReadOwnedFileRequiresExactManagedHistory(t *testing.T) {
 	t.Parallel()
 
 	const historyPath = "generated/proto/wire-map.json"
-	history := []byte("{\"projection_schema\":\"plystra.proto-wire-map/v1\"}\n")
+	history := []byte("{\"projection_schema\":\"plystra.proto-wire-map/v2\"}\n")
 	root := t.TempDir()
 	if data, exists, err := generatedfiles.ReadOwnedFile(root, historyPath, 1024); err != nil || exists || data != nil {
 		t.Fatalf("initial ReadOwnedFile = %q, %t, %v", data, exists, err)

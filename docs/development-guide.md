@@ -378,7 +378,7 @@ orders/
     .plystra-manifest.json                CLI ownership manifest
     manifest.json                         resolved application manifest
     proto/
-      wire-map.json                       committed Protobuf field history
+      wire-map.json                       committed Protobuf wire history
     docs/
     go/
       adapters/
@@ -404,14 +404,19 @@ disposable cache. For each canonical Capability on the selected Connect
 surface, it preserves request and response field numbers across declaration
 reordering and allocates new fields without renumbering existing ones. Removing
 a field permanently reserves both its generated name and number, and removing
-exposure or disabling Connect retains the canonical history as inactive. An
-application Alias reuses the canonical target messages and therefore has no
-separate ledger entry. Commit this CLI-owned file with the rest of generated
-output, but never edit or delete it. If generation reports ledger drift,
-restore the exact last committed copy before rerunning `plystra generate`.
-The current ledger does not emit `.proto` files or descriptors and does not yet
-assign enum numbers or provide Connect runtime bindings; those remain deferred
-to later transport gates.
+exposure or disabling Connect retains the canonical history as inactive.
+Every scalar contract enum receives a numeric zero `*_UNSPECIFIED` sentinel.
+Its canonical members receive stable positive numbers: reordering does not
+change them, additions use unused positive values without renumbering existing
+members, and removals permanently reserve both generated member names and
+numbers. If a field stops using an enum, its history remains inactive for later
+compatible reactivation. An application Alias reuses the canonical target
+messages and enums and therefore has no separate ledger entry. Commit this
+CLI-owned file with the rest of generated output, but never edit or delete it.
+If generation reports ledger drift, restore the exact last committed copy
+before rerunning `plystra generate`. The current ledger does not emit `.proto`
+files, descriptor sets, or Connect runtime bindings; those remain deferred to
+later transport gates.
 
 `.agents/skills/plystra/` is a creation-time project guide that the project may
 maintain as its authored workflows evolve. It is outside `generated/` and is not
@@ -1225,9 +1230,9 @@ version. Do not weaken equality or add a compatibility decoder.
 Do not repair `generated/proto/wire-map.json` by hand or delete it to force new
 numbers. Restore the exact last committed file, then regenerate from the
 authored Capability contracts. A missing ownership baseline, changed digest,
-noncanonical JSON, reused removed field name or number, or inconsistent message
-identity is a compatibility error that generation intentionally refuses to
-guess through.
+noncanonical JSON, reused removed field or enum-member name or number,
+inconsistent message or enum identity, or invalid zero sentinel is a
+compatibility error that generation intentionally refuses to guess through.
 
 ### Plugin target is ambiguous
 

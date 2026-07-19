@@ -281,7 +281,7 @@ func TestApplicationModelDigestPinsNormalizedConnectProtobufProjection(t *testin
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(Connect Protobuf projection): %v", err)
 	}
-	const expected = "sha256:d9b795fbc7f7b50b51829f4becc46ea88db2f1303dee69dab9f12c8ee8f30a61"
+	const expected = "sha256:8abbe771e5e59191c72c9005c28a3a156174e1369aee1c9a701798f86c1ba3a5"
 	if digest != expected {
 		t.Fatalf("Connect Protobuf projection application-model digest = %q; want %q", digest, expected)
 	}
@@ -344,6 +344,73 @@ errors: [invalid_recipient]
 	}
 	if historicalDigest == cleanDigest {
 		t.Fatal("different active Protobuf field assignments produced the same application-model digest")
+	}
+}
+
+func TestApplicationModelDigestIncludesActiveEnumWireHistory(t *testing.T) {
+	t.Parallel()
+
+	currentResolution := resolvedApplicationWithEmail(t, "", `id: email.send/v1
+request:
+  to: {type: string, required: true}
+  priority: {type: string, enum: [normal, urgent]}
+response:
+  accepted: {type: boolean, required: true}
+errors: [invalid_recipient]
+`)
+	options := applicationgen.ApplicationModelOptions{
+		ModulePath:          applicationModulePath,
+		JavaScriptPackage:   applicationSDKPackage,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
+		HTTPTransports:      applicationmeta.HTTPTransports{Connect: true},
+		Providers:           selectedProviderInputs(),
+		Resolution:          currentResolution,
+	}
+	currentProjection, err := applicationgen.ProtobufProjection(options.HTTPTransports, currentResolution)
+	if err != nil {
+		t.Fatalf("ProtobufProjection(current): %v", err)
+	}
+	cleanMap, err := protobufwiremap.Build(currentProjection, nil, false, "")
+	if err != nil {
+		t.Fatalf("Build(clean): %v", err)
+	}
+	options.ProtobufWireMap = cleanMap
+	cleanDigest, err := applicationgen.ApplicationModelDigest(options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(clean): %v", err)
+	}
+
+	historicalResolution := resolvedApplicationWithEmail(t, "", `id: email.send/v1
+request:
+  to: {type: string, required: true}
+  priority: {type: string, enum: [alpha, normal, urgent]}
+response:
+  accepted: {type: boolean, required: true}
+errors: [invalid_recipient]
+`)
+	historicalProjection, err := applicationgen.ProtobufProjection(options.HTTPTransports, historicalResolution)
+	if err != nil {
+		t.Fatalf("ProtobufProjection(historical): %v", err)
+	}
+	history, err := protobufwiremap.Build(historicalProjection, nil, false, "")
+	if err != nil {
+		t.Fatalf("Build(history): %v", err)
+	}
+	reconciled, err := protobufwiremap.Build(currentProjection, history.CanonicalJSON(), true, history.Digest())
+	if err != nil {
+		t.Fatalf("Build(reconciled): %v", err)
+	}
+	if bytes.Equal(cleanMap.ActiveJSON(), reconciled.ActiveJSON()) || cleanMap.Digest() == reconciled.Digest() {
+		t.Fatal("historical enum assignment did not alter active or committed wire-map evidence")
+	}
+	options.ProtobufWireMap = reconciled
+	historicalDigest, err := applicationgen.ApplicationModelDigest(options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(historical): %v", err)
+	}
+	if historicalDigest == cleanDigest {
+		t.Fatal("different active Protobuf enum assignments produced the same application-model digest")
 	}
 }
 

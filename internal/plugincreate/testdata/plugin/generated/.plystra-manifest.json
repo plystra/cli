@@ -27,11 +27,11 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:73f654811f6a33a04b7c485c356170736635d27a21f124457a34f557327c614b"
+      "sha256": "sha256:0662cbcb455c918268d4bc20e52f494bbf89d454491ad84e0ea3f642f167afc0"
     },
     {
       "path": "generated/proto/wire-map.json",
-      "sha256": "sha256:5429be97f5d0e2093f13a69ae9524c2ba170b1cbe61ad593da678e9df42cec83"
+      "sha256": "sha256:e563b91c26485ad548360d3b61bd79104cd76b2ef4771c41e6fbda4660bb525f"
     }
   ],
   "application_manifest": {
@@ -51,8 +51,8 @@
           "dependency_baseline": []
         }
       ],
-      "protobuf_wire_map_digest": "sha256:5429be97f5d0e2093f13a69ae9524c2ba170b1cbe61ad593da678e9df42cec83",
-      "application_model_digest": "sha256:8a5e982ebf639ca59bd5b11593d3811cbf17ed5695dea167c63be39a3372955f"
+      "protobuf_wire_map_digest": "sha256:e563b91c26485ad548360d3b61bd79104cd76b2ef4771c41e6fbda4660bb525f",
+      "application_model_digest": "sha256:66ebde7f1a93b59323ddabb4a25577cd71a553286ae07d329d591d5c7b35e582"
     }
   }
 }
