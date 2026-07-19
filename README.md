@@ -177,6 +177,13 @@ Module Cache, create `go.work`, or grant the template any Provider or
 configuration priority. A module without root `plystra.yaml` is rejected and
 the target directory is not installed.
 
+The template's default application model must resolve without Provider
+ambiguity. If several compatible Plugins provide one required Capability and
+the template root does not select one under `capabilities.use`, creation rejects
+the template before installing the target. The diagnostic names every candidate
+and requires the template publisher to record the explicit default choice in
+root `plystra.yaml` and publish a corrected module version.
+
 Typed operational values and Secret-reference placeholders declared by the
 template's root configuration are materialized in the new root `plystra.yaml`
 through that same dependency composition. Creation validates them against the

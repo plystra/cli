@@ -95,6 +95,18 @@ contain neither that reference target nor its resolved value. The CLI does not
 invent values for required fields omitted by the template; an incomplete
 declaration fails the creation transaction.
 
+Template creation requires an unambiguous default Provider model. If several
+visible Plugins provide one required Capability, the template publisher must
+record one explicit choice in the template root plystra.yaml before publishing
+that version:
+
+    capabilities:
+      use:
+        email.send/v1: acme.platform.mailer
+
+Creation otherwise names every candidate and leaves no target Project for the
+consumer to repair.
+
 Add one ordinary Go Module dependency through the public transaction:
 
     plystra add github.com/acme/email@v1.4.2

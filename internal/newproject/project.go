@@ -28,6 +28,7 @@ import (
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/projectlocate"
+	"github.com/plystra/cli/internal/providerresolution"
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -196,6 +197,14 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 			MutateModule:     mutate,
 			RejectUnexpected: true,
 		}); err != nil {
+			if errors.Is(err, providerresolution.ErrAmbiguousProvider) {
+				return fmt.Errorf(
+					"%w: template %q cannot qualify because its default Provider model is ambiguous: %w; correction: the template publisher must add the listed capabilities.use choices to its root plystra.yaml and publish a corrected module version",
+					ErrInvalidTemplate,
+					query,
+					err,
+				)
+			}
 			return fmt.Errorf("generate Project from template dependency %q: %w", query, err)
 		}
 		return nil
@@ -409,6 +418,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"Template-declared operational values and Secret-reference placeholders",
 		"does not read PLATFORM_SMTP_PASSWORD",
 		"invent values for required fields omitted by the template",
+		"Template creation requires an unambiguous default Provider model",
 		"plystra plugin create records",
 		"plystra capability create records.read --plugin records --expose",
 		"plystra capability implement email.send/v1 --plugin mailer",

@@ -316,6 +316,57 @@ func TestCreateRejectsTemplateWithoutRootProjectMarkerAndRollsBack(t *testing.T)
 	assertNoTransactionFiles(t, parent)
 }
 
+func TestPublicCommandRejectsTemplateWithAmbiguousDefaultProvidersAndRollsBack(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/ambiguous-platform"
+	const templateVersion = "v1.0.0"
+	const templateQuery = templatePath + "@" + templateVersion
+	contract := []byte("id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"template.go":        []byte("package platform\n"),
+		"plystra.yaml":       []byte("capabilities:\n  require:\n    - email.send/v1\n"),
+		"memory/plugin.yaml": []byte("id: acme.platform.memory\nprovides: [email.send/v1]\n"),
+		"memory/capabilities/email.send/v1/capability.yaml": contract,
+		"smtp/plugin.yaml": []byte("id: acme.platform.smtp\nprovides: [email.send/v1]\n"),
+		"smtp/capabilities/email.send/v1/capability.yaml": contract,
+	})
+	environment := isolatedGoEnvironment(t, proxy)
+	parent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	arguments := []string{
+		"new", "my-app",
+		"--module", "example.com/acme/my-app",
+		"--template", templateQuery,
+		"--no-git", "--no-github-ci", "--no-skills",
+	}
+
+	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 1 {
+		t.Fatalf("RunIn exit code = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("RunIn stdout = %q, want empty output", stdout.String())
+	}
+	for _, detail := range []string{
+		"invalid Plystra Project template",
+		templateQuery,
+		"cannot qualify because its default Provider model is ambiguous",
+		"ambiguous canonical Capability provider",
+		"email.send/v1",
+		"acme.platform.memory",
+		"acme.platform.smtp",
+		"template publisher must add the listed capabilities.use choices to its root plystra.yaml",
+	} {
+		if !strings.Contains(stderr.String(), detail) {
+			t.Fatalf("RunIn stderr omits %q: %s", detail, stderr.String())
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists after ambiguous template failure: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
+}
+
 func TestCreateRollsBackTemplateGenerationFailure(t *testing.T) {
 	proxy := createKernelProxy(t)
 	const templatePath = "example.com/acme/incomplete"
