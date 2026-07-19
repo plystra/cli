@@ -31,6 +31,7 @@ const (
   plystra add <go-module-query>
   plystra remove <go-module-path>
   plystra update <go-module-query>
+  plystra use <capability-name>/vN <plugin-id> [--env <environment>|--config <yaml-path>]
   plystra plugin create <name>
   plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
@@ -233,6 +234,8 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		}
 		_, _ = fmt.Fprintf(stdout, "updated dependency %s in %s at %s\n", result.Query(), result.Module().ModulePath(), result.Module().Path())
 		return 0
+	case "use":
+		return runUse(arguments, stdout, stderr, workingDirectory, environment)
 	case "plugin":
 		if len(arguments) != 3 || arguments[1] != "create" {
 			_, _ = io.WriteString(stderr, "usage: plystra plugin create <name>\n")

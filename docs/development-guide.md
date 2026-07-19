@@ -28,6 +28,7 @@ plystra new <module-path> [options]
 plystra add <go-module-query>
 plystra remove <go-module-path>
 plystra update <go-module-query>
+plystra use <capability-name>/vN <plugin-id> [--env <environment>|--config <yaml-path>]
 plystra plugin create <name>
 plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
 plystra capability implement <capability-name>/vN [--plugin <plugin>]
@@ -36,8 +37,8 @@ plystra generate [--check] [--env <environment>|--config <yaml-path>]
 ```
 
 Commands documented in the roadmap but absent from `plystra --help` are not
-implemented. In particular, do not tell users to rely on `remove`, `update`,
-`use`, `dev`, `test`, `build`, `check`, `fix`, `doctor`, SDK packaging, or
+implemented. In particular, do not tell users to rely on `dev`, `test`,
+`build`, `check`, `fix`, `doctor`, SDK packaging, or
 `release` yet. Use the Go, npm, and public generation commands in this guide.
 
 ## Workspace and repository layout
@@ -795,6 +796,25 @@ capabilities:
   aliases: {}
 ```
 
+Use the targeted command for the same explicit current-Project decision:
+
+```powershell
+plystra use email.send/v1 acme.email.smtp
+plystra use email.send/v1 acme.email.production --env production
+plystra use email.send/v1 acme.email.customer --config deploy/customer-a.yaml
+```
+
+The default form writes root `plystra.yaml`; `--env` writes only the selected
+sparse project-root overlay; and `--config` writes only the selected complete
+replacement document. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` provide the same
+selection when no flag is present, while an explicit flag overrides both
+variables. The command may start inside a Plugin, preserves comments and
+unrelated values, regenerates and validates with the same selection, and
+restores the selected YAML, generated output, `go.mod`, and `go.sum` if any
+later step fails. It rejects intrinsic Capabilities, application Aliases,
+unknown or unrequired Capabilities, unknown Plugins, and Plugins that do not
+provide the exact contract.
+
 There is no provider priority, discovery-order winner, enabled-Plugin file, or
 runtime selection fallback.
 
@@ -1048,8 +1068,9 @@ error. An explicit `GOWORK` value is preserved.
 Confirm the exact canonical ID is visible and provided by a local Plugin or a
 dependency Plystra Project anywhere in the effective Go Module graph. A
 markerless Go dependency is intentionally not scanned. If several compatible
-providers remain, add the exact `capabilities.use` entry. Do not add a priority
-or fallback.
+Providers remain, run `plystra use <capability-name>/vN <plugin-id>` with the
+same `--env` or `--config` selection used to generate the application. Do not
+add a priority or fallback.
 
 ### Inherited configuration conflict
 

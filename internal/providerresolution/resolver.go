@@ -993,11 +993,12 @@ func (e *AmbiguousProviderError) Error() string {
 		providers[index] = fmt.Sprintf("%s at %s", provider.pluginID, provider.source)
 	}
 	return fmt.Sprintf(
-		"%s: %s required by [%s] has compatible providers [%s]; correction: set capabilities.use[%s] to one Plugin ID; no priority, status, discovery-order, filesystem-order, or alphabetical fallback is applied",
+		"%s: %s required by [%s] has compatible providers [%s]; correction: run `plystra use %s <plugin-id>` to set capabilities.use[%s] to one Plugin ID; no priority, status, discovery-order, filesystem-order, or alphabetical fallback is applied",
 		ErrAmbiguousProvider,
 		e.capability,
 		strings.Join(e.sources, ", "),
 		strings.Join(providers, ", "),
+		e.capability,
 		e.capability,
 	)
 }

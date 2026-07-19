@@ -484,6 +484,34 @@ func TestResolveExtensionsRunsOnlyExplicitlySelectedActivationProvider(t *testin
 	}
 }
 
+func TestResolveExtensionsRejectsProviderChoiceThatNeverBecomesRequired(t *testing.T) {
+	email := extensionTestContract(t, "email.send/v1", "")
+	input := ExtensionInput{
+		Input: Input{
+			Requirements: []providerresolution.Requirement{{Contract: email, Source: "email workflow"}},
+			Candidates: []providerresolution.Candidate{{
+				PluginID: "example.email",
+				Contract: email,
+				Source:   "email/capability.yaml",
+			}},
+			Choices: []providerresolution.Choice{{
+				Capability: "missing.operation/v1",
+				PluginID:   "example.email",
+				Source:     "plystra.yaml capabilities.use.missing.operation/v1",
+			}},
+		},
+		Plugins:      []Plugin{extensionTestPlugin("example.email", "email", "email.send/v1")},
+		Capabilities: []generation.CapabilityInput{{ContractJSON: email}},
+	}
+	result, err := resolveExtensions(t.Context(), input, newFakeExtensionBuilder(nil).Build)
+	if !errors.Is(err, providerresolution.ErrInvalidChoice) || !strings.Contains(err.Error(), "missing.operation/v1") || !strings.Contains(err.Error(), "no canonical requirement or visible provider declares this Capability") {
+		t.Fatalf("dormant Provider choice error = %v", err)
+	}
+	if result.Passes() != 0 || len(result.Context().CanonicalJSON()) != 0 {
+		t.Fatalf("invalid dormant choice returned partial result %#v", result)
+	}
+}
+
 func TestResolveExtensionsUsesOrdinaryProviderRulesForGeneratedRequirements(t *testing.T) {
 	order := extensionTestContract(t, "order.create/v1", "extensions:\n  authn: {authenticated: true}\n")
 	verify := extensionTestContract(t, "authn.session.verify/v1", "")
