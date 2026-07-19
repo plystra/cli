@@ -37,6 +37,8 @@ import (
 // KernelVersion is the exact Kernel release targeted by this CLI release.
 const KernelVersion = "v0.0.0-20260718010024-34af10315d98"
 
+const maximumGoEnvironmentValueBytes = 64 << 10
+
 var (
 	// ErrCreate reports a project creation failure.
 	ErrCreate = errors.New("create Plystra project")
@@ -190,6 +192,9 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 		if !template.Project() {
 			return fmt.Errorf("%w: resolved module %q has no regular root plystra.yaml", ErrInvalidTemplate, modulePath)
 		}
+		if err := rejectPrivateTemplateDependencies(ctx, root, query, goCommand, environment, dependencies); err != nil {
+			return err
+		}
 		if _, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
 			Start:            root,
 			GoCommand:        goCommand,
@@ -209,6 +214,49 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 		}
 		return nil
 	})
+}
+
+func rejectPrivateTemplateDependencies(ctx context.Context, root, query, goCommand string, environment []string, dependencies moduledependency.Index) error {
+	output, err := gocommand.Output(ctx, gocommand.Options{
+		Command:     goCommand,
+		Directory:   root,
+		Environment: environment,
+		OutputLimit: maximumGoEnvironmentValueBytes,
+	}, "env", "GOPRIVATE")
+	if err != nil {
+		return fmt.Errorf("%w: inspect Go privacy configuration while qualifying template %q: %w", ErrInvalidTemplate, query, err)
+	}
+	patterns := strings.TrimSpace(string(output))
+	if patterns == "" {
+		return nil
+	}
+
+	private := make([]string, 0)
+	for _, dependency := range dependencies.Modules() {
+		modulePrivate := module.MatchPrefixPatterns(patterns, dependency.Path())
+		replacement, replaced := dependency.Replacement()
+		replacementPrivate := replaced && !replacement.Local() && module.MatchPrefixPatterns(patterns, replacement.Path())
+		if !modulePrivate && !replacementPrivate {
+			continue
+		}
+		reference := dependency.Path()
+		if dependency.SelectedVersion() != "" {
+			reference += "@" + dependency.SelectedVersion()
+		}
+		if replacementPrivate {
+			reference += " => " + replacement.Path() + "@" + replacement.Version()
+		}
+		private = append(private, reference)
+	}
+	if len(private) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: template %q cannot qualify because its effective Go Module graph requires private modules matched by GOPRIVATE: %s; correction: qualified templates must use only public modules; publish or replace the listed dependencies, or correct an overbroad GOPRIVATE setting, then retry",
+		ErrInvalidTemplate,
+		query,
+		strings.Join(private, ", "),
+	)
 }
 
 func populate(ctx context.Context, root, modulePath, name string, githubCI, skills bool) error {
@@ -419,6 +467,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"does not read PLATFORM_SMTP_PASSWORD",
 		"invent values for required fields omitted by the template",
 		"Template creation requires an unambiguous default Provider model",
+		"Template dependencies must not match the effective GOPRIVATE setting",
 		"plystra plugin create records",
 		"plystra capability create records.read --plugin records --expose",
 		"plystra capability implement email.send/v1 --plugin mailer",

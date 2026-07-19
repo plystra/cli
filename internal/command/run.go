@@ -61,7 +61,7 @@ regenerates, tidies, and validates the complete Project in one rollback boundary
 
 Options:
   --module <go-module-path> Set the Go Module path; defaults to the project name.
-  --template <module-query> Add and compose one ordinary Plystra Project dependency.
+  --template <module-query> Create from one public Plystra Project dependency.
   --plugin <name>           Create an initial root-level plugin.
   --git, --no-git           Initialize or omit a Git repository.
   --github-ci, --no-github-ci

@@ -184,6 +184,12 @@ the template before installing the target. The diagnostic names every candidate
 and requires the template publisher to record the explicit default choice in
 root `plystra.yaml` and publish a corrected module version.
 
+The complete effective template graph must also use public Go Modules. Creation
+rejects every direct or transitive module matched by the effective `GOPRIVATE`
+setting, reports each selected `path@version`, and leaves no target directory.
+Publish or replace a genuinely private dependency before publishing the
+template, or correct an overbroad Go privacy setting before retrying.
+
 Typed operational values and Secret-reference placeholders declared by the
 template's root configuration are materialized in the new root `plystra.yaml`
 through that same dependency composition. Creation validates them against the

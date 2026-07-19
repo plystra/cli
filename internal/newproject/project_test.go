@@ -195,7 +195,7 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
 		"generated/go/configuration/mailer_gen.go":             []byte("package configuration\n\nimport (\n\t\"context\"\n\n\tkernelconfiguration \"github.com/plystra/kernel/configuration\"\n)\n\ntype MailerConfig struct { Host string; Password kernelconfiguration.Secret }\nfunc DecodeMailer(context.Context, *kernelconfiguration.Resolver, []byte) (MailerConfig, error) { return MailerConfig{}, nil }\n"),
 		"generated/go/contracts/email/send/v1/contract_gen.go": []byte("package emailsendv1\n\nconst CapabilityID = \"email.send/v1\"\ntype Request struct{}\ntype Response struct{}\n"),
 	})
-	environment := isolatedGoEnvironment(t, proxy)
+	environment := setEnvironmentValue(isolatedGoEnvironment(t, proxy), "GOPRIVATE", "corp.example.com")
 	environment = append(environment, secretReference+"="+resolvedSecret)
 	if err := gocommand.Run(t.Context(), gocommand.Options{
 		Directory:   t.TempDir(),
@@ -363,6 +363,74 @@ func TestPublicCommandRejectsTemplateWithAmbiguousDefaultProvidersAndRollsBack(t
 	}
 	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("target exists after ambiguous template failure: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
+}
+
+func TestPublicCommandRejectsPrivateTemplateGraphAndRollsBack(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/private-dependent-platform"
+	const templateVersion = "v1.0.0"
+	const templateQuery = templatePath + "@" + templateVersion
+	const privateRuntimePath = "example.com/acme/private-runtime"
+	const privateRuntimeVersion = "v1.2.0"
+	const privateToolsPath = "example.com/acme/private-tools"
+	const privateToolsVersion = "v1.1.0"
+	writeProxyModule(t, proxy, privateRuntimePath, privateRuntimeVersion, map[string][]byte{
+		"runtime.go": []byte("package runtime\n"),
+	})
+	writeProxyModule(t, proxy, privateToolsPath, privateToolsVersion, map[string][]byte{
+		"tools.go": []byte("package tools\n"),
+	})
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"go.mod":       []byte("module " + templatePath + "\n\ngo 1.26\n\nrequire (\n\t" + privateRuntimePath + " " + privateRuntimeVersion + "\n\t" + privateToolsPath + " " + privateToolsVersion + "\n)\n"),
+		"template.go":  []byte("package platform\n"),
+		"plystra.yaml": []byte("{}\n"),
+	})
+	environment := setEnvironmentValue(
+		isolatedGoEnvironment(t, proxy),
+		"GOPRIVATE",
+		templatePath+","+privateRuntimePath+","+privateToolsPath,
+	)
+	parent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	arguments := []string{
+		"new", "my-app",
+		"--module", "example.com/acme/my-app",
+		"--template", templateQuery,
+		"--no-git", "--no-github-ci", "--no-skills",
+	}
+
+	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 1 {
+		t.Fatalf("RunIn exit code = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("RunIn stdout = %q, want empty output", stdout.String())
+	}
+	for _, detail := range []string{
+		"invalid Plystra Project template",
+		templateQuery,
+		"cannot qualify because its effective Go Module graph requires private modules matched by GOPRIVATE",
+		privateRuntimePath + "@" + privateRuntimeVersion,
+		privateToolsPath + "@" + privateToolsVersion,
+		"qualified templates must use only public modules",
+		"correct an overbroad GOPRIVATE setting",
+	} {
+		if !strings.Contains(stderr.String(), detail) {
+			t.Fatalf("RunIn stderr omits %q: %s", detail, stderr.String())
+		}
+	}
+	_, privateList, found := strings.Cut(strings.SplitN(stderr.String(), "; correction:", 2)[0], "matched by GOPRIVATE: ")
+	if !found {
+		t.Fatalf("RunIn stderr omits private module list: %s", stderr.String())
+	}
+	wantPrivateList := templateQuery + ", " + privateRuntimePath + "@" + privateRuntimeVersion + ", " + privateToolsPath + "@" + privateToolsVersion
+	if privateList != wantPrivateList {
+		t.Fatalf("RunIn private module list = %q, want %q", privateList, wantPrivateList)
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists after private dependency failure: %v", err)
 	}
 	assertNoTransactionFiles(t, parent)
 }
@@ -873,6 +941,9 @@ func writeProxyModule(t *testing.T, root, modulePath, version string, source map
 	writeTestFile(t, filepath.Join(versionRoot, "list"), []byte(version+"\n"))
 	writeTestFile(t, filepath.Join(versionRoot, escapedVersion+".info"), fmt.Appendf(nil, "{\"Version\":%q,\"Time\":\"2026-07-19T00:00:00Z\"}\n", version))
 	moduleFile := []byte("module " + modulePath + "\n\ngo 1.26\n")
+	if declared, exists := source["go.mod"]; exists {
+		moduleFile = declared
+	}
 	writeTestFile(t, filepath.Join(versionRoot, escapedVersion+".mod"), moduleFile)
 
 	archiveFile, err := os.Create(filepath.Join(versionRoot, escapedVersion+".zip"))
@@ -934,6 +1005,17 @@ func environmentValue(t *testing.T, environment []string, wanted string) string 
 	}
 	t.Fatalf("environment omits %s", wanted)
 	return ""
+}
+
+func setEnvironmentValue(environment []string, wanted, value string) []string {
+	result := make([]string, 0, len(environment)+1)
+	for _, entry := range environment {
+		key, _, _ := strings.Cut(entry, "=")
+		if !strings.EqualFold(key, wanted) {
+			result = append(result, entry)
+		}
+	}
+	return append(result, wanted+"="+value)
 }
 
 func isolatedGoEnvironment(t *testing.T, proxyRoot string) []string {
