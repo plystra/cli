@@ -940,6 +940,8 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("numeric zero `*_UNSPECIFIED` sentinel"),
 		[]byte("removed member names and numbers remain permanently reserved"),
 		[]byte("Capability Aliases reuse their canonical target messages and enums"),
+		[]byte("derive the same ProtoJSON name or generated enum type"),
+		[]byte("rename one field in `capability.yaml`"),
 		[]byte("does not emit `.proto` source, descriptor sets"),
 	} {
 		if !bytes.Contains(readme, wireHistory) {
@@ -1688,6 +1690,10 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"sentinel and stable positive member numbers",
 		"removed member names and numbers remain permanently",
 		"application Alias reuses its canonical target messages and enums",
+		"Protobuf-derived names must be unique within each request and response",
+		"foo1 and foo_1 both derive the ProtoJSON name foo1",
+		"http_status and h_t_t_p_status both derive one HTTPStatusEnum type",
+		"Protobuf naming collision",
 		"does not emit .proto source, descriptor sets",
 		"configuration schema v4",
 		"Protobuf wire-map digest",

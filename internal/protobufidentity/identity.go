@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/goname"
 )
 
 const (
@@ -24,9 +25,9 @@ var (
 	// ErrBuild reports invalid or internally inconsistent Protobuf surface
 	// identity input.
 	ErrBuild = errors.New("build Protobuf surface identities")
-	// ErrCollision reports two public Capability surfaces projected onto one
+	// ErrCollision reports two authored identities projected onto one generated
 	// Protobuf or Connect identity.
-	ErrCollision = errors.New("Protobuf surface identity collision")
+	ErrCollision = errors.New("Protobuf identity collision")
 )
 
 // Surface binds one public canonical or Alias ID to the canonical target whose
@@ -219,6 +220,33 @@ func Package(identifier capabilityid.Identifier) string {
 	}
 	segments = append(segments, "v"+strconv.FormatUint(identifier.Major(), 10))
 	return packagePrefix + strings.Join(segments, ".")
+}
+
+// FieldJSONName returns the deterministic ProtoJSON lower-camel identity for
+// one canonical lower snake-case field name.
+func FieldJSONName(value string) string {
+	var result strings.Builder
+	result.Grow(len(value))
+	uppercaseNext := false
+	for index := 0; index < len(value); index++ {
+		character := value[index]
+		if character == '_' {
+			uppercaseNext = true
+			continue
+		}
+		if uppercaseNext && character >= 'a' && character <= 'z' {
+			character -= 'a' - 'A'
+		}
+		uppercaseNext = false
+		result.WriteByte(character)
+	}
+	return result.String()
+}
+
+// EnumType returns the fully qualified generated enum identity owned by one
+// canonical message field.
+func EnumType(messageType, fieldName string) string {
+	return messageType + goname.Field(fieldName) + "Enum"
 }
 
 // DecodePackage reverses a generated package identity into its exact canonical

@@ -166,6 +166,13 @@ the exact previously generated content before running plystra generate. The
 current ledger does not emit .proto source, descriptor sets, or Connect runtime
 bindings; those remain later transport work.
 
+Protobuf-derived names must be unique within each request and response. For
+example, foo1 and foo_1 both derive the ProtoJSON name foo1, while enum fields
+http_status and h_t_t_p_status both derive one HTTPStatusEnum type. Generation
+reports the Capability, request or response, both canonical field names, and the
+colliding identity before writing output. Rename one authored capability.yaml
+field and regenerate; never repair the collision in generated files.
+
 The CLI currently does not create or execute database migrations. When a Plugin
 owns migrations, keep them inside that Plugin and make its runtime lifecycle or
 provider implementation apply them deliberately. Do not place migrations under
@@ -952,6 +959,11 @@ build and distribution boundary for every Plystra module.
   generated/proto/wire-map.json. Never edit or delete it to force new field
   or enum-member numbers; generation rejects missing, modified, corrupt, reused,
   or inconsistent history instead of guessing.
+- Protobuf naming collision: rename one of the two canonical fields named by
+  the diagnostic in the authored capability.yaml. ProtoJSON collapses names
+  such as foo1 and foo_1, and generated enum initialisms can collapse names such
+  as http_status and h_t_t_p_status. Do not patch generated names or the wire
+  map; ordinary generation and generate --check leave the Project unchanged.
 - Stale output after removal: run plystra generate so the managed-file manifest
   can remove obsolete contracts, clients, adapters, Alias surfaces, docs, and
   SDK operations transactionally.

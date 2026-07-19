@@ -29,6 +29,7 @@ import (
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/pluginmeta"
+	"github.com/plystra/cli/internal/protobufidentity"
 	"github.com/plystra/cli/internal/protobufwiremap"
 )
 
@@ -353,6 +354,57 @@ errors: []
 		t.Fatalf("enum-history rollback changed generated tree:\nbefore: %#v\nafter: %#v", generatedBeforeRollback, after)
 	}
 	assertNoTransactions(t, root)
+}
+
+func TestGenerateRejectsProtobufNamingCollisionsWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	for _, check := range []bool{false, true} {
+		check := check
+		name := "generate"
+		if check {
+			name = "generate check"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			writeApplicationModule(t, root, "example.com/acme/protobuf-collision")
+			writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
+  transports: {connect: true, rest: false}
+  expose: [naming.collision/v1]
+capabilities:
+  require: [naming.collision/v1]
+`)
+			writePlugin(t, root, "naming", "id: acme.naming\nprovides: [naming.collision/v1]\n")
+			writeCapability(t, root, "naming", "naming.collision/v1", `id: naming.collision/v1
+request:
+  foo_1: {type: string}
+  foo1: {type: string}
+response: {}
+errors: []
+`)
+			before := snapshotTree(t, root)
+			_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+				Start:       root,
+				Check:       check,
+				Environment: goEnvironment(nil),
+				Validate:    func(_ context.Context, _ string) error { return nil },
+			})
+			if !errors.Is(err, protobufidentity.ErrCollision) {
+				t.Fatalf("Generate error = %v", err)
+			}
+			for _, want := range []string{"Capability naming.collision/v1", "request", `"foo1"`, `"foo_1"`, `Protobuf JSON name "foo1"`} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("Generate error %q omits %q", err, want)
+				}
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed generation mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			assertNoTransactions(t, root)
+		})
+	}
 }
 
 type wireAssignments struct {
