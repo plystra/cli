@@ -15,7 +15,7 @@ import (
 const (
 	capabilityCreateSynopsis    = "plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]"
 	capabilityImplementSynopsis = "plystra capability implement <capability-name>/vN [--plugin <plugin>]"
-	capabilityExposeSynopsis    = "plystra capability expose <capability-name>/vN"
+	capabilityExposeSynopsis    = "plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]"
 	capabilityUsage             = `Usage:
   ` + capabilityCreateSynopsis + `
   ` + capabilityImplementSynopsis + `
@@ -24,14 +24,28 @@ const (
 	capabilityCreateUsage    = "usage: " + capabilityCreateSynopsis + "\n"
 	capabilityImplementUsage = "usage: " + capabilityImplementSynopsis + "\n"
 	capabilityExposeUsage    = "usage: " + capabilityExposeSynopsis + "\n"
+	capabilityExposeHelp     = `Usage:
+  ` + capabilityExposeSynopsis + `
+
+Options:
+  --env <environment>    Write exposure to plystra.<environment>.yaml.
+  --config <yaml-path>   Write exposure to one complete replacement configuration.
+
+PLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit
+selector is present; setting both is an error. Explicit --env or --config
+overrides both variables, and the two flags cannot be combined. Relative
+configuration paths are resolved from the detected Plystra Project root.
+`
 )
 
 type capabilityArguments struct {
-	action    string
-	reference string
-	plugin    string
-	confirm   bool
-	expose    bool
+	action      string
+	reference   string
+	plugin      string
+	confirm     bool
+	expose      bool
+	config      string
+	environment string
 }
 
 func runCapability(arguments []string, stdout, stderr io.Writer, workingDirectory string, environment []string, selectPlugin plugintarget.Selector) int {
@@ -48,9 +62,11 @@ func runCapability(arguments []string, stdout, stderr io.Writer, workingDirector
 	defer cancel()
 	if parsed.action == "expose" {
 		result, err := capabilityexpose.Expose(ctx, capabilityexpose.Options{
-			Start:       workingDirectory,
-			Reference:   parsed.reference,
-			Environment: environment,
+			Start:             workingDirectory,
+			Reference:         parsed.reference,
+			ConfigurationPath: parsed.config,
+			EnvironmentName:   parsed.environment,
+			Environment:       environment,
 		})
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "%v\n", err)
@@ -122,8 +138,27 @@ func parseCapabilityArguments(arguments []string) (capabilityArguments, bool) {
 	}
 	result := capabilityArguments{action: arguments[1], reference: arguments[2]}
 	if result.action == "expose" {
-		if len(arguments) != 3 {
-			return capabilityArguments{}, false
+		configurationSet := false
+		environmentSet := false
+		for index := 3; index < len(arguments); index++ {
+			switch arguments[index] {
+			case "--config":
+				if configurationSet || environmentSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+					return capabilityArguments{}, false
+				}
+				configurationSet = true
+				index++
+				result.config = arguments[index]
+			case "--env":
+				if environmentSet || configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+					return capabilityArguments{}, false
+				}
+				environmentSet = true
+				index++
+				result.environment = arguments[index]
+			default:
+				return capabilityArguments{}, false
+			}
 		}
 		return result, true
 	}
@@ -163,7 +198,7 @@ func capabilityHelp(arguments []string) (string, bool) {
 	case len(arguments) == 3 && arguments[0] == "capability" && arguments[1] == "implement" && isHelp(arguments[2]):
 		return "Usage:\n  " + capabilityImplementSynopsis + "\n", true
 	case len(arguments) == 3 && arguments[0] == "capability" && arguments[1] == "expose" && isHelp(arguments[2]):
-		return "Usage:\n  " + capabilityExposeSynopsis + "\n", true
+		return capabilityExposeHelp, true
 	default:
 		return "", false
 	}

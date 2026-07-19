@@ -28,8 +28,8 @@ plystra new <module-path> [options]
 plystra plugin create <name>
 plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
 plystra capability implement <capability-name>/vN [--plugin <plugin>]
-plystra capability expose <capability-name>/vN
-plystra generate [--check] [--config <yaml-path>]
+plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
+plystra generate [--check] [--env <environment>|--config <yaml-path>]
 ```
 
 Commands documented in the roadmap but absent from `plystra --help` are not
@@ -794,10 +794,27 @@ Expose an existing exact canonical Capability:
 
 ```powershell
 plystra capability expose catalog.item.get/v1
+plystra capability expose catalog.item.get/v1 --env production
 ```
 
-Success reports the `plystra.yaml` path. Repeating the command is byte-idempotent
-when generated output is current.
+The default command writes root `plystra.yaml`. The environment form writes
+only the sparse project-root `plystra.production.yaml` overlay, preserving its
+comments, unrelated values, and explicit add/remove tombstones. For an
+advanced complete replacement, use:
+
+```powershell
+plystra capability expose catalog.item.get/v1 --config deploy/customer-a.yaml
+```
+
+`PLYSTRA_ENV` and `PLYSTRA_CONFIG` select the same targets when no explicit
+selector is present. An explicit `--env` or `--config` overrides both ambient
+variables; the two explicit flags and the two ambient variables cannot be
+combined. Relative `--config` paths resolve from the Project root even when the
+command starts inside a Plugin. Success reports the selected document path,
+regenerates with the same selection, never synchronizes an unselected YAML
+file, and is byte-idempotent when generated output is current. A selection,
+generation, module, or validation failure restores the selected document and
+all other files in the transaction.
 
 The generated strict handler is under:
 

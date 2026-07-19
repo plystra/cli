@@ -41,6 +41,65 @@ func (s ConfigurationSelection) Environment() string { return s.environment }
 // Digest returns the normalized selected-document digest.
 func (s ConfigurationSelection) Digest() string { return s.digest }
 
+// ConfigurationTarget is one validated selected current-project document and
+// the exact bounded filesystem snapshot from which a targeted mutation may be
+// planned. Environment targets are sparse overlays; default and explicit
+// targets are complete current-project documents.
+type ConfigurationTarget struct {
+	selection ConfigurationSelection
+	snapshot  ManifestSnapshot
+}
+
+// Selection returns the normalized selector and document digest.
+func (t ConfigurationTarget) Selection() ConfigurationSelection { return t.selection }
+
+// Snapshot returns the immutable selected-document snapshot. Snapshot.Data
+// returns defensive bytes for an atomic write precondition.
+func (t ConfigurationTarget) Snapshot() ManifestSnapshot { return t.snapshot }
+
+// EnvironmentOverlay reports whether the selected document must be parsed and
+// edited with sparse environment-overlay semantics.
+func (t ConfigurationTarget) EnvironmentOverlay() bool {
+	return t.selection.mode == configurationModeEnvironment
+}
+
+// SelectConfigurationTarget applies the same explicit and ambient selector
+// rules as complete application resolution, safely reads the selected file,
+// validates it for its mode, and computes its normalized non-secret digest.
+// moduleRoot must already be the detected Plystra Project root.
+func SelectConfigurationTarget(moduleRoot, explicitConfiguration, explicitEnvironment string, environment []string) (ConfigurationTarget, error) {
+	selector, err := resolveConfigurationSelector(moduleRoot, explicitConfiguration, explicitEnvironment, environment)
+	if err != nil {
+		return ConfigurationTarget{}, err
+	}
+	var snapshot ManifestSnapshot
+	if selector.mode == configurationModeEnvironment {
+		snapshot, _, err = loadEnvironmentOverlay(moduleRoot, selector.path)
+	} else {
+		snapshot, _, err = loadConfiguration(moduleRoot, selector.path)
+	}
+	if err != nil {
+		return ConfigurationTarget{}, err
+	}
+	digestFunction := applicationgen.ConfigurationDigest
+	if selector.mode == configurationModeEnvironment {
+		digestFunction = applicationgen.EnvironmentOverlayDigest
+	}
+	digest, err := digestFunction(snapshot.Data())
+	if err != nil {
+		return ConfigurationTarget{}, fmt.Errorf("digest selected configuration %s: %w", selector.path, err)
+	}
+	return ConfigurationTarget{
+		selection: ConfigurationSelection{
+			mode:        selector.mode,
+			path:        selector.path,
+			environment: selector.environment,
+			digest:      digest,
+		},
+		snapshot: snapshot,
+	}, nil
+}
+
 type configurationSelector struct {
 	mode        string
 	path        string

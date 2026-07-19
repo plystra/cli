@@ -562,9 +562,26 @@ without adding providers or Kernel registrations.
 Expose an existing exact canonical Capability with:
 
     plystra capability expose records.read/v1
+    plystra capability expose records.read/v1 --env production
 
-Or expose during creation with --expose. Exposure is application-owned and
-updates plystra.yaml http.expose. The CLI generates a strict POST handler at:
+The default form updates root plystra.yaml. The environment form updates only
+the sparse project-root plystra.production.yaml overlay while preserving
+comments, unrelated values, and explicit add/remove tombstones. For an
+advanced complete replacement, use:
+
+    plystra capability expose records.read/v1 --config deploy/customer-a.yaml
+
+PLYSTRA_ENV and PLYSTRA_CONFIG select the same targets when neither explicit
+flag is present. An explicit --env or --config overrides both variables, and
+the selector modes cannot be combined. Relative replacement paths resolve from
+the Project root even when the command starts inside a Plugin. The command
+regenerates with the same selection, reports the selected document path, never
+synchronizes an unselected YAML file, and restores the selected document on
+failure.
+
+Or expose during creation with --expose. That shortcut uses the default root
+configuration. Exposure is application-owned and updates the selected
+document's http.expose declaration. The CLI generates a strict POST handler at:
 
     /api/v1/capabilities/records.read/v1/invoke
 

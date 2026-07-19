@@ -32,6 +32,8 @@ var (
 type Options struct {
 	Start                 string
 	Reference             string
+	ConfigurationPath     string
+	EnvironmentName       string
 	GoCommand             string
 	Environment           []string
 	DependencyOutputLimit int
@@ -53,7 +55,7 @@ func (r Result) Capability() capabilityid.Identifier { return r.capability }
 // ModuleRoot returns the canonical absolute application Go Module root.
 func (r Result) ModuleRoot() string { return r.moduleRoot }
 
-// ManifestPath returns the canonical absolute plystra.yaml path.
+// ManifestPath returns the canonical absolute selected configuration path.
 func (r Result) ManifestPath() string { return r.manifestPath }
 
 // Changed reports whether the transaction added the exposure declaration.
@@ -64,23 +66,37 @@ func (r Result) Changed() bool { return r.changed }
 // ManifestWrite plans one concurrency-protected plystra.yaml replacement.
 // The zero write and false are returned when id is already exposed.
 func ManifestWrite(moduleRoot string, id capabilityid.Identifier) (atomicfs.Write, bool, error) {
-	snapshot, err := applicationresolve.ReadManifestSnapshot(moduleRoot)
+	write, changed, _, err := SelectedManifestWrite(moduleRoot, id, "", "", nil)
+	return write, changed, err
+}
+
+// SelectedManifestWrite plans one concurrency-protected replacement for the
+// current-project document selected by the same explicit and ambient rules as
+// generation. The returned selection identifies the file even when no write
+// is required.
+func SelectedManifestWrite(moduleRoot string, id capabilityid.Identifier, configurationPath, environmentName string, environment []string) (atomicfs.Write, bool, applicationresolve.ConfigurationSelection, error) {
+	target, err := applicationresolve.SelectConfigurationTarget(moduleRoot, configurationPath, environmentName, environment)
 	if err != nil {
-		return atomicfs.Write{}, false, fmt.Errorf("%w: read plystra.yaml: %w", ErrManifestWrite, err)
+		return atomicfs.Write{}, false, applicationresolve.ConfigurationSelection{}, fmt.Errorf("%w: select current-project configuration: %w", ErrManifestWrite, err)
 	}
+	snapshot := target.Snapshot()
 	original := snapshot.Data()
-	updated, changed, err := applicationmeta.AddHTTPExposure(original, id)
+	addExposure := applicationmeta.AddHTTPExposure
+	if target.EnvironmentOverlay() {
+		addExposure = applicationmeta.AddHTTPExposureOverlay
+	}
+	updated, changed, err := addExposure(original, id)
 	if err != nil {
-		return atomicfs.Write{}, false, fmt.Errorf("%w: %w", ErrManifestWrite, err)
+		return atomicfs.Write{}, false, applicationresolve.ConfigurationSelection{}, fmt.Errorf("%w: %w", ErrManifestWrite, err)
 	}
 	if !changed {
-		return atomicfs.Write{}, false, nil
+		return atomicfs.Write{}, false, target.Selection(), nil
 	}
 	return atomicfs.Write{
-		Path:         "plystra.yaml",
+		Path:         target.Selection().Path(),
 		Data:         updated,
 		ExpectedData: original,
-	}, true, nil
+	}, true, target.Selection(), nil
 }
 
 // Expose adds one exact canonical Capability to http.expose and regenerates,
@@ -97,7 +113,7 @@ func Expose(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrExpose, err)
 	}
-	write, changed, err := ManifestWrite(module.Path(), id)
+	write, changed, selection, err := SelectedManifestWrite(module.Path(), id, options.ConfigurationPath, options.EnvironmentName, options.Environment)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrExpose, err)
 	}
@@ -109,6 +125,8 @@ func Expose(ctx context.Context, options Options) (Result, error) {
 		return modulemutation.Tidy(ctx, updatedRoot, options.GoCommand, options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
 			_, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
 				Start:                 updatedRoot,
+				ConfigurationPath:     options.ConfigurationPath,
+				EnvironmentName:       options.EnvironmentName,
 				GoCommand:             options.GoCommand,
 				Environment:           options.Environment,
 				DependencyOutputLimit: options.DependencyOutputLimit,
@@ -124,7 +142,7 @@ func Expose(ctx context.Context, options Options) (Result, error) {
 	return Result{
 		capability:   id,
 		moduleRoot:   module.Path(),
-		manifestPath: filepath.Join(module.Path(), "plystra.yaml"),
+		manifestPath: filepath.Join(module.Path(), filepath.FromSlash(selection.Path())),
 		changed:      changed,
 	}, nil
 }
