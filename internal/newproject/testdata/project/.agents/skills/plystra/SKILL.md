@@ -75,10 +75,20 @@ Remove a selected dependency by exact module path without a version query:
 
     plystra remove github.com/acme/email
 
-Both commands may start at the Project root or inside a Plugin. Add resolves the
-query through ordinary Go tooling and retains the selected module as a direct
-go.mod requirement. Remove requires the module to be selected in go.mod and
-verifies that regeneration plus tidy did not select it again. Each command
+Update exactly one selected dependency through a standard module query:
+
+    plystra update github.com/acme/email@v1.5.0
+
+All three commands may start at the Project root or inside a Plugin. Add
+resolves the query through ordinary Go tooling and
+retains the selected module as a direct go.mod requirement. Remove requires the
+module to be selected in go.mod and
+verifies that regeneration plus tidy did not select it again. Update requires
+an existing selection and preserves an existing direct requirement. It targets
+only that module query; Go may adjust transitive versions required by the selected
+graph. An omitted
+version query uses Go's normal upgrade selection rather than requesting an
+upgrade of every selected module. Each command
 recomposes root plystra.yaml, regenerates, tidies, and validates the complete
 Project. The current dependency surfaces use the default root configuration and
 never rewrite unselected environment overlays or alternative YAML files. A

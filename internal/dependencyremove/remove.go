@@ -7,17 +7,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
-	"strings"
-	"unicode"
 
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/moduleargument"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/modulemutation"
 	"github.com/plystra/cli/internal/projectlocate"
-	"golang.org/x/mod/modfile"
-	"golang.org/x/mod/module"
 )
 
 // ErrRemove reports failure to remove and validate one Go Module dependency.
@@ -55,7 +50,7 @@ func Remove(ctx context.Context, options Options) (Result, error) {
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: context is nil", ErrRemove)
 	}
-	modulePath, err := validateModulePath(options.ModulePath)
+	modulePath, err := moduleargument.ParsePath(options.ModulePath)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrRemove, err)
 	}
@@ -63,7 +58,7 @@ func Remove(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrRemove, err)
 	}
-	selected, err := requirementSelected(project.Path(), modulePath)
+	_, selected, err := modulemutation.FindRequirement(project.Path(), modulePath)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: inspect selected dependency: %w", ErrRemove, err)
 	}
@@ -87,7 +82,7 @@ func Remove(ctx context.Context, options Options) (Result, error) {
 					if err := validate(); err != nil {
 						return err
 					}
-					selected, err := requirementSelected(root, modulePath)
+					_, selected, err := modulemutation.FindRequirement(root, modulePath)
 					if err != nil {
 						return fmt.Errorf("confirm removed dependency: %w", err)
 					}
@@ -105,53 +100,4 @@ func Remove(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %w", ErrRemove, err)
 	}
 	return Result{module: project, modulePath: modulePath}, nil
-}
-
-func validateModulePath(value string) (string, error) {
-	path := strings.TrimSpace(value)
-	if path == "" {
-		return "", errors.New("Go Module path is empty")
-	}
-	if path != value || strings.HasPrefix(path, "-") || strings.Contains(path, "@") || strings.IndexFunc(path, func(r rune) bool {
-		return unicode.IsSpace(r) || unicode.IsControl(r)
-	}) >= 0 {
-		return "", fmt.Errorf("Go Module path %q is invalid; provide a path without a version query", value)
-	}
-	if err := module.CheckPath(path); err != nil {
-		return "", fmt.Errorf("Go Module path %q: %w", path, err)
-	}
-	return path, nil
-}
-
-func requirementSelected(rootPath, modulePath string) (selected bool, resultErr error) {
-	root, err := os.OpenRoot(rootPath)
-	if err != nil {
-		return false, err
-	}
-	defer func() {
-		if err := root.Close(); err != nil {
-			resultErr = errors.Join(resultErr, err)
-		}
-	}()
-	info, err := root.Lstat("go.mod")
-	if err != nil {
-		return false, err
-	}
-	if !info.Mode().IsRegular() || info.Mode()&fs.ModeSymlink != 0 {
-		return false, errors.New("go.mod is not a regular non-symbolic file")
-	}
-	data, err := root.ReadFile("go.mod")
-	if err != nil {
-		return false, err
-	}
-	parsed, err := modfile.Parse("go.mod", data, nil)
-	if err != nil {
-		return false, err
-	}
-	for _, requirement := range parsed.Require {
-		if requirement.Mod.Path == modulePath {
-			return true, nil
-		}
-	}
-	return false, nil
 }

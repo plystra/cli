@@ -14,6 +14,7 @@ import (
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/dependencyadd"
 	"github.com/plystra/cli/internal/dependencyremove"
+	"github.com/plystra/cli/internal/dependencyupdate"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/newproject"
 	"github.com/plystra/cli/internal/plugincreate"
@@ -29,6 +30,7 @@ const (
   plystra new <module-path> [options]
   plystra add <go-module-query>
   plystra remove <go-module-path>
+  plystra update <go-module-query>
   plystra plugin create <name>
   plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
@@ -45,6 +47,12 @@ tidies, and validates the complete Project in one rollback boundary.
   plystra remove <go-module-path>
 
 Removes one ordinary Go Module dependency, recomposes root plystra.yaml,
+regenerates, tidies, and validates the complete Project in one rollback boundary.
+`
+	updateUsage = `Usage:
+  plystra update <go-module-query>
+
+Updates one selected ordinary Go Module dependency, recomposes root plystra.yaml,
 regenerates, tidies, and validates the complete Project in one rollback boundary.
 `
 	newUsage = `Usage:
@@ -202,6 +210,28 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			return 1
 		}
 		_, _ = fmt.Fprintf(stdout, "removed dependency %s from %s in %s\n", result.ModulePath(), result.Module().ModulePath(), result.Module().Path())
+		return 0
+	case "update":
+		if len(arguments) == 2 && isHelp(arguments[1]) {
+			_, _ = io.WriteString(stdout, updateUsage)
+			return 0
+		}
+		if len(arguments) != 2 || strings.TrimSpace(arguments[1]) == "" || strings.HasPrefix(arguments[1], "--") {
+			_, _ = io.WriteString(stderr, updateUsage)
+			return 2
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
+		defer cancel()
+		result, err := dependencyupdate.Update(ctx, dependencyupdate.Options{
+			Start:       workingDirectory,
+			Query:       arguments[1],
+			Environment: environment,
+		})
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "%v\n", err)
+			return 1
+		}
+		_, _ = fmt.Fprintf(stdout, "updated dependency %s in %s at %s\n", result.Query(), result.Module().ModulePath(), result.Module().Path())
 		return 0
 	case "plugin":
 		if len(arguments) != 3 || arguments[1] != "create" {
