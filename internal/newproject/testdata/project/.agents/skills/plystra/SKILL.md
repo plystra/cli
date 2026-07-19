@@ -113,6 +113,13 @@ path@version, and leaves no target Project. Publish or replace a genuinely
 private dependency before publishing the template. If a reported module is
 already public, correct the overbroad Go privacy setting before retrying.
 
+Template dependency Projects must not declare relative replace directives in
+their go.mod files. Publish the referenced module version first, replace the
+local path with that ordinary requirement, and publish a corrected Project
+version. Creation checks the template and every transitive dependency Project,
+reports stable module@version/go.mod provenance, and leaves no target when a
+relative replacement remains.
+
 Add one ordinary Go Module dependency through the public transaction:
 
     plystra add github.com/acme/email@v1.4.2

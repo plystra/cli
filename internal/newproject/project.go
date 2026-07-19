@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/plystra/cli/internal/applicationgen"
@@ -195,6 +196,9 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 		if err := rejectPrivateTemplateDependencies(ctx, root, query, goCommand, environment, dependencies); err != nil {
 			return err
 		}
+		if err := rejectRelativeTemplateReplacements(query, dependencies); err != nil {
+			return err
+		}
 		if _, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
 			Start:            root,
 			GoCommand:        goCommand,
@@ -239,10 +243,7 @@ func rejectPrivateTemplateDependencies(ctx context.Context, root, query, goComma
 		if !modulePrivate && !replacementPrivate {
 			continue
 		}
-		reference := dependency.Path()
-		if dependency.SelectedVersion() != "" {
-			reference += "@" + dependency.SelectedVersion()
-		}
+		reference := selectedModuleReference(dependency)
 		if replacementPrivate {
 			reference += " => " + replacement.Path() + "@" + replacement.Version()
 		}
@@ -257,6 +258,54 @@ func rejectPrivateTemplateDependencies(ctx context.Context, root, query, goComma
 		query,
 		strings.Join(private, ", "),
 	)
+}
+
+func rejectRelativeTemplateReplacements(query string, dependencies moduledependency.Index) error {
+	findings := make([]string, 0)
+	for _, dependency := range dependencies.Projects() {
+		parsed, err := modfile.Parse("go.mod", dependency.ProjectGoMod(), nil)
+		if err != nil {
+			return fmt.Errorf("%w: inspect dependency Project %s go.mod while qualifying template %q: %v", ErrInvalidTemplate, selectedModuleReference(dependency), query, err)
+		}
+		for _, replacement := range parsed.Replace {
+			if replacement.New.Version != "" || !relativeReplacementPath(replacement.New.Path) {
+				continue
+			}
+			old := replacement.Old.Path
+			if replacement.Old.Version != "" {
+				old += "@" + replacement.Old.Version
+			}
+			findings = append(findings, fmt.Sprintf(
+				"%s/go.mod: replace %s => %s",
+				selectedModuleReference(dependency),
+				old,
+				replacement.New.Path,
+			))
+		}
+	}
+	if len(findings) == 0 {
+		return nil
+	}
+	sort.Strings(findings)
+	return fmt.Errorf(
+		"%w: template %q cannot qualify because dependency Plystra Projects declare relative Go Module replacements: %s; correction: publish every required module version and remove each relative replace from the listed go.mod before publishing a corrected template version",
+		ErrInvalidTemplate,
+		query,
+		strings.Join(findings, "; "),
+	)
+}
+
+func selectedModuleReference(dependency moduledependency.Module) string {
+	version := dependency.SelectedVersion()
+	if version == "" {
+		version = "workspace"
+	}
+	return dependency.Path() + "@" + version
+}
+
+func relativeReplacementPath(value string) bool {
+	normalized := strings.ReplaceAll(value, `\`, "/")
+	return normalized == "." || normalized == ".." || strings.HasPrefix(normalized, "./") || strings.HasPrefix(normalized, "../")
 }
 
 func populate(ctx context.Context, root, modulePath, name string, githubCI, skills bool) error {
@@ -468,6 +517,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"invent values for required fields omitted by the template",
 		"Template creation requires an unambiguous default Provider model",
 		"Template dependencies must not match the effective GOPRIVATE setting",
+		"Template dependency Projects must not declare relative replace directives",
 		"plystra plugin create records",
 		"plystra capability create records.read --plugin records --expose",
 		"plystra capability implement email.send/v1 --plugin mailer",

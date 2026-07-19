@@ -45,6 +45,8 @@ A template's default Provider model must be unambiguous. If several compatible P
 
 The template's complete effective graph must contain only public Go Modules. Creation rejects every direct or transitive module matched by the effective ` + "`GOPRIVATE`" + ` setting, reports its selected ` + "`path@version`" + `, and leaves no target Project. Publish or replace a genuinely private dependency before publishing the template, or correct an overbroad Go privacy setting before retrying.
 
+Every dependency Plystra Project in the template graph must be portable without a relative Go Module ` + "`replace`" + `. Creation reports each remaining directive with stable ` + "`module@version/go.mod`" + ` provenance and leaves no target Project. Publish the referenced module versions and remove the relative replacements before publishing a corrected template.
+
 Root ` + "`plystra.yaml`" + ` is the mandatory Project marker and shared default configuration. A sparse project-root ` + "`plystra.production.yaml`" + ` can be selected with ` + "`plystra generate --env production`" + ` and checked with the same selector; it is never created or loaded implicitly. To use one complete alternative current-Project document, run ` + "`plystra generate --config deploy/customer-a.yaml`" + `. Root configuration is not merged beneath an explicitly selected file. ` + "`PLYSTRA_ENV`" + ` and ` + "`PLYSTRA_CONFIG`" + ` supply the corresponding selector for automation; select exactly one mode.
 
 When several compatible Plugins provide one required Capability, select one with ` + "`plystra use <capability-name>/vN <plugin-id>`" + `. Add ` + "`--env <environment>`" + ` to write only that sparse overlay or ` + "`--config <yaml-path>`" + ` to write only one complete replacement configuration; the command regenerates and validates with the same selection.
@@ -227,6 +229,13 @@ checks the complete direct and transitive graph, reports every selected private
 path@version, and leaves no target Project. Publish or replace a genuinely
 private dependency before publishing the template. If a reported module is
 already public, correct the overbroad Go privacy setting before retrying.
+
+Template dependency Projects must not declare relative replace directives in
+their go.mod files. Publish the referenced module version first, replace the
+local path with that ordinary requirement, and publish a corrected Project
+version. Creation checks the template and every transitive dependency Project,
+reports stable module@version/go.mod provenance, and leaves no target when a
+relative replacement remains.
 
 Add one ordinary Go Module dependency through the public transaction:
 

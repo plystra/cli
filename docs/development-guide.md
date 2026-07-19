@@ -267,6 +267,13 @@ replace a genuinely private dependency before releasing the template. If the
 reported module is already public, correct the overbroad Go privacy setting and
 retry creation.
 
+Template dependency Projects must not declare relative `replace` directives in
+their `go.mod` files. Publish the referenced module version first, replace the
+local path with that ordinary requirement, and publish a corrected Project
+version. Creation checks the template and every transitive dependency Project,
+reports stable `module@version/go.mod` provenance, and leaves no target when a
+relative replacement remains.
+
 The template's root configuration is also the source of its verified local
 operational inputs. Typed values and Secret-reference placeholders declared
 there are composed into the new Project's root `plystra.yaml` and validated
