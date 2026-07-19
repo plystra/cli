@@ -107,6 +107,12 @@ that version:
 Creation otherwise names every candidate and leaves no target Project for the
 consumer to repair.
 
+Template dependencies must not match the effective GOPRIVATE setting. The CLI
+checks the complete direct and transitive graph, reports every selected private
+path@version, and leaves no target Project. Publish or replace a genuinely
+private dependency before publishing the template. If a reported module is
+already public, correct the overbroad Go privacy setting before retrying.
+
 Add one ordinary Go Module dependency through the public transaction:
 
     plystra add github.com/acme/email@v1.4.2

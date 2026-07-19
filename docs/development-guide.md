@@ -260,6 +260,13 @@ template's root `plystra.yaml` and publish that corrected module version.
 Creation otherwise reports every candidate and leaves no target directory for
 the consumer to repair.
 
+Template dependencies must not match the effective `GOPRIVATE` setting. The
+CLI checks the complete direct and transitive graph, reports every selected
+private `path@version`, and rolls back creation. A publisher must publish or
+replace a genuinely private dependency before releasing the template. If the
+reported module is already public, correct the overbroad Go privacy setting and
+retry creation.
+
 The template's root configuration is also the source of its verified local
 operational inputs. Typed values and Secret-reference placeholders declared
 there are composed into the new Project's root `plystra.yaml` and validated
