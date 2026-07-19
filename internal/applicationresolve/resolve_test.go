@@ -273,6 +273,97 @@ func TestResolveRequiresSelectedEnvironmentOverlay(t *testing.T) {
 	}
 }
 
+func TestResolveDerivesExposureFromEverySelectedConfigurationMode(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name         string
+		mode         string
+		rootData     string
+		selectedPath string
+		selectedData string
+		configure    func(*applicationresolve.Options)
+	}{
+		{
+			name:         "default",
+			mode:         applicationgen.ConfigurationModeDefault,
+			rootData:     "http: {expose: [kernel.health/v1]}\n",
+			selectedPath: "plystra.yaml",
+		},
+		{
+			name:         "environment overlay",
+			mode:         applicationgen.ConfigurationModeEnvironment,
+			rootData:     "http: {expose: [kernel.info/v1]}\n",
+			selectedPath: "plystra.production.yaml",
+			selectedData: "http:\n  expose: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n",
+			configure: func(options *applicationresolve.Options) {
+				options.EnvironmentName = "production"
+			},
+		},
+		{
+			name:         "full replacement",
+			mode:         applicationgen.ConfigurationModeExplicit,
+			rootData:     "http: {expose: [kernel.info/v1]}\n",
+			selectedPath: "deploy/customer.yaml",
+			selectedData: "http: {expose: [kernel.health/v1]}\n",
+			configure: func(options *applicationresolve.Options) {
+				options.ConfigurationPath = "deploy/customer.yaml"
+			},
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			writeModule(t, root, "example.com/selected-exposure/"+strings.ReplaceAll(test.name, " ", "-"))
+			writeFile(t, filepath.Join(root, "plystra.yaml"), test.rootData)
+			if test.selectedPath != "plystra.yaml" {
+				writeFile(t, filepath.Join(root, filepath.FromSlash(test.selectedPath)), test.selectedData)
+			}
+			before := snapshotTree(t, root)
+			options := applicationresolve.Options{
+				Start:       filepath.Join(root, filepath.Dir(filepath.FromSlash(test.selectedPath))),
+				Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+			}
+			if test.configure != nil {
+				test.configure(&options)
+			}
+
+			result, err := applicationresolve.Resolve(t.Context(), options)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			selection := result.ConfigurationSelection()
+			if selection.Mode() != test.mode || selection.Path() != test.selectedPath {
+				t.Fatalf("selection = mode %q path %q", selection.Mode(), selection.Path())
+			}
+			if got := applicationExposureIDs(result.Manifest()); !reflect.DeepEqual(got, []string{"kernel.health/v1"}) {
+				t.Fatalf("effective exposures = %v", got)
+			}
+			if got := applicationRequirementIDs(result.Manifest()); len(got) != 0 {
+				t.Fatalf("authored requirements = %v", got)
+			}
+			if requirements := result.Resolution().Context().Requirements(); len(requirements) != 1 || requirements[0].String() != "kernel.health/v1" {
+				t.Fatalf("resolved exposure requirements = %v", requirements)
+			}
+			healthID := parseGenerationCapability(t, "kernel.health/v1")
+			health, exists := result.Resolution().Context().Capability(healthID)
+			if !exists || health.Exposure() != (generation.Exposure{Go: true, HTTP: true, JavaScript: true}) {
+				t.Fatalf("health exposure = %#v, %t", health.Exposure(), exists)
+			}
+			infoID := parseGenerationCapability(t, "kernel.info/v1")
+			info, exists := result.Resolution().Context().Capability(infoID)
+			if !exists || info.Exposure() != (generation.Exposure{Go: true}) {
+				t.Fatalf("unselected info exposure = %#v, %t", info.Exposure(), exists)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("Resolve mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
 func TestResolveRejectsSelectedExposureWithoutHTTPTransport(t *testing.T) {
 	t.Parallel()
 
