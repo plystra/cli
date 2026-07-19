@@ -47,11 +47,13 @@ func TestMain(main *testing.M) {
 func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.T) {
 	proxy := createKernelProxy(t)
 	environment := isolatedGoEnvironment(t, proxy)
+	const projectName = "my-app"
 	const modulePath = "example.com/acme/my-app"
 
 	directParent := t.TempDir()
 	direct, err := newproject.Create(context.Background(), newproject.Options{
 		Parent:      directParent,
+		ProjectName: projectName,
 		ModulePath:  modulePath,
 		Git:         true,
 		GitHubCI:    true,
@@ -68,7 +70,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	commandParent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	if exitCode := command.RunIn([]string{"new", modulePath, "--git", "--github-ci", "--skills"}, &stdout, &stderr, commandParent, environment); exitCode != 0 {
+	if exitCode := command.RunIn([]string{"new", projectName, "--module", modulePath, "--git", "--github-ci", "--skills"}, &stdout, &stderr, commandParent, environment); exitCode != 0 {
 		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
 	}
 	commandTarget := filepath.Join(commandParent, "my-app")
@@ -148,6 +150,32 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	}
 }
 
+func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
+	proxy := createKernelProxy(t)
+	environment := isolatedGoEnvironment(t, proxy)
+	parent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := command.RunIn([]string{"new", "my-app", "--plugin", "records", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, environment)
+	if exitCode != 0 {
+		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
+	}
+	target := filepath.Join(parent, "my-app")
+	if stdout.String() != fmt.Sprintf("created my-app in %s\n", target) || stderr.Len() != 0 {
+		t.Fatalf("RunIn output = stdout %q, stderr %q", stdout.String(), stderr.String())
+	}
+	assertModuleState(t, target, "my-app")
+	pluginManifest, err := os.ReadFile(filepath.Join(target, "records", "plugin.yaml"))
+	if err != nil || !bytes.Contains(pluginManifest, []byte("id: my-app.records")) {
+		t.Fatalf("default-module Plugin manifest = %q, %v", pluginManifest, err)
+	}
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: target, Check: true, Environment: environment})
+	if err != nil || !checked.Report().Clean() {
+		t.Fatalf("default-module generated output = %#v, %v", checked.Report().Changes(), err)
+	}
+}
+
 func assertCIUsesCurrentActions(t *testing.T, workflow []byte) {
 	t.Helper()
 	for _, action := range [][]byte{[]byte("actions/checkout@v7"), []byte("actions/setup-go@v6")} {
@@ -197,6 +225,7 @@ func TestCreateWithInitialPluginComposesProjectTransactions(t *testing.T) {
 	directParent := t.TempDir()
 	direct, err := newproject.Create(context.Background(), newproject.Options{
 		Parent:      directParent,
+		ProjectName: "my-app",
 		ModulePath:  modulePath,
 		Plugin:      pluginName,
 		Environment: environment,
@@ -208,7 +237,7 @@ func TestCreateWithInitialPluginComposesProjectTransactions(t *testing.T) {
 	commandParent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	arguments := []string{"new", modulePath, "--plugin", pluginName, "--no-git", "--no-github-ci", "--no-skills"}
+	arguments := []string{"new", "my-app", "--module", modulePath, "--plugin", pluginName, "--no-git", "--no-github-ci", "--no-skills"}
 	if exitCode := command.RunIn(arguments, &stdout, &stderr, commandParent, environment); exitCode != 0 {
 		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
 	}
@@ -247,12 +276,42 @@ func TestPublicCommandRejectsRemovedLibraryFlagWithoutMutation(t *testing.T) {
 	parent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := command.RunIn([]string{"new", "example.com/acme/my-app", "--library", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
-	if exitCode != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "plystra new <module-path>") || strings.Contains(stderr.String(), "Create a non-runnable") {
+	exitCode := command.RunIn([]string{"new", "my-app", "--library", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
+	if exitCode != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "plystra new <project-name>") || strings.Contains(stderr.String(), "Create a non-runnable") {
 		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
 	}
 	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
 		t.Fatalf("removed flag mutated parent: %v, %v", entries, err)
+	}
+}
+
+func TestPublicCommandRejectsOldPositionalModulePathWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := command.RunIn([]string{"new", "example.com/acme/my-app", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
+	if exitCode != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "project name") {
+		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
+	}
+	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
+		t.Fatalf("old positional syntax mutated parent: %v, %v", entries, err)
+	}
+}
+
+func TestPublicCommandRejectsInvalidModuleOverrideWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := command.RunIn([]string{"new", "my-app", "--module", "local-module", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
+	if exitCode != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "invalid explicit Go Module path") {
+		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
+	}
+	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
+		t.Fatalf("invalid module override mutated parent: %v, %v", entries, err)
 	}
 }
 
@@ -275,12 +334,15 @@ func TestCreateHonorsOptionalProjectChoices(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			parent := t.TempDir()
-			modulePath := "example.com/acme/choice-" + test.name
-			if test.modulePath != "" {
-				modulePath = test.modulePath
+			projectName := "choice-" + test.name
+			modulePath := test.modulePath
+			expectedModulePath := modulePath
+			if expectedModulePath == "" {
+				expectedModulePath = projectName
 			}
 			result, err := newproject.Create(t.Context(), newproject.Options{
 				Parent:      parent,
+				ProjectName: projectName,
 				ModulePath:  modulePath,
 				Git:         test.git,
 				GitHubCI:    test.githubCI,
@@ -290,6 +352,10 @@ func TestCreateHonorsOptionalProjectChoices(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create: %v", err)
 			}
+			if result.ModulePath() != expectedModulePath || result.Path() != filepath.Join(parent, projectName) {
+				t.Fatalf("Create result = module %q path %q", result.ModulePath(), result.Path())
+			}
+			assertModuleState(t, result.Path(), expectedModulePath)
 			assertPathPresence(t, filepath.Join(result.Path(), ".git"), test.git)
 			assertPathPresence(t, filepath.Join(result.Path(), ".github", "workflows", "ci.yml"), test.githubCI)
 			assertPathPresence(t, filepath.Join(result.Path(), ".agents", "skills", "plystra", "SKILL.md"), test.skills)
@@ -297,7 +363,7 @@ func TestCreateHonorsOptionalProjectChoices(t *testing.T) {
 				assertGitInitialized(t, result.Path())
 			}
 			if test.skills {
-				assertPlystraSkill(t, result.Path(), modulePath)
+				assertPlystraSkill(t, result.Path(), expectedModulePath)
 			}
 		})
 	}
@@ -309,7 +375,7 @@ func TestPublicCommandRequiresExplicitNonInteractiveChoices(t *testing.T) {
 	parent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := command.RunIn([]string{"new", "example.com/acme/my-app"}, &stdout, &stderr, parent, nil)
+	exitCode := command.RunIn([]string{"new", "my-app"}, &stdout, &stderr, parent, nil)
 	if exitCode != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "--git or --no-git") || !strings.Contains(stderr.String(), "--github-ci or --no-github-ci") || !strings.Contains(stderr.String(), "--skills or --no-skills") {
 		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
 	}
@@ -324,6 +390,7 @@ func TestCreateRollsBackGitInitializationFailure(t *testing.T) {
 	parent := t.TempDir()
 	_, err := newproject.Create(t.Context(), newproject.Options{
 		Parent:      parent,
+		ProjectName: "my-app",
 		ModulePath:  "example.com/acme/my-app",
 		Git:         true,
 		GitCommand:  filepath.Join(parent, "missing-git-command"),
@@ -344,9 +411,10 @@ func TestCreateRollsBackGoValidationFailure(t *testing.T) {
 	parent := t.TempDir()
 	target := filepath.Join(parent, "my-app")
 	_, err := newproject.Create(context.Background(), newproject.Options{
-		Parent:     parent,
-		ModulePath: "example.com/acme/my-app",
-		GoCommand:  filepath.Join(parent, "missing-go-command"),
+		Parent:      parent,
+		ProjectName: "my-app",
+		ModulePath:  "example.com/acme/my-app",
+		GoCommand:   filepath.Join(parent, "missing-go-command"),
 	})
 	if !errors.Is(err, newproject.ErrCreate) {
 		t.Fatalf("Create error = %v, want ErrCreate", err)
@@ -368,6 +436,7 @@ func TestCreateWithInitialPluginRollsBackOuterProjectOnPluginValidationFailure(t
 	environment := append(os.Environ(), "PLYSTRA_NEW_PLUGIN_ROLLBACK_HELPER=1")
 	_, err = newproject.Create(context.Background(), newproject.Options{
 		Parent:      parent,
+		ProjectName: "my-app",
 		ModulePath:  "example.com/acme/my-app",
 		Plugin:      "account",
 		GoCommand:   command,
@@ -382,26 +451,53 @@ func TestCreateWithInitialPluginRollsBackOuterProjectOnPluginValidationFailure(t
 	assertNoTransactionFiles(t, parent)
 }
 
-func TestCreateRejectsInvalidInputsBeforeMutation(t *testing.T) {
+func TestCreateRejectsUnsafeProjectNamesBeforeMutation(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		modulePath string
+		name        string
+		projectName string
 	}{
-		{name: "empty", modulePath: ""},
-		{name: "invalid path", modulePath: "example.com/acme/../app"},
-		{name: "uppercase base", modulePath: "example.com/acme/MyApp"},
-		{name: "double hyphen", modulePath: "example.com/acme/my--app"},
-		{name: "trailing hyphen", modulePath: "example.com/acme/my-app-"},
+		{name: "empty"},
+		{name: "current directory", projectName: "."},
+		{name: "parent directory", projectName: ".."},
+		{name: "absolute", projectName: string(filepath.Separator) + "absolute"},
+		{name: "slash", projectName: "nested/app"},
+		{name: "backslash", projectName: `nested\app`},
+		{name: "uppercase", projectName: "MyApp"},
+		{name: "double hyphen", projectName: "my--app"},
+		{name: "trailing hyphen", projectName: "my-app-"},
+		{name: "control", projectName: "my\napp"},
+		{name: "reserved", projectName: "con"},
+		{name: "oversized", projectName: strings.Repeat("a", 65)},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			parent := t.TempDir()
-			_, err := newproject.Create(context.Background(), newproject.Options{Parent: parent, ModulePath: test.modulePath})
+			_, err := newproject.Create(context.Background(), newproject.Options{Parent: parent, ProjectName: test.projectName})
 			if !errors.Is(err, newproject.ErrCreate) {
 				t.Fatalf("Create error = %v, want ErrCreate", err)
+			}
+			entries, readErr := os.ReadDir(parent)
+			if readErr != nil || len(entries) != 0 {
+				t.Fatalf("parent entries = %v, %v", entries, readErr)
+			}
+		})
+	}
+}
+
+func TestCreateRejectsInvalidExplicitModulePathsBeforeMutation(t *testing.T) {
+	t.Parallel()
+
+	for _, modulePath := range []string{"my-app", "example.com/acme/../app", "example.com/acme/app/v1", "Example.com/acme/app"} {
+		modulePath := modulePath
+		t.Run(modulePath, func(t *testing.T) {
+			t.Parallel()
+			parent := t.TempDir()
+			_, err := newproject.Create(context.Background(), newproject.Options{Parent: parent, ProjectName: "my-app", ModulePath: modulePath})
+			if !errors.Is(err, newproject.ErrCreate) || !strings.Contains(err.Error(), "invalid explicit Go Module path") {
+				t.Fatalf("Create error = %v", err)
 			}
 			entries, readErr := os.ReadDir(parent)
 			if readErr != nil || len(entries) != 0 {
@@ -420,9 +516,10 @@ func TestCreateRejectsInvalidInitialPluginBeforeMutation(t *testing.T) {
 			t.Parallel()
 			parent := t.TempDir()
 			_, err := newproject.Create(context.Background(), newproject.Options{
-				Parent:     parent,
-				ModulePath: "example.com/acme/my-app",
-				Plugin:     pluginName,
+				Parent:      parent,
+				ProjectName: "my-app",
+				ModulePath:  "example.com/acme/my-app",
+				Plugin:      pluginName,
 			})
 			if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, plugincreate.ErrInvalidName) {
 				t.Fatalf("Create error = %v, want ErrCreate and ErrInvalidName", err)
@@ -448,9 +545,10 @@ func TestCreatePreservesExistingProject(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	_, err := newproject.Create(context.Background(), newproject.Options{
-		Parent:     parent,
-		ModulePath: "example.com/acme/my-app",
-		GoCommand:  filepath.Join(parent, "must-not-run"),
+		Parent:      parent,
+		ProjectName: "my-app",
+		ModulePath:  "example.com/acme/my-app",
+		GoCommand:   filepath.Join(parent, "must-not-run"),
 	})
 	if !errors.Is(err, newproject.ErrCreate) {
 		t.Fatalf("Create error = %v, want ErrCreate", err)
@@ -637,6 +735,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"name: plystra",
 		"The current Go Module path is " + modulePath,
 		"## Module and file ownership",
+		"plystra new app",
+		"plystra new app --module github.com/acme/app",
 		"plystra plugin create records",
 		"plystra capability create records.read --plugin records --expose",
 		"plystra capability implement email.send/v1 --plugin mailer",

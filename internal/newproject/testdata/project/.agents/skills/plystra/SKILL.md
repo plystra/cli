@@ -291,13 +291,18 @@ Switching a build-affecting selection correctly creates generated drift.
 - An application-local Capability Alias has the same ID grammar but is never a
   provider, canonical contract, reusable requirement, or Kernel registration.
 
-## Create a module and a Plugin
+## Create a Project and a Plugin
 
-From the desired parent directory, create a Plystra Project interactively:
+From the desired parent directory, create `./app/` with the project name as
+its initial Go Module path:
 
-    plystra new example.com/acme/app
+    plystra new app
 
-Inside an existing module, create a root-level Plugin:
+Choose an independent standard Go Module path without changing the directory:
+
+    plystra new app --module github.com/acme/app
+
+Inside an existing Project, create a root-level Plugin:
 
     plystra plugin create records
 

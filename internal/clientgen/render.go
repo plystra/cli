@@ -17,7 +17,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/goname"
-	"golang.org/x/mod/module"
+	"github.com/plystra/cli/internal/modulepath"
 )
 
 // ErrRender reports that a canonical Capability or application-local Alias
@@ -66,7 +66,7 @@ type canonicalContract struct {
 // client whose operation delegates through a caller-bound Kernel invocation
 // handle. Concrete provider packages never enter the generated caller surface.
 func Render(modulePath string, schema []byte) (File, error) {
-	if err := module.CheckPath(modulePath); err != nil {
+	if err := modulepath.CheckProject(modulePath); err != nil {
 		return File{}, fmt.Errorf("%w: invalid Go Module path %q: %v", ErrRender, modulePath, err)
 	}
 	canonical, err := capabilitymeta.NormalizeSchema(schema)
@@ -143,7 +143,7 @@ func Render(modulePath string, schema []byte) (File, error) {
 // It never creates an Alias contract, invocation handle, provider, or Kernel
 // registration.
 func RenderAlias(modulePath string, alias AliasView, target CanonicalTargetView) (File, error) {
-	if err := module.CheckPath(modulePath); err != nil {
+	if err := modulepath.CheckProject(modulePath); err != nil {
 		return File{}, fmt.Errorf("%w: invalid Go Module path %q: %v", ErrRender, modulePath, err)
 	}
 	if alias == nil {

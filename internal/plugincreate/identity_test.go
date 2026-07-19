@@ -14,6 +14,7 @@ func TestDeriveIDExcludesModuleHostAndMajorVersion(t *testing.T) {
 		want       string
 	}{
 		{modulePath: "example.com/acme/my-app", name: "account", want: "acme.my-app.account"},
+		{modulePath: "my-app", name: "account", want: "my-app.account"},
 		{modulePath: "example.com/acme/my-app/v2", name: "email-smtp", want: "acme.my-app.email-smtp"},
 		{modulePath: "example.com/my-app", name: "account", want: "my-app.account"},
 		{modulePath: "example.com/acme.co/my-app", name: "account", want: "acme.co.my-app.account"},

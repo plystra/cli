@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/plystra/cli/internal/modulepath"
 	"golang.org/x/mod/modfile"
-	"golang.org/x/mod/module"
 )
 
 const maximumGoModSize = 1 << 20
@@ -79,7 +79,7 @@ func Find(start string) (Module, error) {
 				return Module{}, fmt.Errorf("%w: module directive is required", ErrInvalidGoMod)
 			}
 			modulePath := parsed.Module.Mod.Path
-			if err := module.CheckPath(modulePath); err != nil {
+			if err := modulepath.CheckProject(modulePath); err != nil {
 				return Module{}, fmt.Errorf("%w: module path %q: %v", ErrInvalidGoMod, modulePath, err)
 			}
 			return Module{path: directory, modulePath: modulePath}, nil

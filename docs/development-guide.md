@@ -24,7 +24,7 @@ The public command surface currently implemented by the `plystra` binary is:
 ```text
 plystra help
 plystra version
-plystra new <module-path> [options]
+plystra new <project-name> [--module <go-module-path>] [options]
 plystra add <go-module-query>
 plystra remove <go-module-path>
 plystra update <go-module-query>
@@ -232,15 +232,23 @@ Interactive creation asks, in order, whether to initialize Git, include GitHub
 Actions CI, and include `.agents/skills/plystra/`. Enter accepts yes.
 
 ```powershell
-plystra new example.com/acme/orders
+plystra new orders
+plystra new orders --module example.com/acme/orders
 ```
+
+The positional value creates exactly `./orders/`. Without `--module`, the
+initial `go.mod` directive is `module orders`. Use `--module` when directory
+identity and a standard publishable Go Module path differ. Project names must
+be one safe lower-case ASCII kebab-case child component; absolute paths,
+traversal, separators, `.`, `..`, unsafe names, and existing targets fail
+before mutation. The old positional full-module-path syntax is not supported.
 
 Automation must answer all three choices explicitly:
 
 ```powershell
-plystra new example.com/acme/orders --no-git --no-github-ci --skills
-plystra new example.com/acme/contracts --no-git --no-github-ci --no-skills
-plystra new example.com/acme/orders --plugin catalog --git --github-ci --skills
+plystra new orders --module example.com/acme/orders --no-git --no-github-ci --skills
+plystra new contracts --module example.com/acme/contracts --no-git --no-github-ci --no-skills
+plystra new orders --module example.com/acme/orders --plugin catalog --git --github-ci --skills
 ```
 
 Success is reported as:

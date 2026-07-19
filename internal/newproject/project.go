@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -21,6 +20,7 @@ import (
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/plugininventory"
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
@@ -41,6 +41,7 @@ var (
 // Options contains the explicit inputs and process environment for creation.
 type Options struct {
 	Parent      string
+	ProjectName string
 	ModulePath  string
 	Plugin      string
 	Git         bool
@@ -65,19 +66,20 @@ func (r Result) Path() string { return r.path }
 
 // Create stages, validates, and atomically commits a new Plystra Go Module.
 func Create(ctx context.Context, options Options) (Result, error) {
-	if err := module.CheckPath(options.ModulePath); err != nil {
-		return Result{}, fmt.Errorf("%w: invalid Go Module path %q: %v", ErrCreate, options.ModulePath, err)
+	if !validProjectName(options.ProjectName) {
+		return Result{}, fmt.Errorf("%w: project name %q must be one lower-case ASCII kebab-case child directory", ErrCreate, options.ProjectName)
 	}
-	prefix, _, ok := module.SplitPathVersion(options.ModulePath)
-	if !ok {
-		return Result{}, fmt.Errorf("%w: invalid semantic import version in %q", ErrCreate, options.ModulePath)
-	}
-	name := path.Base(prefix)
-	if !validProjectName(name) {
-		return Result{}, fmt.Errorf("%w: module base %q must be lower-case ASCII kebab-case", ErrCreate, name)
+	modulePath := options.ModulePath
+	if modulePath == "" {
+		modulePath = options.ProjectName
+		if err := modulepath.CheckProject(modulePath); err != nil {
+			return Result{}, fmt.Errorf("%w: project name %q cannot be used as the initial Go Module path: %v", ErrCreate, options.ProjectName, err)
+		}
+	} else if err := module.CheckPath(modulePath); err != nil {
+		return Result{}, fmt.Errorf("%w: invalid explicit Go Module path %q: %v", ErrCreate, modulePath, err)
 	}
 	if options.Plugin != "" {
-		if _, err := plugincreate.DeriveID(options.ModulePath, options.Plugin); err != nil {
+		if _, err := plugincreate.DeriveID(modulePath, options.Plugin); err != nil {
 			return Result{}, fmt.Errorf("%w: initial plugin: %w", ErrCreate, err)
 		}
 	}
@@ -89,7 +91,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: resolve parent directory: %v", ErrCreate, err)
 	}
-	target := filepath.Join(absoluteParent, name)
+	target := filepath.Join(absoluteParent, options.ProjectName)
 	goCommand := options.GoCommand
 	if goCommand == "" {
 		goCommand = "go"
@@ -100,7 +102,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	}
 
 	err = atomicfs.CreateDirectory(target, func(stagingRoot string) error {
-		if err := populate(ctx, stagingRoot, options.ModulePath, name, options.GitHubCI, options.Skills); err != nil {
+		if err := populate(ctx, stagingRoot, modulePath, options.ProjectName, options.GitHubCI, options.Skills); err != nil {
 			return err
 		}
 		for _, arguments := range [][]string{{"mod", "download"}, {"mod", "tidy"}} {
@@ -120,7 +122,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		} else if err := gocommand.Run(ctx, gocommand.Options{Command: goCommand, Directory: stagingRoot, Environment: environment}, "test", "./..."); err != nil {
 			return err
 		}
-		if err := verifyModule(stagingRoot, options.ModulePath); err != nil {
+		if err := verifyModule(stagingRoot, modulePath); err != nil {
 			return err
 		}
 		if options.Git {
@@ -128,12 +130,12 @@ func Create(ctx context.Context, options Options) (Result, error) {
 				return err
 			}
 		}
-		return verifyChoices(stagingRoot, options.ModulePath, options.Git, options.GitHubCI, options.Skills)
+		return verifyChoices(stagingRoot, modulePath, options.Git, options.GitHubCI, options.Skills)
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrCreate, err)
 	}
-	return Result{modulePath: options.ModulePath, path: target}, nil
+	return Result{modulePath: modulePath, path: target}, nil
 }
 
 func populate(ctx context.Context, root, modulePath, name string, githubCI, skills bool) error {
@@ -337,6 +339,8 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"description: Develop, structure, configure, debug, and validate Plystra Go Modules",
 		"The current Go Module path is " + modulePath,
 		"## Module and file ownership",
+		"plystra new app",
+		"plystra new app --module github.com/acme/app",
 		"plystra plugin create records",
 		"plystra capability create records.read --plugin records --expose",
 		"plystra capability implement email.send/v1 --plugin mailer",
@@ -483,7 +487,7 @@ func verifyModule(root, modulePath string) error {
 }
 
 func validProjectName(value string) bool {
-	if value == "" || len(value) > 64 || value[0] < 'a' || value[0] > 'z' {
+	if value == "" || len(value) > 64 || value[0] < 'a' || value[0] > 'z' || module.CheckImportPath(value) != nil {
 		return false
 	}
 	previousHyphen := false

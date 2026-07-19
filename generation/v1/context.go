@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/plystra/cli/internal/capabilitymeta"
+	"github.com/plystra/cli/internal/modulepath"
 	"golang.org/x/mod/module"
 )
 
@@ -439,8 +440,14 @@ func normalizePlugins(inputs []PluginInput) ([]PluginView, map[PluginID]int, err
 }
 
 func normalizeModule(field, modulePath, version string) (ModuleView, error) {
-	if err := module.CheckPath(modulePath); err != nil {
-		return ModuleView{}, invalidContext("%s.module_path %q is not canonical: %v", field, modulePath, err)
+	var pathErr error
+	if version == "" {
+		pathErr = modulepath.CheckProject(modulePath)
+	} else {
+		pathErr = module.CheckPath(modulePath)
+	}
+	if pathErr != nil {
+		return ModuleView{}, invalidContext("%s.module_path %q is not canonical: %v", field, modulePath, pathErr)
 	}
 	if version != "" {
 		if err := module.Check(modulePath, version); err != nil {

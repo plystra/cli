@@ -156,15 +156,23 @@ and include the Plystra-specific development skill under
 `.agents/skills/plystra/`:
 
 ```powershell
-plystra new github.com/acme/my-app
+plystra new my-app
+plystra new my-app --module github.com/acme/my-app
 ```
+
+The positional value is one lower-case ASCII kebab-case child-directory name.
+The first command creates `./my-app/` with `module my-app`; `--module` changes
+the `go.mod` identity and generated imports without changing that directory.
+Unsafe names, paths, traversal, separators, and an existing target fail before
+filesystem mutation. An explicit module path must satisfy standard Go Module
+rules. The removed positional full-module-path form is not accepted.
 
 Each prompt defaults to yes and accepts `yes`/`y`, `no`/`n`, or Enter. Scripts
 and other non-interactive callers must choose every option explicitly:
 
 ```powershell
-plystra new github.com/acme/my-app --git --github-ci --skills
-plystra new github.com/acme/email --no-git --no-github-ci --no-skills
+plystra new my-app --module github.com/acme/my-app --git --github-ci --skills
+plystra new email --module github.com/acme/email --no-git --no-github-ci --no-skills
 ```
 
 The independent flag pairs are `--git`/`--no-git`,

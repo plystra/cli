@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/plystra/cli/internal/modulepath"
 	"golang.org/x/mod/module"
 )
 
@@ -17,7 +18,7 @@ var ErrPackageIdentity = errors.New("infer JavaScript SDK package identity")
 // scope when another component remains; deeper components form one hyphenated
 // package name. A semantic import version never changes the package identity.
 func InferPackageName(modulePath string) (string, error) {
-	if err := module.CheckPath(modulePath); err != nil {
+	if err := modulepath.CheckProject(modulePath); err != nil {
 		return "", fmt.Errorf("%w: invalid Go Module path %q: %v", ErrPackageIdentity, modulePath, err)
 	}
 	prefix, _, ok := module.SplitPathVersion(modulePath)
@@ -25,11 +26,15 @@ func InferPackageName(modulePath string) (string, error) {
 		return "", fmt.Errorf("%w: invalid semantic import version in %q", ErrPackageIdentity, modulePath)
 	}
 	parts := strings.Split(prefix, "/")
-	if len(parts) < 2 {
-		return "", fmt.Errorf("%w: module path %q has no application name below its host", ErrPackageIdentity, modulePath)
+	componentStart := 0
+	if strings.Contains(parts[0], ".") {
+		if len(parts) < 2 {
+			return "", fmt.Errorf("%w: module path %q has no application name below its host", ErrPackageIdentity, modulePath)
+		}
+		componentStart = 1
 	}
-	components := make([]string, len(parts)-1)
-	for index, value := range parts[1:] {
+	components := make([]string, len(parts)-componentStart)
+	for index, value := range parts[componentStart:] {
 		if value != strings.ToLower(value) || !validPackagePart(value) {
 			return "", fmt.Errorf("%w: Go Module path component %q is not a canonical lower-case npm package part", ErrPackageIdentity, value)
 		}

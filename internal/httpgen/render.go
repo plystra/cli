@@ -21,7 +21,7 @@ import (
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/goname"
-	"golang.org/x/mod/module"
+	"github.com/plystra/cli/internal/modulepath"
 )
 
 const maximumBodyBytes = 1 << 20
@@ -109,7 +109,7 @@ func RenderPlan(modulePath string, target CanonicalTargetView, plan generationlo
 // canonical generated HTTP handler. It never owns transport validation,
 // application invocation, a provider, or a Kernel registration.
 func RenderAlias(modulePath string, alias AliasView, target CanonicalTargetView) (File, error) {
-	if err := module.CheckPath(modulePath); err != nil {
+	if err := modulepath.CheckProject(modulePath); err != nil {
 		return File{}, fmt.Errorf("%w: invalid Go Module path %q: %v", ErrRender, modulePath, err)
 	}
 	if alias == nil {
@@ -207,7 +207,7 @@ func RenderAlias(modulePath string, alias AliasView, target CanonicalTargetView)
 }
 
 func render(modulePath string, target CanonicalTargetView, plan *generationlowering.Plan) (File, error) {
-	if err := module.CheckPath(modulePath); err != nil {
+	if err := modulepath.CheckProject(modulePath); err != nil {
 		return File{}, fmt.Errorf("%w: invalid Go Module path %q: %v", ErrRender, modulePath, err)
 	}
 	if plan != nil && plan.ModulePath() != modulePath {

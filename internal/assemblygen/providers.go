@@ -14,6 +14,7 @@ import (
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/goname"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/pluginid"
 	"github.com/plystra/kernel/plugin/manifest"
 	"golang.org/x/mod/module"
@@ -82,7 +83,7 @@ type importSpec struct {
 // startup, rejects stale configuration before invoking constructors, and
 // never embeds application runtime values or Secret reference targets.
 func RenderProviders(applicationModulePath string, inputs []ProviderInput) ([]byte, error) {
-	if err := module.CheckPath(applicationModulePath); err != nil {
+	if err := modulepath.CheckProject(applicationModulePath); err != nil {
 		return nil, fmt.Errorf("%w: %w: invalid application Go Module path %q: %v", ErrRenderProviders, ErrInvalidProvider, applicationModulePath, err)
 	}
 	providers, imports, err := planProviders(inputs)
@@ -523,8 +524,14 @@ func planProviders(inputs []ProviderInput) ([]plannedProvider, []importSpec, err
 		if err := pluginid.Validate(input.PluginID); err != nil {
 			return nil, nil, fmt.Errorf("%w: Plugin ID %q: %v", ErrInvalidProvider, input.PluginID, err)
 		}
-		if err := module.CheckPath(input.ModulePath); err != nil {
-			return nil, nil, fmt.Errorf("%w: plugin %q has invalid Go Module path %q: %v", ErrInvalidProvider, input.PluginID, input.ModulePath, err)
+		var modulePathErr error
+		if input.ModuleVersion == "" {
+			modulePathErr = modulepath.CheckProject(input.ModulePath)
+		} else {
+			modulePathErr = module.CheckPath(input.ModulePath)
+		}
+		if modulePathErr != nil {
+			return nil, nil, fmt.Errorf("%w: plugin %q has invalid Go Module path %q: %v", ErrInvalidProvider, input.PluginID, input.ModulePath, modulePathErr)
 		}
 		if input.ModuleVersion != "" {
 			if err := module.Check(input.ModulePath, input.ModuleVersion); err != nil {

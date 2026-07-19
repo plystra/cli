@@ -14,7 +14,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/goname"
-	"golang.org/x/mod/module"
+	"github.com/plystra/cli/internal/modulepath"
 )
 
 // ErrRender reports that a capability declaration could not produce a Go
@@ -46,7 +46,7 @@ type canonicalContract struct {
 // The interface stays independent of concrete providers and Kernel runtime
 // implementation details so generated adapters can bind it later.
 func Render(modulePath string, schema []byte) (File, error) {
-	if err := module.CheckPath(modulePath); err != nil {
+	if err := modulepath.CheckProject(modulePath); err != nil {
 		return File{}, fmt.Errorf("%w: invalid Go Module path %q: %v", ErrRender, modulePath, err)
 	}
 	canonical, err := capabilitymeta.NormalizeSchema(schema)
