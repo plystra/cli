@@ -177,6 +177,16 @@ Module Cache, create `go.work`, or grant the template any Provider or
 configuration priority. A module without root `plystra.yaml` is rejected and
 the target directory is not installed.
 
+Typed operational values and Secret-reference placeholders declared by the
+template's root configuration are materialized in the new root `plystra.yaml`
+through that same dependency composition. Creation validates them against the
+selected Plugin schemas but never reads an `env` or `file` reference, even when
+the referenced value exists in the creation environment. Secret-reference
+targets and resolved Secret values are excluded from generated source and
+manifest provenance. A required Plugin field omitted by the template is not
+invented; generation fails transactionally until the template declares a valid
+local value or reference.
+
 Each prompt defaults to yes and accepts `yes`/`y`, `no`/`n`, or Enter. Scripts
 and other non-interactive callers must choose every option explicitly:
 

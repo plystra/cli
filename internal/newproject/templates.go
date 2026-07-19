@@ -39,7 +39,7 @@ go test ./...
 go vet ./...
 ` + "```" + `
 
-Mutating Plystra commands regenerate automatically. Add an ordinary Go Module dependency with ` + "`plystra add github.com/acme/platform@v1.0.0`" + `, update it with ` + "`plystra update github.com/acme/platform@v1.1.0`" + `, and remove it with ` + "`plystra remove github.com/acme/platform`" + `. A Project created with ` + "`plystra new app --template github.com/acme/platform@v1.0.0`" + ` retains the selected template as the same kind of ordinary direct dependency: its root declarations compose into the application, but its source is not copied and it receives no resolution priority. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate.
+Mutating Plystra commands regenerate automatically. Add an ordinary Go Module dependency with ` + "`plystra add github.com/acme/platform@v1.0.0`" + `, update it with ` + "`plystra update github.com/acme/platform@v1.1.0`" + `, and remove it with ` + "`plystra remove github.com/acme/platform`" + `. A Project created with ` + "`plystra new app --template github.com/acme/platform@v1.0.0`" + ` retains the selected template as the same kind of ordinary direct dependency: its root declarations, typed local operational values, and Secret-reference placeholders compose into this Project, but its source is not copied and it receives no resolution priority. Creation validates those values without reading referenced ` + "`env`" + ` or ` + "`file`" + ` Secrets; generated source and manifest provenance contain neither reference targets nor resolved values. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate.
 
 Root ` + "`plystra.yaml`" + ` is the mandatory Project marker and shared default configuration. A sparse project-root ` + "`plystra.production.yaml`" + ` can be selected with ` + "`plystra generate --env production`" + ` and checked with the same selector; it is never created or loaded implicitly. To use one complete alternative current-Project document, run ` + "`plystra generate --config deploy/customer-a.yaml`" + `. Root configuration is not merged beneath an explicitly selected file. ` + "`PLYSTRA_ENV`" + ` and ` + "`PLYSTRA_CONFIG`" + ` supply the corresponding selector for automation; select exactly one mode.
 
@@ -189,6 +189,22 @@ regenerates the staged application. It does not copy dependency files, mutate
 Module Cache source, create go.work, inherit dependency environment overlays,
 or give template origin Provider or configuration priority. A failure leaves no
 target Project.
+
+Template-declared operational values and Secret-reference placeholders are
+composed into the new root plystra.yaml through the same typed field rules. For
+example, a template may declare:
+
+    config:
+      acme.platform.mailer:
+        host: smtp.localhost
+        password:
+          env: PLATFORM_SMTP_PASSWORD
+
+Creation validates this object against acme.platform.mailer's plugin.yaml but
+does not read PLATFORM_SMTP_PASSWORD. Generated source and manifest provenance
+contain neither that reference target nor its resolved value. The CLI does not
+invent values for required fields omitted by the template; an incomplete
+declaration fails the creation transaction.
 
 Add one ordinary Go Module dependency through the public transaction:
 
