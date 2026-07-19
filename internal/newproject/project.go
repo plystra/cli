@@ -421,6 +421,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
 		ModulePath:          modulePath,
 		KernelModuleVersion: KernelVersion,
+		HTTPTransports:      currentManifest.HTTPTransports(),
 		Resolution:          resolution,
 	})
 	if err != nil {

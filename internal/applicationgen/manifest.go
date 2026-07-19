@@ -375,6 +375,7 @@ type ApplicationModelOptions struct {
 	JavaScriptPackage   string
 	KernelModuleVersion string
 	KernelBuildIdentity string
+	HTTPTransports      applicationmeta.HTTPTransports
 	Configurations      []configurationgen.Input
 	Providers           []assemblygen.ProviderInput
 	Resolution          generationresolution.ExtensionResult
@@ -386,11 +387,17 @@ type applicationModelDocument struct {
 	JavaScriptPackage    string                                `json:"javascript_package"`
 	KernelModuleVersion  string                                `json:"kernel_module_version"`
 	KernelBuildIdentity  string                                `json:"kernel_build_identity"`
+	HTTPTransports       applicationModelHTTPTransports        `json:"http_transports"`
 	ContextDigest        string                                `json:"context_digest"`
 	AliasDigest          string                                `json:"alias_digest"`
 	Configurations       []applicationModelConfiguration       `json:"configurations"`
 	Providers            []applicationModelProvider            `json:"providers"`
 	GenerationExtensions []applicationModelGenerationExtension `json:"generation_extensions"`
+}
+
+type applicationModelHTTPTransports struct {
+	Connect bool `json:"connect"`
+	REST    bool `json:"rest"`
 }
 
 type applicationModelConfiguration struct {
@@ -495,11 +502,15 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 	}
 	sort.Slice(extensions, func(left, right int) bool { return extensions[left].PluginID < extensions[right].PluginID })
 	document := applicationModelDocument{
-		Version:              1,
-		ModulePath:           options.ModulePath,
-		JavaScriptPackage:    options.JavaScriptPackage,
-		KernelModuleVersion:  options.KernelModuleVersion,
-		KernelBuildIdentity:  options.KernelBuildIdentity,
+		Version:             2,
+		ModulePath:          options.ModulePath,
+		JavaScriptPackage:   options.JavaScriptPackage,
+		KernelModuleVersion: options.KernelModuleVersion,
+		KernelBuildIdentity: options.KernelBuildIdentity,
+		HTTPTransports: applicationModelHTTPTransports{
+			Connect: options.HTTPTransports.Connect,
+			REST:    options.HTTPTransports.REST,
+		},
 		ContextDigest:        context.Digest(),
 		AliasDigest:          aliases.Digest(),
 		Configurations:       configurationRecords,

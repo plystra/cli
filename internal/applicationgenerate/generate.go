@@ -250,11 +250,13 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
+	httpTransports := resolved.Manifest().HTTPTransports()
 	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
 		ModulePath:          resolved.Module().ModulePath(),
 		JavaScriptPackage:   javaScriptPackage,
 		KernelModuleVersion: kernelVersion,
 		KernelBuildIdentity: kernelBuildIdentity,
+		HTTPTransports:      httpTransports,
 		Configurations:      configurations,
 		Providers:           providers,
 		Resolution:          resolved.Resolution(),
@@ -286,6 +288,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		JavaScriptPackage:   javaScriptPackage,
 		KernelModuleVersion: kernelVersion,
 		KernelBuildIdentity: kernelBuildIdentity,
+		HTTPTransports:      httpTransports,
 		Composition:         resolved.Composition(),
 		ManifestProvenance:  provenance,
 		Configurations:      configurations,
