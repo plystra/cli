@@ -216,8 +216,41 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 			}
 			return fmt.Errorf("generate Project from template dependency %q: %w", query, err)
 		}
+		checked, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
+			Start:       root,
+			Check:       true,
+			GoCommand:   goCommand,
+			Environment: environment,
+		})
+		if err != nil {
+			return fmt.Errorf(
+				"%w: template %q cannot qualify because generated stability checking failed immediately after installation: %w; correction: the template publisher must make generation deterministic, run plystra generate followed by plystra generate --check in a fresh Project directory, and publish a corrected module version",
+				ErrInvalidTemplate,
+				query,
+				err,
+			)
+		}
+		if checked.ConfigurationChanged() || !checked.Report().Clean() {
+			return fmt.Errorf(
+				"%w: template %q cannot qualify because generated output is not stable immediately after installation: %s; correction: the template publisher must make generation deterministic, run plystra generate followed by plystra generate --check in a fresh Project directory, and publish a corrected module version",
+				ErrInvalidTemplate,
+				query,
+				strings.Join(templateGenerationDrift(checked), ", "),
+			)
+		}
 		return nil
 	})
+}
+
+func templateGenerationDrift(result applicationgenerate.Result) []string {
+	details := make([]string, 0, len(result.Report().Changes())+1)
+	if result.ConfigurationChanged() {
+		details = append(details, fmt.Sprintf("changed %s (dependency composition)", result.ConfigurationMaintenancePath()))
+	}
+	for _, change := range result.Report().Changes() {
+		details = append(details, fmt.Sprintf("%s %s", change.Kind(), change.Path()))
+	}
+	return details
 }
 
 func rejectPrivateTemplateDependencies(ctx context.Context, root, query, goCommand string, environment []string, dependencies moduledependency.Index) error {
