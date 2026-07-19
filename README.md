@@ -26,15 +26,19 @@ for canonical Capability request and response messages selected for Connect.
 Generation assigns the lowest permitted positive field number, preserves that
 assignment across declaration reordering, allocates new fields without
 renumbering existing fields, and permanently reserves both the name and number
-of every removed field. It retains inactive canonical histories when Connect
-or exposure is later disabled. Capability Aliases reuse their canonical
-target's messages and never receive separate ledger entries. The ownership
-manifest records the exact ledger digest, and generation rejects a missing,
-manually changed, corrupt, or inconsistent prior ledger instead of guessing.
-Never edit or delete this file; restore its exact last committed content before
-regenerating. Emission of `.proto` source, descriptor sets, enum-number
-history, and Connect runtime bindings remains deferred to later transport
-work.
+of every removed field. Scalar contract enums additionally receive a numeric
+zero `*_UNSPECIFIED` sentinel and deterministic positive member numbers.
+Existing members keep their assignments across declaration reordering and
+additions; removed member names and numbers remain permanently reserved. The
+ledger retains inactive canonical field and enum histories when Connect,
+exposure, or an enum is later disabled. Capability Aliases reuse their
+canonical target's messages and enums and never receive separate ledger
+entries. The ownership manifest records the exact ledger digest, and
+generation rejects a missing, manually changed, corrupt, or inconsistent prior
+ledger instead of guessing. Never edit or delete this file; restore its exact
+last committed content before regenerating. Emission of `.proto` source,
+descriptor sets, and Connect runtime bindings remains deferred to later
+transport work.
 
 Capability inspection strictly parses the optional `extensions` mapping within the 1 MiB declaration boundary. The CLI preserves every valid lower-kebab namespace, including unknown namespaces, as immutable namespace-sorted canonical JSON-compatible metadata: object key order is normalized, scalar types and array order are preserved, and omitted and empty metadata are equivalent. Normalized extension metadata participates in exact contract equality, so providers cannot add, remove, or change generation-affecting behavior under one Capability ID; conflicts report the differing metadata paths and require a new version. Namespace interpretation remains a selected plugin generation-extension responsibility.
 

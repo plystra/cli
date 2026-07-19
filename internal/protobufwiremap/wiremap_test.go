@@ -2,8 +2,10 @@ package protobufwiremap
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -102,10 +104,174 @@ errors: []
 	}
 }
 
+func TestBuildAllocatesAndPreservesCanonicalEnumHistory(t *testing.T) {
+	t.Parallel()
+
+	initialModel := wireModel(t, true, wireTarget(t, `id: delivery.route/v1
+request:
+  mode: {type: string, enum: [slow, fast]}
+response: {}
+errors: []
+`))
+	initial, err := Build(initialModel, nil, false, "")
+	if err != nil {
+		t.Fatalf("Build(initial): %v", err)
+	}
+	initialAssignment := decodeTestDocument(t, initial.CanonicalJSON()).Capabilities["delivery.route/v1"].Request.Enums["mode"]
+	const identity = "plystra.generated.delivery.route.v1.DeliveryRouteV1RequestModeEnum"
+	const sentinel = "DELIVERYROUTEV1REQUESTMODEENUM_UNSPECIFIED"
+	if !initialAssignment.Active || initialAssignment.Identity != identity || initialAssignment.Kind != "string" || initialAssignment.Sentinel != (enumSymbol{Name: sentinel, Number: 0}) {
+		t.Fatalf("initial enum identity = %#v", initialAssignment)
+	}
+	if got := enumNumbers(initialAssignment); !equalStringIntMap(got, map[string]int{`"fast"`: 1, `"slow"`: 2}) {
+		t.Fatalf("initial enum numbers = %v", got)
+	}
+	for _, member := range initialAssignment.Members {
+		sum := sha256.Sum256(member.Canonical)
+		want := "DELIVERYROUTEV1REQUESTMODEENUM_VALUE_" + fmt.Sprintf("%X", sum)
+		if member.Name != want || member.Number <= 0 {
+			t.Fatalf("member assignment = %#v; want name %s and positive number", member, want)
+		}
+	}
+	kindChanged := wireModel(t, true, wireTarget(t, `id: delivery.route/v1
+request:
+  mode: {type: integer, enum: [1, 2]}
+response: {}
+errors: []
+`))
+	if result, err := Build(kindChanged, initial.CanonicalJSON(), true, initial.Digest()); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "enum kind changed") {
+		t.Fatalf("Build(changed enum kind) = %#v, %v", result, err)
+	}
+
+	addedModel := wireModel(t, true, wireTarget(t, `id: delivery.route/v1
+request:
+  mode: {type: string, enum: [express, fast, slow]}
+response: {}
+errors: []
+`))
+	added, err := Build(addedModel, initial.CanonicalJSON(), true, initial.Digest())
+	if err != nil {
+		t.Fatalf("Build(added): %v", err)
+	}
+	addedAssignment := decodeTestDocument(t, added.CanonicalJSON()).Capabilities["delivery.route/v1"].Request.Enums["mode"]
+	if got := enumNumbers(addedAssignment); !equalStringIntMap(got, map[string]int{`"express"`: 3, `"fast"`: 1, `"slow"`: 2}) {
+		t.Fatalf("added enum numbers = %v", got)
+	}
+
+	removedModel := wireModel(t, true, wireTarget(t, `id: delivery.route/v1
+request:
+  mode: {type: string, enum: [later, slow, express]}
+response: {}
+errors: []
+`))
+	removed, err := Build(removedModel, added.CanonicalJSON(), true, added.Digest())
+	if err != nil {
+		t.Fatalf("Build(removed): %v", err)
+	}
+	removedAssignment := decodeTestDocument(t, removed.CanonicalJSON()).Capabilities["delivery.route/v1"].Request.Enums["mode"]
+	if got := enumNumbers(removedAssignment); !equalStringIntMap(got, map[string]int{`"express"`: 3, `"later"`: 4, `"slow"`: 2}) {
+		t.Fatalf("post-removal enum numbers = %v", got)
+	}
+	fastName := enumMemberName(identity, json.RawMessage(`"fast"`))
+	if !slices.Equal(removedAssignment.ReservedNumbers, []int{1}) || !slices.Equal(removedAssignment.ReservedNames, []string{fastName}) {
+		t.Fatalf("enum reservations = numbers %v names %v", removedAssignment.ReservedNumbers, removedAssignment.ReservedNames)
+	}
+
+	readdedModel := wireModel(t, true, wireTarget(t, `id: delivery.route/v1
+request:
+  mode: {type: string, enum: [fast, later, slow, express]}
+response: {}
+errors: []
+`))
+	if result, err := Build(readdedModel, removed.CanonicalJSON(), true, removed.Digest()); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "permanently occupied generated name") {
+		t.Fatalf("Build(re-added member) = %#v, %v", result, err)
+	}
+}
+
+func TestBuildSupportsEveryCanonicalScalarEnumKind(t *testing.T) {
+	t.Parallel()
+
+	model := wireModel(t, true, wireTarget(t, `id: scalar.enum/v1
+request:
+  text: {type: string, enum: [alpha, beta]}
+  count: {type: integer, enum: [-1, 0, 9223372036854775807]}
+  ratio: {type: number, enum: [-2.5, 1, 1.25]}
+  enabled: {type: boolean, enum: [false, true]}
+response: {}
+errors: []
+`))
+	result, err := Build(model, nil, false, "")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	enums := decodeTestDocument(t, result.CanonicalJSON()).Capabilities["scalar.enum/v1"].Request.Enums
+	for field, kind := range map[string]string{"text": "string", "count": "integer", "ratio": "number", "enabled": "boolean"} {
+		assignment := enums[field]
+		if !assignment.Active || string(assignment.Kind) != kind || assignment.Sentinel.Number != 0 || len(assignment.Members) < 2 {
+			t.Fatalf("enum %s = %#v", field, assignment)
+		}
+		for _, member := range assignment.Members {
+			if member.Number <= 0 {
+				t.Fatalf("enum %s member = %#v", field, member)
+			}
+		}
+	}
+	if got := enumNumbers(enums["count"])["9223372036854775807"]; got == 0 {
+		t.Fatalf("signed 64-bit integer enum was not retained: %#v", enums["count"])
+	}
+}
+
+func TestBuildRetainsInactiveEnumHistoryOutsideActiveProjection(t *testing.T) {
+	t.Parallel()
+
+	withEnum := wireModel(t, true, wireTarget(t, `id: account.state/v1
+request: {state: {type: string, enum: [active, disabled]}}
+response: {}
+errors: []
+`))
+	initial, err := Build(withEnum, nil, false, "")
+	if err != nil {
+		t.Fatalf("Build(initial): %v", err)
+	}
+	initialAssignment := decodeTestDocument(t, initial.CanonicalJSON()).Capabilities["account.state/v1"].Request.Enums["state"]
+
+	withoutEnum := wireModel(t, true, wireTarget(t, `id: account.state/v1
+request: {state: {type: string}}
+response: {}
+errors: []
+`))
+	inactive, err := Build(withoutEnum, initial.CanonicalJSON(), true, initial.Digest())
+	if err != nil {
+		t.Fatalf("Build(without enum): %v", err)
+	}
+	inactiveAssignment := decodeTestDocument(t, inactive.CanonicalJSON()).Capabilities["account.state/v1"].Request.Enums["state"]
+	if inactiveAssignment.Active || !equalStringIntMap(enumNumbers(inactiveAssignment), enumNumbers(initialAssignment)) {
+		t.Fatalf("inactive enum history = %#v", inactiveAssignment)
+	}
+	var active activeDocument
+	if err := json.Unmarshal(inactive.ActiveJSON(), &active); err != nil {
+		t.Fatalf("decode ActiveJSON: %v", err)
+	}
+	if enums := active.Capabilities["account.state/v1"].Request.Enums; len(enums) != 0 {
+		t.Fatalf("active projection retained inactive enum history: %#v", enums)
+	}
+
+	reactivated, err := Build(withEnum, inactive.CanonicalJSON(), true, inactive.Digest())
+	if err != nil {
+		t.Fatalf("Build(reactivated): %v", err)
+	}
+	reactivatedAssignment := decodeTestDocument(t, reactivated.CanonicalJSON()).Capabilities["account.state/v1"].Request.Enums["state"]
+	if !reactivatedAssignment.Active || !equalStringIntMap(enumNumbers(reactivatedAssignment), enumNumbers(initialAssignment)) {
+		t.Fatalf("reactivated enum history = %#v", reactivatedAssignment)
+	}
+}
+
 func TestBuildIsDeterministicDefensiveAndAllocatesNoAliasLedger(t *testing.T) {
 	t.Parallel()
 	target := wireTarget(t, `id: customer.profile.get/v1
-request: {profile_id: {type: string}}
+request:
+  profile_id: {type: string}
+  view: {type: string, enum: [compact, full]}
 response: {found: {type: boolean}}
 errors: []
 `)
@@ -128,6 +294,9 @@ errors: []
 	}
 	if _, allocated := document.Capabilities["account.profile/v1"]; allocated {
 		t.Fatal("Alias allocated a field-number ledger")
+	}
+	if enums := document.Capabilities["customer.profile.get/v1"].Request.Enums; len(enums) != 1 || len(enums["view"].Members) != 2 {
+		t.Fatalf("canonical target enum ledger = %#v", enums)
 	}
 	canonical := first.CanonicalJSON()
 	active := first.ActiveJSON()
@@ -182,6 +351,89 @@ errors: []
 	if result, err := Build(model, data, true, digest(data)); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "message identities") {
 		t.Fatalf("Build(inconsistent) = %#v, %v", result, err)
 	}
+	oldSchema := bytes.Replace(valid.CanonicalJSON(), []byte(ProjectionSchema), []byte("plystra.proto-wire-map/v1"), 1)
+	if result, err := Build(model, oldSchema, true, digest(oldSchema)); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "projection_schema") {
+		t.Fatalf("Build(old schema) = %#v, %v", result, err)
+	}
+}
+
+func TestBuildRejectsCorruptEnumHistory(t *testing.T) {
+	t.Parallel()
+
+	model := wireModel(t, true, wireTarget(t, `id: email.send/v1
+request: {priority: {type: string, enum: [normal, urgent]}}
+response: {}
+errors: []
+`))
+	valid, err := Build(model, nil, false, "")
+	if err != nil {
+		t.Fatalf("Build(valid): %v", err)
+	}
+	tests := []struct {
+		name     string
+		mutate   func(*enumAssignment)
+		contains string
+	}{
+		{name: "identity", mutate: func(value *enumAssignment) { value.Identity += "Wrong" }, contains: "identity"},
+		{name: "kind", mutate: func(value *enumAssignment) { value.Kind = "object" }, contains: "supported canonical scalar"},
+		{name: "sentinel name", mutate: func(value *enumAssignment) { value.Sentinel.Name = "WRONG_UNSPECIFIED" }, contains: "sentinel must be"},
+		{name: "sentinel number", mutate: func(value *enumAssignment) { value.Sentinel.Number = 1 }, contains: "numeric value 0"},
+		{name: "member canonical kind", mutate: func(value *enumAssignment) { value.Members[0].Canonical = json.RawMessage("1") }, contains: "must be a JSON string"},
+		{name: "member generated name", mutate: func(value *enumAssignment) { value.Members[0].Name += "WRONG" }, contains: "generated name"},
+		{name: "member zero number", mutate: func(value *enumAssignment) { value.Members[0].Number = 0 }, contains: "invalid positive number"},
+		{name: "duplicate member number", mutate: func(value *enumAssignment) { value.Members[1].Number = value.Members[0].Number }, contains: "duplicate number"},
+		{name: "reserved number collision", mutate: func(value *enumAssignment) { value.ReservedNumbers = []int{value.Members[0].Number} }, contains: "reserved enum number"},
+		{name: "invalid reserved name", mutate: func(value *enumAssignment) { value.ReservedNames = []string{"WRONG"} }, contains: "reserved enum name"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			document := decodeTestDocument(t, valid.CanonicalJSON())
+			record := document.Capabilities["email.send/v1"]
+			assignment := record.Request.Enums["priority"]
+			test.mutate(&assignment)
+			record.Request.Enums["priority"] = assignment
+			document.Capabilities["email.send/v1"] = record
+			data, encodeErr := encode(document, true)
+			if encodeErr != nil {
+				t.Fatalf("encode corrupt history: %v", encodeErr)
+			}
+			result, buildErr := Build(model, data, true, digest(data))
+			if !errors.Is(buildErr, ErrHistory) || result.Valid() || !strings.Contains(buildErr.Error(), test.contains) {
+				t.Fatalf("Build(corrupt enum) = %#v, %v; want %q", result, buildErr, test.contains)
+			}
+		})
+	}
+}
+
+func TestEnumHistoryCloningIsDefensive(t *testing.T) {
+	t.Parallel()
+
+	model := wireModel(t, true, wireTarget(t, `id: records.create/v1
+request: {kind: {type: string, enum: [primary, secondary]}}
+response: {}
+errors: []
+`))
+	result, err := Build(model, nil, false, "")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	document := decodeTestDocument(t, result.CanonicalJSON())
+	cloned := cloneDocument(document)
+	record := cloned.Capabilities["records.create/v1"]
+	assignment := record.Request.Enums["kind"]
+	assignment.Members[0].Canonical[0] = 'x'
+	assignment.Members[0].Name = "changed"
+	assignment.ReservedNumbers = append(assignment.ReservedNumbers, 99)
+	assignment.ReservedNames = append(assignment.ReservedNames, "changed")
+	record.Request.Enums["kind"] = assignment
+	cloned.Capabilities["records.create/v1"] = record
+
+	original := document.Capabilities["records.create/v1"].Request.Enums["kind"]
+	if original.Members[0].Canonical[0] != '"' || original.Members[0].Name == "changed" || len(original.ReservedNumbers) != 0 || len(original.ReservedNames) != 0 {
+		t.Fatalf("clone mutated source enum history: %#v", original)
+	}
 }
 
 func TestNextFieldNumberSkipsProtobufReservedRange(t *testing.T) {
@@ -192,6 +444,13 @@ func TestNextFieldNumberSkipsProtobufReservedRange(t *testing.T) {
 	}
 	if number, err := nextFieldNumber(used); err != nil || number != reservedRangeEnd+1 {
 		t.Fatalf("nextFieldNumber = %d, %v", number, err)
+	}
+}
+
+func TestNextEnumNumberUsesOnlyUnusedPositiveValues(t *testing.T) {
+	t.Parallel()
+	if number, err := nextEnumNumber(map[int]string{0: "sentinel", 1: "member", 2: "reserved"}); err != nil || number != 3 {
+		t.Fatalf("nextEnumNumber = %d, %v", number, err)
 	}
 }
 
@@ -276,4 +535,24 @@ func decodeTestDocument(t testing.TB, data []byte) document {
 		t.Fatalf("decode wire map: %v", err)
 	}
 	return result
+}
+
+func enumNumbers(value enumAssignment) map[string]int {
+	result := make(map[string]int, len(value.Members))
+	for _, member := range value.Members {
+		result[string(member.Canonical)] = member.Number
+	}
+	return result
+}
+
+func equalStringIntMap(left, right map[string]int) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if right[key] != value {
+			return false
+		}
+	}
+	return true
 }

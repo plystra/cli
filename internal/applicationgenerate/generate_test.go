@@ -245,11 +245,176 @@ errors: []
 	}
 }
 
+func TestGenerateMaintainsStableOwnedProtobufEnumHistoryTransactionally(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeApplicationModule(t, root, "example.com/acme/enum-wire-history")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
+  transports: {connect: true, rest: false}
+  expose: [delivery.route/v1]
+capabilities:
+  require: [delivery.route/v1]
+`)
+	writePlugin(t, root, "delivery", "id: acme.delivery\nprovides: [delivery.route/v1]\n")
+	capabilityPath := filepath.Join(root, "delivery", "capabilities", "delivery.route", "v1", "capability.yaml")
+	writeCapability(t, root, "delivery", "delivery.route/v1", `id: delivery.route/v1
+request:
+  mode: {type: string, enum: [slow, fast]}
+response: {}
+errors: []
+`)
+	environment := goEnvironment(nil)
+	validate := func(_ context.Context, _ string) error { return nil }
+	if result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Environment: environment, Validate: validate}); err != nil || !result.Report().Clean() {
+		t.Fatalf("initial Generate = %#v, %v", result.Report().Changes(), err)
+	}
+	initialMap := readFile(t, root, protobufwiremap.Path)
+	initial := decodeWireEnumAssignments(t, initialMap, "delivery.route/v1", "mode")
+	if initial.members[`"fast"`].number != 1 || initial.members[`"slow"`].number != 2 || initial.sentinelNumber != 0 {
+		t.Fatalf("initial enum assignments = %#v", initial)
+	}
+
+	writeFile(t, capabilityPath, `response: {}
+errors: []
+request:
+  mode: {enum: [fast, slow], type: string}
+id: delivery.route/v1
+`)
+	beforeReorder := snapshotTree(t, root)
+	reordered, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment})
+	if err != nil || !reordered.Report().Clean() || !reflect.DeepEqual(snapshotTree(t, root), beforeReorder) {
+		t.Fatalf("reordered enum check = %#v, %v", reordered.Report().Changes(), err)
+	}
+
+	writeFile(t, capabilityPath, `id: delivery.route/v1
+request:
+  mode: {type: string, enum: [express, fast, slow]}
+response: {}
+errors: []
+`)
+	beforeAdditionCheck := snapshotTree(t, root)
+	drift, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment})
+	if err != nil || drift.Report().Clean() || !slicesContains(drift.Report().Changed(), protobufwiremap.Path) || !reflect.DeepEqual(snapshotTree(t, root), beforeAdditionCheck) {
+		t.Fatalf("added-enum-member check = %#v, %v", drift.Report().Changes(), err)
+	}
+	if result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Environment: environment, Validate: validate}); err != nil || !result.Report().Clean() {
+		t.Fatalf("added-enum-member Generate = %#v, %v", result.Report().Changes(), err)
+	}
+	added := decodeWireEnumAssignments(t, readFile(t, root, protobufwiremap.Path), "delivery.route/v1", "mode")
+	if added.members[`"fast"`].number != 1 || added.members[`"slow"`].number != 2 || added.members[`"express"`].number != 3 {
+		t.Fatalf("added enum assignments = %#v", added)
+	}
+
+	writeFile(t, capabilityPath, `id: delivery.route/v1
+request:
+  mode: {type: string, enum: [express, later, slow]}
+response: {}
+errors: []
+`)
+	if result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Environment: environment, Validate: validate}); err != nil || !result.Report().Clean() {
+		t.Fatalf("removed-enum-member Generate = %#v, %v", result.Report().Changes(), err)
+	}
+	removedMap := readFile(t, root, protobufwiremap.Path)
+	removed := decodeWireEnumAssignments(t, removedMap, "delivery.route/v1", "mode")
+	if removed.members[`"express"`].number != 3 || removed.members[`"slow"`].number != 2 || removed.members[`"later"`].number != 4 || !reflect.DeepEqual(removed.reservedNumbers, []int{1}) || len(removed.reservedNames) != 1 || removed.reservedNames[0] != initial.members[`"fast"`].name {
+		t.Fatalf("removed enum assignments = %#v", removed)
+	}
+
+	writeFile(t, capabilityPath, `id: delivery.route/v1
+request:
+  mode: {type: string, enum: [express, fast, later, slow]}
+response: {}
+errors: []
+`)
+	beforeReaddition := snapshotTree(t, root)
+	if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment}); !errors.Is(err, protobufwiremap.ErrHistory) || !strings.Contains(err.Error(), "permanently occupied generated name") {
+		t.Fatalf("re-added enum member error = %v", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, beforeReaddition) {
+		t.Fatal("failed enum re-addition check mutated the Project")
+	}
+
+	writeFile(t, capabilityPath, `id: delivery.route/v1
+request:
+  mode: {type: string, enum: [express, later, slow, urgent]}
+response: {}
+errors: []
+`)
+	generatedBeforeRollback := snapshotGenerated(t, root)
+	forced := errors.New("forced enum validation failure")
+	if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start: root, Environment: environment,
+		Validate: func(_ context.Context, _ string) error { return forced },
+	}); !errors.Is(err, forced) {
+		t.Fatalf("enum rollback Generate error = %v", err)
+	}
+	if after := snapshotGenerated(t, root); !reflect.DeepEqual(after, generatedBeforeRollback) {
+		t.Fatalf("enum-history rollback changed generated tree:\nbefore: %#v\nafter: %#v", generatedBeforeRollback, after)
+	}
+	assertNoTransactions(t, root)
+}
+
 type wireAssignments struct {
 	request         map[string]int
 	response        map[string]int
 	reservedNumbers []int
 	reservedNames   []string
+}
+
+type wireEnumMember struct {
+	name   string
+	number int
+}
+
+type wireEnumAssignments struct {
+	sentinelNumber  int
+	members         map[string]wireEnumMember
+	reservedNumbers []int
+	reservedNames   []string
+}
+
+func decodeWireEnumAssignments(t testing.TB, data []byte, capabilityID, fieldName string) wireEnumAssignments {
+	t.Helper()
+	var document struct {
+		Capabilities map[string]struct {
+			Request struct {
+				Enums map[string]struct {
+					Sentinel struct {
+						Number int `json:"number"`
+					} `json:"sentinel"`
+					Members []struct {
+						Canonical json.RawMessage `json:"canonical"`
+						Name      string          `json:"name"`
+						Number    int             `json:"number"`
+					} `json:"members"`
+					ReservedNumbers []int    `json:"reserved_numbers"`
+					ReservedNames   []string `json:"reserved_names"`
+				} `json:"enums"`
+			} `json:"request"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("decode wire map: %v", err)
+	}
+	record, exists := document.Capabilities[capabilityID]
+	if !exists {
+		t.Fatalf("wire map omits %s: %s", capabilityID, data)
+	}
+	assignment, exists := record.Request.Enums[fieldName]
+	if !exists {
+		t.Fatalf("wire map omits enum %s.%s: %s", capabilityID, fieldName, data)
+	}
+	result := wireEnumAssignments{
+		sentinelNumber:  assignment.Sentinel.Number,
+		members:         make(map[string]wireEnumMember, len(assignment.Members)),
+		reservedNumbers: append([]int(nil), assignment.ReservedNumbers...),
+		reservedNames:   append([]string(nil), assignment.ReservedNames...),
+	}
+	for _, member := range assignment.Members {
+		result.members[string(member.Canonical)] = wireEnumMember{name: member.Name, number: member.Number}
+	}
+	return result
 }
 
 func decodeWireAssignments(t testing.TB, data []byte, capabilityID string) wireAssignments {
