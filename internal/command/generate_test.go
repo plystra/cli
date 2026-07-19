@@ -15,6 +15,9 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/command"
+	"github.com/plystra/cli/internal/connectgen"
+	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/semver"
 )
 
 func TestRunGenerateAndCheckUsePublicApplicationSurface(t *testing.T) {
@@ -114,6 +117,101 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("unexpected user file = %q", got)
 	}
 	assertNoCommandTransactions(t, root)
+}
+
+func TestRunGenerateInstallsConnectRuntimeRequirementsAndCheckIsReadOnly(t *testing.T) {
+	root := t.TempDir()
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	goMod := fmt.Sprintf(`module example.com/acme/connect-runtime
+
+go 1.26
+
+require (
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot))
+	writeCommandFile(t, filepath.Join(root, "go.mod"), goMod)
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("read CLI go.sum: %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	addLegacyProtobufReplacement(t, root)
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `http:
+  transports:
+    connect: true
+    rest: false
+  expose:
+    - kernel.health/v1
+`)
+	environment := commandGoEnvironment()
+
+	beforeCheck := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"generate", "--check"}, root, environment)
+	if exitCode != 1 || stdout != "" {
+		t.Fatalf("initial Connect check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	for _, want := range []string{
+		"invalid generated application runtime dependency",
+		connectgen.ConnectModulePath,
+		connectgen.ConnectModuleVersion,
+		"run plystra generate",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("initial Connect check stderr %q omits %q", stderr, want)
+		}
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeCheck) {
+		t.Fatalf("generate --check changed the Project before runtime installation:\nbefore: %#v\nafter:  %#v", beforeCheck, after)
+	}
+
+	exitCode, stdout, stderr = runCommand(t, []string{"generate"}, root, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/connect-runtime in "+root+"\n" {
+		t.Fatalf("Connect generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	assertCommandFile(t, root, "generated/go/adapters/connect/kernel/health/v1/handler_gen.go")
+
+	modData := readCommandFile(t, root, "go.mod")
+	parsed, err := modfile.Parse("go.mod", modData, nil)
+	if err != nil {
+		t.Fatalf("parse generated go.mod: %v", err)
+	}
+	requirements := make(map[string]*modfile.Require, len(parsed.Require))
+	for _, requirement := range parsed.Require {
+		requirements[requirement.Mod.Path] = requirement
+	}
+	for _, expected := range []struct {
+		path    string
+		version string
+	}{
+		{path: connectgen.ConnectModulePath, version: connectgen.ConnectModuleVersion},
+		{path: connectgen.ProtobufModulePath, version: connectgen.ProtobufModuleVersion},
+	} {
+		requirement, exists := requirements[expected.path]
+		if !exists {
+			t.Fatalf("generated go.mod omits %s", expected.path)
+		}
+		if requirement.Indirect {
+			t.Fatalf("generated runtime requirement %s remains indirect", expected.path)
+		}
+		if semver.Compare(requirement.Mod.Version, expected.version) < 0 {
+			t.Fatalf("generated runtime requirement %s = %s, want at least %s", expected.path, requirement.Mod.Version, expected.version)
+		}
+	}
+
+	beforeCleanCheck := commandTree(t, root)
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/connect-runtime in "+root+"\n" {
+		t.Fatalf("clean Connect check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeCleanCheck) {
+		t.Fatalf("clean generate --check changed the Project:\nbefore: %#v\nafter:  %#v", beforeCleanCheck, after)
+	}
 }
 
 func TestRunGenerateRequiresConnectForJavaScriptSDKWithoutMutation(t *testing.T) {
@@ -321,6 +419,7 @@ replace example.com/platform => %s
 replace github.com/plystra/kernel => %s
 `, filepath.ToSlash(dependencyRoot), filepath.ToSlash(kernelRoot))
 	writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), goMod)
+	addLegacyProtobufReplacement(t, applicationRoot)
 	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
 	if err != nil {
 		t.Fatalf("ReadFile(go.sum): %v", err)
@@ -775,6 +874,21 @@ func writeCommandFile(t testing.TB, name, content string) {
 	}
 	if err := os.WriteFile(name, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile(%s): %v", name, err)
+	}
+}
+
+func addLegacyProtobufReplacement(t testing.TB, moduleRoot string) {
+	t.Helper()
+	legacyRoot := filepath.Join(t.TempDir(), "legacy-protobuf")
+	writeCommandFile(t, filepath.Join(legacyRoot, "go.mod"), "module github.com/golang/protobuf\n\ngo 1.26\n")
+	goModPath := filepath.Join(moduleRoot, "go.mod")
+	data, err := os.ReadFile(goModPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", goModPath, err)
+	}
+	data = append(data, []byte("\nreplace github.com/golang/protobuf => "+filepath.ToSlash(legacyRoot)+"\n")...)
+	if err := os.WriteFile(goModPath, data, 0o644); err != nil {
+		t.Fatalf("WriteFile(%s): %v", goModPath, err)
 	}
 }
 

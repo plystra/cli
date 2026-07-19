@@ -44,7 +44,15 @@ well-known descriptors. A Project without a selected Connect surface retains a
 valid empty descriptor set. These schema and descriptor files are CLI-owned,
 exclude Provider, Plugin, Go Module, configuration, and Secret data, and are
 checked for drift with the rest of `generated/`; never edit them manually.
-Connect runtime bindings remain deferred to later transport work. Before
+For every selected Connect surface, generation also emits a Go handler under
+`generated/go/adapters/connect/`. Canonical handlers bind one exact procedure
+to the generated canonical application-invocation handle; Alias handlers are
+thin forwards to that canonical handler and never create a Provider or Alias
+dispatch entry. The CLI transaction installs direct `connectrpc.com/connect`
+and `google.golang.org/protobuf` requirements at the supported versions when
+those handlers are present. The generated application entrypoint does not yet
+mount an HTTP server; server mounting and the remaining protocol projections
+remain later transport work. Before
 wire-map reconciliation, the normalized Protobuf model
 rejects two canonical fields in the same request or response when they derive
 the same ProtoJSON name or generated enum type. The diagnostic names the

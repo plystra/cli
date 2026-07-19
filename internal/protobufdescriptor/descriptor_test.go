@@ -61,6 +61,14 @@ func TestBuildRendersDeterministicSchemasAndSelfContainedDescriptors(t *testing.
 	if evidence.Digest() != descriptorDigest(files[0].Data()) {
 		t.Fatalf("Digest = %q, want %q", evidence.Digest(), descriptorDigest(files[0].Data()))
 	}
+	descriptorSet := evidence.DescriptorSet()
+	if !bytes.Equal(descriptorSet, files[0].Data()) {
+		t.Fatal("DescriptorSet does not return the generated binary descriptor evidence")
+	}
+	descriptorSet[0] ^= 0xff
+	if bytes.Equal(descriptorSet, evidence.DescriptorSet()) {
+		t.Fatal("DescriptorSet exposed mutable descriptor storage")
+	}
 
 	set := decodeDescriptorSet(t, files[0].Data())
 	if len(set.File) != 3 {

@@ -174,7 +174,15 @@ descriptor graph, including required well-known descriptors. With no selected
 Connect surface it remains present as a valid empty descriptor set. These files
 contain no Provider, Plugin, Go Module, configuration, or Secret data. They are
 CLI-owned; never edit them, and use plystra generate --check to detect drift.
-Connect runtime bindings remain later transport work.
+A selected Connect surface also emits a Go handler under
+generated/go/adapters/connect/. Canonical handlers bind one exact procedure to
+the generated canonical application-invocation handle, while Alias handlers
+forward through that canonical handler without owning a Provider or Alias
+dispatch entry. Generation installs direct connectrpc.com/connect and
+google.golang.org/protobuf requirements at the supported versions inside the
+existing module transaction. The generated application entrypoint does not
+yet mount an HTTP server; server mounting and the remaining protocol
+projections remain later transport work.
 
 Protobuf-derived names must be unique within each request and response. For
 example, foo1 and foo_1 both derive the ProtoJSON name foo1, while enum fields
@@ -431,8 +439,9 @@ The official generated JavaScript SDK requires connect: true whenever the
 selected model contains JavaScript Capability or Alias surfaces. Generation
 fails before output with the selected configuration path and every affected
 surface when Connect is disabled. Enable Connect in that current-Project
-selection or remove those surfaces. Real Connect/REST projection remains a
-later roadmap feature, so rest: true does not yet create a REST adapter.
+selection or remove those surfaces. Connect handlers are generated for
+selected surfaces; server mounting and the optional REST projection remain
+later transport work, so rest: true does not yet create a REST adapter.
 
 http.cors is an optional closed current-Project object. When present it
 requires one nonempty allowed_origins list and accepts only optional boolean
@@ -854,8 +863,10 @@ JavaScript SDK generation requires Connect. A REST-only selected model with
 JavaScript Capability or Alias surfaces fails before output and names every
 affected surface; enable connect: true in the selected current-Project
 configuration or remove those surfaces.
-The current generated handler remains the implemented HTTP surface until the
-later Connect and optional REST projection gates consume this selection.
+The generated strict JSON handler remains the implemented HTTP surface, and a
+selected Connect surface also receives a generated canonical handler plus any
+Alias forwards. Server mounting and the optional REST projection remain in the
+later transport gates.
 
 Cross-origin configuration belongs in the selected current-Project document.
 http.cors accepts only required nonempty allowed_origins and optional boolean
@@ -871,9 +882,10 @@ no-store headers. They require a trusted RootContext function and the generated
 application invocation handle. The CLI-owned generated/go/application entrypoint
 owns default lifecycle startup, signal-driven shutdown, and template health
 smoke, but it does not yet mount an HTTP server. Do not edit that generated main
-or add a competing startup workaround. Connect serving and generated handler
-binding remain deferred to the HTTP transport gate. Test the real generated
-handler with httptest, including success, every semantic error, malformed JSON,
+or add a competing startup workaround. The generated Connect handler is
+available for direct httptest validation; server mounting remains in the later
+HTTP transport gate. Test the real generated handler with httptest, including
+success, every semantic error, malformed JSON,
 unknown fields, wrong media type, and oversized input where relevant.
 
 The provider-independent TypeScript package is under

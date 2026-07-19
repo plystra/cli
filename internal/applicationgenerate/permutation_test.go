@@ -50,7 +50,7 @@ config:
 		writePlugin(t, dependencyRoots["a"], "smtp", "id: example.smtp\nprovides: [email.send/v1]\nconfig:\n  endpoint: {type: string}\n")
 		writeCapability(t, dependencyRoots["a"], "smtp", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 
-		writeApplicationModule(t, appRoot, "example.com/acme/permutation-app")
+		writeConnectApplicationModule(t, appRoot, "example.com/acme/permutation-app")
 		goModPath := filepath.Join(appRoot, "go.mod")
 		goMod := string(readAbsoluteFile(t, goModPath)) + permutationModuleDirectives(order, dependencyRoots)
 		writeFile(t, goModPath, goMod)

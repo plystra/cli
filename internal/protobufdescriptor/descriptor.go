@@ -78,6 +78,17 @@ func (e Evidence) Files() []File {
 	return result
 }
 
+// DescriptorSet returns a defensive copy of the deterministic binary
+// FileDescriptorSet owned by this evidence.
+func (e Evidence) DescriptorSet() []byte {
+	for _, file := range e.files {
+		if file.path == DescriptorSetPath {
+			return append([]byte(nil), file.data...)
+		}
+	}
+	return nil
+}
+
 // Digest returns the SHA-256 digest of the deterministic binary descriptor set.
 func (e Evidence) Digest() string { return e.digest }
 

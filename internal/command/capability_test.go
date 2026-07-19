@@ -388,6 +388,7 @@ require github.com/plystra/kernel v0.0.0
 replace github.com/plystra/kernel => %s
 `, filepath.ToSlash(kernelRoot))
 	writeCommandFile(t, filepath.Join(root, "go.mod"), goMod)
+	addLegacyProtobufReplacement(t, root)
 	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
 	if err != nil {
 		t.Fatalf("read CLI go.sum: %v", err)

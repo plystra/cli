@@ -10,6 +10,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/atomicfs"
+	"golang.org/x/mod/modfile"
 )
 
 func TestMain(main *testing.M) {
@@ -18,8 +19,63 @@ func TestMain(main *testing.M) {
 		os.Exit(runTidyHelper())
 	case "change":
 		os.Exit(runChangeHelper())
+	case "runtime":
+		os.Exit(runRuntimeRequirementHelper())
 	}
 	os.Exit(main.Run())
+}
+
+func runRuntimeRequirementHelper() int {
+	data, err := os.ReadFile("go.mod")
+	if err != nil {
+		return 30
+	}
+	parsed, err := modfile.Parse("go.mod", data, nil)
+	if err != nil {
+		return 31
+	}
+	switch {
+	case len(os.Args) >= 3 && os.Args[1] == "get":
+		if err := os.WriteFile("runtime-get.txt", []byte(strings.Join(os.Args[2:], "\n")+"\n"), 0o644); err != nil {
+			return 32
+		}
+		for _, query := range os.Args[2:] {
+			modulePath, version, found := strings.Cut(query, "@")
+			if !found || modulePath == "" || version == "" {
+				return 33
+			}
+			if modulePath == "connectrpc.com/connect" {
+				return 34
+			}
+			if err := parsed.AddRequire(modulePath, version); err != nil {
+				return 35
+			}
+		}
+	case len(os.Args) == 3 && os.Args[1] == "mod" && os.Args[2] == "tidy":
+		requirements := make([]*modfile.Require, len(parsed.Require))
+		for index, requirement := range parsed.Require {
+			requirements[index] = &modfile.Require{Mod: requirement.Mod, Indirect: true}
+		}
+		parsed.SetRequire(requirements)
+	default:
+		return 36
+	}
+	parsed.Cleanup()
+	formatted, err := parsed.Format()
+	if err != nil {
+		return 37
+	}
+	if err := os.WriteFile("go.mod", formatted, 0o644); err != nil {
+		return 38
+	}
+	sum, err := os.ReadFile("go.sum")
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return 39
+	}
+	if err := os.WriteFile("go.sum", append(sum, []byte("runtime module metadata\n")...), 0o644); err != nil {
+		return 40
+	}
+	return 0
 }
 
 func runTidyHelper() int {
@@ -94,7 +150,7 @@ func TestChangePreservesExplicitDependencyAndCommitsValidatedMetadata(t *testing
 		Arguments:          []string{"get", "example.com/dependency@v1.0.0"},
 		DirectRequirements: []string{"example.com/dependency"},
 	}, func(mutate applicationgenerate.ModuleMutation) error {
-		return mutate(t.Context(), root, func() error {
+		return mutate(t.Context(), root, nil, func() error {
 			validated = true
 			data, err := os.ReadFile(filepath.Join(root, "go.mod"))
 			if err != nil {
@@ -152,7 +208,7 @@ func TestChangeRestoresModuleMetadataAfterEveryFailureBoundary(t *testing.T) {
 			name:        "validation failure after tidy",
 			environment: append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=change"),
 			operation: func(mutate applicationgenerate.ModuleMutation, root string) error {
-				return mutate(t.Context(), root, func() error { return laterFailure })
+				return mutate(t.Context(), root, nil, func() error { return laterFailure })
 			},
 		},
 	}
@@ -250,7 +306,7 @@ func TestTidyRestoresMetadataWhenGenerationFailsAfterMutation(t *testing.T) {
 	laterErr := errors.New("generation failed after module mutation")
 	mutated := false
 	err = Tidy(t.Context(), root, command, append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=1"), func(mutate applicationgenerate.ModuleMutation) error {
-		if err := mutate(t.Context(), root, func() error { return nil }); err != nil {
+		if err := mutate(t.Context(), root, nil, func() error { return nil }); err != nil {
 			return err
 		}
 		normalized, err := captureModuleFiles(root)
@@ -272,5 +328,97 @@ func TestTidyRestoresMetadataWhenGenerationFailsAfterMutation(t *testing.T) {
 	}
 	if !reflect.DeepEqual(after, before) {
 		t.Fatalf("module metadata changed after later generation failure:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestTidySelectsGeneratedRuntimeMinimumAndPreservesNewerDirectRequirement(t *testing.T) {
+	t.Parallel()
+
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatalf("Executable: %v", err)
+	}
+	connect, err := applicationgenerate.NewModuleRequirement("connectrpc.com/connect", "v1.20.0")
+	if err != nil {
+		t.Fatalf("NewModuleRequirement(connect): %v", err)
+	}
+	protobuf, err := applicationgenerate.NewModuleRequirement("google.golang.org/protobuf", "v1.36.11")
+	if err != nil {
+		t.Fatalf("NewModuleRequirement(protobuf): %v", err)
+	}
+	requirements := []applicationgenerate.ModuleRequirement{protobuf, connect}
+
+	for _, test := range []struct {
+		name      string
+		protobuf  string
+		wantQuery string
+	}{
+		{name: "missing requirement", wantQuery: "google.golang.org/protobuf@v1.36.11\n"},
+		{name: "older requirement", protobuf: "\trequire google.golang.org/protobuf v1.35.0 // indirect\n", wantQuery: "google.golang.org/protobuf@v1.36.11\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			goMod := "module example.com/acme/runtime\n\ngo 1.26\n\nrequire connectrpc.com/connect v1.21.0\n" + test.protobuf
+			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(goMod), 0o644); err != nil {
+				t.Fatalf("WriteFile(go.mod): %v", err)
+			}
+			validated := false
+			err := Tidy(t.Context(), root, command, append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=runtime"), func(mutate applicationgenerate.ModuleMutation) error {
+				return mutate(t.Context(), root, requirements, func() error {
+					validated = true
+					return nil
+				})
+			})
+			if err != nil || !validated {
+				t.Fatalf("Tidy = validated %t, %v", validated, err)
+			}
+			query, err := os.ReadFile(filepath.Join(root, "runtime-get.txt"))
+			if err != nil || string(query) != test.wantQuery {
+				t.Fatalf("runtime query = %q, %v; want %q", query, err, test.wantQuery)
+			}
+			selectedConnect, exists, err := FindRequirement(root, connect.Path())
+			if err != nil || !exists || selectedConnect.Version() != "v1.21.0" || selectedConnect.Indirect() {
+				t.Fatalf("selected Connect = %#v, %t, %v", selectedConnect, exists, err)
+			}
+			selectedProtobuf, exists, err := FindRequirement(root, protobuf.Path())
+			if err != nil || !exists || selectedProtobuf.Version() != protobuf.MinimumVersion() || selectedProtobuf.Indirect() {
+				t.Fatalf("selected Protobuf = %#v, %t, %v", selectedProtobuf, exists, err)
+			}
+		})
+	}
+}
+
+func TestTidyRestoresGeneratedRuntimeRequirementsAfterValidationFailure(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/acme/runtime-rollback\n\ngo 1.26\n\nrequire connectrpc.com/connect v1.21.0\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(go.mod): %v", err)
+	}
+	before, err := captureModuleFiles(root)
+	if err != nil {
+		t.Fatalf("capture before: %v", err)
+	}
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatalf("Executable: %v", err)
+	}
+	connect, _ := applicationgenerate.NewModuleRequirement("connectrpc.com/connect", "v1.20.0")
+	protobuf, _ := applicationgenerate.NewModuleRequirement("google.golang.org/protobuf", "v1.36.11")
+	validationFailure := errors.New("reject generated runtime")
+	err = Tidy(t.Context(), root, command, append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=runtime"), func(mutate applicationgenerate.ModuleMutation) error {
+		return mutate(t.Context(), root, []applicationgenerate.ModuleRequirement{connect, protobuf}, func() error {
+			return validationFailure
+		})
+	})
+	if !errors.Is(err, validationFailure) {
+		t.Fatalf("Tidy error = %v, want validation failure", err)
+	}
+	after, err := captureModuleFiles(root)
+	if err != nil {
+		t.Fatalf("capture after: %v", err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("module metadata changed after rollback:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 }

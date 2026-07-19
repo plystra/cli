@@ -81,8 +81,8 @@ func Update(ctx context.Context, options Options) (Result, error) {
 			Environment:           options.Environment,
 			DependencyOutputLimit: options.DependencyOutputLimit,
 			Validate:              options.Validate,
-			MutateModule: func(ctx context.Context, root string, validate func() error) error {
-				return mutate(ctx, root, func() error {
+			MutateModule: func(ctx context.Context, root string, requirements []applicationgenerate.ModuleRequirement, validate func() error) error {
+				return mutate(ctx, root, requirements, func() error {
 					if err := validate(); err != nil {
 						return err
 					}

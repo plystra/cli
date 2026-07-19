@@ -19,13 +19,17 @@ import (
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/configurationresolve"
+	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/modulelocate"
+	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 	kernelinvocation "github.com/plystra/kernel/invocation"
+	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 )
 
 var (
@@ -38,17 +42,43 @@ var (
 	// ErrKernelDependency reports a Plystra Project that does not directly
 	// select the Kernel Go Module used by its generated runtime.
 	ErrKernelDependency = errors.New("invalid application Kernel dependency")
+	// ErrRuntimeDependency reports generated application source whose normal
+	// Go Module runtime requirements are absent, indirect, or too old.
+	ErrRuntimeDependency = errors.New("invalid generated application runtime dependency")
 )
 
 // Validator validates the complete application while desired generated files
 // are installed but still protected by the transaction rollback boundary.
 type Validator func(context.Context, string) error
 
+// ModuleRequirement is one direct minimum-version Go Module dependency needed
+// by generated application source.
+type ModuleRequirement struct {
+	path           string
+	minimumVersion string
+}
+
+// NewModuleRequirement validates one generated runtime dependency contract.
+func NewModuleRequirement(modulePath, minimumVersion string) (ModuleRequirement, error) {
+	_, pathMajor, pathOK := module.SplitPathVersion(modulePath)
+	if module.CheckPath(modulePath) != nil || !pathOK || !semver.IsValid(minimumVersion) || semver.Canonical(minimumVersion) != minimumVersion || module.CheckPathMajor(minimumVersion, pathMajor) != nil {
+		return ModuleRequirement{}, fmt.Errorf("%w: invalid minimum requirement %s@%s", ErrRuntimeDependency, modulePath, minimumVersion)
+	}
+	return ModuleRequirement{path: modulePath, minimumVersion: minimumVersion}, nil
+}
+
+// Path returns the required Go Module path.
+func (r ModuleRequirement) Path() string { return r.path }
+
+// MinimumVersion returns the oldest supported canonical semantic version.
+func (r ModuleRequirement) MinimumVersion() string { return r.minimumVersion }
+
 // ModuleMutation wraps validation and generation-input confirmation while the
 // desired generated tree is installed. It lets a higher-level mutating command
-// normalize module-owned metadata and restore that metadata if any later check
-// fails. The supplied operation must be called exactly once.
-type ModuleMutation func(context.Context, string, func() error) error
+// select generated runtime requirements, normalize module-owned metadata, and
+// restore that metadata if any later check fails. The supplied operation must
+// be called exactly once.
+type ModuleMutation func(context.Context, string, []ModuleRequirement, func() error) error
 
 // Options contains the application location, bounded Go helper settings, and
 // operation mode. Check performs a read-only comparison. Validate overrides
@@ -120,6 +150,9 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
 	}
 	if options.Check {
+		if err := validateRuntimeRequirements(prepared.resolved, prepared.runtimeRequirements); err != nil {
+			return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
+		}
 		report, err := generatedfiles.Check(prepared.resolved.Module().Path(), prepared.output)
 		if err != nil {
 			return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
@@ -158,7 +191,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		install = generatedfiles.InstallStrictWithWrites
 	}
 	report, err := install(prepared.resolved.Module().Path(), prepared.output, additional, func(root string) error {
-		return runModuleMutation(ctx, options, root, func() error {
+		return runModuleMutation(ctx, options, root, prepared.runtimeRequirements, func() error {
 			if err := validate(ctx, root); err != nil {
 				return fmt.Errorf("validate generated application: %w", err)
 			}
@@ -171,6 +204,9 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			}
 			if confirmed.resolved.ConfigurationMaintenance().Changed() {
 				return fmt.Errorf("%w: dependency-derived Project configuration remains stale after installation", ErrConcurrentChange)
+			}
+			if err := validateRuntimeRequirements(confirmed.resolved, confirmed.runtimeRequirements); err != nil {
+				return err
 			}
 			return nil
 		})
@@ -190,12 +226,12 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 	}, nil
 }
 
-func runModuleMutation(ctx context.Context, options Options, root string, operation func() error) error {
+func runModuleMutation(ctx context.Context, options Options, root string, requirements []ModuleRequirement, operation func() error) error {
 	if options.MutateModule == nil {
 		return operation()
 	}
 	calls := 0
-	err := options.MutateModule(ctx, root, func() error {
+	err := options.MutateModule(ctx, root, append([]ModuleRequirement(nil), requirements...), func() error {
 		calls++
 		if calls != 1 {
 			return errors.New("module mutation called generation validation more than once")
@@ -212,9 +248,10 @@ func runModuleMutation(ctx context.Context, options Options, root string, operat
 }
 
 type preparedGeneration struct {
-	resolved    applicationresolve.Result
-	output      generatedfiles.Output
-	fingerprint string
+	resolved            applicationresolve.Result
+	output              generatedfiles.Output
+	runtimeRequirements []ModuleRequirement
+	fingerprint         string
 }
 
 func prepare(ctx context.Context, options Options, start string) (preparedGeneration, error) {
@@ -266,6 +303,10 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		previousWireMapExists,
 		resolved.PreviousManifestProvenance().ProtobufWireMapDigest(),
 	)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
+	runtimeRequirements, err := connectRuntimeRequirements(protobufProjection)
 	if err != nil {
 		return preparedGeneration{}, err
 	}
@@ -322,7 +363,41 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
-	return preparedGeneration{resolved: resolved, output: output, fingerprint: fingerprint}, nil
+	return preparedGeneration{resolved: resolved, output: output, runtimeRequirements: runtimeRequirements, fingerprint: fingerprint}, nil
+}
+
+func connectRuntimeRequirements(model protobufmodel.Model) ([]ModuleRequirement, error) {
+	if len(model.Operations()) == 0 && len(model.Aliases()) == 0 {
+		return nil, nil
+	}
+	inputs := [][2]string{
+		{connectgen.ConnectModulePath, connectgen.ConnectModuleVersion},
+		{connectgen.ProtobufModulePath, connectgen.ProtobufModuleVersion},
+	}
+	result := make([]ModuleRequirement, len(inputs))
+	for index, input := range inputs {
+		requirement, err := NewModuleRequirement(input[0], input[1])
+		if err != nil {
+			return nil, err
+		}
+		result[index] = requirement
+	}
+	return result, nil
+}
+
+func validateRuntimeRequirements(resolved applicationresolve.Result, requirements []ModuleRequirement) error {
+	for _, requirement := range requirements {
+		dependency, exists := resolved.Dependencies().ByPath(requirement.Path())
+		if !exists || !dependency.Direct() || dependency.Indirect() || !semver.IsValid(dependency.RequiredVersion()) || semver.Compare(dependency.RequiredVersion(), requirement.MinimumVersion()) < 0 {
+			return fmt.Errorf(
+				"%w: go.mod must directly require %s at %s or newer without // indirect; run plystra generate to repair module metadata transactionally",
+				ErrRuntimeDependency,
+				requirement.Path(),
+				requirement.MinimumVersion(),
+			)
+		}
+	}
+	return nil
 }
 
 func kernelBuildProvenance(resolved applicationresolve.Result) (string, string, error) {

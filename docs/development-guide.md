@@ -1,8 +1,9 @@
 # Plystra Development Guide
 
-This guide describes the implementation that exists after Gate 9. It is for
-contributors working on the Kernel or CLI and for developers building a Plystra
-Go Module with the current public CLI.
+This guide describes the implementation that exists after the Gate 9 baseline
+and the canonical Connect-handler foundation. It is for contributors working
+on the Kernel or CLI and for developers building a Plystra Go Module with the
+current public CLI.
 
 `core-philosophy/` remains the binding architecture specification. This guide
 adds operational detail from the working implementation; it does not replace
@@ -428,8 +429,16 @@ descriptor graph, including required well-known descriptors. When no Connect
 surface is selected, the descriptor set remains present as a valid empty set.
 The schemas and descriptor set contain no Provider, Plugin, Go Module,
 configuration, or Secret data. They are CLI-owned evidence: never edit them,
-and use `plystra generate --check` to detect missing or modified files. Connect
-runtime bindings remain deferred to a later transport gate.
+and use `plystra generate --check` to detect missing or modified files. A
+selected Connect surface also emits a Go handler under
+`generated/go/adapters/connect/`. Canonical handlers bind one exact procedure
+to the generated canonical application-invocation handle; Alias handlers
+forward through that canonical handler and never own a Provider or Alias
+dispatch entry. Generation installs direct `connectrpc.com/connect` and
+`google.golang.org/protobuf` requirements at the supported versions inside the
+existing module transaction. The generated application entrypoint still does
+not mount an HTTP server; server mounting and the remaining protocol
+projections are later transport work.
 
 Protobuf-derived names must also be unique within each request and response.
 For example, `foo1` and `foo_1` both become the ProtoJSON name `foo1`, while
@@ -655,8 +664,9 @@ selected default, environment, or full-replacement model with JavaScript
 Capability or Alias surfaces and `connect: false` fails before output. The
 diagnostic identifies the selected configuration and every affected surface;
 enable `connect: true` in that current-Project selection or remove those
-surfaces. The real Connect and optional REST projections remain in later
-transport gates; setting `rest: true` does not yet create a REST adapter.
+surfaces. Connect handlers are generated for selected surfaces, while server
+mounting and the optional REST projection remain in later transport gates;
+setting `rest: true` does not yet create a REST adapter.
 
 `http.cors` is an optional closed current-Project object. When present it
 requires one nonempty `allowed_origins` list and accepts only an optional
@@ -1050,13 +1060,13 @@ Its route is:
 POST /api/v1/capabilities/catalog.item.get/v1/invoke
 ```
 
-The CLI generates handlers, but the current CLI-owned
-`generated/go/application/main_gen.go` entrypoint does not yet mount an HTTP
-server. It owns default runtime startup, signal-driven shutdown, and the private
-template-qualification health smoke. Do not edit that generated entrypoint or
-add a competing application startup workaround. Connect serving and generated
-handler binding remain deferred to the HTTP transport gate; validate the real
-handler directly with `httptest` until that gate lands.
+The CLI generates both strict JSON HTTP handlers and Connect handlers, but the
+current CLI-owned `generated/go/application/main_gen.go` entrypoint does not
+yet mount an HTTP server. It owns default runtime startup, signal-driven
+shutdown, and the private template-qualification health smoke. Do not edit
+that generated entrypoint or add a competing application startup workaround.
+Validate the generated Connect handler directly with `httptest` until server
+mounting lands in the later transport gate.
 
 The handler's root-context function is a trusted adapter boundary. Do not
 convert raw headers into verified internal AuthN state there. Official AuthN
@@ -1361,7 +1371,7 @@ repository process belongs in contributor documentation such as this guide.
 - External and internal calls share the same generated application invocation
   requirements.
 
-## Intentionally deferred after Gate 9
+## Intentionally deferred after the current Connect-handler foundation
 
 The following remain roadmap work and must not be represented as complete:
 
