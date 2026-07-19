@@ -2,6 +2,7 @@ package command_test
 
 import (
 	"archive/zip"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -127,6 +128,123 @@ func TestRunAddRejectsInvalidModuleQueryBeforeMutation(t *testing.T) {
 		t.Fatalf("invalid query changed Project:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 	assertNoCommandTransactions(t, root)
+}
+
+func TestRunRemoveRecomposesProjectAndPreservesUnselectedConfiguration(t *testing.T) {
+	proxy := writeCommandDependencyProxy(t, []commandProxyModule{
+		{
+			path:     "example.com/acme/platform",
+			version:  "v1.0.0",
+			manifest: "capabilities:\n  require: [kernel.health/v1]\n",
+		},
+	})
+	environment := commandDependencyEnvironment(t, proxy)
+	root := writeCapabilityCommandModule(t)
+	rootData := "# Shared application choices.\n{}\n"
+	overlayData := "# Unselected production choices.\ncapabilities:\n  require: {add: [kernel.info/v1]}\n"
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootData)
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayData)
+	proxyBefore := commandTree(t, proxy)
+
+	query := "example.com/acme/platform@v1.0.0"
+	exitCode, stdout, stderr := runCommand(t, []string{"add", query}, root, environment)
+	if exitCode != 0 || stderr != "" || !strings.HasPrefix(stdout, "added dependency "+query) {
+		t.Fatalf("initial plystra add = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+
+	modulePath := "example.com/acme/platform"
+	exitCode, stdout, stderr = runCommand(t, []string{"remove", modulePath}, filepath.Join(root, "records"), environment)
+	wantOutput := "removed dependency " + modulePath + " from example.com/acme/library in " + root + "\n"
+	if exitCode != 0 || stdout != wantOutput || stderr != "" {
+		t.Fatalf("plystra remove = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	goMod := string(readCommandFile(t, root, "go.mod"))
+	if strings.Contains(goMod, modulePath) {
+		t.Fatalf("go.mod retains removed dependency:\n%s", goMod)
+	}
+	rootConfiguration := string(readCommandFile(t, root, "plystra.yaml"))
+	if !strings.Contains(rootConfiguration, "# Shared application choices.") || strings.Contains(rootConfiguration, "kernel.health/v1") {
+		t.Fatalf("root dependency recomposition = %q", rootConfiguration)
+	}
+	if got := string(readCommandFile(t, root, "plystra.production.yaml")); got != overlayData {
+		t.Fatalf("remove rewrote unselected overlay: %q", got)
+	}
+	for _, obsolete := range []string{
+		"generated/go/clients/kernel/health/v1/client_gen.go",
+		"generated/go/invocation/kernel/health/v1/invocation_gen.go",
+	} {
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(obsolete))); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("removed dependency output %s still exists: %v", obsolete, err)
+		}
+	}
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/library in "+root+"\n" {
+		t.Fatalf("post-remove generate check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if proxyAfter := commandTree(t, proxy); !reflect.DeepEqual(proxyAfter, proxyBefore) {
+		t.Fatalf("Go Module proxy changed during remove:\nbefore: %#v\nafter:  %#v", proxyBefore, proxyAfter)
+	}
+	assertNoCommandTransactions(t, root)
+}
+
+func TestRunRemoveRestoresModuleConfigurationAndGeneratedOutputAfterValidationFailure(t *testing.T) {
+	proxy := writeCommandDependencyProxy(t, []commandProxyModule{
+		{
+			path:     "example.com/acme/platform",
+			version:  "v1.0.0",
+			manifest: "capabilities:\n  require: [kernel.health/v1]\n",
+		},
+	})
+	environment := commandDependencyEnvironment(t, proxy)
+	root := writeCapabilityCommandModule(t)
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "# Preserve root.\n{}\n")
+	query := "example.com/acme/platform@v1.0.0"
+	exitCode, stdout, stderr := runCommand(t, []string{"add", query}, root, environment)
+	if exitCode != 0 || stderr != "" || !strings.HasPrefix(stdout, "added dependency "+query) {
+		t.Fatalf("initial plystra add = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	writeCommandFile(t, filepath.Join(root, "validation_failure_test.go"), `package library
+
+import "testing"
+
+func TestInjectedDependencyRemovalValidationFailure(t *testing.T) {
+	t.Fatal("injected dependency removal validation failure")
+}
+`)
+	before := commandTree(t, root)
+	exitCode, stdout, stderr = runCommand(t, []string{"remove", "example.com/acme/platform"}, filepath.Join(root, "records"), environment)
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "injected dependency removal validation failure") {
+		t.Fatalf("failed plystra remove = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("failed remove changed Project-owned files:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoCommandTransactions(t, root)
+}
+
+func TestRunRemoveRejectsInvalidOrUnselectedModuleBeforeMutation(t *testing.T) {
+	root := writeCapabilityCommandModule(t)
+	for _, test := range []struct {
+		name       string
+		modulePath string
+		wantError  string
+	}{
+		{name: "version query", modulePath: "example.com/acme/platform@v1.0.0", wantError: "without a version query"},
+		{name: "unsafe path", modulePath: "../outside", wantError: "Go Module path"},
+		{name: "unselected path", modulePath: "example.com/acme/platform", wantError: "is not selected in go.mod"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, []string{"remove", test.modulePath}, filepath.Join(root, "records"), commandGoEnvironment())
+			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, test.wantError) {
+				t.Fatalf("invalid plystra remove = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("invalid removal changed Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
 }
 
 type commandProxyModule struct {

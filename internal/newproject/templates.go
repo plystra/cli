@@ -39,7 +39,7 @@ go test ./...
 go vet ./...
 ` + "```" + `
 
-Mutating Plystra commands regenerate automatically. Add an ordinary Go Module dependency with ` + "`plystra add github.com/acme/platform@v1.0.0`" + `. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate.
+Mutating Plystra commands regenerate automatically. Add an ordinary Go Module dependency with ` + "`plystra add github.com/acme/platform@v1.0.0`" + ` and remove it with ` + "`plystra remove github.com/acme/platform`" + `. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate.
 
 Root ` + "`plystra.yaml`" + ` is the mandatory Project marker and shared default configuration. A sparse project-root ` + "`plystra.production.yaml`" + ` can be selected with ` + "`plystra generate --env production`" + ` and checked with the same selector; it is never created or loaded implicitly. To use one complete alternative current-Project document, run ` + "`plystra generate --config deploy/customer-a.yaml`" + `. Root configuration is not merged beneath an explicitly selected file. ` + "`PLYSTRA_ENV`" + ` and ` + "`PLYSTRA_CONFIG`" + ` supply the corresponding selector for automation; select exactly one mode.
 
@@ -180,14 +180,20 @@ Add one ordinary Go Module dependency through the public transaction:
 
     plystra add github.com/acme/email@v1.4.2
 
-The command may start at the Project root or inside a Plugin. It resolves the
-query through ordinary Go tooling, retains the selected module as a direct
-go.mod requirement, recomposes root plystra.yaml, regenerates, tidies, and
-validates the complete Project. The current add surface uses the default root
-configuration and never rewrites unselected environment overlays or alternative
-YAML files. A failed Go command, resolution, composition, generation, tidy, or
-validation step restores every transaction-owned module, root-configuration,
-and generated file.
+Remove a selected dependency by exact module path without a version query:
+
+    plystra remove github.com/acme/email
+
+Both commands may start at the Project root or inside a Plugin. Add resolves the
+query through ordinary Go tooling and retains the selected module as a direct
+go.mod requirement. Remove requires the module to be selected in go.mod and
+verifies that regeneration plus tidy did not select it again. Each command
+recomposes root plystra.yaml, regenerates, tidies, and validates the complete
+Project. The current dependency surfaces use the default root configuration and
+never rewrite unselected environment overlays or alternative YAML files. A
+failed Go command, resolution, composition, generation, tidy, removal
+postcondition, or validation step restores every transaction-owned module,
+root-configuration, and generated file.
 
 The CLI asks Go for the effective module graph. Every direct or transitive
 module with regular root plystra.yaml is a dependency Plystra Project; its

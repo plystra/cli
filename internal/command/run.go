@@ -13,6 +13,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/dependencyadd"
+	"github.com/plystra/cli/internal/dependencyremove"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/newproject"
 	"github.com/plystra/cli/internal/plugincreate"
@@ -27,6 +28,7 @@ const (
   plystra version
   plystra new <module-path> [options]
   plystra add <go-module-query>
+  plystra remove <go-module-path>
   plystra plugin create <name>
   plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
@@ -38,6 +40,12 @@ const (
 
 Adds one ordinary Go Module dependency, recomposes root plystra.yaml, regenerates,
 tidies, and validates the complete Project in one rollback boundary.
+`
+	removeUsage = `Usage:
+  plystra remove <go-module-path>
+
+Removes one ordinary Go Module dependency, recomposes root plystra.yaml,
+regenerates, tidies, and validates the complete Project in one rollback boundary.
 `
 	newUsage = `Usage:
   plystra new <module-path> [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]
@@ -172,6 +180,28 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			return 1
 		}
 		_, _ = fmt.Fprintf(stdout, "added dependency %s to %s in %s\n", result.Query(), result.Module().ModulePath(), result.Module().Path())
+		return 0
+	case "remove":
+		if len(arguments) == 2 && isHelp(arguments[1]) {
+			_, _ = io.WriteString(stdout, removeUsage)
+			return 0
+		}
+		if len(arguments) != 2 || strings.TrimSpace(arguments[1]) == "" || strings.HasPrefix(arguments[1], "--") {
+			_, _ = io.WriteString(stderr, removeUsage)
+			return 2
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
+		defer cancel()
+		result, err := dependencyremove.Remove(ctx, dependencyremove.Options{
+			Start:       workingDirectory,
+			ModulePath:  arguments[1],
+			Environment: environment,
+		})
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "%v\n", err)
+			return 1
+		}
+		_, _ = fmt.Fprintf(stdout, "removed dependency %s from %s in %s\n", result.ModulePath(), result.Module().ModulePath(), result.Module().Path())
 		return 0
 	case "plugin":
 		if len(arguments) != 3 || arguments[1] != "create" {
