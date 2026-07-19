@@ -549,8 +549,19 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		return errors.New("generated Plystra skill is incomplete")
 	}
 	required := []string{
-		"description: Develop, structure, configure, debug, and validate Plystra Go Modules",
+		"description: Operate and develop Plystra Projects through Go Modules, Plugins, versioned Capabilities, and plystra.yaml",
 		"The current Go Module path is " + modulePath,
+		"## Choose the smallest workflow",
+		"### Operate a Project created from a template",
+		"The current CLI does not advertise any template as qualified",
+		"### Change ordinary business behavior",
+		"ordinary path uses four public concepts",
+		"Never import the other concrete Plugin package",
+		"### Select one environment",
+		"Use --config only when the task",
+		"one complete replacement document; it is an advanced",
+		"## Detailed task reference",
+		"Read only the section that matches the current task",
 		"## Module and file ownership",
 		"plystra new app",
 		"plystra new app --module github.com/acme/app",
@@ -580,7 +591,58 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 			return fmt.Errorf("generated Plystra skill omits required guidance %q", phrase)
 		}
 	}
+	if err := validateSkillProgressiveDisclosure(text); err != nil {
+		return err
+	}
 	return validateSkillProcessGuidance(text, modulePath)
+}
+
+func validateSkillProgressiveDisclosure(text string) error {
+	const (
+		workflowHeading = "## Choose the smallest workflow"
+		templateHeading = "### Operate a Project created from a template"
+		businessHeading = "### Change ordinary business behavior"
+		detailHeading   = "## Detailed task reference"
+	)
+	workflowStart := strings.Index(text, workflowHeading)
+	templateStart := strings.Index(text, templateHeading)
+	businessStart := strings.Index(text, businessHeading)
+	detailStart := strings.Index(text, detailHeading)
+	if workflowStart < 0 || templateStart <= workflowStart || businessStart <= templateStart || detailStart <= businessStart {
+		return errors.New("generated Plystra skill has no progressive-disclosure boundary")
+	}
+
+	templatePath := strings.ToLower(text[templateStart:businessStart])
+	for _, term := range []string{"plugin", "capability", "provider", "alias", "protobuf", "connect"} {
+		if strings.Contains(templatePath, term) {
+			return fmt.Errorf("generated Plystra skill exposes concept %q in the template-consumer workflow", term)
+		}
+	}
+
+	ordinaryPath := strings.ToLower(text[workflowStart:detailStart])
+	for _, term := range []string{
+		"provider",
+		"alias",
+		"generation extension",
+		"fixed-point",
+		"contribution graph",
+		"normalized application model",
+		"composition provenance",
+		"template provenance",
+		"wire-map",
+		"protobuf",
+		"connect",
+		"connectrpc",
+		"candidate lineage",
+		"release candidate",
+		"release evidence",
+		"kernel assembly",
+	} {
+		if strings.Contains(ordinaryPath, term) {
+			return fmt.Errorf("generated Plystra skill exposes advanced concept %q before the detailed reference", term)
+		}
+	}
+	return nil
 }
 
 func validateSkillProcessGuidance(text, modulePath string) error {

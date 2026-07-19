@@ -420,7 +420,14 @@ later transport gates.
 
 `.agents/skills/plystra/` is a creation-time project guide that the project may
 maintain as its authored workflows evolve. It is outside `generated/` and is not
-part of `plystra generate --check` ownership.
+part of `plystra generate --check` ownership. The generated guide begins with
+the currently supported template-create-and-check path and an ordinary
+business-development sequence using only Go Module, Plugin, Capability, and
+`plystra.yaml`. It teaches one selected environment on that path, marks complete
+`--config` replacement as advanced, and puts resolver, generation,
+wire-history, and maintainer mechanics behind a detailed-reference boundary.
+It does not advertise a template as qualified while the complete qualification
+suite remains unfinished.
 
 The current CLI does not scaffold or run database migrations. A Plugin that
 owns migrations keeps them under that Plugin, and its lifecycle or provider

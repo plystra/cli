@@ -1,9 +1,97 @@
 ---
 name: plystra
-description: Develop, structure, configure, debug, and validate Plystra Go Modules, Plugins, and versioned Capabilities. Use when creating or modifying plugin.yaml, capability.yaml, plystra.yaml, dependency Project composition, generated contracts or clients, provider selection, cross-Plugin calls, Capability Aliases, HTTP exposure, JavaScript SDK output, runtime bootstrap, or generation diagnostics.
+description: Operate and develop Plystra Projects through Go Modules, Plugins, versioned Capabilities, and plystra.yaml. Use when starting from a template or creating, implementing, configuring, exposing, consuming, testing, or debugging a Plugin or Capability.
 ---
 
 # Plystra Module Development
+
+## Choose the smallest workflow
+
+Start here and use only the workflow that matches the requested task. The
+ordinary path uses four public concepts: Go Module, Plugin, Capability, and
+plystra.yaml. Do not begin by studying the detailed mechanisms later in this
+guide unless the task or a Plystra diagnostic specifically requires them.
+
+### Operate a Project created from a template
+
+Create from a published template Go Module query in the desired parent
+directory:
+
+    plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3
+
+On success the command reports:
+
+    Created app from github.com/acme/platform@v1.2.3
+    Configuration scaffolded
+    Generated, checked, built, and locally verified
+
+    Next:
+      cd app
+      plystra check
+
+Follow that next action. Read root plystra.yaml only when the Project needs a
+documented local operational value or the check gives a configuration recovery
+action. Do not inspect or alter implementation internals merely because the
+Project came from a template. Creation is atomic, so a failure leaves no target
+Project to repair; address the reported cause and retry the command.
+
+Use only a template version that its publisher explicitly identifies as
+qualified. The current CLI does not advertise any template as qualified. A
+successful creation proves the lifecycle shown above, but it does not by itself
+grant that label.
+
+### Change ordinary business behavior
+
+Stay inside the four-concept model:
+
+- The Go Module is the dependency and import boundary.
+- A Plugin is one root-level implementation unit declared by plugin.yaml.
+- A Capability is one exact versioned contract declared by capability.yaml.
+- plystra.yaml selects the application configuration and public surface.
+
+For a new local behavior, use this sequence:
+
+    plystra plugin create records
+    plystra capability create records.read --plugin records --expose
+    # Edit the authored contract and Plugin method.
+    plystra generate
+    go test ./...
+    plystra check
+
+When one Plugin needs behavior from another, declare the exact Capability in
+the caller's plugin.yaml, regenerate, and call the generated dependency client.
+Never import the other concrete Plugin package. If Plystra reports several
+compatible implementing Plugins for one required Capability, select the exact
+one requested by the application:
+
+    plystra use email.send/v1 acme.email.smtp
+
+The detailed reference below contains complete file shapes and variants. Open
+only the section needed for the current command or authored file.
+
+### Select one environment
+
+Keep shared choices in root plystra.yaml. Put only environment-specific
+differences in one sparse project-root overlay such as
+plystra.production.yaml, then use the same selector for generation and checks:
+
+    plystra generate --env production
+    plystra generate --check --env production
+    plystra check --env production
+
+No selector means root plystra.yaml only. Use --config only when the task
+explicitly requires one complete replacement document; it is an advanced
+deployment path, not a second ordinary configuration layer.
+
+## Detailed task reference
+
+Read only the section that matches the current task. Ordinary Project and
+business-Plugin work does not require Generation Extensions, fixed-point
+resolution, contribution graphs, normalized application models, wire-map
+allocation, release evidence, or Kernel assembly internals. Those are
+CLI-owned or maintainer mechanisms. They remain documented here only where an
+infrastructure task, compatibility change, or specific diagnostic makes them
+necessary.
 
 ## Start from the module boundary
 
