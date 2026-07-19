@@ -27,6 +27,7 @@ plystra version
 plystra new <module-path> [options]
 plystra add <go-module-query>
 plystra remove <go-module-path>
+plystra update <go-module-query>
 plystra plugin create <name>
 plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
 plystra capability implement <capability-name>/vN [--plugin <plugin>]
@@ -322,16 +323,29 @@ Remove a selected module by exact path without a version query:
 plystra remove github.com/acme/email
 ```
 
-Both commands may start at the Project root or inside a Plugin. Add resolves
+Update exactly one selected module to an explicit version:
+
+```powershell
+plystra update github.com/acme/email@v1.5.0
+```
+
+Omitting `@version` asks ordinary Go tooling for its normal upgrade selection
+for that module. The command never turns an omitted argument into a whole-graph
+upgrade.
+
+All three commands may start at the Project root or inside a Plugin. Add resolves
 the query through ordinary Go tooling and retains the module as a direct
 `go.mod` requirement even when its declarations do not create a Go import.
 Remove requires the exact module path to be selected in `go.mod`, removes it
 through ordinary Go tooling, and verifies that regeneration plus tidy did not
-select it again. Each command recomposes the dependency-derived root
-`plystra.yaml` baseline, regenerates, tidies, and runs
+select it again. Update also requires an existing selection, preserves a direct
+requirement as direct, and verifies that the module remains selected. It
+targets one query; ordinary Go resolution may still adjust transitive versions
+required by the selected graph. Each command recomposes the dependency-derived
+root `plystra.yaml` baseline, regenerates, tidies, and runs
 `go test -mod=readonly ./...`. The current dependency surfaces use the default
 root configuration; environment and full-replacement validation for dependency
-mutations remains incomplete. They never rewrite an unselected overlay or
+mutations remains incomplete. The commands never rewrite an unselected overlay or
 alternative YAML file. Any later failure restores `go.mod`, `go.sum`, root
 configuration, generated output, and every other transaction-owned file.
 

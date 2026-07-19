@@ -242,7 +242,15 @@ Remove a selected dependency with its exact module path and no version query:
 plystra remove github.com/acme/email
 ```
 
-`plystra add` validates one module query, resolves it through ordinary Go tooling, and records the selected module as a direct requirement. `plystra remove` requires a module already selected in `go.mod`, uses ordinary Go tooling to remove it, and fails if regeneration or tidy would select it again. Both commands recompose the dependency-derived root `plystra.yaml` baseline, regenerate, tidy, and validate the complete Project. These initial dependency workflows use the default root configuration and never scan for or rewrite environment overlays or alternative YAML files. A failed Go command, resolution, composition, generation, tidy, removal postcondition, or validation step restores `go.mod`, `go.sum`, root configuration, generated artifacts, and every other transaction-owned file without overwriting a concurrent user edit. The Go Module proxy and cache remain ordinary Go-tool boundaries; the CLI never copies or modifies dependency source.
+Update exactly one selected dependency to the query resolved by Go:
+
+```powershell
+plystra update github.com/acme/email@v1.5.0
+```
+
+Omit the version query to request Go's normal upgrade selection for that module. `plystra update` never performs an implicit whole-graph upgrade.
+
+`plystra add` validates one module query, resolves it through ordinary Go tooling, and records the selected module as a direct requirement. `plystra remove` requires a module already selected in `go.mod`, uses ordinary Go tooling to remove it, and fails if regeneration or tidy would select it again. `plystra update` also requires an existing selection, preserves a direct requirement as direct, and verifies that the module remains selected. All three commands recompose the dependency-derived root `plystra.yaml` baseline, regenerate, tidy, and validate the complete Project. These initial dependency workflows use the default root configuration and never scan for or rewrite environment overlays or alternative YAML files. A failed Go command, resolution, composition, generation, tidy, dependency postcondition, or validation step restores `go.mod`, `go.sum`, root configuration, generated artifacts, and every other transaction-owned file without overwriting a concurrent user edit. The Go Module proxy and cache remain ordinary Go-tool boundaries; the CLI never copies or modifies dependency source.
 
 ## Public command surface
 

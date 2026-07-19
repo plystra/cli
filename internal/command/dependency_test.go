@@ -247,6 +247,130 @@ func TestRunRemoveRejectsInvalidOrUnselectedModuleBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestRunUpdateResolvesSelectedModuleAndRecomposesProject(t *testing.T) {
+	proxy := writeCommandDependencyProxy(t, []commandProxyModule{
+		{
+			path:     "example.com/acme/platform",
+			version:  "v1.0.0",
+			manifest: "capabilities:\n  require: [kernel.health/v1]\n",
+		},
+		{
+			path:     "example.com/acme/platform",
+			version:  "v1.1.0",
+			manifest: "capabilities:\n  require: [kernel.info/v1]\n",
+		},
+	})
+	environment := commandDependencyEnvironment(t, proxy)
+	root := writeCapabilityCommandModule(t)
+	rootData := "# Shared application choices.\n{}\n"
+	overlayData := "# Unselected production choices.\ncapabilities:\n  require: {add: [kernel.health/v1]}\n"
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootData)
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayData)
+	query := "example.com/acme/platform@v1.0.0"
+	exitCode, stdout, stderr := runCommand(t, []string{"add", query}, root, environment)
+	if exitCode != 0 || stderr != "" || !strings.HasPrefix(stdout, "added dependency "+query) {
+		t.Fatalf("initial plystra add = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	proxyBefore := commandTree(t, proxy)
+
+	modulePath := "example.com/acme/platform"
+	exitCode, stdout, stderr = runCommand(t, []string{"update", modulePath}, filepath.Join(root, "records"), environment)
+	wantOutput := "updated dependency " + modulePath + " in example.com/acme/library at " + root + "\n"
+	if exitCode != 0 || stdout != wantOutput || stderr != "" {
+		t.Fatalf("plystra update = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	goMod := readCommandFile(t, root, "go.mod")
+	parsedModule, err := modfile.Parse("go.mod", goMod, nil)
+	if err != nil {
+		t.Fatalf("Parse(go.mod): %v", err)
+	}
+	updatedDirect := false
+	for _, requirement := range parsedModule.Require {
+		if requirement.Mod.Path == modulePath && requirement.Mod.Version == "v1.1.0" && !requirement.Indirect {
+			updatedDirect = true
+		}
+	}
+	if !updatedDirect {
+		t.Fatalf("go.mod does not retain the updated direct dependency:\n%s", goMod)
+	}
+	rootConfiguration := string(readCommandFile(t, root, "plystra.yaml"))
+	if !strings.Contains(rootConfiguration, "# Shared application choices.") || !strings.Contains(rootConfiguration, "kernel.info/v1") || strings.Contains(rootConfiguration, "kernel.health/v1") {
+		t.Fatalf("root dependency recomposition = %q", rootConfiguration)
+	}
+	if got := string(readCommandFile(t, root, "plystra.production.yaml")); got != overlayData {
+		t.Fatalf("update rewrote unselected overlay: %q", got)
+	}
+	assertCommandFile(t, root, "generated/go/clients/kernel/info/v1/client_gen.go")
+	if _, err := os.Lstat(filepath.Join(root, "generated", "go", "clients", "kernel", "health", "v1", "client_gen.go")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("obsolete dependency output still exists: %v", err)
+	}
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/library in "+root+"\n" {
+		t.Fatalf("post-update generate check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if proxyAfter := commandTree(t, proxy); !reflect.DeepEqual(proxyAfter, proxyBefore) {
+		t.Fatalf("Go Module proxy changed during update:\nbefore: %#v\nafter:  %#v", proxyBefore, proxyAfter)
+	}
+	assertNoCommandTransactions(t, root)
+}
+
+func TestRunUpdateRestoresModuleConfigurationAndGeneratedOutputAfterValidationFailure(t *testing.T) {
+	proxy := writeCommandDependencyProxy(t, []commandProxyModule{
+		{path: "example.com/acme/platform", version: "v1.0.0", manifest: "capabilities:\n  require: [kernel.health/v1]\n"},
+		{path: "example.com/acme/platform", version: "v1.1.0", manifest: "capabilities:\n  require: [kernel.info/v1]\n"},
+	})
+	environment := commandDependencyEnvironment(t, proxy)
+	root := writeCapabilityCommandModule(t)
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "# Preserve root.\n{}\n")
+	query := "example.com/acme/platform@v1.0.0"
+	exitCode, stdout, stderr := runCommand(t, []string{"add", query}, root, environment)
+	if exitCode != 0 || stderr != "" || !strings.HasPrefix(stdout, "added dependency "+query) {
+		t.Fatalf("initial plystra add = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	writeCommandFile(t, filepath.Join(root, "validation_failure_test.go"), `package library
+
+import "testing"
+
+func TestInjectedDependencyUpdateValidationFailure(t *testing.T) {
+	t.Fatal("injected dependency update validation failure")
+}
+`)
+	before := commandTree(t, root)
+	exitCode, stdout, stderr = runCommand(t, []string{"update", "example.com/acme/platform@v1.1.0"}, filepath.Join(root, "records"), environment)
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "injected dependency update validation failure") {
+		t.Fatalf("failed plystra update = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("failed update changed Project-owned files:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoCommandTransactions(t, root)
+}
+
+func TestRunUpdateRejectsInvalidOrUnselectedQueryBeforeMutation(t *testing.T) {
+	root := writeCapabilityCommandModule(t)
+	for _, test := range []struct {
+		name      string
+		query     string
+		wantError string
+	}{
+		{name: "removal query", query: "example.com/acme/platform@none", wantError: "use plystra remove"},
+		{name: "unsafe query", query: "../outside@v1.0.0", wantError: "Go Module path"},
+		{name: "unselected query", query: "example.com/acme/platform@v1.1.0", wantError: "use plystra add"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, []string{"update", test.query}, filepath.Join(root, "records"), commandGoEnvironment())
+			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, test.wantError) {
+				t.Fatalf("invalid plystra update = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("invalid update changed Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 type commandProxyModule struct {
 	path     string
 	version  string
@@ -269,7 +393,12 @@ func writeCommandDependencyProxy(t *testing.T, modules []commandProxyModule) str
 		if err := os.MkdirAll(versionRoot, 0o755); err != nil {
 			t.Fatalf("MkdirAll(%s): %v", versionRoot, err)
 		}
-		writeCommandFile(t, filepath.Join(versionRoot, "list"), candidate.version+"\n")
+		listPath := filepath.Join(versionRoot, "list")
+		listData, err := os.ReadFile(listPath)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("ReadFile(%s): %v", listPath, err)
+		}
+		writeCommandFile(t, listPath, string(listData)+candidate.version+"\n")
 		writeCommandFile(t, filepath.Join(versionRoot, escapedVersion+".info"), fmt.Sprintf("{\"Version\":%q,\"Time\":\"2026-07-19T00:00:00Z\"}\n", candidate.version))
 		goMod := []byte("module " + candidate.path + "\n\ngo 1.26\n")
 		writeCommandFile(t, filepath.Join(versionRoot, escapedVersion+".mod"), string(goMod))

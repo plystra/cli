@@ -6,14 +6,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
-	"unicode"
 
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/moduleargument"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/modulemutation"
 	"github.com/plystra/cli/internal/projectlocate"
-	"golang.org/x/mod/module"
 )
 
 // ErrAdd reports failure to add and validate one Go Module dependency.
@@ -50,7 +48,7 @@ func Add(ctx context.Context, options Options) (Result, error) {
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: context is nil", ErrAdd)
 	}
-	query, modulePath, err := validateQuery(options.Query)
+	query, modulePath, err := moduleargument.ParseQuery(options.Query)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrAdd, err)
 	}
@@ -79,31 +77,4 @@ func Add(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %w", ErrAdd, err)
 	}
 	return Result{module: project, query: query}, nil
-}
-
-func validateQuery(value string) (string, string, error) {
-	query := strings.TrimSpace(value)
-	if query == "" {
-		return "", "", errors.New("Go Module query is empty")
-	}
-	if query != value || strings.HasPrefix(query, "-") || strings.IndexFunc(query, func(r rune) bool {
-		return unicode.IsSpace(r) || unicode.IsControl(r)
-	}) >= 0 {
-		return "", "", fmt.Errorf("Go Module query %q is invalid", value)
-	}
-	path := query
-	if separator := strings.LastIndexByte(query, '@'); separator >= 0 {
-		path = query[:separator]
-		version := query[separator+1:]
-		if version == "" {
-			return "", "", fmt.Errorf("Go Module query %q has an empty version query", query)
-		}
-		if version == "none" {
-			return "", "", errors.New("Go Module query @none removes a dependency; use plystra remove")
-		}
-	}
-	if err := module.CheckPath(path); err != nil {
-		return "", "", fmt.Errorf("Go Module path %q: %w", path, err)
-	}
-	return query, path, nil
 }
