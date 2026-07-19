@@ -89,7 +89,7 @@ Private values and Secret reference targets do not enter generation-extension co
 
 For every selected local plugin, generation derives its module-owned type and decoder under `generated/go/configuration/` from the validated `plugin.yaml` schema alone. Required fields and fields with defaults use direct Go values; omitted optional scalars use pointers, while optional objects and arrays preserve nil-versus-configured-empty behavior. The generated decoder calls Kernel `configuration.Decode` at runtime, constructs one typed object for the Plugin ID, and redacts formatting and serialization. Application values and Secret reference targets are never embedded in this source. Selected dependency plugins ship the same generated configuration boundary in their own Go Modules.
 
-The application-owned `generated/go/bootstrap` package is the runtime construction boundary. Its `New` function accepts the runtime document path, loads it through the Kernel's bounded regular-file API, validates `timeouts.startup`, resolves Secrets, constructs each selected ordinary provider exactly once, adds the Kernel's intrinsic bindings, publishes the complete canonical invocation runtime, and returns a private redacted `Application`. `Application.Invocations` exposes the immutable typed application handles after successful construction. `Application.Start` applies the configured startup deadline and bounded failed-start rollback; `Application.Stop` shuts active lifecycle providers down in reverse selected Plugin ID order. Callers retain control of the document location and lifecycle contexts, and no runtime value or Secret reference target is embedded in generated source.
+The application-owned `generated/go/bootstrap` package is the runtime construction boundary. Its `New` function accepts the runtime document path, loads it through the Kernel's bounded regular-file API, validates `timeouts.startup`, resolves Secrets, constructs each selected ordinary provider exactly once, adds the Kernel's intrinsic bindings, publishes the complete canonical invocation runtime, and returns a private redacted `Application`. `Application.Invocations` exposes the immutable typed application handles after successful construction. `Application.Start` applies the configured startup deadline and bounded failed-start rollback; `Application.Stop` shuts active lifecycle providers down in reverse selected Plugin ID order. The CLI-owned `generated/go/application` process entrypoint uses root `plystra.yaml`, waits for `SIGINT` or `SIGTERM` during normal execution, and owns bounded shutdown. Its private smoke path starts the same runtime, invokes intrinsic health through the shared dispatcher, and stops immediately. Selector-aware runtime startup remains a later gate. No runtime value or Secret reference target is embedded in generated source.
 
 ## Generated application invocation
 
@@ -104,7 +104,7 @@ generated adapter or Capability client
 
 The CLI emits `generated/go/assembly/invocations_gen.go` with one typed endpoint adapter per selected ordinary canonical Capability, the complete Kernel-owned intrinsic binding set, one immutable canonical catalog, one shared dispatcher, and dependency-ordered application handles. Assembly prepares every typed handle while the dispatcher is unpublished, constructs every selected provider, and atomically publishes the canonical catalog only after all constructors succeed. The catalog records exact contract digests and provider provenance: ordinary entries carry Plugin ID, package, Go Module build, and sole-provider or explicit-selection reason; intrinsic entries carry Kernel module/build provenance, an empty Plugin ID, and the intrinsic selection reason. Cross-module adapters copy fields directly and perform explicit conversions only for generated named enum types; they do not use JSON as an in-process type bridge. Raw dispatch applies a 30-second default only when the caller and generated path supply no earlier deadline. Alias IDs never enter the catalog or dispatcher.
 
-Required or explicitly exposed intrinsic Capabilities receive normal typed application handles and clients. Their generated request, response, and enum declarations are aliases to `github.com/plystra/kernel/intrinsic`, and assembly binds those handles with `intrinsic.HealthContract`, `intrinsic.InfoContract`, and the Kernel's own binding constructors so callers and endpoints share the same typed contract tokens. Generated application handles are constructed in topological dependency order from the canonical clients required by their lowered contributions; an ordinary invocation may depend on an intrinsic client. A cycle, missing or repeated dependency, accessor collision, invalid provenance value, or inconsistent intrinsic/ordinary selection fails generation. Applications with no ordinary providers still publish the two intrinsic canonical bindings, while HTTP and JavaScript surfaces remain absent unless explicitly exposed.
+Required or explicitly exposed intrinsic Capabilities receive normal typed application handles and clients. Their generated request, response, and enum declarations are aliases to `github.com/plystra/kernel/intrinsic`, and assembly binds those handles with `intrinsic.HealthContract`, `intrinsic.InfoContract`, and the Kernel's own binding constructors so callers and endpoints share the same typed contract tokens. `Invocations.IntrinsicHealth` is always available after assembly publication and creates a typed health handle against the same shared dispatcher, even when health is not an application requirement. Generated application handles are constructed in topological dependency order from the canonical clients required by their lowered contributions; an ordinary invocation may depend on an intrinsic client. A cycle, missing or repeated dependency, accessor collision, invalid provenance value, or inconsistent intrinsic/ordinary selection fails generation. Applications with no ordinary providers still publish the two intrinsic canonical bindings, while HTTP and JavaScript surfaces remain absent unless explicitly exposed.
 
 For each local plugin that declares exact `requires`, generation emits an immutable client set at `generated/go/dependencies/<plugin-directory>/dependencies_gen.go`. Its authored constructor receives `func New(Config, dependencies.Dependencies) *Plugin`; a plugin with no requirements keeps `func New(Config) *Plugin`. Dependency-module plugins use the equivalent generated package from their own module. Constructors may validate and retain these clients but cannot invoke them successfully until construction completes and assembly publishes the catalog. Every later cross-plugin call therefore follows the same generated application invocation path and contributions as an external adapter. A missing contract, unbound client, constructor panic or nil result, cross-module type mismatch, or publication failure leaves the runtime unpublished.
 
@@ -212,9 +212,13 @@ check pass in a fresh Project directory before publishing a corrected version.
 
 The staged Project must also build every Go package with
 `go build -mod=readonly ./...`. Build failure rejects the template inside the
-same transaction and reports publisher-owned remediation. This package build
-does not claim the later `plystra build` executable and `dist/` contract, which
-remain deferred with startup and health qualification.
+same transaction and reports publisher-owned remediation. The CLI then builds
+the generated application entrypoint with `GOWORK=off` into isolated temporary
+output, starts the real assembled runtime, invokes intrinsic
+`kernel.health/v1`, and stops lifecycle providers cleanly. Child output is not
+surfaced and the temporary executable is removed on every path. Failure remains
+inside the same creation transaction. This private qualification executable is
+not the later public `plystra build` and `dist/` contract.
 
 Typed operational values and Secret-reference placeholders declared by the
 template's root configuration are materialized in the new root `plystra.yaml`
@@ -256,10 +260,11 @@ created github.com/acme/my-app from github.com/acme/platform@v1.2.3 in <absolute
 ```
 
 This ordinary template-dependency workflow now includes automatic read-only Go
-package tests and builds. The complete qualified-template contract still needs
-the public `plystra build` executable and `dist/` workflow, isolated startup,
-health verification, and clean shutdown. No template is advertised as qualified
-by this CLI version.
+package tests and builds plus isolated startup, intrinsic health verification,
+and clean shutdown. The complete qualified-template contract still needs the
+public `plystra build` executable and `dist/` workflow, applicable JavaScript SDK
+qualification, and concise Level 0 success output. No template is advertised as
+qualified by this CLI version.
 
 ## Transaction safety
 

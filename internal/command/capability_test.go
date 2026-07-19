@@ -87,6 +87,7 @@ func TestRunCapabilityCreateAndExposeRegenerateRunnableApplication(t *testing.T)
 		t.Fatalf("runnable capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	for _, filePath := range []string{
+		"generated/go/application/main_gen.go",
 		"generated/go/assembly/providers_gen.go",
 		"generated/go/bootstrap/bootstrap_gen.go",
 		"generated/go/contracts/records/list/v1/contract_gen.go",

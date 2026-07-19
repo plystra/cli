@@ -135,6 +135,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildablePlugins(t *testing.T
 		"account-profile/plugin.yaml",
 		"account-profile/plugin_test.go",
 		"generated/.plystra-manifest.json",
+		"generated/go/application/main_gen.go",
 		"generated/go/assembly/compatibility_gen.go",
 		"generated/go/configuration/account-profile_gen.go",
 	}
@@ -495,7 +496,7 @@ func scaffoldSnapshot(t *testing.T, root string) map[string][]byte {
 	tree := snapshotTree(t, root)
 	result := make(map[string][]byte)
 	for name, data := range tree {
-		if strings.HasPrefix(name, "account-profile/") || name == "generated/.plystra-manifest.json" || name == "generated/go/assembly/compatibility_gen.go" || name == "generated/go/configuration/account-profile_gen.go" {
+		if strings.HasPrefix(name, "account-profile/") || name == "generated/.plystra-manifest.json" || name == "generated/go/application/main_gen.go" || name == "generated/go/assembly/compatibility_gen.go" || name == "generated/go/configuration/account-profile_gen.go" {
 			result[name] = data
 		}
 	}

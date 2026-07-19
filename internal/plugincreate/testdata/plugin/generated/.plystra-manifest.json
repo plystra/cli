@@ -2,12 +2,16 @@
   "version": 2,
   "files": [
     {
+      "path": "generated/go/application/main_gen.go",
+      "sha256": "sha256:fd39b9159e1ee1320f5d1cab7d9efde4df34e90900d9733b40f5eb54ea647c0f"
+    },
+    {
       "path": "generated/go/assembly/compatibility_gen.go",
       "sha256": "sha256:f3cd92d2b0829d1fd646c4bf65840d578f784ab5111c6972d3545d31fc847a42"
     },
     {
       "path": "generated/go/assembly/invocations_gen.go",
-      "sha256": "sha256:d0cc25698ec32787edc60b7f6d5b6a0bb783f5e0d4afbf66963ec56a1ae938e4"
+      "sha256": "sha256:2f9055033cab4e915c2b41e6ab19ab3aa7e9f9af7634bc6323e01ebe275d5f59"
     },
     {
       "path": "generated/go/assembly/providers_gen.go",
