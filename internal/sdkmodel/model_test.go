@@ -109,6 +109,36 @@ func TestBuildCanonicalNormalizesImmutableSDKOperations(t *testing.T) {
 	}
 }
 
+func TestBuildHTTPReusesExactContractsWithoutJavaScriptExposure(t *testing.T) {
+	t.Parallel()
+
+	email := sdkTarget(t, sdkEmailSchema, generation.Exposure{HTTP: true})
+	alias := sdkAlias(t, "mail.deliver/v1", email, generation.Exposure{HTTP: true}, "Use email.send/v1 instead.")
+	hidden := sdkAlias(t, "internal.send/v1", email, generation.Exposure{Go: true}, "")
+	model, err := sdkmodel.BuildHTTP(
+		[]sdkmodel.CanonicalTargetView{email},
+		[]sdkmodel.AliasView{hidden, alias},
+	)
+	if err != nil {
+		t.Fatalf("BuildHTTP: %v", err)
+	}
+	if len(model.Operations()) != 1 || model.Operations()[0].ID() != email.id {
+		t.Fatalf("HTTP operations = %#v", model.Operations())
+	}
+	aliases := model.Aliases()
+	if len(aliases) != 1 || aliases[0].ID().String() != "mail.deliver/v1" || aliases[0].TargetOperation().ID() != email.id {
+		t.Fatalf("HTTP Aliases = %#v", aliases)
+	}
+	if bytes.Contains(model.CanonicalJSON(), []byte("internal.send/v1")) || !bytes.Contains(model.CanonicalJSON(), []byte(`"id":"mail.deliver/v1"`)) {
+		t.Fatalf("HTTP CanonicalJSON = %s", model.CanonicalJSON())
+	}
+
+	notHTTP := sdkTarget(t, "id: internal.task/v1\n", generation.Exposure{Go: true})
+	if invalid, err := sdkmodel.BuildHTTP([]sdkmodel.CanonicalTargetView{notHTTP}, nil); !errors.Is(err, sdkmodel.ErrNormalize) || !errors.Is(err, sdkmodel.ErrTarget) || invalid.CanonicalJSON() != nil || !strings.Contains(err.Error(), "not exposed to HTTP") {
+		t.Fatalf("BuildHTTP(non-HTTP) = %s, %v", invalid.CanonicalJSON(), err)
+	}
+}
+
 func TestBuildNormalizesImmutableJavaScriptAliases(t *testing.T) {
 	t.Parallel()
 

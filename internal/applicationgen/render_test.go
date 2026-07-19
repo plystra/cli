@@ -555,14 +555,18 @@ errors: [invalid_recipient]
 }
 
 func resolvedApplication(t testing.TB, applicationYAML string) generationresolution.ExtensionResult {
-	t.Helper()
-	email := normalizedContract(t, `id: email.send/v1
+	return resolvedApplicationWithEmail(t, applicationYAML, `id: email.send/v1
 request:
   to: {type: string, required: true}
 response:
   accepted: {type: boolean, required: true}
 errors: [invalid_recipient]
 `)
+}
+
+func resolvedApplicationWithEmail(t testing.TB, applicationYAML, emailSource string) generationresolution.ExtensionResult {
+	t.Helper()
+	email := normalizedContract(t, emailSource)
 	health := normalizedContract(t, `id: kernel.health/v1
 description: Reports intrinsic Kernel liveness.
 request: {}
