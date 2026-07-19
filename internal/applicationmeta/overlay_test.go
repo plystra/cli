@@ -58,6 +58,9 @@ settings: {type: object}
 http:
   address: ":8080"
   transports: {connect: false, rest: true}
+  cors:
+    allowed_origins: [https://shared.example]
+    allow_credentials: true
   expose: [audit.write/v1, email.send/v1]
 timeouts: {startup: 1m}
 capabilities:
@@ -79,6 +82,9 @@ config:
 http:
   address: ":9090"
   transports: {connect: true, rest: null}
+  cors:
+    allowed_origins: [https://production.example, https://PRODUCTION.example:443]
+    allow_credentials: null
   expose:
     add: [reports.read/v1]
     remove: [audit.write/v1]
@@ -112,6 +118,10 @@ config:
 	if transports := current.HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
 		t.Fatalf("HTTPTransports = %#v", transports)
 	}
+	cors, exists := current.HTTPCORS()
+	if !exists || !reflect.DeepEqual(cors.AllowedOrigins, []string{"https://production.example"}) || cors.AllowCredentials {
+		t.Fatalf("HTTPCORS = %#v, %t", cors, exists)
+	}
 	if current.StartupTimeout() != applicationmeta.DefaultStartupTimeout {
 		t.Fatalf("StartupTimeout = %s", current.StartupTimeout())
 	}
@@ -133,7 +143,7 @@ config:
 			ModulePath:    "example.com/a",
 			ModuleVersion: "v1.0.0",
 			Manifest: parseOverlayManifest(t, "plystra.yaml", `
-http: {transports: {connect: false, rest: true}, expose: [audit.write/v1]}
+http: {transports: {connect: false, rest: true}, cors: {allowed_origins: ['*']}, expose: [audit.write/v1]}
 capabilities:
   require: [audit.write/v1]
   use:
@@ -160,6 +170,10 @@ config:
 	effective := composed.Manifest()
 	if transports := effective.HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
 		t.Fatalf("effective HTTP transports = %#v", transports)
+	}
+	effectiveCORS, exists := effective.HTTPCORS()
+	if !exists || !reflect.DeepEqual(effectiveCORS.AllowedOrigins, []string{"https://production.example"}) || effectiveCORS.AllowCredentials {
+		t.Fatalf("effective HTTPCORS = %#v, %t", effectiveCORS, exists)
 	}
 	if got := overlayRequirementIDs(effective); !reflect.DeepEqual(got, []string{"email.send/v1", "reports.read/v1"}) {
 		t.Fatalf("effective requirements = %v", got)
@@ -198,7 +212,11 @@ func TestApplyOverlayInheritsOmittedFieldsAndRejectsInvalidChanges(t *testing.T)
 	schema := composeSchema(t, "host: {type: string}\nsettings: {type: object}\n")
 	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{"acme.smtp": schema})
 	base := parseOverlayManifest(t, "plystra.yaml", `
-http: {address: ":8080", transports: {connect: false, rest: true}, expose: [email.send/v1]}
+http:
+  address: ":8080"
+  transports: {connect: false, rest: true}
+  cors: {allowed_origins: [https://shared.example], allow_credentials: true}
+  expose: [email.send/v1]
 timeouts: {startup: 45s}
 capabilities: {require: [email.send/v1]}
 config: {acme.smtp: {host: shared.example, settings: {mode: shared}}}
@@ -212,6 +230,10 @@ config: {acme.smtp: {host: shared.example, settings: {mode: shared}}}
 	}
 	if transports := inherited.HTTPTransports(); transports != (applicationmeta.HTTPTransports{REST: true}) {
 		t.Fatalf("inherited HTTP transports = %#v", transports)
+	}
+	inheritedCORS, exists := inherited.HTTPCORS()
+	if !exists || !reflect.DeepEqual(inheritedCORS.AllowedOrigins, []string{"https://shared.example"}) || !inheritedCORS.AllowCredentials {
+		t.Fatalf("inherited HTTPCORS = %#v, %t", inheritedCORS, exists)
 	}
 	if got := overlayRequirementIDs(inherited); !reflect.DeepEqual(got, []string{"email.send/v1"}) {
 		t.Fatalf("inherited requirements = %v", got)
@@ -229,6 +251,26 @@ config: {acme.smtp: {host: shared.example, settings: {mode: shared}}}
 	baseAlias := parseOverlayManifest(t, "plystra.yaml", "capabilities: {aliases: {mail.send/v1: email.send/v1}}\n")
 	if _, err := applicationmeta.ApplyOverlay(baseAlias, aliasChain, lookup); !errors.Is(err, applicationmeta.ErrApplyOverlay) || !strings.Contains(err.Error(), "Alias chain") {
 		t.Fatalf("Alias chain error = %v", err)
+	}
+	wildcard := parseOverlayManifest(t, "plystra.test.yaml", "http: {cors: {allowed_origins: ['*']}}\n")
+	if _, err := applicationmeta.ApplyOverlay(base, wildcard, lookup); !errors.Is(err, applicationmeta.ErrApplyOverlay) || !strings.Contains(err.Error(), "wildcard origin") {
+		t.Fatalf("credentialed wildcard overlay error = %v", err)
+	}
+	sparseCredentials, err := applicationmeta.ParseOverlaySource("plystra.test.yaml", []byte("http: {cors: {allow_credentials: false}}\n"))
+	if err != nil {
+		t.Fatalf("ParseOverlaySource(sparse CORS): %v", err)
+	}
+	sparseResult, err := applicationmeta.ApplyOverlay(base, sparseCredentials, lookup)
+	sparseCORS, exists := sparseResult.HTTPCORS()
+	if err != nil || !exists || !reflect.DeepEqual(sparseCORS.AllowedOrigins, []string{"https://shared.example"}) || sparseCORS.AllowCredentials {
+		t.Fatalf("sparse credential overlay HTTPCORS = %#v, %t, error %v", sparseCORS, exists, err)
+	}
+	if _, err := applicationmeta.ApplyOverlay(parseOverlayManifest(t, "plystra.yaml", "{}\n"), sparseCredentials, lookup); !errors.Is(err, applicationmeta.ErrApplyOverlay) || !strings.Contains(err.Error(), "allowed_origins is required") {
+		t.Fatalf("sparse CORS without root error = %v", err)
+	}
+	removed, err := applicationmeta.ApplyOverlay(base, parseOverlayManifest(t, "plystra.test.yaml", "http: {cors: null}\n"), lookup)
+	if _, exists := removed.HTTPCORS(); err != nil || exists {
+		t.Fatalf("removed HTTPCORS exists = %t, error %v", exists, err)
 	}
 }
 

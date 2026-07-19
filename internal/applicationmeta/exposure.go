@@ -132,6 +132,9 @@ func manifestDifferenceOutsideHTTPExposure(left, right Manifest) string {
 	if left.httpTransports != right.httpTransports {
 		return "http.transports"
 	}
+	if !equalHTTPCORSLayers(left.httpCORS, right.httpCORS) {
+		return "http.cors"
+	}
 	if left.StartupTimeout() != right.StartupTimeout() || left.hasStartupTimeout != right.hasStartupTimeout {
 		return "timeouts.startup"
 	}

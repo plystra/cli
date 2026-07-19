@@ -67,6 +67,18 @@ capabilities:
 	}
 }
 
+func TestEnvironmentOverlayDigestAcceptsOnlySparseOverlayValidation(t *testing.T) {
+	t.Parallel()
+
+	data := []byte("http: {cors: {allow_credentials: false}}\n")
+	if _, err := applicationgen.EnvironmentOverlayDigest(data); err != nil {
+		t.Fatalf("EnvironmentOverlayDigest: %v", err)
+	}
+	if _, err := applicationgen.ConfigurationDigest(data); err == nil || !strings.Contains(err.Error(), "allowed_origins is required") {
+		t.Fatalf("ConfigurationDigest(sparse overlay) error = %v", err)
+	}
+}
+
 func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 	t.Parallel()
 

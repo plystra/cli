@@ -204,6 +204,68 @@ func TestComposeKeepsDependencyHTTPTransportsOutsideInheritance(t *testing.T) {
 	}
 }
 
+func TestComposeKeepsDependencyHTTPCORSOutsideInheritance(t *testing.T) {
+	t.Parallel()
+
+	dependencies := []applicationmeta.Dependency{
+		{
+			ModulePath:    "example.com/wildcard",
+			ModuleVersion: "v1.0.0",
+			Manifest:      composeManifest(t, "http: {cors: {allowed_origins: ['*']}}\n"),
+		},
+		{
+			ModulePath:    "example.com/credentialed",
+			ModuleVersion: "v2.0.0",
+			Manifest:      composeManifest(t, "http: {cors: {allowed_origins: [https://dependency.example], allow_credentials: true}}\n"),
+		},
+	}
+
+	for _, test := range []struct {
+		name        string
+		current     string
+		wantOrigins []string
+		wantCreds   bool
+		wantExists  bool
+	}{
+		{
+			name:    "omitted current CORS stays absent",
+			current: "{}\n",
+		},
+		{
+			name:        "explicit current CORS wins",
+			current:     "http: {cors: {allowed_origins: [https://current.example], allow_credentials: true}}\n",
+			wantOrigins: []string{"https://current.example"},
+			wantCreds:   true,
+			wantExists:  true,
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			first, err := applicationmeta.Compose(dependencies, composeManifest(t, test.current), composeSchemaLookup(nil))
+			if err != nil {
+				t.Fatalf("Compose: %v", err)
+			}
+			second, err := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[1], dependencies[0]}, composeManifest(t, test.current), composeSchemaLookup(nil))
+			if err != nil {
+				t.Fatalf("Compose(reordered): %v", err)
+			}
+			for _, composed := range []applicationmeta.Composition{first, second} {
+				cors, exists := composed.Manifest().HTTPCORS()
+				if exists != test.wantExists || !slices.Equal(cors.AllowedOrigins, test.wantOrigins) || cors.AllowCredentials != test.wantCreds {
+					t.Fatalf("HTTPCORS = %#v, %t; want %#v, %t", cors, exists, test.wantOrigins, test.wantExists)
+				}
+			}
+			if first.DependencyDigest() != second.DependencyDigest() {
+				t.Fatalf("dependency digest changed with order: %s then %s", first.DependencyDigest(), second.DependencyDigest())
+			}
+			if records := first.Provenance(); len(records) != 0 {
+				t.Fatalf("dependency-only CORS entered provenance: %#v", provenanceStrings(records))
+			}
+		})
+	}
+}
+
 func TestComposeRequiresCurrentProviderReplacementForInheritedConflict(t *testing.T) {
 	t.Parallel()
 

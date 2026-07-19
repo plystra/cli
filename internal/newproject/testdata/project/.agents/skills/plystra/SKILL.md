@@ -82,8 +82,8 @@ Composition uses field-specific rules:
 - Plugin configuration merges only by fields declared in plugin.yaml.
   Declared objects merge recursively; scalar and array fields replace as one
   value. Null removes one inherited field or a complete Plugin config entry.
-- Dependency http.address, http.transports, and timeouts.startup never replace
-  this Project's process settings.
+- Dependency http.address, http.transports, http.cors, and timeouts.startup
+  never replace this Project's process settings.
 - Incompatible Provider, Alias, or Plugin-field values fail with every
   contributing module@version/plystra.yaml source.
 
@@ -146,6 +146,9 @@ optional sparse project-root overlay, for example plystra.production.yaml:
     http:
       transports:
         rest: true
+      cors:
+        allowed_origins:
+          - https://app.example.com
     capabilities:
       use:
         email.send/v1: acme.email.smtp
@@ -180,6 +183,19 @@ settings are ignored.
 The current CLI validates and composes this selection. Connect/REST projection
 from the selected transport model is a later roadmap feature, so rest: true
 does not yet create a REST adapter.
+
+http.cors is an optional closed current-Project object. When present it
+requires one nonempty allowed_origins list and accepts only optional boolean
+allow_credentials, which defaults to false. The CLI normalizes, sorts, and
+deduplicates HTTP/HTTPS origins; * cannot be combined with credentials. An
+environment overlay replaces the complete origin list when present and may omit
+it to inherit root origins, while credentials compose independently. The
+effective result must still contain origins. Set http.cors to null to disable
+root CORS for that environment. A complete --config document does not inherit
+root CORS, and dependency Project CORS settings are ignored.
+
+The current CLI validates and composes CORS. Generated CORS response behavior
+remains a later HTTP transport feature.
 
 PLYSTRA_ENV supplies the same environment name for automation when --env is
 omitted. To generate from a complete alternative document instead, use the same
@@ -389,6 +405,10 @@ generated source:
       transports:
         connect: true
         rest: false
+      cors:
+        allowed_origins:
+          - https://app.example.com
+        allow_credentials: true
       expose:
         - records.read/v1
 
@@ -554,6 +574,14 @@ rest: false. Environment overlays replace those two booleans independently,
 and dependency Project transport choices never override the current Project.
 The current generated handler remains the implemented HTTP surface until the
 later Connect and optional REST projection gates consume this selection.
+
+Cross-origin configuration belongs in the selected current-Project document.
+http.cors accepts only required nonempty allowed_origins and optional boolean
+allow_credentials. Origins must be * or origin-only HTTP/HTTPS URLs; a
+credentialed wildcard is invalid. Environment overlays may inherit the root
+origin list or replace it completely; http.cors: null disables the root
+declaration, and dependency Project CORS never applies. Generated CORS response
+behavior remains deferred to the later HTTP transport gate.
 
 Generated handlers enforce the exact route, application/json, bounded bodies,
 required and unknown fields, enums, response validation, safe errors, and

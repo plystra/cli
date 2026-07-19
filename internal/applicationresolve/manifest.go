@@ -40,11 +40,19 @@ func (s ManifestSnapshot) Path() string { return s.path }
 func (s ManifestSnapshot) Data() []byte { return append([]byte(nil), s.data...) }
 
 func loadConfiguration(moduleRoot, relativePath string) (ManifestSnapshot, applicationmeta.Manifest, error) {
+	return loadConfigurationWithParser(moduleRoot, relativePath, applicationmeta.ParseSource)
+}
+
+func loadEnvironmentOverlay(moduleRoot, relativePath string) (ManifestSnapshot, applicationmeta.Manifest, error) {
+	return loadConfigurationWithParser(moduleRoot, relativePath, applicationmeta.ParseOverlaySource)
+}
+
+func loadConfigurationWithParser(moduleRoot, relativePath string, parse func(string, []byte) (applicationmeta.Manifest, error)) (ManifestSnapshot, applicationmeta.Manifest, error) {
 	snapshot, err := readManifestSnapshot(moduleRoot, relativePath)
 	if err != nil {
 		return ManifestSnapshot{}, applicationmeta.Manifest{}, fmt.Errorf("%w: %w", ErrManifest, err)
 	}
-	manifest, err := applicationmeta.ParseSource(snapshot.path, snapshot.data)
+	manifest, err := parse(snapshot.path, snapshot.data)
 	if err != nil {
 		return ManifestSnapshot{}, applicationmeta.Manifest{}, fmt.Errorf("%w: %w", ErrManifest, err)
 	}

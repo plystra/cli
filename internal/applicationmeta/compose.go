@@ -188,6 +188,7 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 		httpAddress:     current.httpAddress,
 		hasHTTPAddress:  current.hasHTTPAddress,
 		httpTransports:  current.httpTransports,
+		httpCORS:        cloneHTTPCORSLayer(current.httpCORS),
 		httpExposures:   exposures,
 		requirements:    requirements,
 		providerChoices: choices,

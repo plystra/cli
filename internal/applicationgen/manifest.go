@@ -111,7 +111,11 @@ func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenanc
 	if err != nil {
 		return ManifestProvenance{}, fmt.Errorf("root configuration: %w", err)
 	}
-	selectedDigest, err := ConfigurationDigest(options.SelectedData)
+	selectedDigestFunction := ConfigurationDigest
+	if options.Mode == ConfigurationModeEnvironment {
+		selectedDigestFunction = EnvironmentOverlayDigest
+	}
+	selectedDigest, err := selectedDigestFunction(options.SelectedData)
 	if err != nil {
 		return ManifestProvenance{}, fmt.Errorf("selected configuration: %w", err)
 	}
@@ -514,7 +518,19 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 // Plystra application configuration. Comments, scalar style, and mapping order
 // do not enter the digest; sequence order, scalar types, and tombstones do.
 func ConfigurationDigest(data []byte) (string, error) {
-	if _, err := applicationmeta.Parse(data); err != nil {
+	return configurationDigest(data, applicationmeta.Parse)
+}
+
+// EnvironmentOverlayDigest returns the same deterministic semantic digest for
+// one valid sparse current-project environment overlay.
+func EnvironmentOverlayDigest(data []byte) (string, error) {
+	return configurationDigest(data, func(data []byte) (applicationmeta.Manifest, error) {
+		return applicationmeta.ParseOverlaySource("plystra.environment.yaml", data)
+	})
+}
+
+func configurationDigest(data []byte, parse func([]byte) (applicationmeta.Manifest, error)) (string, error) {
+	if _, err := parse(data); err != nil {
 		return "", fmt.Errorf("parse application configuration: %w", err)
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))

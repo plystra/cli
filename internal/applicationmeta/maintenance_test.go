@@ -21,6 +21,7 @@ func TestMaintainDependencyConfigurationMaterializesBaselineWithoutOverwritingLo
 		ModuleVersion: "v1.0.0",
 		Manifest: composeManifest(t, `
 http:
+  cors: {allowed_origins: ['*']}
   expose: [records.read/v1]
 capabilities:
   require: [email.send/v1]
@@ -42,6 +43,9 @@ http:
   transports:
     connect: false # local Connect decision
     rest: true # local REST decision
+  cors:
+    allowed_origins: [https://app.example.com] # local CORS origin
+    allow_credentials: true # local CORS credentials
   expose:
     - local.health/v1 # explicit local exposure
 capabilities:
@@ -67,6 +71,8 @@ config:
 		[]byte("# local process setting"),
 		[]byte("# local Connect decision"),
 		[]byte("# local REST decision"),
+		[]byte("# local CORS origin"),
+		[]byte("# local CORS credentials"),
 		[]byte("# explicit local exposure"),
 		[]byte("# explicit local Provider"),
 		[]byte("# explicit local value"),
@@ -85,6 +91,10 @@ config:
 	manifest := composeManifest(t, string(data))
 	if transports := manifest.HTTPTransports(); transports != (applicationmeta.HTTPTransports{REST: true}) {
 		t.Fatalf("maintained HTTP transports = %#v", transports)
+	}
+	cors, exists := manifest.HTTPCORS()
+	if !exists || len(cors.AllowedOrigins) != 1 || cors.AllowedOrigins[0] != "https://app.example.com" || !cors.AllowCredentials {
+		t.Fatalf("maintained HTTPCORS = %#v, %t", cors, exists)
 	}
 	composition, err := applicationmeta.Compose(dependencies, manifest, lookup)
 	if err != nil {

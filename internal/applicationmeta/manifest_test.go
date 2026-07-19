@@ -197,6 +197,54 @@ func TestParseNormalizesClosedHTTPTransportSelection(t *testing.T) {
 	}
 }
 
+func TestParseNormalizesClosedHTTPCORS(t *testing.T) {
+	t.Parallel()
+
+	manifest, err := applicationmeta.Parse([]byte(`
+http:
+  cors:
+    allowed_origins:
+      - https://EXAMPLE.com:443
+      - http://localhost:80
+      - https://example.com
+      - http://[2001:0DB8::1]:80
+    allow_credentials: true
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cors, exists := manifest.HTTPCORS()
+	if !exists {
+		t.Fatal("HTTPCORS is absent")
+	}
+	if !slices.Equal(cors.AllowedOrigins, []string{"http://[2001:db8::1]", "http://localhost", "https://example.com"}) || !cors.AllowCredentials {
+		t.Fatalf("HTTPCORS = %#v", cors)
+	}
+	cors.AllowedOrigins[0] = "https://mutated.example"
+	repeated, _ := manifest.HTTPCORS()
+	if repeated.AllowedOrigins[0] != "http://[2001:db8::1]" {
+		t.Fatalf("HTTPCORS exposed mutable origin storage: %#v", repeated)
+	}
+
+	for _, data := range []string{
+		"{}\n",
+		"http: {cors: null}\n",
+	} {
+		withoutCORS, err := applicationmeta.Parse([]byte(data))
+		if _, exists := withoutCORS.HTTPCORS(); err != nil || exists {
+			t.Fatalf("Parse(%q) HTTPCORS exists = %t, error %v", data, exists, err)
+		}
+	}
+	withDefaults, err := applicationmeta.Parse([]byte("http: {cors: {allowed_origins: ['*']}}\n"))
+	if err != nil {
+		t.Fatalf("Parse(default credentials): %v", err)
+	}
+	defaultCORS, exists := withDefaults.HTTPCORS()
+	if !exists || !slices.Equal(defaultCORS.AllowedOrigins, []string{"*"}) || defaultCORS.AllowCredentials {
+		t.Fatalf("default HTTPCORS = %#v, %t", defaultCORS, exists)
+	}
+}
+
 func TestParseNormalizesAndRedactsPluginConfiguration(t *testing.T) {
 	t.Parallel()
 
@@ -328,6 +376,19 @@ func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 		{name: "unknown http transport", data: "http: {transports: {grpc: true}}\n", want: `http.transports contains unknown key "grpc"`},
 		{name: "connect transport type", data: "http: {transports: {connect: enabled}}\n", want: "http.transports.connect must be true, false, or null"},
 		{name: "REST transport type", data: "http: {transports: {rest: 1}}\n", want: "http.transports.rest must be true, false, or null"},
+		{name: "CORS type", data: "http: {cors: []}\n", want: "http.cors must be a mapping"},
+		{name: "unknown CORS field", data: "http: {cors: {allowed_origins: ['*'], allowed_headers: ['*']}}\n", want: `http.cors contains unknown key "allowed_headers"`},
+		{name: "missing CORS origins", data: "http: {cors: {allow_credentials: false}}\n", want: "http.cors.allowed_origins is required"},
+		{name: "CORS origins type", data: "http: {cors: {allowed_origins: '*'}}\n", want: "must be a nonempty sequence"},
+		{name: "empty CORS origins", data: "http: {cors: {allowed_origins: []}}\n", want: "must be a nonempty sequence"},
+		{name: "CORS origin item type", data: "http: {cors: {allowed_origins: [true]}}\n", want: "allowed_origins[0] must be an origin string"},
+		{name: "CORS origin scheme", data: "http: {cors: {allowed_origins: ['ftp://example.com']}}\n", want: "must use the http or https scheme"},
+		{name: "CORS origin path", data: "http: {cors: {allowed_origins: ['https://example.com/path']}}\n", want: "must contain only an http or https scheme, host, and optional port"},
+		{name: "CORS origin userinfo", data: "http: {cors: {allowed_origins: ['https://user@example.com']}}\n", want: "must contain only an http or https scheme, host, and optional port"},
+		{name: "CORS origin unicode host", data: "http: {cors: {allowed_origins: ['https://münich.example']}}\n", want: "must contain a valid ASCII host"},
+		{name: "CORS origin port", data: "http: {cors: {allowed_origins: ['https://example.com:0']}}\n", want: "port from 1 through 65535"},
+		{name: "CORS credentials type", data: "http: {cors: {allowed_origins: ['https://example.com'], allow_credentials: yes}}\n", want: "allow_credentials must be true, false, or null"},
+		{name: "credentialed wildcard CORS", data: "http: {cors: {allowed_origins: ['*'], allow_credentials: true}}\n", want: "cannot combine wildcard origin"},
 		{name: "http exposure sparse key", data: "http: {expose: {append: []}}\n", want: `unknown sparse-edit key "append"`},
 		{name: "http exposure sparse add type", data: "http: {expose: {add: {}}}\n", want: "http.expose.add must be a sequence"},
 		{name: "http exposure sparse remove type", data: "http: {expose: {remove: true}}\n", want: "http.expose.remove must be a sequence"},
@@ -426,6 +487,8 @@ func FuzzParseApplicationManifest(f *testing.F) {
 		"http: {address: \":8080\", expose: [kernel.health/v1, order.create/v1]}\n",
 		"http: {transports: {connect: false, rest: true}}\n",
 		"http: {transports: {connect: null, rest: null}}\n",
+		"http: {cors: {allowed_origins: [https://example.com, http://localhost:80], allow_credentials: true}}\n",
+		"http: {cors: null}\n",
 		"http: {address: null, expose: {add: [kernel.health/v1], remove: [order.create/v1]}}\n",
 		"capabilities: {aliases: {}}\n",
 		"capabilities: {require: {remove: [order.create/v1]}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n",
@@ -455,12 +518,17 @@ func FuzzParseApplicationManifest(f *testing.F) {
 		}
 		firstAddress, firstHasAddress := first.HTTPAddress()
 		secondAddress, secondHasAddress := second.HTTPAddress()
+		firstCORS, firstHasCORS := first.HTTPCORS()
+		secondCORS, secondHasCORS := second.HTTPCORS()
 		if !slices.Equal(aliasStrings(first.Aliases()), aliasStrings(second.Aliases())) ||
 			!slices.Equal(httpExposureStrings(first.HTTPExposures()), httpExposureStrings(second.HTTPExposures())) ||
 			!slices.Equal(requirementStrings(first.Requirements()), requirementStrings(second.Requirements())) ||
 			!slices.Equal(providerChoiceStrings(first.ProviderChoices()), providerChoiceStrings(second.ProviderChoices())) ||
 			firstAddress != secondAddress || firstHasAddress != secondHasAddress ||
 			first.HTTPTransports() != second.HTTPTransports() ||
+			firstHasCORS != secondHasCORS ||
+			firstCORS.AllowCredentials != secondCORS.AllowCredentials ||
+			!slices.Equal(firstCORS.AllowedOrigins, secondCORS.AllowedOrigins) ||
 			first.StartupTimeout() != second.StartupTimeout() {
 			t.Fatalf("Parse is nondeterministic: %#v then %#v", first, second)
 		}
