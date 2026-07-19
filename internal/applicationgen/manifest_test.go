@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationgen"
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/kernel/plugin/manifest"
 )
 
@@ -213,6 +214,40 @@ func TestApplicationModelDigestIncludesAliasesAndExcludesSelectionPath(t *testin
 	}
 	if !strings.HasPrefix(withDigest, "sha256:") || len(withDigest) != 71 {
 		t.Fatalf("application-model digest = %q", withDigest)
+	}
+}
+
+func TestApplicationModelDigestIncludesHTTPTransportsDeterministically(t *testing.T) {
+	t.Parallel()
+
+	options := applicationgen.ApplicationModelOptions{
+		ModulePath:          applicationModulePath,
+		JavaScriptPackage:   applicationSDKPackage,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
+		HTTPTransports:      applicationmeta.HTTPTransports{Connect: true},
+		Providers:           selectedProviderInputs(),
+		Resolution:          resolvedApplication(t, ""),
+	}
+	connectDigest, err := applicationgen.ApplicationModelDigest(options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(Connect): %v", err)
+	}
+	repeatedDigest, err := applicationgen.ApplicationModelDigest(options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(repeated Connect): %v", err)
+	}
+	if repeatedDigest != connectDigest {
+		t.Fatalf("equal transport selections produced different digests: %q != %q", repeatedDigest, connectDigest)
+	}
+
+	options.HTTPTransports = applicationmeta.HTTPTransports{REST: true}
+	restDigest, err := applicationgen.ApplicationModelDigest(options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(REST): %v", err)
+	}
+	if restDigest == connectDigest {
+		t.Fatal("Connect-only and REST-only transport selections produced the same application-model digest")
 	}
 }
 

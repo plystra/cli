@@ -53,6 +53,7 @@ type Options struct {
 	JavaScriptPackage   string
 	KernelModuleVersion string
 	KernelBuildIdentity string
+	HTTPTransports      applicationmeta.HTTPTransports
 	Composition         applicationmeta.Composition
 	ManifestProvenance  ManifestProvenance
 	Configurations      []configurationgen.Input
@@ -81,6 +82,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		JavaScriptPackage:   options.JavaScriptPackage,
 		KernelModuleVersion: options.KernelModuleVersion,
 		KernelBuildIdentity: options.KernelBuildIdentity,
+		HTTPTransports:      options.HTTPTransports,
 		Configurations:      options.Configurations,
 		Providers:           options.Providers,
 		Resolution:          resolution,

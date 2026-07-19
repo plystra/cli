@@ -436,6 +436,154 @@ func TestGenerateDetectsDependencyPluginConfigurationSchemaDrift(t *testing.T) {
 	}
 }
 
+func TestGenerateSelectedHTTPTransportsCauseApplicationModelDrift(t *testing.T) {
+	tests := []struct {
+		name         string
+		rootData     string
+		selectedPath string
+		selectedData string
+		changedData  string
+		configure    func(*applicationgenerate.Options)
+	}{
+		{
+			name:         "default",
+			selectedPath: "plystra.yaml",
+			selectedData: "http:\n  transports: {connect: true, rest: false}\n",
+			changedData:  "http:\n  transports: {connect: false, rest: true}\n",
+		},
+		{
+			name:         "environment",
+			rootData:     "http:\n  transports: {connect: true, rest: false}\n",
+			selectedPath: "plystra.production.yaml",
+			selectedData: "http:\n  transports: {connect: true, rest: false}\n",
+			changedData:  "http:\n  transports: {connect: false, rest: true}\n",
+			configure: func(options *applicationgenerate.Options) {
+				options.EnvironmentName = "production"
+			},
+		},
+		{
+			name:         "full replacement",
+			rootData:     "http:\n  transports: {connect: true, rest: false}\n",
+			selectedPath: "deploy/customer-a.yaml",
+			selectedData: "http:\n  transports: {connect: true, rest: false}\n",
+			changedData:  "http:\n  transports: {connect: false, rest: true}\n",
+			configure: func(options *applicationgenerate.Options) {
+				options.ConfigurationPath = "deploy/customer-a.yaml"
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeApplicationModule(t, root, "example.com/acme/transport-"+strings.ReplaceAll(test.name, " ", "-"))
+			rootData := test.rootData
+			if test.selectedPath == "plystra.yaml" {
+				rootData = test.selectedData
+			}
+			writeFile(t, filepath.Join(root, "plystra.yaml"), rootData)
+			selectedPath := filepath.Join(root, filepath.FromSlash(test.selectedPath))
+			if test.selectedPath != "plystra.yaml" {
+				writeFile(t, selectedPath, test.selectedData)
+			}
+			environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+			options := applicationgenerate.Options{
+				Start:       root,
+				Environment: environment,
+				Validate:    func(_ context.Context, _ string) error { return nil },
+			}
+			if test.configure != nil {
+				test.configure(&options)
+			}
+
+			generated, err := applicationgenerate.Generate(t.Context(), options)
+			if err != nil || !generated.Report().Clean() {
+				t.Fatalf("initial Generate = changes %#v, %v", generated.Report().Changes(), err)
+			}
+			initialProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+			if err != nil {
+				t.Fatalf("DecodeManifestProvenance(initial): %v", err)
+			}
+
+			writeFile(t, selectedPath, test.changedData)
+			beforeCheck := snapshotTree(t, root)
+			checkOptions := options
+			checkOptions.Check = true
+			checkOptions.Validate = nil
+			checked, err := applicationgenerate.Generate(t.Context(), checkOptions)
+			if err != nil {
+				t.Fatalf("Generate check after transport change: %v", err)
+			}
+			if checked.Report().Clean() || !strings.Contains(strings.Join(checked.Report().Changed(), "\n"), "generated/manifest.json") {
+				t.Fatalf("transport change report = %#v", checked.Report().Changes())
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, beforeCheck) {
+				t.Fatal("transport drift check mutated the Project")
+			}
+
+			updated, err := applicationgenerate.Generate(t.Context(), options)
+			if err != nil || !updated.Report().Clean() {
+				t.Fatalf("updated Generate = changes %#v, %v", updated.Report().Changes(), err)
+			}
+			updatedProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+			if err != nil {
+				t.Fatalf("DecodeManifestProvenance(updated): %v", err)
+			}
+			if updatedProvenance.ApplicationModelDigest() == initialProvenance.ApplicationModelDigest() {
+				t.Fatal("selected HTTP transport change preserved application_model_digest")
+			}
+		})
+	}
+}
+
+func TestGenerateApplicationModelDigestExcludesRuntimeValuesAndMachinePaths(t *testing.T) {
+	root := t.TempDir()
+	writeApplicationModule(t, root, "example.com/acme/private-runtime-values")
+	writePlugin(t, root, "mailer", "id: acme.mailer\nprovides: [email.send/v1]\nconfig:\n  endpoint: {type: string, required: true}\n  password: {type: secret, required: true}\n")
+	writeCapability(t, root, "mailer", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	configurationPath := filepath.Join(root, "plystra.yaml")
+	writeFile(t, configurationPath, "http:\n  transports: {connect: true, rest: false}\ncapabilities: {require: [email.send/v1]}\nconfig:\n  acme.mailer:\n    endpoint: 'C:/private/machine-one'\n    password: {env: PRIVATE_TOKEN_ONE}\n")
+	options := applicationgenerate.Options{
+		Start:       root,
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "PRIVATE_TOKEN_ONE": "resolved-super-secret-one", "PRIVATE_TOKEN_TWO": "resolved-super-secret-two"}),
+		Validate:    func(_ context.Context, _ string) error { return nil },
+	}
+	initial, err := applicationgenerate.Generate(t.Context(), options)
+	if err != nil || !initial.Report().Clean() {
+		t.Fatalf("initial Generate = changes %#v, %v", initial.Report().Changes(), err)
+	}
+	initialProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance(initial): %v", err)
+	}
+
+	writeFile(t, configurationPath, "http:\n  transports: {connect: true, rest: false}\ncapabilities: {require: [email.send/v1]}\nconfig:\n  acme.mailer:\n    endpoint: 'D:/private/machine-two'\n    password: {env: PRIVATE_TOKEN_TWO}\n")
+	updated, err := applicationgenerate.Generate(t.Context(), options)
+	if err != nil || !updated.Report().Clean() {
+		t.Fatalf("updated Generate = changes %#v, %v", updated.Report().Changes(), err)
+	}
+	manifestData := readFile(t, root, "generated/manifest.json")
+	updatedProvenance, err := applicationgen.DecodeManifestProvenance(manifestData)
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance(updated): %v", err)
+	}
+	if updatedProvenance.ApplicationModelDigest() != initialProvenance.ApplicationModelDigest() {
+		t.Fatalf("runtime-only values changed application_model_digest: %q != %q", updatedProvenance.ApplicationModelDigest(), initialProvenance.ApplicationModelDigest())
+	}
+	for _, forbidden := range []string{
+		root,
+		"C:/private/machine-one",
+		"D:/private/machine-two",
+		"PRIVATE_TOKEN_ONE",
+		"PRIVATE_TOKEN_TWO",
+		"resolved-super-secret-one",
+		"resolved-super-secret-two",
+	} {
+		if bytes.Contains(manifestData, []byte(forbidden)) {
+			t.Fatalf("generated manifest leaked %q: %s", forbidden, manifestData)
+		}
+	}
+}
+
 func TestGenerateMaintainsRootAndTracksSelectedEnvironmentOverlay(t *testing.T) {
 	root := t.TempDir()
 	appRoot := filepath.Join(root, "app")
