@@ -130,6 +130,47 @@ http:
 	}
 }
 
+func TestAddHTTPExposureOverlayPreservesSparseCommentsAndPartialCORS(t *testing.T) {
+	t.Parallel()
+
+	input := []byte(`# Production-only choices.
+http:
+  cors:
+    # Inherit allowed_origins from root.
+    allow_credentials: true
+  expose:
+    remove:
+      - kernel.health/v1
+      - records.read/v1
+capabilities:
+  use:
+    email.send/v1: acme.email.smtp # keep provider choice
+`)
+	updated, changed, err := applicationmeta.AddHTTPExposureOverlay(input, mustExposureID(t, "kernel.health/v1"))
+	if err != nil || !changed {
+		t.Fatalf("AddHTTPExposureOverlay = changed %t, %v", changed, err)
+	}
+	for _, retained := range [][]byte{
+		[]byte("# Production-only choices."),
+		[]byte("# Inherit allowed_origins from root."),
+		[]byte("allow_credentials: true"),
+		[]byte("add:\n      - kernel.health/v1"),
+		[]byte("remove:\n      - records.read/v1"),
+		[]byte("email.send/v1: acme.email.smtp # keep provider choice"),
+	} {
+		if !bytes.Contains(updated, retained) {
+			t.Fatalf("updated sparse overlay omits %q:\n%s", retained, updated)
+		}
+	}
+	manifest, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", updated)
+	if err != nil || len(manifest.HTTPExposures()) != 1 || manifest.HTTPExposures()[0].ID().String() != "kernel.health/v1" {
+		t.Fatalf("ParseOverlaySource(updated) exposures = %#v, %v", manifest.HTTPExposures(), err)
+	}
+	if _, err := applicationmeta.ParseSource("plystra.production.yaml", input); err == nil {
+		t.Fatal("strict current-project parser accepted partial overlay CORS")
+	}
+}
+
 func TestAddHTTPExposureRejectsInvalidInputsWithoutPartialOutput(t *testing.T) {
 	t.Parallel()
 

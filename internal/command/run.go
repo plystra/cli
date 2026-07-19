@@ -28,7 +28,7 @@ const (
   plystra plugin create <name>
   plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
-  plystra capability expose <capability-name>/vN
+  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
   plystra generate [--check] [--env <environment>|--config <yaml-path>]
 `
 	newUsage = `Usage:

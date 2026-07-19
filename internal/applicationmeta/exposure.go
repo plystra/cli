@@ -19,10 +19,24 @@ var ErrAddHTTPExposure = errors.New("add HTTP Capability exposure")
 // http.expose. Existing bytes are returned unchanged when id is already
 // present. Changed documents retain comments and all unrelated YAML values.
 func AddHTTPExposure(data []byte, id capabilityid.Identifier) ([]byte, bool, error) {
+	return addHTTPExposure(data, id, Parse)
+}
+
+// AddHTTPExposureOverlay returns deterministic sparse environment-overlay
+// bytes that include id in http.expose. It preserves the same comments,
+// tombstones, and unrelated values as AddHTTPExposure while validating fields
+// with environment-overlay semantics.
+func AddHTTPExposureOverlay(data []byte, id capabilityid.Identifier) ([]byte, bool, error) {
+	return addHTTPExposure(data, id, func(input []byte) (Manifest, error) {
+		return ParseOverlaySource("plystra.<environment>.yaml", input)
+	})
+}
+
+func addHTTPExposure(data []byte, id capabilityid.Identifier, parse func([]byte) (Manifest, error)) ([]byte, bool, error) {
 	if id.String() == "" {
 		return nil, false, fmt.Errorf("%w: Capability is empty", ErrAddHTTPExposure)
 	}
-	before, err := Parse(data)
+	before, err := parse(data)
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: %w", ErrAddHTTPExposure, err)
 	}
@@ -83,7 +97,7 @@ func AddHTTPExposure(data []byte, id capabilityid.Identifier) ([]byte, bool, err
 		return nil, false, fmt.Errorf("%w: close application manifest encoder: %w", ErrAddHTTPExposure, err)
 	}
 	updated := output.Bytes()
-	after, err := Parse(updated)
+	after, err := parse(updated)
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: validate updated application manifest: %w", ErrAddHTTPExposure, err)
 	}

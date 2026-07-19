@@ -1,11 +1,50 @@
 package applicationresolve
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestSelectConfigurationTargetUsesResolutionSelectorAndParserRules(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	files := map[string]string{
+		"plystra.yaml":            "http:\n  cors:\n    allowed_origins: [https://app.example.com]\n",
+		"plystra.production.yaml": "# Production.\nhttp:\n  cors:\n    allow_credentials: true\n",
+		"deploy/customer.yaml":    "http: {expose: [kernel.info/v1]}\n",
+	}
+	for name, data := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", name, err)
+		}
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", name, err)
+		}
+	}
+
+	defaultTarget, err := SelectConfigurationTarget(root, "", "", []string{"UNRELATED=value"})
+	if err != nil || defaultTarget.Selection().Mode() != configurationModeDefault || defaultTarget.Selection().Path() != "plystra.yaml" || defaultTarget.Selection().Digest() == "" || defaultTarget.EnvironmentOverlay() {
+		t.Fatalf("default target = %#v, %v", defaultTarget.Selection(), err)
+	}
+	if got := defaultTarget.Snapshot().Data(); !bytes.Equal(got, []byte(files["plystra.yaml"])) {
+		t.Fatalf("default snapshot = %q", got)
+	}
+
+	environmentTarget, err := SelectConfigurationTarget(root, "", "", []string{"PLYSTRA_ENV=production"})
+	if err != nil || environmentTarget.Selection().Mode() != configurationModeEnvironment || environmentTarget.Selection().Environment() != "production" || environmentTarget.Selection().Path() != "plystra.production.yaml" || environmentTarget.Selection().Digest() == "" || !environmentTarget.EnvironmentOverlay() {
+		t.Fatalf("environment target = %#v, %v", environmentTarget.Selection(), err)
+	}
+
+	explicitTarget, err := SelectConfigurationTarget(root, "deploy/customer.yaml", "", []string{"PLYSTRA_ENV=ignored", "PLYSTRA_CONFIG=ignored.yaml", "PLYSTRA_CONFIG=duplicate.yaml"})
+	if err != nil || explicitTarget.Selection().Mode() != configurationModeExplicit || explicitTarget.Selection().Path() != "deploy/customer.yaml" || explicitTarget.Selection().Digest() == "" || explicitTarget.EnvironmentOverlay() {
+		t.Fatalf("explicit target = %#v, %v", explicitTarget.Selection(), err)
+	}
+}
 
 func TestResolveConfigurationSelectorPrecedenceAndNormalization(t *testing.T) {
 	t.Parallel()

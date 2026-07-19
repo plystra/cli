@@ -159,6 +159,130 @@ func TestRunCapabilityCreateAndExposeRegenerateRunnableApplication(t *testing.T)
 	}
 }
 
+func TestRunCapabilityExposeSelectsEnvironmentAndReplacementConfiguration(t *testing.T) {
+	root := writeCapabilityCommandModule(t)
+	pluginRoot := filepath.Join(root, "records")
+	rootData := "# Shared defaults.\n{}\n"
+	productionData := "# Production choices.\nhttp:\n  expose:\n    remove: [kernel.health/v1, kernel.info/v1]\n"
+	stagingData := "# Staging choices.\n{}\n"
+	customerData := "# Customer A.\n{}\n"
+	automationData := "# Automation.\n{}\n"
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootData)
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), productionData)
+	writeCommandFile(t, filepath.Join(root, "plystra.staging.yaml"), stagingData)
+	writeCommandFile(t, filepath.Join(root, "deploy", "customer-a.yaml"), customerData)
+	writeCommandFile(t, filepath.Join(root, "deploy", "automation.yaml"), automationData)
+
+	bothAmbient := commandGoEnvironmentWith(map[string]string{
+		"PLYSTRA_CONFIG": "ignored.yaml",
+		"PLYSTRA_ENV":    "ignored",
+	})
+	exitCode, stdout, stderr := runCommand(t, []string{"capability", "expose", "kernel.health/v1", "--env", "production"}, pluginRoot, bothAmbient)
+	productionPath := filepath.Join(root, "plystra.production.yaml")
+	wantOutput := "exposed capability kernel.health/v1 over HTTP in " + productionPath + "\n"
+	if exitCode != 0 || stdout != wantOutput || stderr != "" {
+		t.Fatalf("explicit environment expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	production := string(readCommandFile(t, root, "plystra.production.yaml"))
+	for _, retained := range []string{"# Production choices.", "add:\n      - kernel.health/v1", "remove: [kernel.info/v1]"} {
+		if !strings.Contains(production, retained) {
+			t.Fatalf("production overlay omits %q:\n%s", retained, production)
+		}
+	}
+	for name, want := range map[string]string{
+		"plystra.yaml":           rootData,
+		"plystra.staging.yaml":   stagingData,
+		"deploy/customer-a.yaml": customerData,
+		"deploy/automation.yaml": automationData,
+	} {
+		if got := string(readCommandFile(t, root, name)); got != want {
+			t.Fatalf("explicit environment changed %s:\n%s", name, got)
+		}
+	}
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--env", "production"}, pluginRoot, bothAmbient)
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/library in "+root+"\n" {
+		t.Fatalf("environment post-exposure check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	idempotentBefore := commandTree(t, root)
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "expose", "kernel.health/v1", "--env", "production"}, root, bothAmbient)
+	wantOutput = "capability kernel.health/v1 is already exposed over HTTP in " + productionPath + "\n"
+	if exitCode != 0 || stdout != wantOutput || stderr != "" {
+		t.Fatalf("idempotent environment expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, idempotentBefore) {
+		t.Fatalf("idempotent environment expose changed Project:\nbefore: %#v\nafter:  %#v", idempotentBefore, after)
+	}
+
+	stagingEnvironment := commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "staging"})
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "expose", "kernel.info/v1"}, pluginRoot, stagingEnvironment)
+	stagingPath := filepath.Join(root, "plystra.staging.yaml")
+	wantOutput = "exposed capability kernel.info/v1 over HTTP in " + stagingPath + "\n"
+	if exitCode != 0 || stdout != wantOutput || stderr != "" {
+		t.Fatalf("ambient environment expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if staging := string(readCommandFile(t, root, "plystra.staging.yaml")); !strings.Contains(staging, "# Staging choices.") || !strings.Contains(staging, "kernel.info/v1") {
+		t.Fatalf("ambient environment exposure = %q", staging)
+	}
+	if got := string(readCommandFile(t, root, "plystra.yaml")); got != rootData {
+		t.Fatalf("ambient environment changed root configuration: %q", got)
+	}
+
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "expose", "kernel.health/v1", "--config", "deploy/customer-a.yaml"}, pluginRoot, bothAmbient)
+	customerPath := filepath.Join(root, "deploy", "customer-a.yaml")
+	wantOutput = "exposed capability kernel.health/v1 over HTTP in " + customerPath + "\n"
+	if exitCode != 0 || stdout != wantOutput || stderr != "" {
+		t.Fatalf("explicit replacement expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if customer := string(readCommandFile(t, root, "deploy/customer-a.yaml")); !strings.Contains(customer, "# Customer A.") || !strings.Contains(customer, "kernel.health/v1") {
+		t.Fatalf("explicit replacement exposure = %q", customer)
+	}
+	if got := string(readCommandFile(t, root, "plystra.yaml")); got != rootData {
+		t.Fatalf("explicit replacement changed root configuration: %q", got)
+	}
+
+	automationEnvironment := commandGoEnvironmentWith(map[string]string{"PLYSTRA_CONFIG": "deploy/automation.yaml"})
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "expose", "kernel.info/v1"}, pluginRoot, automationEnvironment)
+	automationPath := filepath.Join(root, "deploy", "automation.yaml")
+	wantOutput = "exposed capability kernel.info/v1 over HTTP in " + automationPath + "\n"
+	if exitCode != 0 || stdout != wantOutput || stderr != "" {
+		t.Fatalf("ambient replacement expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if automation := string(readCommandFile(t, root, "deploy/automation.yaml")); !strings.Contains(automation, "# Automation.") || !strings.Contains(automation, "kernel.info/v1") {
+		t.Fatalf("ambient replacement exposure = %q", automation)
+	}
+	assertNoCommandTransactions(t, root)
+}
+
+func TestRunCapabilityExposeRejectsUnsafeOrMissingSelectionWithoutMutation(t *testing.T) {
+	root := writeCapabilityCommandModule(t)
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "# Production.\n{}\n")
+
+	tests := []struct {
+		name        string
+		arguments   []string
+		environment []string
+		wantError   string
+	}{
+		{name: "missing environment overlay", arguments: []string{"capability", "expose", "kernel.health/v1", "--env", "missing"}, environment: commandGoEnvironment(), wantError: "plystra.missing.yaml"},
+		{name: "unsafe environment", arguments: []string{"capability", "expose", "kernel.health/v1", "--env", "../outside"}, environment: commandGoEnvironment(), wantError: "one safe filename component"},
+		{name: "escaping replacement", arguments: []string{"capability", "expose", "kernel.health/v1", "--config", "../outside.yaml"}, environment: commandGoEnvironment(), wantError: "within the Project root"},
+		{name: "ambient selector conflict", arguments: []string{"capability", "expose", "kernel.health/v1"}, environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "production", "PLYSTRA_CONFIG": "plystra.yaml"}), wantError: "PLYSTRA_CONFIG and PLYSTRA_ENV cannot be used together"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, test.arguments, filepath.Join(root, "records"), test.environment)
+			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, test.wantError) {
+				t.Fatalf("capability expose = exit %d, stdout %q, stderr %q; want error containing %q", exitCode, stdout, stderr, test.wantError)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("rejected selector changed Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func TestRunCapabilityRejectsUnexpectedGeneratedOutput(t *testing.T) {
 	root := writeCapabilityCommandModule(t)
 	environment := commandGoEnvironment()
@@ -191,6 +315,21 @@ func TestRunCapabilityRejectsUnexpectedGeneratedOutput(t *testing.T) {
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("failed expose changed module:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoCommandTransactions(t, root)
+
+	overlayData := "# Production-only exposure.\n{}\n"
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayData)
+	overlayBefore := commandTree(t, root)
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "expose", "kernel.health/v1", "--env", "production"}, filepath.Join(root, "records"), environment)
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "unexpected generated output") || !strings.Contains(stderr, "generated/manual.txt") {
+		t.Fatalf("unexpected-output environment expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, overlayBefore) {
+		t.Fatalf("failed environment expose changed Project:\nbefore: %#v\nafter:  %#v", overlayBefore, after)
+	}
+	if got := string(readCommandFile(t, root, "plystra.production.yaml")); got != overlayData {
+		t.Fatalf("failed environment expose did not restore overlay: %q", got)
 	}
 	assertNoCommandTransactions(t, root)
 }
