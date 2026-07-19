@@ -17,7 +17,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/plystra/cli/internal/goname"
 	"github.com/plystra/cli/internal/protobufidentity"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/sdkmodel"
@@ -748,7 +747,7 @@ func cloneRawMessages(values []json.RawMessage) []json.RawMessage {
 }
 
 func enumIdentity(packageName, messageName, fieldName string) string {
-	return packageName + "." + messageName + goname.Field(fieldName) + "Enum"
+	return protobufidentity.EnumType(packageName+"."+messageName, fieldName)
 }
 
 func enumPrefix(identity string) string {

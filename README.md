@@ -38,7 +38,12 @@ generation rejects a missing, manually changed, corrupt, or inconsistent prior
 ledger instead of guessing. Never edit or delete this file; restore its exact
 last committed content before regenerating. Emission of `.proto` source,
 descriptor sets, and Connect runtime bindings remains deferred to later
-transport work.
+transport work. Before wire-map reconciliation, the normalized Protobuf model
+rejects two canonical fields in the same request or response when they derive
+the same ProtoJSON name or generated enum type. The diagnostic names the
+Capability, message direction, both authored field names, and the colliding
+identity; ordinary generation and `generate --check` fail without changing the
+Project.
 
 Capability inspection strictly parses the optional `extensions` mapping within the 1 MiB declaration boundary. The CLI preserves every valid lower-kebab namespace, including unknown namespaces, as immutable namespace-sorted canonical JSON-compatible metadata: object key order is normalized, scalar types and array order are preserved, and omitted and empty metadata are equivalent. Normalized extension metadata participates in exact contract equality, so providers cannot add, remove, or change generation-affecting behavior under one Capability ID; conflicts report the differing metadata paths and require a new version. Namespace interpretation remains a selected plugin generation-extension responsibility.
 

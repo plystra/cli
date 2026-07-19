@@ -108,6 +108,29 @@ func TestPackageEncodingIsCanonicalAndReversible(t *testing.T) {
 	}
 }
 
+func TestFieldAndEnumIdentitiesFollowProtobufNaming(t *testing.T) {
+	t.Parallel()
+
+	for value, want := range map[string]string{
+		"field":       "field",
+		"field_name":  "fieldName",
+		"foo_1":       "foo1",
+		"h_t_t_p_url": "hTTPUrl",
+	} {
+		if got := protobufidentity.FieldJSONName(value); got != want {
+			t.Errorf("FieldJSONName(%q) = %q, want %q", value, got, want)
+		}
+	}
+
+	const message = "plystra.generated.customer.profile.v1.CustomerProfileV1Request"
+	if got, want := protobufidentity.EnumType(message, "http_status"), message+"HTTPStatusEnum"; got != want {
+		t.Fatalf("EnumType = %q, want %q", got, want)
+	}
+	if got := protobufidentity.EnumType(message, "h_t_t_p_status"); got != message+"HTTPStatusEnum" {
+		t.Fatalf("initialism-equivalent EnumType = %q", got)
+	}
+}
+
 func TestBuildRejectsInvalidDuplicateAndCrossVersionSurfaces(t *testing.T) {
 	t.Parallel()
 

@@ -12,6 +12,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilitymeta"
+	"github.com/plystra/cli/internal/protobufidentity"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/sdkmodel"
 )
@@ -162,6 +163,77 @@ func TestBuildRejectsInvalidSelectedTargetsAndAliases(t *testing.T) {
 				t.Fatalf("Build = %#v, %v", model, err)
 			}
 		})
+	}
+}
+
+func TestBuildRejectsProtobufFieldIdentityCollisions(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name      string
+		contract  string
+		direction string
+		left      string
+		right     string
+		kind      string
+		identity  string
+	}{
+		{
+			name: "request JSON name",
+			contract: `id: naming.collision/v1
+request:
+  foo_1: {type: string}
+  foo1: {type: string}
+response: {}
+errors: []
+`,
+			direction: "request", left: "foo1", right: "foo_1", kind: "Protobuf JSON name", identity: "foo1",
+		},
+		{
+			name: "response enum type",
+			contract: `id: naming.collision/v1
+request: {}
+response:
+  http_status: {type: string, enum: [ready]}
+  h_t_t_p_status: {type: string, enum: [waiting]}
+errors: []
+`,
+			direction: "response", left: "h_t_t_p_status", right: "http_status", kind: "generated enum identity", identity: "plystra.generated.naming.collision.v1.NamingCollisionV1ResponseHTTPStatusEnum",
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			target := projectionTarget(t, test.contract, generation.Exposure{HTTP: true})
+			model, err := protobufmodel.Build(true, []protobufmodel.CanonicalTargetView{target}, nil)
+			if model.Valid() || !errors.Is(err, protobufmodel.ErrBuild) || !errors.Is(err, protobufmodel.ErrTarget) || !errors.Is(err, protobufidentity.ErrCollision) {
+				t.Fatalf("Build = %#v, %v", model, err)
+			}
+			for _, want := range []string{"Capability naming.collision/v1", test.direction, test.left, test.right, test.kind, test.identity} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("Build error %q omits %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildScopesProtobufFieldIdentitiesToRequestAndResponse(t *testing.T) {
+	t.Parallel()
+
+	target := projectionTarget(t, `id: naming.scoped/v1
+request:
+  foo1: {type: string}
+  http_status: {type: string, enum: [ready]}
+response:
+  foo_1: {type: string}
+  h_t_t_p_status: {type: string, enum: [waiting]}
+errors: []
+`, generation.Exposure{HTTP: true})
+	model, err := protobufmodel.Build(true, []protobufmodel.CanonicalTargetView{target}, nil)
+	if err != nil || !model.Valid() {
+		t.Fatalf("Build = %#v, %v", model, err)
 	}
 }
 

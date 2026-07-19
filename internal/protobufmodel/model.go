@@ -232,13 +232,21 @@ func Build(connect bool, targets []CanonicalTargetView, aliasViews []AliasView) 
 		if err != nil {
 			return Model{}, fmt.Errorf("%w: %w: canonical contract provenance for %s: %v", ErrBuild, ErrTarget, operation.ID(), err)
 		}
+		request := operation.Request()
+		if err := validateFieldIdentities(operation.ID().String(), "request", identity.RequestType(), request); err != nil {
+			return Model{}, err
+		}
+		response := operation.Response()
+		if err := validateFieldIdentities(operation.ID().String(), "response", identity.ResponseType(), response); err != nil {
+			return Model{}, err
+		}
 		operations[index] = Operation{
 			id:             operation.ID(),
 			identity:       identity,
 			contractDigest: operation.ContractDigest(),
 			sources:        sources,
-			request:        operation.Request(),
-			response:       operation.Response(),
+			request:        request,
+			response:       response,
 			errors:         operation.Errors(),
 		}
 	}
@@ -257,6 +265,36 @@ func Build(connect bool, targets []CanonicalTargetView, aliasViews []AliasView) 
 		}
 	}
 	return finalize(true, operations, aliases)
+}
+
+func validateFieldIdentities(capabilityID, direction, messageType string, fields []sdkmodel.Field) error {
+	ordered := append([]sdkmodel.Field(nil), fields...)
+	sort.Slice(ordered, func(left, right int) bool {
+		return ordered[left].Name() < ordered[right].Name()
+	})
+	jsonOwners := make(map[string]string, len(ordered))
+	enumOwners := make(map[string]string, len(ordered))
+	for _, field := range ordered {
+		fieldName := field.Name()
+		jsonName := protobufidentity.FieldJSONName(fieldName)
+		if previous, exists := jsonOwners[jsonName]; exists && previous != fieldName {
+			return fieldCollision(capabilityID, direction, previous, fieldName, "Protobuf JSON name", jsonName)
+		}
+		jsonOwners[jsonName] = fieldName
+		if len(field.EnumJSON()) == 0 {
+			continue
+		}
+		enumType := protobufidentity.EnumType(messageType, fieldName)
+		if previous, exists := enumOwners[enumType]; exists && previous != fieldName {
+			return fieldCollision(capabilityID, direction, previous, fieldName, "generated enum identity", enumType)
+		}
+		enumOwners[enumType] = fieldName
+	}
+	return nil
+}
+
+func fieldCollision(capabilityID, direction, left, right, kind, identity string) error {
+	return fmt.Errorf("%w: %w: %w: Capability %s %s canonical fields %q and %q produce the same %s %q", ErrBuild, ErrTarget, protobufidentity.ErrCollision, capabilityID, direction, left, right, kind, identity)
 }
 
 func finalize(enabled bool, operations []Operation, aliases []Alias) (Model, error) {
