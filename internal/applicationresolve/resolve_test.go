@@ -59,6 +59,9 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if transports := first.Manifest().HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
 		t.Fatalf("default HTTP transports = %#v", transports)
 	}
+	if cors, exists := first.Manifest().HTTPCORS(); exists {
+		t.Fatalf("default HTTPCORS = %#v, %t", cors, exists)
+	}
 	if len(first.Inventory().Plugins()) != 0 {
 		t.Fatalf("Inventory = %#v", first.Inventory().Plugins())
 	}
@@ -108,8 +111,8 @@ require example.com/platform v1.0.0
 
 replace example.com/platform => ../platform
 `)
-	rootConfiguration := "http: {address: \":8080\", transports: {connect: false, rest: false}}\ncapabilities: {require: [kernel.health/v1]}\n"
-	selectedConfiguration := "# selected file remains independently authored\nhttp: {address: \":9090\", transports: {rest: true}}\ncapabilities: {require: [kernel.info/v1]}\n"
+	rootConfiguration := "http: {address: \":8080\", transports: {connect: false, rest: false}, cors: {allowed_origins: ['*']}}\ncapabilities: {require: [kernel.health/v1]}\n"
+	selectedConfiguration := "# selected file remains independently authored\nhttp: {address: \":9090\", transports: {rest: true}, cors: {allowed_origins: [https://customer.example], allow_credentials: true}}\ncapabilities: {require: [kernel.info/v1]}\n"
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), rootConfiguration)
 	writeFile(t, filepath.Join(appRoot, "deploy", "customer.yaml"), selectedConfiguration)
 	before := snapshotTree(t, appRoot)
@@ -131,6 +134,10 @@ replace example.com/platform => ../platform
 	}
 	if transports := result.Manifest().HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true, REST: true}) {
 		t.Fatalf("effective replacement HTTP transports = %#v; root replacement leaked", transports)
+	}
+	cors, exists := result.Manifest().HTTPCORS()
+	if !exists || !reflect.DeepEqual(cors.AllowedOrigins, []string{"https://customer.example"}) || !cors.AllowCredentials {
+		t.Fatalf("effective replacement HTTPCORS = %#v, %t; root replacement leaked", cors, exists)
 	}
 	if got := applicationRequirementIDs(result.Manifest()); !reflect.DeepEqual(got, []string{"kernel.health/v1", "kernel.info/v1"}) {
 		t.Fatalf("effective requirements = %v", got)
@@ -184,7 +191,7 @@ func TestResolveAppliesOneEnvironmentOverlayAboveRootAndDependencies(t *testing.
 	dependencyBRoot := filepath.Join(root, "platform-b")
 	writeModule(t, dependencyARoot, "example.com/platform-a")
 	writeModule(t, dependencyBRoot, "example.com/platform-b")
-	writeFile(t, filepath.Join(dependencyARoot, "plystra.yaml"), "http: {expose: [kernel.info/v1]}\ncapabilities: {require: [kernel.health/v1]}\n")
+	writeFile(t, filepath.Join(dependencyARoot, "plystra.yaml"), "http: {cors: {allowed_origins: ['*']}, expose: [kernel.info/v1]}\ncapabilities: {require: [kernel.health/v1]}\n")
 	writeFile(t, filepath.Join(dependencyARoot, "plystra.production.yaml"), "capabilities: {require: [kernel.info/v1]}\n")
 	writeFile(t, filepath.Join(dependencyBRoot, "plystra.yaml"), "capabilities: {require: {remove: [kernel.health/v1]}}\n")
 	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
@@ -200,8 +207,8 @@ replace example.com/platform-a => ../platform-a
 
 replace example.com/platform-b => ../platform-b
 `)
-	rootConfiguration := "# shared root\nhttp: {address: \":8080\", transports: {connect: false, rest: true}}\ncapabilities: {require: [kernel.info/v1]}\n"
-	overlayConfiguration := "# sparse production overlay\nhttp: {address: \":9090\", transports: {connect: true, rest: null}}\ncapabilities:\n  require: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n"
+	rootConfiguration := "# shared root\nhttp: {address: \":8080\", transports: {connect: false, rest: true}, cors: {allowed_origins: [https://shared.example], allow_credentials: true}}\ncapabilities: {require: [kernel.info/v1]}\n"
+	overlayConfiguration := "# sparse production overlay\nhttp: {address: \":9090\", transports: {connect: true, rest: null}, cors: {allow_credentials: null}}\ncapabilities:\n  require: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n"
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), rootConfiguration)
 	writeFile(t, filepath.Join(appRoot, "plystra.production.yaml"), overlayConfiguration)
 	before := snapshotTree(t, appRoot)
@@ -223,6 +230,10 @@ replace example.com/platform-b => ../platform-b
 	}
 	if transports := result.Manifest().HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
 		t.Fatalf("effective environment HTTP transports = %#v", transports)
+	}
+	cors, exists := result.Manifest().HTTPCORS()
+	if !exists || !reflect.DeepEqual(cors.AllowedOrigins, []string{"https://shared.example"}) || cors.AllowCredentials {
+		t.Fatalf("effective environment HTTPCORS = %#v, %t", cors, exists)
 	}
 	if got := applicationRequirementIDs(result.Manifest()); !reflect.DeepEqual(got, []string{"kernel.health/v1"}) {
 		t.Fatalf("effective requirements = %v", got)

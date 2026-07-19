@@ -181,8 +181,8 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("ReadFile(go.sum): %v", err)
 	}
 	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
-	rootConfiguration := "# shared root\ncapabilities: {require: [kernel.health/v1]}\n"
-	overlayConfiguration := "# sparse production overlay\ncapabilities:\n  require:\n    add: [kernel.info/v1]\n    remove: [kernel.health/v1]\n"
+	rootConfiguration := "# shared root\nhttp: {cors: {allowed_origins: [https://app.example.com], allow_credentials: true}}\ncapabilities: {require: [kernel.health/v1]}\n"
+	overlayConfiguration := "# sparse production overlay\nhttp: {cors: {allow_credentials: null}}\ncapabilities:\n  require:\n    add: [kernel.info/v1]\n    remove: [kernel.health/v1]\n"
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootConfiguration)
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayConfiguration)
 	start := filepath.Join(root, "nested")

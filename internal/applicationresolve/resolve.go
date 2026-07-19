@@ -160,7 +160,11 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	configurationSnapshot := rootSnapshot
 	selectedManifest := rootManifest
 	if selector.path != applicationManifestName {
-		configurationSnapshot, selectedManifest, err = loadConfiguration(module.Path(), selector.path)
+		if selector.mode == configurationModeEnvironment {
+			configurationSnapshot, selectedManifest, err = loadEnvironmentOverlay(module.Path(), selector.path)
+		} else {
+			configurationSnapshot, selectedManifest, err = loadConfiguration(module.Path(), selector.path)
+		}
 		if err != nil {
 			return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 		}
@@ -243,7 +247,11 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if selector.mode == configurationModeEnvironment {
 		selectedData = configurationSnapshot.Data()
 	}
-	selectedDigest, err := applicationgen.ConfigurationDigest(selectedData)
+	selectedDigestFunction := applicationgen.ConfigurationDigest
+	if selector.mode == configurationModeEnvironment {
+		selectedDigestFunction = applicationgen.EnvironmentOverlayDigest
+	}
+	selectedDigest, err := selectedDigestFunction(selectedData)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: digest selected configuration %s: %w", ErrResolve, selector.path, err)
 	}

@@ -8,7 +8,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
+	"net/url"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -102,6 +106,24 @@ type httpTransportLayer struct {
 	removeREST    bool
 }
 
+// HTTPCORS is one normalized selected-current-project cross-origin policy.
+// Its origins are sorted and deduplicated, and callers receive defensive
+// storage through Manifest.HTTPCORS.
+type HTTPCORS struct {
+	AllowedOrigins   []string
+	AllowCredentials bool
+}
+
+type httpCORSLayer struct {
+	allowedOrigins         []string
+	hasAllowedOrigins      bool
+	allowCredentials       bool
+	hasAllowCredentials    bool
+	removeAllowCredentials bool
+	present                bool
+	remove                 bool
+}
+
 // CapabilityRequirement is one explicit canonical Capability requirement.
 type CapabilityRequirement struct {
 	id     capabilityid.Identifier
@@ -187,6 +209,7 @@ type Manifest struct {
 	hasHTTPAddress         bool
 	removeHTTPAddress      bool
 	httpTransports         httpTransportLayer
+	httpCORS               httpCORSLayer
 	httpExposures          []HTTPExposure
 	removedHTTPExposures   []capabilityRemoval
 	requirements           []CapabilityRequirement
@@ -240,6 +263,18 @@ func (m Manifest) HTTPTransports() HTTPTransports {
 	return result
 }
 
+// HTTPCORS returns the normalized optional selected-current-project CORS
+// declaration. The returned origins do not alias Manifest storage.
+func (m Manifest) HTTPCORS() (HTTPCORS, bool) {
+	if !m.httpCORS.present || m.httpCORS.remove {
+		return HTTPCORS{}, false
+	}
+	return HTTPCORS{
+		AllowedOrigins:   append([]string(nil), m.httpCORS.allowedOrigins...),
+		AllowCredentials: m.httpCORS.allowCredentials,
+	}, true
+}
+
 // StartupTimeout returns the normalized positive provider-startup timeout.
 // Omitted timeouts.startup uses DefaultStartupTimeout.
 func (m Manifest) StartupTimeout() time.Duration { return m.startupTimeout }
@@ -289,6 +324,17 @@ func Parse(data []byte) (Manifest, error) {
 // ParseSource reads one strict bounded current-project document and retains
 // its stable Project-relative source name for diagnostics.
 func ParseSource(source string, data []byte) (Manifest, error) {
+	return parseSource(source, data, false)
+}
+
+// ParseOverlaySource reads one sparse bounded environment-overlay document.
+// Required effective fields may be omitted here and are validated after typed
+// application over the complete root current-project document.
+func ParseOverlaySource(source string, data []byte) (Manifest, error) {
+	return parseSource(source, data, true)
+}
+
+func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, error) {
 	if source == "" || strings.TrimSpace(source) == "" || strings.IndexFunc(source, unicode.IsControl) >= 0 {
 		return Manifest{}, invalid("configuration source must be non-empty and contain no control characters")
 	}
@@ -307,7 +353,7 @@ func ParseSource(source string, data []byte) (Manifest, error) {
 			return Manifest{}, invalid("unknown key %q", key)
 		}
 	}
-	address, hasAddress, removeAddress, transports, exposures, removedExposures, err := parseHTTP(values["http"])
+	address, hasAddress, removeAddress, transports, cors, exposures, removedExposures, err := parseHTTP(values["http"], sparseOverlay)
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -328,6 +374,7 @@ func ParseSource(source string, data []byte) (Manifest, error) {
 		hasHTTPAddress:         hasAddress,
 		removeHTTPAddress:      removeAddress,
 		httpTransports:         transports,
+		httpCORS:               cors,
 		httpExposures:          exposures,
 		removedHTTPExposures:   removedExposures,
 		requirements:           requirements,
@@ -451,19 +498,19 @@ func parseConfigurations(node *yaml.Node) ([]PluginConfiguration, []pluginConfig
 	return configurations, removals, nil
 }
 
-func parseHTTP(node *yaml.Node) (string, bool, bool, httpTransportLayer, []HTTPExposure, []capabilityRemoval, error) {
+func parseHTTP(node *yaml.Node, sparseOverlay bool) (string, bool, bool, httpTransportLayer, httpCORSLayer, []HTTPExposure, []capabilityRemoval, error) {
 	if node == nil {
-		return "", false, false, httpTransportLayer{}, nil, nil, nil
+		return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, nil
 	}
 	values, err := mapping(node, "http")
 	if err != nil {
-		return "", false, false, httpTransportLayer{}, nil, nil, err
+		return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, err
 	}
 	for _, key := range sortedNodeKeys(values) {
 		switch key {
-		case "address", "transports", "expose":
+		case "address", "transports", "cors", "expose":
 		default:
-			return "", false, false, httpTransportLayer{}, nil, nil, invalid("http contains unknown key %q", key)
+			return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, invalid("http contains unknown key %q", key)
 		}
 	}
 	address := ""
@@ -475,26 +522,30 @@ func parseHTTP(node *yaml.Node) (string, bool, bool, httpTransportLayer, []HTTPE
 		} else {
 			address, err = strictString(addressNode)
 			if err != nil || address == "" || len(address) > 4096 || strings.TrimSpace(address) != address || strings.ContainsRune(address, '\x00') {
-				return "", false, false, httpTransportLayer{}, nil, nil, invalid("http.address must be a non-empty trimmed string of at most 4096 bytes with no NUL or null")
+				return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, invalid("http.address must be a non-empty trimmed string of at most 4096 bytes with no NUL or null")
 			}
 			hasAddress = true
 		}
 	}
 	transports, err := parseHTTPTransports(values["transports"])
 	if err != nil {
-		return "", false, false, httpTransportLayer{}, nil, nil, err
+		return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, err
+	}
+	cors, err := parseHTTPCORS(values["cors"], sparseOverlay)
+	if err != nil {
+		return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, err
 	}
 	exposeNode, exists := values["expose"]
 	if !exists {
-		return address, hasAddress, removeAddress, transports, nil, nil, nil
+		return address, hasAddress, removeAddress, transports, cors, nil, nil, nil
 	}
 	exposures, removals, err := parseCapabilitySet(exposeNode, "http.expose", func(id capabilityid.Identifier, source string) HTTPExposure {
 		return HTTPExposure{id: id, source: source}
 	})
 	if err != nil {
-		return "", false, false, httpTransportLayer{}, nil, nil, err
+		return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, err
 	}
-	return address, hasAddress, removeAddress, transports, exposures, removals, nil
+	return address, hasAddress, removeAddress, transports, cors, exposures, removals, nil
 }
 
 func parseHTTPTransports(node *yaml.Node) (httpTransportLayer, error) {
@@ -536,6 +587,161 @@ func parseHTTPTransports(node *yaml.Node) (httpTransportLayer, error) {
 		}
 	}
 	return result, nil
+}
+
+func parseHTTPCORS(node *yaml.Node, sparseOverlay bool) (httpCORSLayer, error) {
+	if node == nil {
+		return httpCORSLayer{}, nil
+	}
+	if isNull(node) {
+		return httpCORSLayer{remove: true}, nil
+	}
+	values, err := mapping(node, "http.cors")
+	if err != nil {
+		return httpCORSLayer{}, err
+	}
+	for _, key := range sortedNodeKeys(values) {
+		switch key {
+		case "allowed_origins", "allow_credentials":
+		default:
+			return httpCORSLayer{}, invalid("http.cors contains unknown key %q", key)
+		}
+	}
+	originsNode, exists := values["allowed_origins"]
+	if !exists && !sparseOverlay {
+		return httpCORSLayer{}, invalid("http.cors.allowed_origins is required when http.cors is present")
+	}
+	var origins []string
+	if exists {
+		origins, err = parseCORSOrigins(originsNode)
+		if err != nil {
+			return httpCORSLayer{}, err
+		}
+	}
+	result := httpCORSLayer{
+		allowedOrigins:    origins,
+		hasAllowedOrigins: exists,
+		present:           true,
+	}
+	if credentialsNode, exists := values["allow_credentials"]; exists {
+		if isNull(credentialsNode) {
+			result.removeAllowCredentials = true
+		} else {
+			result.allowCredentials, err = strictBool(credentialsNode)
+			if err != nil {
+				return httpCORSLayer{}, invalid("http.cors.allow_credentials must be true, false, or null")
+			}
+			result.hasAllowCredentials = true
+		}
+	}
+	if result.hasAllowedOrigins {
+		if err := validateHTTPCORSLayer(result); err != nil {
+			return httpCORSLayer{}, err
+		}
+	} else if !sparseOverlay {
+		return httpCORSLayer{}, invalid("http.cors.allowed_origins is required when http.cors is present")
+	}
+	return result, nil
+}
+
+func parseCORSOrigins(node *yaml.Node) ([]string, error) {
+	if node == nil || node.Kind != yaml.SequenceNode {
+		return nil, invalid("http.cors.allowed_origins must be a nonempty sequence of origins")
+	}
+	if len(node.Content) == 0 {
+		return nil, invalid("http.cors.allowed_origins must be a nonempty sequence of origins")
+	}
+	set := make(map[string]struct{}, len(node.Content))
+	for index, item := range node.Content {
+		raw, err := strictString(item)
+		if err != nil {
+			return nil, invalid("http.cors.allowed_origins[%d] must be an origin string", index)
+		}
+		origin, err := normalizeCORSOrigin(raw)
+		if err != nil {
+			return nil, invalid("http.cors.allowed_origins[%d] %v", index, err)
+		}
+		set[origin] = struct{}{}
+	}
+	result := make([]string, 0, len(set))
+	for origin := range set {
+		result = append(result, origin)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func normalizeCORSOrigin(raw string) (string, error) {
+	if raw == "*" {
+		return raw, nil
+	}
+	if raw == "" || len(raw) > 4096 || strings.TrimSpace(raw) != raw || strings.IndexFunc(raw, unicode.IsControl) >= 0 {
+		return "", errors.New("must be a nonempty trimmed origin of at most 4096 bytes with no control characters")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Opaque != "" || parsed.User != nil || parsed.Host == "" || parsed.Path != "" || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return "", errors.New("must contain only an http or https scheme, host, and optional port")
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", errors.New("must use the http or https scheme")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	nonASCIIHost := strings.IndexFunc(host, func(value rune) bool { return value > unicode.MaxASCII }) >= 0
+	if host == "" || strings.IndexFunc(host, unicode.IsControl) >= 0 || nonASCIIHost || strings.ContainsAny(host, " /\\%") {
+		return "", errors.New("must contain a valid ASCII host")
+	}
+	if parsedIP := net.ParseIP(host); parsedIP != nil {
+		host = parsedIP.String()
+	}
+	port := parsed.Port()
+	if strings.HasSuffix(parsed.Host, ":") {
+		return "", errors.New("must contain a valid optional port")
+	}
+	if port != "" {
+		value, err := strconv.ParseUint(port, 10, 16)
+		if err != nil || value == 0 {
+			return "", errors.New("must contain an optional port from 1 through 65535")
+		}
+		if (scheme == "http" && value == 80) || (scheme == "https" && value == 443) {
+			port = ""
+		}
+	}
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if port != "" {
+		host = net.JoinHostPort(strings.Trim(host, "[]"), port)
+	}
+	return scheme + "://" + host, nil
+}
+
+func validateHTTPCORSLayer(cors httpCORSLayer) error {
+	if !cors.present || cors.remove {
+		return nil
+	}
+	if !cors.hasAllowedOrigins || len(cors.allowedOrigins) == 0 {
+		return invalid("http.cors.allowed_origins is required when http.cors is present")
+	}
+	if cors.allowCredentials && slices.Contains(cors.allowedOrigins, "*") {
+		return invalid("http.cors cannot combine wildcard origin %q with allow_credentials: true", "*")
+	}
+	return nil
+}
+
+func cloneHTTPCORSLayer(cors httpCORSLayer) httpCORSLayer {
+	cors.allowedOrigins = append([]string(nil), cors.allowedOrigins...)
+	return cors
+}
+
+func equalHTTPCORSLayers(left, right httpCORSLayer) bool {
+	return left.hasAllowedOrigins == right.hasAllowedOrigins &&
+		left.allowCredentials == right.allowCredentials &&
+		left.hasAllowCredentials == right.hasAllowCredentials &&
+		left.removeAllowCredentials == right.removeAllowCredentials &&
+		left.present == right.present &&
+		left.remove == right.remove &&
+		slices.Equal(left.allowedOrigins, right.allowedOrigins)
 }
 
 func parseCapabilitySet[T any](node *yaml.Node, path string, makeValue func(capabilityid.Identifier, string) T) ([]T, []capabilityRemoval, error) {

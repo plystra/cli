@@ -514,6 +514,7 @@ func sameCurrentProjectProcessSettings(left, right Manifest) bool {
 	return leftAddress == rightAddress && leftHasAddress == rightHasAddress &&
 		left.removeHTTPAddress == right.removeHTTPAddress &&
 		left.httpTransports == right.httpTransports &&
+		equalHTTPCORSLayers(left.httpCORS, right.httpCORS) &&
 		left.StartupTimeout() == right.StartupTimeout() &&
 		left.hasStartupTimeout == right.hasStartupTimeout &&
 		left.removeStartupTimeout == right.removeStartupTimeout

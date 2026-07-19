@@ -26,6 +26,10 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (Manifest, error
 		httpAddress, hasHTTPAddress, removeHTTPAddress = overlay.httpAddress, true, false
 	}
 	httpTransports := overlayHTTPTransports(base.httpTransports, overlay.httpTransports)
+	httpCORS, err := overlayHTTPCORS(base.httpCORS, overlay.httpCORS)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("%w: %w", ErrApplyOverlay, err)
+	}
 	startupTimeout, hasStartupTimeout, removeStartupTimeout := base.startupTimeout, base.hasStartupTimeout, base.removeStartupTimeout
 	if overlay.removeStartupTimeout {
 		startupTimeout, hasStartupTimeout, removeStartupTimeout = DefaultStartupTimeout, false, true
@@ -53,6 +57,7 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (Manifest, error
 		hasHTTPAddress:         hasHTTPAddress,
 		removeHTTPAddress:      removeHTTPAddress,
 		httpTransports:         httpTransports,
+		httpCORS:               httpCORS,
 		httpExposures:          exposures,
 		removedHTTPExposures:   removedExposures,
 		requirements:           requirements,
@@ -82,6 +87,39 @@ func overlayHTTPTransports(base, overlay httpTransportLayer) httpTransportLayer 
 		result.rest, result.hasREST, result.removeREST = overlay.rest, true, false
 	}
 	return result
+}
+
+func overlayHTTPCORS(base, overlay httpCORSLayer) (httpCORSLayer, error) {
+	if overlay.remove {
+		return httpCORSLayer{remove: true}, nil
+	}
+	result := cloneHTTPCORSLayer(base)
+	if !overlay.present {
+		return result, validateHTTPCORSLayer(result)
+	}
+	if !result.present || result.remove {
+		result = httpCORSLayer{present: true}
+	} else {
+		result.present = true
+		result.remove = false
+	}
+	if overlay.hasAllowedOrigins {
+		result.allowedOrigins = append([]string(nil), overlay.allowedOrigins...)
+		result.hasAllowedOrigins = true
+	}
+	if overlay.removeAllowCredentials {
+		result.allowCredentials = false
+		result.hasAllowCredentials = false
+		result.removeAllowCredentials = true
+	} else if overlay.hasAllowCredentials {
+		result.allowCredentials = overlay.allowCredentials
+		result.hasAllowCredentials = true
+		result.removeAllowCredentials = false
+	}
+	if err := validateHTTPCORSLayer(result); err != nil {
+		return httpCORSLayer{}, err
+	}
+	return result, nil
 }
 
 func overlayExposureSet(base, overlay Manifest) ([]HTTPExposure, []capabilityRemoval) {

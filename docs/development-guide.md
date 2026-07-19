@@ -326,8 +326,9 @@ Composition is typed and independent of dependency order:
   replace as complete values. A keyed `null` removes one inherited field, and
   `config.<plugin-id>: null` removes that Plugin's inherited object. Unknown
   fields and invalid or changing types fail.
-- Dependency `http.address`, `http.transports`, `timeouts.startup`, and other
-  process settings do not enter the current Project.
+- Dependency `http.address`, `http.transports`, `http.cors`,
+  `timeouts.startup`, and other process settings do not enter the current
+  Project.
 - Incompatible inherited Providers, Aliases, or Plugin fields fail with every
   contributing `module@version/plystra.yaml` source.
 
@@ -411,6 +412,9 @@ in `plystra.production.yaml`:
 http:
   transports:
     rest: true
+  cors:
+    allowed_origins:
+      - https://app.example.com
 
 capabilities:
   use:
@@ -451,6 +455,22 @@ At this implementation boundary, resolution validates and composes the closed
 selection. Connecting it to the generated application model, Connect output,
 and optional REST projection remains in the later transport gates; setting
 `rest: true` does not yet create a REST adapter.
+
+`http.cors` is an optional closed current-Project object. When present it
+requires one nonempty `allowed_origins` list and accepts only an optional
+boolean `allow_credentials`, which defaults to `false`. The CLI lowercases
+schemes and hosts, removes default ports, sorts, and deduplicates HTTP/HTTPS
+origins; `*` is allowed only without credentials. In an environment overlay,
+the origin list replaces as one deterministic value when present and may be
+omitted to inherit root origins, while credentials replace independently. The
+effective result must still contain origins. Use `http: {cors: null}` to disable
+root CORS for that selected environment. A full-replacement file does not
+inherit root CORS, and dependency Project CORS never participates in
+composition.
+
+At this implementation boundary, resolution validates and composes CORS but
+the generated HTTP handler does not yet emit CORS response behavior. That
+projection remains in the later HTTP transport gate.
 
 For automation, select the same environment name with:
 
