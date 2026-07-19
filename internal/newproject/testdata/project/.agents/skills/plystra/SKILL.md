@@ -295,8 +295,9 @@ mismatches remain errors. Dependency Project environment overlays are never
 inherited.
 
 http.transports is a closed current-Project object. It accepts only boolean
-connect and rest fields. When omitted, connect defaults to true and rest
-defaults to false. In an environment overlay, those fields replace
+connect and rest fields. New Project scaffolds write both fields explicitly as
+connect: true and rest: false. When omitted from another selected document,
+the same schema defaults apply. In an environment overlay, those fields replace
 independently: omission inherits the root value and null restores that field's
 schema default. A complete --config document does not inherit root transport
 choices; omitted fields use the same defaults. Dependency Project transport
@@ -717,9 +718,10 @@ document's http.expose declaration. The CLI generates a strict POST handler at:
     /api/v1/capabilities/records.read/v1/invoke
 
 Keep transport selection in the selected current-Project document. Only
-connect and rest are valid keys; omitted values use connect: true and
-rest: false. Environment overlays replace those two booleans independently,
-and dependency Project transport choices never override the current Project.
+connect and rest are valid keys. New Project scaffolds record connect: true and
+rest: false; omitted values in another selected document use those same schema
+defaults. Environment overlays replace the two booleans independently, and
+dependency Project transport choices never override the current Project.
 The current generated handler remains the implemented HTTP surface until the
 later Connect and optional REST projection gates consume this selection.
 

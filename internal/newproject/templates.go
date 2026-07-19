@@ -9,6 +9,9 @@ require github.com/plystra/kernel %s
 
 const plystraTemplate = `http:
   address: ":8080"
+  transports:
+    connect: true
+    rest: false
   expose: []
 
 timeouts:
@@ -56,6 +59,8 @@ Template creation next runs the same read-only workflow as ` + "`plystra check`"
 Template creation then builds every staged Go package with ` + "`go build -mod=readonly ./...`" + `. It next builds the generated application entrypoint with ` + "`GOWORK=off`" + ` into isolated temporary output, starts the real assembled runtime, invokes intrinsic ` + "`kernel.health/v1`" + `, and stops lifecycle providers cleanly. Child output is suppressed and temporary smoke output is removed on every path. Any failure restores the creation transaction and leaves no target Project. This private qualification executable does not create public distribution output.
 
 Root ` + "`plystra.yaml`" + ` is the mandatory Project marker and shared default configuration. A sparse project-root ` + "`plystra.production.yaml`" + ` can be selected with ` + "`plystra generate --env production`" + ` and checked with the same selector; it is never created or loaded implicitly. To use one complete alternative current-Project document, run ` + "`plystra generate --config deploy/customer-a.yaml`" + `. Root configuration is not merged beneath an explicitly selected file. ` + "`PLYSTRA_ENV`" + ` and ` + "`PLYSTRA_CONFIG`" + ` supply the corresponding selector for automation; select exactly one mode.
+
+New Projects record ` + "`http.transports.connect: true`" + ` and ` + "`http.transports.rest: false`" + ` explicitly in root configuration. Keep those current-Project transport choices explicit when changing them.
 
 When several compatible Plugins provide one required Capability, select one with ` + "`plystra use <capability-name>/vN <plugin-id>`" + `. Add ` + "`--env <environment>`" + ` to write only that sparse overlay or ` + "`--config <yaml-path>`" + ` to write only one complete replacement configuration; the command regenerates and validates with the same selection.
 
@@ -420,8 +425,9 @@ mismatches remain errors. Dependency Project environment overlays are never
 inherited.
 
 http.transports is a closed current-Project object. It accepts only boolean
-connect and rest fields. When omitted, connect defaults to true and rest
-defaults to false. In an environment overlay, those fields replace
+connect and rest fields. New Project scaffolds write both fields explicitly as
+connect: true and rest: false. When omitted from another selected document,
+the same schema defaults apply. In an environment overlay, those fields replace
 independently: omission inherits the root value and null restores that field's
 schema default. A complete --config document does not inherit root transport
 choices; omitted fields use the same defaults. Dependency Project transport
@@ -842,9 +848,10 @@ document's http.expose declaration. The CLI generates a strict POST handler at:
     /api/v1/capabilities/records.read/v1/invoke
 
 Keep transport selection in the selected current-Project document. Only
-connect and rest are valid keys; omitted values use connect: true and
-rest: false. Environment overlays replace those two booleans independently,
-and dependency Project transport choices never override the current Project.
+connect and rest are valid keys. New Project scaffolds record connect: true and
+rest: false; omitted values in another selected document use those same schema
+defaults. Environment overlays replace the two booleans independently, and
+dependency Project transport choices never override the current Project.
 The current generated handler remains the implemented HTTP surface until the
 later Connect and optional REST projection gates consume this selection.
 
