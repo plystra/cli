@@ -155,3 +155,34 @@ func TestParseGenerateArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestParseCheckArguments(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		arguments         []string
+		configurationPath string
+		environmentName   string
+		ok                bool
+	}{
+		{arguments: []string{"check"}, ok: true},
+		{arguments: []string{"check", "--config", "deploy/customer.yaml"}, configurationPath: "deploy/customer.yaml", ok: true},
+		{arguments: []string{"check", "--env", "test"}, environmentName: "test", ok: true},
+		{arguments: nil},
+		{arguments: []string{"generate"}},
+		{arguments: []string{"check", "--check"}},
+		{arguments: []string{"check", "--config"}},
+		{arguments: []string{"check", "--config", ""}},
+		{arguments: []string{"check", "--config", "a.yaml", "--config", "b.yaml"}},
+		{arguments: []string{"check", "--env"}},
+		{arguments: []string{"check", "--env", ""}},
+		{arguments: []string{"check", "--env", "test", "--env", "production"}},
+		{arguments: []string{"check", "--env", "test", "--config", "deploy.yaml"}},
+	}
+	for _, test := range tests {
+		result, ok := parseCheckArguments(test.arguments)
+		if result.configurationPath != test.configurationPath || result.environmentName != test.environmentName || ok != test.ok {
+			t.Errorf("parseCheckArguments(%q) = %#v, %t; want path %q, environment %q, ok %t", test.arguments, result, ok, test.configurationPath, test.environmentName, test.ok)
+		}
+	}
+}

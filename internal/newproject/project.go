@@ -28,6 +28,7 @@ import (
 	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/plugininventory"
+	"github.com/plystra/cli/internal/projectcheck"
 	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/providerresolution"
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
@@ -235,19 +236,40 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 				"%w: template %q cannot qualify because generated output is not stable immediately after installation: %s; correction: the template publisher must make generation deterministic, run plystra generate followed by plystra generate --check in a fresh Project directory, and publish a corrected module version",
 				ErrInvalidTemplate,
 				query,
-				strings.Join(templateGenerationDrift(checked), ", "),
+				strings.Join(templateGenerationDrift(checked.ConfigurationChanged(), checked.ConfigurationMaintenancePath(), checked.Report()), ", "),
+			)
+		}
+		qualified, err := projectcheck.Check(ctx, projectcheck.Options{
+			Start:       root,
+			GoCommand:   goCommand,
+			Environment: environment,
+		})
+		if err != nil {
+			return fmt.Errorf(
+				"%w: template %q cannot qualify because plystra check failed during creation: %w; correction: the template publisher must run plystra check successfully in a fresh Project directory and publish a corrected module version",
+				ErrInvalidTemplate,
+				query,
+				err,
+			)
+		}
+		if !qualified.Clean() {
+			return fmt.Errorf(
+				"%w: template %q cannot qualify because plystra check reported stale Project state during creation: %s; correction: the template publisher must run plystra generate followed by plystra check successfully in a fresh Project directory and publish a corrected module version",
+				ErrInvalidTemplate,
+				query,
+				strings.Join(templateGenerationDrift(qualified.ConfigurationChanged(), qualified.ConfigurationMaintenancePath(), qualified.Report()), ", "),
 			)
 		}
 		return nil
 	})
 }
 
-func templateGenerationDrift(result applicationgenerate.Result) []string {
-	details := make([]string, 0, len(result.Report().Changes())+1)
-	if result.ConfigurationChanged() {
-		details = append(details, fmt.Sprintf("changed %s (dependency composition)", result.ConfigurationMaintenancePath()))
+func templateGenerationDrift(configurationChanged bool, maintenancePath string, report generatedfiles.Report) []string {
+	details := make([]string, 0, len(report.Changes())+1)
+	if configurationChanged {
+		details = append(details, fmt.Sprintf("changed %s (dependency composition)", maintenancePath))
 	}
-	for _, change := range result.Report().Changes() {
+	for _, change := range report.Changes() {
 		details = append(details, fmt.Sprintf("%s %s", change.Kind(), change.Path()))
 	}
 	return details

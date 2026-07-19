@@ -9,13 +9,14 @@ import (
 )
 
 const (
-	wantUsage                 = "Usage:\n  plystra help\n  plystra version\n  plystra new <project-name> [options]\n  plystra add <go-module-query>\n  plystra remove <go-module-path>\n  plystra update <go-module-query>\n  plystra use <capability-name>/vN <plugin-id> [--env <environment>|--config <yaml-path>]\n  plystra plugin create <name>\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]\n"
+	wantUsage                 = "Usage:\n  plystra help\n  plystra version\n  plystra new <project-name> [options]\n  plystra add <go-module-query>\n  plystra remove <go-module-path>\n  plystra update <go-module-query>\n  plystra use <capability-name>/vN <plugin-id> [--env <environment>|--config <yaml-path>]\n  plystra plugin create <name>\n  plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n  plystra check [--env <environment>|--config <yaml-path>]\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]\n"
 	wantAddUsage              = "Usage:\n  plystra add <go-module-query>\n\nAdds one ordinary Go Module dependency, recomposes root plystra.yaml, regenerates,\ntidies, and validates the complete Project in one rollback boundary.\n"
 	wantRemoveUsage           = "Usage:\n  plystra remove <go-module-path>\n\nRemoves one ordinary Go Module dependency, recomposes root plystra.yaml,\nregenerates, tidies, and validates the complete Project in one rollback boundary.\n"
 	wantUpdateUsage           = "Usage:\n  plystra update <go-module-query>\n\nUpdates one selected ordinary Go Module dependency, recomposes root plystra.yaml,\nregenerates, tidies, and validates the complete Project in one rollback boundary.\n"
 	wantUseUsage              = "Usage:\n  plystra use <capability-name>/vN <plugin-id> [--env <environment>|--config <yaml-path>]\n\nOptions:\n  --env <environment>    Write the Provider choice to plystra.<environment>.yaml.\n  --config <yaml-path>   Write the Provider choice to one complete replacement configuration.\n\nPLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit\nselector is present; setting both is an error. Explicit --env or --config\noverrides both variables, and the two flags cannot be combined. Relative\nconfiguration paths are resolved from the detected Plystra Project root.\n"
 	wantNewUsage              = "Usage:\n  plystra new <project-name> [--module <go-module-path>] [--template <go-module-query>] [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]\n\nOptions:\n  --module <go-module-path> Set the Go Module path; defaults to the project name.\n  --template <module-query> Create from one public, portable Plystra Project dependency.\n  --plugin <name>           Create an initial root-level plugin.\n  --git, --no-git           Initialize or omit a Git repository.\n  --github-ci, --no-github-ci\n                            Include or omit GitHub Actions CI.\n  --skills, --no-skills     Include or omit Plystra agent skills.\n\nInteractive creation asks for each unspecified choice. Non-interactive creation\nmust specify one flag from every choice pair.\n\nTemplate dependencies must be public, portable, and generation-stable. Creation\nrejects the staged Project unless an immediate plystra generate --check succeeds.\n"
 	wantGenerateUsage         = "Usage:\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]\n\nOptions:\n  --check                Report drift without modifying configuration or generated files.\n  --env <environment>    Overlay root plystra.yaml with plystra.<environment>.yaml.\n  --config <yaml-path>   Use one complete current-project configuration instead of root plystra.yaml.\n\nPLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit\nselector is present; setting both is an error. Explicit --env or --config\noverrides both variables, and the two flags cannot be combined. Relative\nconfiguration paths are resolved from the detected Plystra Project root. Root\nplystra.yaml remains mandatory and is not merged beneath --config.\n"
+	wantCheckUsage            = "Usage:\n  plystra check [--env <environment>|--config <yaml-path>]\n\nOptions:\n  --env <environment>    Check root plystra.yaml with plystra.<environment>.yaml.\n  --config <yaml-path>   Check one complete current-project configuration instead of root plystra.yaml.\n\nThe check is read-only: it verifies dependency composition and generated output,\nthen runs go test -mod=readonly ./... when both are current. PLYSTRA_ENV and\nPLYSTRA_CONFIG supply equivalent selectors when no explicit selector is present;\nsetting both is an error. Explicit --env or --config overrides both variables,\nand the two flags cannot be combined. Relative configuration paths are resolved\nfrom the detected Plystra Project root. Root plystra.yaml remains mandatory and\nis not merged beneath --config.\n"
 	wantCapabilityExposeUsage = "Usage:\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n\nOptions:\n  --env <environment>    Write exposure to plystra.<environment>.yaml.\n  --config <yaml-path>   Write exposure to one complete replacement configuration.\n\nPLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit\nselector is present; setting both is an error. Explicit --env or --config\noverrides both variables, and the two flags cannot be combined. Relative\nconfiguration paths are resolved from the detected Plystra Project root.\n"
 )
 
@@ -49,6 +50,18 @@ func TestRunGenerateHelp(t *testing.T) {
 		var stderr bytes.Buffer
 		if exitCode := command.Run([]string{"generate", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantGenerateUsage || stderr.Len() != 0 {
 			t.Fatalf("Run(generate %s) = exit %d, stdout %q, stderr %q", argument, exitCode, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestRunCheckHelp(t *testing.T) {
+	t.Parallel()
+
+	for _, argument := range []string{"help", "-h", "--help"} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		if exitCode := command.Run([]string{"check", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantCheckUsage || stderr.Len() != 0 {
+			t.Fatalf("Run(check %s) = exit %d, stdout %q, stderr %q", argument, exitCode, stdout.String(), stderr.String())
 		}
 	}
 }

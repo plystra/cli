@@ -19,6 +19,7 @@ import (
 	"github.com/plystra/cli/internal/newproject"
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/plugintarget"
+	"github.com/plystra/cli/internal/projectcheck"
 	"github.com/plystra/cli/internal/version"
 )
 
@@ -36,6 +37,7 @@ const (
   plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
   plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
+  plystra check [--env <environment>|--config <yaml-path>]
   plystra generate [--check] [--env <environment>|--config <yaml-path>]
 `
 	addUsage = `Usage:
@@ -87,6 +89,21 @@ selector is present; setting both is an error. Explicit --env or --config
 overrides both variables, and the two flags cannot be combined. Relative
 configuration paths are resolved from the detected Plystra Project root. Root
 plystra.yaml remains mandatory and is not merged beneath --config.
+`
+	checkUsage = `Usage:
+  plystra check [--env <environment>|--config <yaml-path>]
+
+Options:
+  --env <environment>    Check root plystra.yaml with plystra.<environment>.yaml.
+  --config <yaml-path>   Check one complete current-project configuration instead of root plystra.yaml.
+
+The check is read-only: it verifies dependency composition and generated output,
+then runs go test -mod=readonly ./... when both are current. PLYSTRA_ENV and
+PLYSTRA_CONFIG supply equivalent selectors when no explicit selector is present;
+setting both is an error. Explicit --env or --config overrides both variables,
+and the two flags cannot be combined. Relative configuration paths are resolved
+from the detected Plystra Project root. Root plystra.yaml remains mandatory and
+is not merged beneath --config.
 `
 )
 
@@ -267,6 +284,38 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		return 0
 	case "capability":
 		return runCapability(arguments, stdout, stderr, workingDirectory, environment, selectPlugin)
+	case "check":
+		if len(arguments) == 2 && isHelp(arguments[1]) {
+			_, _ = io.WriteString(stdout, checkUsage)
+			return 0
+		}
+		check, ok := parseCheckArguments(arguments)
+		if !ok {
+			_, _ = io.WriteString(stderr, checkUsage)
+			return 2
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
+		defer cancel()
+		result, err := projectcheck.Check(ctx, projectcheck.Options{
+			Start:             workingDirectory,
+			ConfigurationPath: check.configurationPath,
+			EnvironmentName:   check.environmentName,
+			Environment:       environment,
+		})
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "%v\n", err)
+			return 1
+		}
+		if !result.Clean() {
+			heading := "generated output is not current"
+			if result.ConfigurationChanged() {
+				heading = "Project configuration or generated output is not current"
+			}
+			writeGenerationReport(stderr, heading, result.ConfigurationChanged(), result.ConfigurationMaintenancePath(), result.Report())
+			return 1
+		}
+		_, _ = fmt.Fprintf(stdout, "Project checks passed for %s in %s\n", result.Module().ModulePath(), result.Module().Path())
+		return 0
 	case "generate":
 		if len(arguments) == 2 && (arguments[1] == "help" || arguments[1] == "-h" || arguments[1] == "--help") {
 			_, _ = io.WriteString(stdout, generateUsage)
@@ -342,6 +391,41 @@ type generateArguments struct {
 	check             bool
 	configurationPath string
 	environmentName   string
+}
+
+type checkArguments struct {
+	configurationPath string
+	environmentName   string
+}
+
+func parseCheckArguments(arguments []string) (checkArguments, bool) {
+	if len(arguments) == 0 || arguments[0] != "check" {
+		return checkArguments{}, false
+	}
+	var result checkArguments
+	configurationSet := false
+	environmentSet := false
+	for index := 1; index < len(arguments); index++ {
+		switch arguments[index] {
+		case "--config":
+			if configurationSet || environmentSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+				return checkArguments{}, false
+			}
+			configurationSet = true
+			index++
+			result.configurationPath = arguments[index]
+		case "--env":
+			if environmentSet || configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+				return checkArguments{}, false
+			}
+			environmentSet = true
+			index++
+			result.environmentName = arguments[index]
+		default:
+			return checkArguments{}, false
+		}
+	}
+	return result, true
 }
 
 func parseGenerateArguments(arguments []string) (generateArguments, bool) {

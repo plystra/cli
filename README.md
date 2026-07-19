@@ -204,6 +204,12 @@ back the target. The template publisher must make generation deterministic,
 run `plystra generate` followed by `plystra generate --check` in a fresh
 Project directory, and publish a corrected module version.
 
+Template creation then runs the same read-only validation workflow as
+`plystra check`: it rechecks the selected configuration and generated output,
+then runs `go test -mod=readonly ./...`. A failure remains inside the creation
+transaction and leaves no target Project. The publisher must make that public
+check pass in a fresh Project directory before publishing a corrected version.
+
 Typed operational values and Secret-reference placeholders declared by the
 template's root configuration are materialized in the new root `plystra.yaml`
 through that same dependency composition. Creation validates them against the
@@ -363,6 +369,12 @@ plystra release
 ```
 
 Mutating commands perform all derivable generation automatically. Build and generation never publish or release as a side effect.
+
+The current `plystra check` implementation is read-only. It verifies the
+selected dependency composition and generated fixed point, then runs
+`go test -mod=readonly ./...` from the Project root. Later roadmap gates add
+the remaining transport, JavaScript SDK, formatting, race, and release-era
+checks without changing this command or its configuration selectors.
 
 `plystra plugin create` keeps the new scaffold, generated module surfaces, and Go module metadata in one rollback boundary. It runs `go mod tidy` after generated imports exist, retains explicit pre-existing requirements and checksum entries, validates with `go test -mod=readonly ./...`, and rolls back its own `go.mod`, `go.sum`, generated-file, and scaffold changes if any later check fails. Concurrent user edits remain protected.
 

@@ -128,6 +128,13 @@ publisher must make generation deterministic, run plystra generate followed by
 plystra generate --check in a fresh Project directory, and publish a corrected
 module version.
 
+Template creation next runs the same read-only workflow as plystra check. It
+rechecks the selected configuration and generated output, then runs Go package
+tests with -mod=readonly from the staged Project root. Any failure restores the
+creation transaction and leaves no target Project. The publisher must make that
+public check pass in a fresh Project directory before publishing a corrected
+version.
+
 Add one ordinary Go Module dependency through the public transaction:
 
     plystra add github.com/acme/email@v1.4.2
@@ -762,11 +769,19 @@ Run the narrowest relevant test first, then the complete module checks:
     plystra generate --check
     plystra generate --check --env production
     plystra generate --check --config deploy/customer-a.yaml
+    plystra check
+    plystra check --env production
+    plystra check --config deploy/customer-a.yaml
     go test ./...
     go test -race ./...
     go vet ./...
     go build ./...
     go mod verify
+
+Plystra check verifies the selected configuration and generated fixed point,
+then runs go test -mod=readonly ./... from the Project root. Use the same --env
+or --config selector used for generation. The command is read-only and never
+repairs YAML, generated output, or module metadata.
 
 plystra generate --check is read-only. It recomputes the complete resolution and
 generation fixed point and fails on changed, missing, unexpected, or obsolete
