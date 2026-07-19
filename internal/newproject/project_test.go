@@ -435,6 +435,71 @@ func TestPublicCommandRejectsPrivateTemplateGraphAndRollsBack(t *testing.T) {
 	assertNoTransactionFiles(t, parent)
 }
 
+func TestPublicCommandRejectsRelativeReplacementsAcrossTemplateProjectsAndRollsBack(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const supportPath = "example.com/acme/support"
+	const supportVersion = "v1.3.0"
+	const basePath = "example.com/acme/relative-base"
+	const baseVersion = "v1.1.0"
+	const templatePath = "example.com/acme/relative-platform"
+	const templateVersion = "v1.0.0"
+	const templateQuery = templatePath + "@" + templateVersion
+	writeProxyModule(t, proxy, supportPath, supportVersion, map[string][]byte{
+		"support.go": []byte("package support\n"),
+	})
+	writeProxyModule(t, proxy, basePath, baseVersion, map[string][]byte{
+		"go.mod":       []byte("module " + basePath + "\n\ngo 1.26\n\nrequire " + supportPath + " " + supportVersion + "\n\nreplace " + supportPath + " " + supportVersion + " => ../support\n"),
+		"base.go":      []byte("package base\n"),
+		"plystra.yaml": []byte("{}\n"),
+	})
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"go.mod":       []byte("module " + templatePath + "\n\ngo 1.26\n\nrequire " + basePath + " " + baseVersion + "\n\nreplace " + basePath + " " + baseVersion + " => ../relative-base\n"),
+		"template.go":  []byte("package platform\n"),
+		"plystra.yaml": []byte("{}\n"),
+	})
+	environment := isolatedGoEnvironment(t, proxy)
+	parent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	arguments := []string{
+		"new", "my-app",
+		"--module", "example.com/acme/my-app",
+		"--template", templateQuery,
+		"--no-git", "--no-github-ci", "--no-skills",
+	}
+
+	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 1 {
+		t.Fatalf("RunIn exit code = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("RunIn stdout = %q, want empty output", stdout.String())
+	}
+	for _, detail := range []string{
+		"invalid Plystra Project template",
+		templateQuery,
+		"cannot qualify because dependency Plystra Projects declare relative Go Module replacements",
+		basePath + "@" + baseVersion + "/go.mod: replace " + supportPath + "@" + supportVersion + " => ../support",
+		templatePath + "@" + templateVersion + "/go.mod: replace " + basePath + "@" + baseVersion + " => ../relative-base",
+		"publish every required module version and remove each relative replace",
+	} {
+		if !strings.Contains(stderr.String(), detail) {
+			t.Fatalf("RunIn stderr omits %q: %s", detail, stderr.String())
+		}
+	}
+	_, replacementList, found := strings.Cut(strings.SplitN(stderr.String(), "; correction:", 2)[0], "replacements: ")
+	if !found {
+		t.Fatalf("RunIn stderr omits relative replacement list: %s", stderr.String())
+	}
+	wantReplacementList := basePath + "@" + baseVersion + "/go.mod: replace " + supportPath + "@" + supportVersion + " => ../support; " + templatePath + "@" + templateVersion + "/go.mod: replace " + basePath + "@" + baseVersion + " => ../relative-base"
+	if replacementList != wantReplacementList {
+		t.Fatalf("RunIn relative replacement list = %q, want %q", replacementList, wantReplacementList)
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists after relative replace failure: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
+}
+
 func TestCreateRollsBackTemplateGenerationFailure(t *testing.T) {
 	proxy := createKernelProxy(t)
 	const templatePath = "example.com/acme/incomplete"
@@ -1081,6 +1146,9 @@ func assertDirectRequirement(t *testing.T, root, modulePath, version string) {
 	parsed, err := modfile.Parse("go.mod", data, nil)
 	if err != nil {
 		t.Fatalf("Parse(go.mod): %v", err)
+	}
+	if len(parsed.Replace) != 0 {
+		t.Fatalf("generated go.mod contains permanent replacements: %#v", parsed.Replace)
 	}
 	for _, requirement := range parsed.Require {
 		if requirement.Mod.Path == modulePath {

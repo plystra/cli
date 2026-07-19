@@ -190,6 +190,12 @@ setting, reports each selected `path@version`, and leaves no target directory.
 Publish or replace a genuinely private dependency before publishing the
 template, or correct an overbroad Go privacy setting before retrying.
 
+Every dependency Plystra Project in the selected template graph must also be
+portable without a relative Go Module `replace`. Creation inspects the bounded
+validated `go.mod` snapshots, reports each `module@version/go.mod` directive,
+and rolls back. Publish the referenced module versions and remove the relative
+replacements before publishing a corrected template.
+
 Typed operational values and Secret-reference placeholders declared by the
 template's root configuration are materialized in the new root `plystra.yaml`
 through that same dependency composition. Creation validates them against the

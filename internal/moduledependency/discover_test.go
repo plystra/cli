@@ -71,6 +71,17 @@ func TestDiscoverUsesSortedEffectiveGraphAndRecognizesProjects(t *testing.T) {
 	if modules[0].RequiredVersion() != "v1.2.0" || modules[0].SelectedVersion() != "v1.3.0" || !modules[0].Direct() || modules[0].Indirect() || modules[0].Workspace() || !modules[0].Project() {
 		t.Fatalf("a module provenance = %#v", modules[0])
 	}
+	goMod := modules[0].ProjectGoMod()
+	if !bytes.Contains(goMod, []byte("module example.com/a")) {
+		t.Fatalf("a module go.mod = %q", goMod)
+	}
+	goMod[0] = 'x'
+	if bytes.Equal(goMod, modules[0].ProjectGoMod()) {
+		t.Fatal("ProjectGoMod exposed mutable snapshot storage")
+	}
+	if modules[1].ProjectGoMod() != nil {
+		t.Fatalf("ordinary dependency retained Project go.mod: %q", modules[1].ProjectGoMod())
+	}
 	if modules[1].RequiredVersion() != "" || modules[1].Direct() || modules[1].Project() {
 		t.Fatalf("ordinary transitive module provenance = %#v", modules[1])
 	}

@@ -80,6 +80,7 @@ type Module struct {
 	indirect        bool
 	workspace       bool
 	project         bool
+	goMod           []byte
 	replacement     Replacement
 }
 
@@ -112,6 +113,11 @@ func (m Module) Workspace() bool { return m.workspace }
 // Project reports whether the selected module root contains a regular
 // non-symbolic plystra.yaml and is therefore a dependency Plystra Project.
 func (m Module) Project() bool { return m.project }
+
+// ProjectGoMod returns the exact bounded go.mod snapshot validated for a
+// dependency Plystra Project. It returns nil for an ordinary Go dependency,
+// and the returned bytes are defensive.
+func (m Module) ProjectGoMod() []byte { return append([]byte(nil), m.goMod...) }
 
 // Replacement returns replacement provenance when Go selected one.
 func (m Module) Replacement() (Replacement, bool) {
@@ -203,6 +209,9 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 			return Index{}, fmt.Errorf("%w: inspect dependency Project marker for %q: %w", ErrDiscover, modules[index].path, err)
 		}
 		modules[index].project = project
+		if !project {
+			modules[index].goMod = nil
+		}
 	}
 	return Index{modules: modules}, nil
 }
@@ -344,13 +353,14 @@ func decodeModules(data []byte, application modulelocate.Module, requirements []
 			replacement = Replacement{path: listed.Replace.Path, version: listed.Replace.Version}
 		}
 		root := ""
+		var goModData []byte
 		if (directory == "" || goModPath == "") && !listed.Main && (listed.Replace == nil || listed.Replace.Version != "") {
 			// go list may report only graph metadata when a selected source
 			// archive has not been extracted yet. Resolve that exact selected
 			// version later, outside the Project directory.
 		} else {
 			var err error
-			root, err = validateModuleRoot(listed.Path, directory, goModPath, expectedSourcePath, listed.Main)
+			root, goModData, err = validateModuleRoot(listed.Path, directory, goModPath, expectedSourcePath, listed.Main)
 			if err != nil {
 				return nil, err
 			}
@@ -371,6 +381,7 @@ func decodeModules(data []byte, application modulelocate.Module, requirements []
 			direct:          isDirect,
 			indirect:        isDirect && declared.indirect,
 			workspace:       listed.Main,
+			goMod:           goModData,
 			replacement:     replacement,
 		}
 	}
@@ -450,11 +461,12 @@ func resolveMissingSources(ctx context.Context, applicationRoot string, expected
 		if downloaded.Path != queryPath || downloaded.Version != queryVersion {
 			return fmt.Errorf("%w: downloaded source for module %q returned %s@%s, expected %s", ErrInvalidOutput, modules[index].path, downloaded.Path, downloaded.Version, query)
 		}
-		root, err := validateModuleRoot(modules[index].path, downloaded.Dir, downloaded.GoMod, queryPath, false)
+		root, goModData, err := validateModuleRoot(modules[index].path, downloaded.Dir, downloaded.GoMod, queryPath, false)
 		if err != nil {
 			return err
 		}
 		modules[index].root = root
+		modules[index].goMod = goModData
 	}
 
 	// Downloads run outside the Project directory. Recheck the Project module
@@ -502,24 +514,24 @@ func sameDirectory(left, right string) bool {
 	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
 }
 
-func validateModuleRoot(modulePath, directory, goModPath, expectedSourcePath string, project bool) (string, error) {
+func validateModuleRoot(modulePath, directory, goModPath, expectedSourcePath string, project bool) (string, []byte, error) {
 	if directory == "" || goModPath == "" {
-		return "", fmt.Errorf("%w: %w: module %q must be downloaded before generation", ErrInvalidOutput, ErrModuleUnavailable, modulePath)
+		return "", nil, fmt.Errorf("%w: %w: module %q must be downloaded before generation", ErrInvalidOutput, ErrModuleUnavailable, modulePath)
 	}
 	if !filepath.IsAbs(directory) || !filepath.IsAbs(goModPath) {
-		return "", fmt.Errorf("%w: module %q returned non-absolute source provenance", ErrInvalidOutput, modulePath)
+		return "", nil, fmt.Errorf("%w: module %q returned non-absolute source provenance", ErrInvalidOutput, modulePath)
 	}
 	canonicalRoot, err := filepath.EvalSymlinks(filepath.Clean(directory))
 	if err != nil {
-		return "", fmt.Errorf("%w: %w: resolve source for module %q: %v", ErrInvalidOutput, ErrModuleUnavailable, modulePath, err)
+		return "", nil, fmt.Errorf("%w: %w: resolve source for module %q: %v", ErrInvalidOutput, ErrModuleUnavailable, modulePath, err)
 	}
 	rootInfo, err := os.Lstat(canonicalRoot)
 	if err != nil || !rootInfo.IsDir() || rootInfo.Mode()&fs.ModeSymlink != 0 {
-		return "", fmt.Errorf("%w: %w: source for module %q is not a directory", ErrInvalidOutput, ErrModuleUnavailable, modulePath)
+		return "", nil, fmt.Errorf("%w: %w: source for module %q is not a directory", ErrInvalidOutput, ErrModuleUnavailable, modulePath)
 	}
 	reportedInfo, err := os.Lstat(goModPath)
 	if err != nil || !reportedInfo.Mode().IsRegular() || reportedInfo.Mode()&fs.ModeSymlink != 0 {
-		return "", fmt.Errorf("%w: module %q reported invalid go.mod provenance", ErrInvalidOutput, modulePath)
+		return "", nil, fmt.Errorf("%w: module %q reported invalid go.mod provenance", ErrInvalidOutput, modulePath)
 	}
 	manifestPath := goModPath
 	rootGoMod := filepath.Join(canonicalRoot, "go.mod")
@@ -528,17 +540,17 @@ func validateModuleRoot(modulePath, directory, goModPath, expectedSourcePath str
 	case rootErr == nil && rootInfo.Mode().IsRegular() && rootInfo.Mode()&fs.ModeSymlink == 0:
 		manifestPath = rootGoMod
 	case rootErr == nil:
-		return "", fmt.Errorf("%w: module %q source has unsafe go.mod", ErrInvalidOutput, modulePath)
+		return "", nil, fmt.Errorf("%w: module %q source has unsafe go.mod", ErrInvalidOutput, modulePath)
 	case !errors.Is(rootErr, fs.ErrNotExist):
-		return "", fmt.Errorf("%w: inspect source go.mod for module %q: %v", ErrInvalidOutput, modulePath, rootErr)
+		return "", nil, fmt.Errorf("%w: inspect source go.mod for module %q: %v", ErrInvalidOutput, modulePath, rootErr)
 	}
 	snapshot, err := readGoMod(manifestPath)
 	if err != nil {
-		return "", fmt.Errorf("%w: %w: inspect go.mod for module %q: %v", ErrInvalidOutput, ErrModuleUnavailable, modulePath, err)
+		return "", nil, fmt.Errorf("%w: %w: inspect go.mod for module %q: %v", ErrInvalidOutput, ErrModuleUnavailable, modulePath, err)
 	}
 	parsed, err := modfile.Parse("go.mod", snapshot.data, nil)
 	if err != nil || parsed.Module == nil {
-		return "", fmt.Errorf("%w: module %q source has invalid go.mod", ErrInvalidOutput, modulePath)
+		return "", nil, fmt.Errorf("%w: module %q source has invalid go.mod", ErrInvalidOutput, modulePath)
 	}
 	var pathErr error
 	if project {
@@ -547,12 +559,12 @@ func validateModuleRoot(modulePath, directory, goModPath, expectedSourcePath str
 		pathErr = module.CheckPath(parsed.Module.Mod.Path)
 	}
 	if pathErr != nil {
-		return "", fmt.Errorf("%w: module %q source declares invalid path %q", ErrInvalidOutput, modulePath, parsed.Module.Mod.Path)
+		return "", nil, fmt.Errorf("%w: module %q source declares invalid path %q", ErrInvalidOutput, modulePath, parsed.Module.Mod.Path)
 	}
 	if expectedSourcePath != "" && parsed.Module.Mod.Path != expectedSourcePath {
-		return "", fmt.Errorf("%w: module %q source declares %q, expected %q", ErrInvalidOutput, modulePath, parsed.Module.Mod.Path, expectedSourcePath)
+		return "", nil, fmt.Errorf("%w: module %q source declares %q, expected %q", ErrInvalidOutput, modulePath, parsed.Module.Mod.Path, expectedSourcePath)
 	}
-	return canonicalRoot, nil
+	return canonicalRoot, append([]byte(nil), snapshot.data...), nil
 }
 
 type fileSnapshot struct {
