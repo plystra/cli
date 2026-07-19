@@ -67,6 +67,18 @@ generated.
 
 ## Compose dependency Project configuration
 
+Start a new Project from one ordinary Plystra Project dependency:
+
+    plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3
+
+The template value is a standard Go Module query. The selected module must have
+regular root plystra.yaml, remains a direct go.mod requirement, and has no
+special status after creation. The CLI composes only its root declarations and
+regenerates the staged application. It does not copy dependency files, mutate
+Module Cache source, create go.work, inherit dependency environment overlays,
+or give template origin Provider or configuration priority. A failure leaves no
+target Project.
+
 Add one ordinary Go Module dependency through the public transaction:
 
     plystra add github.com/acme/email@v1.4.2
@@ -301,6 +313,10 @@ its initial Go Module path:
 Choose an independent standard Go Module path without changing the directory:
 
     plystra new app --module github.com/acme/app
+
+Start from an existing Plystra Project distributed as a Go Module dependency:
+
+    plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3
 
 Inside an existing Project, create a root-level Plugin:
 

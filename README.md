@@ -158,6 +158,7 @@ and include the Plystra-specific development skill under
 ```powershell
 plystra new my-app
 plystra new my-app --module github.com/acme/my-app
+plystra new my-app --module github.com/acme/my-app --template github.com/acme/platform@v1.2.3
 ```
 
 The positional value is one lower-case ASCII kebab-case child-directory name.
@@ -167,11 +168,21 @@ Unsafe names, paths, traversal, separators, and an existing target fail before
 filesystem mutation. An explicit module path must satisfy standard Go Module
 rules. The removed positional full-module-path form is not accepted.
 
+`--template` resolves one standard Go Module query, requires that selected
+module to contain regular root `plystra.yaml`, and retains it as an ordinary
+direct dependency. The CLI composes the dependency Project's root declarations
+into the new Project and regenerates the application; it does not clone or copy
+the dependency source, inspect dependency environment overlays, modify the Go
+Module Cache, create `go.work`, or grant the template any Provider or
+configuration priority. A module without root `plystra.yaml` is rejected and
+the target directory is not installed.
+
 Each prompt defaults to yes and accepts `yes`/`y`, `no`/`n`, or Enter. Scripts
 and other non-interactive callers must choose every option explicitly:
 
 ```powershell
 plystra new my-app --module github.com/acme/my-app --git --github-ci --skills
+plystra new my-app --module github.com/acme/my-app --template github.com/acme/platform@v1.2.3 --git --github-ci --skills
 plystra new email --module github.com/acme/email --no-git --no-github-ci --no-skills
 ```
 
@@ -189,9 +200,20 @@ runtime, validation, and troubleshooting workflows. It contains no Git,
 branch, commit, or push instructions. `plystra new --help` documents the
 complete creation contract.
 
+Successful template creation reports the selected query:
+
+```text
+created github.com/acme/my-app from github.com/acme/platform@v1.2.3 in <absolute-path>/my-app
+```
+
+This ordinary template-dependency workflow is implemented. The separate
+qualified-template contract for automatic build, startup, health verification,
+and clean shutdown is not yet implemented and no template is advertised as
+qualified by this CLI version.
+
 ## Transaction safety
 
-New project trees, optional CI and skill files, and requested Git initialization are populated and validated in a same-parent staging directory before rename. A Git initialization failure leaves no target project. In-place changes use same-filesystem staged replacements and backups, reject unsafe symbolic traversal, recheck source snapshots, preserve concurrent user edits, and restore original bytes and modes after validation failure or panic.
+New project trees, template dependency metadata and composition, optional CI and skill files, and requested Git initialization are populated and validated in a same-parent staging directory before rename. A template resolution, composition, generation, validation, or Git initialization failure leaves no target project. In-place changes use same-filesystem staged replacements and backups, reject unsafe symbolic traversal, recheck source snapshots, preserve concurrent user edits, and restore original bytes and modes after validation failure or panic.
 
 Commands below a module root use the nearest real enclosing `go.mod`; nested modules do not leak mutations into an outer module. The Module Cache remains read-only.
 

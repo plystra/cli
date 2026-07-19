@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/newproject"
@@ -173,6 +174,161 @@ func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
 	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: target, Check: true, Environment: environment})
 	if err != nil || !checked.Report().Clean() {
 		t.Fatalf("default-module generated output = %#v, %v", checked.Report().Changes(), err)
+	}
+}
+
+func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/platform"
+	const templateVersion = "v1.2.3"
+	const templateQuery = templatePath + "@" + templateVersion
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"template.go":             []byte("package platform\n\nconst Identity = \"template-source-only\"\n"),
+		"TEMPLATE_ONLY.md":        []byte("This file must remain in the dependency source.\n"),
+		"plystra.yaml":            []byte("http:\n  expose:\n    - kernel.health/v1\n\ncapabilities:\n  require:\n    - kernel.info/v1\n  use: {}\n  aliases: {}\n\nconfig: {}\n"),
+		"plystra.production.yaml": []byte("capabilities:\n  require:\n    - missing.overlay/v1\n"),
+	})
+	environment := isolatedGoEnvironment(t, proxy)
+	if err := gocommand.Run(t.Context(), gocommand.Options{
+		Directory:   t.TempDir(),
+		Environment: environment,
+	}, "mod", "download", templateQuery); err != nil {
+		t.Fatalf("pre-download template: %v", err)
+	}
+	cacheRoot := moduleCacheRoot(t, environment, templatePath, templateVersion)
+	cacheBefore := snapshotTree(t, cacheRoot)
+	proxyBefore := snapshotTree(t, proxy)
+
+	parent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	arguments := []string{
+		"new", "my-app",
+		"--module", "example.com/acme/my-app",
+		"--template", templateQuery,
+		"--no-git", "--no-github-ci", "--skills",
+	}
+	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 0 {
+		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
+	}
+	target := filepath.Join(parent, "my-app")
+	wantOutput := fmt.Sprintf("created example.com/acme/my-app from %s in %s\n", templateQuery, target)
+	if stdout.String() != wantOutput || stderr.Len() != 0 {
+		t.Fatalf("RunIn output = stdout %q, stderr %q", stdout.String(), stderr.String())
+	}
+
+	assertDirectRequirement(t, target, templatePath, templateVersion)
+	configuration, err := os.ReadFile(filepath.Join(target, "plystra.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile(plystra.yaml): %v", err)
+	}
+	model, err := applicationmeta.Parse(configuration)
+	if err != nil {
+		t.Fatalf("Parse(plystra.yaml): %v", err)
+	}
+	exposures := model.HTTPExposures()
+	if len(exposures) != 1 || exposures[0].ID().String() != "kernel.health/v1" {
+		t.Fatalf("composed HTTP exposures = %#v, want kernel.health/v1", exposures)
+	}
+	requirements := model.Requirements()
+	if len(requirements) != 1 || requirements[0].ID().String() != "kernel.info/v1" {
+		t.Fatalf("composed requirements = %#v, want kernel.info/v1", requirements)
+	}
+	if bytes.Contains(configuration, []byte("missing.overlay/v1")) {
+		t.Fatalf("dependency environment overlay was inherited:\n%s", configuration)
+	}
+	for _, copied := range []string{"template.go", "TEMPLATE_ONLY.md", "plystra.production.yaml", "go.work"} {
+		if _, err := os.Lstat(filepath.Join(target, copied)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("template source path %s was copied into the Project: %v", copied, err)
+		}
+	}
+	manifest, err := os.ReadFile(filepath.Join(target, "generated", "manifest.json"))
+	if err != nil || !bytes.Contains(manifest, []byte(templatePath)) {
+		t.Fatalf("generated manifest template provenance = %q, %v", manifest, err)
+	}
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       target,
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil || !checked.Report().Clean() || checked.ConfigurationChanged() {
+		t.Fatalf("template generation check = changes %#v, configuration changed %t, %v", checked.Report().Changes(), checked.ConfigurationChanged(), err)
+	}
+	assertPlystraSkill(t, target, "example.com/acme/my-app")
+	if cacheAfter := snapshotTree(t, cacheRoot); !reflect.DeepEqual(cacheAfter, cacheBefore) {
+		t.Fatalf("template Module Cache source changed:\nbefore: %#v\nafter:  %#v", cacheBefore, cacheAfter)
+	}
+	if proxyAfter := snapshotTree(t, proxy); !reflect.DeepEqual(proxyAfter, proxyBefore) {
+		t.Fatalf("Go Module proxy changed during template creation:\nbefore: %#v\nafter:  %#v", proxyBefore, proxyAfter)
+	}
+}
+
+func TestCreateRejectsTemplateWithoutRootProjectMarkerAndRollsBack(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/ordinary"
+	const templateVersion = "v1.0.0"
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"ordinary.go": []byte("package ordinary\n"),
+	})
+	environment := isolatedGoEnvironment(t, proxy)
+	parent := t.TempDir()
+	_, err := newproject.Create(t.Context(), newproject.Options{
+		Parent:      parent,
+		ProjectName: "my-app",
+		ModulePath:  "example.com/acme/my-app",
+		Template:    templatePath + "@" + templateVersion,
+		Environment: environment,
+	})
+	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrInvalidTemplate) || !strings.Contains(err.Error(), "root plystra.yaml") {
+		t.Fatalf("Create error = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists after markerless template failure: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
+}
+
+func TestCreateRollsBackTemplateGenerationFailure(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/incomplete"
+	const templateVersion = "v1.0.0"
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"incomplete.go": []byte("package incomplete\n"),
+		"plystra.yaml":  []byte("capabilities:\n  require:\n    - missing.provider/v1\n"),
+	})
+	environment := isolatedGoEnvironment(t, proxy)
+	parent := t.TempDir()
+	_, err := newproject.Create(t.Context(), newproject.Options{
+		Parent:      parent,
+		ProjectName: "my-app",
+		ModulePath:  "example.com/acme/my-app",
+		Template:    templatePath + "@" + templateVersion,
+		Environment: environment,
+	})
+	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, applicationgenerate.ErrGenerate) {
+		t.Fatalf("Create error = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists after template generation failure: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
+}
+
+func TestCreateRejectsInvalidTemplateQueryBeforeMutation(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	_, err := newproject.Create(t.Context(), newproject.Options{
+		Parent:      parent,
+		ProjectName: "my-app",
+		Template:    "../platform@v1.0.0",
+		GoCommand:   filepath.Join(parent, "must-not-run"),
+	})
+	if !errors.Is(err, newproject.ErrCreate) || !strings.Contains(err.Error(), "template query") {
+		t.Fatalf("Create error = %v", err)
+	}
+	if entries, readErr := os.ReadDir(parent); readErr != nil || len(entries) != 0 {
+		t.Fatalf("invalid template query mutated parent: %v, %v", entries, readErr)
 	}
 }
 
@@ -591,10 +747,11 @@ func createKernelProxy(t *testing.T) string {
 		data []byte
 	}{
 		{name: "assembly/version.go", data: []byte("package assembly\n\nimport \"fmt\"\n\ntype Version uint32\n\nconst V1 Version = 1\n\nfunc RequireVersion(version Version) error {\n\tif version != V1 { return fmt.Errorf(\"unsupported assembly API version %d\", version) }\n\treturn nil\n}\n")},
+		{name: "capability/capability.go", data: []byte("package capability\n\nimport \"context\"\n\ntype Contract[Request, Response any] struct{}\ntype Handler[Request, Response any] func(context.Context, Request) (Response, error)\n")},
 		{name: "configuration/configuration.go", data: []byte("package configuration\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"os\"\n\n\t\"github.com/plystra/kernel/plugin/manifest\"\n)\n\nconst MaximumSecretValueBytes = 1 << 20\n\nvar ErrSecretExposure = errors.New(\"Secret serialization is prohibited\")\n\ntype ResolverOptions struct { MaximumValueBytes int }\ntype Resolver struct{}\ntype Values struct{}\ntype ObjectMap struct{}\ntype StringMap struct{}\n\nfunc NewResolver(ResolverOptions) (*Resolver, error) { return &Resolver{}, nil }\nfunc LoadDocument(path string) ([]byte, error) { return os.ReadFile(path) }\nfunc (ObjectMap) Names() []string { return nil }\nfunc (ObjectMap) YAML(string) ([]byte, bool) { return nil, false }\nfunc (StringMap) Names() []string { return nil }\nfunc (StringMap) Value(string) (string, bool) { return \"\", false }\nfunc ExtractObjectMap([]byte, string) (ObjectMap, error) { return ObjectMap{}, nil }\nfunc ExtractStringMap([]byte, string) (StringMap, error) { return StringMap{}, nil }\nfunc Decode(context.Context, *Resolver, manifest.Config, []byte) (Values, error) { return Values{}, nil }\n")},
 		{name: "go.mod", data: moduleFile},
-		{name: "intrinsic/intrinsic.go", data: []byte("package intrinsic\n\nimport \"github.com/plystra/kernel/invocation\"\n\ntype BindingOptions struct { ModuleVersion, BuildIdentity string }\n\nfunc NewBindings(BindingOptions) ([]invocation.Binding, error) { return make([]invocation.Binding, 2), nil }\n")},
-		{name: "invocation/invocation.go", data: []byte("package invocation\n\nimport \"time\"\n\ntype Binding struct{}\ntype Catalog struct { bindings []Binding }\nfunc NewCatalog(bindings []Binding) (Catalog, error) { return Catalog{bindings: append([]Binding(nil), bindings...)}, nil }\nfunc (c Catalog) Bindings() []Binding { return append([]Binding(nil), c.bindings...) }\ntype DispatcherOptions struct { DefaultTimeout time.Duration }\ntype Dispatcher struct { published bool }\nfunc NewDispatcher(DispatcherOptions) (*Dispatcher, error) { return &Dispatcher{}, nil }\nfunc (d *Dispatcher) Publish(Catalog) error { d.published = true; return nil }\nfunc (d *Dispatcher) Published() bool { return d != nil && d.published }\n")},
+		{name: "intrinsic/intrinsic.go", data: []byte("package intrinsic\n\nimport (\n\t\"github.com/plystra/kernel/capability\"\n\t\"github.com/plystra/kernel/invocation\"\n)\n\ntype BindingOptions struct { ModuleVersion, BuildIdentity string }\n\ntype HealthRequest struct{}\ntype HealthStatus string\nconst HealthStatusHealthy HealthStatus = \"healthy\"\ntype HealthResponse struct { Status HealthStatus `json:\"status\"` }\ntype InfoRequest struct{}\ntype InfoResponse struct { AssemblyAPI string `json:\"assembly_api\"`; KernelModule string `json:\"kernel_module\"`; KernelVersion string `json:\"kernel_version\"` }\n\nfunc HealthContract() capability.Contract[HealthRequest, HealthResponse] { return capability.Contract[HealthRequest, HealthResponse]{} }\nfunc InfoContract() capability.Contract[InfoRequest, InfoResponse] { return capability.Contract[InfoRequest, InfoResponse]{} }\nfunc NewBindings(BindingOptions) ([]invocation.Binding, error) { return make([]invocation.Binding, 2), nil }\n")},
+		{name: "invocation/invocation.go", data: []byte("package invocation\n\nimport (\n\t\"context\"\n\t\"time\"\n\n\t\"github.com/plystra/kernel/capability\"\n)\n\ntype Binding struct{}\ntype Catalog struct { bindings []Binding }\nfunc NewCatalog(bindings []Binding) (Catalog, error) { return Catalog{bindings: append([]Binding(nil), bindings...)}, nil }\nfunc (c Catalog) Bindings() []Binding { return append([]Binding(nil), c.bindings...) }\ntype DispatcherOptions struct { DefaultTimeout time.Duration }\ntype Dispatcher struct { published bool }\nfunc NewDispatcher(DispatcherOptions) (*Dispatcher, error) { return &Dispatcher{}, nil }\nfunc (d *Dispatcher) Publish(Catalog) error { d.published = true; return nil }\nfunc (d *Dispatcher) Published() bool { return d != nil && d.published }\ntype Handle[Request, Response any] struct { available bool }\nfunc NewHandle[Request, Response any](_ *Dispatcher, _ capability.Contract[Request, Response], available bool) (Handle[Request, Response], error) { return Handle[Request, Response]{available: available}, nil }\nfunc (h Handle[Request, Response]) Available() bool { return h.available }\nfunc (Handle[Request, Response]) Invoke(context.Context, Request) (Response, error) { var response Response; return response, nil }\ntype ErrorCode string\nconst (\n\tErrorInvalidArgument ErrorCode = \"invalid_argument\"\n\tErrorUnauthenticated ErrorCode = \"unauthenticated\"\n\tErrorDenied ErrorCode = \"denied\"\n\tErrorNotFound ErrorCode = \"not_found\"\n\tErrorConflict ErrorCode = \"conflict\"\n\tErrorVersionIncompatible ErrorCode = \"version_incompatible\"\n\tErrorTimeout ErrorCode = \"timeout\"\n\tErrorUnavailable ErrorCode = \"unavailable\"\n\tErrorResultUnknown ErrorCode = \"result_unknown\"\n\tErrorCancelled ErrorCode = \"cancelled\"\n)\nfunc (code ErrorCode) String() string { return string(code) }\nfunc (code ErrorCode) Valid() bool { return code != \"\" }\ntype Error struct { code ErrorCode; detailCode string }\nfunc (*Error) Error() string { return \"invocation error\" }\nfunc (err *Error) Code() ErrorCode { if err == nil { return \"\" }; return err.code }\nfunc (err *Error) DetailCode() string { if err == nil { return \"\" }; return err.detailCode }\nfunc ValidDetailCode(string) bool { return true }\n")},
 		{name: "lifecycle/lifecycle.go", data: []byte("package lifecycle\n\nimport (\n\t\"context\"\n\t\"time\"\n\n\t\"github.com/plystra/kernel/plugin\"\n)\n\ntype Provider interface {\n\tStart(context.Context) error\n\tStop(context.Context) error\n}\n\ntype State string\ntype Binding struct{}\ntype Manager struct{}\ntype ManagerOptions struct { RollbackTimeout time.Duration }\n\nfunc NewBinding(plugin.ID, Provider) (Binding, error) { return Binding{}, nil }\nfunc NewManager(ManagerOptions, []Binding) (*Manager, error) { return &Manager{}, nil }\nfunc (*Manager) State() State { return \"new\" }\nfunc (*Manager) Start(context.Context) error { return nil }\nfunc (*Manager) Stop(context.Context) error { return nil }\n")},
 		{name: "plugin/id.go", data: []byte("package plugin\n\ntype ID struct{}\n\nfunc ParseID(string) (ID, error) { return ID{}, nil }\n")},
 		{name: "plugin/manifest/config.go", data: []byte("package manifest\n\ntype Config struct{}\n\nfunc ParseConfig([]byte) (Config, error) { return Config{}, nil }\n")},
@@ -618,6 +775,86 @@ func createKernelProxy(t *testing.T) string {
 		t.Fatalf("close zip file: %v", err)
 	}
 	return root
+}
+
+func writeProxyModule(t *testing.T, root, modulePath, version string, source map[string][]byte) {
+	t.Helper()
+	escapedPath, err := module.EscapePath(modulePath)
+	if err != nil {
+		t.Fatalf("EscapePath(%s): %v", modulePath, err)
+	}
+	escapedVersion, err := module.EscapeVersion(version)
+	if err != nil {
+		t.Fatalf("EscapeVersion(%s): %v", version, err)
+	}
+	versionRoot := filepath.Join(root, filepath.FromSlash(escapedPath), "@v")
+	if err := os.MkdirAll(versionRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", versionRoot, err)
+	}
+	writeTestFile(t, filepath.Join(versionRoot, "list"), []byte(version+"\n"))
+	writeTestFile(t, filepath.Join(versionRoot, escapedVersion+".info"), fmt.Appendf(nil, "{\"Version\":%q,\"Time\":\"2026-07-19T00:00:00Z\"}\n", version))
+	moduleFile := []byte("module " + modulePath + "\n\ngo 1.26\n")
+	writeTestFile(t, filepath.Join(versionRoot, escapedVersion+".mod"), moduleFile)
+
+	archiveFile, err := os.Create(filepath.Join(versionRoot, escapedVersion+".zip"))
+	if err != nil {
+		t.Fatalf("Create zip: %v", err)
+	}
+	archive := zip.NewWriter(archiveFile)
+	files := make(map[string][]byte, len(source)+1)
+	files["go.mod"] = moduleFile
+	for name, data := range source {
+		files[name] = data
+	}
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	prefix := modulePath + "@" + version + "/"
+	for _, name := range names {
+		header := &zip.FileHeader{Name: prefix + filepath.ToSlash(name), Method: zip.Deflate}
+		header.SetMode(0o644)
+		header.Modified = time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)
+		writer, err := archive.CreateHeader(header)
+		if err != nil {
+			t.Fatalf("CreateHeader(%s): %v", name, err)
+		}
+		if _, err := writer.Write(files[name]); err != nil {
+			t.Fatalf("write zip entry %s: %v", name, err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := archiveFile.Close(); err != nil {
+		t.Fatalf("close zip file: %v", err)
+	}
+}
+
+func moduleCacheRoot(t *testing.T, environment []string, modulePath, version string) string {
+	t.Helper()
+	escapedPath, err := module.EscapePath(modulePath)
+	if err != nil {
+		t.Fatalf("EscapePath(%s): %v", modulePath, err)
+	}
+	escapedVersion, err := module.EscapeVersion(version)
+	if err != nil {
+		t.Fatalf("EscapeVersion(%s): %v", version, err)
+	}
+	return filepath.Join(environmentValue(t, environment, "GOMODCACHE"), filepath.FromSlash(escapedPath)+"@"+escapedVersion)
+}
+
+func environmentValue(t *testing.T, environment []string, wanted string) string {
+	t.Helper()
+	for _, entry := range environment {
+		key, value, found := strings.Cut(entry, "=")
+		if found && strings.EqualFold(key, wanted) {
+			return value
+		}
+	}
+	t.Fatalf("environment omits %s", wanted)
+	return ""
 }
 
 func isolatedGoEnvironment(t *testing.T, proxyRoot string) []string {
@@ -672,6 +909,27 @@ func assertModuleState(t *testing.T, root, modulePath string) {
 	if sum, err := os.ReadFile(filepath.Join(root, "go.sum")); err != nil || len(sum) == 0 {
 		t.Fatalf("go.sum = %q, %v", sum, err)
 	}
+}
+
+func assertDirectRequirement(t *testing.T, root, modulePath, version string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatalf("ReadFile(go.mod): %v", err)
+	}
+	parsed, err := modfile.Parse("go.mod", data, nil)
+	if err != nil {
+		t.Fatalf("Parse(go.mod): %v", err)
+	}
+	for _, requirement := range parsed.Require {
+		if requirement.Mod.Path == modulePath {
+			if requirement.Mod.Version != version || requirement.Indirect {
+				t.Fatalf("requirement %s = %s indirect %t, want %s direct", modulePath, requirement.Mod.Version, requirement.Indirect, version)
+			}
+			return
+		}
+	}
+	t.Fatalf("go.mod omits direct requirement %s@%s", modulePath, version)
 }
 
 func snapshotTree(t *testing.T, root string) map[string][]byte {
@@ -737,6 +995,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"## Module and file ownership",
 		"plystra new app",
 		"plystra new app --module github.com/acme/app",
+		"plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3",
 		"plystra plugin create records",
 		"plystra capability create records.read --plugin records --expose",
 		"plystra capability implement email.send/v1 --plugin mailer",

@@ -57,10 +57,11 @@ Updates one selected ordinary Go Module dependency, recomposes root plystra.yaml
 regenerates, tidies, and validates the complete Project in one rollback boundary.
 `
 	newUsage = `Usage:
-  plystra new <project-name> [--module <go-module-path>] [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]
+  plystra new <project-name> [--module <go-module-path>] [--template <go-module-query>] [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]
 
 Options:
   --module <go-module-path> Set the Go Module path; defaults to the project name.
+  --template <module-query> Add and compose one ordinary Plystra Project dependency.
   --plugin <name>           Create an initial root-level plugin.
   --git, --no-git           Initialize or omit a Git repository.
   --github-ci, --no-github-ci
@@ -158,6 +159,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			Parent:      workingDirectory,
 			ProjectName: options.projectName,
 			ModulePath:  options.modulePath,
+			Template:    options.template,
 			Plugin:      options.plugin,
 			Git:         choices.git,
 			GitHubCI:    choices.githubCI,
@@ -168,7 +170,11 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			_, _ = fmt.Fprintf(stderr, "create project: %v\n", err)
 			return 1
 		}
-		_, _ = fmt.Fprintf(stdout, "created %s in %s\n", result.ModulePath(), result.Path())
+		if options.template != "" {
+			_, _ = fmt.Fprintf(stdout, "created %s from %s in %s\n", result.ModulePath(), options.template, result.Path())
+		} else {
+			_, _ = fmt.Fprintf(stdout, "created %s in %s\n", result.ModulePath(), result.Path())
+		}
 		return 0
 	case "add":
 		if len(arguments) == 2 && isHelp(arguments[1]) {
@@ -383,6 +389,7 @@ func writeGenerationReport(writer io.Writer, heading string, configurationDrift 
 type newArguments struct {
 	projectName string
 	modulePath  string
+	template    string
 	plugin      string
 	git         booleanChoice
 	githubCI    booleanChoice
@@ -411,6 +418,7 @@ func parseNewArguments(arguments []string) (newArguments, bool) {
 	}
 	result := newArguments{projectName: arguments[1]}
 	moduleSet := false
+	templateSet := false
 	pluginSet := false
 	for index := 2; index < len(arguments); index++ {
 		switch arguments[index] {
@@ -421,6 +429,13 @@ func parseNewArguments(arguments []string) (newArguments, bool) {
 			moduleSet = true
 			index++
 			result.modulePath = arguments[index]
+		case "--template":
+			if templateSet || index+1 >= len(arguments) || arguments[index+1] == "" || strings.HasPrefix(arguments[index+1], "--") {
+				return newArguments{}, false
+			}
+			templateSet = true
+			index++
+			result.template = arguments[index]
 		case "--plugin":
 			if pluginSet || index+1 >= len(arguments) || arguments[index+1] == "" || strings.HasPrefix(arguments[index+1], "--") {
 				return newArguments{}, false
