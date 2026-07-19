@@ -23,7 +23,7 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:c816524710124301ca4fbdf7fba75229d6ee6fe53cd8960301b3f2e3482eedc0"
+      "sha256": "sha256:a856feaee16fe34b0ee3342a2804ed6e30bcd91c1b1f72932f65f26aeccf99a4"
     }
   ],
   "application_manifest": {
@@ -33,7 +33,7 @@
       "mode": "default",
       "root": {
         "path": "plystra.yaml",
-        "digest": "sha256:751041f141718d68179258343ab084a490e134bd9c6b8571702634a2133049c2"
+        "digest": "sha256:b183097574f85f18bbbda8533504fbb59077ced4a3560a599dfc1272525f593c"
       },
       "dependency_baselines": [
         {

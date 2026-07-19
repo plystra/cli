@@ -225,6 +225,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	if !bytes.Contains(directTree["plystra.yaml"], []byte("  aliases: {}")) {
 		t.Fatalf("project scaffold omits capabilities.aliases:\n%s", directTree["plystra.yaml"])
 	}
+	assertDefaultTransportScaffold(t, directTree["plystra.yaml"])
 	assertReadmeUsesAvailableCommands(t, directTree["README.md"])
 	assertCIUsesCurrentActions(t, directTree[".github/workflows/ci.yml"])
 	assertPlystraSkill(t, direct.Path(), modulePath)
@@ -333,6 +334,7 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
 	if err != nil {
 		t.Fatalf("ReadFile(plystra.yaml): %v", err)
 	}
+	assertDefaultTransportScaffold(t, configuration)
 	model, err := applicationmeta.Parse(configuration)
 	if err != nil {
 		t.Fatalf("Parse(plystra.yaml): %v", err)
@@ -340,6 +342,9 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
 	exposures := model.HTTPExposures()
 	if len(exposures) != 1 || exposures[0].ID().String() != "kernel.health/v1" {
 		t.Fatalf("composed HTTP exposures = %#v, want kernel.health/v1", exposures)
+	}
+	if transports := model.HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
+		t.Fatalf("composed HTTP transports = %#v, want Connect enabled and REST disabled", transports)
 	}
 	requirements := model.Requirements()
 	if len(requirements) != 2 || requirements[0].ID().String() != "email.send/v1" || requirements[1].ID().String() != "kernel.info/v1" {
@@ -918,6 +923,11 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 	for _, available := range [][]byte{[]byte("plystra add github.com/acme/platform@v1.0.0"), []byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("plystra generate --env"), []byte("PLYSTRA_ENV"), []byte("plystra generate --config"), []byte("PLYSTRA_CONFIG"), []byte("plystra check"), []byte("go test ./..."), []byte("go build ./..."), []byte("go vet ./...")} {
 		if !bytes.Contains(readme, available) {
 			t.Fatalf("generated README omits available workflow %q:\n%s", available, readme)
+		}
+	}
+	for _, transport := range [][]byte{[]byte("http.transports.connect: true"), []byte("http.transports.rest: false")} {
+		if !bytes.Contains(readme, transport) {
+			t.Fatalf("generated README omits explicit default transport %q:\n%s", transport, readme)
 		}
 	}
 	if !bytes.Contains(readme, []byte("--expose")) {
@@ -1564,6 +1574,14 @@ func assertGitInitialized(t *testing.T, root string) {
 	}
 }
 
+func assertDefaultTransportScaffold(t *testing.T, configuration []byte) {
+	t.Helper()
+	const expected = "  transports:\n    connect: true\n    rest: false\n"
+	if !bytes.Contains(configuration, []byte(expected)) {
+		t.Fatalf("Project configuration omits explicit default transports:\n%s", configuration)
+	}
+}
+
 func assertPlystraSkill(t *testing.T, root, modulePath string) {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "plystra", "SKILL.md"))
@@ -1623,7 +1641,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra capability expose records.read/v1 --config deploy/customer-a.yaml",
 		"regenerates with the same selection",
 		"http.transports is a closed current-Project object",
-		"connect defaults to true and rest",
+		"New Project scaffolds write both fields explicitly",
 		"null restores that field's",
 		"Dependency Project transport",
 		"http.cors is an optional closed current-Project object",

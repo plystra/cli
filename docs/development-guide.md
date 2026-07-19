@@ -582,8 +582,18 @@ Unknown fields and type mismatches remain errors. A dependency Project's own
 environment files are never inherited.
 
 `http.transports` is a closed current-Project object. It accepts only boolean
-`connect` and `rest` fields. When omitted, Connect defaults to enabled and REST
-defaults to disabled. In an environment overlay the two fields replace
+`connect` and `rest` fields. A new Project records the default selection
+explicitly in root `plystra.yaml`:
+
+```yaml
+http:
+  transports:
+    connect: true
+    rest: false
+```
+
+When omitted from another selected document, Connect still defaults to enabled
+and REST to disabled. In an environment overlay the two fields replace
 independently: an omitted field inherits the root choice, while `null` restores
 that field's schema default. A full-replacement file does not inherit root
 transport choices; omitted transport fields use the same defaults. Dependency
