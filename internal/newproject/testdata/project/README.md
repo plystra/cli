@@ -11,6 +11,7 @@ plystra plugin create records
 plystra capability create records.read --plugin records --expose
 plystra generate
 plystra generate --check
+plystra check
 go test ./...
 go vet ./...
 ```
@@ -24,6 +25,8 @@ The template's complete effective graph must contain only public Go Modules. Cre
 Every dependency Plystra Project in the template graph must be portable without a relative Go Module `replace`. Creation reports each remaining directive with stable `module@version/go.mod` provenance and leaves no target Project. Publish the referenced module versions and remove the relative replacements before publishing a corrected template.
 
 The staged generated application must be a fixed point. Creation installs generated output and then runs an immediate `plystra generate --check` equivalent. Dependency-composition drift or any changed, missing, unexpected, or obsolete generated path rejects the template and restores the transaction. The publisher must make generation deterministic, run `plystra generate` followed by `plystra generate --check` in a fresh Project directory, and publish a corrected module version.
+
+Template creation next runs the same read-only workflow as `plystra check`: it rechecks the selected configuration and generated output, then runs `go test -mod=readonly ./...` from the staged Project root. Any failure restores the creation transaction and leaves no target Project. The publisher must make that public check pass in a fresh Project directory before publishing a corrected version.
 
 Root `plystra.yaml` is the mandatory Project marker and shared default configuration. A sparse project-root `plystra.production.yaml` can be selected with `plystra generate --env production` and checked with the same selector; it is never created or loaded implicitly. To use one complete alternative current-Project document, run `plystra generate --config deploy/customer-a.yaml`. Root configuration is not merged beneath an explicitly selected file. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` supply the corresponding selector for automation; select exactly one mode.
 

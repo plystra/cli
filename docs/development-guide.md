@@ -79,6 +79,7 @@ package. Important entry points are:
 | `internal/applicationinput/` | bounded, immutable application inputs |
 | `internal/applicationresolve/` | complete provider and extension fixed point |
 | `internal/applicationgenerate/` | complete Plystra Project generation transactions |
+| `internal/projectcheck/` | shared read-only Project drift and Go-test workflow |
 | `internal/aliasresolution/` | final application-local Alias map |
 | `internal/generation*` | extension activation, execution, lowering, and ordering |
 | `internal/*gen/` | typed generated surfaces |
@@ -279,9 +280,14 @@ the generated output and immediately runs the equivalent of
 `plystra generate --check`. Dependency-composition drift or any changed,
 missing, unexpected, or obsolete generated path rejects the template and
 restores the transaction. The publisher must make generation deterministic,
-run `plystra generate` followed
-by `plystra generate --check` in a fresh Project directory, and publish a
-corrected module version.
+run `plystra generate` followed by `plystra generate --check` in a fresh
+Project directory, and publish a corrected module version.
+
+Creation next runs the same read-only workflow as `plystra check`. It verifies
+the selected configuration and generated output again, then runs
+`go test -mod=readonly ./...` from the staged Project root. A failure restores
+the creation transaction; the publisher must make the public check pass in a
+fresh Project directory before publishing a corrected version.
 
 The template's root configuration is also the source of its verified local
 operational inputs. Typed values and Secret-reference placeholders declared
@@ -1109,6 +1115,20 @@ Clean check output resembles:
 ```text
 generated output is current for example.com/acme/orders in <absolute-path>/orders
 ```
+
+Run the initial Project-wide read-only check with the same selection:
+
+```powershell
+plystra check
+plystra check --env production
+plystra check --config deploy/customer-a.yaml
+```
+
+It verifies dependency-composition and generated-output currency before
+running `go test -mod=readonly ./...` from the Project root. The check never
+repairs YAML, generated output, or module metadata. Transport, JavaScript SDK,
+formatting, race, and release-era validation remain deferred to their later
+roadmap gates.
 
 Check mode is read-only. Drift reports one or more categories:
 
