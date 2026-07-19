@@ -53,7 +53,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	if !checked.Checked() || checked.Module().Path() != root || checked.Module().ModulePath() != "example.com/Acme/empty" {
 		t.Fatalf("checked result = %#v", checked)
 	}
-	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/wire-map.json"}; !reflect.DeepEqual(got, want) {
+	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("missing files = %v, want %v", got, want)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
@@ -92,6 +92,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	assertFileExists(t, root, "generated/go/assembly/invocations_gen.go")
 	assertFileExists(t, root, "generated/go/assembly/providers_gen.go")
 	assertFileExists(t, root, "generated/go/bootstrap/bootstrap_gen.go")
+	assertFileExists(t, root, "generated/proto/descriptor-set.pb")
 	assertFileExists(t, root, "generated/proto/wire-map.json")
 	if bootstrap := readFile(t, root, "generated/go/bootstrap/bootstrap_gen.go"); bytes.Contains(bootstrap, []byte("17s")) {
 		t.Fatalf("generated bootstrap embeds application-specific startup timeout:\n%s", bootstrap)
@@ -122,6 +123,48 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	})
 	if err != nil || !clean.Report().Clean() {
 		t.Fatalf("clean check = %#v, %v", clean.Report().Changes(), err)
+	}
+}
+
+func TestGenerateDetectsDescriptorEvidenceDriftWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeApplicationModule(t, root, "example.com/acme/descriptor-drift")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	environment := goEnvironment(nil)
+	options := applicationgenerate.Options{
+		Start:       root,
+		Environment: environment,
+		Validate:    func(_ context.Context, _ string) error { return nil },
+	}
+	if generated, err := applicationgenerate.Generate(t.Context(), options); err != nil || !generated.Report().Clean() {
+		t.Fatalf("initial Generate = %#v, %v", generated.Report().Changes(), err)
+	}
+	descriptorPath := filepath.Join(root, filepath.FromSlash("generated/proto/descriptor-set.pb"))
+	writeFile(t, descriptorPath, "manual descriptor drift")
+	changedBefore := snapshotTree(t, root)
+	checkOptions := options
+	checkOptions.Check = true
+	checkOptions.Validate = nil
+	changed, err := applicationgenerate.Generate(t.Context(), checkOptions)
+	if err != nil || !reflect.DeepEqual(changed.Report().Changed(), []string{"generated/proto/descriptor-set.pb"}) {
+		t.Fatalf("changed descriptor check = %#v, %v", changed.Report().Changes(), err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, changedBefore) {
+		t.Fatal("changed descriptor check mutated the Project")
+	}
+
+	if err := os.Remove(descriptorPath); err != nil {
+		t.Fatalf("Remove descriptor set: %v", err)
+	}
+	missingBefore := snapshotTree(t, root)
+	missing, err := applicationgenerate.Generate(t.Context(), checkOptions)
+	if err != nil || !reflect.DeepEqual(missing.Report().Missing(), []string{"generated/proto/descriptor-set.pb"}) {
+		t.Fatalf("missing descriptor check = %#v, %v", missing.Report().Changes(), err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, missingBefore) {
+		t.Fatal("missing descriptor check mutated the Project")
 	}
 }
 
@@ -1009,6 +1052,8 @@ func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
 			}
 			assertFileExists(t, root, "generated/sdk/javascript/src/operations/kernel/info/v1.ts")
 			assertFileMissing(t, root, "generated/sdk/javascript/src/operations/kernel/health/v1.ts")
+			assertFileExists(t, root, "generated/proto/plystra/generated/kernel/info/v1/capability.proto")
+			assertFileMissing(t, root, "generated/proto/plystra/generated/kernel/health/v1/capability.proto")
 
 			writeFile(t, selectedPath, test.changedData)
 			beforeCheck := snapshotTree(t, root)
@@ -1019,7 +1064,11 @@ func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Generate check after exposure change: %v", err)
 			}
-			if checked.Report().Clean() || !slicesContains(checked.Report().Changed(), "generated/manifest.json") {
+			if checked.Report().Clean() ||
+				!slicesContains(checked.Report().Changed(), "generated/manifest.json") ||
+				!slicesContains(checked.Report().Changed(), "generated/proto/descriptor-set.pb") ||
+				!slicesContains(checked.Report().Missing(), "generated/proto/plystra/generated/kernel/health/v1/capability.proto") ||
+				!slicesContains(checked.Report().Obsolete(), "generated/proto/plystra/generated/kernel/info/v1/capability.proto") {
 				t.Fatalf("exposure change report = %#v", checked.Report().Changes())
 			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, beforeCheck) {
@@ -1039,6 +1088,8 @@ func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
 			}
 			assertFileExists(t, root, "generated/sdk/javascript/src/operations/kernel/health/v1.ts")
 			assertFileMissing(t, root, "generated/sdk/javascript/src/operations/kernel/info/v1.ts")
+			assertFileExists(t, root, "generated/proto/plystra/generated/kernel/health/v1/capability.proto")
+			assertFileMissing(t, root, "generated/proto/plystra/generated/kernel/info/v1/capability.proto")
 		})
 	}
 }
@@ -1630,6 +1681,9 @@ capabilities:
 		"generated/go/invocation/email/send/v1/invocation_gen.go",
 		"generated/go/providers/email/send/v1/provider_gen.go",
 		"generated/manifest.json",
+		"generated/proto/descriptor-set.pb",
+		"generated/proto/plystra/generated/email/send/v1/capability.proto",
+		"generated/proto/plystra/generated/mail/deliver/v1/capability.proto",
 		"generated/sdk/javascript/package.json",
 		"generated/sdk/javascript/src/operations/email/send/v1.ts",
 		"generated/sdk/javascript/src/operations/mail/deliver/v1.ts",
@@ -1659,6 +1713,7 @@ capabilities:
 	for _, obsolete := range []string{
 		"generated/go/adapters/http/mail/deliver/v1/handler_gen.go",
 		"generated/go/clients/mail/deliver/v1/client_gen.go",
+		"generated/proto/plystra/generated/mail/deliver/v1/capability.proto",
 		"generated/sdk/javascript/src/operations/mail/deliver/v1.ts",
 	} {
 		assertFileMissing(t, root, obsolete)

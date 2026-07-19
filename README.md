@@ -36,9 +36,16 @@ canonical target's messages and enums and never receive separate ledger
 entries. The ownership manifest records the exact ledger digest, and
 generation rejects a missing, manually changed, corrupt, or inconsistent prior
 ledger instead of guessing. Never edit or delete this file; restore its exact
-last committed content before regenerating. Emission of `.proto` source,
-descriptor sets, and Connect runtime bindings remains deferred to later
-transport work. Before wire-map reconciliation, the normalized Protobuf model
+last committed content before regenerating. Generation also emits one
+deterministic `.proto` schema for each selected canonical Connect Capability,
+one service-only Alias schema that imports the canonical messages, and a
+self-contained `generated/proto/descriptor-set.pb` containing any required
+well-known descriptors. A Project without a selected Connect surface retains a
+valid empty descriptor set. These schema and descriptor files are CLI-owned,
+exclude Provider, Plugin, Go Module, configuration, and Secret data, and are
+checked for drift with the rest of `generated/`; never edit them manually.
+Connect runtime bindings remain deferred to later transport work. Before
+wire-map reconciliation, the normalized Protobuf model
 rejects two canonical fields in the same request or response when they derive
 the same ProtoJSON name or generated enum type. The diagnostic names the
 Capability, message direction, both authored field names, and the colliding

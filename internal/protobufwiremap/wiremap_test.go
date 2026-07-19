@@ -104,6 +104,50 @@ errors: []
 	}
 }
 
+func TestActiveCapabilitiesExposeTypedDefensiveProjection(t *testing.T) {
+	t.Parallel()
+
+	model := wireModel(t, true, wireTarget(t, `id: delivery.route/v1
+request:
+  mode: {type: string, enum: [fast, slow]}
+  route_id: {type: string}
+response:
+  accepted: {type: boolean}
+`))
+	wireMap, err := Build(model, nil, false, "")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	active := wireMap.ActiveCapabilities()
+	if len(active) != 1 || active[0].ID() != "delivery.route/v1" || active[0].ContractDigest() == "" {
+		t.Fatalf("ActiveCapabilities = %#v", active)
+	}
+	request := active[0].Request()
+	if request.Name() != "DeliveryRouteV1Request" || len(request.Fields()) != 2 || len(request.Enums()) != 1 {
+		t.Fatalf("Request = %#v", request)
+	}
+	fields := request.Fields()
+	enums := request.Enums()
+	members := enums[0].Members()
+	canonical := members[0].CanonicalJSON()
+	reservedNumbers := request.ReservedNumbers()
+	active[0] = CapabilityProjection{}
+	fields[0] = FieldProjection{}
+	enums[0] = EnumProjection{}
+	members[0] = EnumValueProjection{}
+	if len(canonical) != 0 {
+		canonical[0] = 'x'
+	}
+	reservedNumbers = append(reservedNumbers, 99)
+	if len(reservedNumbers) != 1 {
+		t.Fatalf("mutated reservation copy = %v", reservedNumbers)
+	}
+	fresh := wireMap.ActiveCapabilities()[0]
+	if fresh.ID() != "delivery.route/v1" || fresh.Request().Fields()[0].CanonicalName() != "mode" || fresh.Request().Enums()[0].Members()[0].Name() == "" || len(fresh.Request().ReservedNumbers()) != 0 {
+		t.Fatal("ActiveCapabilities exposed mutable projection storage")
+	}
+}
+
 func TestBuildAllocatesAndPreservesCanonicalEnumHistory(t *testing.T) {
 	t.Parallel()
 

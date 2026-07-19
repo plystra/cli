@@ -55,6 +55,7 @@ var (
 type Map struct {
 	canonicalJSON    []byte
 	activeJSON       []byte
+	active           []CapabilityProjection
 	digest           string
 	activeDigest     string
 	projectionDigest string
@@ -63,7 +64,7 @@ type Map struct {
 
 // Valid reports whether Build produced the map.
 func (m Map) Valid() bool {
-	return m.prepared && len(m.canonicalJSON) != 0 && len(m.activeJSON) != 0 && validDigest(m.digest) && validDigest(m.activeDigest) && validDigest(m.projectionDigest)
+	return m.prepared && len(m.canonicalJSON) != 0 && len(m.activeJSON) != 0 && m.active != nil && validDigest(m.digest) && validDigest(m.activeDigest) && validDigest(m.projectionDigest)
 }
 
 // CanonicalJSON returns defensive canonical committed history bytes.
@@ -81,6 +82,153 @@ func (m Map) ActiveDigest() string { return m.activeDigest }
 // ProjectionDigest identifies the exact normalized current Protobuf model
 // against which this map was reconciled. It is intentionally not serialized.
 func (m Map) ProjectionDigest() string { return m.projectionDigest }
+
+// CapabilityProjection is one active canonical Capability's validated wire
+// assignments. It contains no Provider, Plugin, Module, or runtime identity.
+type CapabilityProjection struct {
+	id             string
+	contractDigest string
+	request        MessageProjection
+	response       MessageProjection
+}
+
+// ID returns the exact canonical Capability ID.
+func (p CapabilityProjection) ID() string { return p.id }
+
+// ContractDigest returns the complete normalized canonical contract digest.
+func (p CapabilityProjection) ContractDigest() string { return p.contractDigest }
+
+// Request returns the canonical request-message projection.
+func (p CapabilityProjection) Request() MessageProjection { return cloneMessageProjection(p.request) }
+
+// Response returns the canonical response-message projection.
+func (p CapabilityProjection) Response() MessageProjection { return cloneMessageProjection(p.response) }
+
+// MessageProjection is one active canonical message plus permanent field and
+// enum reservations retained from earlier projections.
+type MessageProjection struct {
+	name            string
+	fields          []FieldProjection
+	enums           []EnumProjection
+	reservedNumbers []int
+	reservedNames   []string
+}
+
+// Name returns the unqualified generated message name.
+func (p MessageProjection) Name() string { return p.name }
+
+// Fields returns canonical-name-sorted active field assignments.
+func (p MessageProjection) Fields() []FieldProjection {
+	return append([]FieldProjection(nil), p.fields...)
+}
+
+// Enums returns canonical-field-name-sorted active enum assignments.
+func (p MessageProjection) Enums() []EnumProjection {
+	result := make([]EnumProjection, len(p.enums))
+	for index, value := range p.enums {
+		result[index] = cloneEnumProjection(value)
+	}
+	return result
+}
+
+// ReservedNumbers returns ascending permanently reserved field numbers.
+func (p MessageProjection) ReservedNumbers() []int {
+	return append([]int(nil), p.reservedNumbers...)
+}
+
+// ReservedNames returns lexically sorted permanently reserved field names.
+func (p MessageProjection) ReservedNames() []string {
+	return append([]string(nil), p.reservedNames...)
+}
+
+// FieldProjection binds one canonical field to its stable Protobuf identity.
+type FieldProjection struct {
+	canonicalName string
+	name          string
+	number        int
+}
+
+// CanonicalName returns the exact canonical field name.
+func (p FieldProjection) CanonicalName() string { return p.canonicalName }
+
+// Name returns the stable generated Protobuf field name.
+func (p FieldProjection) Name() string { return p.name }
+
+// Number returns the stable positive Protobuf field number.
+func (p FieldProjection) Number() int { return p.number }
+
+// EnumProjection is one active generated enum and its stable wire history.
+type EnumProjection struct {
+	canonicalField  string
+	identity        string
+	kind            sdkmodel.Kind
+	sentinel        EnumValueProjection
+	members         []EnumValueProjection
+	reservedNumbers []int
+	reservedNames   []string
+}
+
+// CanonicalField returns the exact canonical field that owns this enum.
+func (p EnumProjection) CanonicalField() string { return p.canonicalField }
+
+// Identity returns the fully qualified generated enum identity.
+func (p EnumProjection) Identity() string { return p.identity }
+
+// Kind returns the canonical scalar kind represented by the enum.
+func (p EnumProjection) Kind() sdkmodel.Kind { return p.kind }
+
+// Sentinel returns the generated numeric-zero unspecified value.
+func (p EnumProjection) Sentinel() EnumValueProjection {
+	return cloneEnumValueProjection(p.sentinel)
+}
+
+// Members returns stable positive enum-member assignments.
+func (p EnumProjection) Members() []EnumValueProjection {
+	result := make([]EnumValueProjection, len(p.members))
+	for index, value := range p.members {
+		result[index] = cloneEnumValueProjection(value)
+	}
+	return result
+}
+
+// ReservedNumbers returns ascending permanently reserved enum numbers.
+func (p EnumProjection) ReservedNumbers() []int {
+	return append([]int(nil), p.reservedNumbers...)
+}
+
+// ReservedNames returns lexically sorted permanently reserved enum names.
+func (p EnumProjection) ReservedNames() []string {
+	return append([]string(nil), p.reservedNames...)
+}
+
+// EnumValueProjection is one generated enum name and number. CanonicalJSON is
+// present for canonical members and absent for the generated sentinel.
+type EnumValueProjection struct {
+	canonical []byte
+	name      string
+	number    int
+}
+
+// CanonicalJSON returns the exact normalized canonical scalar value.
+func (p EnumValueProjection) CanonicalJSON() []byte {
+	return append([]byte(nil), p.canonical...)
+}
+
+// Name returns the generated enum value name.
+func (p EnumValueProjection) Name() string { return p.name }
+
+// Number returns the stable enum numeric value.
+func (p EnumValueProjection) Number() int { return p.number }
+
+// ActiveCapabilities returns exact-ID-sorted active wire projections with
+// defensive storage. Inactive Capability history remains only in CanonicalJSON.
+func (m Map) ActiveCapabilities() []CapabilityProjection {
+	result := make([]CapabilityProjection, len(m.active))
+	for index, capability := range m.active {
+		result[index] = cloneCapabilityProjection(capability)
+	}
+	return result
+}
 
 type document struct {
 	ProjectionSchema string                `json:"projection_schema"`
@@ -220,11 +368,120 @@ func Build(model protobufmodel.Model, previous []byte, previousExists bool, prev
 	return Map{
 		canonicalJSON:    canonical,
 		activeJSON:       active,
+		active:           activeProjections(current),
 		digest:           digest(canonical),
 		activeDigest:     digest(active),
 		projectionDigest: model.Digest(),
 		prepared:         true,
 	}, nil
+}
+
+func activeProjections(value document) []CapabilityProjection {
+	identifiers := make([]string, 0, len(value.Capabilities))
+	for identifier, capability := range value.Capabilities {
+		if capability.Active {
+			identifiers = append(identifiers, identifier)
+		}
+	}
+	sort.Strings(identifiers)
+	result := make([]CapabilityProjection, len(identifiers))
+	for index, identifier := range identifiers {
+		capability := value.Capabilities[identifier]
+		result[index] = CapabilityProjection{
+			id:             identifier,
+			contractDigest: capability.CanonicalContractDigest,
+			request:        projectMessage(capability.Request),
+			response:       projectMessage(capability.Response),
+		}
+	}
+	return result
+}
+
+func projectMessage(value message) MessageProjection {
+	fieldNames := make([]string, 0, len(value.Fields))
+	for canonicalName := range value.Fields {
+		fieldNames = append(fieldNames, canonicalName)
+	}
+	sort.Strings(fieldNames)
+	fields := make([]FieldProjection, len(fieldNames))
+	for index, canonicalName := range fieldNames {
+		assignment := value.Fields[canonicalName]
+		fields[index] = FieldProjection{canonicalName: canonicalName, name: assignment.Name, number: assignment.Number}
+	}
+	enumNames := make([]string, 0, len(value.Enums))
+	for canonicalField, assignment := range value.Enums {
+		if assignment.Active {
+			enumNames = append(enumNames, canonicalField)
+		}
+	}
+	sort.Strings(enumNames)
+	enums := make([]EnumProjection, len(enumNames))
+	for index, canonicalField := range enumNames {
+		assignment := value.Enums[canonicalField]
+		members := make([]EnumValueProjection, len(assignment.Members))
+		for memberIndex, member := range assignment.Members {
+			members[memberIndex] = EnumValueProjection{canonical: append([]byte(nil), member.Canonical...), name: member.Name, number: member.Number}
+		}
+		enums[index] = EnumProjection{
+			canonicalField:  canonicalField,
+			identity:        assignment.Identity,
+			kind:            assignment.Kind,
+			sentinel:        EnumValueProjection{name: assignment.Sentinel.Name, number: assignment.Sentinel.Number},
+			members:         members,
+			reservedNumbers: append([]int(nil), assignment.ReservedNumbers...),
+			reservedNames:   append([]string(nil), assignment.ReservedNames...),
+		}
+	}
+	return MessageProjection{
+		name:            value.Message,
+		fields:          fields,
+		enums:           enums,
+		reservedNumbers: append([]int(nil), value.ReservedNumbers...),
+		reservedNames:   append([]string(nil), value.ReservedNames...),
+	}
+}
+
+func cloneCapabilityProjection(value CapabilityProjection) CapabilityProjection {
+	return CapabilityProjection{
+		id:             value.id,
+		contractDigest: value.contractDigest,
+		request:        cloneMessageProjection(value.request),
+		response:       cloneMessageProjection(value.response),
+	}
+}
+
+func cloneMessageProjection(value MessageProjection) MessageProjection {
+	result := MessageProjection{
+		name:            value.name,
+		fields:          append([]FieldProjection(nil), value.fields...),
+		reservedNumbers: append([]int(nil), value.reservedNumbers...),
+		reservedNames:   append([]string(nil), value.reservedNames...),
+		enums:           make([]EnumProjection, len(value.enums)),
+	}
+	for index, enum := range value.enums {
+		result.enums[index] = cloneEnumProjection(enum)
+	}
+	return result
+}
+
+func cloneEnumProjection(value EnumProjection) EnumProjection {
+	result := EnumProjection{
+		canonicalField:  value.canonicalField,
+		identity:        value.identity,
+		kind:            value.kind,
+		sentinel:        cloneEnumValueProjection(value.sentinel),
+		members:         make([]EnumValueProjection, len(value.members)),
+		reservedNumbers: append([]int(nil), value.reservedNumbers...),
+		reservedNames:   append([]string(nil), value.reservedNames...),
+	}
+	for index, member := range value.members {
+		result.members[index] = cloneEnumValueProjection(member)
+	}
+	return result
+}
+
+func cloneEnumValueProjection(value EnumValueProjection) EnumValueProjection {
+	return EnumValueProjection{canonical: append([]byte(nil), value.canonical...), name: value.name, number: value.number}
 }
 
 func decode(data []byte) (document, error) {

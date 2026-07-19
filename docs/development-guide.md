@@ -378,6 +378,9 @@ orders/
     .plystra-manifest.json                CLI ownership manifest
     manifest.json                         resolved application manifest
     proto/
+      descriptor-set.pb                   self-contained descriptor evidence
+      plystra/generated/.../capability.proto
+                                          canonical and Alias schemas
       wire-map.json                       committed Protobuf wire history
     docs/
     go/
@@ -414,9 +417,19 @@ compatible reactivation. An application Alias reuses the canonical target
 messages and enums and therefore has no separate ledger entry. Commit this
 CLI-owned file with the rest of generated output, but never edit or delete it.
 If generation reports ledger drift, restore the exact last committed copy
-before rerunning `plystra generate`. The current ledger does not emit `.proto`
-files, descriptor sets, or Connect runtime bindings; those remain deferred to
-later transport gates.
+before rerunning `plystra generate`.
+
+For every canonical Capability on the selected Connect surface, generation
+emits one deterministic
+`generated/proto/plystra/generated/.../capability.proto` schema. An Alias emits
+a service-only schema that imports and reuses its canonical target messages.
+`generated/proto/descriptor-set.pb` is the deterministic self-contained binary
+descriptor graph, including required well-known descriptors. When no Connect
+surface is selected, the descriptor set remains present as a valid empty set.
+The schemas and descriptor set contain no Provider, Plugin, Go Module,
+configuration, or Secret data. They are CLI-owned evidence: never edit them,
+and use `plystra generate --check` to detect missing or modified files. Connect
+runtime bindings remain deferred to a later transport gate.
 
 Protobuf-derived names must also be unique within each request and response.
 For example, `foo1` and `foo_1` both become the ProtoJSON name `foo1`, while

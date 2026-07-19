@@ -131,6 +131,8 @@ A typical Plystra Project evolves into this layout:
       .plystra-manifest.json
       manifest.json
       proto/
+        descriptor-set.pb
+        plystra/generated/.../capability.proto
         wire-map.json
       docs/
       go/
@@ -162,9 +164,17 @@ existing assignments; removed member names and numbers remain permanently
 reserved, and enum history becomes inactive when the field stops using it. An
 application Alias reuses its canonical target messages and enums and never owns
 a separate ledger entry. Never edit or delete the ledger. If it drifts, recover
-the exact previously generated content before running plystra generate. The
-current ledger does not emit .proto source, descriptor sets, or Connect runtime
-bindings; those remain later transport work.
+the exact previously generated content before running plystra generate.
+
+Generation emits one deterministic .proto schema for every canonical
+Capability on the selected Connect surface. An Alias emits a service-only
+schema that imports and reuses the canonical target messages.
+generated/proto/descriptor-set.pb is the self-contained deterministic binary
+descriptor graph, including required well-known descriptors. With no selected
+Connect surface it remains present as a valid empty descriptor set. These files
+contain no Provider, Plugin, Go Module, configuration, or Secret data. They are
+CLI-owned; never edit them, and use plystra generate --check to detect drift.
+Connect runtime bindings remain later transport work.
 
 Protobuf-derived names must be unique within each request and response. For
 example, foo1 and foo_1 both derive the ProtoJSON name foo1, while enum fields
@@ -959,6 +969,9 @@ build and distribution boundary for every Plystra module.
   generated/proto/wire-map.json. Never edit or delete it to force new field
   or enum-member numbers; generation rejects missing, modified, corrupt, reused,
   or inconsistent history instead of guessing.
+- Protobuf schema or descriptor drift: never patch generated .proto files or
+  generated/proto/descriptor-set.pb. Restore or regenerate the complete
+  CLI-owned output, then rerun plystra generate --check.
 - Protobuf naming collision: rename one of the two canonical fields named by
   the diagnostic in the authored capability.yaml. ProtoJSON collapses names
   such as foo1 and foo_1, and generated enum initialisms can collapse names such

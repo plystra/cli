@@ -70,6 +70,7 @@ func TestRunAddComposesDependencyProjectAndPreservesUnselectedConfiguration(t *t
 		"generated/go/clients/kernel/health/v1/client_gen.go",
 		"generated/go/invocation/kernel/health/v1/invocation_gen.go",
 		"generated/manifest.json",
+		"generated/proto/descriptor-set.pb",
 		"generated/proto/wire-map.json",
 	} {
 		assertCommandFile(t, root, generated)

@@ -1,12 +1,12 @@
-github.com/plystra/kernel v0.0.0-20260718010024-34af10315d98 h1:5XqVhj0PgMCtMsk+6gO23BBtTPrJg6ZAo41VFqpEwTM=
-github.com/plystra/kernel v0.0.0-20260718010024-34af10315d98/go.mod h1:9NpMvVkhP9tR1tqfzIDJQ1Qbe3oj9+CtDnJpLabOqZc=
-github.com/plystra/kernel v0.0.0-20260718131432-4d96243c06fc h1:yVbP4iuUdmQm/AWWyXHwSoNECsMPtMQSX9Z5DAtBcgk=
-github.com/plystra/kernel v0.0.0-20260718131432-4d96243c06fc/go.mod h1:9NpMvVkhP9tR1tqfzIDJQ1Qbe3oj9+CtDnJpLabOqZc=
+github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
+github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/plystra/kernel v0.0.0-20260718150757-3f63ed6bc604 h1:4jen0NW2T88YbdxXV4O8lrx8AuojNTUd/smsEcXOJQk=
 github.com/plystra/kernel v0.0.0-20260718150757-3f63ed6bc604/go.mod h1:9NpMvVkhP9tR1tqfzIDJQ1Qbe3oj9+CtDnJpLabOqZc=
 go.yaml.in/yaml/v3 v3.0.4 h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=
 go.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=
 golang.org/x/mod v0.38.0 h1:MECBjubtXD7yj4HrhIUcywNaGeNVUdfVnxmPajOk4yk=
 golang.org/x/mod v0.38.0/go.mod h1:V6Xz0pq8TQ3dGqVQ1FVHuelZpAL0uNhSkk9ogYP3c40=
+google.golang.org/protobuf v1.36.11 h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBNVE=
+google.golang.org/protobuf v1.36.11/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=

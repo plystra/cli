@@ -30,6 +30,10 @@
       "sha256": "sha256:0662cbcb455c918268d4bc20e52f494bbf89d454491ad84e0ea3f642f167afc0"
     },
     {
+      "path": "generated/proto/descriptor-set.pb",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
       "path": "generated/proto/wire-map.json",
       "sha256": "sha256:e563b91c26485ad548360d3b61bd79104cd76b2ef4771c41e6fbda4660bb525f"
     }
