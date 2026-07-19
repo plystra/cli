@@ -1607,6 +1607,17 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 	for _, required := range []string{
 		"name: plystra",
 		"The current Go Module path is " + modulePath,
+		"## Choose the smallest workflow",
+		"### Operate a Project created from a template",
+		"The current CLI does not advertise any template as qualified",
+		"### Change ordinary business behavior",
+		"ordinary path uses four public concepts",
+		"Never import the other concrete Plugin package",
+		"### Select one environment",
+		"Use --config only when the task",
+		"one complete replacement document; it is an advanced",
+		"## Detailed task reference",
+		"Read only the section that matches the current task",
 		"## Module and file ownership",
 		"plystra new app",
 		"plystra new app --module github.com/acme/app",
@@ -1701,8 +1712,13 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 			t.Fatalf("Plystra skill contains forbidden %q guidance:\n%s", forbidden, data)
 		}
 	}
+	for _, unavailable := range []string{"plystra dev", "plystra build"} {
+		if strings.Contains(lower, unavailable) {
+			t.Fatalf("Plystra skill advertises unavailable command %q:\n%s", unavailable, data)
+		}
+	}
 	metadata, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "plystra", "agents", "openai.yaml"))
-	if err != nil || !bytes.Contains(metadata, []byte("Use $plystra")) || !bytes.Contains(metadata, []byte("module, Plugin, or Capability")) {
+	if err != nil || !bytes.Contains(metadata, []byte("Use $plystra")) || !bytes.Contains(metadata, []byte("Go Module, Plugin, Capability, or plystra.yaml")) {
 		t.Fatalf("Plystra skill metadata = %q, %v", metadata, err)
 	}
 }

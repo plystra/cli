@@ -1,9 +1,76 @@
 package newproject
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestGeneratedSkillUsesProgressiveDisclosure(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "example.com/acme/application"
+	text := fmt.Sprintf(skillTemplate, modulePath)
+	if err := validateGeneratedSkill([]byte(text), modulePath); err != nil {
+		t.Fatalf("validateGeneratedSkill() rejected template: %v", err)
+	}
+
+	workflowStart := strings.Index(text, "## Choose the smallest workflow")
+	detailStart := strings.Index(text, "## Detailed task reference")
+	moduleReference := strings.Index(text, "## Start from the module boundary")
+	if workflowStart < 0 || detailStart <= workflowStart || moduleReference <= detailStart {
+		t.Fatalf("generated skill section order = workflow %d, detail %d, module reference %d", workflowStart, detailStart, moduleReference)
+	}
+}
+
+func TestValidateSkillProgressiveDisclosureRejectsAdvancedConceptsInOrdinaryPath(t *testing.T) {
+	t.Parallel()
+
+	base := fmt.Sprintf(skillTemplate, "example.com/acme/application")
+	const boundary = "## Detailed task reference"
+	for _, concept := range []string{
+		"Provider candidates",
+		"Capability Aliases",
+		"Generation Extensions",
+		"fixed-point resolution",
+		"template provenance",
+		"wire-map allocation",
+		"Protobuf projection",
+		"ConnectRPC transport",
+		"release evidence",
+		"Kernel assembly",
+	} {
+		concept := concept
+		t.Run(concept, func(t *testing.T) {
+			t.Parallel()
+			text := strings.Replace(base, boundary, concept+"\n\n"+boundary, 1)
+			if err := validateSkillProgressiveDisclosure(text); err == nil {
+				t.Fatalf("validateSkillProgressiveDisclosure() accepted %q before boundary", concept)
+			}
+		})
+	}
+}
+
+func TestValidateSkillProgressiveDisclosureKeepsTemplateWorkflowConceptFree(t *testing.T) {
+	t.Parallel()
+
+	base := fmt.Sprintf(skillTemplate, "example.com/acme/application")
+	const boundary = "### Change ordinary business behavior"
+	text := strings.Replace(base, boundary, "Inspect each Capability Provider.\n\n"+boundary, 1)
+	if err := validateSkillProgressiveDisclosure(text); err == nil {
+		t.Fatal("validateSkillProgressiveDisclosure() accepted architecture concepts in the template workflow")
+	}
+}
+
+func TestValidateSkillProgressiveDisclosureRequiresOrderedBoundary(t *testing.T) {
+	t.Parallel()
+
+	text := fmt.Sprintf(skillTemplate, "example.com/acme/application")
+	text = strings.Replace(text, "## Detailed task reference", "## Complete reference", 1)
+	if err := validateSkillProgressiveDisclosure(text); err == nil {
+		t.Fatal("validateSkillProgressiveDisclosure() accepted a missing detail boundary")
+	}
+}
 
 func TestValidateSkillProcessGuidanceAllowsGoModuleReferences(t *testing.T) {
 	t.Parallel()

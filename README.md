@@ -266,11 +266,17 @@ initialization creates an empty repository on branch `main`; requested CI emits
 `.github/workflows/ci.yml`; requested skills emit a complete, validated
 Plystra-specific `SKILL.md` and agent metadata rather than generic advice or
 TODO placeholders. The skill embeds the created module path and provides
-operational module layout, Plugin and Capability authoring, configuration,
-provider selection, cross-Plugin generated-client use, Alias, HTTP, JavaScript,
-runtime, validation, and troubleshooting workflows. It contains no Git,
-branch, commit, or push instructions. `plystra new --help` documents the
-complete creation contract.
+an immediate task-oriented route for operating a template-created Project and
+another for ordinary development through only Go Module, Plugin, Capability,
+and `plystra.yaml`. It presents environment selection on that ordinary path,
+identifies complete `--config` replacement as advanced, and places resolution,
+generation, wire-history, and other mechanism-heavy guidance after an explicit
+detailed-reference boundary. The complete reference still covers operational
+module layout, Plugin and Capability authoring, configuration, provider
+selection, cross-Plugin generated-client use, Alias, HTTP, JavaScript, runtime,
+validation, and troubleshooting workflows. It contains no Git, branch, commit,
+or push instructions. `plystra new --help` documents the complete creation
+contract.
 
 Successful template creation reports the selected query:
 
