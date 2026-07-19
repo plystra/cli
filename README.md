@@ -210,6 +210,12 @@ then runs `go test -mod=readonly ./...`. A failure remains inside the creation
 transaction and leaves no target Project. The publisher must make that public
 check pass in a fresh Project directory before publishing a corrected version.
 
+The staged Project must also build every Go package with
+`go build -mod=readonly ./...`. Build failure rejects the template inside the
+same transaction and reports publisher-owned remediation. This package build
+does not claim the later `plystra build` executable and `dist/` contract, which
+remain deferred with startup and health qualification.
+
 Typed operational values and Secret-reference placeholders declared by the
 template's root configuration are materialized in the new root `plystra.yaml`
 through that same dependency composition. Creation validates them against the
@@ -249,10 +255,11 @@ Successful template creation reports the selected query:
 created github.com/acme/my-app from github.com/acme/platform@v1.2.3 in <absolute-path>/my-app
 ```
 
-This ordinary template-dependency workflow is implemented. The separate
-qualified-template contract for automatic build, startup, health verification,
-and clean shutdown is not yet implemented and no template is advertised as
-qualified by this CLI version.
+This ordinary template-dependency workflow now includes automatic read-only Go
+package tests and builds. The complete qualified-template contract still needs
+the public `plystra build` executable and `dist/` workflow, isolated startup,
+health verification, and clean shutdown. No template is advertised as qualified
+by this CLI version.
 
 ## Transaction safety
 

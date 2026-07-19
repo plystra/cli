@@ -74,7 +74,8 @@ Interactive creation asks for each unspecified choice. Non-interactive creation
 must specify one flag from every choice pair.
 
 Template dependencies must be public, portable, and generation-stable. Creation
-rejects the staged Project unless an immediate plystra generate --check succeeds.
+rejects the staged Project unless immediate generation checking, Project checks,
+and a read-only Go package build all succeed.
 `
 	generateUsage = `Usage:
   plystra generate [--check] [--env <environment>|--config <yaml-path>]
