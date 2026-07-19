@@ -273,6 +273,82 @@ func TestResolveRequiresSelectedEnvironmentOverlay(t *testing.T) {
 	}
 }
 
+func TestResolveRejectsSelectedExposureWithoutHTTPTransport(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name      string
+		rootData  string
+		path      string
+		exposeKey string
+		selected  string
+		configure func(*applicationresolve.Options)
+	}{
+		{
+			name:      "default",
+			rootData:  "http: {transports: {connect: false, rest: false}, expose: [kernel.health/v1]}\n",
+			path:      "plystra.yaml",
+			exposeKey: "http.expose",
+		},
+		{
+			name:      "environment overlay",
+			rootData:  "{}\n",
+			path:      "plystra.production.yaml",
+			exposeKey: "http.expose.add",
+			selected:  "http: {transports: {connect: false, rest: false}, expose: {add: [kernel.health/v1]}}\n",
+			configure: func(options *applicationresolve.Options) {
+				options.EnvironmentName = "production"
+			},
+		},
+		{
+			name:      "full replacement",
+			rootData:  "{}\n",
+			path:      "deploy/customer.yaml",
+			exposeKey: "http.expose",
+			selected:  "http: {transports: {connect: false, rest: false}, expose: [kernel.health/v1]}\n",
+			configure: func(options *applicationresolve.Options) {
+				options.ConfigurationPath = "deploy/customer.yaml"
+			},
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeModule(t, root, "example.com/no-http-transport/"+strings.ReplaceAll(test.name, " ", "-"))
+			writeFile(t, filepath.Join(root, "plystra.yaml"), test.rootData)
+			if test.path != "plystra.yaml" {
+				writeFile(t, filepath.Join(root, filepath.FromSlash(test.path)), test.selected)
+			}
+			before := snapshotTree(t, root)
+			options := applicationresolve.Options{
+				Start:       root,
+				Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+			}
+			if test.configure != nil {
+				test.configure(&options)
+			}
+
+			result, err := applicationresolve.Resolve(t.Context(), options)
+			if !errors.Is(err, applicationmeta.ErrHTTPTransportSelection) || result.Module().Path() != "" {
+				t.Fatalf("Resolve = %#v, %v", result, err)
+			}
+			for _, want := range []string{
+				"http.expose is nonempty",
+				"http.transports.connect and http.transports.rest are both false",
+				`kernel.health/v1 at ` + test.path + ` ` + test.exposeKey + `["kernel.health/v1"]`,
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("Resolve error %q does not contain %q", err, want)
+				}
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("Resolve mutated rejected Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
 func TestResolveClosesLocalRequirementsThroughDependencyProvidersAndAliases(t *testing.T) {
 	t.Parallel()
 
