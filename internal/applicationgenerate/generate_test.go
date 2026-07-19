@@ -940,6 +940,109 @@ func TestGenerateSelectedHTTPTransportsCauseApplicationModelDrift(t *testing.T) 
 	}
 }
 
+func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		rootData     string
+		selectedPath string
+		selectedData string
+		changedData  string
+		configure    func(*applicationgenerate.Options)
+	}{
+		{
+			name:         "default",
+			selectedPath: "plystra.yaml",
+			selectedData: "http: {expose: [kernel.info/v1]}\n",
+			changedData:  "http: {expose: [kernel.health/v1]}\n",
+		},
+		{
+			name:         "environment",
+			rootData:     "http: {expose: [kernel.info/v1]}\n",
+			selectedPath: "plystra.production.yaml",
+			selectedData: "{}\n",
+			changedData:  "http:\n  expose: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n",
+			configure: func(options *applicationgenerate.Options) {
+				options.EnvironmentName = "production"
+			},
+		},
+		{
+			name:         "full replacement",
+			rootData:     "http: {expose: [kernel.health/v1]}\n",
+			selectedPath: "deploy/customer-a.yaml",
+			selectedData: "http: {expose: [kernel.info/v1]}\n",
+			changedData:  "http: {expose: [kernel.health/v1]}\n",
+			configure: func(options *applicationgenerate.Options) {
+				options.ConfigurationPath = "deploy/customer-a.yaml"
+			},
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeApplicationModule(t, root, "example.com/acme/exposure-"+strings.ReplaceAll(test.name, " ", "-"))
+			rootData := test.rootData
+			if test.selectedPath == "plystra.yaml" {
+				rootData = test.selectedData
+			}
+			writeFile(t, filepath.Join(root, "plystra.yaml"), rootData)
+			selectedPath := filepath.Join(root, filepath.FromSlash(test.selectedPath))
+			if test.selectedPath != "plystra.yaml" {
+				writeFile(t, selectedPath, test.selectedData)
+			}
+			environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+			options := applicationgenerate.Options{
+				Start:       root,
+				Environment: environment,
+				Validate:    func(_ context.Context, _ string) error { return nil },
+			}
+			if test.configure != nil {
+				test.configure(&options)
+			}
+
+			generated, err := applicationgenerate.Generate(t.Context(), options)
+			if err != nil || !generated.Report().Clean() {
+				t.Fatalf("initial Generate = changes %#v, %v", generated.Report().Changes(), err)
+			}
+			initialProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+			if err != nil {
+				t.Fatalf("DecodeManifestProvenance(initial): %v", err)
+			}
+			assertFileExists(t, root, "generated/sdk/javascript/src/operations/kernel/info/v1.ts")
+			assertFileMissing(t, root, "generated/sdk/javascript/src/operations/kernel/health/v1.ts")
+
+			writeFile(t, selectedPath, test.changedData)
+			beforeCheck := snapshotTree(t, root)
+			checkOptions := options
+			checkOptions.Check = true
+			checkOptions.Validate = nil
+			checked, err := applicationgenerate.Generate(t.Context(), checkOptions)
+			if err != nil {
+				t.Fatalf("Generate check after exposure change: %v", err)
+			}
+			if checked.Report().Clean() || !slicesContains(checked.Report().Changed(), "generated/manifest.json") {
+				t.Fatalf("exposure change report = %#v", checked.Report().Changes())
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, beforeCheck) {
+				t.Fatal("exposure drift check mutated the Project")
+			}
+
+			updated, err := applicationgenerate.Generate(t.Context(), options)
+			if err != nil || !updated.Report().Clean() {
+				t.Fatalf("updated Generate = changes %#v, %v", updated.Report().Changes(), err)
+			}
+			updatedProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+			if err != nil {
+				t.Fatalf("DecodeManifestProvenance(updated): %v", err)
+			}
+			if updatedProvenance.ApplicationModelDigest() == initialProvenance.ApplicationModelDigest() {
+				t.Fatal("selected exposure change preserved application_model_digest")
+			}
+			assertFileExists(t, root, "generated/sdk/javascript/src/operations/kernel/health/v1.ts")
+			assertFileMissing(t, root, "generated/sdk/javascript/src/operations/kernel/info/v1.ts")
+		})
+	}
+}
+
 func TestGenerateRequiresConnectForSelectedJavaScriptSDK(t *testing.T) {
 	tests := []struct {
 		name         string
