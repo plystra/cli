@@ -59,6 +59,7 @@ replace github.com/plystra/kernel => %s
 		"  missing generated/go/assembly/providers_gen.go\n" +
 		"  missing generated/go/bootstrap/bootstrap_gen.go\n" +
 		"  missing generated/manifest.json\n" +
+		"  missing generated/proto/descriptor-set.pb\n" +
 		"  missing generated/proto/wire-map.json\n"
 	if stderr != wantMissing {
 		t.Fatalf("initial check stderr = %q, want %q", stderr, wantMissing)
@@ -79,6 +80,7 @@ replace github.com/plystra/kernel => %s
 		"generated/go/assembly/providers_gen.go",
 		"generated/go/bootstrap/bootstrap_gen.go",
 		"generated/manifest.json",
+		"generated/proto/descriptor-set.pb",
 		"generated/proto/wire-map.json",
 	} {
 		assertCommandFile(t, root, name)
@@ -696,6 +698,7 @@ func (*Plugin) Send(_ context.Context, _ contract.Request) (contract.Response, e
 		"generated/go/contracts/email/send/v1/contract_gen.go",
 		"generated/go/providers/email/send/v1/provider_gen.go",
 		"generated/manifest.json",
+		"generated/proto/descriptor-set.pb",
 		"generated/proto/wire-map.json",
 	} {
 		assertCommandFile(t, root, name)

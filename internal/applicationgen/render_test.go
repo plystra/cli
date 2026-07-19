@@ -72,6 +72,11 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		"generated/go/invocation/kernel/health/v1/invocation_gen.go",
 		"generated/go/providers/email/send/v1/provider_gen.go",
 		"generated/manifest.json",
+		"generated/proto/descriptor-set.pb",
+		"generated/proto/plystra/generated/compat/send/v1/capability.proto",
+		"generated/proto/plystra/generated/email/send/v1/capability.proto",
+		"generated/proto/plystra/generated/health/status/v1/capability.proto",
+		"generated/proto/plystra/generated/kernel/health/v1/capability.proto",
 		"generated/proto/wire-map.json",
 		"generated/sdk/javascript/.npmrc",
 		"generated/sdk/javascript/README.md",
@@ -193,6 +198,8 @@ func TestRenderRemovesAliasSurfacesWhenFinalMapChanges(t *testing.T) {
 		"generated/go/adapters/http/health/status/v1/handler_gen.go",
 		"generated/go/clients/compat/send/v1/client_gen.go",
 		"generated/go/clients/health/status/v1/client_gen.go",
+		"generated/proto/plystra/generated/compat/send/v1/capability.proto",
+		"generated/proto/plystra/generated/health/status/v1/capability.proto",
 		"generated/sdk/javascript/src/operations/compat/send/v1.ts",
 		"generated/sdk/javascript/src/operations/health/status/v1.ts",
 	}
@@ -218,7 +225,7 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render empty: %v", err)
 	}
-	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/wire-map.json"}) {
+	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}) {
 		t.Fatalf("empty output paths = %v", got)
 	}
 	wantManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), options.ManifestProvenance)

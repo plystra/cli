@@ -28,6 +28,7 @@ import (
 	"github.com/plystra/cli/internal/httpgen"
 	"github.com/plystra/cli/internal/invocationgen"
 	"github.com/plystra/cli/internal/javascriptgen"
+	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providergen"
 	"github.com/plystra/cli/internal/sdkmodel"
@@ -109,6 +110,14 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	if err := validateAssemblyClosure(options, context); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: %v", ErrRender, ErrResolution, err)
 	}
+	protobufProjection, err := ProtobufProjection(options.HTTPTransports, resolution)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf projection: %w", ErrRender, err)
+	}
+	descriptorEvidence, err := protobufdescriptor.Build(protobufProjection, options.ProtobufWireMap)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf descriptor evidence: %w", ErrRender, err)
+	}
 	plan, err := generationlowering.Lower(options.ModulePath, resolution.Contributions())
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: lower contributions: %w", ErrRender, err)
@@ -125,6 +134,11 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	if err := add(protobufwiremap.Path, options.ProtobufWireMap.CanonicalJSON()); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf wire map: %w", ErrRender, err)
+	}
+	for _, file := range descriptorEvidence.Files() {
+		if err := add(file.Path(), file.Data()); err != nil {
+			return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf descriptor evidence: %w", ErrRender, err)
+		}
 	}
 	configurationInputs := append([]configurationgen.Input(nil), options.Configurations...)
 	sort.Slice(configurationInputs, func(left, right int) bool {

@@ -193,6 +193,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 		"generated/go/assembly/providers_gen.go",
 		"generated/go/bootstrap/bootstrap_gen.go",
 		"generated/manifest.json",
+		"generated/proto/descriptor-set.pb",
 		"generated/proto/wire-map.json",
 		"go.mod",
 		"go.sum",
@@ -942,7 +943,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("Capability Aliases reuse their canonical target messages and enums"),
 		[]byte("derive the same ProtoJSON name or generated enum type"),
 		[]byte("rename one field in `capability.yaml`"),
-		[]byte("does not emit `.proto` source, descriptor sets"),
+		[]byte("generated/proto/descriptor-set.pb"),
+		[]byte("self-contained"),
+		[]byte("Connect runtime bindings remain later transport work"),
 	} {
 		if !bytes.Contains(readme, wireHistory) {
 			t.Fatalf("generated README omits Protobuf wire-history guidance %q:\n%s", wireHistory, readme)
@@ -1694,7 +1697,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"foo1 and foo_1 both derive the ProtoJSON name foo1",
 		"http_status and h_t_t_p_status both derive one HTTPStatusEnum type",
 		"Protobuf naming collision",
-		"does not emit .proto source, descriptor sets",
+		"generated/proto/descriptor-set.pb is the self-contained deterministic",
+		"Connect runtime bindings remain later transport work",
 		"configuration schema v4",
 		"Protobuf wire-map digest",
 		"environment, or explicit-config mode",

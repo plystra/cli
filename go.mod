@@ -7,3 +7,5 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/mod v0.38.0
 )
+
+require google.golang.org/protobuf v1.36.11
