@@ -213,7 +213,7 @@ func TestResolveRequiresExplicitChoiceForSeveralProviders(t *testing.T) {
 	if ambiguous.Providers()[0].PluginID() != "acme.email" {
 		t.Fatal("AmbiguousProviderError exposed mutable providers")
 	}
-	for _, detail := range []string{"capabilities.use[email.send/v1]", "acme.email", "zeta.email", "no priority", "discovery-order", "filesystem-order", "alphabetical fallback"} {
+	for _, detail := range []string{"plystra use email.send/v1 <plugin-id>", "capabilities.use[email.send/v1]", "acme.email", "zeta.email", "no priority", "discovery-order", "filesystem-order", "alphabetical fallback"} {
 		if !strings.Contains(firstErr.Error(), detail) {
 			t.Fatalf("ambiguity omits %q: %v", detail, firstErr)
 		}

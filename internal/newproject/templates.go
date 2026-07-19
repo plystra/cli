@@ -43,6 +43,8 @@ Mutating Plystra commands regenerate automatically. Add an ordinary Go Module de
 
 Root ` + "`plystra.yaml`" + ` is the mandatory Project marker and shared default configuration. A sparse project-root ` + "`plystra.production.yaml`" + ` can be selected with ` + "`plystra generate --env production`" + ` and checked with the same selector; it is never created or loaded implicitly. To use one complete alternative current-Project document, run ` + "`plystra generate --config deploy/customer-a.yaml`" + `. Root configuration is not merged beneath an explicitly selected file. ` + "`PLYSTRA_ENV`" + ` and ` + "`PLYSTRA_CONFIG`" + ` supply the corresponding selector for automation; select exactly one mode.
 
+When several compatible Plugins provide one required Capability, select one with ` + "`plystra use <capability-name>/vN <plugin-id>`" + `. Add ` + "`--env <environment>`" + ` to write only that sparse overlay or ` + "`--config <yaml-path>`" + ` to write only one complete replacement configuration; the command regenerates and validates with the same selection.
+
 Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 `
 
@@ -230,6 +232,22 @@ Resolve an inherited Provider conflict with one exact current-Project choice:
     capabilities:
       use:
         email.send/v1: acme.email.smtp
+
+Prefer the targeted public workflow for ordinary Provider selection:
+
+    plystra use email.send/v1 acme.email.smtp
+    plystra use email.send/v1 acme.email.production --env production
+    plystra use email.send/v1 acme.email.customer --config deploy/customer-a.yaml
+
+The default form writes root plystra.yaml. Environment mode writes only the
+selected sparse overlay, and full-replacement mode writes only the selected
+complete document. PLYSTRA_ENV and PLYSTRA_CONFIG select the same targets when
+no flag is present; an explicit selector overrides both ambient variables. The
+command preserves comments and unrelated values, regenerates with the same
+selection, and restores configuration, generated output, go.mod, and go.sum
+after any later failure. It rejects intrinsic Capabilities, Aliases, unknown or
+unrequired Capabilities, unknown Plugins, and Plugins that do not provide the
+exact contract.
 
 The current entry replaces inherited choices for email.send/v1, then normal
 Provider and exact contract validation still runs. Do not reorder dependencies,
@@ -811,8 +829,9 @@ build and distribution boundary for every Plystra module.
   compatible provider visible through a local Plugin or a dependency Plystra
   Project in the effective Go Module graph. Markerless dependencies are not
   scanned for Plugins.
-- Ambiguous provider: set plystra.yaml capabilities.use for the canonical ID.
-  Do not add priorities or rely on discovery order.
+- Ambiguous provider: run plystra use <capability-name>/vN <plugin-id> with the
+  same --env or --config selector used for the application. Do not add
+  priorities or rely on discovery order.
 - Incompatible contract: compare exact request, response, semantic errors,
   behavioral metadata, and extension metadata. Implement the visible contract
   or create a new version instead of weakening validation.

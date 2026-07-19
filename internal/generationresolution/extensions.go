@@ -278,6 +278,9 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 		}
 		selected := activation.Extensions()
 		if len(selected) == 0 {
+			if err := validateFinalProviderChoices(activation.ProviderResolution(), input.Candidates, input.Choices); err != nil {
+				return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w", ErrResolveExtensions, pass, err)
+			}
 			aliases, err := aliasresolution.Resolve(generationContext, []ExtensionOutput{})
 			if err != nil {
 				return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w: %w", ErrResolveExtensions, pass, ErrAliasResolution, err)
@@ -338,6 +341,9 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 				)
 			}
 			if added == 0 {
+				if err := validateFinalProviderChoices(activation.ProviderResolution(), input.Candidates, input.Choices); err != nil {
+					return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w", ErrResolveExtensions, pass, err)
+				}
 				contributions, err := resolveContributionGraph(outputs)
 				if err != nil {
 					return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w", ErrResolveExtensions, pass, err)
@@ -367,6 +373,56 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 		maximumPasses,
 		len(input.Capabilities),
 	)
+}
+
+// validateFinalProviderChoices rejects explicit choices that never became
+// applicable after the complete activation and Generation Extension closure.
+// Choices remain dormant during intermediate passes because a later derived
+// requirement may activate them, but no stale or invented choice may survive
+// the final application model.
+func validateFinalProviderChoices(resolution providerresolution.Result, candidates []providerresolution.Candidate, choices []providerresolution.Choice) error {
+	capabilities := resolution.Capabilities()
+	required := make(map[capabilityid.Identifier]struct{}, len(capabilities))
+	for _, capability := range capabilities {
+		required[capability.ID()] = struct{}{}
+	}
+	applicable := 0
+	for _, choice := range choices {
+		id, err := capabilityid.Parse(choice.Capability)
+		if err != nil {
+			// Invalid identifiers are retained by choicesForRequirements and have
+			// already failed the provider-resolution pass.
+			applicable++
+			continue
+		}
+		if _, exists := required[id]; exists {
+			applicable++
+		}
+	}
+	if applicable == len(choices) {
+		return nil
+	}
+	requirements := make([]providerresolution.Requirement, 0, len(capabilities))
+	for _, capability := range capabilities {
+		sources := capability.Sources()
+		if len(sources) == 0 {
+			sources = []string{"final application requirement " + capability.ID().String()}
+		}
+		for _, source := range sources {
+			requirements = append(requirements, providerresolution.Requirement{
+				Contract: capability.ContractJSON(),
+				Source:   source,
+			})
+		}
+	}
+	if _, err := providerresolution.Resolve(providerresolution.Input{
+		Requirements: requirements,
+		Candidates:   candidates,
+		Choices:      choices,
+	}); err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: dormant explicit Provider choice survived final requirement closure", ErrApplicationContext)
 }
 
 type pluginRequirementKey struct {
