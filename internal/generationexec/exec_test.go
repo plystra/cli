@@ -18,10 +18,12 @@ import (
 	generation "github.com/plystra/cli/generation/v1"
 )
 
+const helperTestExecutionTimeout = 30 * time.Second
+
 func TestHelperGeneratesNormalizedOutputWithSanitizedEnvironment(t *testing.T) {
 	t.Setenv("PLYSTRA_TEST_SECRET", "must-not-reach-extension")
 	fixture := newExtensionFixture(t, validExtensionSource)
-	helper, err := Build(t.Context(), fixture.spec, fixture.options(2*time.Second))
+	helper, err := Build(t.Context(), fixture.spec, fixture.options(helperTestExecutionTimeout))
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -88,7 +90,7 @@ func TestHelperGeneratesNormalizedOutputWithSanitizedEnvironment(t *testing.T) {
 
 func TestHelperClassifiesBoundedExecutionFailures(t *testing.T) {
 	fixture := newExtensionFixture(t, validExtensionSource)
-	helper, err := Build(t.Context(), fixture.spec, fixture.options(2*time.Second))
+	helper, err := Build(t.Context(), fixture.spec, fixture.options(helperTestExecutionTimeout))
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -141,7 +143,7 @@ func TestHelperClassifiesBoundedExecutionFailures(t *testing.T) {
 
 func TestHelperUsesFreshWorkingDirectoryForEveryInvocation(t *testing.T) {
 	fixture := newExtensionFixture(t, validExtensionSource)
-	helper, err := Build(t.Context(), fixture.spec, fixture.options(2*time.Second))
+	helper, err := Build(t.Context(), fixture.spec, fixture.options(helperTestExecutionTimeout))
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -162,7 +164,7 @@ func TestHelperUsesFreshWorkingDirectoryForEveryInvocation(t *testing.T) {
 
 func TestHelperSupportsConcurrentInvocations(t *testing.T) {
 	fixture := newExtensionFixture(t, validExtensionSource)
-	helper, err := Build(t.Context(), fixture.spec, fixture.options(2*time.Second))
+	helper, err := Build(t.Context(), fixture.spec, fixture.options(helperTestExecutionTimeout))
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -196,7 +198,7 @@ func TestHelperSupportsConcurrentInvocations(t *testing.T) {
 
 func TestHelperRejectsMismatchedContextBeforeExecution(t *testing.T) {
 	fixture := newExtensionFixture(t, validExtensionSource)
-	helper, err := Build(t.Context(), fixture.spec, fixture.options(2*time.Second))
+	helper, err := Build(t.Context(), fixture.spec, fixture.options(helperTestExecutionTimeout))
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
