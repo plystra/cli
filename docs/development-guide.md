@@ -599,10 +599,15 @@ that field's schema default. A full-replacement file does not inherit root
 transport choices; omitted transport fields use the same defaults. Dependency
 Project transport settings never participate in composition.
 
-At this implementation boundary, resolution validates and composes the closed
-selection. Connecting it to the generated application model, Connect output,
-and optional REST projection remains in the later transport gates; setting
-`rest: true` does not yet create a REST adapter.
+The selected transport values are build-affecting and participate in the
+generated application-model digest. A nonempty `http.expose` set requires at
+least one enabled transport. JavaScript SDK generation requires Connect, so a
+selected default, environment, or full-replacement model with JavaScript
+Capability or Alias surfaces and `connect: false` fails before output. The
+diagnostic identifies the selected configuration and every affected surface;
+enable `connect: true` in that current-Project selection or remove those
+surfaces. The real Connect and optional REST projections remain in later
+transport gates; setting `rest: true` does not yet create a REST adapter.
 
 `http.cors` is an optional closed current-Project object. When present it
 requires one nonempty `allowed_origins` list and accepts only an optional

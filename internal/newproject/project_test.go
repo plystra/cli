@@ -930,6 +930,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 			t.Fatalf("generated README omits explicit default transport %q:\n%s", transport, readme)
 		}
 	}
+	if !bytes.Contains(readme, []byte("JavaScript SDK generation requires Connect")) {
+		t.Fatalf("generated README omits the JavaScript Connect requirement:\n%s", readme)
+	}
 	if !bytes.Contains(readme, []byte("--expose")) {
 		t.Fatalf("generated README omits exposure workflow:\n%s", readme)
 	}
@@ -1644,6 +1647,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"New Project scaffolds write both fields explicitly",
 		"null restores that field's",
 		"Dependency Project transport",
+		"official generated JavaScript SDK requires connect: true",
 		"http.cors is an optional closed current-Project object",
 		"requires one nonempty allowed_origins list",
 		"http.cors to null",

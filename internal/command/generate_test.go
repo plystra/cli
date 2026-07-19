@@ -112,6 +112,53 @@ replace github.com/plystra/kernel => %s
 	assertNoCommandTransactions(t, root)
 }
 
+func TestRunGenerateRequiresConnectForJavaScriptSDKWithoutMutation(t *testing.T) {
+	root := t.TempDir()
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	goMod := fmt.Sprintf(`module example.com/acme/javascript-connect
+
+go 1.26
+
+require (
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot))
+	writeCommandFile(t, filepath.Join(root, "go.mod"), goMod)
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("ReadFile(go.sum): %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {transports: {connect: false, rest: true}, expose: [kernel.health/v1]}\n")
+	before := commandTree(t, root)
+
+	for _, arguments := range [][]string{{"generate", "--check"}, {"generate"}} {
+		exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
+		if exitCode != 1 || stdout != "" {
+			t.Fatalf("%v = exit %d, stdout %q, stderr %q", arguments, exitCode, stdout, stderr)
+		}
+		for _, want := range []string{
+			"invalid JavaScript SDK transport selection",
+			`http.transports.connect is false for selected configuration "plystra.yaml"`,
+			"official generated JavaScript SDK requires Connect for Capability kernel.health/v1",
+			"enable http.transports.connect",
+		} {
+			if !strings.Contains(stderr, want) {
+				t.Fatalf("%v stderr %q does not contain %q", arguments, stderr, want)
+			}
+		}
+		if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+			t.Fatalf("%v mutated rejected Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+		}
+		assertNoCommandTransactions(t, root)
+	}
+}
+
 func TestRunGenerateCheckReportsDependencyCompositionDriftWithoutMutation(t *testing.T) {
 	root := t.TempDir()
 	applicationRoot := filepath.Join(root, "application")
