@@ -19,7 +19,7 @@ import (
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/generationresolution"
-	"github.com/plystra/cli/internal/protobufidentity"
+	"github.com/plystra/cli/internal/protobufmodel"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -394,7 +394,7 @@ type applicationModelDocument struct {
 	Configurations       []applicationModelConfiguration       `json:"configurations"`
 	Providers            []applicationModelProvider            `json:"providers"`
 	GenerationExtensions []applicationModelGenerationExtension `json:"generation_extensions"`
-	ProtobufSurfaces     []applicationModelProtobufSurface     `json:"protobuf_surfaces"`
+	ProtobufProjection   json.RawMessage                       `json:"protobuf_projection"`
 }
 
 type applicationModelHTTPTransports struct {
@@ -429,17 +429,6 @@ type applicationModelGenerationExtension struct {
 	Package    string   `json:"package"`
 	Namespaces []string `json:"namespaces"`
 	Digest     string   `json:"digest"`
-}
-
-type applicationModelProtobufSurface struct {
-	PublicID     string `json:"public_id"`
-	CanonicalID  string `json:"canonical_id"`
-	Package      string `json:"package"`
-	Service      string `json:"service"`
-	Method       string `json:"method"`
-	RequestType  string `json:"request_type"`
-	ResponseType string `json:"response_type"`
-	Procedure    string `json:"procedure"`
 }
 
 // ApplicationModelDigest returns the deterministic non-secret digest of the
@@ -514,43 +503,20 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		}
 	}
 	sort.Slice(extensions, func(left, right int) bool { return extensions[left].PluginID < extensions[right].PluginID })
-	protobufInputs := make([]protobufidentity.Surface, 0)
-	if options.HTTPTransports.Connect {
-		for _, capability := range context.Capabilities() {
-			if capability.Exposure().HTTP {
-				id := capability.ID().String()
-				protobufInputs = append(protobufInputs, protobufidentity.Surface{PublicID: id, CanonicalID: id})
-			}
-		}
-		for _, alias := range aliases.Aliases() {
-			if alias.Exposure().HTTP {
-				protobufInputs = append(protobufInputs, protobufidentity.Surface{
-					PublicID:    alias.ID().String(),
-					CanonicalID: alias.Target().String(),
-				})
-			}
-		}
+	protobufTargets := make([]protobufmodel.CanonicalTargetView, 0, len(context.Capabilities()))
+	for _, capability := range context.Capabilities() {
+		protobufTargets = append(protobufTargets, capability)
 	}
-	protobufProjection, err := protobufidentity.Build(protobufInputs)
+	protobufAliases := make([]protobufmodel.AliasView, 0, len(aliases.Aliases()))
+	for _, alias := range aliases.Aliases() {
+		protobufAliases = append(protobufAliases, alias)
+	}
+	protobufProjection, err := protobufmodel.Build(options.HTTPTransports.Connect, protobufTargets, protobufAliases)
 	if err != nil {
-		return "", fmt.Errorf("%w: Protobuf surface identities: %v", ErrResolution, err)
-	}
-	protobufIdentities := protobufProjection.Identities()
-	protobufSurfaces := make([]applicationModelProtobufSurface, len(protobufIdentities))
-	for index, identity := range protobufIdentities {
-		protobufSurfaces[index] = applicationModelProtobufSurface{
-			PublicID:     identity.PublicID(),
-			CanonicalID:  identity.CanonicalID(),
-			Package:      identity.Package(),
-			Service:      identity.Service(),
-			Method:       identity.Method(),
-			RequestType:  identity.RequestType(),
-			ResponseType: identity.ResponseType(),
-			Procedure:    identity.Procedure(),
-		}
+		return "", fmt.Errorf("%w: Protobuf projection: %w", ErrResolution, err)
 	}
 	document := applicationModelDocument{
-		Version:             3,
+		Version:             4,
 		ModulePath:          options.ModulePath,
 		JavaScriptPackage:   options.JavaScriptPackage,
 		KernelModuleVersion: options.KernelModuleVersion,
@@ -564,7 +530,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		Configurations:       configurationRecords,
 		Providers:            providerRecords,
 		GenerationExtensions: extensions,
-		ProtobufSurfaces:     protobufSurfaces,
+		ProtobufProjection:   json.RawMessage(protobufProjection.CanonicalJSON()),
 	}
 	canonical, err := json.Marshal(document)
 	if err != nil {

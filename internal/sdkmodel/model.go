@@ -153,8 +153,7 @@ type Model struct {
 // Operations returns canonical operations sorted by exact Capability ID.
 func (m Model) Operations() []Operation { return append([]Operation(nil), m.operations...) }
 
-// Aliases returns JavaScript-exposed application-local names sorted by exact
-// Alias ID.
+// Aliases returns selected application-local names sorted by exact Alias ID.
 func (m Model) Aliases() []Alias { return append([]Alias(nil), m.aliases...) }
 
 // CanonicalJSON returns a defensive copy of the deterministic SDK model.
@@ -216,11 +215,29 @@ func BuildCanonical(targets []CanonicalTargetView) (Model, error) {
 	return Build(targets, nil)
 }
 
+// BuildHTTP validates final HTTP-exposed canonical targets and Aliases and
+// returns the same provider-independent exact contract model used by transport
+// projections. Callers remain responsible for selecting an enabled transport.
+func BuildHTTP(targets []CanonicalTargetView, aliasViews []AliasView) (Model, error) {
+	return build(targets, aliasViews, httpSurface)
+}
+
 // Build validates final JavaScript-exposed canonical targets and the final
 // application Alias map. Aliases excluded from JavaScript are intentionally
 // absent from this SDK model. Included Aliases reuse their direct target's
 // request, response, errors, and contract digest.
 func Build(targets []CanonicalTargetView, aliasViews []AliasView) (Model, error) {
+	return build(targets, aliasViews, javaScriptSurface)
+}
+
+type selectedSurface uint8
+
+const (
+	javaScriptSurface selectedSurface = iota + 1
+	httpSurface
+)
+
+func build(targets []CanonicalTargetView, aliasViews []AliasView, surface selectedSurface) (Model, error) {
 	if len(targets)+len(aliasViews) > maximumOperations {
 		return Model{}, fmt.Errorf("%w: %d canonical and Alias operations exceeds maximum %d", ErrNormalize, len(targets)+len(aliasViews), maximumOperations)
 	}
@@ -228,7 +245,7 @@ func Build(targets []CanonicalTargetView, aliasViews []AliasView) (Model, error)
 	seen := make(map[generation.CapabilityID]int, len(targets))
 	targetsByID := make(map[generation.CapabilityID]normalizedTarget, len(targets))
 	for index, target := range targets {
-		operation, err := normalizeTarget(index, target)
+		operation, err := normalizeTarget(index, target, surface)
 		if err != nil {
 			return Model{}, err
 		}
@@ -245,7 +262,7 @@ func Build(targets []CanonicalTargetView, aliasViews []AliasView) (Model, error)
 	aliases := make([]Alias, 0, len(aliasViews))
 	seenAliases := make(map[generation.CapabilityID]int, len(aliasViews))
 	for index, view := range aliasViews {
-		alias, include, err := normalizeAlias(index, view, targetsByID)
+		alias, include, err := normalizeAlias(index, view, targetsByID, surface)
 		if err != nil {
 			return Model{}, err
 		}
@@ -303,7 +320,7 @@ type normalizedTarget struct {
 	exposure  generation.Exposure
 }
 
-func normalizeAlias(index int, view AliasView, targets map[generation.CapabilityID]normalizedTarget) (Alias, bool, error) {
+func normalizeAlias(index int, view AliasView, targets map[generation.CapabilityID]normalizedTarget, surface selectedSurface) (Alias, bool, error) {
 	field := fmt.Sprintf("aliases[%d]", index)
 	if view == nil {
 		return Alias{}, false, fmt.Errorf("%w: %w: %s view is absent", ErrNormalize, ErrAlias, field)
@@ -321,15 +338,15 @@ func normalizeAlias(index int, view AliasView, targets map[generation.Capability
 		return Alias{}, false, fmt.Errorf("%w: %w: %s %s deprecation metadata is invalid", ErrNormalize, ErrAlias, field, id)
 	}
 	exposure := view.Exposure()
-	if !exposure.JavaScript {
+	if !surface.selected(exposure) {
 		return Alias{}, false, nil
 	}
-	if !exposure.HTTP {
+	if surface == javaScriptSurface && !exposure.HTTP {
 		return Alias{}, false, fmt.Errorf("%w: %w: %s %s has JavaScript exposure without its required HTTP transport", ErrNormalize, ErrAlias, field, id)
 	}
 	target, exists := targets[targetID]
 	if !exists {
-		return Alias{}, false, fmt.Errorf("%w: %w: %s %s target %s is not a JavaScript-exposed canonical operation", ErrNormalize, ErrAlias, field, id, targetID)
+		return Alias{}, false, fmt.Errorf("%w: %w: %s %s target %s is not a %s-exposed canonical operation", ErrNormalize, ErrAlias, field, id, targetID, surface.label())
 	}
 	if _, collision := targets[id]; collision {
 		return Alias{}, false, fmt.Errorf("%w: %w: %s %s collides with a canonical Capability", ErrNormalize, ErrAlias, field, id)
@@ -362,7 +379,7 @@ func exposureSubset(alias, target generation.Exposure) bool {
 	return (!alias.Go || target.Go) && (!alias.HTTP || target.HTTP) && (!alias.JavaScript || target.JavaScript)
 }
 
-func normalizeTarget(index int, target CanonicalTargetView) (Operation, error) {
+func normalizeTarget(index int, target CanonicalTargetView, surface selectedSurface) (Operation, error) {
 	field := fmt.Sprintf("targets[%d]", index)
 	if target == nil {
 		return Operation{}, fmt.Errorf("%w: %w: %s view is absent", ErrNormalize, ErrTarget, field)
@@ -372,10 +389,10 @@ func normalizeTarget(index int, target CanonicalTargetView) (Operation, error) {
 		return Operation{}, fmt.Errorf("%w: %w: %s ID %q is not canonical: %v", ErrNormalize, ErrTarget, field, target.ID().String(), err)
 	}
 	exposure := target.Exposure()
-	if !exposure.JavaScript {
-		return Operation{}, fmt.Errorf("%w: %w: %s %s is not exposed to JavaScript", ErrNormalize, ErrTarget, field, id)
+	if !surface.selected(exposure) {
+		return Operation{}, fmt.Errorf("%w: %w: %s %s is not exposed to %s", ErrNormalize, ErrTarget, field, id, surface.label())
 	}
-	if !exposure.HTTP {
+	if surface == javaScriptSurface && !exposure.HTTP {
 		return Operation{}, fmt.Errorf("%w: %w: %s %s has JavaScript exposure without its required HTTP transport", ErrNormalize, ErrTarget, field, id)
 	}
 	contractJSON := target.ContractJSON()
@@ -413,6 +430,24 @@ func normalizeTarget(index int, target CanonicalTargetView) (Operation, error) {
 		response:       response,
 		errors:         append([]string(nil), contract.Errors...),
 	}, nil
+}
+
+func (s selectedSurface) selected(exposure generation.Exposure) bool {
+	switch s {
+	case javaScriptSurface:
+		return exposure.JavaScript
+	case httpSurface:
+		return exposure.HTTP
+	default:
+		return false
+	}
+}
+
+func (s selectedSurface) label() string {
+	if s == httpSurface {
+		return "HTTP"
+	}
+	return "JavaScript"
 }
 
 func normalizeFields(path string, values map[string]canonicalField) ([]Field, error) {

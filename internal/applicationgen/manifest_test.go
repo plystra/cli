@@ -251,7 +251,7 @@ func TestApplicationModelDigestIncludesHTTPTransportsDeterministically(t *testin
 	}
 }
 
-func TestApplicationModelDigestPinsConnectProtobufSurfaceProjection(t *testing.T) {
+func TestApplicationModelDigestPinsNormalizedConnectProtobufProjection(t *testing.T) {
 	t.Parallel()
 
 	options := applicationgen.ApplicationModelOptions{
@@ -265,11 +265,66 @@ func TestApplicationModelDigestPinsConnectProtobufSurfaceProjection(t *testing.T
 	}
 	digest, err := applicationgen.ApplicationModelDigest(options)
 	if err != nil {
-		t.Fatalf("ApplicationModelDigest(Connect Protobuf surfaces): %v", err)
+		t.Fatalf("ApplicationModelDigest(Connect Protobuf projection): %v", err)
 	}
-	const expected = "sha256:e5c4942cb65d7ee7c5c9c876ed1a07e5e9674908ca008c4cb7c7d1f693cd99ad"
+	const expected = "sha256:d2829188d698462bf1fbbd9d0345aaecead348313c1322f0a4864d3d05b83b23"
 	if digest != expected {
-		t.Fatalf("Connect Protobuf surface application-model digest = %q; want %q", digest, expected)
+		t.Fatalf("Connect Protobuf projection application-model digest = %q; want %q", digest, expected)
+	}
+}
+
+func TestApplicationModelDigestNormalizesConnectContractFieldInput(t *testing.T) {
+	t.Parallel()
+
+	options := applicationgen.ApplicationModelOptions{
+		ModulePath:          applicationModulePath,
+		JavaScriptPackage:   applicationSDKPackage,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
+		HTTPTransports:      applicationmeta.HTTPTransports{Connect: true},
+		Providers:           selectedProviderInputs(),
+	}
+	options.Resolution = resolvedApplicationWithEmail(t, "", `id: email.send/v1
+request:
+  to: {type: string, required: true}
+  priority: {type: integer}
+response:
+  accepted: {type: boolean, required: true}
+errors: [invalid_recipient]
+`)
+	first, err := applicationgen.ApplicationModelDigest(options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(first contract): %v", err)
+	}
+	options.Resolution = resolvedApplicationWithEmail(t, "", `response:
+  accepted: {required: true, type: boolean}
+errors: [invalid_recipient]
+request:
+  priority: {type: integer}
+  to: {required: true, type: string}
+id: email.send/v1
+`)
+	reordered, err := applicationgen.ApplicationModelDigest(options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(reordered contract): %v", err)
+	}
+	if reordered != first {
+		t.Fatalf("contract declaration order changed digest: %q != %q", reordered, first)
+	}
+	options.Resolution = resolvedApplicationWithEmail(t, "", `id: email.send/v1
+request:
+  to: {type: string, required: true}
+  priority: {type: number}
+response:
+  accepted: {type: boolean, required: true}
+errors: [invalid_recipient]
+`)
+	changed, err := applicationgen.ApplicationModelDigest(options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(changed contract): %v", err)
+	}
+	if changed == first {
+		t.Fatal("Connect contract field change did not alter the application-model digest")
 	}
 }
 
