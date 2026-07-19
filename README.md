@@ -256,15 +256,22 @@ complete creation contract.
 Successful template creation reports the selected query:
 
 ```text
-created github.com/acme/my-app from github.com/acme/platform@v1.2.3 in <absolute-path>/my-app
+Created my-app from github.com/acme/platform@v1.2.3
+Configuration scaffolded
+Generated, checked, built, and locally verified
+
+Next:
+  cd my-app
+  plystra check
 ```
 
-This ordinary template-dependency workflow now includes automatic read-only Go
-package tests and builds plus isolated startup, intrinsic health verification,
-and clean shutdown. The complete qualified-template contract still needs the
-public `plystra build` executable and `dist/` workflow, applicable JavaScript SDK
-qualification, and concise Level 0 success output. No template is advertised as
-qualified by this CLI version.
+The concise output names the result and next action without exposing absolute
+paths, internal resolution detail, or an unavailable command. This ordinary
+template-dependency workflow includes automatic read-only Go package tests and
+builds plus isolated startup, intrinsic health verification, and clean shutdown.
+The complete qualified-template contract still needs public `plystra dev` and
+`plystra build` workflows plus applicable JavaScript SDK qualification. No
+template is advertised as qualified by this CLI version.
 
 ## Transaction safety
 

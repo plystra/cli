@@ -319,19 +319,29 @@ plystra new contracts --module example.com/acme/contracts --no-git --no-github-c
 plystra new orders --module example.com/acme/orders --plugin catalog --git --github-ci --skills
 ```
 
-Success reports the installed module and target. Template creation also names
-the selected query:
+Non-template creation reports the installed module and target:
 
 ```text
 created example.com/acme/orders in <absolute-path>/orders
-created example.com/acme/orders from example.com/acme/platform@v1.2.3 in <absolute-path>/orders
 ```
 
-The second form is template creation. It now proves read-only Go package tests
-and builds, isolated runtime startup, intrinsic health, and clean shutdown. The
-complete qualified-template acceptance suite still needs the public
-`plystra build` executable and `dist/` workflow, applicable JavaScript SDK
-qualification, and concise Level 0 success output. Do not describe a template as
+Template creation instead reports the Project result and immediate next action
+without an absolute path or internal resolution detail:
+
+```text
+Created orders from example.com/acme/platform@v1.2.3
+Configuration scaffolded
+Generated, checked, built, and locally verified
+
+Next:
+  cd orders
+  plystra check
+```
+
+The template form proves read-only Go package tests and builds, isolated runtime
+startup, intrinsic health, and clean shutdown. The complete qualified-template
+acceptance suite still needs public `plystra dev` and `plystra build` workflows
+plus applicable JavaScript SDK qualification. Do not describe a template as
 qualified until that complete automated suite exists.
 
 Every Plystra Project contains mandatory root `plystra.yaml` and is

@@ -317,7 +317,10 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
 		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
 	}
 	target := filepath.Join(parent, "my-app")
-	wantOutput := fmt.Sprintf("created example.com/acme/my-app from %s in %s\n", templateQuery, target)
+	wantOutput := fmt.Sprintf(
+		"Created my-app from %s\nConfiguration scaffolded\nGenerated, checked, built, and locally verified\n\nNext:\n  cd my-app\n  plystra check\n",
+		templateQuery,
+	)
 	if stdout.String() != wantOutput || stderr.Len() != 0 {
 		t.Fatalf("RunIn output = stdout %q, stderr %q", stdout.String(), stderr.String())
 	}
