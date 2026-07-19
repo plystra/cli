@@ -39,7 +39,7 @@ go test ./...
 go vet ./...
 ` + "```" + `
 
-Mutating Plystra commands regenerate automatically. Add an ordinary Go Module dependency with ` + "`plystra add github.com/acme/platform@v1.0.0`" + `, update it with ` + "`plystra update github.com/acme/platform@v1.1.0`" + `, and remove it with ` + "`plystra remove github.com/acme/platform`" + `. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate.
+Mutating Plystra commands regenerate automatically. Add an ordinary Go Module dependency with ` + "`plystra add github.com/acme/platform@v1.0.0`" + `, update it with ` + "`plystra update github.com/acme/platform@v1.1.0`" + `, and remove it with ` + "`plystra remove github.com/acme/platform`" + `. A Project created with ` + "`plystra new app --template github.com/acme/platform@v1.0.0`" + ` retains the selected template as the same kind of ordinary direct dependency: its root declarations compose into the application, but its source is not copied and it receives no resolution priority. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate.
 
 Root ` + "`plystra.yaml`" + ` is the mandatory Project marker and shared default configuration. A sparse project-root ` + "`plystra.production.yaml`" + ` can be selected with ` + "`plystra generate --env production`" + ` and checked with the same selector; it is never created or loaded implicitly. To use one complete alternative current-Project document, run ` + "`plystra generate --config deploy/customer-a.yaml`" + `. Root configuration is not merged beneath an explicitly selected file. ` + "`PLYSTRA_ENV`" + ` and ` + "`PLYSTRA_CONFIG`" + ` supply the corresponding selector for automation; select exactly one mode.
 
@@ -177,6 +177,18 @@ provider implementation apply them deliberately. Do not place migrations under
 generated.
 
 ## Compose dependency Project configuration
+
+Start a new Project from one ordinary Plystra Project dependency:
+
+    plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3
+
+The template value is a standard Go Module query. The selected module must have
+regular root plystra.yaml, remains a direct go.mod requirement, and has no
+special status after creation. The CLI composes only its root declarations and
+regenerates the staged application. It does not copy dependency files, mutate
+Module Cache source, create go.work, inherit dependency environment overlays,
+or give template origin Provider or configuration priority. A failure leaves no
+target Project.
 
 Add one ordinary Go Module dependency through the public transaction:
 
@@ -412,6 +424,10 @@ its initial Go Module path:
 Choose an independent standard Go Module path without changing the directory:
 
     plystra new app --module github.com/acme/app
+
+Start from an existing Plystra Project distributed as a Go Module dependency:
+
+    plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3
 
 Inside an existing Project, create a root-level Plugin:
 

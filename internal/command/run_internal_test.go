@@ -18,6 +18,7 @@ func TestParseNewArguments(t *testing.T) {
 	}{
 		{name: "project", arguments: []string{"new", "app"}, want: newArguments{projectName: "app"}, ok: true},
 		{name: "module", arguments: []string{"new", "app", "--module", "example.com/acme/app"}, want: newArguments{projectName: "app", modulePath: "example.com/acme/app"}, ok: true},
+		{name: "template", arguments: []string{"new", "app", "--template", "example.com/acme/platform@v1.2.3"}, want: newArguments{projectName: "app", template: "example.com/acme/platform@v1.2.3"}, ok: true},
 		{name: "plugin", arguments: []string{"new", "app", "--plugin", "account"}, want: newArguments{projectName: "app", plugin: "account"}, ok: true},
 		{name: "all choices enabled", arguments: []string{"new", "app", "--git", "--github-ci", "--skills"}, want: newArguments{projectName: "app", git: choiceYes, githubCI: choiceYes, skills: choiceYes}, ok: true},
 		{name: "all choices disabled", arguments: []string{"new", "app", "--no-skills", "--no-git", "--no-github-ci"}, want: newArguments{projectName: "app", git: choiceNo, githubCI: choiceNo, skills: choiceNo}, ok: true},
@@ -28,6 +29,9 @@ func TestParseNewArguments(t *testing.T) {
 		{name: "missing module", arguments: []string{"new", "app", "--module"}},
 		{name: "option as module", arguments: []string{"new", "app", "--module", "--library"}},
 		{name: "duplicate module", arguments: []string{"new", "app", "--module", "example.com/a", "--module", "example.com/b"}},
+		{name: "missing template", arguments: []string{"new", "app", "--template"}},
+		{name: "option as template", arguments: []string{"new", "app", "--template", "--library"}},
+		{name: "duplicate template", arguments: []string{"new", "app", "--template", "example.com/a", "--template", "example.com/b"}},
 		{name: "missing plugin", arguments: []string{"new", "app", "--plugin"}},
 		{name: "option as plugin", arguments: []string{"new", "app", "--plugin", "--library"}},
 		{name: "duplicate plugin", arguments: []string{"new", "app", "--plugin", "account", "--plugin", "profile"}},

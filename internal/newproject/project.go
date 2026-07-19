@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/plystra/cli/internal/applicationgen"
+	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/assemblygen"
@@ -20,9 +21,13 @@ import (
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/moduleargument"
+	"github.com/plystra/cli/internal/moduledependency"
+	"github.com/plystra/cli/internal/modulemutation"
 	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/plugininventory"
+	"github.com/plystra/cli/internal/projectlocate"
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -36,6 +41,9 @@ var (
 	ErrCreate = errors.New("create Plystra project")
 	// ErrGitInitialization reports a failed requested Git repository setup.
 	ErrGitInitialization = errors.New("initialize Git repository")
+	// ErrInvalidTemplate reports a resolved module that cannot serve as a
+	// Plystra Project template dependency.
+	ErrInvalidTemplate = errors.New("invalid Plystra Project template")
 )
 
 // Options contains the explicit inputs and process environment for creation.
@@ -43,6 +51,7 @@ type Options struct {
 	Parent      string
 	ProjectName string
 	ModulePath  string
+	Template    string
 	Plugin      string
 	Git         bool
 	GitHubCI    bool
@@ -77,6 +86,15 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		}
 	} else if err := module.CheckPath(modulePath); err != nil {
 		return Result{}, fmt.Errorf("%w: invalid explicit Go Module path %q: %v", ErrCreate, modulePath, err)
+	}
+	templateQuery := ""
+	templateModulePath := ""
+	if options.Template != "" {
+		var err error
+		templateQuery, templateModulePath, err = moduleargument.ParseQuery(options.Template)
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: template query: %w", ErrCreate, err)
+		}
 	}
 	if options.Plugin != "" {
 		if _, err := plugincreate.DeriveID(modulePath, options.Plugin); err != nil {
@@ -122,6 +140,11 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		} else if err := gocommand.Run(ctx, gocommand.Options{Command: goCommand, Directory: stagingRoot, Environment: environment}, "test", "./..."); err != nil {
 			return err
 		}
+		if templateQuery != "" {
+			if err := installTemplateDependency(ctx, stagingRoot, templateQuery, templateModulePath, goCommand, environment); err != nil {
+				return err
+			}
+		}
 		if err := verifyModule(stagingRoot, modulePath); err != nil {
 			return err
 		}
@@ -136,6 +159,47 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %w", ErrCreate, err)
 	}
 	return Result{modulePath: modulePath, path: target}, nil
+}
+
+func installTemplateDependency(ctx context.Context, root, query, modulePath, goCommand string, environment []string) error {
+	return modulemutation.Change(ctx, root, modulemutation.ChangeOptions{
+		GoCommand:          goCommand,
+		Environment:        environment,
+		Arguments:          []string{"get", query},
+		DirectRequirements: []string{modulePath},
+	}, func(mutate applicationgenerate.ModuleMutation) error {
+		project, err := projectlocate.Find(root)
+		if err != nil {
+			return fmt.Errorf("%w: locate staged Project: %w", ErrInvalidTemplate, err)
+		}
+		dependencies, err := moduledependency.Discover(ctx, project, moduledependency.Options{
+			GoCommand:   goCommand,
+			Environment: environment,
+		})
+		if err != nil {
+			return fmt.Errorf("%w: inspect resolved template %q: %w", ErrInvalidTemplate, query, err)
+		}
+		template, exists := dependencies.ByPath(modulePath)
+		if !exists {
+			return fmt.Errorf("%w: query %q did not select module %q in the effective Go Module graph", ErrInvalidTemplate, query, modulePath)
+		}
+		if !template.Direct() || template.Indirect() {
+			return fmt.Errorf("%w: resolved module %q was not recorded as an ordinary direct dependency", ErrInvalidTemplate, modulePath)
+		}
+		if !template.Project() {
+			return fmt.Errorf("%w: resolved module %q has no regular root plystra.yaml", ErrInvalidTemplate, modulePath)
+		}
+		if _, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
+			Start:            root,
+			GoCommand:        goCommand,
+			Environment:      environment,
+			MutateModule:     mutate,
+			RejectUnexpected: true,
+		}); err != nil {
+			return fmt.Errorf("generate Project from template dependency %q: %w", query, err)
+		}
+		return nil
+	})
 }
 
 func populate(ctx context.Context, root, modulePath, name string, githubCI, skills bool) error {
@@ -341,6 +405,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"## Module and file ownership",
 		"plystra new app",
 		"plystra new app --module github.com/acme/app",
+		"plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3",
 		"plystra plugin create records",
 		"plystra capability create records.read --plugin records --expose",
 		"plystra capability implement email.send/v1 --plugin mailer",

@@ -24,7 +24,7 @@ The public command surface currently implemented by the `plystra` binary is:
 ```text
 plystra help
 plystra version
-plystra new <project-name> [--module <go-module-path>] [options]
+plystra new <project-name> [--module <go-module-path>] [--template <go-module-query>] [options]
 plystra add <go-module-query>
 plystra remove <go-module-path>
 plystra update <go-module-query>
@@ -234,6 +234,7 @@ Actions CI, and include `.agents/skills/plystra/`. Enter accepts yes.
 ```powershell
 plystra new orders
 plystra new orders --module example.com/acme/orders
+plystra new orders --module example.com/acme/orders --template example.com/acme/platform@v1.2.3
 ```
 
 The positional value creates exactly `./orders/`. Without `--module`, the
@@ -243,19 +244,36 @@ be one safe lower-case ASCII kebab-case child component; absolute paths,
 traversal, separators, `.`, `..`, unsafe names, and existing targets fail
 before mutation. The old positional full-module-path syntax is not supported.
 
+`--template` accepts one standard Go Module query. Go resolves the query, the
+selected module must contain regular root `plystra.yaml`, and the new Project
+retains it as a direct `go.mod` requirement. The CLI composes that dependency
+Project's root declarations, regenerates the complete application, and validates
+the staged Project before installing the target directory. It does not clone a
+source repository, copy Plugin directories, inspect dependency environment
+overlays, modify Module Cache source, generate `go.work`, or assign the template
+special Provider or configuration precedence after creation.
+
 Automation must answer all three choices explicitly:
 
 ```powershell
 plystra new orders --module example.com/acme/orders --no-git --no-github-ci --skills
+plystra new orders --module example.com/acme/orders --template example.com/acme/platform@v1.2.3 --no-git --no-github-ci --skills
 plystra new contracts --module example.com/acme/contracts --no-git --no-github-ci --no-skills
 plystra new orders --module example.com/acme/orders --plugin catalog --git --github-ci --skills
 ```
 
-Success is reported as:
+Success reports the installed module and target. Template creation also names
+the selected query:
 
 ```text
 created example.com/acme/orders in <absolute-path>/orders
+created example.com/acme/orders from example.com/acme/platform@v1.2.3 in <absolute-path>/orders
 ```
+
+The second form is template creation. This implementation does not yet provide
+the later qualified-template acceptance suite that also proves build, isolated
+startup, intrinsic health, and clean shutdown. Do not describe a template as
+qualified until that complete automated suite exists.
 
 Every Plystra Project contains mandatory root `plystra.yaml` and is
 independently runnable. A new Project may validly contain zero local Plugins,
