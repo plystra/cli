@@ -23,6 +23,7 @@ import (
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/modulelocate"
+	"github.com/plystra/cli/internal/protobufwiremap"
 	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 )
@@ -251,6 +252,23 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		return preparedGeneration{}, err
 	}
 	httpTransports := resolved.Manifest().HTTPTransports()
+	protobufProjection, err := applicationgen.ProtobufProjection(httpTransports, resolved.Resolution())
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("build final Protobuf projection: %w", err)
+	}
+	previousWireMap, previousWireMapExists, err := generatedfiles.ReadOwnedFile(resolved.Module().Path(), protobufwiremap.Path, protobufwiremap.MaximumBytes)
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("read prior Protobuf wire history: %w", err)
+	}
+	wireMap, err := protobufwiremap.Build(
+		protobufProjection,
+		previousWireMap,
+		previousWireMapExists,
+		resolved.PreviousManifestProvenance().ProtobufWireMapDigest(),
+	)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
 	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
 		ModulePath:          resolved.Module().ModulePath(),
 		JavaScriptPackage:   javaScriptPackage,
@@ -260,6 +278,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		Configurations:      configurations,
 		Providers:           providers,
 		Resolution:          resolved.Resolution(),
+		ProtobufWireMap:     wireMap,
 	})
 	if err != nil {
 		return preparedGeneration{}, fmt.Errorf("digest final application model: %w", err)
@@ -277,6 +296,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		SelectedPath:           selection.Path(),
 		SelectedData:           selectedData,
 		Composition:            resolved.Composition(),
+		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: modelDigest,
 		Previous:               resolved.PreviousManifestProvenance(),
 	})
@@ -293,6 +313,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		ManifestProvenance:  provenance,
 		Configurations:      configurations,
 		Providers:           providers,
+		ProtobufWireMap:     wireMap,
 	}, resolved.Resolution())
 	if err != nil {
 		return preparedGeneration{}, err

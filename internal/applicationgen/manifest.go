@@ -20,11 +20,12 @@ import (
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/protobufmodel"
+	"github.com/plystra/cli/internal/protobufwiremap"
 	"go.yaml.in/yaml/v3"
 )
 
 const (
-	applicationManifestConfigurationVersion = 3
+	applicationManifestConfigurationVersion = 4
 	// ConfigurationModeDefault identifies the mandatory root plystra.yaml as
 	// the current-project document.
 	ConfigurationModeDefault = "default"
@@ -56,6 +57,7 @@ type applicationManifestConfiguration struct {
 	Overlay                *applicationManifestDocumentReference  `json:"overlay,omitempty"`
 	Selected               *applicationManifestDocumentReference  `json:"selected,omitempty"`
 	DependencyBaselines    []applicationManifestSelectionBaseline `json:"dependency_baselines"`
+	ProtobufWireMapDigest  string                                 `json:"protobuf_wire_map_digest"`
 	ApplicationModelDigest string                                 `json:"application_model_digest"`
 }
 
@@ -82,6 +84,7 @@ type ManifestProvenanceOptions struct {
 	SelectedPath           string
 	SelectedData           []byte
 	Composition            applicationmeta.Composition
+	ProtobufWireMapDigest  string
 	ApplicationModelDigest string
 	Previous               ManifestProvenance
 }
@@ -96,6 +99,7 @@ type ManifestProvenance struct {
 	selectedPath           string
 	selectedDigest         string
 	baselines              []manifestSelectionBaseline
+	protobufWireMapDigest  string
 	applicationModelDigest string
 }
 
@@ -155,6 +159,7 @@ func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenanc
 		selectedPath:           options.SelectedPath,
 		selectedDigest:         selectedDigest,
 		baselines:              baselines,
+		protobufWireMapDigest:  options.ProtobufWireMapDigest,
 		applicationModelDigest: options.ApplicationModelDigest,
 	}
 	if err := validateManifestProvenance(provenance); err != nil {
@@ -207,16 +212,20 @@ func (p ManifestProvenance) ApplicationModelDigest() string {
 	return p.applicationModelDigest
 }
 
+// ProtobufWireMapDigest returns the full committed historical wire-map digest.
+func (p ManifestProvenance) ProtobufWireMapDigest() string { return p.protobufWireMapDigest }
+
 // MatchesSelection reports whether this provenance owns the baseline for the
 // exact current-project selection.
 func (p ManifestProvenance) MatchesSelection(mode, selectedPath string) bool {
 	return p.mode == mode && p.selectedPath == selectedPath
 }
 
-func (p ManifestProvenance) matches(composition applicationmeta.Composition, applicationModelDigest string) bool {
+func (p ManifestProvenance) matches(composition applicationmeta.Composition, protobufWireMapDigest, applicationModelDigest string) bool {
 	baseline := p.DependencyBaseline()
 	return validateManifestProvenance(p) == nil && composition.Valid() &&
 		baseline.Digest() == composition.DependencyBaseline().Digest() &&
+		p.protobufWireMapDigest == protobufWireMapDigest &&
 		p.applicationModelDigest == applicationModelDigest
 }
 
@@ -263,6 +272,7 @@ func RenderManifest(aliasJSON []byte, provenance ManifestProvenance) ([]byte, er
 				Digest: provenance.rootDigest,
 			},
 			DependencyBaselines:    baselines,
+			ProtobufWireMapDigest:  provenance.protobufWireMapDigest,
 			ApplicationModelDigest: provenance.applicationModelDigest,
 		},
 	}
@@ -360,6 +370,7 @@ func DecodeManifestProvenance(data []byte) (ManifestProvenance, error) {
 		selectedPath:           selectedPath,
 		selectedDigest:         selectedDigest,
 		baselines:              baselines,
+		protobufWireMapDigest:  configuration.ProtobufWireMapDigest,
 		applicationModelDigest: configuration.ApplicationModelDigest,
 	}
 	if err := validateManifestProvenance(provenance); err != nil {
@@ -380,21 +391,23 @@ type ApplicationModelOptions struct {
 	Configurations      []configurationgen.Input
 	Providers           []assemblygen.ProviderInput
 	Resolution          generationresolution.ExtensionResult
+	ProtobufWireMap     protobufwiremap.Map
 }
 
 type applicationModelDocument struct {
-	Version              int                                   `json:"version"`
-	ModulePath           string                                `json:"module_path"`
-	JavaScriptPackage    string                                `json:"javascript_package"`
-	KernelModuleVersion  string                                `json:"kernel_module_version"`
-	KernelBuildIdentity  string                                `json:"kernel_build_identity"`
-	HTTPTransports       applicationModelHTTPTransports        `json:"http_transports"`
-	ContextDigest        string                                `json:"context_digest"`
-	AliasDigest          string                                `json:"alias_digest"`
-	Configurations       []applicationModelConfiguration       `json:"configurations"`
-	Providers            []applicationModelProvider            `json:"providers"`
-	GenerationExtensions []applicationModelGenerationExtension `json:"generation_extensions"`
-	ProtobufProjection   json.RawMessage                       `json:"protobuf_projection"`
+	Version                int                                   `json:"version"`
+	ModulePath             string                                `json:"module_path"`
+	JavaScriptPackage      string                                `json:"javascript_package"`
+	KernelModuleVersion    string                                `json:"kernel_module_version"`
+	KernelBuildIdentity    string                                `json:"kernel_build_identity"`
+	HTTPTransports         applicationModelHTTPTransports        `json:"http_transports"`
+	ContextDigest          string                                `json:"context_digest"`
+	AliasDigest            string                                `json:"alias_digest"`
+	Configurations         []applicationModelConfiguration       `json:"configurations"`
+	Providers              []applicationModelProvider            `json:"providers"`
+	GenerationExtensions   []applicationModelGenerationExtension `json:"generation_extensions"`
+	ProtobufProjection     json.RawMessage                       `json:"protobuf_projection"`
+	ProtobufWireProjection json.RawMessage                       `json:"protobuf_wire_projection"`
 }
 
 type applicationModelHTTPTransports struct {
@@ -503,20 +516,15 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		}
 	}
 	sort.Slice(extensions, func(left, right int) bool { return extensions[left].PluginID < extensions[right].PluginID })
-	protobufTargets := make([]protobufmodel.CanonicalTargetView, 0, len(context.Capabilities()))
-	for _, capability := range context.Capabilities() {
-		protobufTargets = append(protobufTargets, capability)
-	}
-	protobufAliases := make([]protobufmodel.AliasView, 0, len(aliases.Aliases()))
-	for _, alias := range aliases.Aliases() {
-		protobufAliases = append(protobufAliases, alias)
-	}
-	protobufProjection, err := protobufmodel.Build(options.HTTPTransports.Connect, protobufTargets, protobufAliases)
+	protobufProjection, err := ProtobufProjection(options.HTTPTransports, options.Resolution)
 	if err != nil {
 		return "", fmt.Errorf("%w: Protobuf projection: %w", ErrResolution, err)
 	}
+	if !options.ProtobufWireMap.Valid() || options.ProtobufWireMap.ProjectionDigest() != protobufProjection.Digest() {
+		return "", fmt.Errorf("%w: Protobuf wire map is absent or does not match the normalized projection", ErrResolution)
+	}
 	document := applicationModelDocument{
-		Version:             4,
+		Version:             5,
 		ModulePath:          options.ModulePath,
 		JavaScriptPackage:   options.JavaScriptPackage,
 		KernelModuleVersion: options.KernelModuleVersion,
@@ -525,12 +533,13 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 			Connect: options.HTTPTransports.Connect,
 			REST:    options.HTTPTransports.REST,
 		},
-		ContextDigest:        context.Digest(),
-		AliasDigest:          aliases.Digest(),
-		Configurations:       configurationRecords,
-		Providers:            providerRecords,
-		GenerationExtensions: extensions,
-		ProtobufProjection:   json.RawMessage(protobufProjection.CanonicalJSON()),
+		ContextDigest:          context.Digest(),
+		AliasDigest:            aliases.Digest(),
+		Configurations:         configurationRecords,
+		Providers:              providerRecords,
+		GenerationExtensions:   extensions,
+		ProtobufProjection:     json.RawMessage(protobufProjection.CanonicalJSON()),
+		ProtobufWireProjection: json.RawMessage(options.ProtobufWireMap.ActiveJSON()),
 	}
 	canonical, err := json.Marshal(document)
 	if err != nil {
@@ -538,6 +547,25 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 	}
 	sum := sha256.Sum256(canonical)
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+// ProtobufProjection returns the exact provider-independent transport model
+// used by both application digesting and historical wire allocation.
+func ProtobufProjection(transports applicationmeta.HTTPTransports, resolution generationresolution.ExtensionResult) (protobufmodel.Model, error) {
+	context := resolution.Context()
+	aliases := resolution.AliasResolution()
+	if !validContext(context) || !validAliases(aliases) {
+		return protobufmodel.Model{}, fmt.Errorf("%w: final resolution is absent or invalid", ErrResolution)
+	}
+	targets := make([]protobufmodel.CanonicalTargetView, 0, len(context.Capabilities()))
+	for _, capability := range context.Capabilities() {
+		targets = append(targets, capability)
+	}
+	aliasViews := make([]protobufmodel.AliasView, 0, len(aliases.Aliases()))
+	for _, alias := range aliases.Aliases() {
+		aliasViews = append(aliasViews, alias)
+	}
+	return protobufmodel.Build(transports.Connect, targets, aliasViews)
 }
 
 // ConfigurationDigest returns a deterministic semantic digest for one valid
@@ -638,6 +666,9 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 	}
 	if active != 1 {
 		return errors.New("dependency baseline history must contain the active selection exactly once")
+	}
+	if !validSHA256(provenance.protobufWireMapDigest) {
+		return errors.New("Protobuf wire-map digest must be a lower-case SHA-256 digest")
 	}
 	if !validSHA256(provenance.applicationModelDigest) {
 		return errors.New("application-model digest must be a lower-case SHA-256 digest")

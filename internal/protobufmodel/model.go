@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
+	"unicode/utf8"
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/protobufidentity"
@@ -24,9 +27,13 @@ var (
 	ErrAlias = errors.New("invalid Protobuf projection Alias")
 )
 
-// CanonicalTargetView is the exact resolved canonical surface required by the
-// Protobuf projection. generation.CapabilityView satisfies this interface.
-type CanonicalTargetView = sdkmodel.CanonicalTargetView
+// CanonicalTargetView is the exact resolved canonical surface and immutable
+// contract provenance required by the Protobuf projection.
+// generation.CapabilityView satisfies this interface.
+type CanonicalTargetView interface {
+	sdkmodel.CanonicalTargetView
+	Sources() []string
+}
 
 // AliasView is one final validated application-local Alias surface.
 type AliasView = sdkmodel.AliasView
@@ -37,6 +44,7 @@ type Operation struct {
 	id             generation.CapabilityID
 	identity       protobufidentity.Identity
 	contractDigest string
+	sources        []string
 	request        []sdkmodel.Field
 	response       []sdkmodel.Field
 	errors         []string
@@ -51,6 +59,9 @@ func (o Operation) ID() generation.CapabilityID { return o.id }
 // ContractDigest returns the digest of the complete normalized canonical
 // contract, including generation-affecting extension metadata.
 func (o Operation) ContractDigest() string { return o.contractDigest }
+
+// Sources returns deterministic provenance for the exact canonical contract.
+func (o Operation) Sources() []string { return append([]string(nil), o.sources...) }
 
 // Request returns request fields sorted by canonical field name.
 func (o Operation) Request() []sdkmodel.Field { return append([]sdkmodel.Field(nil), o.request...) }
@@ -133,6 +144,7 @@ type canonicalOperation struct {
 	ResponseType   string           `json:"response_type"`
 	Procedure      string           `json:"procedure"`
 	ContractDigest string           `json:"contract_digest"`
+	Sources        []string         `json:"sources"`
 	Request        []canonicalField `json:"request"`
 	Response       []canonicalField `json:"response"`
 	Errors         []string         `json:"errors"`
@@ -182,7 +194,11 @@ func Build(connect bool, targets []CanonicalTargetView, aliasViews []AliasView) 
 		}
 	}
 
-	contracts, err := sdkmodel.BuildHTTP(httpTargets, aliasViews)
+	sdkTargets := make([]sdkmodel.CanonicalTargetView, len(httpTargets))
+	for index, target := range httpTargets {
+		sdkTargets[index] = target
+	}
+	contracts, err := sdkmodel.BuildHTTP(sdkTargets, aliasViews)
 	if err != nil {
 		return Model{}, fmt.Errorf("%w: %w", ErrBuild, err)
 	}
@@ -212,10 +228,15 @@ func Build(connect bool, targets []CanonicalTargetView, aliasViews []AliasView) 
 		if !exists || identity.PublicID() != identity.CanonicalID() {
 			return Model{}, fmt.Errorf("%w: %w: canonical identity for %s is absent or inconsistent", ErrBuild, ErrTarget, operation.ID())
 		}
+		sources, err := targetSources(httpTargets, operation.ID())
+		if err != nil {
+			return Model{}, fmt.Errorf("%w: %w: canonical contract provenance for %s: %v", ErrBuild, ErrTarget, operation.ID(), err)
+		}
 		operations[index] = Operation{
 			id:             operation.ID(),
 			identity:       identity,
 			contractDigest: operation.ContractDigest(),
+			sources:        sources,
 			request:        operation.Request(),
 			response:       operation.Response(),
 			errors:         operation.Errors(),
@@ -257,6 +278,7 @@ func finalize(enabled bool, operations []Operation, aliases []Alias) (Model, err
 			ResponseType:   identity.ResponseType(),
 			Procedure:      identity.Procedure(),
 			ContractDigest: operation.contractDigest,
+			Sources:        append([]string(nil), operation.sources...),
 			Request:        canonicalFields(operation.request),
 			Response:       canonicalFields(operation.response),
 			Errors:         append([]string(nil), operation.errors...),
@@ -290,6 +312,30 @@ func finalize(enabled bool, operations []Operation, aliases []Alias) (Model, err
 		digest:        "sha256:" + hex.EncodeToString(sum[:]),
 		prepared:      true,
 	}, nil
+}
+
+func targetSources(targets []CanonicalTargetView, id generation.CapabilityID) ([]string, error) {
+	for _, target := range targets {
+		if target.ID() == id {
+			result := target.Sources()
+			if len(result) == 0 {
+				return nil, errors.New("at least one source is required")
+			}
+			for index, source := range result {
+				if source == "" || len(source) > 1024 || !utf8.ValidString(source) || strings.ContainsRune(source, '\x00') {
+					return nil, fmt.Errorf("sources[%d] is invalid", index)
+				}
+			}
+			sort.Strings(result)
+			for index := 1; index < len(result); index++ {
+				if result[index] == result[index-1] {
+					return nil, fmt.Errorf("sources duplicates %q", result[index])
+				}
+			}
+			return result, nil
+		}
+	}
+	return nil, errors.New("source view is absent")
 }
 
 func canonicalFields(fields []sdkmodel.Field) []canonicalField {

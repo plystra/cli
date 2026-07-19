@@ -21,6 +21,21 @@ The CLI owns:
 
 The CLI is the sole writer of final `generated/` source.
 
+`generated/proto/wire-map.json` is committed, CLI-owned compatibility history
+for canonical Capability request and response messages selected for Connect.
+Generation assigns the lowest permitted positive field number, preserves that
+assignment across declaration reordering, allocates new fields without
+renumbering existing fields, and permanently reserves both the name and number
+of every removed field. It retains inactive canonical histories when Connect
+or exposure is later disabled. Capability Aliases reuse their canonical
+target's messages and never receive separate ledger entries. The ownership
+manifest records the exact ledger digest, and generation rejects a missing,
+manually changed, corrupt, or inconsistent prior ledger instead of guessing.
+Never edit or delete this file; restore its exact last committed content before
+regenerating. Emission of `.proto` source, descriptor sets, enum-number
+history, and Connect runtime bindings remains deferred to later transport
+work.
+
 Capability inspection strictly parses the optional `extensions` mapping within the 1 MiB declaration boundary. The CLI preserves every valid lower-kebab namespace, including unknown namespaces, as immutable namespace-sorted canonical JSON-compatible metadata: object key order is normalized, scalar types and array order are preserved, and omitted and empty metadata are equivalent. Normalized extension metadata participates in exact contract equality, so providers cannot add, remove, or change generation-affecting behavior under one Capability ID; conflicts report the differing metadata paths and require a new version. Namespace interpretation remains a selected plugin generation-extension responsibility.
 
 ## Resolution and generation fixed point
@@ -85,7 +100,7 @@ Root `plystra.yaml` is the mandatory Project marker, shared current-Project laye
 
 The CLI indexes each visible plugin's strict Kernel configuration declaration and composes Plugin values only at declared typed field boundaries. It validates `timeouts.startup` as an optional positive Go duration, using `2m` when omitted; generated bootstrap reads the setting again from the bounded runtime document rather than embedding an application value. After the provider and generation fixed point stabilizes, the CLI validates exactly one object for every selected Plugin ID with the Kernel's non-resolving validator. Omitted objects normalize to `{}` so optional fields and defaults remain usable; missing required fields, unknown fields, invalid values or Secret-reference syntax, and configuration for an unselected plugin fail before rendering. Environment variables and files are never read during generation.
 
-Private values and Secret reference targets do not enter generation-extension context, generated source, SDKs, documentation, or diagnostics. `generated/manifest.json` configuration schema v3 records `default`, `environment`, or `explicit-config` mode; the selected environment and overlay reference when applicable; stable Project-relative paths; normalized semantic document digests; dependency-composition baseline history; and the final build-affecting application-model digest. Environment mode retains the root dependency baseline because the sparse overlay never owns dependency maintenance. Baseline records contain only deterministic path/digest/removal/source provenance; raw configuration, Secret reference targets, resolved Secrets, and machine-specific absolute paths are excluded. A separate private digest covers the validated selected plugin manifests and values only for concurrent-input detection during the generation transaction.
+Private values and Secret reference targets do not enter generation-extension context, generated source, SDKs, documentation, or diagnostics. `generated/manifest.json` configuration schema v4 records `default`, `environment`, or `explicit-config` mode; the selected environment and overlay reference when applicable; stable Project-relative paths; normalized semantic document digests; dependency-composition baseline history; the committed Protobuf wire-map digest; and the final build-affecting application-model digest. Environment mode retains the root dependency baseline because the sparse overlay never owns dependency maintenance. Baseline records contain only deterministic path/digest/removal/source provenance; raw configuration, Secret reference targets, resolved Secrets, and machine-specific absolute paths are excluded. A separate private digest covers the validated selected plugin manifests and values only for concurrent-input detection during the generation transaction.
 
 For every selected local plugin, generation derives its module-owned type and decoder under `generated/go/configuration/` from the validated `plugin.yaml` schema alone. Required fields and fields with defaults use direct Go values; omitted optional scalars use pointers, while optional objects and arrays preserve nil-versus-configured-empty behavior. The generated decoder calls Kernel `configuration.Decode` at runtime, constructs one typed object for the Plugin ID, and redacts formatting and serialization. Application values and Secret reference targets are never embedded in this source. Selected dependency plugins ship the same generated configuration boundary in their own Go Modules.
 

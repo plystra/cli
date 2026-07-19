@@ -193,6 +193,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 		"generated/go/assembly/providers_gen.go",
 		"generated/go/bootstrap/bootstrap_gen.go",
 		"generated/manifest.json",
+		"generated/proto/wire-map.json",
 		"go.mod",
 		"go.sum",
 		"plystra.yaml",
@@ -933,6 +934,16 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 	if !bytes.Contains(readme, []byte("JavaScript SDK generation requires Connect")) {
 		t.Fatalf("generated README omits the JavaScript Connect requirement:\n%s", readme)
 	}
+	for _, wireHistory := range [][]byte{
+		[]byte("generated/proto/wire-map.json"),
+		[]byte("permanently reserves removed field names and numbers"),
+		[]byte("Capability Aliases reuse their canonical target messages"),
+		[]byte("does not emit `.proto` source or descriptors"),
+	} {
+		if !bytes.Contains(readme, wireHistory) {
+			t.Fatalf("generated README omits Protobuf wire-history guidance %q:\n%s", wireHistory, readme)
+		}
+	}
 	if !bytes.Contains(readme, []byte("--expose")) {
 		t.Fatalf("generated README omits exposure workflow:\n%s", readme)
 	}
@@ -1657,7 +1668,13 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra generate --config deploy/customer-a.yaml",
 		"plystra generate --check --config deploy/customer-a.yaml",
 		"PLYSTRA_CONFIG supplies the same path",
-		"configuration schema v3",
+		"generated/proto/wire-map.json is durable CLI-owned compatibility history",
+		"permanently reserves removed field",
+		"names and numbers, and retains inactive canonical history",
+		"application Alias reuses its canonical target messages",
+		"does not emit .proto source or descriptors",
+		"configuration schema v4",
+		"Protobuf wire-map digest",
 		"environment, or explicit-config mode",
 		"root dependency baseline",
 		"merged beneath deploy/customer-a.yaml",

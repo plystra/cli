@@ -3,6 +3,9 @@ package applicationgenerate_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"go/format"
@@ -26,6 +29,7 @@ import (
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/pluginmeta"
+	"github.com/plystra/cli/internal/protobufwiremap"
 )
 
 func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *testing.T) {
@@ -48,7 +52,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	if !checked.Checked() || checked.Module().Path() != root || checked.Module().ModulePath() != "example.com/Acme/empty" {
 		t.Fatalf("checked result = %#v", checked)
 	}
-	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json"}; !reflect.DeepEqual(got, want) {
+	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/wire-map.json"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("missing files = %v, want %v", got, want)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
@@ -69,11 +73,12 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	applicationManifest := readFile(t, root, "generated/manifest.json")
 	for _, required := range []string{
 		`"capability_aliases":[]`,
-		`"configuration":{"version":3,"mode":"default"`,
+		`"configuration":{"version":4,"mode":"default"`,
 		`"root":{"path":"plystra.yaml","digest":"sha256:`,
 		`"dependency_baselines":[{"mode":"default","path":"plystra.yaml"`,
 		`"dependency_composition_digest":"sha256:`,
 		`"dependency_baseline":[]`,
+		`"protobuf_wire_map_digest":"sha256:`,
 		`"application_model_digest":"sha256:`,
 	} {
 		if !bytes.Contains(applicationManifest, []byte(required)) {
@@ -86,6 +91,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	assertFileExists(t, root, "generated/go/assembly/invocations_gen.go")
 	assertFileExists(t, root, "generated/go/assembly/providers_gen.go")
 	assertFileExists(t, root, "generated/go/bootstrap/bootstrap_gen.go")
+	assertFileExists(t, root, "generated/proto/wire-map.json")
 	if bootstrap := readFile(t, root, "generated/go/bootstrap/bootstrap_gen.go"); bytes.Contains(bootstrap, []byte("17s")) {
 		t.Fatalf("generated bootstrap embeds application-specific startup timeout:\n%s", bootstrap)
 	}
@@ -116,6 +122,188 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	if err != nil || !clean.Report().Clean() {
 		t.Fatalf("clean check = %#v, %v", clean.Report().Changes(), err)
 	}
+}
+
+func TestGenerateMaintainsStableOwnedProtobufFieldHistoryTransactionally(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeApplicationModule(t, root, "example.com/acme/wire-history")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
+  transports: {connect: true, rest: false}
+  expose: [customer.enroll/v1]
+capabilities:
+  require: [customer.enroll/v1]
+`)
+	writePlugin(t, root, "customer", "id: acme.customer\nprovides: [customer.enroll/v1]\n")
+	capabilityPath := filepath.Join(root, "customer", "capabilities", "customer.enroll", "v1", "capability.yaml")
+	initialContract := `id: customer.enroll/v1
+request:
+  beta: {type: string}
+  alpha: {type: string}
+response:
+  customer_id: {type: string}
+errors: []
+`
+	writeCapability(t, root, "customer", "customer.enroll/v1", initialContract)
+	environment := goEnvironment(nil)
+	validate := func(_ context.Context, _ string) error { return nil }
+	if result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Environment: environment, Validate: validate}); err != nil || !result.Report().Clean() {
+		t.Fatalf("initial Generate = %#v, %v", result.Report().Changes(), err)
+	}
+	initialMap := readFile(t, root, protobufwiremap.Path)
+	initial := decodeWireAssignments(t, initialMap, "customer.enroll/v1")
+	if initial.request["alpha"] != 1 || initial.request["beta"] != 2 || initial.response["customer_id"] != 1 {
+		t.Fatalf("initial assignments = %#v", initial)
+	}
+	initialManifest, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+	if err != nil || initialManifest.ProtobufWireMapDigest() != sha256Text(initialMap) {
+		t.Fatalf("initial wire-map provenance = %q, %v", initialManifest.ProtobufWireMapDigest(), err)
+	}
+
+	writeFile(t, capabilityPath, `response: {customer_id: {type: string}}
+errors: []
+request:
+  alpha: {type: string}
+  beta: {type: string}
+id: customer.enroll/v1
+`)
+	beforeReorder := snapshotTree(t, root)
+	reordered, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment})
+	if err != nil || !reordered.Report().Clean() || !reflect.DeepEqual(snapshotTree(t, root), beforeReorder) {
+		t.Fatalf("reordered check = %#v, %v", reordered.Report().Changes(), err)
+	}
+
+	writeFile(t, capabilityPath, `id: customer.enroll/v1
+request:
+  gamma: {type: integer}
+  beta: {type: string}
+  alpha: {type: string}
+response: {customer_id: {type: string}}
+errors: []
+`)
+	beforeAdditionCheck := snapshotTree(t, root)
+	drift, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment})
+	if err != nil || drift.Report().Clean() || !slicesContains(drift.Report().Changed(), protobufwiremap.Path) || !reflect.DeepEqual(snapshotTree(t, root), beforeAdditionCheck) {
+		t.Fatalf("added-field check = %#v, %v", drift.Report().Changes(), err)
+	}
+	if result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Environment: environment, Validate: validate}); err != nil || !result.Report().Clean() {
+		t.Fatalf("added-field Generate = %#v, %v", result.Report().Changes(), err)
+	}
+	addedMap := readFile(t, root, protobufwiremap.Path)
+	added := decodeWireAssignments(t, addedMap, "customer.enroll/v1")
+	if added.request["alpha"] != 1 || added.request["beta"] != 2 || added.request["gamma"] != 3 {
+		t.Fatalf("added assignments = %#v", added)
+	}
+
+	writeFile(t, capabilityPath, `id: customer.enroll/v1
+request:
+  delta: {type: boolean}
+  gamma: {type: integer}
+  alpha: {type: string}
+response: {customer_id: {type: string}}
+errors: []
+`)
+	if result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Environment: environment, Validate: validate}); err != nil || !result.Report().Clean() {
+		t.Fatalf("removed-field Generate = %#v, %v", result.Report().Changes(), err)
+	}
+	removedMap := readFile(t, root, protobufwiremap.Path)
+	removed := decodeWireAssignments(t, removedMap, "customer.enroll/v1")
+	if removed.request["alpha"] != 1 || removed.request["gamma"] != 3 || removed.request["delta"] != 4 || !reflect.DeepEqual(removed.reservedNumbers, []int{2}) || !reflect.DeepEqual(removed.reservedNames, []string{"beta"}) {
+		t.Fatalf("removed assignments = %#v", removed)
+	}
+
+	writeFile(t, capabilityPath, `id: customer.enroll/v1
+request:
+  epsilon: {type: number}
+  delta: {type: boolean}
+  gamma: {type: integer}
+  alpha: {type: string}
+response: {customer_id: {type: string}}
+errors: []
+`)
+	generatedBeforeRollback := snapshotGenerated(t, root)
+	forced := errors.New("forced validation failure")
+	if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start: root, Environment: environment,
+		Validate: func(_ context.Context, _ string) error { return forced },
+	}); !errors.Is(err, forced) {
+		t.Fatalf("rollback Generate error = %v", err)
+	}
+	if after := snapshotGenerated(t, root); !reflect.DeepEqual(after, generatedBeforeRollback) {
+		t.Fatalf("wire-history rollback changed generated tree:\nbefore: %#v\nafter: %#v", generatedBeforeRollback, after)
+	}
+	assertNoTransactions(t, root)
+
+	writeFile(t, filepath.Join(root, filepath.FromSlash(protobufwiremap.Path)), "manual drift\n")
+	driftedBefore := snapshotTree(t, root)
+	if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment}); !errors.Is(err, generatedfiles.ErrManifest) || !strings.Contains(err.Error(), "digest") {
+		t.Fatalf("manually modified wire map error = %v", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, driftedBefore) {
+		t.Fatal("failed managed-history check mutated the Project")
+	}
+}
+
+type wireAssignments struct {
+	request         map[string]int
+	response        map[string]int
+	reservedNumbers []int
+	reservedNames   []string
+}
+
+func decodeWireAssignments(t testing.TB, data []byte, capabilityID string) wireAssignments {
+	t.Helper()
+	var document struct {
+		Capabilities map[string]struct {
+			Request struct {
+				Fields map[string]struct {
+					Number int `json:"number"`
+				} `json:"fields"`
+				ReservedNumbers []int    `json:"reserved_numbers"`
+				ReservedNames   []string `json:"reserved_names"`
+			} `json:"request"`
+			Response struct {
+				Fields map[string]struct {
+					Number int `json:"number"`
+				} `json:"fields"`
+			} `json:"response"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("decode wire map: %v", err)
+	}
+	record, exists := document.Capabilities[capabilityID]
+	if !exists {
+		t.Fatalf("wire map omits %s: %s", capabilityID, data)
+	}
+	result := wireAssignments{
+		request:         make(map[string]int, len(record.Request.Fields)),
+		response:        make(map[string]int, len(record.Response.Fields)),
+		reservedNumbers: append([]int(nil), record.Request.ReservedNumbers...),
+		reservedNames:   append([]string(nil), record.Request.ReservedNames...),
+	}
+	for name, field := range record.Request.Fields {
+		result.request[name] = field.Number
+	}
+	for name, field := range record.Response.Fields {
+		result.response[name] = field.Number
+	}
+	return result
+}
+
+func slicesContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func sha256Text(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func TestGenerateChecksAndRepairsDependencyCompositionDriftTransactionally(t *testing.T) {

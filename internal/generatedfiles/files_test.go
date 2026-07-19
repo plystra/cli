@@ -663,6 +663,72 @@ func TestReadApplicationManifestRecoveryRejectsMalformedOrUnsafeState(t *testing
 	})
 }
 
+func TestReadOwnedFileRequiresExactManagedHistory(t *testing.T) {
+	t.Parallel()
+
+	const historyPath = "generated/proto/wire-map.json"
+	history := []byte("{\"projection_schema\":\"plystra.proto-wire-map/v1\"}\n")
+	root := t.TempDir()
+	if data, exists, err := generatedfiles.ReadOwnedFile(root, historyPath, 1024); err != nil || exists || data != nil {
+		t.Fatalf("initial ReadOwnedFile = %q, %t, %v", data, exists, err)
+	}
+	writeOutput(t, root, managedOutput(t, historyPath, string(history)))
+	data, exists, err := generatedfiles.ReadOwnedFile(root, historyPath, 1024)
+	if err != nil || !exists || !bytes.Equal(data, history) {
+		t.Fatalf("ReadOwnedFile = %q, %t, %v", data, exists, err)
+	}
+	data[0] = 'x'
+	repeated, exists, err := generatedfiles.ReadOwnedFile(root, historyPath, 1024)
+	if err != nil || !exists || !bytes.Equal(repeated, history) {
+		t.Fatalf("repeated ReadOwnedFile = %q, %t, %v", repeated, exists, err)
+	}
+
+	writeFile(t, root, historyPath, "manual drift\n")
+	if _, _, err := generatedfiles.ReadOwnedFile(root, historyPath, 1024); !errors.Is(err, generatedfiles.ErrManifest) || !strings.Contains(err.Error(), "digest") {
+		t.Fatalf("drifted ReadOwnedFile error = %v", err)
+	}
+
+	missing := t.TempDir()
+	writeOutput(t, missing, managedOutput(t, historyPath, string(history)))
+	if err := os.Remove(filepath.Join(missing, filepath.FromSlash(historyPath))); err != nil {
+		t.Fatalf("Remove(history): %v", err)
+	}
+	if _, _, err := generatedfiles.ReadOwnedFile(missing, historyPath, 1024); !errors.Is(err, generatedfiles.ErrManifest) || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("missing ReadOwnedFile error = %v", err)
+	}
+
+	unowned := t.TempDir()
+	writeOutput(t, unowned, managedOutput(t, "generated/other.txt", "owned\n"))
+	writeFileBytes(t, unowned, historyPath, history)
+	if _, _, err := generatedfiles.ReadOwnedFile(unowned, historyPath, 1024); !errors.Is(err, generatedfiles.ErrManifest) || !strings.Contains(err.Error(), "not owned") {
+		t.Fatalf("unowned ReadOwnedFile error = %v", err)
+	}
+
+	bounded := t.TempDir()
+	writeOutput(t, bounded, managedOutput(t, historyPath, string(history)))
+	if _, _, err := generatedfiles.ReadOwnedFile(bounded, historyPath, int64(len(history)-1)); !errors.Is(err, generatedfiles.ErrManifest) || !strings.Contains(err.Error(), "bounded") {
+		t.Fatalf("bounded ReadOwnedFile error = %v", err)
+	}
+}
+
+func TestReadOwnedFileRejectsSymbolicManagedParent(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "generated"), 0o755); err != nil {
+		t.Fatalf("Mkdir(generated): %v", err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "generated", "proto")); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("create directory symlink: %v", err)
+		}
+		t.Fatalf("Symlink: %v", err)
+	}
+	if _, _, err := generatedfiles.ReadOwnedFile(root, "generated/proto/wire-map.json", 1024); !errors.Is(err, generatedfiles.ErrManifest) || !strings.Contains(err.Error(), "non-symbolic") {
+		t.Fatalf("symbolic parent error = %v", err)
+	}
+}
+
 func managedFile(t testing.TB, filePath string, data []byte) generatedfiles.File {
 	t.Helper()
 	file, err := generatedfiles.NewFile(filePath, data)

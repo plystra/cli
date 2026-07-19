@@ -63,6 +63,14 @@ func TestNewContextBuildsDeterministicImmutableViews(t *testing.T) {
 	if !bytes.Equal(order.ContractJSON(), orderContract) || !digestPattern.MatchString(order.ContractDigest()) {
 		t.Fatalf("order contract = %s, digest %q", order.ContractJSON(), order.ContractDigest())
 	}
+	if got := order.Sources(); !slices.Equal(got, []string{"github.com/acme/app@local/orders/capability.yaml", "github.com/acme/contracts@v1.0.0/order.create/v1/capability.yaml"}) {
+		t.Fatalf("order Sources = %v", got)
+	}
+	orderSources := order.Sources()
+	orderSources[0] = "changed"
+	if order.Sources()[0] != "github.com/acme/app@local/orders/capability.yaml" {
+		t.Fatal("CapabilityView.Sources exposed mutable storage")
+	}
 	if got := extensionNamespaces(order.Extensions()); !slices.Equal(got, []string{"authn", "authz"}) {
 		t.Fatalf("order Extensions = %v", got)
 	}
@@ -130,10 +138,11 @@ func TestNewContextBuildsDeterministicImmutableViews(t *testing.T) {
 	}
 
 	input.Capabilities[0].ContractJSON[0] = '['
+	input.Capabilities[0].Sources[0] = "changed"
 	input.Plugins[1].BuildMetadataJSON[0] = '['
 	input.Plugins[0].Provides[0] = "changed.invalid/v1"
 	input.CapabilityAliases[0].Sources[0].ID = "changed"
-	if !bytes.Equal(order.ContractJSON(), orderContract) || audit.BuildMetadataJSON()[0] != '{' || context.Plugins()[1].Provides()[0].String() != "order.create/v1" || alias.Sources()[0].ID() != "application" {
+	if !bytes.Equal(order.ContractJSON(), orderContract) || order.Sources()[0] != "github.com/acme/app@local/orders/capability.yaml" || audit.BuildMetadataJSON()[0] != '{' || context.Plugins()[1].Provides()[0].String() != "order.create/v1" || alias.Sources()[0].ID() != "application" {
 		t.Fatal("NewContext retained mutable input storage")
 	}
 
@@ -143,6 +152,9 @@ func TestNewContextBuildsDeterministicImmutableViews(t *testing.T) {
 	slices.Reverse(equivalent.Requirements)
 	slices.Reverse(equivalent.Providers)
 	slices.Reverse(equivalent.CapabilityAliases[0].Sources)
+	for index := range equivalent.Capabilities {
+		slices.Reverse(equivalent.Capabilities[index].Sources)
+	}
 	equivalent.Plugins[0].BuildMetadataJSON = json.RawMessage(`{"batch":{"enabled":true,"size":2},"region":"global"}`)
 	second, err := generation.NewContext(equivalent)
 	if err != nil {
@@ -257,6 +269,10 @@ func TestNewContextRejectsInconsistentOrUnsafeInput(t *testing.T) {
 		},
 		"ordinary marked intrinsic": func(input *generation.Input) { input.Capabilities[0].Intrinsic = true },
 		"kernel not intrinsic":      func(input *generation.Input) { input.Capabilities[1].Intrinsic = false },
+		"duplicate contract source": func(input *generation.Input) {
+			input.Capabilities[0].Sources = append(input.Capabilities[0].Sources, input.Capabilities[0].Sources[0])
+		},
+		"invalid contract source": func(input *generation.Input) { input.Capabilities[0].Sources[0] = "bad\x00source" },
 		"null extensions": func(input *generation.Input) {
 			input.Capabilities[0].ContractJSON = json.RawMessage(`{"id":"order.create/v1","request":{},"response":{},"errors":[],"extensions":null}`)
 		},
@@ -426,9 +442,9 @@ func validInput() generation.Input {
 			},
 		},
 		Capabilities: []generation.CapabilityInput{
-			{ContractJSON: orderContract, Exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: true}},
-			{ContractJSON: canonicalContract("kernel.health/v1", nil), Intrinsic: true, Exposure: generation.Exposure{Go: true, HTTP: true}},
-			{ContractJSON: canonicalContract("audit.write/v1", nil), Exposure: generation.Exposure{Go: true}},
+			{ContractJSON: orderContract, Sources: []string{"github.com/acme/contracts@v1.0.0/order.create/v1/capability.yaml", "github.com/acme/app@local/orders/capability.yaml"}, Exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: true}},
+			{ContractJSON: canonicalContract("kernel.health/v1", nil), Sources: []string{"github.com/plystra/kernel/intrinsic/kernel.health/v1"}, Intrinsic: true, Exposure: generation.Exposure{Go: true, HTTP: true}},
+			{ContractJSON: canonicalContract("audit.write/v1", nil), Sources: []string{"github.com/acme/audit@v1.2.3/audit.write/v1/capability.yaml"}, Exposure: generation.Exposure{Go: true}},
 		},
 		Requirements: []string{"order.create/v1", "kernel.health/v1", "audit.write/v1"},
 		Providers: []generation.ProviderInput{

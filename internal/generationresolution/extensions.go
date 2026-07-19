@@ -685,6 +685,7 @@ func cloneCapabilityInputs(inputs []generation.CapabilityInput) []generation.Cap
 	for index, input := range inputs {
 		result[index] = input
 		result[index].ContractJSON = append([]byte(nil), input.ContractJSON...)
+		result[index].Sources = append([]string(nil), input.Sources...)
 	}
 	return result
 }

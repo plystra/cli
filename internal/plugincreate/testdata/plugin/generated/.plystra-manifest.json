@@ -11,7 +11,7 @@
     },
     {
       "path": "generated/go/assembly/invocations_gen.go",
-      "sha256": "sha256:2f9055033cab4e915c2b41e6ab19ab3aa7e9f9af7634bc6323e01ebe275d5f59"
+      "sha256": "sha256:3a38eb9803e5b6960ad256ccc21e6fb8edd72b041644d656204bbda748b38cac"
     },
     {
       "path": "generated/go/assembly/providers_gen.go",
@@ -27,13 +27,17 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:290464131404798ef6a79cfe6df9f9d281dfb3a5ba57d9f741e462630d17a777"
+      "sha256": "sha256:73f654811f6a33a04b7c485c356170736635d27a21f124457a34f557327c614b"
+    },
+    {
+      "path": "generated/proto/wire-map.json",
+      "sha256": "sha256:5429be97f5d0e2093f13a69ae9524c2ba170b1cbe61ad593da678e9df42cec83"
     }
   ],
   "application_manifest": {
     "capability_aliases": [],
     "configuration": {
-      "version": 3,
+      "version": 4,
       "mode": "default",
       "root": {
         "path": "plystra.yaml",
@@ -47,7 +51,8 @@
           "dependency_baseline": []
         }
       ],
-      "application_model_digest": "sha256:6e26af98c637b79bfbbf4315d366fb3fce3b8cbb260d885ad45a140d1c550cd4"
+      "protobuf_wire_map_digest": "sha256:5429be97f5d0e2093f13a69ae9524c2ba170b1cbe61ad593da678e9df42cec83",
+      "application_model_digest": "sha256:8a5e982ebf639ca59bd5b11593d3811cbf17ed5695dea167c63be39a3372955f"
     }
   }
 }

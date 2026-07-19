@@ -377,6 +377,8 @@ orders/
   generated/
     .plystra-manifest.json                CLI ownership manifest
     manifest.json                         resolved application manifest
+    proto/
+      wire-map.json                       committed Protobuf field history
     docs/
     go/
       adapters/
@@ -396,6 +398,20 @@ orders/
 Edit declarations, Plugin Go code, tests, entry points, and Plugin-owned assets
 outside `generated/`. Every path under `generated/` is CLI-owned. Fix its
 authored input and regenerate; never patch generated output by hand.
+
+`generated/proto/wire-map.json` is durable compatibility history, not a
+disposable cache. For each canonical Capability on the selected Connect
+surface, it preserves request and response field numbers across declaration
+reordering and allocates new fields without renumbering existing ones. Removing
+a field permanently reserves both its generated name and number, and removing
+exposure or disabling Connect retains the canonical history as inactive. An
+application Alias reuses the canonical target messages and therefore has no
+separate ledger entry. Commit this CLI-owned file with the rest of generated
+output, but never edit or delete it. If generation reports ledger drift,
+restore the exact last committed copy before rerunning `plystra generate`.
+The current ledger does not emit `.proto` files or descriptors and does not yet
+assign enum numbers or provide Connect runtime bindings; those remain deferred
+to later transport gates.
 
 `.agents/skills/plystra/` is a creation-time project guide that the project may
 maintain as its authored workflows evolve. It is outside `generated/` and is not
@@ -669,15 +685,16 @@ mode reports the maintained path, such as
 `changed deploy/customer-a.yaml (dependency composition)`, and does not write
 either surface.
 
-`generated/manifest.json` configuration schema v3 records `default`,
+`generated/manifest.json` configuration schema v4 records `default`,
 `environment`, or `explicit-config` mode; the environment name and overlay
 reference when applicable; project-relative paths; normalized document
-digests; dependency baseline history; and the final build-affecting
-application-model digest. Environment mode reuses the root dependency baseline
-because overlays do not own dependency maintenance. The manifest excludes raw
-configuration, Secret reference targets, resolved Secrets, and machine-specific
-absolute paths. Use the same selection for generation and its check; selecting
-another build-affecting model correctly reports generated drift.
+digests; dependency baseline history; the committed Protobuf wire-map digest;
+and the final build-affecting application-model digest. Environment mode reuses
+the root dependency baseline because overlays do not own dependency
+maintenance. The manifest excludes raw configuration, Secret reference
+targets, resolved Secrets, and machine-specific absolute paths. Use the same
+selection for generation and its check; selecting another build-affecting
+model correctly reports generated drift.
 
 ## Create and configure a Plugin
 
@@ -1202,6 +1219,15 @@ missing selected overlay or root Project marker is an error.
 Compare request, response, semantic errors, behavioral metadata, and normalized
 extension metadata. Implement the visible exact contract or create a new
 version. Do not weaken equality or add a compatibility decoder.
+
+### Protobuf wire-history drift
+
+Do not repair `generated/proto/wire-map.json` by hand or delete it to force new
+numbers. Restore the exact last committed file, then regenerate from the
+authored Capability contracts. A missing ownership baseline, changed digest,
+noncanonical JSON, reused removed field name or number, or inconsistent message
+identity is a compatibility error that generation intentionally refuses to
+guess through.
 
 ### Plugin target is ambiguous
 

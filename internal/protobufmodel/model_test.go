@@ -69,6 +69,9 @@ func TestBuildNormalizesExactConnectProjectionDeterministically(t *testing.T) {
 	if got := operations[0].Errors(); !slices.Equal(got, []string{"profile_missing", "profile_unavailable"}) {
 		t.Fatalf("semantic errors = %v", got)
 	}
+	if got := operations[0].Sources(); !slices.Equal(got, target.sources) {
+		t.Fatalf("contract sources = %v", got)
+	}
 
 	aliases := model.Aliases()
 	if len(aliases) != 1 || aliases[0].ID().String() != "account.profile/v1" || aliases[0].Target() != target.id || aliases[0].TargetContractDigest() != target.digest || aliases[0].Deprecated() != "Use customer.profile.get/v1." {
@@ -83,6 +86,7 @@ func TestBuildNormalizesExactConnectProjectionDeterministically(t *testing.T) {
 	for _, required := range []string{
 		`{"version":1,"enabled":true,"operations":[{"public_id":"customer.profile.get/v1"`,
 		`"contract_digest":"` + target.digest + `"`,
+		`"sources":["` + target.sources[0] + `"]`,
 		`"name":"profile_id","kind":"string","required":true`,
 		`"name":"status","kind":"string","required":false,"enum":["active","suspended"]`,
 		`"aliases":[{"public_id":"account.profile/v1","canonical_id":"customer.profile.get/v1"`,
@@ -111,10 +115,12 @@ func TestBuildNormalizesExactConnectProjectionDeterministically(t *testing.T) {
 	operations[0] = protobufmodel.Operation{}
 	aliases[0] = protobufmodel.Alias{}
 	request[0] = sdkmodel.Field{}
+	operationSources := model.Operations()[0].Sources()
+	operationSources[0] = "changed"
 	enumCopy := model.Operations()[0].Request()[2].EnumJSON()
 	enumCopy[0][0] = 'x'
 	canonical[0] = 'x'
-	if model.Operations()[0].ID().String() != "customer.profile.get/v1" || model.Aliases()[0].ID().String() != "account.profile/v1" || string(model.Operations()[0].Request()[2].EnumJSON()[0]) != `"active"` || model.CanonicalJSON()[0] != '{' {
+	if model.Operations()[0].ID().String() != "customer.profile.get/v1" || model.Operations()[0].Sources()[0] != target.sources[0] || model.Aliases()[0].ID().String() != "account.profile/v1" || string(model.Operations()[0].Request()[2].EnumJSON()[0]) != `"active"` || model.CanonicalJSON()[0] != '{' {
 		t.Fatal("Model exposed mutable projection storage")
 	}
 }
@@ -133,6 +139,8 @@ func TestBuildRejectsInvalidSelectedTargetsAndAliases(t *testing.T) {
 
 	target := projectionTarget(t, projectionContract, generation.Exposure{HTTP: true})
 	alias := projectionAlias(t, "account.profile/v1", target, generation.Exposure{HTTP: true}, "")
+	missingSources := target
+	missingSources.sources = nil
 	for _, test := range []struct {
 		name    string
 		targets []protobufmodel.CanonicalTargetView
@@ -144,6 +152,7 @@ func TestBuildRejectsInvalidSelectedTargetsAndAliases(t *testing.T) {
 		{name: "absent Alias", targets: []protobufmodel.CanonicalTargetView{target}, aliases: []protobufmodel.AliasView{nil}, kind: protobufmodel.ErrAlias, want: "view is absent"},
 		{name: "duplicate target", targets: []protobufmodel.CanonicalTargetView{target, target}, kind: sdkmodel.ErrTarget, want: "duplicates canonical Capability"},
 		{name: "duplicate Alias", targets: []protobufmodel.CanonicalTargetView{target}, aliases: []protobufmodel.AliasView{alias, alias}, kind: sdkmodel.ErrAlias, want: "duplicates Capability Alias"},
+		{name: "missing contract provenance", targets: []protobufmodel.CanonicalTargetView{missingSources}, kind: protobufmodel.ErrTarget, want: "at least one source"},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
@@ -160,12 +169,14 @@ type projectionTargetView struct {
 	id       generation.CapabilityID
 	contract []byte
 	digest   string
+	sources  []string
 	exposure generation.Exposure
 }
 
 func (v projectionTargetView) ID() generation.CapabilityID   { return v.id }
 func (v projectionTargetView) ContractJSON() []byte          { return append([]byte(nil), v.contract...) }
 func (v projectionTargetView) ContractDigest() string        { return v.digest }
+func (v projectionTargetView) Sources() []string             { return append([]string(nil), v.sources...) }
 func (v projectionTargetView) Exposure() generation.Exposure { return v.exposure }
 
 type projectionAliasView struct {
@@ -198,7 +209,7 @@ func projectionTarget(t testing.TB, source string, exposure generation.Exposure)
 	if err != nil {
 		t.Fatalf("ParseCapabilityID(%s): %v", idSource.ID, err)
 	}
-	return projectionTargetView{id: id, contract: canonical, digest: projectionDigest(canonical), exposure: exposure}
+	return projectionTargetView{id: id, contract: canonical, digest: projectionDigest(canonical), sources: []string{"example.com/contracts@v1/" + id.String() + "/capability.yaml"}, exposure: exposure}
 }
 
 func projectionAlias(t testing.TB, id string, target projectionTargetView, exposure generation.Exposure, deprecated string) projectionAliasView {

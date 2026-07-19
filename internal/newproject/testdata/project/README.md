@@ -39,6 +39,8 @@ When several compatible Plugins provide one required Capability, select one with
 
 Generated source under `generated/` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
+`generated/proto/wire-map.json` is committed compatibility history for canonical Capability request and response messages selected for Connect. Generation preserves field numbers across declaration reordering, allocates new fields without renumbering existing fields, permanently reserves removed field names and numbers, and retains inactive canonical history when exposure or Connect is disabled. Capability Aliases reuse their canonical target messages and have no separate ledger entry. Never edit or delete the ledger; restore its exact last committed content before regenerating. The current ledger does not emit `.proto` source or descriptors, assign enum numbers, or provide Connect runtime bindings; those remain later transport work.
+
 ## Continuous integration
 
 GitHub Actions runs `go test ./...` and `go vet ./...` on Linux, Windows, and macOS, plus the Go race suite on Linux. Keep `.github/workflows/ci.yml` aligned with the local validation commands.
