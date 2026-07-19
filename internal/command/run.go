@@ -192,7 +192,13 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			return 1
 		}
 		if options.template != "" {
-			_, _ = fmt.Fprintf(stdout, "created %s from %s in %s\n", result.ModulePath(), options.template, result.Path())
+			_, _ = fmt.Fprintf(
+				stdout,
+				"Created %s from %s\nConfiguration scaffolded\nGenerated, checked, built, and locally verified\n\nNext:\n  cd %s\n  plystra check\n",
+				options.projectName,
+				options.template,
+				options.projectName,
+			)
 		} else {
 			_, _ = fmt.Fprintf(stdout, "created %s in %s\n", result.ModulePath(), result.Path())
 		}
