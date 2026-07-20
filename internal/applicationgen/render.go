@@ -108,6 +108,10 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: transport configuration provenance: %v", ErrRender, ErrResolution, err)
 	}
+	modelCompatibility, err := bootstrapgen.NewApplicationModelCompatibility(modelDigest, options.Composition.Manifest())
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: %w: runtime application-model compatibility: %v", ErrRender, ErrResolution, err)
+	}
 	if err := validateJavaScriptTransport(options, context, aliases); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w", ErrRender, err)
 	}
@@ -232,10 +236,11 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		}
 	}
 	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
-		ModulePath:              options.ModulePath,
-		DefaultStartupTimeout:   applicationmeta.DefaultStartupTimeout,
-		ConfigurationSchemas:    runtimeConfigurationSchemas,
-		ConfigurationProvenance: transportProvenance,
+		ModulePath:                    options.ModulePath,
+		DefaultStartupTimeout:         applicationmeta.DefaultStartupTimeout,
+		ConfigurationSchemas:          runtimeConfigurationSchemas,
+		ConfigurationProvenance:       transportProvenance,
+		ApplicationModelCompatibility: modelCompatibility,
 	})
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: runtime bootstrap: %w", ErrRender, err)

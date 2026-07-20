@@ -1101,15 +1101,18 @@ supported absolute replacement paths must identify an existing nonsymbolic
 regular file inside the runtime Project directory. Unsafe selectors, missing
 files, unknown fields, invalid typed values, and YAML anchors or aliases fail
 before Provider construction; unselected overlays and replacement files are
-not read. Generate, check, and start with the same selector. Compiled
-selection provenance is visible in
-`generated/go/bootstrap/bootstrap_gen.go` as canonical non-secret JSON and its
-digest. It records the mode, selected environment when applicable, stable
-Project-relative document paths, normalized document and dependency-composition
-digests, and final application-model digest; it contains no YAML values or
-Secret-reference targets. Runtime compatibility enforcement against that model
-digest remains deferred Gate 10 work, so selecting a runtime document with a
-different build-affecting model is not yet supported.
+not read. Generate, check, and start with the same selector. Compiled selection
+provenance and the versioned application-model compatibility projection are
+visible in `generated/go/bootstrap/bootstrap_gen.go` as canonical non-secret
+JSON plus digests. The projection covers selected transports, CORS, public
+exposure, requirements, explicit Provider choices, and Alias declarations and
+is cryptographically associated with the complete generated application-model
+digest. Startup derives the same projection from the normalized selected
+runtime document and rejects a mismatch with rebuild guidance before reading
+startup settings, creating a Secret resolver, or constructing a Provider.
+Runtime-only address, timeout, Plugin configuration, and Secret-reference
+changes do not enter the projection. Neither compiled record contains YAML
+values, Secret-reference targets, resolved Secrets, or machine paths.
 
 Validate the generated Connect handler directly with `httptest` until server
 mounting lands in the later transport gate. Exercise both binary Protobuf and
@@ -1351,6 +1354,16 @@ in `generated/manifest.json`. Run generation and check with the same `--env` or
 `PLYSTRA_CONFIG`. An environment is a sparse overlay above root, while an
 explicit file is complete and root `plystra.yaml` is not merged beneath it. A
 missing selected overlay or root Project marker is an error.
+
+### Runtime configuration requires a different compiled model
+
+The generated binary rejects a selected document that changes HTTP transports,
+CORS, public exposure, Capability requirements, an explicit Provider choice,
+or an Alias declaration from the model used to build it. Regenerate and rebuild
+with the same `--env` or `--config` selector, then start the replacement binary
+with that selector. A change limited to `http.address`, `timeouts.startup`,
+ordinary Plugin configuration, or Secret references does not require a new
+static model, but it must still pass typed runtime validation.
 
 ### Incompatible contract
 

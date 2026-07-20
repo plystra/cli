@@ -11,6 +11,7 @@ import (
 	"time"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/transportprovenance"
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
@@ -28,10 +29,12 @@ token: {type: secret}
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
 	}
+	provenance := bootstrapConfigurationProvenance(t, generation.ConfigurationModeDefault)
 	options := bootstrapgen.Options{
-		ModulePath:              "example.com/acme/application",
-		DefaultStartupTimeout:   2 * time.Minute,
-		ConfigurationProvenance: bootstrapConfigurationProvenance(t, generation.ConfigurationModeDefault),
+		ModulePath:                    "example.com/acme/application",
+		DefaultStartupTimeout:         2 * time.Minute,
+		ConfigurationProvenance:       provenance,
+		ApplicationModelCompatibility: bootstrapModelCompatibility(t, provenance),
 		ConfigurationSchemas: []bootstrapgen.ConfigurationSchema{
 			{PluginID: "acme.records", Schema: configurationSchema},
 			{PluginID: "acme.audit", Schema: kernelmanifest.Config{}},
@@ -50,7 +53,14 @@ token: {type: secret}
 		"compiledConfigurationSelectionProvenanceJSON",
 		strconv.Quote(string(options.ConfigurationProvenance.CanonicalJSON())),
 		`compiledConfigurationSelectionProvenanceDigest = "` + options.ConfigurationProvenance.Digest() + `"`,
+		"compiledApplicationModelCompatibilityJSON",
+		strconv.Quote(string(options.ApplicationModelCompatibility.CanonicalJSON())),
+		`compiledApplicationModelCompatibilityDigest = "` + options.ApplicationModelCompatibility.Digest() + `"`,
+		"compiledApplicationModelDigest",
+		strconv.Quote(options.ApplicationModelCompatibility.ApplicationModelDigest()),
 		"func New(ctx context.Context, options RuntimeOptions)",
+		"validateRuntimeApplicationModel(document)",
+		"runtimeApplicationModelCompatibilityDigest",
 		"func loadRuntimeDocument(options RuntimeOptions)",
 		`runtimeEnvironmentVariable   = "PLYSTRA_ENV"`,
 		`runtimeConfigurationVariable = "PLYSTRA_CONFIG"`,
@@ -114,9 +124,10 @@ func TestRenderRecordsEveryConfigurationSelectionProvenance(t *testing.T) {
 	} {
 		provenance := bootstrapConfigurationProvenance(t, mode)
 		options := bootstrapgen.Options{
-			ModulePath:              "example.com/acme/application",
-			DefaultStartupTimeout:   time.Minute,
-			ConfigurationProvenance: provenance,
+			ModulePath:                    "example.com/acme/application",
+			DefaultStartupTimeout:         time.Minute,
+			ConfigurationProvenance:       provenance,
+			ApplicationModelCompatibility: bootstrapModelCompatibility(t, provenance),
 		}
 		generated, err := bootstrapgen.Render(options)
 		if err != nil {
@@ -153,13 +164,20 @@ func TestRenderRejectsInvalidOptions(t *testing.T) {
 	t.Parallel()
 
 	validProvenance := bootstrapConfigurationProvenance(t, generation.ConfigurationModeDefault)
+	validCompatibility := bootstrapModelCompatibility(t, validProvenance)
+	mismatchedCompatibility, err := bootstrapgen.NewApplicationModelCompatibility(bootstrapDigest("4"), applicationmeta.Manifest{})
+	if err != nil {
+		t.Fatalf("bootstrapgen.NewApplicationModelCompatibility(mismatched): %v", err)
+	}
 	for _, options := range []bootstrapgen.Options{
-		{ModulePath: "not a module", DefaultStartupTimeout: 2 * time.Minute, ConfigurationProvenance: validProvenance},
-		{ModulePath: "example.com/acme/application", ConfigurationProvenance: validProvenance},
-		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: -time.Second, ConfigurationProvenance: validProvenance},
+		{ModulePath: "not a module", DefaultStartupTimeout: 2 * time.Minute, ConfigurationProvenance: validProvenance, ApplicationModelCompatibility: validCompatibility},
+		{ModulePath: "example.com/acme/application", ConfigurationProvenance: validProvenance, ApplicationModelCompatibility: validCompatibility},
+		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: -time.Second, ConfigurationProvenance: validProvenance, ApplicationModelCompatibility: validCompatibility},
 		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: time.Second},
-		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: time.Second, ConfigurationProvenance: validProvenance, ConfigurationSchemas: []bootstrapgen.ConfigurationSchema{{PluginID: "not a Plugin"}}},
-		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: time.Second, ConfigurationProvenance: validProvenance, ConfigurationSchemas: []bootstrapgen.ConfigurationSchema{{PluginID: "acme.mail"}, {PluginID: "acme.mail"}}},
+		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: time.Second, ConfigurationProvenance: validProvenance},
+		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: time.Second, ConfigurationProvenance: validProvenance, ApplicationModelCompatibility: mismatchedCompatibility},
+		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: time.Second, ConfigurationProvenance: validProvenance, ApplicationModelCompatibility: validCompatibility, ConfigurationSchemas: []bootstrapgen.ConfigurationSchema{{PluginID: "not a Plugin"}}},
+		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: time.Second, ConfigurationProvenance: validProvenance, ApplicationModelCompatibility: validCompatibility, ConfigurationSchemas: []bootstrapgen.ConfigurationSchema{{PluginID: "acme.mail"}, {PluginID: "acme.mail"}}},
 	} {
 		generated, err := bootstrapgen.Render(options)
 		if generated != nil || !errors.Is(err, bootstrapgen.ErrRender) || !errors.Is(err, bootstrapgen.ErrInvalidOptions) {
@@ -193,6 +211,15 @@ func bootstrapConfigurationProvenance(t testing.TB, mode generation.Configuratio
 		t.Fatalf("transportprovenance.New(%s): %v", mode, err)
 	}
 	return provenance
+}
+
+func bootstrapModelCompatibility(t testing.TB, provenance transportprovenance.Provenance) bootstrapgen.ApplicationModelCompatibility {
+	t.Helper()
+	compatibility, err := bootstrapgen.NewApplicationModelCompatibility(provenance.ApplicationModelDigest(), applicationmeta.Manifest{})
+	if err != nil {
+		t.Fatalf("bootstrapgen.NewApplicationModelCompatibility: %v", err)
+	}
+	return compatibility
 }
 
 func bootstrapDigest(character string) string {

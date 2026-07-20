@@ -101,6 +101,9 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	for _, required := range [][]byte{
 		[]byte(`defaultRuntimeDocument = "plystra.yaml"`),
 		[]byte("func New(ctx context.Context, options RuntimeOptions)"),
+		[]byte("compiledApplicationModelCompatibilityJSON"),
+		[]byte("compiledApplicationModelCompatibilityDigest"),
+		[]byte("validateRuntimeApplicationModel(document)"),
 		[]byte(`runtimeEnvironmentVariable   = "PLYSTRA_ENV"`),
 		[]byte(`runtimeConfigurationVariable = "PLYSTRA_CONFIG"`),
 		[]byte(`case "--env":`),
@@ -1402,6 +1405,9 @@ func TestGenerateApplicationModelDigestExcludesRuntimeValuesAndMachinePaths(t *t
 	for _, required := range []string{
 		"compiledConfigurationSelectionProvenanceJSON",
 		"compiledConfigurationSelectionProvenanceDigest",
+		"compiledApplicationModelCompatibilityJSON",
+		"compiledApplicationModelCompatibilityDigest",
+		"validateRuntimeApplicationModel(document)",
 		updatedProvenance.RootDigest(),
 		updatedProvenance.ApplicationModelDigest(),
 	} {
