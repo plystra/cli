@@ -318,9 +318,13 @@ The concise output names the result and next action without exposing absolute
 paths, internal resolution detail, or an unavailable command. This ordinary
 template-dependency workflow includes automatic read-only Go package tests and
 builds plus isolated startup, intrinsic health verification, and clean shutdown.
-The complete qualified-template contract still needs public `plystra dev` and
-`plystra build` workflows plus applicable JavaScript SDK qualification. No
-template is advertised as qualified by this CLI version.
+When the generated Project has a JavaScript SDK, creation also runs the package
+manager workflow `npm install --ignore-scripts --no-audit --no-fund`,
+`npm run typecheck`, `npm run build`, and `npm pack --dry-run --json`. The
+validation-only `node_modules/` and `dist/` directories are removed before the
+target is installed. The complete qualified-template contract still needs
+public `plystra dev` and `plystra build` workflows. No template is advertised
+as qualified by this CLI version.
 
 ## Transaction safety
 

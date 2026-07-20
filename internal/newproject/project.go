@@ -3,8 +3,10 @@ package newproject
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,6 +64,7 @@ type Options struct {
 	GitHubCI    bool
 	Skills      bool
 	GoCommand   string
+	NPMCommand  string
 	GitCommand  string
 	Environment []string
 }
@@ -146,7 +149,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 			return err
 		}
 		if templateQuery != "" {
-			if err := installTemplateDependency(ctx, stagingRoot, templateQuery, templateModulePath, goCommand, environment); err != nil {
+			if err := installTemplateDependency(ctx, stagingRoot, templateQuery, templateModulePath, goCommand, options.NPMCommand, environment); err != nil {
 				return err
 			}
 		}
@@ -166,7 +169,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	return Result{modulePath: modulePath, path: target}, nil
 }
 
-func installTemplateDependency(ctx context.Context, root, query, modulePath, goCommand string, environment []string) error {
+func installTemplateDependency(ctx context.Context, root, query, modulePath, goCommand, npmCommand string, environment []string) error {
 	return modulemutation.Change(ctx, root, modulemutation.ChangeOptions{
 		GoCommand:          goCommand,
 		Environment:        environment,
@@ -239,6 +242,9 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 				strings.Join(templateGenerationDrift(checked.ConfigurationChanged(), checked.ConfigurationMaintenancePath(), checked.Report()), ", "),
 			)
 		}
+		if err := validateGeneratedJavaScriptSDK(ctx, root, query, npmCommand, environment); err != nil {
+			return err
+		}
 		qualified, err := projectcheck.Check(ctx, projectcheck.Options{
 			Start:       root,
 			GoCommand:   goCommand,
@@ -286,6 +292,128 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 		}
 		return nil
 	})
+}
+
+const generatedJavaScriptSDKPath = "generated/sdk/javascript"
+
+// validateGeneratedJavaScriptSDK qualifies the optional generated SDK through
+// npm using the scripts and dependencies in package.json. Validation artifacts
+// are disposable and are removed before the staged Project is installed.
+func validateGeneratedJavaScriptSDK(ctx context.Context, root, query, npmCommand string, environment []string) error {
+	sdkRoot := filepath.Join(root, filepath.FromSlash(generatedJavaScriptSDKPath))
+	info, err := os.Lstat(sdkRoot)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("%w: inspect generated JavaScript SDK for template %q: %v", ErrInvalidTemplate, query, err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%w: template %q generated %s is not a regular directory", ErrInvalidTemplate, query, generatedJavaScriptSDKPath)
+	}
+	packagePath := filepath.Join(sdkRoot, "package.json")
+	packageInfo, err := os.Lstat(packagePath)
+	if err != nil {
+		return fmt.Errorf("%w: template %q generated JavaScript SDK is missing %s: %v", ErrInvalidTemplate, query, filepath.ToSlash(filepath.Join(generatedJavaScriptSDKPath, "package.json")), err)
+	}
+	if !packageInfo.Mode().IsRegular() || packageInfo.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%w: template %q generated JavaScript SDK package.json is not a regular file", ErrInvalidTemplate, query)
+	}
+	packageData, err := os.ReadFile(packagePath)
+	if err != nil {
+		return fmt.Errorf("%w: read generated JavaScript SDK package.json for template %q: %v", ErrInvalidTemplate, query, err)
+	}
+	var packageManifest struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(packageData)))
+	decodeErr := decoder.Decode(&packageManifest)
+	if decodeErr == nil {
+		var trailing json.RawMessage
+		decodeErr = decoder.Decode(&trailing)
+		if errors.Is(decodeErr, io.EOF) {
+			decodeErr = nil
+		}
+	}
+	if decodeErr != nil || strings.TrimSpace(packageManifest.Scripts["typecheck"]) == "" || strings.TrimSpace(packageManifest.Scripts["build"]) == "" {
+		return fmt.Errorf("%w: template %q generated JavaScript SDK package.json must declare typecheck and build scripts", ErrInvalidTemplate, query)
+	}
+	if npmCommand == "" {
+		npmCommand = "npm"
+	}
+	commands := [][]string{
+		{"install", "--ignore-scripts", "--no-audit", "--no-fund", "--package-lock=false"},
+		{"run", "typecheck"},
+		{"run", "build"},
+		{"pack", "--dry-run", "--json"},
+	}
+	for _, arguments := range commands {
+		if err := runNPM(ctx, npmCommand, sdkRoot, environment, arguments...); err != nil {
+			return fmt.Errorf("%w: template %q cannot qualify because generated JavaScript SDK validation failed at npm %s: %w; correction: the template publisher must make `npm install --ignore-scripts --no-audit --no-fund`, `npm run typecheck`, `npm run build`, and `npm pack --dry-run --json` pass in a fresh Project directory", ErrInvalidTemplate, query, strings.Join(arguments, " "), err)
+		}
+	}
+	for _, name := range []string{"package-lock.json", "npm-shrinkwrap.json"} {
+		path := filepath.Join(sdkRoot, name)
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("%w: template %q generated unexpected %s after npm validation; correction: keep package-lock generation disabled with the generated .npmrc and publish a corrected template version", ErrInvalidTemplate, query, filepath.ToSlash(filepath.Join(generatedJavaScriptSDKPath, name)))
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%w: inspect generated JavaScript SDK validation output %s: %v", ErrInvalidTemplate, query, err)
+		}
+	}
+	if err := removeJavaScriptValidationOutput(sdkRoot); err != nil {
+		return fmt.Errorf("%w: template %q cannot remove temporary JavaScript SDK validation output: %v", ErrInvalidTemplate, query, err)
+	}
+	return nil
+}
+
+func runNPM(ctx context.Context, command, directory string, environment []string, arguments ...string) error {
+	if environment == nil {
+		environment = os.Environ()
+	}
+	process := exec.CommandContext(ctx, command, arguments...)
+	process.Dir = directory
+	process.Env = append([]string(nil), environment...)
+	output, err := process.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	message := gocommand.SanitizeOutput(string(output), directory)
+	if len(message) > 4096 {
+		message = message[:4096] + "..."
+	}
+	if message == "" {
+		return errors.New("npm command failed")
+	}
+	return errors.New(message)
+}
+
+func removeJavaScriptValidationOutput(sdkRoot string) error {
+	for _, name := range []string{"node_modules", "dist"} {
+		path := filepath.Join(sdkRoot, name)
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is symbolic", filepath.ToSlash(filepath.Join(generatedJavaScriptSDKPath, name)))
+		}
+		if info.IsDir() {
+			if err := os.RemoveAll(path); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.Remove(path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func templateGenerationDrift(configurationChanged bool, maintenancePath string, report generatedfiles.Report) []string {
