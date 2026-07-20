@@ -198,7 +198,7 @@ func TestRenderPlanPreservesLoweredSemanticOrder(t *testing.T) {
 	source := string(file.Data())
 	first := strings.Index(source, "plystraPolicyZFirstCheckResponse")
 	second := strings.Index(source, "plystraPolicyASecondCheckResponse")
-	dispatch := strings.Index(source, "return h.target.Invoke(ctx, request)")
+	dispatch := strings.Index(source, "response, invocationError := h.target.Invoke(ctx, request)")
 	if first < 0 || second <= first || dispatch <= second {
 		t.Fatalf("semantic order was not preserved: first=%d second=%d dispatch=%d\n%s", first, second, dispatch, source)
 	}
@@ -1930,7 +1930,7 @@ func TestEarlierNodeValuesFlowIntoContextAndCalls(t *testing.T) {
 	}
 	invalidDetails := map[string]any{"invalid": func() {}}
 	response, err, calls, dispatched = invoke(context.Background(), &reason, &invalidDetails, 0)
-	if err == nil || err.Error() != "invalid generated invocation value" || response.Accepted || calls != 1 || dispatched != 0 {
+	if err == nil || err.Error() != "invalid canonical Provider response" || response.Accepted || calls != 1 || dispatched != 0 {
 		t.Fatalf("Invoke(conversion failure) = %#v, %v, calls %d, dispatched %d", response, err, calls, dispatched)
 	}
 	response, err, calls, dispatched = invoke(nil, &reason, nil, 0)
