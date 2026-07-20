@@ -19,6 +19,7 @@ import (
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/atomicfs"
+	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
@@ -606,7 +607,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 		data []byte
 	}
 	files := []projectFile{
-		{path: "go.mod", data: fmt.Appendf(nil, goModuleTemplate, modulePath, KernelVersion)},
+		{path: "go.mod", data: fmt.Appendf(nil, goModuleTemplate, modulePath, KernelVersion, bootstrapgen.YAMLModuleVersion)},
 		{path: "README.md", data: []byte(readme)},
 		{path: ".gitignore", data: []byte(gitignoreTemplate)},
 		{path: ".gitattributes", data: []byte(gitattributesTemplate)},
@@ -888,14 +889,20 @@ func verifyModule(root, modulePath string) error {
 		return errors.New("generated go.mod lost its module path")
 	}
 	foundKernel := false
+	foundYAML := false
 	for _, requirement := range parsed.Require {
 		if requirement.Mod.Path == "github.com/plystra/kernel" && requirement.Mod.Version == KernelVersion && !requirement.Indirect {
 			foundKernel = true
-			break
+		}
+		if requirement.Mod.Path == bootstrapgen.YAMLModulePath && requirement.Mod.Version == bootstrapgen.YAMLModuleVersion && !requirement.Indirect {
+			foundYAML = true
 		}
 	}
 	if !foundKernel {
 		return fmt.Errorf("generated go.mod does not require github.com/plystra/kernel %s", KernelVersion)
+	}
+	if !foundYAML {
+		return fmt.Errorf("generated go.mod does not require %s %s", bootstrapgen.YAMLModulePath, bootstrapgen.YAMLModuleVersion)
 	}
 	info, err := os.Stat(filepath.Join(root, "go.sum"))
 	if err != nil {

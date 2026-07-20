@@ -257,7 +257,7 @@ replace github.com/plystra/kernel => %s
 	}
 	for _, requirement := range [][]byte{
 		[]byte("example.com/catalog v0.0.0"),
-		[]byte("go.yaml.in/yaml/v3 v3.0.4 // indirect"),
+		[]byte("go.yaml.in/yaml/v3 v3.0.4"),
 	} {
 		if !bytes.Contains(normalizedMod, requirement) {
 			t.Fatalf("normalized go.mod omits %q:\n%s", requirement, normalizedMod)

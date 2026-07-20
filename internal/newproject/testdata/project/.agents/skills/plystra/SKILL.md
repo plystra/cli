@@ -78,10 +78,17 @@ plystra.production.yaml, then use the same selector for generation and checks:
     plystra generate --env production
     plystra generate --check --env production
     plystra check --env production
+    go run ./generated/go/application --env production
 
 No selector means root plystra.yaml only. Use --config only when the task
 explicitly requires one complete replacement document; it is an advanced
 deployment path, not a second ordinary configuration layer.
+
+Generated startup accepts the same --env selector or PLYSTRA_ENV. An explicit
+flag overrides the ambient selector. The selected overlay must exist and pass
+typed composition before application construction; unselected overlays are not
+read. Do not pass --config or PLYSTRA_CONFIG to the generated binary yet, and
+generate with the same environment before startup.
 
 ## Detailed task reference
 
@@ -424,6 +431,7 @@ Generate and check that exact environment consistently:
 
     plystra generate --env production
     plystra generate --check --env production
+    go run ./generated/go/application --env production
 
 The selected overlay must exist. The CLI does not create common environment
 files or load unselected overlays. The effective order is dependency Project
@@ -433,6 +441,14 @@ objects merge by declared field path, set fields use their sparse add/remove
 form, and null keeps its exact tombstone meaning. Unknown fields and type
 mismatches remain errors. Dependency Project environment overlays are never
 inherited.
+
+Generated startup defaults to root plystra.yaml and accepts either --env or
+PLYSTRA_ENV. An explicit flag overrides the ambient selector. It loads root
+plus the one selected overlay, applies these typed rules, and rejects unsafe or
+missing overlays before Provider construction. Generate, check, and start with
+the same environment. Runtime --config/PLYSTRA_CONFIG selection and compiled
+application-model compatibility validation remain deferred; do not use the
+CLI's complete-replacement selector as a generated-binary argument yet.
 
 http.transports is a closed current-Project object. It accepts only boolean
 connect and rest fields. New Project scaffolds write both fields explicitly as

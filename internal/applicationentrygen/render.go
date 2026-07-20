@@ -34,9 +34,8 @@ type Options struct {
 	ShutdownTimeout time.Duration
 }
 
-// Render emits the signal-driven process boundary and its internal lifecycle
-// smoke mode. Runtime configuration selectors remain owned by the later
-// selector-aware bootstrap gate.
+// Render emits the signal-driven process boundary, its internal lifecycle
+// smoke mode, and transparent runtime-selector forwarding to bootstrap.
 func Render(options Options) ([]byte, error) {
 	if err := modulepath.CheckProject(options.ModulePath); err != nil {
 		return nil, fmt.Errorf("%w: %w: invalid Go Module path %q", ErrRender, ErrInvalidOptions, options.ModulePath)
@@ -78,21 +77,24 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "func main() {")
 	fmt.Fprintln(&source, "\tctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)")
 	fmt.Fprintln(&source, "\tdefer cancel()")
-	fmt.Fprintln(&source, "\tif err := run(ctx, os.Args[1:]); err != nil {")
+	fmt.Fprintln(&source, "\tif err := run(ctx, os.Args[1:], os.Environ()); err != nil {")
 	fmt.Fprintln(&source, "\t\t_, _ = fmt.Fprintln(os.Stderr, err)")
 	fmt.Fprintln(&source, "\t\tos.Exit(1)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
-	fmt.Fprintln(&source, "func run(ctx context.Context, arguments []string) (result error) {")
+	fmt.Fprintln(&source, "func run(ctx context.Context, arguments, environment []string) (result error) {")
 	fmt.Fprintln(&source, "\tif ctx == nil {")
 	fmt.Fprintln(&source, "\t\treturn fmt.Errorf(\"%w: context is required\", ErrRun)")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\tsmoke, err := smokeMode(arguments)")
+	fmt.Fprintln(&source, "\tsmoke, selectorArguments, err := processArguments(arguments)")
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn err")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\tapplication, err := applicationbootstrap.New(ctx)")
+	fmt.Fprintln(&source, "\tapplication, err := applicationbootstrap.New(ctx, applicationbootstrap.RuntimeOptions{")
+	fmt.Fprintln(&source, "\t\tArguments:   selectorArguments,")
+	fmt.Fprintln(&source, "\t\tEnvironment: environment,")
+	fmt.Fprintln(&source, "\t})")
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn fmt.Errorf(\"%w: construct: %w\", ErrRun, err)")
 	fmt.Fprintln(&source, "\t}")
@@ -127,15 +129,20 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\treturn nil")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
-	fmt.Fprintln(&source, "func smokeMode(arguments []string) (bool, error) {")
-	fmt.Fprintln(&source, "\tswitch {")
-	fmt.Fprintln(&source, "\tcase len(arguments) == 0:")
-	fmt.Fprintln(&source, "\t\treturn false, nil")
-	fmt.Fprintln(&source, "\tcase len(arguments) == 1 && arguments[0] == \"--smoke\":")
-	fmt.Fprintln(&source, "\t\treturn true, nil")
-	fmt.Fprintln(&source, "\tdefault:")
-	fmt.Fprintln(&source, "\t\treturn false, fmt.Errorf(\"%w: expected no arguments or --smoke\", ErrArguments)")
+	fmt.Fprintln(&source, "func processArguments(arguments []string) (bool, []string, error) {")
+	fmt.Fprintln(&source, "\tsmoke := false")
+	fmt.Fprintln(&source, "\tselectors := make([]string, 0, len(arguments))")
+	fmt.Fprintln(&source, "\tfor _, argument := range arguments {")
+	fmt.Fprintln(&source, "\t\tif argument != \"--smoke\" {")
+	fmt.Fprintln(&source, "\t\t\tselectors = append(selectors, argument)")
+	fmt.Fprintln(&source, "\t\t\tcontinue")
+	fmt.Fprintln(&source, "\t\t}")
+	fmt.Fprintln(&source, "\t\tif smoke {")
+	fmt.Fprintln(&source, "\t\t\treturn false, nil, fmt.Errorf(\"%w: --smoke may be specified once\", ErrArguments)")
+	fmt.Fprintln(&source, "\t\t}")
+	fmt.Fprintln(&source, "\t\tsmoke = true")
 	fmt.Fprintln(&source, "\t}")
+	fmt.Fprintln(&source, "\treturn smoke, selectors, nil")
 	fmt.Fprintln(&source, "}")
 
 	formatted, err := format.Source([]byte(source.String()))

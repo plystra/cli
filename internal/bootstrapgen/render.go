@@ -29,6 +29,7 @@ var (
 type Options struct {
 	ModulePath            string
 	DefaultStartupTimeout time.Duration
+	ConfigurationSchemas  []ConfigurationSchema
 }
 
 // Render emits the redacted runtime boundary that safely loads the application
@@ -40,6 +41,14 @@ func Render(options Options) ([]byte, error) {
 	if options.DefaultStartupTimeout <= 0 {
 		return nil, fmt.Errorf("%w: %w: default startup timeout must be positive", ErrRender, ErrInvalidOptions)
 	}
+	schemas, err := planRuntimeConfigurationSchemas(options.ConfigurationSchemas)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w: %v", ErrRender, ErrInvalidOptions, err)
+	}
+	runtimeSupport, err := renderRuntimeConfigurationSupport(schemas)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w: %v", ErrRender, ErrInvalidOptions, err)
+	}
 
 	assemblyPath := path.Join(options.ModulePath, "generated/go/assembly")
 	var source strings.Builder
@@ -48,16 +57,27 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "package bootstrap")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "import (")
+	fmt.Fprintln(&source, "\t\"bytes\"")
 	fmt.Fprintln(&source, "\t\"context\"")
 	fmt.Fprintln(&source, "\t\"errors\"")
 	fmt.Fprintln(&source, "\t\"fmt\"")
+	fmt.Fprintln(&source, "\t\"io\"")
 	fmt.Fprintln(&source, "\t\"log/slog\"")
+	fmt.Fprintln(&source, "\t\"net\"")
+	fmt.Fprintln(&source, "\t\"net/url\"")
+	fmt.Fprintln(&source, "\t\"path/filepath\"")
+	fmt.Fprintln(&source, "\t\"sort\"")
+	fmt.Fprintln(&source, "\t\"strconv\"")
 	fmt.Fprintln(&source, "\t\"strings\"")
 	fmt.Fprintln(&source, "\t\"time\"")
+	fmt.Fprintln(&source, "\t\"unicode\"")
 	fmt.Fprintln(&source)
 	fmt.Fprintf(&source, "\tapplicationassembly %s\n", strconv.Quote(assemblyPath))
+	fmt.Fprintln(&source, "\tkernelcapability \"github.com/plystra/kernel/capability\"")
 	fmt.Fprintln(&source, "\tkernelconfiguration \"github.com/plystra/kernel/configuration\"")
 	fmt.Fprintln(&source, "\tkernellifecycle \"github.com/plystra/kernel/lifecycle\"")
+	fmt.Fprintln(&source, "\tkernelplugin \"github.com/plystra/kernel/plugin\"")
+	fmt.Fprintln(&source, "\tyaml \"go.yaml.in/yaml/v3\"")
 	fmt.Fprintln(&source, ")")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "const (")
@@ -74,11 +94,21 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\tErrInvalidContext = errors.New(\"invalid generated application context\")")
 	fmt.Fprintln(&source, "\t// ErrRuntimeSettings reports invalid generated-bootstrap runtime settings.")
 	fmt.Fprintln(&source, "\tErrRuntimeSettings = errors.New(\"invalid runtime startup settings\")")
+	fmt.Fprintln(&source, "\t// ErrRuntimeSelector reports an invalid generated-application configuration selector.")
+	fmt.Fprintln(&source, "\tErrRuntimeSelector = errors.New(\"invalid runtime configuration selector\")")
+	fmt.Fprintln(&source, "\t// ErrRuntimeConfiguration reports invalid root or environment runtime configuration.")
+	fmt.Fprintln(&source, "\tErrRuntimeConfiguration = errors.New(\"invalid runtime configuration composition\")")
 	fmt.Fprintln(&source, "\t// ErrApplicationStart reports a redacted provider startup failure.")
 	fmt.Fprintln(&source, "\tErrApplicationStart = errors.New(\"generated application startup failed\")")
 	fmt.Fprintln(&source, "\t// ErrApplicationStop reports a redacted provider shutdown failure.")
 	fmt.Fprintln(&source, "\tErrApplicationStop = errors.New(\"generated application shutdown failed\")")
 	fmt.Fprintln(&source, ")")
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "// RuntimeOptions carries one immutable selector invocation into generated bootstrap.")
+	fmt.Fprintln(&source, "type RuntimeOptions struct {")
+	fmt.Fprintln(&source, "\tArguments   []string")
+	fmt.Fprintln(&source, "\tEnvironment []string")
+	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// Application is one constructed selected-provider set and its Kernel lifecycle.")
 	fmt.Fprintln(&source, "// Provider instances and their resolved runtime configuration remain private.")
@@ -91,13 +121,13 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// New loads the default runtime document, validates startup settings, resolves Secrets,")
 	fmt.Fprintln(&source, "// constructs every selected provider exactly once, and binds lifecycle order.")
-	fmt.Fprintln(&source, "func New(ctx context.Context) (*Application, error) {")
+	fmt.Fprintln(&source, "func New(ctx context.Context, options RuntimeOptions) (*Application, error) {")
 	fmt.Fprintln(&source, "\tif ctx == nil {")
 	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: %w\", ErrBootstrap, ErrInvalidContext)")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\tdocument, err := kernelconfiguration.LoadDocument(defaultRuntimeDocument)")
+	fmt.Fprintln(&source, "\tdocument, err := loadRuntimeDocument(options)")
 	fmt.Fprintln(&source, "\tif err != nil {")
-	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: load runtime document: %w\", ErrBootstrap, err)")
+	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: select runtime configuration: %w\", ErrBootstrap, err)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\tdefer clear(document)")
 	fmt.Fprintln(&source)
@@ -227,6 +257,8 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\treturn timeout, nil")
 	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source)
+	source.WriteString(runtimeSupport)
 
 	formatted, err := format.Source([]byte(source.String()))
 	if err != nil {

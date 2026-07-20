@@ -3,7 +3,7 @@
   "files": [
     {
       "path": "generated/go/application/main_gen.go",
-      "sha256": "sha256:26c6d675d0417e6a3711cdc90d1864c23b3827e77d59e955085a60ab96ef4dbb"
+      "sha256": "sha256:ca1a7d375fc532384f14a6669260268dc1a3d5b8e204e0f4ed30f78a2cca6e21"
     },
     {
       "path": "generated/go/assembly/compatibility_gen.go",
@@ -19,7 +19,7 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:9e1eec91e6cf81ecd83cdec3e580790ba4d2f1f62f4aa095ba0153bf5056ebae"
+      "sha256": "sha256:4ceee28067ca0e9048f3f9f0e118139f050aa514b3cd0576afcdb9cb9a465e56"
     },
     {
       "path": "generated/go/configuration/account-profile_gen.go",

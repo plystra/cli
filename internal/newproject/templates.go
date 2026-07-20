@@ -4,7 +4,10 @@ const goModuleTemplate = `module %s
 
 go 1.26
 
-require github.com/plystra/kernel %s
+require (
+	github.com/plystra/kernel %s
+	go.yaml.in/yaml/v3 %s
+)
 `
 
 const plystraTemplate = `http:
@@ -59,6 +62,8 @@ Template creation next runs the same read-only workflow as ` + "`plystra check`"
 Template creation then builds every staged Go package with ` + "`go build -mod=readonly ./...`" + `. When ` + "`generated/sdk/javascript/package.json`" + ` exists, it also runs ` + "`npm install --ignore-scripts --no-audit --no-fund`" + `, ` + "`npm run typecheck`" + `, ` + "`npm run build`" + `, and ` + "`npm pack --dry-run --json`" + ` through npm using that generated package's declared scripts and dependencies. Validation-only ` + "`node_modules/`" + ` and ` + "`dist/`" + ` output is removed before installation. It then builds the generated application entrypoint with ` + "`GOWORK=off`" + ` into isolated temporary output, starts the real assembled runtime, invokes intrinsic ` + "`kernel.health/v1`" + `, and stops lifecycle providers cleanly. Child output is suppressed and temporary smoke output is removed on every path. Any failure restores the creation transaction and leaves no target Project. This private qualification executable does not create public distribution output.
 
 Root ` + "`plystra.yaml`" + ` is the mandatory Project marker and shared default configuration. A sparse project-root ` + "`plystra.production.yaml`" + ` can be selected with ` + "`plystra generate --env production`" + ` and checked with the same selector; it is never created or loaded implicitly. To use one complete alternative current-Project document, run ` + "`plystra generate --config deploy/customer-a.yaml`" + `. Root configuration is not merged beneath an explicitly selected file. ` + "`PLYSTRA_ENV`" + ` and ` + "`PLYSTRA_CONFIG`" + ` supply the corresponding selector for automation; select exactly one mode.
+
+Start the generated application with the same environment by running ` + "`go run ./generated/go/application --env production`" + `. Generated startup uses root ` + "`plystra.yaml`" + ` when no selector is present and accepts ` + "`PLYSTRA_ENV`" + ` when ` + "`--env`" + ` is omitted. An explicit flag overrides the ambient selector. Unsafe or missing overlays and invalid typed changes fail before Provider construction, and unselected overlays are ignored. Generated-binary ` + "`--config`" + `/` + "`PLYSTRA_CONFIG`" + ` selection and compiled-model compatibility checks are not available yet; do not pass a full-replacement selector to the generated binary.
 
 New Projects record ` + "`http.transports.connect: true`" + ` and ` + "`http.transports.rest: false`" + ` explicitly in root configuration. Keep those current-Project transport choices explicit when changing them. A nonempty public exposure requires at least one enabled transport, and JavaScript SDK generation requires Connect. If a selected default, environment, or full-replacement model has JavaScript Capability or Alias surfaces with Connect disabled, generation fails and identifies every affected surface; enable Connect in that selected current-Project configuration or remove those surfaces.
 
@@ -210,10 +215,17 @@ plystra.production.yaml, then use the same selector for generation and checks:
     plystra generate --env production
     plystra generate --check --env production
     plystra check --env production
+    go run ./generated/go/application --env production
 
 No selector means root plystra.yaml only. Use --config only when the task
 explicitly requires one complete replacement document; it is an advanced
 deployment path, not a second ordinary configuration layer.
+
+Generated startup accepts the same --env selector or PLYSTRA_ENV. An explicit
+flag overrides the ambient selector. The selected overlay must exist and pass
+typed composition before application construction; unselected overlays are not
+read. Do not pass --config or PLYSTRA_CONFIG to the generated binary yet, and
+generate with the same environment before startup.
 
 ## Detailed task reference
 
@@ -556,6 +568,7 @@ Generate and check that exact environment consistently:
 
     plystra generate --env production
     plystra generate --check --env production
+    go run ./generated/go/application --env production
 
 The selected overlay must exist. The CLI does not create common environment
 files or load unselected overlays. The effective order is dependency Project
@@ -565,6 +578,14 @@ objects merge by declared field path, set fields use their sparse add/remove
 form, and null keeps its exact tombstone meaning. Unknown fields and type
 mismatches remain errors. Dependency Project environment overlays are never
 inherited.
+
+Generated startup defaults to root plystra.yaml and accepts either --env or
+PLYSTRA_ENV. An explicit flag overrides the ambient selector. It loads root
+plus the one selected overlay, applies these typed rules, and rejects unsafe or
+missing overlays before Provider construction. Generate, check, and start with
+the same environment. Runtime --config/PLYSTRA_CONFIG selection and compiled
+application-model compatibility validation remain deferred; do not use the
+CLI's complete-replacement selector as a generated-binary argument yet.
 
 http.transports is a closed current-Project object. It accepts only boolean
 connect and rest fields. New Project scaffolds write both fields explicitly as

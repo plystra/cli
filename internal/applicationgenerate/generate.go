@@ -18,6 +18,7 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/atomicfs"
+	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/connectgen"
@@ -311,7 +312,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
-	runtimeRequirements, err := connectRuntimeRequirements(protobufProjection)
+	runtimeRequirements, err := generatedRuntimeRequirements(protobufProjection)
 	if err != nil {
 		return preparedGeneration{}, err
 	}
@@ -373,14 +374,15 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	return preparedGeneration{resolved: resolved, output: output, runtimeRequirements: runtimeRequirements, fingerprint: fingerprint}, nil
 }
 
-func connectRuntimeRequirements(model protobufmodel.Model) ([]ModuleRequirement, error) {
-	if len(model.Operations()) == 0 && len(model.Aliases()) == 0 {
-		return nil, nil
+func generatedRuntimeRequirements(model protobufmodel.Model) ([]ModuleRequirement, error) {
+	inputs := make([][2]string, 0, 3)
+	if len(model.Operations()) != 0 || len(model.Aliases()) != 0 {
+		inputs = append(inputs,
+			[2]string{connectgen.ConnectModulePath, connectgen.ConnectModuleVersion},
+			[2]string{connectgen.ProtobufModulePath, connectgen.ProtobufModuleVersion},
+		)
 	}
-	inputs := [][2]string{
-		{connectgen.ConnectModulePath, connectgen.ConnectModuleVersion},
-		{connectgen.ProtobufModulePath, connectgen.ProtobufModuleVersion},
-	}
+	inputs = append(inputs, [2]string{bootstrapgen.YAMLModulePath, bootstrapgen.YAMLModuleVersion})
 	result := make([]ModuleRequirement, len(inputs))
 	for index, input := range inputs {
 		requirement, err := NewModuleRequirement(input[0], input[1])

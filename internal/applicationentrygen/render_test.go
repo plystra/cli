@@ -28,13 +28,18 @@ func TestRenderProducesDeterministicSignalAndSmokeLifecycle(t *testing.T) {
 	for _, required := range []string{
 		`applicationbootstrap "example.com/acme/application/generated/go/bootstrap"`,
 		`signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)`,
-		`applicationbootstrap.New(ctx)`,
+		`run(ctx, os.Args[1:], os.Environ())`,
+		`processArguments(arguments)`,
+		`applicationbootstrap.New(ctx, applicationbootstrap.RuntimeOptions{`,
+		`Arguments:   selectorArguments`,
+		`Environment: environment`,
 		`application.Start(ctx)`,
 		`application.Invocations().IntrinsicHealth(ctx)`,
 		`health.Status != kernelintrinsic.HealthStatusHealthy`,
 		`application.Stop(stopContext)`,
 		`<-ctx.Done()`,
-		`arguments[0] == "--smoke"`,
+		`argument != "--smoke"`,
+		`--smoke may be specified once`,
 	} {
 		if !bytes.Contains(generated, []byte(required)) {
 			t.Fatalf("generated entrypoint omits %q:\n%s", required, generated)

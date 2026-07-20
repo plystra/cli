@@ -130,7 +130,7 @@ go 1.26
 require (
 	example.com/assemblydependency v0.0.0
 	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -152,22 +152,25 @@ replace github.com/plystra/kernel => %s
 	}
 	writeBytes(t, filepath.Join(applicationRoot, "go.sum"), goSum)
 
+	localSchema := parseConfig(t, `
+mode: {type: string, default: ready, enum: [ready, panic, nil]}
+label: {type: string, default: public-default-label}
+settings: {type: object}
+`)
 	localConfiguration := renderConfiguration(t, configurationgen.Input{
 		PluginName: "local-service",
 		PluginID:   "acme.local-service",
-		Schema: parseConfig(t, `
-mode: {type: string, default: ready, enum: [ready, panic, nil]}
-label: {type: string, default: public-default-label}
-`),
+		Schema:     localSchema,
 	})
-	remoteConfiguration := renderConfiguration(t, configurationgen.Input{
-		PluginName: "remote-store",
-		PluginID:   "zeta.remote-store",
-		Schema: parseConfig(t, `
+	remoteSchema := parseConfig(t, `
 endpoint: {type: string, required: true}
 token: {type: secret, required: true}
 startup: {type: string, default: ready, enum: [ready, wait]}
-`),
+`)
+	remoteConfiguration := renderConfiguration(t, configurationgen.Input{
+		PluginName: "remote-store",
+		PluginID:   "zeta.remote-store",
+		Schema:     remoteSchema,
 	})
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(localConfiguration.Path())), localConfiguration.Data())
 	writeBytes(t, filepath.Join(dependencyRoot, filepath.FromSlash(remoteConfiguration.Path())), remoteConfiguration.Data())
@@ -176,8 +179,8 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 	writeFile(t, filepath.Join(dependencyRoot, "lifecycleevents", "events.go"), lifecycleEventsSource)
 
 	providerInputs := []assemblygen.ProviderInput{
-		{PluginID: "zeta.remote-store", ModulePath: "example.com/assemblydependency", ImportPath: "example.com/assemblydependency/remote-store"},
-		{PluginID: "acme.local-service", ModulePath: "example.com/assemblyapp", ImportPath: "example.com/assemblyapp/local-service"},
+		{PluginID: "zeta.remote-store", ModulePath: "example.com/assemblydependency", ImportPath: "example.com/assemblydependency/remote-store", ConfigurationSchema: remoteSchema},
+		{PluginID: "acme.local-service", ModulePath: "example.com/assemblyapp", ImportPath: "example.com/assemblyapp/local-service", ConfigurationSchema: localSchema},
 	}
 	providers, err := assemblygen.RenderProviders("example.com/assemblyapp", providerInputs)
 	if err != nil {
@@ -206,6 +209,10 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
 		ModulePath:            "example.com/assemblyapp",
 		DefaultStartupTimeout: applicationmeta.DefaultStartupTimeout,
+		ConfigurationSchemas: []bootstrapgen.ConfigurationSchema{
+			{PluginID: "zeta.remote-store", Schema: remoteSchema},
+			{PluginID: "acme.local-service", Schema: localSchema},
+		},
 	})
 	if err != nil {
 		t.Fatalf("Render bootstrap: %v", err)
@@ -239,7 +246,7 @@ go 1.26
 
 require (
 	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -691,6 +698,7 @@ import (
 	remotestore "example.com/assemblydependency/remote-store"
 	kernelconfiguration "github.com/plystra/kernel/configuration"
 	kernellifecycle "github.com/plystra/kernel/lifecycle"
+	yaml "go.yaml.in/yaml/v3"
 )
 
 const bootstrapRemoteConfiguration = "  zeta.remote-store:\n    endpoint: runtime-private-endpoint\n    token: {env: PLYSTRA_ASSEMBLY_PRIVATE_SECRET}\n"
@@ -703,7 +711,7 @@ func TestApplicationConstructsStartsAndStopsSelectedProviders(t *testing.T) {
 	remotestore.Reset()
 
 	writeRuntimeDocument(t, validRuntimeDocument)
-	application, err := New(context.Background())
+	application, err := New(context.Background(), RuntimeOptions{})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -758,6 +766,178 @@ func TestApplicationConstructsStartsAndStopsSelectedProviders(t *testing.T) {
 	}
 }
 
+func TestApplicationSelectsOneNamedEnvironment(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	root := "timeouts:\n  startup: 1m\nconfig:\n  acme.local-service:\n    label: shared-label\n    settings:\n      region: shared\n      nested:\n        keep: shared\n        remove: runtime-private-remove\n  zeta.remote-store:\n    endpoint: shared-endpoint\n    token: {env: PLYSTRA_ASSEMBLY_PRIVATE_SECRET}\n"
+	overlay := "timeouts:\n  startup: 45s\nconfig:\n  acme.local-service:\n    label: production-label\n    settings:\n      nested:\n        keep: production\n        remove: null\n        added: production\n  zeta.remote-store:\n    endpoint: production-endpoint\n"
+	writeRuntimeDocument(t, root)
+	writeEnvironmentDocument(t, "production", overlay)
+	writeEnvironmentDocument(t, "ignored", "not: [valid\n")
+
+	tests := map[string]RuntimeOptions{
+		"explicit overrides ambient": {
+			Arguments:   []string{"--env", "production"},
+			Environment: []string{"PLYSTRA_ENV=missing"},
+		},
+		"ambient": {Environment: []string{"PLYSTRA_ENV=production"}},
+	}
+	for name, options := range tests {
+		t.Run(name, func(t *testing.T) {
+			localservice.Reset()
+			remotestore.Reset()
+			application, err := New(context.Background(), options)
+			if err != nil || application == nil || !application.Valid() {
+				t.Fatalf("New = %#v, %v", application, err)
+			}
+			localCalls, localConfig := localservice.Snapshot()
+			remoteCalls, remoteConfig := remotestore.Snapshot()
+			if localCalls != 1 || localConfig.Label != "production-label" || remoteCalls != 1 || remoteConfig.Endpoint != "production-endpoint" || string(remoteConfig.Token.Bytes()) != "runtime-private-secret-value" {
+				t.Fatal("named environment did not reach selected Provider construction")
+			}
+			if localConfig.Settings["region"] != "shared" {
+				t.Fatalf("object field did not inherit root key: %#v", localConfig.Settings)
+			}
+			nested, ok := localConfig.Settings["nested"].(map[string]any)
+			if !ok || nested["keep"] != "production" || nested["added"] != "production" {
+				t.Fatalf("object field did not merge overlay keys: %#v", localConfig.Settings)
+			}
+			if _, exists := nested["remove"]; exists {
+				t.Fatalf("object tombstone did not remove inherited key: %#v", nested)
+			}
+		})
+	}
+
+	localservice.Reset()
+	remotestore.Reset()
+	application, err := New(context.Background(), RuntimeOptions{})
+	if err != nil || application == nil || !application.Valid() {
+		t.Fatalf("default New with unselected invalid overlay = %#v, %v", application, err)
+	}
+	_, localConfig := localservice.Snapshot()
+	_, remoteConfig := remotestore.Snapshot()
+	if localConfig.Label != "shared-label" || remoteConfig.Endpoint != "shared-endpoint" {
+		t.Fatal("default selection did not retain root configuration")
+	}
+}
+
+func TestRuntimeEnvironmentComposesEveryApplicationField(t *testing.T) {
+	root := ` + "`" + `http:
+  address: ":8080"
+  transports: {connect: true, rest: false}
+  cors:
+    allowed_origins: [https://shared.example]
+    allow_credentials: true
+  expose: [kernel.health/v1]
+timeouts: {startup: 1m}
+capabilities:
+  require: [records.read/v1]
+  use: {records.read/v1: acme.local-service}
+  aliases:
+    public.records/v1:
+      target: records.read/v1
+      expose: {go: true, http: true, javascript: false}
+config: {}
+` + "`" + `
+	overlay := ` + "`" + `http:
+  address: ":9090"
+  transports: {rest: true}
+  cors:
+    allowed_origins: [https://production.example, https://production.example]
+  expose:
+    add: [kernel.info/v1]
+    remove: [kernel.health/v1]
+timeouts: {startup: 45s}
+capabilities:
+  require:
+    add: [records.write/v1]
+    remove: [records.read/v1]
+  use: {records.read/v1: zeta.remote-store}
+  aliases:
+    public.records/v1:
+      target: records.write/v1
+      expose: {go: false, http: true, javascript: false}
+` + "`" + `
+	writeRuntimeDocument(t, root)
+	writeEnvironmentDocument(t, "production", overlay)
+	document, err := loadRuntimeDocument(RuntimeOptions{Arguments: []string{"--env", "production"}})
+	if err != nil {
+		t.Fatalf("loadRuntimeDocument: %v", err)
+	}
+	defer clear(document)
+	var effective struct {
+		HTTP struct {
+			Address    string          ` + "`" + `yaml:"address"` + "`" + `
+			Transports map[string]bool ` + "`" + `yaml:"transports"` + "`" + `
+			CORS       struct {
+				AllowedOrigins   []string ` + "`" + `yaml:"allowed_origins"` + "`" + `
+				AllowCredentials bool     ` + "`" + `yaml:"allow_credentials"` + "`" + `
+			} ` + "`" + `yaml:"cors"` + "`" + `
+			Expose []string ` + "`" + `yaml:"expose"` + "`" + `
+		} ` + "`" + `yaml:"http"` + "`" + `
+		Timeouts struct {
+			Startup string ` + "`" + `yaml:"startup"` + "`" + `
+		} ` + "`" + `yaml:"timeouts"` + "`" + `
+		Capabilities struct {
+			Require []string          ` + "`" + `yaml:"require"` + "`" + `
+			Use     map[string]string ` + "`" + `yaml:"use"` + "`" + `
+			Aliases map[string]struct {
+				Target string          ` + "`" + `yaml:"target"` + "`" + `
+				Expose map[string]bool ` + "`" + `yaml:"expose"` + "`" + `
+			} ` + "`" + `yaml:"aliases"` + "`" + `
+		} ` + "`" + `yaml:"capabilities"` + "`" + `
+	}
+	if err := yaml.Unmarshal(document, &effective); err != nil {
+		t.Fatalf("decode effective runtime configuration: %v", err)
+	}
+	alias := effective.Capabilities.Aliases["public.records/v1"]
+	if effective.HTTP.Address != ":9090" || !effective.HTTP.Transports["connect"] || !effective.HTTP.Transports["rest"] || !effective.HTTP.CORS.AllowCredentials {
+		t.Fatalf("HTTP composition = %#v", effective.HTTP)
+	}
+	if strings.Join(effective.HTTP.CORS.AllowedOrigins, ",") != "https://production.example" || strings.Join(effective.HTTP.Expose, ",") != "kernel.info/v1" {
+		t.Fatalf("HTTP set composition = %#v", effective.HTTP)
+	}
+	if effective.Timeouts.Startup != "45s" || strings.Join(effective.Capabilities.Require, ",") != "records.write/v1" || effective.Capabilities.Use["records.read/v1"] != "zeta.remote-store" {
+		t.Fatalf("application composition = %#v, %#v", effective.Timeouts, effective.Capabilities)
+	}
+	if alias.Target != "records.write/v1" || alias.Expose["go"] || !alias.Expose["http"] || alias.Expose["javascript"] {
+		t.Fatalf("Alias composition = %#v", alias)
+	}
+}
+
+func TestApplicationRejectsInvalidEnvironmentSelectionBeforeConstructors(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	writeRuntimeDocument(t, validRuntimeDocument)
+	writeEnvironmentDocument(t, "type-change", "config:\n  zeta.remote-store:\n    endpoint: {nested: value}\n")
+	writeEnvironmentDocument(t, "unknown-field", "config:\n  zeta.remote-store:\n    unknown: value\n")
+	writeEnvironmentDocument(t, "alias", "config:\n  zeta.remote-store: &shared\n    endpoint: value\n")
+
+	tests := []struct {
+		name    string
+		options RuntimeOptions
+		reason  error
+	}{
+		{name: "missing", options: RuntimeOptions{Arguments: []string{"--env", "missing"}}, reason: ErrRuntimeSelector},
+		{name: "unsafe", options: RuntimeOptions{Arguments: []string{"--env", "../production"}}, reason: ErrRuntimeSelector},
+		{name: "unsupported selector", options: RuntimeOptions{Arguments: []string{"--config", "deploy.yaml"}}, reason: ErrRuntimeSelector},
+		{name: "duplicate ambient", options: RuntimeOptions{Environment: []string{"PLYSTRA_ENV=test", "PLYSTRA_ENV=production"}}, reason: ErrRuntimeSelector},
+		{name: "type change", options: RuntimeOptions{Arguments: []string{"--env", "type-change"}}, reason: ErrRuntimeConfiguration},
+		{name: "unknown field", options: RuntimeOptions{Arguments: []string{"--env", "unknown-field"}}, reason: ErrRuntimeConfiguration},
+		{name: "YAML reference", options: RuntimeOptions{Arguments: []string{"--env", "alias"}}, reason: ErrRuntimeConfiguration},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			localservice.Reset()
+			remotestore.Reset()
+			application, err := New(context.Background(), test.options)
+			if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, test.reason) {
+				t.Fatalf("New = %#v, %v", application, err)
+			}
+			assertNoBootstrapConstructorCalls(t)
+			assertSafeBootstrapError(t, err)
+		})
+	}
+}
+
 func TestApplicationRejectsInvalidSettingsBeforeConstructors(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
 	tests := map[string]string{
@@ -770,8 +950,8 @@ func TestApplicationRejectsInvalidSettingsBeforeConstructors(t *testing.T) {
 			localservice.Reset()
 			remotestore.Reset()
 			writeRuntimeDocument(t, document)
-			application, err := New(context.Background())
-			if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrRuntimeSettings) {
+			application, err := New(context.Background(), RuntimeOptions{})
+			if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrRuntimeConfiguration) {
 				t.Fatalf("New = %#v, %v", application, err)
 			}
 			assertNoBootstrapConstructorCalls(t)
@@ -787,7 +967,7 @@ func TestApplicationStartupTimeoutCancelsAndRollsBack(t *testing.T) {
 	lifecycleevents.Reset()
 	document := "timeouts:\n  startup: 25ms\nconfig:\n  zeta.remote-store:\n    endpoint: runtime-private-endpoint\n    token: {env: PLYSTRA_ASSEMBLY_PRIVATE_SECRET}\n    startup: wait\n"
 	writeRuntimeDocument(t, document)
-	application, err := New(context.Background())
+	application, err := New(context.Background(), RuntimeOptions{})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -818,7 +998,7 @@ func TestApplicationRejectsMissingRuntimeDocument(t *testing.T) {
 	if err := os.Remove(defaultRuntimeDocument); err != nil && !os.IsNotExist(err) {
 		t.Fatalf("remove default runtime document: %v", err)
 	}
-	application, err := New(context.Background())
+	application, err := New(context.Background(), RuntimeOptions{})
 	if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, kernelconfiguration.ErrLoadDocument) || !errors.Is(err, kernelconfiguration.ErrDocumentUnavailable) {
 		t.Fatalf("New(missing) = %#v, %v", application, err)
 	}
@@ -839,7 +1019,7 @@ func TestApplicationRejectsSymbolicRuntimeDocument(t *testing.T) {
 		t.Skipf("symbolic links are unavailable: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Remove(defaultRuntimeDocument) })
-	application, err := New(context.Background())
+	application, err := New(context.Background(), RuntimeOptions{})
 	if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, kernelconfiguration.ErrLoadDocument) || !errors.Is(err, kernelconfiguration.ErrDocumentUnavailable) {
 		t.Fatalf("New(symbolic link) = %#v, %v", application, err)
 	}
@@ -852,12 +1032,12 @@ func TestApplicationRejectsInvalidContextsAndValues(t *testing.T) {
 	localservice.Reset()
 	remotestore.Reset()
 	writeRuntimeDocument(t, validRuntimeDocument)
-	if application, err := New(nil); application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrInvalidContext) {
+	if application, err := New(nil, RuntimeOptions{}); application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrInvalidContext) {
 		t.Fatalf("New(nil) = %#v, %v", application, err)
 	}
 	assertNoBootstrapConstructorCalls(t)
 
-	application, err := New(context.Background())
+	application, err := New(context.Background(), RuntimeOptions{})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -885,6 +1065,15 @@ func writeRuntimeDocument(t *testing.T, document string) {
 		t.Fatalf("write runtime document: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Remove(defaultRuntimeDocument) })
+}
+
+func writeEnvironmentDocument(t *testing.T, environment, document string) {
+	t.Helper()
+	path := "plystra." + environment + ".yaml"
+	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+		t.Fatalf("write environment document: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
 }
 
 func assertNoBootstrapConstructorCalls(t *testing.T) {
@@ -928,7 +1117,7 @@ func TestEmptyApplicationLifecycle(t *testing.T) {
 		t.Fatalf("write runtime document: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Remove(defaultRuntimeDocument) })
-	application, err := New(context.Background())
+	application, err := New(context.Background(), RuntimeOptions{})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
