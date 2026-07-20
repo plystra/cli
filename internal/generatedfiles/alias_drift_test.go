@@ -14,6 +14,9 @@ import (
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/httpgen"
 	"github.com/plystra/cli/internal/javascriptgen"
+	"github.com/plystra/cli/internal/protobufdescriptor"
+	"github.com/plystra/cli/internal/protobufmodel"
+	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/sdkmodel"
 )
 
@@ -346,7 +349,34 @@ func renderAliasOutput(t testing.TB, options aliasRenderOptions) generatedfiles.
 			add(handler.Path(), handler.Data())
 		}
 	}
-	javaScript, err := javascriptgen.Render(javascriptgen.Options{PackageName: aliasDriftPackage}, model)
+	protobufTargets := make([]protobufmodel.CanonicalTargetView, len(capabilityViews))
+	for index, target := range capabilityViews {
+		protobufTargets[index] = sourcedAliasCapabilityView{CapabilityView: target}
+	}
+	protobufAliases := make([]protobufmodel.AliasView, len(resolvedAliases))
+	for index, alias := range resolvedAliases {
+		protobufAliases[index] = alias
+	}
+	projection, err := protobufmodel.Build(true, protobufTargets, protobufAliases)
+	if err != nil {
+		t.Fatalf("Build Protobuf projection: %v", err)
+	}
+	wireMap, err := protobufwiremap.Build(projection, nil, false, "")
+	if err != nil {
+		t.Fatalf("Build Protobuf wire map: %v", err)
+	}
+	descriptors, err := protobufdescriptor.Build(projection, wireMap)
+	if err != nil {
+		t.Fatalf("Build Protobuf descriptors: %v", err)
+	}
+	javaScript, err := javascriptgen.Render(javascriptgen.Options{
+		PackageName: aliasDriftPackage,
+		Transport: javascriptgen.TransportOptions{
+			Projection:    projection,
+			WireMap:       wireMap,
+			DescriptorSet: descriptors.DescriptorSet(),
+		},
+	}, model)
 	if err != nil {
 		t.Fatalf("Render JavaScript: %v", err)
 	}
@@ -365,6 +395,14 @@ func renderAliasOutput(t testing.TB, options aliasRenderOptions) generatedfiles.
 		t.Fatalf("NewOutput: %v", err)
 	}
 	return output
+}
+
+type sourcedAliasCapabilityView struct {
+	generation.CapabilityView
+}
+
+func (v sourcedAliasCapabilityView) Sources() []string {
+	return []string{"test@local/" + v.ID().String() + "/capability.yaml"}
 }
 
 func assertContainsPaths(t testing.TB, name string, got, want []string) {

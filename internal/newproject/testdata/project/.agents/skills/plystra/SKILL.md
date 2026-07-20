@@ -147,6 +147,9 @@ A typical Plystra Project evolves into this layout:
         invocation/
         providers/
       sdk/javascript/
+        package.json
+        src/descriptors.ts
+        src/runtime.ts
 
 Author plugin.yaml, capability.yaml, Plugin Go implementation, tests, entry
 points, and optional Plugin-owned assets outside generated. Treat every path
@@ -183,7 +186,11 @@ Protobuf or ProtoJSON, require Connect-Protocol-Version: 1, and reject gRPC and
 gRPC-Web before root-context or Provider invocation. Generation installs direct
 connectrpc.com/connect and google.golang.org/protobuf requirements at the
 supported versions inside the existing module transaction. The generated
-application entrypoint does not
+JavaScript wrapper loads that same descriptor graph and declares pinned direct
+@bufbuild/protobuf, @connectrpc/connect, and @connectrpc/connect-web runtime
+dependencies. Callers never construct raw descriptors, Protobuf messages, or
+Connect clients and never receive ConnectError as the public error model. The
+generated application entrypoint does not
 yet mount an HTTP server; server mounting and the remaining protocol
 projections remain later transport work.
 
@@ -910,6 +917,11 @@ the documented install command.
 Use createPlystraClient from the generated package and call the nested exact
 version method, for example client.records.read.v1({record_id: "demo"}). Only
 explicitly exposed canonical Capabilities and valid Alias surfaces appear.
+The wrapper resolves the matching unary method from src/descriptors.ts and
+sends binary Connect requests through the pinned direct @bufbuild/protobuf,
+@connectrpc/connect, and @connectrpc/connect-web dependencies. Application
+callers do not construct raw Protobuf messages or Connect clients and do not
+receive raw ConnectError values.
 When configuring getAccessToken, return only the raw token. The generated
 transport adds the Bearer authorization scheme and rejects a callback value
 that already includes the Bearer scheme before sending a request.

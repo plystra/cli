@@ -9,13 +9,80 @@ import {
   PlystraError,
   type ClientOptions,
   type JSONValue,
+  type MessageCodec,
   type RequestOptions,
   type Runtime,
 } from "../../../runtime.js";
+import { resolveUnaryMethod } from "../../../descriptors.js";
 
 export const capabilityID = "email.send/v1";
 export const contractDigest = "sha256:836377411dbd56a4b2e7441377ce8e3f093d1e8758677ae44b8062bb69c6a8a5";
-const routePath = "api/v1/capabilities/email.send/v1/invoke";
+const method = resolveUnaryMethod(
+  "plystra.generated.email.send.v1.EmailSendV1Service",
+  "Invoke",
+  "plystra.generated.email.send.v1.EmailSendV1Request",
+  "plystra.generated.email.send.v1.EmailSendV1Response",
+);
+const requestCodec: MessageCodec = {
+  fields: [
+    {
+      canonicalName: "metadata",
+      protobufJSONName: "metadata",
+      kind: "object",
+      required: false,
+    },
+    {
+      canonicalName: "priority",
+      protobufJSONName: "priority",
+      kind: "string",
+      required: true,
+      enum: [
+        { canonical: "normal", protobufName: "EMAILSENDV1REQUESTPRIORITYENUM_VALUE_82FBB169E798324839513347C048ECC9C91A6574588E1760F13D6B9650C328BF" },
+        { canonical: "urgent", protobufName: "EMAILSENDV1REQUESTPRIORITYENUM_VALUE_7466B39FCDA68E26B86694D2BF85F5A0AB189B2F26675DA303A0B3FBABA19CED" },
+      ],
+    },
+    {
+      canonicalName: "retries",
+      protobufJSONName: "retries",
+      kind: "integer",
+      required: false,
+      enum: [
+        { canonical: -1, protobufName: "EMAILSENDV1REQUESTRETRIESENUM_VALUE_1BAD6B8CF97131FCEAB8543E81F7757195FBB1D36B376EE994AD1CF17699C464" },
+        { canonical: 0, protobufName: "EMAILSENDV1REQUESTRETRIESENUM_VALUE_5FECEB66FFC86F38D952786C6D696C79C2DBC239DD4E91B46729D73A27FB57E9" },
+        { canonical: 2, protobufName: "EMAILSENDV1REQUESTRETRIESENUM_VALUE_D4735E3A265E16EEE03F59718B9B5D03019C07D8B6C51F90DA3A666EEC13AB35" },
+      ],
+    },
+    {
+      canonicalName: "tags",
+      protobufJSONName: "tags",
+      kind: "array",
+      items: "string",
+      required: true,
+    },
+    {
+      canonicalName: "to",
+      protobufJSONName: "to",
+      kind: "string",
+      required: true,
+    },
+  ],
+};
+const responseCodec: MessageCodec = {
+  fields: [
+    {
+      canonicalName: "accepted",
+      protobufJSONName: "accepted",
+      kind: "boolean",
+      required: true,
+    },
+    {
+      canonicalName: "latency",
+      protobufJSONName: "latency",
+      kind: "number",
+      required: false,
+    },
+  ],
+};
 
 export interface Request {
   readonly "metadata"?: Readonly<Record<string, JSONValue>>;
@@ -59,10 +126,10 @@ export type Operation = (
 ) => Promise<Response>;
 
 export function bindOperation(runtime: Runtime): Operation {
-  return bindOperationRoute(runtime, routePath);
+  return bindOperationMethod(runtime, method);
 }
 
-export function bindOperationRoute(runtime: Runtime, operationRoutePath: string): Operation {
+export function bindOperationMethod(runtime: Runtime, operationMethod: typeof method): Operation {
   return async (request, options = {}) => {
     let requestIsValid = false;
     try {
@@ -73,7 +140,7 @@ export function bindOperationRoute(runtime: Runtime, operationRoutePath: string)
     if (!requestIsValid) {
       throw new TypeError("request does not match email.send/v1");
     }
-    const response = await invoke(runtime, operationRoutePath, request, options);
+    const response = await invoke(runtime, operationMethod, requestCodec, responseCodec, request, options);
     if (!isResponse(response)) {
       throw new PlystraError(200, "invalid_response");
     }

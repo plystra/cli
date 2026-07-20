@@ -16,6 +16,9 @@ import (
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/javascriptgen"
+	"github.com/plystra/cli/internal/protobufdescriptor"
+	"github.com/plystra/cli/internal/protobufmodel"
+	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/sdkmodel"
 )
 
@@ -49,12 +52,14 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		javascriptTarget(t, "id: foo-bar.send/v1\n"),
 		javascriptTarget(t, "id: foo.bar-send/v1\n"),
 	}
-	model := javascriptModelWithAliases(t, targets, []javascriptAliasView{
+	aliases := []javascriptAliasView{
 		javascriptAlias(t, "mail.deliver/v1", email, "Use email.send/v1 instead."),
 		javascriptAlias(t, "compat.send/v1", email, ""),
 		javascriptHiddenAlias(t, "internal.send/v1", email),
-	})
-	files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "@acme/project-sdk"}, model)
+	}
+	model := javascriptModelWithAliases(t, targets, aliases)
+	options := javascriptOptions(t, "@acme/project-sdk", targets, aliases)
+	files, err := javascriptgen.Render(options, model)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -62,6 +67,7 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		"generated/sdk/javascript/.npmrc",
 		"generated/sdk/javascript/README.md",
 		"generated/sdk/javascript/package.json",
+		"generated/sdk/javascript/src/descriptors.ts",
 		"generated/sdk/javascript/src/index.ts",
 		"generated/sdk/javascript/src/operations/account/profile/get/v2.ts",
 		"generated/sdk/javascript/src/operations/alpha/beta/v1.ts",
@@ -84,16 +90,20 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		`readonly "send":`,
 		`readonly "v1": EmailSendV1Operation`,
 		`createEmailSendV1`,
-		`api/v1/capabilities/email.send/v1/invoke`,
-		`api/v1/capabilities/compat.send/v1/invoke`,
+		`plystra.generated.email.send.v1.EmailSendV1Service`,
+		`plystra.generated.compat.send.v1.CompatSendV1Service`,
 		`targetCapabilityID = "email.send/v1"`,
-		`bindOperationRoute as bindCanonicalOperationRoute`,
+		`bindOperationMethod as bindCanonicalOperationMethod`,
+		`resolveUnaryMethod`,
 		`/** @deprecated Use email.send/v1 instead. */`,
 		`export type ErrorCode = "invalid_recipient" | "temporarily_unavailable";`,
 		`Number.isSafeInteger`,
 		`getAccessToken`,
 		`raw token without the Bearer scheme`,
 		`"typescript": "7.0.2"`,
+		`"@bufbuild/protobuf": "2.12.1"`,
+		`"@connectrpc/connect": "2.1.2"`,
+		`"@connectrpc/connect-web": "2.1.2"`,
 		`package-lock=false`,
 		`npm install --ignore-scripts --no-audit --no-fund`,
 	} {
@@ -101,14 +111,14 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 			t.Fatalf("generated package omits %q", required)
 		}
 	}
-	for _, forbidden := range []string{"provider-only-marker", "generated/go", "kernelinvocation", "plugin_id", "secret_value"} {
+	for _, forbidden := range []string{"provider-only-marker", "generated/go", "kernelinvocation", "plugin_id", "secret_value", "api/v1/capabilities", `Accept: "application/json"`} {
 		if bytes.Contains(bytes.ToLower(combined), []byte(forbidden)) {
 			t.Fatalf("generated package contains forbidden provider/server value %q", forbidden)
 		}
 	}
 	assertGoldenPackage(t, files)
 
-	repeated, err := javascriptgen.Render(javascriptgen.Options{PackageName: "@acme/project-sdk"}, model)
+	repeated, err := javascriptgen.Render(options, model)
 	if err != nil || !equalFiles(repeated, files) {
 		t.Fatalf("repeated Render differs: %v", err)
 	}
@@ -127,11 +137,13 @@ func TestRenderJavaScriptAliasesReuseCanonicalOperation(t *testing.T) {
 	t.Parallel()
 
 	email := javascriptTarget(t, javascriptEmailSchema)
-	model := javascriptModelWithAliases(t, []javascriptTargetView{email}, []javascriptAliasView{
+	targets := []javascriptTargetView{email}
+	aliases := []javascriptAliasView{
 		javascriptAlias(t, "compat.send/v1", email, ""),
 		javascriptAlias(t, "mail.deliver/v1", email, "Use email.send/v1 instead."),
-	})
-	files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "alias-sdk"}, model)
+	}
+	model := javascriptModelWithAliases(t, targets, aliases)
+	files, err := javascriptgen.Render(javascriptOptions(t, "alias-sdk", targets, aliases), model)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -141,14 +153,14 @@ func TestRenderJavaScriptAliasesReuseCanonicalOperation(t *testing.T) {
 	for _, alias := range [][]byte{compat, deprecated} {
 		for _, required := range []string{
 			`from "../../../operations/email/send/v1.js"`,
-			`bindCanonicalOperationRoute(runtime, routePath)`,
+			`bindCanonicalOperationMethod(runtime, method)`,
 			`export type { ErrorCode, Operation, Request, Response }`,
 		} {
 			if !bytes.Contains(alias, []byte(required)) {
 				t.Fatalf("Alias operation omits %q:\n%s", required, alias)
 			}
 		}
-		for _, forbidden := range []string{"function isRequest", "function isResponse", "invoke(runtime", "interface Request", "interface Response"} {
+		for _, forbidden := range []string{"function isRequest", "function isResponse", "invoke(runtime", "interface Request", "interface Response", "requestCodec", "responseCodec"} {
 			if bytes.Contains(alias, []byte(forbidden)) {
 				t.Fatalf("Alias operation duplicates canonical concern %q:\n%s", forbidden, alias)
 			}
@@ -174,13 +186,14 @@ func TestRenderJavaScriptAliasesReuseCanonicalOperation(t *testing.T) {
 func TestRenderCanonicalJavaScriptHandlesDeepAndCollidingNames(t *testing.T) {
 	t.Parallel()
 
-	model := javascriptModel(t,
+	targets := []javascriptTargetView{
 		javascriptTarget(t, "id: alpha.beta/v1\n"),
 		javascriptTarget(t, "id: alpha.beta.v1.check/v1\n"),
 		javascriptTarget(t, "id: foo-bar.send/v1\n"),
 		javascriptTarget(t, "id: foo.bar-send/v1\n"),
-	)
-	files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "application-sdk"}, model)
+	}
+	model := javascriptModel(t, targets...)
+	files, err := javascriptgen.Render(javascriptOptions(t, "application-sdk", targets, nil), model)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -204,7 +217,7 @@ func TestRenderCanonicalJavaScriptSupportsEmptySDK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "empty-sdk"}, model)
+	files, err := javascriptgen.Render(javascriptOptions(t, "empty-sdk", nil, nil), model)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -212,7 +225,7 @@ func TestRenderCanonicalJavaScriptSupportsEmptySDK(t *testing.T) {
 	if !bytes.Contains(index, []byte("Readonly<Record<string, never>>")) || bytes.Contains(index, []byte("src/operations")) {
 		t.Fatalf("empty index:\n%s", index)
 	}
-	if len(files) != 6 {
+	if len(files) != 7 {
 		t.Fatalf("empty package file count = %d", len(files))
 	}
 }
@@ -220,28 +233,41 @@ func TestRenderCanonicalJavaScriptSupportsEmptySDK(t *testing.T) {
 func TestRenderCanonicalJavaScriptRejectsInvalidInputs(t *testing.T) {
 	t.Parallel()
 
-	model := javascriptModel(t, javascriptTarget(t, javascriptEmailSchema))
+	target := javascriptTarget(t, javascriptEmailSchema)
+	model := javascriptModel(t, target)
+	transport := javascriptOptions(t, "valid-sdk", []javascriptTargetView{target}, nil).Transport
 	for _, name := range []string{"", "@acme", "@Acme/app", "@acme/app/extra", ".hidden", "Upper", "name/", "a..b"} {
 		name := name
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			files, err := javascriptgen.Render(javascriptgen.Options{PackageName: name}, model)
+			files, err := javascriptgen.Render(javascriptgen.Options{PackageName: name, Transport: transport}, model)
 			if !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "npm package name") {
 				t.Fatalf("Render(%q) = %#v, %v", name, files, err)
 			}
 		})
 	}
-	if files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "valid-sdk"}, sdkmodel.Model{}); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "SDK model") {
+	if files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "valid-sdk", Transport: transport}, sdkmodel.Model{}); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "SDK model") {
 		t.Fatalf("Render(zero model) = %#v, %v", files, err)
 	}
-	unsafeInteger := javascriptModel(t, javascriptTarget(t, "id: metrics.record/v1\nrequest:\n  count: {type: integer, required: true, enum: [9007199254740992]}\n"))
-	if files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "valid-sdk"}, unsafeInteger); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "safe-integer") {
+	unsafeTarget := javascriptTarget(t, "id: metrics.record/v1\nrequest:\n  count: {type: integer, required: true, enum: [9007199254740992]}\n")
+	unsafeInteger := javascriptModel(t, unsafeTarget)
+	if files, err := javascriptgen.Render(javascriptOptions(t, "valid-sdk", []javascriptTargetView{unsafeTarget}, nil), unsafeInteger); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "safe-integer") {
 		t.Fatalf("Render(unsafe integer enum) = %#v, %v", files, err)
+	}
+	if files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "valid-sdk"}, model); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "transport projection") {
+		t.Fatalf("Render(missing transport) = %#v, %v", files, err)
+	}
+	corrupt := javascriptgen.Options{PackageName: "valid-sdk", Transport: transport}
+	corrupt.Transport.DescriptorSet = []byte{0xff}
+	if files, err := javascriptgen.Render(corrupt, model); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "Connect descriptors") {
+		t.Fatalf("Render(corrupt descriptors) = %#v, %v", files, err)
 	}
 }
 
 func FuzzRenderCanonicalJavaScriptPackageName(f *testing.F) {
-	model := javascriptModel(f, javascriptTarget(f, javascriptEmailSchema))
+	target := javascriptTarget(f, javascriptEmailSchema)
+	model := javascriptModel(f, target)
+	transport := javascriptOptions(f, "application-sdk", []javascriptTargetView{target}, nil).Transport
 	for _, seed := range []string{"@acme/project-sdk", "application-sdk", "", "@Bad/name", "a..b", "name_with.parts"} {
 		f.Add(seed)
 	}
@@ -249,8 +275,8 @@ func FuzzRenderCanonicalJavaScriptPackageName(f *testing.F) {
 		if len(packageName) > 512 {
 			return
 		}
-		first, firstErr := javascriptgen.Render(javascriptgen.Options{PackageName: packageName}, model)
-		second, secondErr := javascriptgen.Render(javascriptgen.Options{PackageName: packageName}, model)
+		first, firstErr := javascriptgen.Render(javascriptgen.Options{PackageName: packageName, Transport: transport}, model)
+		second, secondErr := javascriptgen.Render(javascriptgen.Options{PackageName: packageName, Transport: transport}, model)
 		if (firstErr == nil) != (secondErr == nil) {
 			t.Fatalf("Render changed result: %v then %v", firstErr, secondErr)
 		}
@@ -298,8 +324,11 @@ func FuzzRenderJavaScriptAliasDeprecation(f *testing.F) {
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		first, firstErr := javascriptgen.Render(javascriptgen.Options{PackageName: "alias-sdk"}, model)
-		second, secondErr := javascriptgen.Render(javascriptgen.Options{PackageName: "alias-sdk"}, model)
+		targets := []javascriptTargetView{target}
+		aliases := []javascriptAliasView{alias}
+		options := javascriptOptions(t, "alias-sdk", targets, aliases)
+		first, firstErr := javascriptgen.Render(options, model)
+		second, secondErr := javascriptgen.Render(options, model)
 		if firstErr != nil || secondErr != nil || !equalFiles(first, second) {
 			t.Fatalf("Render Alias is not deterministic: %v then %v", firstErr, secondErr)
 		}
@@ -331,6 +360,9 @@ type javascriptAliasView struct {
 func (v javascriptTargetView) ID() generation.CapabilityID { return v.id }
 func (v javascriptTargetView) ContractJSON() []byte        { return append([]byte(nil), v.contract...) }
 func (v javascriptTargetView) ContractDigest() string      { return v.digest }
+func (v javascriptTargetView) Sources() []string {
+	return []string{"test@local/" + v.id.String() + "/capability.yaml"}
+}
 func (v javascriptTargetView) Exposure() generation.Exposure {
 	return generation.Exposure{HTTP: true, JavaScript: true}
 }
@@ -408,6 +440,38 @@ func javascriptModelWithAliases(t testing.TB, targets []javascriptTargetView, al
 		t.Fatalf("Build: %v", err)
 	}
 	return model
+}
+
+func javascriptOptions(t testing.TB, packageName string, targets []javascriptTargetView, aliases []javascriptAliasView) javascriptgen.Options {
+	t.Helper()
+	targetViews := make([]protobufmodel.CanonicalTargetView, len(targets))
+	for index, target := range targets {
+		targetViews[index] = target
+	}
+	aliasViews := make([]protobufmodel.AliasView, len(aliases))
+	for index, alias := range aliases {
+		aliasViews[index] = alias
+	}
+	projection, err := protobufmodel.Build(true, targetViews, aliasViews)
+	if err != nil {
+		t.Fatalf("protobufmodel.Build: %v", err)
+	}
+	wireMap, err := protobufwiremap.Build(projection, nil, false, "")
+	if err != nil {
+		t.Fatalf("protobufwiremap.Build: %v", err)
+	}
+	evidence, err := protobufdescriptor.Build(projection, wireMap)
+	if err != nil {
+		t.Fatalf("protobufdescriptor.Build: %v", err)
+	}
+	return javascriptgen.Options{
+		PackageName: packageName,
+		Transport: javascriptgen.TransportOptions{
+			Projection:    projection,
+			WireMap:       wireMap,
+			DescriptorSet: evidence.DescriptorSet(),
+		},
+	}
 }
 
 func assertGoldenPackage(t *testing.T, files []javascriptgen.File) {

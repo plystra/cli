@@ -18,8 +18,10 @@ import (
 )
 
 const (
-	generatedRoot     = "generated/sdk/javascript"
-	typescriptVersion = "7.0.2"
+	generatedRoot             = "generated/sdk/javascript"
+	protobufJavaScriptVersion = "2.12.1"
+	connectJavaScriptVersion  = "2.1.2"
+	typescriptVersion         = "7.0.2"
 )
 
 // ErrRender reports that a normalized SDK model could not produce a complete
@@ -29,6 +31,7 @@ var ErrRender = errors.New("render generated JavaScript SDK")
 // Options controls application-owned npm package identity.
 type Options struct {
 	PackageName string
+	Transport   TransportOptions
 }
 
 // File is one immutable generated JavaScript SDK source file.
@@ -52,6 +55,7 @@ type renderedOperation struct {
 	version    string
 	symbol     string
 	source     string
+	transport  transportOperation
 }
 
 func (o renderedOperation) isAlias() bool { return o.id != o.target }
@@ -76,10 +80,15 @@ func Render(options Options, model sdkmodel.Model) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
+	operations, err = bindTransport(operations, options.Transport)
+	if err != nil {
+		return nil, err
+	}
 	files := []File{
 		newFile(path.Join(generatedRoot, ".npmrc"), []byte(npmrcSource)),
 		newFile(path.Join(generatedRoot, "package.json"), renderPackageJSON(options.PackageName)),
 		newFile(path.Join(generatedRoot, "tsconfig.json"), []byte(tsconfigSource)),
+		newFile(path.Join(generatedRoot, "src", "descriptors.ts"), renderDescriptorSource(options.Transport.DescriptorSet)),
 		newFile(path.Join(generatedRoot, "src", "runtime.ts"), []byte(runtimeSource)),
 	}
 	index, err := renderIndex(operations)
@@ -177,22 +186,28 @@ func renderPackageJSON(packageName string) []byte {
 		Build     string `json:"build"`
 		Typecheck string `json:"typecheck"`
 	}
-	type packageDependencies struct {
+	type packageRuntimeDependencies struct {
+		Protobuf   string `json:"@bufbuild/protobuf"`
+		Connect    string `json:"@connectrpc/connect"`
+		ConnectWeb string `json:"@connectrpc/connect-web"`
+	}
+	type packageDevelopmentDependencies struct {
 		TypeScript string `json:"typescript"`
 	}
 	manifest := struct {
-		Name            string              `json:"name"`
-		Version         string              `json:"version"`
-		Description     string              `json:"description"`
-		Type            string              `json:"type"`
-		SideEffects     bool                `json:"sideEffects"`
-		Files           []string            `json:"files"`
-		Main            string              `json:"main"`
-		Module          string              `json:"module"`
-		Types           string              `json:"types"`
-		Exports         packageExports      `json:"exports"`
-		Scripts         packageScripts      `json:"scripts"`
-		DevDependencies packageDependencies `json:"devDependencies"`
+		Name            string                         `json:"name"`
+		Version         string                         `json:"version"`
+		Description     string                         `json:"description"`
+		Type            string                         `json:"type"`
+		SideEffects     bool                           `json:"sideEffects"`
+		Files           []string                       `json:"files"`
+		Main            string                         `json:"main"`
+		Module          string                         `json:"module"`
+		Types           string                         `json:"types"`
+		Exports         packageExports                 `json:"exports"`
+		Scripts         packageScripts                 `json:"scripts"`
+		Dependencies    packageRuntimeDependencies     `json:"dependencies"`
+		DevDependencies packageDevelopmentDependencies `json:"devDependencies"`
 	}{
 		Name:        packageName,
 		Version:     "0.0.0",
@@ -211,7 +226,12 @@ func renderPackageJSON(packageName string) []byte {
 			Build:     "tsc -p tsconfig.json",
 			Typecheck: "tsc -p tsconfig.json --noEmit",
 		},
-		DevDependencies: packageDependencies{TypeScript: typescriptVersion},
+		Dependencies: packageRuntimeDependencies{
+			Protobuf:   protobufJavaScriptVersion,
+			Connect:    connectJavaScriptVersion,
+			ConnectWeb: connectJavaScriptVersion,
+		},
+		DevDependencies: packageDevelopmentDependencies{TypeScript: typescriptVersion},
 	}
 	encoded, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -267,12 +287,15 @@ func renderOperation(operation renderedOperation) ([]byte, error) {
 	if operationUsesJSONValue(operation.operation) {
 		fmt.Fprintln(&source, "  type JSONValue,")
 	}
+	fmt.Fprintln(&source, "  type MessageCodec,")
 	fmt.Fprintln(&source, "  type RequestOptions,")
 	fmt.Fprintln(&source, "  type Runtime,")
-	fmt.Fprintf(&source, "} from %s;\n\n", jsString(strings.Repeat("../", len(operation.segments)+1)+"runtime.js"))
+	rootPrefix := strings.Repeat("../", len(operation.segments)+1)
+	fmt.Fprintf(&source, "} from %s;\n", jsString(rootPrefix+"runtime.js"))
+	fmt.Fprintf(&source, "import { resolveUnaryMethod } from %s;\n\n", jsString(rootPrefix+"descriptors.js"))
 	fmt.Fprintf(&source, "export const capabilityID = %s;\n", jsString(operation.operation.ID().String()))
 	fmt.Fprintf(&source, "export const contractDigest = %s;\n", jsString(operation.operation.ContractDigest()))
-	fmt.Fprintf(&source, "const routePath = %s;\n\n", jsString("api/v1/capabilities/"+operation.operation.ID().String()+"/invoke"))
+	renderMethodBinding(&source, operation.transport)
 	renderType(&source, "Request", operation.operation.Request())
 	renderType(&source, "Response", operation.operation.Response())
 	renderErrorCode(&source, operation.operation.Errors())
@@ -284,10 +307,10 @@ func renderOperation(operation renderedOperation) ([]byte, error) {
 	fmt.Fprintln(&source, ") => Promise<Response>;")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "export function bindOperation(runtime: Runtime): Operation {")
-	fmt.Fprintln(&source, "  return bindOperationRoute(runtime, routePath);")
+	fmt.Fprintln(&source, "  return bindOperationMethod(runtime, method);")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
-	fmt.Fprintln(&source, "export function bindOperationRoute(runtime: Runtime, operationRoutePath: string): Operation {")
+	fmt.Fprintln(&source, "export function bindOperationMethod(runtime: Runtime, operationMethod: typeof method): Operation {")
 	fmt.Fprintln(&source, "  return async (request, options = {}) => {")
 	fmt.Fprintln(&source, "    let requestIsValid = false;")
 	fmt.Fprintln(&source, "    try {")
@@ -298,7 +321,7 @@ func renderOperation(operation renderedOperation) ([]byte, error) {
 	fmt.Fprintln(&source, "    if (!requestIsValid) {")
 	fmt.Fprintf(&source, "      throw new TypeError(%s);\n", jsString("request does not match "+operation.operation.ID().String()))
 	fmt.Fprintln(&source, "    }")
-	fmt.Fprintln(&source, "    const response = await invoke(runtime, operationRoutePath, request, options);")
+	fmt.Fprintln(&source, "    const response = await invoke(runtime, operationMethod, requestCodec, responseCodec, request, options);")
 	fmt.Fprintln(&source, "    if (!isResponse(response)) {")
 	fmt.Fprintln(&source, "      throw new PlystraError(200, \"invalid_response\");")
 	fmt.Fprintln(&source, "    }")
@@ -323,9 +346,10 @@ func renderAliasOperation(alias renderedOperation) ([]byte, error) {
 	var source strings.Builder
 	fmt.Fprintln(&source, "// Code generated by Plystra CLI. DO NOT EDIT.")
 	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "import { resolveUnaryMethod } from "+jsString(rootPrefix+"descriptors.js")+";")
 	fmt.Fprintln(&source, "import { createRuntime, type ClientOptions, type Runtime } from "+jsString(rootPrefix+"runtime.js")+";")
 	fmt.Fprintln(&source, "import {")
-	fmt.Fprintln(&source, "  bindOperationRoute as bindCanonicalOperationRoute,")
+	fmt.Fprintln(&source, "  bindOperationMethod as bindCanonicalOperationMethod,")
 	fmt.Fprintln(&source, "  type Operation,")
 	fmt.Fprintln(&source, "} from "+jsString(targetImport)+";")
 	fmt.Fprintln(&source, "export type { ErrorCode, Operation, Request, Response } from "+jsString(targetImport)+";")
@@ -333,10 +357,11 @@ func renderAliasOperation(alias renderedOperation) ([]byte, error) {
 	fmt.Fprintf(&source, "export const capabilityID = %s;\n", jsString(alias.id.String()))
 	fmt.Fprintf(&source, "export const targetCapabilityID = %s;\n", jsString(alias.target.String()))
 	fmt.Fprintf(&source, "export const contractDigest = %s;\n", jsString(alias.operation.ContractDigest()))
-	fmt.Fprintf(&source, "const routePath = %s;\n\n", jsString("api/v1/capabilities/"+alias.id.String()+"/invoke"))
+	renderMethodResolver(&source, alias.transport)
+	fmt.Fprintln(&source)
 	renderJSDocDeprecation(&source, "", alias.deprecated)
 	fmt.Fprintln(&source, "export function bindOperation(runtime: Runtime): Operation {")
-	fmt.Fprintln(&source, "  return bindCanonicalOperationRoute(runtime, routePath);")
+	fmt.Fprintln(&source, "  return bindCanonicalOperationMethod(runtime, method);")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
 	renderJSDocDeprecation(&source, "", alias.deprecated)
@@ -568,6 +593,8 @@ func renderREADME(packageName string, operations []renderedOperation) []byte {
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "The generated `.npmrc` disables lockfile creation because this package is CLI-owned. Installation may create only the ignored `node_modules/` and `dist/` validation outputs.")
 	fmt.Fprintln(&readme)
+	fmt.Fprintln(&readme, "The Plystra wrapper resolves generated Protobuf descriptors and sends binary Connect requests through its pinned `@bufbuild/protobuf`, `@connectrpc/connect`, and `@connectrpc/connect-web` dependencies. Application code does not construct raw Protobuf messages or Connect clients, and raw Connect errors are normalized before they cross the wrapper boundary.")
+	fmt.Fprintln(&readme)
 	if len(operations) == 0 {
 		fmt.Fprintln(&readme, "This application currently exposes no JavaScript Capability operations.")
 		return []byte(readme.String())
@@ -594,7 +621,7 @@ func renderREADME(packageName string, operations []renderedOperation) []byte {
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "`getAccessToken` returns only the raw token value. The generated transport adds the `Bearer` authorization scheme; returning a value that already includes that scheme fails before the request is sent.")
 	fmt.Fprintln(&readme)
-	fmt.Fprintln(&readme, "Only explicitly exposed canonical operations and validated application-local Alias surfaces are generated. Alias methods reuse their direct canonical target contract and invoke the matching generated Alias HTTP route. Provider packages, server configuration, verified internal context, and Secret values are never included.")
+	fmt.Fprintln(&readme, "Only explicitly exposed canonical operations and validated application-local Alias surfaces are generated. Alias methods reuse their direct canonical target contract and invoke the matching generated Alias Connect procedure. Provider packages, server configuration, verified internal context, and Secret values are never included.")
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "## Canonical operations")
 	fmt.Fprintln(&readme)

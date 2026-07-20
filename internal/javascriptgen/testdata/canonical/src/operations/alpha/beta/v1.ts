@@ -7,13 +7,28 @@ import {
   isPlainObject,
   PlystraError,
   type ClientOptions,
+  type MessageCodec,
   type RequestOptions,
   type Runtime,
 } from "../../../runtime.js";
+import { resolveUnaryMethod } from "../../../descriptors.js";
 
 export const capabilityID = "alpha.beta/v1";
 export const contractDigest = "sha256:570f299106e1a66a1c0d760720a54cbcf9054b763f38bc41ba65fe89e4dc1f26";
-const routePath = "api/v1/capabilities/alpha.beta/v1/invoke";
+const method = resolveUnaryMethod(
+  "plystra.generated.alpha.beta.v1.AlphaBetaV1Service",
+  "Invoke",
+  "plystra.generated.alpha.beta.v1.AlphaBetaV1Request",
+  "plystra.generated.alpha.beta.v1.AlphaBetaV1Response",
+);
+const requestCodec: MessageCodec = {
+  fields: [
+  ],
+};
+const responseCodec: MessageCodec = {
+  fields: [
+  ],
+};
 
 export type Request = Readonly<Record<string, never>>;
 
@@ -41,10 +56,10 @@ export type Operation = (
 ) => Promise<Response>;
 
 export function bindOperation(runtime: Runtime): Operation {
-  return bindOperationRoute(runtime, routePath);
+  return bindOperationMethod(runtime, method);
 }
 
-export function bindOperationRoute(runtime: Runtime, operationRoutePath: string): Operation {
+export function bindOperationMethod(runtime: Runtime, operationMethod: typeof method): Operation {
   return async (request, options = {}) => {
     let requestIsValid = false;
     try {
@@ -55,7 +70,7 @@ export function bindOperationRoute(runtime: Runtime, operationRoutePath: string)
     if (!requestIsValid) {
       throw new TypeError("request does not match alpha.beta/v1");
     }
-    const response = await invoke(runtime, operationRoutePath, request, options);
+    const response = await invoke(runtime, operationMethod, requestCodec, responseCodec, request, options);
     if (!isResponse(response)) {
       throw new PlystraError(200, "invalid_response");
     }
