@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/plystra/cli/internal/modulepath"
+	"github.com/plystra/cli/internal/transportprovenance"
 )
 
 // Path is the application-relative generated bootstrap source path.
@@ -27,9 +28,10 @@ var (
 // default is embedded, while the application-specific value remains in the
 // runtime document and never enters generated source.
 type Options struct {
-	ModulePath            string
-	DefaultStartupTimeout time.Duration
-	ConfigurationSchemas  []ConfigurationSchema
+	ModulePath              string
+	DefaultStartupTimeout   time.Duration
+	ConfigurationSchemas    []ConfigurationSchema
+	ConfigurationProvenance transportprovenance.Provenance
 }
 
 // Render emits the redacted runtime boundary that safely loads the application
@@ -40,6 +42,9 @@ func Render(options Options) ([]byte, error) {
 	}
 	if options.DefaultStartupTimeout <= 0 {
 		return nil, fmt.Errorf("%w: %w: default startup timeout must be positive", ErrRender, ErrInvalidOptions)
+	}
+	if !options.ConfigurationProvenance.Valid() {
+		return nil, fmt.Errorf("%w: %w: configuration-selection provenance is absent or invalid", ErrRender, ErrInvalidOptions)
 	}
 	schemas, err := planRuntimeConfigurationSchemas(options.ConfigurationSchemas)
 	if err != nil {
@@ -84,6 +89,9 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "const (")
 	fmt.Fprintln(&source, "\tdefaultRuntimeDocument = \"plystra.yaml\"")
 	fmt.Fprintf(&source, "\tdefaultStartupTimeout = time.Duration(%d)\n", options.DefaultStartupTimeout)
+	fmt.Fprintln(&source, "\t// compiledConfigurationSelectionProvenanceJSON records the normalized non-secret build selection.")
+	fmt.Fprintf(&source, "\tcompiledConfigurationSelectionProvenanceJSON = %s\n", strconv.Quote(string(options.ConfigurationProvenance.CanonicalJSON())))
+	fmt.Fprintf(&source, "\tcompiledConfigurationSelectionProvenanceDigest = %s\n", strconv.Quote(options.ConfigurationProvenance.Digest()))
 	fmt.Fprintln(&source, ")")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "var (")
