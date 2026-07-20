@@ -88,6 +88,28 @@ func TestHelperGeneratesNormalizedOutputWithSanitizedEnvironment(t *testing.T) {
 	}
 }
 
+func TestHelperRoundTripsConfigurationProvenance(t *testing.T) {
+	fixture := newExtensionFixture(t, validExtensionSource)
+	helper, err := Build(t.Context(), fixture.spec, fixture.options(helperTestExecutionTimeout))
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := helper.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+
+	output, err := helper.Generate(t.Context(), extensionContext(t, "provenance"))
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	diagnostics := output.Diagnostics()
+	if len(diagnostics) != 1 || diagnostics[0].Code != "configuration.provenance" || diagnostics[0].Message != "environment:production:plystra.production.yaml" {
+		t.Fatalf("Diagnostics = %#v", diagnostics)
+	}
+}
+
 func TestHelperClassifiesBoundedExecutionFailures(t *testing.T) {
 	fixture := newExtensionFixture(t, validExtensionSource)
 	helper, err := Build(t.Context(), fixture.spec, fixture.options(helperTestExecutionTimeout))
@@ -445,6 +467,17 @@ func extensionContext(t *testing.T, mode string) generation.Context {
 		Requirements: []string{"order.create/v1"},
 		Providers:    []generation.ProviderInput{{Capability: "order.create/v1", Plugin: "example.business"}},
 	}
+	if mode == "provenance" {
+		input.ConfigurationProvenance = &generation.ConfigurationProvenanceInput{
+			Mode:                        generation.ConfigurationModeEnvironment,
+			Environment:                 "production",
+			RootPath:                    "plystra.yaml",
+			RootDigest:                  "sha256:" + strings.Repeat("1", 64),
+			SelectedPath:                "plystra.production.yaml",
+			SelectedDigest:              "sha256:" + strings.Repeat("2", 64),
+			DependencyCompositionDigest: "sha256:" + strings.Repeat("3", 64),
+		}
+	}
 	context, err := generation.NewContext(input)
 	if err != nil {
 		t.Fatalf("NewContext: %v", err)
@@ -573,6 +606,15 @@ func Generate(context generation.GenerationContext) (generation.Output, error) {
 				ID: "authn.order-shortcut", Namespace: "authn", Source: order, Alias: orderAlias, Target: order,
 			}},
 		}, nil
+	case "provenance":
+		provenance, exists := context.ConfigurationProvenance()
+		if !exists {
+			return generation.Output{}, errors.New("configuration provenance is absent")
+		}
+		if provenance.Mode() != generation.ConfigurationModeEnvironment || provenance.Environment() != "production" || provenance.RootPath() != "plystra.yaml" || provenance.RootDigest() != "sha256:"+strings.Repeat("1", 64) || provenance.SelectedPath() != "plystra.production.yaml" || provenance.SelectedDigest() != "sha256:"+strings.Repeat("2", 64) || provenance.DependencyCompositionDigest() != "sha256:"+strings.Repeat("3", 64) {
+			return generation.Output{}, fmt.Errorf("unexpected configuration provenance: mode=%s environment=%s root=%s selected=%s", provenance.Mode(), provenance.Environment(), provenance.RootPath(), provenance.SelectedPath())
+		}
+		return generation.Output{Diagnostics: []generation.Diagnostic{{Code: "configuration.provenance", Severity: generation.DiagnosticInfo, Message: string(provenance.Mode()) + ":" + provenance.Environment() + ":" + provenance.SelectedPath(), Namespace: "authn", Source: order, RuleID: "authn.provenance"}}}, nil
 	case "error":
 		return generation.Output{}, errors.New("request failed at https://person:secret@example.com/private?token=secret")
 	case "panic":

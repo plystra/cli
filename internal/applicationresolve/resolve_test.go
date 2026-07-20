@@ -53,6 +53,7 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if first.Module().Path() != root || first.Module().ModulePath() != "example.com/empty" {
 		t.Fatalf("Module = %#v", first.Module())
 	}
+	assertResolvedConfigurationProvenance(t, first)
 	if _, exists := first.Manifest().HTTPAddress(); exists || len(first.Manifest().Requirements()) != 0 || len(first.Manifest().Aliases()) != 0 {
 		t.Fatalf("Manifest is not empty: %#v", first.Manifest())
 	}
@@ -129,6 +130,7 @@ replace example.com/platform => ../platform
 	if selection.Mode() != "explicit-config" || selection.Path() != "deploy/customer.yaml" || !strings.HasPrefix(selection.Digest(), "sha256:") {
 		t.Fatalf("ConfigurationSelection = mode %q path %q digest %q", selection.Mode(), selection.Path(), selection.Digest())
 	}
+	assertResolvedConfigurationProvenance(t, result)
 	if address, exists := result.Manifest().HTTPAddress(); !exists || address != ":9090" {
 		t.Fatalf("effective HTTP address = %q, %t; root replacement leaked", address, exists)
 	}
@@ -225,6 +227,7 @@ replace example.com/platform-b => ../platform-b
 	if selection.Mode() != applicationgen.ConfigurationModeEnvironment || selection.Environment() != "production" || selection.Path() != "plystra.production.yaml" || !strings.HasPrefix(selection.Digest(), "sha256:") {
 		t.Fatalf("ConfigurationSelection = mode %q environment %q path %q digest %q", selection.Mode(), selection.Environment(), selection.Path(), selection.Digest())
 	}
+	assertResolvedConfigurationProvenance(t, result)
 	if address, exists := result.Manifest().HTTPAddress(); !exists || address != ":9090" {
 		t.Fatalf("effective HTTP address = %q, %t", address, exists)
 	}
@@ -483,13 +486,14 @@ replace example.com/providers => ../providers
 	dependencyBefore := snapshotTree(t, providerRoot)
 	options := applicationresolve.Options{
 		Start:       filepath.Join(appRoot, "local"),
-		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "PLYSTRA_APPLICATION_RESOLVE_PRIVATE_SECRET": "resolved-private-secret"}),
 	}
 
 	first, err := applicationresolve.Resolve(t.Context(), options)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
+	assertResolvedConfigurationProvenance(t, first)
 	plugins := first.Inventory().Plugins()
 	dependencies := first.Dependencies().Modules()
 	if len(dependencies) != 1 || dependencies[0].Path() != "example.com/providers" || dependencies[0].SelectedVersion() != "v1.2.3" {
@@ -527,7 +531,7 @@ replace example.com/providers => ../providers
 	if got := configurationBindingIDs(first.Configurations().Bindings()); !reflect.DeepEqual(got, []string{"example.local", "example.smtp"}) {
 		t.Fatalf("configuration bindings = %v", got)
 	}
-	for _, forbidden := range []string{"private.smtp.example.com", "PLYSTRA_APPLICATION_RESOLVE_PRIVATE_SECRET"} {
+	for _, forbidden := range []string{"private.smtp.example.com", "PLYSTRA_APPLICATION_RESOLVE_PRIVATE_SECRET", "resolved-private-secret", appRoot, providerRoot} {
 		if bytes.Contains(resolved.Context().CanonicalJSON(), []byte(forbidden)) {
 			t.Fatalf("generation context exposed private configuration %q: %s", forbidden, resolved.Context().CanonicalJSON())
 		}
@@ -895,6 +899,7 @@ extensions:
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
+	assertResolvedConfigurationProvenance(t, result)
 	generated := result.Resolution().GeneratedRequirements()
 	if result.Resolution().Passes() != 3 || len(generated) != 1 || generated[0].PluginID() != "example.authn" || generated[0].Capability().String() != "audit.write/v1" {
 		t.Fatalf("extension resolution = passes %d, generated %#v", result.Resolution().Passes(), generated)
@@ -1109,6 +1114,25 @@ func pluginSummaries(plugins []plugininventory.Plugin) []string {
 	return result
 }
 
+func assertResolvedConfigurationProvenance(t testing.TB, result applicationresolve.Result) {
+	t.Helper()
+	provenance, exists := result.Resolution().Context().ConfigurationProvenance()
+	selection := result.ConfigurationSelection()
+	if !exists {
+		t.Fatal("filesystem-backed resolution omitted configuration provenance")
+	}
+	rootDigest, err := applicationgen.ConfigurationDigest(result.RootConfigurationData())
+	if err != nil {
+		t.Fatalf("ConfigurationDigest(root): %v", err)
+	}
+	if provenance.Mode() != generation.ConfigurationMode(selection.Mode()) || provenance.Environment() != selection.Environment() || provenance.RootPath() != "plystra.yaml" || provenance.RootDigest() != rootDigest || provenance.SelectedPath() != selection.Path() || provenance.SelectedDigest() != selection.Digest() || provenance.DependencyCompositionDigest() != result.Composition().DependencyDigest() {
+		t.Fatalf("configuration provenance = mode %q environment %q root %q/%q selected %q/%q dependency %q; selection = mode %q environment %q path %q digest %q", provenance.Mode(), provenance.Environment(), provenance.RootPath(), provenance.RootDigest(), provenance.SelectedPath(), provenance.SelectedDigest(), provenance.DependencyCompositionDigest(), selection.Mode(), selection.Environment(), selection.Path(), selection.Digest())
+	}
+	if result.Resolution().Context().Digest() == result.Resolution().Context().BuildModelDigest() {
+		t.Fatal("filesystem configuration provenance did not enter the extension context digest")
+	}
+}
+
 type treeEntry struct {
 	path     string
 	mode     fs.FileMode
@@ -1192,9 +1216,17 @@ func repositoryRoot(t testing.TB) string {
 
 const realExtensionSource = `package extension
 
-import generation "github.com/plystra/cli/generation/v1"
+import (
+	"fmt"
+
+	generation "github.com/plystra/cli/generation/v1"
+)
 
 func Generate(context generation.GenerationContext) (generation.Output, error) {
+	provenance, exists := context.ConfigurationProvenance()
+	if !exists || provenance.Mode() != generation.ConfigurationModeDefault || provenance.Environment() != "" || provenance.RootPath() != "plystra.yaml" || provenance.SelectedPath() != "plystra.yaml" || provenance.RootDigest() == "" || provenance.SelectedDigest() != provenance.RootDigest() || provenance.DependencyCompositionDigest() == "" {
+		return generation.Output{}, fmt.Errorf("invalid configuration provenance: present=%t mode=%s environment=%q root=%q selected=%q", exists, provenance.Mode(), provenance.Environment(), provenance.RootPath(), provenance.SelectedPath())
+	}
 	order, _ := generation.ParseCapabilityID("order.create/v1")
 	audit, _ := generation.ParseCapabilityID("audit.write/v1")
 	if _, exists := context.Capability(order); !exists {

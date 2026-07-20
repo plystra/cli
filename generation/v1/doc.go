@@ -2,9 +2,11 @@
 // between Plystra CLI and plugin-provided generation extensions.
 //
 // A Context contains only normalized public contracts, selected providers,
-// exposure, aliases, module provenance, and explicitly build-visible metadata.
-// It contains no runtime configuration, Secret value, process environment,
-// filesystem path, writable handle, or generated-output location.
+// exposure, aliases, module provenance, explicitly build-visible metadata, and
+// non-secret selected-configuration identity. Configuration identity contains
+// stable Project-relative paths plus normalized digests, never YAML values. A
+// Context contains no runtime configuration, Secret value, process environment,
+// absolute filesystem path, writable handle, or generated-output location.
 //
 // Generation extensions are trusted Go build dependencies. This package makes
 // supported inputs immutable and deterministic; it is not a security sandbox.

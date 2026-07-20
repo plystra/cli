@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
@@ -225,7 +226,36 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	manifest := composition.Manifest()
-	input, err := applicationinput.Build(manifest, inventory, generationexec.BuildOptions{
+	selectedData := maintenance.Data()
+	if selector.mode == configurationModeEnvironment {
+		selectedData = configurationSnapshot.Data()
+	}
+	selectedDigestFunction := applicationgen.ConfigurationDigest
+	if selector.mode == configurationModeEnvironment {
+		selectedDigestFunction = applicationgen.EnvironmentOverlayDigest
+	}
+	selectedDigest, err := selectedDigestFunction(selectedData)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: digest selected configuration %s: %w", ErrResolve, selector.path, err)
+	}
+	rootData := rootSnapshot.Data()
+	if maintenanceSnapshot.path == applicationManifestName {
+		rootData = maintenance.Data()
+	}
+	rootDigest, err := applicationgen.ConfigurationDigest(rootData)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: digest root configuration %s: %w", ErrResolve, applicationManifestName, err)
+	}
+	configurationProvenance := &generation.ConfigurationProvenanceInput{
+		Mode:                        generation.ConfigurationMode(selector.mode),
+		Environment:                 selector.environment,
+		RootPath:                    applicationManifestName,
+		RootDigest:                  rootDigest,
+		SelectedPath:                selector.path,
+		SelectedDigest:              selectedDigest,
+		DependencyCompositionDigest: composition.DependencyDigest(),
+	}
+	input, err := applicationinput.Build(manifest, inventory, configurationProvenance, generationexec.BuildOptions{
 		GoCommand:        options.GoCommand,
 		BuildEnvironment: append([]string(nil), options.Environment...),
 		CompileTimeout:   options.CompileTimeout,
@@ -242,22 +272,6 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	configs, err := configurationresolve.Resolve(manifest, inventory, resolution.Context())
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	selectedData := maintenance.Data()
-	if selector.mode == configurationModeEnvironment {
-		selectedData = configurationSnapshot.Data()
-	}
-	selectedDigestFunction := applicationgen.ConfigurationDigest
-	if selector.mode == configurationModeEnvironment {
-		selectedDigestFunction = applicationgen.EnvironmentOverlayDigest
-	}
-	selectedDigest, err := selectedDigestFunction(selectedData)
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: digest selected configuration %s: %w", ErrResolve, selector.path, err)
-	}
-	rootData := rootSnapshot.Data()
-	if maintenanceSnapshot.path == applicationManifestName {
-		rootData = maintenance.Data()
 	}
 	after, err := ReadManifestSnapshot(module.Path())
 	if err != nil {

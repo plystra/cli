@@ -533,7 +533,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 			Connect: options.HTTPTransports.Connect,
 			REST:    options.HTTPTransports.REST,
 		},
-		ContextDigest:          context.Digest(),
+		ContextDigest:          context.BuildModelDigest(),
 		AliasDigest:            aliases.Digest(),
 		Configurations:         configurationRecords,
 		Providers:              providerRecords,

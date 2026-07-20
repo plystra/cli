@@ -407,9 +407,9 @@ func kernelBuildProvenance(resolved applicationresolve.Result) (string, string, 
 	}
 	identity := ""
 	if dependency.SelectedVersion() == "" {
-		identity = resolved.Resolution().Context().Digest()
+		identity = resolved.Resolution().Context().BuildModelDigest()
 	} else if _, replaced := dependency.Replacement(); replaced {
-		identity = resolved.Resolution().Context().Digest()
+		identity = resolved.Resolution().Context().BuildModelDigest()
 	}
 	if _, err := kernelinvocation.NewModuleBuild(kernelintrinsic.ModulePath, dependency.SelectedVersion(), identity); err != nil {
 		return "", "", fmt.Errorf("%w: selected %s build provenance: %v", ErrKernelDependency, kernelintrinsic.ModulePath, err)

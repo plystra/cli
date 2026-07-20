@@ -95,6 +95,8 @@ The CLI accepts only a supported generation API, a canonical plugin-relative pac
 
 The public v1 input contract is `github.com/plystra/cli/generation/v1`. It validates complete resolved state, exposes only defensive immutable views, canonically orders every collection and JSON-compatible metadata value, and provides stable SHA-256 input and contract digests. Its empty context is valid for applications with no plugins or extensions.
 
+Filesystem-backed contexts also expose immutable configuration provenance: selection mode, selected environment when applicable, stable Project-relative root and selected-document paths, normalized root and selected-document digests, and the dependency-composition digest. They never expose YAML values, resolved Secrets, absolute paths, the process environment, or generated-output locations. `Digest` covers this complete extension input and survives the helper-process round trip. `BuildModelDigest` excludes document provenance so a runtime-only configuration change does not alter static assembly unless an extension actually changes its normalized output.
+
 Each compatible generation package exports exactly:
 
 ```go

@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationinput"
@@ -526,7 +527,18 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if err != nil {
 		return fmt.Errorf("compose initial Project configuration: %w", err)
 	}
-	input, err := applicationinput.Build(currentManifest, plugininventory.Index{}, generationexec.BuildOptions{})
+	configurationDigest, err := applicationgen.ConfigurationDigest([]byte(plystraTemplate))
+	if err != nil {
+		return fmt.Errorf("digest initial Project configuration: %w", err)
+	}
+	input, err := applicationinput.Build(currentManifest, plugininventory.Index{}, &generation.ConfigurationProvenanceInput{
+		Mode:                        generation.ConfigurationModeDefault,
+		RootPath:                    "plystra.yaml",
+		RootDigest:                  configurationDigest,
+		SelectedPath:                "plystra.yaml",
+		SelectedDigest:              configurationDigest,
+		DependencyCompositionDigest: composition.DependencyDigest(),
+	}, generationexec.BuildOptions{})
 	if err != nil {
 		return fmt.Errorf("build initial application model: %w", err)
 	}
