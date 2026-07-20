@@ -547,7 +547,10 @@ func prepareGeneratedClientModule(t testing.TB, contract contractgen.File, invoc
 	writeGeneratedFile(t, root, "kernel/go.mod", []byte("module github.com/plystra/kernel\n\ngo 1.26\n"))
 	writeGeneratedFile(t, root, "kernel/invocation/handle.go", []byte(`package invocation
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 type Handle[Request, Response any] struct {
 	available bool
@@ -567,6 +570,45 @@ func (h Handle[Request, Response]) Invoke(ctx context.Context, request Request) 
 	var response Response
 	return response, nil
 }
+
+type ErrorCode string
+
+const (
+	ErrorInvalidArgument ErrorCode = "invalid_argument"
+	ErrorNotFound ErrorCode = "not_found"
+	ErrorConflict ErrorCode = "conflict"
+	ErrorDenied ErrorCode = "denied"
+	ErrorUnauthenticated ErrorCode = "unauthenticated"
+	ErrorUnavailable ErrorCode = "unavailable"
+	ErrorTimeout ErrorCode = "timeout"
+	ErrorCancelled ErrorCode = "cancelled"
+	ErrorResultUnknown ErrorCode = "result_unknown"
+	ErrorInternal ErrorCode = "internal"
+	ErrorVersionIncompatible ErrorCode = "version_incompatible"
+)
+
+func (c ErrorCode) String() string { return string(c) }
+func (c ErrorCode) Valid() bool {
+	switch c {
+	case ErrorInvalidArgument, ErrorNotFound, ErrorConflict, ErrorDenied, ErrorUnauthenticated, ErrorUnavailable, ErrorTimeout, ErrorCancelled, ErrorResultUnknown, ErrorInternal, ErrorVersionIncompatible:
+		return true
+	default:
+		return false
+	}
+}
+
+func ValidDetailCode(value string) bool {
+	return value == "" || len(value) <= 128 && !strings.ContainsAny(value, " \r\n\x00")
+}
+
+type Error struct {
+	code ErrorCode
+	detail string
+}
+
+func (e *Error) Error() string { return "invocation error" }
+func (e *Error) Code() ErrorCode { if e == nil { return "" }; return e.code }
+func (e *Error) DetailCode() string { if e == nil { return "" }; return e.detail }
 `))
 	moduleFile := "module " + testModulePath + "\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\n\nreplace github.com/plystra/kernel => ./kernel\n"
 	writeGeneratedFile(t, root, "go.mod", []byte(moduleFile))

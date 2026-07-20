@@ -14,7 +14,6 @@ import (
 
 	contract "example.com/acme/project/generated/go/contracts/email/send/v1"
 	applicationinvocation "example.com/acme/project/generated/go/invocation/email/send/v1"
-	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
 const (
@@ -262,62 +261,36 @@ func plystraWriteInvocationError(writer http.ResponseWriter, err error) {
 			plystraWriteError(writer, http.StatusInternalServerError, "internal", "")
 		}
 	}()
-	if semantic, ok := plystraSemanticError(err); ok {
+	input := applicationinvocation.SafeTransportError(err)
+	if semantic := input.SemanticErrorCode(); semantic != "" {
 		plystraWriteError(writer, http.StatusUnprocessableEntity, "capability_error", semantic)
 		return
 	}
-	var classified *kernelinvocation.Error
-	if errors.As(err, &classified) && classified.Code().Valid() && kernelinvocation.ValidDetailCode(classified.DetailCode()) {
-		plystraWriteError(writer, plystraStatus(classified.Code()), classified.Code().String(), classified.DetailCode())
+	if class := input.KernelErrorClass(); class != "" {
+		plystraWriteError(writer, plystraStatus(class), class, input.KernelDetailCode())
 		return
 	}
-	switch {
-	case errors.Is(err, context.DeadlineExceeded):
-		plystraWriteError(writer, http.StatusServiceUnavailable, kernelinvocation.ErrorTimeout.String(), "")
-	case errors.Is(err, context.Canceled):
-		plystraWriteError(writer, 499, kernelinvocation.ErrorCancelled.String(), "")
-	default:
-		plystraWriteError(writer, http.StatusInternalServerError, "internal", "")
-	}
+	plystraWriteError(writer, http.StatusInternalServerError, "internal", "")
 }
 
-func plystraStatus(code kernelinvocation.ErrorCode) int {
+func plystraStatus(code string) int {
 	switch code {
-	case kernelinvocation.ErrorInvalidArgument:
+	case "invalid_argument":
 		return http.StatusBadRequest
-	case kernelinvocation.ErrorUnauthenticated:
+	case "unauthenticated":
 		return http.StatusUnauthorized
-	case kernelinvocation.ErrorDenied:
+	case "denied":
 		return http.StatusForbidden
-	case kernelinvocation.ErrorNotFound:
+	case "not_found":
 		return http.StatusNotFound
-	case kernelinvocation.ErrorConflict, kernelinvocation.ErrorVersionIncompatible:
+	case "conflict", "version_incompatible":
 		return http.StatusConflict
-	case kernelinvocation.ErrorTimeout, kernelinvocation.ErrorUnavailable, kernelinvocation.ErrorResultUnknown:
+	case "timeout", "unavailable", "result_unknown":
 		return http.StatusServiceUnavailable
-	case kernelinvocation.ErrorCancelled:
+	case "cancelled":
 		return 499
 	default:
 		return http.StatusInternalServerError
-	}
-}
-
-type plystraSemanticErrorCoder interface {
-	error
-	SemanticErrorCode() string
-}
-
-func plystraSemanticError(err error) (string, bool) {
-	var semantic plystraSemanticErrorCoder
-	if !errors.As(err, &semantic) {
-		return "", false
-	}
-	code := semantic.SemanticErrorCode()
-	switch code {
-	case "authentication_failed", "invalid_recipient", "temporarily_unavailable":
-		return code, true
-	default:
-		return "", false
 	}
 }
 

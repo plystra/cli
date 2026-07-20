@@ -1946,6 +1946,60 @@ func TestEarlierNodeValuesFlowIntoContextAndCalls(t *testing.T) {
 func writeInvocationTestKernel(t testing.TB, root string) {
 	t.Helper()
 	writeGeneratedFile(t, root, "kernel/go.mod", []byte("module github.com/plystra/kernel\n\ngo 1.26\n"))
+	writeGeneratedFile(t, root, "kernel/invocation/error.go", []byte(`package invocation
+
+import "strings"
+
+type ErrorCode string
+
+const (
+	ErrorInvalidArgument ErrorCode = "invalid_argument"
+	ErrorNotFound ErrorCode = "not_found"
+	ErrorConflict ErrorCode = "conflict"
+	ErrorDenied ErrorCode = "denied"
+	ErrorUnauthenticated ErrorCode = "unauthenticated"
+	ErrorUnavailable ErrorCode = "unavailable"
+	ErrorTimeout ErrorCode = "timeout"
+	ErrorCancelled ErrorCode = "cancelled"
+	ErrorResultUnknown ErrorCode = "result_unknown"
+	ErrorInternal ErrorCode = "internal"
+	ErrorVersionIncompatible ErrorCode = "version_incompatible"
+)
+
+func (c ErrorCode) String() string { return string(c) }
+func (c ErrorCode) Valid() bool {
+	switch c {
+	case ErrorInvalidArgument, ErrorNotFound, ErrorConflict, ErrorDenied, ErrorUnauthenticated, ErrorUnavailable, ErrorTimeout, ErrorCancelled, ErrorResultUnknown, ErrorInternal, ErrorVersionIncompatible:
+		return true
+	default:
+		return false
+	}
+}
+
+func ValidDetailCode(value string) bool {
+	return value == "" || len(value) <= 128 && !strings.ContainsAny(value, " \r\n\x00")
+}
+
+type Error struct {
+	code ErrorCode
+	detail string
+}
+
+func NewTestError(code ErrorCode, detail string) *Error { return &Error{code: code, detail: detail} }
+func (e *Error) Error() string { return "classified Provider secret" }
+func (e *Error) Code() ErrorCode { return e.code }
+func (e *Error) DetailCode() string { return e.detail }
+
+type SemanticError struct { code string }
+func NewTestSemanticError(code string) *SemanticError { return &SemanticError{code: code} }
+func (e *SemanticError) Error() string { return "semantic Provider secret" }
+func (e *SemanticError) SemanticErrorCode() string { return e.code }
+
+type PanickingSemanticError struct{}
+func NewTestPanickingSemanticError() *PanickingSemanticError { return &PanickingSemanticError{} }
+func (*PanickingSemanticError) Error() string { return "panicking semantic Provider secret" }
+func (*PanickingSemanticError) SemanticErrorCode() string { panic("semantic Provider secret") }
+`))
 	writeGeneratedFile(t, root, "kernel/invocation/handle.go", []byte(`package invocation
 
 import "context"

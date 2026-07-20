@@ -61,14 +61,14 @@ func TestRenderCanonicalHTTPAdapter(t *testing.T) {
 		`decoder.Token()`,
 		`bytes.Equal(bytes.TrimSpace(value), []byte("null"))`,
 		`http.MaxBytesReader(writer, request.Body, MaximumRequestBytes)`,
+		`input := applicationinvocation.SafeTransportError(err)`,
 		`plystraWriteError(writer, http.StatusUnprocessableEntity, "capability_error", semantic)`,
-		`SemanticErrorCode() string`,
 	} {
 		if !strings.Contains(generated, required) {
 			t.Fatalf("generated adapter omits %q:\n%s", required, file.Data())
 		}
 	}
-	if bytes.Contains(file.Data(), []byte("Dispatcher")) || bytes.Contains(file.Data(), []byte("kernelinvocation.Handle")) {
+	if bytes.Contains(file.Data(), []byte("Dispatcher")) || bytes.Contains(file.Data(), []byte("kernelinvocation")) || bytes.Contains(file.Data(), []byte("github.com/plystra/kernel")) {
 		t.Fatalf("generated adapter bypasses canonical application invocation:\n%s", file.Data())
 	}
 	want, err := os.ReadFile("testdata/email.send.v1.go")
