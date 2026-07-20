@@ -340,10 +340,13 @@ Next:
 ```
 
 The template form proves read-only Go package tests and builds, isolated runtime
-startup, intrinsic health, and clean shutdown. The complete qualified-template
-acceptance suite still needs public `plystra dev` and `plystra build` workflows
-plus applicable JavaScript SDK qualification. Do not describe a template as
-qualified until that complete automated suite exists.
+startup, intrinsic health, and clean shutdown. When a generated JavaScript SDK
+is present, creation also runs `npm install --ignore-scripts --no-audit --no-fund`,
+`npm run typecheck`, `npm run build`, and `npm pack --dry-run --json`, then
+removes validation-only `node_modules/` and `dist/` output before installation.
+The complete qualified-template acceptance suite still needs public `plystra dev`
+and `plystra build` workflows. Do not describe a template as qualified until
+that complete automated suite exists.
 
 Every Plystra Project contains mandatory root `plystra.yaml` and is
 independently runnable. A new Project may validly contain zero local Plugins,

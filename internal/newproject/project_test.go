@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -44,6 +45,9 @@ const (
 )
 
 func TestMain(main *testing.M) {
+	if os.Getenv("PLYSTRA_NPM_HELPER") == "1" {
+		os.Exit(runNPMHelper())
+	}
 	if os.Getenv(templateDriftHelperEnvironment) == "1" {
 		os.Exit(runTemplateDriftGoHelper())
 	}
@@ -58,6 +62,49 @@ func TestMain(main *testing.M) {
 		}
 	}
 	os.Exit(main.Run())
+}
+
+func runNPMHelper() int {
+	if len(os.Args) < 2 {
+		_, _ = fmt.Fprintln(os.Stderr, "missing npm arguments")
+		return 2
+	}
+	arguments := strings.Join(os.Args[1:], " ")
+	if logPath := os.Getenv("PLYSTRA_NPM_LOG"); logPath != "" {
+		file, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "open npm log: %v", err)
+			return 2
+		}
+		_, _ = fmt.Fprintln(file, arguments)
+		_ = file.Close()
+	}
+	if os.Getenv("PLYSTRA_NPM_FAIL_ON") == arguments {
+		_, _ = fmt.Fprintf(os.Stderr, "injected npm failure for %s\n", arguments)
+		return 17
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "get npm working directory: %v\n", err)
+		return 2
+	}
+	switch {
+	case os.Args[1] == "install":
+		if err := os.MkdirAll(filepath.Join(root, "node_modules", ".bin"), 0o755); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "create node_modules: %v\n", err)
+			return 2
+		}
+	case os.Args[1] == "run" && len(os.Args) >= 3 && os.Args[2] == "build":
+		if err := os.MkdirAll(filepath.Join(root, "dist"), 0o755); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "create dist: %v\n", err)
+			return 2
+		}
+		if err := os.WriteFile(filepath.Join(root, "dist", "index.js"), []byte("compiled\n"), 0o644); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "write dist: %v\n", err)
+			return 2
+		}
+	}
+	return 0
 }
 
 func runTemplateDriftGoHelper() int {
@@ -400,6 +447,107 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
 	if proxyAfter := snapshotTree(t, proxy); !reflect.DeepEqual(proxyAfter, proxyBefore) {
 		t.Fatalf("Go Module proxy changed during template creation:\nbefore: %#v\nafter:  %#v", proxyBefore, proxyAfter)
 	}
+}
+
+func TestCreateQualifiesGeneratedJavaScriptSDKAndRemovesValidationOutput(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/javascript-platform"
+	const templateVersion = "v1.0.0"
+	templateQuery := templatePath + "@" + templateVersion
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"template.go":  []byte("package platform\n"),
+		"plystra.yaml": []byte("http:\n  expose: [kernel.health/v1]\n"),
+	})
+	logPath := filepath.Join(t.TempDir(), "npm.log")
+	environment := isolatedGoEnvironment(t, proxy)
+	environment = setEnvironmentValue(environment, "PLYSTRA_NPM_HELPER", "1")
+	environment = setEnvironmentValue(environment, "PLYSTRA_NPM_LOG", logPath)
+	parent := t.TempDir()
+	result, err := newproject.Create(t.Context(), newproject.Options{
+		Parent:      parent,
+		ProjectName: "my-app",
+		ModulePath:  "example.com/acme/my-app",
+		Template:    templateQuery,
+		NPMCommand:  os.Args[0],
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if result.Path() != filepath.Join(parent, "my-app") {
+		t.Fatalf("result path = %q", result.Path())
+	}
+	assertDirectRequirement(t, result.Path(), "connectrpc.com/connect", "v1.20.0")
+	assertDirectRequirement(t, result.Path(), "google.golang.org/protobuf", "v1.36.11")
+	if _, err := os.Lstat(filepath.Join(result.Path(), "go.work")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("generated Project contains go.work: %v", err)
+	}
+	packageData, err := os.ReadFile(filepath.Join(result.Path(), "generated", "sdk", "javascript", "package.json"))
+	if err != nil {
+		t.Fatalf("read generated JavaScript package metadata: %v", err)
+	}
+	var packageManifest struct {
+		Scripts struct {
+			Typecheck string `json:"typecheck"`
+			Build     string `json:"build"`
+		} `json:"scripts"`
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(packageData, &packageManifest); err != nil {
+		t.Fatalf("decode generated JavaScript package metadata: %v", err)
+	}
+	if packageManifest.Scripts.Typecheck == "" || packageManifest.Scripts.Build == "" || packageManifest.DevDependencies["typescript"] == "" {
+		t.Fatalf("generated JavaScript package metadata omits required package-manager inputs: %s", packageData)
+	}
+	if err := gocommand.Run(t.Context(), gocommand.Options{
+		Directory:   result.Path(),
+		Environment: environment,
+	}, "list", "-mod=readonly", "./..."); err != nil {
+		t.Fatalf("created Project does not resolve with GOWORK=off: %v", err)
+	}
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read npm log: %v", err)
+	}
+	wantLog := "install --ignore-scripts --no-audit --no-fund --package-lock=false\nrun typecheck\nrun build\npack --dry-run --json\n"
+	if string(logData) != wantLog {
+		t.Fatalf("npm validation calls = %q, want %q", logData, wantLog)
+	}
+	for _, relative := range []string{"generated/sdk/javascript/node_modules", "generated/sdk/javascript/dist", "generated/sdk/javascript/package-lock.json", "generated/sdk/javascript/npm-shrinkwrap.json"} {
+		if _, err := os.Lstat(filepath.Join(result.Path(), filepath.FromSlash(relative))); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("validation output %s remains in committed Project: %v", relative, err)
+		}
+	}
+}
+
+func TestCreateRollsBackWhenGeneratedJavaScriptSDKValidationFails(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/javascript-failing-platform"
+	const templateVersion = "v1.0.0"
+	templateQuery := templatePath + "@" + templateVersion
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"template.go":  []byte("package platform\n"),
+		"plystra.yaml": []byte("http:\n  expose: [kernel.health/v1]\n"),
+	})
+	environment := isolatedGoEnvironment(t, proxy)
+	environment = setEnvironmentValue(environment, "PLYSTRA_NPM_HELPER", "1")
+	environment = setEnvironmentValue(environment, "PLYSTRA_NPM_FAIL_ON", "run typecheck")
+	parent := t.TempDir()
+	_, err := newproject.Create(t.Context(), newproject.Options{
+		Parent:      parent,
+		ProjectName: "my-app",
+		ModulePath:  "example.com/acme/my-app",
+		Template:    templateQuery,
+		NPMCommand:  os.Args[0],
+		Environment: environment,
+	})
+	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrInvalidTemplate) || !strings.Contains(err.Error(), "npm run typecheck") || !strings.Contains(err.Error(), "injected npm failure") {
+		t.Fatalf("Create error = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists after JavaScript qualification failure: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
 }
 
 func TestCreateRejectsTemplateWithoutRootProjectMarkerAndRollsBack(t *testing.T) {
