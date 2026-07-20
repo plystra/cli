@@ -19,6 +19,7 @@ import (
 	"github.com/plystra/cli/internal/apidocgen"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/sdkmodel"
+	"github.com/plystra/cli/internal/transportprovenance"
 )
 
 var (
@@ -59,7 +60,8 @@ func TestRenderApplicationAPIDocumentation(t *testing.T) {
 		apiAlias(t, "go.only/v1", email, generation.Exposure{Go: true}, ""),
 	}
 	model := apiModel(t, targets, aliases)
-	files, err := apidocgen.Render(model, apiAliasViews(aliases))
+	provenance := apiConfigurationProvenance(t, generation.ConfigurationModeDefault)
+	files, err := apidocgen.Render(model, apiAliasViews(aliases), provenance)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -116,9 +118,13 @@ func TestRenderApplicationAPIDocumentation(t *testing.T) {
 	}
 	assertGoldenDocumentation(t, files)
 
-	repeated, err := apidocgen.Render(model, apiAliasViews([]apiAliasView{aliases[2], aliases[0], aliases[3], aliases[1]}))
+	repeated, err := apidocgen.Render(model, apiAliasViews([]apiAliasView{aliases[2], aliases[0], aliases[3], aliases[1]}), provenance)
 	if err != nil || !equalFiles(files, repeated) {
 		t.Fatalf("reordered Render differs: %v", err)
+	}
+	environmentFiles, err := apidocgen.Render(model, apiAliasViews(aliases), apiConfigurationProvenance(t, generation.ConfigurationModeEnvironment))
+	if err != nil || !equalFiles(files, environmentFiles) {
+		t.Fatalf("environment selection changed equal-model API documentation: %v", err)
 	}
 	returned := files[0].Data()
 	returned[0] = 'x'
@@ -134,7 +140,7 @@ func TestRenderApplicationAPIDocumentationSupportsNoExposedCapabilities(t *testi
 	if err != nil {
 		t.Fatalf("BuildCanonical: %v", err)
 	}
-	files, err := apidocgen.Render(model, nil)
+	files, err := apidocgen.Render(model, nil, apiConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -146,6 +152,18 @@ func TestRenderApplicationAPIDocumentationSupportsNoExposedCapabilities(t *testi
 	}
 	if err := json.Unmarshal(fileData(t, files, "generated/docs/openapi.json"), &openAPI); err != nil || len(openAPI.Paths) != 0 {
 		t.Fatalf("empty OpenAPI paths = %#v, %v", openAPI.Paths, err)
+	}
+}
+
+func TestRenderApplicationAPIDocumentationRequiresConfigurationProvenance(t *testing.T) {
+	t.Parallel()
+
+	model, err := sdkmodel.BuildCanonical(nil)
+	if err != nil {
+		t.Fatalf("BuildCanonical: %v", err)
+	}
+	if files, err := apidocgen.Render(model, nil, transportprovenance.Provenance{}); !errors.Is(err, apidocgen.ErrRender) || !strings.Contains(err.Error(), "configuration provenance") || len(files) != 0 {
+		t.Fatalf("Render(missing provenance) = %#v, %v", files, err)
 	}
 }
 
@@ -177,7 +195,7 @@ func TestRenderApplicationAPIDocumentationRejectsInvalidAliases(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			files, err := apidocgen.Render(canonicalModel, test.aliases)
+			files, err := apidocgen.Render(canonicalModel, test.aliases, apiConfigurationProvenance(t, generation.ConfigurationModeDefault))
 			if !errors.Is(err, apidocgen.ErrRender) || !strings.Contains(err.Error(), test.want) || len(files) != 0 {
 				t.Fatalf("Render = %#v, %v; want %q", files, err, test.want)
 			}
@@ -186,14 +204,14 @@ func TestRenderApplicationAPIDocumentationRejectsInvalidAliases(t *testing.T) {
 
 	javaScriptAlias := apiAlias(t, "compat.send/v1", target, generation.Exposure{HTTP: true, JavaScript: true}, "")
 	model := apiModel(t, []apiTargetView{target}, []apiAliasView{javaScriptAlias})
-	if files, err := apidocgen.Render(model, nil); !errors.Is(err, apidocgen.ErrRender) || !strings.Contains(err.Error(), "disagrees") || len(files) != 0 {
+	if files, err := apidocgen.Render(model, nil, apiConfigurationProvenance(t, generation.ConfigurationModeDefault)); !errors.Is(err, apidocgen.ErrRender) || !strings.Contains(err.Error(), "disagrees") || len(files) != 0 {
 		t.Fatalf("Render missing final Alias = %#v, %v", files, err)
 	}
-	if files, err := apidocgen.Render(sdkmodel.Model{}, nil); !errors.Is(err, apidocgen.ErrRender) || !strings.Contains(err.Error(), "model") || len(files) != 0 {
+	if files, err := apidocgen.Render(sdkmodel.Model{}, nil, apiConfigurationProvenance(t, generation.ConfigurationModeDefault)); !errors.Is(err, apidocgen.ErrRender) || !strings.Contains(err.Error(), "model") || len(files) != 0 {
 		t.Fatalf("Render zero model = %#v, %v", files, err)
 	}
 	goOnly := withAPIAlias(valid, func(value *apiAliasView) { value.exposure = generation.Exposure{Go: true} })
-	files, err := apidocgen.Render(canonicalModel, []apidocgen.AliasView{goOnly})
+	files, err := apidocgen.Render(canonicalModel, []apidocgen.AliasView{goOnly}, apiConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil || bytes.Contains(joinFiles(files), []byte("mail.deliver/v1")) {
 		t.Fatalf("Render Go-only Alias = %v\n%s", err, joinFiles(files))
 	}
@@ -217,7 +235,7 @@ func FuzzRenderApplicationAPIDeprecation(f *testing.F) {
 			return
 		}
 		alias := apiAlias(t, "mail.deliver/v1", target, generation.Exposure{HTTP: true}, deprecated)
-		first, firstErr := apidocgen.Render(model, []apidocgen.AliasView{alias})
+		first, firstErr := apidocgen.Render(model, []apidocgen.AliasView{alias}, apiConfigurationProvenance(t, generation.ConfigurationModeDefault))
 		invalid := len(deprecated) > 1024 || !utf8.ValidString(deprecated) || strings.ContainsRune(deprecated, '\x00')
 		if invalid {
 			if !errors.Is(firstErr, apidocgen.ErrRender) {
@@ -225,7 +243,7 @@ func FuzzRenderApplicationAPIDeprecation(f *testing.F) {
 			}
 			return
 		}
-		second, secondErr := apidocgen.Render(model, []apidocgen.AliasView{alias})
+		second, secondErr := apidocgen.Render(model, []apidocgen.AliasView{alias}, apiConfigurationProvenance(t, generation.ConfigurationModeDefault))
 		if firstErr != nil || secondErr != nil || !equalFiles(first, second) {
 			t.Fatalf("Render is not deterministic: %v then %v", firstErr, secondErr)
 		}
@@ -407,4 +425,28 @@ func equalFiles(left, right []apidocgen.File) bool {
 func hash(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func apiConfigurationProvenance(t testing.TB, mode generation.ConfigurationMode) transportprovenance.Provenance {
+	t.Helper()
+	rootDigest := "sha256:" + strings.Repeat("1", 64)
+	input := transportprovenance.Input{
+		Mode:                        mode,
+		RootPath:                    "plystra.yaml",
+		RootDigest:                  rootDigest,
+		SelectedPath:                "plystra.yaml",
+		SelectedDigest:              rootDigest,
+		DependencyCompositionDigest: "sha256:" + strings.Repeat("2", 64),
+		ApplicationModelDigest:      "sha256:" + strings.Repeat("3", 64),
+	}
+	if mode == generation.ConfigurationModeEnvironment {
+		input.Environment = "production"
+		input.SelectedPath = "plystra.production.yaml"
+		input.SelectedDigest = "sha256:" + strings.Repeat("4", 64)
+	}
+	provenance, err := transportprovenance.New(input)
+	if err != nil {
+		t.Fatalf("transportprovenance.New: %v", err)
+	}
+	return provenance
 }

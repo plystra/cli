@@ -1213,6 +1213,17 @@ not force a different compiled model. If an extension deliberately changes its
 normalized output from a provenance digest, the extension output digest still
 changes the final application model.
 
+Application generation also converts that same bounded identity into one
+internal transport-provenance value. It must agree with the selected
+configuration record in `generated/manifest.json`, the typed dependency
+composition digest, and the final build-affecting application-model digest
+before Connect, REST/JSON, JavaScript, or API-document rendering can start.
+Transport renderers receive no YAML values or Secret targets and do not embed
+selector-only paths or document digests in their source. Changing from the
+default file to an environment overlay or full replacement therefore changes
+manifest provenance, while equal effective build models retain byte-identical
+transport output.
+
 Output is limited to exact generated requirements, structured diagnostics,
 typed contributions at `http.ingress`, `invocation.prepare`,
 `invocation.complete`, or `http.egress`, and direct application-local Alias

@@ -24,6 +24,7 @@ import (
 	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
+	"github.com/plystra/cli/internal/transportprovenance"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 )
@@ -59,7 +60,8 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 	t.Parallel()
 
 	fixture := buildFixture(t, connectContract, "account.profile/v1")
-	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan)
+	provenance := connectConfigurationProvenance(t, generation.ConfigurationModeDefault)
+	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, provenance)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -119,7 +121,7 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 			t.Fatalf("parse %s: %v\n%s", file.Path(), err, file.Data())
 		}
 	}
-	repeated, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan)
+	repeated, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, provenance)
 	if err != nil || !connectFilesEqual(files, repeated) {
 		t.Fatalf("repeated Render drifted: %v", err)
 	}
@@ -138,7 +140,7 @@ func TestRenderSelectsHTTPAwareCanonicalInvocationOnlyWhenRequired(t *testing.T)
 
 	fixture := buildFixture(t, connectContract, "")
 	httpPlan := buildHTTPPlan(t, fixture.target)
-	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, httpPlan)
+	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, httpPlan, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil {
 		t.Fatalf("Render(HTTP plan): %v", err)
 	}
@@ -176,24 +178,42 @@ func TestRenderRejectsInconsistentDescriptorAndPlanEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal inconsistent descriptor set: %v", err)
 	}
-	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, inconsistent, fixture.plan); len(files) != 0 || !errors.Is(err, connectgen.ErrRender) || !errors.Is(err, connectgen.ErrDescriptor) || !strings.Contains(err.Error(), "method") {
+	provenance := connectConfigurationProvenance(t, generation.ConfigurationModeDefault)
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, inconsistent, fixture.plan, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrRender) || !errors.Is(err, connectgen.ErrDescriptor) || !strings.Contains(err.Error(), "method") {
 		t.Fatalf("Render(inconsistent descriptor) = %#v, %v", files, err)
 	}
 	otherPlan, err := generationlowering.Lower("example.com/other", []generation.NormalizedContribution{})
 	if err != nil {
 		t.Fatalf("Lower(other): %v", err)
 	}
-	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, otherPlan); len(files) != 0 || !errors.Is(err, connectgen.ErrRender) || !errors.Is(err, connectgen.ErrProjection) || !strings.Contains(err.Error(), "example.com/other") {
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, otherPlan, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrRender) || !errors.Is(err, connectgen.ErrProjection) || !strings.Contains(err.Error(), "example.com/other") {
 		t.Fatalf("Render(module-drift plan) = %#v, %v", files, err)
 	}
-	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, []byte("not a descriptor set"), fixture.plan); len(files) != 0 || !errors.Is(err, connectgen.ErrDescriptor) {
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, []byte("not a descriptor set"), fixture.plan, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrDescriptor) {
 		t.Fatalf("Render(corrupt descriptor) = %#v, %v", files, err)
+	}
+}
+
+func TestRenderRequiresConfigurationProvenanceWithoutEmbeddingSelection(t *testing.T) {
+	t.Parallel()
+
+	fixture := buildFixture(t, connectContract, "account.profile/v1")
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, transportprovenance.Provenance{}); len(files) != 0 || !errors.Is(err, connectgen.ErrProjection) || !strings.Contains(err.Error(), "configuration provenance") {
+		t.Fatalf("Render(missing provenance) = %#v, %v", files, err)
+	}
+	defaultFiles, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
+	if err != nil {
+		t.Fatalf("Render(default): %v", err)
+	}
+	environmentFiles, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, connectConfigurationProvenance(t, generation.ConfigurationModeEnvironment))
+	if err != nil || !connectFilesEqual(defaultFiles, environmentFiles) {
+		t.Fatalf("environment selection changed equal-model Connect source: %v", err)
 	}
 }
 
 func TestGeneratedCanonicalAndAliasHandlersInvokeOneCanonicalTarget(t *testing.T) {
 	fixture := buildFixture(t, connectContract, "account.profile/v1")
-	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan)
+	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -375,6 +395,30 @@ func connectFilesEqual(left, right []connectgen.File) bool {
 func digest(value []byte) string {
 	sum := sha256.Sum256(value)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func connectConfigurationProvenance(t testing.TB, mode generation.ConfigurationMode) transportprovenance.Provenance {
+	t.Helper()
+	rootDigest := "sha256:" + strings.Repeat("1", 64)
+	input := transportprovenance.Input{
+		Mode:                        mode,
+		RootPath:                    "plystra.yaml",
+		RootDigest:                  rootDigest,
+		SelectedPath:                "plystra.yaml",
+		SelectedDigest:              rootDigest,
+		DependencyCompositionDigest: "sha256:" + strings.Repeat("2", 64),
+		ApplicationModelDigest:      "sha256:" + strings.Repeat("3", 64),
+	}
+	if mode == generation.ConfigurationModeEnvironment {
+		input.Environment = "production"
+		input.SelectedPath = "plystra.production.yaml"
+		input.SelectedDigest = "sha256:" + strings.Repeat("4", 64)
+	}
+	provenance, err := transportprovenance.New(input)
+	if err != nil {
+		t.Fatalf("transportprovenance.New: %v", err)
+	}
+	return provenance
 }
 
 func assertGeneratedHandlersRun(t testing.TB, contract contractgen.File, invocation invocationgen.File, handlers []connectgen.File) {

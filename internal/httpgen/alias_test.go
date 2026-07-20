@@ -33,7 +33,7 @@ func TestRenderAliasRoutesForwardToOneCanonicalHandler(t *testing.T) {
 	}
 	files := make([]httpgen.File, len(aliases))
 	for index, alias := range aliases {
-		file, err := httpgen.RenderAlias(testModulePath, alias, target)
+		file, err := httpgen.RenderAlias(testModulePath, alias, target, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 		if err != nil {
 			t.Fatalf("RenderAlias(%s): %v", alias.ID(), err)
 		}
@@ -73,7 +73,7 @@ func TestRenderAliasRoutesForwardToOneCanonicalHandler(t *testing.T) {
 		t.Fatalf("deprecation marker count = %d\n%s", count, files[2].Data())
 	}
 
-	repeated, err := httpgen.RenderAlias(testModulePath, aliases[2], target)
+	repeated, err := httpgen.RenderAlias(testModulePath, aliases[2], target, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil || repeated.Path() != files[2].Path() || !bytes.Equal(repeated.Data(), files[2].Data()) {
 		t.Fatalf("repeated RenderAlias = %#v, %v", repeated, err)
 	}
@@ -94,7 +94,7 @@ func TestRenderAliasSupportsIntrinsicCanonicalTarget(t *testing.T) {
 		digest:   target.ContractDigest(),
 		exposure: generation.Exposure{HTTP: true},
 	}
-	file, err := httpgen.RenderAlias(testModulePath, alias, target)
+	file, err := httpgen.RenderAlias(testModulePath, alias, target, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil {
 		t.Fatalf("RenderAlias: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestRenderAliasRejectsInvalidOrBroadenedRoute(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			file, err := httpgen.RenderAlias(test.modulePath, test.alias, test.target)
+			file, err := httpgen.RenderAlias(test.modulePath, test.alias, test.target, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 			if !errors.Is(err, httpgen.ErrRender) || test.also != nil && !errors.Is(err, test.also) || !strings.Contains(err.Error(), test.want) || file.Path() != "" || file.Data() != nil {
 				t.Fatalf("RenderAlias = %#v, %v; want %q", file, err, test.want)
 			}
@@ -171,7 +171,7 @@ func FuzzRenderAliasDeprecation(f *testing.F) {
 			exposure:   generation.Exposure{HTTP: true},
 			deprecated: deprecation,
 		}
-		first, err := httpgen.RenderAlias(testModulePath, alias, target)
+		first, err := httpgen.RenderAlias(testModulePath, alias, target, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 		if len(deprecation) > 1024 || !utf8.ValidString(deprecation) || strings.ContainsRune(deprecation, '\x00') {
 			if !errors.Is(err, httpgen.ErrRender) {
 				t.Fatalf("RenderAlias invalid deprecation error = %v", err)
@@ -181,7 +181,7 @@ func FuzzRenderAliasDeprecation(f *testing.F) {
 		if err != nil {
 			t.Fatalf("RenderAlias: %v", err)
 		}
-		second, err := httpgen.RenderAlias(testModulePath, alias, target)
+		second, err := httpgen.RenderAlias(testModulePath, alias, target, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 		if err != nil || first.Path() != second.Path() || first.PackageName() != second.PackageName() || !bytes.Equal(first.Data(), second.Data()) {
 			t.Fatalf("RenderAlias is not deterministic: %#v then %#v, %v", first, second, err)
 		}

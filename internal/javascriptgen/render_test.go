@@ -20,6 +20,7 @@ import (
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/sdkmodel"
+	"github.com/plystra/cli/internal/transportprovenance"
 )
 
 var updateJavaScriptGolden = flag.Bool("update", false, "update generated JavaScript SDK golden files")
@@ -121,6 +122,12 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 	repeated, err := javascriptgen.Render(options, model)
 	if err != nil || !equalFiles(repeated, files) {
 		t.Fatalf("repeated Render differs: %v", err)
+	}
+	environmentOptions := options
+	environmentOptions.ConfigurationProvenance = javascriptConfigurationProvenance(t, generation.ConfigurationModeEnvironment)
+	environmentFiles, err := javascriptgen.Render(environmentOptions, model)
+	if err != nil || !equalFiles(environmentFiles, files) {
+		t.Fatalf("environment selection changed equal-model JavaScript source: %v", err)
 	}
 	returned := files[0].Data()
 	returned[0] = 'x'
@@ -236,17 +243,21 @@ func TestRenderCanonicalJavaScriptRejectsInvalidInputs(t *testing.T) {
 	target := javascriptTarget(t, javascriptEmailSchema)
 	model := javascriptModel(t, target)
 	transport := javascriptOptions(t, "valid-sdk", []javascriptTargetView{target}, nil).Transport
+	provenance := javascriptConfigurationProvenance(t, generation.ConfigurationModeDefault)
+	if files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "valid-sdk", Transport: transport}, model); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "configuration provenance") {
+		t.Fatalf("Render(missing provenance) = %#v, %v", files, err)
+	}
 	for _, name := range []string{"", "@acme", "@Acme/app", "@acme/app/extra", ".hidden", "Upper", "name/", "a..b"} {
 		name := name
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			files, err := javascriptgen.Render(javascriptgen.Options{PackageName: name, Transport: transport}, model)
+			files, err := javascriptgen.Render(javascriptgen.Options{PackageName: name, ConfigurationProvenance: provenance, Transport: transport}, model)
 			if !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "npm package name") {
 				t.Fatalf("Render(%q) = %#v, %v", name, files, err)
 			}
 		})
 	}
-	if files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "valid-sdk", Transport: transport}, sdkmodel.Model{}); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "SDK model") {
+	if files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "valid-sdk", ConfigurationProvenance: provenance, Transport: transport}, sdkmodel.Model{}); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "SDK model") {
 		t.Fatalf("Render(zero model) = %#v, %v", files, err)
 	}
 	unsafeTarget := javascriptTarget(t, "id: metrics.record/v1\nrequest:\n  count: {type: integer, required: true, enum: [9007199254740992]}\n")
@@ -254,10 +265,10 @@ func TestRenderCanonicalJavaScriptRejectsInvalidInputs(t *testing.T) {
 	if files, err := javascriptgen.Render(javascriptOptions(t, "valid-sdk", []javascriptTargetView{unsafeTarget}, nil), unsafeInteger); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "safe-integer") {
 		t.Fatalf("Render(unsafe integer enum) = %#v, %v", files, err)
 	}
-	if files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "valid-sdk"}, model); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "transport projection") {
+	if files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "valid-sdk", ConfigurationProvenance: provenance}, model); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "transport projection") {
 		t.Fatalf("Render(missing transport) = %#v, %v", files, err)
 	}
-	corrupt := javascriptgen.Options{PackageName: "valid-sdk", Transport: transport}
+	corrupt := javascriptgen.Options{PackageName: "valid-sdk", ConfigurationProvenance: provenance, Transport: transport}
 	corrupt.Transport.DescriptorSet = []byte{0xff}
 	if files, err := javascriptgen.Render(corrupt, model); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "Connect descriptors") {
 		t.Fatalf("Render(corrupt descriptors) = %#v, %v", files, err)
@@ -268,6 +279,7 @@ func FuzzRenderCanonicalJavaScriptPackageName(f *testing.F) {
 	target := javascriptTarget(f, javascriptEmailSchema)
 	model := javascriptModel(f, target)
 	transport := javascriptOptions(f, "application-sdk", []javascriptTargetView{target}, nil).Transport
+	provenance := javascriptConfigurationProvenance(f, generation.ConfigurationModeDefault)
 	for _, seed := range []string{"@acme/project-sdk", "application-sdk", "", "@Bad/name", "a..b", "name_with.parts"} {
 		f.Add(seed)
 	}
@@ -275,8 +287,8 @@ func FuzzRenderCanonicalJavaScriptPackageName(f *testing.F) {
 		if len(packageName) > 512 {
 			return
 		}
-		first, firstErr := javascriptgen.Render(javascriptgen.Options{PackageName: packageName, Transport: transport}, model)
-		second, secondErr := javascriptgen.Render(javascriptgen.Options{PackageName: packageName, Transport: transport}, model)
+		first, firstErr := javascriptgen.Render(javascriptgen.Options{PackageName: packageName, ConfigurationProvenance: provenance, Transport: transport}, model)
+		second, secondErr := javascriptgen.Render(javascriptgen.Options{PackageName: packageName, ConfigurationProvenance: provenance, Transport: transport}, model)
 		if (firstErr == nil) != (secondErr == nil) {
 			t.Fatalf("Render changed result: %v then %v", firstErr, secondErr)
 		}
@@ -465,13 +477,38 @@ func javascriptOptions(t testing.TB, packageName string, targets []javascriptTar
 		t.Fatalf("protobufdescriptor.Build: %v", err)
 	}
 	return javascriptgen.Options{
-		PackageName: packageName,
+		PackageName:             packageName,
+		ConfigurationProvenance: javascriptConfigurationProvenance(t, generation.ConfigurationModeDefault),
 		Transport: javascriptgen.TransportOptions{
 			Projection:    projection,
 			WireMap:       wireMap,
 			DescriptorSet: evidence.DescriptorSet(),
 		},
 	}
+}
+
+func javascriptConfigurationProvenance(t testing.TB, mode generation.ConfigurationMode) transportprovenance.Provenance {
+	t.Helper()
+	rootDigest := "sha256:" + strings.Repeat("1", 64)
+	input := transportprovenance.Input{
+		Mode:                        mode,
+		RootPath:                    "plystra.yaml",
+		RootDigest:                  rootDigest,
+		SelectedPath:                "plystra.yaml",
+		SelectedDigest:              rootDigest,
+		DependencyCompositionDigest: "sha256:" + strings.Repeat("2", 64),
+		ApplicationModelDigest:      "sha256:" + strings.Repeat("3", 64),
+	}
+	if mode == generation.ConfigurationModeEnvironment {
+		input.Environment = "production"
+		input.SelectedPath = "plystra.production.yaml"
+		input.SelectedDigest = "sha256:" + strings.Repeat("4", 64)
+	}
+	provenance, err := transportprovenance.New(input)
+	if err != nil {
+		t.Fatalf("transportprovenance.New: %v", err)
+	}
+	return provenance
 }
 
 func assertGoldenPackage(t *testing.T, files []javascriptgen.File) {

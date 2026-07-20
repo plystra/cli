@@ -18,6 +18,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/sdkmodel"
+	"github.com/plystra/cli/internal/transportprovenance"
 )
 
 const (
@@ -68,7 +69,10 @@ func (o renderedOperation) isAlias() bool { return o.id != o.target }
 // model supplies exact canonical schemas; aliases supplies the complete final
 // map so HTTP-only exposure narrowing remains visible even when an Alias is
 // intentionally absent from browser SDKs.
-func Render(model sdkmodel.Model, aliases []AliasView) ([]File, error) {
+func Render(model sdkmodel.Model, aliases []AliasView, configurationProvenance transportprovenance.Provenance) ([]File, error) {
+	if !configurationProvenance.Valid() {
+		return nil, fmt.Errorf("%w: selected configuration provenance is absent or invalid", ErrRender)
+	}
 	canonical := model.CanonicalJSON()
 	if len(canonical) == 0 || model.Digest() != digest(canonical) {
 		return nil, fmt.Errorf("%w: canonical application model is absent or has an invalid digest", ErrRender)

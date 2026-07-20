@@ -18,6 +18,7 @@ import (
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/sdkmodel"
+	"github.com/plystra/cli/internal/transportprovenance"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -75,7 +76,11 @@ func Render(
 	wireMap protobufwiremap.Map,
 	descriptorSet []byte,
 	plan generationlowering.Plan,
+	configurationProvenance transportprovenance.Provenance,
 ) ([]File, error) {
+	if !configurationProvenance.Valid() {
+		return nil, fmt.Errorf("%w: %w: selected configuration provenance is absent or invalid", ErrRender, ErrProjection)
+	}
 	if err := modulepath.CheckProject(modulePath); err != nil {
 		return nil, fmt.Errorf("%w: %w: invalid application Go Module path %q", ErrRender, ErrProjection, modulePath)
 	}

@@ -15,6 +15,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/sdkmodel"
+	"github.com/plystra/cli/internal/transportprovenance"
 )
 
 const (
@@ -30,8 +31,9 @@ var ErrRender = errors.New("render generated JavaScript SDK")
 
 // Options controls application-owned npm package identity.
 type Options struct {
-	PackageName string
-	Transport   TransportOptions
+	PackageName             string
+	ConfigurationProvenance transportprovenance.Provenance
+	Transport               TransportOptions
 }
 
 // File is one immutable generated JavaScript SDK source file.
@@ -69,6 +71,9 @@ type clientNode struct {
 // Provider IDs, runtime plugin configuration, build metadata, and Secret
 // values are absent from both the input model and final files.
 func Render(options Options, model sdkmodel.Model) ([]File, error) {
+	if !options.ConfigurationProvenance.Valid() {
+		return nil, fmt.Errorf("%w: selected configuration provenance is absent or invalid", ErrRender)
+	}
 	if !validPackageName(options.PackageName) {
 		return nil, fmt.Errorf("%w: npm package name %q is not canonical lower-case package identity", ErrRender, options.PackageName)
 	}

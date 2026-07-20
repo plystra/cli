@@ -3,6 +3,7 @@ package generatedfiles_test
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	generation "github.com/plystra/cli/generation/v1"
@@ -18,6 +19,7 @@ import (
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/sdkmodel"
+	"github.com/plystra/cli/internal/transportprovenance"
 )
 
 const (
@@ -305,6 +307,7 @@ func renderAliasOutput(t testing.TB, options aliasRenderOptions) generatedfiles.
 	if err != nil {
 		t.Fatalf("Build SDK model: %v", err)
 	}
+	configurationProvenance := aliasConfigurationProvenance(t)
 
 	var files []generatedfiles.File
 	add := func(filePath string, data []byte) {
@@ -323,7 +326,7 @@ func renderAliasOutput(t testing.TB, options aliasRenderOptions) generatedfiles.
 			t.Fatalf("Render client %s: %v", target.ID(), err)
 		}
 		add(client.Path(), client.Data())
-		handler, err := httpgen.Render(aliasDriftModulePath, target)
+		handler, err := httpgen.Render(aliasDriftModulePath, target, configurationProvenance)
 		if err != nil {
 			t.Fatalf("Render HTTP %s: %v", target.ID(), err)
 		}
@@ -342,7 +345,7 @@ func renderAliasOutput(t testing.TB, options aliasRenderOptions) generatedfiles.
 			add(client.Path(), client.Data())
 		}
 		if alias.Exposure().HTTP {
-			handler, err := httpgen.RenderAlias(aliasDriftModulePath, alias, target)
+			handler, err := httpgen.RenderAlias(aliasDriftModulePath, alias, target, configurationProvenance)
 			if err != nil {
 				t.Fatalf("Render Alias HTTP %s: %v", alias.ID(), err)
 			}
@@ -370,7 +373,8 @@ func renderAliasOutput(t testing.TB, options aliasRenderOptions) generatedfiles.
 		t.Fatalf("Build Protobuf descriptors: %v", err)
 	}
 	javaScript, err := javascriptgen.Render(javascriptgen.Options{
-		PackageName: aliasDriftPackage,
+		PackageName:             aliasDriftPackage,
+		ConfigurationProvenance: configurationProvenance,
 		Transport: javascriptgen.TransportOptions{
 			Projection:    projection,
 			WireMap:       wireMap,
@@ -383,7 +387,7 @@ func renderAliasOutput(t testing.TB, options aliasRenderOptions) generatedfiles.
 	for _, file := range javaScript {
 		add(file.Path(), file.Data())
 	}
-	docs, err := apidocgen.Render(model, docAliases)
+	docs, err := apidocgen.Render(model, docAliases, configurationProvenance)
 	if err != nil {
 		t.Fatalf("Render API docs: %v", err)
 	}
@@ -395,6 +399,24 @@ func renderAliasOutput(t testing.TB, options aliasRenderOptions) generatedfiles.
 		t.Fatalf("NewOutput: %v", err)
 	}
 	return output
+}
+
+func aliasConfigurationProvenance(t testing.TB) transportprovenance.Provenance {
+	t.Helper()
+	rootDigest := "sha256:" + strings.Repeat("1", 64)
+	provenance, err := transportprovenance.New(transportprovenance.Input{
+		Mode:                        generation.ConfigurationModeDefault,
+		RootPath:                    "plystra.yaml",
+		RootDigest:                  rootDigest,
+		SelectedPath:                "plystra.yaml",
+		SelectedDigest:              rootDigest,
+		DependencyCompositionDigest: "sha256:" + strings.Repeat("2", 64),
+		ApplicationModelDigest:      "sha256:" + strings.Repeat("3", 64),
+	})
+	if err != nil {
+		t.Fatalf("transportprovenance.New: %v", err)
+	}
+	return provenance
 }
 
 type sourcedAliasCapabilityView struct {

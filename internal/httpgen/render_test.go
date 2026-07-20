@@ -18,6 +18,7 @@ import (
 	"github.com/plystra/cli/internal/contractgen"
 	"github.com/plystra/cli/internal/httpgen"
 	"github.com/plystra/cli/internal/invocationgen"
+	"github.com/plystra/cli/internal/transportprovenance"
 )
 
 const (
@@ -41,7 +42,8 @@ func TestRenderCanonicalHTTPAdapter(t *testing.T) {
 	t.Parallel()
 
 	target := exposedTarget(t, emailSendSchema)
-	file, err := httpgen.Render(testModulePath, target)
+	provenance := httpConfigurationProvenance(t, generation.ConfigurationModeDefault)
+	file, err := httpgen.Render(testModulePath, target, provenance)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -90,7 +92,7 @@ func TestRenderCanonicalHTTPAdapter(t *testing.T) {
 	if bytes.Equal(returned, file.Data()) {
 		t.Fatal("Data exposed mutable generated storage")
 	}
-	repeated, err := httpgen.Render(testModulePath, target)
+	repeated, err := httpgen.Render(testModulePath, target, provenance)
 	if err != nil || repeated.Path() != file.Path() || repeated.PackageName() != file.PackageName() || !bytes.Equal(repeated.Data(), file.Data()) {
 		t.Fatalf("repeated Render = %#v, %v", repeated, err)
 	}
@@ -99,7 +101,7 @@ func TestRenderCanonicalHTTPAdapter(t *testing.T) {
 func TestRenderDerivesHierarchicalCanonicalRoute(t *testing.T) {
 	t.Parallel()
 
-	file, err := httpgen.Render("example.com/acme/project/v3", exposedTarget(t, "id: authn.login.oidc.complete/v12\n"))
+	file, err := httpgen.Render("example.com/acme/project/v3", exposedTarget(t, "id: authn.login.oidc.complete/v12\n"), httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -140,11 +142,32 @@ func TestRenderRejectsInvalidOrUnexposedTarget(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			file, err := httpgen.Render(test.modulePath, test.target)
+			file, err := httpgen.Render(test.modulePath, test.target, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 			if !errors.Is(err, httpgen.ErrRender) || test.also != nil && !errors.Is(err, test.also) || !strings.Contains(err.Error(), test.want) || file.Path() != "" || file.PackageName() != "" || file.Data() != nil {
 				t.Fatalf("Render = %#v, %v; want %q", file, err, test.want)
 			}
 		})
+	}
+}
+
+func TestRenderRequiresConfigurationProvenanceWithoutEmbeddingSelection(t *testing.T) {
+	t.Parallel()
+
+	target := exposedTarget(t, emailSendSchema)
+	if file, err := httpgen.Render(testModulePath, target, transportprovenance.Provenance{}); !errors.Is(err, httpgen.ErrRender) || !strings.Contains(err.Error(), "configuration provenance") || file.Data() != nil {
+		t.Fatalf("Render(missing provenance) = %#v, %v", file, err)
+	}
+	alias := testHTTPAlias{id: httpCapabilityID(t, "compat.send/v1"), target: target.ID(), digest: target.ContractDigest(), exposure: generation.Exposure{HTTP: true}}
+	if file, err := httpgen.RenderAlias(testModulePath, alias, target, transportprovenance.Provenance{}); !errors.Is(err, httpgen.ErrRender) || !strings.Contains(err.Error(), "configuration provenance") || file.Data() != nil {
+		t.Fatalf("RenderAlias(missing provenance) = %#v, %v", file, err)
+	}
+	defaultFile, err := httpgen.Render(testModulePath, target, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
+	if err != nil {
+		t.Fatalf("Render(default): %v", err)
+	}
+	explicitFile, err := httpgen.Render(testModulePath, target, httpConfigurationProvenance(t, generation.ConfigurationModeExplicit))
+	if err != nil || defaultFile.Path() != explicitFile.Path() || !bytes.Equal(defaultFile.Data(), explicitFile.Data()) {
+		t.Fatalf("explicit selection changed equal-model HTTP source: %v", err)
 	}
 }
 
@@ -166,14 +189,14 @@ func FuzzRender(f *testing.F) {
 			t.Fatalf("ParseCapabilityID: %v", err)
 		}
 		target := testTarget{id: identifier, contract: canonical, digest: digest(canonical), exposure: generation.Exposure{HTTP: true}}
-		first, err := httpgen.Render(testModulePath, target)
+		first, err := httpgen.Render(testModulePath, target, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 		if err != nil {
 			if !errors.Is(err, httpgen.ErrRender) {
 				t.Fatalf("Render returned unexpected error: %v", err)
 			}
 			return
 		}
-		second, err := httpgen.Render(testModulePath, target)
+		second, err := httpgen.Render(testModulePath, target, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 		if err != nil || first.Path() != second.Path() || first.PackageName() != second.PackageName() || !bytes.Equal(first.Data(), second.Data()) {
 			t.Fatalf("Render is not deterministic: %#v then %#v, %v", first, second, err)
 		}
@@ -236,6 +259,34 @@ func httpCapabilityID(t testing.TB, value string) generation.CapabilityID {
 func digest(value []byte) string {
 	sum := sha256.Sum256(value)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func httpConfigurationProvenance(t testing.TB, mode generation.ConfigurationMode) transportprovenance.Provenance {
+	t.Helper()
+	rootDigest := "sha256:" + strings.Repeat("1", 64)
+	input := transportprovenance.Input{
+		Mode:                        mode,
+		RootPath:                    "plystra.yaml",
+		RootDigest:                  rootDigest,
+		SelectedPath:                "plystra.yaml",
+		SelectedDigest:              rootDigest,
+		DependencyCompositionDigest: "sha256:" + strings.Repeat("2", 64),
+		ApplicationModelDigest:      "sha256:" + strings.Repeat("3", 64),
+	}
+	switch mode {
+	case generation.ConfigurationModeEnvironment:
+		input.Environment = "production"
+		input.SelectedPath = "plystra.production.yaml"
+		input.SelectedDigest = "sha256:" + strings.Repeat("4", 64)
+	case generation.ConfigurationModeExplicit:
+		input.SelectedPath = "deploy/customer-a.yaml"
+		input.SelectedDigest = "sha256:" + strings.Repeat("5", 64)
+	}
+	provenance, err := transportprovenance.New(input)
+	if err != nil {
+		t.Fatalf("transportprovenance.New: %v", err)
+	}
+	return provenance
 }
 
 func assertGeneratedHTTPAdapterRuns(t testing.TB, contract contractgen.File, invocation invocationgen.File, adapter httpgen.File) {
