@@ -224,9 +224,17 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	if err := add(assemblygen.ProvidersPath, providers); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: selected providers: %w", ErrRender, err)
 	}
+	runtimeConfigurationSchemas := make([]bootstrapgen.ConfigurationSchema, len(providerInputs))
+	for index, provider := range providerInputs {
+		runtimeConfigurationSchemas[index] = bootstrapgen.ConfigurationSchema{
+			PluginID: provider.PluginID,
+			Schema:   provider.ConfigurationSchema,
+		}
+	}
 	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
 		ModulePath:            options.ModulePath,
 		DefaultStartupTimeout: applicationmeta.DefaultStartupTimeout,
+		ConfigurationSchemas:  runtimeConfigurationSchemas,
 	})
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: runtime bootstrap: %w", ErrRender, err)

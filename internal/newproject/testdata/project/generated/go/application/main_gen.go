@@ -29,21 +29,24 @@ var (
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	if err := run(ctx, os.Args[1:]); err != nil {
+	if err := run(ctx, os.Args[1:], os.Environ()); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, arguments []string) (result error) {
+func run(ctx context.Context, arguments, environment []string) (result error) {
 	if ctx == nil {
 		return fmt.Errorf("%w: context is required", ErrRun)
 	}
-	smoke, err := smokeMode(arguments)
+	smoke, selectorArguments, err := processArguments(arguments)
 	if err != nil {
 		return err
 	}
-	application, err := applicationbootstrap.New(ctx)
+	application, err := applicationbootstrap.New(ctx, applicationbootstrap.RuntimeOptions{
+		Arguments:   selectorArguments,
+		Environment: environment,
+	})
 	if err != nil {
 		return fmt.Errorf("%w: construct: %w", ErrRun, err)
 	}
@@ -78,13 +81,18 @@ func run(ctx context.Context, arguments []string) (result error) {
 	return nil
 }
 
-func smokeMode(arguments []string) (bool, error) {
-	switch {
-	case len(arguments) == 0:
-		return false, nil
-	case len(arguments) == 1 && arguments[0] == "--smoke":
-		return true, nil
-	default:
-		return false, fmt.Errorf("%w: expected no arguments or --smoke", ErrArguments)
+func processArguments(arguments []string) (bool, []string, error) {
+	smoke := false
+	selectors := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		if argument != "--smoke" {
+			selectors = append(selectors, argument)
+			continue
+		}
+		if smoke {
+			return false, nil, fmt.Errorf("%w: --smoke may be specified once", ErrArguments)
+		}
+		smoke = true
 	}
+	return smoke, selectors, nil
 }

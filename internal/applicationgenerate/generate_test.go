@@ -100,15 +100,16 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	}
 	for _, required := range [][]byte{
 		[]byte(`defaultRuntimeDocument = "plystra.yaml"`),
-		[]byte("func New(ctx context.Context)"),
-		[]byte("kernelconfiguration.LoadDocument(defaultRuntimeDocument)"),
+		[]byte("func New(ctx context.Context, options RuntimeOptions)"),
+		[]byte(`runtimeEnvironmentVariable = "PLYSTRA_ENV"`),
+		[]byte(`overlayPath := "plystra." + environment + ".yaml"`),
 	} {
 		if !bytes.Contains(bootstrap, required) {
 			t.Fatalf("generated bootstrap omits default configuration selection %q:\n%s", required, bootstrap)
 		}
 	}
 	entrypoint := readFile(t, root, "generated/go/application/main_gen.go")
-	if !bytes.Contains(entrypoint, []byte("applicationbootstrap.New(ctx)")) || bytes.Contains(entrypoint, []byte("plystra.yaml")) {
+	if !bytes.Contains(entrypoint, []byte("applicationbootstrap.New(ctx, applicationbootstrap.RuntimeOptions{")) || !bytes.Contains(entrypoint, []byte("os.Environ()")) || bytes.Contains(entrypoint, []byte("plystra.yaml")) {
 		t.Fatalf("generated entrypoint does not delegate default configuration selection to bootstrap:\n%s", entrypoint)
 	}
 	assertFileMissing(t, root, "generated/sdk/javascript/package.json")
@@ -1676,7 +1677,7 @@ import (
 )
 
 func TestUnrequiredCapabilityIsNotRegistered(t *testing.T) {
-	application, err := bootstrap.New(context.Background())
+	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
 	if err != nil || !application.Valid() {
 		t.Fatalf("bootstrap.New = %#v, %v", application, err)
 	}
@@ -2018,7 +2019,7 @@ go 1.26
 require (
 	github.com/plystra/cli v0.0.0
 	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -2111,7 +2112,7 @@ func writeApplicationModule(t testing.TB, root, modulePath string) {
 	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
 	extra := fmt.Sprintf(`require (
 	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -2369,7 +2370,7 @@ import (
 )
 
 func TestIntrinsicApplicationRuntime(t *testing.T) {
-	application, err := bootstrap.New(context.Background())
+	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
 	if err != nil || !application.Valid() {
 		t.Fatalf("bootstrap.New = %#v, %v", application, err)
 	}
@@ -2419,7 +2420,7 @@ import (
 )
 
 func TestGeneratedCrossPluginCall(t *testing.T) {
-	application, err := bootstrap.New(context.Background())
+	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
 	if err != nil || !application.Valid() {
 		t.Fatalf("bootstrap.New = %#v, %v", application, err)
 	}

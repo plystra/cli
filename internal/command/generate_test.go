@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -14,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationgen"
+	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/connectgen"
 	"golang.org/x/mod/modfile"
@@ -30,7 +32,7 @@ go 1.26
 
 require (
 	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -191,6 +193,7 @@ replace github.com/plystra/kernel => %s
 	}{
 		{path: connectgen.ConnectModulePath, version: connectgen.ConnectModuleVersion},
 		{path: connectgen.ProtobufModulePath, version: connectgen.ProtobufModuleVersion},
+		{path: bootstrapgen.YAMLModulePath, version: bootstrapgen.YAMLModuleVersion},
 	} {
 		requirement, exists := requirements[expected.path]
 		if !exists {
@@ -365,6 +368,50 @@ replace github.com/plystra/kernel => %s
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--env", "production"}, start, explicitEnvironment)
 	if exitCode != 0 || stderr != "" {
 		t.Fatalf("explicit --env did not override ambient selectors = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+
+	for _, runtime := range []struct {
+		name        string
+		arguments   []string
+		environment []string
+	}{
+		{
+			name:        "explicit environment overrides ambient",
+			arguments:   []string{"run", "./generated/go/application", "--smoke", "--env", "production"},
+			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "missing"}),
+		},
+		{
+			name:        "ambient environment",
+			arguments:   []string{"run", "./generated/go/application", "--smoke"},
+			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "production"}),
+		},
+	} {
+		t.Run("generated binary "+runtime.name, func(t *testing.T) {
+			process := exec.CommandContext(t.Context(), "go", runtime.arguments...)
+			process.Dir = root
+			process.Env = runtime.environment
+			if output, err := process.CombinedOutput(); err != nil {
+				t.Fatalf("generated application %s: %v\n%s", runtime.name, err, output)
+			}
+		})
+	}
+	for _, runtime := range []struct {
+		name      string
+		arguments []string
+		want      string
+	}{
+		{name: "missing environment", arguments: []string{"run", "./generated/go/application", "--smoke", "--env", "missing"}, want: "requires plystra.missing.yaml"},
+		{name: "unsafe environment", arguments: []string{"run", "./generated/go/application", "--smoke", "--env", "../production"}, want: "safe filename component"},
+	} {
+		t.Run("generated binary "+runtime.name, func(t *testing.T) {
+			process := exec.CommandContext(t.Context(), "go", runtime.arguments...)
+			process.Dir = root
+			process.Env = environment
+			output, err := process.CombinedOutput()
+			if err == nil || !strings.Contains(string(output), runtime.want) {
+				t.Fatalf("generated application %s = %v, %s", runtime.name, err, output)
+			}
+		})
 	}
 
 	beforeConflict := commandTree(t, root)

@@ -1079,6 +1079,26 @@ yet mount an HTTP server. It delegates default root `plystra.yaml` selection to
 `generated/go/bootstrap`, then owns signal-driven shutdown and the private
 template-qualification health smoke. Do not edit either generated boundary or
 add a competing application startup workaround.
+
+Start the generated application from the Project root with the same environment
+selection used for generation:
+
+```powershell
+go run ./generated/go/application
+go run ./generated/go/application --env production
+```
+
+The first command loads only root `plystra.yaml`. The second requires
+`plystra.production.yaml` and applies it as one typed sparse overlay above the
+root document. `PLYSTRA_ENV=production` is the ambient equivalent when no
+explicit selector is present, and an explicit `--env` overrides it. Unsafe
+names, missing overlays, unknown fields, invalid typed changes, and YAML
+anchors or aliases fail before Provider construction; unselected overlays are
+not read. Run `plystra generate --env production` and
+`plystra generate --check --env production` before starting that environment.
+Generated-binary `--config`/`PLYSTRA_CONFIG` selection and compiled
+application-model compatibility enforcement remain deferred Gate 10 work.
+
 Validate the generated Connect handler directly with `httptest` until server
 mounting lands in the later transport gate. Exercise both binary Protobuf and
 ProtoJSON Connect clients. Requests using gRPC or gRPC-Web media types must

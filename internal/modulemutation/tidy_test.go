@@ -10,6 +10,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/atomicfs"
+	"github.com/plystra/cli/internal/bootstrapgen"
 	"golang.org/x/mod/modfile"
 )
 
@@ -405,9 +406,10 @@ func TestTidyRestoresGeneratedRuntimeRequirementsAfterValidationFailure(t *testi
 	}
 	connect, _ := applicationgenerate.NewModuleRequirement("connectrpc.com/connect", "v1.20.0")
 	protobuf, _ := applicationgenerate.NewModuleRequirement("google.golang.org/protobuf", "v1.36.11")
+	yaml, _ := applicationgenerate.NewModuleRequirement(bootstrapgen.YAMLModulePath, bootstrapgen.YAMLModuleVersion)
 	validationFailure := errors.New("reject generated runtime")
 	err = Tidy(t.Context(), root, command, append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=runtime"), func(mutate applicationgenerate.ModuleMutation) error {
-		return mutate(t.Context(), root, []applicationgenerate.ModuleRequirement{connect, protobuf}, func() error {
+		return mutate(t.Context(), root, []applicationgenerate.ModuleRequirement{connect, protobuf, yaml}, func() error {
 			return validationFailure
 		})
 	})
