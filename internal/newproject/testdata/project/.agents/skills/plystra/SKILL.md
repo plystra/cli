@@ -98,10 +98,13 @@ plystra.yaml as the mandatory Project marker but does not merge it beneath the
 selected file. Generated bootstrap records the matching selection mode,
 selected environment when applicable, stable relative paths, normalized
 document and dependency-composition digests, and final application-model digest
-as non-secret provenance. It never embeds YAML values or Secret-reference
-targets. Generate and start with the same build-affecting selection; runtime
-comparison against that compiled model remains later work, so switching that
-selection only at startup is not yet supported.
+as non-secret provenance. It also embeds a bounded compatibility projection for
+the build-affecting declarations tied to that full model digest. Startup derives
+the same projection from the selected runtime document and rejects a mismatch
+with rebuild guidance before startup settings, Secret resolution, or application
+construction. Runtime-only address, timeout, ordinary configuration, and Secret-
+reference changes stay outside that comparison. Neither compiled record contains
+YAML values, Secret-reference targets, resolved Secrets, or machine paths.
 
 ## Detailed task reference
 
@@ -464,8 +467,13 @@ marker but does not parse or merge root configuration; its selected path must
 be an existing nonsymbolic regular file within the runtime Project directory.
 Both modes apply typed validation and reject unsafe or missing selections
 before Provider construction. Generate, check, and start with the same
-selector. Compiled application-model compatibility validation remains
-deferred, so do not switch build-affecting models only at startup.
+selector. Generated startup compares the selected document's normalized
+transport, CORS, public-exposure, requirement, explicit Provider-choice, and
+Alias projection with the projection compiled for the full application-model
+digest. A mismatch fails before startup settings, Secret resolution, or
+Provider construction and instructs the operator to rebuild with the same
+selector. Runtime-only address, timeout, Plugin configuration, and Secret-
+reference differences remain valid when they pass typed validation.
 
 http.transports is a closed current-Project object. It accepts only boolean
 connect and rest fields. New Project scaffolds write both fields explicitly as

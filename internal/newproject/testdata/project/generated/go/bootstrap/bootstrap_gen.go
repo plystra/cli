@@ -5,6 +5,9 @@ package bootstrap
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -33,6 +36,10 @@ const (
 	// compiledConfigurationSelectionProvenanceJSON records the normalized non-secret build selection.
 	compiledConfigurationSelectionProvenanceJSON   = "{\"version\":1,\"mode\":\"default\",\"root_path\":\"plystra.yaml\",\"root_digest\":\"sha256:b183097574f85f18bbbda8533504fbb59077ced4a3560a599dfc1272525f593c\",\"selected_path\":\"plystra.yaml\",\"selected_digest\":\"sha256:b183097574f85f18bbbda8533504fbb59077ced4a3560a599dfc1272525f593c\",\"dependency_composition_digest\":\"sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130\",\"application_model_digest\":\"sha256:a2534bf40615ba4d3c3961984fd7675b6c01e8224fdd238f5a5cae880f619a35\"}"
 	compiledConfigurationSelectionProvenanceDigest = "sha256:6ab76bfb33dd8c0ad98dbf5d53c7066517d3fc41df15de2f5d9da2740be822c1"
+	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:a2534bf40615ba4d3c3961984fd7675b6c01e8224fdd238f5a5cae880f619a35\",\"projection\":{\"aliases\":[],\"http_cors\":null,\"http_exposures\":[],\"http_transports\":{\"connect\":true,\"rest\":false},\"provider_choices\":[],\"requirements\":[]},\"version\":1}"
+	compiledApplicationModelCompatibilityDigest = "sha256:1f45378d043f5dee0b7341446b626607efb473ad71ec1f5961eb02b40d420648"
+	compiledApplicationModelDigest              = "sha256:a2534bf40615ba4d3c3961984fd7675b6c01e8224fdd238f5a5cae880f619a35"
 )
 
 var (
@@ -48,6 +55,8 @@ var (
 	ErrRuntimeSelector = errors.New("invalid runtime configuration selector")
 	// ErrRuntimeConfiguration reports an invalid selected runtime configuration.
 	ErrRuntimeConfiguration = errors.New("invalid selected runtime configuration")
+	// ErrRuntimeCompatibility reports a runtime document that requires a different compiled application model.
+	ErrRuntimeCompatibility = errors.New("runtime configuration is incompatible with compiled application model")
 	// ErrApplicationStart reports a redacted provider startup failure.
 	ErrApplicationStart = errors.New("generated application startup failed")
 	// ErrApplicationStop reports a redacted provider shutdown failure.
@@ -69,7 +78,7 @@ type Application struct {
 	startupTimeout time.Duration
 }
 
-// New loads the selected runtime document, validates startup settings, resolves Secrets,
+// New loads the selected runtime document, validates its compiled model and startup settings, resolves Secrets,
 // constructs every selected provider exactly once, and binds lifecycle order.
 func New(ctx context.Context, options RuntimeOptions) (*Application, error) {
 	if ctx == nil {
@@ -80,6 +89,10 @@ func New(ctx context.Context, options RuntimeOptions) (*Application, error) {
 		return nil, fmt.Errorf("%w: select runtime configuration: %w", ErrBootstrap, err)
 	}
 	defer clear(document)
+
+	if err := validateRuntimeApplicationModel(document); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrBootstrap, err)
+	}
 
 	startupTimeout, err := parseStartupTimeout(document)
 	if err != nil {
@@ -240,6 +253,242 @@ type runtimeSelection struct {
 	mode        runtimeSelectionMode
 	path        string
 	environment string
+}
+
+func validateRuntimeApplicationModel(document []byte) error {
+	digest, err := runtimeApplicationModelCompatibilityDigest(document)
+	if err != nil {
+		return fmt.Errorf("%w: inspect build-affecting declarations: %v", ErrRuntimeCompatibility, err)
+	}
+	if digest != compiledApplicationModelCompatibilityDigest {
+		return fmt.Errorf("%w: selected runtime configuration changes build-affecting application declarations; rebuild with the same --env or --config selection before starting this binary", ErrRuntimeCompatibility)
+	}
+	return nil
+}
+
+func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error) {
+	root, err := decodeRuntimeDocument(document, "effective runtime configuration")
+	if err != nil {
+		return "", err
+	}
+	values, err := runtimeMapping(root, "effective runtime configuration", runtimeKeySet("http", "timeouts", "capabilities", "config"))
+	if err != nil {
+		return "", err
+	}
+	transports, cors, exposures, err := runtimeApplicationModelHTTP(values["http"])
+	if err != nil {
+		return "", err
+	}
+	requirements, providers, aliases, err := runtimeApplicationModelCapabilities(values["capabilities"])
+	if err != nil {
+		return "", err
+	}
+	canonical, err := json.Marshal(map[string]any{
+		"application_model_digest": compiledApplicationModelDigest,
+		"projection": map[string]any{
+			"aliases":          aliases,
+			"http_cors":        cors,
+			"http_exposures":   exposures,
+			"http_transports":  transports,
+			"provider_choices": providers,
+			"requirements":     requirements,
+		},
+		"version": 1,
+	})
+	if err != nil {
+		return "", runtimeConfigurationError("encode build-affecting runtime projection")
+	}
+	sum := sha256.Sum256(canonical)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+func runtimeApplicationModelHTTP(node *yaml.Node) (map[string]any, any, []string, error) {
+	values, err := runtimeOptionalMapping(node, "http", runtimeKeySet("address", "transports", "cors", "expose"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	connect := true
+	rest := false
+	transports, err := runtimeOptionalMapping(values["transports"], "http.transports", runtimeKeySet("connect", "rest"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if selected := transports["connect"]; selected != nil {
+		connect, err = runtimeApplicationModelBoolean(selected, "http.transports.connect")
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	if selected := transports["rest"]; selected != nil {
+		rest, err = runtimeApplicationModelBoolean(selected, "http.transports.rest")
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	var cors any
+	if corsNode := values["cors"]; corsNode != nil {
+		fields, mappingErr := runtimeMapping(corsNode, "http.cors", runtimeKeySet("allowed_origins", "allow_credentials"))
+		if mappingErr != nil {
+			return nil, nil, nil, mappingErr
+		}
+		origins, sequenceErr := runtimeApplicationModelStrings(fields["allowed_origins"], "http.cors.allowed_origins")
+		if sequenceErr != nil {
+			return nil, nil, nil, sequenceErr
+		}
+		credentials := false
+		if selected := fields["allow_credentials"]; selected != nil {
+			credentials, err = runtimeApplicationModelBoolean(selected, "http.cors.allow_credentials")
+			if err != nil {
+				return nil, nil, nil, err
+			}
+		}
+		cors = map[string]any{
+			"allow_credentials": credentials,
+			"allowed_origins":   origins,
+		}
+	}
+	exposures, err := runtimeApplicationModelStrings(values["expose"], "http.expose")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return map[string]any{"connect": connect, "rest": rest}, cors, exposures, nil
+}
+
+func runtimeApplicationModelCapabilities(node *yaml.Node) ([]string, []map[string]any, []map[string]any, error) {
+	values, err := runtimeOptionalMapping(node, "capabilities", runtimeKeySet("require", "use", "aliases"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	requirements, err := runtimeApplicationModelStrings(values["require"], "capabilities.require")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	choices, err := runtimeOptionalMapping(values["use"], "capabilities.use", nil)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	capabilities := make([]string, 0, len(choices))
+	for capability := range choices {
+		capabilities = append(capabilities, capability)
+	}
+	sort.Strings(capabilities)
+	providers := make([]map[string]any, 0, len(capabilities))
+	for _, capability := range capabilities {
+		pluginID, valueErr := runtimeString(choices[capability])
+		if valueErr != nil {
+			return nil, nil, nil, runtimeConfigurationError("capabilities.use[%q] must be a canonical Plugin ID string", capability)
+		}
+		providers = append(providers, map[string]any{
+			"capability": capability,
+			"plugin_id":  pluginID,
+		})
+	}
+	aliases, err := runtimeApplicationModelAliases(values["aliases"])
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return requirements, providers, aliases, nil
+}
+
+func runtimeApplicationModelAliases(node *yaml.Node) ([]map[string]any, error) {
+	values, err := runtimeOptionalMapping(node, "capabilities.aliases", nil)
+	if err != nil {
+		return nil, err
+	}
+	identifiers := make([]string, 0, len(values))
+	for identifier := range values {
+		identifiers = append(identifiers, identifier)
+	}
+	sort.Strings(identifiers)
+	aliases := make([]map[string]any, 0, len(identifiers))
+	for _, identifier := range identifiers {
+		value := values[identifier]
+		target := ""
+		deprecated := ""
+		var exposure any
+		if value.Kind == yaml.ScalarNode && value.Tag == "!!str" {
+			target = value.Value
+		} else {
+			fields, mappingErr := runtimeMapping(value, "capabilities.aliases["+strconv.Quote(identifier)+"]", runtimeKeySet("target", "expose", "deprecated"))
+			if mappingErr != nil {
+				return nil, mappingErr
+			}
+			target, err = runtimeString(fields["target"])
+			if err != nil {
+				return nil, runtimeConfigurationError("capabilities.aliases[%q].target must be a canonical Capability ID", identifier)
+			}
+			if expose := fields["expose"]; expose != nil {
+				exposureFields, exposureErr := runtimeMapping(expose, "capabilities.aliases["+strconv.Quote(identifier)+"].expose", runtimeKeySet("go", "http", "javascript"))
+				if exposureErr != nil {
+					return nil, exposureErr
+				}
+				goExposure, booleanErr := runtimeApplicationModelBoolean(exposureFields["go"], "capabilities.aliases.expose.go")
+				if booleanErr != nil {
+					return nil, booleanErr
+				}
+				httpExposure, booleanErr := runtimeApplicationModelBoolean(exposureFields["http"], "capabilities.aliases.expose.http")
+				if booleanErr != nil {
+					return nil, booleanErr
+				}
+				javaScriptExposure, booleanErr := runtimeApplicationModelBoolean(exposureFields["javascript"], "capabilities.aliases.expose.javascript")
+				if booleanErr != nil {
+					return nil, booleanErr
+				}
+				exposure = map[string]any{
+					"go":         goExposure,
+					"http":       httpExposure,
+					"javascript": javaScriptExposure,
+				}
+			}
+			if deprecation := fields["deprecated"]; deprecation != nil {
+				deprecationFields, deprecationErr := runtimeMapping(deprecation, "capabilities.aliases["+strconv.Quote(identifier)+"].deprecated", runtimeKeySet("message"))
+				if deprecationErr != nil {
+					return nil, deprecationErr
+				}
+				deprecated, err = runtimeString(deprecationFields["message"])
+				if err != nil {
+					return nil, runtimeConfigurationError("capabilities.aliases[%q].deprecated.message must be a string", identifier)
+				}
+			}
+		}
+		aliases = append(aliases, map[string]any{
+			"deprecated": deprecated,
+			"exposure":   exposure,
+			"id":         identifier,
+			"target":     target,
+		})
+	}
+	return aliases, nil
+}
+
+func runtimeApplicationModelStrings(node *yaml.Node, path string) ([]string, error) {
+	if node == nil {
+		return []string{}, nil
+	}
+	if node.Kind != yaml.SequenceNode {
+		return nil, runtimeConfigurationError("%s must be a sequence", path)
+	}
+	result := make([]string, len(node.Content))
+	for index, item := range node.Content {
+		value, err := runtimeString(item)
+		if err != nil {
+			return nil, runtimeConfigurationError("%s[%d] must be a string", path, index)
+		}
+		result[index] = value
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func runtimeApplicationModelBoolean(node *yaml.Node, path string) (bool, error) {
+	if node == nil {
+		return false, runtimeConfigurationError("%s is required", path)
+	}
+	normalized, err := validateRuntimeBoolean(node, path)
+	if err != nil {
+		return false, err
+	}
+	return normalized.Value == "true", nil
 }
 
 func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {

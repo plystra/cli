@@ -28,10 +28,11 @@ var (
 // default is embedded, while the application-specific value remains in the
 // runtime document and never enters generated source.
 type Options struct {
-	ModulePath              string
-	DefaultStartupTimeout   time.Duration
-	ConfigurationSchemas    []ConfigurationSchema
-	ConfigurationProvenance transportprovenance.Provenance
+	ModulePath                    string
+	DefaultStartupTimeout         time.Duration
+	ConfigurationSchemas          []ConfigurationSchema
+	ConfigurationProvenance       transportprovenance.Provenance
+	ApplicationModelCompatibility ApplicationModelCompatibility
 }
 
 // Render emits the redacted runtime boundary that safely loads the application
@@ -45,6 +46,12 @@ func Render(options Options) ([]byte, error) {
 	}
 	if !options.ConfigurationProvenance.Valid() {
 		return nil, fmt.Errorf("%w: %w: configuration-selection provenance is absent or invalid", ErrRender, ErrInvalidOptions)
+	}
+	if !options.ApplicationModelCompatibility.Valid() {
+		return nil, fmt.Errorf("%w: %w: application-model compatibility projection is absent or invalid", ErrRender, ErrInvalidOptions)
+	}
+	if options.ApplicationModelCompatibility.ApplicationModelDigest() != options.ConfigurationProvenance.ApplicationModelDigest() {
+		return nil, fmt.Errorf("%w: %w: application-model compatibility and configuration provenance disagree", ErrRender, ErrInvalidOptions)
 	}
 	schemas, err := planRuntimeConfigurationSchemas(options.ConfigurationSchemas)
 	if err != nil {
@@ -64,6 +71,9 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "import (")
 	fmt.Fprintln(&source, "\t\"bytes\"")
 	fmt.Fprintln(&source, "\t\"context\"")
+	fmt.Fprintln(&source, "\t\"crypto/sha256\"")
+	fmt.Fprintln(&source, "\t\"encoding/hex\"")
+	fmt.Fprintln(&source, "\t\"encoding/json\"")
 	fmt.Fprintln(&source, "\t\"errors\"")
 	fmt.Fprintln(&source, "\t\"fmt\"")
 	fmt.Fprintln(&source, "\t\"io\"")
@@ -92,6 +102,10 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\t// compiledConfigurationSelectionProvenanceJSON records the normalized non-secret build selection.")
 	fmt.Fprintf(&source, "\tcompiledConfigurationSelectionProvenanceJSON = %s\n", strconv.Quote(string(options.ConfigurationProvenance.CanonicalJSON())))
 	fmt.Fprintf(&source, "\tcompiledConfigurationSelectionProvenanceDigest = %s\n", strconv.Quote(options.ConfigurationProvenance.Digest()))
+	fmt.Fprintln(&source, "\t// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.")
+	fmt.Fprintf(&source, "\tcompiledApplicationModelCompatibilityJSON = %s\n", strconv.Quote(string(options.ApplicationModelCompatibility.CanonicalJSON())))
+	fmt.Fprintf(&source, "\tcompiledApplicationModelCompatibilityDigest = %s\n", strconv.Quote(options.ApplicationModelCompatibility.Digest()))
+	fmt.Fprintf(&source, "\tcompiledApplicationModelDigest = %s\n", strconv.Quote(options.ApplicationModelCompatibility.ApplicationModelDigest()))
 	fmt.Fprintln(&source, ")")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "var (")
@@ -107,6 +121,8 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\tErrRuntimeSelector = errors.New(\"invalid runtime configuration selector\")")
 	fmt.Fprintln(&source, "\t// ErrRuntimeConfiguration reports an invalid selected runtime configuration.")
 	fmt.Fprintln(&source, "\tErrRuntimeConfiguration = errors.New(\"invalid selected runtime configuration\")")
+	fmt.Fprintln(&source, "\t// ErrRuntimeCompatibility reports a runtime document that requires a different compiled application model.")
+	fmt.Fprintln(&source, "\tErrRuntimeCompatibility = errors.New(\"runtime configuration is incompatible with compiled application model\")")
 	fmt.Fprintln(&source, "\t// ErrApplicationStart reports a redacted provider startup failure.")
 	fmt.Fprintln(&source, "\tErrApplicationStart = errors.New(\"generated application startup failed\")")
 	fmt.Fprintln(&source, "\t// ErrApplicationStop reports a redacted provider shutdown failure.")
@@ -128,7 +144,7 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\tstartupTimeout time.Duration")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
-	fmt.Fprintln(&source, "// New loads the selected runtime document, validates startup settings, resolves Secrets,")
+	fmt.Fprintln(&source, "// New loads the selected runtime document, validates its compiled model and startup settings, resolves Secrets,")
 	fmt.Fprintln(&source, "// constructs every selected provider exactly once, and binds lifecycle order.")
 	fmt.Fprintln(&source, "func New(ctx context.Context, options RuntimeOptions) (*Application, error) {")
 	fmt.Fprintln(&source, "\tif ctx == nil {")
@@ -139,6 +155,10 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: select runtime configuration: %w\", ErrBootstrap, err)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\tdefer clear(document)")
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "\tif err := validateRuntimeApplicationModel(document); err != nil {")
+	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: %w\", ErrBootstrap, err)")
+	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "\tstartupTimeout, err := parseStartupTimeout(document)")
 	fmt.Fprintln(&source, "\tif err != nil {")

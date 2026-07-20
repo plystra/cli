@@ -730,6 +730,9 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"plystra remove github.com/acme/email",
 		"plystra update github.com/acme/email@v1.5.0",
 		"generated/go/application entrypoint",
+		"bounded compatibility projection",
+		"rebuild with the same",
+		"Runtime-only address",
 		"npm run typecheck",
 		"plystra generate --check",
 	}

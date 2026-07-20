@@ -400,6 +400,17 @@ replace github.com/plystra/kernel => %s
 			}
 		})
 	}
+	changedOverlay := strings.Replace(overlayConfiguration, "add: [kernel.info/v1]", "add: [kernel.health/v1]", 1)
+	changedOverlay = strings.Replace(changedOverlay, "remove: [kernel.health/v1]", "remove: [kernel.info/v1]", 1)
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), changedOverlay)
+	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--env", "production")
+	process.Dir = root
+	process.Env = environment
+	output, runtimeErr := process.CombinedOutput()
+	if runtimeErr == nil || !strings.Contains(string(output), "runtime configuration is incompatible with compiled application model") || !strings.Contains(string(output), "rebuild with the same --env or --config selection") {
+		t.Fatalf("generated application accepted build-affecting environment drift: %v\n%s", runtimeErr, output)
+	}
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayConfiguration)
 	for _, runtime := range []struct {
 		name      string
 		arguments []string
@@ -662,6 +673,19 @@ func (*Plugin) Read(_ context.Context, _ contract.Request) (contract.Response, e
 			}
 		})
 	}
+	changedSelected := bytes.Replace(selected, []byte("expose: [reports.read/v1]"), []byte("expose: [kernel.info/v1]"), 1)
+	if bytes.Equal(changedSelected, selected) {
+		t.Fatal("test replacement did not contain the compiled exposure declaration")
+	}
+	writeCommandFile(t, selectedPath, string(changedSelected))
+	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--config", "deploy/customer.yaml")
+	process.Dir = applicationRoot
+	process.Env = environment
+	output, runtimeErr := process.CombinedOutput()
+	if runtimeErr == nil || !strings.Contains(string(output), "runtime configuration is incompatible with compiled application model") || !strings.Contains(string(output), "rebuild with the same --env or --config selection") {
+		t.Fatalf("generated application accepted build-affecting replacement drift: %v\n%s", runtimeErr, output)
+	}
+	writeCommandFile(t, selectedPath, string(selected))
 	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), rootConfiguration)
 
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--config", "deploy/customer.yaml"}, nestedStart, environment)
@@ -1010,6 +1034,10 @@ func assertCommandBootstrapProvenanceMatchesManifest(t testing.TB, root string) 
 	for _, required := range []string{
 		strconv.Quote(string(provenance.CanonicalJSON())),
 		strconv.Quote(provenance.Digest()),
+		"compiledApplicationModelCompatibilityJSON",
+		"compiledApplicationModelCompatibilityDigest",
+		"compiledApplicationModelDigest",
+		strconv.Quote(manifest.ApplicationModelDigest()),
 	} {
 		if !bytes.Contains(bootstrap, []byte(required)) {
 			t.Fatalf("generated bootstrap provenance disagrees with generated manifest %q", required)

@@ -209,9 +209,10 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 		t.Fatalf("RenderCompatibility: %v", err)
 	}
 	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
-		ModulePath:              "example.com/assemblyapp",
-		DefaultStartupTimeout:   applicationmeta.DefaultStartupTimeout,
-		ConfigurationProvenance: assemblyBootstrapProvenance(t),
+		ModulePath:                    "example.com/assemblyapp",
+		DefaultStartupTimeout:         applicationmeta.DefaultStartupTimeout,
+		ConfigurationProvenance:       assemblyBootstrapProvenance(t),
+		ApplicationModelCompatibility: assemblyBootstrapCompatibility(t),
 		ConfigurationSchemas: []bootstrapgen.ConfigurationSchema{
 			{PluginID: "zeta.remote-store", Schema: remoteSchema},
 			{PluginID: "acme.local-service", Schema: localSchema},
@@ -280,9 +281,10 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("RenderCompatibility: %v", err)
 	}
 	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
-		ModulePath:              "example.com/emptyapp",
-		DefaultStartupTimeout:   applicationmeta.DefaultStartupTimeout,
-		ConfigurationProvenance: assemblyBootstrapProvenance(t),
+		ModulePath:                    "example.com/emptyapp",
+		DefaultStartupTimeout:         applicationmeta.DefaultStartupTimeout,
+		ConfigurationProvenance:       assemblyBootstrapProvenance(t),
+		ApplicationModelCompatibility: assemblyBootstrapCompatibility(t),
 	})
 	if err != nil {
 		t.Fatalf("Render bootstrap: %v", err)
@@ -337,6 +339,15 @@ func assemblyBootstrapProvenance(t testing.TB) transportprovenance.Provenance {
 		t.Fatalf("transportprovenance.New: %v", err)
 	}
 	return provenance
+}
+
+func assemblyBootstrapCompatibility(t testing.TB) bootstrapgen.ApplicationModelCompatibility {
+	t.Helper()
+	compatibility, err := bootstrapgen.NewApplicationModelCompatibility("sha256:"+strings.Repeat("3", 64), applicationmeta.Manifest{})
+	if err != nil {
+		t.Fatalf("bootstrapgen.NewApplicationModelCompatibility: %v", err)
+	}
+	return compatibility
 }
 
 func writeFile(t testing.TB, name, data string) {
@@ -959,6 +970,54 @@ capabilities:
 	}
 	if alias.Target != "records.write/v1" || alias.Expose["go"] || !alias.Expose["http"] || alias.Expose["javascript"] {
 		t.Fatalf("Alias composition = %#v", alias)
+	}
+}
+
+func TestApplicationRejectsBuildAffectingRuntimeChangesBeforeConstructors(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	tests := []struct {
+		name    string
+		prepare func(*testing.T)
+		options RuntimeOptions
+	}{
+		{
+			name: "default",
+			prepare: func(t *testing.T) {
+				writeRuntimeDocument(t, "http: {transports: {connect: false}}\n"+validRuntimeDocument)
+			},
+		},
+		{
+			name: "environment",
+			prepare: func(t *testing.T) {
+				writeRuntimeDocument(t, validRuntimeDocument)
+				writeEnvironmentDocument(t, "production", "http: {expose: [kernel.health/v1]}\n")
+			},
+			options: RuntimeOptions{Arguments: []string{"--env", "production"}},
+		},
+		{
+			name: "full replacement",
+			prepare: func(t *testing.T) {
+				writeRuntimeDocument(t, validRuntimeDocument)
+				writeReplacementDocument(t, "changed-model.yaml", "capabilities: {require: [kernel.health/v1]}\n"+validRuntimeDocument)
+			},
+			options: RuntimeOptions{Arguments: []string{"--config", "changed-model.yaml"}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.prepare(t)
+			localservice.Reset()
+			remotestore.Reset()
+			application, err := New(context.Background(), test.options)
+			if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrRuntimeCompatibility) {
+				t.Fatalf("New = %#v, %v", application, err)
+			}
+			if !strings.Contains(err.Error(), "rebuild with the same --env or --config selection") {
+				t.Fatalf("compatibility diagnostic is not actionable: %v", err)
+			}
+			assertNoBootstrapConstructorCalls(t)
+			assertSafeBootstrapError(t, err)
+		})
 	}
 }
 
