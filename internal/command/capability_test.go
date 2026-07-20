@@ -385,6 +385,69 @@ func (*Plugin) Archive(_ context.Context, _ contract.Request) (contract.Response
 	assertNoCommandTransactions(t, root)
 }
 
+func TestRunCapabilityExposeRejectsEventAndRollsBack(t *testing.T) {
+	for _, selection := range []struct {
+		name         string
+		arguments    []string
+		selectedPath string
+		selectedData string
+	}{
+		{name: "default", selectedPath: "plystra.yaml", selectedData: "# Shared configuration.\n{}\n"},
+		{name: "environment", arguments: []string{"--env", "production"}, selectedPath: "plystra.production.yaml", selectedData: "# Production event choices.\n{}\n"},
+		{name: "full replacement", arguments: []string{"--config", "deploy/customer-a.yaml"}, selectedPath: "deploy/customer-a.yaml", selectedData: "# Customer event choices.\n{}\n"},
+	} {
+		selection := selection
+		t.Run(selection.name, func(t *testing.T) {
+			root := writeCapabilityCommandModule(t)
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "# Shared configuration.\n{}\n")
+			if selection.selectedPath != "plystra.yaml" {
+				writeCommandFile(t, filepath.Join(root, filepath.FromSlash(selection.selectedPath)), selection.selectedData)
+			}
+			writeCommandFile(t, filepath.Join(root, "records", "plugin.yaml"), "id: acme.library.records\nprovides: [records.archived/v1]\n")
+			writeCommandFile(t, filepath.Join(root, "records", "capabilities", "records.archived", "v1", "capability.yaml"), `id: records.archived/v1
+request: {record_id: {type: string, required: true}}
+response: {}
+errors: []
+semantics:
+  kind: event
+  effects: external-write
+  idempotency: {mode: none}
+  retry: {safety: never}
+  cancellation: {mode: best-effort}
+  completion: {mode: accepted-for-processing}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`)
+			before := commandTree(t, root)
+			arguments := append([]string{"capability", "expose", "records.archived/v1"}, selection.arguments...)
+			exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "records"), commandGoEnvironment())
+			if exitCode != 1 || stdout != "" {
+				t.Fatalf("capability expose event = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			for _, want := range []string{
+				"Capability records.archived/v1",
+				`semantics.kind "event"`,
+				"requested Connect surface",
+				"unary boundary",
+				`semantics.kind "query"`,
+				`"command"`,
+				"remove records.archived/v1 from http.expose",
+			} {
+				if !strings.Contains(stderr, want) {
+					t.Fatalf("stderr %q does not contain %q", stderr, want)
+				}
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed event exposure changed Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			if got := string(readCommandFile(t, root, filepath.ToSlash(selection.selectedPath))); got != selection.selectedData {
+				t.Fatalf("failed event exposure did not restore selected configuration: %q", got)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func TestRunCapabilityRejectsUnexpectedGeneratedOutput(t *testing.T) {
 	root := writeCapabilityCommandModule(t)
 	environment := commandGoEnvironment()

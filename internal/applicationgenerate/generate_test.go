@@ -638,13 +638,66 @@ semantics:
 }
 
 func TestGenerateRejectsEventConnectExposureWithoutMutation(t *testing.T) {
-	t.Parallel()
+	selections := []struct {
+		name         string
+		selectedPath string
+		configure    func(*applicationgenerate.Options)
+	}{
+		{name: "default", selectedPath: "plystra.yaml"},
+		{
+			name:         "environment",
+			selectedPath: "plystra.production.yaml",
+			configure: func(options *applicationgenerate.Options) {
+				options.EnvironmentName = "production"
+			},
+		},
+		{
+			name:         "full replacement",
+			selectedPath: "deploy/customer-a.yaml",
+			configure: func(options *applicationgenerate.Options) {
+				options.ConfigurationPath = "deploy/customer-a.yaml"
+			},
+		},
+	}
+	surfaces := []struct {
+		name string
+		yaml string
+	}{
+		{name: "canonical", yaml: "http: {expose: [records.archived/v1]}\n"},
+		{
+			name: "canonical with Alias",
+			yaml: `http: {expose: [records.archived/v1]}
+capabilities:
+  aliases: {records.archive-notification/v1: records.archived/v1}
+`,
+		},
+	}
 
-	root := t.TempDir()
-	writeApplicationModule(t, root, "example.com/acme/connect-event")
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: [records.archived/v1]}\n")
-	writePlugin(t, root, "records", "id: acme.records\nprovides: [records.archived/v1]\n")
-	writeCapability(t, root, "records", "records.archived/v1", `id: records.archived/v1
+	for _, selection := range selections {
+		selection := selection
+		for _, surface := range surfaces {
+			surface := surface
+			for _, check := range []bool{false, true} {
+				check := check
+				name := selection.name + "/" + surface.name + "/generate"
+				if check {
+					name += " check"
+				}
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
+
+					root := t.TempDir()
+					writeApplicationModule(t, root, "example.com/acme/connect-event")
+					rootData := "{}\n"
+					if selection.selectedPath == "plystra.yaml" {
+						rootData = surface.yaml
+					}
+					writeFile(t, filepath.Join(root, "plystra.yaml"), rootData)
+					if selection.selectedPath != "plystra.yaml" {
+						writeFile(t, filepath.Join(root, filepath.FromSlash(selection.selectedPath)), surface.yaml)
+					}
+					writePlugin(t, root, "records", "id: acme.records\nprovides: [records.archived/v1]\n")
+					writeCapability(t, root, "records", "records.archived/v1", `id: records.archived/v1
 request: {record_id: {type: string, required: true}}
 response: {}
 errors: []
@@ -658,34 +711,40 @@ semantics:
   ordering: {mode: none}
   data: {request: public, response: public}
 `)
-	for _, check := range []bool{false, true} {
-		before := snapshotTree(t, root)
-		_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-			Start:       root,
-			Check:       check,
-			Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
-			Validate:    func(_ context.Context, _ string) error { return nil },
-		})
-		if !errors.Is(err, protobufmodel.ErrOperationKind) {
-			t.Fatalf("Generate(check=%t) error = %v", check, err)
-		}
-		for _, want := range []string{
-			"Capability records.archived/v1",
-			`semantics.kind "event"`,
-			"requested Connect surface",
-			"unary boundary",
-			`semantics.kind "query"`,
-			`"command"`,
-			"remove records.archived/v1 from http.expose",
-		} {
-			if !strings.Contains(err.Error(), want) {
-				t.Fatalf("Generate error %q omits %q", err, want)
+					before := snapshotTree(t, root)
+					options := applicationgenerate.Options{
+						Start:       root,
+						Check:       check,
+						Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+						Validate:    func(_ context.Context, _ string) error { return nil },
+					}
+					if selection.configure != nil {
+						selection.configure(&options)
+					}
+					_, err := applicationgenerate.Generate(t.Context(), options)
+					if !errors.Is(err, protobufmodel.ErrOperationKind) {
+						t.Fatalf("Generate(check=%t) error = %v", check, err)
+					}
+					for _, want := range []string{
+						"Capability records.archived/v1",
+						`semantics.kind "event"`,
+						"requested Connect surface",
+						"unary boundary",
+						`semantics.kind "query"`,
+						`"command"`,
+						"remove records.archived/v1 from http.expose",
+					} {
+						if !strings.Contains(err.Error(), want) {
+							t.Fatalf("Generate error %q omits %q", err, want)
+						}
+					}
+					if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+						t.Fatalf("failed generation mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
+					}
+					assertNoTransactions(t, root)
+				})
 			}
 		}
-		if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
-			t.Fatalf("failed generation mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
-		}
-		assertNoTransactions(t, root)
 	}
 }
 
