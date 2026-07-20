@@ -2,6 +2,8 @@ package applicationgen_test
 
 import (
 	"bytes"
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -265,6 +267,96 @@ func TestApplicationModelDigestIncludesHTTPTransportsDeterministically(t *testin
 	}
 }
 
+func TestApplicationModelDigestIncludesNormalizedHTTPCORS(t *testing.T) {
+	t.Parallel()
+
+	options := applicationgen.ApplicationModelOptions{
+		ModulePath:          applicationModulePath,
+		JavaScriptPackage:   applicationSDKPackage,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
+		HTTPTransports:      applicationmeta.HTTPTransports{Connect: true},
+		Providers:           selectedProviderInputs(),
+		Resolution:          resolvedApplication(t, ""),
+	}
+	absentDigest, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(absent CORS): %v", err)
+	}
+
+	reordered := applicationmeta.HTTPCORS{
+		AllowedOrigins: []string{
+			"https://B.example:443",
+			"https://a.example",
+			"https://a.example:443",
+		},
+	}
+	options.HTTPCORS = &reordered
+	reorderedDigest, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(reordered CORS): %v", err)
+	}
+	if !slices.Equal(reordered.AllowedOrigins, []string{"https://B.example:443", "https://a.example", "https://a.example:443"}) {
+		t.Fatalf("ApplicationModelDigest mutated CORS input: %#v", reordered)
+	}
+
+	normalized := applicationmeta.HTTPCORS{AllowedOrigins: []string{"https://a.example", "https://b.example"}}
+	options.HTTPCORS = &normalized
+	normalizedDigest, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(normalized CORS): %v", err)
+	}
+	if normalizedDigest != reorderedDigest {
+		t.Fatalf("equivalent CORS policies produced different digests: %q != %q", normalizedDigest, reorderedDigest)
+	}
+	if normalizedDigest == absentDigest {
+		t.Fatal("present and absent CORS policies produced the same application-model digest")
+	}
+
+	credentials := applicationmeta.HTTPCORS{
+		AllowedOrigins:   []string{"https://a.example", "https://b.example"},
+		AllowCredentials: true,
+	}
+	options.HTTPCORS = &credentials
+	credentialsDigest, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(credentialed CORS): %v", err)
+	}
+	if credentialsDigest == normalizedDigest {
+		t.Fatal("allow_credentials change did not alter the application-model digest")
+	}
+
+	changedOrigin := applicationmeta.HTTPCORS{AllowedOrigins: []string{"https://api.example"}}
+	options.HTTPCORS = &changedOrigin
+	changedOriginDigest, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(changed CORS origin): %v", err)
+	}
+	if changedOriginDigest == normalizedDigest {
+		t.Fatal("allowed_origins change did not alter the application-model digest")
+	}
+
+	for _, test := range []struct {
+		name string
+		cors applicationmeta.HTTPCORS
+		want string
+	}{
+		{name: "missing origins", cors: applicationmeta.HTTPCORS{}, want: "allowed_origins"},
+		{name: "malformed origin", cors: applicationmeta.HTTPCORS{AllowedOrigins: []string{"https://example.com/path"}}, want: "scheme, host, and optional port"},
+		{name: "credentialed wildcard", cors: applicationmeta.HTTPCORS{AllowedOrigins: []string{"*"}, AllowCredentials: true}, want: "wildcard origin"},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			invalid := options
+			invalid.HTTPCORS = &test.cors
+			_, err := applicationModelDigest(t, invalid)
+			if !errors.Is(err, applicationgen.ErrResolution) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ApplicationModelDigest error = %v, want ErrResolution containing %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestApplicationModelDigestPinsNormalizedConnectProtobufProjection(t *testing.T) {
 	t.Parallel()
 
@@ -281,7 +373,7 @@ func TestApplicationModelDigestPinsNormalizedConnectProtobufProjection(t *testin
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(Connect Protobuf projection): %v", err)
 	}
-	const expected = "sha256:8abbe771e5e59191c72c9005c28a3a156174e1369aee1c9a701798f86c1ba3a5"
+	const expected = "sha256:c8cac60ef0fb00f087f0382f9137b587f7f0aee8356f06caef35ce6cdfb1a567"
 	if digest != expected {
 		t.Fatalf("Connect Protobuf projection application-model digest = %q; want %q", digest, expected)
 	}

@@ -1036,6 +1036,123 @@ func TestGenerateSelectedHTTPTransportsCauseApplicationModelDrift(t *testing.T) 
 	}
 }
 
+func TestGenerateSelectedHTTPCORSCausesApplicationModelDrift(t *testing.T) {
+	tests := []struct {
+		name           string
+		rootData       string
+		selectedPath   string
+		selectedData   string
+		equivalentData string
+		changedData    string
+		configure      func(*applicationgenerate.Options)
+	}{
+		{
+			name:           "default",
+			selectedPath:   "plystra.yaml",
+			selectedData:   "http:\n  cors:\n    allowed_origins: [https://B.example:443, https://a.example, https://a.example:443]\n",
+			equivalentData: "http:\n  cors:\n    allowed_origins: [https://a.example, https://b.example]\n",
+			changedData:    "http:\n  cors:\n    allowed_origins: [https://api.example]\n",
+		},
+		{
+			name:           "environment",
+			rootData:       "http:\n  cors:\n    allowed_origins: [https://root.example]\n",
+			selectedPath:   "plystra.production.yaml",
+			selectedData:   "http:\n  cors:\n    allowed_origins: [https://B.example:443, https://a.example, https://a.example:443]\n    allow_credentials: false\n",
+			equivalentData: "http:\n  cors:\n    allowed_origins: [https://a.example, https://b.example]\n",
+			changedData:    "http:\n  cors:\n    allowed_origins: [https://a.example, https://b.example]\n    allow_credentials: true\n",
+			configure: func(options *applicationgenerate.Options) {
+				options.EnvironmentName = "production"
+			},
+		},
+		{
+			name:           "full replacement",
+			rootData:       "http:\n  cors:\n    allowed_origins: [https://root.example]\n",
+			selectedPath:   "deploy/customer-a.yaml",
+			selectedData:   "http:\n  cors:\n    allowed_origins: [https://B.example:443, https://a.example, https://a.example:443]\n",
+			equivalentData: "http:\n  cors:\n    allowed_origins: [https://a.example, https://b.example]\n",
+			changedData:    "http:\n  cors:\n    allowed_origins: [https://api.example]\n",
+			configure: func(options *applicationgenerate.Options) {
+				options.ConfigurationPath = "deploy/customer-a.yaml"
+			},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeApplicationModule(t, root, "example.com/acme/cors-"+strings.ReplaceAll(test.name, " ", "-"))
+			rootData := test.rootData
+			if test.selectedPath == "plystra.yaml" {
+				rootData = test.selectedData
+			}
+			writeFile(t, filepath.Join(root, "plystra.yaml"), rootData)
+			selectedPath := filepath.Join(root, filepath.FromSlash(test.selectedPath))
+			if test.selectedPath != "plystra.yaml" {
+				writeFile(t, selectedPath, test.selectedData)
+			}
+			environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+			options := applicationgenerate.Options{
+				Start:       root,
+				Environment: environment,
+				Validate:    func(_ context.Context, _ string) error { return nil },
+			}
+			if test.configure != nil {
+				test.configure(&options)
+			}
+
+			generated, err := applicationgenerate.Generate(t.Context(), options)
+			if err != nil || !generated.Report().Clean() {
+				t.Fatalf("initial Generate = changes %#v, %v", generated.Report().Changes(), err)
+			}
+			initialProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+			if err != nil {
+				t.Fatalf("DecodeManifestProvenance(initial): %v", err)
+			}
+
+			writeFile(t, selectedPath, test.equivalentData)
+			equivalent, err := applicationgenerate.Generate(t.Context(), options)
+			if err != nil || !equivalent.Report().Clean() {
+				t.Fatalf("equivalent Generate = changes %#v, %v", equivalent.Report().Changes(), err)
+			}
+			equivalentProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+			if err != nil {
+				t.Fatalf("DecodeManifestProvenance(equivalent): %v", err)
+			}
+			if equivalentProvenance.ApplicationModelDigest() != initialProvenance.ApplicationModelDigest() {
+				t.Fatalf("equivalent normalized CORS changed application_model_digest: %q != %q", equivalentProvenance.ApplicationModelDigest(), initialProvenance.ApplicationModelDigest())
+			}
+
+			writeFile(t, selectedPath, test.changedData)
+			beforeCheck := snapshotTree(t, root)
+			checkOptions := options
+			checkOptions.Check = true
+			checkOptions.Validate = nil
+			checked, err := applicationgenerate.Generate(t.Context(), checkOptions)
+			if err != nil {
+				t.Fatalf("Generate check after CORS change: %v", err)
+			}
+			if checked.Report().Clean() || !strings.Contains(strings.Join(checked.Report().Changed(), "\n"), "generated/manifest.json") {
+				t.Fatalf("CORS change report = %#v", checked.Report().Changes())
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, beforeCheck) {
+				t.Fatal("CORS drift check mutated the Project")
+			}
+
+			updated, err := applicationgenerate.Generate(t.Context(), options)
+			if err != nil || !updated.Report().Clean() {
+				t.Fatalf("updated Generate = changes %#v, %v", updated.Report().Changes(), err)
+			}
+			updatedProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+			if err != nil {
+				t.Fatalf("DecodeManifestProvenance(updated): %v", err)
+			}
+			if updatedProvenance.ApplicationModelDigest() == initialProvenance.ApplicationModelDigest() {
+				t.Fatal("selected HTTP CORS change preserved application_model_digest")
+			}
+		})
+	}
+}
+
 func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
 	for _, test := range []struct {
 		name         string

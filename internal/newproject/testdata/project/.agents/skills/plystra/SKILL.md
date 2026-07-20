@@ -463,8 +463,11 @@ effective result must still contain origins. Set http.cors to null to disable
 root CORS for that environment. A complete --config document does not inherit
 root CORS, and dependency Project CORS settings are ignored.
 
-The current CLI validates and composes CORS. Generated CORS response behavior
-remains a later HTTP transport feature.
+The normalized selected CORS policy participates in the generated
+application-model digest. Origin or credential changes create generation drift,
+while reordered or duplicate equivalent origins retain one static model
+identity. Generated CORS response behavior remains a later HTTP transport
+feature.
 
 PLYSTRA_ENV supplies the same environment name for automation when --env is
 omitted. To generate from a complete alternative document instead, use the same
@@ -885,8 +888,10 @@ http.cors accepts only required nonempty allowed_origins and optional boolean
 allow_credentials. Origins must be * or origin-only HTTP/HTTPS URLs; a
 credentialed wildcard is invalid. Environment overlays may inherit the root
 origin list or replace it completely; http.cors: null disables the root
-declaration, and dependency Project CORS never applies. Generated CORS response
-behavior remains deferred to the later HTTP transport gate.
+declaration, and dependency Project CORS never applies. The normalized selected
+CORS configuration participates in the build-affecting application-model
+digest; origin or credential changes create generation drift. Response behavior
+remains deferred to the later HTTP transport gate.
 
 Generated handlers enforce the exact route, application/json, bounded bodies,
 required and unknown fields, enums, response validation, safe errors, and

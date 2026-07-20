@@ -388,6 +388,7 @@ type ApplicationModelOptions struct {
 	KernelModuleVersion string
 	KernelBuildIdentity string
 	HTTPTransports      applicationmeta.HTTPTransports
+	HTTPCORS            *applicationmeta.HTTPCORS
 	Configurations      []configurationgen.Input
 	Providers           []assemblygen.ProviderInput
 	Resolution          generationresolution.ExtensionResult
@@ -401,6 +402,7 @@ type applicationModelDocument struct {
 	KernelModuleVersion    string                                `json:"kernel_module_version"`
 	KernelBuildIdentity    string                                `json:"kernel_build_identity"`
 	HTTPTransports         applicationModelHTTPTransports        `json:"http_transports"`
+	HTTPCORS               *applicationModelHTTPCORS             `json:"http_cors"`
 	ContextDigest          string                                `json:"context_digest"`
 	AliasDigest            string                                `json:"alias_digest"`
 	Configurations         []applicationModelConfiguration       `json:"configurations"`
@@ -413,6 +415,11 @@ type applicationModelDocument struct {
 type applicationModelHTTPTransports struct {
 	Connect bool `json:"connect"`
 	REST    bool `json:"rest"`
+}
+
+type applicationModelHTTPCORS struct {
+	AllowedOrigins   []string `json:"allowed_origins"`
+	AllowCredentials bool     `json:"allow_credentials"`
 }
 
 type applicationModelConfiguration struct {
@@ -452,6 +459,17 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 	aliases := options.Resolution.AliasResolution()
 	if !validContext(context) || !validAliases(aliases) {
 		return "", fmt.Errorf("%w: final resolution is absent or invalid", ErrResolution)
+	}
+	var httpCORS *applicationModelHTTPCORS
+	if options.HTTPCORS != nil {
+		normalized, err := applicationmeta.NormalizeHTTPCORS(*options.HTTPCORS)
+		if err != nil {
+			return "", fmt.Errorf("%w: selected HTTP CORS: %v", ErrResolution, err)
+		}
+		httpCORS = &applicationModelHTTPCORS{
+			AllowedOrigins:   normalized.AllowedOrigins,
+			AllowCredentials: normalized.AllowCredentials,
+		}
 	}
 	configurations := append([]configurationgen.Input(nil), options.Configurations...)
 	sort.Slice(configurations, func(left, right int) bool {
@@ -524,7 +542,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		return "", fmt.Errorf("%w: Protobuf wire map is absent or does not match the normalized projection", ErrResolution)
 	}
 	document := applicationModelDocument{
-		Version:             6,
+		Version:             7,
 		ModulePath:          options.ModulePath,
 		JavaScriptPackage:   options.JavaScriptPackage,
 		KernelModuleVersion: options.KernelModuleVersion,
@@ -533,6 +551,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 			Connect: options.HTTPTransports.Connect,
 			REST:    options.HTTPTransports.REST,
 		},
+		HTTPCORS:               httpCORS,
 		ContextDigest:          context.BuildModelDigest(),
 		AliasDigest:            aliases.Digest(),
 		Configurations:         configurationRecords,
