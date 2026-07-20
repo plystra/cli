@@ -30,6 +30,7 @@ import (
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/pluginmeta"
 	"github.com/plystra/cli/internal/protobufidentity"
+	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 )
 
@@ -522,6 +523,109 @@ errors: []
 			}
 			assertNoTransactions(t, root)
 		})
+	}
+}
+
+func TestGenerateRejectsNonQueryConnectExposureWithoutMutation(t *testing.T) {
+	for _, selection := range []struct {
+		name         string
+		rootData     string
+		selectedPath string
+		selectedData string
+		configure    func(*applicationgenerate.Options)
+	}{
+		{
+			name:         "default",
+			selectedPath: "plystra.yaml",
+			selectedData: "http: {expose: [records.archive/v1]}\n",
+		},
+		{
+			name:         "environment",
+			rootData:     "http: {expose: [records.archive/v1]}\n",
+			selectedPath: "plystra.production.yaml",
+			selectedData: "{}\n",
+			configure: func(options *applicationgenerate.Options) {
+				options.EnvironmentName = "production"
+			},
+		},
+		{
+			name:         "full replacement",
+			rootData:     "{}\n",
+			selectedPath: "deploy/customer-a.yaml",
+			selectedData: "http: {expose: [records.archive/v1]}\n",
+			configure: func(options *applicationgenerate.Options) {
+				options.ConfigurationPath = "deploy/customer-a.yaml"
+			},
+		},
+	} {
+		selection := selection
+		for _, check := range []bool{false, true} {
+			check := check
+			name := selection.name + "/generate"
+			if check {
+				name = selection.name + "/generate check"
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				root := t.TempDir()
+				writeApplicationModule(t, root, "example.com/acme/connect-kind-"+strings.ReplaceAll(selection.name, " ", "-"))
+				rootData := selection.rootData
+				if selection.selectedPath == "plystra.yaml" {
+					rootData = selection.selectedData
+				}
+				writeFile(t, filepath.Join(root, "plystra.yaml"), rootData)
+				if selection.selectedPath != "plystra.yaml" {
+					writeFile(t, filepath.Join(root, filepath.FromSlash(selection.selectedPath)), selection.selectedData)
+				}
+				writePlugin(t, root, "records", "id: acme.records\nprovides: [records.archive/v1]\n")
+				writeCapability(t, root, "records", "records.archive/v1", `id: records.archive/v1
+request: {record_id: {type: string, required: true}}
+response: {archived: {type: boolean, required: true}}
+errors: [archive_failed]
+semantics:
+  kind: command
+  effects: external-write
+  idempotency: {mode: none}
+  retry: {safety: never}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`)
+
+				before := snapshotTree(t, root)
+				options := applicationgenerate.Options{
+					Start:       root,
+					Check:       check,
+					Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+					Validate:    func(_ context.Context, _ string) error { return nil },
+				}
+				if selection.configure != nil {
+					selection.configure(&options)
+				}
+				_, err := applicationgenerate.Generate(t.Context(), options)
+				if !errors.Is(err, protobufmodel.ErrOperationKind) {
+					t.Fatalf("Generate error = %v", err)
+				}
+				for _, want := range []string{
+					"Capability records.archive/v1",
+					`semantics.kind "command"`,
+					"requested Connect surface",
+					"unary boundary",
+					`semantics.kind "query"`,
+					"remove records.archive/v1 from http.expose",
+				} {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("Generate error %q omits %q", err, want)
+					}
+				}
+				if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+					t.Fatalf("failed generation mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
+				}
+				assertNoTransactions(t, root)
+			})
+		}
 	}
 }
 

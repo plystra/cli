@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/protobufidentity"
 	"github.com/plystra/cli/internal/sdkmodel"
 )
@@ -25,6 +26,9 @@ var (
 	ErrTarget = errors.New("invalid Protobuf projection target")
 	// ErrAlias reports an invalid Capability Alias projection input.
 	ErrAlias = errors.New("invalid Protobuf projection Alias")
+	// ErrOperationKind reports a canonical Capability kind that cannot enter
+	// the currently supported Connect operation boundary.
+	ErrOperationKind = errors.New("unsupported Connect operation kind")
 )
 
 // CanonicalTargetView is the exact resolved canonical surface and immutable
@@ -42,6 +46,7 @@ type AliasView = sdkmodel.AliasView
 // the Connect transport.
 type Operation struct {
 	id             generation.CapabilityID
+	kind           capabilitymeta.CapabilityKind
 	identity       protobufidentity.Identity
 	contractDigest string
 	sources        []string
@@ -55,6 +60,10 @@ func (o Operation) Identity() protobufidentity.Identity { return o.identity }
 
 // ID returns the exact canonical Capability ID.
 func (o Operation) ID() generation.CapabilityID { return o.id }
+
+// Kind returns the validated provider-independent operation kind projected by
+// this Connect procedure.
+func (o Operation) Kind() capabilitymeta.CapabilityKind { return o.kind }
 
 // ContractDigest returns the digest of the complete normalized canonical
 // contract, including generation-affecting extension metadata.
@@ -135,19 +144,20 @@ type canonicalModel struct {
 }
 
 type canonicalOperation struct {
-	PublicID       string           `json:"public_id"`
-	CanonicalID    string           `json:"canonical_id"`
-	Package        string           `json:"package"`
-	Service        string           `json:"service"`
-	Method         string           `json:"method"`
-	RequestType    string           `json:"request_type"`
-	ResponseType   string           `json:"response_type"`
-	Procedure      string           `json:"procedure"`
-	ContractDigest string           `json:"contract_digest"`
-	Sources        []string         `json:"sources"`
-	Request        []canonicalField `json:"request"`
-	Response       []canonicalField `json:"response"`
-	Errors         []string         `json:"errors"`
+	PublicID       string                        `json:"public_id"`
+	CanonicalID    string                        `json:"canonical_id"`
+	Kind           capabilitymeta.CapabilityKind `json:"kind"`
+	Package        string                        `json:"package"`
+	Service        string                        `json:"service"`
+	Method         string                        `json:"method"`
+	RequestType    string                        `json:"request_type"`
+	ResponseType   string                        `json:"response_type"`
+	Procedure      string                        `json:"procedure"`
+	ContractDigest string                        `json:"contract_digest"`
+	Sources        []string                      `json:"sources"`
+	Request        []canonicalField              `json:"request"`
+	Response       []canonicalField              `json:"response"`
+	Errors         []string                      `json:"errors"`
 }
 
 type canonicalAlias struct {
@@ -240,8 +250,16 @@ func Build(connect bool, targets []CanonicalTargetView, aliasViews []AliasView) 
 		if err := validateFieldIdentities(operation.ID().String(), "response", identity.ResponseType(), response); err != nil {
 			return Model{}, err
 		}
+		kind, err := targetKind(httpTargets, operation.ID())
+		if err != nil {
+			return Model{}, fmt.Errorf("%w: %w: canonical operation kind for %s: %v", ErrBuild, ErrTarget, operation.ID(), err)
+		}
+		if kind != capabilitymeta.CapabilityKindQuery {
+			return Model{}, fmt.Errorf("%w: %w: %w: Capability %s declares semantics.kind %q for the requested Connect surface; the current unary boundary supports only semantics.kind %q; remove %s from http.expose until its Connect operation kind is supported", ErrBuild, ErrTarget, ErrOperationKind, operation.ID(), kind, capabilitymeta.CapabilityKindQuery, operation.ID())
+		}
 		operations[index] = Operation{
 			id:             operation.ID(),
+			kind:           kind,
 			identity:       identity,
 			contractDigest: operation.ContractDigest(),
 			sources:        sources,
@@ -299,7 +317,7 @@ func fieldCollision(capabilityID, direction, left, right, kind, identity string)
 
 func finalize(enabled bool, operations []Operation, aliases []Alias) (Model, error) {
 	document := canonicalModel{
-		Version:    1,
+		Version:    2,
 		Enabled:    enabled,
 		Operations: make([]canonicalOperation, len(operations)),
 		Aliases:    make([]canonicalAlias, len(aliases)),
@@ -309,6 +327,7 @@ func finalize(enabled bool, operations []Operation, aliases []Alias) (Model, err
 		document.Operations[index] = canonicalOperation{
 			PublicID:       identity.PublicID(),
 			CanonicalID:    identity.CanonicalID(),
+			Kind:           operation.kind,
 			Package:        identity.Package(),
 			Service:        identity.Service(),
 			Method:         identity.Method(),
@@ -350,6 +369,23 @@ func finalize(enabled bool, operations []Operation, aliases []Alias) (Model, err
 		digest:        "sha256:" + hex.EncodeToString(sum[:]),
 		prepared:      true,
 	}, nil
+}
+
+func targetKind(targets []CanonicalTargetView, id generation.CapabilityID) (capabilitymeta.CapabilityKind, error) {
+	for _, target := range targets {
+		if target.ID() != id {
+			continue
+		}
+		manifest, err := capabilitymeta.Parse(target.ContractJSON())
+		if err != nil {
+			return "", fmt.Errorf("parse canonical contract: %w", err)
+		}
+		if manifest.ID().String() != id.String() {
+			return "", fmt.Errorf("contract identity %s does not match target %s", manifest.ID(), id)
+		}
+		return manifest.Semantics().Kind(), nil
+	}
+	return "", errors.New("target view is absent")
 }
 
 func targetSources(targets []CanonicalTargetView, id generation.CapabilityID) ([]string, error) {

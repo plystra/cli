@@ -331,6 +331,47 @@ func TestRunCapabilityExposeRejectsMissingHTTPTransportAndRollsBack(t *testing.T
 	}
 }
 
+func TestRunCapabilityExposeRejectsNonQueryAndRollsBack(t *testing.T) {
+	root := writeCapabilityCommandModule(t)
+	writeCommandFile(t, filepath.Join(root, "records", "plugin.yaml"), "id: acme.library.records\nprovides: [records.archive/v1]\n")
+	writeCommandFile(t, filepath.Join(root, "records", "capabilities", "records.archive", "v1", "capability.yaml"), `id: records.archive/v1
+request: {record_id: {type: string, required: true}}
+response: {archived: {type: boolean, required: true}}
+errors: [archive_failed]
+semantics:
+  kind: command
+  effects: external-write
+  idempotency: {mode: none}
+  retry: {safety: never}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`)
+	before := commandTree(t, root)
+
+	exitCode, stdout, stderr := runCommand(t, []string{"capability", "expose", "records.archive/v1"}, filepath.Join(root, "records"), commandGoEnvironment())
+	if exitCode != 1 || stdout != "" {
+		t.Fatalf("capability expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	for _, want := range []string{
+		"Capability records.archive/v1",
+		`semantics.kind "command"`,
+		"requested Connect surface",
+		"unary boundary",
+		`semantics.kind "query"`,
+		"remove records.archive/v1 from http.expose",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr %q does not contain %q", stderr, want)
+		}
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("failed non-query exposure changed Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoCommandTransactions(t, root)
+}
+
 func TestRunCapabilityRejectsUnexpectedGeneratedOutput(t *testing.T) {
 	root := writeCapabilityCommandModule(t)
 	environment := commandGoEnvironment()

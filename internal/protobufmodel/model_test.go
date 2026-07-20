@@ -47,7 +47,7 @@ func TestBuildNormalizesExactConnectProjectionDeterministically(t *testing.T) {
 		t.Fatalf("Build = %#v, %v", model, err)
 	}
 	operations := model.Operations()
-	if len(operations) != 1 || operations[0].ID().String() != "customer.profile.get/v1" || operations[0].ContractDigest() != target.digest {
+	if len(operations) != 1 || operations[0].ID().String() != "customer.profile.get/v1" || operations[0].Kind() != capabilitymeta.CapabilityKindQuery || operations[0].ContractDigest() != target.digest {
 		t.Fatalf("Operations = %#v", operations)
 	}
 	identity := operations[0].Identity()
@@ -85,7 +85,7 @@ func TestBuildNormalizesExactConnectProjectionDeterministically(t *testing.T) {
 
 	canonical := model.CanonicalJSON()
 	for _, required := range []string{
-		`{"version":1,"enabled":true,"operations":[{"public_id":"customer.profile.get/v1"`,
+		`{"version":2,"enabled":true,"operations":[{"public_id":"customer.profile.get/v1","canonical_id":"customer.profile.get/v1","kind":"query"`,
 		`"contract_digest":"` + target.digest + `"`,
 		`"sources":["` + target.sources[0] + `"]`,
 		`"name":"profile_id","kind":"string","required":true`,
@@ -130,8 +130,80 @@ func TestBuildDisabledProjectionIsExplicitAndIgnoresUnselectedInput(t *testing.T
 	t.Parallel()
 
 	model, err := protobufmodel.Build(false, []protobufmodel.CanonicalTargetView{nil}, []protobufmodel.AliasView{nil})
-	if err != nil || !model.Valid() || model.Enabled() || len(model.Operations()) != 0 || len(model.Aliases()) != 0 || string(model.CanonicalJSON()) != `{"version":1,"enabled":false,"operations":[],"aliases":[]}` || model.Digest() != projectionDigest(model.CanonicalJSON()) {
+	if err != nil || !model.Valid() || model.Enabled() || len(model.Operations()) != 0 || len(model.Aliases()) != 0 || string(model.CanonicalJSON()) != `{"version":2,"enabled":false,"operations":[],"aliases":[]}` || model.Digest() != projectionDigest(model.CanonicalJSON()) {
 		t.Fatalf("Build(disabled) = %#v, %v", model, err)
+	}
+}
+
+func TestBuildRejectsNonQueryKindsAtTheUnaryConnectBoundary(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		kind      capabilitymeta.CapabilityKind
+		semantics string
+	}{
+		{
+			kind: capabilitymeta.CapabilityKindCommand,
+			semantics: `semantics:
+  kind: command
+  effects: external-write
+  idempotency: {mode: none}
+  retry: {safety: never}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`,
+		},
+		{
+			kind: capabilitymeta.CapabilityKindEvent,
+			semantics: `semantics:
+  kind: event
+  effects: external-write
+  idempotency: {mode: none}
+  retry: {safety: never}
+  cancellation: {mode: best-effort}
+  completion: {mode: accepted-for-processing}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`,
+		},
+		{
+			kind: capabilitymeta.CapabilityKindStream,
+			semantics: `semantics:
+  kind: stream
+  effects: none
+  idempotency: {mode: none}
+  retry: {safety: never}
+  cancellation: {mode: best-effort}
+  completion: {mode: accepted-for-processing}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`,
+		},
+	} {
+		test := test
+		t.Run(string(test.kind), func(t *testing.T) {
+			t.Parallel()
+
+			target := projectionTarget(t, "id: customer.profile.get/v1\n"+test.semantics, generation.Exposure{HTTP: true})
+			model, err := protobufmodel.Build(true, []protobufmodel.CanonicalTargetView{target}, nil)
+			if model.Valid() || !errors.Is(err, protobufmodel.ErrBuild) || !errors.Is(err, protobufmodel.ErrTarget) || !errors.Is(err, protobufmodel.ErrOperationKind) {
+				t.Fatalf("Build = %#v, %v", model, err)
+			}
+			for _, want := range []string{
+				"Capability customer.profile.get/v1",
+				`semantics.kind "` + string(test.kind) + `"`,
+				"requested Connect surface",
+				"unary boundary",
+				`semantics.kind "query"`,
+				"remove customer.profile.get/v1 from http.expose",
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("Build error %q omits %q", err, want)
+				}
+			}
+		})
 	}
 }
 

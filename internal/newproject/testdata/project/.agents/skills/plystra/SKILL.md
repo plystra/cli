@@ -204,7 +204,13 @@ A selected Connect surface also emits a Go handler under
 generated/go/adapters/connect/. Canonical handlers bind one exact procedure to
 the generated canonical application-invocation handle, while Alias handlers
 forward through that canonical handler without owning a Provider or Alias
-dispatch entry. Both accept only Connect POST requests encoded as binary
+dispatch entry. The current Connect boundary accepts only canonical contracts
+with explicit semantics.kind: query and projects each as one unary procedure;
+an Alias reuses that query target. Selecting a command, event, or stream for
+Connect fails before output and identifies the Capability, typed kind,
+supported query boundary, and http.expose remediation. Do not relabel an
+effectful operation as a query to bypass this check. Both accept only Connect
+POST requests encoded as binary
 Protobuf or ProtoJSON, require Connect-Protocol-Version: 1, and reject gRPC and
 gRPC-Web before root-context or Provider invocation. Generation installs direct
 connectrpc.com/connect and google.golang.org/protobuf requirements at the
@@ -1084,6 +1090,10 @@ build and distribution boundary for every Plystra module.
   such as foo1 and foo_1, and generated enum initialisms can collapse names such
   as http_status and h_t_t_p_status. Do not patch generated names or the wire
   map; ordinary generation and generate --check leave the Project unchanged.
+- Unsupported Connect operation kind: the current unary boundary accepts only
+  a canonical contract with semantics.kind: query. Remove the named command,
+  event, or stream from http.expose until its operation kind is supported; do
+  not relabel an effectful operation as a query.
 - Stale output after removal: run plystra generate so the managed-file manifest
   can remove obsolete contracts, clients, adapters, Alias surfaces, docs, and
   SDK operations transactionally.

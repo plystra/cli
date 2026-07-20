@@ -31,6 +31,11 @@ Options:
   --env <environment>    Write exposure to plystra.<environment>.yaml.
   --config <yaml-path>   Write exposure to one complete replacement configuration.
 
+The current Connect unary boundary accepts only a canonical Capability whose
+explicit semantics.kind is query. Exposing a command, event, or stream fails
+the transaction; remove it from http.expose until that operation kind is
+supported rather than relabeling an effectful contract.
+
 PLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit
 selector is present; setting both is an error. Explicit --env or --config
 overrides both variables, and the two flags cannot be combined. Relative

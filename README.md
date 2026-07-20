@@ -48,7 +48,13 @@ For every selected Connect surface, generation also emits a Go handler under
 `generated/go/adapters/connect/`. Canonical handlers bind one exact procedure
 to the generated canonical application-invocation handle; Alias handlers are
 thin forwards to that canonical handler and never create a Provider or Alias
-dispatch entry. Both accept only Connect POST requests encoded as binary
+dispatch entry. The current Connect boundary accepts only canonical contracts
+whose explicit `semantics.kind` is `query` and projects each as one unary
+procedure; an Alias reuses that query target. Selecting a `command`, `event`,
+or `stream` for Connect fails before generated output and names the Capability,
+declared kind, supported query boundary, and `http.expose` remediation. Do not
+change a contract to `query` unless the operation is genuinely read-only.
+Both handlers accept only Connect POST requests encoded as binary
 Protobuf or ProtoJSON, require `Connect-Protocol-Version: 1`, and reject gRPC
 and gRPC-Web with `415 Unsupported Media Type` before root-context or Provider
 invocation. Their `Accept-Post` response advertises only the two supported

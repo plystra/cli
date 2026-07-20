@@ -70,6 +70,10 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 	t.Parallel()
 
 	fixture := buildFixture(t, connectContract, "account.profile/v1")
+	operations := fixture.model.Operations()
+	if len(operations) != 1 || operations[0].Kind() != capabilitymeta.CapabilityKindQuery {
+		t.Fatalf("Connect fixture operations = %#v", operations)
+	}
 	provenance := connectConfigurationProvenance(t, generation.ConfigurationModeDefault)
 	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, provenance)
 	if err != nil {
@@ -223,6 +227,10 @@ func TestRenderRequiresConfigurationProvenanceWithoutEmbeddingSelection(t *testi
 
 func TestGeneratedCanonicalAndAliasHandlersInvokeOneCanonicalTarget(t *testing.T) {
 	fixture := buildFixture(t, connectContract, "account.profile/v1")
+	operations := fixture.model.Operations()
+	if len(operations) != 1 || operations[0].Kind() != capabilitymeta.CapabilityKindQuery {
+		t.Fatalf("generated handler target operations = %#v", operations)
+	}
 	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
