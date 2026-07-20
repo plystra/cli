@@ -16,6 +16,17 @@ import (
 	"github.com/plystra/cli/internal/capabilitysource"
 )
 
+const querySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
+
 func TestResolveSourcesLoadsEveryProviderWithoutRequiringByteEquality(t *testing.T) {
 	t.Parallel()
 
@@ -23,8 +34,8 @@ func TestResolveSourcesLoadsEveryProviderWithoutRequiringByteEquality(t *testing
 	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
 	writePlugin(t, root, "profile", "id: acme.app.profile\nprovides: [account.register/v1]\n")
 	id := mustCapabilityID(t, "account.register/v1")
-	first := []byte("id: account.register/v1\ndescription: Account provider wording.\nrequest:\n  email: {type: string, required: false, enum: [work, personal]}\nerrors: [unavailable, invalid_email]\nextensions:\n  authz: {space: request.space_id, permission: account.register}\n  authn: {authenticated: true}\n")
-	second := []byte("extensions: {authn: {authenticated: true}, authz: {permission: account.register, space: request.space_id}}\nerrors: [invalid_email, unavailable]\nrequest: {email: {enum: [personal, work], type: string}}\ndescription: Profile provider wording.\nid: account.register/v1\n")
+	first := []byte("id: account.register/v1\ndescription: Account provider wording.\nrequest:\n  email: {type: string, required: false, enum: [work, personal]}\nerrors: [unavailable, invalid_email]\nextensions:\n  authz: {space: request.space_id, permission: account.register}\n  authn: {authenticated: true}\n" + querySemanticsYAML)
+	second := []byte("extensions: {authn: {authenticated: true}, authz: {permission: account.register, space: request.space_id}}\nerrors: [invalid_email, unavailable]\nrequest: {email: {enum: [personal, work], type: string}}\ndescription: Profile provider wording.\nid: account.register/v1\n" + querySemanticsYAML)
 	writeCapabilitySource(t, filepath.Join(root, "account"), id, first)
 	writeCapabilitySource(t, filepath.Join(root, "profile"), id, second)
 
@@ -51,8 +62,8 @@ func TestResolveSourcesRejectsExtensionMetadataConflict(t *testing.T) {
 	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
 	writePlugin(t, root, "profile", "id: acme.app.profile\nprovides: [account.register/v1]\n")
 	id := mustCapabilityID(t, "account.register/v1")
-	writeCapabilitySource(t, filepath.Join(root, "account"), id, []byte("id: account.register/v1\nextensions:\n  authn: {authenticated: true}\n  authz: {permission: account.register, space: request.space_id}\n"))
-	writeCapabilitySource(t, filepath.Join(root, "profile"), id, []byte("id: account.register/v1\nextensions:\n  authz: {permission: account.update, space: request.space_id}\n"))
+	writeCapabilitySource(t, filepath.Join(root, "account"), id, []byte("id: account.register/v1\nextensions:\n  authn: {authenticated: true}\n  authz: {permission: account.register, space: request.space_id}\n"+querySemanticsYAML))
+	writeCapabilitySource(t, filepath.Join(root, "profile"), id, []byte("id: account.register/v1\nextensions:\n  authz: {permission: account.update, space: request.space_id}\n"+querySemanticsYAML))
 
 	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: filepath.Join(root, "account"), Reference: "account.register"})
 	if err != nil {
@@ -85,8 +96,8 @@ func TestResolveSourcesRejectsSemanticSchemaConflict(t *testing.T) {
 	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
 	writePlugin(t, root, "profile", "id: acme.app.profile\nprovides: [account.register/v1]\n")
 	id := mustCapabilityID(t, "account.register/v1")
-	writeCapabilitySource(t, filepath.Join(root, "account"), id, []byte("id: account.register/v1\nrequest:\n  email: {type: string, required: true}\nresponse:\n  state: {type: string, enum: [active, disabled]}\nerrors: [unavailable, invalid_email]\n"))
-	writeCapabilitySource(t, filepath.Join(root, "profile"), id, []byte("id: account.register/v1\nrequest:\n  email: {type: integer}\nresponse:\n  state: {type: string, enum: [pending]}\nerrors: [unavailable]\n"))
+	writeCapabilitySource(t, filepath.Join(root, "account"), id, []byte("id: account.register/v1\nrequest:\n  email: {type: string, required: true}\nresponse:\n  state: {type: string, enum: [active, disabled]}\nerrors: [unavailable, invalid_email]\n"+querySemanticsYAML))
+	writeCapabilitySource(t, filepath.Join(root, "profile"), id, []byte("id: account.register/v1\nrequest:\n  email: {type: integer}\nresponse:\n  state: {type: string, enum: [pending]}\nerrors: [unavailable]\n"+querySemanticsYAML))
 
 	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: filepath.Join(root, "account"), Reference: "account.register"})
 	if err != nil {
@@ -146,8 +157,8 @@ func TestResolveSourcesRejectsInvalidSchemaWithoutPartialResult(t *testing.T) {
 	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
 	writePlugin(t, root, "profile", "id: acme.app.profile\nprovides: [account.register/v1]\n")
 	id := mustCapabilityID(t, "account.register/v1")
-	writeCapabilitySource(t, filepath.Join(root, "account"), id, []byte("id: account.register/v1\nrequest:\n  email: {type: string}\n"))
-	writeCapabilitySource(t, filepath.Join(root, "profile"), id, []byte("id: account.register/v1\nrequest:\n  email: {type: bytes}\n"))
+	writeCapabilitySource(t, filepath.Join(root, "account"), id, []byte("id: account.register/v1\nrequest:\n  email: {type: string}\n"+querySemanticsYAML))
+	writeCapabilitySource(t, filepath.Join(root, "profile"), id, []byte("id: account.register/v1\nrequest:\n  email: {type: bytes}\n"+querySemanticsYAML))
 
 	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: filepath.Join(root, "account"), Reference: "account.register"})
 	if err != nil {
@@ -169,7 +180,7 @@ func TestResolveSourcesReturnsNoPartialResult(t *testing.T) {
 	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
 	writePlugin(t, root, "profile", "id: acme.app.profile\nprovides: [account.register/v1]\n")
 	id := mustCapabilityID(t, "account.register/v1")
-	writeCapabilitySource(t, filepath.Join(root, "account"), id, []byte("id: account.register/v1\n"))
+	writeCapabilitySource(t, filepath.Join(root, "account"), id, []byte("id: account.register/v1\n"+querySemanticsYAML))
 	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: filepath.Join(root, "account"), Reference: "account.register"})
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)

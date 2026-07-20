@@ -8,11 +8,12 @@ import (
 	"io"
 
 	"github.com/plystra/cli/internal/capabilityid"
+	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 	"go.yaml.in/yaml/v3"
 )
 
 // MaximumSize is the largest capability declaration inspected by the CLI.
-const MaximumSize = 1 << 20
+const MaximumSize = kernelmanifest.MaximumDeclarationSize
 
 // ErrInvalidManifest reports unsafe or invalid capability planning metadata.
 var ErrInvalidManifest = errors.New("invalid capability manifest metadata")
@@ -21,66 +22,40 @@ var ErrInvalidManifest = errors.New("invalid capability manifest metadata")
 // Complete contract validation remains the Kernel parser's responsibility.
 type Manifest struct {
 	id         capabilityid.Identifier
+	semantics  CapabilitySemantics
 	extensions CapabilityExtensions
 }
 
 // ID returns the exact canonical Capability ID.
 func (m Manifest) ID() capabilityid.Identifier { return m.id }
 
+// Semantics returns the complete validated provider-independent operation
+// declaration owned by the Kernel Capability model.
+func (m Manifest) Semantics() CapabilitySemantics { return m.semantics }
+
 // Extensions returns immutable normalized build-time metadata.
 func (m Manifest) Extensions() CapabilityExtensions { return m.extensions }
 
-// Parse returns the strict planning metadata from one capability.yaml document.
-// Request, response, error, and description contents remain opaque here.
+// Parse validates one complete capability.yaml through the Kernel-owned parser
+// and returns the immutable planning view consumed by CLI resolution.
 func Parse(data []byte) (Manifest, error) {
-	root, err := decodeDocument(data)
+	declaration, err := kernelmanifest.ParseCapability(data)
 	if err != nil {
-		return Manifest{}, err
+		return Manifest{}, invalid("%v", err)
 	}
-	if root.Kind != yaml.MappingNode {
-		return Manifest{}, invalid("document must be a mapping")
-	}
+	return manifestFromCapability(declaration)
+}
 
-	var idNode, extensionsNode *yaml.Node
-	seen := make(map[string]struct{}, len(root.Content)/2)
-	for index := 0; index < len(root.Content); index += 2 {
-		keyNode, valueNode := root.Content[index], root.Content[index+1]
-		if keyNode.Kind != yaml.ScalarNode || keyNode.Tag != "!!str" {
-			return Manifest{}, invalid("document contains a non-string key")
-		}
-		key := keyNode.Value
-		if _, duplicate := seen[key]; duplicate {
-			return Manifest{}, invalid("duplicate key %q", key)
-		}
-		seen[key] = struct{}{}
-		switch key {
-		case "id":
-			idNode = valueNode
-		case "extensions":
-			extensionsNode = valueNode
-		case "description", "request", "response", "errors":
-		default:
-			return Manifest{}, invalid("unknown key %q", key)
-		}
-	}
-	if idNode == nil {
-		return Manifest{}, invalid("id is required")
-	}
-	if idNode.Kind != yaml.ScalarNode || idNode.Tag != "!!str" {
-		return Manifest{}, invalid("id must be a string")
-	}
-	identifier, err := capabilityid.Parse(idNode.Value)
+func manifestFromCapability(declaration kernelmanifest.Capability) (Manifest, error) {
+	identifier, err := capabilityid.Parse(declaration.ID().String())
 	if err != nil {
-		return Manifest{}, invalid("id %q is not canonical", idNode.Value)
+		return Manifest{}, invalid("Kernel returned invalid Capability ID %q: %v", declaration.ID(), err)
 	}
-	var extensions CapabilityExtensions
-	if extensionsNode != nil {
-		extensions, err = parseCapabilityExtensions(extensionsNode)
-		if err != nil {
-			return Manifest{}, err
-		}
-	}
-	return Manifest{id: identifier, extensions: extensions}, nil
+	return Manifest{
+		id:         identifier,
+		semantics:  declaration.Semantics(),
+		extensions: declaration.Extensions(),
+	}, nil
 }
 
 // ParseID returns the exact canonical ID from one capability.yaml document.
@@ -90,14 +65,6 @@ func ParseID(data []byte) (capabilityid.Identifier, error) {
 		return capabilityid.Identifier{}, err
 	}
 	return manifest.ID(), nil
-}
-
-func decodeDocument(data []byte) (*yaml.Node, error) {
-	document, err := decodeYAMLDocument(data)
-	if err != nil {
-		return nil, err
-	}
-	return document.Content[0], nil
 }
 
 func decodeYAMLDocument(data []byte) (*yaml.Node, error) {

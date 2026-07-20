@@ -279,6 +279,7 @@ func (descriptorAliasView) Deprecated() string                { return "" }
 
 func descriptorTarget(t testing.TB, source string) descriptorTargetView {
 	t.Helper()
+	source = withDescriptorQuerySemantics(source)
 	canonical, err := capabilitymeta.NormalizeSchema([]byte(source))
 	if err != nil {
 		t.Fatalf("NormalizeSchema: %v", err)
@@ -300,6 +301,25 @@ func descriptorTarget(t testing.TB, source string) descriptorTargetView {
 		sources:  []string{"example.com/contracts@v1/" + id.String() + "/capability.yaml"},
 		exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: true},
 	}
+}
+
+func withDescriptorQuerySemantics(source string) string {
+	if strings.Contains(source, "\nsemantics:") {
+		return source
+	}
+	if !strings.HasSuffix(source, "\n") {
+		source += "\n"
+	}
+	return source + `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
 }
 
 func descriptorAlias(t testing.TB, id string, target descriptorTargetView) descriptorAliasView {

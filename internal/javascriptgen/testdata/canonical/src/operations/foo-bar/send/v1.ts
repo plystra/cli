@@ -14,7 +14,7 @@ import {
 import { resolveUnaryMethod } from "../../../descriptors.js";
 
 export const capabilityID = "foo-bar.send/v1";
-export const contractDigest = "sha256:29cf8dc8817a0f702540369a08146a329f4f1d482310112b79871d821d8b9d35";
+export const contractDigest = "sha256:0de2dab1912e93c308a77befb2441b21c92133597154902e71b520ee23237db2";
 const method = resolveUnaryMethod(
   "plystra.generated.foo_h_bar.send.v1.FooBarSendV1Service",
   "Invoke",

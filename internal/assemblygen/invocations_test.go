@@ -33,6 +33,15 @@ request:
 response:
   allowed: {type: boolean, required: true}
 errors: [denied]
+semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
 `
 	runtimeMessageSchema = `id: message.send/v1
 request:
@@ -52,6 +61,15 @@ errors: [invalid_recipient]
 extensions:
   policy:
     required: true
+semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
 `
 )
 

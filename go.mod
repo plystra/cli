@@ -3,11 +3,9 @@ module github.com/plystra/cli
 go 1.26
 
 require (
-	github.com/plystra/kernel v0.0.0-20260718150757-3f63ed6bc604
+	github.com/plystra/kernel v0.0.0-20260720005152-f0de71108379
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/mod v0.38.0
 )
 
 require google.golang.org/protobuf v1.36.11
-
-require connectrpc.com/connect v1.20.0 // indirect

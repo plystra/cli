@@ -22,11 +22,26 @@ import (
 // produced.
 var ErrPlan = errors.New("plan capability authoring")
 
+// IntentProfile identifies one explicit business-intent authoring profile.
+// Profiles expand into the authoritative Capability contract and never become
+// runtime inputs or alternate contract sources.
+type IntentProfile string
+
+const (
+	// IntentProfileQuery creates one read-only synchronously completed query.
+	IntentProfileQuery IntentProfile = "query"
+)
+
+func (p IntentProfile) valid() bool {
+	return p == "" || p == IntentProfileQuery
+}
+
 // Options contains the inputs needed to prepare one authoring plan.
 type Options struct {
 	Start                 string
 	Reference             string
 	Plugin                string
+	Intent                IntentProfile
 	Select                plugintarget.Selector
 	GoCommand             string
 	Environment           []string
@@ -76,6 +91,7 @@ type Plan struct {
 	modulePath      string
 	target          plugintarget.Target
 	version         capabilityversion.Plan
+	intent          IntentProfile
 	providers       []Provider
 	recommendations []capabilityid.Identifier
 }
@@ -88,6 +104,10 @@ func (p Plan) Target() plugintarget.Target { return p.target }
 
 // Version returns the exact capability version decision.
 func (p Plan) Version() capabilityversion.Plan { return p.version }
+
+// Intent returns the explicit business-intent profile selected for a new
+// Capability identity. Later versions reuse their source contract instead.
+func (p Plan) Intent() IntentProfile { return p.intent }
 
 // SourceProviders returns defensive copies in deterministic provider order.
 // Every provider is retained so later schema loading can enforce equality.
@@ -104,6 +124,9 @@ func (p Plan) Recommendations() []capabilityid.Identifier {
 // Prepare creates a non-mutating plan from capabilities declared by local
 // plugins in one immutable module index.
 func Prepare(options Options) (Plan, error) {
+	if !options.Intent.valid() {
+		return Plan{}, fmt.Errorf("%w: unsupported intent profile %q", ErrPlan, options.Intent)
+	}
 	reference, err := capabilityid.ParseReference(options.Reference)
 	if err != nil {
 		return Plan{}, fmt.Errorf("%w: parse reference: %w", ErrPlan, err)
@@ -140,6 +163,7 @@ func Prepare(options Options) (Plan, error) {
 		modulePath:      module.ModulePath(),
 		target:          target,
 		version:         version,
+		intent:          options.Intent,
 		providers:       providers,
 		recommendations: nearbyCapabilities(reference, visible),
 	}, nil
@@ -152,6 +176,9 @@ func Prepare(options Options) (Plan, error) {
 func PrepareVisible(ctx context.Context, options Options) (Plan, error) {
 	if ctx == nil {
 		return Plan{}, fmt.Errorf("%w: context is nil", ErrPlan)
+	}
+	if !options.Intent.valid() {
+		return Plan{}, fmt.Errorf("%w: unsupported intent profile %q", ErrPlan, options.Intent)
 	}
 	reference, err := capabilityid.ParseReference(options.Reference)
 	if err != nil {
@@ -198,6 +225,7 @@ func PrepareVisible(ctx context.Context, options Options) (Plan, error) {
 		modulePath:      module.ModulePath(),
 		target:          target,
 		version:         version,
+		intent:          options.Intent,
 		providers:       visibleSourceProviders(plugins, version),
 		recommendations: nearbyCapabilities(reference, visible),
 	}, nil

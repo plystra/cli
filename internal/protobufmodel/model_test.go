@@ -267,6 +267,7 @@ func (v projectionAliasView) Deprecated() string              { return v.depreca
 
 func projectionTarget(t testing.TB, source string, exposure generation.Exposure) projectionTargetView {
 	t.Helper()
+	source = withProjectionQuerySemantics(source)
 	canonical, err := capabilitymeta.NormalizeSchema([]byte(source))
 	if err != nil {
 		t.Fatalf("NormalizeSchema: %v", err)
@@ -282,6 +283,25 @@ func projectionTarget(t testing.TB, source string, exposure generation.Exposure)
 		t.Fatalf("ParseCapabilityID(%s): %v", idSource.ID, err)
 	}
 	return projectionTargetView{id: id, contract: canonical, digest: projectionDigest(canonical), sources: []string{"example.com/contracts@v1/" + id.String() + "/capability.yaml"}, exposure: exposure}
+}
+
+func withProjectionQuerySemantics(source string) string {
+	if strings.Contains(source, "\nsemantics:") {
+		return source
+	}
+	if !strings.HasSuffix(source, "\n") {
+		source += "\n"
+	}
+	return source + `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
 }
 
 func projectionAlias(t testing.TB, id string, target projectionTargetView, exposure generation.Exposure, deprecated string) projectionAliasView {

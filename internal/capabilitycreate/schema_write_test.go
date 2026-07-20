@@ -17,7 +17,7 @@ func TestRenderSchemaWriteCreatesCompleteFirstVersionWithoutMutation(t *testing.
 
 	root := createModule(t)
 	writePlugin(t, root, "account", "id: acme.app.account\n")
-	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register"})
+	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register", Intent: capabilitycreate.IntentProfileQuery})
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestRenderSchemaWriteCopiesAndRetargetsDeterministicSource(t *testing.T) {
 	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
 	writePlugin(t, root, "profile", "id: acme.app.profile\n")
 	id := mustCapabilityID(t, "account.register/v1")
-	sourceData := []byte("# Account contract.\r\nid: account.register/v1\r\ndescription: Registers an account.\r\nrequest: {email: {type: string, required: true}}\r\nextensions: {authn: {authenticated: true}}\r\n")
+	sourceData := []byte("# Account contract.\r\nid: account.register/v1\r\ndescription: Registers an account.\r\nrequest: {email: {type: string, required: true}}\r\nsemantics:\r\n  kind: query\r\n  effects: none\r\n  idempotency: {mode: inherent}\r\n  retry: {safety: safe}\r\n  cancellation: {mode: best-effort}\r\n  completion: {mode: completed-before-return}\r\n  ordering: {mode: none}\r\n  data: {request: public, response: public}\r\nextensions: {authn: {authenticated: true}}\r\n")
 	sourcePath := filepath.Join(root, "account")
 	writeCapabilitySource(t, sourcePath, id, sourceData)
 	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register", Plugin: "profile"})
@@ -92,7 +92,7 @@ func TestRenderSchemaWritePreservesExactExistingVersionBytes(t *testing.T) {
 	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
 	writePlugin(t, root, "profile", "id: acme.app.profile\n")
 	id := mustCapabilityID(t, "account.register/v1")
-	sourceData := []byte("id: account.register/v1\r\nrequest: {}\r\n")
+	sourceData := []byte("id: account.register/v1\r\nrequest: {}\r\nsemantics:\r\n  kind: query\r\n  effects: none\r\n  idempotency: {mode: inherent}\r\n  retry: {safety: safe}\r\n  cancellation: {mode: best-effort}\r\n  completion: {mode: completed-before-return}\r\n  ordering: {mode: none}\r\n  data: {request: public, response: public}\r\n")
 	writeCapabilitySource(t, filepath.Join(root, "account"), id, sourceData)
 	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register/v1", Plugin: "profile"})
 	if err != nil {
@@ -119,8 +119,8 @@ func TestRenderSchemaWriteRejectsEmptyOrMismatchedSnapshots(t *testing.T) {
 	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
 	writePlugin(t, root, "audit", "id: acme.app.audit\nprovides: [account.register/v1]\n")
 	id := mustCapabilityID(t, "account.register/v1")
-	writeCapabilitySource(t, filepath.Join(root, "account"), id, []byte("id: account.register/v1\n"))
-	writeCapabilitySource(t, filepath.Join(root, "audit"), id, []byte("id: account.register/v1\n"))
+	writeCapabilitySource(t, filepath.Join(root, "account"), id, []byte("id: account.register/v1\n"+querySemanticsYAML))
+	writeCapabilitySource(t, filepath.Join(root, "audit"), id, []byte("id: account.register/v1\n"+querySemanticsYAML))
 	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register", Plugin: "account"})
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)

@@ -29,7 +29,7 @@ errors: [policy_failed]
 extensions:
   policy:
     permission: order.create
-`
+` + invocationQuerySemanticsYAML
 	auditOrderSchema = `id: order.create/v1
 request:
   order_id: {type: string, required: true}
@@ -41,7 +41,7 @@ errors: [policy_failed]
 extensions:
   audit:
     event: order.create
-`
+` + invocationQuerySemanticsYAML
 	policyCheckSchema = `id: policy.check/v1
 request:
   permission: {type: string, required: true}
@@ -54,7 +54,7 @@ response:
   reason: {type: string}
   details: {type: object}
 errors: [unavailable]
-`
+` + invocationQuerySemanticsYAML
 	auditWriteSchema = `id: audit.write/v1
 request:
   event: {type: string, required: true}
@@ -64,7 +64,7 @@ request:
 response:
   recorded: {type: boolean, required: true}
 errors: [write_failed]
-`
+` + invocationQuerySemanticsYAML
 	completionOrderSchema = `id: order.create/v1
 request:
   order_id: {type: string, required: true}
@@ -76,7 +76,7 @@ errors: [policy_failed]
 extensions:
   audit:
     event: order.create
-`
+` + invocationQuerySemanticsYAML
 	typedOrderSchema = `id: order.typed-create/v1
 request:
   name: {type: string, required: true}
@@ -92,7 +92,7 @@ errors: [policy_failed]
 extensions:
   policy:
     permission: order.typed-create
-`
+` + invocationQuerySemanticsYAML
 	typedPolicySchema = `id: policy.typed-check/v1
 request:
   name: {type: string, required: true}
@@ -107,7 +107,7 @@ request:
 response:
   allowed: {type: boolean, required: true}
 errors: [unavailable]
-`
+` + invocationQuerySemanticsYAML
 	contextOrderSchema = `id: order.context-create/v1
 request:
   space_id: {type: string, required: true}
@@ -118,7 +118,7 @@ errors: [policy_failed]
 extensions:
   policy:
     permission: order.context-create
-`
+` + invocationQuerySemanticsYAML
 )
 
 func TestRenderPlanGoldenAndRuntimeOrder(t *testing.T) {

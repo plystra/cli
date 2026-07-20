@@ -52,7 +52,7 @@ Stay inside the four-concept model:
 For a new local behavior, use this sequence:
 
     plystra plugin create records
-    plystra capability create records.read --plugin records --expose
+    plystra capability create records.read --query --plugin records --expose
     # Edit the authored contract and Plugin method.
     plystra generate
     go test ./...
@@ -594,9 +594,9 @@ dependency-module Plugins are selected only when exact requirements need them.
 
 ## Create and implement a new Capability
 
-Create and expose a first version in one transaction:
+Create and expose a first Query Capability version in one transaction:
 
-    plystra capability create records.read --plugin records --expose
+    plystra capability create records.read --query --plugin records --expose
 
 The command creates
 records/capabilities/records.read/v1/capability.yaml, adds
@@ -630,6 +630,28 @@ Edit the authored capability.yaml into a complete provider-independent contract:
     errors:
       - invalid_record_id
       - not_found
+
+    semantics:
+      kind: query
+      effects: none
+      idempotency:
+        mode: inherent
+      retry:
+        safety: safe
+      cancellation:
+        mode: best-effort
+      completion:
+        mode: completed-before-return
+      ordering:
+        mode: none
+      data:
+        request: public
+        response: public
+
+The --query profile writes those complete semantics into the authoritative
+capability.yaml. A Capability name never implies behavior, and a genuinely new
+identity requires one supported intent profile before the command mutates the
+Project.
 
 Then regenerate before implementing against the typed contract:
 
@@ -669,13 +691,17 @@ deadline behavior when relevant, and any state transition owned by the Plugin.
 
 ## Version and implement canonical contracts
 
-Use the unversioned create workflow for an ordinary first or next version:
+Use an explicit intent profile for the first version of a new identity:
 
-    plystra capability create records.archive --plugin records
+    plystra capability create records.archive --query --plugin records
 
-Use an explicit version only for a deliberate unusual version and confirm it:
+When the identity is already visible, the same unversioned command creates the
+next version by copying the highest exact contract, including its semantics;
+omit profile flags for that later-version workflow. Use an explicit version for
+a deliberate unusual new identity and version, select its profile, and confirm
+it:
 
-    plystra capability create records.archive/v3 --plugin records --confirm
+    plystra capability create records.archive/v3 --query --plugin records --confirm
 
 Implement an exact canonical Capability already visible from an official or
 dependency module with:

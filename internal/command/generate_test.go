@@ -979,6 +979,12 @@ func commandGoEnvironmentWith(overrides map[string]string) []string {
 
 func writeCommandFile(t testing.TB, name, content string) {
 	t.Helper()
+	if filepath.Base(name) == "capability.yaml" && !strings.Contains(content, "\nsemantics:") {
+		if !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		content += commandQuerySemanticsYAML
+	}
 	if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
 		t.Fatalf("MkdirAll(%s): %v", filepath.Dir(name), err)
 	}
@@ -986,6 +992,17 @@ func writeCommandFile(t testing.TB, name, content string) {
 		t.Fatalf("WriteFile(%s): %v", name, err)
 	}
 }
+
+const commandQuerySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
 
 func addLegacyProtobufReplacement(t testing.TB, moduleRoot string) {
 	t.Helper()

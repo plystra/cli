@@ -41,6 +41,17 @@ extensions:
   testing: {marker: provider-only-marker}
 `
 
+const javascriptQuerySemantics = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
+
 func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 	t.Parallel()
 
@@ -387,7 +398,7 @@ func (v javascriptAliasView) Deprecated() string              { return v.depreca
 
 func javascriptTarget(t testing.TB, schema string) javascriptTargetView {
 	t.Helper()
-	canonical, err := capabilitymeta.NormalizeSchema([]byte(schema))
+	canonical, err := capabilitymeta.NormalizeSchema([]byte(schema + javascriptQuerySemantics))
 	if err != nil {
 		t.Fatalf("NormalizeSchema: %v", err)
 	}

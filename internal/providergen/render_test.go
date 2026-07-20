@@ -29,6 +29,16 @@ response:
   message_id: {type: string, required: true}
   status: {type: string, enum: [queued, sent], required: true}
 errors: [invalid_recipient, authentication_failed, temporarily_unavailable]
+` + providerQuerySemanticsYAML
+	providerQuerySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
 `
 )
 
@@ -65,7 +75,7 @@ func TestRenderGoldenProviderInterface(t *testing.T) {
 func TestRenderDerivesOperationNameAndVersionedImport(t *testing.T) {
 	t.Parallel()
 
-	file, err := providergen.Render("example.com/acme/project/v3", []byte("id: gateway.send-http/v12\n"))
+	file, err := providergen.Render("example.com/acme/project/v3", []byte(withProviderQuerySemantics("id: gateway.send-http/v12\n")))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -83,7 +93,7 @@ func TestRenderDerivesOperationNameAndVersionedImport(t *testing.T) {
 func TestRenderDerivesHierarchicalCapabilityPath(t *testing.T) {
 	t.Parallel()
 
-	file, err := providergen.Render(testModulePath, []byte("id: authn.login.oidc.complete/v1\n"))
+	file, err := providergen.Render(testModulePath, []byte(withProviderQuerySemantics("id: authn.login.oidc.complete/v1\n")))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -100,10 +110,20 @@ func TestRenderIgnoresNonSemanticSourceDifferences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render(first): %v", err)
 	}
-	second, err := providergen.Render(testModulePath, []byte("errors: [temporarily_unavailable, authentication_failed, invalid_recipient]\r\nresponse: {status: {required: true, enum: [sent, queued], type: string}, message_id: {required: true, type: string}}\r\nrequest: {html: {type: string}, text: {type: string}, subject: {required: true, type: string}, to: {required: true, items: string, type: array}}\r\ndescription: Different words.\r\nid: email.send/v1\r\n"))
+	second, err := providergen.Render(testModulePath, []byte(withProviderQuerySemantics("errors: [temporarily_unavailable, authentication_failed, invalid_recipient]\r\nresponse: {status: {required: true, enum: [sent, queued], type: string}, message_id: {required: true, type: string}}\r\nrequest: {html: {type: string}, text: {type: string}, subject: {required: true, type: string}, to: {required: true, items: string, type: array}}\r\ndescription: Different words.\r\nid: email.send/v1\r\n")))
 	if err != nil || first.Path() != second.Path() || !bytes.Equal(first.Data(), second.Data()) {
 		t.Fatalf("non-semantic rendering differs: %v\nfirst:\n%s\nsecond:\n%s", err, first.Data(), second.Data())
 	}
+}
+
+func withProviderQuerySemantics(source string) string {
+	if strings.Contains(source, "\nsemantics:") {
+		return source
+	}
+	if !strings.HasSuffix(source, "\n") {
+		source += "\n"
+	}
+	return source + providerQuerySemanticsYAML
 }
 
 func TestRenderRejectsInvalidInputs(t *testing.T) {

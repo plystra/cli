@@ -31,6 +31,15 @@ response:
   status: {type: string, enum: [found, partial], required: true}
   source: {type: string, enum: [primary, replica]}
 errors: [not_found]
+semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
 `
 	wiringOrderSchema = `id: order.place/v1
 request:
@@ -42,6 +51,15 @@ response:
   status: {type: string, enum: [accepted, partial], required: true}
   source: {type: string, enum: [primary, replica]}
 errors: [not_found]
+semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
 `
 	wiringWorkflowSchema = `id: workflow.run/v1
 request:
@@ -53,6 +71,15 @@ response:
   status: {type: string, enum: [completed, partial], required: true}
   source: {type: string, enum: [primary, replica]}
 errors: [not_found]
+semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
 `
 )
 

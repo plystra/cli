@@ -211,7 +211,7 @@ replace github.com/plystra/kernel => %s
 	}
 	writeProviderFile(t, filepath.Join(root, "go.sum"), string(goSum))
 	writeProviderFile(t, filepath.Join(root, "plystra.yaml"), "# Preserve this Provider configuration.\ncapabilities:\n  require: [email.send/v1]\n")
-	contract := "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n"
+	contract := "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\nsemantics:\n  kind: query\n  effects: none\n  idempotency: {mode: inherent}\n  retry: {safety: safe}\n  cancellation: {mode: best-effort}\n  completion: {mode: completed-before-return}\n  ordering: {mode: none}\n  data: {request: public, response: public}\n"
 	for _, provider := range []struct {
 		directory string
 		packageID string

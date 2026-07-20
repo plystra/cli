@@ -11,7 +11,7 @@ Canonical capabilities implemented by this plugin are listed under `provides` in
 Create a custom capability from the module root with:
 
 ```text
-plystra capability create <capability-name> --plugin account-profile
+plystra capability create <capability-name> --query --plugin account-profile
 ```
 
 Implement an existing canonical capability with:

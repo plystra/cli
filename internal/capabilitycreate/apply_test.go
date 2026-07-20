@@ -27,6 +27,7 @@ func TestCreateCommitsCapabilityImplementationAndGeneratedProject(t *testing.T) 
 		Options: capabilitycreate.Options{
 			Start:       filepath.Join(root, "records"),
 			Reference:   "records.create",
+			Intent:      capabilitycreate.IntentProfileQuery,
 			Environment: environment,
 		},
 	})
@@ -96,7 +97,7 @@ func TestImplementCopiesVisibleDependencyContract(t *testing.T) {
 	writeAuthoringFile(t, filepath.Join(catalogRoot, "go.mod"), "module example.com/catalog\n\ngo 1.26\n")
 	writeAuthoringFile(t, filepath.Join(catalogRoot, "plystra.yaml"), "{}\n")
 	writePlugin(t, catalogRoot, "email", "id: catalog.email\nprovides: [email.send/v1]\n")
-	schema := "id: email.send/v1\nextensions: {delivery: {idempotent: true}}\nrequest: {to: {type: string, required: true}}\nresponse: {accepted: {type: boolean, required: true}}\nerrors: [invalid_recipient]\n"
+	schema := "id: email.send/v1\nextensions: {delivery: {idempotent: true}}\nrequest: {to: {type: string, required: true}}\nresponse: {accepted: {type: boolean, required: true}}\nerrors: [invalid_recipient]\nsemantics:\n  kind: query\n  effects: none\n  idempotency: {mode: inherent}\n  retry: {safety: safe}\n  cancellation: {mode: best-effort}\n  completion: {mode: completed-before-return}\n  ordering: {mode: none}\n  data: {request: public, response: public}\n"
 	writeAuthoringFile(t, filepath.Join(catalogRoot, "email", "capabilities", "email.send", "v1", "capability.yaml"), schema)
 
 	root := createBuildableAuthoringModule(t, "example.com/acme/app", catalogRoot)
@@ -134,7 +135,7 @@ func TestAuthoringEnforcesActionAndExplicitVersionConfirmation(t *testing.T) {
 	writePlugin(t, root, "records", "id: acme.library.records\n")
 	writeAuthoringFile(t, filepath.Join(root, "records", "plugin.go"), "package records\n\ntype Plugin struct{}\n\nfunc New(_ ...any) *Plugin { return &Plugin{} }\n")
 	environment := visiblePlanEnvironment()
-	base := capabilitycreate.Options{Start: root, Plugin: "records", Environment: environment}
+	base := capabilitycreate.Options{Start: root, Plugin: "records", Intent: capabilitycreate.IntentProfileQuery, Environment: environment}
 
 	before := snapshotAuthoringTree(t, root)
 	base.Reference = "records.create/v3"
@@ -170,6 +171,7 @@ func TestCreateRollsBackDeclarationsImplementationGenerationAndModuleMetadata(t 
 		Options: capabilitycreate.Options{
 			Start:       root,
 			Reference:   "records.create",
+			Intent:      capabilitycreate.IntentProfileQuery,
 			Environment: visiblePlanEnvironment(),
 		},
 		Validate: func(context.Context, string) error { return validationErr },
@@ -194,6 +196,7 @@ func TestCreateRejectsUnexpectedGeneratedOutputWithoutMutation(t *testing.T) {
 		Options: capabilitycreate.Options{
 			Start:       root,
 			Reference:   "records.create",
+			Intent:      capabilitycreate.IntentProfileQuery,
 			Environment: visiblePlanEnvironment(),
 		},
 	})

@@ -35,6 +35,17 @@ response:
 errors: [temporarily_unavailable, invalid_recipient]
 extensions:
   authn: {authenticated: true}
+` + sdkQuerySemanticsYAML
+
+const sdkQuerySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
 `
 
 func TestBuildCanonicalNormalizesImmutableSDKOperations(t *testing.T) {
@@ -310,7 +321,7 @@ func FuzzBuildCanonical(f *testing.F) {
 		if len(schema) > 1<<20 {
 			return
 		}
-		canonical, err := capabilitymeta.NormalizeSchema([]byte(schema))
+		canonical, err := capabilitymeta.NormalizeSchema([]byte(withSDKQuerySemantics(schema)))
 		if err != nil {
 			return
 		}
@@ -422,6 +433,7 @@ func (v sdkTargetView) Exposure() generation.Exposure { return v.exposure }
 
 func sdkTarget(t testing.TB, schema string, exposure generation.Exposure) sdkTargetView {
 	t.Helper()
+	schema = withSDKQuerySemantics(schema)
 	canonical, err := capabilitymeta.NormalizeSchema([]byte(schema))
 	if err != nil {
 		t.Fatalf("NormalizeSchema: %v", err)
@@ -435,6 +447,16 @@ func sdkTarget(t testing.TB, schema string, exposure generation.Exposure) sdkTar
 		t.Fatalf("ParseCapabilityID: %v", err)
 	}
 	return sdkTargetView{id: id, contract: canonical, digest: digest(canonical), exposure: exposure}
+}
+
+func withSDKQuerySemantics(source string) string {
+	if strings.Contains(source, "\nsemantics:") {
+		return source
+	}
+	if !strings.HasSuffix(source, "\n") {
+		source += "\n"
+	}
+	return source + sdkQuerySemanticsYAML
 }
 
 func withSDKTarget(value sdkTargetView, edit func(*sdkTargetView)) sdkTargetView {

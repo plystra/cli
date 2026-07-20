@@ -17,8 +17,8 @@ func TestDefinitionsAdaptAuthoritativeKernelCatalog(t *testing.T) {
 		t.Fatalf("Definitions = %v", got)
 	}
 	wantDigests := []string{
-		"sha256:6b1b78b7e99fcae04e27eed02fd1c9d4cfbb92cb8e07565b4fe44b03f074820c",
-		"sha256:fb8538e46264d046cc04c79ee3974293d50edbb19cc4cfd0dca9955747e70153",
+		"sha256:24b3601547ebd37da37341a86699a51b2e8a2d1706662bafed0b4d6d3a1548a9",
+		"sha256:3ec0d8f2bfda17c88d8bf5e724f8612049fb0779074999f3a7c9fc9495d3695b",
 	}
 	for index, definition := range definitions {
 		if definition.ContractDigest() != wantDigests[index] || !bytes.Contains(definition.ContractJSON(), []byte(`"id":"`+definition.ID().String()+`"`)) {

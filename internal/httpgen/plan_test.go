@@ -31,7 +31,7 @@ request:
 response:
   allowed: {type: boolean, required: true}
 errors: [unavailable]
-`
+` + httpQuerySemanticsYAML
 )
 
 func TestRenderPlanRunsOrderedHTTPContributions(t *testing.T) {

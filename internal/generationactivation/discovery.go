@@ -90,7 +90,7 @@ func (c Catalog) DiscoverRequirements(resolution providerresolution.Result) (Req
 
 	for _, capability := range resolution.Capabilities() {
 		contract := capability.ContractJSON()
-		canonical, err := capabilitymeta.NormalizeSchema(contract)
+		canonical, metadata, err := capabilitymeta.NormalizeSchemaAndManifest(contract)
 		if err != nil || !bytes.Equal(canonical, contract) {
 			issues = append(issues, fmt.Errorf(
 				"%w: Capability %s does not contain canonical exact contract JSON",
@@ -99,8 +99,7 @@ func (c Catalog) DiscoverRequirements(resolution providerresolution.Result) (Req
 			))
 			continue
 		}
-		metadata, err := capabilitymeta.Parse(contract)
-		if err != nil || metadata.ID() != capability.ID() {
+		if metadata.ID() != capability.ID() {
 			issues = append(issues, fmt.Errorf(
 				"%w: Capability %s contract identity is inconsistent",
 				ErrInvalidResolution,

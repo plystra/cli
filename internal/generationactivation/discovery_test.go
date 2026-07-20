@@ -202,8 +202,19 @@ func resolved(t *testing.T, requirements []providerresolution.Requirement, candi
 }
 
 func exactContract(id, body string) []byte {
-	return []byte("id: " + id + "\n" + body)
+	return []byte("id: " + id + "\n" + body + activationQuerySemanticsYAML)
 }
+
+const activationQuerySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
 
 func mustCapabilityID(t *testing.T, value string) capabilityid.Identifier {
 	t.Helper()

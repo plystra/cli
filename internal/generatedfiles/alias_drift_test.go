@@ -29,6 +29,7 @@ const (
 	aliasClientPath      = "generated/go/clients/compat/status/v1/client_gen.go"
 	aliasHTTPPath        = "generated/go/adapters/http/compat/status/v1/handler_gen.go"
 	aliasJavaScriptPath  = "generated/sdk/javascript/src/operations/compat/status/v1.ts"
+	querySemanticsJSON   = `{"kind":"query","effects":"none","idempotency":{"mode":"inherent"},"retry":{"safety":"safe"},"cancellation":{"mode":"best-effort"},"completion":{"mode":"completed-before-return"},"ordering":{"mode":"none"},"data":{"request":"public","response":"public"}}`
 )
 
 var fullAliasExposure = generation.Exposure{Go: true, HTTP: true, JavaScript: true}
@@ -169,7 +170,7 @@ func TestAliasRetargetDeprecationExposureAndTargetContractDrift(t *testing.T) {
 		{
 			name: "target contract digest",
 			options: aliasRenderOptions{
-				healthSchema: `{"id":"kernel.health/v1","request":{},"response":{"healthy":{"type":"boolean","required":true},"status":{"type":"string","required":true}},"errors":[]}`,
+				healthSchema: `{"id":"kernel.health/v1","request":{},"response":{"healthy":{"type":"boolean","required":true},"status":{"type":"string","required":true}},"errors":[],"semantics":` + querySemanticsJSON + `}`,
 				aliases:      baselineOptions.aliases,
 			},
 			changed: []string{
@@ -239,11 +240,11 @@ func renderAliasOutput(t testing.TB, options aliasRenderOptions) generatedfiles.
 	t.Helper()
 	healthSchema := options.healthSchema
 	if healthSchema == "" {
-		healthSchema = `{"id":"kernel.health/v1","request":{},"response":{"healthy":{"type":"boolean","required":true}},"errors":[]}`
+		healthSchema = `{"id":"kernel.health/v1","request":{},"response":{"healthy":{"type":"boolean","required":true}},"errors":[],"semantics":` + querySemanticsJSON + `}`
 	}
 	targetSchemas := []string{
 		healthSchema,
-		`{"id":"kernel.info/v1","request":{},"response":{"version":{"type":"string","required":true}},"errors":[]}`,
+		`{"id":"kernel.info/v1","request":{},"response":{"version":{"type":"string","required":true}},"errors":[],"semantics":` + querySemanticsJSON + `}`,
 	}
 	capabilities := make([]generation.CapabilityInput, len(targetSchemas))
 	requirements := make([]string, len(targetSchemas))

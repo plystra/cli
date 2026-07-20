@@ -36,7 +36,7 @@ const (
   plystra update <go-module-query>
   plystra use <capability-name>/vN <plugin-id> [--env <environment>|--config <yaml-path>]
   plystra plugin create <name>
-  plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
+  plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
   plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
   plystra check [--env <environment>|--config <yaml-path>]

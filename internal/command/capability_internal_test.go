@@ -23,14 +23,14 @@ func TestParseCapabilityArguments(t *testing.T) {
 	}{
 		{
 			name:      "create inferred target",
-			arguments: []string{"capability", "create", "records.create"},
-			want:      capabilityArguments{action: "create", reference: "records.create"},
+			arguments: []string{"capability", "create", "records.create", "--query"},
+			want:      capabilityArguments{action: "create", reference: "records.create", query: true},
 			ok:        true,
 		},
 		{
 			name:      "create explicit target and confirmation",
-			arguments: []string{"capability", "create", "records.create/v3", "--expose", "--confirm", "--plugin", "acme.records"},
-			want:      capabilityArguments{action: "create", reference: "records.create/v3", plugin: "acme.records", confirm: true, expose: true},
+			arguments: []string{"capability", "create", "records.create/v3", "--expose", "--query", "--confirm", "--plugin", "acme.records"},
+			want:      capabilityArguments{action: "create", reference: "records.create/v3", plugin: "acme.records", confirm: true, expose: true, query: true},
 			ok:        true,
 		},
 		{
@@ -66,6 +66,9 @@ func TestParseCapabilityArguments(t *testing.T) {
 		{name: "implement confirmation", arguments: []string{"capability", "implement", "records.create/v1", "--confirm"}},
 		{name: "implement exposure", arguments: []string{"capability", "implement", "records.create/v1", "--expose"}},
 		{name: "duplicate exposure", arguments: []string{"capability", "create", "records.create/v1", "--expose", "--expose"}},
+		{name: "duplicate query profile", arguments: []string{"capability", "create", "records.create/v1", "--query", "--query"}},
+		{name: "implement query profile", arguments: []string{"capability", "implement", "records.create/v1", "--query"}},
+		{name: "invalid profile", arguments: []string{"capability", "create", "records.create/v1", "--mutation"}},
 		{name: "expose option", arguments: []string{"capability", "expose", "records.create/v1", "--confirm"}},
 		{name: "expose missing environment", arguments: []string{"capability", "expose", "records.create/v1", "--env"}},
 		{name: "expose duplicate environment", arguments: []string{"capability", "expose", "records.create/v1", "--env", "test", "--env", "production"}},
@@ -96,7 +99,7 @@ func TestRunCapabilityPromptsForAmbiguousPluginTarget(t *testing.T) {
 	var stderr bytes.Buffer
 
 	exitCode := runIn(
-		[]string{"capability", "create", "profile.get"},
+		[]string{"capability", "create", "profile.get", "--query"},
 		&stdout,
 		&stderr,
 		root,

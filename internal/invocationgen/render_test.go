@@ -29,6 +29,16 @@ response:
   message_id: {type: string, required: true}
   status: {type: string, enum: [queued, sent], required: true}
 errors: [invalid_recipient, authentication_failed, temporarily_unavailable]
+` + invocationQuerySemanticsYAML
+	invocationQuerySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
 `
 )
 
@@ -65,7 +75,7 @@ func TestRenderGoldenCanonicalApplicationInvocation(t *testing.T) {
 func TestRenderDerivesHierarchicalCapabilityPath(t *testing.T) {
 	t.Parallel()
 
-	file, err := invocationgen.Render("example.com/acme/project/v3", []byte("id: authn.login.oidc.complete/v12\n"))
+	file, err := invocationgen.Render("example.com/acme/project/v3", []byte(withInvocationQuerySemantics("id: authn.login.oidc.complete/v12\n")))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -97,10 +107,20 @@ func TestRenderIgnoresNonSemanticSourceDifferences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render(first): %v", err)
 	}
-	second, err := invocationgen.Render(testModulePath, []byte("errors: [temporarily_unavailable, authentication_failed, invalid_recipient]\r\nresponse: {status: {required: true, enum: [sent, queued], type: string}, message_id: {required: true, type: string}}\r\nrequest: {html: {type: string}, text: {type: string}, subject: {required: true, type: string}, to: {required: true, items: string, type: array}}\r\ndescription: Different words.\r\nid: email.send/v1\r\n"))
+	second, err := invocationgen.Render(testModulePath, []byte(withInvocationQuerySemantics("errors: [temporarily_unavailable, authentication_failed, invalid_recipient]\r\nresponse: {status: {required: true, enum: [sent, queued], type: string}, message_id: {required: true, type: string}}\r\nrequest: {html: {type: string}, text: {type: string}, subject: {required: true, type: string}, to: {required: true, items: string, type: array}}\r\ndescription: Different words.\r\nid: email.send/v1\r\n")))
 	if err != nil || first.Path() != second.Path() || !bytes.Equal(first.Data(), second.Data()) {
 		t.Fatalf("non-semantic rendering differs: %v\nfirst:\n%s\nsecond:\n%s", err, first.Data(), second.Data())
 	}
+}
+
+func withInvocationQuerySemantics(source string) string {
+	if strings.Contains(source, "\nsemantics:") {
+		return source
+	}
+	if !strings.HasSuffix(source, "\n") {
+		source += "\n"
+	}
+	return source + invocationQuerySemanticsYAML
 }
 
 func TestRenderRejectsInvalidInputs(t *testing.T) {

@@ -15,6 +15,7 @@ func TestParseCapabilityExtensions(t *testing.T) {
 	t.Parallel()
 
 	metadata, err := capabilitymeta.Parse([]byte(`id: order.cancel/v1
+` + querySemanticsYAML + `
 extensions:
   rate-limit: 5
   telemetry: [null, true, 1, 1.5, sample]
@@ -71,11 +72,11 @@ extensions:
 func TestParseNormalizesEmptyCapabilityExtensions(t *testing.T) {
 	t.Parallel()
 
-	omitted, err := capabilitymeta.Parse([]byte("id: kernel.health/v1\n"))
+	omitted, err := capabilitymeta.Parse([]byte("id: example.health/v1\n" + querySemanticsYAML + "\n"))
 	if err != nil {
 		t.Fatalf("Parse(omitted): %v", err)
 	}
-	empty, err := capabilitymeta.Parse([]byte("id: kernel.health/v1\nextensions: {}\n"))
+	empty, err := capabilitymeta.Parse([]byte("id: example.health/v1\nextensions: {}\n" + querySemanticsYAML + "\n"))
 	if err != nil {
 		t.Fatalf("Parse(empty): %v", err)
 	}
@@ -109,7 +110,7 @@ func TestParseRejectsInvalidCapabilityExtensions(t *testing.T) {
 		name, extension := name, extension
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			metadata, err := capabilitymeta.Parse([]byte("id: example.check/v1\n" + extension))
+			metadata, err := capabilitymeta.Parse([]byte("id: example.check/v1\n" + querySemanticsYAML + "\n" + extension))
 			if !errors.Is(err, capabilitymeta.ErrInvalidManifest) {
 				t.Fatalf("Parse error = %v, want ErrInvalidManifest", err)
 			}
@@ -122,9 +123,9 @@ func TestParseRejectsInvalidCapabilityExtensions(t *testing.T) {
 
 func FuzzParse(f *testing.F) {
 	for _, seed := range []string{
-		"id: kernel.health/v1\n",
-		"id: order.cancel/v1\nextensions:\n  authn: {authenticated: true}\n",
-		"id: example.check/v1\nextensions:\n  sample: [null, true, 1, 1.5, value, {nested: false}]\n",
+		"id: example.health/v1\n" + querySemanticsYAML + "\n",
+		"id: order.cancel/v1\n" + querySemanticsYAML + "\nextensions:\n  authn: {authenticated: true}\n",
+		"id: example.check/v1\n" + querySemanticsYAML + "\nextensions:\n  sample: [null, true, 1, 1.5, value, {nested: false}]\n",
 		"id: example.check/v1\nextensions: &metadata {authn: {authenticated: true}}\n",
 		"[]\n",
 	} {

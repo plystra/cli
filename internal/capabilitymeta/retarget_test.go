@@ -14,7 +14,7 @@ import (
 func TestRetargetSchemaPreservesSourceMaterialAndContractSemantics(t *testing.T) {
 	t.Parallel()
 
-	source := []byte("# Account capability.\r\nid: 'account.register/v1' # Exact identity.\r\ndescription: Registers an account.\r\nrequest:\r\n  email: {type: string, required: true} # Login address.\r\nresponse: {}\r\nerrors: [already_exists]\r\nextensions:\r\n  authn: {authenticated: true}\r\n")
+	source := []byte("# Account capability.\r\nid: 'account.register/v1' # Exact identity.\r\ndescription: Registers an account.\r\nrequest:\r\n  email: {type: string, required: true} # Login address.\r\nresponse: {}\r\nerrors: [already_exists]\r\n" + strings.ReplaceAll(querySemanticsYAML, "\n", "\r\n") + "\r\nextensions:\r\n  authn: {authenticated: true}\r\n")
 	original := append([]byte(nil), source...)
 	target := mustIdentifier(t, "account.register/v2")
 	got, err := capabilitymeta.RetargetSchema(source, target)
@@ -56,7 +56,7 @@ func TestRetargetSchemaPreservesSourceMaterialAndContractSemantics(t *testing.T)
 func TestRetargetSchemaPreservesExactVersionBytesDefensively(t *testing.T) {
 	t.Parallel()
 
-	source := []byte("id: account.register/v1\r\nrequest: {}\r\n")
+	source := []byte("id: account.register/v1\r\nrequest: {}\r\n" + strings.ReplaceAll(querySemanticsYAML, "\n", "\r\n") + "\r\n")
 	got, err := capabilitymeta.RetargetSchema(source, mustIdentifier(t, "account.register/v1"))
 	if err != nil || !bytes.Equal(got, source) {
 		t.Fatalf("RetargetSchema(same ID) = %q, %v", got, err)
@@ -77,7 +77,7 @@ func TestRetargetSchemaRejectsInvalidTargetsAndSources(t *testing.T) {
 		also   error
 	}{
 		{name: "empty target", data: "id: account.register/v1\n", target: capabilityid.Identifier{}},
-		{name: "different name", data: "id: account.register/v1\n", target: mustIdentifier(t, "profile.get/v2")},
+		{name: "different name", data: "id: account.register/v1\n" + querySemanticsYAML + "\n", target: mustIdentifier(t, "profile.get/v2")},
 		{name: "invalid source", data: "id: account.register/v1\nrequest:\n  email: {type: bytes}\n", target: mustIdentifier(t, "account.register/v2"), also: capabilitymeta.ErrInvalidManifest},
 	}
 	for _, test := range tests {
@@ -102,7 +102,7 @@ func mustIdentifier(t *testing.T, value string) capabilityid.Identifier {
 }
 
 func FuzzRetargetSchema(f *testing.F) {
-	for _, seed := range []string{normalizationInput, "id: account.register/v1\n", "id: account.register/v1\nextensions:\n  authn: {authenticated: true}\n", "[]\n", "id: &x account.register/v1\ndescription: *x\n"} {
+	for _, seed := range []string{normalizationInput, "id: account.register/v1\n" + querySemanticsYAML + "\n", "id: account.register/v1\n" + querySemanticsYAML + "\nextensions:\n  authn: {authenticated: true}\n", "[]\n", "id: &x account.register/v1\ndescription: *x\n"} {
 		f.Add(seed)
 	}
 	target := mustFuzzIdentifier(f, "account.register/v2")

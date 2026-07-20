@@ -96,7 +96,7 @@ func TestRunAddRestoresModuleConfigurationAndGeneratedOutputAfterValidationFailu
 	environment := commandDependencyEnvironment(t, proxy)
 	root := writeCapabilityCommandModule(t)
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "# Preserve root.\n{}\n")
-	exitCode, stdout, stderr := runCommand(t, []string{"capability", "create", "records.list", "--plugin", "records"}, root, environment)
+	exitCode, stdout, stderr := runCommand(t, []string{"capability", "create", "records.list", "--query", "--plugin", "records"}, root, environment)
 	if exitCode != 0 || stderr != "" || !strings.HasPrefix(stdout, "created capability records.list/v1") {
 		t.Fatalf("initial capability creation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}

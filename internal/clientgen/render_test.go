@@ -39,6 +39,16 @@ response:
   message_id: {type: string, required: true}
   status: {type: string, enum: [queued, sent], required: true}
 errors: [invalid_recipient, authentication_failed, temporarily_unavailable]
+` + querySemanticsYAML
+	querySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
 `
 )
 
@@ -152,7 +162,7 @@ func TestRenderGoldenAliasClientsForwardToOneCanonicalTarget(t *testing.T) {
 func TestRenderAliasSupportsIntrinsicCanonicalTarget(t *testing.T) {
 	t.Parallel()
 
-	schema := []byte("id: kernel.health/v1\nresponse:\n  healthy: {type: boolean, required: true}\n")
+	schema := []byte(withQuerySemantics("id: kernel.health/v1\nresponse:\n  healthy: {type: boolean, required: true}\n"))
 	canonical, err := capabilitymeta.NormalizeSchema(schema)
 	if err != nil {
 		t.Fatalf("NormalizeSchema: %v", err)
@@ -202,7 +212,7 @@ func TestRenderAliasSupportsIntrinsicCanonicalTarget(t *testing.T) {
 func TestRenderDerivesOperationNameAndVersionedImport(t *testing.T) {
 	t.Parallel()
 
-	file, err := clientgen.Render("example.com/acme/project/v3", []byte("id: gateway.send-http/v12\n"))
+	file, err := clientgen.Render("example.com/acme/project/v3", []byte(withQuerySemantics("id: gateway.send-http/v12\n")))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -227,7 +237,7 @@ func TestRenderDerivesOperationNameAndVersionedImport(t *testing.T) {
 func TestRenderDerivesHierarchicalCapabilityPath(t *testing.T) {
 	t.Parallel()
 
-	file, err := clientgen.Render(testModulePath, []byte("id: authn.login.oidc.complete/v1\n"))
+	file, err := clientgen.Render(testModulePath, []byte(withQuerySemantics("id: authn.login.oidc.complete/v1\n")))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -240,7 +250,7 @@ func TestRenderDerivesHierarchicalCapabilityPath(t *testing.T) {
 func TestRenderAvoidsAvailableOperationCollision(t *testing.T) {
 	t.Parallel()
 
-	schema := []byte("id: status.available/v1\n")
+	schema := []byte(withQuerySemantics("id: status.available/v1\n"))
 	file, err := clientgen.Render(testModulePath, schema)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -272,7 +282,7 @@ func TestRenderIgnoresNonSemanticSourceDifferences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render(first): %v", err)
 	}
-	second, err := clientgen.Render(testModulePath, []byte("errors: [temporarily_unavailable, authentication_failed, invalid_recipient]\r\nresponse: {status: {required: true, enum: [sent, queued], type: string}, message_id: {required: true, type: string}}\r\nrequest: {html: {type: string}, text: {type: string}, subject: {required: true, type: string}, to: {required: true, items: string, type: array}}\r\ndescription: Different words.\r\nid: email.send/v1\r\n"))
+	second, err := clientgen.Render(testModulePath, []byte(withQuerySemantics("errors: [temporarily_unavailable, authentication_failed, invalid_recipient]\r\nresponse: {status: {required: true, enum: [sent, queued], type: string}, message_id: {required: true, type: string}}\r\nrequest: {html: {type: string}, text: {type: string}, subject: {required: true, type: string}, to: {required: true, items: string, type: array}}\r\ndescription: Different words.\r\nid: email.send/v1\r\n")))
 	if err != nil || first.Path() != second.Path() || !bytes.Equal(first.Data(), second.Data()) {
 		t.Fatalf("non-semantic rendering differs: %v\nfirst:\n%s\nsecond:\n%s", err, first.Data(), second.Data())
 	}
@@ -449,6 +459,16 @@ func clientCapabilityID(t testing.TB, value string) generation.CapabilityID {
 		t.Fatalf("ParseCapabilityID(%s): %v", value, err)
 	}
 	return id
+}
+
+func withQuerySemantics(source string) string {
+	if strings.Contains(source, "\nsemantics:") {
+		return source
+	}
+	if !strings.HasSuffix(source, "\n") {
+		source += "\n"
+	}
+	return source + querySemanticsYAML
 }
 
 func resolvedClientAliases(t testing.TB) (generation.Context, aliasresolution.Result) {

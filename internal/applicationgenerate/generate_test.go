@@ -280,27 +280,27 @@ errors: []
 		t.Fatalf("initial wire-map provenance = %q, %v", initialManifest.ProtobufWireMapDigest(), err)
 	}
 
-	writeFile(t, capabilityPath, `response: {customer_id: {type: string}}
+	writeFile(t, capabilityPath, withQuerySemantics(`response: {customer_id: {type: string}}
 errors: []
 request:
   alpha: {type: string}
   beta: {type: string}
 id: customer.enroll/v1
-`)
+`))
 	beforeReorder := snapshotTree(t, root)
 	reordered, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment})
 	if err != nil || !reordered.Report().Clean() || !reflect.DeepEqual(snapshotTree(t, root), beforeReorder) {
 		t.Fatalf("reordered check = %#v, %v", reordered.Report().Changes(), err)
 	}
 
-	writeFile(t, capabilityPath, `id: customer.enroll/v1
+	writeFile(t, capabilityPath, withQuerySemantics(`id: customer.enroll/v1
 request:
   gamma: {type: integer}
   beta: {type: string}
   alpha: {type: string}
 response: {customer_id: {type: string}}
 errors: []
-`)
+`))
 	beforeAdditionCheck := snapshotTree(t, root)
 	drift, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment})
 	if err != nil || drift.Report().Clean() || !slicesContains(drift.Report().Changed(), protobufwiremap.Path) || !reflect.DeepEqual(snapshotTree(t, root), beforeAdditionCheck) {
@@ -315,14 +315,14 @@ errors: []
 		t.Fatalf("added assignments = %#v", added)
 	}
 
-	writeFile(t, capabilityPath, `id: customer.enroll/v1
+	writeFile(t, capabilityPath, withQuerySemantics(`id: customer.enroll/v1
 request:
   delta: {type: boolean}
   gamma: {type: integer}
   alpha: {type: string}
 response: {customer_id: {type: string}}
 errors: []
-`)
+`))
 	if result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Environment: environment, Validate: validate}); err != nil || !result.Report().Clean() {
 		t.Fatalf("removed-field Generate = %#v, %v", result.Report().Changes(), err)
 	}
@@ -332,7 +332,7 @@ errors: []
 		t.Fatalf("removed assignments = %#v", removed)
 	}
 
-	writeFile(t, capabilityPath, `id: customer.enroll/v1
+	writeFile(t, capabilityPath, withQuerySemantics(`id: customer.enroll/v1
 request:
   epsilon: {type: number}
   delta: {type: boolean}
@@ -340,7 +340,7 @@ request:
   alpha: {type: string}
 response: {customer_id: {type: string}}
 errors: []
-`)
+`))
 	generatedBeforeRollback := snapshotGenerated(t, root)
 	forced := errors.New("forced validation failure")
 	if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
@@ -394,24 +394,24 @@ errors: []
 		t.Fatalf("initial enum assignments = %#v", initial)
 	}
 
-	writeFile(t, capabilityPath, `response: {}
+	writeFile(t, capabilityPath, withQuerySemantics(`response: {}
 errors: []
 request:
   mode: {enum: [fast, slow], type: string}
 id: delivery.route/v1
-`)
+`))
 	beforeReorder := snapshotTree(t, root)
 	reordered, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment})
 	if err != nil || !reordered.Report().Clean() || !reflect.DeepEqual(snapshotTree(t, root), beforeReorder) {
 		t.Fatalf("reordered enum check = %#v, %v", reordered.Report().Changes(), err)
 	}
 
-	writeFile(t, capabilityPath, `id: delivery.route/v1
+	writeFile(t, capabilityPath, withQuerySemantics(`id: delivery.route/v1
 request:
   mode: {type: string, enum: [express, fast, slow]}
 response: {}
 errors: []
-`)
+`))
 	beforeAdditionCheck := snapshotTree(t, root)
 	drift, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment})
 	if err != nil || drift.Report().Clean() || !slicesContains(drift.Report().Changed(), protobufwiremap.Path) || !reflect.DeepEqual(snapshotTree(t, root), beforeAdditionCheck) {
@@ -425,12 +425,12 @@ errors: []
 		t.Fatalf("added enum assignments = %#v", added)
 	}
 
-	writeFile(t, capabilityPath, `id: delivery.route/v1
+	writeFile(t, capabilityPath, withQuerySemantics(`id: delivery.route/v1
 request:
   mode: {type: string, enum: [express, later, slow]}
 response: {}
 errors: []
-`)
+`))
 	if result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Environment: environment, Validate: validate}); err != nil || !result.Report().Clean() {
 		t.Fatalf("removed-enum-member Generate = %#v, %v", result.Report().Changes(), err)
 	}
@@ -440,12 +440,12 @@ errors: []
 		t.Fatalf("removed enum assignments = %#v", removed)
 	}
 
-	writeFile(t, capabilityPath, `id: delivery.route/v1
+	writeFile(t, capabilityPath, withQuerySemantics(`id: delivery.route/v1
 request:
   mode: {type: string, enum: [express, fast, later, slow]}
 response: {}
 errors: []
-`)
+`))
 	beforeReaddition := snapshotTree(t, root)
 	if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment}); !errors.Is(err, protobufwiremap.ErrHistory) || !strings.Contains(err.Error(), "permanently occupied generated name") {
 		t.Fatalf("re-added enum member error = %v", err)
@@ -454,12 +454,12 @@ errors: []
 		t.Fatal("failed enum re-addition check mutated the Project")
 	}
 
-	writeFile(t, capabilityPath, `id: delivery.route/v1
+	writeFile(t, capabilityPath, withQuerySemantics(`id: delivery.route/v1
 request:
   mode: {type: string, enum: [express, later, slow, urgent]}
 response: {}
 errors: []
-`)
+`))
 	generatedBeforeRollback := snapshotGenerated(t, root)
 	forced := errors.New("forced enum validation failure")
 	if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
@@ -2049,7 +2049,7 @@ replace github.com/plystra/cli => %s
 replace github.com/plystra/kernel => %s
 `, filepath.ToSlash(cliRoot), filepath.ToSlash(kernelRoot))
 	writeFile(t, filepath.Join(root, "go.mod"), goMod)
-	writeFile(t, filepath.Join(root, "go.sum"), string(readAbsoluteFile(t, filepath.Join(cliRoot, "go.sum"))))
+	downloadModuleDependencies(t, root)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), "capabilities:\n  require: [order.create/v1]\n")
 	writePlugin(t, root, "business", "id: example.business\nprovides: [order.create/v1]\n")
 	writePlugin(t, root, "authn", `id: example.authn
@@ -2129,6 +2129,12 @@ extensions:
 
 func writeApplicationModule(t testing.TB, root, modulePath string) {
 	t.Helper()
+	writeApplicationModuleDefinition(t, root, modulePath)
+	downloadModuleDependencies(t, root)
+}
+
+func writeApplicationModuleDefinition(t testing.TB, root, modulePath string) {
+	t.Helper()
 	cliRoot := repositoryRoot(t)
 	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
 	extra := fmt.Sprintf(`require (
@@ -2140,12 +2146,11 @@ func writeApplicationModule(t testing.TB, root, modulePath string) {
 replace github.com/plystra/kernel => %s
 `, filepath.ToSlash(kernelRoot))
 	writeModule(t, root, modulePath, extra)
-	writeFile(t, filepath.Join(root, "go.sum"), string(readAbsoluteFile(t, filepath.Join(cliRoot, "go.sum"))))
 }
 
 func writeConnectApplicationModule(t testing.TB, root, modulePath string) {
 	t.Helper()
-	writeApplicationModule(t, root, modulePath)
+	writeApplicationModuleDefinition(t, root, modulePath)
 	legacyProtobufRoot := filepath.Join(t.TempDir(), "legacy-protobuf")
 	writeModule(t, legacyProtobufRoot, "github.com/golang/protobuf", "")
 	goModPath := filepath.Join(root, "go.mod")
@@ -2158,6 +2163,21 @@ require (
 replace github.com/golang/protobuf => %s
 `, filepath.ToSlash(legacyProtobufRoot))
 	writeFile(t, goModPath, data)
+	downloadModuleDependencies(t, root)
+}
+
+func downloadModuleDependencies(t testing.TB, root string) {
+	t.Helper()
+	command := exec.CommandContext(t.Context(), "go", "mod", "download", "all")
+	command.Dir = root
+	command.Env = mergedEnvironment(map[string]string{
+		"GOFLAGS":     "",
+		"GOTOOLCHAIN": "local",
+		"GOWORK":      "off",
+	})
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("go mod download in %s: %v\n%s", root, err, output)
+	}
 }
 
 func writeModule(t testing.TB, root, modulePath, extra string) {
@@ -2205,8 +2225,29 @@ func writeCapability(t testing.TB, root, plugin, value, source string) {
 	if err != nil {
 		t.Fatalf("capabilityid.Parse(%s): %v", value, err)
 	}
-	writeFile(t, filepath.Join(root, plugin, "capabilities", filepath.FromSlash(identifier.Name()), "v"+strconv.FormatUint(identifier.Major(), 10), "capability.yaml"), source)
+	writeFile(t, filepath.Join(root, plugin, "capabilities", filepath.FromSlash(identifier.Name()), "v"+strconv.FormatUint(identifier.Major(), 10), "capability.yaml"), withQuerySemantics(source))
 }
+
+func withQuerySemantics(source string) string {
+	if strings.Contains(source, "\nsemantics:") {
+		return source
+	}
+	if !strings.HasSuffix(source, "\n") {
+		source += "\n"
+	}
+	return source + querySemanticsYAML
+}
+
+const querySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
 
 func writeFile(t testing.TB, name, content string) {
 	t.Helper()
@@ -2328,6 +2369,10 @@ func goEnvironment(overrides map[string]string) []string {
 	for key, value := range overrides {
 		values[strings.ToUpper(key)] = value
 	}
+	return mergedEnvironment(values)
+}
+
+func mergedEnvironment(values map[string]string) []string {
 	environment := make([]string, 0, len(os.Environ())+len(values))
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")

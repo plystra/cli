@@ -855,9 +855,11 @@ func TestResolveExecutesSelectedFilesystemGenerationExtension(t *testing.T) {
 	root := t.TempDir()
 	temporaryParent := t.TempDir()
 	cliRoot := repositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
 	goMod := fmt.Sprintf(
-		"module example.com/extension-app\n\ngo 1.26\n\nrequire github.com/plystra/cli v0.0.0\n\nrequire (\n\tgo.yaml.in/yaml/v3 v3.0.4 // indirect\n\tgolang.org/x/mod v0.38.0 // indirect\n)\n\nreplace github.com/plystra/cli => %s\n",
+		"module example.com/extension-app\n\ngo 1.26\n\nrequire (\n\tgithub.com/plystra/cli v0.0.0\n\tgithub.com/plystra/kernel v0.0.0\n\tgo.yaml.in/yaml/v3 v3.0.4 // indirect\n\tgolang.org/x/mod v0.38.0 // indirect\n)\n\nreplace github.com/plystra/cli => %s\n\nreplace github.com/plystra/kernel => %s\n",
 		strconv.Quote(filepath.ToSlash(cliRoot)),
+		strconv.Quote(filepath.ToSlash(kernelRoot)),
 	)
 	writeFile(t, filepath.Join(root, "go.mod"), goMod)
 	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
@@ -1044,8 +1046,29 @@ func writeCapability(t testing.TB, moduleRoot, plugin, value, source string) {
 	if err != nil {
 		t.Fatalf("capabilityid.Parse(%s): %v", value, err)
 	}
-	writeFile(t, filepath.Join(moduleRoot, plugin, "capabilities", filepath.FromSlash(identifier.Name()), "v"+strconv.FormatUint(identifier.Major(), 10), "capability.yaml"), source)
+	writeFile(t, filepath.Join(moduleRoot, plugin, "capabilities", filepath.FromSlash(identifier.Name()), "v"+strconv.FormatUint(identifier.Major(), 10), "capability.yaml"), withQuerySemantics(source))
 }
+
+func withQuerySemantics(source string) string {
+	if strings.Contains(source, "\nsemantics:") {
+		return source
+	}
+	if !strings.HasSuffix(source, "\n") {
+		source += "\n"
+	}
+	return source + querySemanticsYAML
+}
+
+const querySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
 
 func writeFile(t testing.TB, name, content string) {
 	t.Helper()

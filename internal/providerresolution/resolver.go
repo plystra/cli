@@ -87,6 +87,15 @@ type Input struct {
 	Choices      []Choice
 }
 
+// Catalog is one immutable validated visible Provider candidate set. A caller
+// may reuse it while fixed-point resolution changes only requirements or
+// explicit current-Project choices.
+type Catalog struct {
+	candidatesByCapability map[capabilityid.Identifier][]normalizedCandidate
+	knownPlugins           map[string]struct{}
+	valid                  bool
+}
+
 // ResolvedCapability is one immutable exact requirement. Intrinsic requirements
 // intentionally have no Selection.
 type ResolvedCapability struct {
@@ -226,6 +235,49 @@ func Resolve(input Input) (Result, error) {
 	if len(issues) != 0 {
 		return Result{}, resolutionError(issues)
 	}
+	return resolveNormalized(requirements, choices, candidatesByCapability, knownPlugins)
+}
+
+// NewCatalog validates and normalizes one complete visible Provider candidate
+// set for reuse across deterministic fixed-point passes.
+func NewCatalog(inputs []Candidate) (Catalog, error) {
+	candidates, issues := normalizeCandidates(inputs)
+	if len(issues) != 0 {
+		return Catalog{}, resolutionError(issues)
+	}
+	candidatesByCapability, knownPlugins, issues := groupCandidates(candidates)
+	if len(issues) != 0 {
+		return Catalog{}, resolutionError(issues)
+	}
+	return Catalog{
+		candidatesByCapability: candidatesByCapability,
+		knownPlugins:           knownPlugins,
+		valid:                  true,
+	}, nil
+}
+
+// Resolve validates one changing requirement and choice set against the
+// catalog and returns no partial result unless every exact requirement
+// resolves.
+func (c Catalog) Resolve(requirements []Requirement, choices []Choice) (Result, error) {
+	if !c.valid {
+		return Result{}, resolutionError([]error{fmt.Errorf("%w: provider catalog is not initialized", ErrInvalidInput)})
+	}
+	normalizedRequirements, issues := normalizeRequirements(requirements)
+	normalizedChoices, choiceIssues := normalizeChoices(choices)
+	issues = append(issues, choiceIssues...)
+	if len(issues) != 0 {
+		return Result{}, resolutionError(issues)
+	}
+	return resolveNormalized(normalizedRequirements, normalizedChoices, c.candidatesByCapability, c.knownPlugins)
+}
+
+func resolveNormalized(
+	requirements []normalizedRequirement,
+	choices []normalizedChoice,
+	candidatesByCapability map[capabilityid.Identifier][]normalizedCandidate,
+	knownPlugins map[string]struct{},
+) (Result, error) {
 	groups, issues := groupRequirements(requirements, candidatesByCapability)
 	if len(issues) != 0 {
 		return Result{}, resolutionError(issues)
@@ -416,13 +468,9 @@ func normalizeChoices(inputs []Choice) ([]normalizedChoice, []error) {
 }
 
 func normalizeContract(input []byte, source string) (normalizedContract, error) {
-	canonical, err := capabilitymeta.NormalizeSchema(input)
+	canonical, manifest, err := capabilitymeta.NormalizeSchemaAndManifest(input)
 	if err != nil {
 		return normalizedContract{}, fmt.Errorf("contract is invalid: %w", err)
-	}
-	manifest, err := capabilitymeta.Parse(canonical)
-	if err != nil {
-		return normalizedContract{}, fmt.Errorf("inspect canonical contract: %w", err)
 	}
 	return normalizedContract{
 		id:     manifest.ID(),

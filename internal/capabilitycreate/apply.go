@@ -27,6 +27,9 @@ var (
 	// ErrConfirmationRequired reports an explicit older, skipped, or otherwise
 	// unusual new version that was not confirmed by the caller.
 	ErrConfirmationRequired = errors.New("capability version requires confirmation")
+	// ErrIntentProfile reports a missing or inapplicable explicit business
+	// intent profile for Capability creation.
+	ErrIntentProfile = errors.New("capability creation intent profile is invalid")
 )
 
 // AuthorOptions contains planning inputs and the bounded hooks used by one
@@ -140,6 +143,15 @@ func author(ctx context.Context, options AuthorOptions, expected capabilityversi
 		}
 		return Result{}, fmt.Errorf("%w: %s is %s without visible version history", ErrConfirmationRequired, version.Target(), version.Caution())
 	}
+	if expected == capabilityversion.ActionCreate {
+		_, hasSource := version.Source()
+		switch {
+		case !hasSource && plan.Intent() == "":
+			return Result{}, fmt.Errorf("%w: %s is a new Capability identity; select one explicit profile such as --query", ErrIntentProfile, version.Target())
+		case hasSource && plan.Intent() != "":
+			return Result{}, fmt.Errorf("%w: %s copies semantics from %s; omit --%s", ErrIntentProfile, version.Target(), mustSource(version), plan.Intent())
+		}
+	}
 
 	sources, err := ResolveSources(plan)
 	if err != nil {
@@ -213,4 +225,12 @@ func author(ctx context.Context, options AuthorOptions, expected capabilityversi
 		declarationCreated:    declarationCreated,
 		implementationCreated: implementationCreated,
 	}, nil
+}
+
+func mustSource(version capabilityversion.Plan) capabilityid.Identifier {
+	source, ok := version.Source()
+	if !ok {
+		panic("capability version source is absent")
+	}
+	return source
 }

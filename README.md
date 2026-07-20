@@ -354,15 +354,17 @@ Capability creation and implementation update schemas, `plugin.yaml`, generated 
 
 Plugin and Capability mutations reject unowned or modified-obsolete files under `generated/`. They report the conflicting paths, preserve those files, and roll back every CLI-owned declaration, source, module-metadata, and generated-output change instead of returning success beside immediate generation drift.
 
-Create a first or next version from inside the target plugin, from a single-plugin module, or with an explicit target:
+Create a genuinely new Capability identity from inside the target plugin, from a single-plugin module, or with an explicit target by choosing an intent profile:
 
 ```powershell
-plystra capability create records.create
-plystra capability create records.archive --plugin records
-plystra capability create records.read --plugin records --expose
+plystra capability create records.create --query
+plystra capability create records.archive --query --plugin records
+plystra capability create records.read --query --plugin records --expose
 ```
 
-An omitted version selects `v1` when none is visible and otherwise selects one above the highest visible version, copying that highest exact schema as an editing base. An explicit older or skipped new version is rejected without mutation until it is deliberately repeated with `--confirm`. An existing exact version is never recreated; implement it instead:
+`--query` expands into complete explicit read-only, inherently idempotent, safely retryable, best-effort-cancellable, completed-before-return semantics with public request and response data. Names never imply semantics. A new Capability identity requires one supported profile before any mutation.
+
+An omitted version selects `v1` when none is visible. When the identity is already visible, it selects one above the highest visible version and copies that exact contract, including its semantics, as an editing base; omit profile flags for that later-version workflow. An explicit older or skipped new version is rejected without mutation until it is deliberately repeated with `--confirm`. An existing exact version is never recreated; implement it instead:
 
 ```powershell
 plystra capability implement email.send/v1 --plugin mailer
@@ -378,7 +380,7 @@ In a Plystra Project, expose an existing exact canonical Capability or create an
 plystra capability expose records.create/v1
 plystra capability expose records.create/v1 --env production
 plystra capability expose records.create/v1 --config deploy/customer-a.yaml
-plystra capability create records.update --plugin records --expose
+plystra capability create records.update --query --plugin records --expose
 ```
 
 `capability expose` requires an exact `<capability-name>/vN`. With no selector it updates root `plystra.yaml`; `--env production` updates only the sparse `plystra.production.yaml` overlay; and `--config deploy/customer-a.yaml` updates only that complete replacement document. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` provide the same two selector modes when neither flag is present, while either explicit flag overrides both ambient variables. The command preserves comments, unrelated values, and exact add/remove tombstones, then regenerates every affected Go, HTTP, JavaScript, documentation, assembly, and manifest surface with the same selected configuration. Invocation from a nested Plugin still resolves relative configuration paths from the Project root. Repeating the command is byte-idempotent when generated output is current, and no unselected configuration file is synchronized.

@@ -17,6 +17,8 @@ var (
 	_ generationlowering.ContributionView = generationresolution.ResolvedContribution{}
 )
 
+const loweringQuerySemanticsJSON = `{"kind":"query","effects":"none","idempotency":{"mode":"inherent"},"retry":{"safety":"safe"},"cancellation":{"mode":"best-effort"},"completion":{"mode":"completed-before-return"},"ordering":{"mode":"none"},"data":{"request":"public","response":"public"}}`
+
 func TestLowerBuildsImmutableRenderReadyPlan(t *testing.T) {
 	t.Parallel()
 
@@ -287,12 +289,12 @@ func (c pluginContribution) PluginID() string { return c.pluginID }
 func loweringContext(t *testing.T) generation.Context {
 	t.Helper()
 	capabilities := []generation.CapabilityInput{
-		{ContractJSON: json.RawMessage(`{"id":"order.create/v1","request":{"space_id":{"type":"string","required":true}},"response":{"order_id":{"type":"string","required":true}},"errors":["dispatch_failed","forbidden"],"extensions":{"audit":{"event":"order.created"},"authn":{"authenticated":true},"authz":{"permission":"order.create","space":"request.space_id"}}}`)},
-		{ContractJSON: json.RawMessage(`{"id":"authn.session.verify/v1","request":{"token":{"type":"string","required":true}},"response":{"verified":{"type":"object","required":true}},"errors":["invalid_credentials"]}`)},
-		{ContractJSON: json.RawMessage(`{"id":"authz.check/v1","request":{"permission":{"type":"string","required":true},"space_id":{"type":"string","required":true}},"response":{"allowed":{"type":"boolean","required":true}},"errors":["decision_failed"]}`)},
-		{ContractJSON: json.RawMessage(`{"id":"audit.write/v1","request":{"event":{"type":"string","required":true},"order_id":{"type":"string","required":true}},"response":{},"errors":["write_failed"]}`)},
-		{ContractJSON: json.RawMessage(`{"id":"order.create-item/v1","request":{},"response":{},"errors":[]}`)},
-		{ContractJSON: json.RawMessage(`{"id":"order.createitem/v1","request":{},"response":{},"errors":[]}`)},
+		{ContractJSON: json.RawMessage(`{"id":"order.create/v1","request":{"space_id":{"type":"string","required":true}},"response":{"order_id":{"type":"string","required":true}},"errors":["dispatch_failed","forbidden"],"semantics":` + loweringQuerySemanticsJSON + `,"extensions":{"audit":{"event":"order.created"},"authn":{"authenticated":true},"authz":{"permission":"order.create","space":"request.space_id"}}}`)},
+		{ContractJSON: json.RawMessage(`{"id":"authn.session.verify/v1","request":{"token":{"type":"string","required":true}},"response":{"verified":{"type":"object","required":true}},"errors":["invalid_credentials"],"semantics":` + loweringQuerySemanticsJSON + `}`)},
+		{ContractJSON: json.RawMessage(`{"id":"authz.check/v1","request":{"permission":{"type":"string","required":true},"space_id":{"type":"string","required":true}},"response":{"allowed":{"type":"boolean","required":true}},"errors":["decision_failed"],"semantics":` + loweringQuerySemanticsJSON + `}`)},
+		{ContractJSON: json.RawMessage(`{"id":"audit.write/v1","request":{"event":{"type":"string","required":true},"order_id":{"type":"string","required":true}},"response":{},"errors":["write_failed"],"semantics":` + loweringQuerySemanticsJSON + `}`)},
+		{ContractJSON: json.RawMessage(`{"id":"order.create-item/v1","request":{},"response":{},"errors":[],"semantics":` + loweringQuerySemanticsJSON + `}`)},
+		{ContractJSON: json.RawMessage(`{"id":"order.createitem/v1","request":{},"response":{},"errors":[],"semantics":` + loweringQuerySemanticsJSON + `}`)},
 	}
 	plugins := []generation.PluginInput{
 		{ID: "acme.orders", ModulePath: "example.com/app", Provides: []string{"order.create/v1", "order.create-item/v1", "order.createitem/v1"}},

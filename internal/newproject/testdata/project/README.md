@@ -8,7 +8,7 @@ Local plugins belong in direct child directories containing `plugin.yaml`. Do no
 
 ```powershell
 plystra plugin create records
-plystra capability create records.read --plugin records --expose
+plystra capability create records.read --query --plugin records --expose
 plystra generate
 plystra generate --check
 plystra check

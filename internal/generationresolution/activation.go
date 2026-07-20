@@ -138,22 +138,34 @@ type generatedRequirementKey struct {
 // visible provider and activation declaration sets: every non-final pass adds
 // at least one previously unseen activation cause.
 func Resolve(input Input) (Result, error) {
+	catalog, err := providerresolution.NewCatalog(cloneCandidates(input.Candidates))
+	if err != nil {
+		currentChoices := choicesForRequirements(input.Requirements, input.Choices)
+		_, resolutionErr := providerresolution.Resolve(providerresolution.Input{
+			Requirements: input.Requirements,
+			Candidates:   input.Candidates,
+			Choices:      currentChoices,
+		})
+		if resolutionErr == nil {
+			resolutionErr = err
+		}
+		return Result{}, fmt.Errorf("%w: pass 1: %w", ErrResolve, resolutionErr)
+	}
+	return resolveWithProviderCatalog(input, catalog)
+}
+
+func resolveWithProviderCatalog(input Input, catalog providerresolution.Catalog) (Result, error) {
 	requirements := cloneRequirements(input.Requirements)
-	candidates := cloneCandidates(input.Candidates)
 	choices := append([]providerresolution.Choice(nil), input.Choices...)
 	generated := make(map[generatedRequirementKey]struct{})
 
-	maximumPasses := len(requirements) + len(candidates) + len(input.Activations.Associations()) + 2
+	maximumPasses := len(requirements) + len(input.Candidates) + len(input.Activations.Associations()) + 2
 	for pass := 1; pass <= maximumPasses; pass++ {
 		// Explicit choices for requirements introduced by a later activation or
 		// generation pass remain dormant until that exact Capability is current.
 		// providerresolution still validates each choice as soon as it applies.
 		currentChoices := choicesForRequirements(requirements, choices)
-		resolved, err := providerresolution.Resolve(providerresolution.Input{
-			Requirements: requirements,
-			Candidates:   candidates,
-			Choices:      currentChoices,
-		})
+		resolved, err := catalog.Resolve(requirements, currentChoices)
 		if err != nil {
 			return Result{}, fmt.Errorf("%w: pass %d: %w", ErrResolve, pass, err)
 		}
