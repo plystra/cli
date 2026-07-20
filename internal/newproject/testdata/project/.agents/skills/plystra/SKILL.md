@@ -710,11 +710,16 @@ dependency module with:
 
 That workflow materializes the visible exact contract and adds the local
 provider. It does not create a similar private contract. Never recreate an
-already visible exact version. Before v0.0.1, rewrite unreleased contracts and
-regenerate local fixtures directly instead of adding a compatibility wrapper,
-decoder, fallback, or parallel old version. After a public release, never
-change a released contract in place; create a new /vN for an incompatible
-request, response, semantic-error, or extension-metadata change.
+already visible exact version. Before a contract appears in any published tag,
+rewrite it and regenerate local fixtures directly instead of adding a
+compatibility wrapper, decoder, fallback, or parallel old version.
+A published v0.0.1-rc.N tag and its artifacts are immutable.
+A newer RC may revise the same exact /vN before stable v0.0.1 only by publishing
+a new immutable RC, recording compatibility differences, and re-pinning,
+regenerating, rebuilding, and revalidating every affected downstream Project.
+Never move, delete, overwrite, or reuse a published tag. Do not add a
+compatibility wrapper solely for an obsolete RC.
+After stable v0.0.1, an incompatible exact contract change requires a new /vN.
 
 ## Declare and register providers
 

@@ -17,7 +17,7 @@ Plystra Core is exactly the Kernel plus the CLI:
 - `github.com/plystra/cli` resolves applications and generates their typed Go,
   HTTP, JavaScript, documentation, assembly, bootstrap, and manifest surfaces.
 - `github.com/plystra/authn` and `github.com/plystra/authz` are optional official
-  Plugin modules. Their implementation is deferred to Gates 10 and 11; at this
+  Plugin modules. Their implementation begins at Gates 16 and 23; at this
   boundary they contain architecture documentation, not usable providers.
 
 The public command surface currently implemented by the `plystra` binary is:
@@ -157,7 +157,7 @@ Remove-Item Env:GOWORK
 
 `-p 2` is a bounded Windows setting, not a semantic requirement. It avoids
 process exhaustion on machines where the full CLI suite starts many nested Go
-commands. A failure to download the current pre-release Kernel pseudo-version
+commands. A failure to download the Kernel version recorded in `cli/go.mod`
 means that version is unavailable through normal module resolution; use the
 root workspace for source integration. Do not add a permanent `replace` or make
 `go.work` part of a released contract.
@@ -937,10 +937,14 @@ a similar private one:
 plystra capability implement email.send/v1 --plugin mailer
 ```
 
-Before `v0.0.1`, rewrite unreleased contracts directly when needed for the clean
-initial API. After a version is publicly released, incompatible request,
-response, error, guarantee, serialization, or extension metadata requires a
-new `/vN`.
+Before a contract appears in any published tag, rewrite it directly when needed
+for the clean initial API and regenerate every affected fixture. A published
+`v0.0.1-rc.N` tag and its artifacts are immutable, but a newer RC may revise the
+same exact `/vN` after recording compatibility differences and re-pinning,
+regenerating, rebuilding, and revalidating every affected downstream Project.
+Never move or reuse a published tag, and do not add a compatibility wrapper
+solely for an obsolete RC. After stable `v0.0.1`, an incompatible exact contract
+change requires a new `/vN`.
 
 ## Resolve providers and consume cross-Plugin Capabilities
 
@@ -1468,7 +1472,7 @@ For each smallest coherent feature:
 2. Change implementation, tests, generated output, help, examples, and docs
    together.
 3. Run targeted checks and the strongest applicable full validation.
-4. Confirm no superseded pre-release path remains.
+4. Confirm no superseded active path remains.
 5. Review and stage only that feature.
 6. Commit with `type(scope): description` using the most specific subsystem,
    such as `feat(invocation): ...` or `fix(generation): ...`.
@@ -1476,10 +1480,13 @@ For each smallest coherent feature:
 8. Resolve configured CI failures before the next feature in the normal
    repository workflow.
 
-Before `v0.0.1`, replace conflicting unreleased APIs directly. Do not retain
-compatibility wrappers, deprecated active APIs, migration shims, legacy
-configuration readers, old command aliases, transitional abstractions,
-fallbacks, or obsolete paths. Regenerate local fixtures as needed.
+Apply the contract lifecycle above: untagged development may replace a
+conflicting API directly; a published RC remains immutable while a newer RC may
+replace its contract only with complete downstream revalidation; a stable exact
+contract changes only through a new `/vN`. Do not retain compatibility wrappers,
+deprecated active APIs, migration shims, legacy configuration readers, old
+command aliases, transitional abstractions, fallbacks, or obsolete paths solely
+for an untagged snapshot or obsolete RC. Regenerate local fixtures as needed.
 
 Generated project `SKILL.md` files deliberately contain no Git workflow rules;
 repository process belongs in contributor documentation such as this guide.
@@ -1508,16 +1515,17 @@ repository process belongs in contributor documentation such as this guide.
 
 The following remain roadmap work and must not be represented as complete:
 
-- Gate 10 official AuthN Plugins, verified-state establishment and reuse, and
-  automatic single-login-method Alias contribution.
-- Gate 11 official AuthZ models, providers, explicit Space/resource bindings,
-  and generated authorization decisions.
+- Gate 15 Core foundation closure and the real Kernel and CLI prerelease pair.
+- Gates 16 through 22 official AuthN implementation, complete product
+  acceptance, and the accepted AuthN prerelease.
+- Gates 23 through 25 official AuthZ implementation, layered acceptance, the
+  accepted AuthZ prerelease, and three-layer development-Goal closure.
 - Complete CLI dependency-management, development, test, build, check, fix,
   doctor, SDK packaging/publication, and release commands.
 - CLI-managed database migration workflows and an official persistence Plugin.
-- Final Gate 12 migration closure, full cross-platform acceptance, packaging,
-  release metadata, and removal audit.
-- Public Kernel and CLI `v0.0.1` releases and independent release verification.
+- Gate 26 final cross-platform acceptance, packaging, release metadata,
+  public-source readiness, and coordinated stable Kernel, CLI, AuthN, and AuthZ
+  `v0.0.1` publication.
 
 Do not fill a deferred boundary with a placeholder, fake adapter, compatibility
 layer, skipped test, or undocumented manual edit to CLI-owned files.

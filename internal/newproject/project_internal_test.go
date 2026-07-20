@@ -23,6 +23,32 @@ func TestGeneratedSkillUsesProgressiveDisclosure(t *testing.T) {
 	}
 }
 
+func TestGeneratedSkillDescribesStagedContractLifecycle(t *testing.T) {
+	t.Parallel()
+
+	text := fmt.Sprintf(skillTemplate, "example.com/acme/application")
+	for _, phrase := range []string{
+		"Before a contract appears in any published tag",
+		"A published v0.0.1-rc.N tag and its artifacts are immutable",
+		"A newer RC may revise the same",
+		"revalidating every affected downstream Project",
+		"Never move, delete, overwrite, or reuse a published tag",
+		"After stable v0.0.1, an incompatible exact contract change requires",
+	} {
+		if !strings.Contains(text, phrase) {
+			t.Fatalf("generated skill omits staged lifecycle guidance %q", phrase)
+		}
+	}
+	for _, obsolete := range []string{
+		"Before v0.0.1, rewrite unreleased contracts",
+		"After a public release, never change a released contract in place",
+	} {
+		if strings.Contains(text, obsolete) {
+			t.Fatalf("generated skill retains obsolete lifecycle guidance %q", obsolete)
+		}
+	}
+}
+
 func TestValidateSkillProgressiveDisclosureRejectsAdvancedConceptsInOrdinaryPath(t *testing.T) {
 	t.Parallel()
 
