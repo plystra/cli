@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -42,8 +43,8 @@ var (
 	ErrRuntimeSettings = errors.New("invalid runtime startup settings")
 	// ErrRuntimeSelector reports an invalid generated-application configuration selector.
 	ErrRuntimeSelector = errors.New("invalid runtime configuration selector")
-	// ErrRuntimeConfiguration reports invalid root or environment runtime configuration.
-	ErrRuntimeConfiguration = errors.New("invalid runtime configuration composition")
+	// ErrRuntimeConfiguration reports an invalid selected runtime configuration.
+	ErrRuntimeConfiguration = errors.New("invalid selected runtime configuration")
 	// ErrApplicationStart reports a redacted provider startup failure.
 	ErrApplicationStart = errors.New("generated application startup failed")
 	// ErrApplicationStop reports a redacted provider shutdown failure.
@@ -65,7 +66,7 @@ type Application struct {
 	startupTimeout time.Duration
 }
 
-// New loads the default runtime document, validates startup settings, resolves Secrets,
+// New loads the selected runtime document, validates startup settings, resolves Secrets,
 // constructs every selected provider exactly once, and binds lifecycle order.
 func New(ctx context.Context, options RuntimeOptions) (*Application, error) {
 	if ctx == nil {
@@ -219,12 +220,27 @@ const (
 var runtimeConfigurationSchemas = map[string]map[string]runtimeConfigurationFieldKind{}
 
 const (
-	runtimeEnvironmentVariable = "PLYSTRA_ENV"
-	runtimeMaximumDocumentSize = 1 << 20
+	runtimeEnvironmentVariable   = "PLYSTRA_ENV"
+	runtimeConfigurationVariable = "PLYSTRA_CONFIG"
+	runtimeMaximumDocumentSize   = 1 << 20
 )
 
+type runtimeSelectionMode uint8
+
+const (
+	runtimeSelectionDefault runtimeSelectionMode = iota + 1
+	runtimeSelectionEnvironment
+	runtimeSelectionExplicit
+)
+
+type runtimeSelection struct {
+	mode        runtimeSelectionMode
+	path        string
+	environment string
+}
+
 func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
-	environment, selected, err := selectRuntimeEnvironment(options)
+	selection, err := selectRuntimeConfiguration(options)
 	if err != nil {
 		return nil, err
 	}
@@ -233,61 +249,116 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 		return nil, fmt.Errorf("%w: load default %s: %w", ErrRuntimeSelector, defaultRuntimeDocument, err)
 	}
 	defer clear(root)
-	if !selected {
-		document, err := composeRuntimeDocuments(root, nil)
+	switch selection.mode {
+	case runtimeSelectionDefault:
+		document, err := normalizeRuntimeDocument(root, defaultRuntimeDocument)
 		if err != nil {
 			return nil, fmt.Errorf("%w: default %s: %v", ErrRuntimeConfiguration, defaultRuntimeDocument, err)
 		}
 		return document, nil
+	case runtimeSelectionEnvironment:
+		overlay, err := kernelconfiguration.LoadDocument(selection.path)
+		if err != nil {
+			return nil, fmt.Errorf("%w: environment %q requires %s; create that sparse overlay or select an existing environment: %w", ErrRuntimeSelector, selection.environment, filepath.ToSlash(selection.path), err)
+		}
+		defer clear(overlay)
+		document, err := composeRuntimeDocuments(root, overlay)
+		if err != nil {
+			return nil, fmt.Errorf("%w: apply environment %q from %s: %v", ErrRuntimeConfiguration, selection.environment, filepath.ToSlash(selection.path), err)
+		}
+		return document, nil
+	case runtimeSelectionExplicit:
+		before, err := inspectRuntimeConfigurationPath(selection.path)
+		if err != nil {
+			return nil, fmt.Errorf("%w: full-replacement configuration %s must be an existing regular Project file without symbolic path components", ErrRuntimeSelector, filepath.ToSlash(selection.path))
+		}
+		selected, err := kernelconfiguration.LoadDocument(selection.path)
+		if err != nil {
+			return nil, fmt.Errorf("%w: load full-replacement configuration %s: %w", ErrRuntimeSelector, filepath.ToSlash(selection.path), err)
+		}
+		defer clear(selected)
+		after, err := inspectRuntimeConfigurationPath(selection.path)
+		if err != nil || !sameRuntimeConfigurationPathStates(before, after) {
+			return nil, fmt.Errorf("%w: full-replacement configuration %s changed while it was loaded", ErrRuntimeSelector, filepath.ToSlash(selection.path))
+		}
+		document, err := normalizeRuntimeDocument(selected, filepath.ToSlash(selection.path))
+		if err != nil {
+			return nil, fmt.Errorf("%w: full-replacement configuration %s: %v", ErrRuntimeConfiguration, filepath.ToSlash(selection.path), err)
+		}
+		return document, nil
+	default:
+		return nil, fmt.Errorf("%w: selector mode is invalid", ErrRuntimeSelector)
 	}
-
-	overlayPath := "plystra." + environment + ".yaml"
-	overlay, err := kernelconfiguration.LoadDocument(overlayPath)
-	if err != nil {
-		return nil, fmt.Errorf("%w: environment %q requires %s; create that sparse overlay or select an existing environment: %w", ErrRuntimeSelector, environment, overlayPath, err)
-	}
-	defer clear(overlay)
-	document, err := composeRuntimeDocuments(root, overlay)
-	if err != nil {
-		return nil, fmt.Errorf("%w: apply environment %q from %s: %v", ErrRuntimeConfiguration, environment, overlayPath, err)
-	}
-	return document, nil
 }
 
-func selectRuntimeEnvironment(options RuntimeOptions) (string, bool, error) {
+func selectRuntimeConfiguration(options RuntimeOptions) (runtimeSelection, error) {
 	arguments := options.Arguments
 	if len(arguments) != 0 {
-		if len(arguments) != 2 || arguments[0] != "--env" {
-			return "", false, fmt.Errorf("%w: expected no selector or --env <environment>", ErrRuntimeSelector)
+		hasEnvironment := false
+		hasConfiguration := false
+		for _, argument := range arguments {
+			hasEnvironment = hasEnvironment || argument == "--env"
+			hasConfiguration = hasConfiguration || argument == "--config"
 		}
-		if err := validateRuntimeEnvironmentName(arguments[1], "--env"); err != nil {
-			return "", false, err
+		if hasEnvironment && hasConfiguration {
+			return runtimeSelection{}, fmt.Errorf("%w: --env and --config cannot be used together", ErrRuntimeSelector)
 		}
-		return arguments[1], true, nil
+		if len(arguments) != 2 {
+			return runtimeSelection{}, fmt.Errorf("%w: expected no selector, --env <environment>, or --config <yaml-path>", ErrRuntimeSelector)
+		}
+		switch arguments[0] {
+		case "--env":
+			if err := validateRuntimeEnvironmentName(arguments[1], "--env"); err != nil {
+				return runtimeSelection{}, err
+			}
+			return runtimeSelection{mode: runtimeSelectionEnvironment, path: "plystra." + arguments[1] + ".yaml", environment: arguments[1]}, nil
+		case "--config":
+			path, err := runtimeProjectRelativeConfigurationPath(arguments[1], "--config")
+			if err != nil {
+				return runtimeSelection{}, err
+			}
+			return runtimeSelection{mode: runtimeSelectionExplicit, path: path}, nil
+		default:
+			return runtimeSelection{}, fmt.Errorf("%w: expected no selector, --env <environment>, or --config <yaml-path>", ErrRuntimeSelector)
+		}
 	}
-	value, exists, err := runtimeEnvironmentValue(options.Environment)
+	configurationPath, hasConfiguration, err := runtimeSelectorEnvironmentValue(options.Environment, runtimeConfigurationVariable)
 	if err != nil {
-		return "", false, err
+		return runtimeSelection{}, err
 	}
-	if !exists {
-		return "", false, nil
+	environment, hasEnvironment, err := runtimeSelectorEnvironmentValue(options.Environment, runtimeEnvironmentVariable)
+	if err != nil {
+		return runtimeSelection{}, err
 	}
-	if err := validateRuntimeEnvironmentName(value, runtimeEnvironmentVariable); err != nil {
-		return "", false, err
+	if hasConfiguration && hasEnvironment {
+		return runtimeSelection{}, fmt.Errorf("%w: %s and %s cannot be used together", ErrRuntimeSelector, runtimeConfigurationVariable, runtimeEnvironmentVariable)
 	}
-	return value, true, nil
+	if hasConfiguration {
+		path, err := runtimeProjectRelativeConfigurationPath(configurationPath, runtimeConfigurationVariable)
+		if err != nil {
+			return runtimeSelection{}, err
+		}
+		return runtimeSelection{mode: runtimeSelectionExplicit, path: path}, nil
+	}
+	if hasEnvironment {
+		if err := validateRuntimeEnvironmentName(environment, runtimeEnvironmentVariable); err != nil {
+			return runtimeSelection{}, err
+		}
+		return runtimeSelection{mode: runtimeSelectionEnvironment, path: "plystra." + environment + ".yaml", environment: environment}, nil
+	}
+	return runtimeSelection{mode: runtimeSelectionDefault, path: defaultRuntimeDocument}, nil
 }
 
-func runtimeEnvironmentValue(environment []string) (string, bool, error) {
+func runtimeSelectorEnvironmentValue(environment []string, variable string) (string, bool, error) {
 	var value string
 	found := false
 	for _, entry := range environment {
 		name, current, exists := strings.Cut(entry, "=")
-		if !exists || name != runtimeEnvironmentVariable {
+		if !exists || name != variable {
 			continue
 		}
 		if found {
-			return "", false, fmt.Errorf("%w: environment contains %s more than once", ErrRuntimeSelector, runtimeEnvironmentVariable)
+			return "", false, fmt.Errorf("%w: environment contains %s more than once", ErrRuntimeSelector, variable)
 		}
 		value, found = current, true
 	}
@@ -309,6 +380,79 @@ func validateRuntimeEnvironmentName(value, source string) error {
 	return nil
 }
 
+func runtimeProjectRelativeConfigurationPath(value, source string) (string, error) {
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("%w: %s selects an empty configuration path", ErrRuntimeSelector, source)
+	}
+	if strings.IndexByte(value, 0) >= 0 {
+		return "", fmt.Errorf("%w: %s configuration path contains a NUL byte", ErrRuntimeSelector, source)
+	}
+	root, err := filepath.Abs(".")
+	if err != nil {
+		return "", fmt.Errorf("%w: resolve runtime Project directory", ErrRuntimeSelector)
+	}
+	candidate := value
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(root, candidate)
+	}
+	candidate, err = filepath.Abs(candidate)
+	if err != nil {
+		return "", fmt.Errorf("%w: resolve selected configuration path", ErrRuntimeSelector)
+	}
+	relative, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return "", fmt.Errorf("%w: selected configuration must identify a file within the runtime Project directory", ErrRuntimeSelector)
+	}
+	clean := filepath.Clean(relative)
+	if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%w: selected configuration must identify a file within the runtime Project directory", ErrRuntimeSelector)
+	}
+	return clean, nil
+}
+
+type runtimeConfigurationPathState struct {
+	name string
+	info os.FileInfo
+}
+
+func inspectRuntimeConfigurationPath(path string) ([]runtimeConfigurationPathState, error) {
+	components := strings.Split(filepath.Clean(path), string(filepath.Separator))
+	states := make([]runtimeConfigurationPathState, 0, len(components))
+	current := ""
+	for index, component := range components {
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if err != nil || info == nil || info.Mode()&os.ModeSymlink != 0 {
+			return nil, errors.New("configuration path is unavailable or symbolic")
+		}
+		if index < len(components)-1 {
+			if !info.IsDir() {
+				return nil, errors.New("configuration path contains a non-directory component")
+			}
+		} else if !info.Mode().IsRegular() {
+			return nil, errors.New("configuration path is not a regular file")
+		}
+		states = append(states, runtimeConfigurationPathState{name: current, info: info})
+	}
+	return states, nil
+}
+
+func sameRuntimeConfigurationPathStates(left, right []runtimeConfigurationPathState) bool {
+	if len(left) == 0 || len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index].name != right[index].name || left[index].info == nil || right[index].info == nil ||
+			left[index].info.Mode() != right[index].info.Mode() || !os.SameFile(left[index].info, right[index].info) {
+			return false
+		}
+		if index == len(left)-1 && (left[index].info.Size() != right[index].info.Size() || !left[index].info.ModTime().Equal(right[index].info.ModTime())) {
+			return false
+		}
+	}
+	return true
+}
+
 func composeRuntimeDocuments(rootData, overlayData []byte) ([]byte, error) {
 	root, err := decodeRuntimeDocument(rootData, defaultRuntimeDocument)
 	if err != nil {
@@ -325,10 +469,26 @@ func composeRuntimeDocuments(rootData, overlayData []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return encodeRuntimeDocument(merged)
+}
+
+func normalizeRuntimeDocument(data []byte, source string) ([]byte, error) {
+	root, err := decodeRuntimeDocument(data, source)
+	if err != nil {
+		return nil, err
+	}
+	normalized, err := mergeRuntimeDocument(root, nil)
+	if err != nil {
+		return nil, err
+	}
+	return encodeRuntimeDocument(normalized)
+}
+
+func encodeRuntimeDocument(document *yaml.Node) ([]byte, error) {
 	var output bytes.Buffer
 	encoder := yaml.NewEncoder(&output)
 	encoder.SetIndent(2)
-	if err := encoder.Encode(merged); err != nil {
+	if err := encoder.Encode(document); err != nil {
 		_ = encoder.Close()
 		return nil, runtimeConfigurationError("encode effective runtime document")
 	}

@@ -378,7 +378,7 @@ replace github.com/plystra/kernel => %s
 		{
 			name:        "explicit environment overrides ambient",
 			arguments:   []string{"run", "./generated/go/application", "--smoke", "--env", "production"},
-			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "missing"}),
+			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "missing", "PLYSTRA_CONFIG": "missing.yaml"}),
 		},
 		{
 			name:        "ambient environment",
@@ -624,6 +624,39 @@ func (*Plugin) Read(_ context.Context, _ contract.Request) (contract.Response, e
 			}
 		}
 	}
+
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "root: [intentionally-invalid\n")
+	for _, runtime := range []struct {
+		name        string
+		arguments   []string
+		environment []string
+	}{
+		{
+			name:        "explicit relative replacement overrides ambient selectors",
+			arguments:   []string{"run", "./generated/go/application", "--smoke", "--config", "deploy/customer.yaml"},
+			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_CONFIG": "missing.yaml", "PLYSTRA_ENV": "missing", "SELECTED_MAIL_TOKEN": "resolved-super-secret"}),
+		},
+		{
+			name:        "explicit absolute replacement",
+			arguments:   []string{"run", "./generated/go/application", "--smoke", "--config", selectedPath},
+			environment: environment,
+		},
+		{
+			name:        "ambient replacement",
+			arguments:   []string{"run", "./generated/go/application", "--smoke"},
+			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml", "SELECTED_MAIL_TOKEN": "resolved-super-secret"}),
+		},
+	} {
+		t.Run("generated binary "+runtime.name, func(t *testing.T) {
+			process := exec.CommandContext(t.Context(), "go", runtime.arguments...)
+			process.Dir = applicationRoot
+			process.Env = runtime.environment
+			if output, err := process.CombinedOutput(); err != nil {
+				t.Fatalf("generated application %s: %v\n%s", runtime.name, err, output)
+			}
+		})
+	}
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), rootConfiguration)
 
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--config", "deploy/customer.yaml"}, nestedStart, environment)
 	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/config-select in "+applicationRoot+"\n" {

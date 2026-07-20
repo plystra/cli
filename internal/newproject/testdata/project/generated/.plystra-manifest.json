@@ -19,7 +19,7 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:fc28af382b3cda5260042dea1958dfa750e13c54eb255b85caa78140039e1759"
+      "sha256": "sha256:e02ce227d2143224adb79ae558526cf028cbeb9ece0ce654d8beaf3ca31434a7"
     },
     {
       "path": "generated/manifest.json",
