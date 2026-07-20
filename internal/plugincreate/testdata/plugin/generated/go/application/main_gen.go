@@ -15,10 +15,7 @@ import (
 	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 )
 
-const (
-	defaultRuntimeDocument = "plystra.yaml"
-	defaultShutdownTimeout = time.Duration(30000000000)
-)
+const defaultShutdownTimeout = time.Duration(30000000000)
 
 var (
 	// ErrRun reports a safe generated-process lifecycle failure.
@@ -46,7 +43,7 @@ func run(ctx context.Context, arguments []string) (result error) {
 	if err != nil {
 		return err
 	}
-	application, err := applicationbootstrap.New(ctx, defaultRuntimeDocument)
+	application, err := applicationbootstrap.New(ctx)
 	if err != nil {
 		return fmt.Errorf("%w: construct: %w", ErrRun, err)
 	}

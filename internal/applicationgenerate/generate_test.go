@@ -94,8 +94,22 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	assertFileExists(t, root, "generated/go/bootstrap/bootstrap_gen.go")
 	assertFileExists(t, root, "generated/proto/descriptor-set.pb")
 	assertFileExists(t, root, "generated/proto/wire-map.json")
-	if bootstrap := readFile(t, root, "generated/go/bootstrap/bootstrap_gen.go"); bytes.Contains(bootstrap, []byte("17s")) {
+	bootstrap := readFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
+	if bytes.Contains(bootstrap, []byte("17s")) {
 		t.Fatalf("generated bootstrap embeds application-specific startup timeout:\n%s", bootstrap)
+	}
+	for _, required := range [][]byte{
+		[]byte(`defaultRuntimeDocument = "plystra.yaml"`),
+		[]byte("func New(ctx context.Context)"),
+		[]byte("kernelconfiguration.LoadDocument(defaultRuntimeDocument)"),
+	} {
+		if !bytes.Contains(bootstrap, required) {
+			t.Fatalf("generated bootstrap omits default configuration selection %q:\n%s", required, bootstrap)
+		}
+	}
+	entrypoint := readFile(t, root, "generated/go/application/main_gen.go")
+	if !bytes.Contains(entrypoint, []byte("applicationbootstrap.New(ctx)")) || bytes.Contains(entrypoint, []byte("plystra.yaml")) {
+		t.Fatalf("generated entrypoint does not delegate default configuration selection to bootstrap:\n%s", entrypoint)
 	}
 	assertFileMissing(t, root, "generated/sdk/javascript/package.json")
 
@@ -1662,7 +1676,7 @@ import (
 )
 
 func TestUnrequiredCapabilityIsNotRegistered(t *testing.T) {
-	application, err := bootstrap.New(context.Background(), "plystra.yaml")
+	application, err := bootstrap.New(context.Background())
 	if err != nil || !application.Valid() {
 		t.Fatalf("bootstrap.New = %#v, %v", application, err)
 	}
@@ -2355,7 +2369,7 @@ import (
 )
 
 func TestIntrinsicApplicationRuntime(t *testing.T) {
-	application, err := bootstrap.New(context.Background(), "plystra.yaml")
+	application, err := bootstrap.New(context.Background())
 	if err != nil || !application.Valid() {
 		t.Fatalf("bootstrap.New = %#v, %v", application, err)
 	}
@@ -2405,7 +2419,7 @@ import (
 )
 
 func TestGeneratedCrossPluginCall(t *testing.T) {
-	application, err := bootstrap.New(context.Background(), "plystra.yaml")
+	application, err := bootstrap.New(context.Background())
 	if err != nil || !application.Valid() {
 		t.Fatalf("bootstrap.New = %#v, %v", application, err)
 	}

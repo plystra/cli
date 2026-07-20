@@ -15,7 +15,10 @@ import (
 	kernellifecycle "github.com/plystra/kernel/lifecycle"
 )
 
-const defaultStartupTimeout = time.Duration(120000000000)
+const (
+	defaultRuntimeDocument = "plystra.yaml"
+	defaultStartupTimeout  = time.Duration(120000000000)
+)
 
 var (
 	// ErrBootstrap reports a safe runtime application construction failure.
@@ -41,13 +44,13 @@ type Application struct {
 	startupTimeout time.Duration
 }
 
-// New loads one runtime document, validates startup settings, resolves Secrets,
+// New loads the default runtime document, validates startup settings, resolves Secrets,
 // constructs every selected provider exactly once, and binds lifecycle order.
-func New(ctx context.Context, documentPath string) (*Application, error) {
+func New(ctx context.Context) (*Application, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("%w: %w", ErrBootstrap, ErrInvalidContext)
 	}
-	document, err := kernelconfiguration.LoadDocument(documentPath)
+	document, err := kernelconfiguration.LoadDocument(defaultRuntimeDocument)
 	if err != nil {
 		return nil, fmt.Errorf("%w: load runtime document: %w", ErrBootstrap, err)
 	}

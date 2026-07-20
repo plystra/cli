@@ -1075,9 +1075,10 @@ POST /api/v1/capabilities/catalog.item.get/v1/invoke
 
 The CLI generates both strict JSON HTTP handlers and Connect handlers, but the
 current CLI-owned `generated/go/application/main_gen.go` entrypoint does not
-yet mount an HTTP server. It owns default runtime startup, signal-driven
-shutdown, and the private template-qualification health smoke. Do not edit
-that generated entrypoint or add a competing application startup workaround.
+yet mount an HTTP server. It delegates default root `plystra.yaml` selection to
+`generated/go/bootstrap`, then owns signal-driven shutdown and the private
+template-qualification health smoke. Do not edit either generated boundary or
+add a competing application startup workaround.
 Validate the generated Connect handler directly with `httptest` until server
 mounting lands in the later transport gate. Exercise both binary Protobuf and
 ProtoJSON Connect clients. Requests using gRPC or gRPC-Web media types must
