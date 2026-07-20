@@ -491,6 +491,7 @@ func TestCreateQualifiesGeneratedJavaScriptSDKAndRemovesValidationOutput(t *test
 			Typecheck string `json:"typecheck"`
 			Build     string `json:"build"`
 		} `json:"scripts"`
+		Dependencies    map[string]string `json:"dependencies"`
 		DevDependencies map[string]string `json:"devDependencies"`
 	}
 	if err := json.Unmarshal(packageData, &packageManifest); err != nil {
@@ -498,6 +499,38 @@ func TestCreateQualifiesGeneratedJavaScriptSDKAndRemovesValidationOutput(t *test
 	}
 	if packageManifest.Scripts.Typecheck == "" || packageManifest.Scripts.Build == "" || packageManifest.DevDependencies["typescript"] == "" {
 		t.Fatalf("generated JavaScript package metadata omits required package-manager inputs: %s", packageData)
+	}
+	for dependency, version := range map[string]string{
+		"@bufbuild/protobuf":      "2.12.1",
+		"@connectrpc/connect":     "2.1.2",
+		"@connectrpc/connect-web": "2.1.2",
+	} {
+		if packageManifest.Dependencies[dependency] != version {
+			t.Fatalf("generated JavaScript package dependency %s = %q, want %q: %s", dependency, packageManifest.Dependencies[dependency], version, packageData)
+		}
+	}
+	descriptorSource, err := os.ReadFile(filepath.Join(result.Path(), "generated", "sdk", "javascript", "src", "descriptors.ts"))
+	if err != nil {
+		t.Fatalf("read generated JavaScript Connect descriptors: %v", err)
+	}
+	runtimeSource, err := os.ReadFile(filepath.Join(result.Path(), "generated", "sdk", "javascript", "src", "runtime.ts"))
+	if err != nil {
+		t.Fatalf("read generated JavaScript Connect runtime: %v", err)
+	}
+	for _, required := range [][]byte{[]byte("createFileRegistry"), []byte("FileDescriptorSetSchema"), []byte("resolveUnaryMethod")} {
+		if !bytes.Contains(descriptorSource, required) {
+			t.Fatalf("generated JavaScript descriptors omit %q", required)
+		}
+	}
+	for _, required := range [][]byte{[]byte("createConnectTransport"), []byte("runtime.transport.unary"), []byte("ConnectError")} {
+		if !bytes.Contains(runtimeSource, required) {
+			t.Fatalf("generated JavaScript runtime omits %q", required)
+		}
+	}
+	for _, obsolete := range [][]byte{[]byte("api/v1/capabilities/"), []byte(`Accept: "application/json"`)} {
+		if bytes.Contains(runtimeSource, obsolete) {
+			t.Fatalf("generated JavaScript runtime retains obsolete JSON/fetch transport %q", obsolete)
+		}
 	}
 	if err := gocommand.Run(t.Context(), gocommand.Options{
 		Directory:   result.Path(),
@@ -1890,6 +1923,10 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"Protobuf naming collision",
 		"generated/proto/descriptor-set.pb is the self-contained deterministic",
 		"A selected Connect surface also emits a Go handler",
+		"@bufbuild/protobuf, @connectrpc/connect, and @connectrpc/connect-web runtime",
+		"never receive ConnectError as the public error model",
+		"src/descriptors.ts",
+		"sends binary Connect requests",
 		"configuration schema v4",
 		"Protobuf wire-map digest",
 		"environment, or explicit-config mode",

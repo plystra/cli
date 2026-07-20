@@ -34,7 +34,7 @@ func TestInferPackageNameFromGoModuleIdentity(t *testing.T) {
 			if err != nil || got != test.want {
 				t.Fatalf("InferPackageName(%q) = %q, %v; want %q", test.modulePath, got, err, test.want)
 			}
-			if _, err := javascriptgen.Render(javascriptgen.Options{PackageName: got}, model); err != nil {
+			if _, err := javascriptgen.Render(javascriptOptions(t, got, nil, nil), model); err != nil {
 				t.Fatalf("inferred package %q is not renderable: %v", got, err)
 			}
 		})

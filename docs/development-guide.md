@@ -344,6 +344,9 @@ startup, intrinsic health, and clean shutdown. When a generated JavaScript SDK
 is present, creation also runs `npm install --ignore-scripts --no-audit --no-fund`,
 `npm run typecheck`, `npm run build`, and `npm pack --dry-run --json`, then
 removes validation-only `node_modules/` and `dist/` output before installation.
+The generated package declares pinned Buf and Connect runtime dependencies, so
+this checks the real descriptor-backed transport rather than an unused package
+entry.
 The complete qualified-template acceptance suite still needs public `plystra dev`
 and `plystra build` workflows. Do not describe a template as qualified until
 that complete automated suite exists.
@@ -1098,6 +1101,7 @@ generated/sdk/javascript/
   .npmrc
   package.json
   README.md
+  src/descriptors.ts
   src/index.ts
   src/runtime.ts
   src/operations/catalog/item/get/v1.ts
@@ -1131,10 +1135,16 @@ const item = await client.catalog.item.get.v1({item_id: "coffee"});
 `Bearer` authorization scheme; do not include `Bearer` in the callback result.
 An already-prefixed value fails locally before any request is sent.
 
-The SDK validates requests and responses, uses the exact generated HTTP route,
-normalizes network and credential failures, and exposes only stable error
-status, code, and detail code. Provider packages, runtime configuration,
-verified internal context, and Secrets must not appear in the package.
+The SDK validates Plystra request and response values, resolves the exact unary
+method from the generated self-contained Protobuf descriptor graph, and sends
+binary Connect requests. Its generated `package.json` pins
+`@bufbuild/protobuf`, `@connectrpc/connect`, and `@connectrpc/connect-web` as
+direct runtime dependencies. Callers use only the Plystra wrapper: do not
+export raw descriptors, Protobuf message objects, Connect clients, or
+`ConnectError` as application contracts. Network, credential, cancellation,
+malformed-response, and schema failures are normalized to stable Plystra error
+fields. Provider packages, runtime configuration, verified internal context,
+and Secrets must not appear in the package.
 
 ## Develop a generation extension
 

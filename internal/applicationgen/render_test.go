@@ -86,6 +86,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		"generated/sdk/javascript/.npmrc",
 		"generated/sdk/javascript/README.md",
 		"generated/sdk/javascript/package.json",
+		"generated/sdk/javascript/src/descriptors.ts",
 		"generated/sdk/javascript/src/index.ts",
 		"generated/sdk/javascript/src/operations/compat/send/v1.ts",
 		"generated/sdk/javascript/src/operations/email/send/v1.ts",

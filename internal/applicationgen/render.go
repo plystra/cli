@@ -412,7 +412,14 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		return generatedfiles.Output{}, fmt.Errorf("%w: SDK model: %w", ErrRender, err)
 	}
 	if len(javaScriptTargets) != 0 {
-		javaScript, err := javascriptgen.Render(javascriptgen.Options{PackageName: options.JavaScriptPackage}, model)
+		javaScript, err := javascriptgen.Render(javascriptgen.Options{
+			PackageName: options.JavaScriptPackage,
+			Transport: javascriptgen.TransportOptions{
+				Projection:    protobufProjection,
+				WireMap:       options.ProtobufWireMap,
+				DescriptorSet: descriptorEvidence.DescriptorSet(),
+			},
+		}, model)
 		if err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: JavaScript SDK: %w", ErrRender, err)
 		}

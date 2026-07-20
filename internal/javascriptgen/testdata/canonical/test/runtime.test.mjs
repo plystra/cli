@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { fromBinary, fromJson, toBinary, toJson } from "@bufbuild/protobuf";
 import {
   PlystraError,
   createCompatSendV1,
@@ -8,23 +9,59 @@ import {
   createMailDeliverV1,
   createPlystraClient,
 } from "@acme/project-sdk";
+import { resolveUnaryMethod } from "../dist/descriptors.js";
 
-function jsonResponse(body, status = 200) {
-  return new Response(JSON.stringify(body), {
+const emailMethod = resolveUnaryMethod(
+  "plystra.generated.email.send.v1.EmailSendV1Service",
+  "Invoke",
+  "plystra.generated.email.send.v1.EmailSendV1Request",
+  "plystra.generated.email.send.v1.EmailSendV1Response",
+);
+
+function methodFor(capabilityPackage, typeBase) {
+  return resolveUnaryMethod(
+    `${capabilityPackage}.${typeBase}Service`,
+    "Invoke",
+    `${capabilityPackage}.${typeBase}Request`,
+    `${capabilityPackage}.${typeBase}Response`,
+  );
+}
+
+function protobufResponse(method, json) {
+  const message = fromJson(method.output, json, {
+    ignoreUnknownFields: false,
+  });
+  return new Response(toBinary(method.output, message), {
+    status: 200,
+    headers: { "Content-Type": "application/proto" },
+  });
+}
+
+function connectErrorResponse(code, message, status) {
+  return new Response(JSON.stringify({ code, message }), {
     status,
     headers: { "Content-Type": "application/json" },
   });
 }
 
-test("nested client serializes strict JSON and attaches one access token", async () => {
+async function requestJSON(method, body) {
+  const bytes = new Uint8Array(await new Response(body).arrayBuffer());
+  return toJson(method.input, fromBinary(method.input, bytes), {
+    alwaysEmitImplicit: true,
+    enumAsInteger: false,
+    useProtoFieldName: false,
+  });
+}
+
+test("nested client sends binary Connect with one access token", async () => {
   const calls = [];
   const controller = new AbortController();
   const client = createPlystraClient({
     baseUrl: "https://api.example.test/root",
     getAccessToken: async () => "browser-token",
     fetch: async (input, init) => {
-      calls.push({ input, init });
-      return jsonResponse({ accepted: true, latency: 1.5 });
+      calls.push({ input, init, signalAborted: init.signal?.aborted });
+      return protobufResponse(emailMethod, { accepted: true, latency: 1.5 });
     },
   });
 
@@ -41,39 +78,41 @@ test("nested client serializes strict JSON and attaches one access token", async
 
   assert.deepEqual(response, { accepted: true, latency: 1.5 });
   assert.equal(calls.length, 1);
-  const [{ input, init }] = calls;
+  const [{ input, init, signalAborted }] = calls;
   assert.equal(
-    input.href,
-    "https://api.example.test/root/api/v1/capabilities/email.send/v1/invoke",
+    new URL(input).href,
+    "https://api.example.test/root/plystra.generated.email.send.v1.EmailSendV1Service/Invoke",
   );
   assert.equal(init.method, "POST");
   assert.equal(init.cache, "no-store");
   assert.equal(init.credentials, "same-origin");
   assert.equal(init.redirect, "error");
-  assert.equal(init.signal, controller.signal);
+  assert.equal(init.signal instanceof AbortSignal, true);
+  assert.equal(signalAborted, false);
   const headers = new Headers(init.headers);
-  assert.equal(headers.get("Accept"), "application/json");
-  assert.equal(headers.get("Content-Type"), "application/json");
+  assert.equal(headers.get("Content-Type"), "application/proto");
+  assert.equal(headers.get("Connect-Protocol-Version"), "1");
   assert.equal(headers.get("Authorization"), "Bearer browser-token");
-  assert.deepEqual(JSON.parse(init.body), {
-    metadata: { nested: [true, null, { count: 1 }] },
-    priority: "urgent",
-    retries: 2,
-    tags: ["welcome"],
-    to: "person@example.com",
+  const encoded = await requestJSON(emailMethod, init.body);
+  assert.deepEqual(encoded.metadata, {
+    nested: [true, null, { count: 1 }],
   });
+  assert.deepEqual(encoded.tags, { values: ["welcome"] });
+  assert.equal(encoded.to, "person@example.com");
+  assert.notEqual(encoded.priority, "urgent");
+  assert.notEqual(encoded.retries, 2);
   assert.equal(Object.isFrozen(client), true);
   assert.equal(Object.isFrozen(client.email), true);
   assert.equal(Object.isFrozen(client.email.send), true);
 });
 
-test("tree-shakable operation factory uses the same canonical transport", async () => {
+test("tree-shakable operation factory uses the same Connect descriptor", async () => {
   let requested = "";
   const send = createEmailSendV1({
     baseUrl: new URL("https://api.example.test/"),
     fetch: async (input) => {
-      requested = input.href;
-      return jsonResponse({ accepted: true });
+      requested = new URL(input).href;
+      return protobufResponse(emailMethod, { accepted: true });
     },
   });
   assert.deepEqual(
@@ -82,17 +121,17 @@ test("tree-shakable operation factory uses the same canonical transport", async 
   );
   assert.equal(
     requested,
-    "https://api.example.test/api/v1/capabilities/email.send/v1/invoke",
+    "https://api.example.test/plystra.generated.email.send.v1.EmailSendV1Service/Invoke",
   );
 });
 
-test("multiple aliases reuse the canonical contract over their generated routes", async () => {
+test("aliases reuse the canonical messages over their own Connect procedures", async () => {
   const paths = [];
   const options = {
     baseUrl: "https://api.example.test/root",
     fetch: async (input) => {
-      paths.push(input.pathname);
-      return jsonResponse({ accepted: true });
+      paths.push(new URL(input).pathname);
+      return protobufResponse(emailMethod, { accepted: true });
     },
   };
   const client = createPlystraClient(options);
@@ -111,23 +150,23 @@ test("multiple aliases reuse the canonical contract over their generated routes"
     accepted: true,
   });
   assert.deepEqual(paths, [
-    "/root/api/v1/capabilities/compat.send/v1/invoke",
-    "/root/api/v1/capabilities/mail.deliver/v1/invoke",
-    "/root/api/v1/capabilities/compat.send/v1/invoke",
-    "/root/api/v1/capabilities/mail.deliver/v1/invoke",
+    "/root/plystra.generated.compat.send.v1.CompatSendV1Service/Invoke",
+    "/root/plystra.generated.mail.deliver.v1.MailDeliverV1Service/Invoke",
+    "/root/plystra.generated.compat.send.v1.CompatSendV1Service/Invoke",
+    "/root/plystra.generated.mail.deliver.v1.MailDeliverV1Service/Invoke",
   ]);
 
   await assert.rejects(() => client.compat.send.v1({}), TypeError);
   assert.equal(paths.length, 4);
 });
 
-test("request validation rejects malformed, unsafe, and unknown values before fetch", async () => {
+test("request validation rejects malformed and oversized values before fetch", async () => {
   let calls = 0;
   const send = createEmailSendV1({
     baseUrl: "https://api.example.test",
     fetch: async () => {
       calls++;
-      return jsonResponse({ accepted: true });
+      return protobufResponse(emailMethod, { accepted: true });
     },
   });
   const cyclic = {};
@@ -171,45 +210,39 @@ test("request validation rejects malformed, unsafe, and unknown values before fe
   assert.equal(calls, 0);
 });
 
-test("response validation and error mapping expose only stable fields", async () => {
+test("response and Connect errors expose only Plystra-owned stable fields", async () => {
   const responses = [
-    jsonResponse({ accepted: "yes" }),
-    jsonResponse({ accepted: true, unexpected: true }),
+    protobufResponse(emailMethod, {}),
+    new Response(new Uint8Array([0xff]), {
+      status: 200,
+      headers: { "Content-Type": "application/proto" },
+    }),
     new Response("{}", {
       status: 200,
       headers: { "Content-Type": "text/plain" },
-    }),
-    new Response("{", {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
     }),
   ];
   const send = createEmailSendV1({
     baseUrl: "https://api.example.test",
     fetch: async () => responses.shift(),
   });
-  for (let index = 0; index < 4; index++) {
+  for (let index = 0; index < 3; index++) {
     await assert.rejects(
       () => send({ to: "person@example.com", tags: [], priority: "normal" }),
       (error) =>
         error instanceof PlystraError &&
-        error.code === "invalid_response" &&
-        error.message === "invalid_response",
+        !error.message.includes("protobuf") &&
+        !error.message.includes("content-type"),
     );
   }
 
   const semantic = createEmailSendV1({
     baseUrl: "https://api.example.test",
     fetch: async () =>
-      jsonResponse(
-        {
-          error: {
-            code: "capability_error",
-            detail_code: "invalid_recipient",
-            message: "provider secret must not escape",
-          },
-        },
-        422,
+      connectErrorResponse(
+        "failed_precondition",
+        "provider secret must not escape",
+        400,
       ),
   });
   await assert.rejects(
@@ -218,48 +251,31 @@ test("response validation and error mapping expose only stable fields", async ()
       assert.equal(error instanceof PlystraError, true);
       assert.equal(error.status, 422);
       assert.equal(error.code, "capability_error");
-      assert.equal(error.detailCode, "invalid_recipient");
+      assert.equal(error.detailCode, undefined);
       assert.equal(error.message, "capability_error");
-      assert.equal("body" in error, false);
+      assert.equal(error instanceof Error && error.name, "PlystraError");
+      assert.equal("rawMessage" in error, false);
+      assert.equal("details" in error, false);
       return true;
     },
   );
 
-  const unsafeServerCode = createEmailSendV1({
+  const malformedError = createEmailSendV1({
     baseUrl: "https://api.example.test",
     fetch: async () =>
-      jsonResponse({ error: { code: "provider_secret" } }, 500),
+      connectErrorResponse("provider_secret", "unsafe detail", 500),
   });
   await assert.rejects(
     () =>
-      unsafeServerCode({
-        to: "person@example.com",
-        tags: [],
-        priority: "normal",
-      }),
-    (error) =>
-      error instanceof PlystraError && error.code === "invalid_response",
-  );
-
-  const malformedFetchResult = createEmailSendV1({
-    baseUrl: "https://api.example.test",
-    fetch: async () => ({
-      get status() {
-        throw new Error("response getter secret");
-      },
-    }),
-  });
-  await assert.rejects(
-    () =>
-      malformedFetchResult({
+      malformedError({
         to: "person@example.com",
         tags: [],
         priority: "normal",
       }),
     (error) =>
       error instanceof PlystraError &&
-      error.code === "invalid_response" &&
-      error.message === "invalid_response",
+      !error.message.includes("provider_secret") &&
+      !error.message.includes("unsafe detail"),
   );
 });
 
@@ -270,7 +286,7 @@ test("credentials, cancellation, and network failures are bounded and normalized
     getAccessToken: () => " bad-token",
     fetch: async () => {
       calls++;
-      return jsonResponse({ accepted: true });
+      return protobufResponse(emailMethod, { accepted: true });
     },
   });
   await assert.rejects(
@@ -288,7 +304,7 @@ test("credentials, cancellation, and network failures are bounded and normalized
     getAccessToken: () => "Bearer browser-token",
     fetch: async () => {
       calls++;
-      return jsonResponse({ accepted: true });
+      return protobufResponse(emailMethod, { accepted: true });
     },
   });
   await assert.rejects(
@@ -311,7 +327,7 @@ test("credentials, cancellation, and network failures are bounded and normalized
     },
     fetch: async () => {
       calls++;
-      return jsonResponse({ accepted: true });
+      return protobufResponse(emailMethod, { accepted: true });
     },
   });
   await assert.rejects(
@@ -333,7 +349,7 @@ test("credentials, cancellation, and network failures are bounded and normalized
     baseUrl: "https://api.example.test",
     fetch: async () => {
       calls++;
-      return jsonResponse({ accepted: true });
+      return protobufResponse(emailMethod, { accepted: true });
     },
   });
   await assert.rejects(
@@ -369,12 +385,16 @@ test("empty contracts remain exact and base URLs reject unsafe components", asyn
       }),
     TypeError,
   );
+  const accountMethod = methodFor(
+    "plystra.generated.account.profile.get.v2",
+    "AccountProfileGetV2",
+  );
   let calls = 0;
   const client = createPlystraClient({
     baseUrl: "https://api.example.test",
     fetch: async () => {
       calls++;
-      return jsonResponse({});
+      return protobufResponse(accountMethod, {});
     },
   });
   assert.deepEqual(await client.account.profile.get.v2({}), {});
@@ -385,23 +405,40 @@ test("empty contracts remain exact and base URLs reject unsafe components", asyn
   assert.equal(calls, 1);
 });
 
-test("prefix and hyphenated Capability paths remain callable without collisions", async () => {
+test("prefix and hyphenated Capability identities remain collision-free", async () => {
+  const methods = new Map([
+    [
+      "/plystra.generated.alpha.beta.v1.AlphaBetaV1Service/Invoke",
+      methodFor("plystra.generated.alpha.beta.v1", "AlphaBetaV1"),
+    ],
+    [
+      "/plystra.generated.alpha.beta.v1.check.v1.AlphaBetaV1CheckV1Service/Invoke",
+      methodFor(
+        "plystra.generated.alpha.beta.v1.check.v1",
+        "AlphaBetaV1CheckV1",
+      ),
+    ],
+    [
+      "/plystra.generated.foo_h_bar.send.v1.FooBarSendV1Service/Invoke",
+      methodFor("plystra.generated.foo_h_bar.send.v1", "FooBarSendV1"),
+    ],
+    [
+      "/plystra.generated.foo.bar_h_send.v1.FooBarSendV1Service/Invoke",
+      methodFor("plystra.generated.foo.bar_h_send.v1", "FooBarSendV1"),
+    ],
+  ]);
   const paths = [];
   const client = createPlystraClient({
     baseUrl: "https://api.example.test",
     fetch: async (input) => {
-      paths.push(input.pathname);
-      return jsonResponse({});
+      const path = new URL(input).pathname;
+      paths.push(path);
+      return protobufResponse(methods.get(path), {});
     },
   });
   await client.alpha.beta.v1({});
   await client.alpha.beta.v1.check.v1({});
   await client["foo-bar"].send.v1({});
   await client.foo["bar-send"].v1({});
-  assert.deepEqual(paths, [
-    "/api/v1/capabilities/alpha.beta/v1/invoke",
-    "/api/v1/capabilities/alpha.beta.v1.check/v1/invoke",
-    "/api/v1/capabilities/foo-bar.send/v1/invoke",
-    "/api/v1/capabilities/foo.bar-send/v1/invoke",
-  ]);
+  assert.deepEqual(paths, [...methods.keys()]);
 });
