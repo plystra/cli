@@ -687,7 +687,7 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 		return errors.New("dependency baseline history must contain the active selection exactly once")
 	}
 	if !validSHA256(provenance.protobufWireMapDigest) {
-		return errors.New("Protobuf wire-map digest must be a lower-case SHA-256 digest")
+		return errors.New("generated Protobuf wire-map digest must be a lower-case SHA-256 digest")
 	}
 	if !validSHA256(provenance.applicationModelDigest) {
 		return errors.New("application-model digest must be a lower-case SHA-256 digest")

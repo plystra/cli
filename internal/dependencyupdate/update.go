@@ -91,10 +91,10 @@ func Update(ctx context.Context, options Options) (Result, error) {
 						return fmt.Errorf("confirm updated dependency: %w", err)
 					}
 					if !selected {
-						return fmt.Errorf("Go Module %q is no longer selected after regeneration and tidy", modulePath)
+						return fmt.Errorf("updated Go Module %q is no longer selected after regeneration and tidy", modulePath)
 					}
 					if !before.Indirect() && updated.Indirect() {
-						return fmt.Errorf("Go Module %q became indirect after regeneration and tidy", modulePath)
+						return fmt.Errorf("updated Go Module %q became indirect after regeneration and tidy", modulePath)
 					}
 					return nil
 				})

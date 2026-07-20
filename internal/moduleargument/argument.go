@@ -16,26 +16,26 @@ import (
 func ParseQuery(value string) (string, string, error) {
 	query := strings.TrimSpace(value)
 	if query == "" {
-		return "", "", errors.New("Go Module query is empty")
+		return "", "", errors.New("invalid Go Module query: value is empty")
 	}
 	if query != value || strings.HasPrefix(query, "-") || strings.IndexFunc(query, func(r rune) bool {
 		return unicode.IsSpace(r) || unicode.IsControl(r)
 	}) >= 0 {
-		return "", "", fmt.Errorf("Go Module query %q is invalid", value)
+		return "", "", fmt.Errorf("invalid Go Module query %q", value)
 	}
 	path := query
 	if separator := strings.LastIndexByte(query, '@'); separator >= 0 {
 		path = query[:separator]
 		version := query[separator+1:]
 		if version == "" {
-			return "", "", fmt.Errorf("Go Module query %q has an empty version query", query)
+			return "", "", fmt.Errorf("invalid Go Module query %q: version query is empty", query)
 		}
 		if version == "none" {
-			return "", "", errors.New("Go Module query @none removes a dependency; use plystra remove")
+			return "", "", errors.New("invalid Go Module query @none: use plystra remove to remove the dependency")
 		}
 	}
 	if err := module.CheckPath(path); err != nil {
-		return "", "", fmt.Errorf("Go Module path %q: %w", path, err)
+		return "", "", fmt.Errorf("invalid Go Module path %q: %w", path, err)
 	}
 	return query, path, nil
 }
@@ -44,15 +44,15 @@ func ParseQuery(value string) (string, string, error) {
 func ParsePath(value string) (string, error) {
 	path := strings.TrimSpace(value)
 	if path == "" {
-		return "", errors.New("Go Module path is empty")
+		return "", errors.New("invalid Go Module path: value is empty")
 	}
 	if path != value || strings.HasPrefix(path, "-") || strings.Contains(path, "@") || strings.IndexFunc(path, func(r rune) bool {
 		return unicode.IsSpace(r) || unicode.IsControl(r)
 	}) >= 0 {
-		return "", fmt.Errorf("Go Module path %q is invalid; provide a path without a version query", value)
+		return "", fmt.Errorf("invalid Go Module path %q: provide a path without a version query", value)
 	}
 	if err := module.CheckPath(path); err != nil {
-		return "", fmt.Errorf("Go Module path %q: %w", path, err)
+		return "", fmt.Errorf("invalid Go Module path %q: %w", path, err)
 	}
 	return path, nil
 }

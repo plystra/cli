@@ -23,7 +23,7 @@ func (r Requirement) Indirect() bool { return r.indirect }
 // selected requirement for modulePath when one exists.
 func FindRequirement(root, modulePath string) (Requirement, bool, error) {
 	if modulePath == "" {
-		return Requirement{}, false, errors.New("Go Module path is empty")
+		return Requirement{}, false, errors.New("invalid Go Module path: value is empty")
 	}
 	files, err := captureModuleFiles(root)
 	if err != nil {

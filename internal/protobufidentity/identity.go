@@ -27,7 +27,7 @@ var (
 	ErrBuild = errors.New("build Protobuf surface identities")
 	// ErrCollision reports two authored identities projected onto one generated
 	// Protobuf or Connect identity.
-	ErrCollision = errors.New("Protobuf identity collision")
+	ErrCollision = errors.New("generated Protobuf identity collision")
 )
 
 // Surface binds one public canonical or Alias ID to the canonical target whose

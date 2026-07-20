@@ -713,22 +713,22 @@ func validateDocument(value document) error {
 		}
 		packageName, requestName, responseName, err := canonicalMessageNames(id)
 		if err != nil {
-			return fmt.Errorf("Capability identity %q is invalid: %v", id, err)
+			return fmt.Errorf("invalid Capability identity %q: %v", id, err)
 		}
 		if record.Request.Message != requestName || record.Response.Message != responseName {
-			return fmt.Errorf("Capability %s message identities must be %s and %s", id, requestName, responseName)
+			return fmt.Errorf("invalid Capability %s message identities: must be %s and %s", id, requestName, responseName)
 		}
 		if !validDigest(record.CanonicalContractDigest) {
-			return fmt.Errorf("Capability %s has invalid canonical_contract_digest", id)
+			return fmt.Errorf("invalid Capability %s canonical_contract_digest", id)
 		}
 		if err := validateSources(record.Provenance); err != nil {
-			return fmt.Errorf("Capability %s provenance: %v", id, err)
+			return fmt.Errorf("invalid Capability %s provenance: %v", id, err)
 		}
 		if err := validateMessage(record.Request, packageName); err != nil {
-			return fmt.Errorf("Capability %s request: %v", id, err)
+			return fmt.Errorf("invalid Capability %s request: %v", id, err)
 		}
 		if err := validateMessage(record.Response, packageName); err != nil {
-			return fmt.Errorf("Capability %s response: %v", id, err)
+			return fmt.Errorf("invalid Capability %s response: %v", id, err)
 		}
 	}
 	return nil

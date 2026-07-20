@@ -87,7 +87,7 @@ func Remove(ctx context.Context, options Options) (Result, error) {
 						return fmt.Errorf("confirm removed dependency: %w", err)
 					}
 					if selected {
-						return fmt.Errorf("Go Module %q remains selected after regeneration and tidy", modulePath)
+						return fmt.Errorf("removed Go Module %q remains selected after regeneration and tidy", modulePath)
 					}
 					return nil
 				})
