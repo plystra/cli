@@ -33,6 +33,7 @@ import (
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providergen"
 	"github.com/plystra/cli/internal/sdkmodel"
+	"github.com/plystra/cli/internal/transportprovenance"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
@@ -103,6 +104,10 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	if !options.ManifestProvenance.matches(options.Composition, options.ProtobufWireMap.Digest(), modelDigest) {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: application manifest provenance is absent or inconsistent", ErrRender, ErrResolution)
 	}
+	transportProvenance, err := selectedTransportProvenance(options, context, modelDigest)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: %w: transport configuration provenance: %v", ErrRender, ErrResolution, err)
+	}
 	if err := validateJavaScriptTransport(options, context, aliases); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w", ErrRender, err)
 	}
@@ -149,6 +154,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		options.ProtobufWireMap,
 		descriptorEvidence.DescriptorSet(),
 		plan,
+		transportProvenance,
 	)
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Connect handlers: %w", ErrRender, err)
@@ -352,7 +358,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		}
 		invocationInputs = append(invocationInputs, invocationInput)
 		if target.Exposure().HTTP {
-			handler, err := httpgen.RenderPlan(options.ModulePath, target, plan)
+			handler, err := httpgen.RenderPlan(options.ModulePath, target, plan, transportProvenance)
 			if err != nil {
 				return generatedfiles.Output{}, fmt.Errorf("%w: HTTP adapter %s: %w", ErrRender, id, err)
 			}
@@ -399,7 +405,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		}
 		if alias.Exposure().HTTP {
 			httpAliases++
-			handler, err := httpgen.RenderAlias(options.ModulePath, alias, target)
+			handler, err := httpgen.RenderAlias(options.ModulePath, alias, target, transportProvenance)
 			if err != nil {
 				return generatedfiles.Output{}, fmt.Errorf("%w: Alias HTTP adapter %s: %w", ErrRender, alias.ID(), err)
 			}
@@ -415,7 +421,8 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	if len(javaScriptTargets) != 0 {
 		javaScript, err := javascriptgen.Render(javascriptgen.Options{
-			PackageName: options.JavaScriptPackage,
+			PackageName:             options.JavaScriptPackage,
+			ConfigurationProvenance: transportProvenance,
 			Transport: javascriptgen.TransportOptions{
 				Projection:    protobufProjection,
 				WireMap:       options.ProtobufWireMap,
@@ -432,7 +439,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		}
 	}
 	if httpTargets != 0 || httpAliases != 0 {
-		docs, err := apidocgen.Render(model, docAliasViews)
+		docs, err := apidocgen.Render(model, docAliasViews, transportProvenance)
 		if err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: API documentation: %w", ErrRender, err)
 		}
@@ -448,6 +455,52 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		return generatedfiles.Output{}, fmt.Errorf("%w: finalize managed output: %w", ErrRender, err)
 	}
 	return output, nil
+}
+
+func selectedTransportProvenance(options Options, context generation.Context, modelDigest string) (transportprovenance.Provenance, error) {
+	selected, exists := context.ConfigurationProvenance()
+	if !exists {
+		return transportprovenance.Provenance{}, errors.New("final generation context omits selected configuration identity")
+	}
+	provenance, err := transportprovenance.New(transportprovenance.Input{
+		Mode:                        selected.Mode(),
+		Environment:                 selected.Environment(),
+		RootPath:                    selected.RootPath(),
+		RootDigest:                  selected.RootDigest(),
+		SelectedPath:                selected.SelectedPath(),
+		SelectedDigest:              selected.SelectedDigest(),
+		DependencyCompositionDigest: selected.DependencyCompositionDigest(),
+		ApplicationModelDigest:      modelDigest,
+	})
+	if err != nil {
+		return transportprovenance.Provenance{}, err
+	}
+	manifest := options.ManifestProvenance
+	if string(provenance.Mode()) != manifest.Mode() {
+		return transportprovenance.Provenance{}, errors.New("selection mode disagrees between the final generation context and generated manifest")
+	}
+	if provenance.Environment() != manifest.Environment() {
+		return transportprovenance.Provenance{}, errors.New("selected environment disagrees between the final generation context and generated manifest")
+	}
+	if provenance.RootPath() != manifest.RootPath() {
+		return transportprovenance.Provenance{}, errors.New("root path disagrees between the final generation context and generated manifest")
+	}
+	if provenance.RootDigest() != manifest.RootDigest() {
+		return transportprovenance.Provenance{}, errors.New("root digest disagrees between the final generation context and generated manifest")
+	}
+	if provenance.SelectedPath() != manifest.SelectedPath() {
+		return transportprovenance.Provenance{}, errors.New("selected path disagrees between the final generation context and generated manifest")
+	}
+	if provenance.SelectedDigest() != manifest.SelectedDigest() {
+		return transportprovenance.Provenance{}, errors.New("selected digest disagrees between the final generation context and generated manifest")
+	}
+	if provenance.DependencyCompositionDigest() != options.Composition.DependencyDigest() || provenance.DependencyCompositionDigest() != manifest.DependencyBaseline().Digest() {
+		return transportprovenance.Provenance{}, errors.New("dependency-composition digest disagrees among the final generation context, typed composition, and generated manifest")
+	}
+	if provenance.ApplicationModelDigest() != manifest.ApplicationModelDigest() {
+		return transportprovenance.Provenance{}, errors.New("application-model digest disagrees between transport generation and generated manifest")
+	}
+	return provenance, nil
 }
 
 func validateJavaScriptTransport(options Options, context generation.Context, aliases aliasresolution.Result) error {

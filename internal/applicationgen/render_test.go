@@ -34,16 +34,17 @@ const (
 func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 	t.Parallel()
 
-	resolution := resolvedApplication(t, `capabilities:
+	composition := dependencyComposition(t)
+	resolution := resolvedApplicationWithComposition(t, `capabilities:
   aliases:
     compat.send/v1:
       target: email.send/v1
       deprecated:
         message: Use email.send/v1 instead.
     health.status/v1: kernel.health/v1
-`)
+`, composition)
 	options := resolvedOptions()
-	options.Composition = dependencyComposition(t)
+	options.Composition = composition
 	options = withManifestProvenance(t, options, resolution)
 	output, err := applicationgen.Render(options, resolution)
 	if err != nil {
@@ -437,6 +438,82 @@ func TestRenderRejectsInvalidResolutionModuleAndPackage(t *testing.T) {
 	}
 }
 
+func TestRenderRequiresMatchingTransportConfigurationProvenance(t *testing.T) {
+	t.Parallel()
+
+	missing := resolvedApplicationWithConfigurationProvenance(t, "", nil)
+	missingOptions := withManifestProvenance(t, resolvedOptions(), missing)
+	if _, err := applicationgen.Render(missingOptions, missing); !errors.Is(err, applicationgen.ErrResolution) || !strings.Contains(err.Error(), "omits selected configuration identity") {
+		t.Fatalf("Render(missing context provenance) error = %v", err)
+	}
+
+	resolution := resolvedApplication(t, "")
+	environmentManifest := withManifestProvenanceSelection(t, resolvedOptions(), resolution, applicationgen.ConfigurationModeEnvironment, "production", "plystra.production.yaml", []byte("{}\n"))
+	if _, err := applicationgen.Render(environmentManifest, resolution); !errors.Is(err, applicationgen.ErrResolution) || !strings.Contains(err.Error(), "selection mode disagrees") {
+		t.Fatalf("Render(context/manifest selection mismatch) error = %v", err)
+	}
+
+	composition := dependencyComposition(t)
+	dependencyManifest := resolvedOptions()
+	dependencyManifest.Composition = composition
+	dependencyManifest = withManifestProvenance(t, dependencyManifest, resolution)
+	if _, err := applicationgen.Render(dependencyManifest, resolution); !errors.Is(err, applicationgen.ErrResolution) || !strings.Contains(err.Error(), "dependency-composition digest disagrees") {
+		t.Fatalf("Render(context/composition mismatch) error = %v", err)
+	}
+}
+
+func TestRenderSelectionDriftsManifestButKeepsEqualModelTransportSourceStable(t *testing.T) {
+	t.Parallel()
+
+	composition := testComposition()
+	defaultResolution := resolvedApplicationWithConfigurationProvenance(t, "", defaultConfigurationProvenance(t, composition))
+	defaultOptions := withManifestProvenance(t, resolvedOptions(), defaultResolution)
+	defaultOutput, err := applicationgen.Render(defaultOptions, defaultResolution)
+	if err != nil {
+		t.Fatalf("Render(default): %v", err)
+	}
+
+	environmentInput := selectedConfigurationProvenance(t, composition, generation.ConfigurationModeEnvironment, "production", "plystra.production.yaml", []byte("{}\n"))
+	environmentResolution := resolvedApplicationWithConfigurationProvenance(t, "", environmentInput)
+	environmentOptions := withManifestProvenanceSelection(t, resolvedOptions(), environmentResolution, applicationgen.ConfigurationModeEnvironment, "production", "plystra.production.yaml", []byte("{}\n"))
+	environmentOutput, err := applicationgen.Render(environmentOptions, environmentResolution)
+	if err != nil {
+		t.Fatalf("Render(environment): %v", err)
+	}
+
+	explicitInput := selectedConfigurationProvenance(t, composition, generation.ConfigurationModeExplicit, "", "deploy/customer-a.yaml", []byte("{}\n"))
+	explicitResolution := resolvedApplicationWithConfigurationProvenance(t, "", explicitInput)
+	explicitOptions := withManifestProvenanceSelection(t, resolvedOptions(), explicitResolution, applicationgen.ConfigurationModeExplicit, "", "deploy/customer-a.yaml", []byte("{}\n"))
+	explicitOutput, err := applicationgen.Render(explicitOptions, explicitResolution)
+	if err != nil {
+		t.Fatalf("Render(explicit): %v", err)
+	}
+
+	defaultManifest := outputData(t, defaultOutput, aliasManifestPathForTest)
+	environmentManifest := outputData(t, environmentOutput, aliasManifestPathForTest)
+	explicitManifest := outputData(t, explicitOutput, aliasManifestPathForTest)
+	if bytes.Equal(defaultManifest, environmentManifest) || bytes.Equal(defaultManifest, explicitManifest) || bytes.Equal(environmentManifest, explicitManifest) {
+		t.Fatal("configuration selection did not produce generated-manifest drift")
+	}
+	for name, output := range map[string]generatedfiles.Output{"environment": environmentOutput, "explicit": explicitOutput} {
+		if !sameTransportOutput(defaultOutput, output) {
+			t.Fatalf("%s selection changed transport source for an equal effective build model", name)
+		}
+		for _, file := range output.Files() {
+			if !transportPath(file.Path()) {
+				continue
+			}
+			for _, forbidden := range []string{"production", "plystra.production.yaml", "deploy/customer-a.yaml", "PRIVATE_APPLICATION_TOKEN", "resolved-secret-value"} {
+				if bytes.Contains(file.Data(), []byte(forbidden)) {
+					t.Fatalf("%s contains selected configuration detail %q", file.Path(), forbidden)
+				}
+			}
+		}
+	}
+}
+
+const aliasManifestPathForTest = "generated/manifest.json"
+
 func resolvedOptions() applicationgen.Options {
 	return applicationgen.Options{
 		ModulePath:          applicationModulePath,
@@ -460,6 +537,10 @@ func emptyOptions(modulePath string) applicationgen.Options {
 }
 
 func withManifestProvenance(t testing.TB, options applicationgen.Options, resolution generationresolution.ExtensionResult) applicationgen.Options {
+	return withManifestProvenanceSelection(t, options, resolution, applicationgen.ConfigurationModeDefault, "", "plystra.yaml", []byte("{}\n"))
+}
+
+func withManifestProvenanceSelection(t testing.TB, options applicationgen.Options, resolution generationresolution.ExtensionResult, mode, environment, selectedPath string, selectedData []byte) applicationgen.Options {
 	t.Helper()
 	projection, err := applicationgen.ProtobufProjection(options.HTTPTransports, resolution)
 	if err != nil {
@@ -486,11 +567,12 @@ func withManifestProvenance(t testing.TB, options applicationgen.Options, resolu
 		t.Fatalf("ApplicationModelDigest: %v", err)
 	}
 	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
-		Mode:                   applicationgen.ConfigurationModeDefault,
+		Mode:                   mode,
+		Environment:            environment,
 		RootPath:               "plystra.yaml",
 		RootData:               []byte("{}\n"),
-		SelectedPath:           "plystra.yaml",
-		SelectedData:           []byte("{}\n"),
+		SelectedPath:           selectedPath,
+		SelectedData:           selectedData,
 		Composition:            options.Composition,
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: modelDigest,
@@ -500,6 +582,35 @@ func withManifestProvenance(t testing.TB, options applicationgen.Options, resolu
 	}
 	options.ManifestProvenance = provenance
 	return options
+}
+
+func defaultConfigurationProvenance(t testing.TB, composition applicationmeta.Composition) *generation.ConfigurationProvenanceInput {
+	return selectedConfigurationProvenance(t, composition, generation.ConfigurationModeDefault, "", "plystra.yaml", []byte("{}\n"))
+}
+
+func selectedConfigurationProvenance(t testing.TB, composition applicationmeta.Composition, mode generation.ConfigurationMode, environment, selectedPath string, selectedData []byte) *generation.ConfigurationProvenanceInput {
+	t.Helper()
+	rootDigest, err := applicationgen.ConfigurationDigest([]byte("{}\n"))
+	if err != nil {
+		t.Fatalf("ConfigurationDigest: %v", err)
+	}
+	selectedDigestFunction := applicationgen.ConfigurationDigest
+	if mode == generation.ConfigurationModeEnvironment {
+		selectedDigestFunction = applicationgen.EnvironmentOverlayDigest
+	}
+	selectedDigest, err := selectedDigestFunction(selectedData)
+	if err != nil {
+		t.Fatalf("selected ConfigurationDigest: %v", err)
+	}
+	return &generation.ConfigurationProvenanceInput{
+		Mode:                        mode,
+		Environment:                 environment,
+		RootPath:                    "plystra.yaml",
+		RootDigest:                  rootDigest,
+		SelectedPath:                selectedPath,
+		SelectedDigest:              selectedDigest,
+		DependencyCompositionDigest: composition.DependencyDigest(),
+	}
 }
 
 func applicationModelDigest(t testing.TB, options applicationgen.ApplicationModelOptions) (string, error) {
@@ -564,7 +675,8 @@ func emptyApplication(t testing.TB) generationresolution.ExtensionResult {
 		t.Fatalf("generationactivation.New: %v", err)
 	}
 	resolution, err := generationresolution.ResolveExtensions(t.Context(), generationresolution.ExtensionInput{
-		Input: generationresolution.Input{Activations: catalog},
+		Input:                   generationresolution.Input{Activations: catalog},
+		ConfigurationProvenance: defaultConfigurationProvenance(t, testComposition()),
 	})
 	if err != nil {
 		t.Fatalf("ResolveExtensions: %v", err)
@@ -586,6 +698,7 @@ errors: [invalid_recipient]
 		t.Fatalf("generationactivation.New: %v", err)
 	}
 	resolution, err := generationresolution.ResolveExtensions(t.Context(), generationresolution.ExtensionInput{
+		ConfigurationProvenance: defaultConfigurationProvenance(t, testComposition()),
 		Input: generationresolution.Input{
 			Candidates: []providerresolution.Candidate{{
 				PluginID: "acme.business",
@@ -614,16 +727,24 @@ errors: [invalid_recipient]
 }
 
 func resolvedApplication(t testing.TB, applicationYAML string) generationresolution.ExtensionResult {
+	return resolvedApplicationWithComposition(t, applicationYAML, testComposition())
+}
+
+func resolvedApplicationWithComposition(t testing.TB, applicationYAML string, composition applicationmeta.Composition) generationresolution.ExtensionResult {
+	return resolvedApplicationWithConfigurationProvenance(t, applicationYAML, defaultConfigurationProvenance(t, composition))
+}
+
+func resolvedApplicationWithConfigurationProvenance(t testing.TB, applicationYAML string, configurationProvenance *generation.ConfigurationProvenanceInput) generationresolution.ExtensionResult {
 	return resolvedApplicationWithEmail(t, applicationYAML, `id: email.send/v1
 request:
   to: {type: string, required: true}
 response:
   accepted: {type: boolean, required: true}
 errors: [invalid_recipient]
-`)
+`, configurationProvenance)
 }
 
-func resolvedApplicationWithEmail(t testing.TB, applicationYAML, emailSource string) generationresolution.ExtensionResult {
+func resolvedApplicationWithEmail(t testing.TB, applicationYAML, emailSource string, configurationProvenance *generation.ConfigurationProvenanceInput) generationresolution.ExtensionResult {
 	t.Helper()
 	email := normalizedContract(t, emailSource)
 	health := normalizedContract(t, `id: kernel.health/v1
@@ -649,6 +770,7 @@ errors: []
 		t.Fatalf("generationactivation.New: %v", err)
 	}
 	resolution, err := generationresolution.ResolveExtensions(t.Context(), generationresolution.ExtensionInput{
+		ConfigurationProvenance: configurationProvenance,
 		Input: generationresolution.Input{
 			Requirements: []providerresolution.Requirement{
 				{Contract: email, Source: "application client email.send/v1"},
@@ -730,4 +852,35 @@ func sameOutput(left, right generatedfiles.Output) bool {
 		}
 	}
 	return true
+}
+
+func sameTransportOutput(left, right generatedfiles.Output) bool {
+	leftFiles := make(map[string][]byte)
+	for _, file := range left.Files() {
+		if transportPath(file.Path()) {
+			leftFiles[file.Path()] = file.Data()
+		}
+	}
+	rightFiles := make(map[string][]byte)
+	for _, file := range right.Files() {
+		if transportPath(file.Path()) {
+			rightFiles[file.Path()] = file.Data()
+		}
+	}
+	if len(leftFiles) != len(rightFiles) {
+		return false
+	}
+	for filePath, leftData := range leftFiles {
+		if !bytes.Equal(leftData, rightFiles[filePath]) {
+			return false
+		}
+	}
+	return true
+}
+
+func transportPath(filePath string) bool {
+	return strings.HasPrefix(filePath, "generated/go/adapters/connect/") ||
+		strings.HasPrefix(filePath, "generated/go/adapters/http/") ||
+		strings.HasPrefix(filePath, "generated/sdk/javascript/") ||
+		strings.HasPrefix(filePath, "generated/docs/")
 }

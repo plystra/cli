@@ -42,7 +42,7 @@ func TestRenderPlanRunsOrderedHTTPContributions(t *testing.T) {
 	if !plan.RequiresHTTPPath(target.ID()) {
 		t.Fatal("HTTP contribution plan did not report its external path")
 	}
-	adapter, err := httpgen.RenderPlan(testModulePath, target, plan)
+	adapter, err := httpgen.RenderPlan(testModulePath, target, plan, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil {
 		t.Fatalf("RenderPlan(adapter): %v", err)
 	}
@@ -56,7 +56,7 @@ func TestRenderPlanRunsOrderedHTTPContributions(t *testing.T) {
 		digest:     target.ContractDigest(),
 		exposure:   generation.Exposure{HTTP: true},
 		deprecated: "Use email.send/v1 instead.",
-	}, target)
+	}, target, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil {
 		t.Fatalf("RenderAlias: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestRenderPlanRunsOrderedHTTPContributions(t *testing.T) {
 	}
 	assertGeneratedHTTPPlanRuns(t, adapter, alias, invocation)
 
-	repeated, err := httpgen.RenderPlan(testModulePath, target, plan)
+	repeated, err := httpgen.RenderPlan(testModulePath, target, plan, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil || !bytes.Equal(repeated.Data(), adapter.Data()) {
 		t.Fatalf("repeated RenderPlan = %#v, %v", repeated, err)
 	}
@@ -95,11 +95,11 @@ func TestRenderPlanValidatesPairingAndPreservesBaseOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Lower(empty): %v", err)
 	}
-	base, err := httpgen.Render(testModulePath, target)
+	base, err := httpgen.Render(testModulePath, target, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	planned, err := httpgen.RenderPlan(testModulePath, target, empty)
+	planned, err := httpgen.RenderPlan(testModulePath, target, empty, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil || !bytes.Equal(planned.Data(), base.Data()) {
 		t.Fatalf("empty RenderPlan differs from Render: %v\n%s", err, planned.Data())
 	}
@@ -108,7 +108,7 @@ func TestRenderPlanValidatesPairingAndPreservesBaseOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Lower(other): %v", err)
 	}
-	file, err := httpgen.RenderPlan(testModulePath, target, other)
+	file, err := httpgen.RenderPlan(testModulePath, target, other, httpConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if !errors.Is(err, httpgen.ErrRender) || !errors.Is(err, httpgen.ErrPlan) || !strings.Contains(err.Error(), "example.com/other") || file.Data() != nil {
 		t.Fatalf("RenderPlan(module drift) = %#v, %v", file, err)
 	}

@@ -22,6 +22,7 @@ import (
 	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/goname"
 	"github.com/plystra/cli/internal/modulepath"
+	"github.com/plystra/cli/internal/transportprovenance"
 )
 
 const maximumBodyBytes = 1 << 20
@@ -95,20 +96,23 @@ type preparedField struct {
 
 // Render validates one final canonical target view and emits its strict HTTP
 // transport. The caller cannot use this entry point for an internal-only target.
-func Render(modulePath string, target CanonicalTargetView) (File, error) {
-	return render(modulePath, target, nil)
+func Render(modulePath string, target CanonicalTargetView, configurationProvenance transportprovenance.Provenance) (File, error) {
+	return render(modulePath, target, nil, configurationProvenance)
 }
 
 // RenderPlan emits the HTTP adapter paired with a lowered canonical invocation
 // plan, including its ordered ingress and egress integration path when needed.
-func RenderPlan(modulePath string, target CanonicalTargetView, plan generationlowering.Plan) (File, error) {
-	return render(modulePath, target, &plan)
+func RenderPlan(modulePath string, target CanonicalTargetView, plan generationlowering.Plan, configurationProvenance transportprovenance.Provenance) (File, error) {
+	return render(modulePath, target, &plan, configurationProvenance)
 }
 
 // RenderAlias emits one thin application-local route wrapper around the
 // canonical generated HTTP handler. It never owns transport validation,
 // application invocation, a provider, or a Kernel registration.
-func RenderAlias(modulePath string, alias AliasView, target CanonicalTargetView) (File, error) {
+func RenderAlias(modulePath string, alias AliasView, target CanonicalTargetView, configurationProvenance transportprovenance.Provenance) (File, error) {
+	if !configurationProvenance.Valid() {
+		return File{}, fmt.Errorf("%w: selected configuration provenance is absent or invalid", ErrRender)
+	}
 	if err := modulepath.CheckProject(modulePath); err != nil {
 		return File{}, fmt.Errorf("%w: invalid Go Module path %q: %v", ErrRender, modulePath, err)
 	}
@@ -206,7 +210,10 @@ func RenderAlias(modulePath string, alias AliasView, target CanonicalTargetView)
 	}, nil
 }
 
-func render(modulePath string, target CanonicalTargetView, plan *generationlowering.Plan) (File, error) {
+func render(modulePath string, target CanonicalTargetView, plan *generationlowering.Plan, configurationProvenance transportprovenance.Provenance) (File, error) {
+	if !configurationProvenance.Valid() {
+		return File{}, fmt.Errorf("%w: selected configuration provenance is absent or invalid", ErrRender)
+	}
 	if err := modulepath.CheckProject(modulePath); err != nil {
 		return File{}, fmt.Errorf("%w: invalid Go Module path %q: %v", ErrRender, modulePath, err)
 	}

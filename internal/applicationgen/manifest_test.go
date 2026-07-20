@@ -413,7 +413,7 @@ request:
 response:
   accepted: {type: boolean, required: true}
 errors: [invalid_recipient]
-`)
+`, defaultConfigurationProvenance(t, testComposition()))
 	historicalProjection, err := applicationgen.ProtobufProjection(options.HTTPTransports, historicalResolution)
 	if err != nil {
 		t.Fatalf("ProtobufProjection(historical): %v", err)
@@ -449,7 +449,7 @@ request:
 response:
   accepted: {type: boolean, required: true}
 errors: [invalid_recipient]
-`)
+`, defaultConfigurationProvenance(t, testComposition()))
 	options := applicationgen.ApplicationModelOptions{
 		ModulePath:          applicationModulePath,
 		JavaScriptPackage:   applicationSDKPackage,
@@ -480,7 +480,7 @@ request:
 response:
   accepted: {type: boolean, required: true}
 errors: [invalid_recipient]
-`)
+`, defaultConfigurationProvenance(t, testComposition()))
 	historicalProjection, err := applicationgen.ProtobufProjection(options.HTTPTransports, historicalResolution)
 	if err != nil {
 		t.Fatalf("ProtobufProjection(historical): %v", err)
@@ -524,7 +524,7 @@ request:
 response:
   accepted: {type: boolean, required: true}
 errors: [invalid_recipient]
-`)
+`, defaultConfigurationProvenance(t, testComposition()))
 	first, err := applicationModelDigest(t, options)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(first contract): %v", err)
@@ -536,7 +536,7 @@ request:
   priority: {type: integer}
   to: {required: true, type: string}
 id: email.send/v1
-`)
+`, defaultConfigurationProvenance(t, testComposition()))
 	reordered, err := applicationModelDigest(t, options)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(reordered contract): %v", err)
@@ -551,7 +551,7 @@ request:
 response:
   accepted: {type: boolean, required: true}
 errors: [invalid_recipient]
-`)
+`, defaultConfigurationProvenance(t, testComposition()))
 	changed, err := applicationModelDigest(t, options)
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(changed contract): %v", err)
