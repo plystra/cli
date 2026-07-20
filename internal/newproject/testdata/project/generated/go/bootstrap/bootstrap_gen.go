@@ -30,6 +30,9 @@ import (
 const (
 	defaultRuntimeDocument = "plystra.yaml"
 	defaultStartupTimeout  = time.Duration(120000000000)
+	// compiledConfigurationSelectionProvenanceJSON records the normalized non-secret build selection.
+	compiledConfigurationSelectionProvenanceJSON   = "{\"version\":1,\"mode\":\"default\",\"root_path\":\"plystra.yaml\",\"root_digest\":\"sha256:b183097574f85f18bbbda8533504fbb59077ced4a3560a599dfc1272525f593c\",\"selected_path\":\"plystra.yaml\",\"selected_digest\":\"sha256:b183097574f85f18bbbda8533504fbb59077ced4a3560a599dfc1272525f593c\",\"dependency_composition_digest\":\"sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130\",\"application_model_digest\":\"sha256:a2534bf40615ba4d3c3961984fd7675b6c01e8224fdd238f5a5cae880f619a35\"}"
+	compiledConfigurationSelectionProvenanceDigest = "sha256:6ab76bfb33dd8c0ad98dbf5d53c7066517d3fc41df15de2f5d9da2740be822c1"
 )
 
 var (

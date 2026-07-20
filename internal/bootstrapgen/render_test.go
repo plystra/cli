@@ -5,10 +5,14 @@ import (
 	"errors"
 	"go/parser"
 	"go/token"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/bootstrapgen"
+	"github.com/plystra/cli/internal/transportprovenance"
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 )
 
@@ -25,8 +29,9 @@ token: {type: secret}
 		t.Fatalf("ParseConfig: %v", err)
 	}
 	options := bootstrapgen.Options{
-		ModulePath:            "example.com/acme/application",
-		DefaultStartupTimeout: 2 * time.Minute,
+		ModulePath:              "example.com/acme/application",
+		DefaultStartupTimeout:   2 * time.Minute,
+		ConfigurationProvenance: bootstrapConfigurationProvenance(t, generation.ConfigurationModeDefault),
 		ConfigurationSchemas: []bootstrapgen.ConfigurationSchema{
 			{PluginID: "acme.records", Schema: configurationSchema},
 			{PluginID: "acme.audit", Schema: kernelmanifest.Config{}},
@@ -42,6 +47,9 @@ token: {type: secret}
 	for _, required := range []string{
 		`applicationassembly "example.com/acme/application/generated/go/assembly"`,
 		`defaultRuntimeDocument = "plystra.yaml"`,
+		"compiledConfigurationSelectionProvenanceJSON",
+		strconv.Quote(string(options.ConfigurationProvenance.CanonicalJSON())),
+		`compiledConfigurationSelectionProvenanceDigest = "` + options.ConfigurationProvenance.Digest() + `"`,
 		"func New(ctx context.Context, options RuntimeOptions)",
 		"func loadRuntimeDocument(options RuntimeOptions)",
 		`runtimeEnvironmentVariable   = "PLYSTRA_ENV"`,
@@ -95,19 +103,98 @@ token: {type: secret}
 	}
 }
 
+func TestRenderRecordsEveryConfigurationSelectionProvenance(t *testing.T) {
+	t.Parallel()
+
+	generatedByMode := make(map[generation.ConfigurationMode][]byte)
+	for _, mode := range []generation.ConfigurationMode{
+		generation.ConfigurationModeDefault,
+		generation.ConfigurationModeEnvironment,
+		generation.ConfigurationModeExplicit,
+	} {
+		provenance := bootstrapConfigurationProvenance(t, mode)
+		options := bootstrapgen.Options{
+			ModulePath:              "example.com/acme/application",
+			DefaultStartupTimeout:   time.Minute,
+			ConfigurationProvenance: provenance,
+		}
+		generated, err := bootstrapgen.Render(options)
+		if err != nil {
+			t.Fatalf("Render(%s): %v", mode, err)
+		}
+		if !bytes.Contains(generated, []byte(strconv.Quote(string(provenance.CanonicalJSON())))) || !bytes.Contains(generated, []byte(strconv.Quote(provenance.Digest()))) {
+			t.Fatalf("generated %s bootstrap omits exact canonical provenance:\n%s", mode, generated)
+		}
+		for _, forbidden := range []string{
+			`C:\\Users\\private\\project`,
+			"PRIVATE_SECRET_TARGET",
+			"resolved-secret-value",
+			"runtime-environment-content",
+			"password: super-secret",
+		} {
+			if bytes.Contains(generated, []byte(forbidden)) {
+				t.Fatalf("generated %s bootstrap contains forbidden configuration detail %q", mode, forbidden)
+			}
+		}
+		repeated, err := bootstrapgen.Render(options)
+		if err != nil || !bytes.Equal(generated, repeated) {
+			t.Fatalf("repeated Render(%s) differs: %v", mode, err)
+		}
+		generatedByMode[mode] = generated
+	}
+	if bytes.Equal(generatedByMode[generation.ConfigurationModeDefault], generatedByMode[generation.ConfigurationModeEnvironment]) ||
+		bytes.Equal(generatedByMode[generation.ConfigurationModeDefault], generatedByMode[generation.ConfigurationModeExplicit]) ||
+		bytes.Equal(generatedByMode[generation.ConfigurationModeEnvironment], generatedByMode[generation.ConfigurationModeExplicit]) {
+		t.Fatal("distinct configuration selections produced identical bootstrap provenance")
+	}
+}
+
 func TestRenderRejectsInvalidOptions(t *testing.T) {
 	t.Parallel()
 
+	validProvenance := bootstrapConfigurationProvenance(t, generation.ConfigurationModeDefault)
 	for _, options := range []bootstrapgen.Options{
-		{ModulePath: "not a module", DefaultStartupTimeout: 2 * time.Minute},
-		{ModulePath: "example.com/acme/application"},
-		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: -time.Second},
-		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: time.Second, ConfigurationSchemas: []bootstrapgen.ConfigurationSchema{{PluginID: "not a Plugin"}}},
-		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: time.Second, ConfigurationSchemas: []bootstrapgen.ConfigurationSchema{{PluginID: "acme.mail"}, {PluginID: "acme.mail"}}},
+		{ModulePath: "not a module", DefaultStartupTimeout: 2 * time.Minute, ConfigurationProvenance: validProvenance},
+		{ModulePath: "example.com/acme/application", ConfigurationProvenance: validProvenance},
+		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: -time.Second, ConfigurationProvenance: validProvenance},
+		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: time.Second},
+		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: time.Second, ConfigurationProvenance: validProvenance, ConfigurationSchemas: []bootstrapgen.ConfigurationSchema{{PluginID: "not a Plugin"}}},
+		{ModulePath: "example.com/acme/application", DefaultStartupTimeout: time.Second, ConfigurationProvenance: validProvenance, ConfigurationSchemas: []bootstrapgen.ConfigurationSchema{{PluginID: "acme.mail"}, {PluginID: "acme.mail"}}},
 	} {
 		generated, err := bootstrapgen.Render(options)
 		if generated != nil || !errors.Is(err, bootstrapgen.ErrRender) || !errors.Is(err, bootstrapgen.ErrInvalidOptions) {
 			t.Fatalf("Render(%#v) = %q, %v", options, generated, err)
 		}
 	}
+}
+
+func bootstrapConfigurationProvenance(t testing.TB, mode generation.ConfigurationMode) transportprovenance.Provenance {
+	t.Helper()
+	input := transportprovenance.Input{
+		Mode:                        mode,
+		RootPath:                    "plystra.yaml",
+		RootDigest:                  bootstrapDigest("1"),
+		SelectedPath:                "plystra.yaml",
+		SelectedDigest:              bootstrapDigest("1"),
+		DependencyCompositionDigest: bootstrapDigest("2"),
+		ApplicationModelDigest:      bootstrapDigest("3"),
+	}
+	switch mode {
+	case generation.ConfigurationModeEnvironment:
+		input.Environment = "production"
+		input.SelectedPath = "plystra.production.yaml"
+		input.SelectedDigest = bootstrapDigest("4")
+	case generation.ConfigurationModeExplicit:
+		input.SelectedPath = "deploy/customer-a.yaml"
+		input.SelectedDigest = bootstrapDigest("5")
+	}
+	provenance, err := transportprovenance.New(input)
+	if err != nil {
+		t.Fatalf("transportprovenance.New(%s): %v", mode, err)
+	}
+	return provenance
+}
+
+func bootstrapDigest(character string) string {
+	return "sha256:" + strings.Repeat(character, 64)
 }

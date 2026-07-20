@@ -232,9 +232,10 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		}
 	}
 	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
-		ModulePath:            options.ModulePath,
-		DefaultStartupTimeout: applicationmeta.DefaultStartupTimeout,
-		ConfigurationSchemas:  runtimeConfigurationSchemas,
+		ModulePath:              options.ModulePath,
+		DefaultStartupTimeout:   applicationmeta.DefaultStartupTimeout,
+		ConfigurationSchemas:    runtimeConfigurationSchemas,
+		ConfigurationProvenance: transportProvenance,
 	})
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: runtime bootstrap: %w", ErrRender, err)

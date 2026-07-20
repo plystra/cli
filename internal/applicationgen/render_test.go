@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
+	"github.com/plystra/cli/internal/transportprovenance"
 	"github.com/plystra/kernel/plugin/manifest"
 )
 
@@ -50,6 +52,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
+	assertBootstrapMatchesManifestProvenance(t, output, options)
 	wantPaths := []string{
 		"generated/docs/api.md",
 		"generated/docs/openapi.json",
@@ -488,12 +491,21 @@ func TestRenderSelectionDriftsManifestButKeepsEqualModelTransportSourceStable(t 
 	if err != nil {
 		t.Fatalf("Render(explicit): %v", err)
 	}
+	assertBootstrapMatchesManifestProvenance(t, defaultOutput, defaultOptions)
+	assertBootstrapMatchesManifestProvenance(t, environmentOutput, environmentOptions)
+	assertBootstrapMatchesManifestProvenance(t, explicitOutput, explicitOptions)
 
 	defaultManifest := outputData(t, defaultOutput, aliasManifestPathForTest)
 	environmentManifest := outputData(t, environmentOutput, aliasManifestPathForTest)
 	explicitManifest := outputData(t, explicitOutput, aliasManifestPathForTest)
 	if bytes.Equal(defaultManifest, environmentManifest) || bytes.Equal(defaultManifest, explicitManifest) || bytes.Equal(environmentManifest, explicitManifest) {
 		t.Fatal("configuration selection did not produce generated-manifest drift")
+	}
+	defaultBootstrap := outputData(t, defaultOutput, "generated/go/bootstrap/bootstrap_gen.go")
+	environmentBootstrap := outputData(t, environmentOutput, "generated/go/bootstrap/bootstrap_gen.go")
+	explicitBootstrap := outputData(t, explicitOutput, "generated/go/bootstrap/bootstrap_gen.go")
+	if bytes.Equal(defaultBootstrap, environmentBootstrap) || bytes.Equal(defaultBootstrap, explicitBootstrap) || bytes.Equal(environmentBootstrap, explicitBootstrap) {
+		t.Fatal("configuration selection did not produce generated-bootstrap provenance drift")
 	}
 	for name, output := range map[string]generatedfiles.Output{"environment": environmentOutput, "explicit": explicitOutput} {
 		if !sameTransportOutput(defaultOutput, output) {
@@ -610,6 +622,33 @@ func selectedConfigurationProvenance(t testing.TB, composition applicationmeta.C
 		SelectedPath:                selectedPath,
 		SelectedDigest:              selectedDigest,
 		DependencyCompositionDigest: composition.DependencyDigest(),
+	}
+}
+
+func assertBootstrapMatchesManifestProvenance(t testing.TB, output generatedfiles.Output, options applicationgen.Options) {
+	t.Helper()
+	manifest := options.ManifestProvenance
+	provenance, err := transportprovenance.New(transportprovenance.Input{
+		Mode:                        generation.ConfigurationMode(manifest.Mode()),
+		Environment:                 manifest.Environment(),
+		RootPath:                    manifest.RootPath(),
+		RootDigest:                  manifest.RootDigest(),
+		SelectedPath:                manifest.SelectedPath(),
+		SelectedDigest:              manifest.SelectedDigest(),
+		DependencyCompositionDigest: options.Composition.DependencyDigest(),
+		ApplicationModelDigest:      manifest.ApplicationModelDigest(),
+	})
+	if err != nil {
+		t.Fatalf("transportprovenance.New from manifest: %v", err)
+	}
+	bootstrap := outputData(t, output, "generated/go/bootstrap/bootstrap_gen.go")
+	for _, required := range []string{
+		strconv.Quote(string(provenance.CanonicalJSON())),
+		strconv.Quote(provenance.Digest()),
+	} {
+		if !bytes.Contains(bootstrap, []byte(required)) {
+			t.Fatalf("generated bootstrap disagrees with manifest provenance %q:\n%s", required, bootstrap)
+		}
 	}
 }
 

@@ -1102,9 +1102,14 @@ regular file inside the runtime Project directory. Unsafe selectors, missing
 files, unknown fields, invalid typed values, and YAML anchors or aliases fail
 before Provider construction; unselected overlays and replacement files are
 not read. Generate, check, and start with the same selector. Compiled
-application-model compatibility enforcement remains deferred Gate 10 work, so
-selecting a runtime document with a different build-affecting model is not yet
-supported.
+selection provenance is visible in
+`generated/go/bootstrap/bootstrap_gen.go` as canonical non-secret JSON and its
+digest. It records the mode, selected environment when applicable, stable
+Project-relative document paths, normalized document and dependency-composition
+digests, and final application-model digest; it contains no YAML values or
+Secret-reference targets. Runtime compatibility enforcement against that model
+digest remains deferred Gate 10 work, so selecting a runtime document with a
+different build-affecting model is not yet supported.
 
 Validate the generated Connect handler directly with `httptest` until server
 mounting lands in the later transport gate. Exercise both binary Protobuf and
@@ -1245,12 +1250,15 @@ Application generation also converts that same bounded identity into one
 internal transport-provenance value. It must agree with the selected
 configuration record in `generated/manifest.json`, the typed dependency
 composition digest, and the final build-affecting application-model digest
-before Connect, REST/JSON, JavaScript, or API-document rendering can start.
-Transport renderers receive no YAML values or Secret targets and do not embed
-selector-only paths or document digests in their source. Changing from the
-default file to an environment overlay or full replacement therefore changes
-manifest provenance, while equal effective build models retain byte-identical
-transport output.
+before bootstrap, Connect, REST/JSON, JavaScript, or API-document rendering can
+start. Bootstrap embeds the exact canonical non-secret provenance JSON plus its
+digest in `compiledConfigurationSelectionProvenanceJSON` and
+`compiledConfigurationSelectionProvenanceDigest`; do not edit those generated
+constants. Transport renderers receive no YAML values or Secret targets and do
+not embed selector-only paths or document digests in their source. Changing
+from the default file to an environment overlay or full replacement therefore
+changes manifest and bootstrap provenance, while equal effective build models
+retain byte-identical transport output.
 
 Output is limited to exact generated requirements, structured diagnostics,
 typed contributions at `http.ingress`, `invocation.prepare`,

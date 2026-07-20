@@ -63,7 +63,7 @@ Template creation then builds every staged Go package with ` + "`go build -mod=r
 
 Root ` + "`plystra.yaml`" + ` is the mandatory Project marker and shared default configuration. A sparse project-root ` + "`plystra.production.yaml`" + ` can be selected with ` + "`plystra generate --env production`" + ` and checked with the same selector; it is never created or loaded implicitly. To use one complete alternative current-Project document, run ` + "`plystra generate --config deploy/customer-a.yaml`" + `. Root configuration is not merged beneath an explicitly selected file. ` + "`PLYSTRA_ENV`" + ` and ` + "`PLYSTRA_CONFIG`" + ` supply the corresponding selector for automation; select exactly one mode.
 
-Start the generated application with the same selector used for generation: ` + "`go run ./generated/go/application --env production`" + ` selects one sparse overlay, while ` + "`go run ./generated/go/application --config deploy/customer-a.yaml`" + ` selects one complete replacement. Generated startup uses root ` + "`plystra.yaml`" + ` when no selector is present and accepts ` + "`PLYSTRA_ENV`" + ` or ` + "`PLYSTRA_CONFIG`" + ` when the corresponding flag is omitted. An explicit selector overrides both ambient variables, and the two modes cannot be combined. Replacement mode still requires a regular root Project marker but does not parse or merge its configuration. The selected replacement must be an existing nonsymbolic regular file inside the runtime Project directory. Unsafe or missing selections and invalid typed changes fail before Provider construction, and unselected files are ignored. Generate and start with the same build-affecting selection; switching that selection only at startup is not yet supported.
+Start the generated application with the same selector used for generation: ` + "`go run ./generated/go/application --env production`" + ` selects one sparse overlay, while ` + "`go run ./generated/go/application --config deploy/customer-a.yaml`" + ` selects one complete replacement. Generated startup uses root ` + "`plystra.yaml`" + ` when no selector is present and accepts ` + "`PLYSTRA_ENV`" + ` or ` + "`PLYSTRA_CONFIG`" + ` when the corresponding flag is omitted. An explicit selector overrides both ambient variables, and the two modes cannot be combined. Replacement mode still requires a regular root Project marker but does not parse or merge its configuration. The selected replacement must be an existing nonsymbolic regular file inside the runtime Project directory. Unsafe or missing selections and invalid typed changes fail before Provider construction, and unselected files are ignored. Generated bootstrap records the matching mode, selected environment, stable relative paths, normalized document and dependency-composition digests, and final application-model digest as canonical non-secret provenance; it never embeds YAML values or Secret-reference targets. Generate and start with the same build-affecting selection; runtime comparison against that compiled model remains later work, so switching the selection only at startup is not yet supported.
 
 New Projects record ` + "`http.transports.connect: true`" + ` and ` + "`http.transports.rest: false`" + ` explicitly in root configuration. Keep those current-Project transport choices explicit when changing them. A nonempty public exposure requires at least one enabled transport, and JavaScript SDK generation requires Connect. If a selected default, environment, or full-replacement model has JavaScript Capability or Alias surfaces with Connect disabled, generation fails and identifies every affected surface; enable Connect in that selected current-Project configuration or remove those surfaces.
 
@@ -232,8 +232,13 @@ ambient variables, and the two modes cannot be combined. An overlay or
 replacement must exist and pass typed validation before application
 construction; unselected documents are not read. Replacement mode keeps root
 plystra.yaml as the mandatory Project marker but does not merge it beneath the
-selected file. Generate and start with the same build-affecting selection;
-switching that selection only at startup is not yet supported.
+selected file. Generated bootstrap records the matching selection mode,
+selected environment when applicable, stable relative paths, normalized
+document and dependency-composition digests, and final application-model digest
+as non-secret provenance. It never embeds YAML values or Secret-reference
+targets. Generate and start with the same build-affecting selection; runtime
+comparison against that compiled model remains later work, so switching that
+selection only at startup is not yet supported.
 
 ## Detailed task reference
 

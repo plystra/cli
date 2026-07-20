@@ -95,8 +95,13 @@ ambient variables, and the two modes cannot be combined. An overlay or
 replacement must exist and pass typed validation before application
 construction; unselected documents are not read. Replacement mode keeps root
 plystra.yaml as the mandatory Project marker but does not merge it beneath the
-selected file. Generate and start with the same build-affecting selection;
-switching that selection only at startup is not yet supported.
+selected file. Generated bootstrap records the matching selection mode,
+selected environment when applicable, stable relative paths, normalized
+document and dependency-composition digests, and final application-model digest
+as non-secret provenance. It never embeds YAML values or Secret-reference
+targets. Generate and start with the same build-affecting selection; runtime
+comparison against that compiled model remains later work, so switching that
+selection only at startup is not yet supported.
 
 ## Detailed task reference
 

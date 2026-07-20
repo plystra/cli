@@ -15,10 +15,12 @@ import (
 	"testing"
 	"time"
 
+	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/configurationgen"
+	"github.com/plystra/cli/internal/transportprovenance"
 	"github.com/plystra/kernel/plugin/manifest"
 )
 
@@ -207,8 +209,9 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 		t.Fatalf("RenderCompatibility: %v", err)
 	}
 	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
-		ModulePath:            "example.com/assemblyapp",
-		DefaultStartupTimeout: applicationmeta.DefaultStartupTimeout,
+		ModulePath:              "example.com/assemblyapp",
+		DefaultStartupTimeout:   applicationmeta.DefaultStartupTimeout,
+		ConfigurationProvenance: assemblyBootstrapProvenance(t),
 		ConfigurationSchemas: []bootstrapgen.ConfigurationSchema{
 			{PluginID: "zeta.remote-store", Schema: remoteSchema},
 			{PluginID: "acme.local-service", Schema: localSchema},
@@ -277,8 +280,9 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("RenderCompatibility: %v", err)
 	}
 	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
-		ModulePath:            "example.com/emptyapp",
-		DefaultStartupTimeout: applicationmeta.DefaultStartupTimeout,
+		ModulePath:              "example.com/emptyapp",
+		DefaultStartupTimeout:   applicationmeta.DefaultStartupTimeout,
+		ConfigurationProvenance: assemblyBootstrapProvenance(t),
 	})
 	if err != nil {
 		t.Fatalf("Render bootstrap: %v", err)
@@ -316,6 +320,23 @@ func parseConfig(t testing.TB, source string) manifest.Config {
 		t.Fatalf("manifest.ParseConfig: %v\n%s", err, source)
 	}
 	return schema
+}
+
+func assemblyBootstrapProvenance(t testing.TB) transportprovenance.Provenance {
+	t.Helper()
+	provenance, err := transportprovenance.New(transportprovenance.Input{
+		Mode:                        generation.ConfigurationModeDefault,
+		RootPath:                    "plystra.yaml",
+		RootDigest:                  "sha256:" + strings.Repeat("1", 64),
+		SelectedPath:                "plystra.yaml",
+		SelectedDigest:              "sha256:" + strings.Repeat("1", 64),
+		DependencyCompositionDigest: "sha256:" + strings.Repeat("2", 64),
+		ApplicationModelDigest:      "sha256:" + strings.Repeat("3", 64),
+	})
+	if err != nil {
+		t.Fatalf("transportprovenance.New: %v", err)
+	}
+	return provenance
 }
 
 func writeFile(t testing.TB, name, data string) {

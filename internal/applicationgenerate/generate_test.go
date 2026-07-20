@@ -1391,12 +1391,23 @@ func TestGenerateApplicationModelDigestExcludesRuntimeValuesAndMachinePaths(t *t
 		t.Fatalf("updated Generate = changes %#v, %v", updated.Report().Changes(), err)
 	}
 	manifestData := readFile(t, root, "generated/manifest.json")
+	bootstrapData := readFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
 	updatedProvenance, err := applicationgen.DecodeManifestProvenance(manifestData)
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance(updated): %v", err)
 	}
 	if updatedProvenance.ApplicationModelDigest() != initialProvenance.ApplicationModelDigest() {
 		t.Fatalf("runtime-only values changed application_model_digest: %q != %q", updatedProvenance.ApplicationModelDigest(), initialProvenance.ApplicationModelDigest())
+	}
+	for _, required := range []string{
+		"compiledConfigurationSelectionProvenanceJSON",
+		"compiledConfigurationSelectionProvenanceDigest",
+		updatedProvenance.RootDigest(),
+		updatedProvenance.ApplicationModelDigest(),
+	} {
+		if !bytes.Contains(bootstrapData, []byte(required)) {
+			t.Fatalf("generated bootstrap omits non-secret configuration provenance %q", required)
+		}
 	}
 	for _, forbidden := range []string{
 		root,
@@ -1407,8 +1418,8 @@ func TestGenerateApplicationModelDigestExcludesRuntimeValuesAndMachinePaths(t *t
 		"resolved-super-secret-one",
 		"resolved-super-secret-two",
 	} {
-		if bytes.Contains(manifestData, []byte(forbidden)) {
-			t.Fatalf("generated manifest leaked %q: %s", forbidden, manifestData)
+		if bytes.Contains(manifestData, []byte(forbidden)) || bytes.Contains(bootstrapData, []byte(forbidden)) {
+			t.Fatalf("generated provenance leaked %q", forbidden)
 		}
 	}
 }
