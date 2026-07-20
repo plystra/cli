@@ -27,6 +27,17 @@ response:
   message_id: {type: string, required: true}
   status: {type: string, enum: [queued, sent], required: true}
 errors: [invalid_recipient, authentication_failed, temporarily_unavailable]
+` + querySemanticsYAML
+
+const querySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
 `
 
 func TestRenderGoldenContract(t *testing.T) {
@@ -58,7 +69,7 @@ func TestRenderGoldenContract(t *testing.T) {
 func TestRenderSupportsEveryWireTypeAndPresence(t *testing.T) {
 	t.Parallel()
 
-	file, err := contractgen.Render([]byte(`id: example.types/v2
+	file, err := contractgen.Render([]byte(withQuerySemantics(`id: example.types/v2
 request:
   active: {type: boolean}
   count: {type: integer, required: true}
@@ -67,7 +78,7 @@ request:
   objects: {type: array, items: object, required: true}
   ratio: {type: number}
 response: {}
-`))
+`)))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -93,7 +104,7 @@ response: {}
 func TestRenderDerivesHierarchicalCapabilityPath(t *testing.T) {
 	t.Parallel()
 
-	file, err := contractgen.Render([]byte("id: authn.login.oidc.complete/v1\n"))
+	file, err := contractgen.Render([]byte(withQuerySemantics("id: authn.login.oidc.complete/v1\n")))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -133,7 +144,7 @@ func TestRenderIntrinsicAliasesAuthoritativeKernelTypes(t *testing.T) {
 		}
 	}
 
-	tampered := []byte("id: kernel.health/v1\nrequest: {}\nresponse:\n  status: {type: string, enum: [healthy, unknown], required: true}\nerrors: []\n")
+	tampered := []byte(withQuerySemantics("id: kernel.health/v1\nrequest: {}\nresponse:\n  status: {type: string, enum: [healthy, unknown], required: true}\nerrors: []\n"))
 	if file, err := contractgen.RenderIntrinsic(tampered); !errors.Is(err, contractgen.ErrRender) || file.Data() != nil || !strings.Contains(err.Error(), "differs from the Kernel catalog") {
 		t.Fatalf("RenderIntrinsic(tampered) = %#v, %v", file, err)
 	}
@@ -145,7 +156,7 @@ func TestRenderIntrinsicAliasesAuthoritativeKernelTypes(t *testing.T) {
 func TestRenderDisambiguatesEnumValueNames(t *testing.T) {
 	t.Parallel()
 
-	file, err := contractgen.Render([]byte("id: example.state/v1\nrequest:\n  status: {type: string, enum: [foo-bar, foo_bar, value2]}\n"))
+	file, err := contractgen.Render([]byte(withQuerySemantics("id: example.state/v1\nrequest:\n  status: {type: string, enum: [foo-bar, foo_bar, value2]}\n")))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -169,7 +180,7 @@ func TestRenderIgnoresNonSemanticSourceDifferences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render(first): %v", err)
 	}
-	second, err := contractgen.Render([]byte("errors: [temporarily_unavailable, authentication_failed, invalid_recipient]\r\nresponse: {status: {required: true, enum: [sent, queued], type: string}, message_id: {required: true, type: string}}\r\nrequest: {html: {type: string}, text: {type: string}, subject: {required: true, type: string}, to: {required: true, items: string, type: array}}\r\ndescription: Different words.\r\nid: email.send/v1\r\n"))
+	second, err := contractgen.Render([]byte(withQuerySemantics("errors: [temporarily_unavailable, authentication_failed, invalid_recipient]\r\nresponse: {status: {required: true, enum: [sent, queued], type: string}, message_id: {required: true, type: string}}\r\nrequest: {html: {type: string}, text: {type: string}, subject: {required: true, type: string}, to: {required: true, items: string, type: array}}\r\ndescription: Different words.\r\nid: email.send/v1\r\n")))
 	if err != nil || first.Path() != second.Path() || !bytes.Equal(first.Data(), second.Data()) {
 		t.Fatalf("non-semantic rendering differs: %v\nfirst:\n%s\nsecond:\n%s", err, first.Data(), second.Data())
 	}
@@ -184,8 +195,8 @@ func TestRenderRejectsInvalidSchemaAndGoNameCollisions(t *testing.T) {
 		also  error
 	}{
 		{name: "invalid schema", input: "id: example.types/v1\nrequest: []\n", also: capabilitymeta.ErrInvalidManifest},
-		{name: "field collision", input: "id: example.types/v1\nrequest:\n  i_d: {type: string}\n  id: {type: string}\n", also: contractgen.ErrNameCollision},
-		{name: "error collision", input: "id: example.types/v1\nerrors: [i_d, id]\n", also: contractgen.ErrNameCollision},
+		{name: "field collision", input: withQuerySemantics("id: example.types/v1\nrequest:\n  i_d: {type: string}\n  id: {type: string}\n"), also: contractgen.ErrNameCollision},
+		{name: "error collision", input: withQuerySemantics("id: example.types/v1\nerrors: [i_d, id]\n"), also: contractgen.ErrNameCollision},
 	}
 	for _, test := range tests {
 		test := test
@@ -197,6 +208,16 @@ func TestRenderRejectsInvalidSchemaAndGoNameCollisions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func withQuerySemantics(source string) string {
+	if strings.Contains(source, "\nsemantics:") {
+		return source
+	}
+	if !strings.HasSuffix(source, "\n") {
+		source += "\n"
+	}
+	return source + querySemanticsYAML
 }
 
 func FuzzRender(f *testing.F) {

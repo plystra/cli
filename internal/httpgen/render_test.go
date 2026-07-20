@@ -35,6 +35,16 @@ response:
   message_id: {type: string, required: true}
   status: {type: string, enum: [queued, sent], required: true}
 errors: [invalid_recipient, authentication_failed, temporarily_unavailable]
+` + httpQuerySemanticsYAML
+	httpQuerySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
 `
 )
 
@@ -225,6 +235,7 @@ func withTarget(value testTarget, mutate func(*testTarget)) testTarget {
 
 func exposedTarget(t testing.TB, schema string) generation.CapabilityView {
 	t.Helper()
+	schema = withHTTPQuerySemantics(schema)
 	canonical, err := capabilitymeta.NormalizeSchema([]byte(schema))
 	if err != nil {
 		t.Fatalf("NormalizeSchema: %v", err)
@@ -245,6 +256,16 @@ func exposedTarget(t testing.TB, schema string) generation.CapabilityView {
 		t.Fatalf("Capability(%s) is absent", id)
 	}
 	return target
+}
+
+func withHTTPQuerySemantics(source string) string {
+	if strings.Contains(source, "\nsemantics:") {
+		return source
+	}
+	if !strings.HasSuffix(source, "\n") {
+		source += "\n"
+	}
+	return source + httpQuerySemanticsYAML
 }
 
 func httpCapabilityID(t testing.TB, value string) generation.CapabilityID {

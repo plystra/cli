@@ -19,7 +19,7 @@ func TestLoadReadsExactConventionalSource(t *testing.T) {
 
 	root := t.TempDir()
 	id := mustID(t, "account.register/v2")
-	data := []byte("id: account.register/v2\r\ndescription: Registers an account.\r\nrequest: {}\r\nresponse: {}\r\n")
+	data := []byte("id: account.register/v2\r\ndescription: Registers an account.\r\nrequest: {}\r\nresponse: {}\r\nsemantics:\r\n  kind: query\r\n  effects: none\r\n  idempotency: {mode: inherent}\r\n  retry: {safety: safe}\r\n  cancellation: {mode: best-effort}\r\n  completion: {mode: completed-before-return}\r\n  ordering: {mode: none}\r\n  data: {request: public, response: public}\r\n")
 	wantPath := writeSource(t, root, id, data)
 	source, err := capabilitysource.Load(root, id)
 	if err != nil {
@@ -43,8 +43,8 @@ func TestLoadRejectsInvalidOrMismatchedIdentity(t *testing.T) {
 		data      string
 		wantError error
 	}{
-		{name: "mismatch", data: "id: account.register/v2\n", wantError: capabilitysource.ErrIdentityMismatch},
-		{name: "invalid", data: "id: account.register/v1\nunknown: true\n", wantError: capabilitymeta.ErrInvalidManifest},
+		{name: "mismatch", data: "id: account.register/v2\n" + querySemanticsYAML, wantError: capabilitysource.ErrIdentityMismatch},
+		{name: "invalid", data: "id: account.register/v1\nunknown: true\n" + querySemanticsYAML, wantError: capabilitymeta.ErrInvalidManifest},
 	}
 	for _, test := range tests {
 		test := test
@@ -63,6 +63,17 @@ func TestLoadRejectsInvalidOrMismatchedIdentity(t *testing.T) {
 		})
 	}
 }
+
+const querySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
 
 func TestLoadRejectsMissingOversizedAndNonRegularSources(t *testing.T) {
 	t.Parallel()

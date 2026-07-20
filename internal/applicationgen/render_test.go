@@ -846,12 +846,26 @@ errors: []
 
 func normalizedContract(t testing.TB, source string) []byte {
 	t.Helper()
+	if !strings.Contains(source, "\nsemantics:") {
+		source += querySemanticsYAML
+	}
 	canonical, err := capabilitymeta.NormalizeSchema([]byte(source))
 	if err != nil {
 		t.Fatalf("NormalizeSchema: %v", err)
 	}
 	return canonical
 }
+
+const querySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
 
 func outputPaths(output generatedfiles.Output) []string {
 	files := output.Files()

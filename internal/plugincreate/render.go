@@ -54,7 +54,7 @@ Canonical capabilities implemented by this plugin are listed under ` + "`provide
 Create a custom capability from the module root with:
 
 ` + "```text" + `
-plystra capability create <capability-name> --plugin %s
+plystra capability create <capability-name> --query --plugin %s
 ` + "```" + `
 
 Implement an existing canonical capability with:

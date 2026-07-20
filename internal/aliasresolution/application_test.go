@@ -170,7 +170,7 @@ func applicationAliasContext(t *testing.T) (generation.Context, generation.Input
 	input := aliasContextInput()
 	input.CapabilityAliases = nil
 	input.Capabilities = append(input.Capabilities, generation.CapabilityInput{
-		ContractJSON: json.RawMessage(`{"id":"profile.get/v1","request":{},"response":{},"errors":[]}`),
+		ContractJSON: json.RawMessage(`{"id":"profile.get/v1","request":{},"response":{},"errors":[],"semantics":` + aliasQuerySemanticsJSON + `}`),
 		Exposure:     generation.Exposure{Go: true},
 	})
 	context, err := generation.NewContext(input)

@@ -14,7 +14,7 @@ import {
 import { resolveUnaryMethod } from "../../../../descriptors.js";
 
 export const capabilityID = "account.profile.get/v2";
-export const contractDigest = "sha256:b867859b40c593d2fb90992083d56c12b97691e7507b69e117c3de5671f0d036";
+export const contractDigest = "sha256:96f322e70226b5392d4c68c0ad1c58c0a3d654110e225ac50623ebc81e10d19b";
 const method = resolveUnaryMethod(
   "plystra.generated.account.profile.get.v2.AccountProfileGetV2Service",
   "Invoke",

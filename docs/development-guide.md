@@ -31,7 +31,7 @@ plystra remove <go-module-path>
 plystra update <go-module-query>
 plystra use <capability-name>/vN <plugin-id> [--env <environment>|--config <yaml-path>]
 plystra plugin create <name>
-plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]
+plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]
 plystra capability implement <capability-name>/vN [--plugin <plugin>]
 plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
 plystra generate [--check] [--env <environment>|--config <yaml-path>]
@@ -820,10 +820,10 @@ authn.login.oidc.complete/v1
 The ID identifies a provider-independent contract. It never contains a Plugin
 ID or module path.
 
-Create and expose a first version in one transaction:
+Create and expose a first Query Capability version in one transaction:
 
 ```powershell
-plystra capability create catalog.item.get --plugin catalog --expose
+plystra capability create catalog.item.get --query --plugin catalog --expose
 ```
 
 This creates `catalog/capabilities/catalog.item.get/v1/capability.yaml`, adds
@@ -852,7 +852,29 @@ response:
 errors:
   - invalid_item_id
   - not_found
+
+semantics:
+  kind: query
+  effects: none
+  idempotency:
+    mode: inherent
+  retry:
+    safety: safe
+  cancellation:
+    mode: best-effort
+  completion:
+    mode: completed-before-return
+  ordering:
+    mode: none
+  data:
+    request: public
+    response: public
 ```
+
+`--query` writes that complete semantic profile into the authoritative
+`capability.yaml`; the Capability name never implies behavior. A genuinely new
+identity requires one supported intent profile before the command mutates the
+Project.
 
 Regenerate before implementing against the typed contract:
 
@@ -898,11 +920,14 @@ Return only semantic errors declared by the exact contract. Provider messages,
 undeclared errors, and panics are normalized before they cross the Kernel or
 HTTP boundary.
 
-An omitted version creates `v1`, or the next version above the highest visible
-version. An unusual explicit new version requires deliberate confirmation:
+An omitted version creates `v1` for a new identity. When an identity is already
+visible, the same unversioned command creates the next version by copying the
+highest exact contract, including its semantics; omit profile flags for that
+later-version workflow. An unusual explicit new identity and version requires
+both an intent profile and deliberate confirmation:
 
 ```powershell
-plystra capability create catalog.item.search/v3 --plugin catalog --confirm
+plystra capability create catalog.item.search/v3 --query --plugin catalog --confirm
 ```
 
 Implement an exact visible dependency or official contract instead of creating
@@ -1393,7 +1418,7 @@ types. The diagnostic is lexical and stable, and both ordinary generation and
 Run from inside the target Plugin or pass its directory or exact Plugin ID:
 
 ```powershell
-plystra capability create order.cancel --plugin checkout
+plystra capability create order.cancel --query --plugin checkout
 ```
 
 ### Constructor signature no longer compiles

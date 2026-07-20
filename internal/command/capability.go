@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	capabilityCreateSynopsis    = "plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]"
+	capabilityCreateSynopsis    = "plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]"
 	capabilityImplementSynopsis = "plystra capability implement <capability-name>/vN [--plugin <plugin>]"
 	capabilityExposeSynopsis    = "plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]"
 	capabilityUsage             = `Usage:
@@ -36,6 +36,16 @@ selector is present; setting both is an error. Explicit --env or --config
 overrides both variables, and the two flags cannot be combined. Relative
 configuration paths are resolved from the detected Plystra Project root.
 `
+	capabilityCreateHelp = `Usage:
+  ` + capabilityCreateSynopsis + `
+
+Intent profiles:
+  --query   Create a read-only, safely retryable query contract for a new Capability identity.
+
+A new Capability identity requires one explicit intent profile. A later version
+copies the complete semantics of its highest visible source contract; omit the
+profile flag in that case. Names never imply semantics.
+`
 )
 
 type capabilityArguments struct {
@@ -44,6 +54,7 @@ type capabilityArguments struct {
 	plugin      string
 	confirm     bool
 	expose      bool
+	query       bool
 	config      string
 	environment string
 }
@@ -84,6 +95,7 @@ func runCapability(arguments []string, stdout, stderr io.Writer, workingDirector
 			Start:       workingDirectory,
 			Reference:   parsed.reference,
 			Plugin:      parsed.plugin,
+			Intent:      capabilityIntent(parsed),
 			Select:      selectPlugin,
 			Environment: environment,
 		},
@@ -163,6 +175,7 @@ func parseCapabilityArguments(arguments []string) (capabilityArguments, bool) {
 		return result, true
 	}
 	pluginSet := false
+	profileSet := false
 	for index := 3; index < len(arguments); index++ {
 		switch arguments[index] {
 		case "--plugin":
@@ -177,6 +190,12 @@ func parseCapabilityArguments(arguments []string) (capabilityArguments, bool) {
 				return capabilityArguments{}, false
 			}
 			result.confirm = true
+		case "--query":
+			if result.action != "create" || profileSet {
+				return capabilityArguments{}, false
+			}
+			profileSet = true
+			result.query = true
 		case "--expose":
 			if result.action != "create" || result.expose {
 				return capabilityArguments{}, false
@@ -194,7 +213,7 @@ func capabilityHelp(arguments []string) (string, bool) {
 	case len(arguments) == 2 && arguments[0] == "capability" && isHelp(arguments[1]):
 		return capabilityUsage, true
 	case len(arguments) == 3 && arguments[0] == "capability" && arguments[1] == "create" && isHelp(arguments[2]):
-		return "Usage:\n  " + capabilityCreateSynopsis + "\n", true
+		return capabilityCreateHelp, true
 	case len(arguments) == 3 && arguments[0] == "capability" && arguments[1] == "implement" && isHelp(arguments[2]):
 		return "Usage:\n  " + capabilityImplementSynopsis + "\n", true
 	case len(arguments) == 3 && arguments[0] == "capability" && arguments[1] == "expose" && isHelp(arguments[2]):
@@ -202,6 +221,13 @@ func capabilityHelp(arguments []string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func capabilityIntent(arguments capabilityArguments) capabilitycreate.IntentProfile {
+	if arguments.query {
+		return capabilitycreate.IntentProfileQuery
+	}
+	return ""
 }
 
 func capabilityArgumentUsage(arguments []string) string {

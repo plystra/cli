@@ -9,7 +9,7 @@ This application-local reference lists exact generated HTTP Capability routes. A
 ### `account.profile.get/v2`
 
 - Route: `POST /api/v1/capabilities/account.profile.get/v2/invoke`
-- Canonical contract digest: `sha256:b867859b40c593d2fb90992083d56c12b97691e7507b69e117c3de5671f0d036`
+- Canonical contract digest: `sha256:96f322e70226b5392d4c68c0ad1c58c0a3d654110e225ac50623ebc81e10d19b`
 
 #### Request
 
@@ -26,7 +26,7 @@ None declared.
 ### `email.send/v1`
 
 - Route: `POST /api/v1/capabilities/email.send/v1/invoke`
-- Canonical contract digest: `sha256:836377411dbd56a4b2e7441377ce8e3f093d1e8758677ae44b8062bb69c6a8a5`
+- Canonical contract digest: `sha256:9b01b630e8fae8883269196c6888aefec9416b903ac0076c08695e8de86b7a07`
 
 #### Request
 
@@ -53,7 +53,7 @@ None declared.
 ### `foo-bar.send/v1`
 
 - Route: `POST /api/v1/capabilities/foo-bar.send/v1/invoke`
-- Canonical contract digest: `sha256:29cf8dc8817a0f702540369a08146a329f4f1d482310112b79871d821d8b9d35`
+- Canonical contract digest: `sha256:0de2dab1912e93c308a77befb2441b21c92133597154902e71b520ee23237db2`
 
 #### Request
 
@@ -70,7 +70,7 @@ None declared.
 ### `foo.bar-send/v1`
 
 - Route: `POST /api/v1/capabilities/foo.bar-send/v1/invoke`
-- Canonical contract digest: `sha256:0203205b8651a604925db9af60394d2f3272bd9d5cb969bb87cc6c5594831c4e`
+- Canonical contract digest: `sha256:289854b61ff7acc97547f7b425670e742bc93f32169c80904618b4da4d1b8e3a`
 
 #### Request
 
@@ -91,7 +91,7 @@ None declared.
 Application-local Alias of `email.send/v1`.
 
 - Route: `POST /api/v1/capabilities/browser.hidden/v1/invoke`
-- Canonical contract digest: `sha256:836377411dbd56a4b2e7441377ce8e3f093d1e8758677ae44b8062bb69c6a8a5`
+- Canonical contract digest: `sha256:9b01b630e8fae8883269196c6888aefec9416b903ac0076c08695e8de86b7a07`
 - Generated surfaces: HTTP
 
 #### Request
@@ -121,7 +121,7 @@ Application-local Alias of `email.send/v1`.
 Application-local Alias of `email.send/v1`.
 
 - Route: `POST /api/v1/capabilities/compat.send/v1/invoke`
-- Canonical contract digest: `sha256:836377411dbd56a4b2e7441377ce8e3f093d1e8758677ae44b8062bb69c6a8a5`
+- Canonical contract digest: `sha256:9b01b630e8fae8883269196c6888aefec9416b903ac0076c08695e8de86b7a07`
 - Generated surfaces: HTTP, JavaScript
 
 #### Request
@@ -151,7 +151,7 @@ Application-local Alias of `email.send/v1`.
 Application-local Alias of `email.send/v1`.
 
 - Route: `POST /api/v1/capabilities/mail.deliver/v1/invoke`
-- Canonical contract digest: `sha256:836377411dbd56a4b2e7441377ce8e3f093d1e8758677ae44b8062bb69c6a8a5`
+- Canonical contract digest: `sha256:9b01b630e8fae8883269196c6888aefec9416b903ac0076c08695e8de86b7a07`
 - Generated surfaces: HTTP, JavaScript
 - Deprecation: Use email.send/v1 instead.
 

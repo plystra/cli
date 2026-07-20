@@ -420,7 +420,8 @@ func newExtensionFixture(t *testing.T, source string) extensionFixture {
 	root := t.TempDir()
 	temporaryParent := t.TempDir()
 	cliRoot := repositoryRoot(t)
-	goMod := fmt.Sprintf("module example.com/extensiontest\n\ngo 1.26\n\nrequire github.com/plystra/cli v0.0.0\n\nrequire (\n\tgo.yaml.in/yaml/v3 v3.0.4 // indirect\n\tgolang.org/x/mod v0.38.0 // indirect\n)\n\nreplace github.com/plystra/cli => %s\n", strconv.Quote(filepath.ToSlash(cliRoot)))
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	goMod := fmt.Sprintf("module example.com/extensiontest\n\ngo 1.26\n\nrequire (\n\tgithub.com/plystra/cli v0.0.0\n\tgithub.com/plystra/kernel v0.0.0\n\tgo.yaml.in/yaml/v3 v3.0.4 // indirect\n\tgolang.org/x/mod v0.38.0 // indirect\n)\n\nreplace github.com/plystra/cli => %s\n\nreplace github.com/plystra/kernel => %s\n", strconv.Quote(filepath.ToSlash(cliRoot)), strconv.Quote(filepath.ToSlash(kernelRoot)))
 	writeTestFile(t, filepath.Join(root, "go.mod"), goMod)
 	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
 	if err != nil {
@@ -461,8 +462,8 @@ func extensionContext(t *testing.T, mode string) generation.Context {
 			{ID: "example.extension", ModulePath: "example.com/extensiontest", BuildMetadataJSON: []byte(fmt.Sprintf(`{"mode":%q}`, mode))},
 		},
 		Capabilities: []generation.CapabilityInput{
-			{ContractJSON: []byte(`{"id":"audit.write/v1","request":{},"response":{},"errors":[]}`)},
-			{ContractJSON: []byte(`{"id":"order.create/v1","request":{},"response":{},"errors":[],"extensions":{"authn":{"authenticated":true}}}`)},
+			{ContractJSON: []byte(`{"id":"audit.write/v1","request":{},"response":{},"errors":[],"semantics":` + helperQuerySemanticsJSON + `}`)},
+			{ContractJSON: []byte(`{"id":"order.create/v1","request":{},"response":{},"errors":[],"semantics":` + helperQuerySemanticsJSON + `,"extensions":{"authn":{"authenticated":true}}}`)},
 		},
 		Requirements: []string{"order.create/v1"},
 		Providers:    []generation.ProviderInput{{Capability: "order.create/v1", Plugin: "example.business"}},
@@ -484,6 +485,8 @@ func extensionContext(t *testing.T, mode string) generation.Context {
 	}
 	return context
 }
+
+const helperQuerySemanticsJSON = `{"kind":"query","effects":"none","idempotency":{"mode":"inherent"},"retry":{"safety":"safe"},"cancellation":{"mode":"best-effort"},"completion":{"mode":"completed-before-return"},"ordering":{"mode":"none"},"data":{"request":"public","response":"public"}}`
 
 func repositoryRoot(t *testing.T) string {
 	t.Helper()

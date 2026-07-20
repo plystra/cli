@@ -161,8 +161,63 @@ type Context struct {
 
 var _ GenerationContext = Context{}
 
+// CapabilityCatalog is one immutable validated canonical Capability set that
+// can be reused while fixed-point resolution changes only selected Plugins,
+// requirements, Providers, or Aliases.
+type CapabilityCatalog struct {
+	capabilities    []CapabilityView
+	capabilityIndex map[CapabilityID]int
+	valid           bool
+}
+
+// NewCapabilityCatalog validates, canonicalizes, and defensively copies one
+// complete visible Capability set.
+func NewCapabilityCatalog(inputs []CapabilityInput) (CapabilityCatalog, error) {
+	capabilities, capabilityIndex, err := normalizeCapabilities(inputs)
+	if err != nil {
+		return CapabilityCatalog{}, err
+	}
+	return CapabilityCatalog{
+		capabilities:    capabilities,
+		capabilityIndex: capabilityIndex,
+		valid:           true,
+	}, nil
+}
+
+// Capabilities returns defensive view copies sorted by canonical ID.
+func (c CapabilityCatalog) Capabilities() []CapabilityView {
+	return append([]CapabilityView(nil), c.capabilities...)
+}
+
+// Capability returns one canonical Capability view by exact ID.
+func (c CapabilityCatalog) Capability(id CapabilityID) (CapabilityView, bool) {
+	index, ok := c.capabilityIndex[id]
+	if !ok {
+		return CapabilityView{}, false
+	}
+	return c.capabilities[index], true
+}
+
 // NewContext validates and canonicalizes one complete generation input.
 func NewContext(input Input) (Context, error) {
+	catalog, err := NewCapabilityCatalog(input.Capabilities)
+	if err != nil {
+		return Context{}, err
+	}
+	input.Capabilities = nil
+	return catalog.NewContext(input)
+}
+
+// NewContext validates and canonicalizes dynamic application state against the
+// catalog without reparsing its already validated exact contracts. The input
+// must not supply a second Capability set.
+func (c CapabilityCatalog) NewContext(input Input) (Context, error) {
+	if !c.valid {
+		return Context{}, invalidContext("capability catalog is not initialized")
+	}
+	if len(input.Capabilities) != 0 {
+		return Context{}, invalidContext("capabilities must be empty when using a prepared Capability catalog")
+	}
 	configurationProvenance, err := normalizeConfigurationProvenance(input.ConfigurationProvenance)
 	if err != nil {
 		return Context{}, err
@@ -171,10 +226,8 @@ func NewContext(input Input) (Context, error) {
 	if err != nil {
 		return Context{}, err
 	}
-	capabilities, capabilityIndex, err := normalizeCapabilities(input.Capabilities)
-	if err != nil {
-		return Context{}, err
-	}
+	capabilities := c.capabilities
+	capabilityIndex := c.capabilityIndex
 	requirements, requirementSet, err := normalizeRequirements(input.Requirements, capabilityIndex)
 	if err != nil {
 		return Context{}, err
@@ -701,16 +754,12 @@ func normalizeCapabilitySources(field string, values []string) ([]string, error)
 }
 
 func normalizeCapabilityContract(field string, input []byte) ([]byte, CapabilityID, []ExtensionView, error) {
-	normalized, err := capabilitymeta.NormalizeSchema(input)
+	normalized, manifest, err := capabilitymeta.NormalizeSchemaAndManifest(input)
 	if err != nil {
 		return nil, CapabilityID{}, nil, invalidContext("%s is not a valid exact contract: %v", field, err)
 	}
 	if !bytes.Equal(normalized, input) {
 		return nil, CapabilityID{}, nil, invalidContext("%s must already use the CLI canonical contract encoding", field)
-	}
-	manifest, err := capabilitymeta.Parse(normalized)
-	if err != nil {
-		return nil, CapabilityID{}, nil, invalidContext("%s cannot inspect normalized metadata: %v", field, err)
 	}
 	id, err := contextCapabilityID(field+".id", manifest.ID().String())
 	if err != nil {

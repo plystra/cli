@@ -24,7 +24,7 @@ func TestWriteDeclarationsCommitsOneValidatedTransaction(t *testing.T) {
 	if err := os.Chmod(manifestPath, 0o600); err != nil {
 		t.Fatalf("Chmod: %v", err)
 	}
-	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register"})
+	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register", Intent: capabilitycreate.IntentProfileQuery})
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestWriteDeclarationsCommitsRetainedSourceCopy(t *testing.T) {
 	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
 	writePlugin(t, root, "profile", "id: acme.app.profile\n")
 	id := mustCapabilityID(t, "account.register/v1")
-	sourceData := []byte("# Account contract.\nid: account.register/v1\ndescription: Registers an account.\nrequest: {email: {type: string, required: true}}\nextensions: {authn: {authenticated: true}}\n")
+	sourceData := []byte("# Account contract.\nid: account.register/v1\ndescription: Registers an account.\nrequest: {email: {type: string, required: true}}\nextensions: {authn: {authenticated: true}}\n" + querySemanticsYAML)
 	writeCapabilitySource(t, filepath.Join(root, "account"), id, sourceData)
 	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register", Plugin: "profile"})
 	if err != nil {
@@ -112,7 +112,7 @@ func TestWriteDeclarationsRollsBackWhenDependencySourceChanges(t *testing.T) {
 	writePlugin(t, dependencyRoot, "email", "id: catalog.email\nprovides: [email.send/v1]\n")
 	identifier := mustCapabilityID(t, "email.send/v1")
 	sourcePath := filepath.Join(dependencyRoot, "email")
-	writeCapabilitySource(t, sourcePath, identifier, []byte("id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n"))
+	writeCapabilitySource(t, sourcePath, identifier, []byte("id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n"+querySemanticsYAML))
 
 	root := createModule(t)
 	goMod := "module example.com/acme/app\n\ngo 1.26\n\nrequire example.com/catalog v0.0.0\n\nreplace example.com/catalog => " + filepath.ToSlash(dependencyRoot) + "\n"
@@ -133,7 +133,7 @@ func TestWriteDeclarationsRollsBackWhenDependencySourceChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveSources: %v", err)
 	}
-	writeCapabilitySource(t, sourcePath, identifier, []byte("id: email.send/v1\nrequest: {to: {type: string}}\nresponse: {}\nerrors: []\n"))
+	writeCapabilitySource(t, sourcePath, identifier, []byte("id: email.send/v1\nrequest: {to: {type: string}}\nresponse: {}\nerrors: []\n"+querySemanticsYAML))
 
 	err = capabilitycreate.WriteDeclarations(plan, sources)
 	if !errors.Is(err, capabilitycreate.ErrWriteDeclarations) || !errors.Is(err, atomicfs.ErrConcurrentChange) {
@@ -155,7 +155,7 @@ func TestWriteDeclarationsRollsBackBothFilesWhenValidationFails(t *testing.T) {
 	manifest := []byte("id: acme.app.account\nconfig: {}\n")
 	writePlugin(t, root, "account", string(manifest))
 	writePlugin(t, root, "profile", "id: acme.app.profile\n")
-	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register", Plugin: "account"})
+	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register", Plugin: "account", Intent: capabilitycreate.IntentProfileQuery})
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestWriteDeclarationsPreservesConcurrentTargetManifestEdit(t *testing.T) {
 
 	root := createModule(t)
 	writePlugin(t, root, "account", "id: acme.app.account\n")
-	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register"})
+	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register", Intent: capabilitycreate.IntentProfileQuery})
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestWriteDeclarationsRollsBackWhenResolvedSourceChanges(t *testing.T) {
 	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
 	writePlugin(t, root, "profile", "id: acme.app.profile\n")
 	id := mustCapabilityID(t, "account.register/v1")
-	writeCapabilitySource(t, filepath.Join(root, "account"), id, []byte("id: account.register/v1\nrequest: {}\n"))
+	writeCapabilitySource(t, filepath.Join(root, "account"), id, []byte("id: account.register/v1\nrequest: {}\n"+querySemanticsYAML))
 	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register", Plugin: "profile"})
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
@@ -221,7 +221,7 @@ func TestWriteDeclarationsRollsBackWhenResolvedSourceChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveSources: %v", err)
 	}
-	userEdit := []byte("id: account.register/v1\ndescription: User edit.\nrequest: {}\n")
+	userEdit := []byte("id: account.register/v1\ndescription: User edit.\nrequest: {}\n" + querySemanticsYAML)
 	writeCapabilitySource(t, filepath.Join(root, "account"), id, userEdit)
 	targetManifest := []byte("id: acme.app.profile\n")
 

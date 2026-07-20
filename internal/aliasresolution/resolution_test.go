@@ -302,7 +302,7 @@ func aliasContextInput() generation.Input {
 			{ID: "example.authz", ModulePath: "example.com/authz", Provides: []string{"authz.check/v1"}},
 		},
 		Capabilities: []generation.CapabilityInput{
-			{ContractJSON: json.RawMessage(`{"id":"order.create/v1","request":{},"response":{},"errors":[],"extensions":{"authn":{"authenticated":true},"authz":{"permission":"order.create","space":"request.space_id"}}}`), Exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: true}},
+			{ContractJSON: json.RawMessage(`{"id":"order.create/v1","request":{},"response":{},"errors":[],"semantics":` + aliasQuerySemanticsJSON + `,"extensions":{"authn":{"authenticated":true},"authz":{"permission":"order.create","space":"request.space_id"}}}`), Exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: true}},
 			{ContractJSON: aliasContract("authn.session.verify/v1"), Exposure: generation.Exposure{Go: true}},
 			{ContractJSON: aliasContract("authz.check/v1"), Exposure: generation.Exposure{Go: true}},
 			{ContractJSON: aliasContract("kernel.health/v1"), Intrinsic: true, Exposure: generation.Exposure{Go: true, HTTP: true}},
@@ -321,8 +321,10 @@ func aliasContextInput() generation.Input {
 }
 
 func aliasContract(id string) json.RawMessage {
-	return json.RawMessage(`{"id":"` + id + `","request":{},"response":{},"errors":[]}`)
+	return json.RawMessage(`{"id":"` + id + `","request":{},"response":{},"errors":[],"semantics":` + aliasQuerySemanticsJSON + `}`)
 }
+
+const aliasQuerySemanticsJSON = `{"kind":"query","effects":"none","idempotency":{"mode":"inherent"},"retry":{"safety":"safe"},"cancellation":{"mode":"best-effort"},"completion":{"mode":"completed-before-return"},"ordering":{"mode":"none"},"data":{"request":"public","response":"public"}}`
 
 func aliasCapabilityID(t *testing.T, value string) generation.CapabilityID {
 	t.Helper()

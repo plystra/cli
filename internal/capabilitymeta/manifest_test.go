@@ -18,6 +18,7 @@ id: account.register/v2
 request:
   email: {type: string, required: true}
 errors: [already_exists]
+` + querySemanticsYAML + `
 extensions:
   authn: {authenticated: true}
 `
@@ -25,7 +26,7 @@ extensions:
 	if err != nil || identifier.String() != "account.register/v2" {
 		t.Fatalf("ParseID = %q, %v", identifier, err)
 	}
-	quoted, err := capabilitymeta.ParseID([]byte("id: 'account.register/v2'\n"))
+	quoted, err := capabilitymeta.ParseID([]byte("id: 'account.register/v2'\n" + querySemanticsYAML + "\n"))
 	if err != nil || quoted != identifier {
 		t.Fatalf("ParseID quoted = %q, %v", quoted, err)
 	}
@@ -67,8 +68,8 @@ func TestParseIDRejectsInvalidIdentityEnvelopes(t *testing.T) {
 
 func FuzzParseID(f *testing.F) {
 	for _, seed := range []string{
-		"id: account.register/v1\n",
-		"id: account.register/v1\nrequest: {}\nresponse: {}\n",
+		"id: account.register/v1\n" + querySemanticsYAML + "\n",
+		"id: account.register/v1\nrequest: {}\nresponse: {}\n" + querySemanticsYAML + "\n",
 		"[]\n",
 		"id: &x account.register/v1\nrequest: *x\n",
 	} {

@@ -24,7 +24,7 @@ func TestResolveSelectsSoleOrdinaryProviderAndIntrinsicCapability(t *testing.T) 
 		},
 		Candidates: []providerresolution.Candidate{
 			{PluginID: "example.unused", Contract: contract("email.send/v1", ""), Source: "unused/capability.yaml"},
-			{PluginID: "example.audit", Contract: []byte("request:\n  event: {required: true, type: string}\nid: audit.write/v1\n"), Source: "audit/capabilities/audit.write/v1/capability.yaml"},
+			{PluginID: "example.audit", Contract: append([]byte("request:\n  event: {required: true, type: string}\nid: audit.write/v1\n"), providerQuerySemanticsYAML...), Source: "audit/capabilities/audit.write/v1/capability.yaml"},
 		},
 	}
 	result, err := providerresolution.Resolve(input)
@@ -66,6 +66,48 @@ func TestResolveSelectsSoleOrdinaryProviderAndIntrinsicCapability(t *testing.T) 
 	selections[0] = providerresolution.Selection{}
 	if result.Capabilities()[0].ID().String() != "audit.write/v1" || result.Capabilities()[0].ContractJSON()[0] != '{' || result.Capabilities()[0].Sources()[0] != "orders/plugin.yaml requires" || result.Selections()[0].PluginID() != "example.audit" {
 		t.Fatal("Result exposed mutable input or result storage")
+	}
+}
+
+func TestCatalogReusesImmutableValidatedCandidates(t *testing.T) {
+	t.Parallel()
+
+	contractData := contract("audit.write/v1", "request: {event: {type: string, required: true}}\n")
+	candidates := []providerresolution.Candidate{{
+		PluginID: "example.audit",
+		Contract: append([]byte(nil), contractData...),
+		Source:   "audit/capability.yaml",
+	}}
+	catalog, err := providerresolution.NewCatalog(candidates)
+	if err != nil {
+		t.Fatalf("NewCatalog: %v", err)
+	}
+	candidates[0].PluginID = "changed.invalid"
+	candidates[0].Contract[0] = 'x'
+	candidates[0].Source = "changed"
+
+	requirements := []providerresolution.Requirement{{
+		Capability: "audit.write/v1",
+		Source:     "orders/plugin.yaml requires",
+	}}
+	result, err := catalog.Resolve(requirements, nil)
+	if err != nil {
+		t.Fatalf("Catalog.Resolve: %v", err)
+	}
+	selection, exists := result.SelectedProvider(mustID(t, "audit.write/v1"))
+	if !exists || selection.PluginID() != "example.audit" || selection.ProviderSource() != "audit/capability.yaml" {
+		t.Fatalf("Catalog selection = %#v, %t", selection, exists)
+	}
+	requirements[0].Capability = "changed.invalid/v1"
+	again, err := catalog.Resolve([]providerresolution.Requirement{{Capability: "audit.write/v1", Source: "second pass"}}, nil)
+	if err != nil || !slices.Equal(resolvedIDs(again.Capabilities()), []string{"audit.write/v1"}) {
+		t.Fatalf("second Catalog.Resolve = %#v, %v", again.Capabilities(), err)
+	}
+	if _, err := (providerresolution.Catalog{}).Resolve(nil, nil); !errors.Is(err, providerresolution.ErrInvalidInput) {
+		t.Fatalf("zero Catalog.Resolve error = %v", err)
+	}
+	if _, err := providerresolution.NewCatalog([]providerresolution.Candidate{{PluginID: "invalid", Contract: contractData, Source: "bad"}}); !errors.Is(err, providerresolution.ErrInvalidInput) {
+		t.Fatalf("NewCatalog invalid candidate error = %v", err)
 	}
 }
 
@@ -273,7 +315,7 @@ func TestResolveRejectsContractDifferencesIncludingExtensionMetadata(t *testing.
 	input := providerresolution.Input{
 		Requirements: []providerresolution.Requirement{{Contract: required, Source: "official/order.cancel/v1"}},
 		Candidates: []providerresolution.Candidate{
-			{PluginID: "acme.orders", Contract: []byte("extensions: {authz: {permission: order.cancel}, authn: {authenticated: true}}\nid: order.cancel/v1\n"), Source: "acme/orders/capability.yaml"},
+			{PluginID: "acme.orders", Contract: append([]byte("extensions: {authz: {permission: order.cancel}, authn: {authenticated: true}}\nid: order.cancel/v1\n"), providerQuerySemanticsYAML...), Source: "acme/orders/capability.yaml"},
 			{PluginID: "legacy.orders", Contract: contract("order.cancel/v1", "extensions: {authz: {permission: order.cancel}}\n"), Source: "legacy/orders/capability.yaml"},
 		},
 	}
@@ -498,8 +540,19 @@ func TestResolutionIsStableAcrossEveryInputOrder(t *testing.T) {
 }
 
 func contract(id, body string) []byte {
-	return []byte("id: " + id + "\n" + body)
+	return []byte("id: " + id + "\n" + body + providerQuerySemanticsYAML)
 }
+
+const providerQuerySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
 
 func mustID(t *testing.T, value string) capabilityid.Identifier {
 	t.Helper()

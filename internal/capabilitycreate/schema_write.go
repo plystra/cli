@@ -16,7 +16,8 @@ var ErrRenderSchema = errors.New("render capability schema write")
 
 // RenderSchemaWrite returns the guarded module-relative capability.yaml write
 // for plan without changing the filesystem. First versions receive a complete
-// empty wire schema; later versions copy the deterministic first equal source.
+// explicit profile-expanded wire schema; later versions copy the deterministic
+// first equal source unchanged apart from the exact Capability ID.
 func RenderSchemaWrite(plan Plan, sources []ResolvedSource) (atomicfs.Write, error) {
 	targetPlugin := plan.Target()
 	target := plan.Version().Target()
@@ -39,8 +40,18 @@ func RenderSchemaWrite(plan Plan, sources []ResolvedSource) (atomicfs.Write, err
 		if len(sources) != 0 {
 			return atomicfs.Write{}, fmt.Errorf("%w: plan has resolved sources without a source version", ErrRenderSchema)
 		}
-		data = []byte("id: " + target.String() + "\n\nrequest: {}\nresponse: {}\nerrors: []\n")
+		switch plan.Intent() {
+		case IntentProfileQuery:
+			data = renderQuerySchema(target.String())
+		case "":
+			return atomicfs.Write{}, fmt.Errorf("%w: new Capability identity %s requires an explicit intent profile", ErrRenderSchema, target)
+		default:
+			return atomicfs.Write{}, fmt.Errorf("%w: unsupported intent profile %q", ErrRenderSchema, plan.Intent())
+		}
 	} else {
+		if plan.Intent() != "" {
+			return atomicfs.Write{}, fmt.Errorf("%w: intent profile %q cannot replace source semantics for %s", ErrRenderSchema, plan.Intent(), sourceID)
+		}
 		if len(sources) == 0 {
 			return atomicfs.Write{}, fmt.Errorf("%w: source %s was not resolved", ErrRenderSchema, sourceID)
 		}
@@ -76,4 +87,30 @@ func RenderSchemaWrite(plan Plan, sources []ResolvedSource) (atomicfs.Write, err
 		MustNotExist:       true,
 		ParentMustNotExist: true,
 	}, nil
+}
+
+func renderQuerySchema(identifier string) []byte {
+	return []byte("id: " + identifier + `
+
+request: {}
+response: {}
+errors: []
+
+semantics:
+  kind: query
+  effects: none
+  idempotency:
+    mode: inherent
+  retry:
+    safety: safe
+  cancellation:
+    mode: best-effort
+  completion:
+    mode: completed-before-return
+  ordering:
+    mode: none
+  data:
+    request: public
+    response: public
+`)
 }

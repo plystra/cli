@@ -16,7 +16,7 @@ func TestRunCapabilityCreateAndImplementUsePublicTransactionalSurface(t *testing
 	environment := commandGoEnvironment()
 	pluginRoot := filepath.Join(root, "records")
 
-	exitCode, stdout, stderr := runCommand(t, []string{"capability", "create", "records.create"}, pluginRoot, environment)
+	exitCode, stdout, stderr := runCommand(t, []string{"capability", "create", "records.create", "--query"}, pluginRoot, environment)
 	wantPath := filepath.Join(root, "records", "capabilities", "records.create", "v1", "capability.yaml")
 	wantOutput := "created capability records.create/v1 in acme.library.records at " + wantPath + "\n"
 	if exitCode != 0 || stdout != wantOutput || stderr != "" {
@@ -53,14 +53,14 @@ func TestRunCapabilityCreateAndImplementUsePublicTransactionalSurface(t *testing
 	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeConfirmation) {
 		t.Fatalf("unconfirmed command mutated module:\nbefore: %#v\nafter:  %#v", beforeConfirmation, after)
 	}
-	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.archive/v3", "--confirm", "--plugin", "records"}, root, environment)
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.archive/v3", "--query", "--confirm", "--plugin", "records"}, root, environment)
 	wantArchivePath := filepath.Join(root, "records", "capabilities", "records.archive", "v3", "capability.yaml")
 	wantOutput = "created capability records.archive/v3 in acme.library.records at " + wantArchivePath + "\n"
 	if exitCode != 0 || stdout != wantOutput || stderr != "" {
 		t.Fatalf("confirmed capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 
-	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "record.create", "--plugin", "records"}, root, environment)
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "record.create", "--query", "--plugin", "records"}, root, environment)
 	wantRelatedPath := filepath.Join(root, "records", "capabilities", "record.create", "v1", "capability.yaml")
 	wantOutput = "created capability record.create/v1 in acme.library.records at " + wantRelatedPath + "\n"
 	wantRecommendation := "recommendation: review visible Capability records.create/v1 before keeping custom record.create/v1\n"
@@ -81,6 +81,14 @@ func TestRunCapabilityCreateAndExposeRegenerateRunnableApplication(t *testing.T)
 	environment := commandGoEnvironment()
 
 	exitCode, stdout, stderr := runCommand(t, []string{"capability", "create", "records.list", "--plugin", "records"}, root, environment)
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "select one explicit profile such as --query") {
+		t.Fatalf("name-inferred capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "records", "capabilities", "records.list")); !os.IsNotExist(err) {
+		t.Fatalf("missing-profile create mutated Capability tree: %v", err)
+	}
+
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.list", "--query", "--plugin", "records"}, root, environment)
 	wantPath := filepath.Join(root, "records", "capabilities", "records.list", "v1", "capability.yaml")
 	wantOutput := "created capability records.list/v1 in acme.library.records at " + wantPath + "\n"
 	if exitCode != 0 || stdout != wantOutput || stderr != "" {
@@ -135,7 +143,7 @@ func TestRunCapabilityCreateAndExposeRegenerateRunnableApplication(t *testing.T)
 		t.Fatalf("idempotent capability expose changed module:\nbefore: %#v\nafter:  %#v", idempotentBefore, after)
 	}
 
-	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.write", "--expose", "--plugin", "records"}, root, environment)
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.write", "--query", "--expose", "--plugin", "records"}, root, environment)
 	wantWritePath := filepath.Join(root, "records", "capabilities", "records.write", "v1", "capability.yaml")
 	wantOutput = "created capability records.write/v1 in acme.library.records at " + wantWritePath + "\n" +
 		"exposed capability records.write/v1 over HTTP in " + wantManifestPath + "\n"
@@ -297,7 +305,7 @@ func TestRunCapabilityExposeRejectsMissingHTTPTransportAndRollsBack(t *testing.T
 		capability string
 	}{
 		{name: "standalone exposure", arguments: []string{"capability", "expose", "kernel.health/v1"}, capability: "kernel.health/v1"},
-		{name: "authored exposure", arguments: []string{"capability", "create", "records.disabled", "--expose", "--plugin", "records"}, capability: "records.disabled/v1"},
+		{name: "authored exposure", arguments: []string{"capability", "create", "records.disabled", "--query", "--expose", "--plugin", "records"}, capability: "records.disabled/v1"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			exitCode, stdout, stderr := runCommand(t, test.arguments, filepath.Join(root, "records"), commandGoEnvironment())
@@ -340,7 +348,7 @@ func TestRunCapabilityRejectsUnexpectedGeneratedOutput(t *testing.T) {
 	writeCommandFile(t, filepath.Join(root, "generated", "manual.txt"), "user-owned\n")
 	before := commandTree(t, root)
 
-	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.create", "--expose", "--plugin", "records"}, root, environment)
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.create", "--query", "--expose", "--plugin", "records"}, root, environment)
 	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "unexpected generated output") || !strings.Contains(stderr, "generated/manual.txt") {
 		t.Fatalf("unexpected-output capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}

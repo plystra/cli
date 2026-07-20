@@ -527,6 +527,7 @@ func (wireAliasView) Deprecated() string                { return "" }
 
 func wireTarget(t testing.TB, source string) wireTargetView {
 	t.Helper()
+	source = withWireQuerySemantics(source)
 	canonical, err := capabilitymeta.NormalizeSchema([]byte(source))
 	if err != nil {
 		t.Fatalf("NormalizeSchema: %v", err)
@@ -548,6 +549,25 @@ func wireTarget(t testing.TB, source string) wireTargetView {
 		sources:  []string{"example.com/contracts@v1/" + identity.ID + "/capability.yaml"},
 		exposure: generation.Exposure{Go: true, HTTP: true},
 	}
+}
+
+func withWireQuerySemantics(source string) string {
+	if strings.Contains(source, "\nsemantics:") {
+		return source
+	}
+	if !strings.HasSuffix(source, "\n") {
+		source += "\n"
+	}
+	return source + `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
 }
 
 func wireAlias(t testing.TB, id string, target wireTargetView) wireAliasView {

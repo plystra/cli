@@ -287,6 +287,9 @@ func (v apiAliasView) Deprecated() string              { return v.deprecated }
 
 func apiTarget(t testing.TB, schema string) apiTargetView {
 	t.Helper()
+	if !strings.Contains(schema, "\nsemantics:") {
+		schema += apiQuerySemanticsYAML
+	}
 	canonical, err := capabilitymeta.NormalizeSchema([]byte(schema))
 	if err != nil {
 		t.Fatalf("NormalizeSchema: %v", err)
@@ -301,6 +304,17 @@ func apiTarget(t testing.TB, schema string) apiTargetView {
 		digest:   hash(canonical),
 	}
 }
+
+const apiQuerySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
 
 func apiAlias(t testing.TB, id string, target apiTargetView, exposure generation.Exposure, deprecated string) apiAliasView {
 	t.Helper()

@@ -53,6 +53,16 @@ response:
 errors: []
 extensions:
   policy: {credential: authorization}
+` + querySemanticsYAML
+	querySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
 `
 )
 
@@ -292,6 +302,12 @@ func (v aliasView) Deprecated() string              { return "Use " + v.target.i
 
 func newTarget(t testing.TB, source string) targetView {
 	t.Helper()
+	if !strings.Contains(source, "\nsemantics:") {
+		if !strings.HasSuffix(source, "\n") {
+			source += "\n"
+		}
+		source += querySemanticsYAML
+	}
 	canonical, err := capabilitymeta.NormalizeSchema([]byte(source))
 	if err != nil {
 		t.Fatalf("NormalizeSchema: %v", err)
@@ -433,15 +449,12 @@ func assertGeneratedHandlersRun(t testing.TB, contract contractgen.File, invocat
 	writeGeneratedFile(t, root, "kernel/invocation/handle.go", []byte(testKernelInvocationSource))
 	writeGeneratedFile(t, root, "generated/go/adapters/connect/customer/profile/sync/v1/handler_gen_test.go", []byte(generatedConnectRuntimeTest))
 	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire (\n\tconnectrpc.com/connect "+connectgen.ConnectModuleVersion+"\n\tgithub.com/plystra/kernel v0.0.0\n\tgoogle.golang.org/protobuf "+connectgen.ProtobufModuleVersion+"\n)\n\nreplace github.com/plystra/kernel => ./kernel\n"))
-	workingDirectory, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
+	download := exec.CommandContext(t.Context(), "go", "mod", "download", "all")
+	download.Dir = root
+	download.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=")
+	if output, err := download.CombinedOutput(); err != nil {
+		t.Fatalf("download generated Connect module dependencies: %v\n%s", err, output)
 	}
-	goSum, err := os.ReadFile(filepath.Join(workingDirectory, "..", "..", "go.sum"))
-	if err != nil {
-		t.Fatalf("read CLI go.sum: %v", err)
-	}
-	writeGeneratedFile(t, root, "go.sum", goSum)
 	command := exec.CommandContext(t.Context(), "go", "test", "-count=1", "./...")
 	command.Dir = root
 	command.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=readonly")

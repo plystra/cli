@@ -118,7 +118,7 @@ capabilities:
 	if input.BuildOptions.BuildEnvironment[0] != "GOENV=off" {
 		t.Fatal("Build exposed caller BuildEnvironment storage")
 	}
-	wantOrder, err := capabilitymeta.NormalizeSchema([]byte(orderSource))
+	wantOrder, err := capabilitymeta.NormalizeSchema([]byte(withQuerySemantics(orderSource)))
 	if err != nil {
 		t.Fatalf("NormalizeSchema(order): %v", err)
 	}
@@ -356,8 +356,29 @@ func writeCapability(t *testing.T, moduleRoot, plugin, value, source string) {
 	if err != nil {
 		t.Fatalf("capabilityid.Parse(%s): %v", value, err)
 	}
-	writeFile(t, filepath.Join(moduleRoot, plugin, "capabilities", identifier.Name(), "v1", "capability.yaml"), source)
+	writeFile(t, filepath.Join(moduleRoot, plugin, "capabilities", identifier.Name(), "v1", "capability.yaml"), withQuerySemantics(source))
 }
+
+func withQuerySemantics(source string) string {
+	if strings.Contains(source, "\nsemantics:") {
+		return source
+	}
+	if !strings.HasSuffix(source, "\n") {
+		source += "\n"
+	}
+	return source + querySemanticsYAML
+}
+
+const querySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
 
 func writeFile(t *testing.T, name, content string) {
 	t.Helper()

@@ -71,7 +71,21 @@ func TestRenderProducesDeterministicImmutableClientSet(t *testing.T) {
 }
 
 func TestGeneratedDependenciesValidateAndExposeClients(t *testing.T) {
-	schema := []byte("id: email.send/v1\nrequest:\n  message: {type: string, required: true}\nresponse:\n  receipt: {type: string, required: true}\n")
+	schema := []byte(`id: email.send/v1
+request:
+  message: {type: string, required: true}
+response:
+  receipt: {type: string, required: true}
+semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`)
 	contract, err := contractgen.Render(schema)
 	if err != nil {
 		t.Fatalf("Render contract: %v", err)

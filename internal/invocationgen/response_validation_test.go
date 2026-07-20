@@ -22,7 +22,7 @@ response:
   records: {type: array, items: object, required: true}
   scores: {type: array, items: number, required: true}
   title: {type: string, required: true}
-`
+` + invocationQuerySemanticsYAML
 
 func TestGeneratedInvocationValidatesEveryCanonicalResponseShape(t *testing.T) {
 	t.Parallel()

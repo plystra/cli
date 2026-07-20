@@ -402,8 +402,19 @@ func activationCatalog(t *testing.T, declarations ...generationactivation.Declar
 }
 
 func generationContract(id, body string) []byte {
-	return []byte("id: " + id + "\n" + body)
+	return []byte("id: " + id + "\n" + generationQuerySemanticsYAML + body)
 }
+
+const generationQuerySemanticsYAML = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
 
 func mustGenerationID(t *testing.T, value string) capabilityid.Identifier {
 	t.Helper()

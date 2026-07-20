@@ -720,7 +720,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"Template dependencies must not match the effective GOPRIVATE setting",
 		"Template dependency Projects must not declare relative replace directives",
 		"plystra plugin create records",
-		"plystra capability create records.read --plugin records --expose",
+		"plystra capability create records.read --query --plugin records --expose",
 		"plystra capability implement email.send/v1 --plugin mailer",
 		"capabilities/records.read/v1/capability.yaml",
 		"There is no handwritten provider registration",

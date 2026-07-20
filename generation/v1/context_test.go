@@ -170,6 +170,47 @@ func TestNewContextBuildsDeterministicImmutableViews(t *testing.T) {
 	}
 }
 
+func TestCapabilityCatalogReusesValidatedContractsImmutably(t *testing.T) {
+	t.Parallel()
+
+	input := validInput()
+	catalog, err := generation.NewCapabilityCatalog(input.Capabilities)
+	if err != nil {
+		t.Fatalf("NewCapabilityCatalog: %v", err)
+	}
+	direct, err := generation.NewContext(validInput())
+	if err != nil {
+		t.Fatalf("NewContext: %v", err)
+	}
+	input.Capabilities[0].ContractJSON[0] = '['
+	dynamic := validInput()
+	dynamic.Capabilities = nil
+	reused, err := catalog.NewContext(dynamic)
+	if err != nil {
+		t.Fatalf("CapabilityCatalog.NewContext: %v", err)
+	}
+	if !bytes.Equal(reused.CanonicalJSON(), direct.CanonicalJSON()) || reused.Digest() != direct.Digest() {
+		t.Fatalf("reused context differs from direct context:\nreused: %s\ndirect: %s", reused.CanonicalJSON(), direct.CanonicalJSON())
+	}
+
+	views := catalog.Capabilities()
+	contract := views[0].ContractJSON()
+	contract[0] = '['
+	again, err := catalog.NewContext(dynamic)
+	if err != nil || !bytes.Equal(again.CanonicalJSON(), direct.CanonicalJSON()) {
+		t.Fatalf("catalog exposed mutable contract storage: %s, %v", again.CanonicalJSON(), err)
+	}
+
+	withCapabilities := dynamic
+	withCapabilities.Capabilities = validInput().Capabilities
+	if _, err := catalog.NewContext(withCapabilities); !errors.Is(err, generation.ErrInvalidContext) {
+		t.Fatalf("CapabilityCatalog.NewContext with Capabilities error = %v", err)
+	}
+	if _, err := (generation.CapabilityCatalog{}).NewContext(dynamic); !errors.Is(err, generation.ErrInvalidContext) {
+		t.Fatalf("zero CapabilityCatalog.NewContext error = %v", err)
+	}
+}
+
 func TestContextSeparatesConfigurationProvenanceFromBuildModelDigest(t *testing.T) {
 	t.Parallel()
 
@@ -224,6 +265,15 @@ request:
   space_id: {required: true, type: string}
 response: {}
 errors: [invalid_state]
+semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
 extensions:
   authz: {space: request.space_id, permission: order.create}
 `)
@@ -459,8 +509,8 @@ func FuzzNewContextJSONNormalization(f *testing.F) {
 
 func FuzzNewContextCanonicalContract(f *testing.F) {
 	for _, seed := range []string{
-		`{"id":"order.create/v1","request":{},"response":{},"errors":[]}`,
-		`{"id":"order.create/v1","request":{},"response":{},"errors":[],"extensions":{"authn":{"authenticated":true}}}`,
+		`{"id":"order.create/v1","request":{},"response":{},"errors":[],"semantics":{"kind":"query","effects":"none","idempotency":{"mode":"inherent"},"retry":{"safety":"safe"},"cancellation":{"mode":"best-effort"},"completion":{"mode":"completed-before-return"},"ordering":{"mode":"none"},"data":{"request":"public","response":"public"}}}`,
+		`{"id":"order.create/v1","request":{},"response":{},"errors":[],"semantics":{"kind":"query","effects":"none","idempotency":{"mode":"inherent"},"retry":{"safety":"safe"},"cancellation":{"mode":"best-effort"},"completion":{"mode":"completed-before-return"},"ordering":{"mode":"none"},"data":{"request":"public","response":"public"}},"extensions":{"authn":{"authenticated":true}}}`,
 		` {"id":"order.create/v1","request":{},"response":{},"errors":[]}`,
 		`{"id":"order.create/v1","secret":"value"}`,
 		`[]`,
@@ -490,7 +540,7 @@ func FuzzNewContextCanonicalContract(f *testing.F) {
 var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 func validInput() generation.Input {
-	orderContract := json.RawMessage(`{"id":"order.create/v1","request":{"space_id":{"type":"string","required":true}},"response":{},"errors":["invalid_state"],"extensions":{"authn":{"authenticated":true},"authz":{"permission":"order.create","space":"request.space_id"}}}`)
+	orderContract := json.RawMessage(`{"id":"order.create/v1","request":{"space_id":{"type":"string","required":true}},"response":{},"errors":["invalid_state"],"semantics":{"kind":"query","effects":"none","idempotency":{"mode":"inherent"},"retry":{"safety":"safe"},"cancellation":{"mode":"best-effort"},"completion":{"mode":"completed-before-return"},"ordering":{"mode":"none"},"data":{"request":"public","response":"public"}},"extensions":{"authn":{"authenticated":true},"authz":{"permission":"order.create","space":"request.space_id"}}}`)
 	return generation.Input{
 		ConfigurationProvenance: &generation.ConfigurationProvenanceInput{
 			Mode:                        generation.ConfigurationModeEnvironment,
@@ -543,10 +593,12 @@ func validInput() generation.Input {
 
 func canonicalContract(id string, extensions json.RawMessage) json.RawMessage {
 	if len(extensions) == 0 {
-		return json.RawMessage(`{"id":"` + id + `","request":{},"response":{},"errors":[]}`)
+		return json.RawMessage(`{"id":"` + id + `","request":{},"response":{},"errors":[],"semantics":` + querySemanticsJSON + `}`)
 	}
-	return json.RawMessage(`{"id":"` + id + `","request":{},"response":{},"errors":[],"extensions":` + string(extensions) + `}`)
+	return json.RawMessage(`{"id":"` + id + `","request":{},"response":{},"errors":[],"semantics":` + querySemanticsJSON + `,"extensions":` + string(extensions) + `}`)
 }
+
+const querySemanticsJSON = `{"kind":"query","effects":"none","idempotency":{"mode":"inherent"},"retry":{"safety":"safe"},"cancellation":{"mode":"best-effort"},"completion":{"mode":"completed-before-return"},"ordering":{"mode":"none"},"data":{"request":"public","response":"public"}}`
 
 func mustCapabilityID(t *testing.T, value string) generation.CapabilityID {
 	t.Helper()

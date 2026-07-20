@@ -43,6 +43,16 @@ const (
 	templateDriftFailEnvironment   = "PLYSTRA_TEMPLATE_DRIFT_FAIL"
 	templateCheckFailEnvironment   = "PLYSTRA_TEMPLATE_CHECK_FAIL"
 	templateBuildFailEnvironment   = "PLYSTRA_TEMPLATE_BUILD_FAIL"
+	newProjectQuerySemanticsYAML   = `semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
 )
 
 func TestMain(main *testing.M) {
@@ -337,7 +347,7 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
 		"plystra.yaml":            []byte("http:\n  expose:\n    - kernel.health/v1\n\ncapabilities:\n  require:\n    - email.send/v1\n    - kernel.info/v1\n  use:\n    email.send/v1: acme.platform.mailer\n  aliases: {}\n\nconfig:\n  acme.platform.mailer:\n    host: smtp.localhost\n    password:\n      env: " + secretReference + "\n"),
 		"plystra.production.yaml": []byte("capabilities:\n  require:\n    - missing.overlay/v1\n"),
 		"mailer/plugin.yaml":      []byte("id: acme.platform.mailer\nprovides: [email.send/v1]\nconfig:\n  host: {type: string, required: true}\n  password: {type: secret, required: true}\n"),
-		"mailer/capabilities/email.send/v1/capability.yaml": []byte("id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n"),
+		"mailer/capabilities/email.send/v1/capability.yaml": []byte("id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n" + newProjectQuerySemanticsYAML),
 		"mailer/plugin.go":                                     []byte("package mailer\n\nimport (\n\t\"context\"\n\t\"fmt\"\n\t\"os\"\n\n\tconfiguration \"example.com/acme/platform/generated/go/configuration\"\n\tcontract \"example.com/acme/platform/generated/go/contracts/email/send/v1\"\n)\n\ntype Config = configuration.MailerConfig\ntype Plugin struct{}\nfunc New(Config) *Plugin { return &Plugin{} }\nfunc (*Plugin) Send(context.Context, contract.Request) (contract.Response, error) { return contract.Response{}, nil }\nfunc (*Plugin) Start(context.Context) error { return recordLifecycle(\"start\") }\nfunc (*Plugin) Stop(context.Context) error { return recordLifecycle(\"stop\") }\nfunc recordLifecycle(event string) error {\n\tpath := os.Getenv(\"PLYSTRA_TEMPLATE_LIFECYCLE_LOG\")\n\tif path == \"\" { return nil }\n\tfile, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)\n\tif err != nil { return err }\n\tdefer file.Close()\n\t_, err = fmt.Fprintln(file, event)\n\treturn err\n}\n"),
 		"generated/go/configuration/mailer_gen.go":             []byte("package configuration\n\nimport (\n\t\"context\"\n\n\tkernelconfiguration \"github.com/plystra/kernel/configuration\"\n)\n\ntype MailerConfig struct { Host string; Password kernelconfiguration.Secret }\nfunc DecodeMailer(context.Context, *kernelconfiguration.Resolver, []byte) (MailerConfig, error) { return MailerConfig{}, nil }\n"),
 		"generated/go/contracts/email/send/v1/contract_gen.go": []byte("package emailsendv1\n\nconst CapabilityID = \"email.send/v1\"\ntype Request struct{}\ntype Response struct{}\n"),
@@ -614,7 +624,7 @@ func TestPublicCommandRejectsTemplateWithAmbiguousDefaultProvidersAndRollsBack(t
 	const templatePath = "example.com/acme/ambiguous-platform"
 	const templateVersion = "v1.0.0"
 	const templateQuery = templatePath + "@" + templateVersion
-	contract := []byte("id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	contract := []byte("id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n" + newProjectQuerySemanticsYAML)
 	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
 		"template.go":        []byte("package platform\n"),
 		"plystra.yaml":       []byte("capabilities:\n  require:\n    - email.send/v1\n"),
@@ -1879,7 +1889,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"does not read PLATFORM_SMTP_PASSWORD",
 		"invent values for required fields omitted by the template",
 		"plystra plugin create records",
-		"plystra capability create records.read --plugin records --expose",
+		"plystra capability create records.read --query --plugin records --expose",
 		"plystra capability implement email.send/v1 --plugin mailer",
 		"capabilities/records.read/v1/capability.yaml",
 		"plugin.yaml",
