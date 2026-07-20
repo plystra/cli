@@ -78,6 +78,9 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		"connect.NewUnaryHandler(",
 		"connect.WithSchema(method)",
 		"connect.WithRequestInitializer(connectschema.InitializeDynamicMessage)",
+		"connect.WithRequireConnectProtocolHeader()",
+		"plystraServeConnectOnly(writer, request, h.transport)",
+		`const plystraConnectAcceptPost = "application/json, application/proto"`,
 		"return target.Invoke(ctx, request)",
 		"connectschema.DecodeStruct(",
 		"connectschema.EncodeStruct(",
@@ -99,6 +102,8 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		`canonicaladapter "example.com/acme/project/generated/go/adapters/connect/customer/profile/sync/v1"`,
 		"target.Invoke",
 		"connect.NewUnaryHandler(",
+		"connect.WithRequireConnectProtocolHeader()",
+		"plystraServeConnectOnly(writer, request, h.transport)",
 	} {
 		if !bytes.Contains(alias.Data(), []byte(required)) {
 			t.Fatalf("Alias handler omits %q:\n%s", required, alias.Data())
@@ -454,6 +459,7 @@ import (
 	connectschema "example.com/acme/project/generated/go/internal/connectschema"
 	applicationinvocation "example.com/acme/project/generated/go/invocation/customer/profile/sync/v1"
 	kernelinvocation "github.com/plystra/kernel/invocation"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 )
@@ -509,28 +515,116 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	for _, test := range []struct {
+	routes := []struct {
 		name string
 		procedure string
 		methodName protoreflect.FullName
 	}{
 		{name: "canonical", procedure: canonicaladapter.Procedure, methodName: "plystra.generated.customer.profile.sync.v1.CustomerProfileSyncV1Service.Invoke"},
 		{name: "Alias", procedure: aliasadapter.Procedure, methodName: "plystra.generated.account.profile.v1.AccountProfileV1Service.Invoke"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			method := mustMethod(t, test.methodName)
-			client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](server.Client(), server.URL+test.procedure, connect.WithSchema(method), connect.WithResponseInitializer(connectschema.InitializeDynamicMessage))
-			request := connect.NewRequest(validRequest(t, method, "hello"))
-			request.Header().Set("Authorization", "Bearer test")
-			response, err := client.CallUnary(t.Context(), request)
-			if err != nil {
-				t.Fatalf("CallUnary: %v", err)
-			}
-			assertResponse(t, response.Msg)
-		})
 	}
-	if calls != 3 || rootCalls != 3 {
+	for _, route := range routes {
+		for _, encoding := range []struct {
+			name string
+			option connect.ClientOption
+		}{
+			{name: "binary"},
+			{name: "json", option: connect.WithProtoJSON()},
+		} {
+			t.Run(route.name+"/"+encoding.name, func(t *testing.T) {
+				method := mustMethod(t, route.methodName)
+				options := []connect.ClientOption{connect.WithSchema(method), connect.WithResponseInitializer(connectschema.InitializeDynamicMessage)}
+				if encoding.option != nil {
+					options = append(options, encoding.option)
+				}
+				client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](server.Client(), server.URL+route.procedure, options...)
+				request := connect.NewRequest(validRequest(t, method, "hello"))
+				request.Header().Set("Authorization", "Bearer test")
+				response, err := client.CallUnary(t.Context(), request)
+				if err != nil {
+					t.Fatalf("CallUnary: %v", err)
+				}
+				assertResponse(t, response.Msg)
+			})
+		}
+	}
+	if calls != 5 || rootCalls != 5 {
 		t.Fatalf("canonical calls = %d, root calls = %d", calls, rootCalls)
+	}
+
+	for _, route := range routes {
+		for _, protocol := range []struct {
+			name string
+			contentType string
+		}{
+			{name: "grpc", contentType: "application/grpc"},
+			{name: "grpc-web", contentType: "application/grpc-web"},
+		} {
+			t.Run(route.name+" rejects "+protocol.name, func(t *testing.T) {
+				request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+route.procedure, strings.NewReader("not a Connect envelope"))
+				if err != nil {
+					t.Fatalf("NewRequest: %v", err)
+				}
+				request.Header.Set("Content-Type", protocol.contentType)
+				request.Header.Set("Connect-Protocol-Version", "1")
+				response, err := server.Client().Do(request)
+				if err != nil {
+					t.Fatalf("Do: %v", err)
+				}
+				_ = response.Body.Close()
+				if response.StatusCode != http.StatusUnsupportedMediaType {
+					t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusUnsupportedMediaType)
+				}
+				acceptPost := response.Header.Get("Accept-Post")
+				if acceptPost != "application/json, application/proto" || strings.Contains(strings.ToLower(acceptPost), "grpc") {
+					t.Fatalf("Accept-Post = %q", acceptPost)
+				}
+			})
+		}
+	}
+	if calls != 5 || rootCalls != 5 {
+		t.Fatalf("rejected protocols crossed the boundary: calls %d/%d", calls, rootCalls)
+	}
+	t.Run("Connect protocol header is required", func(t *testing.T) {
+		method := mustMethod(t, "plystra.generated.customer.profile.sync.v1.CustomerProfileSyncV1Service.Invoke")
+		payload, err := protojson.Marshal(validRequest(t, method, "hello"))
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+canonicaladapter.Procedure, strings.NewReader(string(payload)))
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", "Bearer test")
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatalf("Do: %v", err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusBadRequest)
+		}
+	})
+	if calls != 5 || rootCalls != 5 {
+		t.Fatalf("request without the Connect protocol header crossed the boundary: calls %d/%d", calls, rootCalls)
+	}
+	t.Run("non-POST methods are not exposed", func(t *testing.T) {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+canonicaladapter.Procedure, nil)
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatalf("Do: %v", err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusMethodNotAllowed || response.Header.Get("Allow") != http.MethodPost {
+			t.Fatalf("GET response = %d Allow=%q", response.StatusCode, response.Header.Get("Allow"))
+		}
+	})
+	if calls != 5 || rootCalls != 5 {
+		t.Fatalf("non-POST request crossed the boundary: calls %d/%d", calls, rootCalls)
 	}
 
 	method := mustMethod(t, "plystra.generated.customer.profile.sync.v1.CustomerProfileSyncV1Service.Invoke")
@@ -548,7 +642,7 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 			}
 		})
 	}
-	if calls != 3 || rootCalls != 3 {
+	if calls != 5 || rootCalls != 5 {
 		t.Fatalf("invalid requests crossed the boundary: calls %d/%d", calls, rootCalls)
 	}
 	request := connect.NewRequest(validRequest(t, method, "provider-error"))

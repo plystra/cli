@@ -66,7 +66,7 @@ When several compatible Plugins provide one required Capability, select one with
 
 Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
-` + "`generated/proto/wire-map.json`" + ` is committed compatibility history for canonical Capability request and response messages selected for Connect. Generation preserves field numbers across declaration reordering, allocates new fields without renumbering existing fields, and permanently reserves removed field names and numbers. Scalar contract enums receive a numeric zero ` + "`*_UNSPECIFIED`" + ` sentinel and stable positive member numbers; reordering and additions preserve existing assignments, while removed member names and numbers remain permanently reserved. Inactive field and enum history remains when exposure, Connect, or an enum is disabled. Capability Aliases reuse their canonical target messages and enums and have no separate ledger entry. Never edit or delete the ledger; restore its exact last committed content before regenerating. Generation emits deterministic ` + "`.proto`" + ` schemas for the selected canonical and Alias Connect surfaces plus a self-contained ` + "`generated/proto/descriptor-set.pb`" + `; these CLI-owned files contain no Provider, Plugin, Go Module, configuration, or Secret data and must not be edited. A Project without a selected Connect surface retains a valid empty descriptor set. A selected Connect surface also emits a Go handler under ` + "`generated/go/adapters/connect/`" + `. Canonical handlers bind one exact procedure to the generated canonical application-invocation handle, while Alias handlers forward through that canonical handler without owning a Provider or Alias dispatch entry. Generation installs direct ` + "`connectrpc.com/connect`" + ` and ` + "`google.golang.org/protobuf`" + ` requirements at the supported versions inside the existing module transaction. The generated application entrypoint does not yet mount an HTTP server; server mounting and the remaining protocol projections remain later transport work. Generation also rejects canonical fields in the same request or response when they derive the same ProtoJSON name or generated enum type. The diagnostic identifies both authored field names; rename one field in ` + "`capability.yaml`" + ` rather than editing generated output.
+` + "`generated/proto/wire-map.json`" + ` is committed compatibility history for canonical Capability request and response messages selected for Connect. Generation preserves field numbers across declaration reordering, allocates new fields without renumbering existing fields, and permanently reserves removed field names and numbers. Scalar contract enums receive a numeric zero ` + "`*_UNSPECIFIED`" + ` sentinel and stable positive member numbers; reordering and additions preserve existing assignments, while removed member names and numbers remain permanently reserved. Inactive field and enum history remains when exposure, Connect, or an enum is disabled. Capability Aliases reuse their canonical target messages and enums and have no separate ledger entry. Never edit or delete the ledger; restore its exact last committed content before regenerating. Generation emits deterministic ` + "`.proto`" + ` schemas for the selected canonical and Alias Connect surfaces plus a self-contained ` + "`generated/proto/descriptor-set.pb`" + `; these CLI-owned files contain no Provider, Plugin, Go Module, configuration, or Secret data and must not be edited. A Project without a selected Connect surface retains a valid empty descriptor set. A selected Connect surface also emits a Go handler under ` + "`generated/go/adapters/connect/`" + `. Canonical handlers bind one exact procedure to the generated canonical application-invocation handle, while Alias handlers forward through that canonical handler without owning a Provider or Alias dispatch entry. Both accept only Connect POST requests encoded as binary Protobuf or ProtoJSON, require ` + "`Connect-Protocol-Version: 1`" + `, and reject gRPC and gRPC-Web before root-context or Provider invocation. Generation installs direct ` + "`connectrpc.com/connect`" + ` and ` + "`google.golang.org/protobuf`" + ` requirements at the supported versions inside the existing module transaction. The generated application entrypoint does not yet mount an HTTP server; server mounting and the remaining protocol projections remain later transport work. Generation also rejects canonical fields in the same request or response when they derive the same ProtoJSON name or generated enum type. The diagnostic identifies both authored field names; rename one field in ` + "`capability.yaml`" + ` rather than editing generated output.
 `
 
 const githubCIReadmeTemplate = `
@@ -310,9 +310,12 @@ A selected Connect surface also emits a Go handler under
 generated/go/adapters/connect/. Canonical handlers bind one exact procedure to
 the generated canonical application-invocation handle, while Alias handlers
 forward through that canonical handler without owning a Provider or Alias
-dispatch entry. Generation installs direct connectrpc.com/connect and
-google.golang.org/protobuf requirements at the supported versions inside the
-existing module transaction. The generated application entrypoint does not
+dispatch entry. Both accept only Connect POST requests encoded as binary
+Protobuf or ProtoJSON, require Connect-Protocol-Version: 1, and reject gRPC and
+gRPC-Web before root-context or Provider invocation. Generation installs direct
+connectrpc.com/connect and google.golang.org/protobuf requirements at the
+supported versions inside the existing module transaction. The generated
+application entrypoint does not
 yet mount an HTTP server; server mounting and the remaining protocol
 projections remain later transport work.
 
@@ -997,8 +1000,10 @@ affected surface; enable connect: true in the selected current-Project
 configuration or remove those surfaces.
 The generated strict JSON handler remains the implemented HTTP surface, and a
 selected Connect surface also receives a generated canonical handler plus any
-Alias forwards. Server mounting and the optional REST projection remain in the
-later transport gates.
+Alias forwards. Those handlers accept only Connect POST requests encoded as
+binary Protobuf or ProtoJSON, require Connect-Protocol-Version: 1, and reject
+gRPC and gRPC-Web before root-context or Provider invocation. Server mounting
+and the optional REST projection remain in the later transport gates.
 
 Cross-origin configuration belongs in the selected current-Project document.
 http.cors accepts only required nonempty allowed_origins and optional boolean
@@ -1017,8 +1022,9 @@ smoke, but it does not yet mount an HTTP server. Do not edit that generated main
 or add a competing startup workaround. The generated Connect handler is
 available for direct httptest validation; server mounting remains in the later
 HTTP transport gate. Test the real generated handler with httptest, including
-success, every semantic error, malformed JSON,
-unknown fields, wrong media type, and oversized input where relevant.
+binary Protobuf and ProtoJSON success, gRPC and gRPC-Web rejection without
+Provider invocation, every semantic error, malformed JSON, unknown fields,
+wrong media type, and oversized input where relevant.
 
 The provider-independent TypeScript package is under
 generated/sdk/javascript. Validate it with:

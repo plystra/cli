@@ -48,7 +48,11 @@ For every selected Connect surface, generation also emits a Go handler under
 `generated/go/adapters/connect/`. Canonical handlers bind one exact procedure
 to the generated canonical application-invocation handle; Alias handlers are
 thin forwards to that canonical handler and never create a Provider or Alias
-dispatch entry. The CLI transaction installs direct `connectrpc.com/connect`
+dispatch entry. Both accept only Connect POST requests encoded as binary
+Protobuf or ProtoJSON, require `Connect-Protocol-Version: 1`, and reject gRPC
+and gRPC-Web with `415 Unsupported Media Type` before root-context or Provider
+invocation. Their `Accept-Post` response advertises only the two supported
+Connect media types. The CLI transaction installs direct `connectrpc.com/connect`
 and `google.golang.org/protobuf` requirements at the supported versions when
 those handlers are present. The generated application entrypoint does not yet
 mount an HTTP server; server mounting and the remaining protocol projections
