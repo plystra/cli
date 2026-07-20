@@ -28,7 +28,7 @@ func TestRenderProducesDeterministicSignalAndSmokeLifecycle(t *testing.T) {
 	for _, required := range []string{
 		`applicationbootstrap "example.com/acme/application/generated/go/bootstrap"`,
 		`signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)`,
-		`applicationbootstrap.New(ctx, defaultRuntimeDocument)`,
+		`applicationbootstrap.New(ctx)`,
 		`application.Start(ctx)`,
 		`application.Invocations().IntrinsicHealth(ctx)`,
 		`health.Status != kernelintrinsic.HealthStatusHealthy`,
@@ -40,7 +40,7 @@ func TestRenderProducesDeterministicSignalAndSmokeLifecycle(t *testing.T) {
 			t.Fatalf("generated entrypoint omits %q:\n%s", required, generated)
 		}
 	}
-	for _, deferred := range []string{"--env", "--config", "PLYSTRA_ENV", "PLYSTRA_CONFIG"} {
+	for _, deferred := range []string{"plystra.yaml", "defaultRuntimeDocument", "--env", "--config", "PLYSTRA_ENV", "PLYSTRA_CONFIG"} {
 		if bytes.Contains(generated, []byte(deferred)) {
 			t.Fatalf("generated entrypoint prematurely contains selector %q:\n%s", deferred, generated)
 		}

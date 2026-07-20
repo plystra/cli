@@ -27,7 +27,9 @@ func TestRenderProducesDeterministicRedactedRuntimeBoundary(t *testing.T) {
 	}
 	for _, required := range []string{
 		`applicationassembly "example.com/acme/application/generated/go/assembly"`,
-		"kernelconfiguration.LoadDocument(documentPath)",
+		`defaultRuntimeDocument = "plystra.yaml"`,
+		"func New(ctx context.Context)",
+		"kernelconfiguration.LoadDocument(defaultRuntimeDocument)",
 		"defer clear(document)",
 		"kernelconfiguration.ExtractStringMap(document, \"timeouts\")",
 		"kernelconfiguration.NewResolver",
@@ -42,7 +44,7 @@ func TestRenderProducesDeterministicRedactedRuntimeBoundary(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
-		"plystra.yaml",
+		"documentPath string",
 		"private-runtime-value",
 		"PRIVATE_SECRET_TARGET",
 	} {

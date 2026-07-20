@@ -702,7 +702,8 @@ func TestApplicationConstructsStartsAndStopsSelectedProviders(t *testing.T) {
 	localservice.Reset()
 	remotestore.Reset()
 
-	application, err := New(context.Background(), writeRuntimeDocument(t, validRuntimeDocument))
+	writeRuntimeDocument(t, validRuntimeDocument)
+	application, err := New(context.Background())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -768,7 +769,8 @@ func TestApplicationRejectsInvalidSettingsBeforeConstructors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			localservice.Reset()
 			remotestore.Reset()
-			application, err := New(context.Background(), writeRuntimeDocument(t, document))
+			writeRuntimeDocument(t, document)
+			application, err := New(context.Background())
 			if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrRuntimeSettings) {
 				t.Fatalf("New = %#v, %v", application, err)
 			}
@@ -784,7 +786,8 @@ func TestApplicationStartupTimeoutCancelsAndRollsBack(t *testing.T) {
 	remotestore.Reset()
 	lifecycleevents.Reset()
 	document := "timeouts:\n  startup: 25ms\nconfig:\n  zeta.remote-store:\n    endpoint: runtime-private-endpoint\n    token: {env: PLYSTRA_ASSEMBLY_PRIVATE_SECRET}\n    startup: wait\n"
-	application, err := New(context.Background(), writeRuntimeDocument(t, document))
+	writeRuntimeDocument(t, document)
+	application, err := New(context.Background())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -812,8 +815,10 @@ func TestApplicationRejectsMissingRuntimeDocument(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
 	localservice.Reset()
 	remotestore.Reset()
-	missing := filepath.Join(t.TempDir(), "runtime-private-missing-document")
-	application, err := New(context.Background(), missing)
+	if err := os.Remove(defaultRuntimeDocument); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove default runtime document: %v", err)
+	}
+	application, err := New(context.Background())
 	if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, kernelconfiguration.ErrLoadDocument) || !errors.Is(err, kernelconfiguration.ErrDocumentUnavailable) {
 		t.Fatalf("New(missing) = %#v, %v", application, err)
 	}
@@ -827,14 +832,14 @@ func TestApplicationRejectsSymbolicRuntimeDocument(t *testing.T) {
 	remotestore.Reset()
 	root := t.TempDir()
 	target := filepath.Join(root, "runtime-private-target")
-	link := filepath.Join(root, "runtime-private-link")
 	if err := os.WriteFile(target, []byte(validRuntimeDocument), 0o600); err != nil {
 		t.Fatalf("write target: %v", err)
 	}
-	if err := os.Symlink(target, link); err != nil {
+	if err := os.Symlink(target, defaultRuntimeDocument); err != nil {
 		t.Skipf("symbolic links are unavailable: %v", err)
 	}
-	application, err := New(context.Background(), link)
+	t.Cleanup(func() { _ = os.Remove(defaultRuntimeDocument) })
+	application, err := New(context.Background())
 	if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, kernelconfiguration.ErrLoadDocument) || !errors.Is(err, kernelconfiguration.ErrDocumentUnavailable) {
 		t.Fatalf("New(symbolic link) = %#v, %v", application, err)
 	}
@@ -846,13 +851,13 @@ func TestApplicationRejectsInvalidContextsAndValues(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
 	localservice.Reset()
 	remotestore.Reset()
-	documentPath := writeRuntimeDocument(t, validRuntimeDocument)
-	if application, err := New(nil, documentPath); application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrInvalidContext) {
+	writeRuntimeDocument(t, validRuntimeDocument)
+	if application, err := New(nil); application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrInvalidContext) {
 		t.Fatalf("New(nil) = %#v, %v", application, err)
 	}
 	assertNoBootstrapConstructorCalls(t)
 
-	application, err := New(context.Background(), documentPath)
+	application, err := New(context.Background())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -874,13 +879,12 @@ func TestApplicationRejectsInvalidContextsAndValues(t *testing.T) {
 	}
 }
 
-func writeRuntimeDocument(t *testing.T, document string) string {
+func writeRuntimeDocument(t *testing.T, document string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "runtime.yaml")
-	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+	if err := os.WriteFile(defaultRuntimeDocument, []byte(document), 0o600); err != nil {
 		t.Fatalf("write runtime document: %v", err)
 	}
-	return path
+	t.Cleanup(func() { _ = os.Remove(defaultRuntimeDocument) })
 }
 
 func assertNoBootstrapConstructorCalls(t *testing.T) {
@@ -914,18 +918,17 @@ const emptyGeneratedBootstrapRuntimeTest = `package bootstrap
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
 
 	kernellifecycle "github.com/plystra/kernel/lifecycle"
 )
 
 func TestEmptyApplicationLifecycle(t *testing.T) {
-	documentPath := filepath.Join(t.TempDir(), "runtime.yaml")
-	if err := os.WriteFile(documentPath, []byte("{}\n"), 0o600); err != nil {
+	if err := os.WriteFile(defaultRuntimeDocument, []byte("{}\n"), 0o600); err != nil {
 		t.Fatalf("write runtime document: %v", err)
 	}
-	application, err := New(context.Background(), documentPath)
+	t.Cleanup(func() { _ = os.Remove(defaultRuntimeDocument) })
+	application, err := New(context.Background())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
