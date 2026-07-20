@@ -30,8 +30,8 @@ import (
 )
 
 const (
-	testModulePath  = "example.com/acme/project"
-	connectContract = `id: customer.profile.sync/v1
+	testModulePath      = "example.com/acme/project"
+	connectContractBody = `id: customer.profile.sync/v1
 request:
   active: {type: boolean, required: true}
   count: {type: integer}
@@ -53,7 +53,7 @@ response:
 errors: []
 extensions:
   policy: {credential: authorization}
-` + querySemanticsYAML
+`
 	querySemanticsYAML = `semantics:
   kind: query
   effects: none
@@ -64,6 +64,18 @@ extensions:
   ordering: {mode: none}
   data: {request: public, response: public}
 `
+	commandSemanticsYAML = `semantics:
+  kind: command
+  effects: external-write
+  idempotency: {mode: none}
+  retry: {safety: never}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
+	connectContract        = connectContractBody + querySemanticsYAML
+	commandConnectContract = connectContractBody + commandSemanticsYAML
 )
 
 func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
@@ -225,25 +237,36 @@ func TestRenderRequiresConfigurationProvenanceWithoutEmbeddingSelection(t *testi
 	}
 }
 
-func TestGeneratedCanonicalAndAliasHandlersInvokeOneCanonicalTarget(t *testing.T) {
-	fixture := buildFixture(t, connectContract, "account.profile/v1")
-	operations := fixture.model.Operations()
-	if len(operations) != 1 || operations[0].Kind() != capabilitymeta.CapabilityKindQuery {
-		t.Fatalf("generated handler target operations = %#v", operations)
+func TestGeneratedUnaryQueryAndCommandHandlersInvokeOneCanonicalTarget(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		source string
+		kind   capabilitymeta.CapabilityKind
+	}{
+		{name: "query", source: connectContract, kind: capabilitymeta.CapabilityKindQuery},
+		{name: "command", source: commandConnectContract, kind: capabilitymeta.CapabilityKindCommand},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := buildFixture(t, test.source, "account.profile/v1")
+			operations := fixture.model.Operations()
+			if len(operations) != 1 || operations[0].Kind() != test.kind {
+				t.Fatalf("generated handler target operations = %#v", operations)
+			}
+			files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			contract, err := contractgen.Render([]byte(test.source))
+			if err != nil {
+				t.Fatalf("Render contract: %v", err)
+			}
+			invocation, err := invocationgen.Render(testModulePath, []byte(test.source))
+			if err != nil {
+				t.Fatalf("Render invocation: %v", err)
+			}
+			assertGeneratedHandlersRun(t, contract, invocation, files)
+		})
 	}
-	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	contract, err := contractgen.Render([]byte(connectContract))
-	if err != nil {
-		t.Fatalf("Render contract: %v", err)
-	}
-	invocation, err := invocationgen.Render(testModulePath, []byte(connectContract))
-	if err != nil {
-		t.Fatalf("Render invocation: %v", err)
-	}
-	assertGeneratedHandlersRun(t, contract, invocation, files)
 }
 
 type connectFixture struct {

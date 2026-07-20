@@ -254,8 +254,8 @@ func Build(connect bool, targets []CanonicalTargetView, aliasViews []AliasView) 
 		if err != nil {
 			return Model{}, fmt.Errorf("%w: %w: canonical operation kind for %s: %v", ErrBuild, ErrTarget, operation.ID(), err)
 		}
-		if kind != capabilitymeta.CapabilityKindQuery {
-			return Model{}, fmt.Errorf("%w: %w: %w: Capability %s declares semantics.kind %q for the requested Connect surface; the current unary boundary supports only semantics.kind %q; remove %s from http.expose until its Connect operation kind is supported", ErrBuild, ErrTarget, ErrOperationKind, operation.ID(), kind, capabilitymeta.CapabilityKindQuery, operation.ID())
+		if kind != capabilitymeta.CapabilityKindQuery && kind != capabilitymeta.CapabilityKindCommand {
+			return Model{}, fmt.Errorf("%w: %w: %w: Capability %s declares semantics.kind %q for the requested Connect surface; the current unary boundary supports only semantics.kind %q or %q; remove %s from http.expose until its Connect operation kind is supported", ErrBuild, ErrTarget, ErrOperationKind, operation.ID(), kind, capabilitymeta.CapabilityKindQuery, capabilitymeta.CapabilityKindCommand, operation.ID())
 		}
 		operations[index] = Operation{
 			id:             operation.ID(),

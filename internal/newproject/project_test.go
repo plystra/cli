@@ -1139,9 +1139,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("generated/proto/descriptor-set.pb"),
 		[]byte("self-contained"),
 		[]byte("A selected Connect surface also emits a Go handler"),
-		[]byte("explicit `semantics.kind` is `query`"),
+		[]byte("explicit `semantics.kind` is `query` or `command`"),
 		[]byte("projects each as one unary procedure"),
-		[]byte("Do not change an effectful operation to `query`"),
+		[]byte("Do not relabel an event or stream"),
 	} {
 		if !bytes.Contains(readme, wireHistory) {
 			t.Fatalf("generated README omits Protobuf wire-history guidance %q:\n%s", wireHistory, readme)
@@ -1963,9 +1963,9 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"Unsupported Connect operation kind",
 		"generated/proto/descriptor-set.pb is the self-contained deterministic",
 		"A selected Connect surface also emits a Go handler",
-		"explicit semantics.kind: query",
-		"projects each as one unary procedure",
-		"effectful operation as a query to bypass this check",
+		"explicit semantics.kind: query or command",
+		"projects each as one unary",
+		"event or stream from http.expose",
 		"@bufbuild/protobuf, @connectrpc/connect, and @connectrpc/connect-web runtime",
 		"never receive ConnectError as the public error model",
 		"src/descriptors.ts",

@@ -31,6 +31,17 @@ extensions:
   authn: {authenticated: true}
 `
 
+const projectionCommandSemantics = `semantics:
+  kind: command
+  effects: external-write
+  idempotency: {mode: none}
+  retry: {safety: never}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`
+
 func TestBuildNormalizesExactConnectProjectionDeterministically(t *testing.T) {
 	t.Parallel()
 
@@ -135,26 +146,39 @@ func TestBuildDisabledProjectionIsExplicitAndIgnoresUnselectedInput(t *testing.T
 	}
 }
 
-func TestBuildRejectsNonQueryKindsAtTheUnaryConnectBoundary(t *testing.T) {
+func TestBuildNormalizesUnaryCommandAndAlias(t *testing.T) {
+	t.Parallel()
+
+	target := projectionTarget(t, `id: customer.profile.update/v1
+request: {profile_id: {type: string, required: true}}
+response: {updated: {type: boolean, required: true}}
+errors: [update_failed]
+`+projectionCommandSemantics, generation.Exposure{HTTP: true})
+	alias := projectionAlias(t, "account.profile.update/v1", target, generation.Exposure{HTTP: true}, "")
+	model, err := protobufmodel.Build(true, []protobufmodel.CanonicalTargetView{target}, []protobufmodel.AliasView{alias})
+	if err != nil || !model.Valid() || !model.Enabled() {
+		t.Fatalf("Build(command) = %#v, %v", model, err)
+	}
+	operations := model.Operations()
+	aliases := model.Aliases()
+	if len(operations) != 1 || operations[0].ID().String() != "customer.profile.update/v1" || operations[0].Kind() != capabilitymeta.CapabilityKindCommand {
+		t.Fatalf("command operations = %#v", operations)
+	}
+	if len(aliases) != 1 || aliases[0].ID().String() != "account.profile.update/v1" || aliases[0].Target() != operations[0].ID() {
+		t.Fatalf("command aliases = %#v", aliases)
+	}
+	if !bytes.Contains(model.CanonicalJSON(), []byte(`"kind":"command"`)) {
+		t.Fatalf("command canonical projection omits typed kind: %s", model.CanonicalJSON())
+	}
+}
+
+func TestBuildRejectsEventAndStreamKindsAtTheUnaryConnectBoundary(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
 		kind      capabilitymeta.CapabilityKind
 		semantics string
 	}{
-		{
-			kind: capabilitymeta.CapabilityKindCommand,
-			semantics: `semantics:
-  kind: command
-  effects: external-write
-  idempotency: {mode: none}
-  retry: {safety: never}
-  cancellation: {mode: best-effort}
-  completion: {mode: completed-before-return}
-  ordering: {mode: none}
-  data: {request: public, response: public}
-`,
-		},
 		{
 			kind: capabilitymeta.CapabilityKindEvent,
 			semantics: `semantics:
@@ -197,6 +221,7 @@ func TestBuildRejectsNonQueryKindsAtTheUnaryConnectBoundary(t *testing.T) {
 				"requested Connect surface",
 				"unary boundary",
 				`semantics.kind "query"`,
+				`"command"`,
 				"remove customer.profile.get/v1 from http.expose",
 			} {
 				if !strings.Contains(err.Error(), want) {

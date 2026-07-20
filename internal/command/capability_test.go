@@ -331,7 +331,7 @@ func TestRunCapabilityExposeRejectsMissingHTTPTransportAndRollsBack(t *testing.T
 	}
 }
 
-func TestRunCapabilityExposeRejectsNonQueryAndRollsBack(t *testing.T) {
+func TestRunCapabilityExposeSupportsUnaryCommand(t *testing.T) {
 	root := writeCapabilityCommandModule(t)
 	writeCommandFile(t, filepath.Join(root, "records", "plugin.yaml"), "id: acme.library.records\nprovides: [records.archive/v1]\n")
 	writeCommandFile(t, filepath.Join(root, "records", "capabilities", "records.archive", "v1", "capability.yaml"), `id: records.archive/v1
@@ -348,26 +348,39 @@ semantics:
   ordering: {mode: none}
   data: {request: public, response: public}
 `)
-	before := commandTree(t, root)
+	writeCommandFile(t, filepath.Join(root, "records", "capability_records.archive_v1.go"), `package records
+
+import (
+	"context"
+
+	contract "example.com/acme/library/generated/go/contracts/records/archive/v1"
+)
+
+func (*Plugin) Archive(_ context.Context, _ contract.Request) (contract.Response, error) {
+	return contract.Response{}, nil
+}
+`)
 
 	exitCode, stdout, stderr := runCommand(t, []string{"capability", "expose", "records.archive/v1"}, filepath.Join(root, "records"), commandGoEnvironment())
-	if exitCode != 1 || stdout != "" {
+	wantManifestPath := filepath.Join(root, "plystra.yaml")
+	wantOutput := "exposed capability records.archive/v1 over HTTP in " + wantManifestPath + "\n"
+	if exitCode != 0 || stdout != wantOutput || stderr != "" {
 		t.Fatalf("capability expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
-	for _, want := range []string{
-		"Capability records.archive/v1",
-		`semantics.kind "command"`,
-		"requested Connect surface",
-		"unary boundary",
-		`semantics.kind "query"`,
-		"remove records.archive/v1 from http.expose",
+	for _, path := range []string{
+		"generated/go/adapters/connect/records/archive/v1/handler_gen.go",
+		"generated/proto/plystra/generated/records/archive/v1/capability.proto",
+		"generated/sdk/javascript/src/operations/records/archive/v1.ts",
 	} {
-		if !strings.Contains(stderr, want) {
-			t.Fatalf("stderr %q does not contain %q", stderr, want)
-		}
+		assertCommandFile(t, root, path)
 	}
-	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
-		t.Fatalf("failed non-query exposure changed Project:\nbefore: %#v\nafter:  %#v", before, after)
+	manifest, err := applicationmeta.Parse(readCommandFile(t, root, "plystra.yaml"))
+	if err != nil || len(manifest.HTTPExposures()) != 1 || manifest.HTTPExposures()[0].ID().String() != "records.archive/v1" {
+		t.Fatalf("command exposure manifest = %#v, %v", manifest.HTTPExposures(), err)
+	}
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, commandGoEnvironment())
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/library in "+root+"\n" {
+		t.Fatalf("command post-exposure check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	assertNoCommandTransactions(t, root)
 }
