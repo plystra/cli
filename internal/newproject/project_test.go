@@ -1105,7 +1105,7 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 			t.Fatalf("generated README advertises unavailable command %q:\n%s", unavailable, readme)
 		}
 	}
-	for _, available := range [][]byte{[]byte("plystra add github.com/acme/platform@v1.0.0"), []byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("plystra generate --env"), []byte("PLYSTRA_ENV"), []byte("plystra generate --config"), []byte("PLYSTRA_CONFIG"), []byte("plystra check"), []byte("go run ./generated/go/application --env production"), []byte("go test ./..."), []byte("go build ./..."), []byte("go vet ./...")} {
+	for _, available := range [][]byte{[]byte("plystra add github.com/acme/platform@v1.0.0"), []byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("plystra generate --env"), []byte("PLYSTRA_ENV"), []byte("plystra generate --config"), []byte("PLYSTRA_CONFIG"), []byte("plystra check"), []byte("go run ./generated/go/application --env production"), []byte("go run ./generated/go/application --config deploy/customer-a.yaml"), []byte("go test ./..."), []byte("go build ./..."), []byte("go vet ./...")} {
 		if !bytes.Contains(readme, available) {
 			t.Fatalf("generated README omits available workflow %q:\n%s", available, readme)
 		}
@@ -1911,6 +1911,9 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra generate --check --env production",
 		"go run ./generated/go/application --env production",
 		"Generated startup accepts the same --env selector or PLYSTRA_ENV",
+		"--config selector or PLYSTRA_CONFIG",
+		"go run ./generated/go/application --config deploy/customer-a.yaml",
+		"does not merge it beneath",
 		"PLYSTRA_ENV supplies the same environment name",
 		"plystra capability expose records.read/v1 --env production",
 		"plystra capability expose records.read/v1 --config deploy/customer-a.yaml",

@@ -44,9 +44,15 @@ token: {type: secret}
 		`defaultRuntimeDocument = "plystra.yaml"`,
 		"func New(ctx context.Context, options RuntimeOptions)",
 		"func loadRuntimeDocument(options RuntimeOptions)",
-		`runtimeEnvironmentVariable = "PLYSTRA_ENV"`,
-		`arguments[0] != "--env"`,
-		`overlayPath := "plystra." + environment + ".yaml"`,
+		`runtimeEnvironmentVariable   = "PLYSTRA_ENV"`,
+		`runtimeConfigurationVariable = "PLYSTRA_CONFIG"`,
+		`case "--env":`,
+		`case "--config":`,
+		`path: "plystra." + arguments[1] + ".yaml"`,
+		"runtimeProjectRelativeConfigurationPath",
+		"inspectRuntimeConfigurationPath",
+		"sameRuntimeConfigurationPathStates",
+		"normalizeRuntimeDocument",
 		`"acme.audit": {`,
 		`"acme.records": {`,
 		`"headers":    runtimeConfigurationObject`,
@@ -73,8 +79,6 @@ token: {type: secret}
 		"documentPath string",
 		"private-runtime-value",
 		"PRIVATE_SECRET_TARGET",
-		"PLYSTRA_CONFIG",
-		`"--config"`,
 	} {
 		if bytes.Contains(generated, []byte(forbidden)) {
 			t.Fatalf("generated source contains runtime input %q:\n%s", forbidden, generated)

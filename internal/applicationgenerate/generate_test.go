@@ -101,8 +101,12 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	for _, required := range [][]byte{
 		[]byte(`defaultRuntimeDocument = "plystra.yaml"`),
 		[]byte("func New(ctx context.Context, options RuntimeOptions)"),
-		[]byte(`runtimeEnvironmentVariable = "PLYSTRA_ENV"`),
-		[]byte(`overlayPath := "plystra." + environment + ".yaml"`),
+		[]byte(`runtimeEnvironmentVariable   = "PLYSTRA_ENV"`),
+		[]byte(`runtimeConfigurationVariable = "PLYSTRA_CONFIG"`),
+		[]byte(`case "--env":`),
+		[]byte(`case "--config":`),
+		[]byte("runtimeProjectRelativeConfigurationPath"),
+		[]byte("normalizeRuntimeDocument"),
 	} {
 		if !bytes.Contains(bootstrap, required) {
 			t.Fatalf("generated bootstrap omits default configuration selection %q:\n%s", required, bootstrap)

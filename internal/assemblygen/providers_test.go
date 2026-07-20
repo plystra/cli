@@ -777,7 +777,7 @@ func TestApplicationSelectsOneNamedEnvironment(t *testing.T) {
 	tests := map[string]RuntimeOptions{
 		"explicit overrides ambient": {
 			Arguments:   []string{"--env", "production"},
-			Environment: []string{"PLYSTRA_ENV=missing"},
+			Environment: []string{"PLYSTRA_ENV=missing", "PLYSTRA_CONFIG=missing.yaml"},
 		},
 		"ambient": {Environment: []string{"PLYSTRA_ENV=production"}},
 	}
@@ -817,6 +817,43 @@ func TestApplicationSelectsOneNamedEnvironment(t *testing.T) {
 	_, remoteConfig := remotestore.Snapshot()
 	if localConfig.Label != "shared-label" || remoteConfig.Endpoint != "shared-endpoint" {
 		t.Fatal("default selection did not retain root configuration")
+	}
+}
+
+func TestApplicationSelectsCompleteReplacement(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	writeRuntimeDocument(t, "config: [root-is-intentionally-invalid\n")
+	replacementPath := filepath.Join("deploy", "customer.yaml")
+	writeReplacementDocument(t, replacementPath, "config:\n  acme.local-service:\n    label: replacement-label\n  zeta.remote-store:\n    endpoint: replacement-endpoint\n    token: {env: PLYSTRA_ASSEMBLY_PRIVATE_SECRET}\n")
+	writeReplacementDocument(t, filepath.Join("deploy", "ignored.yaml"), "not: [valid\n")
+	absolutePath, err := filepath.Abs(replacementPath)
+	if err != nil {
+		t.Fatalf("resolve absolute replacement path: %v", err)
+	}
+
+	tests := map[string]RuntimeOptions{
+		"explicit relative": {Arguments: []string{"--config", replacementPath}},
+		"explicit absolute": {Arguments: []string{"--config", absolutePath}},
+		"ambient":           {Environment: []string{"PLYSTRA_CONFIG=" + replacementPath}},
+		"explicit overrides ambient selectors": {
+			Arguments:   []string{"--config", replacementPath},
+			Environment: []string{"PLYSTRA_CONFIG=missing.yaml", "PLYSTRA_ENV=missing"},
+		},
+	}
+	for name, options := range tests {
+		t.Run(name, func(t *testing.T) {
+			localservice.Reset()
+			remotestore.Reset()
+			application, err := New(context.Background(), options)
+			if err != nil || application == nil || !application.Valid() {
+				t.Fatalf("New = %#v, %v", application, err)
+			}
+			localCalls, localConfig := localservice.Snapshot()
+			remoteCalls, remoteConfig := remotestore.Snapshot()
+			if localCalls != 1 || localConfig.Label != "replacement-label" || remoteCalls != 1 || remoteConfig.Endpoint != "replacement-endpoint" || string(remoteConfig.Token.Bytes()) != "runtime-private-secret-value" {
+				t.Fatal("complete replacement did not reach selected Provider construction")
+			}
+		})
 	}
 }
 
@@ -918,7 +955,6 @@ func TestApplicationRejectsInvalidEnvironmentSelectionBeforeConstructors(t *test
 	}{
 		{name: "missing", options: RuntimeOptions{Arguments: []string{"--env", "missing"}}, reason: ErrRuntimeSelector},
 		{name: "unsafe", options: RuntimeOptions{Arguments: []string{"--env", "../production"}}, reason: ErrRuntimeSelector},
-		{name: "unsupported selector", options: RuntimeOptions{Arguments: []string{"--config", "deploy.yaml"}}, reason: ErrRuntimeSelector},
 		{name: "duplicate ambient", options: RuntimeOptions{Environment: []string{"PLYSTRA_ENV=test", "PLYSTRA_ENV=production"}}, reason: ErrRuntimeSelector},
 		{name: "type change", options: RuntimeOptions{Arguments: []string{"--env", "type-change"}}, reason: ErrRuntimeConfiguration},
 		{name: "unknown field", options: RuntimeOptions{Arguments: []string{"--env", "unknown-field"}}, reason: ErrRuntimeConfiguration},
@@ -936,6 +972,86 @@ func TestApplicationRejectsInvalidEnvironmentSelectionBeforeConstructors(t *test
 			assertSafeBootstrapError(t, err)
 		})
 	}
+}
+
+func TestApplicationRejectsInvalidReplacementBeforeConstructors(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	writeRuntimeDocument(t, validRuntimeDocument)
+	writeReplacementDocument(t, "invalid-syntax.yaml", "config: [runtime-private-invalid\n")
+	writeReplacementDocument(t, "invalid-type.yaml", "config:\n  zeta.remote-store:\n    endpoint: {nested: value}\n")
+	writeReplacementDocument(t, "unknown-field.yaml", "unknown: true\n")
+	writeReplacementDocument(t, "alias.yaml", "config:\n  zeta.remote-store: &shared\n    endpoint: value\n")
+	if err := os.MkdirAll("replacement-directory", 0o755); err != nil {
+		t.Fatalf("create replacement directory: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		options RuntimeOptions
+		reason  error
+	}{
+		{name: "missing", options: RuntimeOptions{Arguments: []string{"--config", "missing.yaml"}}, reason: ErrRuntimeSelector},
+		{name: "empty", options: RuntimeOptions{Arguments: []string{"--config", ""}}, reason: ErrRuntimeSelector},
+		{name: "outside Project", options: RuntimeOptions{Arguments: []string{"--config", filepath.Join("..", "outside.yaml")}}, reason: ErrRuntimeSelector},
+		{name: "directory", options: RuntimeOptions{Arguments: []string{"--config", "replacement-directory"}}, reason: ErrRuntimeSelector},
+		{name: "duplicate explicit", options: RuntimeOptions{Arguments: []string{"--config", "invalid-type.yaml", "--config", "unknown-field.yaml"}}, reason: ErrRuntimeSelector},
+		{name: "explicit conflict", options: RuntimeOptions{Arguments: []string{"--env", "test", "--config", "invalid-type.yaml"}}, reason: ErrRuntimeSelector},
+		{name: "duplicate ambient", options: RuntimeOptions{Environment: []string{"PLYSTRA_CONFIG=invalid-type.yaml", "PLYSTRA_CONFIG=unknown-field.yaml"}}, reason: ErrRuntimeSelector},
+		{name: "ambient conflict", options: RuntimeOptions{Environment: []string{"PLYSTRA_CONFIG=invalid-type.yaml", "PLYSTRA_ENV=test"}}, reason: ErrRuntimeSelector},
+		{name: "invalid syntax", options: RuntimeOptions{Arguments: []string{"--config", "invalid-syntax.yaml"}}, reason: ErrRuntimeConfiguration},
+		{name: "invalid type", options: RuntimeOptions{Arguments: []string{"--config", "invalid-type.yaml"}}, reason: ErrRuntimeConfiguration},
+		{name: "unknown field", options: RuntimeOptions{Arguments: []string{"--config", "unknown-field.yaml"}}, reason: ErrRuntimeConfiguration},
+		{name: "YAML reference", options: RuntimeOptions{Arguments: []string{"--config", "alias.yaml"}}, reason: ErrRuntimeConfiguration},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			localservice.Reset()
+			remotestore.Reset()
+			application, err := New(context.Background(), test.options)
+			if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, test.reason) {
+				t.Fatalf("New = %#v, %v", application, err)
+			}
+			assertNoBootstrapConstructorCalls(t)
+			assertSafeBootstrapError(t, err)
+		})
+	}
+}
+
+func TestApplicationRejectsSymbolicReplacementBeforeConstructors(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	writeRuntimeDocument(t, validRuntimeDocument)
+	writeReplacementDocument(t, filepath.Join("deploy", "target.yaml"), validRuntimeDocument)
+	if err := os.Symlink(filepath.Join("deploy", "target.yaml"), "linked-replacement.yaml"); err != nil {
+		t.Skipf("symbolic links are unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove("linked-replacement.yaml") })
+
+	localservice.Reset()
+	remotestore.Reset()
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--config", "linked-replacement.yaml"}})
+	if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrRuntimeSelector) {
+		t.Fatalf("New = %#v, %v", application, err)
+	}
+	assertNoBootstrapConstructorCalls(t)
+	assertSafeBootstrapError(t, err)
+}
+
+func TestApplicationRequiresRootMarkerForReplacement(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	writeRuntimeDocument(t, validRuntimeDocument)
+	writeReplacementDocument(t, "replacement.yaml", validRuntimeDocument)
+	if err := os.Remove(defaultRuntimeDocument); err != nil {
+		t.Fatalf("remove root marker: %v", err)
+	}
+
+	localservice.Reset()
+	remotestore.Reset()
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--config", "replacement.yaml"}})
+	if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrRuntimeSelector) {
+		t.Fatalf("New = %#v, %v", application, err)
+	}
+	assertNoBootstrapConstructorCalls(t)
+	assertSafeBootstrapError(t, err)
 }
 
 func TestApplicationRejectsInvalidSettingsBeforeConstructors(t *testing.T) {
@@ -1072,6 +1188,19 @@ func writeEnvironmentDocument(t *testing.T, environment, document string) {
 	path := "plystra." + environment + ".yaml"
 	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
 		t.Fatalf("write environment document: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+}
+
+func writeReplacementDocument(t *testing.T, path, document string) {
+	t.Helper()
+	if parent := filepath.Dir(path); parent != "." {
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			t.Fatalf("create replacement directory: %v", err)
+		}
+	}
+	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+		t.Fatalf("write replacement document: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Remove(path) })
 }

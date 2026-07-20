@@ -82,13 +82,21 @@ plystra.production.yaml, then use the same selector for generation and checks:
 
 No selector means root plystra.yaml only. Use --config only when the task
 explicitly requires one complete replacement document; it is an advanced
-deployment path, not a second ordinary configuration layer.
+deployment path, not a second ordinary configuration layer. Generate, check,
+and start that document with one consistent selector:
 
-Generated startup accepts the same --env selector or PLYSTRA_ENV. An explicit
-flag overrides the ambient selector. The selected overlay must exist and pass
-typed composition before application construction; unselected overlays are not
-read. Do not pass --config or PLYSTRA_CONFIG to the generated binary yet, and
-generate with the same environment before startup.
+    plystra generate --config deploy/customer-a.yaml
+    plystra generate --check --config deploy/customer-a.yaml
+    go run ./generated/go/application --config deploy/customer-a.yaml
+
+Generated startup accepts the same --env selector or PLYSTRA_ENV and the same
+--config selector or PLYSTRA_CONFIG. An explicit selector overrides both
+ambient variables, and the two modes cannot be combined. An overlay or
+replacement must exist and pass typed validation before application
+construction; unselected documents are not read. Replacement mode keeps root
+plystra.yaml as the mandatory Project marker but does not merge it beneath the
+selected file. Generate and start with the same build-affecting selection;
+switching that selection only at startup is not yet supported.
 
 ## Detailed task reference
 
@@ -442,13 +450,17 @@ form, and null keeps its exact tombstone meaning. Unknown fields and type
 mismatches remain errors. Dependency Project environment overlays are never
 inherited.
 
-Generated startup defaults to root plystra.yaml and accepts either --env or
-PLYSTRA_ENV. An explicit flag overrides the ambient selector. It loads root
-plus the one selected overlay, applies these typed rules, and rejects unsafe or
-missing overlays before Provider construction. Generate, check, and start with
-the same environment. Runtime --config/PLYSTRA_CONFIG selection and compiled
-application-model compatibility validation remain deferred; do not use the
-CLI's complete-replacement selector as a generated-binary argument yet.
+Generated startup defaults to root plystra.yaml. It accepts --env or
+PLYSTRA_ENV for one sparse overlay and --config or PLYSTRA_CONFIG for one
+complete replacement. An explicit selector overrides both ambient variables,
+and the two modes cannot be combined. Environment mode loads root plus the one
+selected overlay. Replacement mode still requires a regular root Project
+marker but does not parse or merge root configuration; its selected path must
+be an existing nonsymbolic regular file within the runtime Project directory.
+Both modes apply typed validation and reject unsafe or missing selections
+before Provider construction. Generate, check, and start with the same
+selector. Compiled application-model compatibility validation remains
+deferred, so do not switch build-affecting models only at startup.
 
 http.transports is a closed current-Project object. It accepts only boolean
 connect and rest fields. New Project scaffolds write both fields explicitly as

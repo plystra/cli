@@ -63,7 +63,7 @@ Template creation then builds every staged Go package with ` + "`go build -mod=r
 
 Root ` + "`plystra.yaml`" + ` is the mandatory Project marker and shared default configuration. A sparse project-root ` + "`plystra.production.yaml`" + ` can be selected with ` + "`plystra generate --env production`" + ` and checked with the same selector; it is never created or loaded implicitly. To use one complete alternative current-Project document, run ` + "`plystra generate --config deploy/customer-a.yaml`" + `. Root configuration is not merged beneath an explicitly selected file. ` + "`PLYSTRA_ENV`" + ` and ` + "`PLYSTRA_CONFIG`" + ` supply the corresponding selector for automation; select exactly one mode.
 
-Start the generated application with the same environment by running ` + "`go run ./generated/go/application --env production`" + `. Generated startup uses root ` + "`plystra.yaml`" + ` when no selector is present and accepts ` + "`PLYSTRA_ENV`" + ` when ` + "`--env`" + ` is omitted. An explicit flag overrides the ambient selector. Unsafe or missing overlays and invalid typed changes fail before Provider construction, and unselected overlays are ignored. Generated-binary ` + "`--config`" + `/` + "`PLYSTRA_CONFIG`" + ` selection and compiled-model compatibility checks are not available yet; do not pass a full-replacement selector to the generated binary.
+Start the generated application with the same selector used for generation: ` + "`go run ./generated/go/application --env production`" + ` selects one sparse overlay, while ` + "`go run ./generated/go/application --config deploy/customer-a.yaml`" + ` selects one complete replacement. Generated startup uses root ` + "`plystra.yaml`" + ` when no selector is present and accepts ` + "`PLYSTRA_ENV`" + ` or ` + "`PLYSTRA_CONFIG`" + ` when the corresponding flag is omitted. An explicit selector overrides both ambient variables, and the two modes cannot be combined. Replacement mode still requires a regular root Project marker but does not parse or merge its configuration. The selected replacement must be an existing nonsymbolic regular file inside the runtime Project directory. Unsafe or missing selections and invalid typed changes fail before Provider construction, and unselected files are ignored. Generate and start with the same build-affecting selection; switching that selection only at startup is not yet supported.
 
 New Projects record ` + "`http.transports.connect: true`" + ` and ` + "`http.transports.rest: false`" + ` explicitly in root configuration. Keep those current-Project transport choices explicit when changing them. A nonempty public exposure requires at least one enabled transport, and JavaScript SDK generation requires Connect. If a selected default, environment, or full-replacement model has JavaScript Capability or Alias surfaces with Connect disabled, generation fails and identifies every affected surface; enable Connect in that selected current-Project configuration or remove those surfaces.
 
@@ -219,13 +219,21 @@ plystra.production.yaml, then use the same selector for generation and checks:
 
 No selector means root plystra.yaml only. Use --config only when the task
 explicitly requires one complete replacement document; it is an advanced
-deployment path, not a second ordinary configuration layer.
+deployment path, not a second ordinary configuration layer. Generate, check,
+and start that document with one consistent selector:
 
-Generated startup accepts the same --env selector or PLYSTRA_ENV. An explicit
-flag overrides the ambient selector. The selected overlay must exist and pass
-typed composition before application construction; unselected overlays are not
-read. Do not pass --config or PLYSTRA_CONFIG to the generated binary yet, and
-generate with the same environment before startup.
+    plystra generate --config deploy/customer-a.yaml
+    plystra generate --check --config deploy/customer-a.yaml
+    go run ./generated/go/application --config deploy/customer-a.yaml
+
+Generated startup accepts the same --env selector or PLYSTRA_ENV and the same
+--config selector or PLYSTRA_CONFIG. An explicit selector overrides both
+ambient variables, and the two modes cannot be combined. An overlay or
+replacement must exist and pass typed validation before application
+construction; unselected documents are not read. Replacement mode keeps root
+plystra.yaml as the mandatory Project marker but does not merge it beneath the
+selected file. Generate and start with the same build-affecting selection;
+switching that selection only at startup is not yet supported.
 
 ## Detailed task reference
 
@@ -579,13 +587,17 @@ form, and null keeps its exact tombstone meaning. Unknown fields and type
 mismatches remain errors. Dependency Project environment overlays are never
 inherited.
 
-Generated startup defaults to root plystra.yaml and accepts either --env or
-PLYSTRA_ENV. An explicit flag overrides the ambient selector. It loads root
-plus the one selected overlay, applies these typed rules, and rejects unsafe or
-missing overlays before Provider construction. Generate, check, and start with
-the same environment. Runtime --config/PLYSTRA_CONFIG selection and compiled
-application-model compatibility validation remain deferred; do not use the
-CLI's complete-replacement selector as a generated-binary argument yet.
+Generated startup defaults to root plystra.yaml. It accepts --env or
+PLYSTRA_ENV for one sparse overlay and --config or PLYSTRA_CONFIG for one
+complete replacement. An explicit selector overrides both ambient variables,
+and the two modes cannot be combined. Environment mode loads root plus the one
+selected overlay. Replacement mode still requires a regular root Project
+marker but does not parse or merge root configuration; its selected path must
+be an existing nonsymbolic regular file within the runtime Project directory.
+Both modes apply typed validation and reject unsafe or missing selections
+before Provider construction. Generate, check, and start with the same
+selector. Compiled application-model compatibility validation remains
+deferred, so do not switch build-affecting models only at startup.
 
 http.transports is a closed current-Project object. It accepts only boolean
 connect and rest fields. New Project scaffolds write both fields explicitly as

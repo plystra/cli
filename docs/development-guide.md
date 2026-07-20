@@ -1086,18 +1086,25 @@ selection used for generation:
 ```powershell
 go run ./generated/go/application
 go run ./generated/go/application --env production
+go run ./generated/go/application --config deploy/customer-a.yaml
 ```
 
 The first command loads only root `plystra.yaml`. The second requires
 `plystra.production.yaml` and applies it as one typed sparse overlay above the
-root document. `PLYSTRA_ENV=production` is the ambient equivalent when no
-explicit selector is present, and an explicit `--env` overrides it. Unsafe
-names, missing overlays, unknown fields, invalid typed changes, and YAML
-anchors or aliases fail before Provider construction; unselected overlays are
-not read. Run `plystra generate --env production` and
-`plystra generate --check --env production` before starting that environment.
-Generated-binary `--config`/`PLYSTRA_CONFIG` selection and compiled
-application-model compatibility enforcement remain deferred Gate 10 work.
+root document. The third requires root `plystra.yaml` only as the regular
+Project marker, then loads and normalizes the selected complete document
+without parsing or merging root configuration. `PLYSTRA_ENV=production` and
+`PLYSTRA_CONFIG=deploy/customer-a.yaml` are the ambient equivalents when no
+explicit selector is present. An explicit selector overrides both variables;
+the environment and replacement modes cannot be combined. Relative and
+supported absolute replacement paths must identify an existing nonsymbolic
+regular file inside the runtime Project directory. Unsafe selectors, missing
+files, unknown fields, invalid typed values, and YAML anchors or aliases fail
+before Provider construction; unselected overlays and replacement files are
+not read. Generate, check, and start with the same selector. Compiled
+application-model compatibility enforcement remains deferred Gate 10 work, so
+selecting a runtime document with a different build-affecting model is not yet
+supported.
 
 Validate the generated Connect handler directly with `httptest` until server
 mounting lands in the later transport gate. Exercise both binary Protobuf and
