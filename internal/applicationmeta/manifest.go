@@ -106,12 +106,27 @@ type httpTransportLayer struct {
 	removeREST    bool
 }
 
-// HTTPCORS is one normalized selected-current-project cross-origin policy.
-// Its origins are sorted and deduplicated, and callers receive defensive
-// storage through Manifest.HTTPCORS.
+// HTTPCORS is one selected-current-project cross-origin policy. Values returned
+// by Manifest.HTTPCORS are normalized, sorted, deduplicated defensive copies.
 type HTTPCORS struct {
 	AllowedOrigins   []string
 	AllowCredentials bool
+}
+
+// NormalizeHTTPCORS returns one canonical defensive copy of a selected CORS
+// policy. It is also the validation boundary for synthetic generation input.
+func NormalizeHTTPCORS(cors HTTPCORS) (HTTPCORS, error) {
+	origins, err := normalizeHTTPCORSOrigins(cors.AllowedOrigins)
+	if err != nil {
+		return HTTPCORS{}, err
+	}
+	if cors.AllowCredentials && slices.Contains(origins, "*") {
+		return HTTPCORS{}, invalid("http.cors cannot combine wildcard origin %q with allow_credentials: true", "*")
+	}
+	return HTTPCORS{
+		AllowedOrigins:   origins,
+		AllowCredentials: cors.AllowCredentials,
+	}, nil
 }
 
 type httpCORSLayer struct {
@@ -651,12 +666,23 @@ func parseCORSOrigins(node *yaml.Node) ([]string, error) {
 	if len(node.Content) == 0 {
 		return nil, invalid("http.cors.allowed_origins must be a nonempty sequence of origins")
 	}
-	set := make(map[string]struct{}, len(node.Content))
+	origins := make([]string, len(node.Content))
 	for index, item := range node.Content {
 		raw, err := strictString(item)
 		if err != nil {
 			return nil, invalid("http.cors.allowed_origins[%d] must be an origin string", index)
 		}
+		origins[index] = raw
+	}
+	return normalizeHTTPCORSOrigins(origins)
+}
+
+func normalizeHTTPCORSOrigins(origins []string) ([]string, error) {
+	if len(origins) == 0 {
+		return nil, invalid("http.cors.allowed_origins must be a nonempty sequence of origins")
+	}
+	set := make(map[string]struct{}, len(origins))
+	for index, raw := range origins {
 		origin, err := normalizeCORSOrigin(raw)
 		if err != nil {
 			return nil, invalid("http.cors.allowed_origins[%d] %v", index, err)

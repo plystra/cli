@@ -476,6 +476,7 @@ func withManifestProvenance(t testing.TB, options applicationgen.Options, resolu
 		KernelModuleVersion: options.KernelModuleVersion,
 		KernelBuildIdentity: options.KernelBuildIdentity,
 		HTTPTransports:      options.HTTPTransports,
+		HTTPCORS:            options.HTTPCORS,
 		Configurations:      options.Configurations,
 		Providers:           options.Providers,
 		Resolution:          resolution,

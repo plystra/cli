@@ -60,6 +60,7 @@ type Options struct {
 	KernelModuleVersion string
 	KernelBuildIdentity string
 	HTTPTransports      applicationmeta.HTTPTransports
+	HTTPCORS            *applicationmeta.HTTPCORS
 	Composition         applicationmeta.Composition
 	ManifestProvenance  ManifestProvenance
 	Configurations      []configurationgen.Input
@@ -90,6 +91,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		KernelModuleVersion: options.KernelModuleVersion,
 		KernelBuildIdentity: options.KernelBuildIdentity,
 		HTTPTransports:      options.HTTPTransports,
+		HTTPCORS:            options.HTTPCORS,
 		Configurations:      options.Configurations,
 		Providers:           options.Providers,
 		Resolution:          resolution,

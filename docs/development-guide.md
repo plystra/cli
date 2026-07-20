@@ -690,9 +690,12 @@ root CORS for that selected environment. A full-replacement file does not
 inherit root CORS, and dependency Project CORS never participates in
 composition.
 
-At this implementation boundary, resolution validates and composes CORS but
-the generated HTTP handler does not yet emit CORS response behavior. That
-projection remains in the later HTTP transport gate.
+The normalized selected CORS policy is build-affecting and participates in the
+generated application-model digest. Changing its origins or credential choice
+therefore produces deterministic generation drift, while reordered,
+deduplicated equivalent origins retain one static model identity. At this
+implementation boundary the generated HTTP handler does not yet emit CORS
+response behavior; that projection remains in the later HTTP transport gate.
 
 For automation, select the same environment name with:
 

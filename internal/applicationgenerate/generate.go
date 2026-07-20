@@ -14,6 +14,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationgen"
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/atomicfs"
@@ -289,6 +290,10 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		return preparedGeneration{}, err
 	}
 	httpTransports := resolved.Manifest().HTTPTransports()
+	var httpCORS *applicationmeta.HTTPCORS
+	if selected, exists := resolved.Manifest().HTTPCORS(); exists {
+		httpCORS = &selected
+	}
 	protobufProjection, err := applicationgen.ProtobufProjection(httpTransports, resolved.Resolution())
 	if err != nil {
 		return preparedGeneration{}, fmt.Errorf("build final Protobuf projection: %w", err)
@@ -316,6 +321,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		KernelModuleVersion: kernelVersion,
 		KernelBuildIdentity: kernelBuildIdentity,
 		HTTPTransports:      httpTransports,
+		HTTPCORS:            httpCORS,
 		Configurations:      configurations,
 		Providers:           providers,
 		Resolution:          resolved.Resolution(),
@@ -350,6 +356,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		KernelModuleVersion: kernelVersion,
 		KernelBuildIdentity: kernelBuildIdentity,
 		HTTPTransports:      httpTransports,
+		HTTPCORS:            httpCORS,
 		Composition:         resolved.Composition(),
 		ManifestProvenance:  provenance,
 		Configurations:      configurations,

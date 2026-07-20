@@ -554,10 +554,15 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if err != nil {
 		return fmt.Errorf("build initial Protobuf wire map: %w", err)
 	}
+	var httpCORS *applicationmeta.HTTPCORS
+	if selected, exists := currentManifest.HTTPCORS(); exists {
+		httpCORS = &selected
+	}
 	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
 		ModulePath:          modulePath,
 		KernelModuleVersion: KernelVersion,
 		HTTPTransports:      currentManifest.HTTPTransports(),
+		HTTPCORS:            httpCORS,
 		Resolution:          resolution,
 		ProtobufWireMap:     wireMap,
 	})
@@ -581,6 +586,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 		ModulePath:          modulePath,
 		KernelModuleVersion: KernelVersion,
 		HTTPTransports:      currentManifest.HTTPTransports(),
+		HTTPCORS:            httpCORS,
 		Composition:         composition,
 		ManifestProvenance:  provenance,
 		ProtobufWireMap:     wireMap,
