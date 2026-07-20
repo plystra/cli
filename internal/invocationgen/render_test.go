@@ -76,6 +76,10 @@ func TestRenderDerivesHierarchicalCapabilityPath(t *testing.T) {
 		`func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.Response, error)`,
 		`response, invocationError := h.target.Invoke(ctx, request)`,
 		`if responseError := plystraValidateResponse(response); responseError != nil`,
+		`type TransportErrorInput struct`,
+		`func SafeTransportError(err error) (input TransportErrorInput)`,
+		`SemanticErrorCode() string`,
+		`KernelErrorClass() string`,
 	} {
 		if !strings.Contains(got, required) {
 			t.Fatalf("generated invocation does not contain %q:\n%s", required, file.Data())
@@ -151,33 +155,7 @@ func assertGeneratedInvocationRuns(t testing.TB, contract contractgen.File, invo
 	root := t.TempDir()
 	writeGeneratedFile(t, root, contract.Path(), contract.Data())
 	writeGeneratedFile(t, root, invocation.Path(), invocation.Data())
-	writeGeneratedFile(t, root, "kernel/go.mod", []byte("module github.com/plystra/kernel\n\ngo 1.26\n"))
-	writeGeneratedFile(t, root, "kernel/invocation/handle.go", []byte(`package invocation
-
-import (
-	"context"
-	"errors"
-)
-
-type Handle[Request, Response any] struct {
-	available bool
-	invoke func(context.Context, Request) (Response, error)
-}
-
-func NewTestHandle[Request, Response any](available bool, invoke func(context.Context, Request) (Response, error)) Handle[Request, Response] {
-	return Handle[Request, Response]{available: available, invoke: invoke}
-}
-
-func (h Handle[Request, Response]) Available() bool { return h.available }
-
-func (h Handle[Request, Response]) Invoke(ctx context.Context, request Request) (Response, error) {
-	if h.invoke == nil {
-		var response Response
-		return response, errors.New("invalid handle")
-	}
-	return h.invoke(ctx, request)
-}
-`))
+	writeInvocationTestKernel(t, root)
 	writeGeneratedFile(t, root, "generated/go/invocation/email/send/v1/invocation_gen_test.go", []byte(`package emailsendv1_test
 
 import (

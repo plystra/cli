@@ -94,6 +94,99 @@ func plystraValidateResponse(response contract.Response) error {
 	return nil
 }
 
+// TransportErrorInput is the immutable data-free failure projection consumed by generated external adapters.
+type TransportErrorInput struct {
+	semanticErrorCode string
+	kernelErrorClass  kernelinvocation.ErrorCode
+	kernelDetailCode  string
+}
+
+// Valid reports whether the projection contains exactly one closed semantic or Kernel failure classification.
+func (i TransportErrorInput) Valid() bool {
+	if i.semanticErrorCode != "" {
+		return i.kernelErrorClass == "" && i.kernelDetailCode == "" && plystraDeclaredSemanticError(i.semanticErrorCode)
+	}
+	if !i.kernelErrorClass.Valid() || !kernelinvocation.ValidDetailCode(i.kernelDetailCode) {
+		return false
+	}
+	return i.kernelErrorClass != kernelinvocation.ErrorDenied || i.kernelDetailCode != ""
+}
+
+// SemanticErrorCode returns one declared canonical semantic code or an empty string.
+func (i TransportErrorInput) SemanticErrorCode() string {
+	if !i.Valid() {
+		return ""
+	}
+	return i.semanticErrorCode
+}
+
+// KernelErrorClass returns one closed Kernel failure class or an empty string.
+func (i TransportErrorInput) KernelErrorClass() string {
+	if !i.Valid() {
+		return ""
+	}
+	return i.kernelErrorClass.String()
+}
+
+// KernelDetailCode returns the optional bounded Kernel detail code or an empty string.
+func (i TransportErrorInput) KernelDetailCode() string {
+	if !i.Valid() {
+		return ""
+	}
+	return i.kernelDetailCode
+}
+
+// SafeTransportError projects one canonical invocation failure without retaining its text, cause, payload, or Provider data.
+func SafeTransportError(err error) (input TransportErrorInput) {
+	input = plystraInternalTransportError()
+	defer func() {
+		if recover() != nil || !input.Valid() {
+			input = plystraInternalTransportError()
+		}
+	}()
+	if err == nil {
+		return input
+	}
+	var semantic plystraSemanticErrorCoder
+	if errors.As(err, &semantic) {
+		code := semantic.SemanticErrorCode()
+		if plystraDeclaredSemanticError(code) {
+			return TransportErrorInput{semanticErrorCode: code}
+		}
+		return input
+	}
+	var classified *kernelinvocation.Error
+	if errors.As(err, &classified) {
+		return TransportErrorInput{kernelErrorClass: classified.Code(), kernelDetailCode: classified.DetailCode()}
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return TransportErrorInput{kernelErrorClass: kernelinvocation.ErrorTimeout}
+	case errors.Is(err, context.Canceled):
+		return TransportErrorInput{kernelErrorClass: kernelinvocation.ErrorCancelled}
+	default:
+		return input
+	}
+}
+
+type plystraSemanticErrorCoder interface {
+	error
+	SemanticErrorCode() string
+}
+
+func plystraDeclaredSemanticError(code string) bool {
+	switch code {
+	case "policy_failed":
+		return true
+	default:
+		return false
+	}
+}
+
+func plystraInternalTransportError() TransportErrorInput {
+	return TransportErrorInput{kernelErrorClass: kernelinvocation.ErrorInternal}
+}
+
 func plystraPointer[Value any](value Value) *Value {
 	return &value
 }

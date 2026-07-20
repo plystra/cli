@@ -56,6 +56,7 @@ type canonicalContract struct {
 	ID       string                    `json:"id"`
 	Request  map[string]canonicalField `json:"request"`
 	Response map[string]canonicalField `json:"response"`
+	Errors   []string                  `json:"errors"`
 }
 
 type canonicalField struct {
@@ -248,6 +249,7 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	if err := renderResponseValidation(&source, responseValidation); err != nil {
 		return File{}, fmt.Errorf("%w: render response validation: %w", ErrRender, err)
 	}
+	renderTransportErrorInput(&source, contract.Errors)
 	if prepared.hasAdapterCredentials {
 		fmt.Fprintln(&source)
 		fmt.Fprintln(&source, "func plystraAdapterCredential(source AdapterCredentialSource, name string) (credential *string) {")
@@ -342,6 +344,113 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 		data:         append([]byte(nil), formatted...),
 		dependencies: dependencies,
 	}, nil
+}
+
+func renderTransportErrorInput(source *strings.Builder, semanticErrors []string) {
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "// TransportErrorInput is the immutable data-free failure projection consumed by generated external adapters.")
+	fmt.Fprintln(source, "type TransportErrorInput struct {")
+	fmt.Fprintln(source, "\tsemanticErrorCode string")
+	fmt.Fprintln(source, "\tkernelErrorClass kernelinvocation.ErrorCode")
+	fmt.Fprintln(source, "\tkernelDetailCode string")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "// Valid reports whether the projection contains exactly one closed semantic or Kernel failure classification.")
+	fmt.Fprintln(source, "func (i TransportErrorInput) Valid() bool {")
+	fmt.Fprintln(source, "\tif i.semanticErrorCode != \"\" {")
+	fmt.Fprintln(source, "\t\treturn i.kernelErrorClass == \"\" && i.kernelDetailCode == \"\" && plystraDeclaredSemanticError(i.semanticErrorCode)")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tif !i.kernelErrorClass.Valid() || !kernelinvocation.ValidDetailCode(i.kernelDetailCode) {")
+	fmt.Fprintln(source, "\t\treturn false")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\treturn i.kernelErrorClass != kernelinvocation.ErrorDenied || i.kernelDetailCode != \"\"")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "// SemanticErrorCode returns one declared canonical semantic code or an empty string.")
+	fmt.Fprintln(source, "func (i TransportErrorInput) SemanticErrorCode() string {")
+	fmt.Fprintln(source, "\tif !i.Valid() {")
+	fmt.Fprintln(source, "\t\treturn \"\"")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\treturn i.semanticErrorCode")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "// KernelErrorClass returns one closed Kernel failure class or an empty string.")
+	fmt.Fprintln(source, "func (i TransportErrorInput) KernelErrorClass() string {")
+	fmt.Fprintln(source, "\tif !i.Valid() {")
+	fmt.Fprintln(source, "\t\treturn \"\"")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\treturn i.kernelErrorClass.String()")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "// KernelDetailCode returns the optional bounded Kernel detail code or an empty string.")
+	fmt.Fprintln(source, "func (i TransportErrorInput) KernelDetailCode() string {")
+	fmt.Fprintln(source, "\tif !i.Valid() {")
+	fmt.Fprintln(source, "\t\treturn \"\"")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\treturn i.kernelDetailCode")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "// SafeTransportError projects one canonical invocation failure without retaining its text, cause, payload, or Provider data.")
+	fmt.Fprintln(source, "func SafeTransportError(err error) (input TransportErrorInput) {")
+	fmt.Fprintln(source, "\tinput = plystraInternalTransportError()")
+	fmt.Fprintln(source, "\tdefer func() {")
+	fmt.Fprintln(source, "\t\tif recover() != nil || !input.Valid() {")
+	fmt.Fprintln(source, "\t\t\tinput = plystraInternalTransportError()")
+	fmt.Fprintln(source, "\t\t}")
+	fmt.Fprintln(source, "\t}()")
+	fmt.Fprintln(source, "\tif err == nil {")
+	fmt.Fprintln(source, "\t\treturn input")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tvar semantic plystraSemanticErrorCoder")
+	fmt.Fprintln(source, "\tif errors.As(err, &semantic) {")
+	fmt.Fprintln(source, "\t\tcode := semantic.SemanticErrorCode()")
+	fmt.Fprintln(source, "\t\tif plystraDeclaredSemanticError(code) {")
+	fmt.Fprintln(source, "\t\t\treturn TransportErrorInput{semanticErrorCode: code}")
+	fmt.Fprintln(source, "\t\t}")
+	fmt.Fprintln(source, "\t\treturn input")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tvar classified *kernelinvocation.Error")
+	fmt.Fprintln(source, "\tif errors.As(err, &classified) {")
+	fmt.Fprintln(source, "\t\treturn TransportErrorInput{kernelErrorClass: classified.Code(), kernelDetailCode: classified.DetailCode()}")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tswitch {")
+	fmt.Fprintln(source, "\tcase errors.Is(err, context.DeadlineExceeded):")
+	fmt.Fprintln(source, "\t\treturn TransportErrorInput{kernelErrorClass: kernelinvocation.ErrorTimeout}")
+	fmt.Fprintln(source, "\tcase errors.Is(err, context.Canceled):")
+	fmt.Fprintln(source, "\t\treturn TransportErrorInput{kernelErrorClass: kernelinvocation.ErrorCancelled}")
+	fmt.Fprintln(source, "\tdefault:")
+	fmt.Fprintln(source, "\t\treturn input")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "type plystraSemanticErrorCoder interface {")
+	fmt.Fprintln(source, "\terror")
+	fmt.Fprintln(source, "\tSemanticErrorCode() string")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "func plystraDeclaredSemanticError(code string) bool {")
+	if len(semanticErrors) == 0 {
+		fmt.Fprintln(source, "\treturn false")
+	} else {
+		fmt.Fprintln(source, "\tswitch code {")
+		fmt.Fprint(source, "\tcase ")
+		for index, code := range semanticErrors {
+			if index != 0 {
+				fmt.Fprint(source, ", ")
+			}
+			fmt.Fprint(source, strconv.Quote(code))
+		}
+		fmt.Fprintln(source, ":")
+		fmt.Fprintln(source, "\t\treturn true")
+		fmt.Fprintln(source, "\tdefault:")
+		fmt.Fprintln(source, "\t\treturn false")
+		fmt.Fprintln(source, "\t}")
+	}
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "func plystraInternalTransportError() TransportErrorInput {")
+	fmt.Fprintln(source, "\treturn TransportErrorInput{kernelErrorClass: kernelinvocation.ErrorInternal}")
+	fmt.Fprintln(source, "}")
 }
 
 type responseValidationPlan struct {
