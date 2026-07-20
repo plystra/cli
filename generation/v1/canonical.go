@@ -129,12 +129,23 @@ func normalizeJSONNumber(number json.Number) (any, error) {
 }
 
 type canonicalContext struct {
-	API               string                `json:"api"`
-	Plugins           []canonicalPlugin     `json:"plugins"`
-	Capabilities      []canonicalCapability `json:"capabilities"`
-	Requirements      []string              `json:"requirements"`
-	Providers         []canonicalProvider   `json:"providers"`
-	CapabilityAliases []canonicalAlias      `json:"capability_aliases"`
+	API                     string                            `json:"api"`
+	ConfigurationProvenance *canonicalConfigurationProvenance `json:"configuration_provenance,omitempty"`
+	Plugins                 []canonicalPlugin                 `json:"plugins"`
+	Capabilities            []canonicalCapability             `json:"capabilities"`
+	Requirements            []string                          `json:"requirements"`
+	Providers               []canonicalProvider               `json:"providers"`
+	CapabilityAliases       []canonicalAlias                  `json:"capability_aliases"`
+}
+
+type canonicalConfigurationProvenance struct {
+	Mode                        ConfigurationMode `json:"mode"`
+	Environment                 string            `json:"environment,omitempty"`
+	RootPath                    string            `json:"root_path"`
+	RootDigest                  string            `json:"root_digest"`
+	SelectedPath                string            `json:"selected_path"`
+	SelectedDigest              string            `json:"selected_digest"`
+	DependencyCompositionDigest string            `json:"dependency_composition_digest"`
 }
 
 type canonicalPlugin struct {
@@ -177,7 +188,7 @@ type canonicalAliasSource struct {
 	ID   string          `json:"id"`
 }
 
-func encodeContext(plugins []PluginView, capabilities []CapabilityView, requirements []CapabilityID, providers []ProviderView, aliases []CapabilityAliasView) ([]byte, error) {
+func encodeContext(provenance *ConfigurationProvenanceView, plugins []PluginView, capabilities []CapabilityView, requirements []CapabilityID, providers []ProviderView, aliases []CapabilityAliasView) ([]byte, error) {
 	canonical := canonicalContext{
 		API:               Version,
 		Plugins:           make([]canonicalPlugin, len(plugins)),
@@ -185,6 +196,17 @@ func encodeContext(plugins []PluginView, capabilities []CapabilityView, requirem
 		Requirements:      make([]string, len(requirements)),
 		Providers:         make([]canonicalProvider, len(providers)),
 		CapabilityAliases: make([]canonicalAlias, len(aliases)),
+	}
+	if provenance != nil {
+		canonical.ConfigurationProvenance = &canonicalConfigurationProvenance{
+			Mode:                        provenance.mode,
+			Environment:                 provenance.environment,
+			RootPath:                    provenance.rootPath,
+			RootDigest:                  provenance.rootDigest,
+			SelectedPath:                provenance.selectedPath,
+			SelectedDigest:              provenance.selectedDigest,
+			DependencyCompositionDigest: provenance.dependencyCompositionDigest,
+		}
 	}
 	for index, plugin := range plugins {
 		canonical.Plugins[index] = canonicalPlugin{

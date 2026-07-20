@@ -1181,9 +1181,34 @@ func Generate(context plystragen.GenerationContext) (plystragen.Output, error) {
 The selected provider of the activation Capability owns the only extension
 allowed to interpret that namespace. The input exposes immutable normalized
 Plugins, canonical contracts and metadata, requirements, selected providers,
-exposure, aliases, and digests. It excludes runtime configuration, Secret
-values, unrestricted environment state, another Plugin's raw files, writable
-source, and final generated paths.
+exposure, aliases, and digests. Filesystem-backed contexts additionally expose
+the selected configuration's non-secret identity:
+
+```go
+func selectedEnvironment(context plystragen.GenerationContext) (string, bool) {
+    provenance, ok := context.ConfigurationProvenance()
+    if !ok || provenance.Mode() != plystragen.ConfigurationModeEnvironment {
+        return "", false
+    }
+    return provenance.Environment(), true
+}
+```
+
+The view provides `RootPath`, `RootDigest`, and
+`DependencyCompositionDigest` alongside the selected-document accessors.
+Paths are stable Project-relative slash paths. Digests are normalized
+lowercase SHA-256 identities. No accessor returns YAML content, runtime
+configuration, Secret values, absolute paths, unrestricted environment state,
+another Plugin's raw files, writable source, or final generated paths.
+Synthetic unit-test contexts may omit the view.
+
+Use `context.Digest()` when caching or comparing the complete extension input;
+it includes configuration provenance and is verified across the helper-process
+round trip. `context.BuildModelDigest()` excludes document provenance. The CLI
+uses that second identity for static assembly so runtime-only YAML changes do
+not force a different compiled model. If an extension deliberately changes its
+normalized output from a provenance digest, the extension output digest still
+changes the final application model.
 
 Output is limited to exact generated requirements, structured diagnostics,
 typed contributions at `http.ingress`, `invocation.prepare`,

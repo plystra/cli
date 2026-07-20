@@ -361,7 +361,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
 		ModulePath:               options.ModulePath,
-		ApplicationBuildIdentity: context.Digest(),
+		ApplicationBuildIdentity: context.BuildModelDigest(),
 		KernelModuleVersion:      options.KernelModuleVersion,
 		KernelBuildIdentity:      options.KernelBuildIdentity,
 		DefaultTimeout:           applicationmeta.DefaultInvocationTimeout,

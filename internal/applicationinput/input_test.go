@@ -55,9 +55,22 @@ capabilities:
     orders.submit/v1: order.create/v1
 `)
 	environment := []string{"GOENV=off", "GOWORK=off"}
-	input, err := applicationinput.Build(manifest, inventory, generationexec.BuildOptions{BuildEnvironment: environment})
+	provenance := &generation.ConfigurationProvenanceInput{
+		Mode:                        generation.ConfigurationModeDefault,
+		RootPath:                    "plystra.yaml",
+		RootDigest:                  "sha256:" + strings.Repeat("1", 64),
+		SelectedPath:                "plystra.yaml",
+		SelectedDigest:              "sha256:" + strings.Repeat("1", 64),
+		DependencyCompositionDigest: "sha256:" + strings.Repeat("2", 64),
+	}
+	input, err := applicationinput.Build(manifest, inventory, provenance, generationexec.BuildOptions{BuildEnvironment: environment})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
+	}
+	wantProvenance := *provenance
+	provenance.RootDigest = "changed"
+	if input.ConfigurationProvenance == nil || input.ConfigurationProvenance == provenance || *input.ConfigurationProvenance != wantProvenance {
+		t.Fatalf("ConfigurationProvenance = %#v", input.ConfigurationProvenance)
 	}
 	if got := capabilityInputIDs(t, input.Capabilities); !reflect.DeepEqual(got, []string{"audit.write/v1", "kernel.health/v1", "kernel.info/v1", "order.create/v1"}) {
 		t.Fatalf("Capabilities = %v", got)
@@ -122,7 +135,7 @@ func TestBuildAllowsEmptyPluginApplicationWithIntrinsicCatalog(t *testing.T) {
 	root := t.TempDir()
 	writeModule(t, root, "example.com/app")
 	inventory := configureInventory(t, root)
-	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, generationexec.BuildOptions{})
+	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, nil, generationexec.BuildOptions{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -154,7 +167,7 @@ func TestBuildRejectsMissingAndMismatchedCapabilitySources(t *testing.T) {
 				writeCapability(t, root, "smtp", "email.send/v1", test.content)
 			}
 			inventory := configureInventory(t, root)
-			input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, generationexec.BuildOptions{})
+			input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, nil, generationexec.BuildOptions{})
 			if !errors.Is(err, applicationinput.ErrBuild) || !errors.Is(err, test.wantError) || len(input.Capabilities) != 0 {
 				t.Fatalf("Build = %#v, %v; want ErrBuild and %v", input, err, test.wantError)
 			}
@@ -172,7 +185,7 @@ func TestBuildRejectsConflictingVisibleProviderContracts(t *testing.T) {
 	writeCapability(t, root, "smtp", "email.send/v1", "id: email.send/v1\nrequest: {to: {type: string}}\nresponse: {}\nerrors: []\n")
 	writeCapability(t, root, "mock", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 	inventory := configureInventory(t, root)
-	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, generationexec.BuildOptions{})
+	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, nil, generationexec.BuildOptions{})
 	if !errors.Is(err, applicationinput.ErrBuild) || !errors.Is(err, applicationinput.ErrContractConflict) || len(input.Capabilities) != 0 {
 		t.Fatalf("Build = %#v, %v; want contract conflict", input, err)
 	}
@@ -214,7 +227,7 @@ func TestBuildMergesIdenticalContractsFromSeveralProviders(t *testing.T) {
 	writeCapability(t, root, "smtp", "email.send/v1", contract)
 	writeCapability(t, root, "mock", "email.send/v1", "errors: []\nresponse: {}\nrequest: {to: {type: string}}\nid: email.send/v1\n")
 	inventory := configureInventory(t, root)
-	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, generationexec.BuildOptions{})
+	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, nil, generationexec.BuildOptions{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -239,7 +252,7 @@ func TestBuildRejectsPluginProvidedIntrinsicCapability(t *testing.T) {
 	writeModule(t, root, "example.com/app")
 	writePlugin(t, root, "health", "id: example.health\nprovides: [kernel.health/v1]\n")
 	inventory := configureInventory(t, root)
-	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, generationexec.BuildOptions{})
+	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, nil, generationexec.BuildOptions{})
 	if !errors.Is(err, applicationinput.ErrBuild) || !errors.Is(err, applicationinput.ErrIntrinsicProvider) || len(input.Capabilities) != 0 || !strings.Contains(err.Error(), "example.health") {
 		t.Fatalf("Build = %#v, %v; want intrinsic provider failure", input, err)
 	}

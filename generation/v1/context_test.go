@@ -27,6 +27,10 @@ func TestNewContextBuildsDeterministicImmutableViews(t *testing.T) {
 	if context.APIVersion() != generation.Version {
 		t.Fatalf("APIVersion = %q", context.APIVersion())
 	}
+	provenance, exists := context.ConfigurationProvenance()
+	if !exists || provenance.Mode() != generation.ConfigurationModeEnvironment || provenance.Environment() != "production" || provenance.RootPath() != "plystra.yaml" || provenance.SelectedPath() != "plystra.production.yaml" || !digestPattern.MatchString(provenance.RootDigest()) || !digestPattern.MatchString(provenance.SelectedDigest()) || !digestPattern.MatchString(provenance.DependencyCompositionDigest()) {
+		t.Fatalf("ConfigurationProvenance = %#v, %t", provenance, exists)
+	}
 
 	plugins := context.Plugins()
 	if got := pluginStrings(plugins); !slices.Equal(got, []string{"acme.audit", "acme.orders"}) {
@@ -142,7 +146,8 @@ func TestNewContextBuildsDeterministicImmutableViews(t *testing.T) {
 	input.Plugins[1].BuildMetadataJSON[0] = '['
 	input.Plugins[0].Provides[0] = "changed.invalid/v1"
 	input.CapabilityAliases[0].Sources[0].ID = "changed"
-	if !bytes.Equal(order.ContractJSON(), orderContract) || order.Sources()[0] != "github.com/acme/app@local/orders/capability.yaml" || audit.BuildMetadataJSON()[0] != '{' || context.Plugins()[1].Provides()[0].String() != "order.create/v1" || alias.Sources()[0].ID() != "application" {
+	input.ConfigurationProvenance.Environment = "changed"
+	if current, _ := context.ConfigurationProvenance(); !bytes.Equal(order.ContractJSON(), orderContract) || order.Sources()[0] != "github.com/acme/app@local/orders/capability.yaml" || audit.BuildMetadataJSON()[0] != '{' || context.Plugins()[1].Provides()[0].String() != "order.create/v1" || alias.Sources()[0].ID() != "application" || current.Environment() != "production" {
 		t.Fatal("NewContext retained mutable input storage")
 	}
 
@@ -162,6 +167,35 @@ func TestNewContextBuildsDeterministicImmutableViews(t *testing.T) {
 	}
 	if !bytes.Equal(context.CanonicalJSON(), second.CanonicalJSON()) || context.Digest() != second.Digest() {
 		t.Fatalf("equivalent input changed canonical form:\nfirst  %s\nsecond %s", context.CanonicalJSON(), second.CanonicalJSON())
+	}
+}
+
+func TestContextSeparatesConfigurationProvenanceFromBuildModelDigest(t *testing.T) {
+	t.Parallel()
+
+	input := validInput()
+	first, err := generation.NewContext(input)
+	if err != nil {
+		t.Fatalf("NewContext(first): %v", err)
+	}
+	input.ConfigurationProvenance.SelectedDigest = "sha256:" + strings.Repeat("4", 64)
+	second, err := generation.NewContext(input)
+	if err != nil {
+		t.Fatalf("NewContext(second): %v", err)
+	}
+	if first.Digest() == second.Digest() || bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) {
+		t.Fatal("selected-document provenance did not change the extension context identity")
+	}
+	if first.BuildModelDigest() != second.BuildModelDigest() {
+		t.Fatalf("provenance-only change altered build model digest: %q != %q", first.BuildModelDigest(), second.BuildModelDigest())
+	}
+	input.ConfigurationProvenance = nil
+	synthetic, err := generation.NewContext(input)
+	if err != nil {
+		t.Fatalf("NewContext(synthetic): %v", err)
+	}
+	if _, exists := synthetic.ConfigurationProvenance(); exists || synthetic.BuildModelDigest() != first.BuildModelDigest() {
+		t.Fatalf("synthetic provenance = present %t, build digest %q", exists, synthetic.BuildModelDigest())
 	}
 }
 
@@ -316,6 +350,38 @@ func TestNewContextRejectsInconsistentOrUnsafeInput(t *testing.T) {
 		"plugin requires alias": func(input *generation.Input) {
 			input.Plugins[0].Requires = append(input.Plugins[0].Requires, "orders.submit/v1")
 		},
+		"unsupported configuration mode": func(input *generation.Input) {
+			input.ConfigurationProvenance.Mode = "profile"
+		},
+		"wrong root configuration path": func(input *generation.Input) {
+			input.ConfigurationProvenance.RootPath = "deploy/root.yaml"
+		},
+		"unsafe selected configuration path": func(input *generation.Input) {
+			input.ConfigurationProvenance.SelectedPath = "C:/private/plystra.yaml"
+		},
+		"invalid root configuration digest": func(input *generation.Input) {
+			input.ConfigurationProvenance.RootDigest = "sha256:ABC"
+		},
+		"invalid selected configuration digest": func(input *generation.Input) {
+			input.ConfigurationProvenance.SelectedDigest = "sha256:" + strings.Repeat("g", 64)
+		},
+		"invalid dependency composition digest": func(input *generation.Input) {
+			input.ConfigurationProvenance.DependencyCompositionDigest = ""
+		},
+		"default selection mismatch": func(input *generation.Input) {
+			input.ConfigurationProvenance.Mode = generation.ConfigurationModeDefault
+			input.ConfigurationProvenance.Environment = ""
+		},
+		"unsafe environment name": func(input *generation.Input) {
+			input.ConfigurationProvenance.Environment = "../production"
+		},
+		"environment path mismatch": func(input *generation.Input) {
+			input.ConfigurationProvenance.SelectedPath = "plystra.staging.yaml"
+		},
+		"explicit selection has environment": func(input *generation.Input) {
+			input.ConfigurationProvenance.Mode = generation.ConfigurationModeExplicit
+			input.ConfigurationProvenance.SelectedPath = "deploy/customer.yaml"
+		},
 	}
 	for name, mutate := range tests {
 		name, mutate := name, mutate
@@ -426,6 +492,15 @@ var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 func validInput() generation.Input {
 	orderContract := json.RawMessage(`{"id":"order.create/v1","request":{"space_id":{"type":"string","required":true}},"response":{},"errors":["invalid_state"],"extensions":{"authn":{"authenticated":true},"authz":{"permission":"order.create","space":"request.space_id"}}}`)
 	return generation.Input{
+		ConfigurationProvenance: &generation.ConfigurationProvenanceInput{
+			Mode:                        generation.ConfigurationModeEnvironment,
+			Environment:                 "production",
+			RootPath:                    "plystra.yaml",
+			RootDigest:                  "sha256:" + strings.Repeat("1", 64),
+			SelectedPath:                "plystra.production.yaml",
+			SelectedDigest:              "sha256:" + strings.Repeat("2", 64),
+			DependencyCompositionDigest: "sha256:" + strings.Repeat("3", 64),
+		},
 		Plugins: []generation.PluginInput{
 			{
 				ID:         "acme.orders",

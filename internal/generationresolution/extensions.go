@@ -61,11 +61,12 @@ type Plugin struct {
 }
 
 // ExtensionInput contains the activation-resolution inputs plus the complete
-// visible canonical catalog, public plugin metadata, and parsed application
-// HTTP exposure and Alias declarations needed to build each immutable
-// extension context.
+// visible canonical catalog, public plugin metadata, selected-configuration
+// provenance, and parsed application HTTP exposure and Alias declarations
+// needed to build each immutable extension context.
 type ExtensionInput struct {
 	Input
+	ConfigurationProvenance  *generation.ConfigurationProvenanceInput
 	Plugins                  []Plugin
 	Capabilities             []generation.CapabilityInput
 	ApplicationHTTPExposures []applicationmeta.HTTPExposure
@@ -548,10 +549,11 @@ func buildGenerationContext(input ExtensionInput, plugins map[string]Plugin, res
 		return generation.Context{}, err
 	}
 	contextInput := generation.Input{
-		Plugins:      pluginInputs,
-		Capabilities: capabilityInputs,
-		Requirements: requirementIDs,
-		Providers:    providerInputs,
+		ConfigurationProvenance: cloneConfigurationProvenanceInput(input.ConfigurationProvenance),
+		Plugins:                 pluginInputs,
+		Capabilities:            capabilityInputs,
+		Requirements:            requirementIDs,
+		Providers:               providerInputs,
 	}
 	generationContext, err := generation.NewContext(contextInput)
 	if err != nil {
@@ -583,6 +585,14 @@ func buildGenerationContext(input ExtensionInput, plugins map[string]Plugin, res
 		return generation.Context{}, err
 	}
 	return generationContext, nil
+}
+
+func cloneConfigurationProvenanceInput(input *generation.ConfigurationProvenanceInput) *generation.ConfigurationProvenanceInput {
+	if input == nil {
+		return nil
+	}
+	copy := *input
+	return &copy
 }
 
 func addApplicationHTTPRequirements(

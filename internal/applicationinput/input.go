@@ -41,9 +41,10 @@ var (
 )
 
 // Build loads every indexed provider contract, merges the exact visible
-// canonical catalog with Kernel intrinsics, and constructs the existing
-// fixed-point resolver input. It performs no provider selection itself.
-func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, buildOptions generationexec.BuildOptions) (generationresolution.ExtensionInput, error) {
+// canonical catalog with Kernel intrinsics, carries normalized selected-
+// configuration provenance, and constructs the fixed-point resolver input. It
+// performs no provider selection itself.
+func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, configurationProvenance *generation.ConfigurationProvenanceInput, buildOptions generationexec.BuildOptions) (generationresolution.ExtensionInput, error) {
 	groups := make(map[capabilityid.Identifier]*contractGroup)
 	for _, definition := range intrinsiccatalog.Definitions() {
 		groups[definition.ID()] = &contractGroup{
@@ -170,6 +171,11 @@ func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, b
 		return candidates[left].Source < candidates[right].Source
 	})
 	buildOptions.BuildEnvironment = append([]string(nil), buildOptions.BuildEnvironment...)
+	var provenance *generation.ConfigurationProvenanceInput
+	if configurationProvenance != nil {
+		copy := *configurationProvenance
+		provenance = &copy
+	}
 	return generationresolution.ExtensionInput{
 		Input: generationresolution.Input{
 			Requirements: requirements,
@@ -177,6 +183,7 @@ func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, b
 			Choices:      choices,
 			Activations:  activations,
 		},
+		ConfigurationProvenance:  provenance,
 		Plugins:                  plugins,
 		Capabilities:             capabilities,
 		ApplicationHTTPExposures: manifest.HTTPExposures(),

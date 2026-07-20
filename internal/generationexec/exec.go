@@ -509,6 +509,18 @@ func runtimeEnvironment() []string {
 }
 
 func inputFromContext(context generation.Context) generation.Input {
+	var configurationProvenance *generation.ConfigurationProvenanceInput
+	if provenance, exists := context.ConfigurationProvenance(); exists {
+		configurationProvenance = &generation.ConfigurationProvenanceInput{
+			Mode:                        provenance.Mode(),
+			Environment:                 provenance.Environment(),
+			RootPath:                    provenance.RootPath(),
+			RootDigest:                  provenance.RootDigest(),
+			SelectedPath:                provenance.SelectedPath(),
+			SelectedDigest:              provenance.SelectedDigest(),
+			DependencyCompositionDigest: provenance.DependencyCompositionDigest(),
+		}
+	}
 	pluginViews := context.Plugins()
 	plugins := make([]generation.PluginInput, len(pluginViews))
 	for index, plugin := range pluginViews {
@@ -557,11 +569,12 @@ func inputFromContext(context generation.Context) generation.Input {
 		}
 	}
 	return generation.Input{
-		Plugins:           plugins,
-		Capabilities:      capabilities,
-		Requirements:      capabilityStrings(context.Requirements()),
-		Providers:         providers,
-		CapabilityAliases: aliases,
+		ConfigurationProvenance: configurationProvenance,
+		Plugins:                 plugins,
+		Capabilities:            capabilities,
+		Requirements:            capabilityStrings(context.Requirements()),
+		Providers:               providers,
+		CapabilityAliases:       aliases,
 	}
 }
 

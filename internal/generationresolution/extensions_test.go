@@ -189,6 +189,14 @@ func TestResolveExtensionsSkipsHelpersWhenNoExtensionIsSelected(t *testing.T) {
 	local := extensionTestPlugin("example.local", "local")
 	local.Local = true
 	input := ExtensionInput{
+		ConfigurationProvenance: &generation.ConfigurationProvenanceInput{
+			Mode:                        generation.ConfigurationModeExplicit,
+			RootPath:                    "plystra.yaml",
+			RootDigest:                  "sha256:" + strings.Repeat("1", 64),
+			SelectedPath:                "deploy/customer.yaml",
+			SelectedDigest:              "sha256:" + strings.Repeat("2", 64),
+			DependencyCompositionDigest: "sha256:" + strings.Repeat("3", 64),
+		},
 		Input: Input{
 			Candidates: []providerresolution.Candidate{{PluginID: "example.business", Contract: plain, Source: "business/order.read"}},
 		},
@@ -221,6 +229,10 @@ func TestResolveExtensionsSkipsHelpersWhenNoExtensionIsSelected(t *testing.T) {
 	}
 	if _, exists := result.Context().Plugin(extensionTestPluginID(t, "example.local")); !exists {
 		t.Fatal("root-level local plugin is absent from the normalized application context")
+	}
+	provenance, exists := result.Context().ConfigurationProvenance()
+	if !exists || provenance.Mode() != generation.ConfigurationModeExplicit || provenance.SelectedPath() != "deploy/customer.yaml" || provenance.SelectedDigest() != "sha256:"+strings.Repeat("2", 64) {
+		t.Fatalf("configuration provenance = %#v, %t", provenance, exists)
 	}
 }
 

@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/plystra/cli/internal/capabilitymeta"
@@ -42,11 +44,40 @@ const (
 // application. NewContext validates, sorts, canonicalizes, and defensively
 // copies every member before exposing it to an extension.
 type Input struct {
-	Plugins           []PluginInput          `json:"plugins"`
-	Capabilities      []CapabilityInput      `json:"capabilities"`
-	Requirements      []string               `json:"requirements"`
-	Providers         []ProviderInput        `json:"providers"`
-	CapabilityAliases []CapabilityAliasInput `json:"capability_aliases"`
+	ConfigurationProvenance *ConfigurationProvenanceInput `json:"configuration_provenance,omitempty"`
+	Plugins                 []PluginInput                 `json:"plugins"`
+	Capabilities            []CapabilityInput             `json:"capabilities"`
+	Requirements            []string                      `json:"requirements"`
+	Providers               []ProviderInput               `json:"providers"`
+	CapabilityAliases       []CapabilityAliasInput        `json:"capability_aliases"`
+}
+
+// ConfigurationMode identifies the selected current-project configuration
+// layer represented by one filesystem-backed generation context.
+type ConfigurationMode string
+
+const (
+	// ConfigurationModeDefault selects the mandatory root plystra.yaml.
+	ConfigurationModeDefault ConfigurationMode = "default"
+	// ConfigurationModeEnvironment selects root plystra.yaml plus one sparse
+	// project-local environment overlay.
+	ConfigurationModeEnvironment ConfigurationMode = "environment"
+	// ConfigurationModeExplicit selects one complete replacement document.
+	ConfigurationModeExplicit ConfigurationMode = "explicit-config"
+)
+
+// ConfigurationProvenanceInput carries only stable, normalized, non-secret
+// configuration identity. It never carries YAML values, resolved Secrets,
+// absolute paths, process environment, or generated-output locations.
+// Synthetic contexts may omit it.
+type ConfigurationProvenanceInput struct {
+	Mode                        ConfigurationMode `json:"mode"`
+	Environment                 string            `json:"environment,omitempty"`
+	RootPath                    string            `json:"root_path"`
+	RootDigest                  string            `json:"root_digest"`
+	SelectedPath                string            `json:"selected_path"`
+	SelectedDigest              string            `json:"selected_digest"`
+	DependencyCompositionDigest string            `json:"dependency_composition_digest"`
 }
 
 // PluginInput describes public selected-plugin metadata. BuildMetadataJSON
@@ -96,6 +127,7 @@ type AliasSourceInput struct {
 // entry points.
 type GenerationContext interface {
 	APIVersion() string
+	ConfigurationProvenance() (ConfigurationProvenanceView, bool)
 	Plugins() []PluginView
 	Plugin(PluginID) (PluginView, bool)
 	Capabilities() []CapabilityView
@@ -107,27 +139,34 @@ type GenerationContext interface {
 	CapabilityAlias(CapabilityID) (CapabilityAliasView, bool)
 	CanonicalJSON() []byte
 	Digest() string
+	BuildModelDigest() string
 }
 
 // Context is one immutable, canonically ordered normalized application view.
 type Context struct {
-	plugins              []PluginView
-	pluginIndex          map[PluginID]int
-	capabilities         []CapabilityView
-	capabilityIndex      map[CapabilityID]int
-	requirements         []CapabilityID
-	providers            []ProviderView
-	providerByCapability map[CapabilityID]PluginID
-	aliases              []CapabilityAliasView
-	aliasIndex           map[CapabilityID]int
-	canonicalJSON        []byte
-	digest               string
+	configurationProvenance *ConfigurationProvenanceView
+	plugins                 []PluginView
+	pluginIndex             map[PluginID]int
+	capabilities            []CapabilityView
+	capabilityIndex         map[CapabilityID]int
+	requirements            []CapabilityID
+	providers               []ProviderView
+	providerByCapability    map[CapabilityID]PluginID
+	aliases                 []CapabilityAliasView
+	aliasIndex              map[CapabilityID]int
+	canonicalJSON           []byte
+	digest                  string
+	buildModelDigest        string
 }
 
 var _ GenerationContext = Context{}
 
 // NewContext validates and canonicalizes one complete generation input.
 func NewContext(input Input) (Context, error) {
+	configurationProvenance, err := normalizeConfigurationProvenance(input.ConfigurationProvenance)
+	if err != nil {
+		return Context{}, err
+	}
 	plugins, pluginIndex, err := normalizePlugins(input.Plugins)
 	if err != nil {
 		return Context{}, err
@@ -155,27 +194,42 @@ func NewContext(input Input) (Context, error) {
 		return Context{}, err
 	}
 
-	canonical, err := encodeContext(plugins, capabilities, requirements, providers, aliases)
+	buildModelCanonical, err := encodeContext(nil, plugins, capabilities, requirements, providers, aliases)
+	if err != nil {
+		return Context{}, invalidContext("encode canonical build model: %v", err)
+	}
+	canonical, err := encodeContext(configurationProvenance, plugins, capabilities, requirements, providers, aliases)
 	if err != nil {
 		return Context{}, invalidContext("encode canonical input: %v", err)
 	}
 	return Context{
-		plugins:              plugins,
-		pluginIndex:          pluginIndex,
-		capabilities:         capabilities,
-		capabilityIndex:      capabilityIndex,
-		requirements:         requirements,
-		providers:            providers,
-		providerByCapability: providerByCapability,
-		aliases:              aliases,
-		aliasIndex:           aliasIndex,
-		canonicalJSON:        canonical,
-		digest:               sha256Digest(canonical),
+		configurationProvenance: configurationProvenance,
+		plugins:                 plugins,
+		pluginIndex:             pluginIndex,
+		capabilities:            capabilities,
+		capabilityIndex:         capabilityIndex,
+		requirements:            requirements,
+		providers:               providers,
+		providerByCapability:    providerByCapability,
+		aliases:                 aliases,
+		aliasIndex:              aliasIndex,
+		canonicalJSON:           canonical,
+		digest:                  sha256Digest(canonical),
+		buildModelDigest:        sha256Digest(buildModelCanonical),
 	}, nil
 }
 
 // APIVersion returns the exact generation protocol version.
 func (Context) APIVersion() string { return Version }
+
+// ConfigurationProvenance returns stable, non-secret selected-configuration
+// identity for a filesystem-backed context. Synthetic contexts may omit it.
+func (c Context) ConfigurationProvenance() (ConfigurationProvenanceView, bool) {
+	if c.configurationProvenance == nil {
+		return ConfigurationProvenanceView{}, false
+	}
+	return *c.configurationProvenance, true
+}
 
 // Plugins returns defensive view copies sorted by Plugin ID.
 func (c Context) Plugins() []PluginView { return append([]PluginView(nil), c.plugins...) }
@@ -240,6 +294,48 @@ func (c Context) CanonicalJSON() []byte { return append([]byte(nil), c.canonical
 
 // Digest returns the sha256 digest of CanonicalJSON with a sha256: prefix.
 func (c Context) Digest() string { return c.digest }
+
+// BuildModelDigest returns the deterministic digest of normalized application
+// state excluding configuration-document provenance. Extension output digests
+// separately carry any generated behavior derived from that provenance.
+func (c Context) BuildModelDigest() string { return c.buildModelDigest }
+
+// ConfigurationProvenanceView is immutable selected-configuration identity.
+// Paths are stable Project-relative slash paths and every digest is a
+// canonical lowercase SHA-256 value.
+type ConfigurationProvenanceView struct {
+	mode                        ConfigurationMode
+	environment                 string
+	rootPath                    string
+	rootDigest                  string
+	selectedPath                string
+	selectedDigest              string
+	dependencyCompositionDigest string
+}
+
+// Mode returns default, environment, or explicit-config.
+func (p ConfigurationProvenanceView) Mode() ConfigurationMode { return p.mode }
+
+// Environment returns the selected environment name in environment mode.
+func (p ConfigurationProvenanceView) Environment() string { return p.environment }
+
+// RootPath returns the mandatory root configuration's Project-relative path.
+func (p ConfigurationProvenanceView) RootPath() string { return p.rootPath }
+
+// RootDigest returns the normalized root-document digest.
+func (p ConfigurationProvenanceView) RootDigest() string { return p.rootDigest }
+
+// SelectedPath returns the selected current-project document's relative path.
+func (p ConfigurationProvenanceView) SelectedPath() string { return p.selectedPath }
+
+// SelectedDigest returns the normalized selected-document digest.
+func (p ConfigurationProvenanceView) SelectedDigest() string { return p.selectedDigest }
+
+// DependencyCompositionDigest returns the normalized dependency baseline and
+// all-source provenance digest.
+func (p ConfigurationProvenanceView) DependencyCompositionDigest() string {
+	return p.dependencyCompositionDigest
+}
 
 // ModuleView contains public Go Module provenance without a local filesystem
 // path. An empty version identifies the current local development module.
@@ -401,6 +497,86 @@ func (s AliasSourceView) Kind() AliasSourceKind { return s.kind }
 
 // ID returns "application" or the contributing selected Plugin ID.
 func (s AliasSourceView) ID() string { return s.id }
+
+func normalizeConfigurationProvenance(input *ConfigurationProvenanceInput) (*ConfigurationProvenanceView, error) {
+	if input == nil {
+		return nil, nil
+	}
+	const field = "configuration_provenance"
+	if input.RootPath != "plystra.yaml" {
+		return nil, invalidContext("%s.root_path must be %q", field, "plystra.yaml")
+	}
+	if !validProjectRelativePath(input.SelectedPath) {
+		return nil, invalidContext("%s.selected_path %q is not a stable Project-relative slash path", field, input.SelectedPath)
+	}
+	if !validSHA256Digest(input.RootDigest) {
+		return nil, invalidContext("%s.root_digest is not a canonical SHA-256 digest", field)
+	}
+	if !validSHA256Digest(input.SelectedDigest) {
+		return nil, invalidContext("%s.selected_digest is not a canonical SHA-256 digest", field)
+	}
+	if !validSHA256Digest(input.DependencyCompositionDigest) {
+		return nil, invalidContext("%s.dependency_composition_digest is not a canonical SHA-256 digest", field)
+	}
+	switch input.Mode {
+	case ConfigurationModeDefault:
+		if input.Environment != "" {
+			return nil, invalidContext("%s.environment must be empty in default mode", field)
+		}
+		if input.SelectedPath != input.RootPath || input.SelectedDigest != input.RootDigest {
+			return nil, invalidContext("%s default mode must select the exact root document", field)
+		}
+	case ConfigurationModeEnvironment:
+		if !validEnvironmentName(input.Environment) {
+			return nil, invalidContext("%s.environment %q is not one safe filename component", field, input.Environment)
+		}
+		expected := "plystra." + input.Environment + ".yaml"
+		if input.SelectedPath != expected {
+			return nil, invalidContext("%s.selected_path must be %q in environment mode", field, expected)
+		}
+	case ConfigurationModeExplicit:
+		if input.Environment != "" {
+			return nil, invalidContext("%s.environment must be empty in explicit-config mode", field)
+		}
+	default:
+		return nil, invalidContext("%s.mode %q is not supported", field, input.Mode)
+	}
+	return &ConfigurationProvenanceView{
+		mode:                        input.Mode,
+		environment:                 input.Environment,
+		rootPath:                    input.RootPath,
+		rootDigest:                  input.RootDigest,
+		selectedPath:                input.SelectedPath,
+		selectedDigest:              input.SelectedDigest,
+		dependencyCompositionDigest: input.DependencyCompositionDigest,
+	}, nil
+}
+
+func validProjectRelativePath(value string) bool {
+	if value == "" || len(value) > 1024 || !utf8.ValidString(value) || path.IsAbs(value) || path.Clean(value) != value || value == "." || value == ".." || strings.HasPrefix(value, "../") || strings.Contains(value, "\\") || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return false
+	}
+	if len(value) >= 2 && value[1] == ':' && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) {
+		return false
+	}
+	return true
+}
+
+func validEnvironmentName(value string) bool {
+	return value != "" && len(value) <= 200 && value != "." && value != ".." && utf8.ValidString(value) && !strings.ContainsAny(value, `/\\<>:"|?*`) && strings.IndexFunc(value, unicode.IsControl) < 0
+}
+
+func validSHA256Digest(value string) bool {
+	if len(value) != len("sha256:")+sha256.Size*2 || !strings.HasPrefix(value, "sha256:") {
+		return false
+	}
+	for _, character := range value[len("sha256:"):] {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
+}
 
 func normalizePlugins(inputs []PluginInput) ([]PluginView, map[PluginID]int, error) {
 	plugins := make([]PluginView, 0, len(inputs))
