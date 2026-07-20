@@ -70,7 +70,20 @@ func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.
 	if plystraPolicyConditionsContextBlockedPresent {
 		return contract.Response{}, plystraConditionalError{code: contract.ErrPolicyFailed, message: "Policy context blocked the request."}
 	}
-	return h.target.Invoke(ctx, request)
+	response, invocationError := h.target.Invoke(ctx, request)
+	if invocationError != nil {
+		return contract.Response{}, invocationError
+	}
+	if responseError := plystraValidateResponse(response); responseError != nil {
+		return contract.Response{}, responseError
+	}
+	return response, nil
+}
+
+var plystraErrInvalidProviderResponse = errors.New("invalid canonical Provider response")
+
+func plystraValidateResponse(response contract.Response) error {
+	return nil
 }
 
 var plystraErrInvalidContext = errors.New("nil generated invocation context")

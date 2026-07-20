@@ -4,6 +4,8 @@ package emailsendv1
 
 import (
 	"context"
+	"errors"
+	"unicode/utf8"
 
 	contract "example.com/acme/project/generated/go/contracts/email/send/v1"
 	kernelinvocation "github.com/plystra/kernel/invocation"
@@ -31,5 +33,27 @@ func (h Handle) Available() bool {
 
 // Invoke runs the application path for email.send/v1 and dispatches its canonical ID.
 func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.Response, error) {
-	return h.target.Invoke(ctx, request)
+	response, invocationError := h.target.Invoke(ctx, request)
+	if invocationError != nil {
+		return contract.Response{}, invocationError
+	}
+	if responseError := plystraValidateResponse(response); responseError != nil {
+		return contract.Response{}, responseError
+	}
+	return response, nil
+}
+
+var plystraErrInvalidProviderResponse = errors.New("invalid canonical Provider response")
+
+func plystraValidateResponse(response contract.Response) error {
+	if !utf8.ValidString(response.MessageID) {
+		return plystraErrInvalidProviderResponse
+	}
+	switch response.Status {
+	case contract.ResponseStatus("queued"):
+	case contract.ResponseStatus("sent"):
+	default:
+		return plystraErrInvalidProviderResponse
+	}
+	return nil
 }

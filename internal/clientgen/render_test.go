@@ -520,7 +520,7 @@ func TestAliasForwardsThroughCanonicalGeneratedClient(t *testing.T) {
 		if len(request.To) != 1 || request.To[0] != "person@example.com" || request.Subject != "Welcome" {
 			t.Fatalf("request = %#v", request)
 		}
-		return contract.Response{MessageID: "message-1"}, nil
+		return contract.Response{MessageID: "message-1", Status: contract.ResponseStatusSent}, nil
 	})
 	canonical := canonicalclient.New(applicationinvocation.New(target))
 	alias := aliasclient.New(canonical)

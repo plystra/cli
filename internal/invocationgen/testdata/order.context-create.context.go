@@ -4,6 +4,7 @@ package ordercontextcreatev1
 
 import (
 	"context"
+	"errors"
 
 	contract "example.com/acme/project/generated/go/contracts/order/context-create/v1"
 	invocationcontext "example.com/acme/project/generated/go/internal/invocationcontext"
@@ -77,7 +78,20 @@ func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.
 	if plystraPolicyContextReuseOptionalError != nil {
 		return contract.Response{}, plystraPolicyContextReuseOptionalError
 	}
-	return h.target.Invoke(ctx, request)
+	response, invocationError := h.target.Invoke(ctx, request)
+	if invocationError != nil {
+		return contract.Response{}, invocationError
+	}
+	if responseError := plystraValidateResponse(response); responseError != nil {
+		return contract.Response{}, responseError
+	}
+	return response, nil
+}
+
+var plystraErrInvalidProviderResponse = errors.New("invalid canonical Provider response")
+
+func plystraValidateResponse(response contract.Response) error {
+	return nil
 }
 
 func plystraPointer[Value any](value Value) *Value {

@@ -39,6 +39,7 @@ func TestRenderPlanAdapterCredentialDerivationFailsClosedInternally(t *testing.T
 	for _, required := range []string{
 		"func (h Handle) InvokeHTTP(",
 		`plystraAdapterCredential(adapterCredentials, "authorization")`,
+		"if responseError := plystraValidateResponse(response); responseError != nil",
 		"return contract.Response{}, invocationcontext.ErrInvalidValue",
 	} {
 		if !bytes.Contains(file.Data(), []byte(required)) {

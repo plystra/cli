@@ -74,7 +74,8 @@ func TestRenderDerivesHierarchicalCapabilityPath(t *testing.T) {
 		`contract "example.com/acme/project/v3/generated/go/contracts/authn/login/oidc/complete/v12"`,
 		`target kernelinvocation.Handle[contract.Request, contract.Response]`,
 		`func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.Response, error)`,
-		`return h.target.Invoke(ctx, request)`,
+		`response, invocationError := h.target.Invoke(ctx, request)`,
+		`if responseError := plystraValidateResponse(response); responseError != nil`,
 	} {
 		if !strings.Contains(got, required) {
 			t.Fatalf("generated invocation does not contain %q:\n%s", required, file.Data())
@@ -181,6 +182,8 @@ func (h Handle[Request, Response]) Invoke(ctx context.Context, request Request) 
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	contract "example.com/acme/project/generated/go/contracts/email/send/v1"
@@ -201,6 +204,21 @@ func TestCanonicalApplicationInvocationDelegates(t *testing.T) {
 	response, err := handle.Invoke(context.Background(), contract.Request{Subject: "message-1", To: []string{"user@example.com"}})
 	if err != nil || response.MessageID != "message-1" || response.Status != contract.ResponseStatusSent || calls != 1 {
 		t.Fatalf("Invoke = %#v, %v, calls %d", response, err, calls)
+	}
+	invalid := kernelinvocation.NewTestHandle(true, func(context.Context, contract.Request) (contract.Response, error) {
+		return contract.Response{MessageID: "must-be-discarded", Status: contract.ResponseStatus("invalid-secret-value")}, nil
+	})
+	response, err = applicationinvocation.New(invalid).Invoke(context.Background(), contract.Request{})
+	if err == nil || err.Error() != "invalid canonical Provider response" || response != (contract.Response{}) || strings.Contains(err.Error(), "invalid-secret-value") {
+		t.Fatalf("invalid Provider response = %#v, %v", response, err)
+	}
+	providerFailure := errors.New("provider failure")
+	failing := kernelinvocation.NewTestHandle(true, func(context.Context, contract.Request) (contract.Response, error) {
+		return contract.Response{MessageID: "must-be-discarded", Status: contract.ResponseStatusSent}, providerFailure
+	})
+	response, err = applicationinvocation.New(failing).Invoke(context.Background(), contract.Request{})
+	if !errors.Is(err, providerFailure) || response != (contract.Response{}) {
+		t.Fatalf("failed Provider response = %#v, %v", response, err)
 	}
 	if applicationinvocation.Available(applicationinvocation.Handle{}) {
 		t.Fatal("zero application invocation is available")

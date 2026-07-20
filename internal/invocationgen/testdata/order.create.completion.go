@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"time"
+	"unicode/utf8"
 
 	auditwritev1 "example.com/acme/project/generated/go/clients/audit/write/v1"
 	auditwritev1contract "example.com/acme/project/generated/go/contracts/audit/write/v1"
@@ -73,7 +74,22 @@ func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.
 		},
 	)
 	_ = plystraAuditCompletionRecordError
-	return response, invocationError
+	if invocationError != nil {
+		return contract.Response{}, invocationError
+	}
+	if responseError := plystraValidateResponse(response); responseError != nil {
+		return contract.Response{}, responseError
+	}
+	return response, nil
+}
+
+var plystraErrInvalidProviderResponse = errors.New("invalid canonical Provider response")
+
+func plystraValidateResponse(response contract.Response) error {
+	if !utf8.ValidString(response.OrderID) {
+		return plystraErrInvalidProviderResponse
+	}
+	return nil
 }
 
 var plystraErrInvalidContext = errors.New("nil generated invocation context")
