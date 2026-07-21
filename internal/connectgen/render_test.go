@@ -50,7 +50,7 @@ response:
   records: {type: array, items: object, required: true}
   state: {type: string, enum: [ready, blocked], required: true}
   tags: {type: array, items: string, required: true}
-errors: []
+errors: [temporarily_unavailable]
 extensions:
   policy: {credential: authorization}
 `
@@ -117,6 +117,12 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		"connectschema.DecodeStruct(",
 		"connectschema.EncodeStruct(",
 		"connectschema.ValidateMessage(message.ProtoReflect())",
+		"connectschema.Message(plystraErrorDetailType)",
+		"applicationinvocation.SafeTransportError(err)",
+		"func (h Handler) InvokeRequested(",
+		"connect.NewErrorDetail(message)",
+		`const CapabilityID = "customer.profile.sync/v1"`,
+		`const plystraErrorDetailType = "plystra.generated.transport.v1.PlystraErrorDetail"`,
 		"protoreflect.ValueOfEnum(",
 		"dynamicpb.NewMessage(",
 		"func plystraPointer[Value any](value Value) *Value",
@@ -133,7 +139,8 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 	alias := byPath[wantPaths[0]]
 	for _, required := range []string{
 		`canonicaladapter "example.com/acme/project/generated/go/adapters/connect/customer/profile/sync/v1"`,
-		"target.Invoke",
+		"target.InvokeRequested",
+		`const CapabilityID = "account.profile/v1"`,
 		"connect.NewUnaryHandler(",
 		"connect.WithCodec(connectschema.BinaryCodec{})",
 		"connect.WithCodec(connectschema.JSONCodec{})",
@@ -168,6 +175,7 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		"func ValidateMessage(message protoreflect.Message)",
 		"func ValidateResponseMessage(message protoreflect.Message)",
 		"type ResponseEncodingBudget struct",
+		"func Message(name protoreflect.FullName)",
 		"len(message.GetUnknown()) != 0",
 	} {
 		if !bytes.Contains(schema.Data(), []byte(required)) {
@@ -178,6 +186,9 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		if bytes.Contains(alias.Data(), []byte(forbidden)) {
 			t.Fatalf("Alias handler contains forbidden independent target %q:\n%s", forbidden, alias.Data())
 		}
+	}
+	if bytes.Contains(alias.Data(), []byte("\t\ttarget.Invoke,")) {
+		t.Fatalf("Alias handler loses the requested Alias identity through a direct canonical method value:\n%s", alias.Data())
 	}
 	for _, file := range files {
 		if _, err := parser.ParseFile(token.NewFileSet(), file.Path(), file.Data(), parser.AllErrors); err != nil {
@@ -244,6 +255,20 @@ func TestRenderRejectsInconsistentDescriptorAndPlanEvidence(t *testing.T) {
 	provenance := connectConfigurationProvenance(t, generation.ConfigurationModeDefault)
 	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, inconsistent, fixture.plan, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrRender) || !errors.Is(err, connectgen.ErrDescriptor) || !strings.Contains(err.Error(), "method") {
 		t.Fatalf("Render(inconsistent descriptor) = %#v, %v", files, err)
+	}
+	var missingErrorDetail descriptorpb.FileDescriptorSet
+	if err := proto.Unmarshal(fixture.descriptorSet, &missingErrorDetail); err != nil {
+		t.Fatalf("Unmarshal descriptor set for safe-detail removal: %v", err)
+	}
+	missingErrorDetail.File = slices.DeleteFunc(missingErrorDetail.File, func(file *descriptorpb.FileDescriptorProto) bool {
+		return file.GetName() == protobufdescriptor.ErrorDetailFileName
+	})
+	withoutErrorDetail, err := (proto.MarshalOptions{Deterministic: true}).Marshal(&missingErrorDetail)
+	if err != nil {
+		t.Fatalf("Marshal descriptor set without safe detail: %v", err)
+	}
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, withoutErrorDetail, fixture.plan, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrDescriptor) || !strings.Contains(err.Error(), "safe error detail") {
+		t.Fatalf("Render(missing safe error detail) = %#v, %v", files, err)
 	}
 	otherPlan, err := generationlowering.Lower("example.com/other", []generation.NormalizedContribution{})
 	if err != nil {
@@ -612,6 +637,7 @@ type Error struct {
 	detail string
 }
 
+func NewError(code ErrorCode, detail string) *Error { return &Error{code: code, detail: detail} }
 func (e *Error) Error() string { return "invocation error" }
 func (e *Error) Code() ErrorCode { if e == nil { return "" }; return e.code }
 func (e *Error) DetailCode() string { if e == nil { return "" }; return e.detail }
@@ -650,8 +676,35 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 	rootCalls := 0
 	target := kernelinvocation.NewTestHandle(func(_ context.Context, request contract.Request) (contract.Response, error) {
 		calls++
-		if request.Note != nil && *request.Note == "provider-error" {
-			return contract.Response{}, errors.New("provider secret must not cross the Connect boundary")
+		if request.Note != nil {
+			switch *request.Note {
+			case "provider-error":
+				return contract.Response{}, errors.New("provider secret must not cross the Connect boundary")
+			case "semantic-error":
+				return contract.Response{}, contract.ErrTemporarilyUnavailable
+			case "kernel-invalid-argument":
+				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorInvalidArgument, "contract.invalid_request")
+			case "kernel-not-found":
+				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorNotFound, "resource.not_found")
+			case "kernel-conflict":
+				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorConflict, "resource.conflict")
+			case "kernel-denied":
+				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorDenied, "authorization.denied")
+			case "kernel-unauthenticated":
+				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorUnauthenticated, "authentication.required")
+			case "kernel-unavailable":
+				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorUnavailable, "runtime.unavailable")
+			case "kernel-timeout":
+				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorTimeout, "runtime.timeout")
+			case "kernel-cancelled":
+				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorCancelled, "runtime.cancelled")
+			case "kernel-result-unknown":
+				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorResultUnknown, "runtime.result_unknown")
+			case "kernel-internal":
+				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorInternal, "runtime.internal")
+			case "kernel-version-incompatible":
+				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorVersionIncompatible, "runtime.version_incompatible")
+			}
 		}
 		noteValue := ""
 		expectedSource := "optional-null"
@@ -773,14 +826,12 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 	}
 	directInvalid := connect.NewRequest(withNestedUnknown(validRequest(t, directMethod, "hello")))
 	directInvalid.Header().Set("Authorization", "Bearer test")
-	if _, err := canonical.Invoke(t.Context(), directInvalid); connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("direct nested-unknown Invoke error = %v", err)
-	}
+	_, err = canonical.Invoke(t.Context(), directInvalid)
+	assertSafeConnectError(t, err, connect.CodeInvalidArgument, "customer.profile.sync/v1", "", "invalid_argument")
 	directInvalidUTF8 := connect.NewRequest(withString(t, validRequest(t, directMethod, "hello"), "note", string([]byte{0xff})))
 	directInvalidUTF8.Header().Set("Authorization", "Bearer test")
-	if _, err := canonical.Invoke(t.Context(), directInvalidUTF8); connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("direct invalid-UTF-8 Invoke error = %v", err)
-	}
+	_, err = canonical.Invoke(t.Context(), directInvalidUTF8)
+	assertSafeConnectError(t, err, connect.CodeInvalidArgument, "customer.profile.sync/v1", "", "invalid_argument")
 	if calls != 1 || rootCalls != 1 {
 		t.Fatalf("direct invalid request crossed the boundary: calls %d/%d", calls, rootCalls)
 	}
@@ -1113,6 +1164,49 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 	if calls != 28 || rootCalls != 28 {
 		t.Fatalf("JSON presence and integer calls = %d/%d, want 28/28", calls, rootCalls)
 	}
+
+	errorCases := []struct {
+		name string
+		note string
+		code connect.Code
+		semantic string
+		kernel string
+	}{
+		{name: "semantic", note: "semantic-error", code: connect.CodeFailedPrecondition, semantic: "temporarily_unavailable"},
+		{name: "unsafe provider", note: "provider-error", code: connect.CodeInternal, kernel: "internal"},
+		{name: "invalid argument", note: "kernel-invalid-argument", code: connect.CodeInvalidArgument, kernel: "invalid_argument"},
+		{name: "not found", note: "kernel-not-found", code: connect.CodeNotFound, kernel: "not_found"},
+		{name: "conflict", note: "kernel-conflict", code: connect.CodeAborted, kernel: "conflict"},
+		{name: "denied", note: "kernel-denied", code: connect.CodePermissionDenied, kernel: "denied"},
+		{name: "unauthenticated", note: "kernel-unauthenticated", code: connect.CodeUnauthenticated, kernel: "unauthenticated"},
+		{name: "unavailable", note: "kernel-unavailable", code: connect.CodeUnavailable, kernel: "unavailable"},
+		{name: "timeout", note: "kernel-timeout", code: connect.CodeDeadlineExceeded, kernel: "timeout"},
+		{name: "cancelled", note: "kernel-cancelled", code: connect.CodeCanceled, kernel: "cancelled"},
+		{name: "result unknown", note: "kernel-result-unknown", code: connect.CodeUnavailable, kernel: "result_unknown"},
+		{name: "internal", note: "kernel-internal", code: connect.CodeInternal, kernel: "internal"},
+		{name: "version incompatible", note: "kernel-version-incompatible", code: connect.CodeUnimplemented, kernel: "version_incompatible"},
+	}
+	for _, test := range errorCases {
+		t.Run("safe error detail/"+test.name, func(t *testing.T) {
+			request := connect.NewRequest(validRequest(t, directMethod, test.note))
+			request.Header().Set("Authorization", "Bearer test")
+			response, err := canonical.Invoke(t.Context(), request)
+			if response != nil {
+				t.Fatalf("error response = %#v", response)
+			}
+			assertSafeConnectError(t, err, test.code, "customer.profile.sync/v1", test.semantic, test.kernel)
+		})
+	}
+
+	aliasMethod := mustMethod(t, "plystra.generated.account.profile.v1.AccountProfileV1Service.Invoke")
+	aliasClient := connect.NewClient[dynamicpb.Message, dynamicpb.Message](server.Client(), server.URL+aliasadapter.Procedure, connect.WithSchema(aliasMethod), connect.WithResponseInitializer(connectschema.InitializeDynamicMessage))
+	aliasRequest := connect.NewRequest(validRequest(t, aliasMethod, "semantic-error"))
+	aliasRequest.Header().Set("Authorization", "Bearer test")
+	aliasResponse, aliasErr := aliasClient.CallUnary(t.Context(), aliasRequest)
+	if aliasResponse != nil {
+		t.Fatalf("Alias error response = %#v", aliasResponse)
+	}
+	assertSafeConnectError(t, aliasErr, connect.CodeFailedPrecondition, "account.profile/v1", "temporarily_unavailable", "")
 }
 
 func FuzzJSONCodecNeverPanics(f *testing.F) {
@@ -1214,6 +1308,39 @@ func mustMethod(t *testing.T, name protoreflect.FullName) protoreflect.MethodDes
 		t.Fatalf("Method(%s): %v", name, err)
 	}
 	return method
+}
+
+func assertSafeConnectError(t *testing.T, err error, code connect.Code, requestedCapabilityID, semanticErrorCode, kernelErrorClass string) {
+	t.Helper()
+	var connectError *connect.Error
+	if !errors.As(err, &connectError) || connectError == nil || connectError.Code() != code {
+		t.Fatalf("Connect error = %#v, want code %s", err, code)
+	}
+	details := connectError.Details()
+	if len(details) != 1 || details[0] == nil || details[0].Type() != "plystra.generated.transport.v1.PlystraErrorDetail" {
+		t.Fatalf("Connect error details = %#v", details)
+	}
+	descriptor, descriptorErr := connectschema.Message("plystra.generated.transport.v1.PlystraErrorDetail")
+	if descriptorErr != nil {
+		t.Fatalf("safe error descriptor: %v", descriptorErr)
+	}
+	message := dynamicpb.NewMessage(descriptor)
+	if decodeErr := (proto.UnmarshalOptions{DiscardUnknown: false}).Unmarshal(details[0].Bytes(), message); decodeErr != nil {
+		t.Fatalf("decode safe error detail: %v", decodeErr)
+	}
+	reflected := message.ProtoReflect()
+	if len(reflected.GetUnknown()) != 0 {
+		t.Fatalf("safe error detail contains unknown fields: %x", reflected.GetUnknown())
+	}
+	field := func(number protoreflect.FieldNumber) string {
+		return reflected.Get(descriptor.Fields().ByNumber(number)).String()
+	}
+	if field(1) != requestedCapabilityID || field(2) != "customer.profile.sync/v1" || field(3) != semanticErrorCode || field(4) != kernelErrorClass || field(5) != "" {
+		t.Fatalf("safe error detail = requested %q canonical %q semantic %q kernel %q trace %q", field(1), field(2), field(3), field(4), field(5))
+	}
+	if strings.Contains(err.Error(), "provider secret") || bytes.Contains(details[0].Bytes(), []byte("provider secret")) {
+		t.Fatalf("unsafe provider text crossed the Connect boundary: %v %x", err, details[0].Bytes())
+	}
 }
 
 func validRequest(t *testing.T, method protoreflect.MethodDescriptor, note string) *dynamicpb.Message {

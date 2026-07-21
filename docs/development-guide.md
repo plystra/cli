@@ -1264,6 +1264,38 @@ malformed-response, and schema failures are normalized to stable Plystra error
 fields. Provider packages, runtime configuration, verified internal context,
 and Secrets must not appear in the package.
 
+Generated Connect application failures carry one closed
+`plystra.generated.transport.v1.PlystraErrorDetail`. The detail identifies the
+requested canonical or Alias Capability, its canonical target, and exactly one
+declared semantic error code or closed Kernel error class. It never contains a
+Provider ID or message, cause, payload, panic value, stack, internal Kernel
+detail code, configuration, credential, or Secret. Alias calls therefore keep
+the Alias in `requestedCapabilityID` while `canonicalCapabilityID` remains the
+target. The generated JavaScript wrapper exposes the validated result as an
+immutable Plystra-owned detail rather than a raw `ConnectError`:
+
+```ts
+import { PlystraError } from "@acme/orders-sdk";
+
+try {
+  await client.catalog.item.get.v1({item_id: "coffee"});
+} catch (error) {
+  if (
+    error instanceof PlystraError &&
+    error.detail?.semanticErrorCode === "item_missing"
+  ) {
+    // Handle only the error declared by catalog.item.get/v1.
+  }
+}
+```
+
+Do not parse `error.message` or depend on Connect internals. A missing,
+duplicate, malformed, unknown, identity-mismatched, outer-code-mismatched, or
+undeclared detail is deliberately reduced to the generic `internal` Plystra
+error. When testing a generated handler, assert the exact requested and
+canonical IDs, the semantic-code-or-Kernel-class exclusivity, and absence of
+unsafe Provider text for both canonical and Alias procedures.
+
 Import the SDK only through its generated package root. Its export map blocks
 runtime, descriptor, and generated-operation implementation subpaths, and its
 declarations omit transport, codec, descriptor, and binder internals even

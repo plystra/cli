@@ -7,11 +7,12 @@ import {
   isPlainObject,
   PlystraError,
   type ClientOptions,
+  type ErrorContract,
   type MessageCodec,
   type RequestOptions,
   type Runtime,
 } from "../../../runtime.js";
-import { resolveUnaryMethod } from "../../../descriptors.js";
+import { resolveMessage, resolveUnaryMethod } from "../../../descriptors.js";
 
 export const capabilityID = "alpha.beta/v1";
 export const contractDigest = "sha256:e4f1a8e37e47c8ff3bf76863c2ecbf470a56bb590a77a1ee9708330c452c7acd";
@@ -29,6 +30,10 @@ const responseCodec: MessageCodec = {
   fields: [
   ],
 };
+
+const errorDetailDescriptor = resolveMessage("plystra.generated.transport.v1.PlystraErrorDetail");
+const semanticErrorCodes = Object.freeze([
+]);
 
 export type Request = Readonly<Record<string, never>>;
 
@@ -57,11 +62,17 @@ export type Operation = (
 
 /** @internal */
 export function bindOperation(runtime: Runtime): Operation {
-  return bindOperationMethod(runtime, method);
+  return bindOperationMethod(runtime, method, capabilityID);
 }
 
 /** @internal */
-export function bindOperationMethod(runtime: Runtime, operationMethod: typeof method): Operation {
+export function bindOperationMethod(runtime: Runtime, operationMethod: typeof method, requestedCapabilityID: string): Operation {
+  const errorContract: ErrorContract = {
+    requestedCapabilityID,
+    canonicalCapabilityID: capabilityID,
+    semanticErrorCodes,
+    detailDescriptor: errorDetailDescriptor,
+  };
   return async (request, options = {}) => {
     let requestIsValid = false;
     try {
@@ -72,7 +83,7 @@ export function bindOperationMethod(runtime: Runtime, operationMethod: typeof me
     if (!requestIsValid) {
       throw new TypeError("request does not match alpha.beta/v1");
     }
-    const response = await invoke(runtime, operationMethod, requestCodec, responseCodec, request, options);
+    const response = await invoke(runtime, operationMethod, requestCodec, responseCodec, errorContract, request, options);
     if (!isResponse(response)) {
       throw new PlystraError(200, "invalid_response");
     }

@@ -27,6 +27,12 @@ import (
 const (
 	// DescriptorSetPath is the committed binary FileDescriptorSet evidence.
 	DescriptorSetPath = "generated/proto/descriptor-set.pb"
+	// ErrorDetailFileName is the shared generated safe-error schema included
+	// whenever the selected application exposes at least one Connect operation.
+	ErrorDetailFileName = "plystra/generated/transport/v1/error.proto"
+	// ErrorDetailFullName is the exact closed detail type shared by generated
+	// Connect handlers and JavaScript wrappers.
+	ErrorDetailFullName = "plystra.generated.transport.v1.PlystraErrorDetail"
 	// ProjectionSchema identifies the initial deterministic descriptor model.
 	ProjectionSchema = "plystra.protobuf-descriptor/v1"
 	generatedRoot    = "generated/proto/"
@@ -92,7 +98,7 @@ func (e Evidence) DescriptorSet() []byte {
 // Digest returns the SHA-256 digest of the deterministic binary descriptor set.
 func (e Evidence) Digest() string { return e.digest }
 
-// DescriptorCount returns the number of generated application .proto files.
+// DescriptorCount returns the number of generated .proto files.
 func (e Evidence) DescriptorCount() int { return e.descriptors }
 
 // Build validates exact canonical-to-wire agreement, renders one canonical
@@ -142,6 +148,9 @@ func Build(model protobufmodel.Model, wireMap protobufwiremap.Map) (Evidence, er
 		}
 		descriptors = append(descriptors, file)
 	}
+	if len(model.Operations()) != 0 {
+		descriptors = append(descriptors, errorDetailDescriptor())
+	}
 	sort.Slice(descriptors, func(left, right int) bool { return descriptors[left].GetName() < descriptors[right].GetName() })
 
 	setFiles := append([]*descriptorpb.FileDescriptorProto(nil), descriptors...)
@@ -172,6 +181,36 @@ func Build(model protobufmodel.Model, wireMap protobufwiremap.Map) (Evidence, er
 	files = append(files, File{path: DescriptorSetPath, data: binary})
 	sort.Slice(files, func(left, right int) bool { return files[left].path < files[right].path })
 	return Evidence{files: files, digest: digest(binary), prepared: true, descriptors: len(descriptors)}, nil
+}
+
+func errorDetailDescriptor() *descriptorpb.FileDescriptorProto {
+	fields := []struct {
+		name     string
+		jsonName string
+		number   int32
+	}{
+		{name: "requested_capability_id", jsonName: "requestedCapabilityId", number: 1},
+		{name: "canonical_capability_id", jsonName: "canonicalCapabilityId", number: 2},
+		{name: "semantic_error_code", jsonName: "semanticErrorCode", number: 3},
+		{name: "kernel_error_class", jsonName: "kernelErrorClass", number: 4},
+		{name: "trace_id", jsonName: "traceId", number: 5},
+	}
+	message := &descriptorpb.DescriptorProto{Name: proto.String("PlystraErrorDetail")}
+	for _, field := range fields {
+		message.Field = append(message.Field, &descriptorpb.FieldDescriptorProto{
+			Name:     proto.String(field.name),
+			JsonName: proto.String(field.jsonName),
+			Number:   proto.Int32(field.number),
+			Label:    descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+			Type:     descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum(),
+		})
+	}
+	return &descriptorpb.FileDescriptorProto{
+		Name:        proto.String(ErrorDetailFileName),
+		Package:     proto.String("plystra.generated.transport.v1"),
+		Syntax:      proto.String("proto3"),
+		MessageType: []*descriptorpb.DescriptorProto{message},
+	}
 }
 
 func canonicalDescriptor(operation protobufmodel.Operation, wire protobufwiremap.CapabilityProjection) (*descriptorpb.FileDescriptorProto, bool, error) {

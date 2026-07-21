@@ -86,6 +86,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		"generated/proto/plystra/generated/email/send/v1/capability.proto",
 		"generated/proto/plystra/generated/health/status/v1/capability.proto",
 		"generated/proto/plystra/generated/kernel/health/v1/capability.proto",
+		"generated/proto/plystra/generated/transport/v1/error.proto",
 		"generated/proto/wire-map.json",
 		"generated/sdk/javascript/.npmrc",
 		"generated/sdk/javascript/README.md",

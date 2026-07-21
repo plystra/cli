@@ -112,6 +112,12 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		`targetCapabilityID = "email.send/v1"`,
 		`bindOperationMethod as bindCanonicalOperationMethod`,
 		`resolveUnaryMethod`,
+		`resolveMessage`,
+		`plystra.generated.transport.v1.PlystraErrorDetail`,
+		`export type PlystraErrorDetail`,
+		`readonly detail: PlystraErrorDetail | undefined`,
+		`semanticErrorCodes`,
+		`requestedCapabilityID`,
 		`/** @deprecated Use email.send/v1 instead. */`,
 		`export type ErrorCode = "invalid_recipient" | "temporarily_unavailable";`,
 		`isSignedInteger`,
@@ -136,6 +142,9 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		if bytes.Contains(bytes.ToLower(combined), []byte(forbidden)) {
 			t.Fatalf("generated package contains forbidden provider/server value %q", forbidden)
 		}
+	}
+	if bytes.Contains(combined, []byte("detailCode")) {
+		t.Fatal("generated JavaScript SDK retains the superseded loose detailCode API")
 	}
 	descriptors := fileData(t, files, "generated/sdk/javascript/src/descriptors.ts")
 	encodedDescriptorSet := base64.StdEncoding.EncodeToString(options.Transport.DescriptorSet)
@@ -185,7 +194,7 @@ func TestRenderJavaScriptAliasesReuseCanonicalOperation(t *testing.T) {
 	for _, alias := range [][]byte{compat, deprecated} {
 		for _, required := range []string{
 			`from "../../../operations/email/send/v1.js"`,
-			`bindCanonicalOperationMethod(runtime, method)`,
+			`bindCanonicalOperationMethod(runtime, method, capabilityID)`,
 			`export type { ErrorCode, Operation, Request, Response }`,
 		} {
 			if !bytes.Contains(alias, []byte(required)) {

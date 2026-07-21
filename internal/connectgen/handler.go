@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"go/format"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/goname"
+	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/sdkmodel"
@@ -20,8 +22,10 @@ import (
 func renderCanonical(
 	modulePath string,
 	operation protobufmodel.Operation,
+	aliases []protobufmodel.Alias,
 	wire protobufwiremap.CapabilityProjection,
 	method protoreflect.MethodDescriptor,
+	errorDetail protoreflect.MessageDescriptor,
 	useHTTPPath bool,
 ) (File, error) {
 	identity := operation.Identity()
@@ -30,6 +34,22 @@ func renderCanonical(
 	}
 	if wire.ID() != operation.ID().String() || wire.ContractDigest() != operation.ContractDigest() {
 		return File{}, fmt.Errorf("%w: canonical wire projection is inconsistent", ErrProjection)
+	}
+	if errorDetail == nil || string(errorDetail.FullName()) != protobufdescriptor.ErrorDetailFullName {
+		return File{}, fmt.Errorf("%w: safe error detail descriptor is inconsistent", ErrDescriptor)
+	}
+	requestedCapabilityIDs := []string{operation.ID().String()}
+	for _, alias := range aliases {
+		if alias.Target() != operation.ID() || alias.TargetContractDigest() != operation.ContractDigest() {
+			return File{}, fmt.Errorf("%w: Alias %s is not an exact target of %s", ErrProjection, alias.ID(), operation.ID())
+		}
+		requestedCapabilityIDs = append(requestedCapabilityIDs, alias.ID().String())
+	}
+	sort.Strings(requestedCapabilityIDs)
+	for index := 1; index < len(requestedCapabilityIDs); index++ {
+		if requestedCapabilityIDs[index-1] == requestedCapabilityIDs[index] {
+			return File{}, fmt.Errorf("%w: requested Capability ID %s is duplicated", ErrProjection, requestedCapabilityIDs[index])
+		}
 	}
 	request, err := prepareFields("Request", operation.Request(), wire.Request())
 	if err != nil {
@@ -72,13 +92,16 @@ func renderCanonical(
 	fmt.Fprintln(&source, "\t\"google.golang.org/protobuf/types/dynamicpb\"")
 	fmt.Fprintln(&source, ")")
 	fmt.Fprintln(&source)
+	fmt.Fprintf(&source, "const CapabilityID = %s\n", strconv.Quote(operation.ID().String()))
 	fmt.Fprintf(&source, "const Procedure = %s\n", strconv.Quote(identity.Procedure()))
+	fmt.Fprintf(&source, "const plystraErrorDetailType = %s\n", strconv.Quote(protobufdescriptor.ErrorDetailFullName))
 	if useHTTPPath {
 		fmt.Fprintln(&source, "const MaximumAdapterCredentialBytes = 64 << 10")
 	}
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "var (")
 	fmt.Fprintln(&source, "\tErrInvalidHandler = errors.New(\"invalid generated Connect capability handler\")")
+	fmt.Fprintln(&source, "\tplystraErrCapability = errors.New(\"capability error\")")
 	fmt.Fprintln(&source, "\tplystraErrInvalidRequest = errors.New(\"invalid request\")")
 	fmt.Fprintln(&source, "\tplystraErrInvalidResponse = errors.New(\"invalid response\")")
 	fmt.Fprintln(&source, "\tplystraErrInternal = errors.New(\"internal\")")
@@ -92,6 +115,7 @@ func renderCanonical(
 	fmt.Fprintln(&source, "\troot RootContext")
 	fmt.Fprintln(&source, "\ttarget applicationinvocation.Handle")
 	fmt.Fprintln(&source, "\tmethod protoreflect.MethodDescriptor")
+	fmt.Fprintln(&source, "\terrorDetail protoreflect.MessageDescriptor")
 	fmt.Fprintln(&source, "\ttransport http.Handler")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
@@ -104,7 +128,11 @@ func renderCanonical(
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn Handler{}, ErrInvalidHandler")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\thandler := Handler{root: root, target: target, method: method}")
+	fmt.Fprintln(&source, "\terrorDetail, err := connectschema.Message(plystraErrorDetailType)")
+	fmt.Fprintln(&source, "\tif err != nil || !plystraValidErrorDetailDescriptor(errorDetail) {")
+	fmt.Fprintln(&source, "\t\treturn Handler{}, ErrInvalidHandler")
+	fmt.Fprintln(&source, "\t}")
+	fmt.Fprintln(&source, "\thandler := Handler{root: root, target: target, method: method, errorDetail: errorDetail}")
 	fmt.Fprintln(&source, "\thandler.transport = connect.NewUnaryHandler(")
 	fmt.Fprintln(&source, "\t\tProcedure,")
 	fmt.Fprintln(&source, "\t\tfunc(ctx context.Context, request *connect.Request[dynamicpb.Message]) (*connect.Response[dynamicpb.Message], error) {")
@@ -123,7 +151,7 @@ func renderCanonical(
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// Available reports whether the descriptor, root, invocation, and transport are bound.")
 	fmt.Fprintln(&source, "func Available(handler Handler) bool {")
-	fmt.Fprintln(&source, "\treturn handler.root != nil && applicationinvocation.Available(handler.target) && handler.method != nil && handler.transport != nil")
+	fmt.Fprintln(&source, "\treturn handler.root != nil && applicationinvocation.Available(handler.target) && handler.method != nil && plystraValidErrorDetailDescriptor(handler.errorDetail) && handler.transport != nil")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// ServeHTTP serves only this procedure through the generated Connect runtime.")
@@ -139,22 +167,31 @@ func renderCanonical(
 	fmt.Fprintln(&source)
 	fmt.Fprintf(&source, "// Invoke converts %s messages and enters canonical Capability %s.\n", identity.PublicID(), operation.ID())
 	fmt.Fprintln(&source, "func (h Handler) Invoke(ctx context.Context, request *connect.Request[dynamicpb.Message]) (result *connect.Response[dynamicpb.Message], resultErr error) {")
+	fmt.Fprintln(&source, "\treturn h.InvokeRequested(ctx, CapabilityID, request)")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "// InvokeRequested preserves one generated canonical or Alias request identity while entering the canonical target.")
+	fmt.Fprintln(&source, "func (h Handler) InvokeRequested(ctx context.Context, requestedCapabilityID string, request *connect.Request[dynamicpb.Message]) (result *connect.Response[dynamicpb.Message], resultErr error) {")
+	fmt.Fprintln(&source, "\tsafeRequestedCapabilityID := CapabilityID")
+	fmt.Fprintln(&source, "\tif plystraRequestedCapabilityID(requestedCapabilityID) {")
+	fmt.Fprintln(&source, "\t\tsafeRequestedCapabilityID = requestedCapabilityID")
+	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\tdefer func() {")
 	fmt.Fprintln(&source, "\t\tif recover() != nil {")
 	fmt.Fprintln(&source, "\t\t\tresult = nil")
-	fmt.Fprintln(&source, "\t\t\tresultErr = plystraConnectError(connect.CodeInternal, plystraErrInternal)")
+	fmt.Fprintln(&source, "\t\t\tresultErr = plystraKernelConnectError(h.errorDetail, safeRequestedCapabilityID, \"internal\", plystraErrInternal)")
 	fmt.Fprintln(&source, "\t\t}")
 	fmt.Fprintln(&source, "\t}()")
-	fmt.Fprintln(&source, "\tif ctx == nil || request == nil || request.Msg == nil || !Available(h) {")
-	fmt.Fprintln(&source, "\t\treturn nil, plystraConnectError(connect.CodeInternal, plystraErrInternal)")
+	fmt.Fprintln(&source, "\tif requestedCapabilityID != safeRequestedCapabilityID || ctx == nil || request == nil || request.Msg == nil || !Available(h) {")
+	fmt.Fprintln(&source, "\t\treturn nil, plystraKernelConnectError(h.errorDetail, safeRequestedCapabilityID, \"internal\", plystraErrInternal)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\tinput, err := plystraDecodeRequest(request.Msg)")
 	fmt.Fprintln(&source, "\tif err != nil {")
-	fmt.Fprintln(&source, "\t\treturn nil, plystraConnectError(connect.CodeInvalidArgument, plystraErrInvalidRequest)")
+	fmt.Fprintln(&source, "\t\treturn nil, plystraKernelConnectError(h.errorDetail, safeRequestedCapabilityID, \"invalid_argument\", plystraErrInvalidRequest)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\troot, err := plystraCreateRoot(h.root, ctx, request.Header().Clone())")
 	fmt.Fprintln(&source, "\tif err != nil || root == nil {")
-	fmt.Fprintln(&source, "\t\treturn nil, plystraConnectError(connect.CodeInternal, plystraErrInternal)")
+	fmt.Fprintln(&source, "\t\treturn nil, plystraInvocationConnectError(h.errorDetail, safeRequestedCapabilityID, applicationinvocation.SafeTransportError(err))")
 	fmt.Fprintln(&source, "\t}")
 	if useHTTPPath {
 		fmt.Fprintln(&source, "\tresponse, err := plystraInvoke(root, h.target, input, request.Header())")
@@ -162,16 +199,16 @@ func renderCanonical(
 		fmt.Fprintln(&source, "\tresponse, err := plystraInvoke(root, h.target, input)")
 	}
 	fmt.Fprintln(&source, "\tif err != nil {")
-	fmt.Fprintln(&source, "\t\treturn nil, plystraConnectError(connect.CodeInternal, plystraErrInternal)")
+	fmt.Fprintln(&source, "\t\treturn nil, plystraInvocationConnectError(h.errorDetail, safeRequestedCapabilityID, applicationinvocation.SafeTransportError(err))")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\tmessage, err := plystraEncodeResponse(h.method, response)")
 	fmt.Fprintln(&source, "\tif err != nil {")
-	fmt.Fprintln(&source, "\t\treturn nil, plystraConnectError(connect.CodeInternal, plystraErrInvalidResponse)")
+	fmt.Fprintln(&source, "\t\treturn nil, plystraKernelConnectError(h.errorDetail, safeRequestedCapabilityID, \"internal\", plystraErrInvalidResponse)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\treturn connect.NewResponse(message), nil")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
-	renderBoundaryHelpers(&source, useHTTPPath)
+	renderBoundaryHelpers(&source, useHTTPPath, requestedCapabilityIDs)
 	renderDecodeRequest(&source, identity.RequestType(), request)
 	renderEncodeResponse(&source, identity.ResponseType(), response)
 	if hasOptionalField(request) {
@@ -226,6 +263,7 @@ func renderAlias(
 	fmt.Fprintln(&source)
 	fmt.Fprintf(&source, "package %s\n\n", packageName)
 	fmt.Fprintln(&source, "import (")
+	fmt.Fprintln(&source, "\t\"context\"")
 	fmt.Fprintln(&source, "\t\"errors\"")
 	fmt.Fprintln(&source, "\t\"mime\"")
 	fmt.Fprintln(&source, "\t\"net/http\"")
@@ -233,8 +271,10 @@ func renderAlias(
 	fmt.Fprintln(&source, "\t\"connectrpc.com/connect\"")
 	fmt.Fprintf(&source, "\tcanonicaladapter %s\n", strconv.Quote(canonicalImport))
 	fmt.Fprintf(&source, "\tconnectschema %s\n", strconv.Quote(runtimeSchemaImport(modulePath)))
+	fmt.Fprintln(&source, "\t\"google.golang.org/protobuf/types/dynamicpb\"")
 	fmt.Fprintln(&source, ")")
 	fmt.Fprintln(&source)
+	fmt.Fprintf(&source, "const CapabilityID = %s\n", strconv.Quote(alias.ID().String()))
 	fmt.Fprintf(&source, "const Procedure = %s\n", strconv.Quote(identity.Procedure()))
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "var ErrInvalidHandler = errors.New(\"invalid generated Connect Alias handler\")")
@@ -259,7 +299,9 @@ func renderAlias(
 	fmt.Fprintln(&source, "\thandler := Handler{target: target}")
 	fmt.Fprintln(&source, "\thandler.transport = connect.NewUnaryHandler(")
 	fmt.Fprintln(&source, "\t\tProcedure,")
-	fmt.Fprintln(&source, "\t\ttarget.Invoke,")
+	fmt.Fprintln(&source, "\t\tfunc(ctx context.Context, request *connect.Request[dynamicpb.Message]) (*connect.Response[dynamicpb.Message], error) {")
+	fmt.Fprintln(&source, "\t\t\treturn target.InvokeRequested(ctx, CapabilityID, request)")
+	fmt.Fprintln(&source, "\t\t},")
 	fmt.Fprintln(&source, "\t\tconnect.WithSchema(method),")
 	fmt.Fprintln(&source, "\t\tconnect.WithRequestInitializer(connectschema.InitializeDynamicMessage),")
 	fmt.Fprintln(&source, "\t\tconnect.WithCodec(connectschema.BinaryCodec{}),")
@@ -324,9 +366,102 @@ func renderConnectProtocolBoundary(source *strings.Builder) {
 	fmt.Fprintln(source, "}")
 }
 
-func renderBoundaryHelpers(source *strings.Builder, useHTTPPath bool) {
-	fmt.Fprintln(source, "func plystraConnectError(code connect.Code, safe error) *connect.Error {")
-	fmt.Fprintln(source, "\treturn connect.NewError(code, safe)")
+func renderBoundaryHelpers(source *strings.Builder, useHTTPPath bool, requestedCapabilityIDs []string) {
+	fmt.Fprintln(source, "func plystraRequestedCapabilityID(value string) bool {")
+	fmt.Fprintln(source, "\tswitch value {")
+	fmt.Fprint(source, "\tcase ")
+	for index, capabilityID := range requestedCapabilityIDs {
+		if index != 0 {
+			fmt.Fprint(source, ", ")
+		}
+		fmt.Fprint(source, strconv.Quote(capabilityID))
+	}
+	fmt.Fprintln(source, ":")
+	fmt.Fprintln(source, "\t\treturn true")
+	fmt.Fprintln(source, "\tdefault:")
+	fmt.Fprintln(source, "\t\treturn false")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "func plystraValidErrorDetailDescriptor(descriptor protoreflect.MessageDescriptor) bool {")
+	fmt.Fprintln(source, "\treturn descriptor != nil && descriptor.FullName() == plystraErrorDetailType && descriptor.Fields().Len() == 5 &&")
+	fmt.Fprintln(source, "\t\tplystraValidErrorDetailField(descriptor, 1, \"requested_capability_id\") &&")
+	fmt.Fprintln(source, "\t\tplystraValidErrorDetailField(descriptor, 2, \"canonical_capability_id\") &&")
+	fmt.Fprintln(source, "\t\tplystraValidErrorDetailField(descriptor, 3, \"semantic_error_code\") &&")
+	fmt.Fprintln(source, "\t\tplystraValidErrorDetailField(descriptor, 4, \"kernel_error_class\") &&")
+	fmt.Fprintln(source, "\t\tplystraValidErrorDetailField(descriptor, 5, \"trace_id\")")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "func plystraValidErrorDetailField(descriptor protoreflect.MessageDescriptor, number protoreflect.FieldNumber, name protoreflect.Name) bool {")
+	fmt.Fprintln(source, "\tfield := descriptor.Fields().ByNumber(number)")
+	fmt.Fprintln(source, "\treturn field != nil && field.Name() == name && field.Kind() == protoreflect.StringKind && field.Cardinality() == protoreflect.Optional && !field.HasPresence()")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "func plystraInvocationConnectError(descriptor protoreflect.MessageDescriptor, requestedCapabilityID string, input applicationinvocation.TransportErrorInput) *connect.Error {")
+	fmt.Fprintln(source, "\tif semanticErrorCode := input.SemanticErrorCode(); semanticErrorCode != \"\" {")
+	fmt.Fprintln(source, "\t\treturn plystraConnectError(descriptor, requestedCapabilityID, connect.CodeFailedPrecondition, plystraErrCapability, semanticErrorCode, \"\")")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\treturn plystraKernelConnectError(descriptor, requestedCapabilityID, input.KernelErrorClass(), plystraErrInternal)")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "func plystraKernelConnectError(descriptor protoreflect.MessageDescriptor, requestedCapabilityID, kernelErrorClass string, safe error) *connect.Error {")
+	fmt.Fprintln(source, "\tcode := connect.CodeInternal")
+	fmt.Fprintln(source, "\tswitch kernelErrorClass {")
+	fmt.Fprintln(source, "\tcase \"invalid_argument\":")
+	fmt.Fprintln(source, "\t\tcode = connect.CodeInvalidArgument")
+	fmt.Fprintln(source, "\tcase \"not_found\":")
+	fmt.Fprintln(source, "\t\tcode = connect.CodeNotFound")
+	fmt.Fprintln(source, "\tcase \"conflict\":")
+	fmt.Fprintln(source, "\t\tcode = connect.CodeAborted")
+	fmt.Fprintln(source, "\tcase \"denied\":")
+	fmt.Fprintln(source, "\t\tcode = connect.CodePermissionDenied")
+	fmt.Fprintln(source, "\tcase \"unauthenticated\":")
+	fmt.Fprintln(source, "\t\tcode = connect.CodeUnauthenticated")
+	fmt.Fprintln(source, "\tcase \"unavailable\", \"result_unknown\":")
+	fmt.Fprintln(source, "\t\tcode = connect.CodeUnavailable")
+	fmt.Fprintln(source, "\tcase \"timeout\":")
+	fmt.Fprintln(source, "\t\tcode = connect.CodeDeadlineExceeded")
+	fmt.Fprintln(source, "\tcase \"cancelled\":")
+	fmt.Fprintln(source, "\t\tcode = connect.CodeCanceled")
+	fmt.Fprintln(source, "\tcase \"version_incompatible\":")
+	fmt.Fprintln(source, "\t\tcode = connect.CodeUnimplemented")
+	fmt.Fprintln(source, "\tcase \"internal\":")
+	fmt.Fprintln(source, "\tdefault:")
+	fmt.Fprintln(source, "\t\tkernelErrorClass = \"internal\"")
+	fmt.Fprintln(source, "\t\tsafe = plystraErrInternal")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\treturn plystraConnectError(descriptor, requestedCapabilityID, code, safe, \"\", kernelErrorClass)")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "func plystraConnectError(descriptor protoreflect.MessageDescriptor, requestedCapabilityID string, code connect.Code, safe error, semanticErrorCode, kernelErrorClass string) (result *connect.Error) {")
+	fmt.Fprintln(source, "\tresult = connect.NewError(connect.CodeInternal, plystraErrInternal)")
+	fmt.Fprintln(source, "\tdefer func() {")
+	fmt.Fprintln(source, "\t\tif recover() != nil {")
+	fmt.Fprintln(source, "\t\t\tresult = connect.NewError(connect.CodeInternal, plystraErrInternal)")
+	fmt.Fprintln(source, "\t\t}")
+	fmt.Fprintln(source, "\t}()")
+	fmt.Fprintln(source, "\tif !plystraValidErrorDetailDescriptor(descriptor) || !plystraRequestedCapabilityID(requestedCapabilityID) || safe == nil || (semanticErrorCode == \"\") == (kernelErrorClass == \"\") {")
+	fmt.Fprintln(source, "\t\treturn result")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tif semanticErrorCode != \"\" && code != connect.CodeFailedPrecondition {")
+	fmt.Fprintln(source, "\t\treturn result")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tmessage := dynamicpb.NewMessage(descriptor)")
+	fmt.Fprintln(source, "\tvalues := []string{requestedCapabilityID, CapabilityID, semanticErrorCode, kernelErrorClass, \"\"}")
+	fmt.Fprintln(source, "\tfor index, value := range values {")
+	fmt.Fprintln(source, "\t\tfield := descriptor.Fields().ByNumber(protoreflect.FieldNumber(index + 1))")
+	fmt.Fprintln(source, "\t\tmessage.Set(field, protoreflect.ValueOfString(value))")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tif connectschema.ValidateResponseMessage(message.ProtoReflect()) != nil {")
+	fmt.Fprintln(source, "\t\treturn result")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tdetail, err := connect.NewErrorDetail(message)")
+	fmt.Fprintln(source, "\tif err != nil || detail == nil {")
+	fmt.Fprintln(source, "\t\treturn result")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tresult = connect.NewError(code, safe)")
+	fmt.Fprintln(source, "\tresult.AddDetail(detail)")
+	fmt.Fprintln(source, "\treturn result")
 	fmt.Fprintln(source, "}")
 	fmt.Fprintln(source)
 	fmt.Fprintln(source, "func plystraCreateRoot(root RootContext, parent context.Context, headers http.Header) (ctx context.Context, err error) {")

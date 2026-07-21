@@ -9,12 +9,13 @@ import {
   isPlainObject,
   PlystraError,
   type ClientOptions,
+  type ErrorContract,
   type JSONValue,
   type MessageCodec,
   type RequestOptions,
   type Runtime,
 } from "../../../runtime.js";
-import { resolveUnaryMethod } from "../../../descriptors.js";
+import { resolveMessage, resolveUnaryMethod } from "../../../descriptors.js";
 
 export const capabilityID = "email.send/v1";
 export const contractDigest = "sha256:f8a801ed064ea942c0a6999e45359fba607be8d62fabce6d6ebec8909a5b3833";
@@ -111,6 +112,12 @@ const responseCodec: MessageCodec = {
   ],
 };
 
+const errorDetailDescriptor = resolveMessage("plystra.generated.transport.v1.PlystraErrorDetail");
+const semanticErrorCodes = Object.freeze([
+  "invalid_recipient",
+  "temporarily_unavailable",
+]);
+
 export interface Request {
   readonly "checkpoints"?: ReadonlyArray<bigint>;
   readonly "metadata"?: Readonly<Record<string, JSONValue>>;
@@ -162,11 +169,17 @@ export type Operation = (
 
 /** @internal */
 export function bindOperation(runtime: Runtime): Operation {
-  return bindOperationMethod(runtime, method);
+  return bindOperationMethod(runtime, method, capabilityID);
 }
 
 /** @internal */
-export function bindOperationMethod(runtime: Runtime, operationMethod: typeof method): Operation {
+export function bindOperationMethod(runtime: Runtime, operationMethod: typeof method, requestedCapabilityID: string): Operation {
+  const errorContract: ErrorContract = {
+    requestedCapabilityID,
+    canonicalCapabilityID: capabilityID,
+    semanticErrorCodes,
+    detailDescriptor: errorDetailDescriptor,
+  };
   return async (request, options = {}) => {
     let requestIsValid = false;
     try {
@@ -177,7 +190,7 @@ export function bindOperationMethod(runtime: Runtime, operationMethod: typeof me
     if (!requestIsValid) {
       throw new TypeError("request does not match email.send/v1");
     }
-    const response = await invoke(runtime, operationMethod, requestCodec, responseCodec, request, options);
+    const response = await invoke(runtime, operationMethod, requestCodec, responseCodec, errorContract, request, options);
     if (!isResponse(response)) {
       throw new PlystraError(200, "invalid_response");
     }

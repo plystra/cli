@@ -19,6 +19,8 @@ const maximumCredentialBytes = 65_536;
 const maximumJSONDepth = 64;
 const minimumSignedInteger = -9_223_372_036_854_775_808n;
 const maximumSignedInteger = 9_223_372_036_854_775_807n;
+const plystraErrorDetailType = "plystra.generated.transport.v1.PlystraErrorDetail";
+const maximumTraceIDBytes = 128;
 
 export type Awaitable<T> = T | PromiseLike<T>;
 export type JSONPrimitive = string | number | boolean | null;
@@ -38,17 +40,53 @@ export interface RequestOptions {
   readonly signal?: AbortSignal;
 }
 
+export type KernelErrorClass =
+  | "invalid_argument"
+  | "not_found"
+  | "conflict"
+  | "denied"
+  | "unauthenticated"
+  | "unavailable"
+  | "timeout"
+  | "cancelled"
+  | "result_unknown"
+  | "internal"
+  | "version_incompatible";
+
+interface PlystraErrorDetailBase {
+  readonly requestedCapabilityID: string;
+  readonly canonicalCapabilityID: string;
+  readonly traceID?: string;
+}
+
+export type PlystraErrorDetail = Readonly<
+  PlystraErrorDetailBase &
+    (
+      | {
+          readonly semanticErrorCode: string;
+          readonly kernelErrorClass?: never;
+        }
+      | {
+          readonly semanticErrorCode?: never;
+          readonly kernelErrorClass: KernelErrorClass;
+        }
+    )
+>;
+
 export class PlystraError extends Error {
   readonly status: number;
   readonly code: string;
-  readonly detailCode: string | undefined;
+  readonly detail: PlystraErrorDetail | undefined;
 
-  constructor(status: number, code: string, detailCode?: string) {
+  constructor(status: number, code: string, detail?: PlystraErrorDetail) {
     super(code);
     this.name = "PlystraError";
     this.status = status;
     this.code = code;
-    this.detailCode = detailCode;
+    this.detail =
+      detail === undefined
+        ? undefined
+        : (Object.freeze({ ...detail }) as PlystraErrorDetail);
   }
 }
 
@@ -80,6 +118,14 @@ export interface FieldCodec {
 /** @internal */
 export interface MessageCodec {
   readonly fields: readonly FieldCodec[];
+}
+
+/** @internal */
+export interface ErrorContract {
+  readonly requestedCapabilityID: string;
+  readonly canonicalCapabilityID: string;
+  readonly semanticErrorCodes: readonly string[];
+  readonly detailDescriptor: DescMessage;
 }
 
 /** @internal */
@@ -129,6 +175,7 @@ export async function invoke(
   method: DescMethodUnary,
   requestCodec: MessageCodec,
   responseCodec: MessageCodec,
+  errorContract: ErrorContract,
   request: unknown,
   options: RequestOptions,
 ): Promise<unknown> {
@@ -189,7 +236,7 @@ export async function invoke(
     if (signalAborted(options.signal)) {
       throw new PlystraError(0, "cancelled");
     }
-    throw normalizeTransportError(error);
+    throw normalizeTransportError(error, errorContract);
   }
 
   try {
@@ -489,41 +536,203 @@ function connectBaseUrl(value: URL): string {
   return value.href.endsWith("/") ? value.href.slice(0, -1) : value.href;
 }
 
-function normalizeTransportError(error: unknown): PlystraError {
-  if (!(error instanceof ConnectError)) {
-    return new PlystraError(0, "network_error");
-  }
-  switch (error.code) {
-    case Code.Canceled:
-      return new PlystraError(0, "cancelled");
-    case Code.Unknown:
+function normalizeTransportError(
+  error: unknown,
+  contract: ErrorContract,
+): PlystraError {
+  try {
+    if (!(error instanceof ConnectError)) {
       return new PlystraError(0, "network_error");
-    case Code.InvalidArgument:
-    case Code.OutOfRange:
-      return new PlystraError(400, "invalid_argument");
-    case Code.DeadlineExceeded:
-      return new PlystraError(504, "timeout");
-    case Code.NotFound:
-      return new PlystraError(404, "not_found");
-    case Code.AlreadyExists:
-    case Code.Aborted:
-      return new PlystraError(409, "conflict");
-    case Code.PermissionDenied:
-      return new PlystraError(403, "denied");
-    case Code.ResourceExhausted:
-      return new PlystraError(429, "unavailable");
-    case Code.FailedPrecondition:
-      return new PlystraError(422, "capability_error");
-    case Code.Unimplemented:
-      return new PlystraError(501, "version_incompatible");
-    case Code.Internal:
-    case Code.DataLoss:
+    }
+    if (error.code === Code.Unknown && error.details.length === 0) {
+      return new PlystraError(0, "network_error");
+    }
+    const detail = decodeSafeErrorDetail(error, contract);
+    if (detail === undefined) {
       return new PlystraError(500, "internal");
-    case Code.Unavailable:
-      return new PlystraError(503, "unavailable");
-    case Code.Unauthenticated:
-      return new PlystraError(401, "unauthenticated");
+    }
+    if (detail.semanticErrorCode !== undefined) {
+      return new PlystraError(422, "capability_error", detail);
+    }
+    return kernelPlystraError(detail.kernelErrorClass, detail);
+  } catch {
+    return new PlystraError(500, "internal");
   }
+}
+
+function decodeSafeErrorDetail(
+  error: ConnectError,
+  contract: ErrorContract,
+): PlystraErrorDetail | undefined {
+  if (
+    contract.detailDescriptor.typeName !== plystraErrorDetailType ||
+    contract.requestedCapabilityID === "" ||
+    contract.canonicalCapabilityID === "" ||
+    error.details.length !== 1
+  ) {
+    return undefined;
+  }
+  const semanticErrorCodes = new Set(contract.semanticErrorCodes);
+  if (
+    semanticErrorCodes.size !== contract.semanticErrorCodes.length ||
+    [...semanticErrorCodes].some((value) => value === "")
+  ) {
+    return undefined;
+  }
+  const messages = error.findDetails(contract.detailDescriptor);
+  if (messages.length !== 1) {
+    return undefined;
+  }
+  const message = messages[0];
+  if (
+    message === undefined ||
+    (message.$unknown !== undefined && message.$unknown.length !== 0)
+  ) {
+    return undefined;
+  }
+  const json = toJson(contract.detailDescriptor, message, {
+    alwaysEmitImplicit: true,
+    enumAsInteger: false,
+    useProtoFieldName: true,
+  });
+  if (
+    !isPlainObject(json) ||
+    Object.keys(json).length !== 5 ||
+    !hasOwn(json, "requested_capability_id") ||
+    !hasOwn(json, "canonical_capability_id") ||
+    !hasOwn(json, "semantic_error_code") ||
+    !hasOwn(json, "kernel_error_class") ||
+    !hasOwn(json, "trace_id")
+  ) {
+    return undefined;
+  }
+  const requestedCapabilityID = json["requested_capability_id"];
+  const canonicalCapabilityID = json["canonical_capability_id"];
+  const semanticErrorCode = json["semantic_error_code"];
+  const kernelErrorClass = json["kernel_error_class"];
+  const traceID = json["trace_id"];
+  if (
+    typeof requestedCapabilityID !== "string" ||
+    typeof canonicalCapabilityID !== "string" ||
+    typeof semanticErrorCode !== "string" ||
+    typeof kernelErrorClass !== "string" ||
+    typeof traceID !== "string" ||
+    requestedCapabilityID !== contract.requestedCapabilityID ||
+    canonicalCapabilityID !== contract.canonicalCapabilityID ||
+    !validTraceID(traceID) ||
+    (semanticErrorCode === "") === (kernelErrorClass === "")
+  ) {
+    return undefined;
+  }
+  const trace = traceID === "" ? {} : { traceID };
+  if (semanticErrorCode !== "") {
+    if (
+      error.code !== Code.FailedPrecondition ||
+      !semanticErrorCodes.has(semanticErrorCode)
+    ) {
+      return undefined;
+    }
+    return Object.freeze({
+      requestedCapabilityID,
+      canonicalCapabilityID,
+      semanticErrorCode,
+      ...trace,
+    });
+  }
+  if (
+    !isKernelErrorClass(kernelErrorClass) ||
+    error.code !== connectCodeForKernelError(kernelErrorClass)
+  ) {
+    return undefined;
+  }
+  return Object.freeze({
+    requestedCapabilityID,
+    canonicalCapabilityID,
+    kernelErrorClass,
+    ...trace,
+  });
+}
+
+function isKernelErrorClass(value: string): value is KernelErrorClass {
+  switch (value) {
+    case "invalid_argument":
+    case "not_found":
+    case "conflict":
+    case "denied":
+    case "unauthenticated":
+    case "unavailable":
+    case "timeout":
+    case "cancelled":
+    case "result_unknown":
+    case "internal":
+    case "version_incompatible":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function connectCodeForKernelError(value: KernelErrorClass): Code {
+  switch (value) {
+    case "invalid_argument":
+      return Code.InvalidArgument;
+    case "not_found":
+      return Code.NotFound;
+    case "conflict":
+      return Code.Aborted;
+    case "denied":
+      return Code.PermissionDenied;
+    case "unauthenticated":
+      return Code.Unauthenticated;
+    case "unavailable":
+    case "result_unknown":
+      return Code.Unavailable;
+    case "timeout":
+      return Code.DeadlineExceeded;
+    case "cancelled":
+      return Code.Canceled;
+    case "version_incompatible":
+      return Code.Unimplemented;
+    case "internal":
+      return Code.Internal;
+  }
+}
+
+function kernelPlystraError(
+  code: KernelErrorClass,
+  detail: PlystraErrorDetail,
+): PlystraError {
+  switch (code) {
+    case "invalid_argument":
+      return new PlystraError(400, code, detail);
+    case "not_found":
+      return new PlystraError(404, code, detail);
+    case "conflict":
+      return new PlystraError(409, code, detail);
+    case "denied":
+      return new PlystraError(403, code, detail);
+    case "unauthenticated":
+      return new PlystraError(401, code, detail);
+    case "unavailable":
+    case "result_unknown":
+      return new PlystraError(503, code, detail);
+    case "timeout":
+      return new PlystraError(504, code, detail);
+    case "cancelled":
+      return new PlystraError(0, code, detail);
+    case "version_incompatible":
+      return new PlystraError(501, code, detail);
+    case "internal":
+      return new PlystraError(500, code, detail);
+  }
+}
+
+function validTraceID(value: string): boolean {
+  return (
+    value === "" ||
+    (value.length <= maximumTraceIDBytes &&
+      /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value))
+  );
 }
 
 function signalAborted(signal: AbortSignal | undefined): boolean {

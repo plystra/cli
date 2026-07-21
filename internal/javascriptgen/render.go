@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/sdkmodel"
 	"github.com/plystra/cli/internal/transportprovenance"
 )
@@ -293,6 +294,7 @@ func renderOperation(operation renderedOperation) ([]byte, error) {
 	fmt.Fprintln(&source, "  isPlainObject,")
 	fmt.Fprintln(&source, "  PlystraError,")
 	fmt.Fprintln(&source, "  type ClientOptions,")
+	fmt.Fprintln(&source, "  type ErrorContract,")
 	if operationUsesJSONValue(operation.operation) {
 		fmt.Fprintln(&source, "  type JSONValue,")
 	}
@@ -301,10 +303,17 @@ func renderOperation(operation renderedOperation) ([]byte, error) {
 	fmt.Fprintln(&source, "  type Runtime,")
 	rootPrefix := strings.Repeat("../", len(operation.segments)+1)
 	fmt.Fprintf(&source, "} from %s;\n", jsString(rootPrefix+"runtime.js"))
-	fmt.Fprintf(&source, "import { resolveUnaryMethod } from %s;\n\n", jsString(rootPrefix+"descriptors.js"))
+	fmt.Fprintf(&source, "import { resolveMessage, resolveUnaryMethod } from %s;\n\n", jsString(rootPrefix+"descriptors.js"))
 	fmt.Fprintf(&source, "export const capabilityID = %s;\n", jsString(operation.operation.ID().String()))
 	fmt.Fprintf(&source, "export const contractDigest = %s;\n", jsString(operation.operation.ContractDigest()))
 	renderMethodBinding(&source, operation.transport)
+	fmt.Fprintf(&source, "const errorDetailDescriptor = resolveMessage(%s);\n", jsString(protobufdescriptor.ErrorDetailFullName))
+	fmt.Fprintln(&source, "const semanticErrorCodes = Object.freeze([")
+	for _, semanticErrorCode := range operation.operation.Errors() {
+		fmt.Fprintf(&source, "  %s,\n", jsString(semanticErrorCode))
+	}
+	fmt.Fprintln(&source, "]);")
+	fmt.Fprintln(&source)
 	renderType(&source, "Request", operation.operation.Request())
 	renderType(&source, "Response", operation.operation.Response())
 	renderErrorCode(&source, operation.operation.Errors())
@@ -317,11 +326,17 @@ func renderOperation(operation renderedOperation) ([]byte, error) {
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "/** @internal */")
 	fmt.Fprintln(&source, "export function bindOperation(runtime: Runtime): Operation {")
-	fmt.Fprintln(&source, "  return bindOperationMethod(runtime, method);")
+	fmt.Fprintln(&source, "  return bindOperationMethod(runtime, method, capabilityID);")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "/** @internal */")
-	fmt.Fprintln(&source, "export function bindOperationMethod(runtime: Runtime, operationMethod: typeof method): Operation {")
+	fmt.Fprintln(&source, "export function bindOperationMethod(runtime: Runtime, operationMethod: typeof method, requestedCapabilityID: string): Operation {")
+	fmt.Fprintln(&source, "  const errorContract: ErrorContract = {")
+	fmt.Fprintln(&source, "    requestedCapabilityID,")
+	fmt.Fprintln(&source, "    canonicalCapabilityID: capabilityID,")
+	fmt.Fprintln(&source, "    semanticErrorCodes,")
+	fmt.Fprintln(&source, "    detailDescriptor: errorDetailDescriptor,")
+	fmt.Fprintln(&source, "  };")
 	fmt.Fprintln(&source, "  return async (request, options = {}) => {")
 	fmt.Fprintln(&source, "    let requestIsValid = false;")
 	fmt.Fprintln(&source, "    try {")
@@ -332,7 +347,7 @@ func renderOperation(operation renderedOperation) ([]byte, error) {
 	fmt.Fprintln(&source, "    if (!requestIsValid) {")
 	fmt.Fprintf(&source, "      throw new TypeError(%s);\n", jsString("request does not match "+operation.operation.ID().String()))
 	fmt.Fprintln(&source, "    }")
-	fmt.Fprintln(&source, "    const response = await invoke(runtime, operationMethod, requestCodec, responseCodec, request, options);")
+	fmt.Fprintln(&source, "    const response = await invoke(runtime, operationMethod, requestCodec, responseCodec, errorContract, request, options);")
 	fmt.Fprintln(&source, "    if (!isResponse(response)) {")
 	fmt.Fprintln(&source, "      throw new PlystraError(200, \"invalid_response\");")
 	fmt.Fprintln(&source, "    }")
@@ -372,7 +387,7 @@ func renderAliasOperation(alias renderedOperation) ([]byte, error) {
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "/** @internal */")
 	fmt.Fprintln(&source, "export function bindOperation(runtime: Runtime): Operation {")
-	fmt.Fprintln(&source, "  return bindCanonicalOperationMethod(runtime, method);")
+	fmt.Fprintln(&source, "  return bindCanonicalOperationMethod(runtime, method, capabilityID);")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
 	renderJSDocDeprecation(&source, "", alias.deprecated)
@@ -468,7 +483,7 @@ func renderIndex(operations []renderedOperation) ([]byte, error) {
 	}
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "export { PlystraError } from \"./runtime.js\";")
-	fmt.Fprintln(&source, "export type { ClientOptions, JSONValue, RequestOptions } from \"./runtime.js\";")
+	fmt.Fprintln(&source, "export type { ClientOptions, JSONValue, KernelErrorClass, PlystraErrorDetail, RequestOptions } from \"./runtime.js\";")
 	for _, operation := range operations {
 		importPath := indexImportPath(operation)
 		if operation.isAlias() {
@@ -605,6 +620,8 @@ func renderREADME(packageName string, operations []renderedOperation) []byte {
 	fmt.Fprintln(&readme, "The generated `.npmrc` disables lockfile creation because this package is CLI-owned. Installation may create only the ignored `node_modules/` and `dist/` validation outputs.")
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "The Plystra wrapper resolves generated Protobuf descriptors and sends binary Connect requests through its pinned `@bufbuild/protobuf`, `@connectrpc/connect`, and `@connectrpc/connect-web` dependencies. Application code does not construct raw Protobuf messages or Connect clients, and raw Connect errors are normalized before they cross the wrapper boundary. Import only the package root; the export map blocks internal subpaths and generated declarations omit transport, descriptor, codec, and binder internals.")
+	fmt.Fprintln(&readme)
+	fmt.Fprintln(&readme, "Generated application failures expose only an immutable Plystra-owned safe detail containing the requested canonical or Alias Capability ID, its canonical target, and exactly one declared semantic code or closed Kernel class. Provider text, causes, payloads, panic data, configuration, credentials, Secrets, and raw Connect details are excluded. Missing, duplicate, malformed, unknown, mismatched, or undeclared details fail closed to `internal`; inspect `PlystraError.detail` rather than parsing an error message.")
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "Canonical `integer` fields and integer array items are signed 64-bit values exposed as JavaScript `bigint`, including enum literals such as `0n`. Pass `bigint`, not `number`, so request and response values remain exact across the full range.")
 	fmt.Fprintln(&readme)

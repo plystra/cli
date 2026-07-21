@@ -20,7 +20,7 @@ const method = resolveUnaryMethod(
 
 /** @internal */
 export function bindOperation(runtime: Runtime): Operation {
-  return bindCanonicalOperationMethod(runtime, method);
+  return bindCanonicalOperationMethod(runtime, method, capabilityID);
 }
 
 export function createOperation(options: ClientOptions): Operation {

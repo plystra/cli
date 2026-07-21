@@ -11,6 +11,8 @@ import {
   type EmailSendV1Request,
   type EmailSendV1Response,
   type MailDeliverV1ErrorCode,
+  type KernelErrorClass,
+  type PlystraErrorDetail,
 } from "@acme/project-sdk";
 
 // @ts-expect-error raw Connect errors are not exported by the Plystra SDK.
@@ -53,7 +55,13 @@ const deprecatedResponse: Promise<EmailSendV1Response> =
 const deprecatedStandalone: Promise<EmailSendV1Response> =
   createMailDeliverV1(options)(request);
 const deprecatedError: MailDeliverV1ErrorCode = errorCode;
-const classified = new PlystraError(422, "capability_error", errorCode);
+const safeDetail: PlystraErrorDetail = {
+  requestedCapabilityID: "email.send/v1",
+  canonicalCapabilityID: "email.send/v1",
+  semanticErrorCode: errorCode,
+};
+const kernelClass: KernelErrorClass = "unavailable";
+const classified = new PlystraError(422, "capability_error", safeDetail);
 declare const typedResponse: EmailSendV1Response;
 const revision: bigint | undefined = typedResponse.revision;
 const positions: ReadonlyArray<bigint> | undefined = typedResponse.positions;
@@ -74,6 +82,8 @@ client.email.send.v1({ to: "person@example.com", tags: [], priority: "normal", o
 client.compat.send.v1({});
 // @ts-expect-error exact versions remain visible.
 client.email.send.v2(request);
+// @ts-expect-error loose detail codes are not part of the Plystra error API.
+classified.detailCode;
 
 void response;
 void standaloneResponse;
@@ -83,6 +93,7 @@ void deprecatedResponse;
 void deprecatedStandalone;
 void deprecatedError;
 void classified;
+void kernelClass;
 void revision;
 void positions;
 void prefixOperation;

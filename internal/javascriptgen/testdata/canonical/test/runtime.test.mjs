@@ -11,13 +11,16 @@ import {
   createMailDeliverV1,
   createPlystraClient,
 } from "@acme/project-sdk";
-import { resolveUnaryMethod } from "../dist/descriptors.js";
+import { resolveMessage, resolveUnaryMethod } from "../dist/descriptors.js";
 
 const emailMethod = resolveUnaryMethod(
   "plystra.generated.email.send.v1.EmailSendV1Service",
   "Invoke",
   "plystra.generated.email.send.v1.EmailSendV1Request",
   "plystra.generated.email.send.v1.EmailSendV1Response",
+);
+const errorDetailDescriptor = resolveMessage(
+  "plystra.generated.transport.v1.PlystraErrorDetail",
 );
 
 function methodFor(capabilityPackage, typeBase) {
@@ -39,11 +42,37 @@ function protobufResponse(method, json) {
   });
 }
 
-function connectErrorResponse(code, message, status) {
-  return new Response(JSON.stringify({ code, message }), {
+function connectErrorResponse(code, message, status, details = []) {
+  return new Response(JSON.stringify({ code, message, details }), {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function safeErrorDetail({
+  requestedCapabilityID = "email.send/v1",
+  canonicalCapabilityID = "email.send/v1",
+  semanticErrorCode = "",
+  kernelErrorClass = "",
+  traceID = "",
+} = {}) {
+  const message = fromJson(
+    errorDetailDescriptor,
+    {
+      requestedCapabilityId: requestedCapabilityID,
+      canonicalCapabilityId: canonicalCapabilityID,
+      semanticErrorCode,
+      kernelErrorClass,
+      traceId: traceID,
+    },
+    { ignoreUnknownFields: false },
+  );
+  return {
+    type: errorDetailDescriptor.typeName,
+    value: Buffer.from(toBinary(errorDetailDescriptor, message)).toString(
+      "base64",
+    ),
+  };
 }
 
 test("package exports and declarations hide Connect internals", async () => {
@@ -316,6 +345,12 @@ test("response and Connect errors expose only Plystra-owned stable fields", asyn
         "failed_precondition",
         "provider secret must not escape",
         400,
+        [
+          safeErrorDetail({
+            semanticErrorCode: "temporarily_unavailable",
+            traceID: "trace-123",
+          }),
+        ],
       ),
   });
   await assert.rejects(
@@ -324,15 +359,47 @@ test("response and Connect errors expose only Plystra-owned stable fields", asyn
       assert.equal(error instanceof PlystraError, true);
       assert.equal(error.status, 422);
       assert.equal(error.code, "capability_error");
-      assert.equal(error.detailCode, undefined);
+      assert.deepEqual(error.detail, {
+        requestedCapabilityID: "email.send/v1",
+        canonicalCapabilityID: "email.send/v1",
+        semanticErrorCode: "temporarily_unavailable",
+        traceID: "trace-123",
+      });
+      assert.equal(Object.isFrozen(error.detail), true);
       assert.equal(error.message, "capability_error");
       assert.equal(error instanceof Error && error.name, "PlystraError");
       assert.equal(error instanceof ConnectError, false);
       assert.equal("rawMessage" in error, false);
       assert.equal("details" in error, false);
       assert.equal("cause" in error, false);
+      assert.equal("detailCode" in error, false);
       return true;
     },
+  );
+
+  const aliasSemantic = createMailDeliverV1({
+    baseUrl: "https://api.example.test",
+    fetch: async () =>
+      connectErrorResponse("failed_precondition", "hidden", 400, [
+        safeErrorDetail({
+          requestedCapabilityID: "mail.deliver/v1",
+          semanticErrorCode: "invalid_recipient",
+        }),
+      ]),
+  });
+  await assert.rejects(
+    () =>
+      aliasSemantic({
+        to: "person@example.com",
+        tags: [],
+        priority: "normal",
+      }),
+    (error) =>
+      error instanceof PlystraError &&
+      error.code === "capability_error" &&
+      error.detail?.requestedCapabilityID === "mail.deliver/v1" &&
+      error.detail?.canonicalCapabilityID === "email.send/v1" &&
+      error.detail?.semanticErrorCode === "invalid_recipient",
   );
 
   const malformedError = createEmailSendV1({
@@ -352,6 +419,160 @@ test("response and Connect errors expose only Plystra-owned stable fields", asyn
       !error.message.includes("provider_secret") &&
       !error.message.includes("unsafe detail"),
   );
+});
+
+test("closed Kernel error classes retain typed safe details", async () => {
+  const cases = [
+    ["invalid_argument", "invalid_argument", 400, "invalid_argument"],
+    ["not_found", "not_found", 404, "not_found"],
+    ["aborted", "conflict", 409, "conflict"],
+    ["permission_denied", "denied", 403, "denied"],
+    ["unauthenticated", "unauthenticated", 401, "unauthenticated"],
+    ["unavailable", "unavailable", 503, "unavailable"],
+    ["deadline_exceeded", "timeout", 504, "timeout"],
+    ["canceled", "cancelled", 0, "cancelled"],
+    ["unavailable", "result_unknown", 503, "result_unknown"],
+    ["internal", "internal", 500, "internal"],
+    ["unimplemented", "version_incompatible", 501, "version_incompatible"],
+  ];
+  for (const [connectCode, kernelErrorClass, status, publicCode] of cases) {
+    const send = createEmailSendV1({
+      baseUrl: "https://api.example.test",
+      fetch: async () =>
+        connectErrorResponse(connectCode, "provider secret", 400, [
+          safeErrorDetail({ kernelErrorClass }),
+        ]),
+    });
+    await assert.rejects(
+      () =>
+        send({
+          to: "person@example.com",
+          tags: [],
+          priority: "normal",
+        }),
+      (error) => {
+        assert.equal(error instanceof PlystraError, true);
+        assert.equal(error.status, status);
+        assert.equal(error.code, publicCode);
+        assert.deepEqual(error.detail, {
+          requestedCapabilityID: "email.send/v1",
+          canonicalCapabilityID: "email.send/v1",
+          kernelErrorClass,
+        });
+        assert.equal(error.message.includes("provider secret"), false);
+        return true;
+      },
+    );
+  }
+});
+
+test("missing, malformed, duplicate, and mismatched details fail closed", async () => {
+  const validSemantic = safeErrorDetail({
+    semanticErrorCode: "temporarily_unavailable",
+  });
+  const unknownType = { ...validSemantic, type: "unsafe.ProviderSecret" };
+  const withUnknownField = {
+    ...validSemantic,
+    value: Buffer.concat([
+      Buffer.from(validSemantic.value, "base64"),
+      Buffer.from([0x32, 0x01, 0x78]),
+    ]).toString("base64"),
+  };
+  const invalid = [
+    { code: "failed_precondition", details: [] },
+    {
+      code: "failed_precondition",
+      details: [validSemantic, validSemantic],
+    },
+    { code: "failed_precondition", details: [unknownType] },
+    {
+      code: "failed_precondition",
+      details: [
+        {
+          type: errorDetailDescriptor.typeName,
+          value: Buffer.from([0xff]).toString("base64"),
+        },
+      ],
+    },
+    {
+      code: "failed_precondition",
+      details: [
+        safeErrorDetail({
+          requestedCapabilityID: "mail.deliver/v1",
+          semanticErrorCode: "temporarily_unavailable",
+        }),
+      ],
+    },
+    {
+      code: "failed_precondition",
+      details: [
+        safeErrorDetail({
+          canonicalCapabilityID: "other.capability/v1",
+          semanticErrorCode: "temporarily_unavailable",
+        }),
+      ],
+    },
+    {
+      code: "failed_precondition",
+      details: [safeErrorDetail({ semanticErrorCode: "undeclared_secret" })],
+    },
+    {
+      code: "failed_precondition",
+      details: [
+        safeErrorDetail({
+          semanticErrorCode: "temporarily_unavailable",
+          kernelErrorClass: "internal",
+        }),
+      ],
+    },
+    { code: "internal", details: [safeErrorDetail()] },
+    {
+      code: "internal",
+      details: [safeErrorDetail({ kernelErrorClass: "provider_secret" })],
+    },
+    { code: "internal", details: [validSemantic] },
+    {
+      code: "failed_precondition",
+      details: [validSemantic, unknownType],
+    },
+    { code: "failed_precondition", details: [withUnknownField] },
+    {
+      code: "failed_precondition",
+      details: [
+        safeErrorDetail({
+          semanticErrorCode: "temporarily_unavailable",
+          traceID: "unsafe trace secret",
+        }),
+      ],
+    },
+  ];
+  for (const response of invalid) {
+    const send = createEmailSendV1({
+      baseUrl: "https://api.example.test",
+      fetch: async () =>
+        connectErrorResponse(
+          response.code,
+          "provider secret must not escape",
+          400,
+          response.details,
+        ),
+    });
+    await assert.rejects(
+      () =>
+        send({
+          to: "person@example.com",
+          tags: [],
+          priority: "normal",
+        }),
+      (error) =>
+        error instanceof PlystraError &&
+        error.status === 500 &&
+        error.code === "internal" &&
+        error.detail === undefined &&
+        error.message === "internal" &&
+        !error.message.includes("provider secret"),
+    );
+  }
 });
 
 test("credentials, cancellation, and network failures are bounded and normalized", async () => {

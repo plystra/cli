@@ -15,6 +15,8 @@ The generated `.npmrc` disables lockfile creation because this package is CLI-ow
 
 The Plystra wrapper resolves generated Protobuf descriptors and sends binary Connect requests through its pinned `@bufbuild/protobuf`, `@connectrpc/connect`, and `@connectrpc/connect-web` dependencies. Application code does not construct raw Protobuf messages or Connect clients, and raw Connect errors are normalized before they cross the wrapper boundary. Import only the package root; the export map blocks internal subpaths and generated declarations omit transport, descriptor, codec, and binder internals.
 
+Generated application failures expose only an immutable Plystra-owned safe detail containing the requested canonical or Alias Capability ID, its canonical target, and exactly one declared semantic code or closed Kernel class. Provider text, causes, payloads, panic data, configuration, credentials, Secrets, and raw Connect details are excluded. Missing, duplicate, malformed, unknown, mismatched, or undeclared details fail closed to `internal`; inspect `PlystraError.detail` rather than parsing an error message.
+
 Canonical `integer` fields and integer array items are signed 64-bit values exposed as JavaScript `bigint`, including enum literals such as `0n`. Pass `bigint`, not `number`, so request and response values remain exact across the full range.
 
 ## Usage

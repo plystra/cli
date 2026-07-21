@@ -43,7 +43,7 @@ import {
 } from "./operations/mail/deliver/v1.js";
 
 export { PlystraError } from "./runtime.js";
-export type { ClientOptions, JSONValue, RequestOptions } from "./runtime.js";
+export type { ClientOptions, JSONValue, KernelErrorClass, PlystraErrorDetail, RequestOptions } from "./runtime.js";
 export { createAccountProfileGetV2 };
 export type {
   ErrorCode as AccountProfileGetV2ErrorCode,

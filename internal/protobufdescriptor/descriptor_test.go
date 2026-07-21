@@ -45,7 +45,7 @@ func TestBuildRendersDeterministicSchemasAndSelfContainedDescriptors(t *testing.
 	wireMap := descriptorWireMap(t, model, nil, false, "")
 
 	evidence, err := protobufdescriptor.Build(model, wireMap)
-	if err != nil || !evidence.Valid() || evidence.DescriptorCount() != 2 {
+	if err != nil || !evidence.Valid() || evidence.DescriptorCount() != 3 {
 		t.Fatalf("Build = %#v, %v", evidence, err)
 	}
 	files := evidence.Files()
@@ -54,6 +54,7 @@ func TestBuildRendersDeterministicSchemasAndSelfContainedDescriptors(t *testing.
 		"generated/proto/descriptor-set.pb",
 		"generated/proto/plystra/generated/account/profile/v1/capability.proto",
 		"generated/proto/plystra/generated/customer/profile/get/v1/capability.proto",
+		"generated/proto/" + protobufdescriptor.ErrorDetailFileName,
 	}
 	if !slices.Equal(paths, wantPaths) {
 		t.Fatalf("paths = %v, want %v", paths, wantPaths)
@@ -71,8 +72,8 @@ func TestBuildRendersDeterministicSchemasAndSelfContainedDescriptors(t *testing.
 	}
 
 	set := decodeDescriptorSet(t, files[0].Data())
-	if len(set.File) != 3 {
-		t.Fatalf("descriptor file count = %d, want canonical, Alias, and Struct dependency", len(set.File))
+	if len(set.File) != 4 {
+		t.Fatalf("descriptor file count = %d, want canonical, Alias, safe error detail, and Struct dependency", len(set.File))
 	}
 	if _, err := protodesc.NewFiles(set); err != nil {
 		t.Fatalf("protodesc.NewFiles: %v", err)
@@ -107,6 +108,27 @@ func TestBuildRendersDeterministicSchemasAndSelfContainedDescriptors(t *testing.
 	if aliasService == nil || aliasService.Methods().Get(0).Input().FullName() != request.FullName() || aliasService.Methods().Get(0).Output().FullName() != "plystra.generated.customer.profile.get.v1.CustomerProfileGetV1Response" {
 		t.Fatalf("Alias service = %#v", aliasService)
 	}
+	errorFile := descriptorFile(t, set, protobufdescriptor.ErrorDetailFileName)
+	errorDetail := descriptorMessage(t, errorFile, "PlystraErrorDetail")
+	wantErrorFields := []struct {
+		name   protoreflect.Name
+		number protoreflect.FieldNumber
+	}{
+		{name: "requested_capability_id", number: 1},
+		{name: "canonical_capability_id", number: 2},
+		{name: "semantic_error_code", number: 3},
+		{name: "kernel_error_class", number: 4},
+		{name: "trace_id", number: 5},
+	}
+	if string(errorDetail.FullName()) != protobufdescriptor.ErrorDetailFullName || errorDetail.Fields().Len() != len(wantErrorFields) {
+		t.Fatalf("safe error detail = %#v", errorDetail)
+	}
+	for _, expected := range wantErrorFields {
+		field := errorDetail.Fields().ByNumber(expected.number)
+		if field == nil || field.Name() != expected.name || field.Kind() != protoreflect.StringKind || field.HasPresence() {
+			t.Fatalf("safe error detail field %s = %#v", expected.name, field)
+		}
+	}
 
 	canonicalSource := string(files[2].Data())
 	for _, required := range []string{
@@ -126,6 +148,20 @@ func TestBuildRendersDeterministicSchemasAndSelfContainedDescriptors(t *testing.
 	for _, forbidden := range []string{"provider", "plugin", "module_path", "secret"} {
 		if strings.Contains(strings.ToLower(canonicalSource), forbidden) || bytes.Contains(bytes.ToLower(files[0].Data()), []byte(forbidden)) {
 			t.Fatalf("descriptor evidence contains forbidden %q", forbidden)
+		}
+	}
+	errorSource := string(files[3].Data())
+	for _, required := range []string{
+		"package plystra.generated.transport.v1;",
+		"message PlystraErrorDetail {",
+		"string requested_capability_id = 1",
+		"string canonical_capability_id = 2",
+		"string semantic_error_code = 3",
+		"string kernel_error_class = 4",
+		"string trace_id = 5",
+	} {
+		if !strings.Contains(errorSource, required) {
+			t.Fatalf("safe error source omits %q:\n%s", required, errorSource)
 		}
 	}
 

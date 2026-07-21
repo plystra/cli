@@ -15,6 +15,7 @@ import (
 	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/goname"
 	"github.com/plystra/cli/internal/modulepath"
+	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/sdkmodel"
@@ -106,11 +107,16 @@ func Render(
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrRender, err)
 	}
+	errorDetail, err := exactErrorDetail(registry)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrRender, err)
+	}
 	wireByID := make(map[string]protobufwiremap.CapabilityProjection, len(operations))
 	for _, projection := range wireMap.ActiveCapabilities() {
 		wireByID[projection.ID()] = projection
 	}
 	operationByID := make(map[string]protobufmodel.Operation, len(operations))
+	aliasesByTarget := make(map[string][]protobufmodel.Alias, len(operations))
 	methodByPublicID := make(map[string]protoreflect.MethodDescriptor, len(operations)+len(aliases))
 	for _, operation := range operations {
 		identity := operation.Identity()
@@ -139,6 +145,7 @@ func Render(
 			return nil, fmt.Errorf("%w: %w: Alias %s has no exact canonical target %s", ErrRender, ErrProjection, alias.ID(), alias.Target())
 		}
 		methodByPublicID[identity.PublicID()] = method
+		aliasesByTarget[alias.Target().String()] = append(aliasesByTarget[alias.Target().String()], alias)
 	}
 
 	files := make([]File, 0, 1+len(operations)+len(aliases))
@@ -149,7 +156,7 @@ func Render(
 	files = append(files, File{path: schemaRuntimePath, packageName: "connectschema", data: schemaSource})
 	for _, operation := range operations {
 		wire := wireByID[operation.ID().String()]
-		file, err := renderCanonical(modulePath, operation, wire, methodByPublicID[operation.ID().String()], plan.RequiresHTTPPath(operation.ID()))
+		file, err := renderCanonical(modulePath, operation, aliasesByTarget[operation.ID().String()], wire, methodByPublicID[operation.ID().String()], errorDetail, plan.RequiresHTTPPath(operation.ID()))
 		if err != nil {
 			return nil, fmt.Errorf("%w: Capability %s: %w", ErrRender, operation.ID(), err)
 		}
@@ -170,6 +177,37 @@ func Render(
 		}
 	}
 	return files, nil
+}
+
+func exactErrorDetail(registry *protoregistry.Files) (protoreflect.MessageDescriptor, error) {
+	if registry == nil {
+		return nil, fmt.Errorf("%w: descriptor registry is absent", ErrDescriptor)
+	}
+	descriptor, err := registry.FindDescriptorByName(protoreflect.FullName(protobufdescriptor.ErrorDetailFullName))
+	if err != nil {
+		return nil, fmt.Errorf("%w: safe error detail %s is absent", ErrDescriptor, protobufdescriptor.ErrorDetailFullName)
+	}
+	message, ok := descriptor.(protoreflect.MessageDescriptor)
+	if !ok || message == nil || message.Fields().Len() != 5 {
+		return nil, fmt.Errorf("%w: safe error detail %s is inconsistent", ErrDescriptor, protobufdescriptor.ErrorDetailFullName)
+	}
+	want := []struct {
+		name   protoreflect.Name
+		number protoreflect.FieldNumber
+	}{
+		{name: "requested_capability_id", number: 1},
+		{name: "canonical_capability_id", number: 2},
+		{name: "semantic_error_code", number: 3},
+		{name: "kernel_error_class", number: 4},
+		{name: "trace_id", number: 5},
+	}
+	for _, field := range want {
+		descriptor := message.Fields().ByNumber(field.number)
+		if descriptor == nil || descriptor.Name() != field.name || descriptor.Kind() != protoreflect.StringKind || descriptor.Cardinality() != protoreflect.Optional || descriptor.HasPresence() {
+			return nil, fmt.Errorf("%w: safe error detail field %s is inconsistent", ErrDescriptor, field.name)
+		}
+	}
+	return message, nil
 }
 
 func descriptorRegistry(data []byte) (*protoregistry.Files, error) {
