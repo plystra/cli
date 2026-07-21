@@ -413,7 +413,7 @@ plystra capability implement email.send/v1 --plugin mailer
 
 For a genuinely new name, creation reports conservative typo-like visible exact Capabilities as advisory recommendations. It never redirects or blocks the requested custom identity based only on similar spelling.
 
-Implementation searches local and effective-graph dependency Project contracts, requires exact provider-independent equality including normalized extension metadata, copies the canonical schema when the target plugin does not yet provide it, adds a compile-safe user-owned method only when absent, regenerates all affected module surfaces, tidies module metadata, and validates with `go test -mod=readonly ./...`. Repeating the command preserves an existing method byte-for-byte.
+Implementation searches local and effective-graph dependency Project contracts, requires exact provider-independent equality including typed semantics and normalized extension metadata, copies the canonical schema when the target plugin does not yet provide it, adds a compile-safe user-owned method only when absent, regenerates all affected module surfaces, tidies module metadata, and validates with `go test -mod=readonly ./...`. Repeating the command preserves an existing method byte-for-byte.
 
 In a Plystra Project, expose an existing exact canonical Capability or create and expose a new one in the same transaction:
 

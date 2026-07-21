@@ -900,7 +900,7 @@ func (e *ProviderContractConflictError) Error() string {
 	}
 	fmt.Fprintf(
 		&message,
-		"; correction: make every provider carry one provider-independent contract, including normalized extension metadata, or use a new /vN; no provider contract is chosen by ordering",
+		"; correction: make every provider carry one provider-independent contract, including typed semantics and normalized extension metadata, or use a new /vN; no provider contract is chosen by ordering",
 	)
 	return message.String()
 }
@@ -957,7 +957,7 @@ func (e *ProviderContractError) Error() string {
 	for _, provider := range e.providers {
 		fmt.Fprintf(&message, "; plugin %q at %q carries %s", provider.pluginID, provider.source, provider.digest)
 	}
-	fmt.Fprintf(&message, "; correction: every provider must carry the exact canonical contract, including normalized extension metadata, or use a new /vN")
+	fmt.Fprintf(&message, "; correction: every provider must carry the exact canonical contract, including typed semantics and normalized extension metadata, or use a new /vN")
 	return message.String()
 }
 

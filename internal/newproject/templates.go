@@ -750,7 +750,7 @@ correctly creates generated drift.
   unversioned ID in plugin.yaml, plystra.yaml, generated imports, or runtime
   calls.
 - Capability IDs are provider-independent. Several Plugins may provide the
-  same exact ID only when their request, response, errors, behavioral metadata,
+  same exact ID only when their request, response, errors, typed semantics,
   and normalized extension metadata are exactly compatible.
 - An application-local Capability Alias has the same ID grammar but is never a
   provider, canonical contract, reusable requirement, or Kernel registration.
@@ -1307,7 +1307,7 @@ build and distribution boundary for every Plystra module.
   same --env or --config selector used for the application. Do not add
   priorities or rely on discovery order.
 - Incompatible contract: compare exact request, response, semantic errors,
-  behavioral metadata, and extension metadata. Implement the visible contract
+  typed semantics, and extension metadata. Implement the visible contract
   or create a new version instead of weakening validation.
 - Constructor signature mismatch after adding requires: regenerate, import the
   Plugin's generated dependencies package, and use

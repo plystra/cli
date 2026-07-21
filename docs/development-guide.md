@@ -1523,7 +1523,7 @@ static model, but it must still pass typed runtime validation.
 
 ### Incompatible contract
 
-Compare request, response, semantic errors, behavioral metadata, and normalized
+Compare request, response, semantic errors, typed semantics, and normalized
 extension metadata. Implement the visible exact contract or create a new
 version. Do not weaken equality or add a compatibility decoder.
 
