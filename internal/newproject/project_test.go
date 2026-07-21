@@ -55,6 +55,32 @@ const (
 `
 )
 
+func TestKernelVersionMatchesCLIModuleRequirement(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(filepath.Join("..", "..", "go.mod"))
+	if err != nil {
+		t.Fatalf("ReadFile(go.mod): %v", err)
+	}
+	parsed, err := modfile.Parse("go.mod", data, nil)
+	if err != nil {
+		t.Fatalf("Parse(go.mod): %v", err)
+	}
+	for _, requirement := range parsed.Require {
+		if requirement.Mod.Path != "github.com/plystra/kernel" {
+			continue
+		}
+		if requirement.Indirect {
+			t.Fatal("CLI Kernel requirement is indirect")
+		}
+		if requirement.Mod.Version != newproject.KernelVersion {
+			t.Fatalf("new Project Kernel version %s does not match CLI requirement %s", newproject.KernelVersion, requirement.Mod.Version)
+		}
+		return
+	}
+	t.Fatal("CLI go.mod has no direct github.com/plystra/kernel requirement")
+}
+
 func TestMain(main *testing.M) {
 	if os.Getenv("PLYSTRA_NPM_HELPER") == "1" {
 		os.Exit(runNPMHelper())
