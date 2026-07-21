@@ -411,6 +411,34 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("generated application accepted build-affecting environment drift: %v\n%s", runtimeErr, output)
 	}
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayConfiguration)
+
+	credentialedWildcardOverlay := strings.Replace(
+		overlayConfiguration,
+		"http: {cors: {allow_credentials: null}}",
+		"http: {cors: {allowed_origins: ['*']}}",
+		1,
+	)
+	if credentialedWildcardOverlay == overlayConfiguration {
+		t.Fatal("test overlay does not contain the expected CORS declaration")
+	}
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), credentialedWildcardOverlay)
+	beforeCredentialedWildcardCheck := commandTree(t, root)
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--env", "production"}, start, environment)
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "http.cors cannot combine wildcard origin") {
+		t.Fatalf("credentialed wildcard check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeCredentialedWildcardCheck) {
+		t.Fatal("credentialed wildcard check mutated the Project")
+	}
+	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--env", "production")
+	process.Dir = root
+	process.Env = environment
+	output, runtimeErr = process.CombinedOutput()
+	if runtimeErr == nil || !strings.Contains(string(output), "http.cors cannot combine wildcard origin with allow_credentials: true") {
+		t.Fatalf("generated application accepted credentialed wildcard CORS: %v\n%s", runtimeErr, output)
+	}
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayConfiguration)
+
 	for _, runtime := range []struct {
 		name      string
 		arguments []string
