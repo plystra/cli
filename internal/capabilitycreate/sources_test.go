@@ -89,6 +89,49 @@ func TestResolveSourcesRejectsExtensionMetadataConflict(t *testing.T) {
 	}
 }
 
+func TestResolveSourcesReportsTypedSemanticsConflict(t *testing.T) {
+	t.Parallel()
+
+	root := createModule(t)
+	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v1]\n")
+	writePlugin(t, root, "profile", "id: acme.app.profile\nprovides: [account.register/v1]\n")
+	id := mustCapabilityID(t, "account.register/v1")
+	writeCapabilitySource(t, filepath.Join(root, "account"), id, []byte("id: account.register/v1\n"+querySemanticsYAML))
+	writeCapabilitySource(t, filepath.Join(root, "profile"), id, []byte("id: account.register/v1\n"+strings.Replace(querySemanticsYAML, "response: public", "response: restricted", 1)))
+
+	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: filepath.Join(root, "account"), Reference: "account.register"})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	resolved, err := capabilitycreate.ResolveSources(plan)
+	if !errors.Is(err, capabilitycreate.ErrResolveSources) || !errors.Is(err, capabilitycreate.ErrSchemaConflict) || resolved != nil {
+		t.Fatalf("ResolveSources = %#v, %v", resolved, err)
+	}
+	var conflict *capabilitycreate.SchemaConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("ResolveSources error type = %T", err)
+	}
+	differences := conflict.Differences()
+	if len(differences) != 1 ||
+		differences[0].Path() != "semantics.data.response" ||
+		differences[0].Baseline() != `"public"` ||
+		differences[0].Conflicting() != `"restricted"` {
+		t.Fatalf("semantics differences = %#v", differences)
+	}
+	for _, required := range []string{
+		"acme.app.account",
+		"acme.app.profile",
+		conflict.BaselineSourcePath(),
+		conflict.ConflictingSourcePath(),
+		`semantics.data.response: "public" != "restricted"`,
+		"new capability version",
+	} {
+		if !strings.Contains(err.Error(), required) {
+			t.Fatalf("conflict error %q does not contain %q", err, required)
+		}
+	}
+}
+
 func TestResolveSourcesRejectsSemanticSchemaConflict(t *testing.T) {
 	t.Parallel()
 
