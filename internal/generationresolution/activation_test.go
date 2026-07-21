@@ -30,7 +30,7 @@ func TestResolveBuildsStableActivationClosureAndExcludesUnselectedExtensions(t *
 		activationDeclaration(t, "example.audit", []activationBinding{{"audit", "audit.write/v1"}}),
 	)
 	input := generationresolution.Input{
-		Requirements: []providerresolution.Requirement{{Contract: order, Source: "plystra.yaml http.expose.order"}},
+		Requirements: []providerresolution.Requirement{{Contract: order, Source: activationResolutionTestSource("plystra.yaml http.expose.order")}},
 		Candidates: []providerresolution.Candidate{
 			{PluginID: "example.orders", Contract: order, Source: "orders/order.cancel"},
 			{PluginID: "example.authn-passkey", Contract: verify, Source: "passkey/authn.session.verify"},
@@ -63,7 +63,7 @@ func TestResolveBuildsStableActivationClosureAndExcludesUnselectedExtensions(t *
 		t.Fatalf("selected providers = %v", got)
 	}
 	authn, exists := resolved.Capability(mustGenerationID(t, "authn.session.verify/v1"))
-	if !exists || !slices.Equal(authn.Sources(), []string{"extensions.authn on order.cancel/v1"}) {
+	if !exists || !slices.Equal(activationResolutionSourceReferences(authn.Sources()), []string{"extensions.authn on order.cancel/v1"}) || authn.Sources()[0].Kind != providerresolution.RequirementActivation {
 		t.Fatalf("authn requirement = %#v, %t", authn, exists)
 	}
 
@@ -104,7 +104,7 @@ func TestResolveExpandsTransitiveActivationRequirementsToStability(t *testing.T)
 	verify := generationContract("authn.session.verify/v1", "extensions: {audit: {event: authn.session.verified}}\n")
 	audit := generationContract("audit.write/v1", "")
 	result, err := generationresolution.Resolve(generationresolution.Input{
-		Requirements: []providerresolution.Requirement{{Contract: order, Source: "order route"}},
+		Requirements: []providerresolution.Requirement{{Contract: order, Source: activationResolutionTestSource("order route")}},
 		Candidates: []providerresolution.Candidate{
 			{PluginID: "example.orders", Contract: order, Source: "orders/order.cancel"},
 			{PluginID: "example.authn", Contract: verify, Source: "authn/session.verify"},
@@ -143,7 +143,7 @@ func TestResolveReportsActivationProviderFailures(t *testing.T) {
 
 	order := generationContract("order.cancel/v1", "extensions: {authn: {authenticated: true}}\n")
 	verify := generationContract("authn.session.verify/v1", "")
-	root := providerresolution.Requirement{Contract: order, Source: "order route"}
+	root := providerresolution.Requirement{Contract: order, Source: activationResolutionTestSource("order route")}
 	orderProvider := providerresolution.Candidate{PluginID: "example.orders", Contract: order, Source: "orders/order.cancel"}
 
 	t.Run("missing", func(t *testing.T) {
@@ -226,7 +226,7 @@ func TestResolveRejectsCompleteActivationCycles(t *testing.T) {
 		alpha := generationContract("alpha.call/v1", "extensions: {authn: {authenticated: true}}\n")
 		verify := generationContract("authn.session.verify/v1", "extensions: {audit: {event: authn.verify}}\n")
 		_, err := generationresolution.Resolve(generationresolution.Input{
-			Requirements: []providerresolution.Requirement{{Contract: alpha, Source: "alpha route"}},
+			Requirements: []providerresolution.Requirement{{Contract: alpha, Source: activationResolutionTestSource("alpha route")}},
 			Candidates: []providerresolution.Candidate{
 				{PluginID: "example.alpha", Contract: alpha, Source: "alpha/call"},
 				{PluginID: "example.authn", Contract: verify, Source: "authn/verify"},
@@ -265,7 +265,7 @@ func TestResolveRejectsCompleteActivationCycles(t *testing.T) {
 		t.Parallel()
 		self := generationContract("authn.session.verify/v1", "extensions: {authn: {authenticated: true}}\n")
 		_, err := generationresolution.Resolve(generationresolution.Input{
-			Requirements: []providerresolution.Requirement{{Contract: self, Source: "self root"}},
+			Requirements: []providerresolution.Requirement{{Contract: self, Source: activationResolutionTestSource("self root")}},
 			Candidates:   []providerresolution.Candidate{{PluginID: "example.authn", Contract: self, Source: "authn/verify"}},
 			Activations: activationCatalog(t,
 				activationDeclaration(t, "example.authn", []activationBinding{{"authn", "authn.session.verify/v1"}}),
@@ -283,7 +283,7 @@ func TestResolveSupportsApplicationsWithoutGenerationExtensions(t *testing.T) {
 
 	plain := generationContract("order.read/v1", "")
 	result, err := generationresolution.Resolve(generationresolution.Input{
-		Requirements: []providerresolution.Requirement{{Contract: plain, Source: "order client"}},
+		Requirements: []providerresolution.Requirement{{Contract: plain, Source: activationResolutionTestSource("order client")}},
 		Candidates:   []providerresolution.Candidate{{PluginID: "example.orders", Contract: plain, Source: "orders/read"}},
 	})
 	if err != nil || result.Passes() != 1 || len(result.ActivationRequirements().Requirements()) != 0 || len(result.Extensions()) != 0 {
@@ -302,7 +302,7 @@ func TestResolveBoundsGeneratedActivationProvenance(t *testing.T) {
 	root := generationContract(longID, "extensions: {authn: {authenticated: true}}\n")
 	verify := generationContract("authn.session.verify/v1", "")
 	result, err := generationresolution.Resolve(generationresolution.Input{
-		Requirements: []providerresolution.Requirement{{Contract: root, Source: "long root"}},
+		Requirements: []providerresolution.Requirement{{Contract: root, Source: activationResolutionTestSource("long root")}},
 		Candidates: []providerresolution.Candidate{
 			{PluginID: "example.long", Contract: root, Source: "long/call"},
 			{PluginID: "example.authn", Contract: verify, Source: "authn/verify"},
@@ -315,7 +315,7 @@ func TestResolveBoundsGeneratedActivationProvenance(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 	authn, exists := result.ProviderResolution().Capability(mustGenerationID(t, "authn.session.verify/v1"))
-	if !exists || len(authn.Sources()) != 1 || len(authn.Sources()[0]) != 1024 || !strings.Contains(authn.Sources()[0], "...#sha256:") {
+	if !exists || len(authn.Sources()) != 1 || len(authn.Sources()[0].String()) != 1024 || !strings.Contains(authn.Sources()[0].String(), "...#sha256:") {
 		t.Fatalf("bounded activation source = %q", authn.Sources())
 	}
 }
@@ -326,7 +326,7 @@ func TestResolveIsStableAcrossEveryInputOrder(t *testing.T) {
 	alpha := generationContract("alpha.call/v1", "extensions: {authn: {authenticated: true}, authz: {permission: alpha.call}}\n")
 	verify := generationContract("authn.session.verify/v1", "")
 	check := generationContract("authz.check/v1", "")
-	requirements := []providerresolution.Requirement{{Contract: alpha, Source: "alpha root"}}
+	requirements := []providerresolution.Requirement{{Contract: alpha, Source: activationResolutionTestSource("alpha root")}}
 	candidates := []providerresolution.Candidate{
 		{PluginID: "example.alpha", Contract: alpha, Source: "alpha/call"},
 		{PluginID: "example.authn", Contract: verify, Source: "authn/verify"},
@@ -399,6 +399,25 @@ func activationCatalog(t *testing.T, declarations ...generationactivation.Declar
 		t.Fatalf("generationactivation.New: %v", err)
 	}
 	return catalog
+}
+
+func activationResolutionTestSource(reference string) providerresolution.RequirementSource {
+	return providerresolution.RequirementSource{
+		Kind:       providerresolution.RequirementDeclaration,
+		Reference:  reference,
+		ModulePath: "example.com/project",
+		Path:       "plystra.yaml",
+		Line:       1,
+		Column:     1,
+	}
+}
+
+func activationResolutionSourceReferences(sources []providerresolution.RequirementSource) []string {
+	values := make([]string, len(sources))
+	for index, source := range sources {
+		values[index] = source.String()
+	}
+	return values
 }
 
 func generationContract(id, body string) []byte {

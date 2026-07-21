@@ -83,7 +83,7 @@ config:
 	if err != nil || !second.Valid() {
 		t.Fatalf("Compose(reordered) = %#v, %v", second, err)
 	}
-	if first.DependencyDigest() != second.DependencyDigest() || !reflect.DeepEqual(provenanceStrings(first.Provenance()), provenanceStrings(second.Provenance())) {
+	if first.DependencyDigest() != second.DependencyDigest() || !reflect.DeepEqual(provenanceStrings(first.Provenance()), provenanceStrings(second.Provenance())) || !reflect.DeepEqual(provenanceStrings(first.ResolutionSources()), provenanceStrings(second.ResolutionSources())) {
 		t.Fatalf("composition depends on dependency order:\nfirst:  %s %#v\nsecond: %s %#v", first.DependencyDigest(), provenanceStrings(first.Provenance()), second.DependencyDigest(), provenanceStrings(second.Provenance()))
 	}
 
@@ -122,6 +122,15 @@ config:
 	if len(audit) != 1 || len(audit[0].Sources()) != 2 {
 		t.Fatalf("audit provenance = %#v", provenanceStrings(audit))
 	}
+	effectiveAudit := findProvenance(t, first.ResolutionSources(), `capabilities.require["audit.write/v1"]`)
+	if len(effectiveAudit) != 1 || len(effectiveAudit[0].Sources()) != 2 {
+		t.Fatalf("effective audit provenance = %#v", provenanceStrings(effectiveAudit))
+	}
+	for _, local := range []string{`http.expose["kernel.health/v1"]`, `capabilities.require["kernel.info/v1"]`} {
+		if records := findProvenance(t, first.ResolutionSources(), local); len(records) != 0 {
+			t.Fatalf("current-project declaration entered dependency resolution provenance: %#v", provenanceStrings(records))
+		}
+	}
 	ratio := findProvenance(t, first.Provenance(), `config["acme.email.smtp"]["ratio"]`)
 	if len(ratio) != 1 || len(ratio[0].Sources()) != 2 {
 		t.Fatalf("normalized ratio provenance = %#v", provenanceStrings(ratio))
@@ -142,6 +151,11 @@ config:
 		if first.Provenance()[0].Sources()[0] == "changed" {
 			t.Fatal("Provenance sources exposed mutable storage")
 		}
+	}
+	resolutionSources := first.ResolutionSources()
+	resolutionSources[0] = applicationmeta.Provenance{}
+	if first.ResolutionSources()[0].Path() == "" {
+		t.Fatal("ResolutionSources exposed mutable composition storage")
 	}
 }
 
@@ -363,6 +377,9 @@ func TestComposeRequiresCurrentProviderReplacementForInheritedConflict(t *testin
 	if records := findProvenance(t, composed.Provenance(), `capabilities.use["email.send/v1"]`); len(records) != 2 {
 		t.Fatalf("conflicting baseline provenance = %#v", provenanceStrings(records))
 	}
+	if records := findProvenance(t, composed.ResolutionSources(), `capabilities.use["email.send/v1"]`); len(records) != 0 {
+		t.Fatalf("superseded Provider choices entered effective resolution provenance: %#v", provenanceStrings(records))
+	}
 }
 
 func TestComposeRequiresExactCurrentAliasReplacement(t *testing.T) {
@@ -384,6 +401,9 @@ func TestComposeRequiresExactCurrentAliasReplacement(t *testing.T) {
 	aliases := composed.Manifest().Aliases()
 	if len(aliases) != 1 || aliases[0].Target().String() != "notification.send/v1" {
 		t.Fatalf("current Alias replacement = %#v", aliases)
+	}
+	if records := findProvenance(t, composed.ResolutionSources(), `capabilities.aliases["mail.send/v1"]`); len(records) != 0 {
+		t.Fatalf("superseded Aliases entered effective resolution provenance: %#v", provenanceStrings(records))
 	}
 }
 

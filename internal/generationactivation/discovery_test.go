@@ -21,9 +21,9 @@ func TestDiscoverRequirementsMapsEveryNamespaceUseToOneActivationCapability(t *t
 	invoice := exactContract("invoice.create/v1", "extensions: {authn: {authenticated: true}}\n")
 	resolution := resolved(t,
 		[]providerresolution.Requirement{
-			{Contract: order, Source: "orders/plugin.yaml requires"},
-			{Contract: invoice, Source: "plystra.yaml http.expose.invoice"},
-			{Contract: order, Source: "plystra.yaml http.expose.order"},
+			{Contract: order, Source: activationTestSource("orders/plugin.yaml requires")},
+			{Contract: invoice, Source: activationTestSource("plystra.yaml http.expose.invoice")},
+			{Contract: order, Source: activationTestSource("plystra.yaml http.expose.order")},
 		},
 		[]providerresolution.Candidate{
 			{PluginID: "example.orders", Contract: order, Source: "orders/capability.yaml"},
@@ -56,7 +56,7 @@ func TestDiscoverRequirementsMapsEveryNamespaceUseToOneActivationCapability(t *t
 		t.Fatal("authn activation requirement is absent")
 	}
 	uses := authn.Uses()
-	if len(uses) != 2 || uses[0].Namespace() != "authn" || uses[0].SourceCapability().String() != "invoice.create/v1" || !slices.Equal(uses[1].RequirementSources(), []string{"orders/plugin.yaml requires", "plystra.yaml http.expose.order"}) {
+	if len(uses) != 2 || uses[0].Namespace() != "authn" || uses[0].SourceCapability().String() != "invoice.create/v1" || !slices.Equal(activationTestSourceReferences(uses[1].RequirementSources()), []string{"orders/plugin.yaml requires", "plystra.yaml http.expose.order"}) {
 		t.Fatalf("authn Uses = %#v", uses)
 	}
 	if _, exists := set.Requirement(mustCapabilityID(t, "audit.write/v1")); exists {
@@ -66,8 +66,8 @@ func TestDiscoverRequirementsMapsEveryNamespaceUseToOneActivationCapability(t *t
 	requirements[0] = generationactivation.ActivationRequirement{}
 	uses[0] = generationactivation.NamespaceUse{}
 	sources := authn.Uses()[1].RequirementSources()
-	sources[0] = "changed"
-	if set.Requirements()[0].Capability().String() != "authn.session.verify/v1" || authn.Uses()[0].SourceCapability().String() != "invoice.create/v1" || authn.Uses()[1].RequirementSources()[0] != "orders/plugin.yaml requires" {
+	sources[0] = providerresolution.RequirementSource{}
+	if set.Requirements()[0].Capability().String() != "authn.session.verify/v1" || authn.Uses()[0].SourceCapability().String() != "invoice.create/v1" || authn.Uses()[1].RequirementSources()[0].String() != "orders/plugin.yaml requires" {
 		t.Fatal("activation requirements exposed mutable storage")
 	}
 }
@@ -81,7 +81,7 @@ func TestDiscoverRequirementsReportsEveryMissingNamespaceWithProvenance(t *testi
   audit: {event: order.cancelled}
 `)
 	resolution := resolved(t,
-		[]providerresolution.Requirement{{Contract: order, Source: "plystra.yaml http.expose.order"}},
+		[]providerresolution.Requirement{{Contract: order, Source: activationTestSource("plystra.yaml http.expose.order")}},
 		[]providerresolution.Candidate{{PluginID: "example.orders", Contract: order, Source: "orders/capability.yaml"}},
 	)
 	catalog, err := generationactivation.New([]generationactivation.Declaration{
@@ -112,7 +112,7 @@ func TestDiscoverRequirementsReportsEveryMissingNamespaceWithProvenance(t *testi
 		t.Fatalf("first MissingAssociationError = %#v", missing)
 	}
 	uses := missing.Uses()
-	if len(uses) != 1 || uses[0].SourceCapability().String() != "order.cancel/v1" || !slices.Equal(uses[0].RequirementSources(), []string{"plystra.yaml http.expose.order"}) {
+	if len(uses) != 1 || uses[0].SourceCapability().String() != "order.cancel/v1" || !slices.Equal(activationTestSourceReferences(uses[0].RequirementSources()), []string{"plystra.yaml http.expose.order"}) {
 		t.Fatalf("missing Uses = %#v", uses)
 	}
 	uses[0] = generationactivation.NamespaceUse{}
@@ -131,7 +131,7 @@ func TestDiscoverRequirementsSupportsApplicationsWithoutExtensionMetadata(t *tes
 
 	plain := exactContract("order.read/v1", "")
 	resolution := resolved(t,
-		[]providerresolution.Requirement{{Contract: plain, Source: "order-client"}},
+		[]providerresolution.Requirement{{Contract: plain, Source: activationTestSource("order-client")}},
 		[]providerresolution.Candidate{{PluginID: "example.orders", Contract: plain, Source: "orders/read"}},
 	)
 	set, err := (generationactivation.Catalog{}).DiscoverRequirements(resolution)
@@ -154,8 +154,8 @@ func TestDiscoverRequirementsIsStableAcrossResolutionAndCatalogOrder(t *testing.
 	alpha := exactContract("alpha.call/v1", "extensions: {authn: {authenticated: true}, authz: {permission: alpha.call}}\n")
 	beta := exactContract("beta.call/v1", "extensions: {authn: {authenticated: true}}\n")
 	requirements := []providerresolution.Requirement{
-		{Contract: beta, Source: "beta"},
-		{Contract: alpha, Source: "alpha"},
+		{Contract: beta, Source: activationTestSource("beta")},
+		{Contract: alpha, Source: activationTestSource("alpha")},
 	}
 	candidates := []providerresolution.Candidate{
 		{PluginID: "example.beta", Contract: beta, Source: "beta/provider"},
@@ -199,6 +199,25 @@ func resolved(t *testing.T, requirements []providerresolution.Requirement, candi
 		t.Fatalf("providerresolution.Resolve: %v", err)
 	}
 	return result
+}
+
+func activationTestSource(reference string) providerresolution.RequirementSource {
+	return providerresolution.RequirementSource{
+		Kind:       providerresolution.RequirementDeclaration,
+		Reference:  reference,
+		ModulePath: "example.com/project",
+		Path:       "plystra.yaml",
+		Line:       1,
+		Column:     1,
+	}
+}
+
+func activationTestSourceReferences(sources []providerresolution.RequirementSource) []string {
+	values := make([]string, len(sources))
+	for index, source := range sources {
+		values[index] = source.String()
+	}
+	return values
 }
 
 func exactContract(id, body string) []byte {

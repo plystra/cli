@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	generation "github.com/plystra/cli/generation/v1"
@@ -262,7 +263,11 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		SelectedDigest:              selectedDigest,
 		DependencyCompositionDigest: composition.DependencyDigest(),
 	}
-	input, err := applicationinput.Build(manifest, inventory, configurationProvenance, generationexec.BuildOptions{
+	currentProjectPaths := maintenance.LocalPaths()
+	if selector.mode == configurationModeEnvironment {
+		currentProjectPaths = append(currentProjectPaths, resolutionDeclarationPaths(selectedManifest)...)
+	}
+	input, err := applicationinput.Build(manifest, inventory, applicationInputSourceContext(module, dependencies, composition, currentProjectPaths), configurationProvenance, generationexec.BuildOptions{
 		GoCommand:        options.GoCommand,
 		BuildEnvironment: append([]string(nil), options.Environment...),
 		CompileTimeout:   options.CompileTimeout,
@@ -281,9 +286,10 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
 	evidence, err := resolutionevidence.Build(resolutionevidence.Input{
-		Context:          resolution.Context(),
-		Modules:          evidenceModules,
-		PluginCandidates: resolutionEvidencePluginCandidates(inventory),
+		Context:            resolution.Context(),
+		ProviderResolution: resolution.ActivationResolution().ProviderResolution(),
+		Modules:            evidenceModules,
+		PluginCandidates:   resolutionEvidencePluginCandidates(inventory),
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
@@ -333,6 +339,62 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		maintenanceSource:   maintenanceSnapshot.Data(),
 		previousProvenance:  previousProvenance,
 	}, nil
+}
+
+func applicationInputSourceContext(module modulelocate.Module, dependencies moduledependency.Index, composition applicationmeta.Composition, currentProjectPaths []string) applicationinput.SourceContext {
+	projects := dependencies.Projects()
+	values := make([]applicationinput.DependencySource, len(projects))
+	for index, dependency := range projects {
+		values[index] = applicationinput.DependencySource{
+			ModulePath: dependency.Path(),
+			Version:    dependency.SelectedVersion(),
+		}
+	}
+	provenance := composition.ResolutionSources()
+	configurationSources := make([]applicationinput.DependencyProvenance, len(provenance))
+	for index, record := range provenance {
+		configurationSources[index] = applicationinput.DependencyProvenance{
+			Path:    record.Path(),
+			Sources: record.Sources(),
+		}
+	}
+	return applicationinput.SourceContext{
+		CurrentModulePath:    module.ModulePath(),
+		Dependencies:         values,
+		DependencyProvenance: configurationSources,
+		CurrentProjectPaths:  uniqueSortedStrings(currentProjectPaths),
+	}
+}
+
+func resolutionDeclarationPaths(manifest applicationmeta.Manifest) []string {
+	paths := make([]string, 0, len(manifest.HTTPExposures())+len(manifest.Requirements())+len(manifest.ProviderChoices())+len(manifest.Aliases()))
+	for _, exposure := range manifest.HTTPExposures() {
+		paths = append(paths, fmt.Sprintf("http.expose[%q]", exposure.ID().String()))
+	}
+	for _, requirement := range manifest.Requirements() {
+		paths = append(paths, fmt.Sprintf("capabilities.require[%q]", requirement.ID().String()))
+	}
+	for _, choice := range manifest.ProviderChoices() {
+		paths = append(paths, fmt.Sprintf("capabilities.use[%q]", choice.Capability().String()))
+	}
+	for _, alias := range manifest.Aliases() {
+		paths = append(paths, fmt.Sprintf("capabilities.aliases[%q]", alias.ID().String()))
+	}
+	return paths
+}
+
+func uniqueSortedStrings(values []string) []string {
+	result := append([]string(nil), values...)
+	sort.Strings(result)
+	write := 0
+	for _, value := range result {
+		if write != 0 && result[write-1] == value {
+			continue
+		}
+		result[write] = value
+		write++
+	}
+	return result[:write]
 }
 
 func resolutionEvidenceModules(current modulelocate.Module, dependencies moduledependency.Index) ([]resolutionevidence.ModuleInput, error) {

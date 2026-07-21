@@ -68,9 +68,23 @@ type ExtensionInput struct {
 	ConfigurationProvenance  *generation.ConfigurationProvenanceInput
 	Plugins                  []Plugin
 	Capabilities             []generation.CapabilityInput
-	ApplicationHTTPExposures []applicationmeta.HTTPExposure
-	ApplicationAliases       []applicationmeta.Alias
+	ApplicationHTTPExposures []ApplicationHTTPExposure
+	ApplicationAliases       []ApplicationAlias
 	BuildOptions             generationexec.BuildOptions
+}
+
+// ApplicationHTTPExposure couples one parsed current-application declaration
+// with its typed requirement provenance.
+type ApplicationHTTPExposure struct {
+	Exposure applicationmeta.HTTPExposure
+	Sources  []providerresolution.RequirementSource
+}
+
+// ApplicationAlias couples one parsed current-application Alias declaration
+// with the typed provenance for its canonical target requirement.
+type ApplicationAlias struct {
+	Alias   applicationmeta.Alias
+	Sources []providerresolution.RequirementSource
 }
 
 // GeneratedRequirement records one exact ordinary requirement and complete
@@ -329,7 +343,7 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 				generatedByKey[key] = record
 				requirements = append(requirements, providerresolution.Requirement{
 					Capability: record.capability.String(),
-					Source:     generatedRequirementSource(record),
+					Source:     generatedRequirementSource(record, plugins[record.pluginID]),
 				})
 				added++
 			}
@@ -420,7 +434,7 @@ func validateFinalProviderChoices(resolution providerresolution.Result, candidat
 	for _, capability := range capabilities {
 		sources := capability.Sources()
 		if len(sources) == 0 {
-			sources = []string{"final application requirement " + capability.ID().String()}
+			return fmt.Errorf("%w: final Capability %s has no typed requirement provenance", ErrApplicationContext, capability.ID())
 		}
 		for _, source := range sources {
 			requirements = append(requirements, providerresolution.Requirement{
@@ -487,22 +501,32 @@ func addSelectedPluginRequirements(
 	return result, count, nil
 }
 
-func selectedPluginRequirementSource(pluginID string, plugin Plugin, capability capabilityid.Identifier) string {
+func selectedPluginRequirementSource(pluginID string, plugin Plugin, capability capabilityid.Identifier) providerresolution.RequirementSource {
 	version := plugin.Context.ModuleVersion
 	if version == "" {
 		version = "local"
 	}
 	source := plugin.Context.ModulePath + "@" + version
+	sourcePath := "plugin.yaml"
 	if plugin.PluginPath != "" {
 		source = path.Join(source, plugin.PluginPath, "plugin.yaml")
+		sourcePath = path.Join(plugin.PluginPath, "plugin.yaml")
 	}
 	value := "plugin " + pluginID + " at " + source + " requires " + capability.String()
-	if len(value) <= maximumRequirementSourceSize {
-		return value
+	if len(value) > maximumRequirementSourceSize {
+		sum := sha256.Sum256([]byte(value))
+		suffix := "...#sha256:" + hex.EncodeToString(sum[:])
+		value = value[:maximumRequirementSourceSize-len(suffix)] + suffix
 	}
-	sum := sha256.Sum256([]byte(value))
-	suffix := "...#sha256:" + hex.EncodeToString(sum[:])
-	return value[:maximumRequirementSourceSize-len(suffix)] + suffix
+	return providerresolution.RequirementSource{
+		Kind:       providerresolution.RequirementPlugin,
+		Reference:  value,
+		ModulePath: plugin.Context.ModulePath,
+		Path:       sourcePath,
+		Line:       1,
+		Column:     1,
+		PluginID:   pluginID,
+	}
 }
 
 func indexPlugins(inputs []Plugin) (map[string]Plugin, error) {
@@ -580,7 +604,7 @@ func buildGenerationContext(input ExtensionInput, capabilityCatalog generation.C
 			return generation.Context{}, fmt.Errorf("resolved Capability %s differs from the visible generation catalog contract", capability.ID())
 		}
 	}
-	aliases, err := aliasresolution.NormalizeApplication(generationContext, input.ApplicationAliases)
+	aliases, err := aliasresolution.NormalizeApplication(generationContext, applicationAliasDeclarations(input.ApplicationAliases))
 	if err != nil {
 		return generation.Context{}, err
 	}
@@ -605,7 +629,7 @@ func cloneConfigurationProvenanceInput(input *generation.ConfigurationProvenance
 
 func prepareApplicationHTTPRequirements(
 	requirements []providerresolution.Requirement,
-	exposures []applicationmeta.HTTPExposure,
+	exposures []ApplicationHTTPExposure,
 	capabilities []generation.CapabilityInput,
 ) ([]providerresolution.Requirement, generation.CapabilityCatalog, error) {
 	sourceCatalog, err := generation.NewCapabilityCatalog(cloneCapabilityInputs(capabilities))
@@ -628,17 +652,23 @@ func prepareApplicationHTTPRequirements(
 		})
 	}
 	for _, exposure := range exposures {
-		index, exists := byID[exposure.ID().String()]
+		declaration := exposure.Exposure
+		index, exists := byID[declaration.ID().String()]
 		if !exists {
-			return nil, generation.CapabilityCatalog{}, fmt.Errorf("%s Capability %s is absent from the visible canonical catalog", exposure.Source(), exposure.ID())
+			return nil, generation.CapabilityCatalog{}, fmt.Errorf("%s Capability %s is absent from the visible canonical catalog", declaration.Source(), declaration.ID())
 		}
 		prepared[index].Exposure.HTTP = true
 		prepared[index].Exposure.JavaScript = true
-		result = append(result, providerresolution.Requirement{
-			Capability: exposure.ID().String(),
-			Contract:   prepared[index].ContractJSON,
-			Source:     exposure.Source(),
-		})
+		if len(exposure.Sources) == 0 {
+			return nil, generation.CapabilityCatalog{}, fmt.Errorf("%s has no typed requirement provenance", declaration.Source())
+		}
+		for _, source := range exposure.Sources {
+			result = append(result, providerresolution.Requirement{
+				Capability: declaration.ID().String(),
+				Contract:   prepared[index].ContractJSON,
+				Source:     source,
+			})
+		}
 	}
 	preparedCatalog, err := generation.NewCapabilityCatalog(prepared)
 	if err != nil {
@@ -649,7 +679,7 @@ func prepareApplicationHTTPRequirements(
 
 func addApplicationAliasRequirements(
 	requirements []providerresolution.Requirement,
-	aliases []applicationmeta.Alias,
+	aliases []ApplicationAlias,
 	catalog generation.CapabilityCatalog,
 ) ([]providerresolution.Requirement, error) {
 	if len(aliases) == 0 {
@@ -657,20 +687,34 @@ func addApplicationAliasRequirements(
 	}
 	result := append([]providerresolution.Requirement(nil), requirements...)
 	for _, alias := range aliases {
-		targetID, err := generation.ParseCapabilityID(alias.Target().String())
+		declaration := alias.Alias
+		targetID, err := generation.ParseCapabilityID(declaration.Target().String())
 		if err != nil {
-			return nil, fmt.Errorf("%s target %q is not canonical", alias.Source(), alias.Target())
+			return nil, fmt.Errorf("%s target %q is not canonical", declaration.Source(), declaration.Target())
 		}
-		requirement := providerresolution.Requirement{
-			Capability: targetID.String(),
-			Source:     alias.Source() + " target",
+		if len(alias.Sources) == 0 {
+			return nil, fmt.Errorf("%s has no typed target provenance", declaration.Source())
 		}
-		if target, exists := catalog.Capability(targetID); exists {
-			requirement.Contract = target.ContractJSON()
+		for _, source := range alias.Sources {
+			requirement := providerresolution.Requirement{
+				Capability: targetID.String(),
+				Source:     source,
+			}
+			if target, exists := catalog.Capability(targetID); exists {
+				requirement.Contract = target.ContractJSON()
+			}
+			result = append(result, requirement)
 		}
-		result = append(result, requirement)
 	}
 	return result, nil
+}
+
+func applicationAliasDeclarations(inputs []ApplicationAlias) []applicationmeta.Alias {
+	aliases := make([]applicationmeta.Alias, len(inputs))
+	for index, input := range inputs {
+		aliases[index] = input.Alias
+	}
+	return aliases
 }
 
 func clonePluginInput(input generation.PluginInput) generation.PluginInput {
@@ -903,7 +947,7 @@ func generatedRequirementValues(values map[string]GeneratedRequirement) []Genera
 	return result
 }
 
-func generatedRequirementSource(requirement GeneratedRequirement) string {
+func generatedRequirementSource(requirement GeneratedRequirement, plugin Plugin) providerresolution.RequirementSource {
 	value := fmt.Sprintf(
 		"generation plugin %q rule %q extensions.%s on %s",
 		requirement.pluginID,
@@ -911,12 +955,27 @@ func generatedRequirementSource(requirement GeneratedRequirement) string {
 		requirement.namespace,
 		requirement.source,
 	)
-	if len(value) <= maximumRequirementSourceSize {
-		return value
+	if len(value) > maximumRequirementSourceSize {
+		sum := sha256.Sum256([]byte(value))
+		suffix := "...#sha256:" + hex.EncodeToString(sum[:])
+		value = value[:maximumRequirementSourceSize-len(suffix)] + suffix
 	}
-	sum := sha256.Sum256([]byte(value))
-	suffix := "...#sha256:" + hex.EncodeToString(sum[:])
-	return value[:maximumRequirementSourceSize-len(suffix)] + suffix
+	sourcePath := "plugin.yaml"
+	if plugin.PluginPath != "" {
+		sourcePath = path.Join(plugin.PluginPath, "plugin.yaml")
+	}
+	return providerresolution.RequirementSource{
+		Kind:             providerresolution.RequirementGenerationRule,
+		Reference:        value,
+		ModulePath:       plugin.Context.ModulePath,
+		Path:             sourcePath,
+		Line:             1,
+		Column:           1,
+		PluginID:         requirement.pluginID,
+		Namespace:        requirement.namespace,
+		SourceCapability: requirement.source.String(),
+		RuleID:           requirement.ruleID,
+	}
 }
 
 func extensionOutputDigest(outputs []ExtensionOutput) string {
@@ -1039,7 +1098,7 @@ func findDependencyCycle(activation Result, generated []GeneratedRequirement) *D
 				target:             requirement.Capability(),
 				namespace:          use.Namespace(),
 				pluginID:           provider.PluginID(),
-				requirementSources: use.RequirementSources(),
+				requirementSources: requirementSourceLabels(use.RequirementSources()),
 			})
 		}
 	}

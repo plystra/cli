@@ -189,10 +189,12 @@ func resolveWithProviderCatalog(input Input, catalog providerresolution.Catalog)
 					continue
 				}
 				generated[key] = struct{}{}
-				requirements = append(requirements, providerresolution.Requirement{
-					Capability: activation.Capability().String(),
-					Source:     activationRequirementSource(use),
-				})
+				for _, source := range use.RequirementSources() {
+					requirements = append(requirements, providerresolution.Requirement{
+						Capability: activation.Capability().String(),
+						Source:     activationRequirementSource(use, source),
+					})
+				}
 				added++
 			}
 		}
@@ -275,14 +277,23 @@ func cloneCandidates(inputs []providerresolution.Candidate) []providerresolution
 	return result
 }
 
-func activationRequirementSource(use generationactivation.NamespaceUse) string {
+func activationRequirementSource(use generationactivation.NamespaceUse, cause providerresolution.RequirementSource) providerresolution.RequirementSource {
 	value := "extensions." + use.Namespace() + " on " + use.SourceCapability().String()
-	if len(value) <= maximumRequirementSourceSize {
-		return value
+	if len(value) > maximumRequirementSourceSize {
+		sum := sha256.Sum256([]byte(value))
+		suffix := "...#sha256:" + hex.EncodeToString(sum[:])
+		value = value[:maximumRequirementSourceSize-len(suffix)] + suffix
 	}
-	sum := sha256.Sum256([]byte(value))
-	suffix := "...#sha256:" + hex.EncodeToString(sum[:])
-	return value[:maximumRequirementSourceSize-len(suffix)] + suffix
+	return providerresolution.RequirementSource{
+		Kind:             providerresolution.RequirementActivation,
+		Reference:        value,
+		ModulePath:       cause.ModulePath,
+		Path:             cause.Path,
+		Line:             cause.Line,
+		Column:           cause.Column,
+		Namespace:        use.Namespace(),
+		SourceCapability: use.SourceCapability().String(),
+	}
 }
 
 type extensionBuilder struct {
@@ -453,7 +464,7 @@ func findActivationCycle(requirements generationactivation.RequirementSet) *Acti
 				source:             use.SourceCapability(),
 				target:             requirement.Capability(),
 				namespace:          use.Namespace(),
-				requirementSources: use.RequirementSources(),
+				requirementSources: requirementSourceLabels(use.RequirementSources()),
 			}
 			key := edge.source.String() + "\x00" + edge.target.String() + "\x00" + edge.namespace
 			if _, duplicate := seenEdges[key]; duplicate {
@@ -522,6 +533,14 @@ func findActivationCycle(requirements generationactivation.RequirementSet) *Acti
 		}
 	}
 	return nil
+}
+
+func requirementSourceLabels(sources []providerresolution.RequirementSource) []string {
+	values := make([]string, len(sources))
+	for index, source := range sources {
+		values[index] = source.String()
+	}
+	return values
 }
 
 func closureError(issues []error) error {

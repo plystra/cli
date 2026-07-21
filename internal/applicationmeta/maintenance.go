@@ -51,8 +51,9 @@ type maintenanceCandidate struct {
 // ConfigurationMaintenance is one immutable, comment-preserving planned
 // update of the selected current-project document.
 type ConfigurationMaintenance struct {
-	data    []byte
-	changed bool
+	data       []byte
+	localPaths []string
+	changed    bool
 }
 
 // Data returns defensive planned YAML bytes.
@@ -61,6 +62,12 @@ func (m ConfigurationMaintenance) Data() []byte { return append([]byte(nil), m.d
 // Changed reports whether dependency recomposition changes the selected
 // current-project document.
 func (m ConfigurationMaintenance) Changed() bool { return m.changed }
+
+// LocalPaths returns schema paths whose effective root-document values are
+// explicit current-project decisions rather than maintained dependency state.
+func (m ConfigurationMaintenance) LocalPaths() []string {
+	return append([]string(nil), m.localPaths...)
+}
 
 // MaintainDependencyConfiguration performs a typed three-way merge using the
 // prior generated dependency baseline, the developer's current YAML, and the
@@ -168,9 +175,10 @@ func maintainDependencyConfiguration(data []byte, overlay *Manifest, previous De
 		target[path] = cloneMaintenanceDecision(decision)
 	}
 	target = suppressMaintenanceDescendants(target)
+	localPaths := sortedMaintenanceDecisionPaths(local)
 
 	if maintenanceDecisionMapsEqual(currentByPath, target) {
-		return ConfigurationMaintenance{data: append([]byte(nil), data...)}, nil
+		return ConfigurationMaintenance{data: append([]byte(nil), data...), localPaths: localPaths}, nil
 	}
 	document, err := decodeDocument(data)
 	if err != nil {
@@ -204,7 +212,16 @@ func maintainDependencyConfiguration(data []byte, overlay *Manifest, previous De
 	if !sameCurrentProjectProcessSettings(currentManifest, afterManifest) {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: updated Project configuration changed current-project process settings", ErrMaintainConfiguration)
 	}
-	return ConfigurationMaintenance{data: append([]byte(nil), updated...), changed: !bytes.Equal(data, updated)}, nil
+	return ConfigurationMaintenance{data: append([]byte(nil), updated...), localPaths: localPaths, changed: !bytes.Equal(data, updated)}, nil
+}
+
+func sortedMaintenanceDecisionPaths(values map[string]maintenanceDecision) []string {
+	paths := make([]string, 0, len(values))
+	for path := range values {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 func maintenanceDecisionResolvesPath(decisions map[string]maintenanceDecision, path string) bool {

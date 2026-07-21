@@ -809,6 +809,21 @@ errors: []
 		}
 		aliases = manifest.Aliases()
 	}
+	applicationAliases := make([]generationresolution.ApplicationAlias, len(aliases))
+	for index, alias := range aliases {
+		applicationAliases[index] = generationresolution.ApplicationAlias{
+			Alias: alias,
+			Sources: []providerresolution.RequirementSource{{
+				Kind:       providerresolution.RequirementAliasTarget,
+				Reference:  alias.Source() + " target",
+				ModulePath: businessModulePath,
+				Path:       "plystra.yaml",
+				Line:       1,
+				Column:     1,
+				Alias:      alias.ID().String(),
+			}},
+		}
+	}
 	catalog, err := generationactivation.New(nil)
 	if err != nil {
 		t.Fatalf("generationactivation.New: %v", err)
@@ -817,8 +832,8 @@ errors: []
 		ConfigurationProvenance: configurationProvenance,
 		Input: generationresolution.Input{
 			Requirements: []providerresolution.Requirement{
-				{Contract: email, Source: "application client email.send/v1"},
-				{Contract: health, Source: "application health"},
+				{Contract: email, Source: applicationGenerationRequirementSource("application client email.send/v1")},
+				{Contract: health, Source: applicationGenerationRequirementSource("application health")},
 			},
 			Candidates: []providerresolution.Candidate{{
 				PluginID: "acme.business",
@@ -841,12 +856,23 @@ errors: []
 			{ContractJSON: email, Sources: []string{"business-module/business/capabilities/email.send/v1/capability.yaml"}, Exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: true}},
 			{ContractJSON: health, Sources: []string{"github.com/plystra/kernel/capability/catalog kernel.health/v1"}, Intrinsic: true, Exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: true}},
 		},
-		ApplicationAliases: aliases,
+		ApplicationAliases: applicationAliases,
 	})
 	if err != nil {
 		t.Fatalf("ResolveExtensions: %v", err)
 	}
 	return resolution
+}
+
+func applicationGenerationRequirementSource(reference string) providerresolution.RequirementSource {
+	return providerresolution.RequirementSource{
+		Kind:       providerresolution.RequirementDeclaration,
+		Reference:  reference,
+		ModulePath: businessModulePath,
+		Path:       "plystra.yaml",
+		Line:       1,
+		Column:     1,
+	}
 }
 
 func normalizedContract(t testing.TB, source string) []byte {

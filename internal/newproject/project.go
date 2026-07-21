@@ -532,7 +532,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if err != nil {
 		return fmt.Errorf("digest initial Project configuration: %w", err)
 	}
-	input, err := applicationinput.Build(currentManifest, plugininventory.Index{}, &generation.ConfigurationProvenanceInput{
+	input, err := applicationinput.Build(currentManifest, plugininventory.Index{}, applicationinput.SourceContext{CurrentModulePath: modulePath}, &generation.ConfigurationProvenanceInput{
 		Mode:                        generation.ConfigurationModeDefault,
 		RootPath:                    "plystra.yaml",
 		RootDigest:                  configurationDigest,

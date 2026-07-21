@@ -224,7 +224,7 @@ func TestResolveExtensionsSkipsHelpersWhenNoExtensionIsSelected(t *testing.T) {
 	if got := extensionResolvedCapabilityIDs(result.ActivationResolution().ProviderResolution()); !slices.Equal(got, []string{"kernel.health/v1", "order.read/v1"}) {
 		t.Fatalf("Alias target requirements = %v", got)
 	}
-	if !slices.Equal(resolved[0].Sources(), []string{`plystra.yaml capabilities.aliases["health.status/v1"] target`}) || !slices.Equal(resolved[1].Sources(), []string{`plystra.yaml capabilities.aliases["orders.read/v1"] target`}) {
+	if !slices.Equal(extensionRequirementSourceReferences(resolved[0].Sources()), []string{`plystra.yaml capabilities.aliases["health.status/v1"] target`}) || !slices.Equal(extensionRequirementSourceReferences(resolved[1].Sources()), []string{`plystra.yaml capabilities.aliases["orders.read/v1"] target`}) {
 		t.Fatalf("Alias target requirement sources = %v, %v", resolved[0].Sources(), resolved[1].Sources())
 	}
 	if _, exists := result.Context().Plugin(extensionTestPluginID(t, "example.local")); !exists {
@@ -249,7 +249,7 @@ func TestResolveExtensionsClosesSelectedPluginRequirementsTransitively(t *testin
 	unusedPlugin.Context.Requires = []string{"missing.call/v1"}
 	input := ExtensionInput{
 		Input: Input{
-			Requirements: []providerresolution.Requirement{{Contract: order, Source: "order route"}},
+			Requirements: []providerresolution.Requirement{{Contract: order, Source: extensionRequirementSource("order route")}},
 			Candidates: []providerresolution.Candidate{
 				{PluginID: "example.business", Contract: order, Source: "business/order.create"},
 				{PluginID: "example.audit", Contract: audit, Source: "audit/audit.write"},
@@ -285,11 +285,11 @@ func TestResolveExtensionsClosesSelectedPluginRequirementsTransitively(t *testin
 	}
 	resolved := result.ActivationResolution().ProviderResolution()
 	auditCapability, exists := resolved.Capability(extensionTestInternalCapabilityID(t, "audit.write/v1"))
-	if !exists || !slices.Equal(auditCapability.Sources(), []string{"plugin example.business at example.com/application@local/business/plugin.yaml requires audit.write/v1"}) {
+	if !exists || !slices.Equal(extensionRequirementSourceReferences(auditCapability.Sources()), []string{"plugin example.business at example.com/application@local/business/plugin.yaml requires audit.write/v1"}) {
 		t.Fatalf("audit requirement sources = %v, %t", auditCapability.Sources(), exists)
 	}
 	storageCapability, exists := resolved.Capability(extensionTestInternalCapabilityID(t, "storage.write/v1"))
-	if !exists || !slices.Equal(storageCapability.Sources(), []string{"plugin example.audit at example.com/application@local/audit/plugin.yaml requires storage.write/v1"}) {
+	if !exists || !slices.Equal(extensionRequirementSourceReferences(storageCapability.Sources()), []string{"plugin example.audit at example.com/application@local/audit/plugin.yaml requires storage.write/v1"}) {
 		t.Fatalf("storage requirement sources = %v, %t", storageCapability.Sources(), exists)
 	}
 }
@@ -326,7 +326,7 @@ func TestResolveExtensionsRetainsAllPluginRequirementProvenance(t *testing.T) {
 	local.Context.Requires = []string{"audit.write/v1"}
 	input := ExtensionInput{
 		Input: Input{
-			Requirements: []providerresolution.Requirement{{Contract: audit, Source: "plystra.yaml capabilities.require[0]"}},
+			Requirements: []providerresolution.Requirement{{Contract: audit, Source: extensionRequirementSource("plystra.yaml capabilities.require[0]")}},
 			Candidates:   []providerresolution.Candidate{{PluginID: "example.audit", Contract: audit, Source: "audit/audit.write"}},
 		},
 		Plugins:      []Plugin{local, extensionTestPlugin("example.audit", "audit", "audit.write/v1")},
@@ -338,10 +338,10 @@ func TestResolveExtensionsRetainsAllPluginRequirementProvenance(t *testing.T) {
 	}
 	capability, exists := result.ActivationResolution().ProviderResolution().Capability(extensionTestInternalCapabilityID(t, "audit.write/v1"))
 	want := []string{
-		"plugin example.local at example.com/application@local/local/plugin.yaml requires audit.write/v1",
 		"plystra.yaml capabilities.require[0]",
+		"plugin example.local at example.com/application@local/local/plugin.yaml requires audit.write/v1",
 	}
-	if !exists || !slices.Equal(capability.Sources(), want) {
+	if !exists || !slices.Equal(extensionRequirementSourceReferences(capability.Sources()), want) {
 		t.Fatalf("audit sources = %v, %t; want %v", capability.Sources(), exists, want)
 	}
 }
@@ -387,7 +387,7 @@ func TestResolveExtensionsAddsCanonicalHTTPExposureRequirements(t *testing.T) {
 	if got := extensionResolvedCapabilityIDs(result.ActivationResolution().ProviderResolution()); !slices.Equal(got, []string{"kernel.health/v1", "order.read/v1"}) {
 		t.Fatalf("HTTP requirements = %v", got)
 	}
-	if !slices.Equal(resolved[0].Sources(), []string{`plystra.yaml http.expose["kernel.health/v1"]`}) || !slices.Equal(resolved[1].Sources(), []string{`plystra.yaml http.expose["order.read/v1"]`}) {
+	if !slices.Equal(extensionRequirementSourceReferences(resolved[0].Sources()), []string{`plystra.yaml http.expose["kernel.health/v1"]`}) || !slices.Equal(extensionRequirementSourceReferences(resolved[1].Sources()), []string{`plystra.yaml http.expose["order.read/v1"]`}) {
 		t.Fatalf("HTTP requirement sources = %v, %v", resolved[0].Sources(), resolved[1].Sources())
 	}
 	for _, id := range []string{"kernel.health/v1", "order.read/v1"} {
@@ -461,7 +461,7 @@ func TestResolveExtensionsRunsOnlyExplicitlySelectedActivationProvider(t *testin
 	)
 	input := ExtensionInput{
 		Input: Input{
-			Requirements: []providerresolution.Requirement{{Contract: order, Source: "order route"}},
+			Requirements: []providerresolution.Requirement{{Contract: order, Source: extensionRequirementSource("order route")}},
 			Candidates: []providerresolution.Candidate{
 				{PluginID: "example.business", Contract: order, Source: "business/order.create"},
 				{PluginID: "example.authn-a", Contract: verify, Source: "authn-a/session.verify"},
@@ -500,7 +500,7 @@ func TestResolveExtensionsRejectsProviderChoiceThatNeverBecomesRequired(t *testi
 	email := extensionTestContract(t, "email.send/v1", "")
 	input := ExtensionInput{
 		Input: Input{
-			Requirements: []providerresolution.Requirement{{Contract: email, Source: "email workflow"}},
+			Requirements: []providerresolution.Requirement{{Contract: email, Source: extensionRequirementSource("email workflow")}},
 			Candidates: []providerresolution.Candidate{{
 				PluginID: "example.email",
 				Contract: email,
@@ -631,7 +631,7 @@ func TestResolveExtensionsRejectsDifferentOutputForRepeatedContext(t *testing.T)
 	verify := extensionTestContract(t, "authn.session.verify/v1", "")
 	input := ExtensionInput{
 		Input: Input{
-			Requirements: []providerresolution.Requirement{{Contract: order, Source: "order route"}},
+			Requirements: []providerresolution.Requirement{{Contract: order, Source: extensionRequirementSource("order route")}},
 			Candidates: []providerresolution.Candidate{
 				{PluginID: "example.business", Contract: order, Source: "business/order.create"},
 				{PluginID: "example.authn", Contract: verify, Source: "authn/session.verify"},
@@ -670,7 +670,7 @@ func TestResolveExtensionsRejectsOutputOutsideSelectedActivationInputs(t *testin
 	check := extensionTestContract(t, "authz.check/v1", "")
 	input := ExtensionInput{
 		Input: Input{
-			Requirements: []providerresolution.Requirement{{Contract: order, Source: "order route"}},
+			Requirements: []providerresolution.Requirement{{Contract: order, Source: extensionRequirementSource("order route")}},
 			Candidates: []providerresolution.Candidate{
 				{PluginID: "example.business", Contract: order, Source: "business/order.create"},
 				{PluginID: "example.authn", Contract: verify, Source: "authn/session.verify"},
@@ -765,7 +765,7 @@ func TestResolveExtensionsFailsOnStructuredErrorDiagnostic(t *testing.T) {
 	verify := extensionTestContract(t, "authn.session.verify/v1", "")
 	input := ExtensionInput{
 		Input: Input{
-			Requirements: []providerresolution.Requirement{{Contract: order, Source: "order route"}},
+			Requirements: []providerresolution.Requirement{{Contract: order, Source: extensionRequirementSource("order route")}},
 			Candidates: []providerresolution.Candidate{
 				{PluginID: "example.business", Contract: order, Source: "business/order.create"},
 				{PluginID: "example.authn", Contract: verify, Source: "authn/session.verify"},
@@ -823,7 +823,7 @@ func TestResolveExtensionsRejectsContextCatalogDrift(t *testing.T) {
 	drifted := extensionTestContract(t, "order.read/v1", "extensions:\n  audit: {record: true}\n")
 	input := ExtensionInput{
 		Input: Input{
-			Requirements: []providerresolution.Requirement{{Contract: required, Source: "order route"}},
+			Requirements: []providerresolution.Requirement{{Contract: required, Source: extensionRequirementSource("order route")}},
 			Candidates:   []providerresolution.Candidate{{PluginID: "example.business", Contract: required, Source: "business/order.read"}},
 		},
 		Plugins:      []Plugin{extensionTestPlugin("example.business", "business", "order.read/v1")},
@@ -938,16 +938,32 @@ func extensionTestInput(t testing.TB, order, verify, audit []byte) ExtensionInpu
 	}
 }
 
-func extensionTestApplicationAliases(t testing.TB, aliases string) []applicationmeta.Alias {
+func extensionTestApplicationAliases(t testing.TB, aliases string) []ApplicationAlias {
 	t.Helper()
 	manifest, err := applicationmeta.Parse([]byte("capabilities:\n  aliases:\n" + aliases))
 	if err != nil {
 		t.Fatalf("applicationmeta.Parse: %v", err)
 	}
-	return manifest.Aliases()
+	declarations := manifest.Aliases()
+	values := make([]ApplicationAlias, len(declarations))
+	for index, declaration := range declarations {
+		values[index] = ApplicationAlias{
+			Alias: declaration,
+			Sources: []providerresolution.RequirementSource{{
+				Kind:       providerresolution.RequirementAliasTarget,
+				Reference:  declaration.Source() + " target",
+				ModulePath: "example.com/application",
+				Path:       "plystra.yaml",
+				Line:       1,
+				Column:     1,
+				Alias:      declaration.ID().String(),
+			}},
+		}
+	}
+	return values
 }
 
-func extensionTestHTTPExposures(t testing.TB, capabilities ...string) []applicationmeta.HTTPExposure {
+func extensionTestHTTPExposures(t testing.TB, capabilities ...string) []ApplicationHTTPExposure {
 	t.Helper()
 	var source strings.Builder
 	source.WriteString("http:\n  expose:\n")
@@ -960,7 +976,41 @@ func extensionTestHTTPExposures(t testing.TB, capabilities ...string) []applicat
 	if err != nil {
 		t.Fatalf("applicationmeta.Parse HTTP exposure: %v", err)
 	}
-	return manifest.HTTPExposures()
+	declarations := manifest.HTTPExposures()
+	values := make([]ApplicationHTTPExposure, len(declarations))
+	for index, declaration := range declarations {
+		values[index] = ApplicationHTTPExposure{
+			Exposure: declaration,
+			Sources: []providerresolution.RequirementSource{{
+				Kind:       providerresolution.RequirementExposure,
+				Reference:  declaration.Source(),
+				ModulePath: "example.com/application",
+				Path:       "plystra.yaml",
+				Line:       1,
+				Column:     1,
+			}},
+		}
+	}
+	return values
+}
+
+func extensionRequirementSource(reference string) providerresolution.RequirementSource {
+	return providerresolution.RequirementSource{
+		Kind:       providerresolution.RequirementDeclaration,
+		Reference:  reference,
+		ModulePath: "example.com/application",
+		Path:       "plystra.yaml",
+		Line:       1,
+		Column:     1,
+	}
+}
+
+func extensionRequirementSourceReferences(sources []providerresolution.RequirementSource) []string {
+	values := make([]string, len(sources))
+	for index, source := range sources {
+		values[index] = source.String()
+	}
+	return values
 }
 
 func extensionTestPlugin(id, path string, provides ...string) Plugin {

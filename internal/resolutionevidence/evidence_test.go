@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilitymeta"
+	"github.com/plystra/cli/internal/providerresolution"
 	"github.com/plystra/cli/internal/resolutionevidence"
 )
 
@@ -17,11 +19,11 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 
 	firstContext := selectedContext(t, false, "a", true)
 	secondContext := selectedContext(t, true, "a", true)
-	first, err := resolutionevidence.Build(resolutionevidence.Input{Context: firstContext, Modules: participatingModules(false), PluginCandidates: participatingPluginCandidates(false)})
+	first, err := resolutionevidence.Build(resolutionEvidenceInput(t, firstContext, participatingModules(false), participatingPluginCandidates(false)))
 	if err != nil {
 		t.Fatalf("Build(first): %v", err)
 	}
-	second, err := resolutionevidence.Build(resolutionevidence.Input{Context: secondContext, Modules: participatingModules(true), PluginCandidates: participatingPluginCandidates(true)})
+	second, err := resolutionevidence.Build(resolutionEvidenceInput(t, secondContext, participatingModules(true), participatingPluginCandidates(true)))
 	if err != nil {
 		t.Fatalf("Build(second): %v", err)
 	}
@@ -72,11 +74,7 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	if !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() {
 		t.Fatalf("input permutation changed evidence:\nfirst:  %s %s\nsecond: %s %s", first.CanonicalJSON(), first.Digest(), second.CanonicalJSON(), second.Digest())
 	}
-	withoutUnselected, err := resolutionevidence.Build(resolutionevidence.Input{
-		Context:          firstContext,
-		Modules:          participatingModules(false),
-		PluginCandidates: participatingPluginCandidates(false)[:1],
-	})
+	withoutUnselected, err := resolutionevidence.Build(resolutionEvidenceInput(t, firstContext, participatingModules(false), participatingPluginCandidates(false)[:1]))
 	if err != nil {
 		t.Fatalf("Build(without unselected candidate): %v", err)
 	}
@@ -146,15 +144,15 @@ func TestBuildSeparatesSelectionProvenanceFromBuildState(t *testing.T) {
 	buildContext := selectedContext(t, false, "a", false)
 	modules := participatingModules(false)
 	candidates := participatingPluginCandidates(false)
-	base, err := resolutionevidence.Build(resolutionevidence.Input{Context: baseContext, Modules: modules, PluginCandidates: candidates})
+	base, err := resolutionevidence.Build(resolutionEvidenceInput(t, baseContext, modules, candidates))
 	if err != nil {
 		t.Fatalf("Build(base): %v", err)
 	}
-	selection, err := resolutionevidence.Build(resolutionevidence.Input{Context: selectionContext, Modules: modules, PluginCandidates: candidates})
+	selection, err := resolutionevidence.Build(resolutionEvidenceInput(t, selectionContext, modules, candidates))
 	if err != nil {
 		t.Fatalf("Build(selection): %v", err)
 	}
-	build, err := resolutionevidence.Build(resolutionevidence.Input{Context: buildContext, Modules: modules, PluginCandidates: candidates})
+	build, err := resolutionevidence.Build(resolutionEvidenceInput(t, buildContext, modules, candidates))
 	if err != nil {
 		t.Fatalf("Build(build): %v", err)
 	}
@@ -174,11 +172,11 @@ func TestBuildOrdersEverySelectedPluginReasonDeterministically(t *testing.T) {
 
 	firstContext := multiProviderContext(t, false)
 	secondContext := multiProviderContext(t, true)
-	first, err := resolutionevidence.Build(resolutionevidence.Input{Context: firstContext, Modules: participatingModules(false), PluginCandidates: participatingPluginCandidates(false)})
+	first, err := resolutionevidence.Build(resolutionEvidenceInput(t, firstContext, participatingModules(false), participatingPluginCandidates(false)))
 	if err != nil {
 		t.Fatalf("Build(first): %v", err)
 	}
-	second, err := resolutionevidence.Build(resolutionevidence.Input{Context: secondContext, Modules: participatingModules(true), PluginCandidates: participatingPluginCandidates(true)})
+	second, err := resolutionevidence.Build(resolutionEvidenceInput(t, secondContext, participatingModules(true), participatingPluginCandidates(true)))
 	if err != nil {
 		t.Fatalf("Build(second): %v", err)
 	}
@@ -243,7 +241,7 @@ func TestBuildRejectsInvalidParticipatingProjectEvidence(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			evidence, err := resolutionevidence.Build(resolutionevidence.Input{Context: context, Modules: test.mutate(participatingModules(false)), PluginCandidates: participatingPluginCandidates(false)})
+			evidence, err := resolutionevidence.Build(resolutionEvidenceInput(t, context, test.mutate(participatingModules(false)), participatingPluginCandidates(false)))
 			if !errors.Is(err, resolutionevidence.ErrBuild) || evidence.Valid() {
 				t.Fatalf("Build = %#v, %v", evidence, err)
 			}
@@ -317,7 +315,7 @@ func TestBuildRejectsInvalidDiscoveredPluginCandidateEvidence(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			candidates := test.mutate(participatingPluginCandidates(false))
-			evidence, err := resolutionevidence.Build(resolutionevidence.Input{Context: context, Modules: participatingModules(false), PluginCandidates: candidates})
+			evidence, err := resolutionevidence.Build(resolutionEvidenceInput(t, context, participatingModules(false), candidates))
 			if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), test.want) || evidence.Valid() {
 				t.Fatalf("Build = %#v, %v; want %q", evidence, err, test.want)
 			}
@@ -337,9 +335,327 @@ func TestBuildRejectsSelectedDependencyPluginWithoutASelectionReason(t *testing.
 	if err != nil {
 		t.Fatalf("generation.NewContext: %v", err)
 	}
-	evidence, err := resolutionevidence.Build(resolutionevidence.Input{Context: context, Modules: participatingModules(false), PluginCandidates: participatingPluginCandidates(false)})
+	evidence, err := resolutionevidence.Build(resolutionEvidenceInput(t, context, participatingModules(false), participatingPluginCandidates(false)))
 	if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "at least one selection reason is required") || evidence.Valid() {
 		t.Fatalf("Build = %#v, %v", evidence, err)
+	}
+}
+
+func TestBuildRecordsCanonicalCapabilityRequirementSources(t *testing.T) {
+	t.Parallel()
+
+	context := selectedContext(t, false, "a", true)
+	contracts := make(map[string][]byte)
+	digests := make(map[string]string)
+	for _, capability := range context.Capabilities() {
+		contracts[capability.ID().String()] = capability.ContractJSON()
+		digests[capability.ID().String()] = capability.ContractDigest()
+	}
+	emailSources := []providerresolution.RequirementSource{
+		{
+			Kind:             providerresolution.RequirementGenerationRule,
+			Reference:        "generation plugin example.smtp rule authn.require-email",
+			ModulePath:       "example.com/smtp",
+			Path:             "smtp/plugin.yaml",
+			Line:             1,
+			Column:           1,
+			PluginID:         "example.smtp",
+			Namespace:        "authn",
+			SourceCapability: "order.create/v1",
+			RuleID:           "authn.require-email",
+		},
+		{
+			Kind:       providerresolution.RequirementExposure,
+			Reference:  `plystra.yaml http.expose["email.send/v1"]`,
+			ModulePath: "example.com/app",
+			Path:       "plystra.yaml",
+			Line:       8,
+			Column:     5,
+		},
+		{
+			Kind:       providerresolution.RequirementPlugin,
+			Reference:  "plugin example.smtp requires email.send/v1",
+			ModulePath: "example.com/smtp",
+			Path:       "smtp/plugin.yaml",
+			Line:       1,
+			Column:     1,
+			PluginID:   "example.smtp",
+		},
+		{
+			Kind:       providerresolution.RequirementDeclaration,
+			Reference:  `example.com/smtp@v1.3.0/plystra.yaml capabilities.require["email.send/v1"]`,
+			ModulePath: "example.com/smtp",
+			Path:       "plystra.yaml",
+			Line:       4,
+			Column:     7,
+		},
+		{
+			Kind:       providerresolution.RequirementGeneratedClient,
+			Reference:  "generated client import in example.smtp",
+			ModulePath: "example.com/smtp",
+			Path:       "smtp/internal/client.go",
+			Line:       12,
+			Column:     3,
+			PluginID:   "example.smtp",
+		},
+		{
+			Kind:             providerresolution.RequirementActivation,
+			Reference:        "extensions.authn on order.create/v1",
+			ModulePath:       "example.com/app",
+			Path:             "plystra.yaml",
+			Line:             3,
+			Column:           5,
+			Namespace:        "authn",
+			SourceCapability: "order.create/v1",
+		},
+		{
+			Kind:       providerresolution.RequirementAliasTarget,
+			Reference:  `plystra.yaml capabilities.aliases["mail.send/v1"] target`,
+			ModulePath: "example.com/app",
+			Path:       "plystra.yaml",
+			Line:       11,
+			Column:     5,
+			Alias:      "mail.send/v1",
+		},
+	}
+	duplicateDeclaration := emailSources[3]
+	duplicateDeclaration.Reference = "same declaration through a second diagnostic label"
+	emailSources = append(emailSources, duplicateDeclaration)
+	healthSource := providerresolution.RequirementSource{
+		Kind:       providerresolution.RequirementDeclaration,
+		Reference:  `plystra.yaml capabilities.require["kernel.health/v1"]`,
+		ModulePath: "example.com/app",
+		Path:       "plystra.yaml",
+		Line:       5,
+		Column:     7,
+	}
+
+	build := func(reverse bool) resolutionevidence.Evidence {
+		t.Helper()
+		sources := append([]providerresolution.RequirementSource(nil), emailSources...)
+		if reverse {
+			slices.Reverse(sources)
+		}
+		requirements := make([]providerresolution.Requirement, 0, len(sources)+1)
+		for _, source := range sources {
+			requirements = append(requirements, providerresolution.Requirement{Contract: contracts["email.send/v1"], Source: source})
+		}
+		requirements = append(requirements, providerresolution.Requirement{Contract: contracts["kernel.health/v1"], Source: healthSource})
+		if reverse {
+			slices.Reverse(requirements)
+		}
+		resolved, err := providerresolution.Resolve(providerresolution.Input{
+			Requirements: requirements,
+			Candidates: []providerresolution.Candidate{{
+				PluginID: "example.smtp",
+				Contract: contracts["email.send/v1"],
+				Source:   "smtp/capability.yaml",
+			}},
+		})
+		if err != nil {
+			t.Fatalf("providerresolution.Resolve: %v", err)
+		}
+		evidence, err := resolutionevidence.Build(resolutionevidence.Input{
+			Context:            context,
+			ProviderResolution: resolved,
+			Modules:            participatingModules(reverse),
+			PluginCandidates:   participatingPluginCandidates(reverse),
+		})
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		return evidence
+	}
+
+	first := build(false)
+	second := build(true)
+	if !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() {
+		t.Fatalf("requirement input permutation changed evidence:\nfirst:  %s\nsecond: %s", first.CanonicalJSON(), second.CanonicalJSON())
+	}
+	requirements := first.Requirements()
+	if len(requirements) != 2 || requirements[0].Capability() != "email.send/v1" || requirements[1].Capability() != "kernel.health/v1" {
+		t.Fatalf("requirements = %#v", requirements)
+	}
+	if requirements[0].ContractDigest() != digests["email.send/v1"] || requirements[0].Intrinsic() {
+		t.Fatalf("email requirement = %#v", requirements[0])
+	}
+	wantKinds := []providerresolution.RequirementSourceKind{
+		providerresolution.RequirementActivation,
+		providerresolution.RequirementAliasTarget,
+		providerresolution.RequirementDeclaration,
+		providerresolution.RequirementExposure,
+		providerresolution.RequirementGeneratedClient,
+		providerresolution.RequirementGenerationRule,
+		providerresolution.RequirementPlugin,
+	}
+	sources := requirements[0].Sources()
+	if len(sources) != len(wantKinds) {
+		t.Fatalf("email requirement sources = %#v", sources)
+	}
+	for index, want := range wantKinds {
+		if sources[index].Kind() != want || sources[index].Source().Kind() != string(want) {
+			t.Fatalf("source[%d] = %#v, want kind %q", index, sources[index], want)
+		}
+	}
+	if source := sources[0]; source.Namespace() != "authn" || source.SourceCapability() != "order.create/v1" || source.ProjectModule() != "example.com/app" {
+		t.Fatalf("activation source = %#v", source)
+	}
+	if source := sources[1]; source.Alias() != "mail.send/v1" || source.ProjectModule() != "example.com/app" {
+		t.Fatalf("Alias-target source = %#v", source)
+	}
+	if source := sources[2]; source.ProjectModule() != "example.com/smtp" || source.Source().Module() != "corp.example/smtp" || source.Source().Path() != "plystra.yaml" || source.Source().Line() != 4 || source.Source().Column() != 7 {
+		t.Fatalf("replacement-safe declaration source = %#v", source)
+	}
+	if source := sources[4]; source.PluginID() != "example.smtp" || source.Source().Module() != "corp.example/smtp" || source.Source().Path() != "smtp/internal/client.go" {
+		t.Fatalf("generated-client source = %#v", source)
+	}
+	if source := sources[5]; source.PluginID() != "example.smtp" || source.Namespace() != "authn" || source.SourceCapability() != "order.create/v1" || source.RuleID() != "authn.require-email" || source.Source().Module() != "corp.example/smtp" {
+		t.Fatalf("generation-rule source = %#v", source)
+	}
+	if source := sources[6]; source.PluginID() != "example.smtp" || source.Source().Module() != "corp.example/smtp" || source.Source().Path() != "smtp/plugin.yaml" {
+		t.Fatalf("Plugin source = %#v", source)
+	}
+	if requirements[1].ContractDigest() != digests["kernel.health/v1"] || !requirements[1].Intrinsic() || len(requirements[1].Sources()) != 1 || requirements[1].Sources()[0].ProjectModule() != "example.com/app" {
+		t.Fatalf("intrinsic requirement = %#v", requirements[1])
+	}
+	for _, forbidden := range []string{"same declaration through a second diagnostic label", "generation plugin example.smtp", `capabilities.require[\"kernel.health/v1\"]`} {
+		if bytes.Contains(first.CanonicalJSON(), []byte(forbidden)) {
+			t.Fatalf("canonical evidence contains diagnostic reference %q: %s", forbidden, first.CanonicalJSON())
+		}
+	}
+
+	requirements[0] = resolutionevidence.CapabilityRequirement{}
+	sources[0] = resolutionevidence.RequirementSource{}
+	if got := first.Requirements(); got[0].Capability() != "email.send/v1" || got[0].Sources()[0].Kind() != providerresolution.RequirementActivation {
+		t.Fatal("Requirements or Requirement.Sources exposed mutable evidence storage")
+	}
+}
+
+func TestBuildRejectsRequirementResolutionInconsistentWithSelectedContext(t *testing.T) {
+	t.Parallel()
+
+	context := selectedContext(t, false, "a", true)
+	contracts := make(map[string][]byte)
+	for _, capability := range context.Capabilities() {
+		contracts[capability.ID().String()] = capability.ContractJSON()
+	}
+	resolve := func(t *testing.T, requirements []providerresolution.Requirement, emailContract []byte) providerresolution.Result {
+		t.Helper()
+		resolved, err := providerresolution.Resolve(providerresolution.Input{
+			Requirements: requirements,
+			Candidates: []providerresolution.Candidate{{
+				PluginID: "example.smtp",
+				Contract: emailContract,
+				Source:   "smtp/capability.yaml",
+			}},
+		})
+		if err != nil {
+			t.Fatalf("providerresolution.Resolve: %v", err)
+		}
+		return resolved
+	}
+	declaration := func(modulePath string) providerresolution.RequirementSource {
+		return providerresolution.RequirementSource{
+			Kind:       providerresolution.RequirementDeclaration,
+			Reference:  "configuration declaration",
+			ModulePath: modulePath,
+			Path:       "plystra.yaml",
+			Line:       1,
+			Column:     1,
+		}
+	}
+	build := func(result providerresolution.Result) (resolutionevidence.Evidence, error) {
+		return resolutionevidence.Build(resolutionevidence.Input{
+			Context:            context,
+			ProviderResolution: result,
+			Modules:            participatingModules(false),
+			PluginCandidates:   participatingPluginCandidates(false),
+		})
+	}
+
+	t.Run("missing selected-model requirement", func(t *testing.T) {
+		result := resolve(t, []providerresolution.Requirement{{Contract: contracts["email.send/v1"], Source: declaration("example.com/app")}}, contracts["email.send/v1"])
+		evidence, err := build(result)
+		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "1 requirements while the selected model has 2") || evidence.Valid() {
+			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+	})
+
+	t.Run("contract differs", func(t *testing.T) {
+		changed := normalizeContract(t, `id: email.send/v1
+request: {}
+response: {changed: {type: boolean, required: true}}
+semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`)
+		result := resolve(t, []providerresolution.Requirement{
+			{Contract: changed, Source: declaration("example.com/app")},
+			{Contract: contracts["kernel.health/v1"], Source: declaration("example.com/app")},
+		}, changed)
+		evidence, err := build(result)
+		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "does not match the selected canonical contract") || evidence.Valid() {
+			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+	})
+
+	t.Run("source Project does not participate", func(t *testing.T) {
+		result := resolve(t, []providerresolution.Requirement{
+			{Contract: contracts["email.send/v1"], Source: declaration("example.com/unrelated")},
+			{Contract: contracts["kernel.health/v1"], Source: declaration("example.com/app")},
+		}, contracts["email.send/v1"])
+		evidence, err := build(result)
+		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "is not a participating Project") || evidence.Valid() {
+			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+	})
+}
+
+func resolutionEvidenceInput(t testing.TB, context generation.Context, modules []resolutionevidence.ModuleInput, candidates []resolutionevidence.PluginCandidateInput) resolutionevidence.Input {
+	t.Helper()
+	capabilities := make(map[string]generation.CapabilityView)
+	for _, capability := range context.Capabilities() {
+		capabilities[capability.ID().String()] = capability
+	}
+	requirements := make([]providerresolution.Requirement, 0, len(context.Requirements()))
+	for _, id := range context.Requirements() {
+		capability := capabilities[id.String()]
+		requirements = append(requirements, providerresolution.Requirement{
+			Contract: capability.ContractJSON(),
+			Source: providerresolution.RequirementSource{
+				Kind:       providerresolution.RequirementDeclaration,
+				Reference:  `plystra.yaml capabilities.require["` + id.String() + `"]`,
+				ModulePath: "example.com/app",
+				Path:       "plystra.yaml",
+				Line:       1,
+				Column:     1,
+			},
+		})
+	}
+	providerCandidates := make([]providerresolution.Candidate, 0, len(context.Providers()))
+	for _, provider := range context.Providers() {
+		capability := capabilities[provider.Capability().String()]
+		providerCandidates = append(providerCandidates, providerresolution.Candidate{
+			PluginID: provider.Plugin().String(),
+			Contract: capability.ContractJSON(),
+			Source:   provider.Plugin().String() + "/capability.yaml",
+		})
+	}
+	providerResult, err := providerresolution.Resolve(providerresolution.Input{Requirements: requirements, Candidates: providerCandidates})
+	if err != nil {
+		t.Fatalf("providerresolution.Resolve: %v", err)
+	}
+	return resolutionevidence.Input{
+		Context:            context,
+		ProviderResolution: providerResult,
+		Modules:            modules,
+		PluginCandidates:   candidates,
 	}
 }
 

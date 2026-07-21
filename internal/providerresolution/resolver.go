@@ -9,12 +9,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilitymeta"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/pluginid"
 )
 
@@ -37,15 +39,58 @@ var (
 	ErrInvalidChoice = errors.New("invalid explicit Capability provider choice")
 )
 
-// Requirement carries deterministic provenance describing why the application
-// requires one exact canonical Capability. Contract may use the accepted
-// capability.yaml syntax. Capability may instead carry an exact ordinary ID
-// whose contract must be inferred identically from all visible providers. When
-// both are present, they must identify the same exact Capability.
+// RequirementSourceKind identifies the semantic edge that introduced one
+// exact canonical Capability requirement.
+type RequirementSourceKind string
+
+const (
+	// RequirementDeclaration identifies an explicit capabilities.require entry.
+	RequirementDeclaration RequirementSourceKind = "declaration"
+	// RequirementExposure identifies an explicit public HTTP exposure.
+	RequirementExposure RequirementSourceKind = "exposure"
+	// RequirementGeneratedClient identifies a statically detected generated-client use.
+	RequirementGeneratedClient RequirementSourceKind = "generated-client"
+	// RequirementPlugin identifies one selected Plugin's declared requires edge.
+	RequirementPlugin RequirementSourceKind = "plugin"
+	// RequirementAliasTarget identifies an application Alias target edge.
+	RequirementAliasTarget RequirementSourceKind = "alias-target"
+	// RequirementActivation identifies a generation namespace activation edge.
+	RequirementActivation RequirementSourceKind = "activation"
+	// RequirementGenerationRule identifies a selected generation rule output edge.
+	RequirementGenerationRule RequirementSourceKind = "generation-rule"
+)
+
+// RequirementSource is one typed, stable, module-relative explanation for a
+// canonical requirement. Reference is retained for human diagnostics; the
+// remaining fields let evidence consumers classify provenance without parsing
+// diagnostic text.
+type RequirementSource struct {
+	Kind             RequirementSourceKind
+	Reference        string
+	ModulePath       string
+	Path             string
+	Line             int
+	Column           int
+	PluginID         string
+	Alias            string
+	Namespace        string
+	SourceCapability string
+	RuleID           string
+}
+
+// String returns the bounded stable diagnostic reference.
+func (s RequirementSource) String() string { return s.Reference }
+
+// Requirement carries deterministic typed provenance describing why the
+// application requires one exact canonical Capability. Contract may use the
+// accepted capability.yaml syntax. Capability may instead carry an exact
+// ordinary ID whose contract must be inferred identically from all visible
+// providers. When both are present, they must identify the same exact
+// Capability.
 type Requirement struct {
 	Capability string
 	Contract   []byte
-	Source     string
+	Source     RequirementSource
 }
 
 // Candidate carries one plugin's provider copy of an exact canonical contract.
@@ -103,7 +148,7 @@ type ResolvedCapability struct {
 	contractJSON []byte
 	digest       string
 	intrinsic    bool
-	sources      []string
+	sources      []RequirementSource
 }
 
 // ID returns the exact canonical Capability identity.
@@ -120,9 +165,9 @@ func (c ResolvedCapability) ContractDigest() string { return c.digest }
 // Intrinsic reports whether the Kernel owns this reserved kernel.* Capability.
 func (c ResolvedCapability) Intrinsic() bool { return c.intrinsic }
 
-// Sources returns sorted, deduplicated requirement provenance.
-func (c ResolvedCapability) Sources() []string {
-	return append([]string(nil), c.sources...)
+// Sources returns sorted, deduplicated typed requirement provenance.
+func (c ResolvedCapability) Sources() []RequirementSource {
+	return append([]RequirementSource(nil), c.sources...)
 }
 
 // Selection records one selected ordinary provider.
@@ -198,7 +243,7 @@ type normalizedRequirement struct {
 	id          capabilityid.Identifier
 	contract    normalizedContract
 	hasContract bool
-	source      string
+	source      RequirementSource
 }
 
 type normalizedCandidate struct {
@@ -216,7 +261,7 @@ type requirementGroup struct {
 	id           capabilityid.Identifier
 	contractJSON []byte
 	digest       string
-	sources      []string
+	sources      []RequirementSource
 }
 
 // Resolve validates every input and returns no partial result unless every
@@ -294,7 +339,7 @@ func resolveNormalized(
 			contractJSON: append([]byte(nil), group.contractJSON...),
 			digest:       group.digest,
 			intrinsic:    intrinsic,
-			sources:      append([]string(nil), group.sources...),
+			sources:      append([]RequirementSource(nil), group.sources...),
 		})
 		if intrinsic {
 			continue
@@ -311,7 +356,7 @@ func resolveNormalized(
 			issues = append(issues, &ProviderContractError{
 				capability:      group.id,
 				expectedDigest:  group.digest,
-				expectedSources: append([]string(nil), group.sources...),
+				expectedSources: requirementSourceStrings(group.sources),
 				providers:       incompatible,
 			})
 			continue
@@ -322,7 +367,7 @@ func resolveNormalized(
 		case 0:
 			issues = append(issues, &MissingProviderError{
 				capability: group.id,
-				sources:    append([]string(nil), group.sources...),
+				sources:    requirementSourceStrings(group.sources),
 			})
 		case 1:
 			selected := providers[0]
@@ -338,7 +383,7 @@ func resolveNormalized(
 				}
 				issues = append(issues, &AmbiguousProviderError{
 					capability: group.id,
-					sources:    append([]string(nil), group.sources...),
+					sources:    requirementSourceStrings(group.sources),
 					providers:  details,
 				})
 				continue
@@ -375,18 +420,19 @@ func normalizeRequirements(inputs []Requirement) ([]normalizedRequirement, []err
 	values := make([]normalizedRequirement, 0, len(inputs))
 	var issues []error
 	for _, input := range inputs {
-		source, err := normalizeSource(input.Source)
+		source, err := normalizeRequirementSource(input.Source)
 		if err != nil {
 			issues = append(issues, fmt.Errorf("%w: requirement source: %v", ErrInvalidInput, err))
 			continue
 		}
+		reference := source.String()
 		var identifier capabilityid.Identifier
 		var contract normalizedContract
 		hasContract := len(input.Contract) != 0
 		if hasContract {
-			contract, err = normalizeContract(input.Contract, source)
+			contract, err = normalizeContract(input.Contract, reference)
 			if err != nil {
-				issues = append(issues, fmt.Errorf("%w: requirement at %q: %v", ErrInvalidInput, source, err))
+				issues = append(issues, fmt.Errorf("%w: requirement at %q: %v", ErrInvalidInput, reference, err))
 				continue
 			}
 			identifier = contract.id
@@ -394,17 +440,17 @@ func normalizeRequirements(inputs []Requirement) ([]normalizedRequirement, []err
 		if input.Capability != "" {
 			declared, err := capabilityid.Parse(input.Capability)
 			if err != nil {
-				issues = append(issues, fmt.Errorf("%w: requirement at %q has non-canonical Capability ID %q", ErrInvalidInput, source, input.Capability))
+				issues = append(issues, fmt.Errorf("%w: requirement at %q has non-canonical Capability ID %q", ErrInvalidInput, reference, input.Capability))
 				continue
 			}
 			if hasContract && declared != contract.id {
-				issues = append(issues, fmt.Errorf("%w: requirement at %q names %s but its contract declares %s", ErrInvalidInput, source, declared, contract.id))
+				issues = append(issues, fmt.Errorf("%w: requirement at %q names %s but its contract declares %s", ErrInvalidInput, reference, declared, contract.id))
 				continue
 			}
 			identifier = declared
 		}
 		if identifier.String() == "" {
-			issues = append(issues, fmt.Errorf("%w: requirement at %q must contain Capability or Contract", ErrInvalidInput, source))
+			issues = append(issues, fmt.Errorf("%w: requirement at %q must contain Capability or Contract", ErrInvalidInput, reference))
 			continue
 		}
 		values = append(values, normalizedRequirement{
@@ -496,7 +542,7 @@ func groupRequirements(inputs []normalizedRequirement, candidates map[capability
 				return compared < 0
 			}
 		}
-		return inputs[left].source < inputs[right].source
+		return requirementSourceKey(inputs[left].source) < requirementSourceKey(inputs[right].source)
 	})
 	groups := make([]requirementGroup, 0, len(inputs))
 	var issues []error
@@ -506,14 +552,14 @@ func groupRequirements(inputs []normalizedRequirement, candidates map[capability
 			last++
 		}
 		contracts := make([]normalizedContract, 0, last-first)
-		sources := make([]string, 0, last-first)
+		sources := make([]RequirementSource, 0, last-first)
 		for _, input := range inputs[first:last] {
 			sources = append(sources, input.source)
 			if input.hasContract {
 				contracts = append(contracts, input.contract)
 			}
 		}
-		sources = uniqueStrings(sources)
+		sources = uniqueRequirementSources(sources)
 		variants := contractVariants(contracts)
 		if len(variants) > 1 {
 			issues = append(issues, &RequirementConflictError{capability: inputs[first].id, variants: variants})
@@ -529,7 +575,7 @@ func groupRequirements(inputs []normalizedRequirement, candidates map[capability
 				"%w: intrinsic requirement %s from [%s] must include its authoritative Kernel contract",
 				ErrInvalidInput,
 				inputs[first].id,
-				strings.Join(sources, ", "),
+				strings.Join(requirementSourceStrings(sources), ", "),
 			))
 		} else {
 			providers := candidates[inputs[first].id]
@@ -540,7 +586,7 @@ func groupRequirements(inputs []normalizedRequirement, candidates map[capability
 				}
 				issues = append(issues, &ProviderContractConflictError{
 					capability: inputs[first].id,
-					sources:    sources,
+					sources:    requirementSourceStrings(sources),
 					providers:  details,
 				})
 			} else {
@@ -718,6 +764,149 @@ func normalizeSource(value string) (string, error) {
 		return "", errors.New("must be non-empty valid single-line UTF-8, at most 1024 bytes")
 	}
 	return value, nil
+}
+
+func normalizeRequirementSource(input RequirementSource) (RequirementSource, error) {
+	reference, err := normalizeSource(input.Reference)
+	if err != nil {
+		return RequirementSource{}, fmt.Errorf("reference %v", err)
+	}
+	if err := modulepath.CheckProject(input.ModulePath); err != nil {
+		return RequirementSource{}, fmt.Errorf("module path %q is invalid: %v", input.ModulePath, err)
+	}
+	if input.Path == "" || path.IsAbs(input.Path) || path.Clean(input.Path) != input.Path || input.Path == "." || strings.Contains(input.Path, "\\") || strings.ContainsAny(input.Path, "\x00\r\n") || !utf8.ValidString(input.Path) {
+		return RequirementSource{}, fmt.Errorf("path %q must be one safe module-relative slash path", input.Path)
+	}
+	if input.Line < 1 || input.Column < 1 {
+		return RequirementSource{}, errors.New("line and column must be positive")
+	}
+
+	empty := func(values ...string) bool {
+		for _, value := range values {
+			if value != "" {
+				return false
+			}
+		}
+		return true
+	}
+	validatePlugin := func() error {
+		if err := pluginid.Validate(input.PluginID); err != nil {
+			return fmt.Errorf("plugin ID %q is invalid", input.PluginID)
+		}
+		return nil
+	}
+	validateSourceCapability := func() error {
+		if _, err := capabilityid.Parse(input.SourceCapability); err != nil {
+			return fmt.Errorf("source Capability %q is invalid", input.SourceCapability)
+		}
+		return nil
+	}
+
+	switch input.Kind {
+	case RequirementDeclaration, RequirementExposure:
+		if !empty(input.PluginID, input.Alias, input.Namespace, input.SourceCapability, input.RuleID) {
+			return RequirementSource{}, fmt.Errorf("kind %q contains unrelated semantic fields", input.Kind)
+		}
+	case RequirementGeneratedClient, RequirementPlugin:
+		if err := validatePlugin(); err != nil {
+			return RequirementSource{}, err
+		}
+		if !empty(input.Alias, input.Namespace, input.SourceCapability, input.RuleID) {
+			return RequirementSource{}, fmt.Errorf("kind %q contains unrelated semantic fields", input.Kind)
+		}
+	case RequirementAliasTarget:
+		if _, err := capabilityid.Parse(input.Alias); err != nil {
+			return RequirementSource{}, fmt.Errorf("alias %q is invalid", input.Alias)
+		}
+		if !empty(input.PluginID, input.Namespace, input.SourceCapability, input.RuleID) {
+			return RequirementSource{}, fmt.Errorf("kind %q contains unrelated semantic fields", input.Kind)
+		}
+	case RequirementActivation:
+		if !validLowerKebab(input.Namespace) {
+			return RequirementSource{}, fmt.Errorf("namespace %q is invalid", input.Namespace)
+		}
+		if err := validateSourceCapability(); err != nil {
+			return RequirementSource{}, err
+		}
+		if !empty(input.PluginID, input.Alias, input.RuleID) {
+			return RequirementSource{}, fmt.Errorf("kind %q contains unrelated semantic fields", input.Kind)
+		}
+	case RequirementGenerationRule:
+		if err := validatePlugin(); err != nil {
+			return RequirementSource{}, err
+		}
+		if !validLowerKebab(input.Namespace) {
+			return RequirementSource{}, fmt.Errorf("namespace %q is invalid", input.Namespace)
+		}
+		if err := validateSourceCapability(); err != nil {
+			return RequirementSource{}, err
+		}
+		if _, err := normalizeSource(input.RuleID); err != nil {
+			return RequirementSource{}, fmt.Errorf("rule ID %v", err)
+		}
+		if input.Alias != "" {
+			return RequirementSource{}, fmt.Errorf("kind %q contains an unrelated Alias", input.Kind)
+		}
+	default:
+		return RequirementSource{}, fmt.Errorf("kind %q is invalid", input.Kind)
+	}
+	input.Reference = reference
+	return input, nil
+}
+
+func validLowerKebab(value string) bool {
+	if value == "" || len(value) > 128 || value[0] == '-' || value[len(value)-1] == '-' {
+		return false
+	}
+	previousHyphen := false
+	for _, character := range value {
+		switch {
+		case character >= 'a' && character <= 'z', character >= '0' && character <= '9':
+			previousHyphen = false
+		case character == '-' && !previousHyphen:
+			previousHyphen = true
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func requirementSourceKey(value RequirementSource) string {
+	return strings.Join([]string{
+		string(value.Kind),
+		value.ModulePath,
+		value.Path,
+		fmt.Sprintf("%010d", value.Line),
+		fmt.Sprintf("%010d", value.Column),
+		value.PluginID,
+		value.Alias,
+		value.Namespace,
+		value.SourceCapability,
+		value.RuleID,
+		value.Reference,
+	}, "\x00")
+}
+
+func uniqueRequirementSources(values []RequirementSource) []RequirementSource {
+	sort.Slice(values, func(left, right int) bool {
+		return requirementSourceKey(values[left]) < requirementSourceKey(values[right])
+	})
+	result := values[:0]
+	for _, value := range values {
+		if len(result) == 0 || result[len(result)-1] != value {
+			result = append(result, value)
+		}
+	}
+	return append([]RequirementSource(nil), result...)
+}
+
+func requirementSourceStrings(values []RequirementSource) []string {
+	result := make([]string, len(values))
+	for index, value := range values {
+		result[index] = value.String()
+	}
+	return uniqueStrings(result)
 }
 
 func isIntrinsic(id capabilityid.Identifier) bool {

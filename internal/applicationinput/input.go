@@ -22,6 +22,7 @@ import (
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/intrinsiccatalog"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/providerresolution"
 )
@@ -40,11 +41,36 @@ var (
 	ErrIntrinsicProvider = errors.New("plugin provides intrinsic Capability")
 )
 
+// SourceContext identifies the current and dependency Project modules used to
+// turn parsed configuration references into stable typed requirement sources.
+type SourceContext struct {
+	CurrentModulePath    string
+	Dependencies         []DependencySource
+	DependencyProvenance []DependencyProvenance
+	CurrentProjectPaths  []string
+}
+
+// DependencySource identifies one effective-graph dependency Project version.
+type DependencySource struct {
+	ModulePath string
+	Version    string
+}
+
+// DependencyProvenance identifies every dependency declaration that matches
+// one effective resolution field after current-project replacement.
+type DependencyProvenance struct {
+	Path    string
+	Sources []string
+}
+
 // Build loads every indexed provider contract, merges the exact visible
 // canonical catalog with Kernel intrinsics, carries normalized selected-
 // configuration provenance, and constructs the fixed-point resolver input. It
 // performs no provider selection itself.
-func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, configurationProvenance *generation.ConfigurationProvenanceInput, buildOptions generationexec.BuildOptions) (generationresolution.ExtensionInput, error) {
+func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, sourceContext SourceContext, configurationProvenance *generation.ConfigurationProvenanceInput, buildOptions generationexec.BuildOptions) (generationresolution.ExtensionInput, error) {
+	if err := validateSourceContext(sourceContext); err != nil {
+		return generationresolution.ExtensionInput{}, fmt.Errorf("%w: requirement source context: %v", ErrBuild, err)
+	}
 	groups := make(map[capabilityid.Identifier]*contractGroup)
 	for _, definition := range intrinsiccatalog.Definitions() {
 		groups[definition.ID()] = &contractGroup{
@@ -143,14 +169,43 @@ func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, c
 
 	requirements := make([]providerresolution.Requirement, 0, len(manifest.Requirements()))
 	for _, declared := range manifest.Requirements() {
-		requirement := providerresolution.Requirement{
-			Capability: declared.ID().String(),
-			Source:     declared.Source(),
+		field := fmt.Sprintf("capabilities.require[%q]", declared.ID().String())
+		sources, err := configurationRequirementSources(sourceContext, declared.Source(), field, providerresolution.RequirementDeclaration)
+		if err != nil {
+			return generationresolution.ExtensionInput{}, fmt.Errorf("%w: requirement %s: %v", ErrBuild, declared.ID(), err)
 		}
-		if group, exists := groups[declared.ID()]; exists && len(group.variants) == 1 {
-			requirement.Contract = append([]byte(nil), group.variants[0].contract...)
+		for _, source := range sources {
+			requirement := providerresolution.Requirement{
+				Capability: declared.ID().String(),
+				Source:     source,
+			}
+			if group, exists := groups[declared.ID()]; exists && len(group.variants) == 1 {
+				requirement.Contract = append([]byte(nil), group.variants[0].contract...)
+			}
+			requirements = append(requirements, requirement)
 		}
-		requirements = append(requirements, requirement)
+	}
+	httpExposures := make([]generationresolution.ApplicationHTTPExposure, 0, len(manifest.HTTPExposures()))
+	for _, exposure := range manifest.HTTPExposures() {
+		field := fmt.Sprintf("http.expose[%q]", exposure.ID().String())
+		sources, err := configurationRequirementSources(sourceContext, exposure.Source(), field, providerresolution.RequirementExposure)
+		if err != nil {
+			return generationresolution.ExtensionInput{}, fmt.Errorf("%w: HTTP exposure %s: %v", ErrBuild, exposure.ID(), err)
+		}
+		httpExposures = append(httpExposures, generationresolution.ApplicationHTTPExposure{Exposure: exposure, Sources: sources})
+	}
+	aliases := make([]generationresolution.ApplicationAlias, 0, len(manifest.Aliases()))
+	for _, alias := range manifest.Aliases() {
+		field := fmt.Sprintf("capabilities.aliases[%q]", alias.ID().String())
+		sources, err := configurationRequirementSources(sourceContext, alias.Source(), field, providerresolution.RequirementAliasTarget)
+		if err != nil {
+			return generationresolution.ExtensionInput{}, fmt.Errorf("%w: Alias %s: %v", ErrBuild, alias.ID(), err)
+		}
+		for index := range sources {
+			sources[index].Reference += " target"
+			sources[index].Alias = alias.ID().String()
+		}
+		aliases = append(aliases, generationresolution.ApplicationAlias{Alias: alias, Sources: sources})
 	}
 	choices := make([]providerresolution.Choice, 0, len(manifest.ProviderChoices()))
 	for _, declared := range manifest.ProviderChoices() {
@@ -186,10 +241,148 @@ func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, c
 		ConfigurationProvenance:  provenance,
 		Plugins:                  plugins,
 		Capabilities:             capabilities,
-		ApplicationHTTPExposures: manifest.HTTPExposures(),
-		ApplicationAliases:       manifest.Aliases(),
+		ApplicationHTTPExposures: httpExposures,
+		ApplicationAliases:       aliases,
 		BuildOptions:             buildOptions,
 	}, nil
+}
+
+func validateSourceContext(input SourceContext) error {
+	if err := modulepath.CheckProject(input.CurrentModulePath); err != nil {
+		return fmt.Errorf("current module path %q is invalid: %v", input.CurrentModulePath, err)
+	}
+	seen := make(map[string]struct{}, len(input.Dependencies))
+	for index, dependency := range input.Dependencies {
+		if err := modulepath.CheckProject(dependency.ModulePath); err != nil {
+			return fmt.Errorf("dependencies[%d].module_path %q is invalid: %v", index, dependency.ModulePath, err)
+		}
+		if dependency.ModulePath == input.CurrentModulePath {
+			return fmt.Errorf("dependencies[%d] repeats the current module", index)
+		}
+		if _, duplicate := seen[dependency.ModulePath]; duplicate {
+			return fmt.Errorf("dependencies[%d] repeats module %q", index, dependency.ModulePath)
+		}
+		if strings.ContainsAny(dependency.Version, "\x00\r\n/") {
+			return fmt.Errorf("dependencies[%d].version is invalid", index)
+		}
+		seen[dependency.ModulePath] = struct{}{}
+	}
+	seenProvenance := make(map[string]struct{}, len(input.DependencyProvenance))
+	for index, provenance := range input.DependencyProvenance {
+		if provenance.Path == "" || strings.ContainsAny(provenance.Path, "\x00\r\n") {
+			return fmt.Errorf("dependency_provenance[%d].path is invalid", index)
+		}
+		if _, duplicate := seenProvenance[provenance.Path]; duplicate {
+			return fmt.Errorf("dependency_provenance[%d] repeats path %q", index, provenance.Path)
+		}
+		if len(provenance.Sources) == 0 {
+			return fmt.Errorf("dependency_provenance[%d].sources is empty", index)
+		}
+		seenSources := make(map[string]struct{}, len(provenance.Sources))
+		for sourceIndex, source := range provenance.Sources {
+			if source == "" || len(source) > maximumSourceSize || !utf8.ValidString(source) || strings.ContainsAny(source, "\x00\r\n") {
+				return fmt.Errorf("dependency_provenance[%d].sources[%d] is invalid", index, sourceIndex)
+			}
+			if _, duplicate := seenSources[source]; duplicate {
+				return fmt.Errorf("dependency_provenance[%d].sources[%d] is duplicated", index, sourceIndex)
+			}
+			seenSources[source] = struct{}{}
+		}
+		seenProvenance[provenance.Path] = struct{}{}
+	}
+	seenCurrentPaths := make(map[string]struct{}, len(input.CurrentProjectPaths))
+	for index, currentPath := range input.CurrentProjectPaths {
+		if currentPath == "" || strings.ContainsAny(currentPath, "\x00\r\n") {
+			return fmt.Errorf("current_project_paths[%d] is invalid", index)
+		}
+		if _, duplicate := seenCurrentPaths[currentPath]; duplicate {
+			return fmt.Errorf("current_project_paths[%d] repeats %q", index, currentPath)
+		}
+		seenCurrentPaths[currentPath] = struct{}{}
+	}
+	return nil
+}
+
+func configurationRequirementSources(input SourceContext, reference, field string, kind providerresolution.RequirementSourceKind) ([]providerresolution.RequirementSource, error) {
+	references := make([]string, 0, 2)
+	for _, currentPath := range input.CurrentProjectPaths {
+		if currentPath == field {
+			references = append(references, reference)
+			break
+		}
+	}
+	currentSourceCount := len(references)
+	for _, provenance := range input.DependencyProvenance {
+		if provenance.Path == field {
+			references = append(references, provenance.Sources...)
+			break
+		}
+	}
+	if len(references) == 0 {
+		references = append(references, reference)
+		currentSourceCount = 1
+	}
+	values := make([]providerresolution.RequirementSource, 0, len(references))
+	for index, value := range references {
+		dependencySource := index >= currentSourceCount
+		source, err := configurationRequirementSource(input, value, field, kind, dependencySource)
+		if err != nil {
+			return nil, err
+		}
+		if dependencySource && source.ModulePath == input.CurrentModulePath {
+			return nil, fmt.Errorf("dependency source %q does not identify a discovered dependency Project", value)
+		}
+		values = append(values, source)
+	}
+	return values, nil
+}
+
+func configurationRequirementSource(input SourceContext, reference, field string, kind providerresolution.RequirementSourceKind, dependencySource bool) (providerresolution.RequirementSource, error) {
+	document, err := configurationDocument(reference, field)
+	if err != nil {
+		return providerresolution.RequirementSource{}, err
+	}
+	modulePath := input.CurrentModulePath
+	relativePath := document
+	if dependencySource {
+		for _, dependency := range input.Dependencies {
+			version := dependency.Version
+			if version == "" {
+				version = "workspace"
+			}
+			prefix := dependency.ModulePath + "@" + version + "/"
+			if strings.HasPrefix(document, prefix) {
+				modulePath = dependency.ModulePath
+				relativePath = strings.TrimPrefix(document, prefix)
+				break
+			}
+		}
+	}
+	if relativePath == "" || path.IsAbs(relativePath) || path.Clean(relativePath) != relativePath || relativePath == "." || strings.Contains(relativePath, "\\") || strings.ContainsAny(relativePath, "\x00\r\n") {
+		return providerresolution.RequirementSource{}, fmt.Errorf("source %q has an unsafe Project-relative document", reference)
+	}
+	return providerresolution.RequirementSource{
+		Kind:       kind,
+		Reference:  reference,
+		ModulePath: modulePath,
+		Path:       relativePath,
+		Line:       1,
+		Column:     1,
+	}, nil
+}
+
+func configurationDocument(reference, field string) (string, error) {
+	fields := []string{field}
+	if position := strings.IndexByte(field, '['); position > 0 {
+		fields = append(fields, field[:position]+".add"+field[position:])
+	}
+	for _, candidate := range fields {
+		suffix := " " + candidate
+		if strings.HasSuffix(reference, suffix) && len(reference) > len(suffix) {
+			return strings.TrimSuffix(reference, suffix), nil
+		}
+	}
+	return "", fmt.Errorf("source %q does not identify %s", reference, field)
 }
 
 type contractGroup struct {

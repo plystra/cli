@@ -14,9 +14,11 @@ import (
 	"strings"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/pluginid"
 	"github.com/plystra/cli/internal/pluginscan"
+	"github.com/plystra/cli/internal/providerresolution"
 	gomodule "golang.org/x/mod/module"
 )
 
@@ -64,9 +66,10 @@ const (
 // Input is the construction-only selected-model, participating-Project, and
 // discovered-Plugin input for one evidence document.
 type Input struct {
-	Context          generation.Context
-	Modules          []ModuleInput
-	PluginCandidates []PluginCandidateInput
+	Context            generation.Context
+	ProviderResolution providerresolution.Result
+	Modules            []ModuleInput
+	PluginCandidates   []PluginCandidateInput
 }
 
 // ModuleInput identifies one participating Plystra Project without carrying
@@ -112,6 +115,7 @@ type Evidence struct {
 	modules                  []Module
 	pluginCandidates         []PluginCandidate
 	selectedPlugins          []SelectedPlugin
+	requirements             []CapabilityRequirement
 	canonicalJSON            []byte
 	digest                   string
 	prepared                 bool
@@ -252,6 +256,66 @@ func (r PluginSelectionReason) Kind() PluginSelectionReasonKind { return r.kind 
 // an empty string for current-Project inclusion.
 func (r PluginSelectionReason) Capability() string { return r.capability }
 
+// CapabilityRequirement is one final exact canonical requirement with its
+// contract identity, intrinsic ownership, and every typed introducing edge.
+type CapabilityRequirement struct {
+	capability     string
+	contractDigest string
+	intrinsic      bool
+	sources        []RequirementSource
+}
+
+// Capability returns the exact canonical Capability ID.
+func (r CapabilityRequirement) Capability() string { return r.capability }
+
+// ContractDigest returns the normalized exact contract identity.
+func (r CapabilityRequirement) ContractDigest() string { return r.contractDigest }
+
+// Intrinsic reports whether the Kernel owns this required Capability.
+func (r CapabilityRequirement) Intrinsic() bool { return r.intrinsic }
+
+// Sources returns every deterministic introducing edge in canonical order.
+func (r CapabilityRequirement) Sources() []RequirementSource {
+	return append([]RequirementSource(nil), r.sources...)
+}
+
+// RequirementSource is one typed stable source for a canonical requirement.
+type RequirementSource struct {
+	kind             providerresolution.RequirementSourceKind
+	projectModule    string
+	source           Source
+	pluginID         string
+	alias            string
+	namespace        string
+	sourceCapability string
+	ruleID           string
+}
+
+// Kind returns declaration, exposure, generated-client, plugin, alias-target,
+// activation, or generation-rule.
+func (s RequirementSource) Kind() providerresolution.RequirementSourceKind { return s.kind }
+
+// ProjectModule returns the effective graph module that owns the source.
+func (s RequirementSource) ProjectModule() string { return s.projectModule }
+
+// Source returns the stable module-relative location for this edge.
+func (s RequirementSource) Source() Source { return s.source }
+
+// PluginID returns the requiring or generating Plugin where applicable.
+func (s RequirementSource) PluginID() string { return s.pluginID }
+
+// Alias returns the application Alias ID for an Alias-target edge.
+func (s RequirementSource) Alias() string { return s.alias }
+
+// Namespace returns the generation namespace for activation and rule edges.
+func (s RequirementSource) Namespace() string { return s.namespace }
+
+// SourceCapability returns the metadata-bearing or rule-source Capability.
+func (s RequirementSource) SourceCapability() string { return s.sourceCapability }
+
+// RuleID returns the selected generation rule ID where applicable.
+func (s RequirementSource) RuleID() string { return s.ruleID }
+
 // Source is one stable module-relative declaration reference.
 type Source struct {
 	module string
@@ -327,6 +391,24 @@ type canonicalPluginSelectionReason struct {
 	Capability string                    `json:"capability,omitempty"`
 }
 
+type canonicalCapabilityRequirement struct {
+	Capability     string                       `json:"capability"`
+	ContractDigest string                       `json:"contract_digest"`
+	Intrinsic      bool                         `json:"intrinsic"`
+	Sources        []canonicalRequirementSource `json:"sources"`
+}
+
+type canonicalRequirementSource struct {
+	Kind             providerresolution.RequirementSourceKind `json:"kind"`
+	ProjectModule    string                                   `json:"project_module"`
+	Source           canonicalSource                          `json:"source"`
+	PluginID         string                                   `json:"plugin_id,omitempty"`
+	Alias            string                                   `json:"alias,omitempty"`
+	Namespace        string                                   `json:"namespace,omitempty"`
+	SourceCapability string                                   `json:"source_capability,omitempty"`
+	RuleID           string                                   `json:"rule_id,omitempty"`
+}
+
 type canonicalReplacement struct {
 	Kind       ReplacementKind `json:"kind"`
 	ModulePath string          `json:"module_path"`
@@ -342,14 +424,15 @@ type canonicalSource struct {
 }
 
 type canonicalEvidence struct {
-	Version             int                        `json:"version"`
-	GenerationAPI       string                     `json:"generation_api"`
-	SelectedModelDigest string                     `json:"selected_model_digest"`
-	BuildModelDigest    string                     `json:"build_model_digest"`
-	Modules             []canonicalModule          `json:"modules"`
-	PluginCandidates    []canonicalPluginCandidate `json:"plugin_candidates"`
-	SelectedPlugins     []canonicalSelectedPlugin  `json:"selected_plugins"`
-	Counts              canonicalCounts            `json:"counts"`
+	Version             int                              `json:"version"`
+	GenerationAPI       string                           `json:"generation_api"`
+	SelectedModelDigest string                           `json:"selected_model_digest"`
+	BuildModelDigest    string                           `json:"build_model_digest"`
+	Modules             []canonicalModule                `json:"modules"`
+	PluginCandidates    []canonicalPluginCandidate       `json:"plugin_candidates"`
+	SelectedPlugins     []canonicalSelectedPlugin        `json:"selected_plugins"`
+	Requirements        []canonicalCapabilityRequirement `json:"requirements"`
+	Counts              canonicalCounts                  `json:"counts"`
 }
 
 // Build validates one constructor-produced generation context and derives its
@@ -374,17 +457,22 @@ func Build(source Input) (Evidence, error) {
 	if err != nil {
 		return Evidence{}, fmt.Errorf("%w: selected Plugins: %v", ErrBuild, err)
 	}
+	requirements, err := capabilityRequirementsFromResolution(source.ProviderResolution, context, modules, pluginCandidates)
+	if err != nil {
+		return Evidence{}, fmt.Errorf("%w: canonical Capability requirements: %v", ErrBuild, err)
+	}
 	input := Evidence{
 		generationAPI:            context.APIVersion(),
 		selectedModelDigest:      context.Digest(),
 		buildModelDigest:         context.BuildModelDigest(),
 		canonicalCapabilityCount: len(context.Capabilities()),
-		requirementCount:         len(context.Requirements()),
+		requirementCount:         len(requirements),
 		selectedProviderCount:    len(context.Providers()),
 		capabilityAliasCount:     len(context.CapabilityAliases()),
 		modules:                  modules,
 		pluginCandidates:         pluginCandidates,
 		selectedPlugins:          selectedPlugins,
+		requirements:             requirements,
 		prepared:                 true,
 	}
 	if err := validate(input); err != nil {
@@ -414,6 +502,9 @@ func (e Evidence) Valid() bool {
 	}
 	selectedPlugins, err := normalizeSelectedPlugins(e.selectedPluginInputs(), pluginCandidates, modules)
 	if err != nil || !equalSelectedPlugins(e.selectedPlugins, selectedPlugins) {
+		return false
+	}
+	if err := validateCapabilityRequirements(e.requirements, modules, pluginCandidates); err != nil {
 		return false
 	}
 	canonical, err := encode(e)
@@ -463,6 +554,15 @@ func (e Evidence) SelectedPlugins() []SelectedPlugin {
 // SelectedPluginCount returns the number of selected Plugins.
 func (e Evidence) SelectedPluginCount() int { return len(e.selectedPlugins) }
 
+// Requirements returns every final canonical requirement in Capability order.
+func (e Evidence) Requirements() []CapabilityRequirement {
+	values := append([]CapabilityRequirement(nil), e.requirements...)
+	for index := range values {
+		values[index].sources = append([]RequirementSource(nil), values[index].sources...)
+	}
+	return values
+}
+
 // CanonicalCapabilityCount returns the number of resolved canonical contracts.
 func (e Evidence) CanonicalCapabilityCount() int { return e.canonicalCapabilityCount }
 
@@ -496,6 +596,9 @@ func validate(e Evidence) error {
 	}
 	if len(e.selectedPlugins) > len(e.pluginCandidates) {
 		return errors.New("selected Plugin count exceeds discovered Plugin candidate count")
+	}
+	if e.requirementCount != len(e.requirements) {
+		return fmt.Errorf("requirement count %d does not match records %d", e.requirementCount, len(e.requirements))
 	}
 	counts := []struct {
 		name  string
@@ -601,6 +704,35 @@ func encode(e Evidence) ([]byte, error) {
 			Reasons: reasons,
 		}
 	}
+	requirements := make([]canonicalCapabilityRequirement, len(e.requirements))
+	for index, value := range e.requirements {
+		sources := make([]canonicalRequirementSource, len(value.sources))
+		for sourceIndex, requirementSource := range value.sources {
+			source := requirementSource.source
+			sources[sourceIndex] = canonicalRequirementSource{
+				Kind:          requirementSource.kind,
+				ProjectModule: requirementSource.projectModule,
+				Source: canonicalSource{
+					Module: source.module,
+					Path:   source.path,
+					Kind:   source.kind,
+					Line:   source.line,
+					Column: source.column,
+				},
+				PluginID:         requirementSource.pluginID,
+				Alias:            requirementSource.alias,
+				Namespace:        requirementSource.namespace,
+				SourceCapability: requirementSource.sourceCapability,
+				RuleID:           requirementSource.ruleID,
+			}
+		}
+		requirements[index] = canonicalCapabilityRequirement{
+			Capability:     value.capability,
+			ContractDigest: value.contractDigest,
+			Intrinsic:      value.intrinsic,
+			Sources:        sources,
+		}
+	}
 	return json.Marshal(canonicalEvidence{
 		Version:             schemaVersion,
 		GenerationAPI:       e.generationAPI,
@@ -609,6 +741,7 @@ func encode(e Evidence) ([]byte, error) {
 		Modules:             modules,
 		PluginCandidates:    pluginCandidates,
 		SelectedPlugins:     selectedPlugins,
+		Requirements:        requirements,
 		Counts: canonicalCounts{
 			ParticipatingModules:  len(e.modules),
 			DiscoveredPlugins:     len(e.pluginCandidates),
@@ -864,6 +997,277 @@ func normalizePluginSelectionReasons(inputs []PluginSelectionReason, moduleRole 
 		return reasons[left].capability < reasons[right].capability
 	})
 	return reasons, nil
+}
+
+func capabilityRequirementsFromResolution(
+	resolution providerresolution.Result,
+	context generation.Context,
+	modules []Module,
+	candidates []PluginCandidate,
+) ([]CapabilityRequirement, error) {
+	contextRequirements := context.Requirements()
+	resolved := resolution.Capabilities()
+	if len(resolved) != len(contextRequirements) {
+		return nil, fmt.Errorf("provider resolution has %d requirements while the selected model has %d", len(resolved), len(contextRequirements))
+	}
+	contextCapabilities := make(map[string]generation.CapabilityView, len(context.Capabilities()))
+	for _, capability := range context.Capabilities() {
+		contextCapabilities[capability.ID().String()] = capability
+	}
+	required := make(map[string]struct{}, len(contextRequirements))
+	for _, capability := range contextRequirements {
+		required[capability.String()] = struct{}{}
+	}
+	moduleByPath := make(map[string]Module, len(modules))
+	for _, project := range modules {
+		moduleByPath[project.path] = project
+	}
+	candidateByID := make(map[string]PluginCandidate, len(candidates))
+	for _, candidate := range candidates {
+		candidateByID[candidate.id] = candidate
+	}
+	values := make([]CapabilityRequirement, 0, len(resolved))
+	seen := make(map[string]struct{}, len(resolved))
+	for index, capability := range resolved {
+		id := capability.ID().String()
+		if _, duplicate := seen[id]; duplicate {
+			return nil, fmt.Errorf("provider resolution requirement %q is duplicated", id)
+		}
+		if _, exists := required[id]; !exists {
+			return nil, fmt.Errorf("provider resolution requirement %q is absent from the selected model", id)
+		}
+		view, exists := contextCapabilities[id]
+		if !exists {
+			return nil, fmt.Errorf("provider resolution requirement %q has no selected canonical contract", id)
+		}
+		if capability.ContractDigest() != view.ContractDigest() || capability.Intrinsic() != view.Intrinsic() {
+			return nil, fmt.Errorf("provider resolution requirement %q does not match the selected canonical contract", id)
+		}
+		sources, err := normalizeRequirementSources(capability.Sources(), moduleByPath, candidateByID)
+		if err != nil {
+			return nil, fmt.Errorf("requirements[%d] %s sources: %v", index, id, err)
+		}
+		seen[id] = struct{}{}
+		values = append(values, CapabilityRequirement{
+			capability:     id,
+			contractDigest: capability.ContractDigest(),
+			intrinsic:      capability.Intrinsic(),
+			sources:        sources,
+		})
+	}
+	for id := range required {
+		if _, exists := seen[id]; !exists {
+			return nil, fmt.Errorf("selected-model requirement %q is absent from provider resolution", id)
+		}
+	}
+	sort.Slice(values, func(left, right int) bool { return values[left].capability < values[right].capability })
+	if err := validateCapabilityRequirements(values, modules, candidates); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+func normalizeRequirementSources(
+	inputs []providerresolution.RequirementSource,
+	modules map[string]Module,
+	candidates map[string]PluginCandidate,
+) ([]RequirementSource, error) {
+	if len(inputs) == 0 {
+		return nil, errors.New("at least one typed source is required")
+	}
+	values := make([]RequirementSource, 0, len(inputs))
+	for index, input := range inputs {
+		project, exists := modules[input.ModulePath]
+		if !exists {
+			return nil, fmt.Errorf("sources[%d].module_path %q is not a participating Project", index, input.ModulePath)
+		}
+		value := RequirementSource{
+			kind:          input.Kind,
+			projectModule: input.ModulePath,
+			source: Source{
+				module: project.source.module,
+				path:   input.Path,
+				kind:   string(input.Kind),
+				line:   input.Line,
+				column: input.Column,
+			},
+			pluginID:         input.PluginID,
+			alias:            input.Alias,
+			namespace:        input.Namespace,
+			sourceCapability: input.SourceCapability,
+			ruleID:           input.RuleID,
+		}
+		if input.PluginID != "" {
+			candidate, exists := candidates[input.PluginID]
+			if !exists {
+				return nil, fmt.Errorf("sources[%d].plugin_id %q is not a discovered Plugin", index, input.PluginID)
+			}
+			if candidate.modulePath != input.ModulePath {
+				return nil, fmt.Errorf("sources[%d].plugin_id %q belongs to module %q, not %q", index, input.PluginID, candidate.modulePath, input.ModulePath)
+			}
+			switch input.Kind {
+			case providerresolution.RequirementPlugin, providerresolution.RequirementGenerationRule:
+				if candidate.path+"/plugin.yaml" != input.Path {
+					return nil, fmt.Errorf("sources[%d].path %q does not match Plugin %q declaration", index, input.Path, input.PluginID)
+				}
+			case providerresolution.RequirementGeneratedClient:
+				if input.Path != candidate.path && !strings.HasPrefix(input.Path, candidate.path+"/") {
+					return nil, fmt.Errorf("sources[%d].path %q is outside Plugin %q", index, input.Path, input.PluginID)
+				}
+			}
+		}
+		values = append(values, value)
+	}
+	sort.Slice(values, func(left, right int) bool {
+		return requirementSourceKey(values[left]) < requirementSourceKey(values[right])
+	})
+	unique := values[:0]
+	for _, value := range values {
+		if len(unique) != 0 && unique[len(unique)-1] == value {
+			continue
+		}
+		unique = append(unique, value)
+	}
+	return append([]RequirementSource(nil), unique...), nil
+}
+
+func validateCapabilityRequirements(values []CapabilityRequirement, modules []Module, candidates []PluginCandidate) error {
+	moduleByPath := make(map[string]Module, len(modules))
+	moduleBySource := make(map[string]struct{}, len(modules))
+	for _, project := range modules {
+		moduleByPath[project.path] = project
+		moduleBySource[project.source.module] = struct{}{}
+	}
+	candidateByID := make(map[string]PluginCandidate, len(candidates))
+	for _, candidate := range candidates {
+		candidateByID[candidate.id] = candidate
+	}
+	for index, value := range values {
+		id, err := capabilityid.Parse(value.capability)
+		if err != nil {
+			return fmt.Errorf("requirements[%d].capability %q is invalid", index, value.capability)
+		}
+		if value.intrinsic != strings.HasPrefix(id.Name(), "kernel.") {
+			return fmt.Errorf("requirements[%d].intrinsic contradicts %s", index, id)
+		}
+		if !validDigest(value.contractDigest) {
+			return fmt.Errorf("requirements[%d].contract_digest is invalid", index)
+		}
+		if len(value.sources) == 0 {
+			return fmt.Errorf("requirements[%d].sources must not be empty", index)
+		}
+		if index > 0 && values[index-1].capability >= value.capability {
+			return fmt.Errorf("requirements are not in unique canonical Capability order at %q", value.capability)
+		}
+		for sourceIndex, source := range value.sources {
+			project, exists := moduleByPath[source.projectModule]
+			if !exists {
+				return fmt.Errorf("requirements[%d].sources[%d].project_module %q is not participating", index, sourceIndex, source.projectModule)
+			}
+			if _, exists := moduleBySource[source.source.module]; !exists || project.source.module != source.source.module {
+				return fmt.Errorf("requirements[%d].sources[%d].source.module %q is inconsistent", index, sourceIndex, source.source.module)
+			}
+			if source.source.kind != string(source.kind) || source.source.path == "" || path.IsAbs(source.source.path) || path.Clean(source.source.path) != source.source.path || strings.Contains(source.source.path, "\\") || source.source.line < 1 || source.source.column < 1 {
+				return fmt.Errorf("requirements[%d].sources[%d] has invalid stable location", index, sourceIndex)
+			}
+			if err := validateRequirementSourceSemantics(source, candidateByID); err != nil {
+				return fmt.Errorf("requirements[%d].sources[%d]: %v", index, sourceIndex, err)
+			}
+			if sourceIndex > 0 && requirementSourceKey(value.sources[sourceIndex-1]) >= requirementSourceKey(source) {
+				return fmt.Errorf("requirements[%d].sources are not in unique canonical order", index)
+			}
+		}
+	}
+	return nil
+}
+
+func validateRequirementSourceSemantics(source RequirementSource, candidates map[string]PluginCandidate) error {
+	empty := func(values ...string) bool {
+		for _, value := range values {
+			if value != "" {
+				return false
+			}
+		}
+		return true
+	}
+	validatePlugin := func() error {
+		if err := pluginid.Validate(source.pluginID); err != nil {
+			return fmt.Errorf("plugin_id %q is invalid", source.pluginID)
+		}
+		candidate, exists := candidates[source.pluginID]
+		if !exists || candidate.modulePath != source.projectModule {
+			return fmt.Errorf("plugin_id %q does not match the source Project", source.pluginID)
+		}
+		return nil
+	}
+	validateSourceCapability := func() error {
+		if _, err := capabilityid.Parse(source.sourceCapability); err != nil {
+			return fmt.Errorf("source_capability %q is invalid", source.sourceCapability)
+		}
+		return nil
+	}
+	switch source.kind {
+	case providerresolution.RequirementDeclaration, providerresolution.RequirementExposure:
+		if !empty(source.pluginID, source.alias, source.namespace, source.sourceCapability, source.ruleID) {
+			return errors.New("declarative source contains unrelated semantic fields")
+		}
+	case providerresolution.RequirementGeneratedClient, providerresolution.RequirementPlugin:
+		if err := validatePlugin(); err != nil {
+			return err
+		}
+		if !empty(source.alias, source.namespace, source.sourceCapability, source.ruleID) {
+			return errors.New("plugin source contains unrelated semantic fields")
+		}
+	case providerresolution.RequirementAliasTarget:
+		if _, err := capabilityid.Parse(source.alias); err != nil {
+			return fmt.Errorf("alias %q is invalid", source.alias)
+		}
+		if !empty(source.pluginID, source.namespace, source.sourceCapability, source.ruleID) {
+			return errors.New("alias source contains unrelated semantic fields")
+		}
+	case providerresolution.RequirementActivation:
+		if source.namespace == "" {
+			return errors.New("activation namespace is empty")
+		}
+		if err := validateSourceCapability(); err != nil {
+			return err
+		}
+		if !empty(source.pluginID, source.alias, source.ruleID) {
+			return errors.New("activation source contains unrelated semantic fields")
+		}
+	case providerresolution.RequirementGenerationRule:
+		if err := validatePlugin(); err != nil {
+			return err
+		}
+		if source.namespace == "" || source.ruleID == "" {
+			return errors.New("generation-rule namespace and rule_id are required")
+		}
+		if err := validateSourceCapability(); err != nil {
+			return err
+		}
+		if source.alias != "" {
+			return errors.New("generation-rule source contains an Alias")
+		}
+	default:
+		return fmt.Errorf("kind %q is invalid", source.kind)
+	}
+	return nil
+}
+
+func requirementSourceKey(value RequirementSource) string {
+	return strings.Join([]string{
+		string(value.kind),
+		value.projectModule,
+		value.source.module,
+		value.source.path,
+		fmt.Sprintf("%010d", value.source.line),
+		fmt.Sprintf("%010d", value.source.column),
+		value.pluginID,
+		value.alias,
+		value.namespace,
+		value.sourceCapability,
+		value.ruleID,
+	}, "\x00")
 }
 
 func normalizeModule(input ModuleInput) (Module, error) {

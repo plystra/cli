@@ -3,6 +3,7 @@ package applicationmeta_test
 import (
 	"bytes"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -65,6 +66,21 @@ config:
 	if !maintained.Changed() {
 		t.Fatal("initial dependency baseline was not materialized")
 	}
+	localPaths := maintained.LocalPaths()
+	for _, expected := range []string{`http.expose["local.health/v1"]`, `capabilities.use["email.send/v1"]`, `config["acme.smtp"]["host"]`} {
+		if !slices.Contains(localPaths, expected) {
+			t.Fatalf("local paths %v omit %s", localPaths, expected)
+		}
+	}
+	for _, inherited := range []string{`http.expose["records.read/v1"]`, `capabilities.require["email.send/v1"]`, `capabilities.aliases["mail.send/v1"]`} {
+		if slices.Contains(localPaths, inherited) {
+			t.Fatalf("local paths %v contain inherited %s", localPaths, inherited)
+		}
+	}
+	localPaths[0] = "changed"
+	if maintained.LocalPaths()[0] == "changed" {
+		t.Fatal("LocalPaths exposed mutable maintenance storage")
+	}
 	data := maintained.Data()
 	for _, expected := range [][]byte{
 		[]byte("# Shared application configuration."),
@@ -103,6 +119,9 @@ config:
 	repeated, err := applicationmeta.MaintainDependencyConfiguration(data, composition.DependencyBaseline(), dependencies, lookup)
 	if err != nil || repeated.Changed() || !bytes.Equal(repeated.Data(), data) {
 		t.Fatalf("repeated maintenance = changed %t, err %v\nfirst: %s\nagain: %s", repeated.Changed(), err, data, repeated.Data())
+	}
+	if !slices.Equal(maintained.LocalPaths(), repeated.LocalPaths()) {
+		t.Fatalf("repeated local paths = %v, want %v", repeated.LocalPaths(), maintained.LocalPaths())
 	}
 }
 

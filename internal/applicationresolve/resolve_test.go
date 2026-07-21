@@ -24,6 +24,7 @@ import (
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/projectlocate"
+	"github.com/plystra/cli/internal/providerresolution"
 	"github.com/plystra/cli/internal/resolutionevidence"
 	kernelconfiguration "github.com/plystra/kernel/configuration"
 )
@@ -543,9 +544,26 @@ replace example.com/providers => ../providers
 	if got := configurationBindingIDs(first.Configurations().Bindings()); !reflect.DeepEqual(got, []string{"example.local", "example.smtp"}) {
 		t.Fatalf("configuration bindings = %v", got)
 	}
+	evidenceRequirements := first.ResolutionEvidence().Requirements()
+	if len(evidenceRequirements) != 1 || evidenceRequirements[0].Capability() != "email.send/v1" || evidenceRequirements[0].Intrinsic() {
+		t.Fatalf("resolution evidence requirements = %#v", evidenceRequirements)
+	}
+	evidenceSources := evidenceRequirements[0].Sources()
+	if len(evidenceSources) != 3 || evidenceSources[0].Kind() != providerresolution.RequirementAliasTarget || evidenceSources[1].Kind() != providerresolution.RequirementExposure || evidenceSources[2].Kind() != providerresolution.RequirementPlugin {
+		t.Fatalf("resolution evidence requirement sources = %#v", evidenceSources)
+	}
+	if source := evidenceSources[0]; source.ProjectModule() != "example.com/providers" || source.Source().Module() != "example.com/providers" || source.Source().Path() != "plystra.yaml" || source.Alias() != "mail.send/v1" {
+		t.Fatalf("dependency Alias-target source = %#v", source)
+	}
+	if source := evidenceSources[1]; source.ProjectModule() != "example.com/providers" || source.Source().Module() != "example.com/providers" || source.Source().Path() != "plystra.yaml" {
+		t.Fatalf("dependency exposure source = %#v", source)
+	}
+	if source := evidenceSources[2]; source.ProjectModule() != "example.com/app" || source.Source().Module() != "example.com/app" || source.Source().Path() != "local/plugin.yaml" || source.PluginID() != "example.local" {
+		t.Fatalf("local Plugin requirement source = %#v", source)
+	}
 	for _, forbidden := range []string{"private.smtp.example.com", "PLYSTRA_APPLICATION_RESOLVE_PRIVATE_SECRET", "resolved-private-secret", appRoot, providerRoot} {
-		if bytes.Contains(resolved.Context().CanonicalJSON(), []byte(forbidden)) {
-			t.Fatalf("generation context exposed private configuration %q: %s", forbidden, resolved.Context().CanonicalJSON())
+		if bytes.Contains(resolved.Context().CanonicalJSON(), []byte(forbidden)) || bytes.Contains(first.ResolutionEvidence().CanonicalJSON(), []byte(forbidden)) {
+			t.Fatalf("resolution output exposed private configuration %q", forbidden)
 		}
 	}
 
@@ -635,6 +653,18 @@ replace example.com/ordinary => ../ordinary
 	contextRequirements := result.Resolution().Context().Requirements()
 	if len(contextRequirements) != 2 || contextRequirements[0].String() != "audit.write/v1" || contextRequirements[1].String() != "email.send/v1" {
 		t.Fatalf("resolved requirements = %v", contextRequirements)
+	}
+	evidenceRequirements := result.ResolutionEvidence().Requirements()
+	if len(evidenceRequirements) != 2 || evidenceRequirements[0].Capability() != "audit.write/v1" || evidenceRequirements[1].Capability() != "email.send/v1" {
+		t.Fatalf("resolution evidence requirements = %#v", evidenceRequirements)
+	}
+	auditSources := evidenceRequirements[0].Sources()
+	if len(auditSources) != 1 || auditSources[0].Kind() != providerresolution.RequirementDeclaration || auditSources[0].ProjectModule() != "example.com/transitive" || auditSources[0].Source().Module() != "example.com/transitive" || auditSources[0].Source().Path() != "plystra.yaml" {
+		t.Fatalf("transitive requirement sources = %#v", auditSources)
+	}
+	emailSources := evidenceRequirements[1].Sources()
+	if len(emailSources) != 1 || emailSources[0].Kind() != providerresolution.RequirementExposure || emailSources[0].ProjectModule() != "example.com/direct" || emailSources[0].Source().Module() != "example.com/direct" || emailSources[0].Source().Path() != "plystra.yaml" {
+		t.Fatalf("direct exposure requirement sources = %#v", emailSources)
 	}
 	if provider, exists := result.Resolution().Context().SelectedProvider(parseGenerationCapability(t, "email.send/v1")); !exists || provider.String() != "example.smtp" {
 		t.Fatalf("email Provider = %s, %t", provider, exists)
@@ -977,6 +1007,22 @@ extensions:
 	provider, exists := result.Resolution().Context().SelectedProvider(parseGenerationCapability(t, "audit.write/v1"))
 	if !exists || provider.String() != "example.audit" {
 		t.Fatalf("generated audit provider = %s, %t", provider, exists)
+	}
+	evidenceRequirements := result.ResolutionEvidence().Requirements()
+	if len(evidenceRequirements) != 3 || evidenceRequirements[0].Capability() != "audit.write/v1" || evidenceRequirements[1].Capability() != "authn.session.verify/v1" || evidenceRequirements[2].Capability() != "order.create/v1" {
+		t.Fatalf("resolution evidence requirements = %#v", evidenceRequirements)
+	}
+	auditSources := evidenceRequirements[0].Sources()
+	if len(auditSources) != 1 || auditSources[0].Kind() != providerresolution.RequirementGenerationRule || auditSources[0].ProjectModule() != "example.com/extension-app" || auditSources[0].Source().Path() != "authn/plugin.yaml" || auditSources[0].PluginID() != "example.authn" || auditSources[0].Namespace() != "authn" || auditSources[0].SourceCapability() != "order.create/v1" || auditSources[0].RuleID() != "authn.require-audit" {
+		t.Fatalf("generation-rule requirement source = %#v", auditSources)
+	}
+	authnSources := evidenceRequirements[1].Sources()
+	if len(authnSources) != 1 || authnSources[0].Kind() != providerresolution.RequirementActivation || authnSources[0].ProjectModule() != "example.com/extension-app" || authnSources[0].Source().Path() != "plystra.yaml" || authnSources[0].Namespace() != "authn" || authnSources[0].SourceCapability() != "order.create/v1" {
+		t.Fatalf("activation requirement source = %#v", authnSources)
+	}
+	orderSources := evidenceRequirements[2].Sources()
+	if len(orderSources) != 1 || orderSources[0].Kind() != providerresolution.RequirementDeclaration || orderSources[0].ProjectModule() != "example.com/extension-app" || orderSources[0].Source().Path() != "plystra.yaml" {
+		t.Fatalf("declaration requirement source = %#v", orderSources)
 	}
 	entries, err := os.ReadDir(temporaryParent)
 	if err != nil || len(entries) != 0 {

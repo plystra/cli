@@ -68,10 +68,11 @@ func (p Provenance) Sources() []string { return append([]string(nil), p.sources.
 // Composition is one immutable effective Manifest plus its complete
 // dependency-derived non-secret provenance.
 type Composition struct {
-	manifest         Manifest
-	provenance       []Provenance
-	dependencyDigest string
-	prepared         bool
+	manifest          Manifest
+	provenance        []Provenance
+	resolutionSources []Provenance
+	dependencyDigest  string
+	prepared          bool
 }
 
 // DependencyBaseline returns the validated non-secret dependency provenance
@@ -106,16 +107,18 @@ func (c Composition) Provenance() []Provenance {
 	if !c.Valid() {
 		return nil
 	}
-	result := make([]Provenance, len(c.provenance))
-	for index := range c.provenance {
-		result[index] = Provenance{
-			path:    c.provenance[index].path,
-			digest:  c.provenance[index].digest,
-			removed: c.provenance[index].removed,
-			sources: append([]string(nil), c.provenance[index].sources...),
-		}
+	return cloneProvenance(c.provenance)
+}
+
+// ResolutionSources returns dependency provenance whose normalized value
+// matches one effective requirement, exposure, Provider choice, or Alias.
+// Superseded and removed dependency declarations remain in Provenance but do
+// not introduce final application requirements.
+func (c Composition) ResolutionSources() []Provenance {
+	if !c.Valid() {
+		return nil
 	}
-	return result
+	return cloneProvenance(c.resolutionSources)
 }
 
 // DependencyDigest returns the stable digest of dependency-derived normalized
@@ -202,7 +205,54 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 	if err := validateHTTPTransportSelection(manifest); err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
-	return Composition{manifest: manifest, provenance: provenance, dependencyDigest: digest, prepared: true}, nil
+	return Composition{
+		manifest:          manifest,
+		provenance:        provenance,
+		resolutionSources: effectiveResolutionSources(manifest, provenance),
+		dependencyDigest:  digest,
+		prepared:          true,
+	}, nil
+}
+
+func cloneProvenance(values []Provenance) []Provenance {
+	result := make([]Provenance, len(values))
+	for index := range values {
+		result[index] = Provenance{
+			path:    values[index].path,
+			digest:  values[index].digest,
+			removed: values[index].removed,
+			sources: append([]string(nil), values[index].sources...),
+		}
+	}
+	return result
+}
+
+func effectiveResolutionSources(manifest Manifest, provenance []Provenance) []Provenance {
+	effective := make(map[string]string)
+	for _, exposure := range manifest.httpExposures {
+		path := fmt.Sprintf("http.expose[%q]", exposure.id.String())
+		effective[path] = declarationDigest("http.expose", exposure.id, false)
+	}
+	for _, requirement := range manifest.requirements {
+		path := fmt.Sprintf("capabilities.require[%q]", requirement.id.String())
+		effective[path] = declarationDigest("capabilities.require", requirement.id, false)
+	}
+	for _, choice := range manifest.providerChoices {
+		path := fmt.Sprintf("capabilities.use[%q]", choice.capability.String())
+		effective[path] = digestStrings("capabilities.use", choice.capability.String(), choice.pluginID)
+	}
+	for _, alias := range manifest.aliases {
+		path := fmt.Sprintf("capabilities.aliases[%q]", alias.id.String())
+		effective[path] = aliasDigest(alias)
+	}
+	result := make([]Provenance, 0, len(effective))
+	for _, record := range provenance {
+		if record.removed || effective[record.path] != record.digest {
+			continue
+		}
+		result = append(result, record)
+	}
+	return cloneProvenance(result)
 }
 
 func validateHTTPTransportSelection(manifest Manifest) error {

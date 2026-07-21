@@ -63,7 +63,7 @@ capabilities:
 		SelectedDigest:              "sha256:" + strings.Repeat("1", 64),
 		DependencyCompositionDigest: "sha256:" + strings.Repeat("2", 64),
 	}
-	input, err := applicationinput.Build(manifest, inventory, provenance, generationexec.BuildOptions{BuildEnvironment: environment})
+	input, err := applicationinput.Build(manifest, inventory, applicationInputSourceContext(dependency{path: "example.com/providers", version: "v1.2.0"}), provenance, generationexec.BuildOptions{BuildEnvironment: environment})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -89,7 +89,7 @@ capabilities:
 	}) {
 		t.Fatalf("Candidates = %v", got)
 	}
-	if len(input.Requirements) != 1 || input.Requirements[0].Capability != "kernel.info/v1" || len(input.Requirements[0].Contract) == 0 || input.Requirements[0].Source != `plystra.yaml capabilities.require["kernel.info/v1"]` {
+	if len(input.Requirements) != 1 || input.Requirements[0].Capability != "kernel.info/v1" || len(input.Requirements[0].Contract) == 0 || input.Requirements[0].Source.String() != `plystra.yaml capabilities.require["kernel.info/v1"]` || input.Requirements[0].Source.Kind != providerresolution.RequirementDeclaration || input.Requirements[0].Source.ModulePath != "example.com/app" || input.Requirements[0].Source.Path != "plystra.yaml" {
 		t.Fatalf("Requirements = %#v", input.Requirements)
 	}
 	if len(input.Choices) != 1 || input.Choices[0].Capability != "order.create/v1" || input.Choices[0].PluginID != "example.business" {
@@ -111,7 +111,7 @@ capabilities:
 	if !exists || association.Capability().String() != "order.create/v1" || len(association.Extensions()) != 1 || association.Extensions()[0].PluginID() != "example.business" {
 		t.Fatalf("authz association = %#v, %t", association, exists)
 	}
-	if len(input.ApplicationHTTPExposures) != 1 || input.ApplicationHTTPExposures[0].ID().String() != "order.create/v1" || len(input.ApplicationAliases) != 1 || input.ApplicationAliases[0].ID().String() != "orders.submit/v1" {
+	if len(input.ApplicationHTTPExposures) != 1 || input.ApplicationHTTPExposures[0].Exposure.ID().String() != "order.create/v1" || len(input.ApplicationHTTPExposures[0].Sources) != 1 || input.ApplicationHTTPExposures[0].Sources[0].Kind != providerresolution.RequirementExposure || len(input.ApplicationAliases) != 1 || input.ApplicationAliases[0].Alias.ID().String() != "orders.submit/v1" || len(input.ApplicationAliases[0].Sources) != 1 || input.ApplicationAliases[0].Sources[0].Kind != providerresolution.RequirementAliasTarget || input.ApplicationAliases[0].Sources[0].Alias != "orders.submit/v1" {
 		t.Fatalf("application declarations = HTTP %#v, aliases %#v", input.ApplicationHTTPExposures, input.ApplicationAliases)
 	}
 	environment[0] = "changed"
@@ -129,13 +129,81 @@ capabilities:
 	}
 }
 
+func TestBuildPreservesEffectiveDependencySourcesAndSparseOverlayLocations(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModule(t, root, "example.com/app")
+	inventory := configureInventory(t, root)
+	manifest, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte(`http:
+  expose:
+    add: [kernel.health/v1]
+capabilities:
+  require:
+    add: [kernel.info/v1]
+`))
+	if err != nil {
+		t.Fatalf("ParseOverlaySource: %v", err)
+	}
+	sourceContext := applicationinput.SourceContext{
+		CurrentModulePath: "example.com/app",
+		Dependencies: []applicationinput.DependencySource{
+			{ModulePath: "example.com/a", Version: "v1.0.0"},
+			{ModulePath: "example.com/b", Version: "v2.0.0"},
+		},
+		DependencyProvenance: []applicationinput.DependencyProvenance{{
+			Path: "capabilities.require[\"kernel.info/v1\"]",
+			Sources: []string{
+				`example.com/a@v1.0.0/plystra.yaml capabilities.require["kernel.info/v1"]`,
+				`example.com/b@v2.0.0/plystra.yaml capabilities.require["kernel.info/v1"]`,
+			},
+		}},
+		CurrentProjectPaths: []string{`capabilities.require["kernel.info/v1"]`},
+	}
+	input, err := applicationinput.Build(manifest, inventory, sourceContext, nil, generationexec.BuildOptions{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(input.Requirements) != 3 {
+		t.Fatalf("Requirements = %#v", input.Requirements)
+	}
+	localSource := input.Requirements[0].Source
+	if localSource.Kind != providerresolution.RequirementDeclaration || localSource.ModulePath != "example.com/app" || localSource.Path != "plystra.production.yaml" || localSource.String() != `plystra.production.yaml capabilities.require.add["kernel.info/v1"]` {
+		t.Fatalf("local overlay requirement source = %#v", localSource)
+	}
+	for index, modulePath := range []string{"example.com/a", "example.com/b"} {
+		index++
+		source := input.Requirements[index].Source
+		if source.Kind != providerresolution.RequirementDeclaration || source.ModulePath != modulePath || source.Path != "plystra.yaml" || source.Line != 1 || source.Column != 1 {
+			t.Fatalf("Requirements[%d].Source = %#v", index, source)
+		}
+	}
+	if len(input.ApplicationHTTPExposures) != 1 || len(input.ApplicationHTTPExposures[0].Sources) != 1 {
+		t.Fatalf("ApplicationHTTPExposures = %#v", input.ApplicationHTTPExposures)
+	}
+	exposureSource := input.ApplicationHTTPExposures[0].Sources[0]
+	if exposureSource.Kind != providerresolution.RequirementExposure || exposureSource.ModulePath != "example.com/app" || exposureSource.Path != "plystra.production.yaml" || exposureSource.String() != `plystra.production.yaml http.expose.add["kernel.health/v1"]` {
+		t.Fatalf("sparse overlay exposure source = %#v", exposureSource)
+	}
+
+	invalidContext := sourceContext
+	invalidContext.DependencyProvenance = []applicationinput.DependencyProvenance{{
+		Path:    `capabilities.require["kernel.info/v1"]`,
+		Sources: []string{`example.com/unlisted@v1.0.0/plystra.yaml capabilities.require["kernel.info/v1"]`},
+	}}
+	invalid, err := applicationinput.Build(manifest, inventory, invalidContext, nil, generationexec.BuildOptions{})
+	if !errors.Is(err, applicationinput.ErrBuild) || !strings.Contains(err.Error(), "does not identify a discovered dependency Project") || len(invalid.Requirements) != 0 {
+		t.Fatalf("Build(unlisted dependency source) = %#v, %v", invalid, err)
+	}
+}
+
 func TestBuildAllowsEmptyPluginApplicationWithIntrinsicCatalog(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	writeModule(t, root, "example.com/app")
 	inventory := configureInventory(t, root)
-	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, nil, generationexec.BuildOptions{})
+	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, applicationInputSourceContext(), nil, generationexec.BuildOptions{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -167,7 +235,7 @@ func TestBuildRejectsMissingAndMismatchedCapabilitySources(t *testing.T) {
 				writeCapability(t, root, "smtp", "email.send/v1", test.content)
 			}
 			inventory := configureInventory(t, root)
-			input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, nil, generationexec.BuildOptions{})
+			input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, applicationInputSourceContext(), nil, generationexec.BuildOptions{})
 			if !errors.Is(err, applicationinput.ErrBuild) || !errors.Is(err, test.wantError) || len(input.Capabilities) != 0 {
 				t.Fatalf("Build = %#v, %v; want ErrBuild and %v", input, err, test.wantError)
 			}
@@ -185,7 +253,7 @@ func TestBuildRejectsConflictingVisibleProviderContracts(t *testing.T) {
 	writeCapability(t, root, "smtp", "email.send/v1", "id: email.send/v1\nrequest: {to: {type: string}}\nresponse: {}\nerrors: []\n")
 	writeCapability(t, root, "mock", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 	inventory := configureInventory(t, root)
-	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, nil, generationexec.BuildOptions{})
+	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, applicationInputSourceContext(), nil, generationexec.BuildOptions{})
 	if !errors.Is(err, applicationinput.ErrBuild) || !errors.Is(err, applicationinput.ErrContractConflict) || len(input.Capabilities) != 0 {
 		t.Fatalf("Build = %#v, %v; want contract conflict", input, err)
 	}
@@ -227,7 +295,7 @@ func TestBuildMergesIdenticalContractsFromSeveralProviders(t *testing.T) {
 	writeCapability(t, root, "smtp", "email.send/v1", contract)
 	writeCapability(t, root, "mock", "email.send/v1", "errors: []\nresponse: {}\nrequest: {to: {type: string}}\nid: email.send/v1\n")
 	inventory := configureInventory(t, root)
-	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, nil, generationexec.BuildOptions{})
+	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, applicationInputSourceContext(), nil, generationexec.BuildOptions{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -252,7 +320,7 @@ func TestBuildRejectsPluginProvidedIntrinsicCapability(t *testing.T) {
 	writeModule(t, root, "example.com/app")
 	writePlugin(t, root, "health", "id: example.health\nprovides: [kernel.health/v1]\n")
 	inventory := configureInventory(t, root)
-	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, nil, generationexec.BuildOptions{})
+	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, applicationInputSourceContext(), nil, generationexec.BuildOptions{})
 	if !errors.Is(err, applicationinput.ErrBuild) || !errors.Is(err, applicationinput.ErrIntrinsicProvider) || len(input.Capabilities) != 0 || !strings.Contains(err.Error(), "example.health") {
 		t.Fatalf("Build = %#v, %v; want intrinsic provider failure", input, err)
 	}
@@ -262,6 +330,14 @@ type dependency struct {
 	path    string
 	version string
 	root    string
+}
+
+func applicationInputSourceContext(dependencies ...dependency) applicationinput.SourceContext {
+	values := make([]applicationinput.DependencySource, len(dependencies))
+	for index, dependency := range dependencies {
+		values[index] = applicationinput.DependencySource{ModulePath: dependency.path, Version: dependency.version}
+	}
+	return applicationinput.SourceContext{CurrentModulePath: "example.com/app", Dependencies: values}
 }
 
 func configureInventory(t *testing.T, appRoot string, dependencies ...dependency) plugininventory.Index {

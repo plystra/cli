@@ -26,7 +26,7 @@ var (
 type NamespaceUse struct {
 	namespace          string
 	sourceCapability   capabilityid.Identifier
-	requirementSources []string
+	requirementSources []providerresolution.RequirementSource
 }
 
 // Namespace returns the exact lower-kebab extension namespace.
@@ -37,9 +37,9 @@ func (u NamespaceUse) SourceCapability() capabilityid.Identifier {
 	return u.sourceCapability
 }
 
-// RequirementSources returns sorted provenance for the source requirement.
-func (u NamespaceUse) RequirementSources() []string {
-	return append([]string(nil), u.requirementSources...)
+// RequirementSources returns sorted typed provenance for the source requirement.
+func (u NamespaceUse) RequirementSources() []providerresolution.RequirementSource {
+	return append([]providerresolution.RequirementSource(nil), u.requirementSources...)
 }
 
 // ActivationRequirement is one ordinary canonical activation Capability to add
@@ -187,7 +187,7 @@ func sortNamespaceUses(uses []NamespaceUse) {
 		if uses[left].sourceCapability != uses[right].sourceCapability {
 			return uses[left].sourceCapability.String() < uses[right].sourceCapability.String()
 		}
-		return strings.Join(uses[left].requirementSources, "\x00") < strings.Join(uses[right].requirementSources, "\x00")
+		return strings.Join(requirementSourceReferences(uses[left].requirementSources), "\x00") < strings.Join(requirementSourceReferences(uses[right].requirementSources), "\x00")
 	})
 }
 
@@ -270,7 +270,7 @@ func (e *MissingAssociationError) Error() string {
 			&message,
 			" %s required from [%s];",
 			use.sourceCapability,
-			strings.Join(use.requirementSources, ", "),
+			strings.Join(requirementSourceReferences(use.requirementSources), ", "),
 		)
 	}
 	fmt.Fprintf(
@@ -279,6 +279,14 @@ func (e *MissingAssociationError) Error() string {
 		e.namespace,
 	)
 	return message.String()
+}
+
+func requirementSourceReferences(sources []providerresolution.RequirementSource) []string {
+	values := make([]string, len(sources))
+	for index, source := range sources {
+		values[index] = source.String()
+	}
+	return values
 }
 
 // Unwrap supports errors.Is with ErrMissingAssociation.
