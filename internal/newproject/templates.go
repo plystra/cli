@@ -750,8 +750,9 @@ correctly creates generated drift.
   unversioned ID in plugin.yaml, plystra.yaml, generated imports, or runtime
   calls.
 - Capability IDs are provider-independent. Several Plugins may provide the
-  same exact ID only when their request, response, errors, typed semantics,
-  and normalized extension metadata are exactly compatible.
+  same exact ID only when their request, response, closed field constraints,
+  errors, typed semantics, and normalized extension metadata are exactly
+  compatible.
 - An application-local Capability Alias has the same ID grammar but is never a
   provider, canonical contract, reusable requirement, or Kernel registration.
 
@@ -810,6 +811,10 @@ Edit the authored capability.yaml into a complete provider-independent contract:
       record_id:
         type: string
         required: true
+        constraints:
+          min_length: 1
+          max_length: 128
+          pattern: '^[a-z0-9][a-z0-9_-]{0,127}$'
 
     response:
       record_id:
@@ -847,6 +852,15 @@ The --query profile writes those complete semantics into the authoritative
 capability.yaml. A Capability name never implies behavior, and a genuinely new
 identity requires one supported intent profile before the command mutates the
 Project.
+
+Constraints use one closed type-specific vocabulary: string fields accept
+min_length, max_length, and bounded Go regular-expression pattern; integer and
+number fields accept minimum and maximum; array fields accept min_items and
+max_items. Contract loading rejects unknown or type-incompatible keys, invalid
+bounds or expressions, and inexact normalized numbers. Constraints participate
+in exact equality and the contract digest, so every Provider copy must match.
+Generated request and response enforcement remains pre-release roadmap work;
+do not claim that current generated boundaries enforce constraints yet.
 
 Then regenerate before implementing against the typed contract:
 
@@ -1306,9 +1320,10 @@ build and distribution boundary for every Plystra module.
 - Ambiguous provider: run plystra use <capability-name>/vN <plugin-id> with the
   same --env or --config selector used for the application. Do not add
   priorities or rely on discovery order.
-- Incompatible contract: compare exact request, response, semantic errors,
-  typed semantics, and extension metadata. Implement the visible contract
-  or create a new version instead of weakening validation.
+- Incompatible contract: compare exact request, response, closed field
+  constraints, semantic errors, typed semantics, and extension metadata.
+  Implement the visible contract or create a new version instead of weakening
+  validation.
 - Constructor signature mismatch after adding requires: regenerate, import the
   Plugin's generated dependencies package, and use
   New(Config, dependencies.Dependencies) *Plugin.

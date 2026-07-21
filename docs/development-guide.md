@@ -895,6 +895,10 @@ request:
   item_id:
     type: string
     required: true
+    constraints:
+      min_length: 1
+      max_length: 128
+      pattern: '^[a-z0-9][a-z0-9_-]{0,127}$'
 
 response:
   item_id: {type: string, required: true}
@@ -927,6 +931,17 @@ semantics:
 `capability.yaml`; the Capability name never implies behavior. A genuinely new
 identity requires one supported intent profile before the command mutates the
 Project.
+
+Field constraints use one closed type-specific vocabulary: strings accept
+`min_length`, `max_length`, and bounded Go regular-expression `pattern`;
+integers and numbers accept `minimum` and `maximum`; arrays accept `min_items`
+and `max_items`. Contract loading rejects unknown or type-incompatible keys,
+reversed or excessive bounds, invalid expressions, non-finite numbers, and
+normalized numeric values that would lose their declared value. Constraints
+participate in exact equality and the contract digest, so every Provider copy
+must match the canonical declaration. Generated request/response enforcement
+and transport/SDK projection remain incomplete Gate 12 work in this pre-release
+checkout; do not describe those boundaries as enforcing constraints yet.
 
 Regenerate before implementing against the typed contract:
 
@@ -1523,9 +1538,10 @@ static model, but it must still pass typed runtime validation.
 
 ### Incompatible contract
 
-Compare request, response, semantic errors, typed semantics, and normalized
-extension metadata. Implement the visible exact contract or create a new
-version. Do not weaken equality or add a compatibility decoder.
+Compare request, response, closed field constraints, semantic errors, typed
+semantics, and normalized extension metadata. Implement the visible exact
+contract or create a new version. Do not weaken equality or add a compatibility
+decoder.
 
 ### Protobuf wire-history drift
 
@@ -1649,6 +1665,8 @@ The following remain roadmap work and must not be represented as complete:
   accepted AuthZ prerelease, and three-layer development-Goal closure.
 - Complete CLI dependency-management, development, test, build, check, fix,
   doctor, SDK packaging/publication, and release commands.
+- Generated request and response constraint enforcement plus Go, Connect,
+  JavaScript, documentation, and manifest constraint projection.
 - CLI-managed database migration workflows and an official persistence Plugin.
 - Gate 26 final cross-platform acceptance, packaging, release metadata,
   public-source readiness, and coordinated stable Kernel, CLI, AuthN, and AuthZ

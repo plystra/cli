@@ -108,7 +108,7 @@ func publishInvocations(pending pendingInvocations, providers Providers) (Invoca
 		return Invocations{}, fmt.Errorf("%w: selected providers are invalid", ErrInvocationAssembly)
 	}
 	bindings, err := kernelintrinsic.NewBindings(kernelintrinsic.BindingOptions{
-		ModuleVersion: "v0.0.0-20260720005152-f0de71108379",
+		ModuleVersion: "v0.0.0-20260721165653-c7bd8ea1247f",
 		BuildIdentity: "",
 	})
 	if err != nil {

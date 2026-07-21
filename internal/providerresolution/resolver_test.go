@@ -367,6 +367,36 @@ func TestResolveRejectsProviderLocalSemanticsOverride(t *testing.T) {
 	}
 }
 
+func TestResolveRejectsProviderLocalConstraintOverride(t *testing.T) {
+	t.Parallel()
+
+	required := contract("order.cancel/v1", "request:\n  reason: {type: string, required: true, constraints: {min_length: 1, max_length: 256}}\n")
+	overridden := []byte(strings.Replace(string(required), "max_length: 256", "max_length: 512", 1))
+	result, err := providerresolution.Resolve(providerresolution.Input{
+		Requirements: []providerresolution.Requirement{{Contract: required, Source: "official/order.cancel/v1"}},
+		Candidates: []providerresolution.Candidate{{
+			PluginID: "acme.orders",
+			Contract: overridden,
+			Source:   "acme/orders/capability.yaml",
+		}},
+	})
+	if !errors.Is(err, providerresolution.ErrProviderContract) || len(result.Selections()) != 0 {
+		t.Fatalf("Resolve = %#v, %v, want rejected Provider-local constraint", result, err)
+	}
+	var mismatch *providerresolution.ProviderContractError
+	if !errors.As(err, &mismatch) || mismatch.Capability().String() != "order.cancel/v1" || len(mismatch.Providers()) != 1 || mismatch.Providers()[0].PluginID() != "acme.orders" {
+		t.Fatalf("ProviderContractError = %#v", mismatch)
+	}
+	if mismatch.ExpectedDigest() == mismatch.Providers()[0].ContractDigest() || !slices.Equal(mismatch.ExpectedSources(), []string{"official/order.cancel/v1"}) {
+		t.Fatalf("contract mismatch details = %q, %#v", mismatch.ExpectedDigest(), mismatch.Providers())
+	}
+	for _, detail := range []string{"acme.orders", "closed field constraints", "typed semantics", "normalized extension metadata", "new /vN"} {
+		if !strings.Contains(err.Error(), detail) {
+			t.Fatalf("Provider-local constraint diagnostic omits %q: %v", detail, err)
+		}
+	}
+}
+
 func TestResolveRejectsConflictingRequirementContracts(t *testing.T) {
 	t.Parallel()
 

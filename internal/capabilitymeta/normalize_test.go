@@ -213,6 +213,7 @@ func TestNormalizeSchemaPreservesEveryExactContractDifference(t *testing.T) {
 		"type":                strings.Replace(base, "type: string", "type: integer", 1),
 		"required":            strings.Replace(base, "type: string", "type: string, required: true", 1),
 		"enum":                strings.Replace(base, "type: string", "type: string, enum: [one]", 1),
+		"field constraint":    strings.Replace(base, "type: string", "type: string, constraints: {min_length: 1}", 1),
 		"error":               strings.Replace(base, "errors: [invalid_value]", "errors: []", 1),
 		"typed semantics":     strings.Replace(base, "response: public", "response: internal", 1),
 		"extension namespace": base + "extensions: {authn: {authenticated: true}}\n",
