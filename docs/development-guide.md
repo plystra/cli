@@ -448,6 +448,16 @@ before output with the exact Capability, typed kind, supported unary kinds,
 and instruction to remove the Capability from `http.expose` until that
 operation kind is supported. Do not relabel an event or stream to bypass this
 validation.
+The application supplies one `RootContext` function for each generated
+canonical handler. It receives the live external request context plus a cloned
+header map and returns the trusted Kernel root. The generated handler
+reattaches explicit caller cancellation when the returned root intentionally
+uses `context.WithoutCancel` or otherwise detaches from the request. Canonical,
+Alias, HTTP, and direct paths therefore deliver `context.Canceled` through the
+generated application invocation to the Provider and return no response when
+the invocation observes cancellation. Providers remain responsible for their
+own transaction, compensation, and rollback behavior; best-effort cancellation
+does not undo work already performed.
 Both handlers accept only Connect POST requests encoded as binary
 Protobuf or ProtoJSON, require `Connect-Protocol-Version: 1`, and reject gRPC
 and gRPC-Web with `415 Unsupported Media Type` before root-context or Provider
@@ -1263,6 +1273,24 @@ export raw descriptors, Protobuf message objects, Connect clients, or
 malformed-response, and schema failures are normalized to stable Plystra error
 fields. Provider packages, runtime configuration, verified internal context,
 and Secrets must not appear in the package.
+
+Pass an `AbortSignal` as the operation's second argument for caller-controlled
+cancellation:
+
+```ts
+const controller = new AbortController();
+const pending = client.catalog.item.get.v1(
+  {item_id: "coffee"},
+  {signal: controller.signal},
+);
+controller.abort();
+await pending; // rejects with PlystraError code "cancelled"
+```
+
+The same signal cancels a request already in `fetch`; once server invocation
+has started, the generated Connect boundary propagates that cancellation to the
+canonical invocation and Provider context. Treat it as interruption, not as a
+Provider rollback guarantee.
 
 Generated Connect application failures carry one closed
 `plystra.generated.transport.v1.PlystraErrorDetail`. The detail identifies the

@@ -120,6 +120,10 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		"connectschema.Message(plystraErrorDetailType)",
 		"applicationinvocation.SafeTransportError(err)",
 		"func (h Handler) InvokeRequested(",
+		"cleanupRoot",
+		"context.AfterFunc",
+		"plystraCancelFromParent",
+		"parent.Err() == context.Canceled",
 		"connect.NewErrorDetail(message)",
 		`const CapabilityID = "customer.profile.sync/v1"`,
 		`const plystraErrorDetailType = "plystra.generated.transport.v1.PlystraErrorDetail"`,
@@ -654,8 +658,10 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	aliasadapter "example.com/acme/project/generated/go/adapters/connect/account/profile/v1"
@@ -671,13 +677,42 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+type trustedRootKey struct{}
+
 func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 	calls := 0
 	rootCalls := 0
-	target := kernelinvocation.NewTestHandle(func(_ context.Context, request contract.Request) (contract.Response, error) {
+	cancellationStarted := make(chan string)
+	cancellationObserved := make(chan string)
+	cancellationRescue := make(chan struct{})
+	var rescueOnce sync.Once
+	rescueCancellation := func() {
+		rescueOnce.Do(func() { close(cancellationRescue) })
+	}
+	defer rescueCancellation()
+	target := kernelinvocation.NewTestHandle(func(ctx context.Context, request contract.Request) (contract.Response, error) {
 		calls++
+		if ctx.Value(trustedRootKey{}) != "trusted-root" {
+			return contract.Response{}, errors.New("trusted root value is missing")
+		}
 		if request.Note != nil {
 			switch *request.Note {
+			case "wait-cancel-direct", "wait-cancel-canonical", "wait-cancel-alias":
+				select {
+				case cancellationStarted <- *request.Note:
+				case <-cancellationRescue:
+					return contract.Response{}, errors.New("cancellation test rescued before invocation started")
+				}
+				select {
+				case <-ctx.Done():
+					select {
+					case cancellationObserved <- *request.Note:
+					case <-cancellationRescue:
+					}
+					return contract.Response{}, ctx.Err()
+				case <-cancellationRescue:
+					return contract.Response{}, errors.New("caller cancellation did not reach the Provider context")
+				}
 			case "provider-error":
 				return contract.Response{}, errors.New("provider secret must not cross the Connect boundary")
 			case "semantic-error":
@@ -763,7 +798,7 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 		if headers.Get("Authorization") != "Bearer test" {
 			t.Fatalf("root headers = %v", headers)
 		}
-		return parent, nil
+		return context.WithValue(context.WithoutCancel(parent), trustedRootKey{}, "trusted-root"), nil
 	}, applicationinvocation.New(target))
 	if err != nil || !canonicaladapter.Available(canonical) {
 		t.Fatalf("canonical New = %#v, %v", canonical, err)
@@ -1207,6 +1242,91 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 		t.Fatalf("Alias error response = %#v", aliasResponse)
 	}
 	assertSafeConnectError(t, aliasErr, connect.CodeFailedPrecondition, "account.profile/v1", "temporarily_unavailable", "")
+
+	t.Run("pre-cancelled direct invocation reaches the Provider", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		request := connect.NewRequest(validRequest(t, directMethod, "wait-cancel-direct"))
+		request.Header().Set("Authorization", "Bearer test")
+		result := make(chan struct {
+			response *connect.Response[dynamicpb.Message]
+			err error
+		}, 1)
+		go func() {
+			response, err := canonical.Invoke(ctx, request)
+			result <- struct {
+				response *connect.Response[dynamicpb.Message]
+				err error
+			}{response: response, err: err}
+		}()
+		awaitCancellationEvent(t, cancellationStarted, "wait-cancel-direct", rescueCancellation)
+		awaitCancellationEvent(t, cancellationObserved, "wait-cancel-direct", rescueCancellation)
+		assertCancelledCall(t, result, rescueCancellation)
+	})
+
+	for _, route := range []struct {
+		name string
+		note string
+		procedure string
+		methodName protoreflect.FullName
+	}{
+		{name: "canonical", note: "wait-cancel-canonical", procedure: canonicaladapter.Procedure, methodName: "plystra.generated.customer.profile.sync.v1.CustomerProfileSyncV1Service.Invoke"},
+		{name: "Alias", note: "wait-cancel-alias", procedure: aliasadapter.Procedure, methodName: "plystra.generated.account.profile.v1.AccountProfileV1Service.Invoke"},
+	} {
+		t.Run("in-flight caller cancellation/"+route.name, func(t *testing.T) {
+			method := mustMethod(t, route.methodName)
+			client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](server.Client(), server.URL+route.procedure, connect.WithSchema(method), connect.WithResponseInitializer(connectschema.InitializeDynamicMessage))
+			request := connect.NewRequest(validRequest(t, method, route.note))
+			request.Header().Set("Authorization", "Bearer test")
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			result := make(chan struct {
+				response *connect.Response[dynamicpb.Message]
+				err error
+			}, 1)
+			go func() {
+				response, err := client.CallUnary(ctx, request)
+				result <- struct {
+					response *connect.Response[dynamicpb.Message]
+					err error
+				}{response: response, err: err}
+			}()
+			awaitCancellationEvent(t, cancellationStarted, route.note, rescueCancellation)
+			cancel()
+			awaitCancellationEvent(t, cancellationObserved, route.note, rescueCancellation)
+			assertCancelledCall(t, result, rescueCancellation)
+		})
+	}
+}
+
+func awaitCancellationEvent(t *testing.T, events <-chan string, want string, rescue func()) {
+	t.Helper()
+	select {
+	case got := <-events:
+		if got != want {
+			rescue()
+			t.Fatalf("cancellation event = %q, want %q", got, want)
+		}
+	case <-time.After(5 * time.Second):
+		rescue()
+		t.Fatalf("timed out waiting for cancellation event %q", want)
+	}
+}
+
+func assertCancelledCall(t *testing.T, result <-chan struct {
+	response *connect.Response[dynamicpb.Message]
+	err error
+}, rescue func()) {
+	t.Helper()
+	select {
+	case call := <-result:
+		if call.response != nil || connect.CodeOf(call.err) != connect.CodeCanceled {
+			t.Fatalf("cancelled call = %#v, %v", call.response, call.err)
+		}
+	case <-time.After(5 * time.Second):
+		rescue()
+		t.Fatal("timed out waiting for cancelled call to return")
+	}
 }
 
 func FuzzJSONCodecNeverPanics(f *testing.F) {

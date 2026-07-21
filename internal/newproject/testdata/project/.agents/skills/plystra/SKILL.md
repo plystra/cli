@@ -1044,6 +1044,13 @@ sentinels, non-finite values, more than 64 nested containers, more than 65,536
 structural tokens, independently oversized request and response payloads, and
 canonical/Alias parity. Invalid input must not create a root context or invoke
 a Provider, and response rejection returns no partial canonical response.
+RootContext receives the live external request context and may return a trusted
+root detached with context.WithoutCancel. The generated boundary reattaches
+explicit caller cancellation without discarding trusted root values. Test a
+pre-cancelled direct call and in-flight canonical plus Alias HTTP calls; each
+must reach ctx.Done in the canonical invocation and Provider context and return
+no response. Cancellation is best-effort and never guarantees that Provider
+work already performed is rolled back or compensated.
 
 The provider-independent TypeScript package is under
 generated/sdk/javascript. Validate it with:
@@ -1074,6 +1081,11 @@ never coerce them to JavaScript number values.
 When configuring getAccessToken, return only the raw token. The generated
 transport adds the Bearer authorization scheme and rejects a callback value
 that already includes the Bearer scheme before sending a request.
+Pass an AbortSignal in the operation's second argument when the caller may stop
+waiting. Verify both a pre-aborted signal and an in-flight abort: each rejects
+with PlystraError code cancelled, and the in-flight signal reaches fetch and the
+generated server cancellation path. Do not treat cancellation as a Provider
+rollback guarantee.
 Provider packages, runtime configuration, verified internal context, and Secret
 values must never appear in the browser package.
 

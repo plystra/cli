@@ -673,6 +673,66 @@ test("credentials, cancellation, and network failures are bounded and normalized
   assert.equal(calls, 0);
 });
 
+test("in-flight AbortSignal cancellation reaches the transport", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  let resolveStarted;
+  let observedAbort = false;
+  const started = new Promise((resolve) => {
+    resolveStarted = resolve;
+  });
+  const client = createEmailSendV1({
+    baseUrl: "https://api.example.test",
+    fetch: async (_input, init) => {
+      calls++;
+      const signal = init.signal;
+      resolveStarted();
+      return await new Promise((_resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("caller cancellation did not reach fetch")),
+          5_000,
+        );
+        const abort = () => {
+          clearTimeout(timeout);
+          observedAbort = true;
+          reject(signal?.reason ?? new DOMException("aborted", "AbortError"));
+        };
+        if (signal?.aborted === true) {
+          abort();
+          return;
+        }
+        signal?.addEventListener("abort", abort, { once: true });
+      });
+    },
+  });
+
+  const pending = client(
+    { to: "person@example.com", tags: [], priority: "normal" },
+    { signal: controller.signal },
+  );
+  await Promise.race([
+    started,
+    new Promise((_resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error("request did not reach fetch")),
+        5_000,
+      );
+      started.then(() => clearTimeout(timeout));
+    }),
+  ]);
+  controller.abort();
+
+  await assert.rejects(
+    () => pending,
+    (error) =>
+      error instanceof PlystraError &&
+      error.code === "cancelled" &&
+      error.message === "cancelled",
+  );
+  assert.equal(calls, 1);
+  assert.equal(observedAbort, true);
+});
+
 test("empty contracts remain exact and base URLs reject unsafe components", async () => {
   assert.throws(
     () =>

@@ -75,6 +75,8 @@ The generated JavaScript SDK exposes every canonical ` + "`integer`" + ` field, 
 
 Import the generated JavaScript SDK only through its package root. Internal runtime, descriptor, codec, operation-binder, and raw Connect surfaces are blocked by the package export map and omitted from public declarations.
 
+Pass an AbortSignal as the generated operation's second argument to cancel before dispatch or while fetch is in flight. Cancellation rejects with PlystraError code cancelled. Once server invocation has begun, the generated Connect handler preserves that caller cancellation through the trusted Kernel root, canonical application invocation, and Provider context. Cancellation is best-effort interruption and does not promise Provider rollback or compensation.
+
 ` + "`generated/proto/wire-map.json`" + ` is committed compatibility history for canonical Capability request and response messages selected for Connect. Generation preserves field numbers across declaration reordering, allocates new fields without renumbering existing fields, and permanently reserves removed field names and numbers. Scalar contract enums receive a numeric zero ` + "`*_UNSPECIFIED`" + ` sentinel and stable positive member numbers; reordering and additions preserve existing assignments, while removed member names and numbers remain permanently reserved. Inactive field and enum history remains when exposure, Connect, or an enum is disabled. Capability Aliases reuse their canonical target messages and enums and have no separate ledger entry. Never edit or delete the ledger; restore its exact last committed content before regenerating. Generation emits deterministic ` + "`.proto`" + ` schemas for the selected canonical and Alias Connect surfaces plus a self-contained ` + "`generated/proto/descriptor-set.pb`" + `; these CLI-owned files contain no Provider, Plugin, Go Module, configuration, or Secret data and must not be edited. A Project without a selected Connect surface retains a valid empty descriptor set. A selected Connect surface also emits a Go handler under ` + "`generated/go/adapters/connect/`" + `. Canonical handlers bind one exact procedure to the generated canonical application-invocation handle, while Alias handlers forward through that canonical handler without owning a Provider or Alias dispatch entry. The current Connect boundary accepts canonical contracts whose explicit ` + "`semantics.kind`" + ` is ` + "`query`" + ` or ` + "`command`" + ` and projects each as one unary procedure; an Alias reuses that canonical target. Selecting an ` + "`event`" + ` or ` + "`stream`" + ` for Connect fails before generated output and identifies the Capability, declared kind, supported unary kinds, and ` + "`http.expose`" + ` remediation. Do not relabel an event or stream to bypass validation. Both handlers accept only Connect POST requests encoded as binary Protobuf or ProtoJSON, require ` + "`Connect-Protocol-Version: 1`" + `, and reject gRPC and gRPC-Web before root-context or Provider invocation. Generation installs direct ` + "`connectrpc.com/connect`" + ` and ` + "`google.golang.org/protobuf`" + ` requirements at the supported versions inside the existing module transaction. The generated JavaScript package uses the same descriptor graph and declares pinned direct ` + "`@bufbuild/protobuf`" + `, ` + "`@connectrpc/connect`" + `, and ` + "`@connectrpc/connect-web`" + ` dependencies; application callers use only the Plystra wrapper rather than raw descriptors, messages, clients, or Connect errors. The generated application entrypoint does not yet mount an HTTP server; server mounting and the remaining protocol projections remain later transport work. Generation also rejects canonical fields in the same request or response when they derive the same ProtoJSON name or generated enum type. The diagnostic identifies both authored field names; rename one field in ` + "`capability.yaml`" + ` rather than editing generated output.
 
 Every selected Connect application failure carries one shared ` + "`PlystraErrorDetail`" + ` with the requested canonical or Alias ID, the canonical target, and exactly one declared semantic code or closed Kernel class. Alias handlers preserve the requested Alias while invoking only the canonical target. Provider text, causes, payloads, panic data, configuration, credentials, Secrets, and internal Kernel detail codes never enter this descriptor. The generated JavaScript wrapper exposes only the validated immutable Plystra detail; a missing, duplicate, malformed, unknown, mismatched, or undeclared detail fails closed to ` + "`internal`" + `.
@@ -1189,6 +1191,13 @@ sentinels, non-finite values, more than 64 nested containers, more than 65,536
 structural tokens, independently oversized request and response payloads, and
 canonical/Alias parity. Invalid input must not create a root context or invoke
 a Provider, and response rejection returns no partial canonical response.
+RootContext receives the live external request context and may return a trusted
+root detached with context.WithoutCancel. The generated boundary reattaches
+explicit caller cancellation without discarding trusted root values. Test a
+pre-cancelled direct call and in-flight canonical plus Alias HTTP calls; each
+must reach ctx.Done in the canonical invocation and Provider context and return
+no response. Cancellation is best-effort and never guarantees that Provider
+work already performed is rolled back or compensated.
 
 The provider-independent TypeScript package is under
 generated/sdk/javascript. Validate it with:
@@ -1219,6 +1228,11 @@ never coerce them to JavaScript number values.
 When configuring getAccessToken, return only the raw token. The generated
 transport adds the Bearer authorization scheme and rejects a callback value
 that already includes the Bearer scheme before sending a request.
+Pass an AbortSignal in the operation's second argument when the caller may stop
+waiting. Verify both a pre-aborted signal and an in-flight abort: each rejects
+with PlystraError code cancelled, and the in-flight signal reaches fetch and the
+generated server cancellation path. Do not treat cancellation as a Provider
+rollback guarantee.
 Provider packages, runtime configuration, verified internal context, and Secret
 values must never appear in the browser package.
 

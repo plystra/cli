@@ -34,6 +34,8 @@ const response = await client.account.profile.get.v2({});
 
 `getAccessToken` returns only the raw token value. The generated transport adds the `Bearer` authorization scheme; returning a value that already includes that scheme fails before the request is sent.
 
+Pass an `AbortSignal` as the operation's second argument to cancel before dispatch or while the request is in flight. Cancellation rejects with `PlystraError` code `cancelled`; once server invocation has begun, it reaches the generated Connect handler, canonical invocation, and Provider context. Cancellation is best-effort interruption and does not promise Provider rollback.
+
 Only explicitly exposed canonical operations and validated application-local Alias surfaces are generated. Alias methods reuse their direct canonical target contract and invoke the matching generated Alias Connect procedure. Provider packages, server configuration, verified internal context, and Secret values are never included.
 
 ## Canonical operations
