@@ -56,12 +56,13 @@ declared kind, supported unary kinds, and `http.expose` remediation. Do not
 relabel an event or stream to bypass this validation.
 The configured `RootContext` receives the live external request context and
 returns the trusted Kernel root used by the canonical invocation. Generated
-handlers preserve explicit caller cancellation even when that trusted root
-deliberately detaches from the external context: canonical, Alias, HTTP, and
-direct paths deliver `context.Canceled` through the application invocation to
-the Provider and return no response when the invocation observes it. This is
-best-effort interruption only; cancellation does not roll back or compensate
-Provider work that already occurred.
+handlers preserve explicit caller cancellation and the earlier caller or
+trusted-root deadline even when that trusted root deliberately detaches from
+the external context. Canonical, Alias, HTTP, and direct paths deliver
+`context.Canceled` or `context.DeadlineExceeded` through the application
+invocation to the Provider and return no response when invocation observes it.
+These signals are best-effort interruption only; neither cancellation nor a
+deadline rolls back or compensates Provider work that already occurred.
 Both handlers accept only Connect POST requests encoded as binary
 Protobuf or ProtoJSON, require `Connect-Protocol-Version: 1`, and reject gRPC
 and gRPC-Web with `415 Unsupported Media Type` before root-context or Provider

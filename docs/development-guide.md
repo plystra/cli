@@ -450,14 +450,15 @@ operation kind is supported. Do not relabel an event or stream to bypass this
 validation.
 The application supplies one `RootContext` function for each generated
 canonical handler. It receives the live external request context plus a cloned
-header map and returns the trusted Kernel root. The generated handler
-reattaches explicit caller cancellation when the returned root intentionally
-uses `context.WithoutCancel` or otherwise detaches from the request. Canonical,
-Alias, HTTP, and direct paths therefore deliver `context.Canceled` through the
-generated application invocation to the Provider and return no response when
-the invocation observes cancellation. Providers remain responsible for their
-own transaction, compensation, and rollback behavior; best-effort cancellation
-does not undo work already performed.
+header map and returns the trusted Kernel root. When the returned root
+intentionally uses `context.WithoutCancel` or otherwise detaches from the
+request, the generated handler reattaches explicit caller cancellation and
+derives the earlier caller or trusted-root deadline. Canonical, Alias, HTTP,
+and direct paths therefore deliver `context.Canceled` or
+`context.DeadlineExceeded` through generated application invocation to the
+Provider and return no response when invocation observes either. Providers
+remain responsible for their own transaction, compensation, and rollback
+behavior; best-effort interruption does not undo work already performed.
 Both handlers accept only Connect POST requests encoded as binary
 Protobuf or ProtoJSON, require `Connect-Protocol-Version: 1`, and reject gRPC
 and gRPC-Web with `415 Unsupported Media Type` before root-context or Provider

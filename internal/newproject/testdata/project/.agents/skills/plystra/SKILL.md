@@ -1046,10 +1046,14 @@ canonical/Alias parity. Invalid input must not create a root context or invoke
 a Provider, and response rejection returns no partial canonical response.
 RootContext receives the live external request context and may return a trusted
 root detached with context.WithoutCancel. The generated boundary reattaches
-explicit caller cancellation without discarding trusted root values. Test a
-pre-cancelled direct call and in-flight canonical plus Alias HTTP calls; each
-must reach ctx.Done in the canonical invocation and Provider context and return
-no response. Cancellation is best-effort and never guarantees that Provider
+explicit caller cancellation and derives the earlier caller or trusted-root
+deadline without discarding trusted root values. Test a pre-cancelled direct
+call and in-flight canonical plus Alias HTTP cancellations; each must reach
+ctx.Done in the canonical invocation and Provider context and return no
+response. Also test a pre-expired direct deadline, canonical and Alias HTTP
+Connect-Timeout-Ms deadlines, and an earlier trusted-root deadline. Each must
+retain context.DeadlineExceeded through the Provider and safe Connect error.
+Cancellation and deadlines are best-effort and never guarantee that Provider
 work already performed is rolled back or compensated.
 
 The provider-independent TypeScript package is under

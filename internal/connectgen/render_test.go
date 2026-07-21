@@ -122,6 +122,8 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		"func (h Handler) InvokeRequested(",
 		"cleanupRoot",
 		"context.AfterFunc",
+		"parent.Deadline()",
+		"context.WithDeadline(ctx, deadline)",
 		"plystraCancelFromParent",
 		"parent.Err() == context.Canceled",
 		"connect.NewErrorDetail(message)",
@@ -679,11 +681,25 @@ import (
 
 type trustedRootKey struct{}
 
+type connectCallResult struct {
+	response *connect.Response[dynamicpb.Message]
+	err error
+}
+
+type deadlineEvent struct {
+	note string
+	deadline time.Time
+	hasDeadline bool
+	err error
+}
+
 func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 	calls := 0
 	rootCalls := 0
 	cancellationStarted := make(chan string)
 	cancellationObserved := make(chan string)
+	deadlineStarted := make(chan deadlineEvent)
+	deadlineObserved := make(chan deadlineEvent)
 	cancellationRescue := make(chan struct{})
 	var rescueOnce sync.Once
 	rescueCancellation := func() {
@@ -712,6 +728,28 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 					return contract.Response{}, ctx.Err()
 				case <-cancellationRescue:
 					return contract.Response{}, errors.New("caller cancellation did not reach the Provider context")
+				}
+			case "wait-deadline-direct", "wait-deadline-canonical", "wait-deadline-alias", "wait-deadline-root":
+				deadline, hasDeadline := ctx.Deadline()
+				started := deadlineEvent{note: *request.Note, deadline: deadline, hasDeadline: hasDeadline}
+				select {
+				case deadlineStarted <- started:
+				case <-cancellationRescue:
+					return contract.Response{}, errors.New("deadline test rescued before invocation started")
+				}
+				if !hasDeadline {
+					return contract.Response{}, errors.New("caller deadline did not reach the Provider context")
+				}
+				select {
+				case <-ctx.Done():
+					observed := deadlineEvent{note: *request.Note, deadline: deadline, hasDeadline: true, err: ctx.Err()}
+					select {
+					case deadlineObserved <- observed:
+					case <-cancellationRescue:
+					}
+					return contract.Response{}, ctx.Err()
+				case <-cancellationRescue:
+					return contract.Response{}, errors.New("deadline did not reach the Provider context")
 				}
 			case "provider-error":
 				return contract.Response{}, errors.New("provider secret must not cross the Connect boundary")
@@ -1248,16 +1286,10 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 		cancel()
 		request := connect.NewRequest(validRequest(t, directMethod, "wait-cancel-direct"))
 		request.Header().Set("Authorization", "Bearer test")
-		result := make(chan struct {
-			response *connect.Response[dynamicpb.Message]
-			err error
-		}, 1)
+		result := make(chan connectCallResult, 1)
 		go func() {
 			response, err := canonical.Invoke(ctx, request)
-			result <- struct {
-				response *connect.Response[dynamicpb.Message]
-				err error
-			}{response: response, err: err}
+			result <- connectCallResult{response: response, err: err}
 		}()
 		awaitCancellationEvent(t, cancellationStarted, "wait-cancel-direct", rescueCancellation)
 		awaitCancellationEvent(t, cancellationObserved, "wait-cancel-direct", rescueCancellation)
@@ -1280,16 +1312,10 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 			request.Header().Set("Authorization", "Bearer test")
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			result := make(chan struct {
-				response *connect.Response[dynamicpb.Message]
-				err error
-			}, 1)
+			result := make(chan connectCallResult, 1)
 			go func() {
 				response, err := client.CallUnary(ctx, request)
-				result <- struct {
-					response *connect.Response[dynamicpb.Message]
-					err error
-				}{response: response, err: err}
+				result <- connectCallResult{response: response, err: err}
 			}()
 			awaitCancellationEvent(t, cancellationStarted, route.note, rescueCancellation)
 			cancel()
@@ -1297,6 +1323,98 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 			assertCancelledCall(t, result, rescueCancellation)
 		})
 	}
+
+	t.Run("pre-expired direct deadline reaches the Provider", func(t *testing.T) {
+		ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+		defer cancel()
+		callerDeadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("direct caller context has no deadline")
+		}
+		request := connect.NewRequest(validRequest(t, directMethod, "wait-deadline-direct"))
+		request.Header().Set("Authorization", "Bearer test")
+		result := make(chan connectCallResult, 1)
+		go func() {
+			response, err := canonical.Invoke(ctx, request)
+			result <- connectCallResult{response: response, err: err}
+		}()
+		started := awaitDeadlineEvent(t, deadlineStarted, "wait-deadline-direct", false, rescueCancellation)
+		if !started.deadline.Equal(callerDeadline) {
+			rescueCancellation()
+			t.Fatalf("direct Provider deadline = %s, want %s", started.deadline, callerDeadline)
+		}
+		awaitDeadlineEvent(t, deadlineObserved, "wait-deadline-direct", true, rescueCancellation)
+		assertDeadlineCall(t, result, rescueCancellation)
+	})
+
+	for _, route := range []struct {
+		name string
+		note string
+		procedure string
+		methodName protoreflect.FullName
+	}{
+		{name: "canonical", note: "wait-deadline-canonical", procedure: canonicaladapter.Procedure, methodName: "plystra.generated.customer.profile.sync.v1.CustomerProfileSyncV1Service.Invoke"},
+		{name: "Alias", note: "wait-deadline-alias", procedure: aliasadapter.Procedure, methodName: "plystra.generated.account.profile.v1.AccountProfileV1Service.Invoke"},
+	} {
+		t.Run("in-flight caller deadline/"+route.name, func(t *testing.T) {
+			method := mustMethod(t, route.methodName)
+			client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](server.Client(), server.URL+route.procedure, connect.WithSchema(method), connect.WithResponseInitializer(connectschema.InitializeDynamicMessage))
+			request := connect.NewRequest(validRequest(t, method, route.note))
+			request.Header().Set("Authorization", "Bearer test")
+			request.Header().Set("Connect-Timeout-Ms", "1000")
+			result := make(chan connectCallResult, 1)
+			go func() {
+				response, err := client.CallUnary(t.Context(), request)
+				result <- connectCallResult{response: response, err: err}
+			}()
+			started := awaitDeadlineEvent(t, deadlineStarted, route.note, false, rescueCancellation)
+			remaining := time.Until(started.deadline)
+			if remaining <= 0 || remaining > 1100*time.Millisecond {
+				rescueCancellation()
+				t.Fatalf("%s Provider deadline has remaining duration %s", route.name, remaining)
+			}
+			awaitDeadlineEvent(t, deadlineObserved, route.note, true, rescueCancellation)
+			assertDeadlineCall(t, result, rescueCancellation)
+		})
+	}
+
+	t.Run("earlier trusted-root deadline wins", func(t *testing.T) {
+		rootDeadline := time.Now().Add(500 * time.Millisecond)
+		var cancelRoot context.CancelFunc
+		defer func() {
+			if cancelRoot != nil {
+				cancelRoot()
+			}
+		}()
+		deadlineHandler, err := canonicaladapter.New(func(parent context.Context, headers http.Header) (context.Context, error) {
+			if headers.Get("Authorization") != "Bearer test" {
+				return nil, errors.New("authorization header is missing")
+			}
+			trusted := context.WithValue(context.WithoutCancel(parent), trustedRootKey{}, "trusted-root")
+			ctx, cancel := context.WithDeadline(trusted, rootDeadline)
+			cancelRoot = cancel
+			return ctx, nil
+		}, applicationinvocation.New(target))
+		if err != nil {
+			t.Fatalf("deadline handler New: %v", err)
+		}
+		ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(5*time.Second))
+		defer cancel()
+		request := connect.NewRequest(validRequest(t, directMethod, "wait-deadline-root"))
+		request.Header().Set("Authorization", "Bearer test")
+		result := make(chan connectCallResult, 1)
+		go func() {
+			response, err := deadlineHandler.Invoke(ctx, request)
+			result <- connectCallResult{response: response, err: err}
+		}()
+		started := awaitDeadlineEvent(t, deadlineStarted, "wait-deadline-root", false, rescueCancellation)
+		if !started.deadline.Equal(rootDeadline) {
+			rescueCancellation()
+			t.Fatalf("trusted-root Provider deadline = %s, want %s", started.deadline, rootDeadline)
+		}
+		awaitDeadlineEvent(t, deadlineObserved, "wait-deadline-root", true, rescueCancellation)
+		assertDeadlineCall(t, result, rescueCancellation)
+	})
 }
 
 func awaitCancellationEvent(t *testing.T, events <-chan string, want string, rescue func()) {
@@ -1313,10 +1431,7 @@ func awaitCancellationEvent(t *testing.T, events <-chan string, want string, res
 	}
 }
 
-func assertCancelledCall(t *testing.T, result <-chan struct {
-	response *connect.Response[dynamicpb.Message]
-	err error
-}, rescue func()) {
+func assertCancelledCall(t *testing.T, result <-chan connectCallResult, rescue func()) {
 	t.Helper()
 	select {
 	case call := <-result:
@@ -1326,6 +1441,43 @@ func assertCancelledCall(t *testing.T, result <-chan struct {
 	case <-time.After(5 * time.Second):
 		rescue()
 		t.Fatal("timed out waiting for cancelled call to return")
+	}
+}
+
+func awaitDeadlineEvent(t *testing.T, events <-chan deadlineEvent, want string, wantExpired bool, rescue func()) deadlineEvent {
+	t.Helper()
+	select {
+	case event := <-events:
+		if event.note != want || !event.hasDeadline {
+			rescue()
+			t.Fatalf("deadline event = %#v, want %q with a deadline", event, want)
+		}
+		if wantExpired && !errors.Is(event.err, context.DeadlineExceeded) {
+			rescue()
+			t.Fatalf("deadline event error = %v, want deadline exceeded", event.err)
+		}
+		if !wantExpired && event.err != nil {
+			rescue()
+			t.Fatalf("deadline start error = %v", event.err)
+		}
+		return event
+	case <-time.After(5 * time.Second):
+		rescue()
+		t.Fatalf("timed out waiting for deadline event %q", want)
+		return deadlineEvent{}
+	}
+}
+
+func assertDeadlineCall(t *testing.T, result <-chan connectCallResult, rescue func()) {
+	t.Helper()
+	select {
+	case call := <-result:
+		if call.response != nil || connect.CodeOf(call.err) != connect.CodeDeadlineExceeded {
+			t.Fatalf("deadline call = %#v, %v", call.response, call.err)
+		}
+	case <-time.After(5 * time.Second):
+		rescue()
+		t.Fatal("timed out waiting for deadline call to return")
 	}
 }
 
