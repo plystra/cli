@@ -637,7 +637,38 @@ semantics:
 	}
 }
 
-func TestGenerateRejectsEventConnectExposureWithoutMutation(t *testing.T) {
+func TestGenerateRejectsEventAndStreamConnectExposureWithoutMutation(t *testing.T) {
+	kinds := []struct {
+		name      string
+		semantics string
+	}{
+		{
+			name: "event",
+			semantics: `semantics:
+  kind: event
+  effects: external-write
+  idempotency: {mode: none}
+  retry: {safety: never}
+  cancellation: {mode: best-effort}
+  completion: {mode: accepted-for-processing}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`,
+		},
+		{
+			name: "stream",
+			semantics: `semantics:
+  kind: stream
+  effects: none
+  idempotency: {mode: none}
+  retry: {safety: never}
+  cancellation: {mode: best-effort}
+  completion: {mode: accepted-for-processing}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`,
+		},
+	}
 	selections := []struct {
 		name         string
 		selectedPath string
@@ -673,76 +704,66 @@ capabilities:
 		},
 	}
 
-	for _, selection := range selections {
-		selection := selection
-		for _, surface := range surfaces {
-			surface := surface
-			for _, check := range []bool{false, true} {
-				check := check
-				name := selection.name + "/" + surface.name + "/generate"
-				if check {
-					name += " check"
-				}
-				t.Run(name, func(t *testing.T) {
-					t.Parallel()
+	for _, kind := range kinds {
+		kind := kind
+		for _, selection := range selections {
+			selection := selection
+			for _, surface := range surfaces {
+				surface := surface
+				for _, check := range []bool{false, true} {
+					check := check
+					name := kind.name + "/" + selection.name + "/" + surface.name + "/generate"
+					if check {
+						name += " check"
+					}
+					t.Run(name, func(t *testing.T) {
+						t.Parallel()
 
-					root := t.TempDir()
-					writeApplicationModule(t, root, "example.com/acme/connect-event")
-					rootData := "{}\n"
-					if selection.selectedPath == "plystra.yaml" {
-						rootData = surface.yaml
-					}
-					writeFile(t, filepath.Join(root, "plystra.yaml"), rootData)
-					if selection.selectedPath != "plystra.yaml" {
-						writeFile(t, filepath.Join(root, filepath.FromSlash(selection.selectedPath)), surface.yaml)
-					}
-					writePlugin(t, root, "records", "id: acme.records\nprovides: [records.archived/v1]\n")
-					writeCapability(t, root, "records", "records.archived/v1", `id: records.archived/v1
-request: {record_id: {type: string, required: true}}
-response: {}
-errors: []
-semantics:
-  kind: event
-  effects: external-write
-  idempotency: {mode: none}
-  retry: {safety: never}
-  cancellation: {mode: best-effort}
-  completion: {mode: accepted-for-processing}
-  ordering: {mode: none}
-  data: {request: public, response: public}
-`)
-					before := snapshotTree(t, root)
-					options := applicationgenerate.Options{
-						Start:       root,
-						Check:       check,
-						Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
-						Validate:    func(_ context.Context, _ string) error { return nil },
-					}
-					if selection.configure != nil {
-						selection.configure(&options)
-					}
-					_, err := applicationgenerate.Generate(t.Context(), options)
-					if !errors.Is(err, protobufmodel.ErrOperationKind) {
-						t.Fatalf("Generate(check=%t) error = %v", check, err)
-					}
-					for _, want := range []string{
-						"Capability records.archived/v1",
-						`semantics.kind "event"`,
-						"requested Connect surface",
-						"unary boundary",
-						`semantics.kind "query"`,
-						`"command"`,
-						"remove records.archived/v1 from http.expose",
-					} {
-						if !strings.Contains(err.Error(), want) {
-							t.Fatalf("Generate error %q omits %q", err, want)
+						root := t.TempDir()
+						writeApplicationModule(t, root, "example.com/acme/connect-"+kind.name)
+						rootData := "{}\n"
+						if selection.selectedPath == "plystra.yaml" {
+							rootData = surface.yaml
 						}
-					}
-					if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
-						t.Fatalf("failed generation mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
-					}
-					assertNoTransactions(t, root)
-				})
+						writeFile(t, filepath.Join(root, "plystra.yaml"), rootData)
+						if selection.selectedPath != "plystra.yaml" {
+							writeFile(t, filepath.Join(root, filepath.FromSlash(selection.selectedPath)), surface.yaml)
+						}
+						writePlugin(t, root, "records", "id: acme.records\nprovides: [records.archived/v1]\n")
+						writeCapability(t, root, "records", "records.archived/v1", "id: records.archived/v1\nrequest: {record_id: {type: string, required: true}}\nresponse: {}\nerrors: []\n"+kind.semantics)
+						before := snapshotTree(t, root)
+						options := applicationgenerate.Options{
+							Start:       root,
+							Check:       check,
+							Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+							Validate:    func(_ context.Context, _ string) error { return nil },
+						}
+						if selection.configure != nil {
+							selection.configure(&options)
+						}
+						_, err := applicationgenerate.Generate(t.Context(), options)
+						if !errors.Is(err, protobufmodel.ErrOperationKind) {
+							t.Fatalf("Generate(check=%t) error = %v", check, err)
+						}
+						for _, want := range []string{
+							"Capability records.archived/v1",
+							`semantics.kind "` + kind.name + `"`,
+							"requested Connect surface",
+							"unary boundary",
+							`semantics.kind "query"`,
+							`"command"`,
+							"remove records.archived/v1 from http.expose",
+						} {
+							if !strings.Contains(err.Error(), want) {
+								t.Fatalf("Generate error %q omits %q", err, want)
+							}
+						}
+						if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+							t.Fatalf("failed generation mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
+						}
+						assertNoTransactions(t, root)
+					})
+				}
 			}
 		}
 	}
