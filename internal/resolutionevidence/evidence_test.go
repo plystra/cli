@@ -61,6 +61,14 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	if source := candidates[1].Source(); source.Module() != "corp.example/smtp" || source.Path() != "smtp/plugin.yaml" || source.Kind() != "plugin-declaration" || source.Line() != 1 || source.Column() != 1 {
 		t.Fatalf("replacement Plugin source = %#v", source)
 	}
+	selectedPlugins := first.SelectedPlugins()
+	if len(selectedPlugins) != 1 || selectedPlugins[0].ID() != "example.smtp" || selectedPlugins[0].ModulePath() != "example.com/smtp" || selectedPlugins[0].ModuleVersion() != "v1.3.0" || selectedPlugins[0].ModuleRole() != resolutionevidence.ModuleRoleDependency || selectedPlugins[0].Path() != "smtp" || selectedPlugins[0].Local() || selectedPlugins[0].Source() != candidates[1].Source() {
+		t.Fatalf("selected Plugins = %#v", selectedPlugins)
+	}
+	reasons := selectedPlugins[0].Reasons()
+	if len(reasons) != 1 || reasons[0].Kind() != resolutionevidence.PluginSelectionProvider || reasons[0].Capability() != "email.send/v1" {
+		t.Fatalf("selected Plugin reasons = %#v", reasons)
+	}
 	if !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() {
 		t.Fatalf("input permutation changed evidence:\nfirst:  %s %s\nsecond: %s %s", first.CanonicalJSON(), first.Digest(), second.CanonicalJSON(), second.Digest())
 	}
@@ -96,15 +104,24 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 				Path   string `json:"path"`
 			} `json:"source"`
 		} `json:"plugin_candidates"`
+		SelectedPlugins []struct {
+			ID            string `json:"id"`
+			ModulePath    string `json:"module_path"`
+			ModuleVersion string `json:"module_version"`
+			Reasons       []struct {
+				Kind       string `json:"kind"`
+				Capability string `json:"capability"`
+			} `json:"reasons"`
+		} `json:"selected_plugins"`
 		Counts struct {
 			ParticipatingModules int `json:"participating_modules"`
 			DiscoveredPlugins    int `json:"discovered_plugins"`
 		} `json:"counts"`
 	}
-	if err := json.Unmarshal(first.CanonicalJSON(), &document); err != nil || document.Version != 1 || len(document.Modules) != 3 || document.Counts.ParticipatingModules != 3 || document.Counts.DiscoveredPlugins != 2 || document.Modules[2].Replacement == nil || document.Modules[2].Replacement.Kind != "module" || document.Modules[2].Source.Module != "corp.example/smtp" || document.Modules[2].Source.Path != "plystra.yaml" || len(document.PluginCandidates) != 2 || document.PluginCandidates[1].ID != "example.smtp" || document.PluginCandidates[1].ModulePath != "example.com/smtp" || document.PluginCandidates[1].Source.Module != "corp.example/smtp" || document.PluginCandidates[1].Source.Path != "smtp/plugin.yaml" {
+	if err := json.Unmarshal(first.CanonicalJSON(), &document); err != nil || document.Version != 1 || len(document.Modules) != 3 || document.Counts.ParticipatingModules != 3 || document.Counts.DiscoveredPlugins != 2 || document.Modules[2].Replacement == nil || document.Modules[2].Replacement.Kind != "module" || document.Modules[2].Source.Module != "corp.example/smtp" || document.Modules[2].Source.Path != "plystra.yaml" || len(document.PluginCandidates) != 2 || document.PluginCandidates[1].ID != "example.smtp" || document.PluginCandidates[1].ModulePath != "example.com/smtp" || document.PluginCandidates[1].Source.Module != "corp.example/smtp" || document.PluginCandidates[1].Source.Path != "smtp/plugin.yaml" || len(document.SelectedPlugins) != 1 || document.SelectedPlugins[0].ID != "example.smtp" || document.SelectedPlugins[0].ModulePath != "example.com/smtp" || document.SelectedPlugins[0].ModuleVersion != "v1.3.0" || len(document.SelectedPlugins[0].Reasons) != 1 || document.SelectedPlugins[0].Reasons[0].Kind != "provider" || document.SelectedPlugins[0].Reasons[0].Capability != "email.send/v1" {
 		t.Fatalf("canonical module evidence = %#v, %v", document, err)
 	}
-	for _, forbidden := range []string{"email.send/v1", "capability.yaml", "safe_name"} {
+	for _, forbidden := range []string{"idempotency_key", "capability.yaml", "safe_name"} {
 		if bytes.Contains(first.CanonicalJSON(), []byte(forbidden)) {
 			t.Fatalf("bounded evidence contains detailed model value %q: %s", forbidden, first.CanonicalJSON())
 		}
@@ -114,7 +131,9 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	mutated[0] = '['
 	modules[0] = resolutionevidence.Module{}
 	candidates[0] = resolutionevidence.PluginCandidate{}
-	if first.CanonicalJSON()[0] != '{' || first.Modules()[0].Path() != "example.com/app" || first.PluginCandidates()[0].ID() != "example.shared" || !first.Valid() {
+	selectedPlugins[0] = resolutionevidence.SelectedPlugin{}
+	reasons[0] = resolutionevidence.PluginSelectionReason{}
+	if first.CanonicalJSON()[0] != '{' || first.Modules()[0].Path() != "example.com/app" || first.PluginCandidates()[0].ID() != "example.shared" || first.SelectedPlugins()[0].ID() != "example.smtp" || first.SelectedPlugins()[0].Reasons()[0].Capability() != "email.send/v1" || !first.Valid() {
 		t.Fatal("CanonicalJSON exposed mutable evidence storage")
 	}
 }
@@ -147,6 +166,32 @@ func TestBuildSeparatesSelectionProvenanceFromBuildState(t *testing.T) {
 	}
 	if base.BuildModelDigest() == build.BuildModelDigest() || base.Digest() == build.Digest() {
 		t.Fatal("build-visible exposure change did not alter evidence identity")
+	}
+}
+
+func TestBuildOrdersEverySelectedPluginReasonDeterministically(t *testing.T) {
+	t.Parallel()
+
+	firstContext := multiProviderContext(t, false)
+	secondContext := multiProviderContext(t, true)
+	first, err := resolutionevidence.Build(resolutionevidence.Input{Context: firstContext, Modules: participatingModules(false), PluginCandidates: participatingPluginCandidates(false)})
+	if err != nil {
+		t.Fatalf("Build(first): %v", err)
+	}
+	second, err := resolutionevidence.Build(resolutionevidence.Input{Context: secondContext, Modules: participatingModules(true), PluginCandidates: participatingPluginCandidates(true)})
+	if err != nil {
+		t.Fatalf("Build(second): %v", err)
+	}
+	if !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() {
+		t.Fatalf("provider permutation changed selected Plugin evidence:\nfirst:  %s\nsecond: %s", first.CanonicalJSON(), second.CanonicalJSON())
+	}
+	selected := first.SelectedPlugins()
+	if len(selected) != 1 {
+		t.Fatalf("selected Plugins = %#v", selected)
+	}
+	reasons := selected[0].Reasons()
+	if len(reasons) != 2 || reasons[0].Kind() != resolutionevidence.PluginSelectionProvider || reasons[0].Capability() != "audit.write/v1" || reasons[1].Kind() != resolutionevidence.PluginSelectionProvider || reasons[1].Capability() != "email.send/v1" {
+		t.Fatalf("selected Plugin reasons = %#v", reasons)
 	}
 }
 
@@ -280,6 +325,24 @@ func TestBuildRejectsInvalidDiscoveredPluginCandidateEvidence(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsSelectedDependencyPluginWithoutASelectionReason(t *testing.T) {
+	t.Parallel()
+
+	context, err := generation.NewContext(generation.Input{Plugins: []generation.PluginInput{{
+		ID:                "example.smtp",
+		ModulePath:        "example.com/smtp",
+		ModuleVersion:     "v1.3.0",
+		BuildMetadataJSON: []byte("{}"),
+	}}})
+	if err != nil {
+		t.Fatalf("generation.NewContext: %v", err)
+	}
+	evidence, err := resolutionevidence.Build(resolutionevidence.Input{Context: context, Modules: participatingModules(false), PluginCandidates: participatingPluginCandidates(false)})
+	if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "at least one selection reason is required") || evidence.Valid() {
+		t.Fatalf("Build = %#v, %v", evidence, err)
+	}
+}
+
 func participatingModules(reverse bool) []resolutionevidence.ModuleInput {
 	modules := []resolutionevidence.ModuleInput{
 		{
@@ -322,6 +385,57 @@ func participatingPluginCandidates(reverse bool) []resolutionevidence.PluginCand
 		candidates[0], candidates[1] = candidates[1], candidates[0]
 	}
 	return candidates
+}
+
+func multiProviderContext(t testing.TB, reverse bool) generation.Context {
+	t.Helper()
+	audit := queryContract(t, "audit.write/v1")
+	email := queryContract(t, "email.send/v1")
+	capabilities := []generation.CapabilityInput{{ContractJSON: audit}, {ContractJSON: email}}
+	requirements := []string{"audit.write/v1", "email.send/v1"}
+	providers := []generation.ProviderInput{
+		{Capability: "audit.write/v1", Plugin: "example.smtp"},
+		{Capability: "email.send/v1", Plugin: "example.smtp"},
+	}
+	provides := []string{"audit.write/v1", "email.send/v1"}
+	if reverse {
+		capabilities[0], capabilities[1] = capabilities[1], capabilities[0]
+		requirements[0], requirements[1] = requirements[1], requirements[0]
+		providers[0], providers[1] = providers[1], providers[0]
+		provides[0], provides[1] = provides[1], provides[0]
+	}
+	context, err := generation.NewContext(generation.Input{
+		Plugins: []generation.PluginInput{{
+			ID:                "example.smtp",
+			ModulePath:        "example.com/smtp",
+			ModuleVersion:     "v1.3.0",
+			Provides:          provides,
+			BuildMetadataJSON: []byte("{}"),
+		}},
+		Capabilities: capabilities,
+		Requirements: requirements,
+		Providers:    providers,
+	})
+	if err != nil {
+		t.Fatalf("generation.NewContext: %v", err)
+	}
+	return context
+}
+
+func queryContract(t testing.TB, id string) []byte {
+	t.Helper()
+	return normalizeContract(t, "id: "+id+"\n"+`request: {}
+response: {}
+semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`)
 }
 
 func selectedContext(t testing.TB, reverse bool, selectedDigestCharacter string, exposed bool) generation.Context {

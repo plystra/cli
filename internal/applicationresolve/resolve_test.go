@@ -658,6 +658,18 @@ replace example.com/ordinary => ../ordinary
 			t.Fatalf("resolution evidence Plugin candidate source = %#v", candidate.Source())
 		}
 	}
+	selectedPlugins := result.ResolutionEvidence().SelectedPlugins()
+	if len(selectedPlugins) != 3 || selectedPlugins[0].ID() != "example.app" || selectedPlugins[0].ModulePath() != "example.com/app" || selectedPlugins[0].ModuleVersion() != "" || !selectedPlugins[0].Local() || selectedPlugins[0].Source() != evidenceCandidates[0].Source() || selectedPlugins[1].ID() != "example.audit" || selectedPlugins[1].ModulePath() != "example.com/transitive" || selectedPlugins[1].ModuleVersion() != "v1.4.0" || selectedPlugins[2].ID() != "example.smtp" || selectedPlugins[2].ModulePath() != "example.com/direct" || selectedPlugins[2].ModuleVersion() != "v1.2.0" {
+		t.Fatalf("resolution evidence selected Plugins = %#v", selectedPlugins)
+	}
+	if reasons := selectedPlugins[0].Reasons(); len(reasons) != 1 || reasons[0].Kind() != resolutionevidence.PluginSelectionCurrentProject || reasons[0].Capability() != "" {
+		t.Fatalf("current Project Plugin reasons = %#v", reasons)
+	}
+	for index, capability := range []string{"audit.write/v1", "email.send/v1"} {
+		if reasons := selectedPlugins[index+1].Reasons(); len(reasons) != 1 || reasons[0].Kind() != resolutionevidence.PluginSelectionProvider || reasons[0].Capability() != capability {
+			t.Fatalf("selected Provider Plugin %s reasons = %#v", selectedPlugins[index+1].ID(), reasons)
+		}
+	}
 	if bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte(filepath.ToSlash(root))) || bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte(root)) || bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte("example.com/ordinary")) {
 		t.Fatalf("resolution evidence contains an absolute root or ordinary dependency: %s", result.ResolutionEvidence().CanonicalJSON())
 	}
@@ -897,6 +909,13 @@ func TestResolveUsesActiveGoWorkspaceDependencySource(t *testing.T) {
 	candidates := result.ResolutionEvidence().PluginCandidates()
 	if len(candidates) != 1 || candidates[0].ID() != "example.smtp" || candidates[0].ModulePath() != "example.com/providers" || candidates[0].ModuleRole() != resolutionevidence.ModuleRoleDependency || candidates[0].Path() != "smtp" || candidates[0].Local() || candidates[0].Source().Module() != "example.com/providers" || candidates[0].Source().Path() != "smtp/plugin.yaml" {
 		t.Fatalf("workspace resolution evidence Plugin candidates = %#v", candidates)
+	}
+	selectedPlugins := result.ResolutionEvidence().SelectedPlugins()
+	if len(selectedPlugins) != 1 || selectedPlugins[0].ID() != "example.smtp" || selectedPlugins[0].ModulePath() != "example.com/providers" || selectedPlugins[0].ModuleVersion() != "" || selectedPlugins[0].ModuleRole() != resolutionevidence.ModuleRoleDependency || selectedPlugins[0].Source() != candidates[0].Source() {
+		t.Fatalf("workspace resolution evidence selected Plugins = %#v", selectedPlugins)
+	}
+	if reasons := selectedPlugins[0].Reasons(); len(reasons) != 1 || reasons[0].Kind() != resolutionevidence.PluginSelectionProvider || reasons[0].Capability() != "email.send/v1" {
+		t.Fatalf("workspace selected Plugin reasons = %#v", reasons)
 	}
 }
 

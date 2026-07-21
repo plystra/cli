@@ -48,6 +48,19 @@ const (
 	ReplacementLocal ReplacementKind = "local"
 )
 
+// PluginSelectionReasonKind identifies why one discovered Plugin entered the
+// final normalized application model.
+type PluginSelectionReasonKind string
+
+const (
+	// PluginSelectionCurrentProject identifies a root-level Plugin in the
+	// selected current Project, which is included by definition.
+	PluginSelectionCurrentProject PluginSelectionReasonKind = "current-project"
+	// PluginSelectionProvider identifies a Plugin selected to provide one exact
+	// required ordinary Capability.
+	PluginSelectionProvider PluginSelectionReasonKind = "provider"
+)
+
 // Input is the construction-only selected-model, participating-Project, and
 // discovered-Plugin input for one evidence document.
 type Input struct {
@@ -92,13 +105,13 @@ type Evidence struct {
 	generationAPI            string
 	selectedModelDigest      string
 	buildModelDigest         string
-	selectedPluginCount      int
 	canonicalCapabilityCount int
 	requirementCount         int
 	selectedProviderCount    int
 	capabilityAliasCount     int
 	modules                  []Module
 	pluginCandidates         []PluginCandidate
+	selectedPlugins          []SelectedPlugin
 	canonicalJSON            []byte
 	digest                   string
 	prepared                 bool
@@ -185,6 +198,60 @@ func (p PluginCandidate) Local() bool { return p.moduleRole == ModuleRoleCurrent
 // Source returns the stable Plugin declaration provenance.
 func (p PluginCandidate) Source() Source { return p.source }
 
+// SelectedPlugin is one immutable discovered candidate that entered the final
+// normalized application model.
+type SelectedPlugin struct {
+	id            string
+	modulePath    string
+	moduleVersion string
+	moduleRole    ModuleRole
+	path          string
+	source        Source
+	reasons       []PluginSelectionReason
+}
+
+// ID returns the exact canonical Plugin ID.
+func (p SelectedPlugin) ID() string { return p.id }
+
+// ModulePath returns the effective graph module containing the Plugin.
+func (p SelectedPlugin) ModulePath() string { return p.modulePath }
+
+// ModuleVersion returns the selected graph version, or an empty string for a
+// current-Project or workspace Plugin.
+func (p SelectedPlugin) ModuleVersion() string { return p.moduleVersion }
+
+// ModuleRole returns whether the Plugin belongs to the current or a dependency
+// Project.
+func (p SelectedPlugin) ModuleRole() ModuleRole { return p.moduleRole }
+
+// Path returns the slash-separated module-relative Plugin directory.
+func (p SelectedPlugin) Path() string { return p.path }
+
+// Local reports whether the Plugin belongs to the current Project.
+func (p SelectedPlugin) Local() bool { return p.moduleRole == ModuleRoleCurrent }
+
+// Source returns the stable Plugin declaration provenance.
+func (p SelectedPlugin) Source() Source { return p.source }
+
+// Reasons returns every deterministic reason this Plugin entered the model.
+func (p SelectedPlugin) Reasons() []PluginSelectionReason {
+	return append([]PluginSelectionReason(nil), p.reasons...)
+}
+
+// PluginSelectionReason identifies current-Project inclusion or one exact
+// ordinary Capability for which the Plugin is the selected Provider.
+type PluginSelectionReason struct {
+	kind       PluginSelectionReasonKind
+	capability string
+}
+
+// Kind returns current-project or provider.
+func (r PluginSelectionReason) Kind() PluginSelectionReasonKind { return r.kind }
+
+// Capability returns the exact canonical Capability for a provider reason and
+// an empty string for current-Project inclusion.
+func (r PluginSelectionReason) Capability() string { return r.capability }
+
 // Source is one stable module-relative declaration reference.
 type Source struct {
 	module string
@@ -245,6 +312,21 @@ type canonicalPluginCandidate struct {
 	Source     canonicalSource `json:"source"`
 }
 
+type canonicalSelectedPlugin struct {
+	ID            string                           `json:"id"`
+	ModulePath    string                           `json:"module_path"`
+	ModuleVersion string                           `json:"module_version,omitempty"`
+	ModuleRole    ModuleRole                       `json:"module_role"`
+	Path          string                           `json:"path"`
+	Source        canonicalSource                  `json:"source"`
+	Reasons       []canonicalPluginSelectionReason `json:"reasons"`
+}
+
+type canonicalPluginSelectionReason struct {
+	Kind       PluginSelectionReasonKind `json:"kind"`
+	Capability string                    `json:"capability,omitempty"`
+}
+
 type canonicalReplacement struct {
 	Kind       ReplacementKind `json:"kind"`
 	ModulePath string          `json:"module_path"`
@@ -266,6 +348,7 @@ type canonicalEvidence struct {
 	BuildModelDigest    string                     `json:"build_model_digest"`
 	Modules             []canonicalModule          `json:"modules"`
 	PluginCandidates    []canonicalPluginCandidate `json:"plugin_candidates"`
+	SelectedPlugins     []canonicalSelectedPlugin  `json:"selected_plugins"`
 	Counts              canonicalCounts            `json:"counts"`
 }
 
@@ -287,20 +370,21 @@ func Build(source Input) (Evidence, error) {
 	if err != nil {
 		return Evidence{}, fmt.Errorf("%w: discovered Plugin candidates: %v", ErrBuild, err)
 	}
-	if err := validateSelectedPluginCandidates(context, pluginCandidates, modules); err != nil {
+	selectedPlugins, err := selectedPluginsFromContext(context, pluginCandidates, modules)
+	if err != nil {
 		return Evidence{}, fmt.Errorf("%w: selected Plugins: %v", ErrBuild, err)
 	}
 	input := Evidence{
 		generationAPI:            context.APIVersion(),
 		selectedModelDigest:      context.Digest(),
 		buildModelDigest:         context.BuildModelDigest(),
-		selectedPluginCount:      len(context.Plugins()),
 		canonicalCapabilityCount: len(context.Capabilities()),
 		requirementCount:         len(context.Requirements()),
 		selectedProviderCount:    len(context.Providers()),
 		capabilityAliasCount:     len(context.CapabilityAliases()),
 		modules:                  modules,
 		pluginCandidates:         pluginCandidates,
+		selectedPlugins:          selectedPlugins,
 		prepared:                 true,
 	}
 	if err := validate(input); err != nil {
@@ -326,6 +410,10 @@ func (e Evidence) Valid() bool {
 	}
 	pluginCandidates, err := normalizePluginCandidates(e.pluginCandidateInputs(), modules)
 	if err != nil || !equalPluginCandidates(e.pluginCandidates, pluginCandidates) {
+		return false
+	}
+	selectedPlugins, err := normalizeSelectedPlugins(e.selectedPluginInputs(), pluginCandidates, modules)
+	if err != nil || !equalSelectedPlugins(e.selectedPlugins, selectedPlugins) {
 		return false
 	}
 	canonical, err := encode(e)
@@ -362,8 +450,18 @@ func (e Evidence) PluginCandidates() []PluginCandidate {
 // DiscoveredPluginCount returns the complete visible Plugin candidate count.
 func (e Evidence) DiscoveredPluginCount() int { return len(e.pluginCandidates) }
 
+// SelectedPlugins returns every Plugin in the final normalized application
+// model in canonical Plugin-ID order.
+func (e Evidence) SelectedPlugins() []SelectedPlugin {
+	plugins := append([]SelectedPlugin(nil), e.selectedPlugins...)
+	for index := range plugins {
+		plugins[index].reasons = append([]PluginSelectionReason(nil), plugins[index].reasons...)
+	}
+	return plugins
+}
+
 // SelectedPluginCount returns the number of selected Plugins.
-func (e Evidence) SelectedPluginCount() int { return e.selectedPluginCount }
+func (e Evidence) SelectedPluginCount() int { return len(e.selectedPlugins) }
 
 // CanonicalCapabilityCount returns the number of resolved canonical contracts.
 func (e Evidence) CanonicalCapabilityCount() int { return e.canonicalCapabilityCount }
@@ -396,14 +494,13 @@ func validate(e Evidence) error {
 	if len(e.modules) == 0 {
 		return errors.New("participating Projects must not be empty")
 	}
-	if e.selectedPluginCount > len(e.pluginCandidates) {
+	if len(e.selectedPlugins) > len(e.pluginCandidates) {
 		return errors.New("selected Plugin count exceeds discovered Plugin candidate count")
 	}
 	counts := []struct {
 		name  string
 		value int
 	}{
-		{name: "selected Plugin", value: e.selectedPluginCount},
 		{name: "canonical Capability", value: e.canonicalCapabilityCount},
 		{name: "requirement", value: e.requirementCount},
 		{name: "selected Provider", value: e.selectedProviderCount},
@@ -419,6 +516,17 @@ func validate(e Evidence) error {
 	}
 	if e.selectedProviderCount > e.requirementCount {
 		return errors.New("selected Provider count exceeds requirement count")
+	}
+	providerReasons := 0
+	for _, plugin := range e.selectedPlugins {
+		for _, reason := range plugin.reasons {
+			if reason.kind == PluginSelectionProvider {
+				providerReasons++
+			}
+		}
+	}
+	if providerReasons != e.selectedProviderCount {
+		return fmt.Errorf("selected Provider count %d does not match selected Plugin provider reasons %d", e.selectedProviderCount, providerReasons)
 	}
 	return nil
 }
@@ -468,6 +576,31 @@ func encode(e Evidence) ([]byte, error) {
 			},
 		}
 	}
+	selectedPlugins := make([]canonicalSelectedPlugin, len(e.selectedPlugins))
+	for index, value := range e.selectedPlugins {
+		reasons := make([]canonicalPluginSelectionReason, len(value.reasons))
+		for reasonIndex, reason := range value.reasons {
+			reasons[reasonIndex] = canonicalPluginSelectionReason{
+				Kind:       reason.kind,
+				Capability: reason.capability,
+			}
+		}
+		selectedPlugins[index] = canonicalSelectedPlugin{
+			ID:            value.id,
+			ModulePath:    value.modulePath,
+			ModuleVersion: value.moduleVersion,
+			ModuleRole:    value.moduleRole,
+			Path:          value.path,
+			Source: canonicalSource{
+				Module: value.source.module,
+				Path:   value.source.path,
+				Kind:   value.source.kind,
+				Line:   value.source.line,
+				Column: value.source.column,
+			},
+			Reasons: reasons,
+		}
+	}
 	return json.Marshal(canonicalEvidence{
 		Version:             schemaVersion,
 		GenerationAPI:       e.generationAPI,
@@ -475,10 +608,11 @@ func encode(e Evidence) ([]byte, error) {
 		BuildModelDigest:    e.buildModelDigest,
 		Modules:             modules,
 		PluginCandidates:    pluginCandidates,
+		SelectedPlugins:     selectedPlugins,
 		Counts: canonicalCounts{
 			ParticipatingModules:  len(e.modules),
 			DiscoveredPlugins:     len(e.pluginCandidates),
-			SelectedPlugins:       e.selectedPluginCount,
+			SelectedPlugins:       len(e.selectedPlugins),
 			CanonicalCapabilities: e.canonicalCapabilityCount,
 			Requirements:          e.requirementCount,
 			SelectedProviders:     e.selectedProviderCount,
@@ -578,7 +712,52 @@ func validatePluginPath(modulePath, value string) error {
 	return nil
 }
 
-func validateSelectedPluginCandidates(context generation.Context, candidates []PluginCandidate, modules []Module) error {
+type selectedPluginInput struct {
+	id            string
+	modulePath    string
+	moduleVersion string
+	reasons       []PluginSelectionReason
+}
+
+func selectedPluginsFromContext(context generation.Context, candidates []PluginCandidate, modules []Module) ([]SelectedPlugin, error) {
+	candidateByID := make(map[string]PluginCandidate, len(candidates))
+	for _, candidate := range candidates {
+		candidateByID[candidate.id] = candidate
+	}
+	providerReasons := make(map[string][]PluginSelectionReason)
+	for _, provider := range context.Providers() {
+		pluginID := provider.Plugin().String()
+		providerReasons[pluginID] = append(providerReasons[pluginID], PluginSelectionReason{
+			kind:       PluginSelectionProvider,
+			capability: provider.Capability().String(),
+		})
+	}
+	plugins := context.Plugins()
+	inputs := make([]selectedPluginInput, len(plugins))
+	selected := make(map[string]struct{}, len(plugins))
+	for index, plugin := range plugins {
+		id := plugin.ID().String()
+		reasons := append([]PluginSelectionReason(nil), providerReasons[id]...)
+		if candidate, exists := candidateByID[id]; exists && candidate.moduleRole == ModuleRoleCurrent {
+			reasons = append(reasons, PluginSelectionReason{kind: PluginSelectionCurrentProject})
+		}
+		inputs[index] = selectedPluginInput{
+			id:            id,
+			modulePath:    plugin.Module().Path(),
+			moduleVersion: plugin.Module().Version(),
+			reasons:       reasons,
+		}
+		selected[id] = struct{}{}
+	}
+	for pluginID := range providerReasons {
+		if _, exists := selected[pluginID]; !exists {
+			return nil, fmt.Errorf("provider selection names Plugin %q outside the selected Plugin set", pluginID)
+		}
+	}
+	return normalizeSelectedPlugins(inputs, candidates, modules)
+}
+
+func normalizeSelectedPlugins(inputs []selectedPluginInput, candidates []PluginCandidate, modules []Module) ([]SelectedPlugin, error) {
 	candidateByID := make(map[string]PluginCandidate, len(candidates))
 	for _, candidate := range candidates {
 		candidateByID[candidate.id] = candidate
@@ -587,36 +766,104 @@ func validateSelectedPluginCandidates(context generation.Context, candidates []P
 	for _, project := range modules {
 		moduleByPath[project.path] = project
 	}
-	selected := make(map[string]struct{}, len(context.Plugins()))
-	for _, plugin := range context.Plugins() {
-		id := plugin.ID().String()
-		candidate, exists := candidateByID[id]
-		if !exists {
-			return fmt.Errorf("selected Plugin %q has no discovered candidate", id)
+	selected := make([]SelectedPlugin, 0, len(inputs))
+	seen := make(map[string]struct{}, len(inputs))
+	for index, input := range inputs {
+		if err := pluginid.Validate(input.id); err != nil {
+			return nil, fmt.Errorf("selected_plugins[%d].id %q is invalid: %v", index, input.id, err)
 		}
-		moduleView := plugin.Module()
-		if candidate.modulePath != moduleView.Path() {
-			return fmt.Errorf("selected Plugin %q module %q does not match candidate module %q", id, moduleView.Path(), candidate.modulePath)
+		if _, duplicate := seen[input.id]; duplicate {
+			return nil, fmt.Errorf("selected_plugins[%d].id duplicates %q", index, input.id)
+		}
+		candidate, exists := candidateByID[input.id]
+		if !exists {
+			return nil, fmt.Errorf("selected Plugin %q has no discovered candidate", input.id)
+		}
+		if candidate.modulePath != input.modulePath {
+			return nil, fmt.Errorf("selected Plugin %q module %q does not match candidate module %q", input.id, input.modulePath, candidate.modulePath)
 		}
 		project := moduleByPath[candidate.modulePath]
-		expectedVersion := project.selectedVersion
-		if project.role == ModuleRoleCurrent || project.workspace {
-			expectedVersion = ""
+		expectedVersion := selectedPluginModuleVersion(project)
+		if input.moduleVersion != expectedVersion {
+			return nil, fmt.Errorf("selected Plugin %q module version %q does not match participating Project version %q", input.id, input.moduleVersion, expectedVersion)
 		}
-		if moduleView.Version() != expectedVersion {
-			return fmt.Errorf("selected Plugin %q module version %q does not match participating Project version %q", id, moduleView.Version(), expectedVersion)
+		reasons, err := normalizePluginSelectionReasons(input.reasons, candidate.moduleRole)
+		if err != nil {
+			return nil, fmt.Errorf("selected Plugin %q reasons: %v", input.id, err)
 		}
-		selected[id] = struct{}{}
+		seen[input.id] = struct{}{}
+		selected = append(selected, SelectedPlugin{
+			id:            input.id,
+			modulePath:    candidate.modulePath,
+			moduleVersion: input.moduleVersion,
+			moduleRole:    candidate.moduleRole,
+			path:          candidate.path,
+			source:        candidate.source,
+			reasons:       reasons,
+		})
 	}
 	for _, candidate := range candidates {
 		if candidate.moduleRole != ModuleRoleCurrent {
 			continue
 		}
-		if _, exists := selected[candidate.id]; !exists {
-			return fmt.Errorf("current-Project Plugin candidate %q is not selected", candidate.id)
+		if _, exists := seen[candidate.id]; !exists {
+			return nil, fmt.Errorf("current-Project Plugin candidate %q is not selected", candidate.id)
 		}
 	}
-	return nil
+	sort.Slice(selected, func(left, right int) bool {
+		return selected[left].id < selected[right].id
+	})
+	return selected, nil
+}
+
+func selectedPluginModuleVersion(project Module) string {
+	if project.role == ModuleRoleCurrent || project.workspace {
+		return ""
+	}
+	return project.selectedVersion
+}
+
+func normalizePluginSelectionReasons(inputs []PluginSelectionReason, moduleRole ModuleRole) ([]PluginSelectionReason, error) {
+	if len(inputs) == 0 {
+		return nil, errors.New("at least one selection reason is required")
+	}
+	reasons := make([]PluginSelectionReason, 0, len(inputs))
+	seen := make(map[string]struct{}, len(inputs))
+	currentProject := false
+	for index, input := range inputs {
+		switch input.kind {
+		case PluginSelectionCurrentProject:
+			if input.capability != "" {
+				return nil, fmt.Errorf("reasons[%d] current-project cannot name a Capability", index)
+			}
+			currentProject = true
+		case PluginSelectionProvider:
+			if _, err := generation.ParseCapabilityID(input.capability); err != nil {
+				return nil, fmt.Errorf("reasons[%d] provider Capability %q is invalid: %v", index, input.capability, err)
+			}
+		default:
+			return nil, fmt.Errorf("reasons[%d] kind %q is invalid", index, input.kind)
+		}
+		key := string(input.kind) + "\x00" + input.capability
+		if _, duplicate := seen[key]; duplicate {
+			return nil, fmt.Errorf("reasons[%d] duplicates %s %q", index, input.kind, input.capability)
+		}
+		seen[key] = struct{}{}
+		reasons = append(reasons, input)
+	}
+	if currentProject != (moduleRole == ModuleRoleCurrent) {
+		if moduleRole == ModuleRoleCurrent {
+			return nil, errors.New("current-Project Plugin requires a current-project reason")
+		}
+		return nil, errors.New("dependency Plugin cannot have a current-project reason")
+	}
+	sort.Slice(reasons, func(left, right int) bool {
+		if reasons[left].kind != reasons[right].kind {
+			return reasons[left].kind < reasons[right].kind
+		}
+		return reasons[left].capability < reasons[right].capability
+	})
+	return reasons, nil
 }
 
 func normalizeModule(input ModuleInput) (Module, error) {
@@ -761,6 +1008,19 @@ func (e Evidence) pluginCandidateInputs() []PluginCandidateInput {
 	return inputs
 }
 
+func (e Evidence) selectedPluginInputs() []selectedPluginInput {
+	inputs := make([]selectedPluginInput, len(e.selectedPlugins))
+	for index, value := range e.selectedPlugins {
+		inputs[index] = selectedPluginInput{
+			id:            value.id,
+			modulePath:    value.modulePath,
+			moduleVersion: value.moduleVersion,
+			reasons:       append([]PluginSelectionReason(nil), value.reasons...),
+		}
+	}
+	return inputs
+}
+
 func equalModules(left, right []Module) bool {
 	if len(left) != len(right) {
 		return false
@@ -780,6 +1040,23 @@ func equalPluginCandidates(left, right []PluginCandidate) bool {
 	for index := range left {
 		if left[index] != right[index] {
 			return false
+		}
+	}
+	return true
+}
+
+func equalSelectedPlugins(left, right []SelectedPlugin) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index].id != right[index].id || left[index].modulePath != right[index].modulePath || left[index].moduleVersion != right[index].moduleVersion || left[index].moduleRole != right[index].moduleRole || left[index].path != right[index].path || left[index].source != right[index].source || len(left[index].reasons) != len(right[index].reasons) {
+			return false
+		}
+		for reasonIndex := range left[index].reasons {
+			if left[index].reasons[reasonIndex] != right[index].reasons[reasonIndex] {
+				return false
+			}
 		}
 	}
 	return true
