@@ -36,8 +36,8 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	if first.SelectedModelDigest() != firstContext.Digest() || first.BuildModelDigest() != firstContext.BuildModelDigest() {
 		t.Fatalf("evidence model digests = selected %q build %q", first.SelectedModelDigest(), first.BuildModelDigest())
 	}
-	if first.SelectedPluginCount() != 1 || first.CanonicalCapabilityCount() != 2 || first.RequirementCount() != 2 || first.SelectedProviderCount() != 1 || first.CapabilityAliasCount() != 1 {
-		t.Fatalf("evidence counts = plugins %d capabilities %d requirements %d providers %d aliases %d", first.SelectedPluginCount(), first.CanonicalCapabilityCount(), first.RequirementCount(), first.SelectedProviderCount(), first.CapabilityAliasCount())
+	if first.SelectedPluginCount() != 1 || first.CanonicalCapabilityCount() != 2 || first.RequirementCount() != 2 || first.ProviderCandidateCount() != 1 || first.RejectedProviderCount() != 0 || first.SelectedProviderCount() != 1 || first.CapabilityAliasCount() != 1 {
+		t.Fatalf("evidence counts = plugins %d capabilities %d requirements %d candidates %d rejected %d providers %d aliases %d", first.SelectedPluginCount(), first.CanonicalCapabilityCount(), first.RequirementCount(), first.ProviderCandidateCount(), first.RejectedProviderCount(), first.SelectedProviderCount(), first.CapabilityAliasCount())
 	}
 	if first.ParticipatingModuleCount() != 3 {
 		t.Fatalf("participating module count = %d", first.ParticipatingModuleCount())
@@ -70,6 +70,10 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	reasons := selectedPlugins[0].Reasons()
 	if len(reasons) != 1 || reasons[0].Kind() != resolutionevidence.PluginSelectionProvider || reasons[0].Capability() != "email.send/v1" {
 		t.Fatalf("selected Plugin reasons = %#v", reasons)
+	}
+	providerCandidates := first.ProviderCandidates()
+	if len(providerCandidates) != 1 || providerCandidates[0].Capability() != "email.send/v1" || providerCandidates[0].PluginID() != "example.smtp" || providerCandidates[0].ProjectModule() != "example.com/smtp" || providerCandidates[0].ContractDigest() == "" || providerCandidates[0].Rejected() || providerCandidates[0].RejectionReason() != "" || providerCandidates[0].Source().Module() != "corp.example/smtp" || providerCandidates[0].Source().Path() != "smtp/capabilities/email.send/v1/capability.yaml" || providerCandidates[0].Source().Kind() != "provider-declaration" {
+		t.Fatalf("Provider candidates = %#v", providerCandidates)
 	}
 	if !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() {
 		t.Fatalf("input permutation changed evidence:\nfirst:  %s %s\nsecond: %s %s", first.CanonicalJSON(), first.Digest(), second.CanonicalJSON(), second.Digest())
@@ -111,15 +115,29 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 				Capability string `json:"capability"`
 			} `json:"reasons"`
 		} `json:"selected_plugins"`
+		ProviderCandidates []struct {
+			Capability      string `json:"capability"`
+			PluginID        string `json:"plugin_id"`
+			ProjectModule   string `json:"project_module"`
+			ContractDigest  string `json:"contract_digest"`
+			RejectionReason string `json:"rejection_reason"`
+			Source          struct {
+				Module string `json:"module"`
+				Path   string `json:"path"`
+				Kind   string `json:"kind"`
+			} `json:"source"`
+		} `json:"provider_candidates"`
 		Counts struct {
 			ParticipatingModules int `json:"participating_modules"`
 			DiscoveredPlugins    int `json:"discovered_plugins"`
+			ProviderCandidates   int `json:"provider_candidates"`
+			RejectedProviders    int `json:"rejected_providers"`
 		} `json:"counts"`
 	}
-	if err := json.Unmarshal(first.CanonicalJSON(), &document); err != nil || document.Version != 1 || len(document.Modules) != 3 || document.Counts.ParticipatingModules != 3 || document.Counts.DiscoveredPlugins != 2 || document.Modules[2].Replacement == nil || document.Modules[2].Replacement.Kind != "module" || document.Modules[2].Source.Module != "corp.example/smtp" || document.Modules[2].Source.Path != "plystra.yaml" || len(document.PluginCandidates) != 2 || document.PluginCandidates[1].ID != "example.smtp" || document.PluginCandidates[1].ModulePath != "example.com/smtp" || document.PluginCandidates[1].Source.Module != "corp.example/smtp" || document.PluginCandidates[1].Source.Path != "smtp/plugin.yaml" || len(document.SelectedPlugins) != 1 || document.SelectedPlugins[0].ID != "example.smtp" || document.SelectedPlugins[0].ModulePath != "example.com/smtp" || document.SelectedPlugins[0].ModuleVersion != "v1.3.0" || len(document.SelectedPlugins[0].Reasons) != 1 || document.SelectedPlugins[0].Reasons[0].Kind != "provider" || document.SelectedPlugins[0].Reasons[0].Capability != "email.send/v1" {
+	if err := json.Unmarshal(first.CanonicalJSON(), &document); err != nil || document.Version != 1 || len(document.Modules) != 3 || document.Counts.ParticipatingModules != 3 || document.Counts.DiscoveredPlugins != 2 || document.Counts.ProviderCandidates != 1 || document.Counts.RejectedProviders != 0 || document.Modules[2].Replacement == nil || document.Modules[2].Replacement.Kind != "module" || document.Modules[2].Source.Module != "corp.example/smtp" || document.Modules[2].Source.Path != "plystra.yaml" || len(document.PluginCandidates) != 2 || document.PluginCandidates[1].ID != "example.smtp" || document.PluginCandidates[1].ModulePath != "example.com/smtp" || document.PluginCandidates[1].Source.Module != "corp.example/smtp" || document.PluginCandidates[1].Source.Path != "smtp/plugin.yaml" || len(document.SelectedPlugins) != 1 || document.SelectedPlugins[0].ID != "example.smtp" || document.SelectedPlugins[0].ModulePath != "example.com/smtp" || document.SelectedPlugins[0].ModuleVersion != "v1.3.0" || len(document.SelectedPlugins[0].Reasons) != 1 || document.SelectedPlugins[0].Reasons[0].Kind != "provider" || document.SelectedPlugins[0].Reasons[0].Capability != "email.send/v1" || len(document.ProviderCandidates) != 1 || document.ProviderCandidates[0].Capability != "email.send/v1" || document.ProviderCandidates[0].PluginID != "example.smtp" || document.ProviderCandidates[0].ProjectModule != "example.com/smtp" || document.ProviderCandidates[0].RejectionReason != "" || document.ProviderCandidates[0].Source.Module != "corp.example/smtp" || document.ProviderCandidates[0].Source.Path != "smtp/capabilities/email.send/v1/capability.yaml" || document.ProviderCandidates[0].Source.Kind != "provider-declaration" {
 		t.Fatalf("canonical module evidence = %#v, %v", document, err)
 	}
-	for _, forbidden := range []string{"idempotency_key", "capability.yaml", "safe_name"} {
+	for _, forbidden := range []string{"idempotency_key", "safe_name", "Provider-independent audit"} {
 		if bytes.Contains(first.CanonicalJSON(), []byte(forbidden)) {
 			t.Fatalf("bounded evidence contains detailed model value %q: %s", forbidden, first.CanonicalJSON())
 		}
@@ -131,7 +149,8 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	candidates[0] = resolutionevidence.PluginCandidate{}
 	selectedPlugins[0] = resolutionevidence.SelectedPlugin{}
 	reasons[0] = resolutionevidence.PluginSelectionReason{}
-	if first.CanonicalJSON()[0] != '{' || first.Modules()[0].Path() != "example.com/app" || first.PluginCandidates()[0].ID() != "example.shared" || first.SelectedPlugins()[0].ID() != "example.smtp" || first.SelectedPlugins()[0].Reasons()[0].Capability() != "email.send/v1" || !first.Valid() {
+	providerCandidates[0] = resolutionevidence.ProviderCandidate{}
+	if first.CanonicalJSON()[0] != '{' || first.Modules()[0].Path() != "example.com/app" || first.PluginCandidates()[0].ID() != "example.shared" || first.SelectedPlugins()[0].ID() != "example.smtp" || first.SelectedPlugins()[0].Reasons()[0].Capability() != "email.send/v1" || first.ProviderCandidates()[0].PluginID() != "example.smtp" || !first.Valid() {
 		t.Fatal("CanonicalJSON exposed mutable evidence storage")
 	}
 }
@@ -190,6 +209,106 @@ func TestBuildOrdersEverySelectedPluginReasonDeterministically(t *testing.T) {
 	reasons := selected[0].Reasons()
 	if len(reasons) != 2 || reasons[0].Kind() != resolutionevidence.PluginSelectionProvider || reasons[0].Capability() != "audit.write/v1" || reasons[1].Kind() != resolutionevidence.PluginSelectionProvider || reasons[1].Capability() != "email.send/v1" {
 		t.Fatalf("selected Plugin reasons = %#v", reasons)
+	}
+}
+
+func TestBuildRecordsEveryProviderCandidateAndStableRejectionReason(t *testing.T) {
+	t.Parallel()
+
+	email := queryContract(t, "email.send/v1")
+	queue := queryContract(t, "queue.push/v1")
+	context, err := generation.NewContext(generation.Input{
+		Plugins: []generation.PluginInput{{
+			ID:                "example.smtp",
+			ModulePath:        "example.com/smtp",
+			ModuleVersion:     "v1.3.0",
+			Provides:          []string{"email.send/v1"},
+			BuildMetadataJSON: []byte("{}"),
+		}},
+		Capabilities: []generation.CapabilityInput{{ContractJSON: queue}, {ContractJSON: email}},
+		Requirements: []string{"email.send/v1"},
+		Providers:    []generation.ProviderInput{{Capability: "email.send/v1", Plugin: "example.smtp"}},
+	})
+	if err != nil {
+		t.Fatalf("generation.NewContext: %v", err)
+	}
+	plugins := []resolutionevidence.PluginCandidateInput{
+		{ID: "example.queue", ModulePath: "example.com/shared", Path: "queue"},
+		{ID: "example.smtp", ModulePath: "example.com/smtp", Path: "smtp"},
+		{ID: "example.mailgun", ModulePath: "example.com/shared", Path: "mailgun"},
+	}
+	providerInputs := []providerresolution.Candidate{
+		{PluginID: "example.queue", Contract: queue, Source: "queue diagnostic that must not enter evidence"},
+		{PluginID: "example.smtp", Contract: email, Source: "smtp diagnostic that must not enter evidence"},
+		{PluginID: "example.mailgun", Contract: email, Source: "mailgun diagnostic that must not enter evidence"},
+	}
+	requirement := providerresolution.Requirement{
+		Contract: email,
+		Source: providerresolution.RequirementSource{
+			Kind:       providerresolution.RequirementDeclaration,
+			Reference:  `plystra.yaml capabilities.require["email.send/v1"]`,
+			ModulePath: "example.com/app",
+			Path:       "plystra.yaml",
+			Line:       1,
+			Column:     1,
+		},
+	}
+	choice := providerresolution.Choice{Capability: "email.send/v1", PluginID: "example.smtp", Source: "plystra.yaml capabilities.use.email.send/v1"}
+
+	build := func(reverse bool) resolutionevidence.Evidence {
+		t.Helper()
+		candidates := append([]providerresolution.Candidate(nil), providerInputs...)
+		discovered := append([]resolutionevidence.PluginCandidateInput(nil), plugins...)
+		if reverse {
+			slices.Reverse(candidates)
+			slices.Reverse(discovered)
+		}
+		resolved, err := providerresolution.Resolve(providerresolution.Input{
+			Requirements: []providerresolution.Requirement{requirement},
+			Candidates:   candidates,
+			Choices:      []providerresolution.Choice{choice},
+		})
+		if err != nil {
+			t.Fatalf("providerresolution.Resolve: %v", err)
+		}
+		evidence, err := resolutionevidence.Build(resolutionevidence.Input{
+			Context:            context,
+			ProviderResolution: resolved,
+			Modules:            participatingModules(reverse),
+			PluginCandidates:   discovered,
+		})
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		return evidence
+	}
+
+	first := build(false)
+	second := build(true)
+	if !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() {
+		t.Fatalf("Provider candidate input permutation changed evidence:\nfirst:  %s\nsecond: %s", first.CanonicalJSON(), second.CanonicalJSON())
+	}
+	candidates := first.ProviderCandidates()
+	if first.ProviderCandidateCount() != 3 || first.RejectedProviderCount() != 2 || len(candidates) != 3 {
+		t.Fatalf("Provider candidate counts = %d candidates, %d rejected; values %#v", first.ProviderCandidateCount(), first.RejectedProviderCount(), candidates)
+	}
+	if candidates[0].Capability() != "email.send/v1" || candidates[0].PluginID() != "example.mailgun" || candidates[0].ProjectModule() != "example.com/shared" || candidates[0].RejectionReason() != resolutionevidence.ProviderRejectionAnotherProviderSelected || candidates[0].Source().Module() != "example.com/shared" || candidates[0].Source().Path() != "mailgun/capabilities/email.send/v1/capability.yaml" {
+		t.Fatalf("replaced email candidate = %#v", candidates[0])
+	}
+	if candidates[1].Capability() != "email.send/v1" || candidates[1].PluginID() != "example.smtp" || candidates[1].Rejected() || candidates[1].RejectionReason() != "" || candidates[1].Source().Module() != "corp.example/smtp" || candidates[1].Source().Path() != "smtp/capabilities/email.send/v1/capability.yaml" {
+		t.Fatalf("selected email candidate = %#v", candidates[1])
+	}
+	if candidates[2].Capability() != "queue.push/v1" || candidates[2].PluginID() != "example.queue" || candidates[2].RejectionReason() != resolutionevidence.ProviderRejectionCapabilityNotRequired || candidates[2].Source().Path() != "queue/capabilities/queue.push/v1/capability.yaml" {
+		t.Fatalf("unrequired queue candidate = %#v", candidates[2])
+	}
+	for _, forbidden := range []string{"queue diagnostic", "smtp diagnostic", "mailgun diagnostic"} {
+		if bytes.Contains(first.CanonicalJSON(), []byte(forbidden)) {
+			t.Fatalf("Provider evidence contains resolver diagnostic source %q: %s", forbidden, first.CanonicalJSON())
+		}
+	}
+	candidates[0] = resolutionevidence.ProviderCandidate{}
+	if first.ProviderCandidates()[0].PluginID() != "example.mailgun" || !first.Valid() {
+		t.Fatal("ProviderCandidates exposed mutable evidence storage")
 	}
 }
 
@@ -612,6 +731,43 @@ semantics:
 		}, contracts["email.send/v1"])
 		evidence, err := build(result)
 		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "is not a participating Project") || evidence.Valid() {
+			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+	})
+
+	t.Run("selected Provider differs", func(t *testing.T) {
+		result, err := providerresolution.Resolve(providerresolution.Input{
+			Requirements: []providerresolution.Requirement{
+				{Contract: contracts["email.send/v1"], Source: declaration("example.com/app")},
+				{Contract: contracts["kernel.health/v1"], Source: declaration("example.com/app")},
+			},
+			Candidates: []providerresolution.Candidate{{PluginID: "example.shared", Contract: contracts["email.send/v1"], Source: "shared/email"}},
+		})
+		if err != nil {
+			t.Fatalf("providerresolution.Resolve: %v", err)
+		}
+		evidence, err := build(result)
+		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "does not match provider resolution") || evidence.Valid() {
+			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+	})
+
+	t.Run("candidate Capability is absent from selected catalog", func(t *testing.T) {
+		result, err := providerresolution.Resolve(providerresolution.Input{
+			Requirements: []providerresolution.Requirement{
+				{Contract: contracts["email.send/v1"], Source: declaration("example.com/app")},
+				{Contract: contracts["kernel.health/v1"], Source: declaration("example.com/app")},
+			},
+			Candidates: []providerresolution.Candidate{
+				{PluginID: "example.smtp", Contract: contracts["email.send/v1"], Source: "smtp/email"},
+				{PluginID: "example.shared", Contract: queryContract(t, "queue.push/v1"), Source: "shared/queue"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("providerresolution.Resolve: %v", err)
+		}
+		evidence, err := build(result)
+		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "queue.push/v1 is absent from the selected canonical catalog") || evidence.Valid() {
 			t.Fatalf("Build = %#v, %v", evidence, err)
 		}
 	})

@@ -89,8 +89,8 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if !evidence.Valid() || evidence.SelectedModelDigest() != resolved.Context().Digest() || evidence.BuildModelDigest() != resolved.Context().BuildModelDigest() {
 		t.Fatalf("ResolutionEvidence = valid %t selected %q build %q", evidence.Valid(), evidence.SelectedModelDigest(), evidence.BuildModelDigest())
 	}
-	if evidence.DiscoveredPluginCount() != 0 || evidence.SelectedPluginCount() != 0 || evidence.CanonicalCapabilityCount() != 2 || evidence.RequirementCount() != 0 || evidence.SelectedProviderCount() != 0 || evidence.CapabilityAliasCount() != 0 {
-		t.Fatalf("ResolutionEvidence counts = discovered %d selected %d capabilities %d requirements %d providers %d aliases %d", evidence.DiscoveredPluginCount(), evidence.SelectedPluginCount(), evidence.CanonicalCapabilityCount(), evidence.RequirementCount(), evidence.SelectedProviderCount(), evidence.CapabilityAliasCount())
+	if evidence.DiscoveredPluginCount() != 0 || evidence.SelectedPluginCount() != 0 || evidence.CanonicalCapabilityCount() != 2 || evidence.RequirementCount() != 0 || evidence.ProviderCandidateCount() != 0 || evidence.RejectedProviderCount() != 0 || evidence.SelectedProviderCount() != 0 || evidence.CapabilityAliasCount() != 0 {
+		t.Fatalf("ResolutionEvidence counts = discovered %d selected %d capabilities %d requirements %d candidates %d rejected %d providers %d aliases %d", evidence.DiscoveredPluginCount(), evidence.SelectedPluginCount(), evidence.CanonicalCapabilityCount(), evidence.RequirementCount(), evidence.ProviderCandidateCount(), evidence.RejectedProviderCount(), evidence.SelectedProviderCount(), evidence.CapabilityAliasCount())
 	}
 	modules := evidence.Modules()
 	if evidence.ParticipatingModuleCount() != 1 || len(modules) != 1 || modules[0].Path() != "example.com/empty" || modules[0].Role() != resolutionevidence.ModuleRoleCurrent || modules[0].Source().Module() != "example.com/empty" || modules[0].Source().Path() != "plystra.yaml" {
@@ -604,7 +604,9 @@ capabilities:
 `)
 	writePlugin(t, directRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\n")
 	writeCapability(t, directRoot, "smtp", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
-	writePlugin(t, directRoot, "unused", "id: example.unused\n")
+	writePlugin(t, directRoot, "unused", "id: example.unused\nprovides: [email.send/v1, queue.push/v1]\n")
+	writeCapability(t, directRoot, "unused", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	writeCapability(t, directRoot, "unused", "queue.push/v1", "id: queue.push/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 
 	writeModule(t, ordinaryRoot, "example.com/ordinary")
 	writeFile(t, filepath.Join(ordinaryRoot, "looks-like-plugin", "plugin.yaml"), "this is deliberately not a valid Plugin declaration\n")
@@ -698,6 +700,18 @@ replace example.com/ordinary => ../ordinary
 	for index, capability := range []string{"audit.write/v1", "email.send/v1"} {
 		if reasons := selectedPlugins[index+1].Reasons(); len(reasons) != 1 || reasons[0].Kind() != resolutionevidence.PluginSelectionProvider || reasons[0].Capability() != capability {
 			t.Fatalf("selected Provider Plugin %s reasons = %#v", selectedPlugins[index+1].ID(), reasons)
+		}
+	}
+	providerCandidates := result.ResolutionEvidence().ProviderCandidates()
+	if result.ResolutionEvidence().ProviderCandidateCount() != 4 || result.ResolutionEvidence().RejectedProviderCount() != 2 || len(providerCandidates) != 4 {
+		t.Fatalf("resolution evidence Provider candidate counts = %d candidates, %d rejected; values %#v", result.ResolutionEvidence().ProviderCandidateCount(), result.ResolutionEvidence().RejectedProviderCount(), providerCandidates)
+	}
+	if providerCandidates[0].Capability() != "audit.write/v1" || providerCandidates[0].PluginID() != "example.audit" || providerCandidates[0].Rejected() || providerCandidates[0].ProjectModule() != "example.com/transitive" || providerCandidates[0].Source().Path() != "audit/capabilities/audit.write/v1/capability.yaml" || providerCandidates[1].Capability() != "email.send/v1" || providerCandidates[1].PluginID() != "example.smtp" || providerCandidates[1].Rejected() || providerCandidates[1].ProjectModule() != "example.com/direct" || providerCandidates[2].Capability() != "email.send/v1" || providerCandidates[2].PluginID() != "example.unused" || providerCandidates[2].RejectionReason() != resolutionevidence.ProviderRejectionAnotherProviderSelected || providerCandidates[3].Capability() != "queue.push/v1" || providerCandidates[3].PluginID() != "example.unused" || providerCandidates[3].RejectionReason() != resolutionevidence.ProviderRejectionCapabilityNotRequired {
+		t.Fatalf("resolution evidence Provider candidates = %#v", providerCandidates)
+	}
+	for _, candidate := range providerCandidates {
+		if candidate.Source().Module() != candidate.ProjectModule() || candidate.Source().Kind() != "provider-declaration" || candidate.Source().Line() != 1 || candidate.Source().Column() != 1 {
+			t.Fatalf("resolution evidence Provider candidate source = %#v", candidate)
 		}
 	}
 	if bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte(filepath.ToSlash(root))) || bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte(root)) || bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte("example.com/ordinary")) {
@@ -946,6 +960,10 @@ func TestResolveUsesActiveGoWorkspaceDependencySource(t *testing.T) {
 	}
 	if reasons := selectedPlugins[0].Reasons(); len(reasons) != 1 || reasons[0].Kind() != resolutionevidence.PluginSelectionProvider || reasons[0].Capability() != "email.send/v1" {
 		t.Fatalf("workspace selected Plugin reasons = %#v", reasons)
+	}
+	providerCandidates := result.ResolutionEvidence().ProviderCandidates()
+	if len(providerCandidates) != 1 || providerCandidates[0].Capability() != "email.send/v1" || providerCandidates[0].PluginID() != "example.smtp" || providerCandidates[0].ProjectModule() != "example.com/providers" || providerCandidates[0].Rejected() || providerCandidates[0].Source().Module() != "example.com/providers" || providerCandidates[0].Source().Path() != "smtp/capabilities/email.send/v1/capability.yaml" {
+		t.Fatalf("workspace Provider candidates = %#v", providerCandidates)
 	}
 }
 

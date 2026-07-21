@@ -195,12 +195,36 @@ func (s Selection) Explicit() bool { return s.explicitlyChosen }
 // automatically selected sole provider.
 func (s Selection) ChoiceSource() string { return s.choiceSource }
 
+// ProviderCandidate is one immutable normalized ordinary Provider declaration
+// from the complete visible catalog. It is retained independently of whether
+// its Capability is required or its Plugin is selected.
+type ProviderCandidate struct {
+	capability     capabilityid.Identifier
+	pluginID       string
+	contractDigest string
+	source         string
+}
+
+// Capability returns the exact canonical Capability declared by the Provider.
+func (c ProviderCandidate) Capability() capabilityid.Identifier { return c.capability }
+
+// PluginID returns the canonical Plugin ID declaring the Provider.
+func (c ProviderCandidate) PluginID() string { return c.pluginID }
+
+// ContractDigest returns the normalized exact contract identity.
+func (c ProviderCandidate) ContractDigest() string { return c.contractDigest }
+
+// Source returns the bounded Provider declaration provenance used by resolver
+// diagnostics. Structured evidence derives its typed source independently.
+func (c ProviderCandidate) Source() string { return c.source }
+
 // Result is one immutable deterministic provider resolution.
 type Result struct {
-	capabilities    []ResolvedCapability
-	capabilityIndex map[capabilityid.Identifier]int
-	selections      []Selection
-	selectionIndex  map[capabilityid.Identifier]int
+	capabilities       []ResolvedCapability
+	capabilityIndex    map[capabilityid.Identifier]int
+	providerCandidates []ProviderCandidate
+	selections         []Selection
+	selectionIndex     map[capabilityid.Identifier]int
 }
 
 // Capabilities returns defensive requirement views sorted by canonical ID.
@@ -215,6 +239,12 @@ func (r Result) Capability(id capabilityid.Identifier) (ResolvedCapability, bool
 		return ResolvedCapability{}, false
 	}
 	return r.capabilities[position], true
+}
+
+// ProviderCandidates returns every normalized ordinary Provider declaration
+// in canonical Capability, Plugin ID, and source order.
+func (r Result) ProviderCandidates() []ProviderCandidate {
+	return append([]ProviderCandidate(nil), r.providerCandidates...)
 }
 
 // Selections returns defensive ordinary provider mappings sorted by Capability ID.
@@ -409,11 +439,34 @@ func resolveNormalized(
 		selectionIndex[selection.capability] = index
 	}
 	return Result{
-		capabilities:    capabilities,
-		capabilityIndex: capabilityIndex,
-		selections:      selections,
-		selectionIndex:  selectionIndex,
+		capabilities:       capabilities,
+		capabilityIndex:    capabilityIndex,
+		providerCandidates: providerCandidateViews(candidatesByCapability),
+		selections:         selections,
+		selectionIndex:     selectionIndex,
 	}, nil
+}
+
+func providerCandidateViews(candidates map[capabilityid.Identifier][]normalizedCandidate) []ProviderCandidate {
+	capabilities := make([]capabilityid.Identifier, 0, len(candidates))
+	for capability := range candidates {
+		capabilities = append(capabilities, capability)
+	}
+	sort.Slice(capabilities, func(left, right int) bool {
+		return capabilities[left].String() < capabilities[right].String()
+	})
+	result := make([]ProviderCandidate, 0)
+	for _, capability := range capabilities {
+		for _, candidate := range candidates[capability] {
+			result = append(result, ProviderCandidate{
+				capability:     capability,
+				pluginID:       candidate.pluginID,
+				contractDigest: candidate.contract.digest,
+				source:         candidate.contract.source,
+			})
+		}
+	}
+	return result
 }
 
 func normalizeRequirements(inputs []Requirement) ([]normalizedRequirement, []error) {

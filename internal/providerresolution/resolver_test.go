@@ -54,6 +54,10 @@ func TestResolveSelectsSoleOrdinaryProviderAndIntrinsicCapability(t *testing.T) 
 	if got := selectionStrings(result.Selections()); !slices.Equal(got, []string{"audit.write/v1=example.audit:auto"}) {
 		t.Fatalf("Selections = %v", got)
 	}
+	providerCandidates := result.ProviderCandidates()
+	if len(providerCandidates) != 2 || providerCandidates[0].Capability().String() != "audit.write/v1" || providerCandidates[0].PluginID() != "example.audit" || providerCandidates[0].ContractDigest() != capabilities[0].ContractDigest() || providerCandidates[0].Source() != "audit/capabilities/audit.write/v1/capability.yaml" || providerCandidates[1].Capability().String() != "email.send/v1" || providerCandidates[1].PluginID() != "example.unused" {
+		t.Fatalf("ProviderCandidates = %#v", providerCandidates)
+	}
 
 	input.Requirements[1].Contract[0] = 'x'
 	input.Candidates[1].Contract[0] = 'x'
@@ -64,7 +68,8 @@ func TestResolveSelectsSoleOrdinaryProviderAndIntrinsicCapability(t *testing.T) 
 	sources[0] = providerresolution.RequirementSource{}
 	selections := result.Selections()
 	selections[0] = providerresolution.Selection{}
-	if result.Capabilities()[0].ID().String() != "audit.write/v1" || result.Capabilities()[0].ContractJSON()[0] != '{' || result.Capabilities()[0].Sources()[0].String() != "orders/plugin.yaml requires" || result.Selections()[0].PluginID() != "example.audit" {
+	providerCandidates[0] = providerresolution.ProviderCandidate{}
+	if result.Capabilities()[0].ID().String() != "audit.write/v1" || result.Capabilities()[0].ContractJSON()[0] != '{' || result.Capabilities()[0].Sources()[0].String() != "orders/plugin.yaml requires" || result.Selections()[0].PluginID() != "example.audit" || result.ProviderCandidates()[0].PluginID() != "example.audit" {
 		t.Fatal("Result exposed mutable input or result storage")
 	}
 }
@@ -97,6 +102,9 @@ func TestCatalogReusesImmutableValidatedCandidates(t *testing.T) {
 	selection, exists := result.SelectedProvider(mustID(t, "audit.write/v1"))
 	if !exists || selection.PluginID() != "example.audit" || selection.ProviderSource() != "audit/capability.yaml" {
 		t.Fatalf("Catalog selection = %#v, %t", selection, exists)
+	}
+	if candidates := result.ProviderCandidates(); len(candidates) != 1 || candidates[0].Capability().String() != "audit.write/v1" || candidates[0].PluginID() != "example.audit" || candidates[0].Source() != "audit/capability.yaml" {
+		t.Fatalf("Catalog Provider candidates = %#v", candidates)
 	}
 	requirements[0].Capability = "changed.invalid/v1"
 	again, err := catalog.Resolve([]providerresolution.Requirement{{Capability: "audit.write/v1", Source: requirementSource("second pass")}}, nil)
@@ -547,7 +555,7 @@ func TestResolveRejectsInvalidProviderAndInputEnvelopes(t *testing.T) {
 			if !errors.Is(err, providerresolution.ErrResolve) || !errors.Is(err, providerresolution.ErrInvalidInput) || test.also != nil && !errors.Is(err, test.also) {
 				t.Fatalf("Resolve = %#v, %v", result, err)
 			}
-			if len(result.Capabilities()) != 0 || len(result.Selections()) != 0 {
+			if len(result.Capabilities()) != 0 || len(result.ProviderCandidates()) != 0 || len(result.Selections()) != 0 {
 				t.Fatalf("invalid Resolve returned partial result %#v", result)
 			}
 		})
@@ -558,7 +566,7 @@ func TestResolveSupportsEmptyApplication(t *testing.T) {
 	t.Parallel()
 
 	result, err := providerresolution.Resolve(providerresolution.Input{})
-	if err != nil || len(result.Capabilities()) != 0 || len(result.Selections()) != 0 {
+	if err != nil || len(result.Capabilities()) != 0 || len(result.ProviderCandidates()) != 0 || len(result.Selections()) != 0 {
 		t.Fatalf("Resolve(empty) = %#v, %v", result, err)
 	}
 	if _, ok := result.Capability(mustID(t, "kernel.health/v1")); ok {
@@ -644,9 +652,12 @@ func selectionStrings(values []providerresolution.Selection) []string {
 }
 
 func renderResult(result providerresolution.Result) []string {
-	values := make([]string, 0, len(result.Capabilities())+len(result.Selections()))
+	values := make([]string, 0, len(result.Capabilities())+len(result.ProviderCandidates())+len(result.Selections()))
 	for _, capability := range result.Capabilities() {
 		values = append(values, capability.ID().String()+"|"+capability.ContractDigest()+"|"+strings.Join(requirementSourceReferences(capability.Sources()), ","))
+	}
+	for _, candidate := range result.ProviderCandidates() {
+		values = append(values, "candidate|"+candidate.Capability().String()+"|"+candidate.PluginID()+"|"+candidate.ContractDigest()+"|"+candidate.Source())
 	}
 	values = append(values, selectionStrings(result.Selections())...)
 	return values
