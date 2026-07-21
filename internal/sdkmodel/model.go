@@ -61,13 +61,72 @@ const (
 	KindArray   Kind = "array"
 )
 
+// FieldConstraints is one immutable normalized canonical constraint set.
+// Accessors preserve explicit zero and an explicitly present empty pattern.
+type FieldConstraints struct {
+	minLength *uint32
+	maxLength *uint32
+	pattern   *string
+	minimum   json.RawMessage
+	maximum   json.RawMessage
+	minItems  *uint32
+	maxItems  *uint32
+}
+
+// Empty reports whether the field has no canonical constraints.
+func (c FieldConstraints) Empty() bool {
+	return c.minLength == nil && c.maxLength == nil && c.pattern == nil &&
+		len(c.minimum) == 0 && len(c.maximum) == 0 && c.minItems == nil && c.maxItems == nil
+}
+
+// MinLength returns the minimum Unicode scalar-value count when present.
+func (c FieldConstraints) MinLength() (uint32, bool) { return optionalUint32(c.minLength) }
+
+// MaxLength returns the maximum Unicode scalar-value count when present.
+func (c FieldConstraints) MaxLength() (uint32, bool) { return optionalUint32(c.maxLength) }
+
+// Pattern returns the canonical bounded Go regular expression when present.
+func (c FieldConstraints) Pattern() (string, bool) {
+	if c.pattern == nil {
+		return "", false
+	}
+	return *c.pattern, true
+}
+
+// MinimumJSON returns the canonical exact numeric lower bound when present.
+func (c FieldConstraints) MinimumJSON() []byte { return append([]byte(nil), c.minimum...) }
+
+// MaximumJSON returns the canonical exact numeric upper bound when present.
+func (c FieldConstraints) MaximumJSON() []byte { return append([]byte(nil), c.maximum...) }
+
+// MinItems returns the minimum array item count when present.
+func (c FieldConstraints) MinItems() (uint32, bool) { return optionalUint32(c.minItems) }
+
+// MaxItems returns the maximum array item count when present.
+func (c FieldConstraints) MaxItems() (uint32, bool) { return optionalUint32(c.maxItems) }
+
+// CanonicalJSON returns the deterministic canonical constraint object, or nil
+// when no constraints are present.
+func (c FieldConstraints) CanonicalJSON() []byte {
+	canonical := c.canonical()
+	if canonical == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		panic(err)
+	}
+	return encoded
+}
+
 // Field is one immutable canonical request or response field.
 type Field struct {
-	name     string
-	kind     Kind
-	items    Kind
-	required bool
-	enumJSON []json.RawMessage
+	name        string
+	kind        Kind
+	items       Kind
+	required    bool
+	enumJSON    []json.RawMessage
+	constraints FieldConstraints
 }
 
 // Name returns the canonical lower-snake wire name.
@@ -85,6 +144,9 @@ func (f Field) Required() bool { return f.required }
 
 // EnumJSON returns canonical scalar JSON literals in deterministic order.
 func (f Field) EnumJSON() []json.RawMessage { return cloneRawMessages(f.enumJSON) }
+
+// Constraints returns the field's immutable normalized canonical constraints.
+func (f Field) Constraints() FieldConstraints { return f.constraints }
 
 // Operation is one immutable canonical Capability exposed to an application
 // SDK. It contains no provider identity or runtime configuration.
@@ -170,10 +232,21 @@ type canonicalContract struct {
 }
 
 type canonicalField struct {
-	Type     string            `json:"type"`
-	Items    string            `json:"items,omitempty"`
-	Required bool              `json:"required,omitempty"`
-	Enum     []json.RawMessage `json:"enum,omitempty"`
+	Type        string                    `json:"type"`
+	Items       string                    `json:"items,omitempty"`
+	Required    bool                      `json:"required,omitempty"`
+	Enum        []json.RawMessage         `json:"enum,omitempty"`
+	Constraints canonicalFieldConstraints `json:"constraints,omitempty"`
+}
+
+type canonicalFieldConstraints struct {
+	MinLength *uint32         `json:"min_length,omitempty"`
+	MaxLength *uint32         `json:"max_length,omitempty"`
+	Pattern   *string         `json:"pattern,omitempty"`
+	Minimum   json.RawMessage `json:"minimum,omitempty"`
+	Maximum   json.RawMessage `json:"maximum,omitempty"`
+	MinItems  *uint32         `json:"min_items,omitempty"`
+	MaxItems  *uint32         `json:"max_items,omitempty"`
 }
 
 type canonicalModel struct {
@@ -190,11 +263,12 @@ type canonicalOperation struct {
 }
 
 type canonicalModelField struct {
-	Name     string            `json:"name"`
-	Kind     Kind              `json:"kind"`
-	Items    Kind              `json:"items,omitempty"`
-	Required bool              `json:"required"`
-	Enum     []json.RawMessage `json:"enum,omitempty"`
+	Name        string                     `json:"name"`
+	Kind        Kind                       `json:"kind"`
+	Items       Kind                       `json:"items,omitempty"`
+	Required    bool                       `json:"required"`
+	Enum        []json.RawMessage          `json:"enum,omitempty"`
+	Constraints *canonicalFieldConstraints `json:"constraints,omitempty"`
 }
 
 type canonicalAlias struct {
@@ -472,11 +546,12 @@ func normalizeFields(path string, values map[string]canonicalField) ([]Field, er
 			return nil, fmt.Errorf("%w: %w: %s.%s has items on non-array kind %q", ErrNormalize, ErrTarget, path, name, value.Type)
 		}
 		fields = append(fields, Field{
-			name:     name,
-			kind:     kind,
-			items:    items,
-			required: value.Required,
-			enumJSON: cloneRawMessages(value.Enum),
+			name:        name,
+			kind:        kind,
+			items:       items,
+			required:    value.Required,
+			enumJSON:    cloneRawMessages(value.Enum),
+			constraints: fieldConstraintsFromCanonical(value.Constraints),
 		})
 	}
 	return fields, nil
@@ -495,11 +570,12 @@ func canonicalFields(fields []Field) []canonicalModelField {
 	result := make([]canonicalModelField, len(fields))
 	for index, field := range fields {
 		result[index] = canonicalModelField{
-			Name:     field.name,
-			Kind:     field.kind,
-			Items:    field.items,
-			Required: field.required,
-			Enum:     cloneRawMessages(field.enumJSON),
+			Name:        field.name,
+			Kind:        field.kind,
+			Items:       field.items,
+			Required:    field.required,
+			Enum:        cloneRawMessages(field.enumJSON),
+			Constraints: field.constraints.canonical(),
 		}
 	}
 	return result
@@ -514,6 +590,56 @@ func cloneRawMessages(values []json.RawMessage) []json.RawMessage {
 		result[index] = append(json.RawMessage(nil), value...)
 	}
 	return result
+}
+
+func fieldConstraintsFromCanonical(value canonicalFieldConstraints) FieldConstraints {
+	return FieldConstraints{
+		minLength: cloneUint32(value.MinLength),
+		maxLength: cloneUint32(value.MaxLength),
+		pattern:   cloneString(value.Pattern),
+		minimum:   append(json.RawMessage(nil), value.Minimum...),
+		maximum:   append(json.RawMessage(nil), value.Maximum...),
+		minItems:  cloneUint32(value.MinItems),
+		maxItems:  cloneUint32(value.MaxItems),
+	}
+}
+
+func (c FieldConstraints) canonical() *canonicalFieldConstraints {
+	if c.Empty() {
+		return nil
+	}
+	return &canonicalFieldConstraints{
+		MinLength: cloneUint32(c.minLength),
+		MaxLength: cloneUint32(c.maxLength),
+		Pattern:   cloneString(c.pattern),
+		Minimum:   append(json.RawMessage(nil), c.minimum...),
+		Maximum:   append(json.RawMessage(nil), c.maximum...),
+		MinItems:  cloneUint32(c.minItems),
+		MaxItems:  cloneUint32(c.maxItems),
+	}
+}
+
+func optionalUint32(value *uint32) (uint32, bool) {
+	if value == nil {
+		return 0, false
+	}
+	return *value, true
+}
+
+func cloneUint32(value *uint32) *uint32 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func digest(data []byte) string {

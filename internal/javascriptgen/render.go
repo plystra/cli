@@ -285,6 +285,9 @@ func renderOperation(operation renderedOperation) ([]byte, error) {
 	fmt.Fprintln(&source, "  createRuntime,")
 	fmt.Fprintln(&source, "  hasOwn,")
 	fmt.Fprintln(&source, "  invoke,")
+	if operationUsesStringBounds(operation.operation) {
+		fmt.Fprintln(&source, "  isStringWithinUnicodeScalarBounds,")
+	}
 	if operationUsesInteger(operation.operation) {
 		fmt.Fprintln(&source, "  isSignedInteger,")
 	}
@@ -408,6 +411,7 @@ func renderType(source *strings.Builder, name string, fields []sdkmodel.Field) {
 		if !field.Required() {
 			optional = "?"
 		}
+		renderConstraintJSDoc(source, "  ", field.Constraints())
 		fmt.Fprintf(source, "  readonly %s%s: %s;\n", jsString(field.Name()), optional, typescriptType(field))
 	}
 	fmt.Fprintln(source, "}")
@@ -625,6 +629,8 @@ func renderREADME(packageName string, operations []renderedOperation) []byte {
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "Canonical `integer` fields and integer array items are signed 64-bit values exposed as JavaScript `bigint`, including enum literals such as `0n`. Pass `bigint`, not `number`, so request and response values remain exact across the full range.")
 	fmt.Fprintln(&readme)
+	fmt.Fprintln(&readme, "Generated request and response declarations retain each exact normalized constraint object in a `@plystraConstraints` field annotation. The wrapper preflights Unicode scalar-value length, numeric bounds, and array item counts before sending a request and applies the same portable checks to decoded responses. Canonical `pattern` uses Go regular-expression semantics, so it is declared for tools and developers but remains enforced authoritatively by the generated server rather than reinterpreted through JavaScript `RegExp`.")
+	fmt.Fprintln(&readme)
 	if len(operations) == 0 {
 		fmt.Fprintln(&readme, "This application currently exposes no JavaScript Capability operations.")
 		return []byte(readme.String())
@@ -719,22 +725,83 @@ func typescriptKind(kind sdkmodel.Kind) string {
 }
 
 func validValue(field sdkmodel.Field, expression string) string {
+	var valid string
 	enum := field.EnumJSON()
 	if len(enum) != 0 {
 		values := make([]string, len(enum))
 		for index, value := range enum {
 			values[index] = expression + " === " + typescriptScalarLiteral(field.Kind(), value)
 		}
-		valid := "(" + strings.Join(values, " || ") + ")"
+		valid = "(" + strings.Join(values, " || ") + ")"
 		if field.Kind() == sdkmodel.KindInteger {
 			valid = "isSignedInteger(" + expression + ") && " + valid
 		}
+	} else if field.Kind() == sdkmodel.KindArray {
+		valid = "Array.isArray(" + expression + ") && " + expression + ".every((item) => " + validKind(field.Items(), "item") + ")"
+	} else {
+		valid = validKind(field.Kind(), expression)
+	}
+	checks := constraintChecks(field, expression)
+	if len(checks) == 0 {
 		return valid
 	}
-	if field.Kind() == sdkmodel.KindArray {
-		return "Array.isArray(" + expression + ") && " + expression + ".every((item) => " + validKind(field.Items(), "item") + ")"
+	return "(" + valid + " && " + strings.Join(checks, " && ") + ")"
+}
+
+func constraintChecks(field sdkmodel.Field, expression string) []string {
+	constraints := field.Constraints()
+	checks := make([]string, 0, 2)
+	switch field.Kind() {
+	case sdkmodel.KindString:
+		minimum, hasMinimum := constraints.MinLength()
+		maximum, hasMaximum := constraints.MaxLength()
+		if hasMinimum || hasMaximum {
+			checks = append(checks, fmt.Sprintf(
+				"isStringWithinUnicodeScalarBounds(%s, %s, %s)",
+				expression,
+				optionalCountLiteral(minimum, hasMinimum),
+				optionalCountLiteral(maximum, hasMaximum),
+			))
+		}
+	case sdkmodel.KindInteger, sdkmodel.KindNumber:
+		if minimum := constraints.MinimumJSON(); len(minimum) != 0 {
+			checks = append(checks, expression+" >= "+typescriptNumericConstraintLiteral(field.Kind(), minimum))
+		}
+		if maximum := constraints.MaximumJSON(); len(maximum) != 0 {
+			checks = append(checks, expression+" <= "+typescriptNumericConstraintLiteral(field.Kind(), maximum))
+		}
+	case sdkmodel.KindArray:
+		if minimum, exists := constraints.MinItems(); exists {
+			checks = append(checks, fmt.Sprintf("%s.length >= %d", expression, minimum))
+		}
+		if maximum, exists := constraints.MaxItems(); exists {
+			checks = append(checks, fmt.Sprintf("%s.length <= %d", expression, maximum))
+		}
 	}
-	return validKind(field.Kind(), expression)
+	return checks
+}
+
+func optionalCountLiteral(value uint32, exists bool) string {
+	if !exists {
+		return "undefined"
+	}
+	return strconv.FormatUint(uint64(value), 10)
+}
+
+func typescriptNumericConstraintLiteral(kind sdkmodel.Kind, value []byte) string {
+	if kind == sdkmodel.KindInteger {
+		return string(value) + "n"
+	}
+	return string(value)
+}
+
+func renderConstraintJSDoc(source *strings.Builder, indent string, constraints sdkmodel.FieldConstraints) {
+	canonical := constraints.CanonicalJSON()
+	if len(canonical) == 0 {
+		return
+	}
+	safe := strings.ReplaceAll(string(canonical), "*/", "*\\/")
+	fmt.Fprintf(source, "%s/** @plystraConstraints %s */\n", indent, safe)
 }
 
 func validateJavaScriptFields(section string, fields []sdkmodel.Field) error {
@@ -783,6 +850,24 @@ func operationUsesInteger(operation sdkmodel.Operation) bool {
 	for _, fields := range [][]sdkmodel.Field{operation.Request(), operation.Response()} {
 		for _, field := range fields {
 			if field.Kind() == sdkmodel.KindInteger || field.Kind() == sdkmodel.KindArray && field.Items() == sdkmodel.KindInteger {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func operationUsesStringBounds(operation sdkmodel.Operation) bool {
+	for _, fields := range [][]sdkmodel.Field{operation.Request(), operation.Response()} {
+		for _, field := range fields {
+			if field.Kind() != sdkmodel.KindString {
+				continue
+			}
+			constraints := field.Constraints()
+			if _, exists := constraints.MinLength(); exists {
+				return true
+			}
+			if _, exists := constraints.MaxLength(); exists {
 				return true
 			}
 		}

@@ -19,6 +19,8 @@ Generated application failures expose only an immutable Plystra-owned safe detai
 
 Canonical `integer` fields and integer array items are signed 64-bit values exposed as JavaScript `bigint`, including enum literals such as `0n`. Pass `bigint`, not `number`, so request and response values remain exact across the full range.
 
+Generated request and response declarations retain each exact normalized constraint object in a `@plystraConstraints` field annotation. The wrapper preflights Unicode scalar-value length, numeric bounds, and array item counts before sending a request and applies the same portable checks to decoded responses. Canonical `pattern` uses Go regular-expression semantics, so it is declared for tools and developers but remains enforced authoritatively by the generated server rather than reinterpreted through JavaScript `RegExp`.
+
 ## Usage
 
 ```ts
@@ -43,11 +45,11 @@ Only explicitly exposed canonical operations and validated application-local Ali
 - `account.profile.get/v2` (`sha256:96f322e70226b5392d4c68c0ad1c58c0a3d654110e225ac50623ebc81e10d19b`)
 - `alpha.beta.v1.check/v1` (`sha256:3d25fdeab0811a282920ee03f2eafa5d4ccb3b3de39b69a85e3f93edc4dbea85`)
 - `alpha.beta/v1` (`sha256:e4f1a8e37e47c8ff3bf76863c2ecbf470a56bb590a77a1ee9708330c452c7acd`)
-- `email.send/v1` (`sha256:f8a801ed064ea942c0a6999e45359fba607be8d62fabce6d6ebec8909a5b3833`)
+- `email.send/v1` (`sha256:d1bb3e79da4ce8fc729c4a21d4ebabd3818436c1aac31d407d68ae96b8319e26`)
 - `foo-bar.send/v1` (`sha256:0de2dab1912e93c308a77befb2441b21c92133597154902e71b520ee23237db2`)
 - `foo.bar-send/v1` (`sha256:289854b61ff7acc97547f7b425670e742bc93f32169c80904618b4da4d1b8e3a`)
 
 ## Capability aliases
 
-- `compat.send/v1` -> `email.send/v1` (`sha256:f8a801ed064ea942c0a6999e45359fba607be8d62fabce6d6ebec8909a5b3833`)
-- `mail.deliver/v1` -> `email.send/v1` (`sha256:f8a801ed064ea942c0a6999e45359fba607be8d62fabce6d6ebec8909a5b3833`) - deprecated: "Use email.send/v1 instead."
+- `compat.send/v1` -> `email.send/v1` (`sha256:d1bb3e79da4ce8fc729c4a21d4ebabd3818436c1aac31d407d68ae96b8319e26`)
+- `mail.deliver/v1` -> `email.send/v1` (`sha256:d1bb3e79da4ce8fc729c4a21d4ebabd3818436c1aac31d407d68ae96b8319e26`) - deprecated: "Use email.send/v1 instead."

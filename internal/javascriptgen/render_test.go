@@ -28,18 +28,21 @@ var updateJavaScriptGolden = flag.Bool("update", false, "update generated JavaSc
 
 const javascriptEmailSchema = `id: email.send/v1
 request:
-  checkpoints: {type: array, items: integer}
-  offset: {type: integer}
-  to: {type: string, required: true}
-  tags: {type: array, items: string, required: true}
+  attempt: {type: integer, constraints: {minimum: 1, maximum: 3}}
+  checkpoints: {type: array, items: integer, constraints: {min_items: 1, max_items: 2}}
+  label: {type: string, constraints: {max_length: 1}}
+  offset: {type: integer, constraints: {minimum: -9223372036854775808, maximum: 9223372036854775807}}
+  to: {type: string, required: true, constraints: {min_length: 2, max_length: 254, pattern: '^[^@]+@[^@]+$'}}
+  tags: {type: array, items: string, required: true, constraints: {min_items: 0, max_items: 2}}
   retries: {type: integer, enum: [-9223372036854775808, 0, 9223372036854775807]}
   priority: {type: string, required: true, enum: [normal, urgent]}
   metadata: {type: object}
 response:
   accepted: {type: boolean, required: true}
-  latency: {type: number}
-  positions: {type: array, items: integer}
-  revision: {type: integer}
+  attempt: {type: integer, constraints: {minimum: 1, maximum: 3}}
+  latency: {type: number, constraints: {minimum: 0.5, maximum: 1.5}}
+  positions: {type: array, items: integer, constraints: {min_items: 1, max_items: 2}}
+  revision: {type: integer, constraints: {minimum: -9223372036854775808, maximum: 9223372036854775807}}
 errors: [temporarily_unavailable, invalid_recipient]
 extensions:
   authn: {authenticated: true}
@@ -121,6 +124,21 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		`/** @deprecated Use email.send/v1 instead. */`,
 		`export type ErrorCode = "invalid_recipient" | "temporarily_unavailable";`,
 		`isSignedInteger`,
+		`isStringWithinUnicodeScalarBounds`,
+		`@plystraConstraints {"min_length":2,"max_length":254,"pattern":"^[^@]+@[^@]+$"}`,
+		`isStringWithinUnicodeScalarBounds(value["to"], 2, 254)`,
+		`value["attempt"] >= 1n`,
+		`value["attempt"] <= 3n`,
+		`value["offset"] >= -9223372036854775808n`,
+		`value["offset"] <= 9223372036854775807n`,
+		`value["checkpoints"].length >= 1`,
+		`value["checkpoints"].length <= 2`,
+		`value["latency"] >= 0.5`,
+		`value["latency"] <= 1.5`,
+		`value["positions"].length >= 1`,
+		`value["positions"].length <= 2`,
+		`value["revision"] >= -9223372036854775808n`,
+		`value["revision"] <= 9223372036854775807n`,
 		`bigint`,
 		`9223372036854775807n`,
 		`getAccessToken`,
@@ -262,6 +280,26 @@ response:
 	readme := fileData(t, files, "generated/sdk/javascript/README.md")
 	if !bytes.Contains(readme, []byte(`client.metrics.record.v1({"count":0n,"mode":-9223372036854775808n,"offsets":[]})`)) {
 		t.Fatalf("generated README does not use bigint request literals:\n%s", readme)
+	}
+}
+
+func TestRenderJavaScriptDeclaresPatternWithoutReinterpretingOrTerminatingJSDoc(t *testing.T) {
+	t.Parallel()
+
+	target := javascriptTarget(t, "id: text.match/v1\nrequest:\n  value: {type: string, required: true, constraints: {pattern: 'a*/b'}}\n")
+	model := javascriptModel(t, target)
+	files, err := javascriptgen.Render(javascriptOptions(t, "text-sdk", []javascriptTargetView{target}, nil), model)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	source := fileData(t, files, "generated/sdk/javascript/src/operations/text/match/v1.ts")
+	if !bytes.Contains(source, []byte(`@plystraConstraints {"pattern":"a*\/b"}`)) {
+		t.Fatalf("generated pattern declaration is absent or unsafe:\n%s", source)
+	}
+	for _, forbidden := range [][]byte{[]byte("new RegExp"), []byte("RegExp("), []byte("/a*/b/")} {
+		if bytes.Contains(source, forbidden) {
+			t.Fatalf("generated JavaScript reinterprets canonical Go pattern through %q:\n%s", forbidden, source)
+		}
 	}
 }
 

@@ -944,8 +944,13 @@ enforces every closed constraint before contributions and Provider dispatch and
 validates the Provider response after completion contributions. String bounds
 count Unicode scalar values rather than bytes or grapheme clusters. Generated
 Connect and optional REST adapters run the same request validator before
-trusted-root creation; JavaScript declaration and optional browser preflight
-projection remains deferred Gate 12 work.
+trusted-root creation. Generated JavaScript request and response declarations
+retain the exact normalized constraint object in a `@plystraConstraints`
+annotation. Browser request preflight and decoded-response validation enforce
+Unicode scalar-value length, numeric bounds, and array item counts. Canonical
+`pattern` remains declared and server-authoritative because JavaScript
+`RegExp` is not a compatible substitute for bounded Go regular-expression
+semantics.
 
 Regenerate before implementing against the typed contract:
 
@@ -1669,8 +1674,8 @@ The following remain roadmap work and must not be represented as complete:
   accepted AuthZ prerelease, and three-layer development-Goal closure.
 - Complete CLI dependency-management, development, test, build, check, fix,
   doctor, SDK packaging/publication, and release commands.
-- Generated request and response constraint enforcement plus Go, Connect,
-  JavaScript, documentation, and manifest constraint projection.
+- Generated documentation, compatibility, Behavioral Conformance, manifest,
+  and release-evidence constraint projection.
 - CLI-managed database migration workflows and an official persistence Plugin.
 - Gate 26 final cross-platform acceptance, packaging, release metadata,
   public-source readiness, and coordinated stable Kernel, CLI, AuthN, and AuthZ

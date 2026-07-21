@@ -24,14 +24,14 @@ var (
 
 const sdkEmailSchema = `id: email.send/v1
 request:
-  to: {type: string, required: true}
-  tags: {type: array, items: string, required: true}
-  retries: {type: integer, enum: [-1, 0, 2]}
+  to: {type: string, required: true, constraints: {min_length: 3, max_length: 254, pattern: '^[^@]+@[^@]+$'}}
+  tags: {type: array, items: string, required: true, constraints: {min_items: 1, max_items: 100}}
+  retries: {type: integer, enum: [-1, 0, 2], constraints: {minimum: -1, maximum: 2}}
   priority: {type: string, required: true, enum: [normal, urgent]}
   metadata: {type: object}
 response:
   accepted: {type: boolean, required: true}
-  latency: {type: number}
+  latency: {type: number, constraints: {minimum: 0.5, maximum: 30.5}}
 errors: [temporarily_unavailable, invalid_recipient]
 extensions:
   authn: {authenticated: true}
@@ -81,8 +81,33 @@ func TestBuildCanonicalNormalizesImmutableSDKOperations(t *testing.T) {
 	if got := rawStrings(request[2].EnumJSON()); !slices.Equal(got, []string{"-1", "0", "2"}) {
 		t.Fatalf("retries enum = %v", got)
 	}
+	retryConstraints := request[2].Constraints()
+	if string(retryConstraints.MinimumJSON()) != "-1" || string(retryConstraints.MaximumJSON()) != "2" {
+		t.Fatalf("retries constraints = %s", retryConstraints.CanonicalJSON())
+	}
+	tagConstraints := request[3].Constraints()
+	if minimum, exists := tagConstraints.MinItems(); !exists || minimum != 1 {
+		t.Fatalf("tags minimum = %d, %t", minimum, exists)
+	}
+	if maximum, exists := tagConstraints.MaxItems(); !exists || maximum != 100 {
+		t.Fatalf("tags maximum = %d, %t", maximum, exists)
+	}
+	toConstraints := request[4].Constraints()
+	if minimum, exists := toConstraints.MinLength(); !exists || minimum != 3 {
+		t.Fatalf("to minimum = %d, %t", minimum, exists)
+	}
+	if maximum, exists := toConstraints.MaxLength(); !exists || maximum != 254 {
+		t.Fatalf("to maximum = %d, %t", maximum, exists)
+	}
+	if pattern, exists := toConstraints.Pattern(); !exists || pattern != `^[^@]+@[^@]+$` {
+		t.Fatalf("to pattern = %q, %t", pattern, exists)
+	}
 	if got := fieldNames(operation.Response()); !slices.Equal(got, []string{"accepted", "latency"}) {
 		t.Fatalf("Response fields = %v", got)
+	}
+	latencyConstraints := operation.Response()[1].Constraints()
+	if string(latencyConstraints.MinimumJSON()) != "0.5" || string(latencyConstraints.MaximumJSON()) != "30.5" {
+		t.Fatalf("latency constraints = %s", latencyConstraints.CanonicalJSON())
 	}
 	if got := operation.Errors(); !slices.Equal(got, []string{"invalid_recipient", "temporarily_unavailable"}) {
 		t.Fatalf("Errors = %v", got)
@@ -93,7 +118,9 @@ func TestBuildCanonicalNormalizesImmutableSDKOperations(t *testing.T) {
 		`"id":"email.send/v1"`,
 		`"contract_digest":"` + email.digest + `"`,
 		`"name":"priority","kind":"string","required":true,"enum":["normal","urgent"]`,
-		`"name":"tags","kind":"array","items":"string","required":true`,
+		`"name":"retries","kind":"integer","required":false,"enum":[-1,0,2],"constraints":{"minimum":-1,"maximum":2}`,
+		`"name":"tags","kind":"array","items":"string","required":true,"constraints":{"min_items":1,"max_items":100}`,
+		`"name":"to","kind":"string","required":true,"constraints":{"min_length":3,"max_length":254,"pattern":"^[^@]+@[^@]+$"}`,
 	} {
 		if !bytes.Contains(canonical, []byte(required)) {
 			t.Fatalf("CanonicalJSON %s omits %s", canonical, required)
@@ -113,10 +140,27 @@ func TestBuildCanonicalNormalizesImmutableSDKOperations(t *testing.T) {
 	errorsCopy[0] = "changed"
 	enumCopy := operation.Request()[1].EnumJSON()
 	enumCopy[0][0] = 'x'
+	minimumCopy := operation.Request()[2].Constraints().MinimumJSON()
+	minimumCopy[0] = '9'
 	canonical[0] = 'x'
 	fresh := model.Operations()[1]
-	if fresh.ID().String() != "email.send/v1" || fresh.Request()[0].Name() != "metadata" || fresh.Errors()[0] != "invalid_recipient" || string(fresh.Request()[1].EnumJSON()[0]) != `"normal"` || model.CanonicalJSON()[0] != '{' {
+	if fresh.ID().String() != "email.send/v1" || fresh.Request()[0].Name() != "metadata" || fresh.Errors()[0] != "invalid_recipient" || string(fresh.Request()[1].EnumJSON()[0]) != `"normal"` || string(fresh.Request()[2].Constraints().MinimumJSON()) != "-1" || model.CanonicalJSON()[0] != '{' {
 		t.Fatal("Model exposed mutable normalized storage")
+	}
+}
+
+func TestBuildCanonicalPreservesExplicitEmptyPatternConstraint(t *testing.T) {
+	t.Parallel()
+
+	target := sdkTarget(t, "id: text.match/v1\nrequest:\n  value: {type: string, constraints: {pattern: ''}}\n", generation.Exposure{HTTP: true, JavaScript: true})
+	model, err := sdkmodel.BuildCanonical([]sdkmodel.CanonicalTargetView{target})
+	if err != nil {
+		t.Fatalf("BuildCanonical: %v", err)
+	}
+	constraints := model.Operations()[0].Request()[0].Constraints()
+	pattern, exists := constraints.Pattern()
+	if !exists || pattern != "" || constraints.Empty() || string(constraints.CanonicalJSON()) != `{"pattern":""}` {
+		t.Fatalf("empty pattern constraints = %s, %q, %t", constraints.CanonicalJSON(), pattern, exists)
 	}
 }
 
@@ -174,6 +218,10 @@ func TestBuildNormalizesImmutableJavaScriptAliases(t *testing.T) {
 		}
 		if !slices.Equal(fieldNames(alias.TargetOperation().Request()), []string{"metadata", "priority", "retries", "tags", "to"}) || !slices.Equal(alias.TargetOperation().Errors(), []string{"invalid_recipient", "temporarily_unavailable"}) {
 			t.Fatalf("Alias %s did not reuse canonical target contract", alias.ID())
+		}
+		pattern, exists := alias.TargetOperation().Request()[4].Constraints().Pattern()
+		if !exists || pattern != `^[^@]+@[^@]+$` {
+			t.Fatalf("Alias %s did not reuse canonical target constraints", alias.ID())
 		}
 	}
 	if got[0].Deprecated() != "" || got[1].Deprecated() != "Use email.send/v1 instead." || !got[0].Exposure().Go {

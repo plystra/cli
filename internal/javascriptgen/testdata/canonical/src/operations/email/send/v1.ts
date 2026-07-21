@@ -4,6 +4,7 @@ import {
   createRuntime,
   hasOwn,
   invoke,
+  isStringWithinUnicodeScalarBounds,
   isSignedInteger,
   isJSONValue,
   isPlainObject,
@@ -18,7 +19,7 @@ import {
 import { resolveMessage, resolveUnaryMethod } from "../../../descriptors.js";
 
 export const capabilityID = "email.send/v1";
-export const contractDigest = "sha256:f8a801ed064ea942c0a6999e45359fba607be8d62fabce6d6ebec8909a5b3833";
+export const contractDigest = "sha256:d1bb3e79da4ce8fc729c4a21d4ebabd3818436c1aac31d407d68ae96b8319e26";
 const method = resolveUnaryMethod(
   "plystra.generated.email.send.v1.EmailSendV1Service",
   "Invoke",
@@ -28,10 +29,22 @@ const method = resolveUnaryMethod(
 const requestCodec: MessageCodec = {
   fields: [
     {
+      canonicalName: "attempt",
+      protobufJSONName: "attempt",
+      kind: "integer",
+      required: false,
+    },
+    {
       canonicalName: "checkpoints",
       protobufJSONName: "checkpoints",
       kind: "array",
       items: "integer",
+      required: false,
+    },
+    {
+      canonicalName: "label",
+      protobufJSONName: "label",
+      kind: "string",
       required: false,
     },
     {
@@ -91,6 +104,12 @@ const responseCodec: MessageCodec = {
       required: true,
     },
     {
+      canonicalName: "attempt",
+      protobufJSONName: "attempt",
+      kind: "integer",
+      required: false,
+    },
+    {
       canonicalName: "latency",
       protobufJSONName: "latency",
       kind: "number",
@@ -119,19 +138,32 @@ const semanticErrorCodes = Object.freeze([
 ]);
 
 export interface Request {
+  /** @plystraConstraints {"minimum":1,"maximum":3} */
+  readonly "attempt"?: bigint;
+  /** @plystraConstraints {"min_items":1,"max_items":2} */
   readonly "checkpoints"?: ReadonlyArray<bigint>;
+  /** @plystraConstraints {"max_length":1} */
+  readonly "label"?: string;
   readonly "metadata"?: Readonly<Record<string, JSONValue>>;
+  /** @plystraConstraints {"minimum":-9223372036854775808,"maximum":9223372036854775807} */
   readonly "offset"?: bigint;
   readonly "priority": "normal" | "urgent";
   readonly "retries"?: -9223372036854775808n | 0n | 9223372036854775807n;
+  /** @plystraConstraints {"min_items":0,"max_items":2} */
   readonly "tags": ReadonlyArray<string>;
+  /** @plystraConstraints {"min_length":2,"max_length":254,"pattern":"^[^@]+@[^@]+$"} */
   readonly "to": string;
 }
 
 export interface Response {
   readonly "accepted": boolean;
+  /** @plystraConstraints {"minimum":1,"maximum":3} */
+  readonly "attempt"?: bigint;
+  /** @plystraConstraints {"minimum":0.5,"maximum":1.5} */
   readonly "latency"?: number;
+  /** @plystraConstraints {"min_items":1,"max_items":2} */
   readonly "positions"?: ReadonlyArray<bigint>;
+  /** @plystraConstraints {"minimum":-9223372036854775808,"maximum":9223372036854775807} */
   readonly "revision"?: bigint;
 }
 
@@ -140,25 +172,28 @@ export type ErrorCode = "invalid_recipient" | "temporarily_unavailable";
 function isRequest(value: unknown): value is Request {
   return (
     isPlainObject(value) &&
-    Object.keys(value).every((key) => key === "checkpoints" || key === "metadata" || key === "offset" || key === "priority" || key === "retries" || key === "tags" || key === "to") &&
-    (!hasOwn(value, "checkpoints") || Array.isArray(value["checkpoints"]) && value["checkpoints"].every((item) => isSignedInteger(item))) &&
+    Object.keys(value).every((key) => key === "attempt" || key === "checkpoints" || key === "label" || key === "metadata" || key === "offset" || key === "priority" || key === "retries" || key === "tags" || key === "to") &&
+    (!hasOwn(value, "attempt") || (isSignedInteger(value["attempt"]) && value["attempt"] >= 1n && value["attempt"] <= 3n)) &&
+    (!hasOwn(value, "checkpoints") || (Array.isArray(value["checkpoints"]) && value["checkpoints"].every((item) => isSignedInteger(item)) && value["checkpoints"].length >= 1 && value["checkpoints"].length <= 2)) &&
+    (!hasOwn(value, "label") || (typeof value["label"] === "string" && isStringWithinUnicodeScalarBounds(value["label"], undefined, 1))) &&
     (!hasOwn(value, "metadata") || isPlainObject(value["metadata"]) && isJSONValue(value["metadata"])) &&
-    (!hasOwn(value, "offset") || isSignedInteger(value["offset"])) &&
+    (!hasOwn(value, "offset") || (isSignedInteger(value["offset"]) && value["offset"] >= -9223372036854775808n && value["offset"] <= 9223372036854775807n)) &&
     hasOwn(value, "priority") && (value["priority"] === "normal" || value["priority"] === "urgent") &&
     (!hasOwn(value, "retries") || isSignedInteger(value["retries"]) && (value["retries"] === -9223372036854775808n || value["retries"] === 0n || value["retries"] === 9223372036854775807n)) &&
-    hasOwn(value, "tags") && Array.isArray(value["tags"]) && value["tags"].every((item) => typeof item === "string") &&
-    hasOwn(value, "to") && typeof value["to"] === "string"
+    hasOwn(value, "tags") && (Array.isArray(value["tags"]) && value["tags"].every((item) => typeof item === "string") && value["tags"].length >= 0 && value["tags"].length <= 2) &&
+    hasOwn(value, "to") && (typeof value["to"] === "string" && isStringWithinUnicodeScalarBounds(value["to"], 2, 254))
   );
 }
 
 function isResponse(value: unknown): value is Response {
   return (
     isPlainObject(value) &&
-    Object.keys(value).every((key) => key === "accepted" || key === "latency" || key === "positions" || key === "revision") &&
+    Object.keys(value).every((key) => key === "accepted" || key === "attempt" || key === "latency" || key === "positions" || key === "revision") &&
     hasOwn(value, "accepted") && typeof value["accepted"] === "boolean" &&
-    (!hasOwn(value, "latency") || typeof value["latency"] === "number" && Number.isFinite(value["latency"])) &&
-    (!hasOwn(value, "positions") || Array.isArray(value["positions"]) && value["positions"].every((item) => isSignedInteger(item))) &&
-    (!hasOwn(value, "revision") || isSignedInteger(value["revision"]))
+    (!hasOwn(value, "attempt") || (isSignedInteger(value["attempt"]) && value["attempt"] >= 1n && value["attempt"] <= 3n)) &&
+    (!hasOwn(value, "latency") || (typeof value["latency"] === "number" && Number.isFinite(value["latency"]) && value["latency"] >= 0.5 && value["latency"] <= 1.5)) &&
+    (!hasOwn(value, "positions") || (Array.isArray(value["positions"]) && value["positions"].every((item) => isSignedInteger(item)) && value["positions"].length >= 1 && value["positions"].length <= 2)) &&
+    (!hasOwn(value, "revision") || (isSignedInteger(value["revision"]) && value["revision"] >= -9223372036854775808n && value["revision"] <= 9223372036854775807n))
   );
 }
 

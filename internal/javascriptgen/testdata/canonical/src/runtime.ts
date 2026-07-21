@@ -281,6 +281,35 @@ export function isSignedInteger(value: unknown): value is bigint {
   );
 }
 
+/** @internal */
+export function isStringWithinUnicodeScalarBounds(
+  value: unknown,
+  minimum: number | undefined,
+  maximum: number | undefined,
+): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+  let length = 0;
+  for (let index = 0; index < value.length; index++) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+        return false;
+      }
+      index++;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      return false;
+    }
+    length++;
+    if (maximum !== undefined && length > maximum) {
+      return false;
+    }
+  }
+  return minimum === undefined || length >= minimum;
+}
+
 function encodeMessage<Desc extends DescMessage>(
   descriptor: Desc,
   codec: MessageCodec,

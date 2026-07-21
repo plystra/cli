@@ -2163,6 +2163,18 @@ capabilities:
 			t.Fatalf("generated constrained invocation omits %q:\n%s", required, invocation)
 		}
 	}
+	javascript := readFile(t, root, "generated/sdk/javascript/src/operations/email/send/v1.ts")
+	for _, required := range [][]byte{
+		[]byte(`@plystraConstraints {"min_length":3,"max_length":254,"pattern":"^[^@]+@[^@]+$"}`),
+		[]byte(`isStringWithinUnicodeScalarBounds(value["to"], 3, 254)`),
+	} {
+		if !bytes.Contains(javascript, required) {
+			t.Fatalf("generated constrained JavaScript operation omits %q:\n%s", required, javascript)
+		}
+	}
+	if bytes.Contains(javascript, []byte("RegExp(")) {
+		t.Fatalf("generated JavaScript reinterprets the canonical Go pattern:\n%s", javascript)
+	}
 	manifest := readFile(t, root, "generated/manifest.json")
 	for _, value := range [][]byte{[]byte(`"id":"mail.deliver/v1"`), []byte(`"target":"email.send/v1"`), []byte(`"deprecated":"Use email.send/v1 instead."`)} {
 		if !bytes.Contains(manifest, value) {

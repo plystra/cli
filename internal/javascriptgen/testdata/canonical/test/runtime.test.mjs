@@ -108,6 +108,14 @@ test("package exports and declarations hide Connect internals", async () => {
     operationDeclaration,
     /\bbindOperation(?:Method)?\b/,
   );
+  assert.match(
+    operationDeclaration,
+    /@plystraConstraints \{"min_length":2,"max_length":254,"pattern":"\^\[\^@\]\+@\[\^@\]\+\$"\}/,
+  );
+  assert.doesNotMatch(
+    runtimeDeclaration,
+    /\bisStringWithinUnicodeScalarBounds\b/,
+  );
 });
 
 async function requestJSON(method, body) {
@@ -263,8 +271,22 @@ test("request validation rejects malformed and oversized values before fetch", a
   cyclic.self = cyclic;
   const invalid = [
     {},
+    { to: "😀", tags: [], priority: "normal" },
+    { to: "x".repeat(255), tags: [], priority: "normal" },
+    { to: "person@example.com", tags: [], priority: "normal", label: "e\u0301" },
+    { to: "person@example.com", tags: [], priority: "normal", label: "\ud800" },
     { to: "person@example.com", tags: [], priority: "later" },
     { to: "person@example.com", tags: [1], priority: "normal" },
+    { to: "person@example.com", tags: ["one", "two", "three"], priority: "normal" },
+    { to: "person@example.com", tags: [], priority: "normal", checkpoints: [] },
+    {
+      to: "person@example.com",
+      tags: [],
+      priority: "normal",
+      checkpoints: [1n, 2n, 3n],
+    },
+    { to: "person@example.com", tags: [], priority: "normal", attempt: 0n },
+    { to: "person@example.com", tags: [], priority: "normal", attempt: 4n },
     { to: "person@example.com", tags: [], priority: "normal", retries: 3 },
     {
       to: "person@example.com",
@@ -303,13 +325,51 @@ test("request validation rejects malformed and oversized values before fetch", a
   await assert.rejects(
     () =>
       send({
-        to: "x".repeat(1_048_576),
+        to: "person@example.com",
         tags: [],
         priority: "normal",
+        metadata: { payload: "x".repeat(1_048_576) },
       }),
     RangeError,
   );
   assert.equal(calls, 0);
+  assert.deepEqual(
+    await send({
+      to: "person@example.com",
+      tags: [],
+      priority: "normal",
+      label: "😀",
+      checkpoints: [1n],
+      attempt: 3n,
+      offset: 9_223_372_036_854_775_807n,
+    }),
+    { accepted: true },
+  );
+  assert.equal(calls, 1);
+});
+
+test("response validation enforces canonical field constraints", async () => {
+  const responses = [
+    { accepted: true, latency: 0.25 },
+    { accepted: true, latency: 2 },
+    { accepted: true, positions: { values: [] } },
+    { accepted: true, positions: { values: ["1", "2", "3"] } },
+    { accepted: true, attempt: "0" },
+    { accepted: true, attempt: "4" },
+  ];
+  const send = createEmailSendV1({
+    baseUrl: "https://api.example.test",
+    fetch: async () => protobufResponse(emailMethod, responses.shift()),
+  });
+  for (let index = 0; index < 6; index++) {
+    await assert.rejects(
+      () => send({ to: "person@example.com", tags: [], priority: "normal" }),
+      (error) =>
+        error instanceof PlystraError &&
+        error.code === "invalid_response" &&
+        error.message === "invalid_response",
+    );
+  }
 });
 
 test("response and Connect errors expose only Plystra-owned stable fields", async () => {

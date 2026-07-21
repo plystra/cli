@@ -714,9 +714,13 @@ Generated Go application invocation enforces every closed constraint before
 contributions and Provider dispatch and validates Provider responses after
 completion contributions. String bounds count Unicode scalar values rather
 than bytes or grapheme clusters. Generated Connect and optional REST adapters
-run the same request validator before trusted-root creation. JavaScript
-declaration and optional browser preflight projection remains later roadmap
-work.
+run the same request validator before trusted-root creation. Generated
+JavaScript request and response declarations retain each exact normalized
+constraint object in a @plystraConstraints annotation. Browser request
+preflight and decoded-response validation enforce Unicode scalar-value length,
+numeric bounds, and array item counts. Canonical pattern remains declared and
+server-authoritative because JavaScript RegExp is not a compatible substitute
+for bounded Go regular-expression semantics.
 
 Then regenerate before implementing against the typed contract:
 
