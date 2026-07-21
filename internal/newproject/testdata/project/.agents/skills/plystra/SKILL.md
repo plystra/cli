@@ -222,8 +222,16 @@ bounds. Generated conversion preflights canonical content before proportional
 wire-projection allocation, validates the exact response message, and
 serializes deterministically. Invalid or oversized responses produce only the
 safe internal response failure and no partial response on canonical, Alias, or
-direct handler paths. Complete strict ProtoJSON parity remains later Gate 11
-work.
+direct handler paths. ProtoJSON requests independently accept at most 1 MiB,
+64 nested JSON containers, and 65,536 structural tokens before strict decoding
+and the same canonical validation. Unknown or duplicate fields, malformed or
+trailing documents, invalid UTF-8, invalid required nulls, enum sentinels, non-finite numbers,
+and breached bounds fail before root-context creation or Provider invocation.
+Optional non-nullable null becomes absence, explicit zero values remain
+present, and full-range integers remain exact. ProtoJSON responses use the
+same exact generated message and canonical response validation plus an
+independent 1 MiB serialized limit, with no partial response. Canonical and
+Alias binary and ProtoJSON paths agree.
 Generation installs direct
 connectrpc.com/connect and google.golang.org/protobuf requirements at the
 supported versions inside the existing module transaction. The generated
@@ -980,8 +988,17 @@ conversion preflights canonical content before proportional wire-projection
 allocation, validates the exact response message, and serializes
 deterministically. Invalid or oversized responses yield the safe internal
 response failure without partial bytes on canonical, Alias, and direct paths.
-Strict ProtoJSON parity remains later Gate 11 work. Server mounting and the
-optional REST projection remain in the later transport gates.
+ProtoJSON requests independently accept at most 1 MiB, 64 nested JSON
+containers, and 65,536 structural tokens before strict decoding and the same
+canonical validation. Unknown or duplicate fields, malformed or trailing
+documents, invalid UTF-8, invalid required nulls, enum sentinels, non-finite numbers, and
+breached bounds fail before root-context creation or Provider invocation.
+Optional non-nullable null becomes absence, explicit zero values remain
+present, and full-range integers remain exact. ProtoJSON responses use the
+same exact generated message and canonical response validation plus an
+independent 1 MiB serialized limit, with no partial response. Canonical and
+Alias binary and ProtoJSON paths agree. Server mounting and the optional REST
+projection remain in the later transport gates.
 
 Cross-origin configuration belongs in the selected current-Project document.
 http.cors accepts only required nonempty allowed_origins and optional boolean
@@ -1010,8 +1027,13 @@ oversized input. Binary rejections must not create a root context or invoke a
 Provider. Also test deterministic binary responses, wrong or unknown response
 messages, cyclic object values, oversized output, excessive response nesting
 and nodes, canonical and Alias HTTP paths, and direct invocation; response
-rejection returns no partial response. These checks do not complete strict
-ProtoJSON parity.
+rejection returns no partial response. For ProtoJSON, also test malformed and
+trailing documents, invalid UTF-8, top-level and nested unknown fields, duplicate fields,
+required and optional null, explicit zero values, full-range integers, enum
+sentinels, non-finite values, more than 64 nested containers, more than 65,536
+structural tokens, independently oversized request and response payloads, and
+canonical/Alias parity. Invalid input must not create a root context or invoke
+a Provider, and response rejection returns no partial canonical response.
 
 The provider-independent TypeScript package is under
 generated/sdk/javascript. Validate it with:

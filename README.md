@@ -69,8 +69,17 @@ collections, object graphs, and content bytes before proportional
 wire-projection allocation, validates the exact response message, and
 deterministically serializes it. An invalid or
 oversized response produces only the safe internal response failure and no
-partial response; canonical, Alias, and direct handler paths agree. Complete
-strict ProtoJSON parity remains a later Gate 11 outcome.
+partial response; canonical, Alias, and direct handler paths agree. ProtoJSON
+requests have their own 1 MiB, depth-64, and 65,536-token preflight before
+strict decoding with unknown or duplicate fields and invalid UTF-8 rejected,
+followed by the same generated message and canonical request validation. A required `null` fails requiredness,
+an optional non-nullable `null` becomes absence, explicit zero values retain
+presence, full-range integers remain exact, and non-finite canonical numbers
+fail before root-context creation or Provider invocation. ProtoJSON responses
+are validated against the same exact generated message and canonical response,
+then limited independently to 1 MiB with no partial response. Canonical and
+Alias binary and ProtoJSON paths therefore produce the same canonical values
+and safe failures.
 The CLI transaction installs direct `connectrpc.com/connect`
 and `google.golang.org/protobuf` requirements at the supported versions when
 those handlers are present. The generated application entrypoint does not yet

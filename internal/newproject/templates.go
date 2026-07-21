@@ -72,7 +72,7 @@ When several compatible Plugins provide one required Capability, select one with
 Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
 ` + "`generated/proto/wire-map.json`" + ` is committed compatibility history for canonical Capability request and response messages selected for Connect. Generation preserves field numbers across declaration reordering, allocates new fields without renumbering existing fields, and permanently reserves removed field names and numbers. Scalar contract enums receive a numeric zero ` + "`*_UNSPECIFIED`" + ` sentinel and stable positive member numbers; reordering and additions preserve existing assignments, while removed member names and numbers remain permanently reserved. Inactive field and enum history remains when exposure, Connect, or an enum is disabled. Capability Aliases reuse their canonical target messages and enums and have no separate ledger entry. Never edit or delete the ledger; restore its exact last committed content before regenerating. Generation emits deterministic ` + "`.proto`" + ` schemas for the selected canonical and Alias Connect surfaces plus a self-contained ` + "`generated/proto/descriptor-set.pb`" + `; these CLI-owned files contain no Provider, Plugin, Go Module, configuration, or Secret data and must not be edited. A Project without a selected Connect surface retains a valid empty descriptor set. A selected Connect surface also emits a Go handler under ` + "`generated/go/adapters/connect/`" + `. Canonical handlers bind one exact procedure to the generated canonical application-invocation handle, while Alias handlers forward through that canonical handler without owning a Provider or Alias dispatch entry. The current Connect boundary accepts canonical contracts whose explicit ` + "`semantics.kind`" + ` is ` + "`query`" + ` or ` + "`command`" + ` and projects each as one unary procedure; an Alias reuses that canonical target. Selecting an ` + "`event`" + ` or ` + "`stream`" + ` for Connect fails before generated output and identifies the Capability, declared kind, supported unary kinds, and ` + "`http.expose`" + ` remediation. Do not relabel an event or stream to bypass validation. Both handlers accept only Connect POST requests encoded as binary Protobuf or ProtoJSON, require ` + "`Connect-Protocol-Version: 1`" + `, and reject gRPC and gRPC-Web before root-context or Provider invocation. Generation installs direct ` + "`connectrpc.com/connect`" + ` and ` + "`google.golang.org/protobuf`" + ` requirements at the supported versions inside the existing module transaction. The generated JavaScript package uses the same descriptor graph and declares pinned direct ` + "`@bufbuild/protobuf`" + `, ` + "`@connectrpc/connect`" + `, and ` + "`@connectrpc/connect-web`" + ` dependencies; application callers use only the Plystra wrapper rather than raw descriptors, messages, clients, or Connect errors. The generated application entrypoint does not yet mount an HTTP server; server mounting and the remaining protocol projections remain later transport work. Generation also rejects canonical fields in the same request or response when they derive the same ProtoJSON name or generated enum type. The diagnostic identifies both authored field names; rename one field in ` + "`capability.yaml`" + ` rather than editing generated output.
-Binary Protobuf requests are limited to 1 MiB, decoded with a maximum message depth of 64, and validated with a 65,536-node budget. Malformed or truncated wire data, unknown fields at any message depth, and requests that exceed any bound fail before root-context creation or Provider invocation; direct handler calls apply the same recursive validation. Binary Protobuf responses use the same size, depth, and node bounds. Generated conversion preflights canonical content before proportional wire-projection allocation, validates the exact response message, and serializes deterministically. Invalid or oversized responses produce only the safe internal response failure and no partial response on canonical, Alias, or direct handler paths. Complete strict ProtoJSON parity remains later Gate 11 work.
+Binary Protobuf requests are limited to 1 MiB, decoded with a maximum message depth of 64, and validated with a 65,536-node budget. Malformed or truncated wire data, unknown fields at any message depth, and requests that exceed any bound fail before root-context creation or Provider invocation; direct handler calls apply the same recursive validation. Binary Protobuf responses use the same size, depth, and node bounds. Generated conversion preflights canonical content before proportional wire-projection allocation, validates the exact response message, and serializes deterministically. Invalid or oversized responses produce only the safe internal response failure and no partial response on canonical, Alias, or direct handler paths. ProtoJSON requests independently accept at most 1 MiB, 64 nested JSON containers, and 65,536 structural tokens before strict decoding and the same canonical validation. Unknown or duplicate fields, malformed or trailing documents, invalid UTF-8, invalid required nulls, enum sentinels, non-finite numbers, and breached bounds fail before root-context creation or Provider invocation. Optional non-nullable null becomes absence, explicit zero values remain present, and full-range integers remain exact. ProtoJSON responses use the same exact generated message and canonical response validation plus an independent 1 MiB serialized limit, with no partial response. Canonical and Alias binary and ProtoJSON paths agree.
 `
 
 const githubCIReadmeTemplate = `
@@ -360,8 +360,16 @@ bounds. Generated conversion preflights canonical content before proportional
 wire-projection allocation, validates the exact response message, and
 serializes deterministically. Invalid or oversized responses produce only the
 safe internal response failure and no partial response on canonical, Alias, or
-direct handler paths. Complete strict ProtoJSON parity remains later Gate 11
-work.
+direct handler paths. ProtoJSON requests independently accept at most 1 MiB,
+64 nested JSON containers, and 65,536 structural tokens before strict decoding
+and the same canonical validation. Unknown or duplicate fields, malformed or
+trailing documents, invalid UTF-8, invalid required nulls, enum sentinels, non-finite numbers,
+and breached bounds fail before root-context creation or Provider invocation.
+Optional non-nullable null becomes absence, explicit zero values remain
+present, and full-range integers remain exact. ProtoJSON responses use the
+same exact generated message and canonical response validation plus an
+independent 1 MiB serialized limit, with no partial response. Canonical and
+Alias binary and ProtoJSON paths agree.
 Generation installs direct
 connectrpc.com/connect and google.golang.org/protobuf requirements at the
 supported versions inside the existing module transaction. The generated
@@ -1118,8 +1126,17 @@ conversion preflights canonical content before proportional wire-projection
 allocation, validates the exact response message, and serializes
 deterministically. Invalid or oversized responses yield the safe internal
 response failure without partial bytes on canonical, Alias, and direct paths.
-Strict ProtoJSON parity remains later Gate 11 work. Server mounting and the
-optional REST projection remain in the later transport gates.
+ProtoJSON requests independently accept at most 1 MiB, 64 nested JSON
+containers, and 65,536 structural tokens before strict decoding and the same
+canonical validation. Unknown or duplicate fields, malformed or trailing
+documents, invalid UTF-8, invalid required nulls, enum sentinels, non-finite numbers, and
+breached bounds fail before root-context creation or Provider invocation.
+Optional non-nullable null becomes absence, explicit zero values remain
+present, and full-range integers remain exact. ProtoJSON responses use the
+same exact generated message and canonical response validation plus an
+independent 1 MiB serialized limit, with no partial response. Canonical and
+Alias binary and ProtoJSON paths agree. Server mounting and the optional REST
+projection remain in the later transport gates.
 
 Cross-origin configuration belongs in the selected current-Project document.
 http.cors accepts only required nonempty allowed_origins and optional boolean
@@ -1148,8 +1165,13 @@ oversized input. Binary rejections must not create a root context or invoke a
 Provider. Also test deterministic binary responses, wrong or unknown response
 messages, cyclic object values, oversized output, excessive response nesting
 and nodes, canonical and Alias HTTP paths, and direct invocation; response
-rejection returns no partial response. These checks do not complete strict
-ProtoJSON parity.
+rejection returns no partial response. For ProtoJSON, also test malformed and
+trailing documents, invalid UTF-8, top-level and nested unknown fields, duplicate fields,
+required and optional null, explicit zero values, full-range integers, enum
+sentinels, non-finite values, more than 64 nested containers, more than 65,536
+structural tokens, independently oversized request and response payloads, and
+canonical/Alias parity. Invalid input must not create a root context or invoke
+a Provider, and response rejection returns no partial canonical response.
 
 The provider-independent TypeScript package is under
 generated/sdk/javascript. Validate it with:

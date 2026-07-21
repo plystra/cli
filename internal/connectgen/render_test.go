@@ -107,6 +107,7 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		"connect.WithSchema(method)",
 		"connect.WithRequestInitializer(connectschema.InitializeDynamicMessage)",
 		"connect.WithCodec(connectschema.BinaryCodec{})",
+		"connect.WithCodec(connectschema.JSONCodec{})",
 		"connect.WithReadMaxBytes(connectschema.MaximumRequestBytes)",
 		"connect.WithSendMaxBytes(connectschema.MaximumResponseBytes)",
 		"connect.WithRequireConnectProtocolHeader()",
@@ -135,6 +136,7 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		"target.Invoke",
 		"connect.NewUnaryHandler(",
 		"connect.WithCodec(connectschema.BinaryCodec{})",
+		"connect.WithCodec(connectschema.JSONCodec{})",
 		"connect.WithReadMaxBytes(connectschema.MaximumRequestBytes)",
 		"connect.WithSendMaxBytes(connectschema.MaximumResponseBytes)",
 		"connect.WithRequireConnectProtocolHeader()",
@@ -152,8 +154,16 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		"MaximumResponseBytes",
 		"MaximumEncodeDepth",
 		"MaximumEncodedNodes",
+		"MaximumJSONRequestBytes",
+		"MaximumJSONDecodeDepth",
+		"MaximumJSONDecodedTokens",
+		"MaximumJSONResponseBytes",
 		"type BinaryCodec struct{}",
+		"type JSONCodec struct{}",
 		"(proto.MarshalOptions{Deterministic: true}).Marshal(message)",
+		"protojson.UnmarshalOptions{DiscardUnknown: false, RecursionLimit: MaximumJSONDecodeDepth}",
+		"func plystraValidateJSON(data []byte) error",
+		"func plystraValidScalar(field protoreflect.FieldDescriptor, value protoreflect.Value) bool",
 		"RecursionLimit: MaximumDecodeDepth",
 		"func ValidateMessage(message protoreflect.Message)",
 		"func ValidateResponseMessage(message protoreflect.Message)",
@@ -291,7 +301,7 @@ func TestGeneratedUnaryQueryAndCommandHandlersInvokeOneCanonicalTarget(t *testin
 			if err != nil {
 				t.Fatalf("Render invocation: %v", err)
 			}
-			assertGeneratedHandlersRun(t, contract, invocation, files)
+			assertGeneratedHandlersRun(t, contract, invocation, files, test.kind == capabilitymeta.CapabilityKindQuery)
 		})
 	}
 }
@@ -495,7 +505,7 @@ func connectConfigurationProvenance(t testing.TB, mode generation.ConfigurationM
 	return provenance
 }
 
-func assertGeneratedHandlersRun(t testing.TB, contract contractgen.File, invocation invocationgen.File, handlers []connectgen.File) {
+func assertGeneratedHandlersRun(t testing.TB, contract contractgen.File, invocation invocationgen.File, handlers []connectgen.File, runFuzz bool) {
 	t.Helper()
 	root := t.TempDir()
 	writeGeneratedFile(t, root, contract.Path(), contract.Data())
@@ -519,6 +529,14 @@ func assertGeneratedHandlersRun(t testing.TB, contract contractgen.File, invocat
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run generated Connect module: %v\n%s", err, output)
+	}
+	if runFuzz {
+		fuzz := exec.CommandContext(t.Context(), "go", "test", "-run=^$", "-fuzz=^FuzzJSONCodecNeverPanics$", "-fuzztime=100x", "./generated/go/adapters/connect/customer/profile/sync/v1")
+		fuzz.Dir = root
+		fuzz.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=readonly")
+		if output, err := fuzz.CombinedOutput(); err != nil {
+			t.Fatalf("fuzz generated Connect JSON codec: %v\n%s", err, output)
+		}
 	}
 }
 
@@ -604,7 +622,10 @@ const generatedConnectRuntimeTest = `package customerprofilesyncv1_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -632,15 +653,29 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 		if request.Note != nil && *request.Note == "provider-error" {
 			return contract.Response{}, errors.New("provider secret must not cross the Connect boundary")
 		}
-		if request.Note == nil {
-			t.Fatalf("canonical request has no note: %#v", request)
+		noteValue := ""
+		expectedSource := "optional-null"
+		expectedActive := true
+		expectedCount := int64(42)
+		expectedRatio := 1.5
+		if request.Note != nil {
+			noteValue = *request.Note
+			expectedSource = "browser"
+			switch noteValue {
+			case "":
+				expectedSource = "defaults"
+				expectedActive = false
+				expectedCount = 0
+				expectedRatio = 0
+			case "integer-max":
+				expectedSource = "integer-max"
+				expectedCount = 9223372036854775807
+			case "hello", "oversized-response", "oversized-json-response", "excessive-response-depth", "excessive-response-nodes", "non-finite-response":
+			default:
+				t.Fatalf("canonical request note = %q", noteValue)
+			}
 		}
-		switch *request.Note {
-		case "hello", "oversized-response", "excessive-response-depth", "excessive-response-nodes":
-		default:
-			t.Fatalf("canonical request note = %q", *request.Note)
-		}
-		if !request.Active || request.Count == nil || *request.Count != 42 || request.Ratio != 1.5 || request.State != contract.RequestStateReady || len(request.Tags) != 2 || request.Tags[1] != "two" || request.Metadata["source"] != "browser" || len(request.Records) != 1 || request.Records[0]["id"] != "record-1" {
+		if request.Active != expectedActive || request.Count == nil || *request.Count != expectedCount || request.Ratio != expectedRatio || request.State != contract.RequestStateReady || len(request.Tags) != 2 || request.Tags[1] != "two" || request.Metadata["source"] != expectedSource || len(request.Records) != 1 || request.Records[0]["id"] != "record-1" {
 			t.Fatalf("canonical request = %#v", request)
 		}
 		note := "accepted"
@@ -654,14 +689,19 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 			State: contract.ResponseStateBlocked,
 			Tags: append([]string(nil), request.Tags...),
 		}
-		switch *request.Note {
+		switch noteValue {
 		case "oversized-response":
 			oversized := strings.Repeat("x", connectschema.MaximumResponseBytes)
+			response.Note = &oversized
+		case "oversized-json-response":
+			oversized := strings.Repeat("\n", connectschema.MaximumResponseBytes/2)
 			response.Note = &oversized
 		case "excessive-response-depth":
 			response.Metadata = nestedObject(40)
 		case "excessive-response-nodes":
 			response.Tags = make([]string, connectschema.MaximumEncodedNodes)
+		case "non-finite-response":
+			response.Ratio = math.NaN()
 		}
 		return response, nil
 	})
@@ -697,15 +737,31 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 	if err != nil || !bytes.Equal(firstEncoding, secondEncoding) {
 		t.Fatalf("binary response encoding is not deterministic: %v", err)
 	}
-	for name, invalid := range map[string]any{
+	jsonCodec := connectschema.JSONCodec{}
+	jsonEncoding, err := jsonCodec.Marshal(directResponse.Msg)
+	if err != nil {
+		t.Fatalf("Marshal direct JSON response: %v", err)
+	}
+	jsonRoundTrip := dynamicpb.NewMessage(directMethod.Output())
+	if err := jsonCodec.Unmarshal(jsonEncoding, jsonRoundTrip); err != nil || !proto.Equal(directResponse.Msg, jsonRoundTrip) {
+		t.Fatalf("JSON response round trip = %v, equal %t", err, proto.Equal(directResponse.Msg, jsonRoundTrip))
+	}
+	invalidResponses := map[string]any{
 		"wrong message type": struct{}{},
 		"nested unknown field": withNestedUnknown(proto.Clone(directResponse.Msg).(*dynamicpb.Message)),
+		"invalid UTF-8": withString(t, proto.Clone(directResponse.Msg).(*dynamicpb.Message), "note", string([]byte{0xff})),
 		"oversized message": withString(t, proto.Clone(directResponse.Msg).(*dynamicpb.Message), "note", strings.Repeat("x", connectschema.MaximumResponseBytes)),
 		"excessive nesting": withExcessiveResponseNesting(t, proto.Clone(directResponse.Msg).(*dynamicpb.Message)),
 		"excessive nodes": withExcessiveNodes(t, proto.Clone(directResponse.Msg).(*dynamicpb.Message)),
-	} {
+	}
+	for name, invalid := range invalidResponses {
 		t.Run("binary response codec rejects "+name, func(t *testing.T) {
 			if encoded, err := codec.Marshal(invalid); err == nil || encoded != nil {
+				t.Fatalf("Marshal(%s) = %d bytes, %v", name, len(encoded), err)
+			}
+		})
+		t.Run("JSON response codec rejects "+name, func(t *testing.T) {
+			if encoded, err := jsonCodec.Marshal(invalid); err == nil || encoded != nil {
 				t.Fatalf("Marshal(%s) = %d bytes, %v", name, len(encoded), err)
 			}
 		})
@@ -719,6 +775,11 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 	directInvalid.Header().Set("Authorization", "Bearer test")
 	if _, err := canonical.Invoke(t.Context(), directInvalid); connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("direct nested-unknown Invoke error = %v", err)
+	}
+	directInvalidUTF8 := connect.NewRequest(withString(t, validRequest(t, directMethod, "hello"), "note", string([]byte{0xff})))
+	directInvalidUTF8.Header().Set("Authorization", "Bearer test")
+	if _, err := canonical.Invoke(t.Context(), directInvalidUTF8); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("direct invalid-UTF-8 Invoke error = %v", err)
 	}
 	if calls != 1 || rootCalls != 1 {
 		t.Fatalf("direct invalid request crossed the boundary: calls %d/%d", calls, rootCalls)
@@ -848,6 +909,8 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 		"unknown binary field": withUnknown(validRequest(t, method, "hello")),
 		"unknown nested binary field": withNestedUnknown(validRequest(t, method, "hello")),
 		"invalid enum sentinel": withEnumNumber(t, validRequest(t, method, "hello"), "state", 0),
+		"non-finite number": withNumber(t, validRequest(t, method, "hello"), "ratio", math.NaN()),
+		"non-finite object number": withObject(t, validRequest(t, method, "hello"), "metadata", map[string]any{"invalid": math.Inf(1)}),
 		"excessive nesting": withExcessiveNesting(t, validRequest(t, method, "hello")),
 		"excessive decoded nodes": withExcessiveNodes(t, validRequest(t, method, "hello")),
 	} {
@@ -904,6 +967,51 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 	if calls != 5 || rootCalls != 5 {
 		t.Fatalf("malformed or oversized binary requests crossed the boundary: calls %d/%d", calls, rootCalls)
 	}
+	for _, route := range routes {
+		method := mustMethod(t, route.methodName)
+		payload, err := protojson.Marshal(validRequest(t, method, "hello"))
+		if err != nil {
+			t.Fatalf("Marshal JSON request: %v", err)
+		}
+		payload = compactJSON(t, payload)
+		state := method.Input().Fields().ByName("state")
+		if state == nil || state.Enum().Values().ByNumber(0) == nil || state.Enum().Values().ByNumber(2) == nil {
+			t.Fatal("request state enum is incomplete")
+		}
+		readyState := string(state.Enum().Values().ByNumber(2).Name())
+		unspecifiedState := string(state.Enum().Values().ByNumber(0).Name())
+		invalidJSON := map[string][]byte{
+			"empty body": nil,
+			"malformed document": []byte("{\"active\":"),
+			"trailing document": append(append([]byte(nil), payload...), []byte("{}")...),
+			"duplicate field": addJSONField(t, payload, "\"active\":true"),
+			"unknown top-level field": addJSONField(t, payload, "\"future\":true"),
+			"unknown nested field": replaceJSON(t, payload, "\"tags\":{\"values\":[\"one\",\"two\"]}", "\"tags\":{\"future\":true,\"values\":[\"one\",\"two\"]}"),
+			"required null": replaceJSON(t, payload, "\"active\":true", "\"active\":null"),
+			"enum sentinel": replaceJSON(t, payload, "\"state\":\""+readyState+"\"", "\"state\":\""+unspecifiedState+"\""),
+			"non-finite number": replaceJSON(t, payload, "\"ratio\":1.5", "\"ratio\":\"NaN\""),
+			"invalid UTF-8": replaceJSONBytes(t, payload, []byte("\"note\":\"hello\""), []byte{'"', 'n', 'o', 't', 'e', '"', ':', '"', 0xff, '"'}),
+			"excessive nesting": replaceJSON(t, payload, "\"metadata\":{\"source\":\"browser\"}", "\"metadata\":"+nestedJSON(connectschema.MaximumJSONDecodeDepth+1)),
+			"excessive nodes": replaceJSON(t, payload, "\"tags\":{\"values\":[\"one\",\"two\"]}", "\"tags\":{\"values\":["+repeatedJSONStrings(connectschema.MaximumJSONDecodedTokens)+"]}"),
+		}
+		for name, invalid := range invalidJSON {
+			t.Run(route.name+" rejects JSON "+name, func(t *testing.T) {
+				status, _ := postJSON(t, server.Client(), server.URL+route.procedure, invalid)
+				if status != http.StatusBadRequest {
+					t.Fatalf("status = %d, want %d", status, http.StatusBadRequest)
+				}
+			})
+		}
+		jsonClient := connect.NewClient[dynamicpb.Message, dynamicpb.Message](server.Client(), server.URL+route.procedure, connect.WithSchema(method), connect.WithResponseInitializer(connectschema.InitializeDynamicMessage), connect.WithProtoJSON())
+		oversized := connect.NewRequest(validRequest(t, method, strings.Repeat("x", connectschema.MaximumJSONRequestBytes)))
+		oversized.Header().Set("Authorization", "Bearer test")
+		if _, err := jsonClient.CallUnary(t.Context(), oversized); connect.CodeOf(err) != connect.CodeResourceExhausted {
+			t.Fatalf("%s oversized JSON request error = %v", route.name, err)
+		}
+	}
+	if calls != 5 || rootCalls != 5 {
+		t.Fatalf("invalid JSON requests crossed the boundary: calls %d/%d", calls, rootCalls)
+	}
 	request := connect.NewRequest(validRequest(t, method, "provider-error"))
 	request.Header().Set("Authorization", "Bearer test")
 	_, err = client.CallUnary(t.Context(), request)
@@ -917,21 +1025,186 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 	}
 	for _, route := range routes {
 		method := mustMethod(t, route.methodName)
-		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](server.Client(), server.URL+route.procedure, connect.WithSchema(method), connect.WithResponseInitializer(connectschema.InitializeDynamicMessage))
-		for _, note := range []string{"oversized-response", "excessive-response-depth", "excessive-response-nodes"} {
-			t.Run(route.name+" rejects "+note, func(t *testing.T) {
-				request := connect.NewRequest(validRequest(t, method, note))
-				request.Header().Set("Authorization", "Bearer test")
-				response, err := client.CallUnary(t.Context(), request)
-				if connect.CodeOf(err) != connect.CodeInternal || response != nil {
-					t.Fatalf("response = %#v, %v", response, err)
-				}
-			})
+		for _, encoding := range []struct {
+			name string
+			option connect.ClientOption
+		}{
+			{name: "binary"},
+			{name: "JSON", option: connect.WithProtoJSON()},
+		} {
+			options := []connect.ClientOption{connect.WithSchema(method), connect.WithResponseInitializer(connectschema.InitializeDynamicMessage)}
+			if encoding.option != nil {
+				options = append(options, encoding.option)
+			}
+			client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](server.Client(), server.URL+route.procedure, options...)
+			for _, note := range []string{"oversized-response", "excessive-response-depth", "excessive-response-nodes", "non-finite-response"} {
+				t.Run(route.name+"/"+encoding.name+" rejects "+note, func(t *testing.T) {
+					request := connect.NewRequest(validRequest(t, method, note))
+					request.Header().Set("Authorization", "Bearer test")
+					response, err := client.CallUnary(t.Context(), request)
+					if connect.CodeOf(err) != connect.CodeInternal || response != nil {
+						t.Fatalf("response = %#v, %v", response, err)
+					}
+				})
+			}
 		}
 	}
-	if calls != 13 || rootCalls != 13 {
-		t.Fatalf("response rejection calls = %d/%d, want 13/13", calls, rootCalls)
+	if calls != 23 || rootCalls != 23 {
+		t.Fatalf("response rejection calls = %d/%d, want 23/23", calls, rootCalls)
 	}
+	for _, route := range routes {
+		method := mustMethod(t, route.methodName)
+		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](server.Client(), server.URL+route.procedure, connect.WithSchema(method), connect.WithResponseInitializer(connectschema.InitializeDynamicMessage), connect.WithProtoJSON())
+		request := connect.NewRequest(validRequest(t, method, "oversized-json-response"))
+		request.Header().Set("Authorization", "Bearer test")
+		response, err := client.CallUnary(t.Context(), request)
+		if connect.CodeOf(err) != connect.CodeInternal || response != nil {
+			t.Fatalf("%s oversized JSON response = %#v, %v", route.name, response, err)
+		}
+	}
+	if calls != 25 || rootCalls != 25 {
+		t.Fatalf("JSON encoding rejection calls = %d/%d, want 25/25", calls, rootCalls)
+	}
+	optionalNull, err := protojson.Marshal(validRequest(t, method, "hello"))
+	if err != nil {
+		t.Fatalf("Marshal optional-null request: %v", err)
+	}
+	optionalNull = compactJSON(t, optionalNull)
+	optionalNull = replaceJSON(t, optionalNull, "\"note\":\"hello\"", "\"note\":null")
+	optionalNull = replaceJSON(t, optionalNull, "\"metadata\":{\"source\":\"browser\"}", "\"metadata\":{\"source\":\"optional-null\"}")
+	status, body := postJSON(t, server.Client(), server.URL+canonicaladapter.Procedure, optionalNull)
+	if status != http.StatusOK {
+		t.Fatalf("optional null status = %d, body %s", status, body)
+	}
+	optionalNullResponse := dynamicpb.NewMessage(method.Output())
+	if err := jsonCodec.Unmarshal(body, optionalNullResponse); err != nil {
+		t.Fatalf("decode optional-null response: %v", err)
+	}
+	assertResponse(t, optionalNullResponse)
+	if calls != 26 || rootCalls != 26 {
+		t.Fatalf("optional null calls = %d/%d, want 26/26", calls, rootCalls)
+	}
+	explicitDefaults, err := protojson.Marshal(validRequest(t, method, "hello"))
+	if err != nil {
+		t.Fatalf("Marshal explicit-default request: %v", err)
+	}
+	explicitDefaults = compactJSON(t, explicitDefaults)
+	explicitDefaults = replaceJSON(t, explicitDefaults, "\"active\":true", "\"active\":false")
+	explicitDefaults = replaceJSON(t, explicitDefaults, "\"count\":\"42\"", "\"count\":\"0\"")
+	explicitDefaults = replaceJSON(t, explicitDefaults, "\"note\":\"hello\"", "\"note\":\"\"")
+	explicitDefaults = replaceJSON(t, explicitDefaults, "\"ratio\":1.5", "\"ratio\":0")
+	explicitDefaults = replaceJSON(t, explicitDefaults, "\"metadata\":{\"source\":\"browser\"}", "\"metadata\":{\"source\":\"defaults\"}")
+	status, _ = postJSON(t, server.Client(), server.URL+canonicaladapter.Procedure, explicitDefaults)
+	if status != http.StatusOK {
+		t.Fatalf("explicit defaults status = %d", status)
+	}
+	integerMax, err := protojson.Marshal(validRequest(t, method, "hello"))
+	if err != nil {
+		t.Fatalf("Marshal full-range integer request: %v", err)
+	}
+	integerMax = compactJSON(t, integerMax)
+	integerMax = replaceJSON(t, integerMax, "\"count\":\"42\"", "\"count\":\"9223372036854775807\"")
+	integerMax = replaceJSON(t, integerMax, "\"note\":\"hello\"", "\"note\":\"integer-max\"")
+	integerMax = replaceJSON(t, integerMax, "\"metadata\":{\"source\":\"browser\"}", "\"metadata\":{\"source\":\"integer-max\"}")
+	status, _ = postJSON(t, server.Client(), server.URL+canonicaladapter.Procedure, integerMax)
+	if status != http.StatusOK {
+		t.Fatalf("full-range integer status = %d", status)
+	}
+	if calls != 28 || rootCalls != 28 {
+		t.Fatalf("JSON presence and integer calls = %d/%d, want 28/28", calls, rootCalls)
+	}
+}
+
+func FuzzJSONCodecNeverPanics(f *testing.F) {
+	f.Add([]byte("{}"))
+	f.Add([]byte("{\"active\":null}"))
+	f.Add([]byte("{\"unknown\":true}"))
+	f.Add([]byte("[1,2,3]"))
+	f.Fuzz(func(t *testing.T, payload []byte) {
+		method, err := connectschema.Method("plystra.generated.customer.profile.sync.v1.CustomerProfileSyncV1Service.Invoke")
+		if err != nil {
+			t.Fatalf("Method: %v", err)
+		}
+		message := dynamicpb.NewMessage(method.Input())
+		err = (connectschema.JSONCodec{}).Unmarshal(payload, message)
+		if len(payload) > connectschema.MaximumJSONRequestBytes && err == nil {
+			t.Fatal("oversized fuzz payload decoded")
+		}
+		if err == nil && connectschema.ValidateMessage(message.ProtoReflect()) != nil {
+			t.Fatal("accepted fuzz payload produced an invalid message")
+		}
+	})
+}
+
+func postJSON(t *testing.T, client *http.Client, url string, payload []byte) (int, []byte) {
+	t.Helper()
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Connect-Protocol-Version", "1")
+	request.Header.Set("Authorization", "Bearer test")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	return response.StatusCode, body
+}
+
+func compactJSON(t *testing.T, payload []byte) []byte {
+	t.Helper()
+	var result bytes.Buffer
+	if err := json.Compact(&result, payload); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	return result.Bytes()
+}
+
+func addJSONField(t *testing.T, payload []byte, field string) []byte {
+	t.Helper()
+	trimmed := bytes.TrimSpace(payload)
+	if len(trimmed) < 2 || trimmed[len(trimmed)-1] != '}' {
+		t.Fatalf("JSON payload is not an object: %s", payload)
+	}
+	result := append([]byte(nil), trimmed[:len(trimmed)-1]...)
+	result = append(result, ',')
+	result = append(result, field...)
+	return append(result, '}')
+}
+
+func replaceJSON(t *testing.T, payload []byte, old, replacement string) []byte {
+	t.Helper()
+	result := bytes.Replace(payload, []byte(old), []byte(replacement), 1)
+	if bytes.Equal(result, payload) {
+		t.Fatalf("JSON payload %s does not contain %s", payload, old)
+	}
+	return result
+}
+
+func replaceJSONBytes(t *testing.T, payload, old, replacement []byte) []byte {
+	t.Helper()
+	result := bytes.Replace(payload, old, replacement, 1)
+	if bytes.Equal(result, payload) {
+		t.Fatalf("JSON payload %s does not contain %s", payload, old)
+	}
+	return result
+}
+
+func nestedJSON(depth int) string {
+	return strings.Repeat("{\"nested\":", depth) + "null" + strings.Repeat("}", depth)
+}
+
+func repeatedJSONStrings(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	return strings.TrimSuffix(strings.Repeat("\"\",", count), ",")
 }
 
 func mustMethod(t *testing.T, name protoreflect.FullName) protoreflect.MethodDescriptor {
@@ -1062,6 +1335,18 @@ func withEnumNumber(t *testing.T, message *dynamicpb.Message, name protoreflect.
 func withString(t *testing.T, message *dynamicpb.Message, name protoreflect.Name, value string) *dynamicpb.Message {
 	t.Helper()
 	setScalar(t, message.ProtoReflect(), name, protoreflect.ValueOfString(value))
+	return message
+}
+
+func withNumber(t *testing.T, message *dynamicpb.Message, name protoreflect.Name, value float64) *dynamicpb.Message {
+	t.Helper()
+	setScalar(t, message.ProtoReflect(), name, protoreflect.ValueOfFloat64(value))
+	return message
+}
+
+func withObject(t *testing.T, message *dynamicpb.Message, name protoreflect.Name, value map[string]any) *dynamicpb.Message {
+	t.Helper()
+	setUnvalidatedObject(t, message.ProtoReflect(), name, value)
 	return message
 }
 

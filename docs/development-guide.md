@@ -463,8 +463,17 @@ collections, object graphs, and content bytes before proportional
 wire-projection allocation, validates the exact response message, and
 deterministically serializes it. Invalid or oversized responses produce the
 safe internal response failure without partial bytes on canonical, Alias, and
-direct handler paths. Complete strict ProtoJSON parity remains a later Gate 11
-outcome.
+direct handler paths. ProtoJSON requests independently accept at most 1 MiB,
+64 nested JSON containers, and 65,536 structural tokens before strict decoding;
+unknown or duplicate fields, malformed or trailing documents, invalid UTF-8,
+excessive work, the enum zero sentinel, and non-finite canonical numbers fail before root
+creation or Provider invocation. Required `null` fails requiredness, optional
+non-nullable `null` becomes absence, explicit zero values remain present, and
+full-range integers remain exact. ProtoJSON responses run the same exact
+message and canonical response validation, then enforce their own 1 MiB
+serialized limit without writing a partial response. Canonical and Alias
+binary and ProtoJSON calls therefore reach the same canonical request and
+response model.
 Generation installs direct `connectrpc.com/connect` and
 `google.golang.org/protobuf` requirements at the supported versions inside the
 existing module transaction. The generated application entrypoint still does
@@ -1176,8 +1185,13 @@ For binary responses, include deterministic repeat encoding, wrong message
 types, unknown nested fields, cyclic object input, output over 1 MiB, more than
 64 nested messages, more than 65,536 encoded nodes, canonical and Alias HTTP
 paths, and direct handler invocation. A rejection must return no partial
-response. Do not treat these binary checks as evidence that the later strict
-ProtoJSON parity outcome is complete.
+response. For ProtoJSON, include malformed and trailing documents, invalid
+UTF-8, top-level and nested unknown fields, duplicate fields, required and optional `null`,
+explicit zero values, full-range integers, enum sentinels, non-finite values,
+more than 64 nested containers, more than 65,536 structural tokens, request and
+response payloads over 1 MiB, and canonical/Alias parity. A ProtoJSON rejection
+must likewise return no partial canonical response and must not enter the
+Provider for invalid input.
 
 The handler's root-context function is a trusted adapter boundary. Do not
 convert raw headers into verified internal AuthN state there. Official AuthN
