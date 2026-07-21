@@ -37,7 +37,7 @@ request:
   active: {type: boolean, required: true}
   count: {type: integer}
   metadata: {type: object, required: true}
-  note: {type: string}
+  note: {type: string, constraints: {max_length: 64}}
   ratio: {type: number, required: true}
   records: {type: array, items: object, required: true}
   state: {type: string, enum: [ready, blocked], required: true}
@@ -822,7 +822,12 @@ type Error struct {
 	detail string
 }
 
-func NewError(code ErrorCode, detail string) *Error { return &Error{code: code, detail: detail} }
+func NewError(code ErrorCode, detail string) (*Error, error) {
+	if !code.Valid() || !ValidDetailCode(detail) {
+		return nil, &Error{}
+	}
+	return &Error{code: code, detail: detail}, nil
+}
 func (e *Error) Error() string { return "invocation error" }
 func (e *Error) Code() ErrorCode { if e == nil { return "" }; return e.code }
 func (e *Error) DetailCode() string { if e == nil { return "" }; return e.detail }
@@ -870,6 +875,14 @@ type deadlineEvent struct {
 	deadline time.Time
 	hasDeadline bool
 	err error
+}
+
+func mustKernelError(code kernelinvocation.ErrorCode, detail string) error {
+	result, err := kernelinvocation.NewError(code, detail)
+	if err != nil {
+		panic(err)
+	}
+	return result
 }
 
 func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
@@ -935,27 +948,27 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 			case "semantic-error":
 				return contract.Response{}, contract.ErrTemporarilyUnavailable
 			case "kernel-invalid-argument":
-				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorInvalidArgument, "contract.invalid_request")
+				return contract.Response{}, mustKernelError(kernelinvocation.ErrorInvalidArgument, "contract.invalid_request")
 			case "kernel-not-found":
-				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorNotFound, "resource.not_found")
+				return contract.Response{}, mustKernelError(kernelinvocation.ErrorNotFound, "resource.not_found")
 			case "kernel-conflict":
-				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorConflict, "resource.conflict")
+				return contract.Response{}, mustKernelError(kernelinvocation.ErrorConflict, "resource.conflict")
 			case "kernel-denied":
-				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorDenied, "authorization.denied")
+				return contract.Response{}, mustKernelError(kernelinvocation.ErrorDenied, "authorization.denied")
 			case "kernel-unauthenticated":
-				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorUnauthenticated, "authentication.required")
+				return contract.Response{}, mustKernelError(kernelinvocation.ErrorUnauthenticated, "authentication.required")
 			case "kernel-unavailable":
-				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorUnavailable, "runtime.unavailable")
+				return contract.Response{}, mustKernelError(kernelinvocation.ErrorUnavailable, "runtime.unavailable")
 			case "kernel-timeout":
-				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorTimeout, "runtime.timeout")
+				return contract.Response{}, mustKernelError(kernelinvocation.ErrorTimeout, "runtime.timeout")
 			case "kernel-cancelled":
-				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorCancelled, "runtime.cancelled")
+				return contract.Response{}, mustKernelError(kernelinvocation.ErrorCancelled, "runtime.cancelled")
 			case "kernel-result-unknown":
-				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorResultUnknown, "runtime.result_unknown")
+				return contract.Response{}, mustKernelError(kernelinvocation.ErrorResultUnknown, "runtime.result_unknown")
 			case "kernel-internal":
-				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorInternal, "runtime.internal")
+				return contract.Response{}, mustKernelError(kernelinvocation.ErrorInternal, "runtime.internal")
 			case "kernel-version-incompatible":
-				return contract.Response{}, kernelinvocation.NewError(kernelinvocation.ErrorVersionIncompatible, "runtime.version_incompatible")
+				return contract.Response{}, mustKernelError(kernelinvocation.ErrorVersionIncompatible, "runtime.version_incompatible")
 			}
 		}
 		noteValue := ""
@@ -1032,6 +1045,13 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 		t.Fatalf("direct canonical Invoke: %v", err)
 	} else {
 		assertResponse(t, directResponse.Msg)
+	}
+	directConstraintInvalid := connect.NewRequest(validRequest(t, directMethod, strings.Repeat("x", 65)))
+	directConstraintInvalid.Header().Set("Authorization", "Bearer test")
+	_, err = canonical.Invoke(t.Context(), directConstraintInvalid)
+	assertSafeConnectError(t, err, connect.CodeInvalidArgument, "customer.profile.sync/v1", "", "invalid_argument")
+	if calls != 1 || rootCalls != 1 {
+		t.Fatalf("direct constraint failure crossed the trusted-root boundary: calls %d/%d", calls, rootCalls)
 	}
 	codec := connectschema.BinaryCodec{}
 	firstEncoding, err := codec.Marshal(directResponse.Msg)
@@ -1303,6 +1323,7 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 	client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](server.Client(), server.URL+canonicaladapter.Procedure, connect.WithSchema(method), connect.WithResponseInitializer(connectschema.InitializeDynamicMessage))
 	for name, message := range map[string]*dynamicpb.Message{
 		"missing required fields": dynamicpb.NewMessage(method.Input()),
+		"constraint failure": validRequest(t, method, strings.Repeat("x", 65)),
 		"unknown binary field": withUnknown(validRequest(t, method, "hello")),
 		"unknown nested binary field": withNestedUnknown(validRequest(t, method, "hello")),
 		"invalid enum sentinel": withEnumNumber(t, validRequest(t, method, "hello"), "state", 0),
@@ -1388,6 +1409,7 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 			"enum sentinel": replaceJSON(t, payload, "\"state\":\""+readyState+"\"", "\"state\":\""+unspecifiedState+"\""),
 			"non-finite number": replaceJSON(t, payload, "\"ratio\":1.5", "\"ratio\":\"NaN\""),
 			"invalid UTF-8": replaceJSONBytes(t, payload, []byte("\"note\":\"hello\""), []byte{'"', 'n', 'o', 't', 'e', '"', ':', '"', 0xff, '"'}),
+			"constraint failure": replaceJSON(t, payload, "\"note\":\"hello\"", "\"note\":\""+strings.Repeat("x", 65)+"\""),
 			"excessive nesting": replaceJSON(t, payload, "\"metadata\":{\"source\":\"browser\"}", "\"metadata\":"+nestedJSON(connectschema.MaximumJSONDecodeDepth+1)),
 			"excessive nodes": replaceJSON(t, payload, "\"tags\":{\"values\":[\"one\",\"two\"]}", "\"tags\":{\"values\":["+repeatedJSONStrings(connectschema.MaximumJSONDecodedTokens)+"]}"),
 		}

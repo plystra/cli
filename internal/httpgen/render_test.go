@@ -27,7 +27,7 @@ const (
 description: Sends an email message.
 request:
   to: {type: array, items: string, required: true}
-  subject: {type: string, required: true}
+  subject: {type: string, required: true, constraints: {min_length: 1, max_length: 64, pattern: '^[A-Za-z-]+$'}}
   priority: {type: string, enum: [normal, urgent]}
   text: {type: string}
   html: {type: string}
@@ -71,6 +71,7 @@ func TestRenderCanonicalHTTPAdapter(t *testing.T) {
 		`decoder.Token()`,
 		`bytes.Equal(bytes.TrimSpace(value), []byte("null"))`,
 		`http.MaxBytesReader(writer, request.Body, MaximumRequestBytes)`,
+		`applicationinvocation.ValidateRequest(decoded)`,
 		`input := applicationinvocation.SafeTransportError(err)`,
 		`plystraWriteError(writer, http.StatusUnprocessableEntity, "capability_error", semantic)`,
 	} {
@@ -400,6 +401,12 @@ type Error struct {
 	code ErrorCode
 	detail string
 }
+func NewError(code ErrorCode, detail string) (*Error, error) {
+	if !code.Valid() || !ValidDetailCode(detail) {
+		return nil, &Error{}
+	}
+	return &Error{code: code, detail: detail}, nil
+}
 func NewTestError(code ErrorCode, detail string) *Error { return &Error{code: code, detail: detail} }
 func (e *Error) Error() string { return "classified secret must not cross transport" }
 func (e *Error) Code() ErrorCode { return e.code }
@@ -515,6 +522,9 @@ func TestGeneratedHTTPHandlerValidatesAndInvokesCanonicalPath(t *testing.T) {
 		{name:"duplicate field", method:http.MethodPost, path:adapter.RoutePath, body:"{\"to\":[\"person@example.com\"],\"subject\":\"Welcome\",\"subject\":\"Again\"}", contentType:"application/json", status:http.StatusBadRequest, code:"invalid_request"},
 		{name:"wrong type", method:http.MethodPost, path:adapter.RoutePath, body:"{\"to\":true,\"subject\":\"Welcome\"}", contentType:"application/json", status:http.StatusBadRequest, code:"invalid_request"},
 		{name:"invalid enum", method:http.MethodPost, path:adapter.RoutePath, body:"{\"to\":[\"person@example.com\"],\"subject\":\"Welcome\",\"priority\":\"immediate\"}", contentType:"application/json", status:http.StatusBadRequest, code:"invalid_request"},
+		{name:"constraint minimum", method:http.MethodPost, path:adapter.RoutePath, body:"{\"to\":[\"person@example.com\"],\"subject\":\"\"}", contentType:"application/json", status:http.StatusBadRequest, code:"invalid_argument"},
+		{name:"constraint maximum", method:http.MethodPost, path:adapter.RoutePath, body:"{\"to\":[\"person@example.com\"],\"subject\":\""+strings.Repeat("x", 65)+"\"}", contentType:"application/json", status:http.StatusBadRequest, code:"invalid_argument"},
+		{name:"constraint pattern", method:http.MethodPost, path:adapter.RoutePath, body:"{\"to\":[\"person@example.com\"],\"subject\":\"invalid_subject\"}", contentType:"application/json", status:http.StatusBadRequest, code:"invalid_argument"},
 		{name:"trailing value", method:http.MethodPost, path:adapter.RoutePath, body:"{\"to\":[\"person@example.com\"],\"subject\":\"Welcome\"}{}", contentType:"application/json", status:http.StatusBadRequest, code:"invalid_request"},
 		{name:"oversized", method:http.MethodPost, path:adapter.RoutePath, body:strings.Repeat("x", int(adapter.MaximumRequestBytes)+1), contentType:"application/json", status:http.StatusRequestEntityTooLarge, code:"payload_too_large"},
 	}

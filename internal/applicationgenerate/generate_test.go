@@ -2074,7 +2074,7 @@ func TestGenerateRendersValidatesAndCleansCanonicalAliasSurfaces(t *testing.T) {
 	writePlugin(t, root, "business", "id: acme.business\nprovides: [email.send/v1]\n")
 	writeCapability(t, root, "business", "email.send/v1", `id: email.send/v1
 request:
-  to: {type: string, required: true}
+  to: {type: string, required: true, constraints: {min_length: 3, max_length: 254, pattern: '^[^@]+@[^@]+$'}}
 response:
   accepted: {type: boolean, required: true}
 errors: [invalid_recipient]
@@ -2152,6 +2152,16 @@ capabilities:
 	packageJSON := readFile(t, root, "generated/sdk/javascript/package.json")
 	if !bytes.Contains(packageJSON, []byte(`"name": "@acme/my-app-sdk"`)) {
 		t.Fatalf("package.json has wrong inferred identity:\n%s", packageJSON)
+	}
+	invocation := readFile(t, root, "generated/go/invocation/email/send/v1/invocation_gen.go")
+	for _, required := range [][]byte{
+		[]byte("utf8.RuneCountInString(request.To)"),
+		[]byte("regexp.MustCompile(\"^[^@]+@[^@]+$\")"),
+		[]byte("kernelinvocation.ErrorInvalidArgument"),
+	} {
+		if !bytes.Contains(invocation, required) {
+			t.Fatalf("generated constrained invocation omits %q:\n%s", required, invocation)
+		}
 	}
 	manifest := readFile(t, root, "generated/manifest.json")
 	for _, value := range [][]byte{[]byte(`"id":"mail.deliver/v1"`), []byte(`"target":"email.send/v1"`), []byte(`"deprecated":"Use email.send/v1 instead."`)} {

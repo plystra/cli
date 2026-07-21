@@ -97,6 +97,10 @@ func (h Handler) ServeRoute(writer http.ResponseWriter, request *http.Request, r
 		plystraWriteError(writer, http.StatusInternalServerError, "internal", "")
 		return
 	}
+	if err := applicationinvocation.ValidateRequest(decoded); err != nil {
+		plystraWriteInvocationError(writer, err)
+		return
+	}
 	ctx, err := plystraCreateRoot(h.root, request)
 	if err != nil || ctx == nil {
 		plystraWriteInvocationError(writer, err)

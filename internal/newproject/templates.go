@@ -859,8 +859,13 @@ number fields accept minimum and maximum; array fields accept min_items and
 max_items. Contract loading rejects unknown or type-incompatible keys, invalid
 bounds or expressions, and inexact normalized numbers. Constraints participate
 in exact equality and the contract digest, so every Provider copy must match.
-Generated request and response enforcement remains pre-release roadmap work;
-do not claim that current generated boundaries enforce constraints yet.
+Generated Go application invocation enforces every closed constraint before
+contributions and Provider dispatch and validates Provider responses after
+completion contributions. String bounds count Unicode scalar values rather
+than bytes or grapheme clusters. Generated Connect and optional REST adapters
+run the same request validator before trusted-root creation. JavaScript
+declaration and optional browser preflight projection remains later roadmap
+work.
 
 Then regenerate before implementing against the typed contract:
 

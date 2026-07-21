@@ -939,9 +939,13 @@ and `max_items`. Contract loading rejects unknown or type-incompatible keys,
 reversed or excessive bounds, invalid expressions, non-finite numbers, and
 normalized numeric values that would lose their declared value. Constraints
 participate in exact equality and the contract digest, so every Provider copy
-must match the canonical declaration. Generated request/response enforcement
-and transport/SDK projection remain incomplete Gate 12 work in this pre-release
-checkout; do not describe those boundaries as enforcing constraints yet.
+must match the canonical declaration. Generated Go application invocation now
+enforces every closed constraint before contributions and Provider dispatch and
+validates the Provider response after completion contributions. String bounds
+count Unicode scalar values rather than bytes or grapheme clusters. Generated
+Connect and optional REST adapters run the same request validator before
+trusted-root creation; JavaScript declaration and optional browser preflight
+projection remains deferred Gate 12 work.
 
 Regenerate before implementing against the typed contract:
 

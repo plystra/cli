@@ -1948,7 +1948,10 @@ func writeInvocationTestKernel(t testing.TB, root string) {
 	writeGeneratedFile(t, root, "kernel/go.mod", []byte("module github.com/plystra/kernel\n\ngo 1.26\n"))
 	writeGeneratedFile(t, root, "kernel/invocation/error.go", []byte(`package invocation
 
-import "strings"
+import (
+	"errors"
+	"strings"
+)
 
 type ErrorCode string
 
@@ -1985,6 +1988,12 @@ type Error struct {
 	detail string
 }
 
+func NewError(code ErrorCode, detail string) (*Error, error) {
+	if !code.Valid() || !ValidDetailCode(detail) {
+		return nil, errors.New("invalid invocation error")
+	}
+	return &Error{code: code, detail: detail}, nil
+}
 func NewTestError(code ErrorCode, detail string) *Error { return &Error{code: code, detail: detail} }
 func (e *Error) Error() string { return "classified Provider secret" }
 func (e *Error) Code() ErrorCode { return e.code }

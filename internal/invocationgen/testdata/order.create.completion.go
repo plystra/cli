@@ -44,6 +44,9 @@ func (h Handle) Available() bool {
 
 // Invoke runs the application path for order.create/v1 and dispatches its canonical ID.
 func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.Response, error) {
+	if requestError := ValidateRequest(request); requestError != nil {
+		return contract.Response{}, requestError
+	}
 	plystraAuditPreparationDeriveRequestOrderDerived := string(request.OrderID)
 	ctx, plystraAuditPreparationDeriveRequestOrderError := invocationcontext.WithValue(ctx, "audit.request-order", plystraAuditPreparationDeriveRequestOrderDerived, 32)
 	if plystraAuditPreparationDeriveRequestOrderError != nil {
@@ -81,6 +84,15 @@ func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.
 		return contract.Response{}, responseError
 	}
 	return response, nil
+}
+
+// ValidateRequest applies the canonical request constraints before trusted application work begins.
+func ValidateRequest(request contract.Request) error {
+	return plystraValidateRequest(request)
+}
+
+func plystraValidateRequest(request contract.Request) error {
+	return nil
 }
 
 var plystraErrInvalidProviderResponse = errors.New("invalid canonical Provider response")

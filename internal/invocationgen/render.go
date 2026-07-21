@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"go/format"
+	"math"
 	"path"
 	"sort"
 	"strconv"
@@ -60,10 +61,26 @@ type canonicalContract struct {
 }
 
 type canonicalField struct {
-	Type     generation.GeneratedValueType `json:"type"`
-	Items    generation.GeneratedValueType `json:"items,omitempty"`
-	Required bool                          `json:"required,omitempty"`
-	Enum     []json.RawMessage             `json:"enum,omitempty"`
+	Type        generation.GeneratedValueType `json:"type"`
+	Items       generation.GeneratedValueType `json:"items,omitempty"`
+	Required    bool                          `json:"required,omitempty"`
+	Enum        []json.RawMessage             `json:"enum,omitempty"`
+	Constraints canonicalFieldConstraints     `json:"constraints,omitempty"`
+}
+
+type canonicalFieldConstraints struct {
+	MinLength *uint32         `json:"min_length,omitempty"`
+	MaxLength *uint32         `json:"max_length,omitempty"`
+	Pattern   *string         `json:"pattern,omitempty"`
+	Minimum   json.RawMessage `json:"minimum,omitempty"`
+	Maximum   json.RawMessage `json:"maximum,omitempty"`
+	MinItems  *uint32         `json:"min_items,omitempty"`
+	MaxItems  *uint32         `json:"max_items,omitempty"`
+}
+
+func (c canonicalFieldConstraints) empty() bool {
+	return c.MinLength == nil && c.MaxLength == nil && c.Pattern == nil &&
+		len(c.Minimum) == 0 && len(c.Maximum) == 0 && c.MinItems == nil && c.MaxItems == nil
 }
 
 // Render validates schema and module identity, then emits the canonical
@@ -102,6 +119,7 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	if err != nil {
 		return File{}, fmt.Errorf("%w: %w", ErrRender, err)
 	}
+	requestValidation := prepareRequestValidation(contract.Request)
 	responseValidation := prepareResponseValidation(contract.Response)
 
 	packageName := goname.Package(identifier)
@@ -112,17 +130,20 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	fmt.Fprintf(&source, "package %s\n\n", packageName)
 	fmt.Fprintln(&source, "import (")
 	fmt.Fprintln(&source, "\t\"context\"")
-	if prepared.hasValueConversions || responseValidation.hasObjects {
+	if prepared.hasValueConversions || requestValidation.hasObjects || responseValidation.hasObjects {
 		fmt.Fprintln(&source, "\t\"encoding/json\"")
 	}
 	fmt.Fprintln(&source, "\t\"errors\"")
-	if responseValidation.hasNumbers {
+	if requestValidation.hasNumbers || responseValidation.hasNumbers {
 		fmt.Fprintln(&source, "\t\"math\"")
+	}
+	if requestValidation.hasPatterns || responseValidation.hasPatterns {
+		fmt.Fprintln(&source, "\t\"regexp\"")
 	}
 	if prepared.hasTimedCalls {
 		fmt.Fprintln(&source, "\t\"time\"")
 	}
-	if responseValidation.hasStrings {
+	if requestValidation.hasStrings || responseValidation.hasStrings {
 		fmt.Fprintln(&source, "\t\"unicode/utf8\"")
 	}
 	fmt.Fprintln(&source)
@@ -183,12 +204,18 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	if prepared.hasHTTPPath {
 		fmt.Fprintf(&source, "// Invoke runs the internal application path for %s without HTTP-only integration.\n", identifier.String())
 		fmt.Fprintln(&source, "func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.Response, error) {")
+		fmt.Fprintln(&source, "\tif requestError := ValidateRequest(request); requestError != nil {")
+		fmt.Fprintln(&source, "\t\treturn contract.Response{}, requestError")
+		fmt.Fprintln(&source, "\t}")
 		fmt.Fprintln(&source, "\t_, response, invocationError := h.invoke(ctx, request, nil)")
 		fmt.Fprintln(&source, "\treturn response, invocationError")
 		fmt.Fprintln(&source, "}")
 		fmt.Fprintln(&source)
 		fmt.Fprintf(&source, "// InvokeHTTP runs the external HTTP path for %s around the same canonical dispatch.\n", identifier.String())
 		fmt.Fprintln(&source, "func (h Handle) InvokeHTTP(ctx context.Context, request contract.Request, adapterCredentials AdapterCredentialSource) (contract.Response, error) {")
+		fmt.Fprintln(&source, "\tif requestError := ValidateRequest(request); requestError != nil {")
+		fmt.Fprintln(&source, "\t\treturn contract.Response{}, requestError")
+		fmt.Fprintln(&source, "\t}")
 		if err := renderContributions(&source, contract, prepared, prepared.ingress); err != nil {
 			return File{}, fmt.Errorf("%w: %w", ErrRender, err)
 		}
@@ -228,6 +255,9 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	} else {
 		fmt.Fprintf(&source, "// Invoke runs the application path for %s and dispatches its canonical ID.\n", identifier.String())
 		fmt.Fprintln(&source, "func (h Handle) Invoke(ctx context.Context, request contract.Request) (contract.Response, error) {")
+		fmt.Fprintln(&source, "\tif requestError := ValidateRequest(request); requestError != nil {")
+		fmt.Fprintln(&source, "\t\treturn contract.Response{}, requestError")
+		fmt.Fprintln(&source, "\t}")
 		if err := renderContributions(&source, contract, prepared, prepared.preparations); err != nil {
 			return File{}, fmt.Errorf("%w: %w", ErrRender, err)
 		}
@@ -246,7 +276,10 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 		fmt.Fprintln(&source, "\treturn response, nil")
 		fmt.Fprintln(&source, "}")
 	}
-	if err := renderResponseValidation(&source, responseValidation); err != nil {
+	if err := renderRequestValidation(&source, requestValidation); err != nil {
+		return File{}, fmt.Errorf("%w: render request validation: %w", ErrRender, err)
+	}
+	if err := renderResponseValidation(&source, responseValidation, !requestValidation.hasObjects); err != nil {
 		return File{}, fmt.Errorf("%w: render response validation: %w", ErrRender, err)
 	}
 	renderTransportErrorInput(&source, contract.Errors)
@@ -454,18 +487,28 @@ func renderTransportErrorInput(source *strings.Builder, semanticErrors []string)
 }
 
 type responseValidationPlan struct {
-	fields     []responseValidationField
-	hasNumbers bool
-	hasObjects bool
-	hasStrings bool
+	fields      []responseValidationField
+	hasNumbers  bool
+	hasObjects  bool
+	hasPatterns bool
+	hasStrings  bool
 }
 
 type responseValidationField struct {
-	goName string
-	field  canonicalField
+	goName      string
+	patternName string
+	field       canonicalField
+}
+
+func prepareRequestValidation(fields map[string]canonicalField) responseValidationPlan {
+	return prepareValidation(fields, true, "Request")
 }
 
 func prepareResponseValidation(fields map[string]canonicalField) responseValidationPlan {
+	return prepareValidation(fields, false, "Response")
+}
+
+func prepareValidation(fields map[string]canonicalField, constrainedOnly bool, section string) responseValidationPlan {
 	names := make([]string, 0, len(fields))
 	for name := range fields {
 		names = append(names, name)
@@ -474,8 +517,16 @@ func prepareResponseValidation(fields map[string]canonicalField) responseValidat
 	result := responseValidationPlan{fields: make([]responseValidationField, 0, len(names))}
 	for _, name := range names {
 		field := fields[name]
-		result.fields = append(result.fields, responseValidationField{goName: goname.Field(name), field: field})
-		if len(field.Enum) != 0 {
+		if constrainedOnly && field.Constraints.empty() {
+			continue
+		}
+		prepared := responseValidationField{goName: goname.Field(name), field: field}
+		if field.Constraints.Pattern != nil {
+			prepared.patternName = fmt.Sprintf("plystra%sPattern%d", section, len(result.fields))
+			result.hasPatterns = true
+		}
+		result.fields = append(result.fields, prepared)
+		if len(field.Enum) != 0 && field.Constraints.empty() {
 			continue
 		}
 		kind := field.Type
@@ -496,36 +547,34 @@ func prepareResponseValidation(fields map[string]canonicalField) responseValidat
 	return result
 }
 
-func renderResponseValidation(source *strings.Builder, plan responseValidationPlan) error {
+func renderRequestValidation(source *strings.Builder, plan responseValidationPlan) error {
+	renderConstraintPatterns(source, plan)
+	if len(plan.fields) != 0 {
+		fmt.Fprintln(source)
+		fmt.Fprintln(source, "func plystraInvalidRequestError() error {")
+		fmt.Fprintln(source, "\tfailure, _ := kernelinvocation.NewError(kernelinvocation.ErrorInvalidArgument, \"contract.invalid_request\")")
+		fmt.Fprintln(source, "\treturn failure")
+		fmt.Fprintln(source, "}")
+	}
 	fmt.Fprintln(source)
-	fmt.Fprintln(source, "var plystraErrInvalidProviderResponse = errors.New(\"invalid canonical Provider response\")")
+	fmt.Fprintln(source, "// ValidateRequest applies the canonical request constraints before trusted application work begins.")
+	fmt.Fprintln(source, "func ValidateRequest(request contract.Request) error {")
+	fmt.Fprintln(source, "\treturn plystraValidateRequest(request)")
+	fmt.Fprintln(source, "}")
 	fmt.Fprintln(source)
-	fmt.Fprintln(source, "func plystraValidateResponse(response contract.Response) error {")
+	fmt.Fprintln(source, "func plystraValidateRequest(request contract.Request) error {")
 	for _, prepared := range plan.fields {
-		field := prepared.field
-		value := "response." + prepared.goName
+		value := "request." + prepared.goName
 		indent := "\t"
-		if !field.Required {
+		if !prepared.field.Required {
 			fmt.Fprintf(source, "\tif %s != nil {\n", value)
 			value = "*" + value
 			indent = "\t\t"
 		}
-		if len(field.Enum) != 0 {
-			fmt.Fprintf(source, "%sswitch %s {\n", indent, value)
-			for _, raw := range field.Enum {
-				literal, err := responseLiteral(field.Type, raw)
-				if err != nil {
-					return err
-				}
-				fmt.Fprintf(source, "%scase contract.Response%s(%s):\n", indent, prepared.goName, literal)
-			}
-			fmt.Fprintf(source, "%sdefault:\n", indent)
-			fmt.Fprintf(source, "%s\treturn plystraErrInvalidProviderResponse\n", indent)
-			fmt.Fprintf(source, "%s}\n", indent)
-		} else {
-			renderResponseFieldValidation(source, prepared, value, indent)
+		if err := renderCanonicalFieldValidation(source, "Request", prepared, value, indent, "plystraInvalidRequestError()"); err != nil {
+			return err
 		}
-		if !field.Required {
+		if !prepared.field.Required {
 			fmt.Fprintln(source, "\t}")
 		}
 	}
@@ -537,49 +586,191 @@ func renderResponseValidation(source *strings.Builder, plan responseValidationPl
 	return nil
 }
 
-func renderResponseFieldValidation(source *strings.Builder, prepared responseValidationField, value, indent string) {
+func renderResponseValidation(source *strings.Builder, plan responseValidationPlan, renderObjects bool) error {
+	renderConstraintPatterns(source, plan)
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "var plystraErrInvalidProviderResponse = errors.New(\"invalid canonical Provider response\")")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "func plystraValidateResponse(response contract.Response) error {")
+	for _, prepared := range plan.fields {
+		value := "response." + prepared.goName
+		indent := "\t"
+		if !prepared.field.Required {
+			fmt.Fprintf(source, "\tif %s != nil {\n", value)
+			value = "*" + value
+			indent = "\t\t"
+		}
+		if err := renderCanonicalFieldValidation(source, "Response", prepared, value, indent, "plystraErrInvalidProviderResponse"); err != nil {
+			return err
+		}
+		if !prepared.field.Required {
+			fmt.Fprintln(source, "\t}")
+		}
+	}
+	fmt.Fprintln(source, "\treturn nil")
+	fmt.Fprintln(source, "}")
+	if plan.hasObjects && renderObjects {
+		renderObjectValidation(source)
+	}
+	return nil
+}
+
+func renderConstraintPatterns(source *strings.Builder, plan responseValidationPlan) {
+	for _, prepared := range plan.fields {
+		if prepared.patternName == "" {
+			continue
+		}
+		fmt.Fprintln(source)
+		fmt.Fprintf(source, "var %s = regexp.MustCompile(%s)\n", prepared.patternName, strconv.Quote(*prepared.field.Constraints.Pattern))
+	}
+}
+
+func renderCanonicalFieldValidation(source *strings.Builder, section string, prepared responseValidationField, value, indent, failure string) error {
+	field := prepared.field
+	if len(field.Enum) != 0 {
+		fmt.Fprintf(source, "%sswitch %s {\n", indent, value)
+		for _, raw := range field.Enum {
+			literal, err := responseLiteral(field.Type, raw)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(source, "%scase contract.%s%s(%s):\n", indent, section, prepared.goName, literal)
+		}
+		fmt.Fprintf(source, "%sdefault:\n", indent)
+		fmt.Fprintf(source, "%s\treturn %s\n", indent, failure)
+		fmt.Fprintf(source, "%s}\n", indent)
+	} else {
+		renderFieldShapeValidation(source, prepared, value, indent, failure)
+	}
+	return renderFieldConstraintValidation(source, prepared, value, indent, failure)
+}
+
+func renderFieldShapeValidation(source *strings.Builder, prepared responseValidationField, value, indent, failure string) {
 	field := prepared.field
 	switch field.Type {
 	case generation.GeneratedValueString:
 		fmt.Fprintf(source, "%sif !utf8.ValidString(%s) {\n", indent, value)
-		fmt.Fprintf(source, "%s\treturn plystraErrInvalidProviderResponse\n", indent)
+		fmt.Fprintf(source, "%s\treturn %s\n", indent, failure)
 		fmt.Fprintf(source, "%s}\n", indent)
 	case generation.GeneratedValueNumber:
-		renderFiniteNumberValidation(source, value, indent)
+		renderFiniteNumberValidation(source, value, indent, failure)
 	case generation.GeneratedValueObject:
 		fmt.Fprintf(source, "%sif !plystraValidObject(%s) {\n", indent, value)
-		fmt.Fprintf(source, "%s\treturn plystraErrInvalidProviderResponse\n", indent)
+		fmt.Fprintf(source, "%s\treturn %s\n", indent, failure)
 		fmt.Fprintf(source, "%s}\n", indent)
 	case generation.GeneratedValueArray:
 		if field.Required {
 			fmt.Fprintf(source, "%sif %s == nil {\n", indent, value)
-			fmt.Fprintf(source, "%s\treturn plystraErrInvalidProviderResponse\n", indent)
+			fmt.Fprintf(source, "%s\treturn %s\n", indent, failure)
 			fmt.Fprintf(source, "%s}\n", indent)
 		}
 		switch field.Items {
 		case generation.GeneratedValueString:
 			fmt.Fprintf(source, "%sfor _, item := range %s {\n", indent, value)
 			fmt.Fprintf(source, "%s\tif !utf8.ValidString(item) {\n", indent)
-			fmt.Fprintf(source, "%s\t\treturn plystraErrInvalidProviderResponse\n", indent)
+			fmt.Fprintf(source, "%s\t\treturn %s\n", indent, failure)
 			fmt.Fprintf(source, "%s\t}\n", indent)
 			fmt.Fprintf(source, "%s}\n", indent)
 		case generation.GeneratedValueNumber:
 			fmt.Fprintf(source, "%sfor _, item := range %s {\n", indent, value)
-			renderFiniteNumberValidation(source, "item", indent+"\t")
+			renderFiniteNumberValidation(source, "item", indent+"\t", failure)
 			fmt.Fprintf(source, "%s}\n", indent)
 		case generation.GeneratedValueObject:
 			fmt.Fprintf(source, "%sfor _, item := range %s {\n", indent, value)
 			fmt.Fprintf(source, "%s\tif !plystraValidObject(item) {\n", indent)
-			fmt.Fprintf(source, "%s\t\treturn plystraErrInvalidProviderResponse\n", indent)
+			fmt.Fprintf(source, "%s\t\treturn %s\n", indent, failure)
 			fmt.Fprintf(source, "%s\t}\n", indent)
 			fmt.Fprintf(source, "%s}\n", indent)
 		}
 	}
 }
 
-func renderFiniteNumberValidation(source *strings.Builder, value, indent string) {
+func renderFieldConstraintValidation(source *strings.Builder, prepared responseValidationField, value, indent, failure string) error {
+	constraints := prepared.field.Constraints
+	switch prepared.field.Type {
+	case generation.GeneratedValueString:
+		if constraints.MinLength != nil || constraints.MaxLength != nil {
+			fmt.Fprintf(source, "%s{\n", indent)
+			fmt.Fprintf(source, "%s\tplystraLength := utf8.RuneCountInString(%s)\n", indent, value)
+			checks := make([]string, 0, 2)
+			if constraints.MinLength != nil {
+				checks = append(checks, fmt.Sprintf("plystraLength < %d", *constraints.MinLength))
+			}
+			if constraints.MaxLength != nil {
+				checks = append(checks, fmt.Sprintf("plystraLength > %d", *constraints.MaxLength))
+			}
+			fmt.Fprintf(source, "%s\tif %s {\n", indent, strings.Join(checks, " || "))
+			fmt.Fprintf(source, "%s\t\treturn %s\n", indent, failure)
+			fmt.Fprintf(source, "%s\t}\n", indent)
+			fmt.Fprintf(source, "%s}\n", indent)
+		}
+		if constraints.Pattern != nil {
+			if prepared.patternName == "" {
+				return fmt.Errorf("string constraint pattern has no generated identity")
+			}
+			fmt.Fprintf(source, "%sif !%s.MatchString(%s) {\n", indent, prepared.patternName, value)
+			fmt.Fprintf(source, "%s\treturn %s\n", indent, failure)
+			fmt.Fprintf(source, "%s}\n", indent)
+		}
+	case generation.GeneratedValueInteger, generation.GeneratedValueNumber:
+		if len(constraints.Minimum) != 0 {
+			literal, err := numericConstraintLiteral(prepared.field.Type, constraints.Minimum)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(source, "%sif %s < %s {\n", indent, value, literal)
+			fmt.Fprintf(source, "%s\treturn %s\n", indent, failure)
+			fmt.Fprintf(source, "%s}\n", indent)
+		}
+		if len(constraints.Maximum) != 0 {
+			literal, err := numericConstraintLiteral(prepared.field.Type, constraints.Maximum)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(source, "%sif %s > %s {\n", indent, value, literal)
+			fmt.Fprintf(source, "%s\treturn %s\n", indent, failure)
+			fmt.Fprintf(source, "%s}\n", indent)
+		}
+	case generation.GeneratedValueArray:
+		checks := make([]string, 0, 2)
+		if constraints.MinItems != nil {
+			checks = append(checks, fmt.Sprintf("len(%s) < %d", value, *constraints.MinItems))
+		}
+		if constraints.MaxItems != nil {
+			checks = append(checks, fmt.Sprintf("len(%s) > %d", value, *constraints.MaxItems))
+		}
+		if len(checks) != 0 {
+			fmt.Fprintf(source, "%sif %s {\n", indent, strings.Join(checks, " || "))
+			fmt.Fprintf(source, "%s\treturn %s\n", indent, failure)
+			fmt.Fprintf(source, "%s}\n", indent)
+		}
+	}
+	return nil
+}
+
+func numericConstraintLiteral(kind generation.GeneratedValueType, raw json.RawMessage) (string, error) {
+	source := string(raw)
+	switch kind {
+	case generation.GeneratedValueInteger:
+		value, err := strconv.ParseInt(source, 10, 64)
+		if err != nil {
+			return "", fmt.Errorf("invalid canonical integer constraint %q", source)
+		}
+		return strconv.FormatInt(value, 10), nil
+	case generation.GeneratedValueNumber:
+		value, err := strconv.ParseFloat(source, 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+			return "", fmt.Errorf("invalid canonical number constraint %q", source)
+		}
+		return strconv.FormatFloat(value, 'g', -1, 64), nil
+	default:
+		return "", fmt.Errorf("numeric constraint uses unsupported canonical type %q", kind)
+	}
+}
+
+func renderFiniteNumberValidation(source *strings.Builder, value, indent, failure string) {
 	fmt.Fprintf(source, "%sif math.IsNaN(float64(%s)) || math.IsInf(float64(%s), 0) {\n", indent, value, value)
-	fmt.Fprintf(source, "%s\treturn plystraErrInvalidProviderResponse\n", indent)
+	fmt.Fprintf(source, "%s\treturn %s\n", indent, failure)
 	fmt.Fprintf(source, "%s}\n", indent)
 }
 
