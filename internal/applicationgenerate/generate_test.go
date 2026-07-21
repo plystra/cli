@@ -1506,6 +1506,7 @@ func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
 				t.Fatalf("Generate check after exposure change: %v", err)
 			}
 			if checked.Report().Clean() ||
+				!slicesContains(checked.Report().Changed(), generatedfiles.ManifestPath) ||
 				!slicesContains(checked.Report().Changed(), "generated/manifest.json") ||
 				!slicesContains(checked.Report().Changed(), "generated/proto/descriptor-set.pb") ||
 				!slicesContains(checked.Report().Missing(), "generated/proto/plystra/generated/kernel/health/v1/capability.proto") ||
