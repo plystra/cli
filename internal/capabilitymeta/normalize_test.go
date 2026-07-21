@@ -94,6 +94,47 @@ func TestNormalizeSchemaUsesKernelTypedSemantics(t *testing.T) {
 	}
 }
 
+func TestNormalizeSchemaExposesInvocationPolicySemantics(t *testing.T) {
+	t.Parallel()
+
+	declaration := `id: email.send/v1
+request:
+  idempotency_key: {type: string, required: true}
+  partition: {type: integer, required: true}
+semantics:
+  kind: command
+  effects: external-write
+  idempotency:
+    mode: keyed
+    request_field: idempotency_key
+  retry: {safety: requires-idempotency-key}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering:
+    mode: per-key
+    request_field: partition
+  data: {request: confidential, response: restricted}
+`
+	_, metadata, err := capabilitymeta.NormalizeSchemaAndManifest([]byte(declaration))
+	if err != nil {
+		t.Fatalf("NormalizeSchemaAndManifest: %v", err)
+	}
+	semantics := metadata.Semantics()
+	if semantics.Kind() != capabilitymeta.CapabilityKindCommand ||
+		semantics.Effects() != capabilitymeta.CapabilityEffectsExternalWrite ||
+		semantics.Idempotency().Mode() != capabilitymeta.IdempotencyModeKeyed ||
+		semantics.Idempotency().RequestField() != "idempotency_key" ||
+		semantics.Retry().Safety() != capabilitymeta.RetrySafetyRequiresIdempotencyKey ||
+		semantics.Cancellation().Mode() != capabilitymeta.CancellationModeBestEffort ||
+		semantics.Completion().Mode() != capabilitymeta.CompletionModeCompletedBeforeReturn ||
+		semantics.Ordering().Mode() != capabilitymeta.OrderingModePerKey ||
+		semantics.Ordering().RequestField() != "partition" ||
+		semantics.Data().Request() != capabilitymeta.DataClassificationConfidential ||
+		semantics.Data().Response() != capabilitymeta.DataClassificationRestricted {
+		t.Fatalf("invocation-policy semantics = %#v", semantics)
+	}
+}
+
 func TestNormalizeSchemaIgnoresNonSemanticDifferences(t *testing.T) {
 	t.Parallel()
 
