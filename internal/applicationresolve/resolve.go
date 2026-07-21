@@ -20,6 +20,7 @@ import (
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/projectlocate"
+	"github.com/plystra/cli/internal/resolutionevidence"
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 )
 
@@ -65,6 +66,7 @@ type Result struct {
 	configs             configurationresolve.Result
 	maintenance         applicationmeta.ConfigurationMaintenance
 	selection           ConfigurationSelection
+	evidence            resolutionevidence.Evidence
 	rootData            []byte
 	configurationSource []byte
 	maintenancePath     string
@@ -110,6 +112,10 @@ func (r Result) ConfigurationMaintenance() applicationmeta.ConfigurationMaintena
 // ConfigurationSelection returns the immutable current-project document
 // selection and normalized semantic digest used by this resolution.
 func (r Result) ConfigurationSelection() ConfigurationSelection { return r.selection }
+
+// ResolutionEvidence returns the immutable deterministic identity derived
+// from the same normalized application model used for generation and assembly.
+func (r Result) ResolutionEvidence() resolutionevidence.Evidence { return r.evidence }
 
 // RootConfigurationData returns the final root marker document represented by
 // generated provenance. It includes planned root maintenance in default and
@@ -269,6 +275,10 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
+	evidence, err := resolutionevidence.Build(resolution.Context())
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
+	}
 	configs, err := configurationresolve.Resolve(manifest, inventory, resolution.Context())
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
@@ -301,6 +311,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		resolution:      resolution,
 		configs:         configs,
 		maintenance:     maintenance,
+		evidence:        evidence,
 		selection: ConfigurationSelection{
 			mode:        selector.mode,
 			path:        selector.path,

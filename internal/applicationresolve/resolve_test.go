@@ -83,12 +83,19 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if !first.Configurations().Valid() || len(first.Configurations().Bindings()) != 0 || first.Configurations().Digest() == "" {
 		t.Fatalf("Configurations = %#v", first.Configurations())
 	}
+	evidence := first.ResolutionEvidence()
+	if !evidence.Valid() || evidence.SelectedModelDigest() != resolved.Context().Digest() || evidence.BuildModelDigest() != resolved.Context().BuildModelDigest() {
+		t.Fatalf("ResolutionEvidence = valid %t selected %q build %q", evidence.Valid(), evidence.SelectedModelDigest(), evidence.BuildModelDigest())
+	}
+	if evidence.SelectedPluginCount() != 0 || evidence.CanonicalCapabilityCount() != 2 || evidence.RequirementCount() != 0 || evidence.SelectedProviderCount() != 0 || evidence.CapabilityAliasCount() != 0 {
+		t.Fatalf("ResolutionEvidence counts = plugins %d capabilities %d requirements %d providers %d aliases %d", evidence.SelectedPluginCount(), evidence.CanonicalCapabilityCount(), evidence.RequirementCount(), evidence.SelectedProviderCount(), evidence.CapabilityAliasCount())
+	}
 
 	second, err := applicationresolve.Resolve(t.Context(), options)
 	if err != nil {
 		t.Fatalf("Resolve repeated: %v", err)
 	}
-	if !bytes.Equal(resolved.Context().CanonicalJSON(), second.Resolution().Context().CanonicalJSON()) || resolved.Context().Digest() != second.Resolution().Context().Digest() || !bytes.Equal(resolved.AliasResolution().CanonicalJSON(), second.Resolution().AliasResolution().CanonicalJSON()) || first.Configurations().Digest() != second.Configurations().Digest() {
+	if !bytes.Equal(resolved.Context().CanonicalJSON(), second.Resolution().Context().CanonicalJSON()) || resolved.Context().Digest() != second.Resolution().Context().Digest() || !bytes.Equal(resolved.AliasResolution().CanonicalJSON(), second.Resolution().AliasResolution().CanonicalJSON()) || first.Configurations().Digest() != second.Configurations().Digest() || !bytes.Equal(evidence.CanonicalJSON(), second.ResolutionEvidence().CanonicalJSON()) || evidence.Digest() != second.ResolutionEvidence().Digest() {
 		t.Fatal("repeated empty resolution is not byte-deterministic")
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
