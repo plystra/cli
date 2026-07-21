@@ -23,7 +23,7 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:c4cccc730200f8cf4267fc2921f0afd8d241aff0fd3b63bf65ba6c6809106faa"
+      "sha256": "sha256:6fb7f61b3ae6d7fcd2553f58207d1ff590d5992c3f61c8873c0d7a3280be805e"
     },
     {
       "path": "generated/proto/descriptor-set.pb",
@@ -36,6 +36,24 @@
   ],
   "application_manifest": {
     "capability_aliases": [],
+    "constraint_projection": {
+      "version": 1,
+      "digest": "sha256:a23fa16506b39bf3ebae578596d780807959a587aa92df5d07ec71bebfa02e58",
+      "capabilities": [
+        {
+          "id": "kernel.health/v1",
+          "contract_digest": "sha256:24b3601547ebd37da37341a86699a51b2e8a2d1706662bafed0b4d6d3a1548a9",
+          "constraint_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "fields": []
+        },
+        {
+          "id": "kernel.info/v1",
+          "contract_digest": "sha256:3ec0d8f2bfda17c88d8bf5e724f8612049fb0779074999f3a7c9fc9495d3695b",
+          "constraint_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "fields": []
+        }
+      ]
+    },
     "configuration": {
       "version": 4,
       "mode": "default",

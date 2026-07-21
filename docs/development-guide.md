@@ -793,7 +793,12 @@ mode reports the maintained path, such as
 `changed deploy/customer-a.yaml (dependency composition)`, and does not write
 either surface.
 
-`generated/manifest.json` configuration schema v4 records `default`,
+`generated/manifest.json` records a versioned canonical constraint projection
+with every resolved canonical Capability ID, its exact contract and constraint
+digests, and each constrained request or response field's path, type, and
+normalized constraint object. Unconstrained Capabilities retain empty field
+lists, while the aggregate projection digest changes for added, removed, or
+changed constraints. Configuration schema v4 records `default`,
 `environment`, or `explicit-config` mode; the environment name and overlay
 reference when applicable; project-relative paths; normalized document
 digests; dependency baseline history; the committed Protobuf wire-map digest;

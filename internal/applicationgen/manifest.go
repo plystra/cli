@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/configurationgen"
@@ -69,8 +70,9 @@ type applicationManifestSelectionBaseline struct {
 }
 
 type applicationManifestDocument struct {
-	CapabilityAliases json.RawMessage                  `json:"capability_aliases"`
-	Configuration     applicationManifestConfiguration `json:"configuration"`
+	CapabilityAliases    json.RawMessage                         `json:"capability_aliases"`
+	ConstraintProjection applicationManifestConstraintProjection `json:"constraint_projection"`
+	Configuration        applicationManifestConfiguration        `json:"configuration"`
 }
 
 // ManifestProvenanceOptions contains the complete non-secret generation
@@ -229,12 +231,17 @@ func (p ManifestProvenance) matches(composition applicationmeta.Composition, pro
 		p.applicationModelDigest == applicationModelDigest
 }
 
-// RenderManifest combines the normalized Alias map with strict non-secret
-// configuration and application-model provenance. It never serializes
-// configuration values or Secret reference targets.
-func RenderManifest(aliasJSON []byte, provenance ManifestProvenance) ([]byte, error) {
+// RenderManifest combines the normalized Alias map and canonical constraint
+// projection with strict non-secret configuration and application-model
+// provenance. It never serializes configuration values or Secret reference
+// targets.
+func RenderManifest(aliasJSON []byte, context generation.Context, provenance ManifestProvenance) ([]byte, error) {
 	if err := validateManifestProvenance(provenance); err != nil {
 		return nil, fmt.Errorf("%w: configuration provenance: %v", ErrResolution, err)
+	}
+	constraintProjection, err := buildManifestConstraintProjection(context)
+	if err != nil {
+		return nil, fmt.Errorf("%w: constraint projection: %v", ErrResolution, err)
 	}
 	var aliases struct {
 		CapabilityAliases json.RawMessage `json:"capability_aliases"`
@@ -262,7 +269,8 @@ func RenderManifest(aliasJSON []byte, provenance ManifestProvenance) ([]byte, er
 		}
 	}
 	document := applicationManifestDocument{
-		CapabilityAliases: aliases.CapabilityAliases,
+		CapabilityAliases:    aliases.CapabilityAliases,
+		ConstraintProjection: constraintProjection,
 		Configuration: applicationManifestConfiguration{
 			Version:     applicationManifestConfigurationVersion,
 			Mode:        provenance.mode,
@@ -304,6 +312,9 @@ func DecodeManifestProvenance(data []byte) (ManifestProvenance, error) {
 	}
 	if !jsonArray(document.CapabilityAliases) {
 		return ManifestProvenance{}, errors.New("generated application manifest capability_aliases must be an array")
+	}
+	if err := validateManifestConstraintProjection(document.ConstraintProjection); err != nil {
+		return ManifestProvenance{}, fmt.Errorf("generated application manifest constraint_projection: %w", err)
 	}
 	configuration := document.Configuration
 	if configuration.Version != applicationManifestConfigurationVersion {

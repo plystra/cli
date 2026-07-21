@@ -2,6 +2,7 @@ package applicationgen_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -135,7 +136,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManifestProvenance(environment): %v", err)
 	}
-	environmentData, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), environmentProvenance)
+	environmentData, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), defaultResolution.Context(), environmentProvenance)
 	if err != nil {
 		t.Fatalf("RenderManifest(environment): %v", err)
 	}
@@ -167,7 +168,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManifestProvenance(explicit): %v", err)
 	}
-	data, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), explicitProvenance)
+	data, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), defaultResolution.Context(), explicitProvenance)
 	if err != nil {
 		t.Fatalf("RenderManifest: %v", err)
 	}
@@ -200,6 +201,132 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 	unknown := bytes.Replace(data, []byte(`"mode":"explicit-config"`), []byte(`"unknown":true,"mode":"explicit-config"`), 1)
 	if _, err := applicationgen.DecodeManifestProvenance(unknown); err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("DecodeManifestProvenance(unknown field) error = %v", err)
+	}
+}
+
+func TestGeneratedManifestRecordsCanonicalConstraintProjection(t *testing.T) {
+	t.Parallel()
+
+	type constraintField struct {
+		Path        string          `json:"path"`
+		Type        string          `json:"type"`
+		Constraints json.RawMessage `json:"constraints"`
+	}
+	type capabilityConstraints struct {
+		ID               string            `json:"id"`
+		ContractDigest   string            `json:"contract_digest"`
+		ConstraintDigest string            `json:"constraint_digest"`
+		Fields           []constraintField `json:"fields"`
+	}
+	type manifestDocument struct {
+		ConstraintProjection struct {
+			Version      int                     `json:"version"`
+			Digest       string                  `json:"digest"`
+			Capabilities []capabilityConstraints `json:"capabilities"`
+		} `json:"constraint_projection"`
+	}
+	render := func(source string) ([]byte, manifestDocument) {
+		t.Helper()
+		resolution := resolvedApplicationWithEmail(t, "", source, defaultConfigurationProvenance(t, testComposition()))
+		options := withManifestProvenance(t, resolvedOptions(), resolution)
+		output, err := applicationgen.Render(options, resolution)
+		if err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		data := outputData(t, output, "generated/manifest.json")
+		var document manifestDocument
+		if err := json.Unmarshal(data, &document); err != nil {
+			t.Fatalf("decode generated manifest: %v", err)
+		}
+		return data, document
+	}
+
+	source := `id: email.send/v1
+request:
+  email: {type: string, required: true, constraints: {min_length: 3, max_length: 254, pattern: '^[^@]+@[^@]+$'}}
+  attempt: {type: integer, constraints: {minimum: 1, maximum: 10}}
+  label: {type: string, constraints: {min_length: 0, pattern: ''}}
+  recipients: {type: array, items: string, constraints: {min_items: 1, max_items: 100}}
+  untouched: {type: boolean}
+response:
+  latency: {type: number, constraints: {minimum: 0.5, maximum: 30.5}}
+errors: [invalid_recipient]
+`
+	data, document := render(source)
+	projection := document.ConstraintProjection
+	if projection.Version != 1 || len(projection.Digest) != 71 || !strings.HasPrefix(projection.Digest, "sha256:") {
+		t.Fatalf("constraint projection identity = version %d digest %q", projection.Version, projection.Digest)
+	}
+	if len(projection.Capabilities) != 2 {
+		t.Fatalf("constraint projection capabilities = %#v", projection.Capabilities)
+	}
+	email := projection.Capabilities[0]
+	if email.ID != "email.send/v1" || len(email.ContractDigest) != 71 || len(email.ConstraintDigest) != 71 {
+		t.Fatalf("email constraint record = %#v", email)
+	}
+	wantFields := []struct {
+		path        string
+		kind        string
+		constraints string
+	}{
+		{"request.attempt", "integer", `{"minimum":1,"maximum":10}`},
+		{"request.email", "string", `{"min_length":3,"max_length":254,"pattern":"^[^@]+@[^@]+$"}`},
+		{"request.label", "string", `{"min_length":0,"pattern":""}`},
+		{"request.recipients", "array", `{"min_items":1,"max_items":100}`},
+		{"response.latency", "number", `{"minimum":0.5,"maximum":30.5}`},
+	}
+	if len(email.Fields) != len(wantFields) {
+		t.Fatalf("email constraint fields = %#v", email.Fields)
+	}
+	for index, want := range wantFields {
+		got := email.Fields[index]
+		if got.Path != want.path || got.Type != want.kind || string(got.Constraints) != want.constraints {
+			t.Fatalf("email constraint field %d = %#v, want path=%q type=%q constraints=%s", index, got, want.path, want.kind, want.constraints)
+		}
+	}
+	health := projection.Capabilities[1]
+	if health.ID != "kernel.health/v1" || health.Fields == nil || len(health.Fields) != 0 || len(health.ConstraintDigest) != 71 {
+		t.Fatalf("unconstrained intrinsic record = %#v", health)
+	}
+	if _, err := applicationgen.DecodeManifestProvenance(data); err != nil {
+		t.Fatalf("DecodeManifestProvenance: %v", err)
+	}
+
+	reordered, reorderedDocument := render(`response:
+  latency: {constraints: {maximum: 30.5, minimum: 0.5}, type: number}
+errors: [invalid_recipient]
+request:
+  untouched: {type: boolean}
+  recipients: {constraints: {max_items: 100, min_items: 1}, items: string, type: array}
+  label: {constraints: {pattern: '', min_length: 0}, type: string}
+  attempt: {constraints: {maximum: 10, minimum: 1}, type: integer}
+  email: {constraints: {pattern: '^[^@]+@[^@]+$', max_length: 254, min_length: 3}, required: true, type: string}
+id: email.send/v1
+`)
+	if !bytes.Equal(data, reordered) || reorderedDocument.ConstraintProjection.Digest != projection.Digest {
+		t.Fatal("declaration order changed generated constraint projection")
+	}
+	changed, changedDocument := render(strings.Replace(source, "max_length: 254", "max_length: 255", 1))
+	if bytes.Equal(data, changed) || changedDocument.ConstraintProjection.Digest == projection.Digest ||
+		changedDocument.ConstraintProjection.Capabilities[0].ConstraintDigest == email.ConstraintDigest {
+		t.Fatal("constraint change did not alter generated manifest projection digests")
+	}
+
+	tampered := bytes.Replace(data, []byte(`"max_length":254`), []byte(`"max_length":255`), 1)
+	if _, err := applicationgen.DecodeManifestProvenance(tampered); err == nil || !strings.Contains(err.Error(), "constraint digest is inconsistent") {
+		t.Fatalf("DecodeManifestProvenance(tampered constraint) error = %v", err)
+	}
+	var withoutProjection map[string]json.RawMessage
+	if err := json.Unmarshal(data, &withoutProjection); err != nil {
+		t.Fatalf("decode manifest for missing projection case: %v", err)
+	}
+	delete(withoutProjection, "constraint_projection")
+	missingProjection, err := json.Marshal(withoutProjection)
+	if err != nil {
+		t.Fatalf("encode missing projection case: %v", err)
+	}
+	if _, err := applicationgen.DecodeManifestProvenance(missingProjection); err == nil || !strings.Contains(err.Error(), "constraint_projection") {
+		t.Fatalf("DecodeManifestProvenance(missing projection) error = %v", err)
 	}
 }
 

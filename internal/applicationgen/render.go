@@ -212,7 +212,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 			return generatedfiles.Output{}, fmt.Errorf("%w: dependencies for plugin %q: %w", ErrRender, provider.PluginID, err)
 		}
 	}
-	aliasManifest, err := RenderManifest(aliases.CanonicalJSON(), options.ManifestProvenance)
+	aliasManifest, err := RenderManifest(aliases.CanonicalJSON(), context, options.ManifestProvenance)
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: application manifest: %w", ErrRender, err)
 	}

@@ -728,10 +728,13 @@ plystra.yaml and preserves the sparse overlay. Full-replacement generation
 maintains only the selected file, and independent maintained selections retain
 independent dependency baselines.
 
-Inspect generated/manifest.json configuration schema v4 for default,
-environment, or explicit-config mode; the environment and overlay reference
-when applicable; Project-relative paths; normalized document digests;
-dependency baseline history; the Protobuf wire-map digest; and final
+Inspect generated/manifest.json for the versioned canonical constraint
+projection: every resolved canonical Capability has exact contract and
+constraint digests plus its ordered constrained request and response fields;
+an unconstrained Capability has an empty field list. The configuration schema v4
+records default, environment, or explicit-config mode; the environment and
+overlay reference when applicable; Project-relative paths; normalized document
+digests; dependency baseline history; the Protobuf wire-map digest; and final
 application-model digest. Environment mode retains the root dependency baseline
 because the overlay does not own dependency maintenance. The manifest never
 records raw configuration, Secret reference targets, resolved Secrets, or

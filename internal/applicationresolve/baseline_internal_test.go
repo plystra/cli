@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/generatedfiles"
@@ -123,7 +124,11 @@ func renderDependencyBaseline(t testing.TB, capability string) ([]byte, applicat
 	if err != nil {
 		t.Fatalf("NewManifestProvenance: %v", err)
 	}
-	data, err := applicationgen.RenderManifest([]byte("{\"capability_aliases\":[]}"), provenance)
+	context, err := generation.NewContext(generation.Input{})
+	if err != nil {
+		t.Fatalf("NewContext: %v", err)
+	}
+	data, err := applicationgen.RenderManifest([]byte("{\"capability_aliases\":[]}"), context, provenance)
 	if err != nil {
 		t.Fatalf("RenderManifest: %v", err)
 	}

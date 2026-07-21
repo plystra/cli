@@ -2176,7 +2176,15 @@ capabilities:
 		t.Fatalf("generated JavaScript reinterprets the canonical Go pattern:\n%s", javascript)
 	}
 	manifest := readFile(t, root, "generated/manifest.json")
-	for _, value := range [][]byte{[]byte(`"id":"mail.deliver/v1"`), []byte(`"target":"email.send/v1"`), []byte(`"deprecated":"Use email.send/v1 instead."`)} {
+	for _, value := range [][]byte{
+		[]byte(`"id":"mail.deliver/v1"`),
+		[]byte(`"target":"email.send/v1"`),
+		[]byte(`"deprecated":"Use email.send/v1 instead."`),
+		[]byte(`"constraint_projection":{"version":1,"digest":"sha256:`),
+		[]byte(`"id":"email.send/v1","contract_digest":"sha256:`),
+		[]byte(`"constraint_digest":"sha256:`),
+		[]byte(`"path":"request.to","type":"string","constraints":{"min_length":3,"max_length":254,"pattern":"^[^@]+@[^@]+$"}`),
+	} {
 		if !bytes.Contains(manifest, value) {
 			t.Fatalf("manifest omits %s:\n%s", value, manifest)
 		}

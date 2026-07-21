@@ -260,7 +260,7 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}) {
 		t.Fatalf("empty output paths = %v", got)
 	}
-	wantManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), options.ManifestProvenance)
+	wantManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), resolution.Context(), options.ManifestProvenance)
 	if err != nil {
 		t.Fatalf("RenderManifest: %v", err)
 	}
