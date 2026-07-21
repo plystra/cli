@@ -1509,7 +1509,9 @@ func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
 				!slicesContains(checked.Report().Changed(), "generated/manifest.json") ||
 				!slicesContains(checked.Report().Changed(), "generated/proto/descriptor-set.pb") ||
 				!slicesContains(checked.Report().Missing(), "generated/proto/plystra/generated/kernel/health/v1/capability.proto") ||
-				!slicesContains(checked.Report().Obsolete(), "generated/proto/plystra/generated/kernel/info/v1/capability.proto") {
+				!slicesContains(checked.Report().Obsolete(), "generated/proto/plystra/generated/kernel/info/v1/capability.proto") ||
+				!slicesContains(checked.Report().Missing(), "generated/sdk/javascript/src/operations/kernel/health/v1.ts") ||
+				!slicesContains(checked.Report().Obsolete(), "generated/sdk/javascript/src/operations/kernel/info/v1.ts") {
 				t.Fatalf("exposure change report = %#v", checked.Report().Changes())
 			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, beforeCheck) {
