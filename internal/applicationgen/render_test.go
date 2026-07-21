@@ -47,6 +47,10 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 `, composition)
 	options := resolvedOptions()
 	options.Composition = composition
+	options.HTTPCORS = &applicationmeta.HTTPCORS{
+		AllowedOrigins:   []string{"https://app.example.com"},
+		AllowCredentials: true,
+	}
 	options = withManifestProvenance(t, options, resolution)
 	output, err := applicationgen.Render(options, resolution)
 	if err != nil {
@@ -123,7 +127,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		}
 	}
 	connectHandler := string(outputData(t, output, "generated/go/adapters/connect/email/send/v1/handler_gen.go"))
-	for _, required := range []string{"applicationinvocation.Handle", "return target.Invoke(ctx, request)", "connect.NewUnaryHandler("} {
+	for _, required := range []string{"applicationinvocation.Handle", "return target.Invoke(ctx, request)", "connect.NewUnaryHandler(", `case "https://app.example.com":`, "const plystraCORSAllowCredentials = true"} {
 		if !strings.Contains(connectHandler, required) {
 			t.Fatalf("canonical Connect handler omits %q:\n%s", required, connectHandler)
 		}
@@ -134,7 +138,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		}
 	}
 	connectAlias := string(outputData(t, output, "generated/go/adapters/connect/compat/send/v1/handler_gen.go"))
-	if !strings.Contains(connectAlias, "canonicaladapter.Handler") || strings.Contains(connectAlias, "applicationinvocation") {
+	if !strings.Contains(connectAlias, "canonicaladapter.Handler") || !strings.Contains(connectAlias, `case "https://app.example.com":`) || strings.Contains(connectAlias, "applicationinvocation") {
 		t.Fatalf("Alias Connect handler does not reuse the canonical handler:\n%s", connectAlias)
 	}
 	manifest := string(outputData(t, output, "generated/manifest.json"))

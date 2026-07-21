@@ -67,6 +67,8 @@ Start the generated application with the same selector used for generation: ` + 
 
 New Projects record ` + "`http.transports.connect: true`" + ` and ` + "`http.transports.rest: false`" + ` explicitly in root configuration. Keep those current-Project transport choices explicit when changing them. A nonempty public exposure requires at least one enabled transport, and JavaScript SDK generation requires Connect. If a selected default, environment, or full-replacement model has JavaScript Capability or Alias surfaces with Connect disabled, generation fails and identifies every affected surface; enable Connect in that selected current-Project configuration or remove those surfaces.
 
+Cross-origin browser access is opt-in. Add ` + "`http.cors.allowed_origins`" + ` to the selected current-Project configuration, and set ` + "`allow_credentials: true`" + ` only for exact origins. Generated canonical and Alias Connect handlers accept preflight only for ` + "`POST`" + ` and the fixed ` + "`Authorization`" + `, ` + "`Connect-Protocol-Version`" + `, ` + "`Connect-Timeout-Ms`" + `, and ` + "`Content-Type`" + ` headers. Disallowed requests fail before trusted-root creation or Provider invocation. Without ` + "`http.cors`" + `, generated handlers emit no CORS response headers.
+
 When several compatible Plugins provide one required Capability, select one with ` + "`plystra use <capability-name>/vN <plugin-id>`" + `. Add ` + "`--env <environment>`" + ` to write only that sparse overlay or ` + "`--config <yaml-path>`" + ` to write only one complete replacement configuration; the command regenerates and validates with the same selection.
 
 Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
@@ -690,8 +692,18 @@ root CORS, and dependency Project CORS settings are ignored.
 The normalized selected CORS policy participates in the generated
 application-model digest. Origin or credential changes create generation drift,
 while reordered or duplicate equivalent origins retain one static model
-identity. Generated CORS response behavior remains a later HTTP transport
-feature.
+identity. Generated canonical and Alias Connect handlers enforce the policy
+before protocol dispatch. A valid preflight must use an allowed origin, request
+POST, and request only Authorization, Connect-Protocol-Version,
+Connect-Timeout-Ms, or Content-Type. It returns 204 with deterministic allow
+headers. Allowed actual requests receive Access-Control-Allow-Origin on success
+and safe errors; Access-Control-Allow-Credentials is true only when configured.
+Malformed or disallowed origins, methods, and requested headers return 403
+before trusted-root creation or Provider invocation. Exact-origin responses and
+preflights emit the required Vary fields, while a non-credentialed wildcard
+emits *. Without http.cors, handlers emit no CORS response headers and reject a
+cross-origin preflight. Server mounting and the optional REST projection remain
+later transport work.
 
 PLYSTRA_ENV supplies the same environment name for automation when --env is
 omitted. To generate from a complete alternative document instead, use the same
@@ -1164,8 +1176,18 @@ credentialed wildcard is invalid. Environment overlays may inherit the root
 origin list or replace it completely; http.cors: null disables the root
 declaration, and dependency Project CORS never applies. The normalized selected
 CORS configuration participates in the build-affecting application-model
-digest; origin or credential changes create generation drift. Generated CORS
-response-header behavior remains deferred to the later HTTP transport gate.
+digest; origin or credential changes create generation drift. Generated
+canonical and Alias Connect handlers enforce the selected policy before
+protocol dispatch. A valid preflight uses one allowed origin, requests POST,
+and requests only Authorization, Connect-Protocol-Version, Connect-Timeout-Ms,
+or Content-Type; it receives 204 plus deterministic allow headers. Allowed
+actual requests receive Access-Control-Allow-Origin on successful and safe
+error responses, and credentials emit Access-Control-Allow-Credentials: true.
+Malformed or disallowed origins, methods, and requested headers return 403
+before trusted RootContext creation or Provider invocation. Exact-origin
+responses and preflights include the required Vary fields; a non-credentialed
+wildcard emits *. Without http.cors, generated handlers emit no CORS response
+headers and do not accept a cross-origin preflight.
 
 Generated handlers enforce the exact route, application/json, bounded bodies,
 required and unknown fields, enums, response validation, safe errors, and

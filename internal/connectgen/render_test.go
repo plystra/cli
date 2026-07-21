@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/contractgen"
@@ -87,7 +88,11 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		t.Fatalf("Connect fixture operations = %#v", operations)
 	}
 	provenance := connectConfigurationProvenance(t, generation.ConfigurationModeDefault)
-	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, provenance)
+	cors := applicationmeta.HTTPCORS{
+		AllowedOrigins:   []string{"https://app.example.com", "https://admin.example.com"},
+		AllowCredentials: true,
+	}
+	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, &cors, provenance)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -113,6 +118,11 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		"connect.WithRequireConnectProtocolHeader()",
 		"plystraServeConnectOnly(writer, request, h.transport)",
 		`const plystraConnectAcceptPost = "application/json, application/proto"`,
+		`const plystraCORSAllowHeaders = "Authorization, Connect-Protocol-Version, Connect-Timeout-Ms, Content-Type"`,
+		`const plystraCORSAllowMethods = "POST"`,
+		"const plystraCORSAllowCredentials = true",
+		`case "https://admin.example.com", "https://app.example.com":`,
+		"plystraServeCORS(writer, request)",
 		"return target.Invoke(ctx, request)",
 		"connectschema.DecodeStruct(",
 		"connectschema.EncodeStruct(",
@@ -154,6 +164,8 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		"connect.WithSendMaxBytes(connectschema.MaximumResponseBytes)",
 		"connect.WithRequireConnectProtocolHeader()",
 		"plystraServeConnectOnly(writer, request, h.transport)",
+		"plystraServeCORS(writer, request)",
+		`case "https://admin.example.com", "https://app.example.com":`,
 	} {
 		if !bytes.Contains(alias.Data(), []byte(required)) {
 			t.Fatalf("Alias handler omits %q:\n%s", required, alias.Data())
@@ -201,7 +213,7 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 			t.Fatalf("parse %s: %v\n%s", file.Path(), err, file.Data())
 		}
 	}
-	repeated, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, provenance)
+	repeated, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, &cors, provenance)
 	if err != nil || !connectFilesEqual(files, repeated) {
 		t.Fatalf("repeated Render drifted: %v", err)
 	}
@@ -215,12 +227,52 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 	}
 }
 
+func TestRenderOmitsImplicitCORSAndProjectsWildcardPolicy(t *testing.T) {
+	fixture := buildFixture(t, connectContract, "account.profile/v1")
+	provenance := connectConfigurationProvenance(t, generation.ConfigurationModeDefault)
+	withoutCORS, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, provenance)
+	if err != nil {
+		t.Fatalf("Render(without CORS): %v", err)
+	}
+	for _, file := range withoutCORS {
+		if strings.Contains(file.Path(), "/adapters/connect/") && bytes.Contains(file.Data(), []byte("Access-Control-")) {
+			t.Fatalf("%s contains implicit CORS behavior:\n%s", file.Path(), file.Data())
+		}
+	}
+
+	wildcard := applicationmeta.HTTPCORS{AllowedOrigins: []string{"*"}}
+	withWildcard, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, &wildcard, provenance)
+	if err != nil {
+		t.Fatalf("Render(wildcard CORS): %v", err)
+	}
+	for _, path := range []string{
+		"generated/go/adapters/connect/account/profile/v1/handler_gen.go",
+		"generated/go/adapters/connect/customer/profile/sync/v1/handler_gen.go",
+	} {
+		source := connectFilesByPath(withWildcard)[path].Data()
+		for _, required := range []string{`return "*", true`, "const plystraCORSAllowCredentials = false", "http.StatusNoContent", "http.StatusForbidden"} {
+			if !bytes.Contains(source, []byte(required)) {
+				t.Fatalf("%s omits wildcard CORS behavior %q:\n%s", path, required, source)
+			}
+		}
+	}
+	contract, err := contractgen.Render([]byte(connectContract))
+	if err != nil {
+		t.Fatalf("Render contract: %v", err)
+	}
+	invocation, err := invocationgen.Render(testModulePath, []byte(connectContract))
+	if err != nil {
+		t.Fatalf("Render invocation: %v", err)
+	}
+	assertGeneratedHandlersRunWithSource(t, contract, invocation, withWildcard, generatedConnectWildcardRuntimeTest, false)
+}
+
 func TestRenderSelectsHTTPAwareCanonicalInvocationOnlyWhenRequired(t *testing.T) {
 	t.Parallel()
 
 	fixture := buildFixture(t, connectContract, "")
 	httpPlan := buildHTTPPlan(t, fixture.target)
-	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, httpPlan, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
+	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, httpPlan, nil, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil {
 		t.Fatalf("Render(HTTP plan): %v", err)
 	}
@@ -259,7 +311,7 @@ func TestRenderRejectsInconsistentDescriptorAndPlanEvidence(t *testing.T) {
 		t.Fatalf("Marshal inconsistent descriptor set: %v", err)
 	}
 	provenance := connectConfigurationProvenance(t, generation.ConfigurationModeDefault)
-	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, inconsistent, fixture.plan, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrRender) || !errors.Is(err, connectgen.ErrDescriptor) || !strings.Contains(err.Error(), "method") {
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, inconsistent, fixture.plan, nil, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrRender) || !errors.Is(err, connectgen.ErrDescriptor) || !strings.Contains(err.Error(), "method") {
 		t.Fatalf("Render(inconsistent descriptor) = %#v, %v", files, err)
 	}
 	var missingErrorDetail descriptorpb.FileDescriptorSet
@@ -273,17 +325,17 @@ func TestRenderRejectsInconsistentDescriptorAndPlanEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal descriptor set without safe detail: %v", err)
 	}
-	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, withoutErrorDetail, fixture.plan, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrDescriptor) || !strings.Contains(err.Error(), "safe error detail") {
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, withoutErrorDetail, fixture.plan, nil, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrDescriptor) || !strings.Contains(err.Error(), "safe error detail") {
 		t.Fatalf("Render(missing safe error detail) = %#v, %v", files, err)
 	}
 	otherPlan, err := generationlowering.Lower("example.com/other", []generation.NormalizedContribution{})
 	if err != nil {
 		t.Fatalf("Lower(other): %v", err)
 	}
-	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, otherPlan, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrRender) || !errors.Is(err, connectgen.ErrProjection) || !strings.Contains(err.Error(), "example.com/other") {
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, otherPlan, nil, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrRender) || !errors.Is(err, connectgen.ErrProjection) || !strings.Contains(err.Error(), "example.com/other") {
 		t.Fatalf("Render(module-drift plan) = %#v, %v", files, err)
 	}
-	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, []byte("not a descriptor set"), fixture.plan, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrDescriptor) {
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, []byte("not a descriptor set"), fixture.plan, nil, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrDescriptor) {
 		t.Fatalf("Render(corrupt descriptor) = %#v, %v", files, err)
 	}
 }
@@ -292,16 +344,25 @@ func TestRenderRequiresConfigurationProvenanceWithoutEmbeddingSelection(t *testi
 	t.Parallel()
 
 	fixture := buildFixture(t, connectContract, "account.profile/v1")
-	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, transportprovenance.Provenance{}); len(files) != 0 || !errors.Is(err, connectgen.ErrProjection) || !strings.Contains(err.Error(), "configuration provenance") {
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, transportprovenance.Provenance{}); len(files) != 0 || !errors.Is(err, connectgen.ErrProjection) || !strings.Contains(err.Error(), "configuration provenance") {
 		t.Fatalf("Render(missing provenance) = %#v, %v", files, err)
 	}
-	defaultFiles, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
+	defaultFiles, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil {
 		t.Fatalf("Render(default): %v", err)
 	}
-	environmentFiles, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, connectConfigurationProvenance(t, generation.ConfigurationModeEnvironment))
+	environmentFiles, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, connectConfigurationProvenance(t, generation.ConfigurationModeEnvironment))
 	if err != nil || !connectFilesEqual(defaultFiles, environmentFiles) {
 		t.Fatalf("environment selection changed equal-model Connect source: %v", err)
+	}
+	for _, invalid := range []applicationmeta.HTTPCORS{
+		{},
+		{AllowedOrigins: []string{"https://example.com/path"}},
+		{AllowedOrigins: []string{"*"}, AllowCredentials: true},
+	} {
+		if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, &invalid, connectConfigurationProvenance(t, generation.ConfigurationModeDefault)); len(files) != 0 || !errors.Is(err, connectgen.ErrProjection) || !strings.Contains(err.Error(), "selected CORS policy") {
+			t.Fatalf("Render(invalid CORS %#v) = %#v, %v", invalid, files, err)
+		}
 	}
 }
 
@@ -320,7 +381,11 @@ func TestGeneratedUnaryQueryAndCommandHandlersInvokeOneCanonicalTarget(t *testin
 			if len(operations) != 1 || operations[0].Kind() != test.kind {
 				t.Fatalf("generated handler target operations = %#v", operations)
 			}
-			files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
+			cors := applicationmeta.HTTPCORS{
+				AllowedOrigins:   []string{"https://app.example.com", "https://admin.example.com"},
+				AllowCredentials: true,
+			}
+			files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, &cors, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
 			if err != nil {
 				t.Fatalf("Render: %v", err)
 			}
@@ -335,6 +400,23 @@ func TestGeneratedUnaryQueryAndCommandHandlersInvokeOneCanonicalTarget(t *testin
 			assertGeneratedHandlersRun(t, contract, invocation, files, test.kind == capabilitymeta.CapabilityKindQuery)
 		})
 	}
+}
+
+func TestGeneratedHandlersOmitCORSWithoutSelectedPolicy(t *testing.T) {
+	fixture := buildFixture(t, connectContract, "")
+	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	contract, err := contractgen.Render([]byte(connectContract))
+	if err != nil {
+		t.Fatalf("Render contract: %v", err)
+	}
+	invocation, err := invocationgen.Render(testModulePath, []byte(connectContract))
+	if err != nil {
+		t.Fatalf("Render invocation: %v", err)
+	}
+	assertGeneratedHandlersRunWithSource(t, contract, invocation, files, generatedConnectNoCORSRuntimeTest, false)
 }
 
 type connectFixture struct {
@@ -538,6 +620,11 @@ func connectConfigurationProvenance(t testing.TB, mode generation.ConfigurationM
 
 func assertGeneratedHandlersRun(t testing.TB, contract contractgen.File, invocation invocationgen.File, handlers []connectgen.File, runFuzz bool) {
 	t.Helper()
+	assertGeneratedHandlersRunWithSource(t, contract, invocation, handlers, generatedConnectRuntimeTest, runFuzz)
+}
+
+func assertGeneratedHandlersRunWithSource(t testing.TB, contract contractgen.File, invocation invocationgen.File, handlers []connectgen.File, testSource string, runFuzz bool) {
+	t.Helper()
 	root := t.TempDir()
 	writeGeneratedFile(t, root, contract.Path(), contract.Data())
 	writeGeneratedFile(t, root, invocation.Path(), invocation.Data())
@@ -546,7 +633,7 @@ func assertGeneratedHandlersRun(t testing.TB, contract contractgen.File, invocat
 	}
 	writeGeneratedFile(t, root, "kernel/go.mod", []byte("module github.com/plystra/kernel\n\ngo 1.26\n"))
 	writeGeneratedFile(t, root, "kernel/invocation/handle.go", []byte(testKernelInvocationSource))
-	writeGeneratedFile(t, root, "generated/go/adapters/connect/customer/profile/sync/v1/handler_gen_test.go", []byte(generatedConnectRuntimeTest))
+	writeGeneratedFile(t, root, "generated/go/adapters/connect/customer/profile/sync/v1/handler_gen_test.go", []byte(testSource))
 	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire (\n\tconnectrpc.com/connect "+connectgen.ConnectModuleVersion+"\n\tgithub.com/plystra/kernel v0.0.0\n\tgoogle.golang.org/protobuf "+connectgen.ProtobufModuleVersion+"\n)\n\nreplace github.com/plystra/kernel => ./kernel\n"))
 	download := exec.CommandContext(t.Context(), "go", "mod", "download", "all")
 	download.Dir = root
@@ -581,6 +668,98 @@ func writeGeneratedFile(t testing.TB, root, relative string, data []byte) {
 		t.Fatalf("WriteFile(%s): %v", name, err)
 	}
 }
+
+const generatedConnectNoCORSRuntimeTest = `package customerprofilesyncv1_test
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	canonicaladapter "example.com/acme/project/generated/go/adapters/connect/customer/profile/sync/v1"
+	contract "example.com/acme/project/generated/go/contracts/customer/profile/sync/v1"
+	applicationinvocation "example.com/acme/project/generated/go/invocation/customer/profile/sync/v1"
+	kernelinvocation "github.com/plystra/kernel/invocation"
+)
+
+func TestNoImplicitCORS(t *testing.T) {
+	providerCalled := false
+	target := kernelinvocation.NewTestHandle(func(context.Context, contract.Request) (contract.Response, error) {
+		providerCalled = true
+		return contract.Response{}, nil
+	})
+	handler, err := canonicaladapter.New(func(context.Context, http.Header) (context.Context, error) {
+		t.Fatal("CORS-shaped OPTIONS request created a trusted root")
+		return nil, nil
+	}, applicationinvocation.New(target))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodOptions, canonicaladapter.Procedure, nil)
+	request.Header.Set("Origin", "https://app.example.com")
+	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	request.Header.Set("Access-Control-Request-Headers", "content-type, connect-protocol-version")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodPost {
+		t.Fatalf("response = %d Allow=%q", response.Code, response.Header().Get("Allow"))
+	}
+	for name := range response.Header() {
+		if len(name) >= len("Access-Control-") && name[:len("Access-Control-")] == "Access-Control-" {
+			t.Fatalf("response contains implicit CORS header %s", name)
+		}
+	}
+	if response.Header().Get("Vary") != "" {
+		t.Fatalf("response contains implicit Vary %q", response.Header().Get("Vary"))
+	}
+	if providerCalled {
+		t.Fatal("CORS-shaped OPTIONS request invoked the Provider")
+	}
+}
+`
+
+const generatedConnectWildcardRuntimeTest = `package customerprofilesyncv1
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestWildcardCORS(t *testing.T) {
+	preflight := httptest.NewRequest(http.MethodOptions, Procedure, nil)
+	preflight.Header.Set("Origin", "null")
+	preflight.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	preflight.Header.Set("Access-Control-Request-Headers", "content-type, connect-protocol-version")
+	preflightResponse := httptest.NewRecorder()
+	if !plystraServeCORS(preflightResponse, preflight) {
+		t.Fatal("wildcard preflight was not handled")
+	}
+	if preflightResponse.Code != http.StatusNoContent || preflightResponse.Header().Get("Access-Control-Allow-Origin") != "*" || preflightResponse.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatalf("wildcard preflight = %d origin=%q credentials=%q", preflightResponse.Code, preflightResponse.Header().Get("Access-Control-Allow-Origin"), preflightResponse.Header().Get("Access-Control-Allow-Credentials"))
+	}
+
+	actual := httptest.NewRequest(http.MethodPost, Procedure, strings.NewReader("{}"))
+	actual.Header.Set("Origin", "https://any.example")
+	actualResponse := httptest.NewRecorder()
+	if plystraServeCORS(actualResponse, actual) {
+		t.Fatal("allowed wildcard actual request was consumed")
+	}
+	if actualResponse.Header().Get("Access-Control-Allow-Origin") != "*" || actualResponse.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatalf("wildcard actual response origin=%q credentials=%q", actualResponse.Header().Get("Access-Control-Allow-Origin"), actualResponse.Header().Get("Access-Control-Allow-Credentials"))
+	}
+
+	malformed := httptest.NewRequest(http.MethodOptions, Procedure, nil)
+	malformed.Header.Set("Origin", "https://first.example, https://second.example")
+	malformed.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	malformedResponse := httptest.NewRecorder()
+	if !plystraServeCORS(malformedResponse, malformed) || malformedResponse.Code != http.StatusForbidden || malformedResponse.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("malformed wildcard origin response = %d origin=%q", malformedResponse.Code, malformedResponse.Header().Get("Access-Control-Allow-Origin"))
+	}
+}
+`
 
 const testKernelInvocationSource = `package invocation
 
@@ -923,6 +1102,88 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 		{name: "Alias", procedure: aliasadapter.Procedure, methodName: "plystra.generated.account.profile.v1.AccountProfileV1Service.Invoke"},
 	}
 	for _, route := range routes {
+		t.Run(route.name+" CORS preflight", func(t *testing.T) {
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodOptions, server.URL+route.procedure, nil)
+			if err != nil {
+				t.Fatalf("NewRequest: %v", err)
+			}
+			request.Header.Set("Origin", "https://app.example.com")
+			request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+			request.Header.Set("Access-Control-Request-Headers", "content-type, Authorization, CONNECT-PROTOCOL-VERSION, Connect-Timeout-Ms")
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			_ = response.Body.Close()
+			if response.StatusCode != http.StatusNoContent {
+				t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusNoContent)
+			}
+			assertCORSResponse(t, response.Header, "https://app.example.com", true)
+			if response.Header.Get("Access-Control-Allow-Methods") != http.MethodPost {
+				t.Fatalf("Access-Control-Allow-Methods = %q", response.Header.Get("Access-Control-Allow-Methods"))
+			}
+			if response.Header.Get("Access-Control-Allow-Headers") != "Authorization, Connect-Protocol-Version, Connect-Timeout-Ms, Content-Type" {
+				t.Fatalf("Access-Control-Allow-Headers = %q", response.Header.Get("Access-Control-Allow-Headers"))
+			}
+			assertVary(t, response.Header, "Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers")
+		})
+		for _, denied := range []struct {
+			name string
+			origin string
+			method string
+			headers string
+			secondOrigin string
+		}{
+			{name: "origin", origin: "https://evil.example", method: http.MethodPost, headers: "content-type"},
+			{name: "method", origin: "https://app.example.com", method: http.MethodDelete, headers: "content-type"},
+			{name: "header", origin: "https://app.example.com", method: http.MethodPost, headers: "content-type, x-unsafe"},
+			{name: "multiple origins", origin: "https://app.example.com", secondOrigin: "https://admin.example.com", method: http.MethodPost, headers: "content-type"},
+		} {
+			t.Run(route.name+" rejects CORS preflight "+denied.name, func(t *testing.T) {
+				request, err := http.NewRequestWithContext(t.Context(), http.MethodOptions, server.URL+route.procedure, nil)
+				if err != nil {
+					t.Fatalf("NewRequest: %v", err)
+				}
+				request.Header.Set("Origin", denied.origin)
+				if denied.secondOrigin != "" {
+					request.Header.Add("Origin", denied.secondOrigin)
+				}
+				request.Header.Set("Access-Control-Request-Method", denied.method)
+				request.Header.Set("Access-Control-Request-Headers", denied.headers)
+				response, err := server.Client().Do(request)
+				if err != nil {
+					t.Fatalf("Do: %v", err)
+				}
+				_ = response.Body.Close()
+				if response.StatusCode != http.StatusForbidden || response.Header.Get("Access-Control-Allow-Origin") != "" {
+					t.Fatalf("denied response = %d Allow-Origin=%q", response.StatusCode, response.Header.Get("Access-Control-Allow-Origin"))
+				}
+				assertVary(t, response.Header, "Origin")
+			})
+		}
+		t.Run(route.name+" rejects disallowed actual origin", func(t *testing.T) {
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+route.procedure, strings.NewReader("{}"))
+			if err != nil {
+				t.Fatalf("NewRequest: %v", err)
+			}
+			request.Header.Set("Origin", "https://evil.example")
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Connect-Protocol-Version", "1")
+			request.Header.Set("Authorization", "Bearer test")
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			_ = response.Body.Close()
+			if response.StatusCode != http.StatusForbidden || response.Header.Get("Access-Control-Allow-Origin") != "" {
+				t.Fatalf("denied response = %d Allow-Origin=%q", response.StatusCode, response.Header.Get("Access-Control-Allow-Origin"))
+			}
+		})
+	}
+	if calls != 1 || rootCalls != 1 {
+		t.Fatalf("CORS preflight or denial crossed the boundary: calls %d/%d", calls, rootCalls)
+	}
+	for _, route := range routes {
 		for _, encoding := range []struct {
 			name string
 			option connect.ClientOption
@@ -939,11 +1200,20 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 				client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](server.Client(), server.URL+route.procedure, options...)
 				request := connect.NewRequest(validRequest(t, method, "hello"))
 				request.Header().Set("Authorization", "Bearer test")
+				if encoding.name == "binary" {
+					request.Header().Set("Origin", "https://app.example.com")
+				}
 				response, err := client.CallUnary(t.Context(), request)
 				if err != nil {
 					t.Fatalf("CallUnary: %v", err)
 				}
 				assertResponse(t, response.Msg)
+				if encoding.name == "binary" {
+					assertCORSResponse(t, response.Header(), "https://app.example.com", true)
+					assertVary(t, response.Header(), "Origin")
+				} else if response.Header().Get("Access-Control-Allow-Origin") != "" {
+					t.Fatalf("request without Origin received Access-Control-Allow-Origin %q", response.Header().Get("Access-Control-Allow-Origin"))
+				}
 			})
 		}
 	}
@@ -966,6 +1236,7 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 				}
 				request.Header.Set("Content-Type", protocol.contentType)
 				request.Header.Set("Connect-Protocol-Version", "1")
+				request.Header.Set("Origin", "https://admin.example.com")
 				response, err := server.Client().Do(request)
 				if err != nil {
 					t.Fatalf("Do: %v", err)
@@ -978,6 +1249,8 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 				if acceptPost != "application/json, application/proto" || strings.Contains(strings.ToLower(acceptPost), "grpc") {
 					t.Fatalf("Accept-Post = %q", acceptPost)
 				}
+				assertCORSResponse(t, response.Header, "https://admin.example.com", true)
+				assertVary(t, response.Header, "Origin")
 			})
 		}
 	}
@@ -1415,6 +1688,35 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 		awaitDeadlineEvent(t, deadlineObserved, "wait-deadline-root", true, rescueCancellation)
 		assertDeadlineCall(t, result, rescueCancellation)
 	})
+}
+
+func assertCORSResponse(t *testing.T, headers http.Header, origin string, credentials bool) {
+	t.Helper()
+	if got := headers.Get("Access-Control-Allow-Origin"); got != origin {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want %q", got, origin)
+	}
+	wantCredentials := ""
+	if credentials {
+		wantCredentials = "true"
+	}
+	if got := headers.Get("Access-Control-Allow-Credentials"); got != wantCredentials {
+		t.Fatalf("Access-Control-Allow-Credentials = %q, want %q", got, wantCredentials)
+	}
+}
+
+func assertVary(t *testing.T, headers http.Header, values ...string) {
+	t.Helper()
+	seen := make(map[string]bool)
+	for _, line := range headers.Values("Vary") {
+		for _, field := range strings.Split(line, ",") {
+			seen[strings.ToLower(strings.TrimSpace(field))] = true
+		}
+	}
+	for _, value := range values {
+		if !seen[strings.ToLower(value)] {
+			t.Fatalf("Vary = %q, missing %q", headers.Values("Vary"), value)
+		}
+	}
 }
 
 func awaitCancellationEvent(t *testing.T, events <-chan string, want string, rescue func()) {

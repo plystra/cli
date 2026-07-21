@@ -734,9 +734,20 @@ composition.
 The normalized selected CORS policy is build-affecting and participates in the
 generated application-model digest. Changing its origins or credential choice
 therefore produces deterministic generation drift, while reordered,
-deduplicated equivalent origins retain one static model identity. At this
-implementation boundary the generated HTTP handler does not yet emit CORS
-response behavior; that projection remains in the later HTTP transport gate.
+deduplicated equivalent origins retain one static model identity. Generated
+canonical and Alias Connect handlers enforce that policy before protocol
+dispatch. A valid preflight must use one allowed origin, request `POST`, and
+request only `Authorization`, `Connect-Protocol-Version`,
+`Connect-Timeout-Ms`, or `Content-Type`; success returns `204` with deterministic
+allow headers. Allowed actual requests receive `Access-Control-Allow-Origin`
+on successful and safe error responses, plus
+`Access-Control-Allow-Credentials: true` only when configured. Malformed or
+disallowed origins, methods, and requested headers return `403` before trusted
+root creation or Provider invocation. Exact-origin responses and preflights
+emit the required `Vary` fields. A non-credentialed wildcard emits `*`.
+Without `http.cors`, handlers emit no CORS response headers and do not accept a
+cross-origin preflight. Server mounting and the optional REST projection remain
+later transport work.
 
 For automation, select the same environment name with:
 

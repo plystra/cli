@@ -37,6 +37,8 @@ Start the generated application with the same selector used for generation: `go 
 
 New Projects record `http.transports.connect: true` and `http.transports.rest: false` explicitly in root configuration. Keep those current-Project transport choices explicit when changing them. A nonempty public exposure requires at least one enabled transport, and JavaScript SDK generation requires Connect. If a selected default, environment, or full-replacement model has JavaScript Capability or Alias surfaces with Connect disabled, generation fails and identifies every affected surface; enable Connect in that selected current-Project configuration or remove those surfaces.
 
+Cross-origin browser access is opt-in. Add `http.cors.allowed_origins` to the selected current-Project configuration, and set `allow_credentials: true` only for exact origins. Generated canonical and Alias Connect handlers accept preflight only for `POST` and the fixed `Authorization`, `Connect-Protocol-Version`, `Connect-Timeout-Ms`, and `Content-Type` headers. Disallowed requests fail before trusted-root creation or Provider invocation. Without `http.cors`, generated handlers emit no CORS response headers.
+
 When several compatible Plugins provide one required Capability, select one with `plystra use <capability-name>/vN <plugin-id>`. Add `--env <environment>` to write only that sparse overlay or `--config <yaml-path>` to write only one complete replacement configuration; the command regenerates and validates with the same selection.
 
 Generated source under `generated/` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.

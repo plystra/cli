@@ -1315,13 +1315,13 @@ func TestGenerateSelectedHTTPCORSCausesApplicationModelDrift(t *testing.T) {
 		{
 			name:           "default",
 			selectedPath:   "plystra.yaml",
-			selectedData:   "http:\n  cors:\n    allowed_origins: [https://B.example:443, https://a.example, https://a.example:443]\n",
-			equivalentData: "http:\n  cors:\n    allowed_origins: [https://a.example, https://b.example]\n",
-			changedData:    "http:\n  cors:\n    allowed_origins: [https://api.example]\n",
+			selectedData:   "http:\n  cors:\n    allowed_origins: [https://B.example:443, https://a.example, https://a.example:443]\n  expose: [kernel.health/v1]\n",
+			equivalentData: "http:\n  cors:\n    allowed_origins: [https://a.example, https://b.example]\n  expose: [kernel.health/v1]\n",
+			changedData:    "http:\n  cors:\n    allowed_origins: [https://api.example]\n  expose: [kernel.health/v1]\n",
 		},
 		{
 			name:           "environment",
-			rootData:       "http:\n  cors:\n    allowed_origins: [https://root.example]\n",
+			rootData:       "http:\n  cors:\n    allowed_origins: [https://root.example]\n  expose: [kernel.health/v1]\n",
 			selectedPath:   "plystra.production.yaml",
 			selectedData:   "http:\n  cors:\n    allowed_origins: [https://B.example:443, https://a.example, https://a.example:443]\n    allow_credentials: false\n",
 			equivalentData: "http:\n  cors:\n    allowed_origins: [https://a.example, https://b.example]\n",
@@ -1334,9 +1334,9 @@ func TestGenerateSelectedHTTPCORSCausesApplicationModelDrift(t *testing.T) {
 			name:           "full replacement",
 			rootData:       "http:\n  cors:\n    allowed_origins: [https://root.example]\n",
 			selectedPath:   "deploy/customer-a.yaml",
-			selectedData:   "http:\n  cors:\n    allowed_origins: [https://B.example:443, https://a.example, https://a.example:443]\n",
-			equivalentData: "http:\n  cors:\n    allowed_origins: [https://a.example, https://b.example]\n",
-			changedData:    "http:\n  cors:\n    allowed_origins: [https://api.example]\n",
+			selectedData:   "http:\n  cors:\n    allowed_origins: [https://B.example:443, https://a.example, https://a.example:443]\n  expose: [kernel.health/v1]\n",
+			equivalentData: "http:\n  cors:\n    allowed_origins: [https://a.example, https://b.example]\n  expose: [kernel.health/v1]\n",
+			changedData:    "http:\n  cors:\n    allowed_origins: [https://api.example]\n  expose: [kernel.health/v1]\n",
 			configure: func(options *applicationgenerate.Options) {
 				options.ConfigurationPath = "deploy/customer-a.yaml"
 			},
@@ -1346,7 +1346,7 @@ func TestGenerateSelectedHTTPCORSCausesApplicationModelDrift(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeApplicationModule(t, root, "example.com/acme/cors-"+strings.ReplaceAll(test.name, " ", "-"))
+			writeConnectApplicationModule(t, root, "example.com/acme/cors-"+strings.ReplaceAll(test.name, " ", "-"))
 			rootData := test.rootData
 			if test.selectedPath == "plystra.yaml" {
 				rootData = test.selectedData
@@ -1369,6 +1369,10 @@ func TestGenerateSelectedHTTPCORSCausesApplicationModelDrift(t *testing.T) {
 			generated, err := applicationgenerate.Generate(t.Context(), options)
 			if err != nil || !generated.Report().Clean() {
 				t.Fatalf("initial Generate = changes %#v, %v", generated.Report().Changes(), err)
+			}
+			const connectHandlerPath = "generated/go/adapters/connect/kernel/health/v1/handler_gen.go"
+			if source := readFile(t, root, connectHandlerPath); !strings.Contains(string(source), "plystraServeCORS") || !strings.Contains(string(source), "Access-Control-Allow-Origin") {
+				t.Fatalf("generated Connect handler omits selected CORS behavior:\n%s", source)
 			}
 			initialProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
 			if err != nil {
@@ -1397,7 +1401,8 @@ func TestGenerateSelectedHTTPCORSCausesApplicationModelDrift(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Generate check after CORS change: %v", err)
 			}
-			if checked.Report().Clean() || !strings.Contains(strings.Join(checked.Report().Changed(), "\n"), "generated/manifest.json") {
+			changedPaths := strings.Join(checked.Report().Changed(), "\n")
+			if checked.Report().Clean() || !strings.Contains(changedPaths, "generated/manifest.json") || !strings.Contains(changedPaths, connectHandlerPath) {
 				t.Fatalf("CORS change report = %#v", checked.Report().Changes())
 			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, beforeCheck) {

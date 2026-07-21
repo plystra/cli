@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/goname"
 	"github.com/plystra/cli/internal/protobufdescriptor"
@@ -27,6 +28,7 @@ func renderCanonical(
 	method protoreflect.MethodDescriptor,
 	errorDetail protoreflect.MessageDescriptor,
 	useHTTPPath bool,
+	cors *applicationmeta.HTTPCORS,
 ) (File, error) {
 	identity := operation.Identity()
 	if method == nil || methodName(method) == "" || methodName(method) != identity.Package()+"."+identity.Service()+"."+identity.Method() {
@@ -80,7 +82,7 @@ func renderCanonical(
 	fmt.Fprintln(&source, "\t\"errors\"")
 	fmt.Fprintln(&source, "\t\"mime\"")
 	fmt.Fprintln(&source, "\t\"net/http\"")
-	if useHTTPPath {
+	if useHTTPPath || cors != nil {
 		fmt.Fprintln(&source, "\t\"strings\"")
 	}
 	fmt.Fprintln(&source)
@@ -163,7 +165,7 @@ func renderCanonical(
 	fmt.Fprintln(&source, "\tplystraServeConnectOnly(writer, request, h.transport)")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
-	renderConnectProtocolBoundary(&source)
+	renderConnectProtocolBoundary(&source, cors)
 	fmt.Fprintln(&source)
 	fmt.Fprintf(&source, "// Invoke converts %s messages and enters canonical Capability %s.\n", identity.PublicID(), operation.ID())
 	fmt.Fprintln(&source, "func (h Handler) Invoke(ctx context.Context, request *connect.Request[dynamicpb.Message]) (result *connect.Response[dynamicpb.Message], resultErr error) {")
@@ -233,6 +235,7 @@ func renderAlias(
 	alias protobufmodel.Alias,
 	target protobufmodel.Operation,
 	method protoreflect.MethodDescriptor,
+	cors *applicationmeta.HTTPCORS,
 ) (File, error) {
 	identity := alias.Identity()
 	if method == nil || methodName(method) != identity.Package()+"."+identity.Service()+"."+identity.Method() {
@@ -268,6 +271,9 @@ func renderAlias(
 	fmt.Fprintln(&source, "\t\"errors\"")
 	fmt.Fprintln(&source, "\t\"mime\"")
 	fmt.Fprintln(&source, "\t\"net/http\"")
+	if cors != nil {
+		fmt.Fprintln(&source, "\t\"strings\"")
+	}
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "\t\"connectrpc.com/connect\"")
 	fmt.Fprintf(&source, "\tcanonicaladapter %s\n", strconv.Quote(canonicalImport))
@@ -328,7 +334,7 @@ func renderAlias(
 	fmt.Fprintln(&source, "\tplystraServeConnectOnly(writer, request, h.transport)")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
-	renderConnectProtocolBoundary(&source)
+	renderConnectProtocolBoundary(&source, cors)
 
 	formatted, err := format.Source([]byte(source.String()))
 	if err != nil {
@@ -337,14 +343,24 @@ func renderAlias(
 	return File{path: path.Join(directory, "handler_gen.go"), packageName: packageName, data: append([]byte(nil), formatted...)}, nil
 }
 
-func renderConnectProtocolBoundary(source *strings.Builder) {
+func renderConnectProtocolBoundary(source *strings.Builder, cors *applicationmeta.HTTPCORS) {
 	fmt.Fprintln(source, "const plystraConnectAcceptPost = \"application/json, application/proto\"")
+	if cors != nil {
+		fmt.Fprintln(source, "const plystraCORSAllowHeaders = \"Authorization, Connect-Protocol-Version, Connect-Timeout-Ms, Content-Type\"")
+		fmt.Fprintln(source, "const plystraCORSAllowMethods = \"POST\"")
+		fmt.Fprintf(source, "const plystraCORSAllowCredentials = %t\n", cors.AllowCredentials)
+	}
 	fmt.Fprintln(source)
 	fmt.Fprintln(source, "func plystraServeConnectOnly(writer http.ResponseWriter, request *http.Request, transport http.Handler) {")
 	fmt.Fprintln(source, "\tif request == nil || transport == nil {")
 	fmt.Fprintln(source, "\t\thttp.Error(writer, \"internal\", http.StatusInternalServerError)")
 	fmt.Fprintln(source, "\t\treturn")
 	fmt.Fprintln(source, "\t}")
+	if cors != nil {
+		fmt.Fprintln(source, "\tif plystraServeCORS(writer, request) {")
+		fmt.Fprintln(source, "\t\treturn")
+		fmt.Fprintln(source, "\t}")
+	}
 	fmt.Fprintln(source, "\tif request.Method != http.MethodPost {")
 	fmt.Fprintln(source, "\t\twriter.Header().Set(\"Allow\", http.MethodPost)")
 	fmt.Fprintln(source, "\t\twriter.WriteHeader(http.StatusMethodNotAllowed)")
@@ -365,6 +381,129 @@ func renderConnectProtocolBoundary(source *strings.Builder) {
 	fmt.Fprintln(source, "\t}")
 	fmt.Fprintln(source, "\treturn contentType == \"application/json\" || contentType == \"application/proto\"")
 	fmt.Fprintln(source, "}")
+	if cors != nil {
+		fmt.Fprintln(source)
+		renderCORSBoundary(source, *cors)
+	}
+}
+
+func renderCORSBoundary(source *strings.Builder, cors applicationmeta.HTTPCORS) {
+	fmt.Fprintln(source, "func plystraServeCORS(writer http.ResponseWriter, request *http.Request) bool {")
+	fmt.Fprintln(source, "\tplystraAddVary(writer.Header(), \"Origin\")")
+	fmt.Fprintln(source, "\torigins := request.Header.Values(\"Origin\")")
+	fmt.Fprintln(source, "\tif len(origins) == 0 {")
+	fmt.Fprintln(source, "\t\treturn false")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tif len(origins) != 1 || !plystraValidCORSOrigin(origins[0]) {")
+	fmt.Fprintln(source, "\t\twriter.WriteHeader(http.StatusForbidden)")
+	fmt.Fprintln(source, "\t\treturn true")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tresponseOrigin, allowed := plystraAllowedCORSOrigin(origins[0])")
+	fmt.Fprintln(source, "\tif !allowed {")
+	fmt.Fprintln(source, "\t\twriter.WriteHeader(http.StatusForbidden)")
+	fmt.Fprintln(source, "\t\treturn true")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tif request.Method != http.MethodOptions {")
+	fmt.Fprintln(source, "\t\tplystraSetCORSResponse(writer.Header(), responseOrigin)")
+	fmt.Fprintln(source, "\t\treturn false")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tplystraAddVary(writer.Header(), \"Access-Control-Request-Method\", \"Access-Control-Request-Headers\")")
+	fmt.Fprintln(source, "\tmethods := request.Header.Values(\"Access-Control-Request-Method\")")
+	fmt.Fprintln(source, "\tif len(methods) != 1 || methods[0] != http.MethodPost || !plystraAllowedCORSRequestHeaders(request.Header.Values(\"Access-Control-Request-Headers\")) {")
+	fmt.Fprintln(source, "\t\twriter.WriteHeader(http.StatusForbidden)")
+	fmt.Fprintln(source, "\t\treturn true")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tplystraSetCORSResponse(writer.Header(), responseOrigin)")
+	fmt.Fprintln(source, "\twriter.Header().Set(\"Access-Control-Allow-Methods\", plystraCORSAllowMethods)")
+	fmt.Fprintln(source, "\twriter.Header().Set(\"Access-Control-Allow-Headers\", plystraCORSAllowHeaders)")
+	fmt.Fprintln(source, "\twriter.WriteHeader(http.StatusNoContent)")
+	fmt.Fprintln(source, "\treturn true")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "func plystraAllowedCORSOrigin(origin string) (string, bool) {")
+	if corsAllowsWildcard(cors) {
+		fmt.Fprintln(source, "\treturn \"*\", true")
+	} else {
+		fmt.Fprintln(source, "\tswitch origin {")
+		fmt.Fprint(source, "\tcase ")
+		for index, origin := range cors.AllowedOrigins {
+			if index != 0 {
+				fmt.Fprint(source, ", ")
+			}
+			fmt.Fprint(source, strconv.Quote(origin))
+		}
+		fmt.Fprintln(source, ":")
+		fmt.Fprintln(source, "\t\treturn origin, true")
+		fmt.Fprintln(source, "\tdefault:")
+		fmt.Fprintln(source, "\t\treturn \"\", false")
+		fmt.Fprintln(source, "\t}")
+	}
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "func plystraValidCORSOrigin(origin string) bool {")
+	fmt.Fprintln(source, "\tif origin == \"\" || len(origin) > 4096 || strings.TrimSpace(origin) != origin || strings.Contains(origin, \",\") {")
+	fmt.Fprintln(source, "\t\treturn false")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tfor _, value := range []byte(origin) {")
+	fmt.Fprintln(source, "\t\tif value < 0x20 || value == 0x7f {")
+	fmt.Fprintln(source, "\t\t\treturn false")
+	fmt.Fprintln(source, "\t\t}")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\treturn true")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "func plystraAllowedCORSRequestHeaders(values []string) bool {")
+	fmt.Fprintln(source, "\tfor _, value := range values {")
+	fmt.Fprintln(source, "\t\tfor _, field := range strings.Split(value, \",\") {")
+	fmt.Fprintln(source, "\t\t\tswitch strings.ToLower(strings.TrimSpace(field)) {")
+	fmt.Fprintln(source, "\t\t\tcase \"authorization\", \"connect-protocol-version\", \"connect-timeout-ms\", \"content-type\":")
+	fmt.Fprintln(source, "\t\t\tdefault:")
+	fmt.Fprintln(source, "\t\t\t\treturn false")
+	fmt.Fprintln(source, "\t\t\t}")
+	fmt.Fprintln(source, "\t\t}")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\treturn true")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "func plystraSetCORSResponse(headers http.Header, origin string) {")
+	fmt.Fprintln(source, "\theaders.Set(\"Access-Control-Allow-Origin\", origin)")
+	fmt.Fprintln(source, "\tif plystraCORSAllowCredentials {")
+	fmt.Fprintln(source, "\t\theaders.Set(\"Access-Control-Allow-Credentials\", \"true\")")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
+	fmt.Fprintln(source, "func plystraAddVary(headers http.Header, values ...string) {")
+	fmt.Fprintln(source, "\tfor _, line := range headers.Values(\"Vary\") {")
+	fmt.Fprintln(source, "\t\tfor _, field := range strings.Split(line, \",\") {")
+	fmt.Fprintln(source, "\t\t\tif strings.TrimSpace(field) == \"*\" {")
+	fmt.Fprintln(source, "\t\t\t\treturn")
+	fmt.Fprintln(source, "\t\t\t}")
+	fmt.Fprintln(source, "\t\t}")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tfor _, value := range values {")
+	fmt.Fprintln(source, "\t\tpresent := false")
+	fmt.Fprintln(source, "\t\tfor _, line := range headers.Values(\"Vary\") {")
+	fmt.Fprintln(source, "\t\t\tfor _, field := range strings.Split(line, \",\") {")
+	fmt.Fprintln(source, "\t\t\t\tif strings.EqualFold(strings.TrimSpace(field), value) {")
+	fmt.Fprintln(source, "\t\t\t\t\tpresent = true")
+	fmt.Fprintln(source, "\t\t\t\t\tbreak")
+	fmt.Fprintln(source, "\t\t\t\t}")
+	fmt.Fprintln(source, "\t\t\t}")
+	fmt.Fprintln(source, "\t\t}")
+	fmt.Fprintln(source, "\t\tif !present {")
+	fmt.Fprintln(source, "\t\t\theaders.Add(\"Vary\", value)")
+	fmt.Fprintln(source, "\t\t}")
+	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "}")
+}
+
+func corsAllowsWildcard(cors applicationmeta.HTTPCORS) bool {
+	for _, origin := range cors.AllowedOrigins {
+		if origin == "*" {
+			return true
+		}
+	}
+	return false
 }
 
 func renderBoundaryHelpers(source *strings.Builder, useHTTPPath bool, requestedCapabilityIDs []string) {

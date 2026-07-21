@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/goname"
@@ -77,6 +78,7 @@ func Render(
 	wireMap protobufwiremap.Map,
 	descriptorSet []byte,
 	plan generationlowering.Plan,
+	cors *applicationmeta.HTTPCORS,
 	configurationProvenance transportprovenance.Provenance,
 ) ([]File, error) {
 	if !configurationProvenance.Valid() {
@@ -93,6 +95,14 @@ func Render(
 	}
 	if plan.ModulePath() != modulePath {
 		return nil, fmt.Errorf("%w: %w: invocation plan module %q does not match %q", ErrRender, ErrProjection, plan.ModulePath(), modulePath)
+	}
+	var normalizedCORS *applicationmeta.HTTPCORS
+	if cors != nil {
+		normalized, err := applicationmeta.NormalizeHTTPCORS(*cors)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w: selected CORS policy: %v", ErrRender, ErrProjection, err)
+		}
+		normalizedCORS = &normalized
 	}
 	operations := model.Operations()
 	aliases := model.Aliases()
@@ -156,7 +166,7 @@ func Render(
 	files = append(files, File{path: schemaRuntimePath, packageName: "connectschema", data: schemaSource})
 	for _, operation := range operations {
 		wire := wireByID[operation.ID().String()]
-		file, err := renderCanonical(modulePath, operation, aliasesByTarget[operation.ID().String()], wire, methodByPublicID[operation.ID().String()], errorDetail, plan.RequiresHTTPPath(operation.ID()))
+		file, err := renderCanonical(modulePath, operation, aliasesByTarget[operation.ID().String()], wire, methodByPublicID[operation.ID().String()], errorDetail, plan.RequiresHTTPPath(operation.ID()), normalizedCORS)
 		if err != nil {
 			return nil, fmt.Errorf("%w: Capability %s: %w", ErrRender, operation.ID(), err)
 		}
@@ -164,7 +174,7 @@ func Render(
 	}
 	for _, alias := range aliases {
 		target := operationByID[alias.Target().String()]
-		file, err := renderAlias(modulePath, alias, target, methodByPublicID[alias.ID().String()])
+		file, err := renderAlias(modulePath, alias, target, methodByPublicID[alias.ID().String()], normalizedCORS)
 		if err != nil {
 			return nil, fmt.Errorf("%w: Alias %s: %w", ErrRender, alias.ID(), err)
 		}

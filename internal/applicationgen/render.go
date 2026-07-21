@@ -158,6 +158,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		options.ProtobufWireMap,
 		descriptorEvidence.DescriptorSet(),
 		plan,
+		options.HTTPCORS,
 		transportProvenance,
 	)
 	if err != nil {
