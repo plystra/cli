@@ -1,11 +1,13 @@
 package javascriptgen
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufidentity"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
@@ -61,6 +63,13 @@ func bindTransport(operations []renderedOperation, options TransportOptions) ([]
 	}
 	if len(operations) != 0 && !options.Projection.Enabled() {
 		return nil, fmt.Errorf("%w: JavaScript operations require an enabled Connect transport projection", ErrRender)
+	}
+	expected, err := protobufdescriptor.Build(options.Projection, options.WireMap)
+	if err != nil {
+		return nil, fmt.Errorf("%w: rebuild JavaScript Connect descriptors: %v", ErrRender, err)
+	}
+	if !bytes.Equal(options.DescriptorSet, expected.DescriptorSet()) {
+		return nil, fmt.Errorf("%w: JavaScript Connect descriptors do not exactly match the normalized Protobuf projection and wire map", ErrRender)
 	}
 
 	canonical := make(map[string]protobufmodel.Operation, len(options.Projection.Operations()))

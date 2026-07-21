@@ -3,6 +3,7 @@ package javascriptgen_test
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -127,6 +128,11 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		if bytes.Contains(bytes.ToLower(combined), []byte(forbidden)) {
 			t.Fatalf("generated package contains forbidden provider/server value %q", forbidden)
 		}
+	}
+	descriptors := fileData(t, files, "generated/sdk/javascript/src/descriptors.ts")
+	encodedDescriptorSet := base64.StdEncoding.EncodeToString(options.Transport.DescriptorSet)
+	if bytes.Count(descriptors, []byte(encodedDescriptorSet)) != 1 {
+		t.Fatal("generated JavaScript descriptors do not embed the exact deterministic Protobuf descriptor set once")
 	}
 	assertGoldenPackage(t, files)
 
@@ -283,6 +289,12 @@ func TestRenderCanonicalJavaScriptRejectsInvalidInputs(t *testing.T) {
 	corrupt.Transport.DescriptorSet = []byte{0xff}
 	if files, err := javascriptgen.Render(corrupt, model); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "Connect descriptors") {
 		t.Fatalf("Render(corrupt descriptors) = %#v, %v", files, err)
+	}
+	extra := javascriptTarget(t, "id: audit.record/v1\n")
+	mismatched := javascriptgen.Options{PackageName: "valid-sdk", ConfigurationProvenance: provenance, Transport: transport}
+	mismatched.Transport.DescriptorSet = javascriptOptions(t, "valid-sdk", []javascriptTargetView{target, extra}, nil).Transport.DescriptorSet
+	if files, err := javascriptgen.Render(mismatched, model); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "do not exactly match") {
+		t.Fatalf("Render(valid mismatched descriptors) = %#v, %v", files, err)
 	}
 }
 
