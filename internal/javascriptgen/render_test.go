@@ -28,14 +28,18 @@ var updateJavaScriptGolden = flag.Bool("update", false, "update generated JavaSc
 
 const javascriptEmailSchema = `id: email.send/v1
 request:
+  checkpoints: {type: array, items: integer}
+  offset: {type: integer}
   to: {type: string, required: true}
   tags: {type: array, items: string, required: true}
-  retries: {type: integer, enum: [-1, 0, 2]}
+  retries: {type: integer, enum: [-9223372036854775808, 0, 9223372036854775807]}
   priority: {type: string, required: true, enum: [normal, urgent]}
   metadata: {type: object}
 response:
   accepted: {type: boolean, required: true}
   latency: {type: number}
+  positions: {type: array, items: integer}
+  revision: {type: integer}
 errors: [temporarily_unavailable, invalid_recipient]
 extensions:
   authn: {authenticated: true}
@@ -110,7 +114,9 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		`resolveUnaryMethod`,
 		`/** @deprecated Use email.send/v1 instead. */`,
 		`export type ErrorCode = "invalid_recipient" | "temporarily_unavailable";`,
-		`Number.isSafeInteger`,
+		`isSignedInteger`,
+		`bigint`,
+		`9223372036854775807n`,
 		`getAccessToken`,
 		`raw token without the Bearer scheme`,
 		`"typescript": "7.0.2"`,
@@ -207,6 +213,41 @@ func TestRenderJavaScriptAliasesReuseCanonicalOperation(t *testing.T) {
 	}
 }
 
+func TestRenderJavaScriptPreservesSigned64BitIntegers(t *testing.T) {
+	t.Parallel()
+
+	target := javascriptTarget(t, `id: metrics.record/v1
+request:
+  count: {type: integer, required: true}
+  mode: {type: integer, required: true, enum: [-9223372036854775808, 9223372036854775807]}
+  offsets: {type: array, items: integer, required: true}
+response:
+  count: {type: integer, required: true}
+`)
+	model := javascriptModel(t, target)
+	files, err := javascriptgen.Render(javascriptOptions(t, "metrics-sdk", []javascriptTargetView{target}, nil), model)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	source := fileData(t, files, "generated/sdk/javascript/src/operations/metrics/record/v1.ts")
+	for _, required := range []string{
+		`readonly "count": bigint;`,
+		`readonly "mode": -9223372036854775808n | 9223372036854775807n;`,
+		`readonly "offsets": ReadonlyArray<bigint>;`,
+		`isSignedInteger(value["count"])`,
+		`{ canonical: -9223372036854775808n,`,
+		`{ canonical: 9223372036854775807n,`,
+	} {
+		if !bytes.Contains(source, []byte(required)) {
+			t.Fatalf("generated signed-integer operation omits %q:\n%s", required, source)
+		}
+	}
+	readme := fileData(t, files, "generated/sdk/javascript/README.md")
+	if !bytes.Contains(readme, []byte(`client.metrics.record.v1({"count":0n,"mode":-9223372036854775808n,"offsets":[]})`)) {
+		t.Fatalf("generated README does not use bigint request literals:\n%s", readme)
+	}
+}
+
 func TestRenderCanonicalJavaScriptHandlesDeepAndCollidingNames(t *testing.T) {
 	t.Parallel()
 
@@ -276,11 +317,6 @@ func TestRenderCanonicalJavaScriptRejectsInvalidInputs(t *testing.T) {
 	}
 	if files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "valid-sdk", ConfigurationProvenance: provenance, Transport: transport}, sdkmodel.Model{}); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "SDK model") {
 		t.Fatalf("Render(zero model) = %#v, %v", files, err)
-	}
-	unsafeTarget := javascriptTarget(t, "id: metrics.record/v1\nrequest:\n  count: {type: integer, required: true, enum: [9007199254740992]}\n")
-	unsafeInteger := javascriptModel(t, unsafeTarget)
-	if files, err := javascriptgen.Render(javascriptOptions(t, "valid-sdk", []javascriptTargetView{unsafeTarget}, nil), unsafeInteger); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "safe-integer") {
-		t.Fatalf("Render(unsafe integer enum) = %#v, %v", files, err)
 	}
 	if files, err := javascriptgen.Render(javascriptgen.Options{PackageName: "valid-sdk", ConfigurationProvenance: provenance}, model); !errors.Is(err, javascriptgen.ErrRender) || len(files) != 0 || !strings.Contains(err.Error(), "transport projection") {
 		t.Fatalf("Render(missing transport) = %#v, %v", files, err)

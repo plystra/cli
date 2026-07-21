@@ -283,6 +283,9 @@ func renderOperation(operation renderedOperation) ([]byte, error) {
 	fmt.Fprintln(&source, "  createRuntime,")
 	fmt.Fprintln(&source, "  hasOwn,")
 	fmt.Fprintln(&source, "  invoke,")
+	if operationUsesInteger(operation.operation) {
+		fmt.Fprintln(&source, "  isSignedInteger,")
+	}
 	if operationUsesJSONValue(operation.operation) {
 		fmt.Fprintln(&source, "  isJSONValue,")
 	}
@@ -600,6 +603,8 @@ func renderREADME(packageName string, operations []renderedOperation) []byte {
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "The Plystra wrapper resolves generated Protobuf descriptors and sends binary Connect requests through its pinned `@bufbuild/protobuf`, `@connectrpc/connect`, and `@connectrpc/connect-web` dependencies. Application code does not construct raw Protobuf messages or Connect clients, and raw Connect errors are normalized before they cross the wrapper boundary.")
 	fmt.Fprintln(&readme)
+	fmt.Fprintln(&readme, "Canonical `integer` fields and integer array items are signed 64-bit values exposed as JavaScript `bigint`, including enum literals such as `0n`. Pass `bigint`, not `number`, so request and response values remain exact across the full range.")
+	fmt.Fprintln(&readme)
 	if len(operations) == 0 {
 		fmt.Fprintln(&readme, "This application currently exposes no JavaScript Capability operations.")
 		return []byte(readme.String())
@@ -664,7 +669,7 @@ func typescriptType(field sdkmodel.Field) string {
 	if len(enum) != 0 {
 		values := make([]string, len(enum))
 		for index, value := range enum {
-			values[index] = string(value)
+			values[index] = typescriptScalarLiteral(field.Kind(), value)
 		}
 		return strings.Join(values, " | ")
 	}
@@ -678,7 +683,9 @@ func typescriptKind(kind sdkmodel.Kind) string {
 	switch kind {
 	case sdkmodel.KindString:
 		return "string"
-	case sdkmodel.KindInteger, sdkmodel.KindNumber:
+	case sdkmodel.KindInteger:
+		return "bigint"
+	case sdkmodel.KindNumber:
 		return "number"
 	case sdkmodel.KindBoolean:
 		return "boolean"
@@ -694,11 +701,11 @@ func validValue(field sdkmodel.Field, expression string) string {
 	if len(enum) != 0 {
 		values := make([]string, len(enum))
 		for index, value := range enum {
-			values[index] = expression + " === " + string(value)
+			values[index] = expression + " === " + typescriptScalarLiteral(field.Kind(), value)
 		}
 		valid := "(" + strings.Join(values, " || ") + ")"
 		if field.Kind() == sdkmodel.KindInteger {
-			valid = "Number.isSafeInteger(" + expression + ") && " + valid
+			valid = "isSignedInteger(" + expression + ") && " + valid
 		}
 		return valid
 	}
@@ -709,15 +716,13 @@ func validValue(field sdkmodel.Field, expression string) string {
 }
 
 func validateJavaScriptFields(section string, fields []sdkmodel.Field) error {
-	const maximumSafeInteger = int64(9_007_199_254_740_991)
 	for _, field := range fields {
 		if field.Kind() != sdkmodel.KindInteger {
 			continue
 		}
 		for _, raw := range field.EnumJSON() {
-			value, err := strconv.ParseInt(string(raw), 10, 64)
-			if err != nil || value < -maximumSafeInteger || value > maximumSafeInteger {
-				return fmt.Errorf("%w: %s field %q enum value %s is outside the JavaScript safe-integer range", ErrRender, section, field.Name(), raw)
+			if _, err := strconv.ParseInt(string(raw), 10, 64); err != nil {
+				return fmt.Errorf("%w: %s field %q enum value %s is outside the signed 64-bit integer range", ErrRender, section, field.Name(), raw)
 			}
 		}
 	}
@@ -729,7 +734,7 @@ func validKind(kind sdkmodel.Kind, expression string) string {
 	case sdkmodel.KindString:
 		return "typeof " + expression + " === \"string\""
 	case sdkmodel.KindInteger:
-		return "typeof " + expression + " === \"number\" && Number.isSafeInteger(" + expression + ")"
+		return "isSignedInteger(" + expression + ")"
 	case sdkmodel.KindNumber:
 		return "typeof " + expression + " === \"number\" && Number.isFinite(" + expression + ")"
 	case sdkmodel.KindBoolean:
@@ -745,6 +750,17 @@ func operationUsesJSONValue(operation sdkmodel.Operation) bool {
 	for _, fields := range [][]sdkmodel.Field{operation.Request(), operation.Response()} {
 		for _, field := range fields {
 			if field.Kind() == sdkmodel.KindObject || field.Kind() == sdkmodel.KindArray && field.Items() == sdkmodel.KindObject {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func operationUsesInteger(operation sdkmodel.Operation) bool {
+	for _, fields := range [][]sdkmodel.Field{operation.Request(), operation.Response()} {
+		for _, field := range fields {
+			if field.Kind() == sdkmodel.KindInteger || field.Kind() == sdkmodel.KindArray && field.Items() == sdkmodel.KindInteger {
 				return true
 			}
 		}
@@ -792,42 +808,52 @@ func clientAccessor(operation renderedOperation) string {
 }
 
 func exampleRequest(fields []sdkmodel.Field) string {
-	values := make(map[string]any)
+	var result strings.Builder
+	result.WriteByte('{')
+	written := 0
 	for _, field := range fields {
 		if !field.Required() {
 			continue
 		}
-		values[field.Name()] = exampleValue(field)
+		if written != 0 {
+			result.WriteByte(',')
+		}
+		result.WriteString(jsString(field.Name()))
+		result.WriteByte(':')
+		result.WriteString(exampleValue(field))
+		written++
 	}
-	encoded, err := json.Marshal(values)
-	if err != nil {
-		panic(err)
-	}
-	return string(encoded)
+	result.WriteByte('}')
+	return result.String()
 }
 
-func exampleValue(field sdkmodel.Field) any {
+func exampleValue(field sdkmodel.Field) string {
 	if values := field.EnumJSON(); len(values) != 0 {
-		var result any
-		if err := json.Unmarshal(values[0], &result); err != nil {
-			panic(err)
-		}
-		return result
+		return typescriptScalarLiteral(field.Kind(), values[0])
 	}
 	switch field.Kind() {
 	case sdkmodel.KindString:
-		return "value"
-	case sdkmodel.KindInteger, sdkmodel.KindNumber:
-		return 0
+		return jsString("value")
+	case sdkmodel.KindInteger:
+		return "0n"
+	case sdkmodel.KindNumber:
+		return "0"
 	case sdkmodel.KindBoolean:
-		return false
+		return "false"
 	case sdkmodel.KindObject:
-		return map[string]any{}
+		return "{}"
 	case sdkmodel.KindArray:
-		return []any{}
+		return "[]"
 	default:
 		panic("unsupported normalized SDK kind " + string(field.Kind()))
 	}
+}
+
+func typescriptScalarLiteral(kind sdkmodel.Kind, value json.RawMessage) string {
+	if kind == sdkmodel.KindInteger {
+		return string(value) + "n"
+	}
+	return string(value)
 }
 
 func validPackageName(value string) bool {

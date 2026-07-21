@@ -1243,6 +1243,12 @@ const client = createPlystraClient({
 const item = await client.catalog.item.get.v1({item_id: "coffee"});
 ```
 
+Canonical `integer` fields are signed 64-bit values and use JavaScript
+`bigint` in generated requests, responses, arrays, and enum literals. Write
+values such as `42n`; passing a JavaScript `number` is rejected even when it is
+currently within the safe-number range, so the same API remains exact across
+the complete contract range.
+
 `getAccessToken` returns the raw token only. The generated transport adds the
 `Bearer` authorization scheme; do not include `Bearer` in the callback result.
 An already-prefixed value fails locally before any request is sent.

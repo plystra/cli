@@ -324,7 +324,7 @@ func renderMessageCodec(source *strings.Builder, name string, codec messageCodec
 		if len(field.enum) != 0 {
 			fmt.Fprintln(source, "      enum: [")
 			for _, member := range field.enum {
-				fmt.Fprintf(source, "        { canonical: %s, protobufName: %s },\n", member.canonical, jsString(member.protobufName))
+				fmt.Fprintf(source, "        { canonical: %s, protobufName: %s },\n", typescriptScalarLiteral(field.kind, member.canonical), jsString(member.protobufName))
 			}
 			fmt.Fprintln(source, "      ],")
 		}

@@ -4,6 +4,7 @@ import {
   createRuntime,
   hasOwn,
   invoke,
+  isSignedInteger,
   isJSONValue,
   isPlainObject,
   PlystraError,
@@ -16,7 +17,7 @@ import {
 import { resolveUnaryMethod } from "../../../descriptors.js";
 
 export const capabilityID = "email.send/v1";
-export const contractDigest = "sha256:9b01b630e8fae8883269196c6888aefec9416b903ac0076c08695e8de86b7a07";
+export const contractDigest = "sha256:f8a801ed064ea942c0a6999e45359fba607be8d62fabce6d6ebec8909a5b3833";
 const method = resolveUnaryMethod(
   "plystra.generated.email.send.v1.EmailSendV1Service",
   "Invoke",
@@ -26,9 +27,22 @@ const method = resolveUnaryMethod(
 const requestCodec: MessageCodec = {
   fields: [
     {
+      canonicalName: "checkpoints",
+      protobufJSONName: "checkpoints",
+      kind: "array",
+      items: "integer",
+      required: false,
+    },
+    {
       canonicalName: "metadata",
       protobufJSONName: "metadata",
       kind: "object",
+      required: false,
+    },
+    {
+      canonicalName: "offset",
+      protobufJSONName: "offset",
+      kind: "integer",
       required: false,
     },
     {
@@ -47,9 +61,9 @@ const requestCodec: MessageCodec = {
       kind: "integer",
       required: false,
       enum: [
-        { canonical: -1, protobufName: "EMAILSENDV1REQUESTRETRIESENUM_VALUE_1BAD6B8CF97131FCEAB8543E81F7757195FBB1D36B376EE994AD1CF17699C464" },
-        { canonical: 0, protobufName: "EMAILSENDV1REQUESTRETRIESENUM_VALUE_5FECEB66FFC86F38D952786C6D696C79C2DBC239DD4E91B46729D73A27FB57E9" },
-        { canonical: 2, protobufName: "EMAILSENDV1REQUESTRETRIESENUM_VALUE_D4735E3A265E16EEE03F59718B9B5D03019C07D8B6C51F90DA3A666EEC13AB35" },
+        { canonical: -9223372036854775808n, protobufName: "EMAILSENDV1REQUESTRETRIESENUM_VALUE_85386477F3AF47E4A0B308EE3B3A688DF16E8B2228105DD7D4DCD42A9807CB78" },
+        { canonical: 0n, protobufName: "EMAILSENDV1REQUESTRETRIESENUM_VALUE_5FECEB66FFC86F38D952786C6D696C79C2DBC239DD4E91B46729D73A27FB57E9" },
+        { canonical: 9223372036854775807n, protobufName: "EMAILSENDV1REQUESTRETRIESENUM_VALUE_B34A1C30A715F6BF8B7243AFA7FAB883CE3612B7231716BDCBBDC1982E1AED29" },
       ],
     },
     {
@@ -81,13 +95,28 @@ const responseCodec: MessageCodec = {
       kind: "number",
       required: false,
     },
+    {
+      canonicalName: "positions",
+      protobufJSONName: "positions",
+      kind: "array",
+      items: "integer",
+      required: false,
+    },
+    {
+      canonicalName: "revision",
+      protobufJSONName: "revision",
+      kind: "integer",
+      required: false,
+    },
   ],
 };
 
 export interface Request {
+  readonly "checkpoints"?: ReadonlyArray<bigint>;
   readonly "metadata"?: Readonly<Record<string, JSONValue>>;
+  readonly "offset"?: bigint;
   readonly "priority": "normal" | "urgent";
-  readonly "retries"?: -1 | 0 | 2;
+  readonly "retries"?: -9223372036854775808n | 0n | 9223372036854775807n;
   readonly "tags": ReadonlyArray<string>;
   readonly "to": string;
 }
@@ -95,6 +124,8 @@ export interface Request {
 export interface Response {
   readonly "accepted": boolean;
   readonly "latency"?: number;
+  readonly "positions"?: ReadonlyArray<bigint>;
+  readonly "revision"?: bigint;
 }
 
 export type ErrorCode = "invalid_recipient" | "temporarily_unavailable";
@@ -102,10 +133,12 @@ export type ErrorCode = "invalid_recipient" | "temporarily_unavailable";
 function isRequest(value: unknown): value is Request {
   return (
     isPlainObject(value) &&
-    Object.keys(value).every((key) => key === "metadata" || key === "priority" || key === "retries" || key === "tags" || key === "to") &&
+    Object.keys(value).every((key) => key === "checkpoints" || key === "metadata" || key === "offset" || key === "priority" || key === "retries" || key === "tags" || key === "to") &&
+    (!hasOwn(value, "checkpoints") || Array.isArray(value["checkpoints"]) && value["checkpoints"].every((item) => isSignedInteger(item))) &&
     (!hasOwn(value, "metadata") || isPlainObject(value["metadata"]) && isJSONValue(value["metadata"])) &&
+    (!hasOwn(value, "offset") || isSignedInteger(value["offset"])) &&
     hasOwn(value, "priority") && (value["priority"] === "normal" || value["priority"] === "urgent") &&
-    (!hasOwn(value, "retries") || Number.isSafeInteger(value["retries"]) && (value["retries"] === -1 || value["retries"] === 0 || value["retries"] === 2)) &&
+    (!hasOwn(value, "retries") || isSignedInteger(value["retries"]) && (value["retries"] === -9223372036854775808n || value["retries"] === 0n || value["retries"] === 9223372036854775807n)) &&
     hasOwn(value, "tags") && Array.isArray(value["tags"]) && value["tags"].every((item) => typeof item === "string") &&
     hasOwn(value, "to") && typeof value["to"] === "string"
   );
@@ -114,9 +147,11 @@ function isRequest(value: unknown): value is Request {
 function isResponse(value: unknown): value is Response {
   return (
     isPlainObject(value) &&
-    Object.keys(value).every((key) => key === "accepted" || key === "latency") &&
+    Object.keys(value).every((key) => key === "accepted" || key === "latency" || key === "positions" || key === "revision") &&
     hasOwn(value, "accepted") && typeof value["accepted"] === "boolean" &&
-    (!hasOwn(value, "latency") || typeof value["latency"] === "number" && Number.isFinite(value["latency"]))
+    (!hasOwn(value, "latency") || typeof value["latency"] === "number" && Number.isFinite(value["latency"])) &&
+    (!hasOwn(value, "positions") || Array.isArray(value["positions"]) && value["positions"].every((item) => isSignedInteger(item))) &&
+    (!hasOwn(value, "revision") || isSignedInteger(value["revision"]))
   );
 }
 

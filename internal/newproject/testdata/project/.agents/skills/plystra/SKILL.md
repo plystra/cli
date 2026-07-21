@@ -1056,6 +1056,9 @@ sends binary Connect requests through the pinned direct @bufbuild/protobuf,
 @connectrpc/connect, and @connectrpc/connect-web dependencies. Application
 callers do not construct raw Protobuf messages or Connect clients and do not
 receive raw ConnectError values.
+Canonical integer fields, integer array items, and integer enum members are
+signed 64-bit bigint values in this public API. Use literals such as 42n and
+never coerce them to JavaScript number values.
 When configuring getAccessToken, return only the raw token. The generated
 transport adds the Bearer authorization scheme and rejects a callback value
 that already includes the Bearer scheme before sending a request.

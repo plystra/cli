@@ -10,7 +10,7 @@ export type { ErrorCode, Operation, Request, Response } from "../../../operation
 
 export const capabilityID = "compat.send/v1";
 export const targetCapabilityID = "email.send/v1";
-export const contractDigest = "sha256:9b01b630e8fae8883269196c6888aefec9416b903ac0076c08695e8de86b7a07";
+export const contractDigest = "sha256:f8a801ed064ea942c0a6999e45359fba607be8d62fabce6d6ebec8909a5b3833";
 const method = resolveUnaryMethod(
   "plystra.generated.compat.send.v1.CompatSendV1Service",
   "Invoke",

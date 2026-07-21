@@ -15,6 +15,8 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 const maximumPayloadBytes = 1_048_576;
 const maximumCredentialBytes = 65_536;
 const maximumJSONDepth = 64;
+const minimumSignedInteger = -9_223_372_036_854_775_808n;
+const maximumSignedInteger = 9_223_372_036_854_775_807n;
 
 export type Awaitable<T> = T | PromiseLike<T>;
 export type JSONPrimitive = string | number | boolean | null;
@@ -57,7 +59,7 @@ export type FieldKind =
   | "array";
 
 export interface EnumCodec {
-  readonly canonical: string | number | boolean;
+  readonly canonical: string | bigint | number | boolean;
   readonly protobufName: string;
 }
 
@@ -213,6 +215,14 @@ export function isJSONValue(value: unknown): value is JSONValue {
   return isJSONValueAtDepth(value, 0, new Set<object>());
 }
 
+export function isSignedInteger(value: unknown): value is bigint {
+  return (
+    typeof value === "bigint" &&
+    value >= minimumSignedInteger &&
+    value <= maximumSignedInteger
+  );
+}
+
 function encodeMessage<Desc extends DescMessage>(
   descriptor: Desc,
   codec: MessageCodec,
@@ -252,10 +262,10 @@ function encodeField(field: FieldCodec, value: unknown): ProtobufJSONValue {
       if (typeof value !== "string") throw new TypeError("request string is invalid");
       return value;
     case "integer":
-      if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+      if (!isSignedInteger(value)) {
         throw new TypeError("request integer is invalid");
       }
-      return String(value);
+      return value.toString();
     case "number":
       if (typeof value !== "number" || !Number.isFinite(value)) {
         throw new TypeError("request number is invalid");
@@ -289,10 +299,10 @@ function encodeArrayItem(
       if (typeof value !== "string") throw new TypeError("request array item is invalid");
       return value;
     case "integer":
-      if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+      if (!isSignedInteger(value)) {
         throw new TypeError("request array item is invalid");
       }
-      return String(value);
+      return value.toString();
     case "number":
       if (typeof value !== "number" || !Number.isFinite(value)) {
         throw new TypeError("request array item is invalid");
@@ -417,17 +427,23 @@ function decodeArrayItem(
   }
 }
 
-function decodeInteger(value: unknown): number {
-  let decoded: number;
-  if (typeof value === "string" && /^-?(?:0|[1-9][0-9]*)$/.test(value)) {
-    decoded = Number(value);
-  } else if (typeof value === "number") {
-    decoded = value;
-  } else {
+function decodeInteger(value: unknown): bigint {
+  let decoded: bigint;
+  try {
+    if (typeof value === "string" && /^-?(?:0|[1-9][0-9]*)$/.test(value)) {
+      decoded = BigInt(value);
+    } else if (typeof value === "bigint") {
+      decoded = value;
+    } else if (typeof value === "number" && Number.isSafeInteger(value)) {
+      decoded = BigInt(value);
+    } else {
+      throw new TypeError("response integer is invalid");
+    }
+  } catch {
     throw new TypeError("response integer is invalid");
   }
-  if (!Number.isSafeInteger(decoded)) {
-    throw new TypeError("response integer is outside the safe range");
+  if (!isSignedInteger(decoded)) {
+    throw new TypeError("response integer is outside the signed 64-bit range");
   }
   return decoded;
 }

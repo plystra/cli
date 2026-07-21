@@ -61,7 +61,14 @@ test("nested client sends binary Connect with one access token", async () => {
     getAccessToken: async () => "browser-token",
     fetch: async (input, init) => {
       calls.push({ input, init, signalAborted: init.signal?.aborted });
-      return protobufResponse(emailMethod, { accepted: true, latency: 1.5 });
+      return protobufResponse(emailMethod, {
+        accepted: true,
+        latency: 1.5,
+        positions: {
+          values: ["-9223372036854775808", "9223372036854775807"],
+        },
+        revision: "9223372036854775807",
+      });
     },
   });
 
@@ -70,13 +77,26 @@ test("nested client sends binary Connect with one access token", async () => {
       to: "person@example.com",
       tags: ["welcome"],
       priority: "urgent",
-      retries: 2,
+      checkpoints: [
+        -9_223_372_036_854_775_808n,
+        9_223_372_036_854_775_807n,
+      ],
+      offset: -9_223_372_036_854_775_808n,
+      retries: 9_223_372_036_854_775_807n,
       metadata: { nested: [true, null, { count: 1 }] },
     },
     { signal: controller.signal },
   );
 
-  assert.deepEqual(response, { accepted: true, latency: 1.5 });
+  assert.deepEqual(response, {
+    accepted: true,
+    latency: 1.5,
+    positions: [
+      -9_223_372_036_854_775_808n,
+      9_223_372_036_854_775_807n,
+    ],
+    revision: 9_223_372_036_854_775_807n,
+  });
   assert.equal(calls.length, 1);
   const [{ input, init, signalAborted }] = calls;
   assert.equal(
@@ -98,9 +118,13 @@ test("nested client sends binary Connect with one access token", async () => {
     nested: [true, null, { count: 1 }],
   });
   assert.deepEqual(encoded.tags, { values: ["welcome"] });
+  assert.deepEqual(encoded.checkpoints, {
+    values: ["-9223372036854775808", "9223372036854775807"],
+  });
+  assert.equal(encoded.offset, "-9223372036854775808");
   assert.equal(encoded.to, "person@example.com");
   assert.notEqual(encoded.priority, "urgent");
-  assert.notEqual(encoded.retries, 2);
+  assert.notEqual(encoded.retries, 9_223_372_036_854_775_807n);
   assert.equal(Object.isFrozen(client), true);
   assert.equal(Object.isFrozen(client.email), true);
   assert.equal(Object.isFrozen(client.email.send), true);
@@ -193,6 +217,18 @@ test("request validation rejects malformed and oversized values before fetch", a
       tags: [],
       priority: "normal",
       unexpected: true,
+    },
+    {
+      to: "person@example.com",
+      tags: [],
+      priority: "normal",
+      offset: 1,
+    },
+    {
+      to: "person@example.com",
+      tags: [],
+      priority: "normal",
+      offset: 9_223_372_036_854_775_808n,
     },
   ];
   for (const request of invalid) {
