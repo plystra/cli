@@ -254,6 +254,7 @@ const tsconfigSource = `{
     "rootDir": "src",
     "outDir": "dist",
     "declaration": true,
+    "stripInternal": true,
     "noEmitOnError": true,
     "strict": true,
     "exactOptionalPropertyTypes": true,
@@ -314,10 +315,12 @@ func renderOperation(operation renderedOperation) ([]byte, error) {
 	fmt.Fprintln(&source, "  options?: RequestOptions,")
 	fmt.Fprintln(&source, ") => Promise<Response>;")
 	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "/** @internal */")
 	fmt.Fprintln(&source, "export function bindOperation(runtime: Runtime): Operation {")
 	fmt.Fprintln(&source, "  return bindOperationMethod(runtime, method);")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "/** @internal */")
 	fmt.Fprintln(&source, "export function bindOperationMethod(runtime: Runtime, operationMethod: typeof method): Operation {")
 	fmt.Fprintln(&source, "  return async (request, options = {}) => {")
 	fmt.Fprintln(&source, "    let requestIsValid = false;")
@@ -367,7 +370,7 @@ func renderAliasOperation(alias renderedOperation) ([]byte, error) {
 	fmt.Fprintf(&source, "export const contractDigest = %s;\n", jsString(alias.operation.ContractDigest()))
 	renderMethodResolver(&source, alias.transport)
 	fmt.Fprintln(&source)
-	renderJSDocDeprecation(&source, "", alias.deprecated)
+	fmt.Fprintln(&source, "/** @internal */")
 	fmt.Fprintln(&source, "export function bindOperation(runtime: Runtime): Operation {")
 	fmt.Fprintln(&source, "  return bindCanonicalOperationMethod(runtime, method);")
 	fmt.Fprintln(&source, "}")
@@ -601,7 +604,7 @@ func renderREADME(packageName string, operations []renderedOperation) []byte {
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "The generated `.npmrc` disables lockfile creation because this package is CLI-owned. Installation may create only the ignored `node_modules/` and `dist/` validation outputs.")
 	fmt.Fprintln(&readme)
-	fmt.Fprintln(&readme, "The Plystra wrapper resolves generated Protobuf descriptors and sends binary Connect requests through its pinned `@bufbuild/protobuf`, `@connectrpc/connect`, and `@connectrpc/connect-web` dependencies. Application code does not construct raw Protobuf messages or Connect clients, and raw Connect errors are normalized before they cross the wrapper boundary.")
+	fmt.Fprintln(&readme, "The Plystra wrapper resolves generated Protobuf descriptors and sends binary Connect requests through its pinned `@bufbuild/protobuf`, `@connectrpc/connect`, and `@connectrpc/connect-web` dependencies. Application code does not construct raw Protobuf messages or Connect clients, and raw Connect errors are normalized before they cross the wrapper boundary. Import only the package root; the export map blocks internal subpaths and generated declarations omit transport, descriptor, codec, and binder internals.")
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "Canonical `integer` fields and integer array items are signed 64-bit values exposed as JavaScript `bigint`, including enum literals such as `0n`. Pass `bigint`, not `number`, so request and response values remain exact across the full range.")
 	fmt.Fprintln(&readme)

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { fromBinary, fromJson, toBinary, toJson } from "@bufbuild/protobuf";
+import { ConnectError } from "@connectrpc/connect";
 import {
   PlystraError,
   createCompatSendV1,
@@ -43,6 +45,41 @@ function connectErrorResponse(code, message, status) {
     headers: { "Content-Type": "application/json" },
   });
 }
+
+test("package exports and declarations hide Connect internals", async () => {
+  for (const specifier of [
+    "@acme/project-sdk/runtime.js",
+    "@acme/project-sdk/descriptors.js",
+    "@acme/project-sdk/dist/runtime.js",
+  ]) {
+    await assert.rejects(
+      import(specifier),
+      (error) => error?.code === "ERR_PACKAGE_PATH_NOT_EXPORTED",
+    );
+  }
+
+  const [runtimeDeclaration, descriptorDeclaration, operationDeclaration] =
+    await Promise.all([
+      readFile(new URL("../dist/runtime.d.ts", import.meta.url), "utf8"),
+      readFile(new URL("../dist/descriptors.d.ts", import.meta.url), "utf8"),
+      readFile(
+        new URL("../dist/operations/email/send/v1.d.ts", import.meta.url),
+        "utf8",
+      ),
+    ]);
+  assert.doesNotMatch(
+    runtimeDeclaration,
+    /\b(?:ConnectError|Transport|Runtime|MessageCodec|createRuntime|invoke)\b/,
+  );
+  assert.doesNotMatch(
+    descriptorDeclaration,
+    /\b(?:DescMethodUnary|resolveUnaryMethod)\b/,
+  );
+  assert.doesNotMatch(
+    operationDeclaration,
+    /\bbindOperation(?:Method)?\b/,
+  );
+});
 
 async function requestJSON(method, body) {
   const bytes = new Uint8Array(await new Response(body).arrayBuffer());
@@ -290,8 +327,10 @@ test("response and Connect errors expose only Plystra-owned stable fields", asyn
       assert.equal(error.detailCode, undefined);
       assert.equal(error.message, "capability_error");
       assert.equal(error instanceof Error && error.name, "PlystraError");
+      assert.equal(error instanceof ConnectError, false);
       assert.equal("rawMessage" in error, false);
       assert.equal("details" in error, false);
+      assert.equal("cause" in error, false);
       return true;
     },
   );

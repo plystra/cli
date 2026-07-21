@@ -13,6 +13,13 @@ import {
   type MailDeliverV1ErrorCode,
 } from "@acme/project-sdk";
 
+// @ts-expect-error raw Connect errors are not exported by the Plystra SDK.
+import { ConnectError } from "@acme/project-sdk";
+// @ts-expect-error raw Connect transport types are not exported by the Plystra SDK.
+import type { Transport } from "@acme/project-sdk";
+// @ts-expect-error internal generated modules are blocked by the package export map.
+import { createRuntime } from "@acme/project-sdk/dist/runtime.js";
+
 const options: ClientOptions = {
   baseUrl: "https://api.example.test",
   fetch: async () =>

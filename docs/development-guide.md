@@ -1264,6 +1264,11 @@ malformed-response, and schema failures are normalized to stable Plystra error
 fields. Provider packages, runtime configuration, verified internal context,
 and Secrets must not appear in the package.
 
+Import the SDK only through its generated package root. Its export map blocks
+runtime, descriptor, and generated-operation implementation subpaths, and its
+declarations omit transport, codec, descriptor, and binder internals even
+though those modules remain packaged for the wrapper's own execution.
+
 ## Develop a generation extension
 
 Generation extensions are advanced trusted build dependencies for Plugins that

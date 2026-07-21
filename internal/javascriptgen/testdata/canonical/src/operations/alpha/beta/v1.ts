@@ -55,10 +55,12 @@ export type Operation = (
   options?: RequestOptions,
 ) => Promise<Response>;
 
+/** @internal */
 export function bindOperation(runtime: Runtime): Operation {
   return bindOperationMethod(runtime, method);
 }
 
+/** @internal */
 export function bindOperationMethod(runtime: Runtime, operationMethod: typeof method): Operation {
   return async (request, options = {}) => {
     let requestIsValid = false;

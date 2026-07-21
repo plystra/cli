@@ -18,7 +18,7 @@ const method = resolveUnaryMethod(
   "plystra.generated.email.send.v1.EmailSendV1Response",
 );
 
-/** @deprecated Use email.send/v1 instead. */
+/** @internal */
 export function bindOperation(runtime: Runtime): Operation {
   return bindCanonicalOperationMethod(runtime, method);
 }

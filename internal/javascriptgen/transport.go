@@ -233,6 +233,7 @@ func renderDescriptorSource(descriptorSet []byte) []byte {
 	fmt.Fprintln(&source, "descriptorSet.file = orderDescriptorFiles(descriptorSet.file);")
 	fmt.Fprintln(&source, "const registry = createFileRegistry(descriptorSet);")
 	fmt.Fprintln(&source)
+	fmt.Fprintln(&source, "/** @internal */")
 	fmt.Fprintln(&source, "export function resolveUnaryMethod(")
 	fmt.Fprintln(&source, "  serviceType: string,")
 	fmt.Fprintln(&source, "  methodName: string,")

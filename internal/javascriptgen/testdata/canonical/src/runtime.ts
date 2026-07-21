@@ -50,6 +50,7 @@ export class PlystraError extends Error {
   }
 }
 
+/** @internal */
 export type FieldKind =
   | "string"
   | "integer"
@@ -58,11 +59,13 @@ export type FieldKind =
   | "object"
   | "array";
 
+/** @internal */
 export interface EnumCodec {
   readonly canonical: string | bigint | number | boolean;
   readonly protobufName: string;
 }
 
+/** @internal */
 export interface FieldCodec {
   readonly canonicalName: string;
   readonly protobufJSONName: string;
@@ -72,10 +75,12 @@ export interface FieldCodec {
   readonly enum?: readonly EnumCodec[];
 }
 
+/** @internal */
 export interface MessageCodec {
   readonly fields: readonly FieldCodec[];
 }
 
+/** @internal */
 export interface Runtime {
   readonly transport: Transport;
   readonly getAccessToken:
@@ -83,6 +88,7 @@ export interface Runtime {
     | undefined;
 }
 
+/** @internal */
 export function createRuntime(options: ClientOptions): Runtime {
   if (options === null || typeof options !== "object") {
     throw new TypeError("Plystra client options must be an object");
@@ -115,6 +121,7 @@ export function createRuntime(options: ClientOptions): Runtime {
   });
 }
 
+/** @internal */
 export async function invoke(
   runtime: Runtime,
   method: DescMethodUnary,
@@ -190,6 +197,7 @@ export async function invoke(
   }
 }
 
+/** @internal */
 export function hasOwn(
   value: Readonly<Record<string, unknown>>,
   key: string,
@@ -197,6 +205,7 @@ export function hasOwn(
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
+/** @internal */
 export function isPlainObject(
   value: unknown,
 ): value is Readonly<Record<string, unknown>> {
@@ -211,10 +220,12 @@ export function isPlainObject(
   }
 }
 
+/** @internal */
 export function isJSONValue(value: unknown): value is JSONValue {
   return isJSONValueAtDepth(value, 0, new Set<object>());
 }
 
+/** @internal */
 export function isSignedInteger(value: unknown): value is bigint {
   return (
     typeof value === "bigint" &&

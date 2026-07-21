@@ -123,6 +123,8 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		`"@bufbuild/protobuf": "2.12.1"`,
 		`"@connectrpc/connect": "2.1.2"`,
 		`"@connectrpc/connect-web": "2.1.2"`,
+		`"stripInternal": true`,
+		`/** @internal */`,
 		`package-lock=false`,
 		`npm install --ignore-scripts --no-audit --no-fund`,
 	} {
@@ -196,8 +198,11 @@ func TestRenderJavaScriptAliasesReuseCanonicalOperation(t *testing.T) {
 			}
 		}
 	}
-	if count := bytes.Count(deprecated, []byte("/** @deprecated Use email.send/v1 instead. */")); count != 2 {
+	if count := bytes.Count(deprecated, []byte("/** @deprecated Use email.send/v1 instead. */")); count != 1 {
 		t.Fatalf("deprecated Alias marker count = %d:\n%s", count, deprecated)
+	}
+	if !bytes.Contains(deprecated, []byte("/** @internal */\nexport function bindOperation")) {
+		t.Fatalf("deprecated Alias exposes its internal binder:\n%s", deprecated)
 	}
 	if count := bytes.Count(index, []byte("/** @deprecated Use email.send/v1 instead. */")); count != 2 {
 		t.Fatalf("deprecated index marker count = %d:\n%s", count, index)
@@ -404,9 +409,9 @@ func FuzzRenderJavaScriptAliasDeprecation(f *testing.F) {
 			t.Fatalf("Render Alias is not deterministic: %v then %v", firstErr, secondErr)
 		}
 		generated := fileData(t, first, "generated/sdk/javascript/src/operations/mail/deliver/v1.ts")
-		wantTerminators := 0
+		wantTerminators := 1
 		if deprecated != "" {
-			wantTerminators = 2
+			wantTerminators++
 		}
 		if got := bytes.Count(generated, []byte("*/")); got != wantTerminators {
 			t.Fatalf("Alias JSDoc terminators = %d, want %d:\n%s", got, wantTerminators, generated)

@@ -18,6 +18,7 @@ const descriptorSet = fromBinary(
 descriptorSet.file = orderDescriptorFiles(descriptorSet.file);
 const registry = createFileRegistry(descriptorSet);
 
+/** @internal */
 export function resolveUnaryMethod(
   serviceType: string,
   methodName: string,
