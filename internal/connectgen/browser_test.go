@@ -16,8 +16,8 @@ import (
 	"github.com/plystra/cli/internal/sdkmodel"
 )
 
-func TestGeneratedBrowserInvokesCanonicalCapability(t *testing.T) {
-	fixture := buildFixture(t, connectContract, "")
+func TestGeneratedBrowserInvokesCanonicalCapabilityAndAlias(t *testing.T) {
+	fixture := buildFixture(t, connectContract, "account.profile/v1")
 	provenance := connectConfigurationProvenance(t, generation.ConfigurationModeDefault)
 	handlers, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, provenance)
 	if err != nil {
@@ -32,7 +32,8 @@ func TestGeneratedBrowserInvokesCanonicalCapability(t *testing.T) {
 		t.Fatalf("Render invocation: %v", err)
 	}
 	target := browserTargetView{targetView: fixture.target}
-	model, err := sdkmodel.Build([]sdkmodel.CanonicalTargetView{target}, nil)
+	alias := browserAliasView{aliasView: newAlias(t, "account.profile/v1", fixture.target)}
+	model, err := sdkmodel.Build([]sdkmodel.CanonicalTargetView{target}, []sdkmodel.AliasView{alias})
 	if err != nil {
 		t.Fatalf("Build JavaScript SDK model: %v", err)
 	}
@@ -72,7 +73,7 @@ func TestGeneratedBrowserInvokesCanonicalCapability(t *testing.T) {
 	}
 	validateGeneratedBrowserPackage(t, filepath.Join(root, "generated", "sdk", "javascript"))
 
-	command := exec.CommandContext(t.Context(), "go", "test", "-count=1", "-run=^TestRealBrowserCanonicalInvocation$", "./generated/go/adapters/connect/customer/profile/sync/v1")
+	command := exec.CommandContext(t.Context(), "go", "test", "-count=1", "-run=^TestRealBrowserCanonicalAndAliasInvocation$", "./generated/go/adapters/connect/customer/profile/sync/v1")
 	command.Dir = root
 	command.Env = append(os.Environ(),
 		"GOWORK=off",
@@ -88,6 +89,12 @@ func TestGeneratedBrowserInvokesCanonicalCapability(t *testing.T) {
 type browserTargetView struct{ targetView }
 
 func (browserTargetView) Exposure() generation.Exposure {
+	return generation.Exposure{HTTP: true, JavaScript: true}
+}
+
+type browserAliasView struct{ aliasView }
+
+func (browserAliasView) Exposure() generation.Exposure {
 	return generation.Exposure{HTTP: true, JavaScript: true}
 }
 
@@ -117,7 +124,7 @@ const browserCanonicalPage = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Plystra browser canonical acceptance</title>
+  <title>Plystra browser canonical and Alias acceptance</title>
   <script type="importmap">
   {
     "imports": {
@@ -146,7 +153,7 @@ const browserCanonicalPage = `<!doctype html>
       baseUrl: window.location.origin,
       getAccessToken: async () => "browser-token"
     });
-    const response = await client.customer.profile.sync.v1({
+    const canonical = await client.customer.profile.sync.v1({
       active: true,
       count: 42n,
       metadata: {source: "browser"},
@@ -156,13 +163,26 @@ const browserCanonicalPage = `<!doctype html>
       state: "ready",
       tags: ["one", "two"]
     });
-    if (!response.accepted || response.count !== 42n || response.metadata.source !== "canonical" ||
-        response.note !== "accepted" || response.ratio !== 1.5 || response.records[0].id !== "record-1" ||
-        response.state !== "blocked" || response.tags.join(",") !== "one,two") {
-      throw new Error("unexpected canonical response");
+    const alias = await client.account.profile.v1({
+      active: true,
+      count: 84n,
+      metadata: {source: "alias"},
+      note: "alias-browser",
+      ratio: 1.5,
+      records: [{id: "record-1"}],
+      state: "ready",
+      tags: ["one", "two"]
+    });
+    if (!canonical.accepted || canonical.count !== 42n || canonical.metadata.source !== "canonical" ||
+        canonical.note !== "accepted" || canonical.ratio !== 1.5 || canonical.records[0].id !== "record-1" ||
+        canonical.state !== "blocked" || canonical.tags.join(",") !== "one,two" ||
+        !alias.accepted || alias.count !== 84n || alias.metadata.source !== "canonical" ||
+        alias.note !== "accepted" || alias.ratio !== 1.5 || alias.records[0].id !== "record-1" ||
+        alias.state !== "blocked" || alias.tags.join(",") !== "one,two") {
+      throw new Error("unexpected canonical or Alias response");
     }
     document.body.dataset.result = "pass";
-    document.body.textContent = "canonical:42:blocked";
+    document.body.textContent = "canonical:42:blocked;alias:84:blocked";
   } catch (error) {
     document.body.dataset.result = "fail";
     document.body.textContent = String(error && error.stack ? error.stack : error);
@@ -187,12 +207,13 @@ import (
 	"time"
 
 	canonicaladapter "example.com/acme/project/generated/go/adapters/connect/customer/profile/sync/v1"
+	aliasadapter "example.com/acme/project/generated/go/adapters/connect/account/profile/v1"
 	contract "example.com/acme/project/generated/go/contracts/customer/profile/sync/v1"
 	applicationinvocation "example.com/acme/project/generated/go/invocation/customer/profile/sync/v1"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
-func TestRealBrowserCanonicalInvocation(t *testing.T) {
+func TestRealBrowserCanonicalAndAliasInvocation(t *testing.T) {
 	projectRoot := os.Getenv("PLYSTRA_BROWSER_PROJECT_ROOT")
 	if projectRoot == "" {
 		t.Fatal("PLYSTRA_BROWSER_PROJECT_ROOT is required")
@@ -202,8 +223,14 @@ func TestRealBrowserCanonicalInvocation(t *testing.T) {
 	var rootCalls atomic.Int32
 	target := kernelinvocation.NewTestHandle(func(_ context.Context, request contract.Request) (contract.Response, error) {
 		providerCalls.Add(1)
-		if !request.Active || request.Count == nil || *request.Count != 42 || request.Metadata["source"] != "browser" ||
-			request.Note == nil || *request.Note != "canonical-browser" || request.Ratio != 1.5 || len(request.Records) != 1 ||
+		expectedCount := int64(42)
+		expectedSource := "browser"
+		if request.Note != nil && *request.Note == "alias-browser" {
+			expectedCount = 84
+			expectedSource = "alias"
+		}
+		if !request.Active || request.Count == nil || *request.Count != expectedCount || request.Metadata["source"] != expectedSource ||
+			request.Note == nil || *request.Note != "canonical-browser" && *request.Note != "alias-browser" || request.Ratio != 1.5 || len(request.Records) != 1 ||
 			request.Records[0]["id"] != "record-1" || request.State != contract.RequestStateReady ||
 			len(request.Tags) != 2 || request.Tags[0] != "one" || request.Tags[1] != "two" {
 			return contract.Response{}, fmt.Errorf("canonical browser request did not preserve the contract: %#v", request)
@@ -220,19 +247,24 @@ func TestRealBrowserCanonicalInvocation(t *testing.T) {
 			Tags: append([]string(nil), request.Tags...),
 		}, nil
 	})
-	handler, err := canonicaladapter.New(func(parent context.Context, headers http.Header) (context.Context, error) {
+	canonical, err := canonicaladapter.New(func(parent context.Context, headers http.Header) (context.Context, error) {
 		rootCalls.Add(1)
 		if token := headers.Get("Authorization"); token != "Bearer browser-token" {
 			return nil, fmt.Errorf("authorization header = %q", token)
 		}
 		return context.WithoutCancel(parent), nil
 	}, applicationinvocation.New(target))
-	if err != nil || !canonicaladapter.Available(handler) {
-		t.Fatalf("New canonical browser handler = %#v, %v", handler, err)
+	if err != nil || !canonicaladapter.Available(canonical) {
+		t.Fatalf("New canonical browser handler = %#v, %v", canonical, err)
+	}
+	alias, err := aliasadapter.New(canonical)
+	if err != nil || !aliasadapter.Available(alias) {
+		t.Fatalf("New Alias browser handler = %#v, %v", alias, err)
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle(canonicaladapter.Procedure, handler)
+	mux.Handle(canonicaladapter.Procedure, canonical)
+	mux.Handle(aliasadapter.Procedure, alias)
 	mux.Handle("/sdk/", http.StripPrefix("/sdk/", http.FileServer(http.Dir(filepath.Join(sdkRoot, "dist")))))
 	mux.Handle("/modules/", http.StripPrefix("/modules/", http.FileServer(http.Dir(filepath.Join(sdkRoot, "node_modules")))))
 	mux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
@@ -242,7 +274,17 @@ func TestRealBrowserCanonicalInvocation(t *testing.T) {
 		}
 		http.ServeFile(writer, request, filepath.Join(projectRoot, "browser", "index.html"))
 	})
-	server := httptest.NewServer(mux)
+	var canonicalRequests atomic.Int32
+	var aliasRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case canonicaladapter.Procedure:
+			canonicalRequests.Add(1)
+		case aliasadapter.Procedure:
+			aliasRequests.Add(1)
+		}
+		mux.ServeHTTP(writer, request)
+	}))
 	defer server.Close()
 
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
@@ -274,14 +316,20 @@ func TestRealBrowserCanonicalInvocation(t *testing.T) {
 		t.Fatalf("real browser canonical invocation failed: %v\n%s", err, output)
 	}
 	document := string(output)
-	if !strings.Contains(document, "data-result=\"pass\"") || !strings.Contains(document, "canonical:42:blocked") {
+	if !strings.Contains(document, "data-result=\"pass\"") || !strings.Contains(document, "canonical:42:blocked;alias:84:blocked") {
 		t.Fatalf("real browser canonical result was not successful:\n%s", document)
 	}
-	if calls := providerCalls.Load(); calls != 1 {
-		t.Fatalf("canonical Provider calls = %d, want 1", calls)
+	if calls := providerCalls.Load(); calls != 2 {
+		t.Fatalf("canonical Provider calls = %d, want 2", calls)
 	}
-	if calls := rootCalls.Load(); calls != 1 {
-		t.Fatalf("trusted-root calls = %d, want 1", calls)
+	if calls := rootCalls.Load(); calls != 2 {
+		t.Fatalf("trusted-root calls = %d, want 2", calls)
+	}
+	if calls := canonicalRequests.Load(); calls != 1 {
+		t.Fatalf("canonical Connect requests = %d, want 1", calls)
+	}
+	if calls := aliasRequests.Load(); calls != 1 {
+		t.Fatalf("Alias Connect requests = %d, want 1", calls)
 	}
 }
 
