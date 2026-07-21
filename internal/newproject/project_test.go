@@ -1142,6 +1142,11 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("explicit `semantics.kind` is `query` or `command`"),
 		[]byte("projects each as one unary procedure"),
 		[]byte("Do not relabel an event or stream"),
+		[]byte("Binary Protobuf requests are limited to 1 MiB"),
+		[]byte("maximum message depth of 64"),
+		[]byte("65,536-node budget"),
+		[]byte("unknown fields at any message depth"),
+		[]byte("Complete strict ProtoJSON parity remains"),
 	} {
 		if !bytes.Contains(readme, wireHistory) {
 			t.Fatalf("generated README omits Protobuf wire-history guidance %q:\n%s", wireHistory, readme)
@@ -1966,6 +1971,14 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"explicit semantics.kind: query or command",
 		"projects each as one unary",
 		"event or stream from http.expose",
+		"Binary Protobuf requests",
+		"limited to 1 MiB",
+		"maximum message depth of 64",
+		"65,536-node budget",
+		"unknown fields at",
+		"any message depth",
+		"Strict ProtoJSON",
+		"parity remains later Gate 11 work",
 		"@bufbuild/protobuf, @connectrpc/connect, and @connectrpc/connect-web runtime",
 		"never receive ConnectError as the public error model",
 		"src/descriptors.ts",

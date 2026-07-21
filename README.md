@@ -58,7 +58,13 @@ Both handlers accept only Connect POST requests encoded as binary
 Protobuf or ProtoJSON, require `Connect-Protocol-Version: 1`, and reject gRPC
 and gRPC-Web with `415 Unsupported Media Type` before root-context or Provider
 invocation. Their `Accept-Post` response advertises only the two supported
-Connect media types. The CLI transaction installs direct `connectrpc.com/connect`
+Connect media types. Binary Protobuf requests are limited to 1 MiB, decoded
+with a maximum message depth of 64, and validated with a 65,536-node budget.
+Malformed or truncated wire data, unknown fields at any message depth, and
+requests that exceed any bound fail before root-context creation or Provider
+invocation; the same validation applies when a generated handler is called
+directly. Complete strict ProtoJSON parity remains a later Gate 11 outcome.
+The CLI transaction installs direct `connectrpc.com/connect`
 and `google.golang.org/protobuf` requirements at the supported versions when
 those handlers are present. The generated application entrypoint does not yet
 mount an HTTP server; server mounting and the remaining protocol projections

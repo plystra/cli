@@ -72,6 +72,7 @@ When several compatible Plugins provide one required Capability, select one with
 Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
 ` + "`generated/proto/wire-map.json`" + ` is committed compatibility history for canonical Capability request and response messages selected for Connect. Generation preserves field numbers across declaration reordering, allocates new fields without renumbering existing fields, and permanently reserves removed field names and numbers. Scalar contract enums receive a numeric zero ` + "`*_UNSPECIFIED`" + ` sentinel and stable positive member numbers; reordering and additions preserve existing assignments, while removed member names and numbers remain permanently reserved. Inactive field and enum history remains when exposure, Connect, or an enum is disabled. Capability Aliases reuse their canonical target messages and enums and have no separate ledger entry. Never edit or delete the ledger; restore its exact last committed content before regenerating. Generation emits deterministic ` + "`.proto`" + ` schemas for the selected canonical and Alias Connect surfaces plus a self-contained ` + "`generated/proto/descriptor-set.pb`" + `; these CLI-owned files contain no Provider, Plugin, Go Module, configuration, or Secret data and must not be edited. A Project without a selected Connect surface retains a valid empty descriptor set. A selected Connect surface also emits a Go handler under ` + "`generated/go/adapters/connect/`" + `. Canonical handlers bind one exact procedure to the generated canonical application-invocation handle, while Alias handlers forward through that canonical handler without owning a Provider or Alias dispatch entry. The current Connect boundary accepts canonical contracts whose explicit ` + "`semantics.kind`" + ` is ` + "`query`" + ` or ` + "`command`" + ` and projects each as one unary procedure; an Alias reuses that canonical target. Selecting an ` + "`event`" + ` or ` + "`stream`" + ` for Connect fails before generated output and identifies the Capability, declared kind, supported unary kinds, and ` + "`http.expose`" + ` remediation. Do not relabel an event or stream to bypass validation. Both handlers accept only Connect POST requests encoded as binary Protobuf or ProtoJSON, require ` + "`Connect-Protocol-Version: 1`" + `, and reject gRPC and gRPC-Web before root-context or Provider invocation. Generation installs direct ` + "`connectrpc.com/connect`" + ` and ` + "`google.golang.org/protobuf`" + ` requirements at the supported versions inside the existing module transaction. The generated JavaScript package uses the same descriptor graph and declares pinned direct ` + "`@bufbuild/protobuf`" + `, ` + "`@connectrpc/connect`" + `, and ` + "`@connectrpc/connect-web`" + ` dependencies; application callers use only the Plystra wrapper rather than raw descriptors, messages, clients, or Connect errors. The generated application entrypoint does not yet mount an HTTP server; server mounting and the remaining protocol projections remain later transport work. Generation also rejects canonical fields in the same request or response when they derive the same ProtoJSON name or generated enum type. The diagnostic identifies both authored field names; rename one field in ` + "`capability.yaml`" + ` rather than editing generated output.
+Binary Protobuf requests are limited to 1 MiB, decoded with a maximum message depth of 64, and validated with a 65,536-node budget. Malformed or truncated wire data, unknown fields at any message depth, and requests that exceed any bound fail before root-context creation or Provider invocation; direct handler calls apply the same recursive validation. Complete strict ProtoJSON parity remains later Gate 11 work.
 `
 
 const githubCIReadmeTemplate = `
@@ -349,7 +350,13 @@ supported unary kinds, and http.expose remediation. Do not relabel an event or
 stream to bypass this check. Both accept only Connect
 POST requests encoded as binary
 Protobuf or ProtoJSON, require Connect-Protocol-Version: 1, and reject gRPC and
-gRPC-Web before root-context or Provider invocation. Generation installs direct
+gRPC-Web before root-context or Provider invocation. Binary Protobuf requests
+are limited to 1 MiB, decoded with a maximum message depth of 64, and validated
+with a 65,536-node budget. Malformed or truncated wire data, unknown fields at
+any message depth, and requests that exceed any bound fail before root-context
+creation or Provider invocation; direct handler calls apply the same recursive
+validation. Complete strict ProtoJSON parity remains later Gate 11 work.
+Generation installs direct
 connectrpc.com/connect and google.golang.org/protobuf requirements at the
 supported versions inside the existing module transaction. The generated
 JavaScript wrapper loads that same descriptor graph and declares pinned direct
@@ -1095,8 +1102,13 @@ The generated strict JSON handler remains the implemented HTTP surface, and a
 selected Connect surface also receives a generated canonical handler plus any
 Alias forwards. Those handlers accept only Connect POST requests encoded as
 binary Protobuf or ProtoJSON, require Connect-Protocol-Version: 1, and reject
-gRPC and gRPC-Web before root-context or Provider invocation. Server mounting
-and the optional REST projection remain in the later transport gates.
+gRPC and gRPC-Web before root-context or Provider invocation. Their binary
+decoder accepts at most 1 MiB, at most 64 nested messages, and at most 65,536
+decoded validation nodes. It rejects malformed or truncated data and unknown
+fields at every message depth before root-context or Provider invocation.
+Direct handler calls apply the same recursive validation. Strict ProtoJSON
+parity remains later Gate 11 work. Server mounting and the optional REST
+projection remain in the later transport gates.
 
 Cross-origin configuration belongs in the selected current-Project document.
 http.cors accepts only required nonempty allowed_origins and optional boolean
@@ -1118,8 +1130,11 @@ or add a competing startup workaround. The generated Connect handler is
 available for direct httptest validation; server mounting remains in the later
 HTTP transport gate. Test the real generated handler with httptest, including
 binary Protobuf and ProtoJSON success, gRPC and gRPC-Web rejection without
-Provider invocation, every semantic error, malformed JSON, unknown fields,
-wrong media type, and oversized input where relevant.
+Provider invocation, every semantic error, malformed JSON, nested unknown
+binary fields, malformed and truncated binary wire data, the enum zero
+sentinel, excessive binary nesting and decoded nodes, wrong media type, and
+oversized input. Binary rejections must not create a root context or invoke a
+Provider; these checks do not complete strict ProtoJSON parity.
 
 The provider-independent TypeScript package is under
 generated/sdk/javascript. Validate it with:
