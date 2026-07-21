@@ -22,6 +22,7 @@ import (
 	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/resolutionevidence"
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
+	"golang.org/x/mod/modfile"
 )
 
 var (
@@ -275,7 +276,14 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	evidence, err := resolutionevidence.Build(resolution.Context())
+	evidenceModules, err := resolutionEvidenceModules(module, dependencies)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
+	}
+	evidence, err := resolutionevidence.Build(resolutionevidence.Input{
+		Context: resolution.Context(),
+		Modules: evidenceModules,
+	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
@@ -324,6 +332,45 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		maintenanceSource:   maintenanceSnapshot.Data(),
 		previousProvenance:  previousProvenance,
 	}, nil
+}
+
+func resolutionEvidenceModules(current modulelocate.Module, dependencies moduledependency.Index) ([]resolutionevidence.ModuleInput, error) {
+	modules := []resolutionevidence.ModuleInput{{
+		Path:             current.ModulePath(),
+		Role:             resolutionevidence.ModuleRoleCurrent,
+		SourceModulePath: current.ModulePath(),
+	}}
+	for _, dependency := range dependencies.Projects() {
+		input := resolutionevidence.ModuleInput{
+			Path:             dependency.Path(),
+			Role:             resolutionevidence.ModuleRoleDependency,
+			RequiredVersion:  dependency.RequiredVersion(),
+			SelectedVersion:  dependency.SelectedVersion(),
+			Direct:           dependency.Direct(),
+			Indirect:         dependency.Indirect(),
+			Workspace:        dependency.Workspace(),
+			SourceModulePath: dependency.Path(),
+		}
+		if replacement, exists := dependency.Replacement(); exists {
+			kind := resolutionevidence.ReplacementModule
+			sourceModulePath := replacement.Path()
+			if replacement.Local() {
+				kind = resolutionevidence.ReplacementLocal
+				sourceModulePath = modfile.ModulePath(dependency.ProjectGoMod())
+				if sourceModulePath == "" {
+					return nil, fmt.Errorf("dependency Project %q local replacement has no stable source module identity", dependency.Path())
+				}
+			}
+			input.SourceModulePath = sourceModulePath
+			input.Replacement = &resolutionevidence.ReplacementInput{
+				Kind:       kind,
+				ModulePath: sourceModulePath,
+				Version:    replacement.Version(),
+			}
+		}
+		modules = append(modules, input)
+	}
+	return modules, nil
 }
 
 func loadGeneratedDependencyBaseline(moduleRoot string, selector configurationSelector) (applicationmeta.DependencyBaseline, applicationgen.ManifestProvenance, error) {

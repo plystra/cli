@@ -2,8 +2,8 @@ package resolutionevidence_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -17,11 +17,11 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 
 	firstContext := selectedContext(t, false, "a", true)
 	secondContext := selectedContext(t, true, "a", true)
-	first, err := resolutionevidence.Build(firstContext)
+	first, err := resolutionevidence.Build(resolutionevidence.Input{Context: firstContext, Modules: participatingModules(false)})
 	if err != nil {
 		t.Fatalf("Build(first): %v", err)
 	}
-	second, err := resolutionevidence.Build(secondContext)
+	second, err := resolutionevidence.Build(resolutionevidence.Input{Context: secondContext, Modules: participatingModules(true)})
 	if err != nil {
 		t.Fatalf("Build(second): %v", err)
 	}
@@ -37,12 +37,42 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	if first.SelectedPluginCount() != 1 || first.CanonicalCapabilityCount() != 2 || first.RequirementCount() != 2 || first.SelectedProviderCount() != 1 || first.CapabilityAliasCount() != 1 {
 		t.Fatalf("evidence counts = plugins %d capabilities %d requirements %d providers %d aliases %d", first.SelectedPluginCount(), first.CanonicalCapabilityCount(), first.RequirementCount(), first.SelectedProviderCount(), first.CapabilityAliasCount())
 	}
+	if first.ParticipatingModuleCount() != 3 {
+		t.Fatalf("participating module count = %d", first.ParticipatingModuleCount())
+	}
+	modules := first.Modules()
+	if len(modules) != 3 || modules[0].Path() != "example.com/app" || modules[0].Role() != resolutionevidence.ModuleRoleCurrent || modules[1].Path() != "example.com/shared" || !modules[1].Workspace() || modules[2].Path() != "example.com/smtp" || !modules[2].Direct() || modules[2].RequiredVersion() != "v1.2.0" || modules[2].SelectedVersion() != "v1.3.0" {
+		t.Fatalf("participating modules = %#v", modules)
+	}
+	replacement, exists := modules[2].Replacement()
+	if !exists || replacement.Kind() != resolutionevidence.ReplacementModule || replacement.ModulePath() != "corp.example/smtp" || replacement.Version() != "v1.3.0" {
+		t.Fatalf("versioned replacement = %#v, %t", replacement, exists)
+	}
+	if source := modules[2].Source(); source.Module() != "corp.example/smtp" || source.Path() != "plystra.yaml" || source.Kind() != "project-marker" || source.Line() != 1 || source.Column() != 1 {
+		t.Fatalf("replacement source = %#v", source)
+	}
 	if !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() {
 		t.Fatalf("input permutation changed evidence:\nfirst:  %s %s\nsecond: %s %s", first.CanonicalJSON(), first.Digest(), second.CanonicalJSON(), second.Digest())
 	}
-	want := fmt.Sprintf(`{"version":1,"generation_api":"v1","selected_model_digest":%q,"build_model_digest":%q,"counts":{"selected_plugins":1,"canonical_capabilities":2,"requirements":2,"selected_providers":1,"capability_aliases":1}}`, firstContext.Digest(), firstContext.BuildModelDigest())
-	if string(first.CanonicalJSON()) != want {
-		t.Fatalf("CanonicalJSON = %s\nwant = %s", first.CanonicalJSON(), want)
+	var document struct {
+		Version int `json:"version"`
+		Modules []struct {
+			Path        string `json:"path"`
+			Replacement *struct {
+				Kind       string `json:"kind"`
+				ModulePath string `json:"module_path"`
+			} `json:"replacement"`
+			Source struct {
+				Module string `json:"module"`
+				Path   string `json:"path"`
+			} `json:"source"`
+		} `json:"modules"`
+		Counts struct {
+			ParticipatingModules int `json:"participating_modules"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal(first.CanonicalJSON(), &document); err != nil || document.Version != 1 || len(document.Modules) != 3 || document.Counts.ParticipatingModules != 3 || document.Modules[2].Replacement == nil || document.Modules[2].Replacement.Kind != "module" || document.Modules[2].Source.Module != "corp.example/smtp" || document.Modules[2].Source.Path != "plystra.yaml" {
+		t.Fatalf("canonical module evidence = %#v, %v", document, err)
 	}
 	for _, forbidden := range []string{"example.smtp", "email.send/v1", "capability.yaml", "safe_name"} {
 		if bytes.Contains(first.CanonicalJSON(), []byte(forbidden)) {
@@ -52,7 +82,8 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 
 	mutated := first.CanonicalJSON()
 	mutated[0] = '['
-	if first.CanonicalJSON()[0] != '{' || !first.Valid() {
+	modules[0] = resolutionevidence.Module{}
+	if first.CanonicalJSON()[0] != '{' || first.Modules()[0].Path() != "example.com/app" || !first.Valid() {
 		t.Fatal("CanonicalJSON exposed mutable evidence storage")
 	}
 }
@@ -63,15 +94,16 @@ func TestBuildSeparatesSelectionProvenanceFromBuildState(t *testing.T) {
 	baseContext := selectedContext(t, false, "a", true)
 	selectionContext := selectedContext(t, false, "c", true)
 	buildContext := selectedContext(t, false, "a", false)
-	base, err := resolutionevidence.Build(baseContext)
+	modules := participatingModules(false)
+	base, err := resolutionevidence.Build(resolutionevidence.Input{Context: baseContext, Modules: modules})
 	if err != nil {
 		t.Fatalf("Build(base): %v", err)
 	}
-	selection, err := resolutionevidence.Build(selectionContext)
+	selection, err := resolutionevidence.Build(resolutionevidence.Input{Context: selectionContext, Modules: modules})
 	if err != nil {
 		t.Fatalf("Build(selection): %v", err)
 	}
-	build, err := resolutionevidence.Build(buildContext)
+	build, err := resolutionevidence.Build(resolutionevidence.Input{Context: buildContext, Modules: modules})
 	if err != nil {
 		t.Fatalf("Build(build): %v", err)
 	}
@@ -89,10 +121,90 @@ func TestBuildSeparatesSelectionProvenanceFromBuildState(t *testing.T) {
 func TestBuildRejectsAnAbsentNormalizedModel(t *testing.T) {
 	t.Parallel()
 
-	evidence, err := resolutionevidence.Build(generation.Context{})
+	evidence, err := resolutionevidence.Build(resolutionevidence.Input{})
 	if !errors.Is(err, resolutionevidence.ErrBuild) || evidence.Valid() {
 		t.Fatalf("Build(zero context) = %#v, %v", evidence, err)
 	}
+}
+
+func TestBuildRejectsInvalidParticipatingProjectEvidence(t *testing.T) {
+	t.Parallel()
+
+	context := selectedContext(t, false, "a", true)
+	tests := []struct {
+		name   string
+		mutate func([]resolutionevidence.ModuleInput) []resolutionevidence.ModuleInput
+	}{
+		{
+			name: "no current Project",
+			mutate: func(modules []resolutionevidence.ModuleInput) []resolutionevidence.ModuleInput {
+				return modules[1:]
+			},
+		},
+		{
+			name: "duplicate module path",
+			mutate: func(modules []resolutionevidence.ModuleInput) []resolutionevidence.ModuleInput {
+				modules[2].Path = modules[1].Path
+				return modules
+			},
+		},
+		{
+			name: "machine path as local identity",
+			mutate: func(modules []resolutionevidence.ModuleInput) []resolutionevidence.ModuleInput {
+				modules[1].SourceModulePath = `C:\workspace\smtp`
+				modules[1].Replacement = &resolutionevidence.ReplacementInput{Kind: resolutionevidence.ReplacementLocal, ModulePath: `C:\workspace\smtp`}
+				return modules
+			},
+		},
+		{
+			name: "workspace selected version",
+			mutate: func(modules []resolutionevidence.ModuleInput) []resolutionevidence.ModuleInput {
+				modules[2].SelectedVersion = "v1.0.0"
+				return modules
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			evidence, err := resolutionevidence.Build(resolutionevidence.Input{Context: context, Modules: test.mutate(participatingModules(false))})
+			if !errors.Is(err, resolutionevidence.ErrBuild) || evidence.Valid() {
+				t.Fatalf("Build = %#v, %v", evidence, err)
+			}
+		})
+	}
+}
+
+func participatingModules(reverse bool) []resolutionevidence.ModuleInput {
+	modules := []resolutionevidence.ModuleInput{
+		{
+			Path:             "example.com/app",
+			Role:             resolutionevidence.ModuleRoleCurrent,
+			SourceModulePath: "example.com/app",
+		},
+		{
+			Path:             "example.com/smtp",
+			Role:             resolutionevidence.ModuleRoleDependency,
+			RequiredVersion:  "v1.2.0",
+			SelectedVersion:  "v1.3.0",
+			Direct:           true,
+			SourceModulePath: "corp.example/smtp",
+			Replacement: &resolutionevidence.ReplacementInput{
+				Kind:       resolutionevidence.ReplacementModule,
+				ModulePath: "corp.example/smtp",
+				Version:    "v1.3.0",
+			},
+		},
+		{
+			Path:             "example.com/shared",
+			Role:             resolutionevidence.ModuleRoleDependency,
+			Workspace:        true,
+			SourceModulePath: "example.com/shared",
+		},
+	}
+	if reverse {
+		modules[0], modules[2] = modules[2], modules[0]
+	}
+	return modules
 }
 
 func selectedContext(t testing.TB, reverse bool, selectedDigestCharacter string, exposed bool) generation.Context {

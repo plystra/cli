@@ -24,6 +24,7 @@ import (
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/projectlocate"
+	"github.com/plystra/cli/internal/resolutionevidence"
 	kernelconfiguration "github.com/plystra/kernel/configuration"
 )
 
@@ -89,6 +90,10 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	}
 	if evidence.SelectedPluginCount() != 0 || evidence.CanonicalCapabilityCount() != 2 || evidence.RequirementCount() != 0 || evidence.SelectedProviderCount() != 0 || evidence.CapabilityAliasCount() != 0 {
 		t.Fatalf("ResolutionEvidence counts = plugins %d capabilities %d requirements %d providers %d aliases %d", evidence.SelectedPluginCount(), evidence.CanonicalCapabilityCount(), evidence.RequirementCount(), evidence.SelectedProviderCount(), evidence.CapabilityAliasCount())
+	}
+	modules := evidence.Modules()
+	if evidence.ParticipatingModuleCount() != 1 || len(modules) != 1 || modules[0].Path() != "example.com/empty" || modules[0].Role() != resolutionevidence.ModuleRoleCurrent || modules[0].Source().Module() != "example.com/empty" || modules[0].Source().Path() != "plystra.yaml" {
+		t.Fatalf("ResolutionEvidence modules = %#v", modules)
 	}
 
 	second, err := applicationresolve.Resolve(t.Context(), options)
@@ -630,6 +635,19 @@ replace example.com/ordinary => ../ordinary
 	if provider, exists := result.Resolution().Context().SelectedProvider(parseGenerationCapability(t, "email.send/v1")); !exists || provider.String() != "example.smtp" {
 		t.Fatalf("email Provider = %s, %t", provider, exists)
 	}
+	evidenceModules := result.ResolutionEvidence().Modules()
+	if len(evidenceModules) != 3 || evidenceModules[0].Path() != "example.com/app" || evidenceModules[0].Role() != resolutionevidence.ModuleRoleCurrent || evidenceModules[1].Path() != "example.com/direct" || !evidenceModules[1].Direct() || evidenceModules[1].RequiredVersion() != "v1.2.0" || evidenceModules[1].SelectedVersion() != "v1.2.0" || evidenceModules[2].Path() != "example.com/transitive" || evidenceModules[2].Direct() || evidenceModules[2].RequiredVersion() != "" || evidenceModules[2].SelectedVersion() != "v1.4.0" {
+		t.Fatalf("resolution evidence modules = %#v", evidenceModules)
+	}
+	for _, module := range evidenceModules[1:] {
+		replacement, exists := module.Replacement()
+		if !exists || replacement.Kind() != resolutionevidence.ReplacementLocal || replacement.ModulePath() != module.Path() || replacement.Version() != "" || module.Source().Module() != module.Path() || module.Source().Path() != "plystra.yaml" {
+			t.Fatalf("resolution evidence replacement for %s = %#v/%t source %#v", module.Path(), replacement, exists, module.Source())
+		}
+	}
+	if bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte(filepath.ToSlash(root))) || bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte(root)) || bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte("example.com/ordinary")) {
+		t.Fatalf("resolution evidence contains an absolute root or ordinary dependency: %s", result.ResolutionEvidence().CanonicalJSON())
+	}
 	provenance := result.Composition().Provenance()
 	for path, source := range map[string]string{
 		`http.expose["email.send/v1"]`:           "example.com/direct@v1.2.0/plystra.yaml",
@@ -855,6 +873,13 @@ func TestResolveUsesActiveGoWorkspaceDependencySource(t *testing.T) {
 	provider, exists := result.Resolution().Context().SelectedProvider(parseGenerationCapability(t, "email.send/v1"))
 	if !exists || provider.String() != "example.smtp" {
 		t.Fatalf("workspace provider = %s, %t", provider, exists)
+	}
+	modules := result.ResolutionEvidence().Modules()
+	if len(modules) != 2 || modules[0].Path() != "example.com/workspace-app" || modules[0].Role() != resolutionevidence.ModuleRoleCurrent || modules[1].Path() != "example.com/providers" || modules[1].Role() != resolutionevidence.ModuleRoleDependency || !modules[1].Workspace() || modules[1].SelectedVersion() != "" || modules[1].Direct() || modules[1].Source().Module() != "example.com/providers" {
+		t.Fatalf("workspace resolution evidence modules = %#v", modules)
+	}
+	if _, exists := modules[1].Replacement(); exists {
+		t.Fatalf("workspace resolution evidence has replacement provenance: %#v", modules[1])
 	}
 }
 
