@@ -9,11 +9,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/modulepath"
+	"github.com/plystra/cli/internal/pluginid"
+	"github.com/plystra/cli/internal/pluginscan"
 	gomodule "golang.org/x/mod/module"
 )
 
@@ -45,11 +48,12 @@ const (
 	ReplacementLocal ReplacementKind = "local"
 )
 
-// Input is the construction-only selected-model and participating-Project
-// input for one evidence document.
+// Input is the construction-only selected-model, participating-Project, and
+// discovered-Plugin input for one evidence document.
 type Input struct {
-	Context generation.Context
-	Modules []ModuleInput
+	Context          generation.Context
+	Modules          []ModuleInput
+	PluginCandidates []PluginCandidateInput
 }
 
 // ModuleInput identifies one participating Plystra Project without carrying
@@ -66,6 +70,14 @@ type ModuleInput struct {
 	Replacement      *ReplacementInput
 }
 
+// PluginCandidateInput identifies one discovered root-level Plugin without
+// carrying its absolute source root or unrestricted manifest contents.
+type PluginCandidateInput struct {
+	ID         string
+	ModulePath string
+	Path       string
+}
+
 // ReplacementInput is one construction-only stable replacement identity.
 type ReplacementInput struct {
 	Kind       ReplacementKind
@@ -74,8 +86,8 @@ type ReplacementInput struct {
 }
 
 // Evidence is one immutable deterministic identity for a selected normalized
-// application model. Detailed candidate, decision, and declaration records are
-// added by their owning resolution boundaries rather than inferred here.
+// application model. Detailed decision and declaration records are added by
+// their owning resolution boundaries rather than inferred here.
 type Evidence struct {
 	generationAPI            string
 	selectedModelDigest      string
@@ -86,6 +98,7 @@ type Evidence struct {
 	selectedProviderCount    int
 	capabilityAliasCount     int
 	modules                  []Module
+	pluginCandidates         []PluginCandidate
 	canonicalJSON            []byte
 	digest                   string
 	prepared                 bool
@@ -93,6 +106,7 @@ type Evidence struct {
 
 type canonicalCounts struct {
 	ParticipatingModules  int `json:"participating_modules"`
+	DiscoveredPlugins     int `json:"discovered_plugins"`
 	SelectedPlugins       int `json:"selected_plugins"`
 	CanonicalCapabilities int `json:"canonical_capabilities"`
 	Requirements          int `json:"requirements"`
@@ -141,6 +155,35 @@ func (m Module) Source() Source { return m.source }
 
 // Replacement returns stable replacement provenance, when present.
 func (m Module) Replacement() (Replacement, bool) { return m.replacement, m.hasReplacement }
+
+// PluginCandidate is one immutable visible Plugin declaration from the
+// current Project or a dependency Project in the effective Go Module graph.
+type PluginCandidate struct {
+	id         string
+	modulePath string
+	moduleRole ModuleRole
+	path       string
+	source     Source
+}
+
+// ID returns the exact canonical Plugin ID.
+func (p PluginCandidate) ID() string { return p.id }
+
+// ModulePath returns the effective graph module containing the Plugin.
+func (p PluginCandidate) ModulePath() string { return p.modulePath }
+
+// ModuleRole returns whether the declaration belongs to the current or a
+// dependency Project.
+func (p PluginCandidate) ModuleRole() ModuleRole { return p.moduleRole }
+
+// Path returns the slash-separated module-relative Plugin directory.
+func (p PluginCandidate) Path() string { return p.path }
+
+// Local reports whether the declaration belongs to the current Project.
+func (p PluginCandidate) Local() bool { return p.moduleRole == ModuleRoleCurrent }
+
+// Source returns the stable Plugin declaration provenance.
+func (p PluginCandidate) Source() Source { return p.source }
 
 // Source is one stable module-relative declaration reference.
 type Source struct {
@@ -194,6 +237,14 @@ type canonicalModule struct {
 	Source          canonicalSource       `json:"source"`
 }
 
+type canonicalPluginCandidate struct {
+	ID         string          `json:"id"`
+	ModulePath string          `json:"module_path"`
+	ModuleRole ModuleRole      `json:"module_role"`
+	Path       string          `json:"path"`
+	Source     canonicalSource `json:"source"`
+}
+
 type canonicalReplacement struct {
 	Kind       ReplacementKind `json:"kind"`
 	ModulePath string          `json:"module_path"`
@@ -209,12 +260,13 @@ type canonicalSource struct {
 }
 
 type canonicalEvidence struct {
-	Version             int               `json:"version"`
-	GenerationAPI       string            `json:"generation_api"`
-	SelectedModelDigest string            `json:"selected_model_digest"`
-	BuildModelDigest    string            `json:"build_model_digest"`
-	Modules             []canonicalModule `json:"modules"`
-	Counts              canonicalCounts   `json:"counts"`
+	Version             int                        `json:"version"`
+	GenerationAPI       string                     `json:"generation_api"`
+	SelectedModelDigest string                     `json:"selected_model_digest"`
+	BuildModelDigest    string                     `json:"build_model_digest"`
+	Modules             []canonicalModule          `json:"modules"`
+	PluginCandidates    []canonicalPluginCandidate `json:"plugin_candidates"`
+	Counts              canonicalCounts            `json:"counts"`
 }
 
 // Build validates one constructor-produced generation context and derives its
@@ -231,6 +283,13 @@ func Build(source Input) (Evidence, error) {
 	if err != nil {
 		return Evidence{}, fmt.Errorf("%w: participating Projects: %v", ErrBuild, err)
 	}
+	pluginCandidates, err := normalizePluginCandidates(source.PluginCandidates, modules)
+	if err != nil {
+		return Evidence{}, fmt.Errorf("%w: discovered Plugin candidates: %v", ErrBuild, err)
+	}
+	if err := validateSelectedPluginCandidates(context, pluginCandidates, modules); err != nil {
+		return Evidence{}, fmt.Errorf("%w: selected Plugins: %v", ErrBuild, err)
+	}
 	input := Evidence{
 		generationAPI:            context.APIVersion(),
 		selectedModelDigest:      context.Digest(),
@@ -241,6 +300,7 @@ func Build(source Input) (Evidence, error) {
 		selectedProviderCount:    len(context.Providers()),
 		capabilityAliasCount:     len(context.CapabilityAliases()),
 		modules:                  modules,
+		pluginCandidates:         pluginCandidates,
 		prepared:                 true,
 	}
 	if err := validate(input); err != nil {
@@ -262,6 +322,10 @@ func (e Evidence) Valid() bool {
 	}
 	modules, err := normalizeModules(e.moduleInputs())
 	if err != nil || !equalModules(e.modules, modules) {
+		return false
+	}
+	pluginCandidates, err := normalizePluginCandidates(e.pluginCandidateInputs(), modules)
+	if err != nil || !equalPluginCandidates(e.pluginCandidates, pluginCandidates) {
 		return false
 	}
 	canonical, err := encode(e)
@@ -288,6 +352,15 @@ func (e Evidence) Modules() []Module { return append([]Module(nil), e.modules...
 
 // ParticipatingModuleCount returns the current plus dependency Project count.
 func (e Evidence) ParticipatingModuleCount() int { return len(e.modules) }
+
+// PluginCandidates returns every discovered current- and dependency-Project
+// Plugin declaration in canonical Plugin-ID order.
+func (e Evidence) PluginCandidates() []PluginCandidate {
+	return append([]PluginCandidate(nil), e.pluginCandidates...)
+}
+
+// DiscoveredPluginCount returns the complete visible Plugin candidate count.
+func (e Evidence) DiscoveredPluginCount() int { return len(e.pluginCandidates) }
 
 // SelectedPluginCount returns the number of selected Plugins.
 func (e Evidence) SelectedPluginCount() int { return e.selectedPluginCount }
@@ -322,6 +395,9 @@ func validate(e Evidence) error {
 	}
 	if len(e.modules) == 0 {
 		return errors.New("participating Projects must not be empty")
+	}
+	if e.selectedPluginCount > len(e.pluginCandidates) {
+		return errors.New("selected Plugin count exceeds discovered Plugin candidate count")
 	}
 	counts := []struct {
 		name  string
@@ -376,14 +452,32 @@ func encode(e Evidence) ([]byte, error) {
 			},
 		}
 	}
+	pluginCandidates := make([]canonicalPluginCandidate, len(e.pluginCandidates))
+	for index, value := range e.pluginCandidates {
+		pluginCandidates[index] = canonicalPluginCandidate{
+			ID:         value.id,
+			ModulePath: value.modulePath,
+			ModuleRole: value.moduleRole,
+			Path:       value.path,
+			Source: canonicalSource{
+				Module: value.source.module,
+				Path:   value.source.path,
+				Kind:   value.source.kind,
+				Line:   value.source.line,
+				Column: value.source.column,
+			},
+		}
+	}
 	return json.Marshal(canonicalEvidence{
 		Version:             schemaVersion,
 		GenerationAPI:       e.generationAPI,
 		SelectedModelDigest: e.selectedModelDigest,
 		BuildModelDigest:    e.buildModelDigest,
 		Modules:             modules,
+		PluginCandidates:    pluginCandidates,
 		Counts: canonicalCounts{
 			ParticipatingModules:  len(e.modules),
+			DiscoveredPlugins:     len(e.pluginCandidates),
 			SelectedPlugins:       e.selectedPluginCount,
 			CanonicalCapabilities: e.canonicalCapabilityCount,
 			Requirements:          e.requirementCount,
@@ -424,6 +518,105 @@ func normalizeModules(inputs []ModuleInput) ([]Module, error) {
 		return modules[left].path < modules[right].path
 	})
 	return modules, nil
+}
+
+func normalizePluginCandidates(inputs []PluginCandidateInput, modules []Module) ([]PluginCandidate, error) {
+	moduleByPath := make(map[string]Module, len(modules))
+	for _, project := range modules {
+		moduleByPath[project.path] = project
+	}
+	candidates := make([]PluginCandidate, 0, len(inputs))
+	seenIDs := make(map[string]struct{}, len(inputs))
+	seenSources := make(map[string]struct{}, len(inputs))
+	for index, input := range inputs {
+		if err := pluginid.Validate(input.ID); err != nil {
+			return nil, fmt.Errorf("plugin_candidates[%d].id %q is invalid: %v", index, input.ID, err)
+		}
+		if _, duplicate := seenIDs[input.ID]; duplicate {
+			return nil, fmt.Errorf("plugin_candidates[%d].id duplicates %q", index, input.ID)
+		}
+		project, exists := moduleByPath[input.ModulePath]
+		if !exists {
+			return nil, fmt.Errorf("plugin_candidates[%d].module_path %q is not a participating Project", index, input.ModulePath)
+		}
+		if err := validatePluginPath(input.ModulePath, input.Path); err != nil {
+			return nil, fmt.Errorf("plugin_candidates[%d].path %q is invalid: %v", index, input.Path, err)
+		}
+		sourceKey := input.ModulePath + "\x00" + input.Path
+		if _, duplicate := seenSources[sourceKey]; duplicate {
+			return nil, fmt.Errorf("plugin_candidates[%d] duplicates source %s/%s/plugin.yaml", index, input.ModulePath, input.Path)
+		}
+		seenIDs[input.ID] = struct{}{}
+		seenSources[sourceKey] = struct{}{}
+		candidates = append(candidates, PluginCandidate{
+			id:         input.ID,
+			modulePath: input.ModulePath,
+			moduleRole: project.role,
+			path:       input.Path,
+			source: Source{
+				module: project.source.module,
+				path:   path.Join(input.Path, "plugin.yaml"),
+				kind:   "plugin-declaration",
+				line:   1,
+				column: 1,
+			},
+		})
+	}
+	sort.Slice(candidates, func(left, right int) bool {
+		return candidates[left].id < candidates[right].id
+	})
+	return candidates, nil
+}
+
+func validatePluginPath(modulePath, value string) error {
+	if value == "" || path.IsAbs(value) || path.Clean(value) != value || strings.ContainsAny(value, `/\`) || pluginscan.IsReserved(value) {
+		return errors.New("must be one safe non-reserved root child")
+	}
+	if err := gomodule.CheckImportPath(path.Join(modulePath, value)); err != nil {
+		return fmt.Errorf("does not form a valid Go import path: %v", err)
+	}
+	return nil
+}
+
+func validateSelectedPluginCandidates(context generation.Context, candidates []PluginCandidate, modules []Module) error {
+	candidateByID := make(map[string]PluginCandidate, len(candidates))
+	for _, candidate := range candidates {
+		candidateByID[candidate.id] = candidate
+	}
+	moduleByPath := make(map[string]Module, len(modules))
+	for _, project := range modules {
+		moduleByPath[project.path] = project
+	}
+	selected := make(map[string]struct{}, len(context.Plugins()))
+	for _, plugin := range context.Plugins() {
+		id := plugin.ID().String()
+		candidate, exists := candidateByID[id]
+		if !exists {
+			return fmt.Errorf("selected Plugin %q has no discovered candidate", id)
+		}
+		moduleView := plugin.Module()
+		if candidate.modulePath != moduleView.Path() {
+			return fmt.Errorf("selected Plugin %q module %q does not match candidate module %q", id, moduleView.Path(), candidate.modulePath)
+		}
+		project := moduleByPath[candidate.modulePath]
+		expectedVersion := project.selectedVersion
+		if project.role == ModuleRoleCurrent || project.workspace {
+			expectedVersion = ""
+		}
+		if moduleView.Version() != expectedVersion {
+			return fmt.Errorf("selected Plugin %q module version %q does not match participating Project version %q", id, moduleView.Version(), expectedVersion)
+		}
+		selected[id] = struct{}{}
+	}
+	for _, candidate := range candidates {
+		if candidate.moduleRole != ModuleRoleCurrent {
+			continue
+		}
+		if _, exists := selected[candidate.id]; !exists {
+			return fmt.Errorf("current-Project Plugin candidate %q is not selected", candidate.id)
+		}
+	}
+	return nil
 }
 
 func normalizeModule(input ModuleInput) (Module, error) {
@@ -556,7 +749,31 @@ func (e Evidence) moduleInputs() []ModuleInput {
 	return inputs
 }
 
+func (e Evidence) pluginCandidateInputs() []PluginCandidateInput {
+	inputs := make([]PluginCandidateInput, len(e.pluginCandidates))
+	for index, value := range e.pluginCandidates {
+		inputs[index] = PluginCandidateInput{
+			ID:         value.id,
+			ModulePath: value.modulePath,
+			Path:       value.path,
+		}
+	}
+	return inputs
+}
+
 func equalModules(left, right []Module) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func equalPluginCandidates(left, right []PluginCandidate) bool {
 	if len(left) != len(right) {
 		return false
 	}

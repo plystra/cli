@@ -88,8 +88,8 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if !evidence.Valid() || evidence.SelectedModelDigest() != resolved.Context().Digest() || evidence.BuildModelDigest() != resolved.Context().BuildModelDigest() {
 		t.Fatalf("ResolutionEvidence = valid %t selected %q build %q", evidence.Valid(), evidence.SelectedModelDigest(), evidence.BuildModelDigest())
 	}
-	if evidence.SelectedPluginCount() != 0 || evidence.CanonicalCapabilityCount() != 2 || evidence.RequirementCount() != 0 || evidence.SelectedProviderCount() != 0 || evidence.CapabilityAliasCount() != 0 {
-		t.Fatalf("ResolutionEvidence counts = plugins %d capabilities %d requirements %d providers %d aliases %d", evidence.SelectedPluginCount(), evidence.CanonicalCapabilityCount(), evidence.RequirementCount(), evidence.SelectedProviderCount(), evidence.CapabilityAliasCount())
+	if evidence.DiscoveredPluginCount() != 0 || evidence.SelectedPluginCount() != 0 || evidence.CanonicalCapabilityCount() != 2 || evidence.RequirementCount() != 0 || evidence.SelectedProviderCount() != 0 || evidence.CapabilityAliasCount() != 0 {
+		t.Fatalf("ResolutionEvidence counts = discovered %d selected %d capabilities %d requirements %d providers %d aliases %d", evidence.DiscoveredPluginCount(), evidence.SelectedPluginCount(), evidence.CanonicalCapabilityCount(), evidence.RequirementCount(), evidence.SelectedProviderCount(), evidence.CapabilityAliasCount())
 	}
 	modules := evidence.Modules()
 	if evidence.ParticipatingModuleCount() != 1 || len(modules) != 1 || modules[0].Path() != "example.com/empty" || modules[0].Role() != resolutionevidence.ModuleRoleCurrent || modules[0].Source().Module() != "example.com/empty" || modules[0].Source().Path() != "plystra.yaml" {
@@ -586,6 +586,7 @@ capabilities:
 `)
 	writePlugin(t, directRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\n")
 	writeCapability(t, directRoot, "smtp", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	writePlugin(t, directRoot, "unused", "id: example.unused\n")
 
 	writeModule(t, ordinaryRoot, "example.com/ordinary")
 	writeFile(t, filepath.Join(ordinaryRoot, "looks-like-plugin", "plugin.yaml"), "this is deliberately not a valid Plugin declaration\n")
@@ -604,6 +605,7 @@ replace example.com/transitive => ../transitive
 replace example.com/ordinary => ../ordinary
 `)
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
+	writePlugin(t, appRoot, "app", "id: example.app\n")
 
 	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
 		Start:       appRoot,
@@ -617,8 +619,10 @@ replace example.com/ordinary => ../ordinary
 		t.Fatalf("dependency Projects = %#v", projects)
 	}
 	if got := pluginSummaries(result.Inventory().Plugins()); !reflect.DeepEqual(got, []string{
+		"example.app:example.com/app@local:app:true",
 		"example.audit:example.com/transitive@v1.4.0:audit:false",
 		"example.smtp:example.com/direct@v1.2.0:smtp:false",
+		"example.unused:example.com/direct@v1.2.0:unused:false",
 	}) {
 		t.Fatalf("visible Plugins = %v", got)
 	}
@@ -643,6 +647,15 @@ replace example.com/ordinary => ../ordinary
 		replacement, exists := module.Replacement()
 		if !exists || replacement.Kind() != resolutionevidence.ReplacementLocal || replacement.ModulePath() != module.Path() || replacement.Version() != "" || module.Source().Module() != module.Path() || module.Source().Path() != "plystra.yaml" {
 			t.Fatalf("resolution evidence replacement for %s = %#v/%t source %#v", module.Path(), replacement, exists, module.Source())
+		}
+	}
+	evidenceCandidates := result.ResolutionEvidence().PluginCandidates()
+	if result.ResolutionEvidence().DiscoveredPluginCount() != 4 || result.ResolutionEvidence().SelectedPluginCount() != 3 || len(evidenceCandidates) != 4 || evidenceCandidates[0].ID() != "example.app" || evidenceCandidates[0].ModulePath() != "example.com/app" || evidenceCandidates[0].ModuleRole() != resolutionevidence.ModuleRoleCurrent || !evidenceCandidates[0].Local() || evidenceCandidates[0].Source().Module() != "example.com/app" || evidenceCandidates[0].Source().Path() != "app/plugin.yaml" || evidenceCandidates[1].ID() != "example.audit" || evidenceCandidates[1].ModulePath() != "example.com/transitive" || evidenceCandidates[2].ID() != "example.smtp" || evidenceCandidates[2].ModulePath() != "example.com/direct" || evidenceCandidates[3].ID() != "example.unused" || evidenceCandidates[3].ModulePath() != "example.com/direct" || evidenceCandidates[3].Local() {
+		t.Fatalf("resolution evidence Plugin candidates = %#v", evidenceCandidates)
+	}
+	for _, candidate := range evidenceCandidates {
+		if candidate.Source().Kind() != "plugin-declaration" || candidate.Source().Line() != 1 || candidate.Source().Column() != 1 {
+			t.Fatalf("resolution evidence Plugin candidate source = %#v", candidate.Source())
 		}
 	}
 	if bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte(filepath.ToSlash(root))) || bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte(root)) || bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte("example.com/ordinary")) {
@@ -880,6 +893,10 @@ func TestResolveUsesActiveGoWorkspaceDependencySource(t *testing.T) {
 	}
 	if _, exists := modules[1].Replacement(); exists {
 		t.Fatalf("workspace resolution evidence has replacement provenance: %#v", modules[1])
+	}
+	candidates := result.ResolutionEvidence().PluginCandidates()
+	if len(candidates) != 1 || candidates[0].ID() != "example.smtp" || candidates[0].ModulePath() != "example.com/providers" || candidates[0].ModuleRole() != resolutionevidence.ModuleRoleDependency || candidates[0].Path() != "smtp" || candidates[0].Local() || candidates[0].Source().Module() != "example.com/providers" || candidates[0].Source().Path() != "smtp/plugin.yaml" {
+		t.Fatalf("workspace resolution evidence Plugin candidates = %#v", candidates)
 	}
 }
 

@@ -281,8 +281,9 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
 	evidence, err := resolutionevidence.Build(resolutionevidence.Input{
-		Context: resolution.Context(),
-		Modules: evidenceModules,
+		Context:          resolution.Context(),
+		Modules:          evidenceModules,
+		PluginCandidates: resolutionEvidencePluginCandidates(inventory),
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
@@ -371,6 +372,19 @@ func resolutionEvidenceModules(current modulelocate.Module, dependencies moduled
 		modules = append(modules, input)
 	}
 	return modules, nil
+}
+
+func resolutionEvidencePluginCandidates(inventory plugininventory.Index) []resolutionevidence.PluginCandidateInput {
+	plugins := inventory.Plugins()
+	inputs := make([]resolutionevidence.PluginCandidateInput, len(plugins))
+	for index, plugin := range plugins {
+		inputs[index] = resolutionevidence.PluginCandidateInput{
+			ID:         plugin.ID(),
+			ModulePath: plugin.ModulePath(),
+			Path:       plugin.Path(),
+		}
+	}
+	return inputs
 }
 
 func loadGeneratedDependencyBaseline(moduleRoot string, selector configurationSelector) (applicationmeta.DependencyBaseline, applicationgen.ManifestProvenance, error) {
