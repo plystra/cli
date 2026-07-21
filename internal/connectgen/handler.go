@@ -114,6 +114,7 @@ func renderCanonical(
 	fmt.Fprintln(&source, "\t\tconnect.WithRequestInitializer(connectschema.InitializeDynamicMessage),")
 	fmt.Fprintln(&source, "\t\tconnect.WithCodec(connectschema.BinaryCodec{}),")
 	fmt.Fprintln(&source, "\t\tconnect.WithReadMaxBytes(connectschema.MaximumRequestBytes),")
+	fmt.Fprintln(&source, "\t\tconnect.WithSendMaxBytes(connectschema.MaximumResponseBytes),")
 	fmt.Fprintln(&source, "\t\tconnect.WithRequireConnectProtocolHeader(),")
 	fmt.Fprintln(&source, "\t)")
 	fmt.Fprintln(&source, "\treturn handler, nil")
@@ -262,6 +263,7 @@ func renderAlias(
 	fmt.Fprintln(&source, "\t\tconnect.WithRequestInitializer(connectschema.InitializeDynamicMessage),")
 	fmt.Fprintln(&source, "\t\tconnect.WithCodec(connectschema.BinaryCodec{}),")
 	fmt.Fprintln(&source, "\t\tconnect.WithReadMaxBytes(connectschema.MaximumRequestBytes),")
+	fmt.Fprintln(&source, "\t\tconnect.WithSendMaxBytes(connectschema.MaximumResponseBytes),")
 	fmt.Fprintln(&source, "\t\tconnect.WithRequireConnectProtocolHeader(),")
 	fmt.Fprintln(&source, "\t)")
 	fmt.Fprintln(&source, "\treturn handler, nil")
@@ -489,6 +491,13 @@ func renderEncodeResponse(source *strings.Builder, messageName string, fields []
 	fmt.Fprintf(source, "\tif method == nil || method.Output() == nil || method.Output().FullName() != %s {\n", strconv.Quote(messageName))
 	fmt.Fprintln(source, "\t\treturn nil, plystraErrInvalidResponse")
 	fmt.Fprintln(source, "\t}")
+	fmt.Fprintln(source, "\tbudget := connectschema.NewResponseEncodingBudget()")
+	fmt.Fprintln(source, "\tif budget.ConsumeNodes(1) != nil {")
+	fmt.Fprintln(source, "\t\treturn nil, plystraErrInvalidResponse")
+	fmt.Fprintln(source, "\t}")
+	for _, field := range fields {
+		renderResponseBudgetField(source, field)
+	}
 	fmt.Fprintln(source, "\tmessage := dynamicpb.NewMessage(method.Output())")
 	if len(fields) != 0 {
 		fmt.Fprintln(source, "\treflected := message.ProtoReflect()")
@@ -496,8 +505,55 @@ func renderEncodeResponse(source *strings.Builder, messageName string, fields []
 	for index, field := range fields {
 		renderEncodeField(source, index, field)
 	}
+	fmt.Fprintln(source, "\tif connectschema.ValidateResponseMessage(message.ProtoReflect()) != nil {")
+	fmt.Fprintln(source, "\t\treturn nil, plystraErrInvalidResponse")
+	fmt.Fprintln(source, "\t}")
 	fmt.Fprintln(source, "\treturn message, nil")
 	fmt.Fprintln(source, "}")
+}
+
+func renderResponseBudgetField(source *strings.Builder, prepared preparedField) {
+	value := "response." + prepared.goName
+	indent := "\t"
+	if !prepared.field.Required() {
+		fmt.Fprintf(source, "\tif %s != nil {\n", value)
+		value = "*" + value
+		indent = "\t\t"
+	}
+	fmt.Fprintf(source, "%sif budget.ConsumeNodes(1) != nil {\n", indent)
+	fmt.Fprintf(source, "%s\treturn nil, plystraErrInvalidResponse\n", indent)
+	fmt.Fprintf(source, "%s}\n", indent)
+	switch {
+	case prepared.field.Kind() == sdkmodel.KindString && len(prepared.field.EnumJSON()) == 0:
+		fmt.Fprintf(source, "%sif budget.ConsumeBytes(len(%s)) != nil {\n", indent, value)
+		fmt.Fprintf(source, "%s\treturn nil, plystraErrInvalidResponse\n", indent)
+		fmt.Fprintf(source, "%s}\n", indent)
+	case prepared.field.Kind() == sdkmodel.KindObject:
+		fmt.Fprintf(source, "%sif budget.ValidateObject(%s) != nil {\n", indent, value)
+		fmt.Fprintf(source, "%s\treturn nil, plystraErrInvalidResponse\n", indent)
+		fmt.Fprintf(source, "%s}\n", indent)
+	case prepared.field.Kind() == sdkmodel.KindArray:
+		fmt.Fprintf(source, "%sif budget.ConsumeNodes(len(%s)) != nil {\n", indent, value)
+		fmt.Fprintf(source, "%s\treturn nil, plystraErrInvalidResponse\n", indent)
+		fmt.Fprintf(source, "%s}\n", indent)
+		if prepared.field.Items() == sdkmodel.KindString {
+			fmt.Fprintf(source, "%sfor _, item := range %s {\n", indent, value)
+			fmt.Fprintf(source, "%s\tif budget.ConsumeBytes(len(item)) != nil {\n", indent)
+			fmt.Fprintf(source, "%s\t\treturn nil, plystraErrInvalidResponse\n", indent)
+			fmt.Fprintf(source, "%s\t}\n", indent)
+			fmt.Fprintf(source, "%s}\n", indent)
+		}
+		if prepared.field.Items() == sdkmodel.KindObject {
+			fmt.Fprintf(source, "%sfor _, item := range %s {\n", indent, value)
+			fmt.Fprintf(source, "%s\tif budget.ValidateObject(item) != nil {\n", indent)
+			fmt.Fprintf(source, "%s\t\treturn nil, plystraErrInvalidResponse\n", indent)
+			fmt.Fprintf(source, "%s\t}\n", indent)
+			fmt.Fprintf(source, "%s}\n", indent)
+		}
+	}
+	if !prepared.field.Required() {
+		fmt.Fprintln(source, "\t}")
+	}
 }
 
 func renderEncodeField(source *strings.Builder, index int, prepared preparedField) {

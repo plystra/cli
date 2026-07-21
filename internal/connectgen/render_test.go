@@ -108,6 +108,7 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		"connect.WithRequestInitializer(connectschema.InitializeDynamicMessage)",
 		"connect.WithCodec(connectschema.BinaryCodec{})",
 		"connect.WithReadMaxBytes(connectschema.MaximumRequestBytes)",
+		"connect.WithSendMaxBytes(connectschema.MaximumResponseBytes)",
 		"connect.WithRequireConnectProtocolHeader()",
 		"plystraServeConnectOnly(writer, request, h.transport)",
 		`const plystraConnectAcceptPost = "application/json, application/proto"`,
@@ -135,6 +136,7 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		"connect.NewUnaryHandler(",
 		"connect.WithCodec(connectschema.BinaryCodec{})",
 		"connect.WithReadMaxBytes(connectschema.MaximumRequestBytes)",
+		"connect.WithSendMaxBytes(connectschema.MaximumResponseBytes)",
 		"connect.WithRequireConnectProtocolHeader()",
 		"plystraServeConnectOnly(writer, request, h.transport)",
 	} {
@@ -144,12 +146,18 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 	}
 	schema := byPath[wantPaths[2]]
 	for _, required := range []string{
-		"MaximumRequestBytes = 1 << 20",
-		"MaximumDecodeDepth  = 64",
-		"MaximumDecodedNodes = 64 << 10",
+		"MaximumRequestBytes",
+		"MaximumDecodeDepth",
+		"MaximumDecodedNodes",
+		"MaximumResponseBytes",
+		"MaximumEncodeDepth",
+		"MaximumEncodedNodes",
 		"type BinaryCodec struct{}",
+		"(proto.MarshalOptions{Deterministic: true}).Marshal(message)",
 		"RecursionLimit: MaximumDecodeDepth",
 		"func ValidateMessage(message protoreflect.Message)",
+		"func ValidateResponseMessage(message protoreflect.Message)",
+		"type ResponseEncodingBudget struct",
 		"len(message.GetUnknown()) != 0",
 	} {
 		if !bytes.Contains(schema.Data(), []byte(required)) {
@@ -613,6 +621,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
@@ -623,11 +632,19 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 		if request.Note != nil && *request.Note == "provider-error" {
 			return contract.Response{}, errors.New("provider secret must not cross the Connect boundary")
 		}
-		if !request.Active || request.Count == nil || *request.Count != 42 || request.Ratio != 1.5 || request.State != contract.RequestStateReady || request.Note == nil || *request.Note != "hello" || len(request.Tags) != 2 || request.Tags[1] != "two" || request.Metadata["source"] != "browser" || len(request.Records) != 1 || request.Records[0]["id"] != "record-1" {
+		if request.Note == nil {
+			t.Fatalf("canonical request has no note: %#v", request)
+		}
+		switch *request.Note {
+		case "hello", "oversized-response", "excessive-response-depth", "excessive-response-nodes":
+		default:
+			t.Fatalf("canonical request note = %q", *request.Note)
+		}
+		if !request.Active || request.Count == nil || *request.Count != 42 || request.Ratio != 1.5 || request.State != contract.RequestStateReady || len(request.Tags) != 2 || request.Tags[1] != "two" || request.Metadata["source"] != "browser" || len(request.Records) != 1 || request.Records[0]["id"] != "record-1" {
 			t.Fatalf("canonical request = %#v", request)
 		}
 		note := "accepted"
-		return contract.Response{
+		response := contract.Response{
 			Accepted: true,
 			Count: *request.Count,
 			Metadata: map[string]any{"source": "canonical"},
@@ -636,7 +653,17 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 			Records: []map[string]any{{"id": "record-1"}},
 			State: contract.ResponseStateBlocked,
 			Tags: append([]string(nil), request.Tags...),
-		}, nil
+		}
+		switch *request.Note {
+		case "oversized-response":
+			oversized := strings.Repeat("x", connectschema.MaximumResponseBytes)
+			response.Note = &oversized
+		case "excessive-response-depth":
+			response.Metadata = nestedObject(40)
+		case "excessive-response-nodes":
+			response.Tags = make([]string, connectschema.MaximumEncodedNodes)
+		}
+		return response, nil
 	})
 	canonical, err := canonicaladapter.New(func(parent context.Context, headers http.Header) (context.Context, error) {
 		rootCalls++
@@ -655,10 +682,38 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 	directMethod := mustMethod(t, "plystra.generated.customer.profile.sync.v1.CustomerProfileSyncV1Service.Invoke")
 	directRequest := connect.NewRequest(validRequest(t, directMethod, "hello"))
 	directRequest.Header().Set("Authorization", "Bearer test")
-	if response, err := canonical.Invoke(t.Context(), directRequest); err != nil {
+	directResponse, err := canonical.Invoke(t.Context(), directRequest)
+	if err != nil {
 		t.Fatalf("direct canonical Invoke: %v", err)
 	} else {
-		assertResponse(t, response.Msg)
+		assertResponse(t, directResponse.Msg)
+	}
+	codec := connectschema.BinaryCodec{}
+	firstEncoding, err := codec.Marshal(directResponse.Msg)
+	if err != nil {
+		t.Fatalf("Marshal direct response: %v", err)
+	}
+	secondEncoding, err := codec.Marshal(directResponse.Msg)
+	if err != nil || !bytes.Equal(firstEncoding, secondEncoding) {
+		t.Fatalf("binary response encoding is not deterministic: %v", err)
+	}
+	for name, invalid := range map[string]any{
+		"wrong message type": struct{}{},
+		"nested unknown field": withNestedUnknown(proto.Clone(directResponse.Msg).(*dynamicpb.Message)),
+		"oversized message": withString(t, proto.Clone(directResponse.Msg).(*dynamicpb.Message), "note", strings.Repeat("x", connectschema.MaximumResponseBytes)),
+		"excessive nesting": withExcessiveResponseNesting(t, proto.Clone(directResponse.Msg).(*dynamicpb.Message)),
+		"excessive nodes": withExcessiveNodes(t, proto.Clone(directResponse.Msg).(*dynamicpb.Message)),
+	} {
+		t.Run("binary response codec rejects "+name, func(t *testing.T) {
+			if encoded, err := codec.Marshal(invalid); err == nil || encoded != nil {
+				t.Fatalf("Marshal(%s) = %d bytes, %v", name, len(encoded), err)
+			}
+		})
+	}
+	cyclic := map[string]any{}
+	cyclic["cycle"] = cyclic
+	if err := connectschema.NewResponseEncodingBudget().ValidateObject(cyclic); err == nil {
+		t.Fatal("cyclic response object passed bounded validation")
 	}
 	directInvalid := connect.NewRequest(withNestedUnknown(validRequest(t, directMethod, "hello")))
 	directInvalid.Header().Set("Authorization", "Bearer test")
@@ -855,6 +910,28 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 	if connect.CodeOf(err) != connect.CodeInternal || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("unsafe Provider error = %v", err)
 	}
+	directOversized := connect.NewRequest(validRequest(t, method, "oversized-response"))
+	directOversized.Header().Set("Authorization", "Bearer test")
+	if response, err := canonical.Invoke(t.Context(), directOversized); connect.CodeOf(err) != connect.CodeInternal || response != nil {
+		t.Fatalf("direct oversized response = %#v, %v", response, err)
+	}
+	for _, route := range routes {
+		method := mustMethod(t, route.methodName)
+		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](server.Client(), server.URL+route.procedure, connect.WithSchema(method), connect.WithResponseInitializer(connectschema.InitializeDynamicMessage))
+		for _, note := range []string{"oversized-response", "excessive-response-depth", "excessive-response-nodes"} {
+			t.Run(route.name+" rejects "+note, func(t *testing.T) {
+				request := connect.NewRequest(validRequest(t, method, note))
+				request.Header().Set("Authorization", "Bearer test")
+				response, err := client.CallUnary(t.Context(), request)
+				if connect.CodeOf(err) != connect.CodeInternal || response != nil {
+					t.Fatalf("response = %#v, %v", response, err)
+				}
+			})
+		}
+	}
+	if calls != 13 || rootCalls != 13 {
+		t.Fatalf("response rejection calls = %d/%d, want 13/13", calls, rootCalls)
+	}
 }
 
 func mustMethod(t *testing.T, name protoreflect.FullName) protoreflect.MethodDescriptor {
@@ -982,14 +1059,48 @@ func withEnumNumber(t *testing.T, message *dynamicpb.Message, name protoreflect.
 	return message
 }
 
+func withString(t *testing.T, message *dynamicpb.Message, name protoreflect.Name, value string) *dynamicpb.Message {
+	t.Helper()
+	setScalar(t, message.ProtoReflect(), name, protoreflect.ValueOfString(value))
+	return message
+}
+
 func withExcessiveNesting(t *testing.T, message *dynamicpb.Message) *dynamicpb.Message {
 	t.Helper()
+	setUnvalidatedObject(t, message.ProtoReflect(), "metadata", nestedObject(connectschema.MaximumDecodeDepth+1))
+	return message
+}
+
+func withExcessiveResponseNesting(t *testing.T, message *dynamicpb.Message) *dynamicpb.Message {
+	t.Helper()
+	setUnvalidatedObject(t, message.ProtoReflect(), "metadata", nestedObject(connectschema.MaximumEncodeDepth/2+1))
+	return message
+}
+
+func nestedObject(depth int) map[string]any {
 	value := map[string]any{"leaf": "value"}
-	for depth := 0; depth <= connectschema.MaximumDecodeDepth; depth++ {
+	for level := 0; level < depth; level++ {
 		value = map[string]any{"nested": value}
 	}
-	setObject(t, message.ProtoReflect(), "metadata", value)
-	return message
+	return value
+}
+
+func setUnvalidatedObject(t *testing.T, message protoreflect.Message, name protoreflect.Name, value map[string]any) {
+	t.Helper()
+	field := message.Descriptor().Fields().ByName(name)
+	structured, err := structpb.NewStruct(value)
+	if err != nil {
+		t.Fatalf("NewStruct(%s): %v", name, err)
+	}
+	data, err := proto.Marshal(structured)
+	if err != nil {
+		t.Fatalf("Marshal(%s): %v", name, err)
+	}
+	dynamic := dynamicpb.NewMessage(field.Message())
+	if err := (proto.UnmarshalOptions{RecursionLimit: connectschema.MaximumDecodeDepth * 4}).Unmarshal(data, dynamic); err != nil {
+		t.Fatalf("Unmarshal(%s): %v", name, err)
+	}
+	message.Set(field, protoreflect.ValueOfMessage(dynamic.ProtoReflect()))
 }
 
 func withExcessiveNodes(t *testing.T, message *dynamicpb.Message) *dynamicpb.Message {

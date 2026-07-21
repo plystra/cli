@@ -63,7 +63,14 @@ with a maximum message depth of 64, and validated with a 65,536-node budget.
 Malformed or truncated wire data, unknown fields at any message depth, and
 requests that exceed any bound fail before root-context creation or Provider
 invocation; the same validation applies when a generated handler is called
-directly. Complete strict ProtoJSON parity remains a later Gate 11 outcome.
+directly. Binary Protobuf responses use the same 1 MiB, depth-64, and
+65,536-node bounds. Generated conversion preflights canonical fields,
+collections, object graphs, and content bytes before proportional
+wire-projection allocation, validates the exact response message, and
+deterministically serializes it. An invalid or
+oversized response produces only the safe internal response failure and no
+partial response; canonical, Alias, and direct handler paths agree. Complete
+strict ProtoJSON parity remains a later Gate 11 outcome.
 The CLI transaction installs direct `connectrpc.com/connect`
 and `google.golang.org/protobuf` requirements at the supported versions when
 those handlers are present. The generated application entrypoint does not yet

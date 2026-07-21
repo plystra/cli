@@ -217,7 +217,13 @@ are limited to 1 MiB, decoded with a maximum message depth of 64, and validated
 with a 65,536-node budget. Malformed or truncated wire data, unknown fields at
 any message depth, and requests that exceed any bound fail before root-context
 creation or Provider invocation; direct handler calls apply the same recursive
-validation. Complete strict ProtoJSON parity remains later Gate 11 work.
+validation. Binary Protobuf responses use the same size, depth, and node
+bounds. Generated conversion preflights canonical content before proportional
+wire-projection allocation, validates the exact response message, and
+serializes deterministically. Invalid or oversized responses produce only the
+safe internal response failure and no partial response on canonical, Alias, or
+direct handler paths. Complete strict ProtoJSON parity remains later Gate 11
+work.
 Generation installs direct
 connectrpc.com/connect and google.golang.org/protobuf requirements at the
 supported versions inside the existing module transaction. The generated
@@ -968,9 +974,14 @@ gRPC and gRPC-Web before root-context or Provider invocation. Their binary
 decoder accepts at most 1 MiB, at most 64 nested messages, and at most 65,536
 decoded validation nodes. It rejects malformed or truncated data and unknown
 fields at every message depth before root-context or Provider invocation.
-Direct handler calls apply the same recursive validation. Strict ProtoJSON
-parity remains later Gate 11 work. Server mounting and the optional REST
-projection remain in the later transport gates.
+Direct handler calls apply the same recursive validation. Binary Protobuf
+responses use the same 1 MiB, depth-64, and 65,536-node bounds. Generated
+conversion preflights canonical content before proportional wire-projection
+allocation, validates the exact response message, and serializes
+deterministically. Invalid or oversized responses yield the safe internal
+response failure without partial bytes on canonical, Alias, and direct paths.
+Strict ProtoJSON parity remains later Gate 11 work. Server mounting and the
+optional REST projection remain in the later transport gates.
 
 Cross-origin configuration belongs in the selected current-Project document.
 http.cors accepts only required nonempty allowed_origins and optional boolean
@@ -979,8 +990,8 @@ credentialed wildcard is invalid. Environment overlays may inherit the root
 origin list or replace it completely; http.cors: null disables the root
 declaration, and dependency Project CORS never applies. The normalized selected
 CORS configuration participates in the build-affecting application-model
-digest; origin or credential changes create generation drift. Response behavior
-remains deferred to the later HTTP transport gate.
+digest; origin or credential changes create generation drift. Generated CORS
+response-header behavior remains deferred to the later HTTP transport gate.
 
 Generated handlers enforce the exact route, application/json, bounded bodies,
 required and unknown fields, enums, response validation, safe errors, and
@@ -996,7 +1007,11 @@ Provider invocation, every semantic error, malformed JSON, nested unknown
 binary fields, malformed and truncated binary wire data, the enum zero
 sentinel, excessive binary nesting and decoded nodes, wrong media type, and
 oversized input. Binary rejections must not create a root context or invoke a
-Provider; these checks do not complete strict ProtoJSON parity.
+Provider. Also test deterministic binary responses, wrong or unknown response
+messages, cyclic object values, oversized output, excessive response nesting
+and nodes, canonical and Alias HTTP paths, and direct invocation; response
+rejection returns no partial response. These checks do not complete strict
+ProtoJSON parity.
 
 The provider-independent TypeScript package is under
 generated/sdk/javascript. Validate it with:

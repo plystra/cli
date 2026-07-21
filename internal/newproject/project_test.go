@@ -1146,6 +1146,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("maximum message depth of 64"),
 		[]byte("65,536-node budget"),
 		[]byte("unknown fields at any message depth"),
+		[]byte("Binary Protobuf responses use the same"),
+		[]byte("serializes deterministically"),
+		[]byte("no partial response"),
 		[]byte("Complete strict ProtoJSON parity remains"),
 	} {
 		if !bytes.Contains(readme, wireHistory) {
@@ -1977,6 +1980,11 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"65,536-node budget",
 		"unknown fields at",
 		"any message depth",
+		"Binary Protobuf responses",
+		"same size, depth, and node",
+		"bounds. Generated conversion",
+		"serializes deterministically",
+		"no partial response",
 		"Strict ProtoJSON",
 		"parity remains later Gate 11 work",
 		"@bufbuild/protobuf, @connectrpc/connect, and @connectrpc/connect-web runtime",

@@ -457,8 +457,15 @@ with a maximum message depth of 64, and validated with a 65,536-node budget.
 Malformed or truncated wire data, unknown fields at any message depth, and
 requests that exceed any bound fail before root-context creation or Provider
 invocation. Direct calls to the generated handler apply the same recursive
-message validation. Complete strict ProtoJSON parity remains a later Gate 11
-outcome. Generation installs direct `connectrpc.com/connect` and
+message validation. Binary Protobuf responses use the same 1 MiB, depth-64,
+and 65,536-node bounds. Generated conversion preflights canonical fields,
+collections, object graphs, and content bytes before proportional
+wire-projection allocation, validates the exact response message, and
+deterministically serializes it. Invalid or oversized responses produce the
+safe internal response failure without partial bytes on canonical, Alias, and
+direct handler paths. Complete strict ProtoJSON parity remains a later Gate 11
+outcome.
+Generation installs direct `connectrpc.com/connect` and
 `google.golang.org/protobuf` requirements at the supported versions inside the
 existing module transaction. The generated application entrypoint still does
 not mount an HTTP server; server mounting and the remaining protocol
@@ -1165,8 +1172,12 @@ or Provider invocation. For binary Protobuf, include malformed and truncated
 wire data, nested unknown fields, the enum zero sentinel, more than 64 nested
 messages, more than 65,536 decoded validation nodes, and a request over 1 MiB.
 Each rejection must occur before root-context creation or Provider invocation.
-Do not treat these binary checks as evidence that the later strict ProtoJSON
-parity outcome is complete.
+For binary responses, include deterministic repeat encoding, wrong message
+types, unknown nested fields, cyclic object input, output over 1 MiB, more than
+64 nested messages, more than 65,536 encoded nodes, canonical and Alias HTTP
+paths, and direct handler invocation. A rejection must return no partial
+response. Do not treat these binary checks as evidence that the later strict
+ProtoJSON parity outcome is complete.
 
 The handler's root-context function is a trusted adapter boundary. Do not
 convert raw headers into verified internal AuthN state there. Official AuthN
