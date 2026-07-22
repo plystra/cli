@@ -1155,6 +1155,10 @@ Run the narrowest relevant test first, then the complete module checks:
     plystra explain plugin acme.email.smtp --env production
     plystra explain plugin acme.email.smtp --config deploy/customer-a.yaml
     plystra explain plugin acme.email.smtp --format json
+    plystra explain config config.acme.email.smtp.host
+    plystra explain config config.acme.email.smtp.host --env production
+    plystra explain config config.acme.email.smtp.host --config deploy/customer-a.yaml
+    plystra explain config config.acme.email.smtp.host --format json
     plystra generate --check
     plystra generate --check --env production
     plystra generate --check --config deploy/customer-a.yaml
@@ -1235,6 +1239,12 @@ build and distribution boundary for every Plystra module.
   the returned selector-matched command or field, then regenerate and check with
   that same selector. Add --verbose or --format json for complete redacted
   evidence.
+- Unexpected configuration value, removal, or owner: run plystra explain config
+  config.<plugin-id>.<field> with the same selector. The result identifies the
+  typed effective owner, every winning source, an explicit removal or ancestor
+  suppression, and the exact selected current-Project document field to edit.
+  Values and Secret-reference targets remain redacted; use --verbose only when
+  the complete provenance graph is needed.
 - Alias error: point directly to a resolved canonical target with the same
   version and exposure no broader than the target.
 - Unclaimed extension namespace: add a compatible selected Plugin whose

@@ -64,6 +64,8 @@ func runExplain(arguments []string, stdout, stderr io.Writer, workingDirectory s
 		explanation, err = explainCapability(resolved, parsed.subject)
 	case diagnosticschema.ExplainSubjectPlugin:
 		explanation, err = explainPlugin(resolved, parsed.subject)
+	case diagnosticschema.ExplainSubjectConfiguration:
+		explanation, err = explainConfiguration(resolved, parsed.subject)
 	default:
 		err = fmt.Errorf("explanation subject kind %q is not implemented", parsed.subjectKind)
 	}
@@ -92,7 +94,10 @@ func parseExplainArguments(arguments []string) (explainArguments, bool) {
 	case diagnosticschema.ExplainSubjectCapability, diagnosticschema.ExplainSubjectPlugin:
 		subjectKind = diagnosticschema.ExplainSubjectKind(arguments[1])
 	default:
-		return explainArguments{}, false
+		if arguments[1] != "config" {
+			return explainArguments{}, false
+		}
+		subjectKind = diagnosticschema.ExplainSubjectConfiguration
 	}
 	result := explainArguments{
 		subjectKind: subjectKind,
@@ -295,6 +300,214 @@ func explainPlugin(resolved applicationresolve.Result, subject string) (commandE
 	}
 	explanation.result = result
 	return explanation, nil
+}
+
+func explainConfiguration(resolved applicationresolve.Result, subject string) (commandExplanation, error) {
+	evidence := resolved.ResolutionEvidence()
+	selection, currentModule, err := explanationProjectContext(evidence)
+	if err != nil {
+		return commandExplanation{}, err
+	}
+	field, canonicalSubject, exists := selectedConfigurationField(evidence, subject)
+	if !exists {
+		return commandExplanation{}, fmt.Errorf("configuration field %q is not present in the selected application model", subject)
+	}
+
+	input := diagnosticschema.ExplainInput{
+		Evidence:    evidence,
+		SubjectKind: diagnosticschema.ExplainSubjectConfiguration,
+		Subject:     canonicalSubject,
+	}
+	explanation := commandExplanation{subjectLabel: "Configuration"}
+	changePath := field.Path()
+	var owner resolutionevidence.ConfigurationOwner
+	var sources []resolutionevidence.Source
+	if field.Effective() {
+		contribution, found := effectiveConfigurationContribution(field)
+		if !found {
+			return commandExplanation{}, fmt.Errorf("effective configuration field %q omits its winning contribution", canonicalSubject)
+		}
+		owner = field.Owner()
+		sources = contribution.Sources()
+		input.Reason = string(owner)
+		if field.Removed() {
+			input.Outcome = "removed"
+			explanation.decision = fmt.Sprintf("removed%s by %s", configurationPluginDescription(field.Path(), evidence), owner)
+		} else {
+			input.Outcome = "effective"
+			explanation.decision = fmt.Sprintf("effective %s%s from %s", field.Summary(), configurationPluginDescription(field.Path(), evidence), owner)
+		}
+	} else {
+		suppressor, found := suppressingConfigurationField(evidence, field.Path())
+		if !found {
+			return commandExplanation{}, fmt.Errorf("suppressed configuration field %q omits its effective ancestor", canonicalSubject)
+		}
+		contribution, found := effectiveConfigurationContribution(suppressor)
+		if !found {
+			return commandExplanation{}, fmt.Errorf("suppressing configuration field %q omits its winning contribution", suppressor.Path())
+		}
+		owner = suppressor.Owner()
+		sources = contribution.Sources()
+		changePath = suppressor.Path()
+		input.Outcome = "suppressed"
+		if suppressor.Removed() {
+			input.Reason = "ancestor-removal"
+		} else {
+			input.Reason = "ancestor-replacement"
+		}
+		explanation.decision = fmt.Sprintf("suppressed%s by %s at %s", configurationPluginDescription(field.Path(), evidence), owner, suppressor.Path())
+	}
+	if len(sources) == 0 {
+		return commandExplanation{}, fmt.Errorf("configuration field %q omits causal source provenance", canonicalSubject)
+	}
+	input.PrimarySources = make([]diagnosticjson.Source, len(sources))
+	for index, source := range sources {
+		input.PrimarySources[index] = explainSource(source)
+	}
+	input.Change = configurationFieldChange(selection, currentModule, changePath, owner, sources)
+
+	result, err := diagnosticschema.NewExplain(input)
+	if err != nil {
+		return commandExplanation{}, err
+	}
+	explanation.result = result
+	return explanation, nil
+}
+
+func selectedConfigurationField(evidence resolutionevidence.Evidence, subject string) (resolutionevidence.ConfigurationField, string, bool) {
+	fields := evidence.ConfigurationFields()
+	byPath := make(map[string]resolutionevidence.ConfigurationField, len(fields))
+	for _, field := range fields {
+		byPath[field.Path()] = field
+	}
+	if field, exists := byPath[subject]; exists {
+		return field, subject, true
+	}
+	if !strings.HasPrefix(subject, "config.") {
+		return resolutionevidence.ConfigurationField{}, "", false
+	}
+	pluginID := ""
+	for _, candidate := range evidence.PluginCandidates() {
+		prefix := "config." + candidate.ID()
+		if subject != prefix && !strings.HasPrefix(subject, prefix+".") {
+			continue
+		}
+		if len(candidate.ID()) > len(pluginID) {
+			pluginID = candidate.ID()
+		}
+	}
+	if pluginID == "" {
+		return resolutionevidence.ConfigurationField{}, "", false
+	}
+	canonical := "config[" + strconv.Quote(pluginID) + "]"
+	remainder := strings.TrimPrefix(subject, "config."+pluginID)
+	if remainder != "" {
+		for _, segment := range strings.Split(strings.TrimPrefix(remainder, "."), ".") {
+			if segment == "" {
+				return resolutionevidence.ConfigurationField{}, "", false
+			}
+			canonical += "[" + strconv.Quote(segment) + "]"
+		}
+	}
+	field, exists := byPath[canonical]
+	return field, canonical, exists
+}
+
+func effectiveConfigurationContribution(field resolutionevidence.ConfigurationField) (resolutionevidence.ConfigurationContribution, bool) {
+	for _, contribution := range field.Contributors() {
+		if contribution.Effective() {
+			return contribution, true
+		}
+	}
+	return resolutionevidence.ConfigurationContribution{}, false
+}
+
+func suppressingConfigurationField(evidence resolutionevidence.Evidence, path string) (resolutionevidence.ConfigurationField, bool) {
+	fields := evidence.ConfigurationFields()
+	byPath := make(map[string]resolutionevidence.ConfigurationField, len(fields))
+	for _, field := range fields {
+		byPath[field.Path()] = field
+	}
+	ancestors := explainConfigurationPathAncestors(path)
+	for index := len(ancestors) - 1; index >= 0; index-- {
+		ancestor, exists := byPath[ancestors[index]]
+		if !exists || !ancestor.Effective() || configurationFieldIsObject(ancestor, fields) {
+			continue
+		}
+		return ancestor, true
+	}
+	return resolutionevidence.ConfigurationField{}, false
+}
+
+func explainConfigurationPathAncestors(value string) []string {
+	if strings.HasPrefix(value, "config[") {
+		var result []string
+		for index := strings.IndexByte(value, '['); index >= 0; {
+			close := strings.IndexByte(value[index:], ']')
+			if close < 0 {
+				break
+			}
+			close += index
+			result = append(result, value[:close+1])
+			next := close + 1
+			if next >= len(value) || value[next] != '[' {
+				break
+			}
+			index = next
+		}
+		if len(result) > 0 {
+			result = result[:len(result)-1]
+		}
+		return result
+	}
+	parts := strings.Split(value, ".")
+	result := make([]string, 0, len(parts)-1)
+	for index := 1; index < len(parts); index++ {
+		result = append(result, strings.Join(parts[:index], "."))
+	}
+	return result
+}
+
+func configurationFieldIsObject(field resolutionevidence.ConfigurationField, fields []resolutionevidence.ConfigurationField) bool {
+	if field.Summary() == "object" {
+		return true
+	}
+	if field.Summary() != "redacted" {
+		return false
+	}
+	for _, candidate := range fields {
+		if candidate.Path() != field.Path() && strings.HasPrefix(candidate.Path(), field.Path()+"[") {
+			return true
+		}
+	}
+	return false
+}
+
+func configurationPluginDescription(path string, evidence resolutionevidence.Evidence) string {
+	for _, candidate := range evidence.PluginCandidates() {
+		if strings.HasPrefix(path, "config["+strconv.Quote(candidate.ID())+"]") {
+			return " for Plugin " + candidate.ID()
+		}
+	}
+	return ""
+}
+
+func configurationFieldChange(selection resolutionevidence.ConfigurationSelection, currentModule, field string, owner resolutionevidence.ConfigurationOwner, sources []resolutionevidence.Source) diagnosticschema.ExplainChange {
+	path := selection.SelectedPath()
+	if owner != resolutionevidence.ConfigurationOwnerDependency {
+		for _, source := range sources {
+			if source.Module() == currentModule {
+				path = source.Path()
+				break
+			}
+		}
+	}
+	return diagnosticschema.ExplainChange{
+		Kind:   diagnosticschema.ExplainChangeFile,
+		Module: currentModule,
+		Path:   path,
+		Field:  field,
+	}
 }
 
 func explanationProjectContext(evidence resolutionevidence.Evidence) (resolutionevidence.ConfigurationSelection, string, error) {

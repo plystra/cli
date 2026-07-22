@@ -1476,6 +1476,9 @@ plystra explain capability email.send/v1 --config deploy/customer-a.yaml
 plystra explain plugin acme.email.smtp
 plystra explain plugin acme.email.smtp --env production
 plystra explain plugin acme.email.smtp --config deploy/customer-a.yaml
+plystra explain config config.acme.email.smtp.host
+plystra explain config config.acme.email.smtp.host --env production
+plystra explain config config.acme.email.smtp.host --config deploy/customer-a.yaml
 plystra generate
 plystra generate --check
 plystra generate --env production
@@ -1517,6 +1520,17 @@ selector-matched `plystra use` command or selected-configuration field that
 changes the decision. Keep the same selector for follow-up generation and
 validation; `--verbose` and `--format json` use the same complete redacted
 evidence boundary as Capability explanations.
+
+Use `plystra explain config <field-path>` when the owner or selected source of a
+typed configuration decision is unexpected. Plugin fields use the dotted form
+`config.<plugin-id>.<field>`; the result reports the canonical typed path, the
+effective dependency, root, environment, or full-replacement owner, every
+winning source, and the exact selected current-Project document and field to
+edit. Explicit removals and descendants suppressed by an ancestor removal are
+reported as decisions rather than being mistaken for missing fields. Values,
+Secret-reference targets, and resolved Secrets remain outside concise, verbose,
+and JSON output. Keep the same selector for the follow-up edit, generation, and
+validation.
 
 Clean check output resembles:
 

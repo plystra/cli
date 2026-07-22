@@ -202,6 +202,209 @@ func TestExplainPluginSelectorsUseOneSharedSelectedModel(t *testing.T) {
 	}
 }
 
+func TestExplainConfigurationReportsTypedOwnershipReplacementAndRemoval(t *testing.T) {
+	t.Parallel()
+
+	root, nested := createExplainDependencyPluginProject(t)
+	beforeProject := snapshotInspectProject(t, root)
+	dependencyRoot := filepath.Join(filepath.Dir(root), "platform")
+	beforeDependency := snapshotInspectProject(t, dependencyRoot)
+	tests := []struct {
+		name         string
+		arguments    []string
+		mode         string
+		outcome      string
+		reason       string
+		sourceModule string
+		sourcePath   string
+		changePath   string
+		changeField  string
+	}{
+		{
+			name:         "dependency Secret reference",
+			arguments:    []string{"explain", "config", "config.example.shared.password", "--format", "json"},
+			mode:         "default",
+			outcome:      "effective",
+			reason:       "dependency-project",
+			sourceModule: "example.com/platform",
+			sourcePath:   "plystra.yaml",
+			changePath:   "plystra.yaml",
+			changeField:  `config["example.shared"]["password"]`,
+		},
+		{
+			name:         "root replacement",
+			arguments:    []string{"explain", "config", "config.example.shared.host", "--format", "json"},
+			mode:         "default",
+			outcome:      "effective",
+			reason:       "current-project-root",
+			sourceModule: "example.com/app",
+			sourcePath:   "plystra.yaml",
+			changePath:   "plystra.yaml",
+			changeField:  `config["example.shared"]["host"]`,
+		},
+		{
+			name:         "root process field",
+			arguments:    []string{"explain", "config", "http.address", "--format", "json"},
+			mode:         "default",
+			outcome:      "effective",
+			reason:       "current-project-root",
+			sourceModule: "example.com/app",
+			sourcePath:   "plystra.yaml",
+			changePath:   "plystra.yaml",
+			changeField:  "http.address",
+		},
+		{
+			name:         "environment replacement",
+			arguments:    []string{"explain", "config", "config.example.shared.host", "--format", "json", "--env", "production"},
+			mode:         "environment",
+			outcome:      "effective",
+			reason:       "current-project-environment",
+			sourceModule: "example.com/app",
+			sourcePath:   "plystra.production.yaml",
+			changePath:   "plystra.production.yaml",
+			changeField:  `config["example.shared"]["host"]`,
+		},
+		{
+			name:         "environment removal",
+			arguments:    []string{"explain", "config", "config.example.shared.password", "--format", "json", "--env", "production"},
+			mode:         "environment",
+			outcome:      "removed",
+			reason:       "current-project-environment",
+			sourceModule: "example.com/app",
+			sourcePath:   "plystra.production.yaml",
+			changePath:   "plystra.production.yaml",
+			changeField:  `config["example.shared"]["password"]`,
+		},
+		{
+			name:         "full replacement",
+			arguments:    []string{"explain", "config", "config.example.shared.host", "--format", "json", "--config", "deploy/customer.yaml"},
+			mode:         "explicit-config",
+			outcome:      "effective",
+			reason:       "current-project-config",
+			sourceModule: "example.com/app",
+			sourcePath:   "deploy/customer.yaml",
+			changePath:   "deploy/customer.yaml",
+			changeField:  `config["example.shared"]["host"]`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			exitCode, stdout, stderr := runCommand(t, test.arguments, nested, inspectCommandEnvironment(nil))
+			document := decodeExplainCommandEnvelope(t, stdout)
+			if exitCode != 0 || stderr != inspectProgress || document.ConfigurationMode != test.mode {
+				t.Fatalf("configuration explanation = exit %d, stderr %q, mode %q", exitCode, stderr, document.ConfigurationMode)
+			}
+			if document.Result.Subject.Kind != "configuration" || document.Result.Subject.ID != test.changeField || document.Result.Decision.Outcome != test.outcome || document.Result.Reason.Code != test.reason {
+				t.Fatalf("configuration decision = %#v", document.Result)
+			}
+			if len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Module != test.sourceModule || document.Result.Reason.Sources[0].Path != test.sourcePath {
+				t.Fatalf("configuration reason sources = %#v", document.Result.Reason.Sources)
+			}
+			if document.Result.Change.Kind != "file" || document.Result.Change.Module != "example.com/app" || document.Result.Change.Path != test.changePath || document.Result.Change.Field != test.changeField || document.Result.Change.Command != "" {
+				t.Fatalf("configuration change = %#v", document.Result.Change)
+			}
+			assertConfigurationExplanationRedacted(t, stdout, root)
+		})
+	}
+	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, beforeProject) {
+		t.Fatalf("configuration explanations mutated the Project:\nbefore: %#v\nafter:  %#v", beforeProject, after)
+	}
+	if after := snapshotInspectProject(t, dependencyRoot); !reflect.DeepEqual(after, beforeDependency) {
+		t.Fatalf("configuration explanations mutated the dependency:\nbefore: %#v\nafter:  %#v", beforeDependency, after)
+	}
+}
+
+func TestExplainConfigurationDottedAndCanonicalPathsProduceDeterministicJSON(t *testing.T) {
+	t.Parallel()
+
+	root, nested := createExplainDependencyPluginProject(t)
+	environment := inspectCommandEnvironment(nil)
+	firstExit, firstStdout, firstStderr := runCommand(t, []string{"explain", "config", "config.example.shared.host", "--format", "json"}, nested, environment)
+	secondExit, secondStdout, secondStderr := runCommand(t, []string{"explain", "config", `config["example.shared"]["host"]`, "--verbose", "--format", "json"}, root, environment)
+	if firstExit != 0 || secondExit != 0 || firstStderr != inspectProgress || secondStderr != inspectProgress {
+		t.Fatalf("configuration JSON = first (%d, %q) second (%d, %q)", firstExit, firstStderr, secondExit, secondStderr)
+	}
+	if firstStdout != secondStdout || !strings.HasSuffix(firstStdout, "\n") || strings.Count(firstStdout, "\n") != 1 {
+		t.Fatalf("configuration JSON is not one deterministic canonical document:\nfirst:  %q\nsecond: %q", firstStdout, secondStdout)
+	}
+	document := decodeExplainCommandEnvelope(t, firstStdout)
+	if document.Result.Subject.Kind != "configuration" || document.Result.Subject.ID != `config["example.shared"]["host"]` || document.Result.Decision.Outcome != "effective" || document.Result.Reason.Code != "current-project-root" {
+		t.Fatalf("configuration JSON decision = %#v", document.Result)
+	}
+	assertConfigurationExplanationRedacted(t, firstStdout, root)
+}
+
+func TestExplainConfigurationReportsAncestorSuppression(t *testing.T) {
+	t.Parallel()
+
+	root, nested := createExplainDependencyPluginProject(t)
+	exitCode, stdout, stderr := runCommand(t, []string{"explain", "config", "config.example.shared.settings.nested", "--format", "json", "--env", "suppressed"}, nested, inspectCommandEnvironment(nil))
+	document := decodeExplainCommandEnvelope(t, stdout)
+	if exitCode != 0 || stderr != inspectProgress || document.ConfigurationMode != "environment" || document.Result.Decision.Outcome != "suppressed" || document.Result.Reason.Code != "ancestor-removal" {
+		t.Fatalf("suppressed configuration explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
+	}
+	if document.Result.Subject.ID != `config["example.shared"]["settings"]["nested"]` || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Module != "example.com/app" || document.Result.Reason.Sources[0].Path != "plystra.suppressed.yaml" || document.Result.Reason.Sources[0].Kind != "configuration-removal" {
+		t.Fatalf("suppressed configuration source = %#v", document.Result)
+	}
+	if document.Result.Change.Kind != "file" || document.Result.Change.Path != "plystra.suppressed.yaml" || document.Result.Change.Field != `config["example.shared"]` {
+		t.Fatalf("suppressed configuration change = %#v", document.Result.Change)
+	}
+	assertConfigurationExplanationRedacted(t, stdout, root)
+}
+
+func TestExplainConfigurationSelectorsUseOneSharedSelectedModel(t *testing.T) {
+	t.Parallel()
+
+	root, nested := createExplainDependencyPluginProject(t)
+	tests := []struct {
+		name        string
+		arguments   []string
+		environment map[string]string
+		mode        string
+		reason      string
+		path        string
+	}{
+		{name: "explicit environment", arguments: []string{"explain", "config", "config.example.shared.host", "--format", "json", "--env", "production"}, environment: map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"}, mode: "environment", reason: "current-project-environment", path: "plystra.production.yaml"},
+		{name: "ambient environment", arguments: []string{"explain", "config", "config.example.shared.host", "--format", "json"}, environment: map[string]string{"PLYSTRA_ENV": "production"}, mode: "environment", reason: "current-project-environment", path: "plystra.production.yaml"},
+		{name: "explicit configuration", arguments: []string{"explain", "config", "config.example.shared.host", "--format", "json", "--config", "deploy/customer.yaml"}, environment: map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"}, mode: "explicit-config", reason: "current-project-config", path: "deploy/customer.yaml"},
+		{name: "ambient configuration", arguments: []string{"explain", "config", "config.example.shared.host", "--format", "json"}, environment: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"}, mode: "explicit-config", reason: "current-project-config", path: "deploy/customer.yaml"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			exitCode, stdout, stderr := runCommand(t, test.arguments, nested, inspectCommandEnvironment(test.environment))
+			document := decodeExplainCommandEnvelope(t, stdout)
+			if exitCode != 0 || stderr != inspectProgress || document.ConfigurationMode != test.mode || document.Result.Decision.Outcome != "effective" || document.Result.Reason.Code != test.reason || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != test.path || document.Result.Change.Path != test.path {
+				t.Fatalf("selected configuration explanation = exit %d, stderr %q, mode %q, result %#v", exitCode, stderr, document.ConfigurationMode, document.Result)
+			}
+			assertConfigurationExplanationRedacted(t, stdout, root)
+		})
+	}
+}
+
+func TestExplainConfigurationHumanOutputNamesPluginAndVerboseEvidence(t *testing.T) {
+	t.Parallel()
+
+	root, _ := createExplainDependencyPluginProject(t)
+	exitCode, stdout, stderr := runCommand(t, []string{"explain", "config", "config.example.shared.password", "--verbose"}, root, inspectCommandEnvironment(nil))
+	for _, fragment := range []string{
+		`Configuration: config["example.shared"]["password"]`,
+		"Decision: effective redacted for Plugin example.shared from dependency-project\n",
+		"Reason: dependency-project\n",
+		"Source: example.com/platform:plystra.yaml:1:1 (configuration-value)\n",
+		`Change: edit plystra.yaml at config["example.shared"]["password"]`,
+		"Resolution evidence:\n  {\n",
+		`    "configuration_fields": [`,
+	} {
+		if !strings.Contains(stdout, fragment) {
+			t.Fatalf("configuration explanation omits %q:\n%s", fragment, stdout)
+		}
+	}
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("configuration explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	assertConfigurationExplanationRedacted(t, stdout, root)
+}
+
 func TestExplainCapabilitySelectorsUseOneSharedSelectedModel(t *testing.T) {
 	t.Parallel()
 
@@ -365,6 +568,8 @@ func TestExplainFailuresKeepJSONStdoutEmptyAndDoNotMutate(t *testing.T) {
 		{name: "invalid Capability identity", arguments: []string{"explain", "capability", "email.send", "--format", "json"}, want: "invalid capability ID"},
 		{name: "unknown canonical Plugin", arguments: []string{"explain", "plugin", "missing.plugin", "--format", "json"}, want: "not visible in the selected application model"},
 		{name: "invalid Plugin identity", arguments: []string{"explain", "plugin", "missing", "--format", "json"}, want: "invalid plugin ID"},
+		{name: "unknown configuration field", arguments: []string{"explain", "config", "http.missing", "--format", "json"}, want: "is not present in the selected application model"},
+		{name: "invalid configuration path", arguments: []string{"explain", "config", "config..host", "--format", "json"}, want: "is not present in the selected application model"},
 		{name: "missing overlay", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json", "--env", "missing"}, want: "plystra.missing.yaml"},
 		{name: "unsafe environment", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json", "--env", "../test"}, want: "safe filename component"},
 		{name: "ambient conflict", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json"}, environment: map[string]string{"PLYSTRA_ENV": "production", "PLYSTRA_CONFIG": "deploy/customer.yaml"}, want: "PLYSTRA_CONFIG and PLYSTRA_ENV cannot be used together"},
@@ -452,9 +657,21 @@ func createExplainDependencyPluginProject(t *testing.T) (string, string) {
 	appRoot := filepath.Join(root, "app")
 	platformRoot := filepath.Join(root, "platform")
 	writeCommandFile(t, filepath.Join(platformRoot, "go.mod"), "module example.com/platform\n\ngo 1.26\n")
-	writeCommandFile(t, filepath.Join(platformRoot, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(platformRoot, "plystra.yaml"), `config:
+  example.shared:
+    host: dependency-private.example
+    password: {env: EXPLAIN_PRIVATE_PASSWORD}
+    settings:
+      nested: dependency-private
+`)
 
-	writeCommandFile(t, filepath.Join(platformRoot, "shared", "plugin.yaml"), "id: example.shared\nprovides: [email.send/v1, reports.read/v1]\n")
+	writeCommandFile(t, filepath.Join(platformRoot, "shared", "plugin.yaml"), `id: example.shared
+provides: [email.send/v1, reports.read/v1]
+config:
+  host: {type: string}
+  password: {type: secret}
+  settings: {type: object}
+`)
 	writeCommandFile(t, filepath.Join(platformRoot, "shared", "capabilities", "email.send", "v1", "capability.yaml"), "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 	writeCommandFile(t, filepath.Join(platformRoot, "shared", "capabilities", "reports.read", "v1", "capability.yaml"), "id: reports.read/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 	writeCommandFile(t, filepath.Join(platformRoot, "alternative", "plugin.yaml"), "id: example.alternative\nprovides: [email.send/v1]\n")
@@ -470,9 +687,33 @@ require example.com/platform v1.0.0
 
 replace example.com/platform => %s
 `, filepath.ToSlash(platformRoot)))
-	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), "capabilities:\n  require: [email.send/v1, reports.read/v1]\n  use: {email.send/v1: example.shared}\nhttp:\n  address: resolved-secret-marker\n")
-	writeCommandFile(t, filepath.Join(appRoot, "plystra.production.yaml"), "capabilities:\n  use: {email.send/v1: example.alternative}\n")
-	writeCommandFile(t, filepath.Join(appRoot, "deploy", "customer.yaml"), "capabilities:\n  require: [email.send/v1, reports.read/v1]\n  use: {email.send/v1: example.alternative}\n")
+	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), `capabilities:
+  require: [email.send/v1, reports.read/v1]
+  use: {email.send/v1: example.shared}
+http:
+  address: resolved-secret-marker
+config:
+  example.shared:
+    host: root-private.example
+`)
+	writeCommandFile(t, filepath.Join(appRoot, "plystra.production.yaml"), `capabilities:
+  use: {email.send/v1: example.alternative}
+config:
+  example.shared:
+    host: production-private.example
+    password: null
+`)
+	writeCommandFile(t, filepath.Join(appRoot, "plystra.suppressed.yaml"), `config:
+  example.shared: null
+`)
+	writeCommandFile(t, filepath.Join(appRoot, "deploy", "customer.yaml"), `capabilities:
+  require: [email.send/v1, reports.read/v1]
+  use: {email.send/v1: example.alternative}
+config:
+  example.shared:
+    host: customer-private.example
+    password: {env: CUSTOMER_PRIVATE_PASSWORD}
+`)
 	nested := filepath.Join(appRoot, "nested", "deeper")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatalf("MkdirAll(%s): %v", nested, err)
@@ -487,4 +728,22 @@ func decodeExplainCommandEnvelope(t testing.TB, output string) explainCommandEnv
 		t.Fatalf("decode explain JSON: %v\n%s", err, output)
 	}
 	return result
+}
+
+func assertConfigurationExplanationRedacted(t testing.TB, output, root string) {
+	t.Helper()
+	for _, forbidden := range []string{
+		root,
+		"dependency-private",
+		"root-private",
+		"production-private",
+		"customer-private",
+		"EXPLAIN_PRIVATE_PASSWORD",
+		"CUSTOMER_PRIVATE_PASSWORD",
+		"resolved-secret-marker",
+	} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("configuration explanation exposed %q:\n%s", forbidden, output)
+		}
+	}
 }

@@ -491,6 +491,9 @@ plystra explain capability <capability-name>/vN --format json
 plystra explain plugin <plugin-id>
 plystra explain plugin <plugin-id> --verbose
 plystra explain plugin <plugin-id> --format json
+plystra explain config <field-path>
+plystra explain config <field-path> --verbose
+plystra explain config <field-path> --format json
 plystra check
 plystra fix
 plystra generate
@@ -538,6 +541,16 @@ caused its inclusion. A visible unselected dependency Plugin reports whether an
 alternate Provider won or none of its provided Capabilities is required, plus a
 selector-matched `plystra use` command or configuration field that changes the
 decision. Unknown canonical Plugin IDs fail without modifying the Project.
+
+`plystra explain config <field-path>` traces one typed field through dependency
+Project composition and the selected current-Project layer. Plugin fields accept
+the operational dotted form `config.<plugin-id>.<field>` and are reported with
+their canonical typed path. The result distinguishes effective values, explicit
+removals, and descendants suppressed by an ancestor replacement or removal;
+identifies the owning Plugin when applicable; reports every winning source; and
+points to the exact selected current-Project document and field that changes the
+decision. Configuration values and Secret-reference targets remain redacted in
+concise, verbose, and JSON output.
 
 The current `plystra check` implementation is read-only. It verifies the
 selected dependency composition and generated fixed point, then runs
