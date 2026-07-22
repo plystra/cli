@@ -91,6 +91,9 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if !evidence.Valid() || evidence.SelectedModelDigest() != resolved.Context().Digest() || evidence.BuildModelDigest() != resolved.Context().BuildModelDigest() {
 		t.Fatalf("ResolutionEvidence = valid %t selected %q build %q", evidence.Valid(), evidence.SelectedModelDigest(), evidence.BuildModelDigest())
 	}
+	if transports, exists := evidence.HTTPTransports(); !exists || transports != (applicationmeta.HTTPTransports{Connect: true}) {
+		t.Fatalf("ResolutionEvidence HTTP transports = %#v, %t", transports, exists)
+	}
 	assertStaticAssemblyMatchesResolution(t, first)
 	if evidence.DiscoveredPluginCount() != 0 || evidence.SelectedPluginCount() != 0 || evidence.CanonicalCapabilityCount() != 2 || evidence.RequirementCount() != 0 || evidence.ProviderCandidateCount() != 0 || evidence.RejectedProviderCount() != 0 || evidence.SelectedProviderCount() != 0 || evidence.CapabilityAliasCount() != 0 || evidence.PublicExposureCount() != 0 {
 		t.Fatalf("ResolutionEvidence counts = discovered %d selected %d capabilities %d requirements %d candidates %d rejected %d providers %d aliases %d public %d", evidence.DiscoveredPluginCount(), evidence.SelectedPluginCount(), evidence.CanonicalCapabilityCount(), evidence.RequirementCount(), evidence.ProviderCandidateCount(), evidence.RejectedProviderCount(), evidence.SelectedProviderCount(), evidence.CapabilityAliasCount(), evidence.PublicExposureCount())

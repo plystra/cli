@@ -25,7 +25,7 @@ import (
 	gomodule "golang.org/x/mod/module"
 )
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 // ErrBuild reports an absent or internally inconsistent normalized model.
 var ErrBuild = errors.New("build resolution evidence")
@@ -196,6 +196,7 @@ type Input struct {
 	PluginCandidates   []PluginCandidateInput
 	Configuration      *ConfigurationInput
 	StaticAssembly     *StaticAssemblyInput
+	HTTPTransports     *applicationmeta.HTTPTransports
 }
 
 // ModuleInput identifies one participating Plystra Project without carrying
@@ -252,6 +253,8 @@ type Evidence struct {
 	hasConfigurationSelection bool
 	staticAssembly            StaticAssembly
 	hasStaticAssembly         bool
+	httpTransports            applicationmeta.HTTPTransports
+	hasHTTPTransports         bool
 	canonicalJSON             []byte
 	digest                    string
 	prepared                  bool
@@ -1290,6 +1293,11 @@ type canonicalStaticAssembly struct {
 	Bindings []canonicalAssemblyBinding `json:"bindings"`
 }
 
+type canonicalHTTPTransports struct {
+	Connect bool `json:"connect"`
+	REST    bool `json:"rest"`
+}
+
 type canonicalReplacement struct {
 	Kind       ReplacementKind `json:"kind"`
 	ModulePath string          `json:"module_path"`
@@ -1322,6 +1330,7 @@ type canonicalEvidence struct {
 	ConfigurationSelection *canonicalConfigurationSelection `json:"configuration_selection,omitempty"`
 	ConfigurationFields    []canonicalConfigurationField    `json:"configuration_fields"`
 	StaticAssembly         *canonicalStaticAssembly         `json:"static_assembly,omitempty"`
+	HTTPTransports         *canonicalHTTPTransports         `json:"http_transports,omitempty"`
 	Counts                 canonicalCounts                  `json:"counts"`
 }
 
@@ -1383,6 +1392,11 @@ func Build(source Input) (Evidence, error) {
 	if err != nil {
 		return Evidence{}, fmt.Errorf("%w: static assembly membership: %v", ErrBuild, err)
 	}
+	httpTransports, hasHTTPTransports := applicationmeta.HTTPTransports{}, false
+	if source.HTTPTransports != nil {
+		httpTransports = *source.HTTPTransports
+		hasHTTPTransports = true
+	}
 	input := Evidence{
 		generationAPI:             context.APIVersion(),
 		selectedModelDigest:       context.Digest(),
@@ -1405,6 +1419,8 @@ func Build(source Input) (Evidence, error) {
 		hasConfigurationSelection: hasConfigurationSelection,
 		staticAssembly:            staticAssembly,
 		hasStaticAssembly:         hasStaticAssembly,
+		httpTransports:            httpTransports,
+		hasHTTPTransports:         hasHTTPTransports,
 		prepared:                  true,
 	}
 	if err := validate(input); err != nil {
@@ -1590,6 +1606,13 @@ func (e Evidence) StaticAssembly() (StaticAssembly, bool) {
 	}, true
 }
 
+// HTTPTransports returns the selected closed Connect and REST transport values
+// when the evidence was constructed by filesystem-backed application
+// resolution. Synthetic evidence may omit them.
+func (e Evidence) HTTPTransports() (applicationmeta.HTTPTransports, bool) {
+	return e.httpTransports, e.hasHTTPTransports
+}
+
 // AssemblyPluginCount returns selected constructor package membership.
 func (e Evidence) AssemblyPluginCount() int {
 	if !e.hasStaticAssembly {
@@ -1740,6 +1763,9 @@ func validate(e Evidence) error {
 	}
 	if err := validateStaticAssemblyState(e.staticAssembly, e.hasStaticAssembly, e.selectedPlugins, e.selectedProviders, e.requirements); err != nil {
 		return err
+	}
+	if !e.hasHTTPTransports && e.httpTransports != (applicationmeta.HTTPTransports{}) {
+		return errors.New("absent HTTP transport evidence must use the zero value")
 	}
 	return nil
 }
@@ -2078,6 +2104,13 @@ func encode(e Evidence) ([]byte, error) {
 		}
 		staticAssembly = &canonicalStaticAssembly{Plugins: plugins, Bindings: bindings}
 	}
+	var httpTransports *canonicalHTTPTransports
+	if e.hasHTTPTransports {
+		httpTransports = &canonicalHTTPTransports{
+			Connect: e.httpTransports.Connect,
+			REST:    e.httpTransports.REST,
+		}
+	}
 	return json.Marshal(canonicalEvidence{
 		Version:                schemaVersion,
 		GenerationAPI:          e.generationAPI,
@@ -2096,6 +2129,7 @@ func encode(e Evidence) ([]byte, error) {
 		ConfigurationSelection: configurationSelection,
 		ConfigurationFields:    configurationFields,
 		StaticAssembly:         staticAssembly,
+		HTTPTransports:         httpTransports,
 		Counts: canonicalCounts{
 			ParticipatingModules:  len(e.modules),
 			DiscoveredPlugins:     len(e.pluginCandidates),

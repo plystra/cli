@@ -294,6 +294,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
 	assemblyEvidence := resolutionEvidenceAssemblyInput(configs)
+	httpTransports := manifest.HTTPTransports()
 	evidence, err := resolutionevidence.Build(resolutionevidence.Input{
 		Context:            resolution.Context(),
 		ProviderResolution: resolution.ActivationResolution().ProviderResolution(),
@@ -302,6 +303,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		PluginCandidates:   resolutionEvidencePluginCandidates(inventory),
 		Configuration:      &configurationEvidence,
 		StaticAssembly:     &assemblyEvidence,
+		HTTPTransports:     &httpTransports,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)

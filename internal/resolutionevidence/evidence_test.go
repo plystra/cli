@@ -10,6 +10,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/aliasresolution"
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/providerresolution"
 	"github.com/plystra/cli/internal/resolutionevidence"
@@ -20,10 +21,13 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 
 	firstContext := selectedContext(t, false, "a", true)
 	secondContext := selectedContext(t, true, "a", true)
-	first, err := resolutionevidence.Build(resolutionEvidenceInput(t, firstContext, participatingModules(false), participatingPluginCandidates(false)))
+	firstInput := resolutionEvidenceInput(t, firstContext, participatingModules(false), participatingPluginCandidates(false))
+	first, err := resolutionevidence.Build(firstInput)
 	if err != nil {
 		t.Fatalf("Build(first): %v", err)
 	}
+	firstInput.HTTPTransports.Connect = false
+	firstInput.HTTPTransports.REST = true
 	second, err := resolutionevidence.Build(resolutionEvidenceInput(t, secondContext, participatingModules(true), participatingPluginCandidates(true)))
 	if err != nil {
 		t.Fatalf("Build(second): %v", err)
@@ -31,11 +35,14 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	if !first.Valid() || !second.Valid() {
 		t.Fatal("Build returned invalid evidence")
 	}
-	if first.SchemaVersion() != 1 || first.GenerationAPIVersion() != generation.Version {
+	if first.SchemaVersion() != 2 || first.GenerationAPIVersion() != generation.Version {
 		t.Fatalf("evidence versions = schema %d generation %q", first.SchemaVersion(), first.GenerationAPIVersion())
 	}
 	if first.SelectedModelDigest() != firstContext.Digest() || first.BuildModelDigest() != firstContext.BuildModelDigest() {
 		t.Fatalf("evidence model digests = selected %q build %q", first.SelectedModelDigest(), first.BuildModelDigest())
+	}
+	if transports, exists := first.HTTPTransports(); !exists || transports != (applicationmeta.HTTPTransports{Connect: true}) {
+		t.Fatalf("evidence HTTP transports = %#v, %t", transports, exists)
 	}
 	selection, exists := first.ConfigurationSelection()
 	if !exists || selection.Mode() != generation.ConfigurationModeDefault || selection.Environment() != "" || selection.RootPath() != "plystra.yaml" || selection.SelectedPath() != "plystra.yaml" || selection.RootDigest() != selection.SelectedDigest() || selection.DependencyCompositionDigest() != "sha256:"+strings.Repeat("b", 64) {
@@ -182,6 +189,10 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 			SelectedPath                string `json:"selected_path"`
 			DependencyCompositionDigest string `json:"dependency_composition_digest"`
 		} `json:"configuration_selection"`
+		HTTPTransports struct {
+			Connect bool `json:"connect"`
+			REST    bool `json:"rest"`
+		} `json:"http_transports"`
 		Counts struct {
 			ParticipatingModules  int `json:"participating_modules"`
 			DiscoveredPlugins     int `json:"discovered_plugins"`
@@ -193,7 +204,7 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 			ConfigurationFields   int `json:"configuration_fields"`
 		} `json:"counts"`
 	}
-	if err := json.Unmarshal(first.CanonicalJSON(), &document); err != nil || document.Version != 1 || len(document.Modules) != 3 || document.Counts.ParticipatingModules != 3 || document.Counts.DiscoveredPlugins != 2 || document.Counts.ProviderCandidates != 1 || document.Counts.RejectedProviders != 0 || document.Counts.SelectedProviders != 2 || document.Counts.GenerationActivations != 0 || document.Counts.GeneratedRequirements != 0 || document.Counts.ConfigurationFields != 0 || document.ConfigurationSelection.Mode != "default" || document.ConfigurationSelection.RootPath != "plystra.yaml" || document.ConfigurationSelection.SelectedPath != "plystra.yaml" || document.ConfigurationSelection.DependencyCompositionDigest != "sha256:"+strings.Repeat("b", 64) || document.Modules[2].Replacement == nil || document.Modules[2].Replacement.Kind != "module" || document.Modules[2].Source.Module != "corp.example/smtp" || document.Modules[2].Source.Path != "plystra.yaml" || len(document.PluginCandidates) != 2 || document.PluginCandidates[1].ID != "example.smtp" || document.PluginCandidates[1].ModulePath != "example.com/smtp" || document.PluginCandidates[1].Source.Module != "corp.example/smtp" || document.PluginCandidates[1].Source.Path != "smtp/plugin.yaml" || len(document.SelectedPlugins) != 1 || document.SelectedPlugins[0].ID != "example.smtp" || document.SelectedPlugins[0].ModulePath != "example.com/smtp" || document.SelectedPlugins[0].ModuleVersion != "v1.3.0" || len(document.SelectedPlugins[0].Reasons) != 1 || document.SelectedPlugins[0].Reasons[0].Kind != "provider" || document.SelectedPlugins[0].Reasons[0].Capability != "email.send/v1" || len(document.ProviderCandidates) != 1 || document.ProviderCandidates[0].Capability != "email.send/v1" || document.ProviderCandidates[0].PluginID != "example.smtp" || document.ProviderCandidates[0].ProjectModule != "example.com/smtp" || document.ProviderCandidates[0].RejectionReason != "" || document.ProviderCandidates[0].Source.Module != "corp.example/smtp" || document.ProviderCandidates[0].Source.Path != "smtp/capabilities/email.send/v1/capability.yaml" || document.ProviderCandidates[0].Source.Kind != "provider-declaration" || len(document.SelectedProviders) != 2 || document.SelectedProviders[0].Capability != "email.send/v1" || document.SelectedProviders[0].SelectionReason != "sole-provider" || document.SelectedProviders[0].ProviderSource.Module != "corp.example/smtp" || document.SelectedProviders[1].Capability != "kernel.health/v1" || document.SelectedProviders[1].SelectionReason != "intrinsic-kernel" || document.SelectedProviders[1].ProviderSource.Module != "github.com/plystra/kernel" {
+	if err := json.Unmarshal(first.CanonicalJSON(), &document); err != nil || document.Version != 2 || !document.HTTPTransports.Connect || document.HTTPTransports.REST || len(document.Modules) != 3 || document.Counts.ParticipatingModules != 3 || document.Counts.DiscoveredPlugins != 2 || document.Counts.ProviderCandidates != 1 || document.Counts.RejectedProviders != 0 || document.Counts.SelectedProviders != 2 || document.Counts.GenerationActivations != 0 || document.Counts.GeneratedRequirements != 0 || document.Counts.ConfigurationFields != 0 || document.ConfigurationSelection.Mode != "default" || document.ConfigurationSelection.RootPath != "plystra.yaml" || document.ConfigurationSelection.SelectedPath != "plystra.yaml" || document.ConfigurationSelection.DependencyCompositionDigest != "sha256:"+strings.Repeat("b", 64) || document.Modules[2].Replacement == nil || document.Modules[2].Replacement.Kind != "module" || document.Modules[2].Source.Module != "corp.example/smtp" || document.Modules[2].Source.Path != "plystra.yaml" || len(document.PluginCandidates) != 2 || document.PluginCandidates[1].ID != "example.smtp" || document.PluginCandidates[1].ModulePath != "example.com/smtp" || document.PluginCandidates[1].Source.Module != "corp.example/smtp" || document.PluginCandidates[1].Source.Path != "smtp/plugin.yaml" || len(document.SelectedPlugins) != 1 || document.SelectedPlugins[0].ID != "example.smtp" || document.SelectedPlugins[0].ModulePath != "example.com/smtp" || document.SelectedPlugins[0].ModuleVersion != "v1.3.0" || len(document.SelectedPlugins[0].Reasons) != 1 || document.SelectedPlugins[0].Reasons[0].Kind != "provider" || document.SelectedPlugins[0].Reasons[0].Capability != "email.send/v1" || len(document.ProviderCandidates) != 1 || document.ProviderCandidates[0].Capability != "email.send/v1" || document.ProviderCandidates[0].PluginID != "example.smtp" || document.ProviderCandidates[0].ProjectModule != "example.com/smtp" || document.ProviderCandidates[0].RejectionReason != "" || document.ProviderCandidates[0].Source.Module != "corp.example/smtp" || document.ProviderCandidates[0].Source.Path != "smtp/capabilities/email.send/v1/capability.yaml" || document.ProviderCandidates[0].Source.Kind != "provider-declaration" || len(document.SelectedProviders) != 2 || document.SelectedProviders[0].Capability != "email.send/v1" || document.SelectedProviders[0].SelectionReason != "sole-provider" || document.SelectedProviders[0].ProviderSource.Module != "corp.example/smtp" || document.SelectedProviders[1].Capability != "kernel.health/v1" || document.SelectedProviders[1].SelectionReason != "intrinsic-kernel" || document.SelectedProviders[1].ProviderSource.Module != "github.com/plystra/kernel" {
 		t.Fatalf("canonical module evidence = %#v, %v", document, err)
 	}
 	var aliasDocument struct {
@@ -1430,12 +1441,14 @@ func resolutionEvidenceInput(t testing.TB, context generation.Context, modules [
 	if err != nil {
 		t.Fatalf("providerresolution.Resolve: %v", err)
 	}
+	transports := applicationmeta.HTTPTransports{Connect: true}
 	return resolutionevidence.Input{
 		Context:            context,
 		ProviderResolution: providerResult,
 		AliasResolution:    resolveApplicationAliases(t, context),
 		Modules:            modules,
 		PluginCandidates:   candidates,
+		HTTPTransports:     &transports,
 	}
 }
 
