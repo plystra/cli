@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/diagnosticcode"
 )
 
 func TestRunCapabilityCreateAndImplementUsePublicTransactionalSurface(t *testing.T) {
@@ -47,7 +48,8 @@ func TestRunCapabilityCreateAndImplementUsePublicTransactionalSurface(t *testing
 	beforeConfirmation := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.archive/v3", "--plugin", "records"}, root, environment)
 	wantError = "create capability: capability version requires confirmation: records.archive/v3 is skipped without visible version history\n\n" +
-		"Recovery:\nReview the visible Capability versions, then rerun the create command with `--confirm`.\n"
+		"Recovery:\nReview the visible Capability versions, then rerun the create command with `--confirm`.\n\n" +
+		"Diagnostic: " + diagnosticcode.CapabilityConfirmationRequired + "\n"
 	if exitCode != 1 || stdout != "" || stderr != wantError {
 		t.Fatalf("unconfirmed capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}

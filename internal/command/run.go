@@ -49,7 +49,7 @@ const (
   plystra generate [--check] [--env <environment>|--config <yaml-path>]
 
 Common actionable failures end with one Recovery block containing the primary
-command or file edit to perform before retrying.
+command or file edit and one stable PLYSTRA-* Diagnostic code.
 `
 	addUsage = `Usage:
   plystra add <go-module-query>
@@ -567,10 +567,15 @@ func writeGenerationReport(writer io.Writer, heading string, configurationDrift 
 		_, _ = fmt.Fprintf(writer, "  %s %s\n", change.Kind(), change.Path())
 	}
 	action := "Run `plystra generate" + context.selectorSuffix() + "` to restore the selected generated output."
+	code := diagnosticGeneratedDrift
+	if configurationDrift {
+		code = diagnosticConfigurationCompositionDrift
+	}
 	if len(report.Unexpected()) > 0 {
 		action = "Move every unexpected unowned path outside generated/, then run `plystra generate" + context.selectorSuffix() + "`."
+		code = diagnosticGeneratedUnexpectedOutput
 	}
-	_, _ = fmt.Fprintf(writer, "\nRecovery:\n%s\n", action)
+	_, _ = fmt.Fprintf(writer, "\nRecovery:\n%s\n\nDiagnostic: %s\n", action, code)
 }
 
 type newArguments struct {

@@ -1208,11 +1208,13 @@ build and distribution boundary for every Plystra module.
 
 ## Diagnose common failures
 
-Common actionable CLI failures end with exactly one Recovery: block. Follow that
-one command or file edit with the same default, --env, or --config selection.
-Recovery output preserves safe explicit and ambient selectors, but substitutes
-<environment> or <yaml-path> for unsafe or absolute selector input. An
-unclassified internal error receives no guessed recovery action.
+Common actionable CLI failures end with exactly one Recovery: block followed by
+one stable Diagnostic: PLYSTRA-* code. Follow that one command or file edit with
+the same default, --env, or --config selection, and use the code as the stable
+automation or support identity. Recovery output preserves safe explicit and
+ambient selectors, but substitutes <environment> or <yaml-path> for unsafe or
+absolute selector input. An unclassified internal error receives no guessed
+recovery action or code.
 
 - Missing provider: require or expose the intended canonical ID and make a
   compatible provider visible through a local Plugin or a dependency Plystra

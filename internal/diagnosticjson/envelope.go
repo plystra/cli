@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/modulepath"
 )
 
@@ -433,22 +434,7 @@ func encode(schema Schema, mode generation.ConfigurationMode, applicationModelDi
 }
 
 func validDiagnosticCode(value string) bool {
-	if len(value) <= len("PLYSTRA-") || len(value) > 128 || !strings.HasPrefix(value, "PLYSTRA-") {
-		return false
-	}
-	previousHyphen := true
-	for index := len("PLYSTRA-"); index < len(value); index++ {
-		character := value[index]
-		switch {
-		case character >= 'A' && character <= 'Z', character >= '0' && character <= '9':
-			previousHyphen = false
-		case character == '-' && !previousHyphen:
-			previousHyphen = true
-		default:
-			return false
-		}
-	}
-	return !previousHyphen
+	return diagnosticcode.Valid(value)
 }
 
 func validLowerKebab(value string, maximum int) bool {

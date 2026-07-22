@@ -1604,14 +1604,18 @@ one primary action:
 
 Recovery:
 <one command or file edit>
+
+Diagnostic: PLYSTRA-<STABLE-CODE>
 ```
 
 Run that action with the same selected application model. Recovery commands
 retain default, environment, or complete-replacement mode, including selectors
 supplied through `PLYSTRA_ENV` or `PLYSTRA_CONFIG`. Unsafe or absolute selector
 input is replaced by `<environment>` or `<yaml-path>`; provide the intended safe
-Project-relative selection when rerunning. The CLI does not invent advice for
-an unclassified internal error.
+Project-relative selection when rerunning. Treat the uppercase `PLYSTRA-*` code
+as the stable automation and support identity; the concise problem and recovery
+wording may improve without changing that identity. The CLI does not invent
+advice or a code for an unclassified internal error.
 
 ### No provider or ambiguous provider
 

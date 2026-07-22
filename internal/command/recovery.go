@@ -18,6 +18,7 @@ import (
 	"github.com/plystra/cli/internal/capabilitycreate"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/configurationresolve"
+	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationactivation"
 	"github.com/plystra/cli/internal/generationexec"
@@ -42,6 +43,78 @@ type recoveryContext struct {
 	environment       []string
 }
 
+type actionableDiagnostic struct {
+	code     string
+	recovery string
+}
+
+const (
+	diagnosticTemplateInvalid                    = diagnosticcode.TemplateInvalid
+	diagnosticCapabilityRequirementConflict      = diagnosticcode.CapabilityRequirementConflict
+	diagnosticProviderContractConflict           = diagnosticcode.ProviderContractConflict
+	diagnosticProviderContractMismatch           = diagnosticcode.ProviderContractMismatch
+	diagnosticCapabilityContractConflict         = diagnosticcode.CapabilityContractConflict
+	diagnosticCapabilitySchemaConflict           = diagnosticcode.CapabilitySchemaConflict
+	diagnosticProviderSelectionInvalid           = diagnosticcode.ProviderSelectionInvalid
+	diagnosticProviderMissing                    = diagnosticcode.ProviderMissing
+	diagnosticProviderAmbiguous                  = diagnosticcode.ProviderAmbiguous
+	diagnosticProjectManifestInvalid             = diagnosticcode.ProjectManifestInvalid
+	diagnosticConfigurationInheritedConflict     = diagnosticcode.ConfigurationInheritedConflict
+	diagnosticConfigurationOwnershipAmbiguous    = diagnosticcode.ConfigurationOwnershipAmbiguous
+	diagnosticHTTPTransportSelectionInvalid      = diagnosticcode.HTTPTransportSelectionInvalid
+	diagnosticPluginConfigurationSchemaInvalid   = diagnosticcode.PluginConfigurationSchemaInvalid
+	diagnosticEnvironmentOverlayInvalid          = diagnosticcode.EnvironmentOverlayInvalid
+	diagnosticConfigurationInvalid               = diagnosticcode.ConfigurationInvalid
+	diagnosticPluginConfigurationUnselected      = diagnosticcode.PluginConfigurationUnselected
+	diagnosticPluginConfigurationPluginMissing   = diagnosticcode.PluginConfigurationPluginMissing
+	diagnosticConfigurationSelectionInvalid      = diagnosticcode.ConfigurationSelectionInvalid
+	diagnosticApplicationDependencyDrift         = diagnosticcode.ApplicationDependencyDrift
+	diagnosticProjectNotFound                    = diagnosticcode.ProjectNotFound
+	diagnosticGoModuleNotFound                   = diagnosticcode.GoModuleNotFound
+	diagnosticGoModuleInvalid                    = diagnosticcode.GoModuleInvalid
+	diagnosticGoModuleUnavailable                = diagnosticcode.GoModuleUnavailable
+	diagnosticGoCommandFailed                    = diagnosticcode.GoCommandFailed
+	diagnosticPluginTargetAmbiguous              = diagnosticcode.PluginTargetAmbiguous
+	diagnosticPluginTargetNotFound               = diagnosticcode.PluginTargetNotFound
+	diagnosticPluginTargetInvalid                = diagnosticcode.PluginTargetInvalid
+	diagnosticGenerationActivationConflict       = diagnosticcode.GenerationActivationConflict
+	diagnosticGenerationActivationMissing        = diagnosticcode.GenerationActivationMissing
+	diagnosticGenerationProviderExtensionMissing = diagnosticcode.GenerationProviderExtensionMissing
+	diagnosticGenerationActivationCycle          = diagnosticcode.GenerationActivationCycle
+	diagnosticGenerationDependencyCycle          = diagnosticcode.GenerationDependencyCycle
+	diagnosticGenerationContributionCycle        = diagnosticcode.GenerationContributionCycle
+	diagnosticGenerationContributionsUnordered   = diagnosticcode.GenerationContributionsUnordered
+	diagnosticGenerationStateRepeated            = diagnosticcode.GenerationStateRepeated
+	diagnosticGenerationNonconvergent            = diagnosticcode.GenerationNonconvergent
+	diagnosticGenerationAPIUnsupported           = diagnosticcode.GenerationAPIUnsupported
+	diagnosticGenerationPackageInvalid           = diagnosticcode.GenerationPackageInvalid
+	diagnosticGenerationCompileFailed            = diagnosticcode.GenerationCompileFailed
+	diagnosticGenerationExecutionFailed          = diagnosticcode.GenerationExecutionFailed
+	diagnosticGenerationExtensionFailed          = diagnosticcode.GenerationExtensionFailed
+	diagnosticGenerationCrashed                  = diagnosticcode.GenerationCrashed
+	diagnosticGenerationTimeout                  = diagnosticcode.GenerationTimeout
+	diagnosticGenerationRequestTooLarge          = diagnosticcode.GenerationRequestTooLarge
+	diagnosticGenerationOutputTooLarge           = diagnosticcode.GenerationOutputTooLarge
+	diagnosticGenerationOutputMalformed          = diagnosticcode.GenerationOutputMalformed
+	diagnosticGenerationOutputInvalid            = diagnosticcode.GenerationOutputInvalid
+	diagnosticGenerationExtensionDiagnostic      = diagnosticcode.GenerationExtensionDiagnostic
+	diagnosticAliasConflict                      = diagnosticcode.AliasConflict
+	diagnosticAliasApplicationInvalid            = diagnosticcode.AliasApplicationInvalid
+	diagnosticAliasExtensionOutputInvalid        = diagnosticcode.AliasExtensionOutputInvalid
+	diagnosticAliasResolutionFailed              = diagnosticcode.AliasResolutionFailed
+	diagnosticProtobufWireHistoryInvalid         = diagnosticcode.ProtobufWireHistoryInvalid
+	diagnosticProtobufIdentityCollision          = diagnosticcode.ProtobufIdentityCollision
+	diagnosticProtobufOperationKindUnsupported   = diagnosticcode.ProtobufOperationKindUnsupported
+	diagnosticGeneratedOwnershipConflict         = diagnosticcode.GeneratedOwnershipConflict
+	diagnosticGeneratedUnexpectedOutput          = diagnosticcode.GeneratedUnexpectedOutput
+	diagnosticGeneratedManifestInvalid           = diagnosticcode.GeneratedManifestInvalid
+	diagnosticCapabilityConfirmationRequired     = diagnosticcode.CapabilityConfirmationRequired
+	diagnosticCapabilityManifestInvalid          = diagnosticcode.CapabilityManifestInvalid
+	diagnosticProjectConcurrentChange            = diagnosticcode.ProjectConcurrentChange
+	diagnosticConfigurationCompositionDrift      = diagnosticcode.ConfigurationCompositionDrift
+	diagnosticGeneratedDrift                     = diagnosticcode.GeneratedDrift
+)
+
 func commandRecoveryContext(configurationPath, environmentName string, environment []string) recoveryContext {
 	return recoveryContext{
 		configurationPath: configurationPath,
@@ -54,7 +127,7 @@ func writeCommandFailure(writer io.Writer, prefix string, err error, context rec
 	if err == nil {
 		return
 	}
-	action, actionable := primaryRecoveryAction(err, context)
+	diagnostic, actionable := primaryActionableDiagnostic(err, context)
 	message := err.Error()
 	if actionable {
 		message = primaryFailureMessage(err)
@@ -65,7 +138,7 @@ func writeCommandFailure(writer io.Writer, prefix string, err error, context rec
 		_, _ = fmt.Fprintf(writer, "%s: %s\n", prefix, message)
 	}
 	if actionable {
-		_, _ = fmt.Fprintf(writer, "\nRecovery:\n%s\n", action)
+		_, _ = fmt.Fprintf(writer, "\nRecovery:\n%s\n\nDiagnostic: %s\n", diagnostic.recovery, diagnostic.code)
 	}
 }
 
@@ -116,112 +189,200 @@ func primaryFailureMessage(err error) string {
 	return trimEmbeddedRecovery(err.Error())
 }
 
-func primaryRecoveryAction(err error, context recoveryContext) (string, bool) {
+func primaryActionableDiagnostic(err error, context recoveryContext) (actionableDiagnostic, bool) {
 	if errors.Is(err, newproject.ErrInvalidTemplate) {
 		if _, action, found := splitEmbeddedRecovery(err.Error()); found {
-			return action, true
+			return recoveryDiagnostic(diagnosticTemplateInvalid, action)
 		}
-		return "Use a corrected published template version whose clean Project passes generation, check, build, and lifecycle validation.", true
+		return recoveryDiagnostic(diagnosticTemplateInvalid, "Use a corrected published template version whose clean Project passes generation, check, build, and lifecycle validation.")
 	}
 	var requirementConflict *providerresolution.RequirementConflictError
 	if errors.As(err, &requirementConflict) && requirementConflict != nil {
-		return identicalContractRecovery(requirementConflict.Capability().String()), true
+		return recoveryDiagnostic(diagnosticCapabilityRequirementConflict, identicalContractRecovery(requirementConflict.Capability().String()))
 	}
 	var providerContractConflict *providerresolution.ProviderContractConflictError
 	if errors.As(err, &providerContractConflict) && providerContractConflict != nil {
-		return identicalContractRecovery(providerContractConflict.Capability().String()), true
+		return recoveryDiagnostic(diagnosticProviderContractConflict, identicalContractRecovery(providerContractConflict.Capability().String()))
 	}
 	var providerContract *providerresolution.ProviderContractError
 	if errors.As(err, &providerContract) && providerContract != nil {
-		return identicalContractRecovery(providerContract.Capability().String()), true
+		return recoveryDiagnostic(diagnosticProviderContractMismatch, identicalContractRecovery(providerContract.Capability().String()))
 	}
 	var visibleContractConflict *applicationinput.ContractConflictError
 	if errors.As(err, &visibleContractConflict) && visibleContractConflict != nil {
-		return identicalContractRecovery(visibleContractConflict.ID().String()), true
+		return recoveryDiagnostic(diagnosticCapabilityContractConflict, identicalContractRecovery(visibleContractConflict.ID().String()))
 	}
 	var authoredContractConflict *capabilitycreate.SchemaConflictError
 	if errors.As(err, &authoredContractConflict) && authoredContractConflict != nil {
-		return identicalContractRecovery(authoredContractConflict.Capability().String()), true
+		return recoveryDiagnostic(diagnosticCapabilitySchemaConflict, identicalContractRecovery(authoredContractConflict.Capability().String()))
 	}
 	var invalidChoice *providerresolution.ChoiceError
 	if errors.As(err, &invalidChoice) && invalidChoice != nil {
 		command := "plystra use " + invalidChoice.Capability().String() + " <plugin-id>" + context.selectorSuffix()
-		return "Replace the invalid Provider choice with one visible compatible Plugin by running `" + command + "`.", true
+		return recoveryDiagnostic(diagnosticProviderSelectionInvalid, "Replace the invalid Provider choice with one visible compatible Plugin by running `"+command+"`.")
 	}
 	var missingProvider *providerresolution.MissingProviderError
 	if errors.As(err, &missingProvider) && missingProvider != nil {
-		return "Add an intended dependency with `plystra add <go-module-query>` whose Plugin provides " + missingProvider.Capability().String() + ".", true
+		return recoveryDiagnostic(diagnosticProviderMissing, "Add an intended dependency with `plystra add <go-module-query>` whose Plugin provides "+missingProvider.Capability().String()+".")
 	}
 	var ambiguousProvider *providerresolution.AmbiguousProviderError
 	if errors.As(err, &ambiguousProvider) && ambiguousProvider != nil {
 		command := "plystra use " + ambiguousProvider.Capability().String() + " <plugin-id>" + context.selectorSuffix()
-		return "Select one compatible Provider explicitly by running `" + command + "`.", true
+		return recoveryDiagnostic(diagnosticProviderAmbiguous, "Select one compatible Provider explicitly by running `"+command+"`.")
 	}
 
 	switch {
 	case errors.Is(err, applicationresolve.ErrManifest) && !errors.Is(err, applicationresolve.ErrConfigurationSelection):
-		return "Correct the reported root or dependency Project plystra.yaml, then rerun the command.", true
+		return recoveryDiagnostic(diagnosticProjectManifestInvalid, "Correct the reported root or dependency Project plystra.yaml, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrInheritedConflict):
-		return "Set or remove the conflicting field explicitly in " + context.configurationTarget() + ", then rerun the command.", true
+		return recoveryDiagnostic(diagnosticConfigurationInheritedConflict, "Set or remove the conflicting field explicitly in "+context.configurationTarget()+", then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrAmbiguousConfigurationOwnership):
-		return "Make the inherited field intent explicit in " + context.configurationTarget() + " by restoring it or writing its typed removal.", true
+		return recoveryDiagnostic(diagnosticConfigurationOwnershipAmbiguous, "Make the inherited field intent explicit in "+context.configurationTarget()+" by restoring it or writing its typed removal.")
 	case errors.Is(err, applicationmeta.ErrHTTPTransportSelection):
-		return "Enable a supported transport in " + context.configurationTarget() + " or remove the public exposure, then regenerate.", true
+		return recoveryDiagnostic(diagnosticHTTPTransportSelectionInvalid, "Enable a supported transport in "+context.configurationTarget()+" or remove the public exposure, then regenerate.")
 	case errors.Is(err, applicationmeta.ErrConfigurationSchema):
-		return "Declare the reported Plugin configuration field in plugin.yaml, then rerun the command.", true
-	case errors.Is(err, applicationmeta.ErrApplyOverlay), errors.Is(err, applicationmeta.ErrInvalidManifest), errors.Is(err, configurationresolve.ErrInvalidConfiguration), errors.Is(err, configurationresolve.ErrUnselectedConfiguration), errors.Is(err, configurationresolve.ErrMissingPlugin):
-		return "Edit " + context.configurationTarget() + " so every value matches a selected Plugin's closed typed schema, then rerun the command.", true
+		return recoveryDiagnostic(diagnosticPluginConfigurationSchemaInvalid, "Declare the reported Plugin configuration field in plugin.yaml, then rerun the command.")
+	case errors.Is(err, applicationmeta.ErrApplyOverlay):
+		return recoveryDiagnostic(diagnosticEnvironmentOverlayInvalid, invalidConfigurationRecovery(context))
+	case errors.Is(err, applicationmeta.ErrInvalidManifest), errors.Is(err, configurationresolve.ErrInvalidConfiguration):
+		return recoveryDiagnostic(diagnosticConfigurationInvalid, invalidConfigurationRecovery(context))
+	case errors.Is(err, configurationresolve.ErrUnselectedConfiguration):
+		return recoveryDiagnostic(diagnosticPluginConfigurationUnselected, invalidConfigurationRecovery(context))
+	case errors.Is(err, configurationresolve.ErrMissingPlugin):
+		return recoveryDiagnostic(diagnosticPluginConfigurationPluginMissing, invalidConfigurationRecovery(context))
 	case errors.Is(err, applicationresolve.ErrConfigurationSelection):
-		return "Select exactly one existing Project configuration with `--env <environment>` or `--config <yaml-path>`, then rerun the command.", true
+		return recoveryDiagnostic(diagnosticConfigurationSelectionInvalid, "Select exactly one existing Project configuration with `--env <environment>` or `--config <yaml-path>`, then rerun the command.")
 	case errors.Is(err, projectlocate.ErrInvalidManifest):
-		return "Restore a valid root plystra.yaml in the current Go Module, then rerun the command.", true
+		return recoveryDiagnostic(diagnosticProjectManifestInvalid, "Restore a valid root plystra.yaml in the current Go Module, then rerun the command.")
 	case errors.Is(err, applicationgenerate.ErrKernelDependency), errors.Is(err, applicationgenerate.ErrRuntimeDependency):
-		return "Run `plystra generate" + context.selectorSuffix() + "` to repair the required direct application runtime dependencies.", true
+		return recoveryDiagnostic(diagnosticApplicationDependencyDrift, "Run `plystra generate"+context.selectorSuffix()+"` to repair the required direct application runtime dependencies.")
 	case errors.Is(err, projectlocate.ErrNotFound):
-		return "Run the command inside a Go Module whose root contains plystra.yaml.", true
+		return recoveryDiagnostic(diagnosticProjectNotFound, "Run the command inside a Go Module whose root contains plystra.yaml.")
 	case errors.Is(err, modulelocate.ErrNotFound):
-		return "Run the command inside the intended Go Module.", true
+		return recoveryDiagnostic(diagnosticGoModuleNotFound, "Run the command inside the intended Go Module.")
 	case errors.Is(err, modulelocate.ErrInvalidGoMod), errors.Is(err, moduledependency.ErrInvalidGoMod):
-		return "Correct the reported go.mod entry with standard Go Module syntax, then rerun the command.", true
-	case errors.Is(err, moduledependency.ErrModuleUnavailable), errors.Is(err, gocommand.ErrRun):
-		return "Make the reported module or Go command resolve successfully with ordinary Go tooling, then rerun the Plystra command.", true
-	case errors.Is(err, plugintarget.ErrAmbiguous), errors.Is(err, plugintarget.ErrNotFound), errors.Is(err, plugintarget.ErrSelection):
-		return "Rerun with `--plugin <plugin-directory-or-id>` to select one exact local Plugin.", true
+		return recoveryDiagnostic(diagnosticGoModuleInvalid, "Correct the reported go.mod entry with standard Go Module syntax, then rerun the command.")
+	case errors.Is(err, moduledependency.ErrModuleUnavailable):
+		return recoveryDiagnostic(diagnosticGoModuleUnavailable, goToolingRecovery())
+	case errors.Is(err, gocommand.ErrRun):
+		return recoveryDiagnostic(diagnosticGoCommandFailed, goToolingRecovery())
+	case errors.Is(err, plugintarget.ErrAmbiguous):
+		return recoveryDiagnostic(diagnosticPluginTargetAmbiguous, pluginTargetRecovery())
+	case errors.Is(err, plugintarget.ErrNotFound):
+		return recoveryDiagnostic(diagnosticPluginTargetNotFound, pluginTargetRecovery())
+	case errors.Is(err, plugintarget.ErrSelection):
+		return recoveryDiagnostic(diagnosticPluginTargetInvalid, pluginTargetRecovery())
 	case errors.Is(err, generationactivation.ErrAssociationConflict):
-		return "Edit plugin.yaml generation.activations so the reported namespace uses one exact activation Capability.", true
+		return recoveryDiagnostic(diagnosticGenerationActivationConflict, "Edit plugin.yaml generation.activations so the reported namespace uses one exact activation Capability.")
 	case errors.Is(err, generationactivation.ErrMissingAssociation):
-		return "Add the missing generation.activations entry to the intended Plugin's plugin.yaml.", true
+		return recoveryDiagnostic(diagnosticGenerationActivationMissing, "Add the missing generation.activations entry to the intended Plugin's plugin.yaml.")
 	case errors.Is(err, generationactivation.ErrSelectedProviderExtension):
-		return "Add a compatible generation declaration to the selected activation Provider's plugin.yaml.", true
-	case errors.Is(err, generationresolution.ErrActivationCycle), errors.Is(err, generationresolution.ErrDependencyCycle), errors.Is(err, generationresolution.ErrContributionCycle), errors.Is(err, generationresolution.ErrUnorderedContributions):
-		return "Edit the reported generation declarations to remove the dependency cycle or unordered token flow.", true
-	case errors.Is(err, generationresolution.ErrRepeatedState), errors.Is(err, generationresolution.ErrExtensionConvergence):
-		return "Make the selected generation extensions deterministic and convergent for identical normalized input.", true
-	case errors.Is(err, generationexec.ErrUnsupportedAPI), errors.Is(err, pluginmeta.ErrUnsupportedGenerationAPI), errors.Is(err, pluginindex.ErrInvalidGenerationPackage):
-		return "Edit the Plugin generation declaration to use a supported API and a safe existing package, then rerun the command.", true
-	case generationExecutionFailure(err):
-		return "Fix the selected generation package reported above, then rerun the command.", true
-	case errors.Is(err, aliasresolution.ErrConflict), errors.Is(err, aliasresolution.ErrInvalidApplicationAlias), errors.Is(err, aliasresolution.ErrInvalidExtensionOutput), errors.Is(err, generationresolution.ErrAliasResolution):
-		return "Edit the reported Alias declaration or generation contribution so it maps directly to one compatible canonical target.", true
+		return recoveryDiagnostic(diagnosticGenerationProviderExtensionMissing, "Add a compatible generation declaration to the selected activation Provider's plugin.yaml.")
+	case errors.Is(err, generationresolution.ErrActivationCycle):
+		return recoveryDiagnostic(diagnosticGenerationActivationCycle, generationGraphRecovery())
+	case errors.Is(err, generationresolution.ErrDependencyCycle):
+		return recoveryDiagnostic(diagnosticGenerationDependencyCycle, generationGraphRecovery())
+	case errors.Is(err, generationresolution.ErrContributionCycle):
+		return recoveryDiagnostic(diagnosticGenerationContributionCycle, generationGraphRecovery())
+	case errors.Is(err, generationresolution.ErrUnorderedContributions):
+		return recoveryDiagnostic(diagnosticGenerationContributionsUnordered, generationGraphRecovery())
+	case errors.Is(err, generationresolution.ErrRepeatedState):
+		return recoveryDiagnostic(diagnosticGenerationStateRepeated, generationConvergenceRecovery())
+	case errors.Is(err, generationresolution.ErrExtensionConvergence):
+		return recoveryDiagnostic(diagnosticGenerationNonconvergent, generationConvergenceRecovery())
+	case errors.Is(err, generationexec.ErrUnsupportedAPI), errors.Is(err, pluginmeta.ErrUnsupportedGenerationAPI):
+		return recoveryDiagnostic(diagnosticGenerationAPIUnsupported, generationDeclarationRecovery())
+	case errors.Is(err, pluginindex.ErrInvalidGenerationPackage):
+		return recoveryDiagnostic(diagnosticGenerationPackageInvalid, generationDeclarationRecovery())
+	case errors.Is(err, generationexec.ErrTimeout):
+		return recoveryDiagnostic(diagnosticGenerationTimeout, generationExecutionRecovery())
+	case errors.Is(err, generationexec.ErrRequestTooLarge):
+		return recoveryDiagnostic(diagnosticGenerationRequestTooLarge, generationExecutionRecovery())
+	case errors.Is(err, generationexec.ErrOutputTooLarge):
+		return recoveryDiagnostic(diagnosticGenerationOutputTooLarge, generationExecutionRecovery())
+	case errors.Is(err, generationexec.ErrMalformedOutput):
+		return recoveryDiagnostic(diagnosticGenerationOutputMalformed, generationExecutionRecovery())
+	case errors.Is(err, generationexec.ErrInvalidOutput):
+		return recoveryDiagnostic(diagnosticGenerationOutputInvalid, generationExecutionRecovery())
+	case errors.Is(err, generationexec.ErrExtension):
+		return recoveryDiagnostic(diagnosticGenerationExtensionFailed, generationExecutionRecovery())
+	case errors.Is(err, generationexec.ErrCrash):
+		return recoveryDiagnostic(diagnosticGenerationCrashed, generationExecutionRecovery())
+	case errors.Is(err, generationexec.ErrCompile):
+		return recoveryDiagnostic(diagnosticGenerationCompileFailed, generationExecutionRecovery())
+	case errors.Is(err, generationexec.ErrExecute), errors.Is(err, generationresolution.ErrExtensionExecution):
+		return recoveryDiagnostic(diagnosticGenerationExecutionFailed, generationExecutionRecovery())
+	case errors.Is(err, generationresolution.ErrExtensionDiagnostic):
+		return recoveryDiagnostic(diagnosticGenerationExtensionDiagnostic, generationExecutionRecovery())
+	case errors.Is(err, aliasresolution.ErrConflict):
+		return recoveryDiagnostic(diagnosticAliasConflict, aliasRecovery())
+	case errors.Is(err, aliasresolution.ErrInvalidApplicationAlias):
+		return recoveryDiagnostic(diagnosticAliasApplicationInvalid, aliasRecovery())
+	case errors.Is(err, aliasresolution.ErrInvalidExtensionOutput):
+		return recoveryDiagnostic(diagnosticAliasExtensionOutputInvalid, aliasRecovery())
+	case errors.Is(err, generationresolution.ErrAliasResolution):
+		return recoveryDiagnostic(diagnosticAliasResolutionFailed, aliasRecovery())
 	case errors.Is(err, protobufwiremap.ErrHistory):
-		return "Restore generated/proto/wire-map.json from its last known-good generated state, then regenerate.", true
+		return recoveryDiagnostic(diagnosticProtobufWireHistoryInvalid, "Restore generated/proto/wire-map.json from its last known-good generated state, then regenerate.")
 	case errors.Is(err, protobufidentity.ErrCollision):
-		return "Rename one conflicting authored field or enum member in capability.yaml, then regenerate.", true
+		return recoveryDiagnostic(diagnosticProtobufIdentityCollision, "Rename one conflicting authored field or enum member in capability.yaml, then regenerate.")
 	case errors.Is(err, protobufmodel.ErrOperationKind):
-		return "Remove the unsupported Capability from http.expose in " + context.configurationTarget() + ", then regenerate.", true
-	case errors.Is(err, generatedfiles.ErrConflict), errors.Is(err, generatedfiles.ErrUnexpected):
-		return "Move the reported unowned path outside generated/, then run `plystra generate" + context.selectorSuffix() + "`.", true
+		return recoveryDiagnostic(diagnosticProtobufOperationKindUnsupported, "Remove the unsupported Capability from http.expose in "+context.configurationTarget()+", then regenerate.")
+	case errors.Is(err, generatedfiles.ErrConflict):
+		return recoveryDiagnostic(diagnosticGeneratedOwnershipConflict, generatedOwnershipRecovery(context))
+	case errors.Is(err, generatedfiles.ErrUnexpected):
+		return recoveryDiagnostic(diagnosticGeneratedUnexpectedOutput, generatedOwnershipRecovery(context))
 	case errors.Is(err, generatedfiles.ErrManifest):
-		return "Restore generated/.plystra-manifest.json from a known-good generated state, then run `plystra generate" + context.selectorSuffix() + "`.", true
+		return recoveryDiagnostic(diagnosticGeneratedManifestInvalid, "Restore generated/.plystra-manifest.json from a known-good generated state, then run `plystra generate"+context.selectorSuffix()+"`.")
 	case errors.Is(err, capabilitycreate.ErrConfirmationRequired):
-		return "Review the visible Capability versions, then rerun the create command with `--confirm`.", true
+		return recoveryDiagnostic(diagnosticCapabilityConfirmationRequired, "Review the visible Capability versions, then rerun the create command with `--confirm`.")
 	case errors.Is(err, capabilitymeta.ErrInvalidManifest):
-		return "Correct the reported authored capability.yaml, then rerun the command.", true
+		return recoveryDiagnostic(diagnosticCapabilityManifestInvalid, "Correct the reported authored capability.yaml, then rerun the command.")
 	case errors.Is(err, atomicfs.ErrConcurrentChange), errors.Is(err, applicationresolve.ErrConcurrentChange), errors.Is(err, applicationgenerate.ErrConcurrentChange):
-		return "Stop concurrent Project edits, then rerun the command against the unchanged authored inputs.", true
+		return recoveryDiagnostic(diagnosticProjectConcurrentChange, "Stop concurrent Project edits, then rerun the command against the unchanged authored inputs.")
 	default:
-		return "", false
+		return actionableDiagnostic{}, false
 	}
+}
+
+func recoveryDiagnostic(code, recovery string) (actionableDiagnostic, bool) {
+	return actionableDiagnostic{code: code, recovery: recovery}, true
+}
+
+func invalidConfigurationRecovery(context recoveryContext) string {
+	return "Edit " + context.configurationTarget() + " so every value matches a selected Plugin's closed typed schema, then rerun the command."
+}
+
+func goToolingRecovery() string {
+	return "Make the reported module or Go command resolve successfully with ordinary Go tooling, then rerun the Plystra command."
+}
+
+func pluginTargetRecovery() string {
+	return "Rerun with `--plugin <plugin-directory-or-id>` to select one exact local Plugin."
+}
+
+func generationGraphRecovery() string {
+	return "Edit the reported generation declarations to remove the dependency cycle or unordered token flow."
+}
+
+func generationConvergenceRecovery() string {
+	return "Make the selected generation extensions deterministic and convergent for identical normalized input."
+}
+
+func generationDeclarationRecovery() string {
+	return "Edit the Plugin generation declaration to use a supported API and a safe existing package, then rerun the command."
+}
+
+func generationExecutionRecovery() string {
+	return "Fix the selected generation package reported above, then rerun the command."
+}
+
+func aliasRecovery() string {
+	return "Edit the reported Alias declaration or generation contribution so it maps directly to one compatible canonical target."
+}
+
+func generatedOwnershipRecovery(context recoveryContext) string {
+	return "Move the reported unowned path outside generated/, then run `plystra generate" + context.selectorSuffix() + "`."
 }
 
 func splitEmbeddedRecovery(message string) (string, string, bool) {
@@ -241,20 +402,6 @@ func splitEmbeddedRecovery(message string) (string, string, bool) {
 
 func identicalContractRecovery(capability string) string {
 	return "Make every Provider of " + capability + " carry one identical provider-independent capability.yaml."
-}
-
-func generationExecutionFailure(err error) bool {
-	return errors.Is(err, generationexec.ErrCompile) ||
-		errors.Is(err, generationexec.ErrExecute) ||
-		errors.Is(err, generationexec.ErrExtension) ||
-		errors.Is(err, generationexec.ErrCrash) ||
-		errors.Is(err, generationexec.ErrTimeout) ||
-		errors.Is(err, generationexec.ErrRequestTooLarge) ||
-		errors.Is(err, generationexec.ErrOutputTooLarge) ||
-		errors.Is(err, generationexec.ErrMalformedOutput) ||
-		errors.Is(err, generationexec.ErrInvalidOutput) ||
-		errors.Is(err, generationresolution.ErrExtensionExecution) ||
-		errors.Is(err, generationresolution.ErrExtensionDiagnostic)
 }
 
 func trimEmbeddedRecovery(message string) string {

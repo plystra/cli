@@ -20,6 +20,7 @@ import (
 	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/connectgen"
+	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/transportprovenance"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
@@ -69,7 +70,8 @@ replace github.com/plystra/kernel => %s
 		"  missing generated/manifest.json\n" +
 		"  missing generated/proto/descriptor-set.pb\n" +
 		"  missing generated/proto/wire-map.json\n\n" +
-		"Recovery:\nRun `plystra generate` to restore the selected generated output.\n"
+		"Recovery:\nRun `plystra generate` to restore the selected generated output.\n\n" +
+		"Diagnostic: " + diagnosticcode.GeneratedDrift + "\n"
 	if stderr != wantMissing {
 		t.Fatalf("initial check stderr = %q, want %q", stderr, wantMissing)
 	}
@@ -104,7 +106,7 @@ replace github.com/plystra/kernel => %s
 	writeCommandFile(t, filepath.Join(root, "generated", "manifest.json"), "drift\n")
 	drifted := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, start, environment)
-	if exitCode != 1 || stdout != "" || stderr != "generated output is not current:\n  changed generated/manifest.json\n\nRecovery:\nRun `plystra generate` to restore the selected generated output.\n" {
+	if exitCode != 1 || stdout != "" || stderr != "generated output is not current:\n  changed generated/manifest.json\n\nRecovery:\nRun `plystra generate` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.GeneratedDrift+"\n" {
 		t.Fatalf("drift check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, drifted) {
@@ -117,7 +119,7 @@ replace github.com/plystra/kernel => %s
 
 	writeCommandFile(t, filepath.Join(root, "generated", "manual.txt"), "preserve\n")
 	exitCode, stdout, stderr = runCommand(t, []string{"generate"}, start, environment)
-	if exitCode != 1 || stdout != "" || stderr != "generated output remains inconsistent after installation:\n  unexpected generated/manual.txt\n\nRecovery:\nMove every unexpected unowned path outside generated/, then run `plystra generate`.\n" {
+	if exitCode != 1 || stdout != "" || stderr != "generated output remains inconsistent after installation:\n  unexpected generated/manual.txt\n\nRecovery:\nMove every unexpected unowned path outside generated/, then run `plystra generate`.\n\nDiagnostic: "+diagnosticcode.GeneratedUnexpectedOutput+"\n" {
 		t.Fatalf("unexpected output = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if got := string(readCommandFile(t, root, "generated/manual.txt")); got != "preserve\n" {
@@ -167,7 +169,7 @@ replace github.com/plystra/kernel => %s
 		"invalid generated application runtime dependency",
 		connectgen.ConnectModulePath,
 		connectgen.ConnectModuleVersion,
-		"\n\nRecovery:\nRun `plystra generate` to repair the required direct application runtime dependencies.\n",
+		"\n\nRecovery:\nRun `plystra generate` to repair the required direct application runtime dependencies.\n\nDiagnostic: " + diagnosticcode.ApplicationDependencyDrift + "\n",
 	} {
 		if !strings.Contains(stderr, want) {
 			t.Fatalf("initial Connect check stderr %q omits %q", stderr, want)
@@ -313,7 +315,7 @@ replace github.com/plystra/kernel => %s
 	before := commandTree(t, applicationRoot)
 
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, applicationRoot, environment)
-	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed plystra.yaml (dependency composition)\n") || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate` to restore the selected generated output.\n") || strings.Count(stderr, "Recovery:") != 1 {
+	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed plystra.yaml (dependency composition)\n") || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.ConfigurationCompositionDrift+"\n") || strings.Count(stderr, "Recovery:") != 1 {
 		t.Fatalf("composition check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, before) {
@@ -381,7 +383,7 @@ replace github.com/plystra/kernel => %s
 	writeCommandFile(t, filepath.Join(root, "generated", "manifest.json"), "drift\n")
 	beforeEnvironmentDrift := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--env", "production"}, start, explicitEnvironment)
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate --env \"production\"` to restore the selected generated output.\n") || strings.Count(stderr, "Recovery:") != 1 {
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate --env \"production\"` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.GeneratedDrift+"\n") || strings.Count(stderr, "Recovery:") != 1 {
 		t.Fatalf("environment drift recovery = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeEnvironmentDrift) {
@@ -441,7 +443,7 @@ replace github.com/plystra/kernel => %s
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), credentialedWildcardOverlay)
 	beforeCredentialedWildcardCheck := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--env", "production"}, start, environment)
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "http.cors cannot combine wildcard origin") || !strings.Contains(stderr, "\n\nRecovery:\nEdit plystra.production.yaml so every value matches a selected Plugin's closed typed schema, then rerun the command.\n") || strings.Count(stderr, "Recovery:") != 1 {
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "http.cors cannot combine wildcard origin") || !strings.Contains(stderr, "\n\nRecovery:\nEdit plystra.production.yaml so every value matches a selected Plugin's closed typed schema, then rerun the command.\n\nDiagnostic: "+diagnosticcode.EnvironmentOverlayInvalid+"\n") || strings.Count(stderr, "Recovery:") != 1 {
 		t.Fatalf("credentialed wildcard check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeCredentialedWildcardCheck) {
@@ -744,7 +746,7 @@ func (*Plugin) Read(_ context.Context, _ contract.Request) (contract.Response, e
 	})
 	beforeAmbientCheck := commandTree(t, applicationRoot)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, nestedStart, ambientEnvironment)
-	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed deploy/ambient.yaml (dependency composition)\n") || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate --config \"deploy/ambient.yaml\"` to restore the selected generated output.\n") || strings.Count(stderr, "Recovery:") != 1 {
+	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed deploy/ambient.yaml (dependency composition)\n") || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate --config \"deploy/ambient.yaml\"` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.ConfigurationCompositionDrift+"\n") || strings.Count(stderr, "Recovery:") != 1 {
 		t.Fatalf("PLYSTRA_CONFIG check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, beforeAmbientCheck) {
@@ -758,7 +760,7 @@ func (*Plugin) Read(_ context.Context, _ contract.Request) (contract.Response, e
 	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities: {require: [kernel.info/v1]}\n")
 	beforeCompositionCheck := commandTree(t, applicationRoot)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--config", "deploy/customer.yaml"}, nestedStart, environment)
-	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed deploy/customer.yaml (dependency composition)\n") || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate --config \"deploy/customer.yaml\"` to restore the selected generated output.\n") || strings.Count(stderr, "Recovery:") != 1 {
+	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed deploy/customer.yaml (dependency composition)\n") || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate --config \"deploy/customer.yaml\"` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.ConfigurationCompositionDrift+"\n") || strings.Count(stderr, "Recovery:") != 1 {
 		t.Fatalf("selected-path composition drift = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, beforeCompositionCheck) {

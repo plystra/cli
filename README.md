@@ -577,12 +577,14 @@ digests in concise output.
 
 Common actionable CLI failures append exactly one `Recovery:` block after the
 concise problem. Follow that one command or file edit before rerunning the
-operation. A recovery command preserves the selected default, `--env`, or
+operation. The block is followed by one stable `Diagnostic: PLYSTRA-*` code;
+use that code as the machine-stable failure identity instead of matching the
+human wording. A recovery command preserves the selected default, `--env`, or
 `--config` mode, including a safe selector supplied through `PLYSTRA_ENV` or
 `PLYSTRA_CONFIG`. Unsafe and absolute selector values are replaced by
 `<environment>` or `<yaml-path>` placeholders instead of being copied into the
 advice. Unknown internal failures retain their original diagnostic without an
-invented recovery action.
+invented recovery action or code.
 
 The current `plystra check` implementation is read-only. It verifies the
 selected dependency composition and generated fixed point, then runs

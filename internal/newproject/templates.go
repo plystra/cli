@@ -77,7 +77,7 @@ Cross-origin browser access is opt-in. Add ` + "`http.cors.allowed_origins`" + `
 
 When several compatible Plugins provide one required Capability, select one with ` + "`plystra use <capability-name>/vN <plugin-id>`" + `. Add ` + "`--env <environment>`" + ` to write only that sparse overlay or ` + "`--config <yaml-path>`" + ` to write only one complete replacement configuration; the command regenerates and validates with the same selection.
 
-Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + ` block. Follow that one command or file edit with the same default, ` + "`--env`" + `, or ` + "`--config`" + ` selection. Recovery output preserves safe explicit and ambient selectors, but uses ` + "`<environment>`" + ` or ` + "`<yaml-path>`" + ` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice.
+Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + ` block followed by one stable ` + "`Diagnostic: PLYSTRA-*`" + ` code. Follow that one command or file edit with the same default, ` + "`--env`" + `, or ` + "`--config`" + ` selection, and use the code rather than human wording as the automation or support identity. Recovery output preserves safe explicit and ambient selectors, but uses ` + "`<environment>`" + ` or ` + "`<yaml-path>`" + ` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice or a code.
 
 Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
@@ -1365,11 +1365,13 @@ build and distribution boundary for every Plystra module.
 
 ## Diagnose common failures
 
-Common actionable CLI failures end with exactly one Recovery: block. Follow that
-one command or file edit with the same default, --env, or --config selection.
-Recovery output preserves safe explicit and ambient selectors, but substitutes
-<environment> or <yaml-path> for unsafe or absolute selector input. An
-unclassified internal error receives no guessed recovery action.
+Common actionable CLI failures end with exactly one Recovery: block followed by
+one stable Diagnostic: PLYSTRA-* code. Follow that one command or file edit with
+the same default, --env, or --config selection, and use the code as the stable
+automation or support identity. Recovery output preserves safe explicit and
+ambient selectors, but substitutes <environment> or <yaml-path> for unsafe or
+absolute selector input. An unclassified internal error receives no guessed
+recovery action or code.
 
 - Missing provider: require or expose the intended canonical ID and make a
   compatible provider visible through a local Plugin or a dependency Plystra
