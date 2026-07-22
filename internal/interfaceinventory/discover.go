@@ -106,6 +106,15 @@ func (i Interface) Metadata() (interfacemeta.Document, bool) {
 	return i.metadata, i.hasMetadata
 }
 
+// Semantics returns the optional normalized operation semantics declared by
+// the Interface package's colocated metadata document.
+func (i Interface) Semantics() (interfacemeta.Semantics, bool) {
+	if !i.hasMetadata {
+		return interfacemeta.Semantics{}, false
+	}
+	return i.metadata.Semantics()
+}
+
 // MetadataSource returns stable module-qualified metadata provenance, or an
 // empty string when the Interface package has no optional metadata document.
 func (i Interface) MetadataSource() string {

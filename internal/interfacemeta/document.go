@@ -67,11 +67,13 @@ var authoritativeTopLevelFields = map[string]string{
 	"constructor":         "Implementation constructor identity",
 }
 
-// Document is one immutable, syntactically valid optional metadata document.
-// Semantic normalization is intentionally owned by later validation stages.
+// Document is one immutable, syntactically valid optional metadata document
+// with every supported metadata section normalized as its schema is defined.
 type Document struct {
-	path string
-	data []byte
+	path         string
+	data         []byte
+	semantics    Semantics
+	hasSemantics bool
 }
 
 // Path returns the stable slash-separated module-relative source path.
@@ -79,6 +81,11 @@ func (d Document) Path() string { return d.path }
 
 // Data returns a defensive copy of the exact authored YAML bytes.
 func (d Document) Data() []byte { return append([]byte(nil), d.data...) }
+
+// Semantics returns the optional normalized operation semantics.
+func (d Document) Semantics() (Semantics, bool) {
+	return d.semantics, d.hasSemantics
+}
 
 // ParseFile validates one bounded, single-document YAML mapping while
 // preserving its exact authored bytes for schema-aware normalization.
@@ -121,7 +128,16 @@ func ParseFile(sourcePath string, data []byte) (Document, error) {
 	if err := validateTopLevelFields(sourcePath, root); err != nil {
 		return Document{}, err
 	}
-	return Document{path: sourcePath, data: append([]byte(nil), data...)}, nil
+	semantics, hasSemantics, err := normalizeSemantics(sourcePath, root)
+	if err != nil {
+		return Document{}, err
+	}
+	return Document{
+		path:         sourcePath,
+		data:         append([]byte(nil), data...),
+		semantics:    semantics,
+		hasSemantics: hasSemantics,
+	}, nil
 }
 
 func validateTopLevelFields(sourcePath string, root *yaml.Node) error {

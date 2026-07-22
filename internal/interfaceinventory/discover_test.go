@@ -270,9 +270,11 @@ replace example.com/dependency => ../dependency
 `)
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
 	writeFile(t, filepath.Join(appRoot, "interfaces", "local", "interface.go"), interfaceSource("local", "local.records.list/v1", "List"))
-	localMetadata := "# local metadata\ndescription: Lists local records.\n"
+	localMetadata := "# local metadata\ndescription: Lists local records.\nsemantics:\n  kind: command\n"
 	writeFile(t, filepath.Join(appRoot, "interfaces", "local", interfacemeta.Name), localMetadata)
 	writeFile(t, filepath.Join(appRoot, "interfaces", "plain", "interface.go"), interfaceSource("plain", "local.records.get/v1", "Get"))
+	writeFile(t, filepath.Join(appRoot, "interfaces", "described", "interface.go"), interfaceSource("described", "local.records.describe/v1", "Describe"))
+	writeFile(t, filepath.Join(appRoot, "interfaces", "described", interfacemeta.Name), "description: Describes local records.\n")
 
 	beforeApp := snapshotFiles(t, appRoot)
 	beforeDependency := snapshotFiles(t, dependencyRoot)
@@ -290,12 +292,30 @@ replace example.com/dependency => ../dependency
 	if !present || local.Path() != "interfaces/local/interface.yaml" || string(local.Data()) != localMetadata || byID["local.records.list/v1"].MetadataSource() != "example.com/app@local/interfaces/local/interface.yaml" {
 		t.Fatalf("local metadata = %#v, %t, source %q", local, present, byID["local.records.list/v1"].MetadataSource())
 	}
+	localSemantics, present := byID["local.records.list/v1"].Semantics()
+	if !present || localSemantics.Kind() != interfacemeta.OperationKindCommand {
+		t.Fatalf("local semantics = %#v, %t", localSemantics, present)
+	}
 	dependency, present := byID["dependency.records.list/v1"].Metadata()
 	if !present || dependency.Path() != "api/interface.yaml" || string(dependency.Data()) != dependencyMetadata || byID["dependency.records.list/v1"].MetadataSource() != "example.com/dependency@v1.2.3/api/interface.yaml" {
 		t.Fatalf("dependency metadata = %#v, %t, source %q", dependency, present, byID["dependency.records.list/v1"].MetadataSource())
 	}
+	dependencySemantics, present := byID["dependency.records.list/v1"].Semantics()
+	if !present || dependencySemantics.Kind() != interfacemeta.OperationKindQuery {
+		t.Fatalf("dependency semantics = %#v, %t", dependencySemantics, present)
+	}
 	if metadata, present := byID["local.records.get/v1"].Metadata(); present || metadata.Path() != "" || len(metadata.Data()) != 0 || byID["local.records.get/v1"].MetadataSource() != "" {
 		t.Fatalf("absent metadata = %#v, %t", metadata, present)
+	}
+	if semantics, present := byID["local.records.get/v1"].Semantics(); present || semantics.Kind() != "" {
+		t.Fatalf("absent semantics = %#v, %t", semantics, present)
+	}
+	described, hasMetadata := byID["local.records.describe/v1"].Metadata()
+	if !hasMetadata || described.Path() != "interfaces/described/interface.yaml" {
+		t.Fatalf("description-only metadata = %#v, %t", described, hasMetadata)
+	}
+	if semantics, present := byID["local.records.describe/v1"].Semantics(); present || semantics.Kind() != "" {
+		t.Fatalf("description-only semantics = %#v, %t", semantics, present)
 	}
 	view := local.Data()
 	view[0] = 'x'
@@ -330,6 +350,9 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 		{name: "duplicate key", data: "description: one\ndescription: two\n", want: "duplicate mapping key"},
 		{name: "authoritative field", data: "id: records.invalid.list/v1\n", wantError: interfacemeta.ErrAuthoritativeField, want: "Interface ID is authoritative"},
 		{name: "unknown field", data: "custom: value\n", wantError: interfacemeta.ErrUnknownField, want: "unknown top-level field"},
+		{name: "invalid semantics shape", data: "semantics: []\n", wantError: interfacemeta.ErrInvalidSemantics, want: "semantics must be a mapping"},
+		{name: "invalid semantics field", data: "semantics:\n  kind: query\n  retry: {}\n", wantError: interfacemeta.ErrInvalidSemantics, want: "semantics.retry"},
+		{name: "invalid semantics kind", data: "semantics:\n  kind: event\n", wantError: interfacemeta.ErrInvalidSemantics, want: "expected query or command"},
 		{name: "directory", directory: true, want: "regular non-symbolic file"},
 		{name: "oversized", data: strings.Repeat("x", interfacemeta.MaximumSize+1), want: "exceeds"},
 	}
@@ -554,6 +577,8 @@ type interfaceSummary struct {
 	MetadataPath   string
 	MetadataData   string
 	MetadataSource string
+	SemanticsKind  interfacemeta.OperationKind
+	HasSemantics   bool
 }
 
 func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
@@ -562,6 +587,7 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 	for position, discovered := range interfaces {
 		contract := discovered.Contract()
 		metadata, _ := discovered.Metadata()
+		semantics, hasSemantics := discovered.Semantics()
 		result[position] = interfaceSummary{
 			ID:             discovered.ID(),
 			ModulePath:     discovered.ModulePath(),
@@ -576,6 +602,8 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 			MetadataPath:   metadata.Path(),
 			MetadataData:   string(metadata.Data()),
 			MetadataSource: discovered.MetadataSource(),
+			SemanticsKind:  semantics.Kind(),
+			HasSemantics:   hasSemantics,
 		}
 	}
 	return result

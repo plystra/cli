@@ -19,6 +19,10 @@ func TestParseFilePreservesValidMetadataBytes(t *testing.T) {
 	if document.Path() != "interfaces/records/list/v1/interface.yaml" || string(document.Data()) != string(data) {
 		t.Fatalf("document = path %q data %q", document.Path(), document.Data())
 	}
+	semantics, present := document.Semantics()
+	if !present || semantics.Kind() != interfacemeta.OperationKindQuery {
+		t.Fatalf("semantics = %#v, %t", semantics, present)
+	}
 	view := document.Data()
 	view[0] = 'x'
 	if string(document.Data()) != string(data) {
@@ -32,6 +36,9 @@ func TestParseFileAcceptsEmptyMapping(t *testing.T) {
 	document, err := interfacemeta.ParseFile("interfaces/empty/interface.yaml", []byte("{}\n"))
 	if err != nil || document.Path() == "" {
 		t.Fatalf("ParseFile = %#v, %v", document, err)
+	}
+	if semantics, present := document.Semantics(); present || semantics.Kind() != "" {
+		t.Fatalf("absent semantics = %#v, %t", semantics, present)
 	}
 }
 
@@ -60,6 +67,102 @@ conformance:
 	document, err := interfacemeta.ParseFile("interfaces/order/create/v1/interface.yaml", data)
 	if err != nil || string(document.Data()) != string(data) {
 		t.Fatalf("ParseFile = %#v, %v", document, err)
+	}
+	semantics, present := document.Semantics()
+	if !present || semantics.Kind() != interfacemeta.OperationKindCommand {
+		t.Fatalf("semantics = %#v, %t", semantics, present)
+	}
+}
+
+func TestParseFileNormalizesClosedOperationSemantics(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		data string
+		kind interfacemeta.OperationKind
+	}{
+		{name: "query block", data: "semantics:\n  kind: query\n", kind: interfacemeta.OperationKindQuery},
+		{name: "query flow", data: "semantics: {kind: query}\n", kind: interfacemeta.OperationKindQuery},
+		{name: "query quoted", data: "semantics:\n  kind: \"query\"\n", kind: interfacemeta.OperationKindQuery},
+		{name: "command block", data: "semantics:\n  kind: command\n", kind: interfacemeta.OperationKindCommand},
+		{name: "command flow", data: "semantics: {kind: command}\n", kind: interfacemeta.OperationKindCommand},
+	}
+	var query interfacemeta.Semantics
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			document, err := interfacemeta.ParseFile("interfaces/operation/interface.yaml", []byte(test.data))
+			semantics, present := document.Semantics()
+			if err != nil || !present || semantics.Kind() != test.kind || string(document.Data()) != test.data {
+				t.Fatalf("ParseFile = %#v, %#v, %t, %v", document, semantics, present, err)
+			}
+		})
+		if test.kind == interfacemeta.OperationKindQuery {
+			document, err := interfacemeta.ParseFile("interfaces/operation/interface.yaml", []byte(test.data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			semantics, _ := document.Semantics()
+			if query.Kind() == "" {
+				query = semantics
+			} else if semantics != query {
+				t.Fatalf("equivalent query semantics differ: %#v and %#v", query, semantics)
+			}
+		}
+	}
+}
+
+func TestParseFileRejectsInvalidOperationSemantics(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		data     string
+		location string
+		want     string
+	}{
+		{name: "null", data: "semantics: null\n", location: "interface.yaml:1:12", want: "semantics must be a mapping"},
+		{name: "scalar", data: "semantics: query\n", location: "interface.yaml:1:12", want: "semantics must be a mapping"},
+		{name: "sequence", data: "semantics: []\n", location: "interface.yaml:1:12", want: "semantics must be a mapping"},
+		{name: "empty mapping", data: "semantics: {}\n", location: "interface.yaml:1:12", want: "semantics.kind is missing"},
+		{name: "unknown field", data: "semantics:\n  behavior: query\n", location: "interface.yaml:2:3", want: "semantics.behavior"},
+		{name: "extra field", data: "semantics:\n  kind: query\n  effects: none\n", location: "interface.yaml:3:3", want: "semantics.effects"},
+		{name: "null kind", data: "semantics:\n  kind: null\n", location: "interface.yaml:2:9", want: "semantics.kind must be the string"},
+		{name: "boolean kind", data: "semantics:\n  kind: true\n", location: "interface.yaml:2:9", want: "semantics.kind must be the string"},
+		{name: "sequence kind", data: "semantics:\n  kind: []\n", location: "interface.yaml:2:9", want: "semantics.kind must be the string"},
+		{name: "mapping kind", data: "semantics:\n  kind: {}\n", location: "interface.yaml:2:9", want: "semantics.kind must be the string"},
+		{name: "event", data: "semantics:\n  kind: event\n", location: "interface.yaml:2:9", want: "expected query or command"},
+		{name: "stream", data: "semantics:\n  kind: stream\n", location: "interface.yaml:2:9", want: "expected query or command"},
+		{name: "case mismatch", data: "semantics:\n  kind: Query\n", location: "interface.yaml:2:9", want: "expected query or command"},
+		{name: "empty kind", data: "semantics:\n  kind: \"\"\n", location: "interface.yaml:2:9", want: "expected query or command"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			document, err := interfacemeta.ParseFile("interfaces/operation/interface.yaml", []byte(test.data))
+			if !errors.Is(err, interfacemeta.ErrInvalid) || !errors.Is(err, interfacemeta.ErrInvalidSemantics) || document.Path() != "" || !strings.Contains(err.Error(), test.location) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ParseFile = %#v, %v; want %q at %q", document, err, test.want, test.location)
+			}
+		})
+	}
+}
+
+func TestParseFileRejectsLegacyCapabilitySemanticsFields(t *testing.T) {
+	t.Parallel()
+
+	for _, field := range []string{"effects", "idempotency", "retry", "cancellation", "completion", "ordering", "data"} {
+		field := field
+		t.Run(field, func(t *testing.T) {
+			t.Parallel()
+			data := []byte("semantics:\n  kind: query\n  " + field + ": {}\n")
+			document, err := interfacemeta.ParseFile("interfaces/operation/interface.yaml", data)
+			if !errors.Is(err, interfacemeta.ErrInvalidSemantics) || document.Path() != "" || !strings.Contains(err.Error(), "interface.yaml:3:3") || !strings.Contains(err.Error(), "semantics."+field) {
+				t.Fatalf("ParseFile = %#v, %v", document, err)
+			}
+		})
 	}
 }
 
@@ -199,7 +302,7 @@ func TestParseFileRejectsOversizedDocument(t *testing.T) {
 }
 
 func FuzzParseFile(f *testing.F) {
-	for _, seed := range []string{"{}\n", "description: value\n", "[\n", "---\n{}\n---\n{}\n", "description: &value text\ncopy: *value\n"} {
+	for _, seed := range []string{"{}\n", "description: value\n", "semantics: {kind: query}\n", "semantics: {kind: command}\n", "semantics: {kind: event}\n", "[\n", "---\n{}\n---\n{}\n", "description: &value text\ncopy: *value\n"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, data string) {
@@ -215,6 +318,9 @@ func FuzzParseFile(f *testing.F) {
 		}
 		if document.Path() == "" || string(document.Data()) != data {
 			t.Fatalf("ParseFile returned inconsistent document: %#v", document)
+		}
+		if semantics, present := document.Semantics(); present && semantics.Kind() != interfacemeta.OperationKindQuery && semantics.Kind() != interfacemeta.OperationKindCommand {
+			t.Fatalf("ParseFile returned unsupported semantics: %#v", semantics)
 		}
 	})
 }
