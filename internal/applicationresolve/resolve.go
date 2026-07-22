@@ -205,6 +205,9 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
+	if err := interfaceinventory.ValidateUniqueIDs(interfaces); err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
 	dependencySnapshots, dependencyManifests, err := loadDependencyManifests(dependencies.Projects())
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)

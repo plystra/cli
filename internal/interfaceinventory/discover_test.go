@@ -49,6 +49,9 @@ func TestDiscoverLoadsOnlyActiveEligiblePackagesDeterministically(t *testing.T) 
 	})
 	first := discover(t, root, environment)
 	second := discover(t, root, environment)
+	if err := interfaceinventory.ValidateUniqueIDs(first); err != nil {
+		t.Fatalf("ValidateUniqueIDs: %v", err)
+	}
 
 	wantIDs := []string{"records.alpha.read/v2", "tagged.active.run/v1", "zeta.execute/v1"}
 	if got := interfaceIDs(first); !slices.Equal(got, wantIDs) {
@@ -189,18 +192,43 @@ func TestDiscoverUsesExplicitWorkspaceProjectsWithoutAssigningPriority(t *testin
 	}
 }
 
-func TestDiscoverRetainsDuplicateIDsWithEveryDefinition(t *testing.T) {
+func TestValidateUniqueIDsRejectsEveryDuplicateDefinition(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	writeProject(t, root, "example.com/duplicates")
-	writeFile(t, filepath.Join(root, "first", "interface.go"), interfaceSource("first", "duplicate.visible.run/v1", "Run"))
-	writeFile(t, filepath.Join(root, "second", "interface.go"), interfaceSource("second", "duplicate.visible.run/v1", "Run"))
+	writeFile(t, filepath.Join(root, "zeta", "interface.go"), interfaceSource("zeta", "duplicate.visible.run/v1", "Run"))
+	writeFile(t, filepath.Join(root, "alpha", "interface.go"), interfaceSource("alpha", "duplicate.visible.run/v1", "Run"))
+	writeFile(t, filepath.Join(root, "middle", "interface.go"), interfaceSource("middle", "duplicate.visible.run/v1", "Run"))
 
 	index := discover(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
 	interfaces := index.Interfaces()
-	if len(interfaces) != 2 || interfaces[0].PackagePath() != "example.com/duplicates/first" || interfaces[1].PackagePath() != "example.com/duplicates/second" || interfaces[0].Source() == interfaces[1].Source() {
+	if len(interfaces) != 3 || interfaces[0].PackagePath() != "example.com/duplicates/alpha" || interfaces[1].PackagePath() != "example.com/duplicates/middle" || interfaces[2].PackagePath() != "example.com/duplicates/zeta" {
 		t.Fatalf("duplicate definitions = %#v", inventorySummary(index))
+	}
+	err := interfaceinventory.ValidateUniqueIDs(index)
+	if !errors.Is(err, interfaceinventory.ErrDuplicateID) {
+		t.Fatalf("ValidateUniqueIDs error = %v", err)
+	}
+	var duplicate *interfaceinventory.DuplicateIDError
+	if !errors.As(err, &duplicate) || duplicate.ID() != "duplicate.visible.run/v1" {
+		t.Fatalf("duplicate error = %#v, %v", duplicate, err)
+	}
+	if definitions := duplicate.Definitions(); !reflect.DeepEqual(definitions, interfaces) {
+		t.Fatalf("duplicate definitions = %#v, want %#v", definitions, interfaces)
+	}
+	for _, definition := range interfaces {
+		if !strings.Contains(err.Error(), fmt.Sprintf("package %q at %s", definition.PackagePath(), definition.Source())) {
+			t.Fatalf("duplicate error omits %s at %s: %v", definition.PackagePath(), definition.Source(), err)
+		}
+	}
+	definitions := duplicate.Definitions()
+	definitions[0] = interfaceinventory.Interface{}
+	if duplicate.Definitions()[0].PackagePath() != "example.com/duplicates/alpha" {
+		t.Fatal("DuplicateIDError exposed mutable definition storage")
+	}
+	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+		t.Fatalf("duplicate error exposed private Project root: %v", err)
 	}
 }
 

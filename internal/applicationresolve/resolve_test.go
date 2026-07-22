@@ -195,6 +195,70 @@ type Response struct { Value string `+"`plystra:\"1\"`"+` }
 	}
 }
 
+func TestResolveRejectsDuplicateVisibleInterfaceIDs(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	applicationRoot := filepath.Join(root, "application")
+	dependencyRoot := filepath.Join(root, "dependency")
+	writeModule(t, dependencyRoot, "example.com/dependency")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(dependencyRoot, "second", "interface.go"), interfaceDeclarationSource("second", "duplicate.visible.execute/v1", "Execute"))
+	writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/application
+
+go 1.26
+
+require example.com/dependency v1.2.3
+
+replace example.com/dependency => ../dependency
+`)
+	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(applicationRoot, "first", "interface.go"), interfaceDeclarationSource("first", "duplicate.visible.execute/v1", "Execute"))
+	before := snapshotTree(t, root)
+
+	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       applicationRoot,
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"}),
+	})
+	if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, interfaceinventory.ErrDuplicateID) {
+		t.Fatalf("Resolve error = %v", err)
+	}
+	var duplicate *interfaceinventory.DuplicateIDError
+	if !errors.As(err, &duplicate) || duplicate.ID() != "duplicate.visible.execute/v1" || len(duplicate.Definitions()) != 2 {
+		t.Fatalf("duplicate error = %#v, %v", duplicate, err)
+	}
+	definitions := duplicate.Definitions()
+	if definitions[0].PackagePath() != "example.com/application/first" || definitions[0].ModuleVersion() != "" || definitions[1].PackagePath() != "example.com/dependency/second" || definitions[1].ModuleVersion() != "v1.2.3" {
+		t.Fatalf("duplicate definitions = %#v", definitions)
+	}
+	for _, definition := range definitions {
+		if !strings.Contains(err.Error(), definition.PackagePath()) || !strings.Contains(err.Error(), definition.Source()) {
+			t.Fatalf("Resolve error omits duplicate provenance %#v: %v", definition, err)
+		}
+	}
+	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+		t.Fatalf("Resolve error exposed private Project root: %v", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("Resolve mutated duplicate Interface Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func interfaceDeclarationSource(packageName, id, method string) string {
+	return fmt.Sprintf(`package %s
+
+import "context"
+
+//plystra:interface %s
+type Interface interface {
+	%s(context.Context, Request) (Response, error)
+}
+
+type Request struct { Value string %s }
+type Response struct { Value string %s }
+`, packageName, id, method, "`plystra:\"1\"`", "`plystra:\"1\"`")
+}
+
 func TestResolveUsesCompleteSelectedConfigurationAboveDependencyProjects(t *testing.T) {
 	t.Parallel()
 
