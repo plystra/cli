@@ -183,14 +183,14 @@ type Interface interface {
 	Execute(context.Context, Request) (Response, error)
 }
 
-type Request struct { Value string }
+type Request struct { Value int `+"`plystra:\"1\"`"+` }
 type Response struct { Value string `+"`plystra:\"1\"`"+` }
 `)
 	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
 		Start:       root,
 		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"}),
 	})
-	if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacecontract.ErrInvalid) || !strings.Contains(err.Error(), "missing plystra field-number tag") {
+	if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacecontract.ErrInvalid) || !strings.Contains(err.Error(), "unsupported Go scalar type int") {
 		t.Fatalf("Resolve error = %v", err)
 	}
 }

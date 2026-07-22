@@ -69,7 +69,7 @@ func TestDiscoverLoadsOnlyActiveEligiblePackagesDeterministically(t *testing.T) 
 			t.Fatalf("normalized contract = %#v", contract)
 		}
 		request := contract.RequestFields()[0]
-		if request.Name() != "Value" || request.Number() != 1 || !request.Required() || request.JSONName() != "value" || !request.HasExplicitJSONName() {
+		if request.Name() != "Value" || request.Number() != 1 || !request.Required() || request.JSONName() != "value" || !request.HasExplicitJSONName() || request.Type().Canonical() != "string" {
 			t.Fatalf("request field = %#v", request)
 		}
 		position := discovered.Declaration().Position()

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"go/types"
-	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -26,6 +25,7 @@ type Contract struct {
 	responseName   string
 	requestFields  []Field
 	responseFields []Field
+	messages       []Message
 }
 
 // ID returns the exact canonical Interface ID.
@@ -49,6 +49,22 @@ func (c Contract) RequestFields() []Field { return append([]Field(nil), c.reques
 // ResponseFields returns the response fields in stable field-number order.
 func (c Contract) ResponseFields() []Field { return append([]Field(nil), c.responseFields...) }
 
+// Messages returns every request, response, and nested same-package message in
+// stable Go type-name order.
+func (c Contract) Messages() []Message {
+	return append([]Message(nil), c.messages...)
+}
+
+// Message returns one exact normalized same-package message by Go type name.
+func (c Contract) Message(name string) (Message, bool) {
+	for _, message := range c.messages {
+		if message.name == name {
+			return Message{name: message.name, fields: append([]Field(nil), message.fields...)}, true
+		}
+	}
+	return Message{}, false
+}
+
 // Field is one normalized canonical request or response field.
 type Field struct {
 	name            string
@@ -56,6 +72,7 @@ type Field struct {
 	required        bool
 	jsonName        string
 	hasExplicitJSON bool
+	fieldType       Type
 }
 
 // Name returns the exported Go field name.
@@ -72,6 +89,9 @@ func (f Field) JSONName() string { return f.jsonName }
 
 // HasExplicitJSONName reports whether the Go field declares a nonempty JSON name.
 func (f Field) HasExplicitJSONName() bool { return f.hasExplicitJSON }
+
+// Type returns the normalized closed-graph field type.
+func (f Field) Type() Type { return f.fieldType }
 
 // Validate verifies one parsed declaration against its type-checked Go package.
 func Validate(declaration interfacedecl.Declaration, checkedPackage *types.Package) (Contract, error) {
@@ -123,7 +143,8 @@ func Validate(declaration interfacedecl.Declaration, checkedPackage *types.Packa
 	if err != nil {
 		return Contract{}, invalid(declaration, err.Error())
 	}
-	requestFields, err := normalizeFields(request.structure, "request")
+	graph := newTypeGraph(checkedPackage)
+	requestFields, err := graph.normalizeMessage(request.named, "request")
 	if err != nil {
 		return Contract{}, invalid(declaration, err.Error())
 	}
@@ -135,7 +156,7 @@ func Validate(declaration interfacedecl.Declaration, checkedPackage *types.Packa
 	if err != nil {
 		return Contract{}, invalid(declaration, err.Error())
 	}
-	responseFields, err := normalizeFields(response.structure, "response")
+	responseFields, err := graph.normalizeMessage(response.named, "response")
 	if err != nil {
 		return Contract{}, invalid(declaration, err.Error())
 	}
@@ -151,6 +172,7 @@ func Validate(declaration interfacedecl.Declaration, checkedPackage *types.Packa
 		responseName:   response.name,
 		requestFields:  requestFields,
 		responseFields: responseFields,
+		messages:       graph.normalizedMessages(),
 	}, nil
 }
 
@@ -166,8 +188,8 @@ func isContext(checkedPackage *types.Package, value types.Type) bool {
 }
 
 type canonicalMessage struct {
-	name      string
-	structure *types.Struct
+	name  string
+	named *types.Named
 }
 
 func messageType(checkedPackage *types.Package, value types.Type, role string) (canonicalMessage, error) {
@@ -181,63 +203,10 @@ func messageType(checkedPackage *types.Package, value types.Type, role string) (
 	if named.TypeParams() != nil && named.TypeParams().Len() != 0 {
 		return canonicalMessage{}, fmt.Errorf("Interface %s must not be generic", role)
 	}
-	structure, ok := named.Underlying().(*types.Struct)
-	if !ok {
+	if _, ok := named.Underlying().(*types.Struct); !ok {
 		return canonicalMessage{}, fmt.Errorf("Interface %s must be a defined exported same-package struct", role)
 	}
-	return canonicalMessage{name: named.Obj().Name(), structure: structure}, nil
-}
-
-func normalizeFields(structure *types.Struct, role string) ([]Field, error) {
-	fields := make([]Field, 0, structure.NumFields())
-	numbers := make(map[uint64]string, structure.NumFields())
-	jsonNames := make(map[string]string, structure.NumFields())
-	for index := 0; index < structure.NumFields(); index++ {
-		field := structure.Field(index)
-		if !field.Exported() || field.Embedded() {
-			return nil, fmt.Errorf("Interface %s field %s must be an exported named field", role, field.Name())
-		}
-		tags, err := parseStructTags(structure.Tag(index))
-		if err != nil {
-			return nil, fmt.Errorf("Interface %s field %s: %w", role, field.Name(), err)
-		}
-		number, required, err := parsePlystraTag(tags)
-		if err != nil {
-			return nil, fmt.Errorf("Interface %s field %s: %w", role, field.Name(), err)
-		}
-		if previous, exists := numbers[number]; exists {
-			return nil, fmt.Errorf("Interface %s fields %s and %s use duplicate field number %d", role, previous, field.Name(), number)
-		}
-		numbers[number] = field.Name()
-
-		jsonName, hasExplicitJSON, err := parseJSONName(tags)
-		if err != nil {
-			return nil, fmt.Errorf("Interface %s field %s: %w", role, field.Name(), err)
-		}
-		effectiveJSONName := field.Name()
-		if hasExplicitJSON {
-			effectiveJSONName = jsonName
-		}
-		if previous, exists := jsonNames[effectiveJSONName]; exists {
-			return nil, fmt.Errorf("Interface %s fields %s and %s use duplicate JSON name %q", role, previous, field.Name(), effectiveJSONName)
-		}
-		jsonNames[effectiveJSONName] = field.Name()
-
-		fields = append(fields, Field{
-			name:            field.Name(),
-			number:          number,
-			required:        required,
-			jsonName:        jsonName,
-			hasExplicitJSON: hasExplicitJSON,
-		})
-	}
-	sort.Slice(fields, func(left, right int) bool {
-		if fields[left].number != fields[right].number {
-			return fields[left].number < fields[right].number
-		}
-		return fields[left].name < fields[right].name
-	})
-	return fields, nil
+	return canonicalMessage{name: named.Obj().Name(), named: named}, nil
 }
 
 func parseStructTags(tag string) (map[string]string, error) {
