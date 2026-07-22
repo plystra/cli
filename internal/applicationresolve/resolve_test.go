@@ -144,7 +144,8 @@ type Response struct {
 	Accepted bool `+"`plystra:\"1\" json:\"accepted\"`"+`
 }
 `)
-	writeFile(t, filepath.Join(root, "domains", "orders", "create", "v1", interfacemeta.Name), "description: Executes an order.\nsemantics:\n  kind: command\nerrors:\n  - code: order_rejected\n    description: The order was rejected.\nconstraints:\n  request.order_id: {min_length: 1}\nexamples:\n  - name: accepted\n    request: {order_id: ord_123}\n    response: {accepted: true}\n  - name: rejected\n    request: {order_id: ord_rejected}\n    error: order_rejected\ndeprecation:\n  message: This Interface will be replaced.\n  since: next-release\n")
+	writeFile(t, filepath.Join(root, "domains", "orders", "create", "v1", interfacemeta.Name), "description: Executes an order.\nsemantics:\n  kind: command\nerrors:\n  - code: order_rejected\n    description: The order was rejected.\nconstraints:\n  request.order_id: {min_length: 1}\nexamples:\n  - name: accepted\n    request: {order_id: ord_123}\n    response: {accepted: true}\n  - name: rejected\n    request: {order_id: ord_rejected}\n    error: order_rejected\ndeprecation:\n  message: This Interface will be replaced.\n  since: next-release\nconformance:\n  package: ./conformance\n")
+	writeFile(t, filepath.Join(root, "domains", "orders", "create", "v1", "conformance", "suite_test.go"), "package conformance\n")
 	before := snapshotTree(t, root)
 	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
 		Start:       filepath.Join(root, "domains", "orders"),
@@ -199,6 +200,10 @@ type Response struct {
 	}
 	if since, exists := deprecation.Since(); !exists || since != "next-release" {
 		t.Fatalf("Interface deprecation since = %q, %t", since, exists)
+	}
+	conformance, present := discovered.Conformance()
+	if !present || conformance.Package() != interfacemeta.CanonicalConformancePackage {
+		t.Fatalf("Interface conformance = %#v, %t", conformance, present)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("Resolve mutated Interface Project:\nbefore: %#v\nafter:  %#v", before, after)
@@ -345,6 +350,31 @@ func TestResolveRejectsInvalidInterfaceDeprecationWithoutMutation(t *testing.T) 
 		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"}),
 	})
 	if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacemeta.ErrInvalidDeprecation) || !strings.Contains(err.Error(), "interfaces/invalid/interface.yaml:3:16") || !strings.Contains(err.Error(), "is not a visible Interface") {
+		t.Fatalf("Resolve error = %v", err)
+	}
+	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+		t.Fatalf("Resolve error exposed private Project root: %v", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("failed resolution mutated Interface Project:\nbefore: %#v\nafter: %#v", before, after)
+	}
+}
+
+func TestResolveRejectsInvalidInterfaceConformanceConfigurationWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModule(t, root, "example.com/invalid-interface-conformance")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	packageRoot := filepath.Join(root, "interfaces", "invalid")
+	writeFile(t, filepath.Join(packageRoot, "interface.go"), interfaceDeclarationSource("invalid", "invalid.conformance.execute/v1", "Execute"))
+	writeFile(t, filepath.Join(packageRoot, interfacemeta.Name), "conformance:\n  package: ../shared-tests\n")
+	before := snapshotTree(t, root)
+	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       root,
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"}),
+	})
+	if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacemeta.ErrInvalidConformance) || !strings.Contains(err.Error(), "interfaces/invalid/interface.yaml:2:12") || !strings.Contains(err.Error(), `must be exactly "./conformance"`) {
 		t.Fatalf("Resolve error = %v", err)
 	}
 	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {

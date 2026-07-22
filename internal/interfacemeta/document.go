@@ -79,6 +79,8 @@ type Document struct {
 	examples        []exampleDeclaration
 	deprecation     deprecationDeclaration
 	hasDeprecation  bool
+	conformance     Conformance
+	hasConformance  bool
 }
 
 // Path returns the stable slash-separated module-relative source path.
@@ -91,6 +93,12 @@ func (d Document) Data() []byte { return append([]byte(nil), d.data...) }
 // replacement is validated against visible Interfaces during discovery.
 func (d Document) Deprecation() (Deprecation, bool) {
 	return d.deprecation.value, d.hasDeprecation
+}
+
+// Conformance returns the optional normalized owner-supplied Behavioral
+// Conformance Suite configuration without executing any code.
+func (d Document) Conformance() (Conformance, bool) {
+	return d.conformance, d.hasConformance
 }
 
 // Semantics returns the optional normalized operation semantics.
@@ -165,6 +173,10 @@ func ParseFile(sourcePath string, data []byte) (Document, error) {
 	if err != nil {
 		return Document{}, err
 	}
+	conformance, hasConformance, err := normalizeConformance(sourcePath, root)
+	if err != nil {
+		return Document{}, err
+	}
 	return Document{
 		path:            sourcePath,
 		data:            append([]byte(nil), data...),
@@ -175,6 +187,8 @@ func ParseFile(sourcePath string, data []byte) (Document, error) {
 		examples:        examples,
 		deprecation:     deprecation,
 		hasDeprecation:  hasDeprecation,
+		conformance:     conformance,
+		hasConformance:  hasConformance,
 	}, nil
 }
 

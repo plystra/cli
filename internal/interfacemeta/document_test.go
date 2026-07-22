@@ -43,6 +43,9 @@ func TestParseFileAcceptsEmptyMapping(t *testing.T) {
 	if deprecation, present := document.Deprecation(); present || deprecation.Message() != "" {
 		t.Fatalf("absent deprecation = %#v, %t", deprecation, present)
 	}
+	if conformance, present := document.Conformance(); present || conformance.Package() != "" {
+		t.Fatalf("absent conformance = %#v, %t", conformance, present)
+	}
 }
 
 func TestParseFileAcceptsOnlyNonDuplicatedMetadataFields(t *testing.T) {
@@ -78,6 +81,10 @@ conformance:
 	deprecation, present := document.Deprecation()
 	if !present || deprecation.Message() != "use order.submit/v1" {
 		t.Fatalf("deprecation = %#v, %t", deprecation, present)
+	}
+	conformance, present := document.Conformance()
+	if !present || conformance.Package() != interfacemeta.CanonicalConformancePackage {
+		t.Fatalf("conformance = %#v, %t", conformance, present)
 	}
 }
 
@@ -311,7 +318,7 @@ func TestParseFileRejectsOversizedDocument(t *testing.T) {
 }
 
 func FuzzParseFile(f *testing.F) {
-	for _, seed := range []string{"{}\n", "description: value\n", "semantics: {kind: query}\n", "semantics: {kind: command}\n", "semantics: {kind: event}\n", "errors: [{code: invalid_value}]\n", "errors: [invalid_value]\n", "examples: [{name: accepted, request: {}, response: {}}]\n", "errors: [{code: rejected}]\nexamples: [{name: rejected, request: {}, error: rejected}]\n", "deprecation: {message: obsolete}\n", "deprecation: {message: obsolete, replacement: order.create/v2, since: next-release}\n", "[\n", "---\n{}\n---\n{}\n", "description: &value text\ncopy: *value\n"} {
+	for _, seed := range []string{"{}\n", "description: value\n", "semantics: {kind: query}\n", "semantics: {kind: command}\n", "semantics: {kind: event}\n", "errors: [{code: invalid_value}]\n", "errors: [invalid_value]\n", "examples: [{name: accepted, request: {}, response: {}}]\n", "errors: [{code: rejected}]\nexamples: [{name: rejected, request: {}, error: rejected}]\n", "deprecation: {message: obsolete}\n", "deprecation: {message: obsolete, replacement: order.create/v2, since: next-release}\n", "conformance: {package: ./conformance}\n", "conformance: {package: ../unsafe}\n", "[\n", "---\n{}\n---\n{}\n", "description: &value text\ncopy: *value\n"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, data string) {

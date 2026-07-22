@@ -258,8 +258,9 @@ func TestDiscoverLoadsOptionalColocatedMetadataWithStableProvenance(t *testing.T
 	writeProject(t, dependencyRoot, "example.com/dependency")
 	writeFile(t, filepath.Join(dependencyRoot, "api", "interface.go"), interfaceSource("api", "dependency.records.list/v1", "List"))
 	writeFile(t, filepath.Join(dependencyRoot, "api-v2", "interface.go"), interfaceSource("apiv2", "dependency.records.list/v2", "List"))
-	dependencyMetadata := "description: Lists dependency records.\nsemantics:\n  kind: query\nerrors:\n  - code: dependency_unavailable\nconstraints:\n  request.value: {min_length: 1}\nexamples:\n  - name: unavailable\n    request: {value: missing}\n    error: dependency_unavailable\ndeprecation:\n  message: Use dependency.records.list/v2.\n  replacement: dependency.records.list/v2\n  since: v1.2.3\n"
+	dependencyMetadata := "description: Lists dependency records.\nsemantics:\n  kind: query\nerrors:\n  - code: dependency_unavailable\nconstraints:\n  request.value: {min_length: 1}\nexamples:\n  - name: unavailable\n    request: {value: missing}\n    error: dependency_unavailable\ndeprecation:\n  message: Use dependency.records.list/v2.\n  replacement: dependency.records.list/v2\n  since: v1.2.3\nconformance:\n  package: ./conformance\n"
 	writeFile(t, filepath.Join(dependencyRoot, "api", interfacemeta.Name), dependencyMetadata)
+	writeFile(t, filepath.Join(dependencyRoot, "api", "conformance", "suite_test.go"), "package conformance\n")
 
 	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
 
@@ -271,8 +272,9 @@ replace example.com/dependency => ../dependency
 `)
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
 	writeFile(t, filepath.Join(appRoot, "interfaces", "local", "interface.go"), interfaceSource("local", "local.records.list/v1", "List"))
-	localMetadata := "# local metadata\ndescription: Lists local records.\nsemantics:\n  kind: command\nerrors:\n  - code: records_unavailable\n  - code: invalid_filter\n    description: The filter is invalid.\nconstraints:\n  response.accepted: {}\n  request.value: {min_length: 1}\nexamples:\n  - name: accepted\n    request: {value: all}\n    response: {accepted: true}\n  - name: invalid-filter\n    request: {value: invalid}\n    error: invalid_filter\ndeprecation:\n  message: Use local.records.get/v1.\n  replacement: local.records.get/v1\n  since: next-release\n"
+	localMetadata := "# local metadata\ndescription: Lists local records.\nsemantics:\n  kind: command\nerrors:\n  - code: records_unavailable\n  - code: invalid_filter\n    description: The filter is invalid.\nconstraints:\n  response.accepted: {}\n  request.value: {min_length: 1}\nexamples:\n  - name: accepted\n    request: {value: all}\n    response: {accepted: true}\n  - name: invalid-filter\n    request: {value: invalid}\n    error: invalid_filter\ndeprecation:\n  message: Use local.records.get/v1.\n  replacement: local.records.get/v1\n  since: next-release\nconformance:\n  package: ./conformance\n"
 	writeFile(t, filepath.Join(appRoot, "interfaces", "local", interfacemeta.Name), localMetadata)
+	writeFile(t, filepath.Join(appRoot, "interfaces", "local", "conformance", "suite_test.go"), "package conformance\n")
 	writeFile(t, filepath.Join(appRoot, "interfaces", "plain", "interface.go"), interfaceSource("plain", "local.records.get/v1", "Get"))
 	writeFile(t, filepath.Join(appRoot, "interfaces", "described", "interface.go"), interfaceSource("described", "local.records.describe/v1", "Describe"))
 	writeFile(t, filepath.Join(appRoot, "interfaces", "described", interfacemeta.Name), "description: Describes local records.\n")
@@ -328,6 +330,10 @@ replace example.com/dependency => ../dependency
 	if since, exists := localDeprecation.Since(); !exists || since != "next-release" {
 		t.Fatalf("local deprecation since = %q, %t", since, exists)
 	}
+	localConformance, present := byID["local.records.list/v1"].Conformance()
+	if !present || localConformance.Package() != interfacemeta.CanonicalConformancePackage {
+		t.Fatalf("local conformance = %#v, %t", localConformance, present)
+	}
 	dependency, present := byID["dependency.records.list/v1"].Metadata()
 	if !present || dependency.Path() != "api/interface.yaml" || string(dependency.Data()) != dependencyMetadata || byID["dependency.records.list/v1"].MetadataSource() != "example.com/dependency@v1.2.3/api/interface.yaml" {
 		t.Fatalf("dependency metadata = %#v, %t, source %q", dependency, present, byID["dependency.records.list/v1"].MetadataSource())
@@ -361,6 +367,10 @@ replace example.com/dependency => ../dependency
 	if replacement, exists := dependencyDeprecation.Replacement(); !exists || replacement.String() != "dependency.records.list/v2" {
 		t.Fatalf("dependency replacement = %q, %t", replacement.String(), exists)
 	}
+	dependencyConformance, present := byID["dependency.records.list/v1"].Conformance()
+	if !present || dependencyConformance.Package() != interfacemeta.CanonicalConformancePackage {
+		t.Fatalf("dependency conformance = %#v, %t", dependencyConformance, present)
+	}
 	if metadata, present := byID["local.records.get/v1"].Metadata(); present || metadata.Path() != "" || len(metadata.Data()) != 0 || byID["local.records.get/v1"].MetadataSource() != "" {
 		t.Fatalf("absent metadata = %#v, %t", metadata, present)
 	}
@@ -385,6 +395,9 @@ replace example.com/dependency => ../dependency
 	}
 	if deprecation, present := byID["local.records.describe/v1"].Deprecation(); present || deprecation.Message() != "" {
 		t.Fatalf("description-only deprecation = %#v, %t", deprecation, present)
+	}
+	if conformance, present := byID["local.records.describe/v1"].Conformance(); present || conformance.Package() != "" {
+		t.Fatalf("description-only conformance = %#v, %t", conformance, present)
 	}
 	localErrors[0] = interfacemeta.SemanticError{}
 	if byID["local.records.list/v1"].SemanticErrors()[0].Code() != "invalid_filter" {
@@ -416,12 +429,13 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		data      string
-		directory bool
-		wantError error
-		location  string
-		want      string
+		name               string
+		data               string
+		directory          bool
+		conformancePackage string
+		wantError          error
+		location           string
+		want               string
 	}{
 		{name: "empty", want: "document is empty"},
 		{name: "comments only", data: "# empty\n", want: "expected one YAML document"},
@@ -449,6 +463,12 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 		{name: "invalid deprecation field", data: "deprecation:\n  message: obsolete\n  remove_after: v2\n", wantError: interfacemeta.ErrInvalidDeprecation, location: "interfaces/records/interface.yaml:3:3", want: "deprecation.remove_after"},
 		{name: "self deprecation replacement", data: "deprecation:\n  message: obsolete\n  replacement: records.invalid.list/v1\n", wantError: interfacemeta.ErrInvalidDeprecation, location: "interfaces/records/interface.yaml:3:16", want: "must differ from the deprecated Interface"},
 		{name: "invisible deprecation replacement", data: "deprecation:\n  message: obsolete\n  replacement: records.invalid.list/v2\n", wantError: interfacemeta.ErrInvalidDeprecation, location: "interfaces/records/interface.yaml:3:16", want: "is not a visible Interface"},
+		{name: "invalid conformance shape", data: "conformance: []\n", wantError: interfacemeta.ErrInvalidConformance, location: "interfaces/records/interface.yaml:1:14", want: "conformance must be a mapping"},
+		{name: "unknown conformance field", data: "conformance:\n  package: ./conformance\n  api: v1\n", wantError: interfacemeta.ErrInvalidConformance, location: "interfaces/records/interface.yaml:3:3", want: "conformance.api"},
+		{name: "unsafe conformance package", data: "conformance:\n  package: ../conformance\n", wantError: interfacemeta.ErrInvalidConformance, location: "interfaces/records/interface.yaml:2:12", want: `must be exactly "./conformance"`},
+		{name: "missing conformance package", data: "conformance:\n  package: ./conformance\n", wantError: interfacemeta.ErrInvalidConformance, want: "interfaces/records/conformance"},
+		{name: "conformance package is a file", data: "conformance:\n  package: ./conformance\n", conformancePackage: "file", wantError: interfacemeta.ErrInvalidConformance, want: "must be a non-symbolic directory"},
+		{name: "conformance package has no Go source", data: "conformance:\n  package: ./conformance\n", conformancePackage: "empty", wantError: interfacemeta.ErrInvalidConformance, want: "must contain at least one regular non-symbolic .go source file"},
 		{name: "directory", directory: true, want: "regular non-symbolic file"},
 		{name: "oversized", data: strings.Repeat("x", interfacemeta.MaximumSize+1), want: "exceeds"},
 	}
@@ -468,6 +488,14 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 			} else {
 				writeFile(t, metadataPath, test.data)
 			}
+			switch test.conformancePackage {
+			case "file":
+				writeFile(t, filepath.Join(packageRoot, "conformance"), "not a directory\n")
+			case "empty":
+				if err := os.MkdirAll(filepath.Join(packageRoot, "conformance"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
 			before := snapshotFiles(t, root)
 			_, err := discoverResult(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
 			if !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacemeta.ErrInvalid) || test.wantError != nil && !errors.Is(err, test.wantError) || !strings.Contains(err.Error(), test.want) || !strings.Contains(err.Error(), "interfaces/records/interface.yaml") || test.location != "" && !strings.Contains(err.Error(), test.location) {
@@ -480,6 +508,29 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 				t.Fatalf("failed metadata discovery mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
 			}
 		})
+	}
+}
+
+func TestDiscoverRejectsSymbolicConformancePackageWithoutFollowingIt(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeProject(t, root, "example.com/symbolic-conformance")
+	packageRoot := filepath.Join(root, "interfaces", "records")
+	writeFile(t, filepath.Join(packageRoot, "interface.go"), interfaceSource("records", "records.symbolic.list/v1", "List"))
+	writeFile(t, filepath.Join(packageRoot, interfacemeta.Name), "conformance:\n  package: ./conformance\n")
+	target := t.TempDir()
+	writeFile(t, filepath.Join(target, "suite_test.go"), "package conformance\n")
+	if err := os.Symlink(target, filepath.Join(packageRoot, "conformance")); err != nil {
+		t.Skipf("symbolic links unavailable: %v", err)
+	}
+	targetBefore := snapshotFiles(t, target)
+	_, err := discoverResult(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
+	if !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacemeta.ErrInvalid) || !errors.Is(err, interfacemeta.ErrInvalidConformance) || !strings.Contains(err.Error(), "must be a non-symbolic directory") || strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) || strings.Contains(err.Error(), target) || strings.Contains(err.Error(), filepath.ToSlash(target)) {
+		t.Fatalf("Discover symbolic conformance error = %v", err)
+	}
+	if after := snapshotFiles(t, target); !reflect.DeepEqual(after, targetBefore) {
+		t.Fatalf("conformance discovery mutated symbolic target:\nbefore: %#v\nafter: %#v", targetBefore, after)
 	}
 }
 
@@ -679,6 +730,7 @@ type interfaceSummary struct {
 	ConstraintPaths []string
 	Examples        []string
 	Deprecation     []string
+	Conformance     string
 }
 
 func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
@@ -700,6 +752,7 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 		}
 		examples := inventoryExampleSummary(discovered.Examples())
 		deprecation, _ := discovered.Deprecation()
+		conformance, _ := discovered.Conformance()
 		result[position] = interfaceSummary{
 			ID:              discovered.ID(),
 			ModulePath:      discovered.ModulePath(),
@@ -720,6 +773,7 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 			ConstraintPaths: constraintPaths,
 			Examples:        examples,
 			Deprecation:     inventoryDeprecationSummary(deprecation),
+			Conformance:     conformance.Package(),
 		}
 	}
 	return result

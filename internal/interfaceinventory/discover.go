@@ -146,6 +146,15 @@ func (i Interface) Deprecation() (interfacemeta.Deprecation, bool) {
 	return i.deprecation, i.hasDeprecation
 }
 
+// Conformance returns the optional normalized owner-supplied Behavioral
+// Conformance Suite configuration without loading or executing suite code.
+func (i Interface) Conformance() (interfacemeta.Conformance, bool) {
+	if !i.hasMetadata {
+		return interfacemeta.Conformance{}, false
+	}
+	return i.metadata.Conformance()
+}
+
 // MetadataSource returns stable module-qualified metadata provenance, or an
 // empty string when the Interface package has no optional metadata document.
 func (i Interface) MetadataSource() string {
@@ -303,6 +312,9 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 		if err != nil {
 			return nil, fmt.Errorf("package %s: %w", candidate.importPath, err)
 		}
+		if err := validateConformancePackage(candidate, metadata); err != nil {
+			return nil, fmt.Errorf("package %s: %w", candidate.importPath, err)
+		}
 		if err := validateLoadedPackage(candidate, loaded); err != nil {
 			return nil, err
 		}
@@ -379,6 +391,49 @@ func loadOptionalMetadata(candidate packageCandidate) (interfacemeta.Document, b
 		return interfacemeta.Document{}, false, err
 	}
 	return document, true, nil
+}
+
+func validateConformancePackage(candidate packageCandidate, metadata interfacemeta.Document) error {
+	conformance, present := metadata.Conformance()
+	if !present {
+		return nil
+	}
+	packageDirectory := filepath.Join(candidate.directory, strings.TrimPrefix(conformance.Package(), "./"))
+	relativeDirectory, err := filepath.Rel(candidate.source.root, packageDirectory)
+	if err != nil || filepath.IsAbs(relativeDirectory) || relativeDirectory == ".." || strings.HasPrefix(relativeDirectory, ".."+string(filepath.Separator)) {
+		return invalidConformancePackage(metadata, "package path escapes its owning Go Module")
+	}
+	info, err := os.Lstat(packageDirectory)
+	if err != nil {
+		message := gocommand.SanitizeOutput(err.Error(), candidate.source.root, candidate.directory, packageDirectory)
+		return invalidConformancePackage(metadata, "inspect %s: %s", path.Join(path.Dir(metadata.Path()), "conformance"), message)
+	}
+	if !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
+		return invalidConformancePackage(metadata, "%s must be a non-symbolic directory", path.Join(path.Dir(metadata.Path()), "conformance"))
+	}
+	entries, err := os.ReadDir(packageDirectory)
+	if err != nil {
+		message := gocommand.SanitizeOutput(err.Error(), candidate.source.root, candidate.directory, packageDirectory)
+		return invalidConformancePackage(metadata, "inspect %s: %s", path.Join(path.Dir(metadata.Path()), "conformance"), message)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+			continue
+		}
+		entryInfo, err := entry.Info()
+		if err != nil {
+			message := gocommand.SanitizeOutput(err.Error(), candidate.source.root, candidate.directory, filepath.Join(packageDirectory, entry.Name()))
+			return invalidConformancePackage(metadata, "inspect conformance source %s: %s", entry.Name(), message)
+		}
+		if entryInfo.Mode().IsRegular() && entryInfo.Mode()&fs.ModeSymlink == 0 {
+			return nil
+		}
+	}
+	return invalidConformancePackage(metadata, "%s must contain at least one regular non-symbolic .go source file", path.Join(path.Dir(metadata.Path()), "conformance"))
+}
+
+func invalidConformancePackage(metadata interfacemeta.Document, format string, arguments ...any) error {
+	return fmt.Errorf("%w: %w: %s: %s", interfacemeta.ErrInvalid, interfacemeta.ErrInvalidConformance, metadata.Path(), fmt.Sprintf(format, arguments...))
 }
 
 type moduleSource struct {
