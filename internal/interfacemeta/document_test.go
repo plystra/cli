@@ -223,7 +223,9 @@ func TestParseFileRejectsNestedAuthoritativeFieldsOutsideExamplePayloads(t *test
 func TestParseFileAllowsContractLikeNamesInsideExampleApplicationData(t *testing.T) {
 	t.Parallel()
 
-	data := []byte(`examples:
+	data := []byte(`errors:
+  - code: rejected
+examples:
   - name: contract-like-data
     request:
       id: value
@@ -238,10 +240,10 @@ func TestParseFileAllowsContractLikeNamesInsideExampleApplicationData(t *testing
       constructor: value
     response:
       interface_id: value
-    error:
-      code: rejected
-      details:
-        method_name: value
+  - name: rejected
+    request:
+      id: value
+    error: rejected
 `)
 	document, err := interfacemeta.ParseFile("interfaces/order/interface.yaml", data)
 	if err != nil || string(document.Data()) != string(data) {
@@ -278,7 +280,7 @@ func TestParseFileRejectsUnsafeOrMalformedDocuments(t *testing.T) {
 		{name: "anchor", path: "interfaces/order/interface.yaml", data: "description: &text value\n", want: "anchors and aliases"},
 		{name: "alias", path: "interfaces/order/interface.yaml", data: "description: &text value\ncopy: *text\n", want: "anchors and aliases"},
 		{name: "duplicate key", path: "interfaces/order/interface.yaml", data: "description: one\ndescription: two\n", want: "duplicate mapping key"},
-		{name: "non-string key", path: "interfaces/order/interface.yaml", data: "1: value\n", want: "mapping keys must be nonempty strings"},
+		{name: "non-string key", path: "interfaces/order/interface.yaml", data: "1: value\n", want: "mapping keys must be strings"},
 	}
 	for _, test := range tests {
 		test := test
@@ -302,7 +304,7 @@ func TestParseFileRejectsOversizedDocument(t *testing.T) {
 }
 
 func FuzzParseFile(f *testing.F) {
-	for _, seed := range []string{"{}\n", "description: value\n", "semantics: {kind: query}\n", "semantics: {kind: command}\n", "semantics: {kind: event}\n", "errors: [{code: invalid_value}]\n", "errors: [invalid_value]\n", "[\n", "---\n{}\n---\n{}\n", "description: &value text\ncopy: *value\n"} {
+	for _, seed := range []string{"{}\n", "description: value\n", "semantics: {kind: query}\n", "semantics: {kind: command}\n", "semantics: {kind: event}\n", "errors: [{code: invalid_value}]\n", "errors: [invalid_value]\n", "examples: [{name: accepted, request: {}, response: {}}]\n", "errors: [{code: rejected}]\nexamples: [{name: rejected, request: {}, error: rejected}]\n", "[\n", "---\n{}\n---\n{}\n", "description: &value text\ncopy: *value\n"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, data string) {

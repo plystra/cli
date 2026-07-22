@@ -76,6 +76,7 @@ type Document struct {
 	hasSemantics    bool
 	errors          []SemanticError
 	constraintPaths []constraintPathDeclaration
+	examples        []exampleDeclaration
 }
 
 // Path returns the stable slash-separated module-relative source path.
@@ -148,6 +149,10 @@ func ParseFile(sourcePath string, data []byte) (Document, error) {
 	if err != nil {
 		return Document{}, err
 	}
+	examples, err := parseExampleDeclarations(sourcePath, root, semanticErrors)
+	if err != nil {
+		return Document{}, err
+	}
 	return Document{
 		path:            sourcePath,
 		data:            append([]byte(nil), data...),
@@ -155,6 +160,7 @@ func ParseFile(sourcePath string, data []byte) (Document, error) {
 		hasSemantics:    hasSemantics,
 		errors:          semanticErrors,
 		constraintPaths: constraintPaths,
+		examples:        examples,
 	}, nil
 }
 
@@ -250,12 +256,12 @@ func validateYAMLTree(sourcePath string, node *yaml.Node) error {
 		seen := make(map[string]struct{}, len(node.Content)/2)
 		for index := 0; index < len(node.Content); index += 2 {
 			key := node.Content[index]
-			if key == nil || key.Kind != yaml.ScalarNode || key.Tag != "!!str" || key.Value == "" {
+			if key == nil || key.Kind != yaml.ScalarNode || key.Tag != "!!str" {
 				line, column := 0, 0
 				if key != nil {
 					line, column = key.Line, key.Column
 				}
-				return invalid(sourcePath, line, column, "mapping keys must be nonempty strings")
+				return invalid(sourcePath, line, column, "mapping keys must be strings")
 			}
 			if _, duplicate := seen[key.Value]; duplicate {
 				return invalid(sourcePath, key.Line, key.Column, "duplicate mapping key %q", key.Value)

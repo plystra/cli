@@ -257,7 +257,7 @@ func TestDiscoverLoadsOptionalColocatedMetadataWithStableProvenance(t *testing.T
 	dependencyRoot := filepath.Join(root, "dependency")
 	writeProject(t, dependencyRoot, "example.com/dependency")
 	writeFile(t, filepath.Join(dependencyRoot, "api", "interface.go"), interfaceSource("api", "dependency.records.list/v1", "List"))
-	dependencyMetadata := "description: Lists dependency records.\nsemantics:\n  kind: query\nerrors:\n  - code: dependency_unavailable\nconstraints:\n  request.value: {min_length: 1}\n"
+	dependencyMetadata := "description: Lists dependency records.\nsemantics:\n  kind: query\nerrors:\n  - code: dependency_unavailable\nconstraints:\n  request.value: {min_length: 1}\nexamples:\n  - name: unavailable\n    request: {value: missing}\n    error: dependency_unavailable\n"
 	writeFile(t, filepath.Join(dependencyRoot, "api", interfacemeta.Name), dependencyMetadata)
 
 	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
@@ -270,7 +270,7 @@ replace example.com/dependency => ../dependency
 `)
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
 	writeFile(t, filepath.Join(appRoot, "interfaces", "local", "interface.go"), interfaceSource("local", "local.records.list/v1", "List"))
-	localMetadata := "# local metadata\ndescription: Lists local records.\nsemantics:\n  kind: command\nerrors:\n  - code: records_unavailable\n  - code: invalid_filter\n    description: The filter is invalid.\nconstraints:\n  response.accepted: {}\n  request.value: {min_length: 1}\n"
+	localMetadata := "# local metadata\ndescription: Lists local records.\nsemantics:\n  kind: command\nerrors:\n  - code: records_unavailable\n  - code: invalid_filter\n    description: The filter is invalid.\nconstraints:\n  response.accepted: {}\n  request.value: {min_length: 1}\nexamples:\n  - name: accepted\n    request: {value: all}\n    response: {accepted: true}\n  - name: invalid-filter\n    request: {value: invalid}\n    error: invalid_filter\n"
 	writeFile(t, filepath.Join(appRoot, "interfaces", "local", interfacemeta.Name), localMetadata)
 	writeFile(t, filepath.Join(appRoot, "interfaces", "plain", "interface.go"), interfaceSource("plain", "local.records.get/v1", "Get"))
 	writeFile(t, filepath.Join(appRoot, "interfaces", "described", "interface.go"), interfaceSource("described", "local.records.describe/v1", "Describe"))
@@ -307,6 +307,16 @@ replace example.com/dependency => ../dependency
 	if minimum, ok := localConstraints[0].Rules().MinLength(); !ok || minimum != 1 || !localConstraints[1].Rules().Empty() {
 		t.Fatalf("local constraint rules = %#v", localConstraints)
 	}
+	localExamples := byID["local.records.list/v1"].Examples()
+	if len(localExamples) != 2 || localExamples[0].Name() != "accepted" || localExamples[0].Request().CanonicalJSON() != `{"value":"all"}` || localExamples[1].Name() != "invalid-filter" {
+		t.Fatalf("local examples = %#v", inventoryExampleSummary(localExamples))
+	}
+	if response, present := localExamples[0].Response(); !present || response.CanonicalJSON() != `{"accepted":true}` {
+		t.Fatalf("local success example response = %#v, %t", response, present)
+	}
+	if code, present := localExamples[1].ErrorCode(); !present || code != "invalid_filter" {
+		t.Fatalf("local semantic-error example = %q, %t", code, present)
+	}
 	dependency, present := byID["dependency.records.list/v1"].Metadata()
 	if !present || dependency.Path() != "api/interface.yaml" || string(dependency.Data()) != dependencyMetadata || byID["dependency.records.list/v1"].MetadataSource() != "example.com/dependency@v1.2.3/api/interface.yaml" {
 		t.Fatalf("dependency metadata = %#v, %t, source %q", dependency, present, byID["dependency.records.list/v1"].MetadataSource())
@@ -325,6 +335,13 @@ replace example.com/dependency => ../dependency
 	}
 	if minimum, ok := dependencyConstraints[0].Rules().MinLength(); !ok || minimum != 1 {
 		t.Fatalf("dependency constraint rules = %#v", dependencyConstraints)
+	}
+	dependencyExamples := byID["dependency.records.list/v1"].Examples()
+	if len(dependencyExamples) != 1 || dependencyExamples[0].Name() != "unavailable" || dependencyExamples[0].Request().CanonicalJSON() != `{"value":"missing"}` {
+		t.Fatalf("dependency examples = %#v", inventoryExampleSummary(dependencyExamples))
+	}
+	if code, present := dependencyExamples[0].ErrorCode(); !present || code != "dependency_unavailable" {
+		t.Fatalf("dependency semantic-error example = %q, %t", code, present)
 	}
 	if metadata, present := byID["local.records.get/v1"].Metadata(); present || metadata.Path() != "" || len(metadata.Data()) != 0 || byID["local.records.get/v1"].MetadataSource() != "" {
 		t.Fatalf("absent metadata = %#v, %t", metadata, present)
@@ -345,6 +362,9 @@ replace example.com/dependency => ../dependency
 	if constraints := byID["local.records.describe/v1"].ConstraintTargets(); len(constraints) != 0 {
 		t.Fatalf("description-only constraint targets = %#v", constraints)
 	}
+	if examples := byID["local.records.describe/v1"].Examples(); len(examples) != 0 {
+		t.Fatalf("description-only examples = %#v", examples)
+	}
 	localErrors[0] = interfacemeta.SemanticError{}
 	if byID["local.records.list/v1"].SemanticErrors()[0].Code() != "invalid_filter" {
 		t.Fatal("SemanticErrors exposed mutable metadata storage")
@@ -352,6 +372,10 @@ replace example.com/dependency => ../dependency
 	localConstraints[0] = interfacemeta.ConstraintTarget{}
 	if byID["local.records.list/v1"].ConstraintTargets()[0].Path() != "request.value" {
 		t.Fatal("ConstraintTargets exposed mutable inventory storage")
+	}
+	localExamples[0] = interfacemeta.Example{}
+	if byID["local.records.list/v1"].Examples()[0].Name() != "accepted" {
+		t.Fatal("Examples exposed mutable inventory storage")
 	}
 	view := local.Data()
 	view[0] = 'x'
@@ -375,6 +399,7 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 		data      string
 		directory bool
 		wantError error
+		location  string
 		want      string
 	}{
 		{name: "empty", want: "document is empty"},
@@ -396,6 +421,9 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 		{name: "invalid constraint rules", data: "constraints:\n  request.value: []\n", wantError: interfacemeta.ErrInvalidConstraints, want: "must be a mapping"},
 		{name: "unknown constraint path", data: "constraints:\n  request.missing: {}\n", wantError: interfacemeta.ErrInvalidConstraints, want: "does not identify a canonical"},
 		{name: "invalid typed constraint rule", data: "constraints:\n  request.value:\n    minimum: 1\n", wantError: interfacemeta.ErrInvalidConstraints, want: `rule "minimum" is not supported for string`},
+		{name: "invalid example schema", data: "examples:\n  - name: invalid\n    request: {value: valid}\n", wantError: interfacemeta.ErrInvalidExamples, location: "interfaces/records/interface.yaml:2:5", want: "exactly one of response or error"},
+		{name: "invalid example type", data: "examples:\n  - name: invalid\n    request: {value: true}\n    response: {accepted: true}\n", wantError: interfacemeta.ErrInvalidExamples, location: "interfaces/records/interface.yaml:3:22", want: "canonical string value"},
+		{name: "example constraint violation", data: "constraints:\n  request.value: {min_length: 2}\nexamples:\n  - name: invalid\n    request: {value: x}\n    response: {accepted: true}\n", wantError: interfacemeta.ErrInvalidExamples, location: "interfaces/records/interface.yaml:5:22", want: "violates min_length"},
 		{name: "directory", directory: true, want: "regular non-symbolic file"},
 		{name: "oversized", data: strings.Repeat("x", interfacemeta.MaximumSize+1), want: "exceeds"},
 	}
@@ -417,7 +445,7 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 			}
 			before := snapshotFiles(t, root)
 			_, err := discoverResult(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
-			if !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacemeta.ErrInvalid) || test.wantError != nil && !errors.Is(err, test.wantError) || !strings.Contains(err.Error(), test.want) || !strings.Contains(err.Error(), "interfaces/records/interface.yaml") {
+			if !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacemeta.ErrInvalid) || test.wantError != nil && !errors.Is(err, test.wantError) || !strings.Contains(err.Error(), test.want) || !strings.Contains(err.Error(), "interfaces/records/interface.yaml") || test.location != "" && !strings.Contains(err.Error(), test.location) {
 				t.Fatalf("Discover error = %v, want Interface metadata error containing %q", err, test.want)
 			}
 			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
@@ -624,6 +652,7 @@ type interfaceSummary struct {
 	HasSemantics    bool
 	ErrorCodes      []string
 	ConstraintPaths []string
+	Examples        []string
 }
 
 func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
@@ -643,6 +672,7 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 		for index, target := range constraintTargets {
 			constraintPaths[index] = inventoryConstraintSummary(target)
 		}
+		examples := inventoryExampleSummary(discovered.Examples())
 		result[position] = interfaceSummary{
 			ID:              discovered.ID(),
 			ModulePath:      discovered.ModulePath(),
@@ -661,7 +691,22 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 			HasSemantics:    hasSemantics,
 			ErrorCodes:      errorCodes,
 			ConstraintPaths: constraintPaths,
+			Examples:        examples,
 		}
+	}
+	return result
+}
+
+func inventoryExampleSummary(examples []interfacemeta.Example) []string {
+	result := make([]string, 0, len(examples))
+	for _, example := range examples {
+		outcome := "error:"
+		if response, present := example.Response(); present {
+			outcome = "response:" + response.CanonicalJSON()
+		} else if code, present := example.ErrorCode(); present {
+			outcome += code
+		}
+		result = append(result, example.Name()+"|"+example.Request().CanonicalJSON()+"|"+outcome)
 	}
 	return result
 }
