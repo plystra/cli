@@ -74,6 +74,7 @@ type Document struct {
 	data         []byte
 	semantics    Semantics
 	hasSemantics bool
+	errors       []SemanticError
 }
 
 // Path returns the stable slash-separated module-relative source path.
@@ -85,6 +86,12 @@ func (d Document) Data() []byte { return append([]byte(nil), d.data...) }
 // Semantics returns the optional normalized operation semantics.
 func (d Document) Semantics() (Semantics, bool) {
 	return d.semantics, d.hasSemantics
+}
+
+// Errors returns a defensive code-ordered view of the declared semantic
+// errors. Absence and an explicitly empty sequence normalize identically.
+func (d Document) Errors() []SemanticError {
+	return append([]SemanticError(nil), d.errors...)
 }
 
 // ParseFile validates one bounded, single-document YAML mapping while
@@ -132,11 +139,16 @@ func ParseFile(sourcePath string, data []byte) (Document, error) {
 	if err != nil {
 		return Document{}, err
 	}
+	semanticErrors, err := normalizeSemanticErrors(sourcePath, root)
+	if err != nil {
+		return Document{}, err
+	}
 	return Document{
 		path:         sourcePath,
 		data:         append([]byte(nil), data...),
 		semantics:    semantics,
 		hasSemantics: hasSemantics,
+		errors:       semanticErrors,
 	}, nil
 }
 

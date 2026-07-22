@@ -115,6 +115,15 @@ func (i Interface) Semantics() (interfacemeta.Semantics, bool) {
 	return i.metadata.Semantics()
 }
 
+// SemanticErrors returns the immutable code-ordered domain errors declared by
+// the Interface package's colocated metadata document.
+func (i Interface) SemanticErrors() []interfacemeta.SemanticError {
+	if !i.hasMetadata {
+		return nil
+	}
+	return i.metadata.Errors()
+}
+
 // MetadataSource returns stable module-qualified metadata provenance, or an
 // empty string when the Interface package has no optional metadata document.
 func (i Interface) MetadataSource() string {

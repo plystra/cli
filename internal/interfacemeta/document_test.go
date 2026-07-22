@@ -302,7 +302,7 @@ func TestParseFileRejectsOversizedDocument(t *testing.T) {
 }
 
 func FuzzParseFile(f *testing.F) {
-	for _, seed := range []string{"{}\n", "description: value\n", "semantics: {kind: query}\n", "semantics: {kind: command}\n", "semantics: {kind: event}\n", "[\n", "---\n{}\n---\n{}\n", "description: &value text\ncopy: *value\n"} {
+	for _, seed := range []string{"{}\n", "description: value\n", "semantics: {kind: query}\n", "semantics: {kind: command}\n", "semantics: {kind: event}\n", "errors: [{code: invalid_value}]\n", "errors: [invalid_value]\n", "[\n", "---\n{}\n---\n{}\n", "description: &value text\ncopy: *value\n"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, data string) {
@@ -321,6 +321,16 @@ func FuzzParseFile(f *testing.F) {
 		}
 		if semantics, present := document.Semantics(); present && semantics.Kind() != interfacemeta.OperationKindQuery && semantics.Kind() != interfacemeta.OperationKindCommand {
 			t.Fatalf("ParseFile returned unsupported semantics: %#v", semantics)
+		}
+		previousCode := ""
+		for _, semanticError := range document.Errors() {
+			if semanticError.Code() == "" || previousCode >= semanticError.Code() {
+				t.Fatalf("ParseFile returned unordered semantic errors: %#v", document.Errors())
+			}
+			if description, present := semanticError.Description(); present && strings.TrimSpace(description) == "" {
+				t.Fatalf("ParseFile returned an empty semantic-error description: %#v", semanticError)
+			}
+			previousCode = semanticError.Code()
 		}
 	})
 }

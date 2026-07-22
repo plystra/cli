@@ -257,7 +257,7 @@ func TestDiscoverLoadsOptionalColocatedMetadataWithStableProvenance(t *testing.T
 	dependencyRoot := filepath.Join(root, "dependency")
 	writeProject(t, dependencyRoot, "example.com/dependency")
 	writeFile(t, filepath.Join(dependencyRoot, "api", "interface.go"), interfaceSource("api", "dependency.records.list/v1", "List"))
-	dependencyMetadata := "description: Lists dependency records.\nsemantics:\n  kind: query\n"
+	dependencyMetadata := "description: Lists dependency records.\nsemantics:\n  kind: query\nerrors:\n  - code: dependency_unavailable\n"
 	writeFile(t, filepath.Join(dependencyRoot, "api", interfacemeta.Name), dependencyMetadata)
 
 	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
@@ -270,7 +270,7 @@ replace example.com/dependency => ../dependency
 `)
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
 	writeFile(t, filepath.Join(appRoot, "interfaces", "local", "interface.go"), interfaceSource("local", "local.records.list/v1", "List"))
-	localMetadata := "# local metadata\ndescription: Lists local records.\nsemantics:\n  kind: command\n"
+	localMetadata := "# local metadata\ndescription: Lists local records.\nsemantics:\n  kind: command\nerrors:\n  - code: records_unavailable\n  - code: invalid_filter\n    description: The filter is invalid.\n"
 	writeFile(t, filepath.Join(appRoot, "interfaces", "local", interfacemeta.Name), localMetadata)
 	writeFile(t, filepath.Join(appRoot, "interfaces", "plain", "interface.go"), interfaceSource("plain", "local.records.get/v1", "Get"))
 	writeFile(t, filepath.Join(appRoot, "interfaces", "described", "interface.go"), interfaceSource("described", "local.records.describe/v1", "Describe"))
@@ -296,6 +296,10 @@ replace example.com/dependency => ../dependency
 	if !present || localSemantics.Kind() != interfacemeta.OperationKindCommand {
 		t.Fatalf("local semantics = %#v, %t", localSemantics, present)
 	}
+	localErrors := byID["local.records.list/v1"].SemanticErrors()
+	if len(localErrors) != 2 || localErrors[0].Code() != "invalid_filter" || localErrors[1].Code() != "records_unavailable" {
+		t.Fatalf("local semantic errors = %#v", localErrors)
+	}
 	dependency, present := byID["dependency.records.list/v1"].Metadata()
 	if !present || dependency.Path() != "api/interface.yaml" || string(dependency.Data()) != dependencyMetadata || byID["dependency.records.list/v1"].MetadataSource() != "example.com/dependency@v1.2.3/api/interface.yaml" {
 		t.Fatalf("dependency metadata = %#v, %t, source %q", dependency, present, byID["dependency.records.list/v1"].MetadataSource())
@@ -303,6 +307,10 @@ replace example.com/dependency => ../dependency
 	dependencySemantics, present := byID["dependency.records.list/v1"].Semantics()
 	if !present || dependencySemantics.Kind() != interfacemeta.OperationKindQuery {
 		t.Fatalf("dependency semantics = %#v, %t", dependencySemantics, present)
+	}
+	dependencyErrors := byID["dependency.records.list/v1"].SemanticErrors()
+	if len(dependencyErrors) != 1 || dependencyErrors[0].Code() != "dependency_unavailable" {
+		t.Fatalf("dependency semantic errors = %#v", dependencyErrors)
 	}
 	if metadata, present := byID["local.records.get/v1"].Metadata(); present || metadata.Path() != "" || len(metadata.Data()) != 0 || byID["local.records.get/v1"].MetadataSource() != "" {
 		t.Fatalf("absent metadata = %#v, %t", metadata, present)
@@ -316,6 +324,13 @@ replace example.com/dependency => ../dependency
 	}
 	if semantics, present := byID["local.records.describe/v1"].Semantics(); present || semantics.Kind() != "" {
 		t.Fatalf("description-only semantics = %#v, %t", semantics, present)
+	}
+	if semanticErrors := byID["local.records.describe/v1"].SemanticErrors(); len(semanticErrors) != 0 {
+		t.Fatalf("description-only semantic errors = %#v", semanticErrors)
+	}
+	localErrors[0] = interfacemeta.SemanticError{}
+	if byID["local.records.list/v1"].SemanticErrors()[0].Code() != "invalid_filter" {
+		t.Fatal("SemanticErrors exposed mutable metadata storage")
 	}
 	view := local.Data()
 	view[0] = 'x'
@@ -353,6 +368,9 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 		{name: "invalid semantics shape", data: "semantics: []\n", wantError: interfacemeta.ErrInvalidSemantics, want: "semantics must be a mapping"},
 		{name: "invalid semantics field", data: "semantics:\n  kind: query\n  retry: {}\n", wantError: interfacemeta.ErrInvalidSemantics, want: "semantics.retry"},
 		{name: "invalid semantics kind", data: "semantics:\n  kind: event\n", wantError: interfacemeta.ErrInvalidSemantics, want: "expected query or command"},
+		{name: "invalid semantic errors shape", data: "errors: invalid_value\n", wantError: interfacemeta.ErrInvalidSemanticErrors, want: "errors must be a sequence"},
+		{name: "invalid semantic error field", data: "errors:\n  - code: invalid_value\n    retryable: true\n", wantError: interfacemeta.ErrInvalidSemanticErrors, want: "errors[0].retryable"},
+		{name: "duplicate semantic error", data: "errors:\n  - code: invalid_value\n  - code: invalid_value\n", wantError: interfacemeta.ErrInvalidSemanticErrors, want: "duplicates"},
 		{name: "directory", directory: true, want: "regular non-symbolic file"},
 		{name: "oversized", data: strings.Repeat("x", interfacemeta.MaximumSize+1), want: "exceeds"},
 	}
@@ -579,6 +597,7 @@ type interfaceSummary struct {
 	MetadataSource string
 	SemanticsKind  interfacemeta.OperationKind
 	HasSemantics   bool
+	ErrorCodes     []string
 }
 
 func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
@@ -588,6 +607,11 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 		contract := discovered.Contract()
 		metadata, _ := discovered.Metadata()
 		semantics, hasSemantics := discovered.Semantics()
+		semanticErrors := discovered.SemanticErrors()
+		errorCodes := make([]string, len(semanticErrors))
+		for index, semanticError := range semanticErrors {
+			errorCodes[index] = semanticError.Code()
+		}
 		result[position] = interfaceSummary{
 			ID:             discovered.ID(),
 			ModulePath:     discovered.ModulePath(),
@@ -604,6 +628,7 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 			MetadataSource: discovered.MetadataSource(),
 			SemanticsKind:  semantics.Kind(),
 			HasSemantics:   hasSemantics,
+			ErrorCodes:     errorCodes,
 		}
 	}
 	return result
