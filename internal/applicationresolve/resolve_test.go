@@ -23,6 +23,8 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/configurationresolve"
+	"github.com/plystra/cli/internal/interfacecontract"
+	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/intrinsiccatalog"
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/projectlocate"
@@ -73,6 +75,9 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if len(first.Dependencies().Modules()) != 0 {
 		t.Fatalf("Dependencies = %#v", first.Dependencies().Modules())
 	}
+	if len(first.Interfaces().Interfaces()) != 0 {
+		t.Fatalf("Interfaces = %#v", first.Interfaces().Interfaces())
+	}
 	resolved := first.Resolution()
 	if resolved.Passes() != 1 || len(resolved.Context().Plugins()) != 0 || len(resolved.Context().Requirements()) != 0 || len(resolved.Context().Providers()) != 0 {
 		t.Fatalf("empty resolution = passes %d, plugins %#v, requirements %#v, providers %#v", resolved.Passes(), resolved.Context().Plugins(), resolved.Context().Requirements(), resolved.Context().Providers())
@@ -112,6 +117,81 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("Resolve mutated application tree:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestResolveIntegratesTypeCheckedInterfacePackageDiscovery(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModule(t, root, "example.com/interfaces")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(root, "domains", "orders", "create", "v1", "interface.go"), `package createv1
+
+import "context"
+
+//plystra:interface orders.create.execute/v1
+type Interface interface {
+	Execute(context.Context, Request) (Response, error)
+}
+
+type Request struct {
+	OrderID string `+"`plystra:\"1,required\" json:\"order_id\"`"+`
+}
+
+type Response struct {
+	Accepted bool `+"`plystra:\"1\" json:\"accepted\"`"+`
+}
+`)
+	before := snapshotTree(t, root)
+	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       filepath.Join(root, "domains", "orders"),
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"}),
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	interfaces := result.Interfaces().Interfaces()
+	if len(interfaces) != 1 {
+		t.Fatalf("Interfaces = %#v", interfaces)
+	}
+	discovered := interfaces[0]
+	contract := discovered.Contract()
+	if discovered.ID() != "orders.create.execute/v1" || discovered.ModulePath() != "example.com/interfaces" || discovered.PackagePath() != "example.com/interfaces/domains/orders/create/v1" || discovered.SourcePath() != "domains/orders/create/v1/interface.go" || !discovered.Local() {
+		t.Fatalf("Interface provenance = %#v", discovered)
+	}
+	if contract.MethodName() != "Execute" || contract.RequestName() != "Request" || contract.ResponseName() != "Response" || len(contract.RequestFields()) != 1 || contract.RequestFields()[0].Number() != 1 || !contract.RequestFields()[0].Required() {
+		t.Fatalf("Interface contract = %#v", contract)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("Resolve mutated Interface Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestResolveRejectsInvalidDiscoveredInterfaceContract(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModule(t, root, "example.com/invalid-interface")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(root, "interfaces", "invalid", "interface.go"), `package invalid
+
+import "context"
+
+//plystra:interface invalid.contract.execute/v1
+type Interface interface {
+	Execute(context.Context, Request) (Response, error)
+}
+
+type Request struct { Value string }
+type Response struct { Value string `+"`plystra:\"1\"`"+` }
+`)
+	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       root,
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"}),
+	})
+	if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacecontract.ErrInvalid) || !strings.Contains(err.Error(), "missing plystra field-number tag") {
+		t.Fatalf("Resolve error = %v", err)
 	}
 }
 

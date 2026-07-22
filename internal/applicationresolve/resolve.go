@@ -17,6 +17,7 @@ import (
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
+	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/plugininventory"
@@ -45,8 +46,9 @@ var (
 )
 
 // Options contains the application location and bounded Go helper settings.
-// Environment is shared by read-only module discovery and selected generation
-// extension compilation so both observe the same Go workspace state.
+// Environment is shared by read-only module and Interface-package discovery
+// plus selected legacy generation compilation so each observes the same Go
+// workspace state during the architecture transition.
 type Options struct {
 	Start                 string
 	ConfigurationPath     string
@@ -66,6 +68,7 @@ type Result struct {
 	currentManifest     applicationmeta.Manifest
 	composition         applicationmeta.Composition
 	dependencies        moduledependency.Index
+	interfaces          interfaceinventory.Index
 	inventory           plugininventory.Index
 	resolution          generationresolution.ExtensionResult
 	configs             configurationresolve.Result
@@ -96,6 +99,10 @@ func (r Result) Composition() applicationmeta.Composition { return r.composition
 // Dependencies returns the immutable effective Go Module graph used for
 // dependency-Project discovery and generated runtime build provenance.
 func (r Result) Dependencies() moduledependency.Index { return r.dependencies }
+
+// Interfaces returns every active local and dependency-Project Interface
+// declaration discovered through ordinary Go package loading.
+func (r Result) Interfaces() interfaceinventory.Index { return r.interfaces }
 
 // Inventory returns every visible local and dependency-Project plugin.
 func (r Result) Inventory() plugininventory.Index { return r.inventory }
@@ -150,9 +157,10 @@ func (r Result) PreviousManifestProvenance() applicationgen.ManifestProvenance {
 }
 
 // Resolve locates the nearest Project, loads its root plystra.yaml, discovers
-// the effective Go Module graph, indexes visible Project plugins and contracts,
-// and runs the deterministic generation-resolution fixed point. It rechecks
-// the application manifest before returning and writes no application files.
+// the effective Go Module graph, discovers active authored Interface packages,
+// indexes the legacy Project inputs not yet removed by later roadmap gates,
+// and resolves the application. It rechecks the application manifest before
+// returning and writes no application files.
 func Resolve(ctx context.Context, options Options) (Result, error) {
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: context is nil", ErrResolve)
@@ -182,6 +190,14 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		}
 	}
 	dependencies, err := moduledependency.Discover(ctx, module, moduledependency.Options{
+		GoCommand:   options.GoCommand,
+		Environment: append([]string(nil), options.Environment...),
+		OutputLimit: options.DependencyOutputLimit,
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	interfaces, err := interfaceinventory.Discover(ctx, module, dependencies, interfaceinventory.Options{
 		GoCommand:   options.GoCommand,
 		Environment: append([]string(nil), options.Environment...),
 		OutputLimit: options.DependencyOutputLimit,
@@ -335,6 +351,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		currentManifest: currentManifest,
 		composition:     composition,
 		dependencies:    dependencies,
+		interfaces:      interfaces,
 		inventory:       inventory,
 		resolution:      resolution,
 		configs:         configs,
