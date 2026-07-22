@@ -18,6 +18,7 @@ type constraintPathDeclaration struct {
 	path   string
 	line   int
 	column int
+	rules  []constraintRuleDeclaration
 }
 
 // ConstraintTarget is one immutable metadata path resolved to its exact
@@ -26,6 +27,7 @@ type ConstraintTarget struct {
 	path   string
 	goPath string
 	field  interfacecontract.Field
+	rules  ConstraintRules
 }
 
 // Path returns the exact authored request or response metadata field path.
@@ -36,6 +38,9 @@ func (t ConstraintTarget) GoPath() string { return t.goPath }
 
 // Field returns the normalized canonical Go field selected by the path.
 func (t ConstraintTarget) Field() interfacecontract.Field { return t.field }
+
+// Rules returns the immutable normalized rules declared for the field.
+func (t ConstraintTarget) Rules() ConstraintRules { return t.rules }
 
 // ResolveConstraintTargets resolves every structurally valid constraints key
 // against the canonical request and response message graphs. Returned targets
@@ -65,10 +70,15 @@ func ResolveConstraintTargets(document Document, contract interfacecontract.Cont
 			sort.Strings(paths)
 			return nil, invalidWith(document.path, declaration.line, declaration.column, ErrInvalidConstraints, "constraint path %q is ambiguous between Go fields %s; use unambiguous JSON names", declaration.path, strings.Join(paths, ", "))
 		}
+		rules, err := normalizeConstraintRules(document.path, declaration, matches[0].field.Type())
+		if err != nil {
+			return nil, err
+		}
 		targets = append(targets, ConstraintTarget{
 			path:   declaration.path,
 			goPath: matches[0].goPath,
 			field:  matches[0].field,
+			rules:  rules,
 		})
 	}
 	sort.Slice(targets, func(left, right int) bool {
@@ -100,10 +110,21 @@ func parseConstraintPathDeclarations(sourcePath string, root *yaml.Node) ([]cons
 		if rules.Kind != yaml.MappingNode || rules.Tag != "!!map" {
 			return nil, invalidWith(sourcePath, rules.Line, rules.Column, ErrInvalidConstraints, "constraint rules for path %q must be a mapping", key.Value)
 		}
+		ruleDeclarations := make([]constraintRuleDeclaration, 0, len(rules.Content)/2)
+		for ruleIndex := 0; ruleIndex < len(rules.Content); ruleIndex += 2 {
+			ruleKey, ruleValue := rules.Content[ruleIndex], rules.Content[ruleIndex+1]
+			ruleDeclarations = append(ruleDeclarations, constraintRuleDeclaration{
+				name:   ruleKey.Value,
+				line:   ruleKey.Line,
+				column: ruleKey.Column,
+				value:  ruleValue,
+			})
+		}
 		declarations = append(declarations, constraintPathDeclaration{
 			path:   key.Value,
 			line:   key.Line,
 			column: key.Column,
+			rules:  ruleDeclarations,
 		})
 	}
 	return declarations, nil

@@ -304,6 +304,9 @@ replace example.com/dependency => ../dependency
 	if len(localConstraints) != 2 || localConstraints[0].Path() != "request.value" || localConstraints[0].GoPath() != "Request.Value" || localConstraints[1].Path() != "response.accepted" || localConstraints[1].GoPath() != "Response.Accepted" {
 		t.Fatalf("local constraint targets = %#v", localConstraints)
 	}
+	if minimum, ok := localConstraints[0].Rules().MinLength(); !ok || minimum != 1 || !localConstraints[1].Rules().Empty() {
+		t.Fatalf("local constraint rules = %#v", localConstraints)
+	}
 	dependency, present := byID["dependency.records.list/v1"].Metadata()
 	if !present || dependency.Path() != "api/interface.yaml" || string(dependency.Data()) != dependencyMetadata || byID["dependency.records.list/v1"].MetadataSource() != "example.com/dependency@v1.2.3/api/interface.yaml" {
 		t.Fatalf("dependency metadata = %#v, %t, source %q", dependency, present, byID["dependency.records.list/v1"].MetadataSource())
@@ -319,6 +322,9 @@ replace example.com/dependency => ../dependency
 	dependencyConstraints := byID["dependency.records.list/v1"].ConstraintTargets()
 	if len(dependencyConstraints) != 1 || dependencyConstraints[0].Path() != "request.value" || dependencyConstraints[0].GoPath() != "Request.Value" {
 		t.Fatalf("dependency constraint targets = %#v", dependencyConstraints)
+	}
+	if minimum, ok := dependencyConstraints[0].Rules().MinLength(); !ok || minimum != 1 {
+		t.Fatalf("dependency constraint rules = %#v", dependencyConstraints)
 	}
 	if metadata, present := byID["local.records.get/v1"].Metadata(); present || metadata.Path() != "" || len(metadata.Data()) != 0 || byID["local.records.get/v1"].MetadataSource() != "" {
 		t.Fatalf("absent metadata = %#v, %t", metadata, present)
@@ -389,6 +395,7 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 		{name: "invalid constraints shape", data: "constraints: []\n", wantError: interfacemeta.ErrInvalidConstraints, want: "constraints must be a mapping"},
 		{name: "invalid constraint rules", data: "constraints:\n  request.value: []\n", wantError: interfacemeta.ErrInvalidConstraints, want: "must be a mapping"},
 		{name: "unknown constraint path", data: "constraints:\n  request.missing: {}\n", wantError: interfacemeta.ErrInvalidConstraints, want: "does not identify a canonical"},
+		{name: "invalid typed constraint rule", data: "constraints:\n  request.value:\n    minimum: 1\n", wantError: interfacemeta.ErrInvalidConstraints, want: `rule "minimum" is not supported for string`},
 		{name: "directory", directory: true, want: "regular non-symbolic file"},
 		{name: "oversized", data: strings.Repeat("x", interfacemeta.MaximumSize+1), want: "exceeds"},
 	}
@@ -634,7 +641,7 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 		constraintTargets := discovered.ConstraintTargets()
 		constraintPaths := make([]string, len(constraintTargets))
 		for index, target := range constraintTargets {
-			constraintPaths[index] = target.Path() + "=" + target.GoPath()
+			constraintPaths[index] = inventoryConstraintSummary(target)
 		}
 		result[position] = interfaceSummary{
 			ID:              discovered.ID(),
@@ -655,6 +662,33 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 			ErrorCodes:      errorCodes,
 			ConstraintPaths: constraintPaths,
 		}
+	}
+	return result
+}
+
+func inventoryConstraintSummary(target interfacemeta.ConstraintTarget) string {
+	result := target.Path() + "=" + target.GoPath()
+	rules := target.Rules()
+	if value, ok := rules.MinLength(); ok {
+		result += fmt.Sprintf("|min_length=%d", value)
+	}
+	if value, ok := rules.MaxLength(); ok {
+		result += fmt.Sprintf("|max_length=%d", value)
+	}
+	if value, ok := rules.Pattern(); ok {
+		result += "|pattern=" + value
+	}
+	if value, ok := rules.Minimum(); ok {
+		result += "|minimum=" + string(value.Kind()) + ":" + value.Canonical()
+	}
+	if value, ok := rules.Maximum(); ok {
+		result += "|maximum=" + string(value.Kind()) + ":" + value.Canonical()
+	}
+	if value, ok := rules.MinItems(); ok {
+		result += fmt.Sprintf("|min_items=%d", value)
+	}
+	if value, ok := rules.MaxItems(); ok {
+		result += fmt.Sprintf("|max_items=%d", value)
 	}
 	return result
 }

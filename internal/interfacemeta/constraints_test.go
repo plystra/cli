@@ -61,6 +61,18 @@ func TestResolveConstraintTargetsUsesCanonicalFieldGraph(t *testing.T) {
 			t.Fatalf("target %d = path %q Go path %q field %#v", index, targets[index].Path(), targets[index].GoPath(), field)
 		}
 	}
+	if minimum, ok := targets[3].Rules().Minimum(); !ok || minimum.Kind() != interfacecontract.TypeInt64 || minimum.Canonical() != "0" {
+		t.Fatalf("score minimum = %#v, %t", minimum, ok)
+	}
+	if pattern, ok := targets[2].Rules().Pattern(); !ok || pattern != "^[a-z]+$" {
+		t.Fatalf("detail name pattern = %q, %t", pattern, ok)
+	}
+	if maximum, ok := targets[5].Rules().MaxLength(); !ok || maximum != 64 {
+		t.Fatalf("order ID max_length = %d, %t", maximum, ok)
+	}
+	if !targets[0].Rules().Empty() || !targets[6].Rules().Empty() {
+		t.Fatalf("empty rules = %#v and %#v", targets[0].Rules(), targets[6].Rules())
+	}
 	targets[0] = interfacemeta.ConstraintTarget{}
 	again, err := interfacemeta.ResolveConstraintTargets(document, contract)
 	if err != nil || again[0].Path() != "request.Legacy" {
