@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/configurationresolve"
+	"github.com/plystra/cli/internal/intrinsiccatalog"
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/providerresolution"
@@ -89,6 +91,7 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if !evidence.Valid() || evidence.SelectedModelDigest() != resolved.Context().Digest() || evidence.BuildModelDigest() != resolved.Context().BuildModelDigest() {
 		t.Fatalf("ResolutionEvidence = valid %t selected %q build %q", evidence.Valid(), evidence.SelectedModelDigest(), evidence.BuildModelDigest())
 	}
+	assertStaticAssemblyMatchesResolution(t, first)
 	if evidence.DiscoveredPluginCount() != 0 || evidence.SelectedPluginCount() != 0 || evidence.CanonicalCapabilityCount() != 2 || evidence.RequirementCount() != 0 || evidence.ProviderCandidateCount() != 0 || evidence.RejectedProviderCount() != 0 || evidence.SelectedProviderCount() != 0 || evidence.CapabilityAliasCount() != 0 || evidence.PublicExposureCount() != 0 {
 		t.Fatalf("ResolutionEvidence counts = discovered %d selected %d capabilities %d requirements %d candidates %d rejected %d providers %d aliases %d public %d", evidence.DiscoveredPluginCount(), evidence.SelectedPluginCount(), evidence.CanonicalCapabilityCount(), evidence.RequirementCount(), evidence.ProviderCandidateCount(), evidence.RejectedProviderCount(), evidence.SelectedProviderCount(), evidence.CapabilityAliasCount(), evidence.PublicExposureCount())
 	}
@@ -648,6 +651,7 @@ replace example.com/providers => ../providers
 	if got := configurationBindingIDs(first.Configurations().Bindings()); !reflect.DeepEqual(got, []string{"example.local", "example.smtp"}) {
 		t.Fatalf("configuration bindings = %v", got)
 	}
+	assertStaticAssemblyMatchesResolution(t, first)
 	evidenceRequirements := first.ResolutionEvidence().Requirements()
 	if len(evidenceRequirements) != 1 || evidenceRequirements[0].Capability() != "email.send/v1" || evidenceRequirements[0].Intrinsic() {
 		t.Fatalf("resolution evidence requirements = %#v", evidenceRequirements)
@@ -842,6 +846,7 @@ replace example.com/ordinary => ../ordinary
 	if selectedProviders[1].Capability() != "email.send/v1" || selectedProviders[1].PluginID() != "example.smtp" || selectedProviders[1].ProjectModule() != "example.com/direct" || selectedProviders[1].SelectionReason() != resolutionevidence.ProviderSelectionInherited || len(selectedProviders[1].SelectionSources()) != 1 || selectedProviders[1].SelectionSources()[0].ProjectModule() != "example.com/direct" || selectedProviders[1].SelectionSources()[0].Source().Path() != "plystra.yaml" || selectedProviders[1].SelectionSources()[0].Source().Kind() != "provider-selection" {
 		t.Fatalf("direct inherited Provider evidence = %#v", selectedProviders[1])
 	}
+	assertStaticAssemblyMatchesResolution(t, result)
 	if bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte(filepath.ToSlash(root))) || bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte(root)) || bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte("example.com/ordinary")) {
 		t.Fatalf("resolution evidence contains an absolute root or ordinary dependency: %s", result.ResolutionEvidence().CanonicalJSON())
 	}
@@ -1146,6 +1151,7 @@ func TestResolveUsesActiveGoWorkspaceDependencySource(t *testing.T) {
 	if len(selectedProviders) != 1 || selectedProviders[0].PluginID() != "example.smtp" || selectedProviders[0].SelectionReason() != resolutionevidence.ProviderSelectionSoleProvider || selectedProviders[0].ProviderSource() != providerCandidates[0].Source() || len(selectedProviders[0].SelectionSources()) != 0 {
 		t.Fatalf("workspace selected Provider evidence = %#v", selectedProviders)
 	}
+	assertStaticAssemblyMatchesResolution(t, result)
 	requirementConfiguration := resolvedConfigurationField(t, result, `capabilities.require["email.send/v1"]`)
 	if requirementConfiguration.Owner() != resolutionevidence.ConfigurationOwnerRoot || len(requirementConfiguration.Contributors()) != 2 || requirementConfiguration.Contributors()[0].Owner() != resolutionevidence.ConfigurationOwnerDependency || requirementConfiguration.Contributors()[0].Sources()[0].Module() != "example.com/providers" || requirementConfiguration.Contributors()[1].Owner() != resolutionevidence.ConfigurationOwnerRoot {
 		t.Fatalf("workspace configuration evidence = %#v", requirementConfiguration)
@@ -1496,6 +1502,81 @@ func assertResolvedConfigurationProvenance(t testing.TB, result applicationresol
 	}
 	if result.Resolution().Context().Digest() == result.Resolution().Context().BuildModelDigest() {
 		t.Fatal("filesystem configuration provenance did not enter the extension context digest")
+	}
+}
+
+func assertStaticAssemblyMatchesResolution(t testing.TB, result applicationresolve.Result) {
+	t.Helper()
+	evidence := result.ResolutionEvidence()
+	assembly, exists := evidence.StaticAssembly()
+	if !exists {
+		t.Fatal("filesystem-backed resolution omitted static assembly evidence")
+	}
+	configurationBindings := result.Configurations().Bindings()
+	plugins := assembly.Plugins()
+	if evidence.AssemblyPluginCount() != len(configurationBindings) || len(plugins) != len(configurationBindings) {
+		t.Fatalf("assembly Plugin count = evidence %d values %d configurations %d", evidence.AssemblyPluginCount(), len(plugins), len(configurationBindings))
+	}
+	selectedPlugins := make(map[string]resolutionevidence.SelectedPlugin, evidence.SelectedPluginCount())
+	for _, plugin := range evidence.SelectedPlugins() {
+		selectedPlugins[plugin.ID()] = plugin
+	}
+	providerBindings := make(map[string][]string)
+	ordinaryProviders := 0
+	selectedProviderByCapability := make(map[string]resolutionevidence.SelectedProvider, evidence.SelectedProviderCount())
+	for _, provider := range evidence.SelectedProviders() {
+		selectedProviderByCapability[provider.Capability()] = provider
+		if !provider.Intrinsic() {
+			ordinaryProviders++
+			providerBindings[provider.PluginID()] = append(providerBindings[provider.PluginID()], provider.Capability())
+		}
+	}
+	for index, binding := range configurationBindings {
+		plugin := plugins[index]
+		selected, selectedExists := selectedPlugins[binding.PluginID()]
+		inventoryPlugin, inventoryExists := result.Inventory().ByID(binding.PluginID())
+		if !selectedExists || !inventoryExists || plugin.PluginID() != binding.PluginID() || plugin.ProjectModule() != binding.ModulePath() || plugin.ModuleVersion() != binding.ModuleVersion() || plugin.ImportPath() != binding.ImportPath() || plugin.Source() != selected.Source() || plugin.ConstructorOrder() != index+1 || !plugin.LifecycleProbe() {
+			t.Fatalf("assembly Plugin %d = %#v; configuration %#v selected %#v/%t inventory %t", index, plugin, binding, selected, selectedExists, inventoryExists)
+		}
+		required := inventoryPlugin.Requires()
+		wantClients := make([]string, len(required))
+		for requiredIndex, capability := range required {
+			wantClients[requiredIndex] = capability.String()
+		}
+		sort.Strings(wantClients)
+		wantBindings := append([]string(nil), providerBindings[binding.PluginID()]...)
+		sort.Strings(wantBindings)
+		if !slices.Equal(plugin.RequiredClients(), wantClients) || !slices.Equal(plugin.ProviderBindings(), wantBindings) {
+			t.Fatalf("assembly Plugin %q clients/providers = %v/%v; want %v/%v", plugin.PluginID(), plugin.RequiredClients(), plugin.ProviderBindings(), wantClients, wantBindings)
+		}
+	}
+
+	bindings := assembly.Bindings()
+	if evidence.AssemblyBindingCount() != len(intrinsiccatalog.Definitions())+ordinaryProviders || len(bindings) != evidence.AssemblyBindingCount() {
+		t.Fatalf("assembly binding count = evidence %d values %d; want %d intrinsics plus %d ordinary", evidence.AssemblyBindingCount(), len(bindings), len(intrinsiccatalog.Definitions()), ordinaryProviders)
+	}
+	byCapability := make(map[string]resolutionevidence.AssemblyBinding, len(bindings))
+	for index, binding := range bindings {
+		if index > 0 && bindings[index-1].Capability() >= binding.Capability() {
+			t.Fatalf("assembly bindings are not in canonical order: %#v", bindings)
+		}
+		byCapability[binding.Capability()] = binding
+	}
+	for _, definition := range intrinsiccatalog.Definitions() {
+		binding, found := byCapability[definition.ID().String()]
+		selected, required := selectedProviderByCapability[definition.ID().String()]
+		if !found || !binding.Intrinsic() || binding.Required() != required || binding.ContractDigest() != definition.ContractDigest() || binding.PluginID() != "" || binding.ProjectModule() != "" || binding.SelectionReason() != resolutionevidence.ProviderSelectionIntrinsic || binding.ProviderSource().Module() != "github.com/plystra/kernel" || binding.ProviderSource().Kind() != "intrinsic-provider" || required && (!selected.Intrinsic() || selected.ContractDigest() != binding.ContractDigest()) {
+			t.Fatalf("intrinsic assembly binding %s = %#v/%t selected %#v/%t", definition.ID(), binding, found, selected, required)
+		}
+	}
+	for capability, selected := range selectedProviderByCapability {
+		if selected.Intrinsic() {
+			continue
+		}
+		binding, found := byCapability[capability]
+		if !found || binding.Intrinsic() || !binding.Required() || binding.ContractDigest() != selected.ContractDigest() || binding.PluginID() != selected.PluginID() || binding.ProjectModule() != selected.ProjectModule() || binding.SelectionReason() != selected.SelectionReason() || binding.ProviderSource() != selected.ProviderSource() {
+			t.Fatalf("ordinary assembly binding %s = %#v/%t selected %#v", capability, binding, found, selected)
+		}
 	}
 }
 

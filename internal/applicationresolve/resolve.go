@@ -281,6 +281,10 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
+	configs, err := configurationresolve.Resolve(manifest, inventory, resolution.Context())
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
 	evidenceModules, err := resolutionEvidenceModules(module, dependencies)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
@@ -289,6 +293,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
+	assemblyEvidence := resolutionEvidenceAssemblyInput(configs)
 	evidence, err := resolutionevidence.Build(resolutionevidence.Input{
 		Context:            resolution.Context(),
 		ProviderResolution: resolution.ActivationResolution().ProviderResolution(),
@@ -296,13 +301,10 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		Modules:            evidenceModules,
 		PluginCandidates:   resolutionEvidencePluginCandidates(inventory),
 		Configuration:      &configurationEvidence,
+		StaticAssembly:     &assemblyEvidence,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
-	}
-	configs, err := configurationresolve.Resolve(manifest, inventory, resolution.Context())
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	after, err := ReadManifestSnapshot(module.Path())
 	if err != nil {
@@ -519,6 +521,20 @@ func resolutionEvidenceConfigurationInput(
 		Layers:             layers,
 		Effective:          effective,
 	}, nil
+}
+
+func resolutionEvidenceAssemblyInput(configs configurationresolve.Result) resolutionevidence.StaticAssemblyInput {
+	bindings := configs.Bindings()
+	plugins := make([]resolutionevidence.AssemblyPluginInput, len(bindings))
+	for index, binding := range bindings {
+		plugins[index] = resolutionevidence.AssemblyPluginInput{
+			PluginID:      binding.PluginID(),
+			ModulePath:    binding.ModulePath(),
+			ModuleVersion: binding.ModuleVersion(),
+			ImportPath:    binding.ImportPath(),
+		}
+	}
+	return resolutionevidence.StaticAssemblyInput{Plugins: plugins}
 }
 
 func loadGeneratedDependencyBaseline(moduleRoot string, selector configurationSelector) (applicationmeta.DependencyBaseline, applicationgen.ManifestProvenance, error) {

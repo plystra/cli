@@ -168,6 +168,24 @@ type ConfigurationInput struct {
 	Effective          []applicationmeta.ConfigurationDecision
 }
 
+// AssemblyPluginInput is the exact non-secret selected-package identity used
+// by generated provider construction. Filesystem resolution derives it from
+// the same validated configuration binding later consumed by assembly
+// generation.
+type AssemblyPluginInput struct {
+	PluginID      string
+	ModulePath    string
+	ModuleVersion string
+	ImportPath    string
+}
+
+// StaticAssemblyInput carries the selected constructor packages that enter
+// generated static assembly. Canonical invocation bindings are derived from
+// the already validated Provider result and the Kernel intrinsic catalog.
+type StaticAssemblyInput struct {
+	Plugins []AssemblyPluginInput
+}
+
 // Input is the construction-only selected-model, participating-Project, and
 // discovered-Plugin input for one evidence document.
 type Input struct {
@@ -177,6 +195,7 @@ type Input struct {
 	Modules            []ModuleInput
 	PluginCandidates   []PluginCandidateInput
 	Configuration      *ConfigurationInput
+	StaticAssembly     *StaticAssemblyInput
 }
 
 // ModuleInput identifies one participating Plystra Project without carrying
@@ -231,6 +250,8 @@ type Evidence struct {
 	configurationFields       []ConfigurationField
 	configurationSelection    ConfigurationSelection
 	hasConfigurationSelection bool
+	staticAssembly            StaticAssembly
+	hasStaticAssembly         bool
 	canonicalJSON             []byte
 	digest                    string
 	prepared                  bool
@@ -250,6 +271,8 @@ type canonicalCounts struct {
 	CapabilityAliases     int `json:"capability_aliases"`
 	PublicExposures       int `json:"public_exposures"`
 	ConfigurationFields   int `json:"configuration_fields"`
+	AssemblyPlugins       int `json:"assembly_plugins"`
+	AssemblyBindings      int `json:"assembly_bindings"`
 }
 
 // Module is one immutable participating Plystra Project identity.
@@ -908,6 +931,124 @@ func (s ConfigurationSelection) DependencyCompositionDigest() string {
 	return s.dependencyDigest
 }
 
+// StaticAssembly is the immutable selected constructor and canonical catalog
+// membership that generated assembly compiles into one application binary.
+// It contains no runtime configuration values or dynamic lifecycle result.
+type StaticAssembly struct {
+	plugins  []AssemblyPlugin
+	bindings []AssemblyBinding
+}
+
+// Plugins returns every selected constructor package in deterministic
+// construction order.
+func (a StaticAssembly) Plugins() []AssemblyPlugin {
+	values := append([]AssemblyPlugin(nil), a.plugins...)
+	for index := range values {
+		values[index].requiredClients = append([]string(nil), values[index].requiredClients...)
+		values[index].providerBindings = append([]string(nil), values[index].providerBindings...)
+	}
+	return values
+}
+
+// Bindings returns every canonical runtime catalog member in Capability order.
+// All Kernel intrinsics are present even when not explicitly required.
+func (a StaticAssembly) Bindings() []AssemblyBinding {
+	return append([]AssemblyBinding(nil), a.bindings...)
+}
+
+// AssemblyPlugin is one selected Plugin package imported and constructed
+// exactly once by generated assembly.
+type AssemblyPlugin struct {
+	pluginID         string
+	projectModule    string
+	moduleVersion    string
+	importPath       string
+	source           Source
+	constructorOrder int
+	lifecycleProbe   bool
+	requiredClients  []string
+	providerBindings []string
+}
+
+// PluginID returns the selected canonical Plugin ID.
+func (p AssemblyPlugin) PluginID() string { return p.pluginID }
+
+// ProjectModule returns the effective graph module containing the constructor.
+func (p AssemblyPlugin) ProjectModule() string { return p.projectModule }
+
+// ModuleVersion returns the selected version, or empty for current and
+// workspace-supplied source.
+func (p AssemblyPlugin) ModuleVersion() string { return p.moduleVersion }
+
+// ImportPath returns the stable selected Plugin package import path.
+func (p AssemblyPlugin) ImportPath() string { return p.importPath }
+
+// Source returns replacement-safe Plugin declaration provenance.
+func (p AssemblyPlugin) Source() Source { return p.source }
+
+// ConstructorOrder returns the one-based canonical construction order.
+func (p AssemblyPlugin) ConstructorOrder() int { return p.constructorOrder }
+
+// LifecycleProbe reports that generated assembly checks the constructed value
+// for the optional Kernel lifecycle interface at this same stable position.
+func (p AssemblyPlugin) LifecycleProbe() bool { return p.lifecycleProbe }
+
+// RequiredClients returns exact generated Capability clients injected into the
+// constructor.
+func (p AssemblyPlugin) RequiredClients() []string {
+	return append([]string(nil), p.requiredClients...)
+}
+
+// ProviderBindings returns exact canonical catalog entries implemented by the
+// constructed Plugin.
+func (p AssemblyPlugin) ProviderBindings() []string {
+	return append([]string(nil), p.providerBindings...)
+}
+
+// AssemblyBinding is one canonical entry published atomically into the Kernel
+// dispatcher. Ordinary entries correspond to selected Providers; every
+// Kernel intrinsic is present independently of explicit requirement state.
+type AssemblyBinding struct {
+	capability      string
+	contractDigest  string
+	intrinsic       bool
+	required        bool
+	pluginID        string
+	projectModule   string
+	selectionReason ProviderSelectionReason
+	providerSource  Source
+}
+
+// Capability returns the exact canonical catalog identity.
+func (b AssemblyBinding) Capability() string { return b.capability }
+
+// ContractDigest returns the exact normalized contract identity.
+func (b AssemblyBinding) ContractDigest() string { return b.contractDigest }
+
+// Intrinsic reports whether the Kernel supplies this binding.
+func (b AssemblyBinding) Intrinsic() bool { return b.intrinsic }
+
+// Required reports whether this Capability belongs to the final application
+// requirement closure. Unrequired Kernel intrinsics remain assembled.
+func (b AssemblyBinding) Required() bool { return b.required }
+
+// PluginID returns the selected ordinary Provider Plugin, or empty for an
+// intrinsic binding.
+func (b AssemblyBinding) PluginID() string { return b.pluginID }
+
+// ProjectModule returns the selected ordinary Provider's effective graph
+// module, or empty for an intrinsic binding.
+func (b AssemblyBinding) ProjectModule() string { return b.projectModule }
+
+// SelectionReason returns intrinsic-kernel or the ordinary Provider decision
+// that caused this binding.
+func (b AssemblyBinding) SelectionReason() ProviderSelectionReason {
+	return b.selectionReason
+}
+
+// ProviderSource returns stable intrinsic or Plugin Provider provenance.
+func (b AssemblyBinding) ProviderSource() Source { return b.providerSource }
+
 // Source is one stable module-relative declaration reference.
 type Source struct {
 	module string
@@ -1121,6 +1262,34 @@ type canonicalConfigurationSelection struct {
 	DependencyCompositionDigest string                       `json:"dependency_composition_digest"`
 }
 
+type canonicalAssemblyPlugin struct {
+	PluginID         string          `json:"plugin_id"`
+	ProjectModule    string          `json:"project_module"`
+	ModuleVersion    string          `json:"module_version,omitempty"`
+	ImportPath       string          `json:"import_path"`
+	Source           canonicalSource `json:"source"`
+	ConstructorOrder int             `json:"constructor_order"`
+	LifecycleProbe   bool            `json:"lifecycle_probe"`
+	RequiredClients  []string        `json:"required_clients"`
+	ProviderBindings []string        `json:"provider_bindings"`
+}
+
+type canonicalAssemblyBinding struct {
+	Capability      string                  `json:"capability"`
+	ContractDigest  string                  `json:"contract_digest"`
+	Intrinsic       bool                    `json:"intrinsic"`
+	Required        bool                    `json:"required"`
+	PluginID        string                  `json:"plugin_id,omitempty"`
+	ProjectModule   string                  `json:"project_module,omitempty"`
+	SelectionReason ProviderSelectionReason `json:"selection_reason"`
+	ProviderSource  canonicalSource         `json:"provider_source"`
+}
+
+type canonicalStaticAssembly struct {
+	Plugins  []canonicalAssemblyPlugin  `json:"plugins"`
+	Bindings []canonicalAssemblyBinding `json:"bindings"`
+}
+
 type canonicalReplacement struct {
 	Kind       ReplacementKind `json:"kind"`
 	ModulePath string          `json:"module_path"`
@@ -1152,6 +1321,7 @@ type canonicalEvidence struct {
 	PublicExposures        []canonicalPublicExposure        `json:"public_exposures"`
 	ConfigurationSelection *canonicalConfigurationSelection `json:"configuration_selection,omitempty"`
 	ConfigurationFields    []canonicalConfigurationField    `json:"configuration_fields"`
+	StaticAssembly         *canonicalStaticAssembly         `json:"static_assembly,omitempty"`
 	Counts                 canonicalCounts                  `json:"counts"`
 }
 
@@ -1209,6 +1379,10 @@ func Build(source Input) (Evidence, error) {
 	if err != nil {
 		return Evidence{}, fmt.Errorf("%w: configuration provenance: %v", ErrBuild, err)
 	}
+	staticAssembly, hasStaticAssembly, err := staticAssemblyFromInput(source.StaticAssembly, context, selectedPlugins, selectedProviders, requirements)
+	if err != nil {
+		return Evidence{}, fmt.Errorf("%w: static assembly membership: %v", ErrBuild, err)
+	}
 	input := Evidence{
 		generationAPI:             context.APIVersion(),
 		selectedModelDigest:       context.Digest(),
@@ -1229,6 +1403,8 @@ func Build(source Input) (Evidence, error) {
 		configurationFields:       configurationFields,
 		configurationSelection:    configurationSelection,
 		hasConfigurationSelection: hasConfigurationSelection,
+		staticAssembly:            staticAssembly,
+		hasStaticAssembly:         hasStaticAssembly,
 		prepared:                  true,
 	}
 	if err := validate(input); err != nil {
@@ -1402,6 +1578,34 @@ func (e Evidence) ConfigurationSelection() (ConfigurationSelection, bool) {
 	return e.configurationSelection, e.hasConfigurationSelection
 }
 
+// StaticAssembly returns the exact selected constructor and canonical catalog
+// membership when filesystem resolution supplied validated assembly inputs.
+func (e Evidence) StaticAssembly() (StaticAssembly, bool) {
+	if !e.hasStaticAssembly {
+		return StaticAssembly{}, false
+	}
+	return StaticAssembly{
+		plugins:  e.staticAssembly.Plugins(),
+		bindings: e.staticAssembly.Bindings(),
+	}, true
+}
+
+// AssemblyPluginCount returns selected constructor package membership.
+func (e Evidence) AssemblyPluginCount() int {
+	if !e.hasStaticAssembly {
+		return 0
+	}
+	return len(e.staticAssembly.plugins)
+}
+
+// AssemblyBindingCount returns canonical runtime catalog membership.
+func (e Evidence) AssemblyBindingCount() int {
+	if !e.hasStaticAssembly {
+		return 0
+	}
+	return len(e.staticAssembly.bindings)
+}
+
 // ProviderCandidateCount returns the complete visible Provider declaration
 // count, including Capabilities outside the final requirement closure.
 func (e Evidence) ProviderCandidateCount() int { return len(e.providerCandidates) }
@@ -1532,6 +1736,9 @@ func validate(e Evidence) error {
 		return err
 	}
 	if err := validateConfigurationFields(e.configurationFields, e.modules, e.configurationSelection, e.hasConfigurationSelection); err != nil {
+		return err
+	}
+	if err := validateStaticAssemblyState(e.staticAssembly, e.hasStaticAssembly, e.selectedPlugins, e.selectedProviders, e.requirements); err != nil {
 		return err
 	}
 	return nil
@@ -1840,6 +2047,37 @@ func encode(e Evidence) ([]byte, error) {
 			DependencyCompositionDigest: e.configurationSelection.dependencyDigest,
 		}
 	}
+	var staticAssembly *canonicalStaticAssembly
+	if e.hasStaticAssembly {
+		plugins := make([]canonicalAssemblyPlugin, len(e.staticAssembly.plugins))
+		for index, plugin := range e.staticAssembly.plugins {
+			plugins[index] = canonicalAssemblyPlugin{
+				PluginID:         plugin.pluginID,
+				ProjectModule:    plugin.projectModule,
+				ModuleVersion:    plugin.moduleVersion,
+				ImportPath:       plugin.importPath,
+				Source:           canonicalSource{Module: plugin.source.module, Path: plugin.source.path, Kind: plugin.source.kind, Line: plugin.source.line, Column: plugin.source.column},
+				ConstructorOrder: plugin.constructorOrder,
+				LifecycleProbe:   plugin.lifecycleProbe,
+				RequiredClients:  append([]string(nil), plugin.requiredClients...),
+				ProviderBindings: append([]string(nil), plugin.providerBindings...),
+			}
+		}
+		bindings := make([]canonicalAssemblyBinding, len(e.staticAssembly.bindings))
+		for index, binding := range e.staticAssembly.bindings {
+			bindings[index] = canonicalAssemblyBinding{
+				Capability:      binding.capability,
+				ContractDigest:  binding.contractDigest,
+				Intrinsic:       binding.intrinsic,
+				Required:        binding.required,
+				PluginID:        binding.pluginID,
+				ProjectModule:   binding.projectModule,
+				SelectionReason: binding.selectionReason,
+				ProviderSource:  canonicalSource{Module: binding.providerSource.module, Path: binding.providerSource.path, Kind: binding.providerSource.kind, Line: binding.providerSource.line, Column: binding.providerSource.column},
+			}
+		}
+		staticAssembly = &canonicalStaticAssembly{Plugins: plugins, Bindings: bindings}
+	}
 	return json.Marshal(canonicalEvidence{
 		Version:                schemaVersion,
 		GenerationAPI:          e.generationAPI,
@@ -1857,6 +2095,7 @@ func encode(e Evidence) ([]byte, error) {
 		PublicExposures:        publicExposures,
 		ConfigurationSelection: configurationSelection,
 		ConfigurationFields:    configurationFields,
+		StaticAssembly:         staticAssembly,
 		Counts: canonicalCounts{
 			ParticipatingModules:  len(e.modules),
 			DiscoveredPlugins:     len(e.pluginCandidates),
@@ -1871,6 +2110,8 @@ func encode(e Evidence) ([]byte, error) {
 			CapabilityAliases:     len(e.capabilityAliases),
 			PublicExposures:       len(e.publicExposures),
 			ConfigurationFields:   len(e.configurationFields),
+			AssemblyPlugins:       e.AssemblyPluginCount(),
+			AssemblyBindings:      e.AssemblyBindingCount(),
 		},
 	})
 }
