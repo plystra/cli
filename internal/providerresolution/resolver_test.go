@@ -177,7 +177,7 @@ func TestResolveReferenceOnlyRequirementStillRequiresExplicitProviderChoice(t *t
 	if !errors.Is(err, providerresolution.ErrAmbiguousProvider) {
 		t.Fatalf("Resolve error = %v, want ErrAmbiguousProvider", err)
 	}
-	input.Choices = []providerresolution.Choice{{Capability: "authz.check/v1", PluginID: "example.authz-default", Source: "plystra.yaml capabilities.use.authz.check/v1"}}
+	input.Choices = []providerresolution.Choice{{Capability: "authz.check/v1", PluginID: "example.authz-default", Sources: choiceSources("plystra.yaml capabilities.use.authz.check/v1")}}
 	result, err := providerresolution.Resolve(input)
 	if err != nil {
 		t.Fatalf("Resolve(explicit): %v", err)
@@ -275,7 +275,7 @@ func TestResolveRequiresExplicitChoiceForSeveralProviders(t *testing.T) {
 		Choices: []providerresolution.Choice{{
 			Capability: "email.send/v1",
 			PluginID:   "zeta.email",
-			Source:     "plystra.yaml capabilities.use.email.send/v1",
+			Sources:    choiceSources("plystra.yaml capabilities.use.email.send/v1"),
 		}},
 	})
 	if err != nil {
@@ -284,6 +284,76 @@ func TestResolveRequiresExplicitChoiceForSeveralProviders(t *testing.T) {
 	selection, ok := result.SelectedProvider(mustID(t, "email.send/v1"))
 	if !ok || selection.PluginID() != "zeta.email" || !selection.Explicit() || selection.ChoiceSource() != "plystra.yaml capabilities.use.email.send/v1" {
 		t.Fatalf("explicit selection = %#v, %t", selection, ok)
+	}
+	sources := selection.ChoiceSources()
+	if len(sources) != 1 || sources[0].Kind != providerresolution.ChoiceSourceCurrentProject || sources[0].ModulePath != "example.com/project" || sources[0].Path != "plystra.yaml" {
+		t.Fatalf("explicit selection sources = %#v", sources)
+	}
+	sources[0] = providerresolution.ChoiceSource{}
+	selections := result.Selections()
+	selections[0].ChoiceSources()[0].Path = "changed"
+	if selection.ChoiceSources()[0].Path != "plystra.yaml" || result.Selections()[0].ChoiceSources()[0].Path != "plystra.yaml" {
+		t.Fatal("Provider selections exposed mutable choice-source storage")
+	}
+}
+
+func TestResolvePreservesEveryCompatibleInheritedChoiceSource(t *testing.T) {
+	t.Parallel()
+
+	email := contract("email.send/v1", "")
+	sources := []providerresolution.ChoiceSource{
+		{Kind: providerresolution.ChoiceSourceDependencyProject, Reference: `example.com/b@v2.0.0/plystra.yaml capabilities.use["email.send/v1"]`, ModulePath: "example.com/b", Path: "plystra.yaml", Line: 1, Column: 1},
+		{Kind: providerresolution.ChoiceSourceDependencyProject, Reference: `second diagnostic label for a`, ModulePath: "example.com/a", Path: "plystra.yaml", Line: 1, Column: 1},
+		{Kind: providerresolution.ChoiceSourceDependencyProject, Reference: `example.com/a@v1.0.0/plystra.yaml capabilities.use["email.send/v1"]`, ModulePath: "example.com/a", Path: "plystra.yaml", Line: 1, Column: 1},
+	}
+	result, err := providerresolution.Resolve(providerresolution.Input{
+		Requirements: []providerresolution.Requirement{{Contract: email, Source: requirementSource("email workflow")}},
+		Candidates:   []providerresolution.Candidate{{PluginID: "acme.email", Contract: email, Source: "acme/email"}},
+		Choices:      []providerresolution.Choice{{Capability: "email.send/v1", PluginID: "acme.email", Sources: sources}},
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	sources[0] = providerresolution.ChoiceSource{}
+	selection, ok := result.SelectedProvider(mustID(t, "email.send/v1"))
+	if !ok || !selection.Explicit() {
+		t.Fatalf("SelectedProvider = %#v, %t", selection, ok)
+	}
+	got := selection.ChoiceSources()
+	if len(got) != 2 || got[0].ModulePath != "example.com/a" || got[0].Reference != `example.com/a@v1.0.0/plystra.yaml capabilities.use["email.send/v1"]` || got[1].ModulePath != "example.com/b" {
+		t.Fatalf("inherited choice sources = %#v", got)
+	}
+}
+
+func TestResolveRejectsInvalidTypedChoiceSources(t *testing.T) {
+	t.Parallel()
+
+	email := contract("email.send/v1", "")
+	base := providerresolution.Input{
+		Requirements: []providerresolution.Requirement{{Contract: email, Source: requirementSource("email workflow")}},
+		Candidates:   []providerresolution.Candidate{{PluginID: "acme.email", Contract: email, Source: "acme/email"}},
+	}
+	tests := map[string][]providerresolution.ChoiceSource{
+		"absent": nil,
+		"mixed ownership": {
+			{Kind: providerresolution.ChoiceSourceCurrentProject, Reference: "root", ModulePath: "example.com/app", Path: "plystra.yaml", Line: 1, Column: 1},
+			{Kind: providerresolution.ChoiceSourceDependencyProject, Reference: "dependency", ModulePath: "example.com/dependency", Path: "plystra.yaml", Line: 1, Column: 1},
+		},
+		"several current sources": {
+			{Kind: providerresolution.ChoiceSourceCurrentProject, Reference: "root", ModulePath: "example.com/app", Path: "plystra.yaml", Line: 1, Column: 1},
+			{Kind: providerresolution.ChoiceSourceCurrentProject, Reference: "overlay", ModulePath: "example.com/app", Path: "plystra.production.yaml", Line: 1, Column: 1},
+		},
+		"unsafe path": {{Kind: providerresolution.ChoiceSourceCurrentProject, Reference: "unsafe", ModulePath: "example.com/app", Path: "../plystra.yaml", Line: 1, Column: 1}},
+	}
+	for name, sources := range tests {
+		t.Run(name, func(t *testing.T) {
+			input := base
+			input.Choices = []providerresolution.Choice{{Capability: "email.send/v1", PluginID: "acme.email", Sources: sources}}
+			result, err := providerresolution.Resolve(input)
+			if !errors.Is(err, providerresolution.ErrInvalidInput) || len(result.Selections()) != 0 {
+				t.Fatalf("Resolve = %#v, %v", result, err)
+			}
+		})
 	}
 }
 
@@ -453,23 +523,23 @@ func TestResolveRejectsInvalidExplicitChoices(t *testing.T) {
 		problem providerresolution.ChoiceProblem
 	}{
 		"intrinsic": {
-			choice:  providerresolution.Choice{Capability: "kernel.health/v1", PluginID: "acme.email", Source: "choice/intrinsic"},
+			choice:  providerresolution.Choice{Capability: "kernel.health/v1", PluginID: "acme.email", Sources: choiceSources("choice/intrinsic")},
 			problem: providerresolution.ChoiceIntrinsicCapability,
 		},
 		"unknown capability": {
-			choice:  providerresolution.Choice{Capability: "unknown.call/v1", PluginID: "acme.email", Source: "choice/unknown"},
+			choice:  providerresolution.Choice{Capability: "unknown.call/v1", PluginID: "acme.email", Sources: choiceSources("choice/unknown")},
 			problem: providerresolution.ChoiceUnknownCapability,
 		},
 		"unrequired capability": {
-			choice:  providerresolution.Choice{Capability: "audit.write/v1", PluginID: "acme.audit", Source: "choice/unrequired"},
+			choice:  providerresolution.Choice{Capability: "audit.write/v1", PluginID: "acme.audit", Sources: choiceSources("choice/unrequired")},
 			problem: providerresolution.ChoiceUnrequiredCapability,
 		},
 		"unknown plugin": {
-			choice:  providerresolution.Choice{Capability: "email.send/v1", PluginID: "missing.email", Source: "choice/unknown-plugin"},
+			choice:  providerresolution.Choice{Capability: "email.send/v1", PluginID: "missing.email", Sources: choiceSources("choice/unknown-plugin")},
 			problem: providerresolution.ChoiceUnknownPlugin,
 		},
 		"non provider": {
-			choice:  providerresolution.Choice{Capability: "email.send/v1", PluginID: "acme.audit", Source: "choice/non-provider"},
+			choice:  providerresolution.Choice{Capability: "email.send/v1", PluginID: "acme.audit", Sources: choiceSources("choice/non-provider")},
 			problem: providerresolution.ChoiceNonProvider,
 		},
 	}
@@ -483,7 +553,7 @@ func TestResolveRejectsInvalidExplicitChoices(t *testing.T) {
 				t.Fatalf("Resolve error = %v, want ErrInvalidChoice", err)
 			}
 			var choice *providerresolution.ChoiceError
-			if !errors.As(err, &choice) || choice.Problem() != test.problem || choice.Source() != test.choice.Source || choice.PluginID() != test.choice.PluginID {
+			if !errors.As(err, &choice) || choice.Problem() != test.problem || choice.Source() != test.choice.Sources[0].Reference || choice.PluginID() != test.choice.PluginID {
 				t.Fatalf("ChoiceError = %#v", choice)
 			}
 		})
@@ -491,8 +561,8 @@ func TestResolveRejectsInvalidExplicitChoices(t *testing.T) {
 
 	input := base
 	input.Choices = []providerresolution.Choice{
-		{Capability: "email.send/v1", PluginID: "acme.email", Source: "choice/first"},
-		{Capability: "email.send/v1", PluginID: "acme.email", Source: "choice/second"},
+		{Capability: "email.send/v1", PluginID: "acme.email", Sources: choiceSources("choice/first")},
+		{Capability: "email.send/v1", PluginID: "acme.email", Sources: choiceSources("choice/second")},
 	}
 	_, err := providerresolution.Resolve(input)
 	if !errors.Is(err, providerresolution.ErrInvalidChoice) {
@@ -530,7 +600,7 @@ func TestResolveRejectsInvalidProviderAndInputEnvelopes(t *testing.T) {
 			input: providerresolution.Input{Candidates: []providerresolution.Candidate{{PluginID: "Acme.Email", Contract: ordinary, Source: "bad/plugin"}}},
 		},
 		"invalid choice capability": {
-			input: providerresolution.Input{Choices: []providerresolution.Choice{{Capability: "email.send", PluginID: "acme.email", Source: "bad/choice"}}},
+			input: providerresolution.Input{Choices: []providerresolution.Choice{{Capability: "email.send", PluginID: "acme.email", Sources: choiceSources("bad/choice")}}},
 		},
 		"invalid source": {
 			input: providerresolution.Input{Requirements: []providerresolution.Requirement{{Contract: ordinary, Source: requirementSource("forged\nsource")}}},
@@ -590,7 +660,7 @@ func TestResolutionIsStableAcrossEveryInputOrder(t *testing.T) {
 			{PluginID: "acme.second", Contract: secondContract, Source: "acme/second"},
 			{PluginID: "acme.first", Contract: firstContract, Source: "acme/first"},
 		},
-		Choices: []providerresolution.Choice{{Capability: "first.call/v1", PluginID: "zeta.first", Source: "choice/first"}},
+		Choices: []providerresolution.Choice{{Capability: "first.call/v1", PluginID: "zeta.first", Sources: choiceSources("choice/first")}},
 	}
 	first, err := providerresolution.Resolve(input)
 	if err != nil {
@@ -672,6 +742,17 @@ func requirementSource(reference string) providerresolution.RequirementSource {
 		Line:       1,
 		Column:     1,
 	}
+}
+
+func choiceSources(reference string) []providerresolution.ChoiceSource {
+	return []providerresolution.ChoiceSource{{
+		Kind:       providerresolution.ChoiceSourceCurrentProject,
+		Reference:  reference,
+		ModulePath: "example.com/project",
+		Path:       "plystra.yaml",
+		Line:       1,
+		Column:     1,
+	}}
 }
 
 func requirementSourceReferences(sources []providerresolution.RequirementSource) []string {

@@ -467,7 +467,7 @@ func TestResolveExtensionsRunsOnlyExplicitlySelectedActivationProvider(t *testin
 				{PluginID: "example.authn-a", Contract: verify, Source: "authn-a/session.verify"},
 				{PluginID: "example.authn-b", Contract: verify, Source: "authn-b/session.verify"},
 			},
-			Choices:     []providerresolution.Choice{{Capability: "authn.session.verify/v1", PluginID: "example.authn-b", Source: "plystra.yaml capabilities.use.authn.session.verify/v1"}},
+			Choices:     []providerresolution.Choice{{Capability: "authn.session.verify/v1", PluginID: "example.authn-b", Sources: extensionChoiceSources("plystra.yaml capabilities.use.authn.session.verify/v1")}},
 			Activations: catalog,
 		},
 		Plugins: []Plugin{
@@ -509,7 +509,7 @@ func TestResolveExtensionsRejectsProviderChoiceThatNeverBecomesRequired(t *testi
 			Choices: []providerresolution.Choice{{
 				Capability: "missing.operation/v1",
 				PluginID:   "example.email",
-				Source:     "plystra.yaml capabilities.use.missing.operation/v1",
+				Sources:    extensionChoiceSources("plystra.yaml capabilities.use.missing.operation/v1"),
 			}},
 		},
 		Plugins:      []Plugin{extensionTestPlugin("example.email", "email", "email.send/v1")},
@@ -552,7 +552,7 @@ func TestResolveExtensionsUsesOrdinaryProviderRulesForGeneratedRequirements(t *t
 	base.Choices = append(base.Choices, providerresolution.Choice{
 		Capability: "audit.write/v1",
 		PluginID:   "example.audit-alt",
-		Source:     "plystra.yaml capabilities.use.audit.write/v1",
+		Sources:    extensionChoiceSources("plystra.yaml capabilities.use.audit.write/v1"),
 	})
 	result, err := resolveExtensions(t.Context(), base, newBuilder().Build)
 	if err != nil {
@@ -1157,6 +1157,17 @@ func extensionSelectedProviderStrings(result providerresolution.Result) []string
 		providers[index] = value.Capability().String() + "=" + value.PluginID()
 	}
 	return providers
+}
+
+func extensionChoiceSources(reference string) []providerresolution.ChoiceSource {
+	return []providerresolution.ChoiceSource{{
+		Kind:       providerresolution.ChoiceSourceCurrentProject,
+		Reference:  reference,
+		ModulePath: "example.com/app",
+		Path:       "plystra.yaml",
+		Line:       1,
+		Column:     1,
+	}}
 }
 
 const realExtensionSource = `package extension

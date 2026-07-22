@@ -100,11 +100,40 @@ type Candidate struct {
 	Source   string
 }
 
-// Choice is one normalized explicit capabilities.use entry.
+// ChoiceSourceKind identifies whether one effective capabilities.use source
+// belongs to the selected current Project or one dependency Project.
+type ChoiceSourceKind string
+
+const (
+	// ChoiceSourceCurrentProject identifies the winning selected-current-project
+	// configuration declaration.
+	ChoiceSourceCurrentProject ChoiceSourceKind = "current-project"
+	// ChoiceSourceDependencyProject identifies one compatible inherited
+	// dependency-Project declaration.
+	ChoiceSourceDependencyProject ChoiceSourceKind = "dependency-project"
+)
+
+// ChoiceSource is one typed, stable, module-relative source for an effective
+// capabilities.use selection. Reference is retained only for diagnostics.
+type ChoiceSource struct {
+	Kind       ChoiceSourceKind
+	Reference  string
+	ModulePath string
+	Path       string
+	Line       int
+	Column     int
+}
+
+// String returns the bounded stable diagnostic reference.
+func (s ChoiceSource) String() string { return s.Reference }
+
+// Choice is one normalized explicit capabilities.use entry. Sources contains
+// either the one winning current-Project declaration or every compatible
+// inherited dependency declaration.
 type Choice struct {
 	Capability string
 	PluginID   string
-	Source     string
+	Sources    []ChoiceSource
 }
 
 // ChoiceProblem classifies one rejected explicit provider choice.
@@ -175,7 +204,7 @@ type Selection struct {
 	capability       capabilityid.Identifier
 	pluginID         string
 	providerSource   string
-	choiceSource     string
+	choiceSources    []ChoiceSource
 	explicitlyChosen bool
 }
 
@@ -191,9 +220,20 @@ func (s Selection) ProviderSource() string { return s.providerSource }
 // Explicit reports whether capabilities.use selected this provider.
 func (s Selection) Explicit() bool { return s.explicitlyChosen }
 
-// ChoiceSource returns explicit choice provenance, or an empty string for an
-// automatically selected sole provider.
-func (s Selection) ChoiceSource() string { return s.choiceSource }
+// ChoiceSource returns the first deterministic explicit choice diagnostic
+// reference, or an empty string for an automatically selected sole provider.
+func (s Selection) ChoiceSource() string {
+	if len(s.choiceSources) == 0 {
+		return ""
+	}
+	return s.choiceSources[0].Reference
+}
+
+// ChoiceSources returns the one winning current-Project source or every
+// compatible inherited dependency source. Automatic selections return nil.
+func (s Selection) ChoiceSources() []ChoiceSource {
+	return append([]ChoiceSource(nil), s.choiceSources...)
+}
 
 // ProviderCandidate is one immutable normalized ordinary Provider declaration
 // from the complete visible catalog. It is retained independently of whether
@@ -249,7 +289,11 @@ func (r Result) ProviderCandidates() []ProviderCandidate {
 
 // Selections returns defensive ordinary provider mappings sorted by Capability ID.
 func (r Result) Selections() []Selection {
-	return append([]Selection(nil), r.selections...)
+	values := append([]Selection(nil), r.selections...)
+	for index := range values {
+		values[index].choiceSources = append([]ChoiceSource(nil), values[index].choiceSources...)
+	}
+	return values
 }
 
 // SelectedProvider returns the selected ordinary provider. It returns false for
@@ -259,7 +303,9 @@ func (r Result) SelectedProvider(id capabilityid.Identifier) (Selection, bool) {
 	if !exists {
 		return Selection{}, false
 	}
-	return r.selections[position], true
+	selection := r.selections[position]
+	selection.choiceSources = append([]ChoiceSource(nil), selection.choiceSources...)
+	return selection, true
 }
 
 type normalizedContract struct {
@@ -284,7 +330,7 @@ type normalizedCandidate struct {
 type normalizedChoice struct {
 	capability capabilityid.Identifier
 	pluginID   string
-	source     string
+	sources    []ChoiceSource
 }
 
 type requirementGroup struct {
@@ -547,11 +593,12 @@ func normalizeChoices(inputs []Choice) ([]normalizedChoice, []error) {
 	values := make([]normalizedChoice, 0, len(inputs))
 	var issues []error
 	for _, input := range inputs {
-		source, err := normalizeSource(input.Source)
+		sources, err := normalizeChoiceSources(input.Sources)
 		if err != nil {
 			issues = append(issues, fmt.Errorf("%w: choice source for %q -> %q: %v", ErrInvalidInput, input.Capability, input.PluginID, err))
 			continue
 		}
+		source := sources[0].Reference
 		capability, err := capabilityid.Parse(input.Capability)
 		if err != nil {
 			issues = append(issues, fmt.Errorf("%w: choice at %q has non-canonical Capability ID %q", ErrInvalidInput, source, input.Capability))
@@ -561,7 +608,7 @@ func normalizeChoices(inputs []Choice) ([]normalizedChoice, []error) {
 			issues = append(issues, fmt.Errorf("%w: choice for %s at %q has non-canonical Plugin ID %q", ErrInvalidInput, capability, source, input.PluginID))
 			continue
 		}
-		values = append(values, normalizedChoice{capability: capability, pluginID: input.PluginID, source: source})
+		values = append(values, normalizedChoice{capability: capability, pluginID: input.PluginID, sources: sources})
 	}
 	return values, issues
 }
@@ -696,7 +743,7 @@ func validateChoices(choices []normalizedChoice, requirements []requirementGroup
 		if choices[left].pluginID != choices[right].pluginID {
 			return choices[left].pluginID < choices[right].pluginID
 		}
-		return choices[left].source < choices[right].source
+		return choiceSourceKey(choices[left].sources[0]) < choiceSourceKey(choices[right].sources[0])
 	})
 	required := make(map[capabilityid.Identifier]requirementGroup, len(requirements))
 	for _, requirement := range requirements {
@@ -706,7 +753,7 @@ func validateChoices(choices []normalizedChoice, requirements []requirementGroup
 	var issues []error
 	for index, choice := range choices {
 		if index > 0 && choices[index-1].capability == choice.capability {
-			issues = append(issues, newChoiceError(choice, ChoiceDuplicate, fmt.Sprintf("another choice at %q selects plugin %q", choices[index-1].source, choices[index-1].pluginID)))
+			issues = append(issues, newChoiceError(choice, ChoiceDuplicate, fmt.Sprintf("another choice at %q selects plugin %q", choices[index-1].sources[0].Reference, choices[index-1].pluginID)))
 			delete(result, choice.capability)
 			continue
 		}
@@ -759,7 +806,7 @@ func newSelection(capability capabilityid.Identifier, provider normalizedCandida
 		explicitlyChosen: explicit,
 	}
 	if explicit {
-		selection.choiceSource = choice.source
+		selection.choiceSources = append([]ChoiceSource(nil), choice.sources...)
 	}
 	return selection
 }
@@ -768,7 +815,7 @@ func newChoiceError(choice normalizedChoice, problem ChoiceProblem, detail strin
 	return &ChoiceError{
 		capability: choice.capability,
 		pluginID:   choice.pluginID,
-		source:     choice.source,
+		source:     choice.sources[0].Reference,
 		problem:    problem,
 		detail:     detail,
 	}
@@ -819,6 +866,70 @@ func normalizeSource(value string) (string, error) {
 	return value, nil
 }
 
+func normalizeChoiceSources(inputs []ChoiceSource) ([]ChoiceSource, error) {
+	if len(inputs) == 0 {
+		return nil, errors.New("at least one typed source is required")
+	}
+	values := make([]ChoiceSource, 0, len(inputs))
+	var kind ChoiceSourceKind
+	for index, input := range inputs {
+		reference, err := normalizeSource(input.Reference)
+		if err != nil {
+			return nil, fmt.Errorf("sources[%d].reference %v", index, err)
+		}
+		switch input.Kind {
+		case ChoiceSourceCurrentProject, ChoiceSourceDependencyProject:
+		default:
+			return nil, fmt.Errorf("sources[%d].kind %q is invalid", index, input.Kind)
+		}
+		if kind == "" {
+			kind = input.Kind
+		} else if input.Kind != kind {
+			return nil, errors.New("sources cannot mix current-Project and dependency-Project declarations")
+		}
+		if err := modulepath.CheckProject(input.ModulePath); err != nil {
+			return nil, fmt.Errorf("sources[%d].module_path %q is invalid: %v", index, input.ModulePath, err)
+		}
+		if input.Path == "" || path.IsAbs(input.Path) || path.Clean(input.Path) != input.Path || input.Path == "." || input.Path == ".." || strings.HasPrefix(input.Path, "../") || strings.Contains(input.Path, "/../") || strings.Contains(input.Path, "\\") || strings.ContainsAny(input.Path, "\x00\r\n") || !utf8.ValidString(input.Path) {
+			return nil, fmt.Errorf("sources[%d].path %q must be one safe module-relative slash path", index, input.Path)
+		}
+		if input.Line < 1 || input.Column < 1 {
+			return nil, fmt.Errorf("sources[%d].line and column must be positive", index)
+		}
+		input.Reference = reference
+		values = append(values, input)
+	}
+	sort.Slice(values, func(left, right int) bool {
+		leftKey := choiceSourceKey(values[left])
+		rightKey := choiceSourceKey(values[right])
+		if leftKey != rightKey {
+			return leftKey < rightKey
+		}
+		return values[left].Reference < values[right].Reference
+	})
+	unique := values[:0]
+	for _, value := range values {
+		if len(unique) != 0 && choiceSourceKey(unique[len(unique)-1]) == choiceSourceKey(value) {
+			continue
+		}
+		unique = append(unique, value)
+	}
+	if kind == ChoiceSourceCurrentProject && len(unique) != 1 {
+		return nil, errors.New("a current-Project choice must have exactly one winning source")
+	}
+	return append([]ChoiceSource(nil), unique...), nil
+}
+
+func choiceSourceKey(value ChoiceSource) string {
+	return strings.Join([]string{
+		string(value.Kind),
+		value.ModulePath,
+		value.Path,
+		fmt.Sprintf("%010d", value.Line),
+		fmt.Sprintf("%010d", value.Column),
+	}, "\x00")
+}
+
 func normalizeRequirementSource(input RequirementSource) (RequirementSource, error) {
 	reference, err := normalizeSource(input.Reference)
 	if err != nil {
@@ -827,7 +938,7 @@ func normalizeRequirementSource(input RequirementSource) (RequirementSource, err
 	if err := modulepath.CheckProject(input.ModulePath); err != nil {
 		return RequirementSource{}, fmt.Errorf("module path %q is invalid: %v", input.ModulePath, err)
 	}
-	if input.Path == "" || path.IsAbs(input.Path) || path.Clean(input.Path) != input.Path || input.Path == "." || strings.Contains(input.Path, "\\") || strings.ContainsAny(input.Path, "\x00\r\n") || !utf8.ValidString(input.Path) {
+	if input.Path == "" || path.IsAbs(input.Path) || path.Clean(input.Path) != input.Path || input.Path == "." || input.Path == ".." || strings.HasPrefix(input.Path, "../") || strings.Contains(input.Path, "/../") || strings.Contains(input.Path, "\\") || strings.ContainsAny(input.Path, "\x00\r\n") || !utf8.ValidString(input.Path) {
 		return RequirementSource{}, fmt.Errorf("path %q must be one safe module-relative slash path", input.Path)
 	}
 	if input.Line < 1 || input.Column < 1 {

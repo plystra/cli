@@ -37,7 +37,7 @@ func TestResolveBuildsStableActivationClosureAndExcludesUnselectedExtensions(t *
 			{PluginID: "example.security", Contract: verify, Source: "security/authn.session.verify"},
 			{PluginID: "example.security", Contract: check, Source: "security/authz.check"},
 		},
-		Choices:     []providerresolution.Choice{{Capability: "authn.session.verify/v1", PluginID: "example.security", Source: "plystra.yaml capabilities.use.authn.session.verify/v1"}},
+		Choices:     []providerresolution.Choice{{Capability: "authn.session.verify/v1", PluginID: "example.security", Sources: activationChoiceSources("plystra.yaml capabilities.use.authn.session.verify/v1")}},
 		Activations: catalog,
 	}
 	before := cloneInput(input)
@@ -193,7 +193,7 @@ func TestResolveReportsActivationProviderFailures(t *testing.T) {
 				{PluginID: "example.authn-password", Contract: verify, Source: "password/session.verify"},
 				{PluginID: "example.authn-legacy", Contract: verify, Source: "legacy/session.verify"},
 			},
-			Choices: []providerresolution.Choice{{Capability: "authn.session.verify/v1", PluginID: "example.authn-legacy", Source: "plystra.yaml capabilities.use.authn"}},
+			Choices: []providerresolution.Choice{{Capability: "authn.session.verify/v1", PluginID: "example.authn-legacy", Sources: activationChoiceSources("plystra.yaml capabilities.use.authn")}},
 			Activations: activationCatalog(t,
 				activationDeclaration(t, "example.authn-password", []activationBinding{{"authn", "authn.session.verify/v1"}}),
 			),
@@ -476,6 +476,17 @@ func selectedProviderStrings(result providerresolution.Result) []string {
 		values[index] = selection.Capability().String() + "=" + selection.PluginID()
 	}
 	return values
+}
+
+func activationChoiceSources(reference string) []providerresolution.ChoiceSource {
+	return []providerresolution.ChoiceSource{{
+		Kind:       providerresolution.ChoiceSourceCurrentProject,
+		Reference:  reference,
+		ModulePath: "example.com/app",
+		Path:       "plystra.yaml",
+		Line:       1,
+		Column:     1,
+	}}
 }
 
 func activationRequirementValues(requirements []generationactivation.ActivationRequirement) []string {

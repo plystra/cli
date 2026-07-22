@@ -209,10 +209,15 @@ func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, s
 	}
 	choices := make([]providerresolution.Choice, 0, len(manifest.ProviderChoices()))
 	for _, declared := range manifest.ProviderChoices() {
+		field := fmt.Sprintf("capabilities.use[%q]", declared.Capability().String())
+		sources, err := configurationProviderChoiceSources(sourceContext, declared.Source(), field)
+		if err != nil {
+			return generationresolution.ExtensionInput{}, fmt.Errorf("%w: Provider choice %s: %v", ErrBuild, declared.Capability(), err)
+		}
 		choices = append(choices, providerresolution.Choice{
 			Capability: declared.Capability().String(),
 			PluginID:   declared.PluginID(),
-			Source:     declared.Source(),
+			Sources:    sources,
 		})
 	}
 	activations, err := generationactivation.New(declarations)
@@ -337,6 +342,90 @@ func configurationRequirementSources(input SourceContext, reference, field strin
 	return values, nil
 }
 
+func configurationProviderChoiceSources(input SourceContext, reference, field string) ([]providerresolution.ChoiceSource, error) {
+	for _, currentPath := range input.CurrentProjectPaths {
+		if currentPath != field {
+			continue
+		}
+		source, err := configurationProviderChoiceSource(input, reference, field, providerresolution.ChoiceSourceCurrentProject)
+		if err != nil {
+			return nil, err
+		}
+		return []providerresolution.ChoiceSource{source}, nil
+	}
+	for _, provenance := range input.DependencyProvenance {
+		if provenance.Path != field {
+			continue
+		}
+		values := make([]providerresolution.ChoiceSource, 0, len(provenance.Sources))
+		for _, value := range provenance.Sources {
+			source, err := configurationProviderChoiceSource(input, value, field, providerresolution.ChoiceSourceDependencyProject)
+			if err != nil {
+				return nil, err
+			}
+			if source.ModulePath == input.CurrentModulePath {
+				return nil, fmt.Errorf("dependency source %q does not identify a discovered dependency Project", value)
+			}
+			values = append(values, source)
+		}
+		sort.Slice(values, func(left, right int) bool {
+			if values[left].ModulePath != values[right].ModulePath {
+				return values[left].ModulePath < values[right].ModulePath
+			}
+			if values[left].Path != values[right].Path {
+				return values[left].Path < values[right].Path
+			}
+			if values[left].Line != values[right].Line {
+				return values[left].Line < values[right].Line
+			}
+			if values[left].Column != values[right].Column {
+				return values[left].Column < values[right].Column
+			}
+			return values[left].Reference < values[right].Reference
+		})
+		return values, nil
+	}
+	source, err := configurationProviderChoiceSource(input, reference, field, providerresolution.ChoiceSourceCurrentProject)
+	if err != nil {
+		return nil, err
+	}
+	return []providerresolution.ChoiceSource{source}, nil
+}
+
+func configurationProviderChoiceSource(input SourceContext, reference, field string, kind providerresolution.ChoiceSourceKind) (providerresolution.ChoiceSource, error) {
+	document, err := configurationDocument(reference, field)
+	if err != nil {
+		return providerresolution.ChoiceSource{}, err
+	}
+	modulePath := input.CurrentModulePath
+	relativePath := document
+	if kind == providerresolution.ChoiceSourceDependencyProject {
+		for _, dependency := range input.Dependencies {
+			version := dependency.Version
+			if version == "" {
+				version = "workspace"
+			}
+			prefix := dependency.ModulePath + "@" + version + "/"
+			if strings.HasPrefix(document, prefix) {
+				modulePath = dependency.ModulePath
+				relativePath = strings.TrimPrefix(document, prefix)
+				break
+			}
+		}
+	}
+	if relativePath == "" || path.IsAbs(relativePath) || path.Clean(relativePath) != relativePath || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, "../") || strings.Contains(relativePath, "/../") || strings.Contains(relativePath, "\\") || strings.ContainsAny(relativePath, "\x00\r\n") {
+		return providerresolution.ChoiceSource{}, fmt.Errorf("source %q has an unsafe Project-relative document", reference)
+	}
+	return providerresolution.ChoiceSource{
+		Kind:       kind,
+		Reference:  reference,
+		ModulePath: modulePath,
+		Path:       relativePath,
+		Line:       1,
+		Column:     1,
+	}, nil
+}
+
 func configurationRequirementSource(input SourceContext, reference, field string, kind providerresolution.RequirementSourceKind, dependencySource bool) (providerresolution.RequirementSource, error) {
 	document, err := configurationDocument(reference, field)
 	if err != nil {
@@ -358,7 +447,7 @@ func configurationRequirementSource(input SourceContext, reference, field string
 			}
 		}
 	}
-	if relativePath == "" || path.IsAbs(relativePath) || path.Clean(relativePath) != relativePath || relativePath == "." || strings.Contains(relativePath, "\\") || strings.ContainsAny(relativePath, "\x00\r\n") {
+	if relativePath == "" || path.IsAbs(relativePath) || path.Clean(relativePath) != relativePath || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, "../") || strings.Contains(relativePath, "/../") || strings.Contains(relativePath, "\\") || strings.ContainsAny(relativePath, "\x00\r\n") {
 		return providerresolution.RequirementSource{}, fmt.Errorf("source %q has an unsafe Project-relative document", reference)
 	}
 	return providerresolution.RequirementSource{

@@ -36,7 +36,7 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	if first.SelectedModelDigest() != firstContext.Digest() || first.BuildModelDigest() != firstContext.BuildModelDigest() {
 		t.Fatalf("evidence model digests = selected %q build %q", first.SelectedModelDigest(), first.BuildModelDigest())
 	}
-	if first.SelectedPluginCount() != 1 || first.CanonicalCapabilityCount() != 2 || first.RequirementCount() != 2 || first.ProviderCandidateCount() != 1 || first.RejectedProviderCount() != 0 || first.SelectedProviderCount() != 1 || first.CapabilityAliasCount() != 1 {
+	if first.SelectedPluginCount() != 1 || first.CanonicalCapabilityCount() != 2 || first.RequirementCount() != 2 || first.ProviderCandidateCount() != 1 || first.RejectedProviderCount() != 0 || first.SelectedProviderCount() != 2 || first.CapabilityAliasCount() != 1 {
 		t.Fatalf("evidence counts = plugins %d capabilities %d requirements %d candidates %d rejected %d providers %d aliases %d", first.SelectedPluginCount(), first.CanonicalCapabilityCount(), first.RequirementCount(), first.ProviderCandidateCount(), first.RejectedProviderCount(), first.SelectedProviderCount(), first.CapabilityAliasCount())
 	}
 	if first.ParticipatingModuleCount() != 3 {
@@ -74,6 +74,13 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	providerCandidates := first.ProviderCandidates()
 	if len(providerCandidates) != 1 || providerCandidates[0].Capability() != "email.send/v1" || providerCandidates[0].PluginID() != "example.smtp" || providerCandidates[0].ProjectModule() != "example.com/smtp" || providerCandidates[0].ContractDigest() == "" || providerCandidates[0].Rejected() || providerCandidates[0].RejectionReason() != "" || providerCandidates[0].Source().Module() != "corp.example/smtp" || providerCandidates[0].Source().Path() != "smtp/capabilities/email.send/v1/capability.yaml" || providerCandidates[0].Source().Kind() != "provider-declaration" {
 		t.Fatalf("Provider candidates = %#v", providerCandidates)
+	}
+	selectedProviders := first.SelectedProviders()
+	if len(selectedProviders) != 2 || selectedProviders[0].Capability() != "email.send/v1" || selectedProviders[0].PluginID() != "example.smtp" || selectedProviders[0].ProjectModule() != "example.com/smtp" || selectedProviders[0].ContractDigest() != providerCandidates[0].ContractDigest() || selectedProviders[0].ProviderSource() != providerCandidates[0].Source() || selectedProviders[0].SelectionReason() != resolutionevidence.ProviderSelectionSoleProvider || selectedProviders[0].Intrinsic() || len(selectedProviders[0].SelectionSources()) != 0 {
+		t.Fatalf("ordinary selected Provider = %#v", selectedProviders)
+	}
+	if selectedProviders[1].Capability() != "kernel.health/v1" || selectedProviders[1].PluginID() != "" || selectedProviders[1].ProjectModule() != "" || selectedProviders[1].SelectionReason() != resolutionevidence.ProviderSelectionIntrinsic || !selectedProviders[1].Intrinsic() || selectedProviders[1].ProviderSource().Module() != "github.com/plystra/kernel" || selectedProviders[1].ProviderSource().Path() != "capability/catalog/definitions/kernel.health/v1/capability.yaml" || selectedProviders[1].ProviderSource().Kind() != "intrinsic-provider" || len(selectedProviders[1].SelectionSources()) != 0 {
+		t.Fatalf("intrinsic selected Provider = %#v", selectedProviders[1])
 	}
 	if !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() {
 		t.Fatalf("input permutation changed evidence:\nfirst:  %s %s\nsecond: %s %s", first.CanonicalJSON(), first.Digest(), second.CanonicalJSON(), second.Digest())
@@ -127,14 +134,29 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 				Kind   string `json:"kind"`
 			} `json:"source"`
 		} `json:"provider_candidates"`
+		SelectedProviders []struct {
+			Capability      string `json:"capability"`
+			PluginID        string `json:"plugin_id"`
+			ProjectModule   string `json:"project_module"`
+			SelectionReason string `json:"selection_reason"`
+			ProviderSource  struct {
+				Module string `json:"module"`
+				Path   string `json:"path"`
+				Kind   string `json:"kind"`
+			} `json:"provider_source"`
+			SelectionSources []struct {
+				ProjectModule string `json:"project_module"`
+			} `json:"selection_sources"`
+		} `json:"selected_providers"`
 		Counts struct {
 			ParticipatingModules int `json:"participating_modules"`
 			DiscoveredPlugins    int `json:"discovered_plugins"`
 			ProviderCandidates   int `json:"provider_candidates"`
 			RejectedProviders    int `json:"rejected_providers"`
+			SelectedProviders    int `json:"selected_providers"`
 		} `json:"counts"`
 	}
-	if err := json.Unmarshal(first.CanonicalJSON(), &document); err != nil || document.Version != 1 || len(document.Modules) != 3 || document.Counts.ParticipatingModules != 3 || document.Counts.DiscoveredPlugins != 2 || document.Counts.ProviderCandidates != 1 || document.Counts.RejectedProviders != 0 || document.Modules[2].Replacement == nil || document.Modules[2].Replacement.Kind != "module" || document.Modules[2].Source.Module != "corp.example/smtp" || document.Modules[2].Source.Path != "plystra.yaml" || len(document.PluginCandidates) != 2 || document.PluginCandidates[1].ID != "example.smtp" || document.PluginCandidates[1].ModulePath != "example.com/smtp" || document.PluginCandidates[1].Source.Module != "corp.example/smtp" || document.PluginCandidates[1].Source.Path != "smtp/plugin.yaml" || len(document.SelectedPlugins) != 1 || document.SelectedPlugins[0].ID != "example.smtp" || document.SelectedPlugins[0].ModulePath != "example.com/smtp" || document.SelectedPlugins[0].ModuleVersion != "v1.3.0" || len(document.SelectedPlugins[0].Reasons) != 1 || document.SelectedPlugins[0].Reasons[0].Kind != "provider" || document.SelectedPlugins[0].Reasons[0].Capability != "email.send/v1" || len(document.ProviderCandidates) != 1 || document.ProviderCandidates[0].Capability != "email.send/v1" || document.ProviderCandidates[0].PluginID != "example.smtp" || document.ProviderCandidates[0].ProjectModule != "example.com/smtp" || document.ProviderCandidates[0].RejectionReason != "" || document.ProviderCandidates[0].Source.Module != "corp.example/smtp" || document.ProviderCandidates[0].Source.Path != "smtp/capabilities/email.send/v1/capability.yaml" || document.ProviderCandidates[0].Source.Kind != "provider-declaration" {
+	if err := json.Unmarshal(first.CanonicalJSON(), &document); err != nil || document.Version != 1 || len(document.Modules) != 3 || document.Counts.ParticipatingModules != 3 || document.Counts.DiscoveredPlugins != 2 || document.Counts.ProviderCandidates != 1 || document.Counts.RejectedProviders != 0 || document.Counts.SelectedProviders != 2 || document.Modules[2].Replacement == nil || document.Modules[2].Replacement.Kind != "module" || document.Modules[2].Source.Module != "corp.example/smtp" || document.Modules[2].Source.Path != "plystra.yaml" || len(document.PluginCandidates) != 2 || document.PluginCandidates[1].ID != "example.smtp" || document.PluginCandidates[1].ModulePath != "example.com/smtp" || document.PluginCandidates[1].Source.Module != "corp.example/smtp" || document.PluginCandidates[1].Source.Path != "smtp/plugin.yaml" || len(document.SelectedPlugins) != 1 || document.SelectedPlugins[0].ID != "example.smtp" || document.SelectedPlugins[0].ModulePath != "example.com/smtp" || document.SelectedPlugins[0].ModuleVersion != "v1.3.0" || len(document.SelectedPlugins[0].Reasons) != 1 || document.SelectedPlugins[0].Reasons[0].Kind != "provider" || document.SelectedPlugins[0].Reasons[0].Capability != "email.send/v1" || len(document.ProviderCandidates) != 1 || document.ProviderCandidates[0].Capability != "email.send/v1" || document.ProviderCandidates[0].PluginID != "example.smtp" || document.ProviderCandidates[0].ProjectModule != "example.com/smtp" || document.ProviderCandidates[0].RejectionReason != "" || document.ProviderCandidates[0].Source.Module != "corp.example/smtp" || document.ProviderCandidates[0].Source.Path != "smtp/capabilities/email.send/v1/capability.yaml" || document.ProviderCandidates[0].Source.Kind != "provider-declaration" || len(document.SelectedProviders) != 2 || document.SelectedProviders[0].Capability != "email.send/v1" || document.SelectedProviders[0].SelectionReason != "sole-provider" || document.SelectedProviders[0].ProviderSource.Module != "corp.example/smtp" || document.SelectedProviders[1].Capability != "kernel.health/v1" || document.SelectedProviders[1].SelectionReason != "intrinsic-kernel" || document.SelectedProviders[1].ProviderSource.Module != "github.com/plystra/kernel" {
 		t.Fatalf("canonical module evidence = %#v, %v", document, err)
 	}
 	for _, forbidden := range []string{"idempotency_key", "safe_name", "Provider-independent audit"} {
@@ -150,7 +172,8 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	selectedPlugins[0] = resolutionevidence.SelectedPlugin{}
 	reasons[0] = resolutionevidence.PluginSelectionReason{}
 	providerCandidates[0] = resolutionevidence.ProviderCandidate{}
-	if first.CanonicalJSON()[0] != '{' || first.Modules()[0].Path() != "example.com/app" || first.PluginCandidates()[0].ID() != "example.shared" || first.SelectedPlugins()[0].ID() != "example.smtp" || first.SelectedPlugins()[0].Reasons()[0].Capability() != "email.send/v1" || first.ProviderCandidates()[0].PluginID() != "example.smtp" || !first.Valid() {
+	selectedProviders[0] = resolutionevidence.SelectedProvider{}
+	if first.CanonicalJSON()[0] != '{' || first.Modules()[0].Path() != "example.com/app" || first.PluginCandidates()[0].ID() != "example.shared" || first.SelectedPlugins()[0].ID() != "example.smtp" || first.SelectedPlugins()[0].Reasons()[0].Capability() != "email.send/v1" || first.ProviderCandidates()[0].PluginID() != "example.smtp" || first.SelectedProviders()[0].PluginID() != "example.smtp" || !first.Valid() {
 		t.Fatal("CanonicalJSON exposed mutable evidence storage")
 	}
 }
@@ -253,7 +276,18 @@ func TestBuildRecordsEveryProviderCandidateAndStableRejectionReason(t *testing.T
 			Column:     1,
 		},
 	}
-	choice := providerresolution.Choice{Capability: "email.send/v1", PluginID: "example.smtp", Source: "plystra.yaml capabilities.use.email.send/v1"}
+	choice := providerresolution.Choice{
+		Capability: "email.send/v1",
+		PluginID:   "example.smtp",
+		Sources: []providerresolution.ChoiceSource{{
+			Kind:       providerresolution.ChoiceSourceCurrentProject,
+			Reference:  "plystra.yaml capabilities.use.email.send/v1",
+			ModulePath: "example.com/app",
+			Path:       "plystra.yaml",
+			Line:       1,
+			Column:     1,
+		}},
+	}
 
 	build := func(reverse bool) resolutionevidence.Evidence {
 		t.Helper()
@@ -309,6 +343,140 @@ func TestBuildRecordsEveryProviderCandidateAndStableRejectionReason(t *testing.T
 	candidates[0] = resolutionevidence.ProviderCandidate{}
 	if first.ProviderCandidates()[0].PluginID() != "example.mailgun" || !first.Valid() {
 		t.Fatal("ProviderCandidates exposed mutable evidence storage")
+	}
+}
+
+func TestBuildRecordsEverySelectedProviderReasonAndChoiceSource(t *testing.T) {
+	t.Parallel()
+
+	contracts := map[string][]byte{
+		"audit.write/v1":   queryContract(t, "audit.write/v1"),
+		"email.send/v1":    queryContract(t, "email.send/v1"),
+		"kernel.health/v1": queryContract(t, "kernel.health/v1"),
+		"queue.push/v1":    queryContract(t, "queue.push/v1"),
+	}
+	build := func(reverse bool) resolutionevidence.Evidence {
+		t.Helper()
+		capabilities := []generation.CapabilityInput{
+			{ContractJSON: contracts["audit.write/v1"]},
+			{ContractJSON: contracts["email.send/v1"]},
+			{ContractJSON: contracts["kernel.health/v1"], Intrinsic: true},
+			{ContractJSON: contracts["queue.push/v1"]},
+		}
+		requirementIDs := []string{"audit.write/v1", "email.send/v1", "kernel.health/v1", "queue.push/v1"}
+		providers := []generation.ProviderInput{
+			{Capability: "audit.write/v1", Plugin: "example.app-audit"},
+			{Capability: "email.send/v1", Plugin: "example.smtp"},
+			{Capability: "queue.push/v1", Plugin: "example.smtp"},
+		}
+		plugins := []generation.PluginInput{
+			{ID: "example.app-audit", ModulePath: "example.com/app", Provides: []string{"audit.write/v1"}, BuildMetadataJSON: []byte("{}")},
+			{ID: "example.smtp", ModulePath: "example.com/smtp", ModuleVersion: "v1.3.0", Provides: []string{"email.send/v1", "queue.push/v1"}, BuildMetadataJSON: []byte("{}")},
+		}
+		if reverse {
+			slices.Reverse(capabilities)
+			slices.Reverse(requirementIDs)
+			slices.Reverse(providers)
+			slices.Reverse(plugins)
+		}
+		context, err := generation.NewContext(generation.Input{Plugins: plugins, Capabilities: capabilities, Requirements: requirementIDs, Providers: providers})
+		if err != nil {
+			t.Fatalf("generation.NewContext: %v", err)
+		}
+		requirements := make([]providerresolution.Requirement, 0, len(requirementIDs))
+		for _, capability := range requirementIDs {
+			requirements = append(requirements, providerresolution.Requirement{
+				Contract: contracts[capability],
+				Source: providerresolution.RequirementSource{
+					Kind: providerresolution.RequirementDeclaration, Reference: "require " + capability,
+					ModulePath: "example.com/app", Path: "plystra.yaml", Line: 1, Column: 1,
+				},
+			})
+		}
+		candidates := []providerresolution.Candidate{
+			{PluginID: "example.app-audit", Contract: contracts["audit.write/v1"], Source: "current audit diagnostic"},
+			{PluginID: "example.shared", Contract: contracts["audit.write/v1"], Source: "shared audit diagnostic"},
+			{PluginID: "example.smtp", Contract: contracts["email.send/v1"], Source: "smtp email diagnostic"},
+			{PluginID: "example.shared", Contract: contracts["queue.push/v1"], Source: "shared queue diagnostic"},
+			{PluginID: "example.smtp", Contract: contracts["queue.push/v1"], Source: "smtp queue diagnostic"},
+		}
+		choices := []providerresolution.Choice{
+			{
+				Capability: "audit.write/v1", PluginID: "example.app-audit",
+				Sources: []providerresolution.ChoiceSource{{Kind: providerresolution.ChoiceSourceCurrentProject, Reference: "private current diagnostic", ModulePath: "example.com/app", Path: "plystra.production.yaml", Line: 9, Column: 5}},
+			},
+			{
+				Capability: "queue.push/v1", PluginID: "example.smtp",
+				Sources: []providerresolution.ChoiceSource{
+					{Kind: providerresolution.ChoiceSourceDependencyProject, Reference: "private smtp diagnostic", ModulePath: "example.com/smtp", Path: "plystra.yaml", Line: 3, Column: 7},
+					{Kind: providerresolution.ChoiceSourceDependencyProject, Reference: "private shared diagnostic", ModulePath: "example.com/shared", Path: "plystra.yaml", Line: 4, Column: 2},
+				},
+			},
+		}
+		candidateInputs := []resolutionevidence.PluginCandidateInput{
+			{ID: "example.app-audit", ModulePath: "example.com/app", Path: "audit"},
+			{ID: "example.shared", ModulePath: "example.com/shared", Path: "shared"},
+			{ID: "example.smtp", ModulePath: "example.com/smtp", Path: "smtp"},
+		}
+		modules := participatingModules(reverse)
+		if reverse {
+			slices.Reverse(candidates)
+			slices.Reverse(choices)
+			slices.Reverse(candidateInputs)
+		}
+		resolved, err := providerresolution.Resolve(providerresolution.Input{Requirements: requirements, Candidates: candidates, Choices: choices})
+		if err != nil {
+			t.Fatalf("providerresolution.Resolve: %v", err)
+		}
+		evidence, err := resolutionevidence.Build(resolutionevidence.Input{Context: context, ProviderResolution: resolved, Modules: modules, PluginCandidates: candidateInputs})
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		return evidence
+	}
+
+	first := build(false)
+	second := build(true)
+	if !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() {
+		t.Fatalf("selected Provider permutation changed evidence:\nfirst:  %s\nsecond: %s", first.CanonicalJSON(), second.CanonicalJSON())
+	}
+	providers := first.SelectedProviders()
+	if first.SelectedProviderCount() != 4 || len(providers) != 4 {
+		t.Fatalf("selected Providers = %d %#v", first.SelectedProviderCount(), providers)
+	}
+	want := []struct {
+		capability string
+		reason     resolutionevidence.ProviderSelectionReason
+		plugin     string
+		sources    int
+	}{
+		{"audit.write/v1", resolutionevidence.ProviderSelectionCurrentProject, "example.app-audit", 1},
+		{"email.send/v1", resolutionevidence.ProviderSelectionSoleProvider, "example.smtp", 0},
+		{"kernel.health/v1", resolutionevidence.ProviderSelectionIntrinsic, "", 0},
+		{"queue.push/v1", resolutionevidence.ProviderSelectionInherited, "example.smtp", 2},
+	}
+	for index, expected := range want {
+		if providers[index].Capability() != expected.capability || providers[index].SelectionReason() != expected.reason || providers[index].PluginID() != expected.plugin || len(providers[index].SelectionSources()) != expected.sources {
+			t.Fatalf("selected Providers[%d] = %#v", index, providers[index])
+		}
+	}
+	currentSource := providers[0].SelectionSources()[0]
+	if currentSource.ProjectModule() != "example.com/app" || currentSource.Source().Module() != "example.com/app" || currentSource.Source().Path() != "plystra.production.yaml" || currentSource.Source().Kind() != "provider-selection" || currentSource.Source().Line() != 9 || currentSource.Source().Column() != 5 {
+		t.Fatalf("current selection source = %#v", currentSource)
+	}
+	inherited := providers[3].SelectionSources()
+	if inherited[0].ProjectModule() != "example.com/shared" || inherited[0].Source().Module() != "example.com/shared" || inherited[1].ProjectModule() != "example.com/smtp" || inherited[1].Source().Module() != "corp.example/smtp" {
+		t.Fatalf("inherited selection sources = %#v", inherited)
+	}
+	for _, forbidden := range []string{"private current diagnostic", "private smtp diagnostic", "private shared diagnostic", "current audit diagnostic", "smtp queue diagnostic"} {
+		if bytes.Contains(first.CanonicalJSON(), []byte(forbidden)) {
+			t.Fatalf("selected Provider evidence contains diagnostic text %q: %s", forbidden, first.CanonicalJSON())
+		}
+	}
+	providers[0] = resolutionevidence.SelectedProvider{}
+	inherited[0] = resolutionevidence.ProviderSelectionSource{}
+	if first.SelectedProviders()[0].Capability() != "audit.write/v1" || first.SelectedProviders()[3].SelectionSources()[0].ProjectModule() != "example.com/shared" || !first.Valid() {
+		t.Fatal("SelectedProviders exposed mutable evidence storage")
 	}
 }
 
@@ -748,6 +916,31 @@ semantics:
 		}
 		evidence, err := build(result)
 		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "does not match provider resolution") || evidence.Valid() {
+			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+	})
+
+	t.Run("selection source Project does not participate", func(t *testing.T) {
+		result, err := providerresolution.Resolve(providerresolution.Input{
+			Requirements: []providerresolution.Requirement{
+				{Contract: contracts["email.send/v1"], Source: declaration("example.com/app")},
+				{Contract: contracts["kernel.health/v1"], Source: declaration("example.com/app")},
+			},
+			Candidates: []providerresolution.Candidate{{PluginID: "example.smtp", Contract: contracts["email.send/v1"], Source: "smtp/email"}},
+			Choices: []providerresolution.Choice{{
+				Capability: "email.send/v1",
+				PluginID:   "example.smtp",
+				Sources: []providerresolution.ChoiceSource{{
+					Kind: providerresolution.ChoiceSourceCurrentProject, Reference: "outside choice",
+					ModulePath: "example.com/unrelated", Path: "plystra.yaml", Line: 1, Column: 1,
+				}},
+			}},
+		})
+		if err != nil {
+			t.Fatalf("providerresolution.Resolve: %v", err)
+		}
+		evidence, err := build(result)
+		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "nonparticipating Project") || evidence.Valid() {
 			t.Fatalf("Build = %#v, %v", evidence, err)
 		}
 	})

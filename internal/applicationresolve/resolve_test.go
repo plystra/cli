@@ -176,6 +176,62 @@ replace example.com/platform => ../platform
 	}
 }
 
+func TestResolveRecordsCurrentProviderReplacementForEveryConfigurationMode(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModule(t, root, "example.com/app")
+	contract := "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n"
+	for _, provider := range []struct {
+		directory string
+		id        string
+	}{
+		{directory: "email-root", id: "example.email-root"},
+		{directory: "email-production", id: "example.email-production"},
+		{directory: "email-customer", id: "example.email-customer"},
+	} {
+		writePlugin(t, root, provider.directory, "id: "+provider.id+"\nprovides: [email.send/v1]\n")
+		writeCapability(t, root, provider.directory, "email.send/v1", contract)
+	}
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "capabilities: {require: [email.send/v1], use: {email.send/v1: example.email-root}}\n")
+	writeFile(t, filepath.Join(root, "plystra.production.yaml"), "capabilities: {use: {email.send/v1: example.email-production}}\n")
+	writeFile(t, filepath.Join(root, "deploy", "customer.yaml"), "capabilities: {require: [email.send/v1], use: {email.send/v1: example.email-customer}}\n")
+
+	tests := []struct {
+		name       string
+		options    applicationresolve.Options
+		pluginID   string
+		pluginPath string
+		choicePath string
+	}{
+		{name: "root", pluginID: "example.email-root", pluginPath: "email-root", choicePath: "plystra.yaml"},
+		{name: "environment", options: applicationresolve.Options{EnvironmentName: "production"}, pluginID: "example.email-production", pluginPath: "email-production", choicePath: "plystra.production.yaml"},
+		{name: "full replacement", options: applicationresolve.Options{ConfigurationPath: "deploy/customer.yaml"}, pluginID: "example.email-customer", pluginPath: "email-customer", choicePath: "deploy/customer.yaml"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			options := test.options
+			options.Start = root
+			options.Environment = goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+			result, err := applicationresolve.Resolve(t.Context(), options)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			providers := result.ResolutionEvidence().SelectedProviders()
+			if len(providers) != 1 || providers[0].Capability() != "email.send/v1" || providers[0].PluginID() != test.pluginID || providers[0].ProjectModule() != "example.com/app" || providers[0].SelectionReason() != resolutionevidence.ProviderSelectionCurrentProject || providers[0].Intrinsic() || providers[0].ProviderSource().Module() != "example.com/app" || providers[0].ProviderSource().Path() != test.pluginPath+"/capabilities/email.send/v1/capability.yaml" {
+				t.Fatalf("selected Provider = %#v", providers)
+			}
+			sources := providers[0].SelectionSources()
+			if len(sources) != 1 || sources[0].ProjectModule() != "example.com/app" || sources[0].Source().Module() != "example.com/app" || sources[0].Source().Path() != test.choicePath || sources[0].Source().Kind() != "provider-selection" || sources[0].Source().Line() != 1 || sources[0].Source().Column() != 1 {
+				t.Fatalf("selection sources = %#v", sources)
+			}
+			if bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte(root)) || bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte(filepath.ToSlash(root))) {
+				t.Fatalf("selected Provider evidence contains absolute root: %s", result.ResolutionEvidence().CanonicalJSON())
+			}
+		})
+	}
+}
+
 func TestResolveRequiresRootMarkerAndSelectedFile(t *testing.T) {
 	t.Parallel()
 
@@ -253,6 +309,10 @@ replace example.com/platform-b => ../platform-b
 	}
 	if got := applicationRequirementIDs(result.Manifest()); !reflect.DeepEqual(got, []string{"kernel.health/v1"}) {
 		t.Fatalf("effective requirements = %v", got)
+	}
+	selectedProviders := result.ResolutionEvidence().SelectedProviders()
+	if len(selectedProviders) != 2 || selectedProviders[0].Capability() != "kernel.health/v1" || selectedProviders[0].SelectionReason() != resolutionevidence.ProviderSelectionIntrinsic || !selectedProviders[0].Intrinsic() || selectedProviders[0].ProviderSource().Module() != "github.com/plystra/kernel" || selectedProviders[0].ProviderSource().Path() != "capability/catalog/definitions/kernel.health/v1/capability.yaml" || selectedProviders[1].Capability() != "kernel.info/v1" || selectedProviders[1].SelectionReason() != resolutionevidence.ProviderSelectionIntrinsic || !selectedProviders[1].Intrinsic() {
+		t.Fatalf("intrinsic Provider evidence = %#v", selectedProviders)
 	}
 	if !result.ConfigurationMaintenance().Changed() || result.ConfigurationMaintenancePath() != "plystra.yaml" || !bytes.Equal(result.ConfigurationMaintenanceSource(), []byte(rootConfiguration)) {
 		t.Fatalf("root maintenance = changed %t path %q source %q", result.ConfigurationMaintenance().Changed(), result.ConfigurationMaintenancePath(), result.ConfigurationMaintenanceSource())
@@ -714,6 +774,13 @@ replace example.com/ordinary => ../ordinary
 			t.Fatalf("resolution evidence Provider candidate source = %#v", candidate)
 		}
 	}
+	selectedProviders := result.ResolutionEvidence().SelectedProviders()
+	if len(selectedProviders) != 2 || selectedProviders[0].Capability() != "audit.write/v1" || selectedProviders[0].PluginID() != "example.audit" || selectedProviders[0].ProjectModule() != "example.com/transitive" || selectedProviders[0].SelectionReason() != resolutionevidence.ProviderSelectionSoleProvider || len(selectedProviders[0].SelectionSources()) != 0 {
+		t.Fatalf("transitive automatic Provider evidence = %#v", selectedProviders)
+	}
+	if selectedProviders[1].Capability() != "email.send/v1" || selectedProviders[1].PluginID() != "example.smtp" || selectedProviders[1].ProjectModule() != "example.com/direct" || selectedProviders[1].SelectionReason() != resolutionevidence.ProviderSelectionInherited || len(selectedProviders[1].SelectionSources()) != 1 || selectedProviders[1].SelectionSources()[0].ProjectModule() != "example.com/direct" || selectedProviders[1].SelectionSources()[0].Source().Path() != "plystra.yaml" || selectedProviders[1].SelectionSources()[0].Source().Kind() != "provider-selection" {
+		t.Fatalf("direct inherited Provider evidence = %#v", selectedProviders[1])
+	}
 	if bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte(filepath.ToSlash(root))) || bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte(root)) || bytes.Contains(result.ResolutionEvidence().CanonicalJSON(), []byte("example.com/ordinary")) {
 		t.Fatalf("resolution evidence contains an absolute root or ordinary dependency: %s", result.ResolutionEvidence().CanonicalJSON())
 	}
@@ -792,6 +859,51 @@ replace example.com/b => ../b
 	if len(records) != 2 {
 		t.Fatalf("inherited conflict provenance = %#v", records)
 	}
+	selectedProviders := result.ResolutionEvidence().SelectedProviders()
+	if len(selectedProviders) != 1 || selectedProviders[0].PluginID() != "example.smtp-a" || selectedProviders[0].SelectionReason() != resolutionevidence.ProviderSelectionCurrentProject || len(selectedProviders[0].SelectionSources()) != 1 || selectedProviders[0].SelectionSources()[0].ProjectModule() != "example.com/app" || selectedProviders[0].SelectionSources()[0].Source().Path() != "plystra.yaml" {
+		t.Fatalf("current Provider replacement evidence = %#v", selectedProviders)
+	}
+}
+
+func TestResolveRecordsEveryCompatibleInheritedProviderSelectionSource(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	aRoot := filepath.Join(root, "a")
+	bRoot := filepath.Join(root, "b")
+	for modulePath, moduleRoot := range map[string]string{"example.com/a": aRoot, "example.com/b": bRoot} {
+		writeModule(t, moduleRoot, modulePath)
+		writeFile(t, filepath.Join(moduleRoot, "plystra.yaml"), "capabilities: {use: {email.send/v1: example.smtp}}\n")
+	}
+	writePlugin(t, aRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\n")
+	writeCapability(t, aRoot, "smtp", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
+
+go 1.26
+
+require (
+	example.com/a v1.0.0
+	example.com/b v1.2.0
+)
+
+replace example.com/a => ../a
+replace example.com/b => ../b
+`)
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "capabilities: {require: [email.send/v1]}\n")
+
+	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: appRoot, Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	providers := result.ResolutionEvidence().SelectedProviders()
+	if len(providers) != 1 || providers[0].PluginID() != "example.smtp" || providers[0].SelectionReason() != resolutionevidence.ProviderSelectionInherited {
+		t.Fatalf("selected Provider = %#v", providers)
+	}
+	sources := providers[0].SelectionSources()
+	if len(sources) != 2 || sources[0].ProjectModule() != "example.com/a" || sources[0].Source().Path() != "plystra.yaml" || sources[1].ProjectModule() != "example.com/b" || sources[1].Source().Path() != "plystra.yaml" {
+		t.Fatalf("compatible inherited selection sources = %#v", sources)
+	}
 }
 
 func TestResolveCurrentProviderRemovalRestoresUniqueProviderSelection(t *testing.T) {
@@ -831,6 +943,10 @@ replace example.com/smtp => ../smtp
 	records := compositionProvenance(result.Composition().Provenance(), `capabilities.use["email.send/v1"]`)
 	if len(records) != 1 || len(records[0].Sources()) != 1 || !strings.Contains(records[0].Sources()[0], "example.com/smtp@v1.0.0/plystra.yaml") {
 		t.Fatalf("inherited Provider provenance = %#v", records)
+	}
+	selectedProviders := result.ResolutionEvidence().SelectedProviders()
+	if len(selectedProviders) != 1 || selectedProviders[0].SelectionReason() != resolutionevidence.ProviderSelectionSoleProvider || len(selectedProviders[0].SelectionSources()) != 0 {
+		t.Fatalf("Provider removal automatic evidence = %#v", selectedProviders)
 	}
 }
 
@@ -964,6 +1080,10 @@ func TestResolveUsesActiveGoWorkspaceDependencySource(t *testing.T) {
 	providerCandidates := result.ResolutionEvidence().ProviderCandidates()
 	if len(providerCandidates) != 1 || providerCandidates[0].Capability() != "email.send/v1" || providerCandidates[0].PluginID() != "example.smtp" || providerCandidates[0].ProjectModule() != "example.com/providers" || providerCandidates[0].Rejected() || providerCandidates[0].Source().Module() != "example.com/providers" || providerCandidates[0].Source().Path() != "smtp/capabilities/email.send/v1/capability.yaml" {
 		t.Fatalf("workspace Provider candidates = %#v", providerCandidates)
+	}
+	selectedProviders := result.ResolutionEvidence().SelectedProviders()
+	if len(selectedProviders) != 1 || selectedProviders[0].PluginID() != "example.smtp" || selectedProviders[0].SelectionReason() != resolutionevidence.ProviderSelectionSoleProvider || selectedProviders[0].ProviderSource() != providerCandidates[0].Source() || len(selectedProviders[0].SelectionSources()) != 0 {
+		t.Fatalf("workspace selected Provider evidence = %#v", selectedProviders)
 	}
 }
 

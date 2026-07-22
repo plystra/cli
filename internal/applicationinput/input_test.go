@@ -92,7 +92,7 @@ capabilities:
 	if len(input.Requirements) != 1 || input.Requirements[0].Capability != "kernel.info/v1" || len(input.Requirements[0].Contract) == 0 || input.Requirements[0].Source.String() != `plystra.yaml capabilities.require["kernel.info/v1"]` || input.Requirements[0].Source.Kind != providerresolution.RequirementDeclaration || input.Requirements[0].Source.ModulePath != "example.com/app" || input.Requirements[0].Source.Path != "plystra.yaml" {
 		t.Fatalf("Requirements = %#v", input.Requirements)
 	}
-	if len(input.Choices) != 1 || input.Choices[0].Capability != "order.create/v1" || input.Choices[0].PluginID != "example.business" {
+	if len(input.Choices) != 1 || input.Choices[0].Capability != "order.create/v1" || input.Choices[0].PluginID != "example.business" || len(input.Choices[0].Sources) != 1 || input.Choices[0].Sources[0].Kind != providerresolution.ChoiceSourceCurrentProject || input.Choices[0].Sources[0].ModulePath != "example.com/app" || input.Choices[0].Sources[0].Path != "plystra.yaml" {
 		t.Fatalf("Choices = %#v", input.Choices)
 	}
 	if got := resolutionPluginStrings(input.Plugins); !reflect.DeepEqual(got, []string{
@@ -141,6 +141,8 @@ func TestBuildPreservesEffectiveDependencySourcesAndSparseOverlayLocations(t *te
 capabilities:
   require:
     add: [kernel.info/v1]
+  use:
+    email.send/v1: example.email
 `))
 	if err != nil {
 		t.Fatalf("ParseOverlaySource: %v", err)
@@ -158,7 +160,7 @@ capabilities:
 				`example.com/b@v2.0.0/plystra.yaml capabilities.require["kernel.info/v1"]`,
 			},
 		}},
-		CurrentProjectPaths: []string{`capabilities.require["kernel.info/v1"]`},
+		CurrentProjectPaths: []string{`capabilities.require["kernel.info/v1"]`, `capabilities.use["email.send/v1"]`},
 	}
 	input, err := applicationinput.Build(manifest, inventory, sourceContext, nil, generationexec.BuildOptions{})
 	if err != nil {
@@ -185,6 +187,9 @@ capabilities:
 	if exposureSource.Kind != providerresolution.RequirementExposure || exposureSource.ModulePath != "example.com/app" || exposureSource.Path != "plystra.production.yaml" || exposureSource.String() != `plystra.production.yaml http.expose.add["kernel.health/v1"]` {
 		t.Fatalf("sparse overlay exposure source = %#v", exposureSource)
 	}
+	if len(input.Choices) != 1 || len(input.Choices[0].Sources) != 1 || input.Choices[0].Sources[0].Kind != providerresolution.ChoiceSourceCurrentProject || input.Choices[0].Sources[0].ModulePath != "example.com/app" || input.Choices[0].Sources[0].Path != "plystra.production.yaml" {
+		t.Fatalf("overlay Provider choice sources = %#v", input.Choices)
+	}
 
 	invalidContext := sourceContext
 	invalidContext.DependencyProvenance = []applicationinput.DependencyProvenance{{
@@ -194,6 +199,56 @@ capabilities:
 	invalid, err := applicationinput.Build(manifest, inventory, invalidContext, nil, generationexec.BuildOptions{})
 	if !errors.Is(err, applicationinput.ErrBuild) || !strings.Contains(err.Error(), "does not identify a discovered dependency Project") || len(invalid.Requirements) != 0 {
 		t.Fatalf("Build(unlisted dependency source) = %#v, %v", invalid, err)
+	}
+}
+
+func TestBuildPreservesEveryCompatibleInheritedProviderChoiceSource(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModule(t, root, "example.com/app")
+	inventory := configureInventory(t, root)
+	manifest, err := applicationmeta.ParseSource("example.com/a@v1.0.0/plystra.yaml", []byte(`capabilities:
+  use:
+    email.send/v1: example.email
+`))
+	if err != nil {
+		t.Fatalf("ParseSource: %v", err)
+	}
+	context := applicationinput.SourceContext{
+		CurrentModulePath: "example.com/app",
+		Dependencies: []applicationinput.DependencySource{
+			{ModulePath: "example.com/a", Version: "v1.0.0"},
+			{ModulePath: "example.com/b", Version: ""},
+		},
+		DependencyProvenance: []applicationinput.DependencyProvenance{{
+			Path: `capabilities.use["email.send/v1"]`,
+			Sources: []string{
+				`example.com/b@workspace/plystra.yaml capabilities.use["email.send/v1"]`,
+				`example.com/a@v1.0.0/plystra.yaml capabilities.use["email.send/v1"]`,
+			},
+		}},
+	}
+	input, err := applicationinput.Build(manifest, inventory, context, nil, generationexec.BuildOptions{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(input.Choices) != 1 || len(input.Choices[0].Sources) != 2 {
+		t.Fatalf("Choices = %#v", input.Choices)
+	}
+	sources := input.Choices[0].Sources
+	if sources[0].Kind != providerresolution.ChoiceSourceDependencyProject || sources[0].ModulePath != "example.com/a" || sources[0].Path != "plystra.yaml" || sources[1].Kind != providerresolution.ChoiceSourceDependencyProject || sources[1].ModulePath != "example.com/b" || sources[1].Path != "plystra.yaml" {
+		t.Fatalf("inherited Provider choice sources = %#v", sources)
+	}
+
+	invalidContext := context
+	invalidContext.DependencyProvenance = []applicationinput.DependencyProvenance{{
+		Path:    `capabilities.use["email.send/v1"]`,
+		Sources: []string{`example.com/unlisted@v1.0.0/plystra.yaml capabilities.use["email.send/v1"]`},
+	}}
+	invalid, err := applicationinput.Build(manifest, inventory, invalidContext, nil, generationexec.BuildOptions{})
+	if !errors.Is(err, applicationinput.ErrBuild) || !strings.Contains(err.Error(), "does not identify a discovered dependency Project") || len(invalid.Choices) != 0 {
+		t.Fatalf("Build(unlisted Provider source) = %#v, %v", invalid, err)
 	}
 }
 

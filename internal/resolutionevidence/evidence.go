@@ -79,6 +79,25 @@ const (
 	ProviderRejectionAnotherProviderSelected ProviderRejectionReason = "another-provider-selected"
 )
 
+// ProviderSelectionReason identifies the successful rule that selected one
+// implementation for an exact required canonical Capability.
+type ProviderSelectionReason string
+
+const (
+	// ProviderSelectionSoleProvider identifies automatic selection of the only
+	// compatible visible ordinary Provider.
+	ProviderSelectionSoleProvider ProviderSelectionReason = "sole-provider"
+	// ProviderSelectionCurrentProject identifies an explicit replacement in the
+	// selected current-Project configuration layer.
+	ProviderSelectionCurrentProject ProviderSelectionReason = "current-project-replacement"
+	// ProviderSelectionInherited identifies one compatible Provider choice
+	// inherited from one or more dependency Projects.
+	ProviderSelectionInherited ProviderSelectionReason = "inherited-selection"
+	// ProviderSelectionIntrinsic identifies a Kernel-owned intrinsic
+	// implementation outside ordinary Plugin Provider selection.
+	ProviderSelectionIntrinsic ProviderSelectionReason = "intrinsic-kernel"
+)
+
 // Input is the construction-only selected-model, participating-Project, and
 // discovered-Plugin input for one evidence document.
 type Input struct {
@@ -133,6 +152,7 @@ type Evidence struct {
 	selectedPlugins          []SelectedPlugin
 	requirements             []CapabilityRequirement
 	providerCandidates       []ProviderCandidate
+	selectedProviders        []SelectedProvider
 	canonicalJSON            []byte
 	digest                   string
 	prepared                 bool
@@ -372,6 +392,68 @@ func (c ProviderCandidate) RejectionReason() ProviderRejectionReason {
 	return c.rejectionReason
 }
 
+// SelectedProvider is one successful implementation decision for an exact
+// required canonical Capability. Intrinsic Kernel decisions have no Plugin or
+// participating Project module.
+type SelectedProvider struct {
+	capability       string
+	pluginID         string
+	projectModule    string
+	contractDigest   string
+	providerSource   Source
+	selectionReason  ProviderSelectionReason
+	selectionSources []ProviderSelectionSource
+}
+
+// Capability returns the exact required canonical Capability ID.
+func (p SelectedProvider) Capability() string { return p.capability }
+
+// PluginID returns the selected ordinary Plugin ID, or an empty string for an
+// intrinsic Kernel implementation.
+func (p SelectedProvider) PluginID() string { return p.pluginID }
+
+// ProjectModule returns the effective graph Project module containing the
+// ordinary Provider, or an empty string for an intrinsic implementation.
+func (p SelectedProvider) ProjectModule() string { return p.projectModule }
+
+// ContractDigest returns the normalized exact contract identity.
+func (p SelectedProvider) ContractDigest() string { return p.contractDigest }
+
+// ProviderSource returns the stable ordinary Provider declaration or
+// intrinsic Kernel catalog location.
+func (p SelectedProvider) ProviderSource() Source { return p.providerSource }
+
+// SelectionReason returns the closed successful selection rule.
+func (p SelectedProvider) SelectionReason() ProviderSelectionReason {
+	return p.selectionReason
+}
+
+// SelectionSources returns the winning current-Project declaration or every
+// compatible inherited dependency declaration. Automatic and intrinsic
+// decisions return nil.
+func (p SelectedProvider) SelectionSources() []ProviderSelectionSource {
+	return append([]ProviderSelectionSource(nil), p.selectionSources...)
+}
+
+// Intrinsic reports whether the Kernel owns this selected implementation.
+func (p SelectedProvider) Intrinsic() bool {
+	return p.selectionReason == ProviderSelectionIntrinsic
+}
+
+// ProviderSelectionSource is one typed stable configuration source for an
+// explicit ordinary Provider decision.
+type ProviderSelectionSource struct {
+	projectModule string
+	source        Source
+}
+
+// ProjectModule returns the effective graph Project module that owns the
+// configuration declaration.
+func (s ProviderSelectionSource) ProjectModule() string { return s.projectModule }
+
+// Source returns the replacement-safe module-relative configuration location.
+func (s ProviderSelectionSource) Source() Source { return s.source }
+
 // Source is one stable module-relative declaration reference.
 type Source struct {
 	module string
@@ -474,6 +556,21 @@ type canonicalProviderCandidate struct {
 	RejectionReason ProviderRejectionReason `json:"rejection_reason,omitempty"`
 }
 
+type canonicalSelectedProvider struct {
+	Capability       string                             `json:"capability"`
+	PluginID         string                             `json:"plugin_id,omitempty"`
+	ProjectModule    string                             `json:"project_module,omitempty"`
+	ContractDigest   string                             `json:"contract_digest"`
+	ProviderSource   canonicalSource                    `json:"provider_source"`
+	SelectionReason  ProviderSelectionReason            `json:"selection_reason"`
+	SelectionSources []canonicalProviderSelectionSource `json:"selection_sources"`
+}
+
+type canonicalProviderSelectionSource struct {
+	ProjectModule string          `json:"project_module"`
+	Source        canonicalSource `json:"source"`
+}
+
 type canonicalReplacement struct {
 	Kind       ReplacementKind `json:"kind"`
 	ModulePath string          `json:"module_path"`
@@ -498,6 +595,7 @@ type canonicalEvidence struct {
 	SelectedPlugins     []canonicalSelectedPlugin        `json:"selected_plugins"`
 	Requirements        []canonicalCapabilityRequirement `json:"requirements"`
 	ProviderCandidates  []canonicalProviderCandidate     `json:"provider_candidates"`
+	SelectedProviders   []canonicalSelectedProvider      `json:"selected_providers"`
 	Counts              canonicalCounts                  `json:"counts"`
 }
 
@@ -531,19 +629,24 @@ func Build(source Input) (Evidence, error) {
 	if err != nil {
 		return Evidence{}, fmt.Errorf("%w: Provider candidates: %v", ErrBuild, err)
 	}
+	selectedProviders, err := selectedProvidersFromResolution(source.ProviderResolution, modules, providerCandidates, requirements)
+	if err != nil {
+		return Evidence{}, fmt.Errorf("%w: selected Providers: %v", ErrBuild, err)
+	}
 	input := Evidence{
 		generationAPI:            context.APIVersion(),
 		selectedModelDigest:      context.Digest(),
 		buildModelDigest:         context.BuildModelDigest(),
 		canonicalCapabilityCount: len(context.Capabilities()),
 		requirementCount:         len(requirements),
-		selectedProviderCount:    len(context.Providers()),
+		selectedProviderCount:    len(selectedProviders),
 		capabilityAliasCount:     len(context.CapabilityAliases()),
 		modules:                  modules,
 		pluginCandidates:         pluginCandidates,
 		selectedPlugins:          selectedPlugins,
 		requirements:             requirements,
 		providerCandidates:       providerCandidates,
+		selectedProviders:        selectedProviders,
 		prepared:                 true,
 	}
 	if err := validate(input); err != nil {
@@ -579,6 +682,9 @@ func (e Evidence) Valid() bool {
 		return false
 	}
 	if err := validateProviderCandidates(e.providerCandidates, modules, pluginCandidates, e.requirements, e.selectedPlugins); err != nil {
+		return false
+	}
+	if err := validateSelectedProviders(e.selectedProviders, modules, e.providerCandidates, e.requirements); err != nil {
 		return false
 	}
 	canonical, err := encode(e)
@@ -644,6 +750,17 @@ func (e Evidence) ProviderCandidates() []ProviderCandidate {
 	return append([]ProviderCandidate(nil), e.providerCandidates...)
 }
 
+// SelectedProviders returns one implementation decision for every final
+// canonical requirement in Capability order, including intrinsic Kernel
+// implementations.
+func (e Evidence) SelectedProviders() []SelectedProvider {
+	values := append([]SelectedProvider(nil), e.selectedProviders...)
+	for index := range values {
+		values[index].selectionSources = append([]ProviderSelectionSource(nil), values[index].selectionSources...)
+	}
+	return values
+}
+
 // ProviderCandidateCount returns the complete visible Provider declaration
 // count, including Capabilities outside the final requirement closure.
 func (e Evidence) ProviderCandidateCount() int { return len(e.providerCandidates) }
@@ -666,7 +783,8 @@ func (e Evidence) CanonicalCapabilityCount() int { return e.canonicalCapabilityC
 // RequirementCount returns the number of required canonical Capabilities.
 func (e Evidence) RequirementCount() int { return e.requirementCount }
 
-// SelectedProviderCount returns the number of selected ordinary Providers.
+// SelectedProviderCount returns the number of successful implementation
+// decisions, including intrinsic Kernel implementations.
 func (e Evidence) SelectedProviderCount() int { return e.selectedProviderCount }
 
 // CapabilityAliasCount returns the number of final application Aliases.
@@ -697,6 +815,9 @@ func validate(e Evidence) error {
 	if e.requirementCount != len(e.requirements) {
 		return fmt.Errorf("requirement count %d does not match records %d", e.requirementCount, len(e.requirements))
 	}
+	if e.selectedProviderCount != len(e.selectedProviders) {
+		return fmt.Errorf("selected Provider count %d does not match records %d", e.selectedProviderCount, len(e.selectedProviders))
+	}
 	counts := []struct {
 		name  string
 		value int
@@ -714,11 +835,8 @@ func validate(e Evidence) error {
 	if e.requirementCount > e.canonicalCapabilityCount {
 		return errors.New("requirement count exceeds canonical Capability count")
 	}
-	if e.selectedProviderCount > e.requirementCount {
-		return errors.New("selected Provider count exceeds requirement count")
-	}
-	if e.selectedProviderCount > len(e.providerCandidates) {
-		return errors.New("selected Provider count exceeds Provider candidate count")
+	if e.selectedProviderCount != e.requirementCount {
+		return errors.New("every requirement must have exactly one selected implementation")
 	}
 	providerReasons := 0
 	for _, plugin := range e.selectedPlugins {
@@ -728,10 +846,19 @@ func validate(e Evidence) error {
 			}
 		}
 	}
-	if providerReasons != e.selectedProviderCount {
-		return fmt.Errorf("selected Provider count %d does not match selected Plugin provider reasons %d", e.selectedProviderCount, providerReasons)
+	ordinaryProviders := 0
+	for _, provider := range e.selectedProviders {
+		if !provider.Intrinsic() {
+			ordinaryProviders++
+		}
+	}
+	if providerReasons != ordinaryProviders {
+		return fmt.Errorf("ordinary selected Provider count %d does not match selected Plugin provider reasons %d", ordinaryProviders, providerReasons)
 	}
 	if err := validateProviderCandidates(e.providerCandidates, e.modules, e.pluginCandidates, e.requirements, e.selectedPlugins); err != nil {
+		return err
+	}
+	if err := validateSelectedProviders(e.selectedProviders, e.modules, e.providerCandidates, e.requirements); err != nil {
 		return err
 	}
 	return nil
@@ -853,6 +980,39 @@ func encode(e Evidence) ([]byte, error) {
 			RejectionReason: value.rejectionReason,
 		}
 	}
+	selectedProviders := make([]canonicalSelectedProvider, len(e.selectedProviders))
+	for index, value := range e.selectedProviders {
+		selectionSources := make([]canonicalProviderSelectionSource, len(value.selectionSources))
+		for sourceIndex, selectionSource := range value.selectionSources {
+			source := selectionSource.source
+			selectionSources[sourceIndex] = canonicalProviderSelectionSource{
+				ProjectModule: selectionSource.projectModule,
+				Source: canonicalSource{
+					Module: source.module,
+					Path:   source.path,
+					Kind:   source.kind,
+					Line:   source.line,
+					Column: source.column,
+				},
+			}
+		}
+		providerSource := value.providerSource
+		selectedProviders[index] = canonicalSelectedProvider{
+			Capability:     value.capability,
+			PluginID:       value.pluginID,
+			ProjectModule:  value.projectModule,
+			ContractDigest: value.contractDigest,
+			ProviderSource: canonicalSource{
+				Module: providerSource.module,
+				Path:   providerSource.path,
+				Kind:   providerSource.kind,
+				Line:   providerSource.line,
+				Column: providerSource.column,
+			},
+			SelectionReason:  value.selectionReason,
+			SelectionSources: selectionSources,
+		}
+	}
 	return json.Marshal(canonicalEvidence{
 		Version:             schemaVersion,
 		GenerationAPI:       e.generationAPI,
@@ -863,6 +1023,7 @@ func encode(e Evidence) ([]byte, error) {
 		SelectedPlugins:     selectedPlugins,
 		Requirements:        requirements,
 		ProviderCandidates:  providerCandidates,
+		SelectedProviders:   selectedProviders,
 		Counts: canonicalCounts{
 			ParticipatingModules:  len(e.modules),
 			DiscoveredPlugins:     len(e.pluginCandidates),
@@ -1566,6 +1727,246 @@ func validateProviderCandidates(values []ProviderCandidate, modules []Module, pl
 		}
 	}
 	return nil
+}
+
+func selectedProvidersFromResolution(
+	resolution providerresolution.Result,
+	modules []Module,
+	candidates []ProviderCandidate,
+	requirements []CapabilityRequirement,
+) ([]SelectedProvider, error) {
+	moduleByPath := make(map[string]Module, len(modules))
+	for _, project := range modules {
+		moduleByPath[project.path] = project
+	}
+	candidateBySelection := make(map[string]ProviderCandidate)
+	candidateCounts := make(map[string]int)
+	for _, candidate := range candidates {
+		candidateCounts[candidate.capability]++
+		if !candidate.Rejected() {
+			candidateBySelection[candidate.capability+"\x00"+candidate.pluginID] = candidate
+		}
+	}
+	selectionByCapability := make(map[string]providerresolution.Selection)
+	for _, selection := range resolution.Selections() {
+		capability := selection.Capability().String()
+		if _, duplicate := selectionByCapability[capability]; duplicate {
+			return nil, fmt.Errorf("provider resolution repeats selected Capability %s", capability)
+		}
+		selectionByCapability[capability] = selection
+	}
+
+	values := make([]SelectedProvider, 0, len(requirements))
+	for _, requirement := range requirements {
+		identifier, err := capabilityid.Parse(requirement.capability)
+		if err != nil {
+			return nil, fmt.Errorf("required Capability %q is invalid", requirement.capability)
+		}
+		if requirement.intrinsic {
+			if _, exists := selectionByCapability[requirement.capability]; exists {
+				return nil, fmt.Errorf("intrinsic Capability %s has an ordinary Provider selection", identifier)
+			}
+			values = append(values, SelectedProvider{
+				capability:     requirement.capability,
+				contractDigest: requirement.contractDigest,
+				providerSource: Source{
+					module: "github.com/plystra/kernel",
+					path:   intrinsicProviderPath(identifier),
+					kind:   "intrinsic-provider",
+					line:   1,
+					column: 1,
+				},
+				selectionReason: ProviderSelectionIntrinsic,
+			})
+			continue
+		}
+
+		selection, exists := selectionByCapability[requirement.capability]
+		if !exists {
+			return nil, fmt.Errorf("ordinary requirement %s has no Provider selection", identifier)
+		}
+		candidate, exists := candidateBySelection[requirement.capability+"\x00"+selection.PluginID()]
+		if !exists {
+			return nil, fmt.Errorf("selected Provider %s -> %q has no selected candidate record", identifier, selection.PluginID())
+		}
+		value := SelectedProvider{
+			capability:     requirement.capability,
+			pluginID:       candidate.pluginID,
+			projectModule:  candidate.projectModule,
+			contractDigest: requirement.contractDigest,
+			providerSource: candidate.source,
+		}
+		choiceSources := selection.ChoiceSources()
+		if !selection.Explicit() {
+			if len(choiceSources) != 0 {
+				return nil, fmt.Errorf("automatic Provider selection %s has explicit choice sources", identifier)
+			}
+			if candidateCounts[requirement.capability] != 1 {
+				return nil, fmt.Errorf("automatic Provider selection %s has %d visible candidates", identifier, candidateCounts[requirement.capability])
+			}
+			value.selectionReason = ProviderSelectionSoleProvider
+		} else {
+			if len(choiceSources) == 0 {
+				return nil, fmt.Errorf("explicit Provider selection %s has no typed source", identifier)
+			}
+			switch choiceSources[0].Kind {
+			case providerresolution.ChoiceSourceCurrentProject:
+				value.selectionReason = ProviderSelectionCurrentProject
+			case providerresolution.ChoiceSourceDependencyProject:
+				value.selectionReason = ProviderSelectionInherited
+			default:
+				return nil, fmt.Errorf("explicit Provider selection %s has invalid source kind %q", identifier, choiceSources[0].Kind)
+			}
+			value.selectionSources = make([]ProviderSelectionSource, 0, len(choiceSources))
+			for sourceIndex, choiceSource := range choiceSources {
+				project, exists := moduleByPath[choiceSource.ModulePath]
+				if !exists {
+					return nil, fmt.Errorf("provider selection %s source %d belongs to nonparticipating Project %q", identifier, sourceIndex, choiceSource.ModulePath)
+				}
+				if choiceSource.Kind == providerresolution.ChoiceSourceCurrentProject && project.role != ModuleRoleCurrent {
+					return nil, fmt.Errorf("provider selection %s current-Project source belongs to dependency %q", identifier, choiceSource.ModulePath)
+				}
+				if choiceSource.Kind == providerresolution.ChoiceSourceDependencyProject && project.role != ModuleRoleDependency {
+					return nil, fmt.Errorf("provider selection %s dependency source belongs to current Project", identifier)
+				}
+				value.selectionSources = append(value.selectionSources, ProviderSelectionSource{
+					projectModule: choiceSource.ModulePath,
+					source: Source{
+						module: project.source.module,
+						path:   choiceSource.Path,
+						kind:   "provider-selection",
+						line:   choiceSource.Line,
+						column: choiceSource.Column,
+					},
+				})
+			}
+			sort.Slice(value.selectionSources, func(left, right int) bool {
+				return providerSelectionSourceKey(value.selectionSources[left]) < providerSelectionSourceKey(value.selectionSources[right])
+			})
+		}
+		values = append(values, value)
+	}
+	if err := validateSelectedProviders(values, modules, candidates, requirements); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+func validateSelectedProviders(values []SelectedProvider, modules []Module, candidates []ProviderCandidate, requirements []CapabilityRequirement) error {
+	if len(values) != len(requirements) {
+		return fmt.Errorf("selected Provider records %d do not match requirements %d", len(values), len(requirements))
+	}
+	moduleByPath := make(map[string]Module, len(modules))
+	for _, project := range modules {
+		moduleByPath[project.path] = project
+	}
+	requirementByCapability := make(map[string]CapabilityRequirement, len(requirements))
+	for _, requirement := range requirements {
+		requirementByCapability[requirement.capability] = requirement
+	}
+	candidatesByCapability := make(map[string][]ProviderCandidate)
+	selectedCandidateByKey := make(map[string]ProviderCandidate)
+	for _, candidate := range candidates {
+		candidatesByCapability[candidate.capability] = append(candidatesByCapability[candidate.capability], candidate)
+		if !candidate.Rejected() {
+			selectedCandidateByKey[candidate.capability+"\x00"+candidate.pluginID] = candidate
+		}
+	}
+	seen := make(map[string]struct{}, len(values))
+	ordinarySelections := 0
+	for index, value := range values {
+		identifier, err := capabilityid.Parse(value.capability)
+		if err != nil {
+			return fmt.Errorf("selected_providers[%d].capability %q is invalid", index, value.capability)
+		}
+		if _, duplicate := seen[value.capability]; duplicate {
+			return fmt.Errorf("selected_providers[%d].capability duplicates %s", index, identifier)
+		}
+		if index > 0 && values[index-1].capability >= value.capability {
+			return fmt.Errorf("selected Providers are not in unique canonical order at %s", identifier)
+		}
+		requirement, exists := requirementByCapability[value.capability]
+		if !exists || requirement.contractDigest != value.contractDigest {
+			return fmt.Errorf("selected_providers[%d] does not match its canonical requirement", index)
+		}
+		seen[value.capability] = struct{}{}
+		if value.selectionReason == ProviderSelectionIntrinsic {
+			if !requirement.intrinsic || value.pluginID != "" || value.projectModule != "" || len(value.selectionSources) != 0 {
+				return fmt.Errorf("selected_providers[%d] is an inconsistent intrinsic implementation", index)
+			}
+			expected := Source{module: "github.com/plystra/kernel", path: intrinsicProviderPath(identifier), kind: "intrinsic-provider", line: 1, column: 1}
+			if value.providerSource != expected || len(candidatesByCapability[value.capability]) != 0 {
+				return fmt.Errorf("selected_providers[%d] has invalid intrinsic Kernel provenance", index)
+			}
+			continue
+		}
+		if requirement.intrinsic {
+			return fmt.Errorf("selected_providers[%d] selects an ordinary Provider for intrinsic %s", index, identifier)
+		}
+		if err := pluginid.Validate(value.pluginID); err != nil {
+			return fmt.Errorf("selected_providers[%d].plugin_id %q is invalid", index, value.pluginID)
+		}
+		if _, exists := moduleByPath[value.projectModule]; !exists {
+			return fmt.Errorf("selected_providers[%d].project_module %q is not participating", index, value.projectModule)
+		}
+		candidate, exists := selectedCandidateByKey[value.capability+"\x00"+value.pluginID]
+		if !exists || candidate.projectModule != value.projectModule || candidate.contractDigest != value.contractDigest || candidate.source != value.providerSource {
+			return fmt.Errorf("selected_providers[%d] does not match its selected Provider candidate", index)
+		}
+		ordinarySelections++
+		switch value.selectionReason {
+		case ProviderSelectionSoleProvider:
+			if len(value.selectionSources) != 0 || len(candidatesByCapability[value.capability]) != 1 {
+				return fmt.Errorf("selected_providers[%d] has an invalid sole-provider reason", index)
+			}
+		case ProviderSelectionCurrentProject:
+			if len(value.selectionSources) != 1 {
+				return fmt.Errorf("selected_providers[%d] current-project replacement requires one source", index)
+			}
+		case ProviderSelectionInherited:
+			if len(value.selectionSources) == 0 {
+				return fmt.Errorf("selected_providers[%d] inherited selection requires sources", index)
+			}
+		default:
+			return fmt.Errorf("selected_providers[%d].selection_reason %q is invalid", index, value.selectionReason)
+		}
+		for sourceIndex, selectionSource := range value.selectionSources {
+			sourceProject, exists := moduleByPath[selectionSource.projectModule]
+			if !exists || sourceProject.source.module != selectionSource.source.module || selectionSource.source.kind != "provider-selection" || selectionSource.source.path == "" || path.IsAbs(selectionSource.source.path) || path.Clean(selectionSource.source.path) != selectionSource.source.path || selectionSource.source.path == "." || selectionSource.source.path == ".." || strings.HasPrefix(selectionSource.source.path, "../") || strings.Contains(selectionSource.source.path, "/../") || strings.Contains(selectionSource.source.path, "\\") || selectionSource.source.line < 1 || selectionSource.source.column < 1 {
+				return fmt.Errorf("selected_providers[%d].selection_sources[%d] is invalid", index, sourceIndex)
+			}
+			if value.selectionReason == ProviderSelectionCurrentProject && sourceProject.role != ModuleRoleCurrent {
+				return fmt.Errorf("selected_providers[%d] current-project source belongs to a dependency", index)
+			}
+			if value.selectionReason == ProviderSelectionInherited && sourceProject.role != ModuleRoleDependency {
+				return fmt.Errorf("selected_providers[%d] inherited source belongs to the current Project", index)
+			}
+			if sourceIndex > 0 && providerSelectionSourceKey(value.selectionSources[sourceIndex-1]) >= providerSelectionSourceKey(selectionSource) {
+				return fmt.Errorf("selected_providers[%d].selection_sources are not in unique canonical order", index)
+			}
+		}
+	}
+	if len(seen) != len(requirementByCapability) {
+		return errors.New("selected Provider records omit one or more requirements")
+	}
+	if ordinarySelections != len(selectedCandidateByKey) {
+		return fmt.Errorf("ordinary selected Provider records %d do not match selected candidates %d", ordinarySelections, len(selectedCandidateByKey))
+	}
+	return nil
+}
+
+func intrinsicProviderPath(identifier capabilityid.Identifier) string {
+	return path.Join("capability", "catalog", "definitions", identifier.Name(), "v"+strconv.FormatUint(identifier.Major(), 10), "capability.yaml")
+}
+
+func providerSelectionSourceKey(value ProviderSelectionSource) string {
+	return strings.Join([]string{
+		value.projectModule,
+		value.source.module,
+		value.source.path,
+		fmt.Sprintf("%010d", value.source.line),
+		fmt.Sprintf("%010d", value.source.column),
+	}, "\x00")
 }
 
 func providerCapabilityPath(pluginPath string, identifier capabilityid.Identifier) string {
