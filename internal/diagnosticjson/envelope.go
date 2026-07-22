@@ -65,11 +65,10 @@ type Source struct {
 }
 
 // Input is the construction-only form of one shared envelope. Result must be
-// one JSON object belonging to the schema named by Schema and SchemaVersion.
-// An omitted Result is normalized to an empty object.
+// one JSON object belonging to the command-owned Schema descriptor. An omitted
+// Result is normalized to an empty object.
 type Input struct {
-	Schema                 string
-	SchemaVersion          uint32
+	Schema                 Schema
 	ConfigurationMode      generation.ConfigurationMode
 	ApplicationModelDigest string
 	Diagnostics            []Diagnostic
@@ -79,8 +78,7 @@ type Input struct {
 
 // Envelope is an immutable, bounded, deterministic shared diagnostic result.
 type Envelope struct {
-	schema                 string
-	schemaVersion          uint32
+	schema                 Schema
 	configurationMode      generation.ConfigurationMode
 	applicationModelDigest string
 	diagnostics            []Diagnostic
@@ -132,7 +130,7 @@ func New(input Input) (Envelope, error) {
 	if err != nil {
 		return Envelope{}, fmt.Errorf("%w: result: %v", ErrInvalid, err)
 	}
-	canonical, err := encode(input.Schema, input.SchemaVersion, input.ConfigurationMode, input.ApplicationModelDigest, diagnostics, sources, result)
+	canonical, err := encode(input.Schema, input.ConfigurationMode, input.ApplicationModelDigest, diagnostics, sources, result)
 	if err != nil {
 		return Envelope{}, fmt.Errorf("%w: encode: %v", ErrInvalid, err)
 	}
@@ -141,7 +139,6 @@ func New(input Input) (Envelope, error) {
 	}
 	return Envelope{
 		schema:                 input.Schema,
-		schemaVersion:          input.SchemaVersion,
 		configurationMode:      input.ConfigurationMode,
 		applicationModelDigest: input.ApplicationModelDigest,
 		diagnostics:            diagnostics,
@@ -160,7 +157,6 @@ func (e Envelope) Valid() bool {
 	}
 	input := Input{
 		Schema:                 e.schema,
-		SchemaVersion:          e.schemaVersion,
 		ConfigurationMode:      e.configurationMode,
 		ApplicationModelDigest: e.applicationModelDigest,
 		Diagnostics:            e.Diagnostics(),
@@ -182,15 +178,15 @@ func (e Envelope) Valid() bool {
 	if err != nil || !bytes.Equal(e.resultJSON, result) {
 		return false
 	}
-	canonical, err := encode(e.schema, e.schemaVersion, e.configurationMode, e.applicationModelDigest, diagnostics, sources, result)
+	canonical, err := encode(e.schema, e.configurationMode, e.applicationModelDigest, diagnostics, sources, result)
 	return err == nil && bytes.Equal(e.canonicalJSON, canonical) && e.digest == digest(canonical)
 }
 
-// Schema returns the command-specific schema identity without its version.
-func (e Envelope) Schema() string { return e.schema }
+// Schema returns the immutable command-owned schema descriptor.
+func (e Envelope) Schema() Schema { return e.schema }
 
 // SchemaVersion returns the command-specific schema version.
-func (e Envelope) SchemaVersion() uint32 { return e.schemaVersion }
+func (e Envelope) SchemaVersion() uint32 { return e.schema.Version() }
 
 // ConfigurationMode returns default, environment, or explicit-config.
 func (e Envelope) ConfigurationMode() generation.ConfigurationMode {
@@ -223,11 +219,8 @@ func (e Envelope) CanonicalJSON() []byte {
 func (e Envelope) Digest() string { return e.digest }
 
 func validateIdentity(input Input) error {
-	if !validSchema(input.Schema) {
-		return fmt.Errorf("schema %q is not a stable plystra lower-kebab identity", input.Schema)
-	}
-	if input.SchemaVersion == 0 || input.SchemaVersion > math.MaxInt32 {
-		return errors.New("schema version must be between 1 and 2147483647")
+	if !input.Schema.Valid() {
+		return errors.New("schema descriptor is not valid")
 	}
 	switch input.ConfigurationMode {
 	case generation.ConfigurationModeDefault, generation.ConfigurationModeEnvironment, generation.ConfigurationModeExplicit:
@@ -419,7 +412,7 @@ func normalizeJSONNumber(number json.Number) (any, error) {
 	return value, nil
 }
 
-func encode(schema string, schemaVersion uint32, mode generation.ConfigurationMode, applicationModelDigest string, diagnostics []Diagnostic, sources []Source, result []byte) ([]byte, error) {
+func encode(schema Schema, mode generation.ConfigurationMode, applicationModelDigest string, diagnostics []Diagnostic, sources []Source, result []byte) ([]byte, error) {
 	canonicalDiagnostics := make([]canonicalDiagnostic, len(diagnostics))
 	for index, diagnostic := range diagnostics {
 		canonicalDiagnostics[index] = canonicalDiagnostic(diagnostic)
@@ -429,30 +422,14 @@ func encode(schema string, schemaVersion uint32, mode generation.ConfigurationMo
 		canonicalSources[index] = canonicalSource(source)
 	}
 	return json.Marshal(canonicalEnvelope{
-		Schema:                 schema,
-		SchemaVersion:          schemaVersion,
+		Schema:                 schema.Name(),
+		SchemaVersion:          schema.Version(),
 		ConfigurationMode:      mode,
 		ApplicationModelDigest: applicationModelDigest,
 		Diagnostics:            canonicalDiagnostics,
 		Sources:                canonicalSources,
 		Result:                 json.RawMessage(result),
 	})
-}
-
-func validSchema(value string) bool {
-	if len(value) > 256 || !strings.HasPrefix(value, "plystra.") {
-		return false
-	}
-	segments := strings.Split(value, ".")
-	if len(segments) < 2 {
-		return false
-	}
-	for _, segment := range segments {
-		if !validLowerKebab(segment, 128) {
-			return false
-		}
-	}
-	return true
 }
 
 func validDiagnosticCode(value string) bool {

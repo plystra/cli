@@ -39,7 +39,7 @@ func TestEnvelopeDefinesRequiredCanonicalShape(t *testing.T) {
 	if got := string(first.CanonicalJSON()); got != want || !json.Valid([]byte(got)) {
 		t.Fatalf("CanonicalJSON = %s\nwant          = %s", got, want)
 	}
-	if first.Schema() != input.Schema || first.SchemaVersion() != input.SchemaVersion || first.ConfigurationMode() != input.ConfigurationMode || first.ApplicationModelDigest() != input.ApplicationModelDigest || string(first.ResultJSON()) != `{"a":1,"array":[3,2],"nested":{"a":0,"z":true},"z":1}` || !strings.HasPrefix(first.Digest(), "sha256:") || len(first.Digest()) != 71 {
+	if first.Schema() != input.Schema || first.SchemaVersion() != input.Schema.Version() || first.ConfigurationMode() != input.ConfigurationMode || first.ApplicationModelDigest() != input.ApplicationModelDigest || string(first.ResultJSON()) != `{"a":1,"array":[3,2],"nested":{"a":0,"z":true},"z":1}` || !strings.HasPrefix(first.Digest(), "sha256:") || len(first.Digest()) != 71 {
 		t.Fatalf("accessors do not preserve canonical identity: %#v", first)
 	}
 
@@ -96,11 +96,7 @@ func TestEnvelopeRejectsInvalidIdentity(t *testing.T) {
 		want   string
 	}{
 		{name: "empty", mutate: func(input *diagnosticjson.Input) { *input = diagnosticjson.Input{} }, want: "schema"},
-		{name: "foreign schema", mutate: func(input *diagnosticjson.Input) { input.Schema = "acme.inspect" }, want: "schema"},
-		{name: "schema embeds version", mutate: func(input *diagnosticjson.Input) { input.Schema = "plystra.inspect/v1" }, want: "schema"},
-		{name: "noncanonical schema", mutate: func(input *diagnosticjson.Input) { input.Schema = "plystra.Inspect" }, want: "schema"},
-		{name: "zero version", mutate: func(input *diagnosticjson.Input) { input.SchemaVersion = 0 }, want: "schema version"},
-		{name: "excessive version", mutate: func(input *diagnosticjson.Input) { input.SchemaVersion = 1 << 31 }, want: "schema version"},
+		{name: "zero schema", mutate: func(input *diagnosticjson.Input) { input.Schema = diagnosticjson.Schema{} }, want: "schema"},
 		{name: "unsupported mode", mutate: func(input *diagnosticjson.Input) { input.ConfigurationMode = "profile" }, want: "configuration mode"},
 		{name: "missing digest", mutate: func(input *diagnosticjson.Input) { input.ApplicationModelDigest = "" }, want: "application-model digest"},
 		{name: "uppercase digest", mutate: func(input *diagnosticjson.Input) { input.ApplicationModelDigest = "sha256:" + strings.Repeat("A", 64) }, want: "application-model digest"},
@@ -262,9 +258,12 @@ func TestEnvelopeOwnsAllMutableInputAndOutputStorage(t *testing.T) {
 }
 
 func validInput() diagnosticjson.Input {
+	schema, err := diagnosticjson.NewSchema("plystra.inspect", 1)
+	if err != nil {
+		panic(err)
+	}
 	return diagnosticjson.Input{
-		Schema:                 "plystra.inspect",
-		SchemaVersion:          1,
+		Schema:                 schema,
 		ConfigurationMode:      generation.ConfigurationModeDefault,
 		ApplicationModelDigest: testDigest("a"),
 	}
