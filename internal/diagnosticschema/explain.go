@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -263,7 +262,7 @@ func (r ExplainResult) Valid() bool {
 		allSources = append(allSources, *changeSource)
 	}
 	allSources = append(allSources, r.envelope.Sources()...)
-	allSources = deduplicateExplainSources(allSources)
+	allSources = deduplicateDiagnosticSources(allSources)
 	primarySources, err := normalizeExplainSources(selection.Mode(), r.evidence.BuildModelDigest(), r.primarySources)
 	if err != nil || len(primarySources) == 0 || !equalDiagnosticSources(primarySources, r.primarySources) {
 		return false
@@ -426,36 +425,7 @@ func normalizeExplainChange(input ExplainChange, currentModule string, mode gene
 }
 
 func normalizeExplainSources(mode generation.ConfigurationMode, digest string, values []diagnosticjson.Source) ([]diagnosticjson.Source, error) {
-	values = deduplicateExplainSources(values)
-	envelope, err := diagnosticjson.New(diagnosticjson.Input{
-		Schema:                 explainSchemaV1,
-		ConfigurationMode:      mode,
-		ApplicationModelDigest: digest,
-		Sources:                values,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return envelope.Sources(), nil
-}
-
-func deduplicateExplainSources(values []diagnosticjson.Source) []diagnosticjson.Source {
-	unique := make(map[diagnosticjson.Source]struct{}, len(values))
-	for _, source := range values {
-		unique[source] = struct{}{}
-	}
-	result := make([]diagnosticjson.Source, 0, len(unique))
-	for source := range unique {
-		result = append(result, source)
-	}
-	sort.Slice(result, func(left, right int) bool {
-		return explainSourceKey(result[left]) < explainSourceKey(result[right])
-	})
-	return result
-}
-
-func explainSourceKey(source diagnosticjson.Source) string {
-	return fmt.Sprintf("%s\x00%s\x00%s\x00%010d\x00%010d", source.Module, source.Path, source.Kind, source.Line, source.Column)
+	return normalizeSchemaSources(explainSchemaV1, mode, digest, values)
 }
 
 func explainSources(values []diagnosticjson.Source) []explainSource {
@@ -470,18 +440,6 @@ func explainSources(values []diagnosticjson.Source) []explainSource {
 		}
 	}
 	return result
-}
-
-func equalDiagnosticSources(left, right []diagnosticjson.Source) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for index := range left {
-		if left[index] != right[index] {
-			return false
-		}
-	}
-	return true
 }
 
 func encodeExplainDocument(document explainDocument) ([]byte, error) {

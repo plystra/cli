@@ -375,36 +375,7 @@ func hasWindowsDrivePrefix(value string) bool {
 }
 
 func normalizeGraphSources(mode generation.ConfigurationMode, digest string, values []diagnosticjson.Source) ([]diagnosticjson.Source, error) {
-	values = deduplicateGraphSources(values)
-	envelope, err := diagnosticjson.New(diagnosticjson.Input{
-		Schema:                 graphSchemaV1,
-		ConfigurationMode:      mode,
-		ApplicationModelDigest: digest,
-		Sources:                values,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return envelope.Sources(), nil
-}
-
-func deduplicateGraphSources(values []diagnosticjson.Source) []diagnosticjson.Source {
-	unique := make(map[diagnosticjson.Source]struct{}, len(values))
-	for _, source := range values {
-		unique[source] = struct{}{}
-	}
-	result := make([]diagnosticjson.Source, 0, len(unique))
-	for source := range unique {
-		result = append(result, source)
-	}
-	sort.Slice(result, func(left, right int) bool {
-		return graphSourceKey(result[left]) < graphSourceKey(result[right])
-	})
-	return result
-}
-
-func graphSourceKey(source diagnosticjson.Source) string {
-	return fmt.Sprintf("%s\x00%s\x00%s\x00%010d\x00%010d", source.Module, source.Path, source.Kind, source.Line, source.Column)
+	return normalizeSchemaSources(graphSchemaV1, mode, digest, values)
 }
 
 func graphEdgeSemanticKey(edge GraphEdge) string {
