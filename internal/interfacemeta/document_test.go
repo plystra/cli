@@ -40,6 +40,9 @@ func TestParseFileAcceptsEmptyMapping(t *testing.T) {
 	if semantics, present := document.Semantics(); present || semantics.Kind() != "" {
 		t.Fatalf("absent semantics = %#v, %t", semantics, present)
 	}
+	if deprecation, present := document.Deprecation(); present || deprecation.Message() != "" {
+		t.Fatalf("absent deprecation = %#v, %t", deprecation, present)
+	}
 }
 
 func TestParseFileAcceptsOnlyNonDuplicatedMetadataFields(t *testing.T) {
@@ -71,6 +74,10 @@ conformance:
 	semantics, present := document.Semantics()
 	if !present || semantics.Kind() != interfacemeta.OperationKindCommand {
 		t.Fatalf("semantics = %#v, %t", semantics, present)
+	}
+	deprecation, present := document.Deprecation()
+	if !present || deprecation.Message() != "use order.submit/v1" {
+		t.Fatalf("deprecation = %#v, %t", deprecation, present)
 	}
 }
 
@@ -304,7 +311,7 @@ func TestParseFileRejectsOversizedDocument(t *testing.T) {
 }
 
 func FuzzParseFile(f *testing.F) {
-	for _, seed := range []string{"{}\n", "description: value\n", "semantics: {kind: query}\n", "semantics: {kind: command}\n", "semantics: {kind: event}\n", "errors: [{code: invalid_value}]\n", "errors: [invalid_value]\n", "examples: [{name: accepted, request: {}, response: {}}]\n", "errors: [{code: rejected}]\nexamples: [{name: rejected, request: {}, error: rejected}]\n", "[\n", "---\n{}\n---\n{}\n", "description: &value text\ncopy: *value\n"} {
+	for _, seed := range []string{"{}\n", "description: value\n", "semantics: {kind: query}\n", "semantics: {kind: command}\n", "semantics: {kind: event}\n", "errors: [{code: invalid_value}]\n", "errors: [invalid_value]\n", "examples: [{name: accepted, request: {}, response: {}}]\n", "errors: [{code: rejected}]\nexamples: [{name: rejected, request: {}, error: rejected}]\n", "deprecation: {message: obsolete}\n", "deprecation: {message: obsolete, replacement: order.create/v2, since: next-release}\n", "[\n", "---\n{}\n---\n{}\n", "description: &value text\ncopy: *value\n"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, data string) {

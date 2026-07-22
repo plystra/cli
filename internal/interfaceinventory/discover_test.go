@@ -257,7 +257,8 @@ func TestDiscoverLoadsOptionalColocatedMetadataWithStableProvenance(t *testing.T
 	dependencyRoot := filepath.Join(root, "dependency")
 	writeProject(t, dependencyRoot, "example.com/dependency")
 	writeFile(t, filepath.Join(dependencyRoot, "api", "interface.go"), interfaceSource("api", "dependency.records.list/v1", "List"))
-	dependencyMetadata := "description: Lists dependency records.\nsemantics:\n  kind: query\nerrors:\n  - code: dependency_unavailable\nconstraints:\n  request.value: {min_length: 1}\nexamples:\n  - name: unavailable\n    request: {value: missing}\n    error: dependency_unavailable\n"
+	writeFile(t, filepath.Join(dependencyRoot, "api-v2", "interface.go"), interfaceSource("apiv2", "dependency.records.list/v2", "List"))
+	dependencyMetadata := "description: Lists dependency records.\nsemantics:\n  kind: query\nerrors:\n  - code: dependency_unavailable\nconstraints:\n  request.value: {min_length: 1}\nexamples:\n  - name: unavailable\n    request: {value: missing}\n    error: dependency_unavailable\ndeprecation:\n  message: Use dependency.records.list/v2.\n  replacement: dependency.records.list/v2\n  since: v1.2.3\n"
 	writeFile(t, filepath.Join(dependencyRoot, "api", interfacemeta.Name), dependencyMetadata)
 
 	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
@@ -270,7 +271,7 @@ replace example.com/dependency => ../dependency
 `)
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
 	writeFile(t, filepath.Join(appRoot, "interfaces", "local", "interface.go"), interfaceSource("local", "local.records.list/v1", "List"))
-	localMetadata := "# local metadata\ndescription: Lists local records.\nsemantics:\n  kind: command\nerrors:\n  - code: records_unavailable\n  - code: invalid_filter\n    description: The filter is invalid.\nconstraints:\n  response.accepted: {}\n  request.value: {min_length: 1}\nexamples:\n  - name: accepted\n    request: {value: all}\n    response: {accepted: true}\n  - name: invalid-filter\n    request: {value: invalid}\n    error: invalid_filter\n"
+	localMetadata := "# local metadata\ndescription: Lists local records.\nsemantics:\n  kind: command\nerrors:\n  - code: records_unavailable\n  - code: invalid_filter\n    description: The filter is invalid.\nconstraints:\n  response.accepted: {}\n  request.value: {min_length: 1}\nexamples:\n  - name: accepted\n    request: {value: all}\n    response: {accepted: true}\n  - name: invalid-filter\n    request: {value: invalid}\n    error: invalid_filter\ndeprecation:\n  message: Use local.records.get/v1.\n  replacement: local.records.get/v1\n  since: next-release\n"
 	writeFile(t, filepath.Join(appRoot, "interfaces", "local", interfacemeta.Name), localMetadata)
 	writeFile(t, filepath.Join(appRoot, "interfaces", "plain", "interface.go"), interfaceSource("plain", "local.records.get/v1", "Get"))
 	writeFile(t, filepath.Join(appRoot, "interfaces", "described", "interface.go"), interfaceSource("described", "local.records.describe/v1", "Describe"))
@@ -317,6 +318,16 @@ replace example.com/dependency => ../dependency
 	if code, present := localExamples[1].ErrorCode(); !present || code != "invalid_filter" {
 		t.Fatalf("local semantic-error example = %q, %t", code, present)
 	}
+	localDeprecation, present := byID["local.records.list/v1"].Deprecation()
+	if !present || localDeprecation.Message() != "Use local.records.get/v1." {
+		t.Fatalf("local deprecation = %#v, %t", inventoryDeprecationSummary(localDeprecation), present)
+	}
+	if replacement, exists := localDeprecation.Replacement(); !exists || replacement.String() != "local.records.get/v1" {
+		t.Fatalf("local replacement = %q, %t", replacement.String(), exists)
+	}
+	if since, exists := localDeprecation.Since(); !exists || since != "next-release" {
+		t.Fatalf("local deprecation since = %q, %t", since, exists)
+	}
 	dependency, present := byID["dependency.records.list/v1"].Metadata()
 	if !present || dependency.Path() != "api/interface.yaml" || string(dependency.Data()) != dependencyMetadata || byID["dependency.records.list/v1"].MetadataSource() != "example.com/dependency@v1.2.3/api/interface.yaml" {
 		t.Fatalf("dependency metadata = %#v, %t, source %q", dependency, present, byID["dependency.records.list/v1"].MetadataSource())
@@ -343,6 +354,13 @@ replace example.com/dependency => ../dependency
 	if code, present := dependencyExamples[0].ErrorCode(); !present || code != "dependency_unavailable" {
 		t.Fatalf("dependency semantic-error example = %q, %t", code, present)
 	}
+	dependencyDeprecation, present := byID["dependency.records.list/v1"].Deprecation()
+	if !present || dependencyDeprecation.Message() != "Use dependency.records.list/v2." {
+		t.Fatalf("dependency deprecation = %#v, %t", inventoryDeprecationSummary(dependencyDeprecation), present)
+	}
+	if replacement, exists := dependencyDeprecation.Replacement(); !exists || replacement.String() != "dependency.records.list/v2" {
+		t.Fatalf("dependency replacement = %q, %t", replacement.String(), exists)
+	}
 	if metadata, present := byID["local.records.get/v1"].Metadata(); present || metadata.Path() != "" || len(metadata.Data()) != 0 || byID["local.records.get/v1"].MetadataSource() != "" {
 		t.Fatalf("absent metadata = %#v, %t", metadata, present)
 	}
@@ -364,6 +382,9 @@ replace example.com/dependency => ../dependency
 	}
 	if examples := byID["local.records.describe/v1"].Examples(); len(examples) != 0 {
 		t.Fatalf("description-only examples = %#v", examples)
+	}
+	if deprecation, present := byID["local.records.describe/v1"].Deprecation(); present || deprecation.Message() != "" {
+		t.Fatalf("description-only deprecation = %#v, %t", deprecation, present)
 	}
 	localErrors[0] = interfacemeta.SemanticError{}
 	if byID["local.records.list/v1"].SemanticErrors()[0].Code() != "invalid_filter" {
@@ -424,6 +445,10 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 		{name: "invalid example schema", data: "examples:\n  - name: invalid\n    request: {value: valid}\n", wantError: interfacemeta.ErrInvalidExamples, location: "interfaces/records/interface.yaml:2:5", want: "exactly one of response or error"},
 		{name: "invalid example type", data: "examples:\n  - name: invalid\n    request: {value: true}\n    response: {accepted: true}\n", wantError: interfacemeta.ErrInvalidExamples, location: "interfaces/records/interface.yaml:3:22", want: "canonical string value"},
 		{name: "example constraint violation", data: "constraints:\n  request.value: {min_length: 2}\nexamples:\n  - name: invalid\n    request: {value: x}\n    response: {accepted: true}\n", wantError: interfacemeta.ErrInvalidExamples, location: "interfaces/records/interface.yaml:5:22", want: "violates min_length"},
+		{name: "invalid deprecation shape", data: "deprecation: []\n", wantError: interfacemeta.ErrInvalidDeprecation, location: "interfaces/records/interface.yaml:1:14", want: "deprecation must be a mapping"},
+		{name: "invalid deprecation field", data: "deprecation:\n  message: obsolete\n  remove_after: v2\n", wantError: interfacemeta.ErrInvalidDeprecation, location: "interfaces/records/interface.yaml:3:3", want: "deprecation.remove_after"},
+		{name: "self deprecation replacement", data: "deprecation:\n  message: obsolete\n  replacement: records.invalid.list/v1\n", wantError: interfacemeta.ErrInvalidDeprecation, location: "interfaces/records/interface.yaml:3:16", want: "must differ from the deprecated Interface"},
+		{name: "invisible deprecation replacement", data: "deprecation:\n  message: obsolete\n  replacement: records.invalid.list/v2\n", wantError: interfacemeta.ErrInvalidDeprecation, location: "interfaces/records/interface.yaml:3:16", want: "is not a visible Interface"},
 		{name: "directory", directory: true, want: "regular non-symbolic file"},
 		{name: "oversized", data: strings.Repeat("x", interfacemeta.MaximumSize+1), want: "exceeds"},
 	}
@@ -653,6 +678,7 @@ type interfaceSummary struct {
 	ErrorCodes      []string
 	ConstraintPaths []string
 	Examples        []string
+	Deprecation     []string
 }
 
 func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
@@ -673,6 +699,7 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 			constraintPaths[index] = inventoryConstraintSummary(target)
 		}
 		examples := inventoryExampleSummary(discovered.Examples())
+		deprecation, _ := discovered.Deprecation()
 		result[position] = interfaceSummary{
 			ID:              discovered.ID(),
 			ModulePath:      discovered.ModulePath(),
@@ -692,9 +719,16 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 			ErrorCodes:      errorCodes,
 			ConstraintPaths: constraintPaths,
 			Examples:        examples,
+			Deprecation:     inventoryDeprecationSummary(deprecation),
 		}
 	}
 	return result
+}
+
+func inventoryDeprecationSummary(deprecation interfacemeta.Deprecation) []string {
+	replacement, hasReplacement := deprecation.Replacement()
+	since, hasSince := deprecation.Since()
+	return []string{deprecation.Message(), replacement.String(), fmt.Sprintf("%t", hasReplacement), since, fmt.Sprintf("%t", hasSince)}
 }
 
 func inventoryExampleSummary(examples []interfacemeta.Example) []string {

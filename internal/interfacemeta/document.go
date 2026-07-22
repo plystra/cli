@@ -77,6 +77,8 @@ type Document struct {
 	errors          []SemanticError
 	constraintPaths []constraintPathDeclaration
 	examples        []exampleDeclaration
+	deprecation     deprecationDeclaration
+	hasDeprecation  bool
 }
 
 // Path returns the stable slash-separated module-relative source path.
@@ -84,6 +86,12 @@ func (d Document) Path() string { return d.path }
 
 // Data returns a defensive copy of the exact authored YAML bytes.
 func (d Document) Data() []byte { return append([]byte(nil), d.data...) }
+
+// Deprecation returns the optional normalized lifecycle documentation. A
+// replacement is validated against visible Interfaces during discovery.
+func (d Document) Deprecation() (Deprecation, bool) {
+	return d.deprecation.value, d.hasDeprecation
+}
 
 // Semantics returns the optional normalized operation semantics.
 func (d Document) Semantics() (Semantics, bool) {
@@ -153,6 +161,10 @@ func ParseFile(sourcePath string, data []byte) (Document, error) {
 	if err != nil {
 		return Document{}, err
 	}
+	deprecation, hasDeprecation, err := normalizeDeprecation(sourcePath, root)
+	if err != nil {
+		return Document{}, err
+	}
 	return Document{
 		path:            sourcePath,
 		data:            append([]byte(nil), data...),
@@ -161,6 +173,8 @@ func ParseFile(sourcePath string, data []byte) (Document, error) {
 		errors:          semanticErrors,
 		constraintPaths: constraintPaths,
 		examples:        examples,
+		deprecation:     deprecation,
+		hasDeprecation:  hasDeprecation,
 	}, nil
 }
 

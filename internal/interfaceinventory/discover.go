@@ -54,17 +54,19 @@ type Options struct {
 // Interface is one parsed and type-checked Interface declaration with stable
 // public module, package, and source provenance.
 type Interface struct {
-	modulePath    string
-	moduleVersion string
-	packagePath   string
-	sourcePath    string
-	local         bool
-	declaration   interfacedecl.Declaration
-	contract      interfacecontract.Contract
-	metadata      interfacemeta.Document
-	hasMetadata   bool
-	constraints   []interfacemeta.ConstraintTarget
-	examples      []interfacemeta.Example
+	modulePath     string
+	moduleVersion  string
+	packagePath    string
+	sourcePath     string
+	local          bool
+	declaration    interfacedecl.Declaration
+	contract       interfacecontract.Contract
+	metadata       interfacemeta.Document
+	hasMetadata    bool
+	constraints    []interfacemeta.ConstraintTarget
+	examples       []interfacemeta.Example
+	deprecation    interfacemeta.Deprecation
+	hasDeprecation bool
 }
 
 // ID returns the exact canonical Interface ID.
@@ -136,6 +138,12 @@ func (i Interface) ConstraintTargets() []interfacemeta.ConstraintTarget {
 // semantic-error examples validated against the canonical Go contract.
 func (i Interface) Examples() []interfacemeta.Example {
 	return append([]interfacemeta.Example(nil), i.examples...)
+}
+
+// Deprecation returns optional lifecycle documentation whose replacement, if
+// present, has been validated against the complete visible Interface inventory.
+func (i Interface) Deprecation() (interfacemeta.Deprecation, bool) {
+	return i.deprecation, i.hasDeprecation
 }
 
 // MetadataSource returns stable module-qualified metadata provenance, or an
@@ -224,6 +232,22 @@ func Discover(ctx context.Context, application modulelocate.Module, dependencies
 		}
 		return leftPosition.Column < rightPosition.Column
 	})
+	visibleIDs := make(map[string]struct{}, len(interfaces))
+	for index := range interfaces {
+		visibleIDs[interfaces[index].ID()] = struct{}{}
+	}
+	for index := range interfaces {
+		deprecation, present, err := interfacemeta.ResolveDeprecation(interfaces[index].metadata, interfaces[index].contract, visibleIDs)
+		if err != nil {
+			version := interfaces[index].moduleVersion
+			if version == "" {
+				version = "local"
+			}
+			return Index{}, fmt.Errorf("%w: inspect %s@%s: package %s: %w", ErrDiscover, interfaces[index].modulePath, version, interfaces[index].packagePath, err)
+		}
+		interfaces[index].deprecation = deprecation
+		interfaces[index].hasDeprecation = present
+	}
 	return Index{interfaces: interfaces}, nil
 }
 
