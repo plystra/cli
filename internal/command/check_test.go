@@ -52,7 +52,7 @@ replace github.com/plystra/kernel => %s
 	writeCommandFile(t, filepath.Join(root, "generated", "manifest.json"), "drift\n")
 	drifted := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"check"}, start, environment)
-	if exitCode != 1 || stdout != "" || stderr != "generated output is not current:\n  changed generated/manifest.json\n" {
+	if exitCode != 1 || stdout != "" || stderr != "generated output is not current:\n  changed generated/manifest.json\n\nRecovery:\nRun `plystra generate` to restore the selected generated output.\n" {
 		t.Fatalf("drifted check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, drifted) {

@@ -575,6 +575,15 @@ target. The result identifies the selected `http.expose`, Alias, or
 activation-Provider decision that changes the surface without exposing contract
 digests in concise output.
 
+Common actionable CLI failures append exactly one `Recovery:` block after the
+concise problem. Follow that one command or file edit before rerunning the
+operation. A recovery command preserves the selected default, `--env`, or
+`--config` mode, including a safe selector supplied through `PLYSTRA_ENV` or
+`PLYSTRA_CONFIG`. Unsafe and absolute selector values are replaced by
+`<environment>` or `<yaml-path>` placeholders instead of being copied into the
+advice. Unknown internal failures retain their original diagnostic without an
+invented recovery action.
+
 The current `plystra check` implementation is read-only. It verifies the
 selected dependency composition and generated fixed point, then runs
 `go test -mod=readonly ./...` from the Project root. Later roadmap gates add

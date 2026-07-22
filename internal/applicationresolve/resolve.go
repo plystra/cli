@@ -33,6 +33,9 @@ var (
 	// ErrManifest reports a missing, unsafe, unreadable, or invalid root
 	// plystra.yaml.
 	ErrManifest = errors.New("load application manifest")
+	// ErrConfigurationSelection reports an invalid, missing, unsafe, or
+	// conflicting current-project configuration selector or selected document.
+	ErrConfigurationSelection = errors.New("select current-project configuration")
 	// ErrUnsafeManifest reports a plystra.yaml that is symbolic or not a
 	// regular bounded file.
 	ErrUnsafeManifest = errors.New("unsafe application manifest")
@@ -164,7 +167,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	selector, err := resolveConfigurationSelector(module.Path(), options.ConfigurationPath, options.EnvironmentName, options.Environment)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: select current-project configuration: %w", ErrResolve, err)
+		return Result{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrConfigurationSelection, err)
 	}
 	configurationSnapshot := rootSnapshot
 	selectedManifest := rootManifest
@@ -175,7 +178,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 			configurationSnapshot, selectedManifest, err = loadConfiguration(module.Path(), selector.path)
 		}
 		if err != nil {
-			return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+			return Result{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrConfigurationSelection, err)
 		}
 	}
 	dependencies, err := moduledependency.Discover(ctx, module, moduledependency.Options{

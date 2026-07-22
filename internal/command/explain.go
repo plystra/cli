@@ -54,7 +54,7 @@ func runExplain(arguments []string, stdout, stderr io.Writer, workingDirectory s
 		Environment:       environment,
 	})
 	if err != nil {
-		_, _ = fmt.Fprintf(output.diagnosticWriter(), "explain selected application: %v\n", err)
+		writeCommandFailure(output.diagnosticWriter(), "explain selected application", err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
 		return 1
 	}
 
@@ -74,7 +74,7 @@ func runExplain(arguments []string, stdout, stderr io.Writer, workingDirectory s
 		err = fmt.Errorf("explanation subject kind %q is not implemented", parsed.subjectKind)
 	}
 	if err != nil {
-		_, _ = fmt.Fprintf(output.diagnosticWriter(), "explain %s %s: %v\n", parsed.subjectKind, parsed.subject, err)
+		writeCommandFailure(output.diagnosticWriter(), fmt.Sprintf("explain %s %s", parsed.subjectKind, parsed.subject), err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
 		return 1
 	}
 	if parsed.format == commandFormatJSON {

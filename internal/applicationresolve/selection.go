@@ -70,7 +70,7 @@ func (t ConfigurationTarget) EnvironmentOverlay() bool {
 func SelectConfigurationTarget(moduleRoot, explicitConfiguration, explicitEnvironment string, environment []string) (ConfigurationTarget, error) {
 	selector, err := resolveConfigurationSelector(moduleRoot, explicitConfiguration, explicitEnvironment, environment)
 	if err != nil {
-		return ConfigurationTarget{}, err
+		return ConfigurationTarget{}, fmt.Errorf("%w: %w", ErrConfigurationSelection, err)
 	}
 	var snapshot ManifestSnapshot
 	if selector.mode == configurationModeEnvironment {
@@ -79,7 +79,7 @@ func SelectConfigurationTarget(moduleRoot, explicitConfiguration, explicitEnviro
 		snapshot, _, err = loadConfiguration(moduleRoot, selector.path)
 	}
 	if err != nil {
-		return ConfigurationTarget{}, err
+		return ConfigurationTarget{}, fmt.Errorf("%w: %w", ErrConfigurationSelection, err)
 	}
 	digestFunction := applicationgen.ConfigurationDigest
 	if selector.mode == configurationModeEnvironment {
@@ -87,7 +87,7 @@ func SelectConfigurationTarget(moduleRoot, explicitConfiguration, explicitEnviro
 	}
 	digest, err := digestFunction(snapshot.Data())
 	if err != nil {
-		return ConfigurationTarget{}, fmt.Errorf("digest selected configuration %s: %w", selector.path, err)
+		return ConfigurationTarget{}, fmt.Errorf("%w: digest selected configuration %s: %w", ErrConfigurationSelection, selector.path, err)
 	}
 	return ConfigurationTarget{
 		selection: ConfigurationSelection{

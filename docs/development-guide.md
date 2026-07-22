@@ -1596,6 +1596,23 @@ error. An explicit `GOWORK` value is preserved.
 
 ## Common failures
 
+A common typed failure is rendered as one concise problem followed by exactly
+one primary action:
+
+```text
+<problem>
+
+Recovery:
+<one command or file edit>
+```
+
+Run that action with the same selected application model. Recovery commands
+retain default, environment, or complete-replacement mode, including selectors
+supplied through `PLYSTRA_ENV` or `PLYSTRA_CONFIG`. Unsafe or absolute selector
+input is replaced by `<environment>` or `<yaml-path>`; provide the intended safe
+Project-relative selection when rerunning. The CLI does not invent advice for
+an unclassified internal error.
+
 ### No provider or ambiguous provider
 
 Confirm the exact canonical ID is visible and provided by a local Plugin or a

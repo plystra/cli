@@ -47,6 +47,8 @@ Cross-origin browser access is opt-in. Add `http.cors.allowed_origins` to the se
 
 When several compatible Plugins provide one required Capability, select one with `plystra use <capability-name>/vN <plugin-id>`. Add `--env <environment>` to write only that sparse overlay or `--config <yaml-path>` to write only one complete replacement configuration; the command regenerates and validates with the same selection.
 
+Common actionable Plystra CLI failures end with exactly one `Recovery:` block. Follow that one command or file edit with the same default, `--env`, or `--config` selection. Recovery output preserves safe explicit and ambient selectors, but uses `<environment>` or `<yaml-path>` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice.
+
 Generated source under `generated/` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
 The generated JavaScript SDK exposes every canonical `integer` field, integer array item, and integer enum member as a signed 64-bit `bigint`. Use literals such as `42n` rather than JavaScript `number` values so requests and responses remain exact across the complete range.

@@ -43,7 +43,7 @@ func runInspect(arguments []string, stdout, stderr io.Writer, workingDirectory s
 		Environment:       environment,
 	})
 	if err != nil {
-		_, _ = fmt.Fprintf(output.diagnosticWriter(), "inspect selected application: %v\n", err)
+		writeCommandFailure(output.diagnosticWriter(), "inspect selected application", err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
 		return 1
 	}
 
@@ -52,7 +52,7 @@ func runInspect(arguments []string, stdout, stderr io.Writer, workingDirectory s
 		NextAction: inspectNextAction(resolved.ConfigurationSelection()),
 	})
 	if err != nil {
-		_, _ = fmt.Fprintf(output.diagnosticWriter(), "inspect selected application: %v\n", err)
+		writeCommandFailure(output.diagnosticWriter(), "inspect selected application", err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
 		return 1
 	}
 	if parsed.format == commandFormatJSON {

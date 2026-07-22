@@ -377,7 +377,7 @@ func TestResolveRequiresSelectedEnvironmentOverlay(t *testing.T) {
 		EnvironmentName: "production",
 		Environment:     goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
 	})
-	if err == nil || !strings.Contains(err.Error(), "plystra.production.yaml") {
+	if err == nil || !errors.Is(err, applicationresolve.ErrConfigurationSelection) || !strings.Contains(err.Error(), "plystra.production.yaml") {
 		t.Fatalf("Resolve missing environment overlay error = %v", err)
 	}
 }

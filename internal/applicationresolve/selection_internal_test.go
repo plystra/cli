@@ -2,6 +2,7 @@ package applicationresolve
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,6 +44,9 @@ func TestSelectConfigurationTargetUsesResolutionSelectorAndParserRules(t *testin
 	explicitTarget, err := SelectConfigurationTarget(root, "deploy/customer.yaml", "", []string{"PLYSTRA_ENV=ignored", "PLYSTRA_CONFIG=ignored.yaml", "PLYSTRA_CONFIG=duplicate.yaml"})
 	if err != nil || explicitTarget.Selection().Mode() != configurationModeExplicit || explicitTarget.Selection().Path() != "deploy/customer.yaml" || explicitTarget.Selection().Digest() == "" || explicitTarget.EnvironmentOverlay() {
 		t.Fatalf("explicit target = %#v, %v", explicitTarget.Selection(), err)
+	}
+	if _, err := SelectConfigurationTarget(root, "", "missing", nil); !errors.Is(err, ErrConfigurationSelection) {
+		t.Fatalf("missing environment error = %v, want ErrConfigurationSelection", err)
 	}
 }
 

@@ -750,7 +750,7 @@ func TestPublicCommandRejectsPrivateTemplateGraphAndRollsBack(t *testing.T) {
 			t.Fatalf("RunIn stderr omits %q: %s", detail, stderr.String())
 		}
 	}
-	_, privateList, found := strings.Cut(strings.SplitN(stderr.String(), "; correction:", 2)[0], "matched by GOPRIVATE: ")
+	_, privateList, found := strings.Cut(strings.SplitN(stderr.String(), "\n\nRecovery:", 2)[0], "matched by GOPRIVATE: ")
 	if !found {
 		t.Fatalf("RunIn stderr omits private module list: %s", stderr.String())
 	}
@@ -815,7 +815,7 @@ func TestPublicCommandRejectsRelativeReplacementsAcrossTemplateProjectsAndRollsB
 			t.Fatalf("RunIn stderr omits %q: %s", detail, stderr.String())
 		}
 	}
-	_, replacementList, found := strings.Cut(strings.SplitN(stderr.String(), "; correction:", 2)[0], "replacements: ")
+	_, replacementList, found := strings.Cut(strings.SplitN(stderr.String(), "\n\nRecovery:", 2)[0], "replacements: ")
 	if !found {
 		t.Fatalf("RunIn stderr omits relative replacement list: %s", stderr.String())
 	}

@@ -53,7 +53,7 @@ func runUse(arguments []string, stdout, stderr io.Writer, workingDirectory strin
 		Environment:       environment,
 	})
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "%v\n", err)
+		writeCommandFailure(stderr, "", err, commandRecoveryContext(parsed.config, parsed.environment, environment))
 		return 1
 	}
 	if result.Changed() {

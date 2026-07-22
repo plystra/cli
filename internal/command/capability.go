@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -85,7 +84,7 @@ func runCapability(arguments []string, stdout, stderr io.Writer, workingDirector
 			Environment:       environment,
 		})
 		if err != nil {
-			_, _ = fmt.Fprintf(stderr, "%v\n", err)
+			writeCommandFailure(stderr, "", err, commandRecoveryContext(parsed.config, parsed.environment, environment))
 			return 1
 		}
 		if result.Changed() {
@@ -118,11 +117,7 @@ func runCapability(arguments []string, stdout, stderr io.Writer, workingDirector
 		panic("validated capability action is unsupported")
 	}
 	if err != nil {
-		if errors.Is(err, capabilitycreate.ErrConfirmationRequired) {
-			_, _ = fmt.Fprintf(stderr, "%v; rerun with --confirm after reviewing visible Capability versions\n", err)
-		} else {
-			_, _ = fmt.Fprintf(stderr, "%v\n", err)
-		}
+		writeCommandFailure(stderr, "", err, commandRecoveryContext("", "", environment))
 		return 1
 	}
 	_, _ = fmt.Fprintf(stdout, "%s capability %s in %s at %s\n", pastTense(parsed.action), result.Capability(), result.PluginID(), result.CapabilityPath())
