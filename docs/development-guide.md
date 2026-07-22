@@ -1473,6 +1473,9 @@ plystra inspect --config deploy/customer-a.yaml
 plystra explain capability email.send/v1
 plystra explain capability email.send/v1 --env production
 plystra explain capability email.send/v1 --config deploy/customer-a.yaml
+plystra explain plugin acme.email.smtp
+plystra explain plugin acme.email.smtp --env production
+plystra explain plugin acme.email.smtp --config deploy/customer-a.yaml
 plystra generate
 plystra generate --check
 plystra generate --env production
@@ -1503,6 +1506,17 @@ startup. Add `--verbose` for the complete candidate, rejection, requirement,
 generation, configuration, and assembly evidence, or `--format json` for one
 deterministic `plystra.explain` v1 document. The command is read-only and emits
 neither Secret values nor machine-specific Project paths.
+
+Use `plystra explain plugin <plugin-id>` when a Plugin's inclusion is
+unexpected. A current-Project Plugin is selected by its root-level declaration.
+A selected dependency Plugin lists every exact Capability for which it is the
+chosen Provider and the direct Provider-decision sources. A visible unselected
+dependency Plugin distinguishes an alternate Provider winning from none of its
+provided Capabilities being required. The concise result identifies one
+selector-matched `plystra use` command or selected-configuration field that
+changes the decision. Keep the same selector for follow-up generation and
+validation; `--verbose` and `--format json` use the same complete redacted
+evidence boundary as Capability explanations.
 
 Clean check output resembles:
 

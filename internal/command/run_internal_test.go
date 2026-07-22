@@ -234,6 +234,7 @@ func TestParseExplainArguments(t *testing.T) {
 
 	tests := []struct {
 		arguments         []string
+		subjectKind       diagnosticschema.ExplainSubjectKind
 		subject           string
 		format            commandFormat
 		verbose           bool
@@ -241,15 +242,16 @@ func TestParseExplainArguments(t *testing.T) {
 		environmentName   string
 		ok                bool
 	}{
-		{arguments: []string{"explain", "capability", "email.send/v1"}, subject: "email.send/v1", format: commandFormatHuman, ok: true},
-		{arguments: []string{"explain", "capability", "email.send/v1", "--verbose"}, subject: "email.send/v1", format: commandFormatHuman, verbose: true, ok: true},
-		{arguments: []string{"explain", "capability", "email.send/v1", "--format", "json", "--verbose"}, subject: "email.send/v1", format: commandFormatJSON, verbose: true, ok: true},
-		{arguments: []string{"explain", "capability", "email.send/v1", "--config", "deploy/customer.yaml", "--format", "human"}, subject: "email.send/v1", format: commandFormatHuman, configurationPath: "deploy/customer.yaml", ok: true},
-		{arguments: []string{"explain", "capability", "email.send/v1", "--env", "production", "--format", "json"}, subject: "email.send/v1", format: commandFormatJSON, environmentName: "production", ok: true},
+		{arguments: []string{"explain", "capability", "email.send/v1"}, subjectKind: diagnosticschema.ExplainSubjectCapability, subject: "email.send/v1", format: commandFormatHuman, ok: true},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--verbose"}, subjectKind: diagnosticschema.ExplainSubjectCapability, subject: "email.send/v1", format: commandFormatHuman, verbose: true, ok: true},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--format", "json", "--verbose"}, subjectKind: diagnosticschema.ExplainSubjectCapability, subject: "email.send/v1", format: commandFormatJSON, verbose: true, ok: true},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--config", "deploy/customer.yaml", "--format", "human"}, subjectKind: diagnosticschema.ExplainSubjectCapability, subject: "email.send/v1", format: commandFormatHuman, configurationPath: "deploy/customer.yaml", ok: true},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--env", "production", "--format", "json"}, subjectKind: diagnosticschema.ExplainSubjectCapability, subject: "email.send/v1", format: commandFormatJSON, environmentName: "production", ok: true},
+		{arguments: []string{"explain", "plugin", "acme.email"}, subjectKind: diagnosticschema.ExplainSubjectPlugin, subject: "acme.email", format: commandFormatHuman, ok: true},
 		{arguments: nil},
 		{arguments: []string{"explain"}},
 		{arguments: []string{"explain", "capability"}},
-		{arguments: []string{"explain", "plugin", "acme.email"}},
+		{arguments: []string{"explain", "configuration", "config.acme.email.host"}},
 		{arguments: []string{"explain", "capability", "--verbose"}},
 		{arguments: []string{"explain", "capability", "email.send/v1", "--verbose", "--verbose"}},
 		{arguments: []string{"explain", "capability", "email.send/v1", "--format"}},
@@ -263,11 +265,8 @@ func TestParseExplainArguments(t *testing.T) {
 	}
 	for _, test := range tests {
 		result, ok := parseExplainArguments(test.arguments)
-		if result.subjectKind != diagnosticschema.ExplainSubjectKind("") && result.subjectKind != diagnosticschema.ExplainSubjectCapability {
-			t.Errorf("parseExplainArguments(%q) subject kind = %q", test.arguments, result.subjectKind)
-		}
-		if result.subject != test.subject || result.format != test.format || result.verbose != test.verbose || result.configurationPath != test.configurationPath || result.environmentName != test.environmentName || ok != test.ok {
-			t.Errorf("parseExplainArguments(%q) = %#v, %t; want subject %q, format %q, verbose %t, path %q, environment %q, ok %t", test.arguments, result, ok, test.subject, test.format, test.verbose, test.configurationPath, test.environmentName, test.ok)
+		if result.subjectKind != test.subjectKind || result.subject != test.subject || result.format != test.format || result.verbose != test.verbose || result.configurationPath != test.configurationPath || result.environmentName != test.environmentName || ok != test.ok {
+			t.Errorf("parseExplainArguments(%q) = %#v, %t; want kind %q, subject %q, format %q, verbose %t, path %q, environment %q, ok %t", test.arguments, result, ok, test.subjectKind, test.subject, test.format, test.verbose, test.configurationPath, test.environmentName, test.ok)
 		}
 	}
 }

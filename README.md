@@ -488,6 +488,9 @@ plystra inspect --format json
 plystra explain capability <capability-name>/vN
 plystra explain capability <capability-name>/vN --verbose
 plystra explain capability <capability-name>/vN --format json
+plystra explain plugin <plugin-id>
+plystra explain plugin <plugin-id> --verbose
+plystra explain plugin <plugin-id> --format json
 plystra check
 plystra fix
 plystra generate
@@ -526,6 +529,15 @@ deterministic evidence; `--format json` writes exactly one `plystra.explain` v1
 document while progress remains on stderr. The same explicit and ambient
 configuration selectors apply, and unknown canonical Capability IDs fail
 without modifying the Project.
+
+`plystra explain plugin <plugin-id>` applies the same read-only evidence boundary
+to Plugin selection. A root-level current-Project Plugin reports that membership
+as its direct selection reason. A selected dependency Plugin reports every exact
+Capability for which it is the Provider and the Provider-decision sources that
+caused its inclusion. A visible unselected dependency Plugin reports whether an
+alternate Provider won or none of its provided Capabilities is required, plus a
+selector-matched `plystra use` command or configuration field that changes the
+decision. Unknown canonical Plugin IDs fail without modifying the Project.
 
 The current `plystra check` implementation is read-only. It verifies the
 selected dependency composition and generated fixed point, then runs

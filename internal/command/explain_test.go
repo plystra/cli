@@ -2,6 +2,7 @@ package command_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -103,6 +104,101 @@ func TestExplainCapabilityJSONOwnsStdoutAndIsDeterministic(t *testing.T) {
 	}
 	if strings.Contains(firstStdout, root) || strings.Contains(firstStdout, "resolved-secret-marker") {
 		t.Fatalf("capability JSON leaked a Project path or unrestricted configuration: %s", firstStdout)
+	}
+}
+
+func TestExplainPluginCurrentProjectOutputIsConciseCausalAndReadOnly(t *testing.T) {
+	t.Parallel()
+
+	root, nested := createExplainCommandProject(t)
+	before := snapshotInspectProject(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"explain", "plugin", "acme.email.smtp"}, nested, inspectCommandEnvironment(nil))
+	for _, fragment := range []string{
+		"Plugin: acme.email.smtp\n",
+		"Decision: selected from the current Project\n",
+		"Reason: current-project\n",
+		"Source: example.com/acme/provider-use:smtp/plugin.yaml:1:1 (plugin-declaration)\n",
+		"Change: edit smtp/plugin.yaml at id\n",
+	} {
+		if !strings.Contains(stdout, fragment) {
+			t.Fatalf("Plugin explanation omits %q:\n%s", fragment, stdout)
+		}
+	}
+	for _, forbidden := range []string{"Resolution evidence:", "provider_candidates", "contract_digest", "resolved-secret-marker", root} {
+		if strings.Contains(stdout, forbidden) {
+			t.Fatalf("concise Plugin explanation contains %q:\n%s", forbidden, stdout)
+		}
+	}
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("Plugin explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("Plugin explanation mutated the Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestExplainPluginCoversProviderAndVisibleUnselectedDecisions(t *testing.T) {
+	t.Parallel()
+
+	root, nested := createExplainDependencyPluginProject(t)
+	environment := inspectCommandEnvironment(nil)
+	firstExit, firstStdout, firstStderr := runCommand(t, []string{"explain", "plugin", "example.shared", "--format", "json"}, nested, environment)
+	secondExit, secondStdout, secondStderr := runCommand(t, []string{"explain", "plugin", "example.shared", "--verbose", "--format", "json"}, root, environment)
+	if firstExit != 0 || secondExit != 0 || firstStderr != inspectProgress || secondStderr != inspectProgress || firstStdout != secondStdout {
+		t.Fatalf("selected Plugin JSON = first (%d, %q) second (%d, %q)\nfirst: %s\nsecond: %s", firstExit, firstStderr, secondExit, secondStderr, firstStdout, secondStdout)
+	}
+	document := decodeExplainCommandEnvelope(t, firstStdout)
+	if document.Result.Subject.Kind != "plugin" || document.Result.Subject.ID != "example.shared" || document.Result.Decision.Outcome != "selected" || document.Result.Reason.Code != "provider" {
+		t.Fatalf("selected Plugin decision = %#v", document.Result)
+	}
+	if len(document.Result.Reason.Sources) != 2 || document.Result.Reason.Sources[0].Module != "example.com/app" || document.Result.Reason.Sources[0].Path != "plystra.yaml" || document.Result.Reason.Sources[1].Module != "example.com/platform" || document.Result.Reason.Sources[1].Path != "shared/capabilities/reports.read/v1/capability.yaml" {
+		t.Fatalf("selected Plugin sources = %#v", document.Result.Reason.Sources)
+	}
+	if document.Result.Change.Kind != "command" || document.Result.Change.Command != "plystra use email.send/v1 example.alternative" || strings.Contains(firstStdout, root) || strings.Contains(firstStdout, "resolved-secret-marker") {
+		t.Fatalf("selected Plugin change/output = %#v\n%s", document.Result.Change, firstStdout)
+	}
+
+	exitCode, stdout, stderr := runCommand(t, []string{"explain", "plugin", "example.alternative", "--format", "json"}, nested, environment)
+	document = decodeExplainCommandEnvelope(t, stdout)
+	if exitCode != 0 || stderr != inspectProgress || document.Result.Decision.Outcome != "available" || document.Result.Reason.Code != "another-provider-selected" || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != "alternative/capabilities/email.send/v1/capability.yaml" || document.Result.Change.Command != "plystra use email.send/v1 example.alternative" {
+		t.Fatalf("unselected alternative Plugin = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
+	}
+
+	exitCode, stdout, stderr = runCommand(t, []string{"explain", "plugin", "example.optional", "--format", "json"}, nested, environment)
+	document = decodeExplainCommandEnvelope(t, stdout)
+	if exitCode != 0 || stderr != inspectProgress || document.Result.Decision.Outcome != "available" || document.Result.Reason.Code != "capability-not-required" || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != "optional/capabilities/audit.record/v1/capability.yaml" || document.Result.Change.Kind != "file" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `capabilities.require["audit.record/v1"]` {
+		t.Fatalf("unrequired Provider Plugin = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
+	}
+}
+
+func TestExplainPluginSelectorsUseOneSharedSelectedModel(t *testing.T) {
+	t.Parallel()
+
+	root, nested := createExplainDependencyPluginProject(t)
+	tests := []struct {
+		name        string
+		arguments   []string
+		environment map[string]string
+		mode        string
+		path        string
+		command     string
+	}{
+		{name: "explicit environment", arguments: []string{"explain", "plugin", "example.alternative", "--format", "json", "--env", "production"}, environment: map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"}, mode: "environment", path: "plystra.production.yaml", command: `plystra use email.send/v1 example.shared --env "production"`},
+		{name: "ambient environment", arguments: []string{"explain", "plugin", "example.alternative", "--format", "json"}, environment: map[string]string{"PLYSTRA_ENV": "production"}, mode: "environment", path: "plystra.production.yaml", command: `plystra use email.send/v1 example.shared --env "production"`},
+		{name: "explicit configuration", arguments: []string{"explain", "plugin", "example.alternative", "--format", "json", "--config", "deploy/customer.yaml"}, environment: map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"}, mode: "explicit-config", path: "deploy/customer.yaml", command: `plystra use email.send/v1 example.shared --config "deploy/customer.yaml"`},
+		{name: "ambient configuration", arguments: []string{"explain", "plugin", "example.alternative", "--format", "json"}, environment: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"}, mode: "explicit-config", path: "deploy/customer.yaml", command: `plystra use email.send/v1 example.shared --config "deploy/customer.yaml"`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			exitCode, stdout, stderr := runCommand(t, test.arguments, nested, inspectCommandEnvironment(test.environment))
+			document := decodeExplainCommandEnvelope(t, stdout)
+			if exitCode != 0 || stderr != inspectProgress || document.ConfigurationMode != test.mode || document.Result.Decision.Outcome != "selected" || document.Result.Reason.Code != "provider" || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != test.path || document.Result.Change.Command != test.command {
+				t.Fatalf("selected Plugin explanation = exit %d, stderr %q, mode %q, result %#v", exitCode, stderr, document.ConfigurationMode, document.Result)
+			}
+			if strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
+				t.Fatalf("selected Plugin explanation leaked private input: %s", stdout)
+			}
+		})
 	}
 }
 
@@ -254,7 +350,7 @@ replace example.com/b => ../b
 	}
 }
 
-func TestExplainCapabilityFailuresKeepJSONStdoutEmptyAndDoNotMutate(t *testing.T) {
+func TestExplainFailuresKeepJSONStdoutEmptyAndDoNotMutate(t *testing.T) {
 	t.Parallel()
 
 	root, nested := createExplainCommandProject(t)
@@ -267,6 +363,8 @@ func TestExplainCapabilityFailuresKeepJSONStdoutEmptyAndDoNotMutate(t *testing.T
 	}{
 		{name: "unknown canonical Capability", arguments: []string{"explain", "capability", "missing.operation/v1", "--format", "json"}, want: "not visible in the selected application model"},
 		{name: "invalid Capability identity", arguments: []string{"explain", "capability", "email.send", "--format", "json"}, want: "invalid capability ID"},
+		{name: "unknown canonical Plugin", arguments: []string{"explain", "plugin", "missing.plugin", "--format", "json"}, want: "not visible in the selected application model"},
+		{name: "invalid Plugin identity", arguments: []string{"explain", "plugin", "missing", "--format", "json"}, want: "invalid plugin ID"},
 		{name: "missing overlay", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json", "--env", "missing"}, want: "plystra.missing.yaml"},
 		{name: "unsafe environment", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json", "--env", "../test"}, want: "safe filename component"},
 		{name: "ambient conflict", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json"}, environment: map[string]string{"PLYSTRA_ENV": "production", "PLYSTRA_CONFIG": "deploy/customer.yaml"}, want: "PLYSTRA_CONFIG and PLYSTRA_ENV cannot be used together"},
@@ -308,6 +406,31 @@ func TestExplainCapabilityVerboseIncludesCompleteIndentedEvidence(t *testing.T) 
 	}
 }
 
+func TestExplainPluginVerboseIncludesCompleteIndentedEvidence(t *testing.T) {
+	t.Parallel()
+
+	root, _ := createExplainDependencyPluginProject(t)
+	exitCode, stdout, stderr := runCommand(t, []string{"explain", "plugin", "example.alternative", "--verbose", "--env", "production"}, root, inspectCommandEnvironment(nil))
+	for _, fragment := range []string{
+		"Plugin: example.alternative\n",
+		"Decision: selected as a Provider for email.send/v1\n",
+		"Reason: provider\n",
+		`Change: plystra use email.send/v1 example.shared --env "production"`,
+		"Resolution evidence:\n  {\n",
+		"    \"plugin_candidates\": [",
+		"    \"selected_plugins\": [",
+		"    \"provider_candidates\": [",
+		"    \"configuration_selection\": {",
+	} {
+		if !strings.Contains(stdout, fragment) {
+			t.Fatalf("verbose Plugin explanation omits %q:\n%s", fragment, stdout)
+		}
+	}
+	if exitCode != 0 || stderr != "" || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
+		t.Fatalf("verbose Plugin explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+}
+
 func createExplainCommandProject(t *testing.T) (string, string) {
 	t.Helper()
 	root := writeProviderCommandProject(t)
@@ -321,6 +444,40 @@ func createExplainCommandProject(t *testing.T) (string, string) {
 		t.Fatalf("MkdirAll(%s): %v", nested, err)
 	}
 	return root, nested
+}
+
+func createExplainDependencyPluginProject(t *testing.T) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	platformRoot := filepath.Join(root, "platform")
+	writeCommandFile(t, filepath.Join(platformRoot, "go.mod"), "module example.com/platform\n\ngo 1.26\n")
+	writeCommandFile(t, filepath.Join(platformRoot, "plystra.yaml"), "{}\n")
+
+	writeCommandFile(t, filepath.Join(platformRoot, "shared", "plugin.yaml"), "id: example.shared\nprovides: [email.send/v1, reports.read/v1]\n")
+	writeCommandFile(t, filepath.Join(platformRoot, "shared", "capabilities", "email.send", "v1", "capability.yaml"), "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	writeCommandFile(t, filepath.Join(platformRoot, "shared", "capabilities", "reports.read", "v1", "capability.yaml"), "id: reports.read/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	writeCommandFile(t, filepath.Join(platformRoot, "alternative", "plugin.yaml"), "id: example.alternative\nprovides: [email.send/v1]\n")
+	writeCommandFile(t, filepath.Join(platformRoot, "alternative", "capabilities", "email.send", "v1", "capability.yaml"), "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	writeCommandFile(t, filepath.Join(platformRoot, "optional", "plugin.yaml"), "id: example.optional\nprovides: [audit.record/v1]\n")
+	writeCommandFile(t, filepath.Join(platformRoot, "optional", "capabilities", "audit.record", "v1", "capability.yaml"), "id: audit.record/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+
+	writeCommandFile(t, filepath.Join(appRoot, "go.mod"), fmt.Sprintf(`module example.com/app
+
+go 1.26
+
+require example.com/platform v1.0.0
+
+replace example.com/platform => %s
+`, filepath.ToSlash(platformRoot)))
+	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), "capabilities:\n  require: [email.send/v1, reports.read/v1]\n  use: {email.send/v1: example.shared}\nhttp:\n  address: resolved-secret-marker\n")
+	writeCommandFile(t, filepath.Join(appRoot, "plystra.production.yaml"), "capabilities:\n  use: {email.send/v1: example.alternative}\n")
+	writeCommandFile(t, filepath.Join(appRoot, "deploy", "customer.yaml"), "capabilities:\n  require: [email.send/v1, reports.read/v1]\n  use: {email.send/v1: example.alternative}\n")
+	nested := filepath.Join(appRoot, "nested", "deeper")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", nested, err)
+	}
+	return appRoot, nested
 }
 
 func decodeExplainCommandEnvelope(t testing.TB, output string) explainCommandEnvelope {

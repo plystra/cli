@@ -1151,6 +1151,10 @@ Run the narrowest relevant test first, then the complete module checks:
     plystra explain capability email.send/v1 --env production
     plystra explain capability email.send/v1 --config deploy/customer-a.yaml
     plystra explain capability email.send/v1 --format json
+    plystra explain plugin acme.email.smtp
+    plystra explain plugin acme.email.smtp --env production
+    plystra explain plugin acme.email.smtp --config deploy/customer-a.yaml
+    plystra explain plugin acme.email.smtp --format json
     plystra generate --check
     plystra generate --check --env production
     plystra generate --check --config deploy/customer-a.yaml
@@ -1224,6 +1228,13 @@ build and distribution boundary for every Plystra module.
   changes the decision. Add --verbose for complete candidates, rejections,
   requiring edges, generation rules, configuration provenance, and assembly
   evidence, or --format json for deterministic automation output.
+- Unexpected Plugin selection: run plystra explain plugin <plugin-id> with the
+  same selector. A current-Project Plugin reports declaration membership; a
+  selected dependency Plugin reports every exact Capability Provider reason;
+  and a visible unselected Plugin reports the rejected Provider decision. Use
+  the returned selector-matched command or field, then regenerate and check with
+  that same selector. Add --verbose or --format json for complete redacted
+  evidence.
 - Alias error: point directly to a resolved canonical target with the same
   version and exposure no broader than the target.
 - Unclaimed extension namespace: add a compatible selected Plugin whose
