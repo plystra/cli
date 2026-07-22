@@ -16,6 +16,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/aliasresolution"
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/pluginid"
@@ -138,6 +139,35 @@ const (
 	PublicExposureSourceAliasGeneration PublicExposureSourceKind = "alias-generation-extension"
 )
 
+// ConfigurationOwner identifies the layer that owns one effective typed
+// configuration decision. Dependency projects are always lower precedence
+// than the selected current-project layer.
+type ConfigurationOwner string
+
+const (
+	ConfigurationOwnerDependency  ConfigurationOwner = "dependency-project"
+	ConfigurationOwnerRoot        ConfigurationOwner = "current-project-root"
+	ConfigurationOwnerEnvironment ConfigurationOwner = "current-project-environment"
+	ConfigurationOwnerExplicit    ConfigurationOwner = "current-project-config"
+)
+
+// ConfigurationLayerInput carries one authored current-project layer. The
+// dependency layer is reconstructed from the validated composition baseline so
+// its provenance cannot diverge from the resolver's source of truth.
+type ConfigurationLayerInput struct {
+	Owner     ConfigurationOwner
+	Decisions []applicationmeta.ConfigurationDecision
+}
+
+// ConfigurationInput is construction-only typed configuration provenance. It
+// is deliberately separate from the generated runtime configuration and never
+// carries YAML or Secret values.
+type ConfigurationInput struct {
+	DependencyBaseline applicationmeta.DependencyBaseline
+	Layers             []ConfigurationLayerInput
+	Effective          []applicationmeta.ConfigurationDecision
+}
+
 // Input is the construction-only selected-model, participating-Project, and
 // discovered-Plugin input for one evidence document.
 type Input struct {
@@ -146,6 +176,7 @@ type Input struct {
 	AliasResolution    aliasresolution.Result
 	Modules            []ModuleInput
 	PluginCandidates   []PluginCandidateInput
+	Configuration      *ConfigurationInput
 }
 
 // ModuleInput identifies one participating Plystra Project without carrying
@@ -181,25 +212,28 @@ type ReplacementInput struct {
 // application model. Detailed decision and declaration records are added by
 // their owning resolution boundaries rather than inferred here.
 type Evidence struct {
-	generationAPI            string
-	selectedModelDigest      string
-	buildModelDigest         string
-	canonicalCapabilityCount int
-	requirementCount         int
-	selectedProviderCount    int
-	modules                  []Module
-	pluginCandidates         []PluginCandidate
-	selectedPlugins          []SelectedPlugin
-	requirements             []CapabilityRequirement
-	providerCandidates       []ProviderCandidate
-	selectedProviders        []SelectedProvider
-	generationActivations    []GenerationActivation
-	generatedRequirements    []GeneratedRequirement
-	capabilityAliases        []CapabilityAlias
-	publicExposures          []PublicExposure
-	canonicalJSON            []byte
-	digest                   string
-	prepared                 bool
+	generationAPI             string
+	selectedModelDigest       string
+	buildModelDigest          string
+	canonicalCapabilityCount  int
+	requirementCount          int
+	selectedProviderCount     int
+	modules                   []Module
+	pluginCandidates          []PluginCandidate
+	selectedPlugins           []SelectedPlugin
+	requirements              []CapabilityRequirement
+	providerCandidates        []ProviderCandidate
+	selectedProviders         []SelectedProvider
+	generationActivations     []GenerationActivation
+	generatedRequirements     []GeneratedRequirement
+	capabilityAliases         []CapabilityAlias
+	publicExposures           []PublicExposure
+	configurationFields       []ConfigurationField
+	configurationSelection    ConfigurationSelection
+	hasConfigurationSelection bool
+	canonicalJSON             []byte
+	digest                    string
+	prepared                  bool
 }
 
 type canonicalCounts struct {
@@ -215,6 +249,7 @@ type canonicalCounts struct {
 	GeneratedRequirements int `json:"generated_requirements"`
 	CapabilityAliases     int `json:"capability_aliases"`
 	PublicExposures       int `json:"public_exposures"`
+	ConfigurationFields   int `json:"configuration_fields"`
 }
 
 // Module is one immutable participating Plystra Project identity.
@@ -756,6 +791,123 @@ func (s PublicExposureSource) ActivationCapability() string { return s.activatio
 // Source returns the replacement-safe module-relative declaration location.
 func (s PublicExposureSource) Source() Source { return s.source }
 
+// ConfigurationField is one deterministic typed configuration path with all
+// bounded contributors and its effective owner. A field may have no effective
+// contributor when a higher-level object or removal suppresses its descendants.
+type ConfigurationField struct {
+	path         string
+	digest       string
+	summary      string
+	removed      bool
+	owner        ConfigurationOwner
+	contributors []ConfigurationContribution
+	effective    bool
+}
+
+// Path returns the canonical schema path.
+func (f ConfigurationField) Path() string { return f.path }
+
+// Digest returns the effective normalized non-secret digest, or an empty value
+// for a suppressed descendant.
+func (f ConfigurationField) Digest() string { return f.digest }
+
+// Summary returns the effective bounded redacted value summary.
+func (f ConfigurationField) Summary() string { return f.summary }
+
+// Removed reports whether the effective decision is an explicit tombstone.
+func (f ConfigurationField) Removed() bool { return f.removed }
+
+// Owner returns the effective decision owner.
+func (f ConfigurationField) Owner() ConfigurationOwner { return f.owner }
+
+// Effective reports whether this path participates in the final effective
+// configuration rather than being suppressed by an ancestor.
+func (f ConfigurationField) Effective() bool { return f.effective }
+
+// Contributors returns all deterministic lower- and higher-precedence typed
+// contributions for this path.
+func (f ConfigurationField) Contributors() []ConfigurationContribution {
+	result := make([]ConfigurationContribution, len(f.contributors))
+	for index := range f.contributors {
+		result[index] = f.contributors[index]
+		result[index].sources = append([]Source(nil), f.contributors[index].sources...)
+	}
+	return result
+}
+
+// ConfigurationContribution is one normalized value or explicit removal from
+// one configuration layer. Identical dependency values are represented by one
+// contribution with multiple source locations.
+type ConfigurationContribution struct {
+	owner      ConfigurationOwner
+	precedence int
+	digest     string
+	summary    string
+	removed    bool
+	effective  bool
+	sources    []Source
+}
+
+// Owner returns the layer that authored the contribution.
+func (c ConfigurationContribution) Owner() ConfigurationOwner { return c.owner }
+
+// Precedence returns the closed numeric layer precedence (dependency 1, root
+// or explicit configuration 2, environment overlay 3).
+func (c ConfigurationContribution) Precedence() int { return c.precedence }
+
+// Digest returns the normalized non-secret contribution digest.
+func (c ConfigurationContribution) Digest() string { return c.digest }
+
+// Summary returns the bounded redacted contribution summary.
+func (c ConfigurationContribution) Summary() string { return c.summary }
+
+// Removed reports whether this contribution is an explicit tombstone.
+func (c ConfigurationContribution) Removed() bool { return c.removed }
+
+// Effective reports whether this contribution wins for its path.
+func (c ConfigurationContribution) Effective() bool { return c.effective }
+
+// Sources returns defensive typed source provenance.
+func (c ConfigurationContribution) Sources() []Source {
+	return append([]Source(nil), c.sources...)
+}
+
+// ConfigurationSelection is the stable non-secret identity of the selected
+// current-project configuration mode and dependency baseline.
+type ConfigurationSelection struct {
+	mode             generation.ConfigurationMode
+	environment      string
+	rootPath         string
+	rootDigest       string
+	selectedPath     string
+	selectedDigest   string
+	dependencyDigest string
+}
+
+// Mode returns default, environment, or explicit-config.
+func (s ConfigurationSelection) Mode() generation.ConfigurationMode { return s.mode }
+
+// Environment returns the selected environment name in environment mode.
+func (s ConfigurationSelection) Environment() string { return s.environment }
+
+// RootPath returns the mandatory root configuration path.
+func (s ConfigurationSelection) RootPath() string { return s.rootPath }
+
+// RootDigest returns the normalized root-document digest.
+func (s ConfigurationSelection) RootDigest() string { return s.rootDigest }
+
+// SelectedPath returns the selected current-project document path.
+func (s ConfigurationSelection) SelectedPath() string { return s.selectedPath }
+
+// SelectedDigest returns the normalized selected-document digest.
+func (s ConfigurationSelection) SelectedDigest() string { return s.selectedDigest }
+
+// DependencyCompositionDigest returns the normalized dependency baseline and
+// all-source provenance digest.
+func (s ConfigurationSelection) DependencyCompositionDigest() string {
+	return s.dependencyDigest
+}
+
 // Source is one stable module-relative declaration reference.
 type Source struct {
 	module string
@@ -939,6 +1091,36 @@ type canonicalPublicExposureSource struct {
 	Source               canonicalSource          `json:"source"`
 }
 
+type canonicalConfigurationContribution struct {
+	Owner      ConfigurationOwner `json:"owner"`
+	Precedence int                `json:"precedence"`
+	Digest     string             `json:"digest"`
+	Summary    string             `json:"summary"`
+	Removed    bool               `json:"removed,omitempty"`
+	Effective  bool               `json:"effective"`
+	Sources    []canonicalSource  `json:"sources"`
+}
+
+type canonicalConfigurationField struct {
+	Path         string                               `json:"path"`
+	Digest       string                               `json:"digest,omitempty"`
+	Summary      string                               `json:"summary,omitempty"`
+	Removed      bool                                 `json:"removed,omitempty"`
+	Owner        ConfigurationOwner                   `json:"owner,omitempty"`
+	Effective    bool                                 `json:"effective"`
+	Contributors []canonicalConfigurationContribution `json:"contributors"`
+}
+
+type canonicalConfigurationSelection struct {
+	Mode                        generation.ConfigurationMode `json:"mode"`
+	Environment                 string                       `json:"environment,omitempty"`
+	RootPath                    string                       `json:"root_path"`
+	RootDigest                  string                       `json:"root_digest"`
+	SelectedPath                string                       `json:"selected_path"`
+	SelectedDigest              string                       `json:"selected_digest"`
+	DependencyCompositionDigest string                       `json:"dependency_composition_digest"`
+}
+
 type canonicalReplacement struct {
 	Kind       ReplacementKind `json:"kind"`
 	ModulePath string          `json:"module_path"`
@@ -954,21 +1136,23 @@ type canonicalSource struct {
 }
 
 type canonicalEvidence struct {
-	Version               int                              `json:"version"`
-	GenerationAPI         string                           `json:"generation_api"`
-	SelectedModelDigest   string                           `json:"selected_model_digest"`
-	BuildModelDigest      string                           `json:"build_model_digest"`
-	Modules               []canonicalModule                `json:"modules"`
-	PluginCandidates      []canonicalPluginCandidate       `json:"plugin_candidates"`
-	SelectedPlugins       []canonicalSelectedPlugin        `json:"selected_plugins"`
-	Requirements          []canonicalCapabilityRequirement `json:"requirements"`
-	ProviderCandidates    []canonicalProviderCandidate     `json:"provider_candidates"`
-	SelectedProviders     []canonicalSelectedProvider      `json:"selected_providers"`
-	GenerationActivations []canonicalGenerationActivation  `json:"generation_activations"`
-	GeneratedRequirements []canonicalGeneratedRequirement  `json:"generated_requirements"`
-	CapabilityAliases     []canonicalCapabilityAlias       `json:"capability_aliases"`
-	PublicExposures       []canonicalPublicExposure        `json:"public_exposures"`
-	Counts                canonicalCounts                  `json:"counts"`
+	Version                int                              `json:"version"`
+	GenerationAPI          string                           `json:"generation_api"`
+	SelectedModelDigest    string                           `json:"selected_model_digest"`
+	BuildModelDigest       string                           `json:"build_model_digest"`
+	Modules                []canonicalModule                `json:"modules"`
+	PluginCandidates       []canonicalPluginCandidate       `json:"plugin_candidates"`
+	SelectedPlugins        []canonicalSelectedPlugin        `json:"selected_plugins"`
+	Requirements           []canonicalCapabilityRequirement `json:"requirements"`
+	ProviderCandidates     []canonicalProviderCandidate     `json:"provider_candidates"`
+	SelectedProviders      []canonicalSelectedProvider      `json:"selected_providers"`
+	GenerationActivations  []canonicalGenerationActivation  `json:"generation_activations"`
+	GeneratedRequirements  []canonicalGeneratedRequirement  `json:"generated_requirements"`
+	CapabilityAliases      []canonicalCapabilityAlias       `json:"capability_aliases"`
+	PublicExposures        []canonicalPublicExposure        `json:"public_exposures"`
+	ConfigurationSelection *canonicalConfigurationSelection `json:"configuration_selection,omitempty"`
+	ConfigurationFields    []canonicalConfigurationField    `json:"configuration_fields"`
+	Counts                 canonicalCounts                  `json:"counts"`
 }
 
 // Build validates one constructor-produced generation context and derives its
@@ -1017,24 +1201,35 @@ func Build(source Input) (Evidence, error) {
 	if err != nil {
 		return Evidence{}, fmt.Errorf("%w: public exposure: %v", ErrBuild, err)
 	}
+	configurationSelection, hasConfigurationSelection, err := configurationSelectionFromContext(context)
+	if err != nil {
+		return Evidence{}, fmt.Errorf("%w: configuration selection: %v", ErrBuild, err)
+	}
+	configurationFields, err := configurationEvidenceFromInput(source.Configuration, context, modules)
+	if err != nil {
+		return Evidence{}, fmt.Errorf("%w: configuration provenance: %v", ErrBuild, err)
+	}
 	input := Evidence{
-		generationAPI:            context.APIVersion(),
-		selectedModelDigest:      context.Digest(),
-		buildModelDigest:         context.BuildModelDigest(),
-		canonicalCapabilityCount: len(context.Capabilities()),
-		requirementCount:         len(requirements),
-		selectedProviderCount:    len(selectedProviders),
-		modules:                  modules,
-		pluginCandidates:         pluginCandidates,
-		selectedPlugins:          selectedPlugins,
-		requirements:             requirements,
-		providerCandidates:       providerCandidates,
-		selectedProviders:        selectedProviders,
-		generationActivations:    generationActivations,
-		generatedRequirements:    generatedRequirements,
-		capabilityAliases:        capabilityAliases,
-		publicExposures:          publicExposures,
-		prepared:                 true,
+		generationAPI:             context.APIVersion(),
+		selectedModelDigest:       context.Digest(),
+		buildModelDigest:          context.BuildModelDigest(),
+		canonicalCapabilityCount:  len(context.Capabilities()),
+		requirementCount:          len(requirements),
+		selectedProviderCount:     len(selectedProviders),
+		modules:                   modules,
+		pluginCandidates:          pluginCandidates,
+		selectedPlugins:           selectedPlugins,
+		requirements:              requirements,
+		providerCandidates:        providerCandidates,
+		selectedProviders:         selectedProviders,
+		generationActivations:     generationActivations,
+		generatedRequirements:     generatedRequirements,
+		capabilityAliases:         capabilityAliases,
+		publicExposures:           publicExposures,
+		configurationFields:       configurationFields,
+		configurationSelection:    configurationSelection,
+		hasConfigurationSelection: hasConfigurationSelection,
+		prepared:                  true,
 	}
 	if err := validate(input); err != nil {
 		return Evidence{}, fmt.Errorf("%w: %v", ErrBuild, err)
@@ -1184,6 +1379,29 @@ func (e Evidence) PublicExposures() []PublicExposure {
 	return values
 }
 
+// ConfigurationFields returns every bounded configuration path and its typed
+// ownership/contribution provenance in canonical path order.
+func (e Evidence) ConfigurationFields() []ConfigurationField {
+	values := append([]ConfigurationField(nil), e.configurationFields...)
+	for index := range values {
+		values[index].contributors = append([]ConfigurationContribution(nil), values[index].contributors...)
+		for contributorIndex := range values[index].contributors {
+			values[index].contributors[contributorIndex].sources = append([]Source(nil), values[index].contributors[contributorIndex].sources...)
+		}
+	}
+	return values
+}
+
+// ConfigurationFieldCount returns the number of recorded typed configuration
+// paths, including suppressed descendants retained for provenance.
+func (e Evidence) ConfigurationFieldCount() int { return len(e.configurationFields) }
+
+// ConfigurationSelection returns the selected non-secret configuration
+// identity when the normalized application model carries that provenance.
+func (e Evidence) ConfigurationSelection() (ConfigurationSelection, bool) {
+	return e.configurationSelection, e.hasConfigurationSelection
+}
+
 // ProviderCandidateCount returns the complete visible Provider declaration
 // count, including Capabilities outside the final requirement closure.
 func (e Evidence) ProviderCandidateCount() int { return len(e.providerCandidates) }
@@ -1308,6 +1526,12 @@ func validate(e Evidence) error {
 		return err
 	}
 	if err := validatePublicExposures(e.publicExposures, e.requirements, e.capabilityAliases); err != nil {
+		return err
+	}
+	if err := validateConfigurationSelectionState(e.configurationSelection, e.hasConfigurationSelection, e.configurationFields); err != nil {
+		return err
+	}
+	if err := validateConfigurationFields(e.configurationFields, e.modules, e.configurationSelection, e.hasConfigurationSelection); err != nil {
 		return err
 	}
 	return nil
@@ -1570,21 +1794,69 @@ func encode(e Evidence) ([]byte, error) {
 			Sources:         sources,
 		}
 	}
+	configurationFields := make([]canonicalConfigurationField, len(e.configurationFields))
+	for index, value := range e.configurationFields {
+		contributors := make([]canonicalConfigurationContribution, len(value.contributors))
+		for contributorIndex, contribution := range value.contributors {
+			sources := make([]canonicalSource, len(contribution.sources))
+			for sourceIndex, source := range contribution.sources {
+				sources[sourceIndex] = canonicalSource{
+					Module: source.module,
+					Path:   source.path,
+					Kind:   source.kind,
+					Line:   source.line,
+					Column: source.column,
+				}
+			}
+			contributors[contributorIndex] = canonicalConfigurationContribution{
+				Owner:      contribution.owner,
+				Precedence: contribution.precedence,
+				Digest:     contribution.digest,
+				Summary:    contribution.summary,
+				Removed:    contribution.removed,
+				Effective:  contribution.effective,
+				Sources:    sources,
+			}
+		}
+		configurationFields[index] = canonicalConfigurationField{
+			Path:         value.path,
+			Digest:       value.digest,
+			Summary:      value.summary,
+			Removed:      value.removed,
+			Owner:        value.owner,
+			Effective:    value.effective,
+			Contributors: contributors,
+		}
+	}
+	var configurationSelection *canonicalConfigurationSelection
+	if e.hasConfigurationSelection {
+		configurationSelection = &canonicalConfigurationSelection{
+			Mode:                        e.configurationSelection.mode,
+			Environment:                 e.configurationSelection.environment,
+			RootPath:                    e.configurationSelection.rootPath,
+			RootDigest:                  e.configurationSelection.rootDigest,
+			SelectedPath:                e.configurationSelection.selectedPath,
+			SelectedDigest:              e.configurationSelection.selectedDigest,
+			DependencyCompositionDigest: e.configurationSelection.dependencyDigest,
+		}
+	}
 	return json.Marshal(canonicalEvidence{
-		Version:               schemaVersion,
-		GenerationAPI:         e.generationAPI,
-		SelectedModelDigest:   e.selectedModelDigest,
-		BuildModelDigest:      e.buildModelDigest,
-		Modules:               modules,
-		PluginCandidates:      pluginCandidates,
-		SelectedPlugins:       selectedPlugins,
-		Requirements:          requirements,
-		ProviderCandidates:    providerCandidates,
-		SelectedProviders:     selectedProviders,
-		GenerationActivations: generationActivations,
-		GeneratedRequirements: generatedRequirements,
-		CapabilityAliases:     capabilityAliases,
-		PublicExposures:       publicExposures,
+		Version:                schemaVersion,
+		GenerationAPI:          e.generationAPI,
+		SelectedModelDigest:    e.selectedModelDigest,
+		BuildModelDigest:       e.buildModelDigest,
+		Modules:                modules,
+		PluginCandidates:       pluginCandidates,
+		SelectedPlugins:        selectedPlugins,
+		Requirements:           requirements,
+		ProviderCandidates:     providerCandidates,
+		SelectedProviders:      selectedProviders,
+		GenerationActivations:  generationActivations,
+		GeneratedRequirements:  generatedRequirements,
+		CapabilityAliases:      capabilityAliases,
+		PublicExposures:        publicExposures,
+		ConfigurationSelection: configurationSelection,
+		ConfigurationFields:    configurationFields,
 		Counts: canonicalCounts{
 			ParticipatingModules:  len(e.modules),
 			DiscoveredPlugins:     len(e.pluginCandidates),
@@ -1598,6 +1870,7 @@ func encode(e Evidence) ([]byte, error) {
 			GeneratedRequirements: len(e.generatedRequirements),
 			CapabilityAliases:     len(e.capabilityAliases),
 			PublicExposures:       len(e.publicExposures),
+			ConfigurationFields:   len(e.configurationFields),
 		},
 	})
 }

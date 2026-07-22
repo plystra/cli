@@ -144,6 +144,21 @@ replace example.com/platform => ../platform
 		t.Fatalf("ConfigurationSelection = mode %q path %q digest %q", selection.Mode(), selection.Path(), selection.Digest())
 	}
 	assertResolvedConfigurationProvenance(t, result)
+	httpAddressEvidence := resolvedConfigurationField(t, result, "http.address")
+	if httpAddressEvidence.Owner() != resolutionevidence.ConfigurationOwnerExplicit || httpAddressEvidence.Summary() != "string" || len(httpAddressEvidence.Contributors()) != 1 || httpAddressEvidence.Contributors()[0].Sources()[0].Path() != "deploy/customer.yaml" {
+		t.Fatalf("full-replacement HTTP configuration evidence = %#v", httpAddressEvidence)
+	}
+	for _, field := range result.ResolutionEvidence().ConfigurationFields() {
+		for _, contribution := range field.Contributors() {
+			if contribution.Owner() == resolutionevidence.ConfigurationOwnerRoot || contribution.Owner() == resolutionevidence.ConfigurationOwnerEnvironment {
+				t.Fatalf("full replacement retained an excluded root or environment contribution: %#v", contribution)
+			}
+		}
+	}
+	inheritedHealth := resolvedConfigurationField(t, result, `capabilities.require["kernel.health/v1"]`)
+	if inheritedHealth.Owner() != resolutionevidence.ConfigurationOwnerDependency || len(inheritedHealth.Contributors()) != 1 || inheritedHealth.Contributors()[0].Sources()[0].Module() != "example.com/platform" {
+		t.Fatalf("full-replacement inherited requirement evidence = %#v", inheritedHealth)
+	}
 	if address, exists := result.Manifest().HTTPAddress(); !exists || address != ":9090" {
 		t.Fatalf("effective HTTP address = %q, %t; root replacement leaked", address, exists)
 	}
@@ -297,6 +312,18 @@ replace example.com/platform-b => ../platform-b
 		t.Fatalf("ConfigurationSelection = mode %q environment %q path %q digest %q", selection.Mode(), selection.Environment(), selection.Path(), selection.Digest())
 	}
 	assertResolvedConfigurationProvenance(t, result)
+	httpAddressEvidence := resolvedConfigurationField(t, result, "http.address")
+	if httpAddressEvidence.Owner() != resolutionevidence.ConfigurationOwnerEnvironment || len(httpAddressEvidence.Contributors()) != 2 || httpAddressEvidence.Contributors()[0].Owner() != resolutionevidence.ConfigurationOwnerRoot || httpAddressEvidence.Contributors()[1].Owner() != resolutionevidence.ConfigurationOwnerEnvironment || httpAddressEvidence.Contributors()[1].Sources()[0].Path() != "plystra.production.yaml" {
+		t.Fatalf("environment HTTP address evidence = %#v", httpAddressEvidence)
+	}
+	restRemoval := resolvedConfigurationField(t, result, "http.transports.rest")
+	if !restRemoval.Effective() || !restRemoval.Removed() || restRemoval.Owner() != resolutionevidence.ConfigurationOwnerEnvironment || restRemoval.Summary() != "removal" || len(restRemoval.Contributors()) != 2 {
+		t.Fatalf("environment transport removal evidence = %#v", restRemoval)
+	}
+	infoRemoval := resolvedConfigurationField(t, result, `capabilities.require["kernel.info/v1"]`)
+	if !infoRemoval.Effective() || !infoRemoval.Removed() || infoRemoval.Owner() != resolutionevidence.ConfigurationOwnerEnvironment {
+		t.Fatalf("environment requirement removal evidence = %#v", infoRemoval)
+	}
 	if address, exists := result.Manifest().HTTPAddress(); !exists || address != ":9090" {
 		t.Fatalf("effective HTTP address = %q, %t", address, exists)
 	}
@@ -575,6 +602,15 @@ replace example.com/providers => ../providers
 		t.Fatalf("Resolve: %v", err)
 	}
 	assertResolvedConfigurationProvenance(t, first)
+	hostEvidence := resolvedConfigurationField(t, first, `config["example.smtp"]["host"]`)
+	passwordEvidence := resolvedConfigurationField(t, first, `config["example.smtp"]["password"]`)
+	if hostEvidence.Owner() != resolutionevidence.ConfigurationOwnerDependency || passwordEvidence.Owner() != resolutionevidence.ConfigurationOwnerDependency || len(hostEvidence.Contributors()) != 1 || len(passwordEvidence.Contributors()) != 1 || hostEvidence.Contributors()[0].Sources()[0].Module() != "example.com/providers" || passwordEvidence.Contributors()[0].Sources()[0].Path() != "plystra.yaml" {
+		t.Fatalf("dependency Plugin configuration evidence = host %#v password %#v", hostEvidence, passwordEvidence)
+	}
+	httpAddressEvidence := resolvedConfigurationField(t, first, "http.address")
+	if httpAddressEvidence.Owner() != resolutionevidence.ConfigurationOwnerRoot || len(httpAddressEvidence.Contributors()) != 1 {
+		t.Fatalf("current process configuration evidence = %#v", httpAddressEvidence)
+	}
 	plugins := first.Inventory().Plugins()
 	dependencies := first.Dependencies().Modules()
 	if len(dependencies) != 1 || dependencies[0].Path() != "example.com/providers" || dependencies[0].SelectedVersion() != "v1.2.3" {
@@ -747,6 +783,11 @@ replace example.com/ordinary => ../ordinary
 	emailSources := evidenceRequirements[1].Sources()
 	if len(emailSources) != 1 || emailSources[0].Kind() != providerresolution.RequirementExposure || emailSources[0].ProjectModule() != "example.com/direct" || emailSources[0].Source().Module() != "example.com/direct" || emailSources[0].Source().Path() != "plystra.yaml" {
 		t.Fatalf("direct exposure requirement sources = %#v", emailSources)
+	}
+	auditConfiguration := resolvedConfigurationField(t, result, `capabilities.require["audit.write/v1"]`)
+	emailConfiguration := resolvedConfigurationField(t, result, `http.expose["email.send/v1"]`)
+	if auditConfiguration.Owner() != resolutionevidence.ConfigurationOwnerDependency || emailConfiguration.Owner() != resolutionevidence.ConfigurationOwnerDependency || len(auditConfiguration.Contributors()) != 1 || len(emailConfiguration.Contributors()) != 1 || auditConfiguration.Contributors()[0].Sources()[0].Module() != "example.com/transitive" || emailConfiguration.Contributors()[0].Sources()[0].Module() != "example.com/direct" {
+		t.Fatalf("direct/transitive configuration evidence = audit %#v email %#v", auditConfiguration, emailConfiguration)
 	}
 	if provider, exists := result.Resolution().Context().SelectedProvider(parseGenerationCapability(t, "email.send/v1")); !exists || provider.String() != "example.smtp" {
 		t.Fatalf("email Provider = %s, %t", provider, exists)
@@ -1056,7 +1097,7 @@ func TestResolveUsesActiveGoWorkspaceDependencySource(t *testing.T) {
 	appRoot := filepath.Join(root, "app")
 	providerRoot := filepath.Join(root, "providers")
 	writeModule(t, providerRoot, "example.com/providers")
-	writeFile(t, filepath.Join(providerRoot, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(providerRoot, "plystra.yaml"), "capabilities: {require: [email.send/v1]}\n")
 	writePlugin(t, providerRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\n")
 	writeCapability(t, providerRoot, "smtp", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 	writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/workspace-app\n\ngo 1.26\n")
@@ -1104,6 +1145,10 @@ func TestResolveUsesActiveGoWorkspaceDependencySource(t *testing.T) {
 	selectedProviders := result.ResolutionEvidence().SelectedProviders()
 	if len(selectedProviders) != 1 || selectedProviders[0].PluginID() != "example.smtp" || selectedProviders[0].SelectionReason() != resolutionevidence.ProviderSelectionSoleProvider || selectedProviders[0].ProviderSource() != providerCandidates[0].Source() || len(selectedProviders[0].SelectionSources()) != 0 {
 		t.Fatalf("workspace selected Provider evidence = %#v", selectedProviders)
+	}
+	requirementConfiguration := resolvedConfigurationField(t, result, `capabilities.require["email.send/v1"]`)
+	if requirementConfiguration.Owner() != resolutionevidence.ConfigurationOwnerRoot || len(requirementConfiguration.Contributors()) != 2 || requirementConfiguration.Contributors()[0].Owner() != resolutionevidence.ConfigurationOwnerDependency || requirementConfiguration.Contributors()[0].Sources()[0].Module() != "example.com/providers" || requirementConfiguration.Contributors()[1].Owner() != resolutionevidence.ConfigurationOwnerRoot {
+		t.Fatalf("workspace configuration evidence = %#v", requirementConfiguration)
 	}
 }
 
@@ -1445,9 +1490,24 @@ func assertResolvedConfigurationProvenance(t testing.TB, result applicationresol
 	if provenance.Mode() != generation.ConfigurationMode(selection.Mode()) || provenance.Environment() != selection.Environment() || provenance.RootPath() != "plystra.yaml" || provenance.RootDigest() != rootDigest || provenance.SelectedPath() != selection.Path() || provenance.SelectedDigest() != selection.Digest() || provenance.DependencyCompositionDigest() != result.Composition().DependencyDigest() {
 		t.Fatalf("configuration provenance = mode %q environment %q root %q/%q selected %q/%q dependency %q; selection = mode %q environment %q path %q digest %q", provenance.Mode(), provenance.Environment(), provenance.RootPath(), provenance.RootDigest(), provenance.SelectedPath(), provenance.SelectedDigest(), provenance.DependencyCompositionDigest(), selection.Mode(), selection.Environment(), selection.Path(), selection.Digest())
 	}
+	evidenceSelection, evidenceExists := result.ResolutionEvidence().ConfigurationSelection()
+	if !evidenceExists || evidenceSelection.Mode() != provenance.Mode() || evidenceSelection.Environment() != provenance.Environment() || evidenceSelection.RootPath() != provenance.RootPath() || evidenceSelection.RootDigest() != provenance.RootDigest() || evidenceSelection.SelectedPath() != provenance.SelectedPath() || evidenceSelection.SelectedDigest() != provenance.SelectedDigest() || evidenceSelection.DependencyCompositionDigest() != provenance.DependencyCompositionDigest() {
+		t.Fatalf("resolution-evidence configuration selection = %#v, %t; context provenance = %#v", evidenceSelection, evidenceExists, provenance)
+	}
 	if result.Resolution().Context().Digest() == result.Resolution().Context().BuildModelDigest() {
 		t.Fatal("filesystem configuration provenance did not enter the extension context digest")
 	}
+}
+
+func resolvedConfigurationField(t testing.TB, result applicationresolve.Result, path string) resolutionevidence.ConfigurationField {
+	t.Helper()
+	for _, field := range result.ResolutionEvidence().ConfigurationFields() {
+		if field.Path() == path {
+			return field
+		}
+	}
+	t.Fatalf("configuration field %s is absent from %#v", path, result.ResolutionEvidence().ConfigurationFields())
+	return resolutionevidence.ConfigurationField{}
 }
 
 type treeEntry struct {

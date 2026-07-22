@@ -191,16 +191,20 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 		return Composition{}, fmt.Errorf("%w: encode dependency provenance: %v", ErrCompose, err)
 	}
 	manifest := Manifest{
-		httpAddress:     current.httpAddress,
-		hasHTTPAddress:  current.hasHTTPAddress,
-		httpTransports:  current.httpTransports,
-		httpCORS:        cloneHTTPCORSLayer(current.httpCORS),
-		httpExposures:   exposures,
-		requirements:    requirements,
-		providerChoices: choices,
-		aliases:         aliases,
-		configurations:  configurations,
-		startupTimeout:  current.startupTimeout,
+		source:               current.source,
+		httpAddress:          current.httpAddress,
+		hasHTTPAddress:       current.hasHTTPAddress,
+		removeHTTPAddress:    current.removeHTTPAddress,
+		httpTransports:       current.httpTransports,
+		httpCORS:             cloneHTTPCORSLayer(current.httpCORS),
+		httpExposures:        exposures,
+		requirements:         requirements,
+		providerChoices:      choices,
+		aliases:              aliases,
+		configurations:       configurations,
+		startupTimeout:       current.startupTimeout,
+		hasStartupTimeout:    current.hasStartupTimeout,
+		removeStartupTimeout: current.removeStartupTimeout,
 	}
 	if err := validateHTTPTransportSelection(manifest); err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)

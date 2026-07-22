@@ -220,6 +220,7 @@ func (PluginConfiguration) LogValue() slog.Value {
 // Manifest is the immutable normalized application metadata used by canonical
 // provider, HTTP exposure, and Capability Alias resolution.
 type Manifest struct {
+	source                 string
 	httpAddress            string
 	hasHTTPAddress         bool
 	removeHTTPAddress      bool
@@ -385,6 +386,7 @@ func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, erro
 		return Manifest{}, err
 	}
 	manifest := Manifest{
+		source:                 source,
 		httpAddress:            address,
 		hasHTTPAddress:         hasAddress,
 		removeHTTPAddress:      removeAddress,

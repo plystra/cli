@@ -285,12 +285,17 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
+	configurationEvidence, err := resolutionEvidenceConfigurationInput(selector, composition, maintainedManifest, selectedManifest, maintenance, schemaLookup)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
+	}
 	evidence, err := resolutionevidence.Build(resolutionevidence.Input{
 		Context:            resolution.Context(),
 		ProviderResolution: resolution.ActivationResolution().ProviderResolution(),
 		AliasResolution:    resolution.AliasResolution(),
 		Modules:            evidenceModules,
 		PluginCandidates:   resolutionEvidencePluginCandidates(inventory),
+		Configuration:      &configurationEvidence,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
@@ -448,6 +453,72 @@ func resolutionEvidencePluginCandidates(inventory plugininventory.Index) []resol
 		}
 	}
 	return inputs
+}
+
+func resolutionEvidenceConfigurationInput(
+	selector configurationSelector,
+	composition applicationmeta.Composition,
+	maintained applicationmeta.Manifest,
+	selected applicationmeta.Manifest,
+	maintenance applicationmeta.ConfigurationMaintenance,
+	schemas applicationmeta.SchemaLookup,
+) (resolutionevidence.ConfigurationInput, error) {
+	local := make(map[string]struct{}, len(maintenance.LocalPaths()))
+	for _, path := range maintenance.LocalPaths() {
+		local[path] = struct{}{}
+	}
+	currentDecisions := func(manifest applicationmeta.Manifest, filterMaintained bool) ([]applicationmeta.ConfigurationDecision, error) {
+		decisions, err := applicationmeta.ConfigurationDecisions(manifest, schemas)
+		if err != nil {
+			return nil, err
+		}
+		if !filterMaintained {
+			return decisions, nil
+		}
+		result := make([]applicationmeta.ConfigurationDecision, 0, len(decisions))
+		for _, decision := range decisions {
+			if !decision.DependencyComposable() {
+				result = append(result, decision)
+				continue
+			}
+			if _, explicit := local[decision.Path()]; explicit {
+				result = append(result, decision)
+			}
+		}
+		return result, nil
+	}
+
+	base, err := currentDecisions(maintained, true)
+	if err != nil {
+		return resolutionevidence.ConfigurationInput{}, err
+	}
+	layers := make([]resolutionevidence.ConfigurationLayerInput, 0, 2)
+	switch selector.mode {
+	case configurationModeDefault:
+		layers = append(layers, resolutionevidence.ConfigurationLayerInput{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: base})
+	case configurationModeEnvironment:
+		overlay, err := currentDecisions(selected, false)
+		if err != nil {
+			return resolutionevidence.ConfigurationInput{}, err
+		}
+		layers = append(layers,
+			resolutionevidence.ConfigurationLayerInput{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: base},
+			resolutionevidence.ConfigurationLayerInput{Owner: resolutionevidence.ConfigurationOwnerEnvironment, Decisions: overlay},
+		)
+	case configurationModeExplicit:
+		layers = append(layers, resolutionevidence.ConfigurationLayerInput{Owner: resolutionevidence.ConfigurationOwnerExplicit, Decisions: base})
+	default:
+		return resolutionevidence.ConfigurationInput{}, fmt.Errorf("unsupported configuration selection mode %q", selector.mode)
+	}
+	effective, err := applicationmeta.ConfigurationDecisions(composition.Manifest(), schemas)
+	if err != nil {
+		return resolutionevidence.ConfigurationInput{}, err
+	}
+	return resolutionevidence.ConfigurationInput{
+		DependencyBaseline: composition.DependencyBaseline(),
+		Layers:             layers,
+		Effective:          effective,
+	}, nil
 }
 
 func loadGeneratedDependencyBaseline(moduleRoot string, selector configurationSelector) (applicationmeta.DependencyBaseline, applicationgen.ManifestProvenance, error) {
