@@ -36,6 +36,7 @@ const (
   plystra update <go-module-query>
   plystra use <capability-name>/vN <plugin-id> [--env <environment>|--config <yaml-path>]
   plystra plugin create <name>
+  plystra interface create <interface-name>
   plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
   plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
@@ -348,6 +349,8 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		}
 		_, _ = fmt.Fprintf(stdout, "created plugin %s in %s\n", result.ID(), result.Path())
 		return 0
+	case "interface":
+		return runInterface(arguments, stdout, stderr, workingDirectory, environment)
 	case "capability":
 		return runCapability(arguments, stdout, stderr, workingDirectory, environment, selectPlugin)
 	case "inspect":
