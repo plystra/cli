@@ -72,6 +72,8 @@ var authoritativeTopLevelFields = map[string]string{
 type Document struct {
 	path            string
 	data            []byte
+	description     string
+	hasDescription  bool
 	semantics       Semantics
 	hasSemantics    bool
 	errors          []SemanticError
@@ -88,6 +90,11 @@ func (d Document) Path() string { return d.path }
 
 // Data returns a defensive copy of the exact authored YAML bytes.
 func (d Document) Data() []byte { return append([]byte(nil), d.data...) }
+
+// Description returns the optional normalized public Interface description.
+func (d Document) Description() (string, bool) {
+	return d.description, d.hasDescription
+}
 
 // Deprecation returns the optional normalized lifecycle documentation. A
 // replacement is validated against visible Interfaces during discovery.
@@ -153,6 +160,10 @@ func ParseFile(sourcePath string, data []byte) (Document, error) {
 	if err := validateTopLevelFields(sourcePath, root); err != nil {
 		return Document{}, err
 	}
+	description, hasDescription, err := normalizeDescription(sourcePath, root)
+	if err != nil {
+		return Document{}, err
+	}
 	semantics, hasSemantics, err := normalizeSemantics(sourcePath, root)
 	if err != nil {
 		return Document{}, err
@@ -180,6 +191,8 @@ func ParseFile(sourcePath string, data []byte) (Document, error) {
 	return Document{
 		path:            sourcePath,
 		data:            append([]byte(nil), data...),
+		description:     description,
+		hasDescription:  hasDescription,
 		semantics:       semantics,
 		hasSemantics:    hasSemantics,
 		errors:          semanticErrors,

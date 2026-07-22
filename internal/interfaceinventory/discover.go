@@ -55,20 +55,22 @@ type Options struct {
 // Interface is one parsed and type-checked Interface declaration with stable
 // public module, package, and source provenance.
 type Interface struct {
-	modulePath     string
-	moduleVersion  string
-	packagePath    string
-	sourcePath     string
-	local          bool
-	declaration    interfacedecl.Declaration
-	contract       interfacecontract.Contract
-	contractDigest string
-	metadata       interfacemeta.Document
-	hasMetadata    bool
-	constraints    []interfacemeta.ConstraintTarget
-	examples       []interfacemeta.Example
-	deprecation    interfacemeta.Deprecation
-	hasDeprecation bool
+	modulePath          string
+	moduleVersion       string
+	packagePath         string
+	sourcePath          string
+	local               bool
+	declaration         interfacedecl.Declaration
+	contract            interfacecontract.Contract
+	contractDigest      string
+	documentationDigest string
+	exampleDigest       string
+	metadata            interfacemeta.Document
+	hasMetadata         bool
+	constraints         []interfacemeta.ConstraintTarget
+	examples            []interfacemeta.Example
+	deprecation         interfacemeta.Deprecation
+	hasDeprecation      bool
 }
 
 // ID returns the exact canonical Interface ID.
@@ -111,9 +113,25 @@ func (i Interface) Contract() interfacecontract.Contract { return i.contract }
 // Go contract and compatibility metadata.
 func (i Interface) ContractDigest() string { return i.contractDigest }
 
+// DocumentationDigest returns the versioned SHA-256 digest of normalized
+// descriptions and deprecation presentation.
+func (i Interface) DocumentationDigest() string { return i.documentationDigest }
+
+// ExampleDigest returns the versioned SHA-256 digest of normalized validated
+// request-and-outcome examples.
+func (i Interface) ExampleDigest() string { return i.exampleDigest }
+
 // Metadata returns the optional immutable colocated interface.yaml document.
 func (i Interface) Metadata() (interfacemeta.Document, bool) {
 	return i.metadata, i.hasMetadata
+}
+
+// Description returns the optional normalized public Interface description.
+func (i Interface) Description() (string, bool) {
+	if !i.hasMetadata {
+		return "", false
+	}
+	return i.metadata.Description()
 }
 
 // Semantics returns the optional normalized operation semantics declared by
@@ -347,23 +365,33 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 			if err != nil {
 				return nil, fmt.Errorf("package %s: %w", candidate.importPath, err)
 			}
-			contractDigest, err := interfacedigest.Calculate(contract, metadata, constraints)
+			contractDigest, err := interfacedigest.CalculateContract(contract, metadata, constraints)
 			if err != nil {
 				return nil, fmt.Errorf("package %s: calculate Interface contract digest: %w", candidate.importPath, err)
 			}
+			documentationDigest, err := interfacedigest.CalculateDocumentation(contract, metadata)
+			if err != nil {
+				return nil, fmt.Errorf("package %s: calculate Interface documentation digest: %w", candidate.importPath, err)
+			}
+			exampleDigest, err := interfacedigest.CalculateExamples(contract, examples)
+			if err != nil {
+				return nil, fmt.Errorf("package %s: calculate Interface example digest: %w", candidate.importPath, err)
+			}
 			interfaces = append(interfaces, Interface{
-				modulePath:     candidate.source.path,
-				moduleVersion:  candidate.source.version,
-				packagePath:    candidate.importPath,
-				sourcePath:     declaration.Position().Path,
-				local:          candidate.source.local,
-				declaration:    declaration,
-				contract:       contract,
-				contractDigest: contractDigest,
-				metadata:       metadata,
-				hasMetadata:    hasMetadata,
-				constraints:    constraints,
-				examples:       examples,
+				modulePath:          candidate.source.path,
+				moduleVersion:       candidate.source.version,
+				packagePath:         candidate.importPath,
+				sourcePath:          declaration.Position().Path,
+				local:               candidate.source.local,
+				declaration:         declaration,
+				contract:            contract,
+				contractDigest:      contractDigest,
+				documentationDigest: documentationDigest,
+				exampleDigest:       exampleDigest,
+				metadata:            metadata,
+				hasMetadata:         hasMetadata,
+				constraints:         constraints,
+				examples:            examples,
 			})
 		}
 	}

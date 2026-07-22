@@ -1,5 +1,5 @@
-// Package interfacedigest calculates versioned exact Interface contract digests
-// from normalized Go contracts and compatibility metadata.
+// Package interfacedigest calculates versioned Interface contract,
+// documentation, and example digests from normalized typed inputs.
 package interfacedigest
 
 import (
@@ -15,25 +15,49 @@ import (
 	"github.com/plystra/cli/internal/interfacemeta"
 )
 
-const canonicalSchema = "plystra.interface.contract/v1"
+const (
+	canonicalContractSchema      = "plystra.interface.contract/v1"
+	canonicalDocumentationSchema = "plystra.interface.documentation/v1"
+	canonicalExamplesSchema      = "plystra.interface.examples/v1"
+)
 
-// ErrInvalid reports normalized input that cannot form an exact Interface
-// contract digest.
-var ErrInvalid = errors.New("invalid Interface contract digest input")
+// ErrInvalid reports normalized input that cannot form an Interface digest.
+var ErrInvalid = errors.New("invalid Interface digest input")
 
-// Calculate returns the SHA-256 digest of the versioned canonical Interface
-// contract representation. Documentation-only metadata and examples are not
-// inputs to this digest.
-func Calculate(contract interfacecontract.Contract, metadata interfacemeta.Document, constraints []interfacemeta.ConstraintTarget) (string, error) {
-	canonical, err := canonicalize(contract, metadata, constraints)
+// CalculateContract returns the SHA-256 digest of the versioned canonical
+// Interface contract representation. Documentation-only metadata and examples
+// are not inputs to this digest.
+func CalculateContract(contract interfacecontract.Contract, metadata interfacemeta.Document, constraints []interfacemeta.ConstraintTarget) (string, error) {
+	canonical, err := canonicalizeContract(contract, metadata, constraints)
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(canonical)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return digest(canonical), nil
 }
 
-type canonicalDocument struct {
+// CalculateDocumentation returns the SHA-256 digest of normalized public
+// descriptions and deprecation presentation. Exact contract facts and examples
+// are not inputs to this digest.
+func CalculateDocumentation(contract interfacecontract.Contract, metadata interfacemeta.Document) (string, error) {
+	canonical, err := canonicalizeDocumentation(contract, metadata)
+	if err != nil {
+		return "", err
+	}
+	return digest(canonical), nil
+}
+
+// CalculateExamples returns the SHA-256 digest of normalized validated
+// request-and-outcome examples. Exact contract and documentation presentation
+// are not inputs to this digest.
+func CalculateExamples(contract interfacecontract.Contract, examples []interfacemeta.Example) (string, error) {
+	canonical, err := canonicalizeExamples(contract, examples)
+	if err != nil {
+		return "", err
+	}
+	return digest(canonical), nil
+}
+
+type canonicalContractDocument struct {
 	Schema      string                `json:"schema"`
 	ID          string                `json:"interface_id"`
 	Method      canonicalMethod       `json:"method"`
@@ -83,7 +107,39 @@ type canonicalConformance struct {
 	Package string `json:"package"`
 }
 
-func canonicalize(contract interfacecontract.Contract, metadata interfacemeta.Document, constraints []interfacemeta.ConstraintTarget) ([]byte, error) {
+type canonicalDocumentationDocument struct {
+	Schema                    string                      `json:"schema"`
+	ID                        string                      `json:"interface_id"`
+	Description               *string                     `json:"description"`
+	SemanticErrorDescriptions []canonicalErrorDescription `json:"semantic_error_descriptions"`
+	Deprecation               *canonicalDeprecation       `json:"deprecation"`
+}
+
+type canonicalErrorDescription struct {
+	Code        string `json:"code"`
+	Description string `json:"description"`
+}
+
+type canonicalDeprecation struct {
+	Message     string  `json:"message"`
+	Replacement *string `json:"replacement"`
+	Since       *string `json:"since"`
+}
+
+type canonicalExamplesDocument struct {
+	Schema   string             `json:"schema"`
+	ID       string             `json:"interface_id"`
+	Examples []canonicalExample `json:"examples"`
+}
+
+type canonicalExample struct {
+	Name      string          `json:"name"`
+	Request   json.RawMessage `json:"request"`
+	Response  json.RawMessage `json:"response,omitempty"`
+	ErrorCode string          `json:"error_code,omitempty"`
+}
+
+func canonicalizeContract(contract interfacecontract.Contract, metadata interfacemeta.Document, constraints []interfacemeta.ConstraintTarget) ([]byte, error) {
 	if contract.ID().String() == "" || contract.MethodName() == "" || contract.RequestName() == "" || contract.ResponseName() == "" {
 		return nil, fmt.Errorf("%w: a complete normalized Interface contract is required", ErrInvalid)
 	}
@@ -151,8 +207,8 @@ func canonicalize(contract interfacecontract.Contract, metadata interfacemeta.Do
 		conformance = &canonicalConformance{Package: normalized.Package()}
 	}
 
-	canonical, err := json.Marshal(canonicalDocument{
-		Schema: canonicalSchema,
+	canonical, err := json.Marshal(canonicalContractDocument{
+		Schema: canonicalContractSchema,
 		ID:     contract.ID().String(),
 		Method: canonicalMethod{
 			Name:         contract.MethodName(),
@@ -172,6 +228,113 @@ func canonicalize(contract interfacecontract.Contract, metadata interfacemeta.Do
 	}
 	return canonical, nil
 }
+
+func canonicalizeDocumentation(contract interfacecontract.Contract, metadata interfacemeta.Document) ([]byte, error) {
+	identifier := contract.ID().String()
+	if identifier == "" {
+		return nil, fmt.Errorf("%w: a normalized Interface identity is required", ErrInvalid)
+	}
+
+	var description *string
+	if value, present := metadata.Description(); present {
+		description = stringPointer(value)
+	}
+
+	semanticErrors := metadata.Errors()
+	errorDescriptions := make([]canonicalErrorDescription, 0, len(semanticErrors))
+	for _, semanticError := range semanticErrors {
+		value, present := semanticError.Description()
+		if !present {
+			continue
+		}
+		errorDescriptions = append(errorDescriptions, canonicalErrorDescription{
+			Code:        semanticError.Code(),
+			Description: value,
+		})
+	}
+	sort.Slice(errorDescriptions, func(left, right int) bool {
+		return errorDescriptions[left].Code < errorDescriptions[right].Code
+	})
+
+	var deprecation *canonicalDeprecation
+	if value, present := metadata.Deprecation(); present {
+		deprecation = &canonicalDeprecation{Message: value.Message()}
+		if replacement, exists := value.Replacement(); exists {
+			deprecation.Replacement = stringPointer(replacement.String())
+		}
+		if since, exists := value.Since(); exists {
+			deprecation.Since = stringPointer(since)
+		}
+	}
+
+	canonical, err := json.Marshal(canonicalDocumentationDocument{
+		Schema:                    canonicalDocumentationSchema,
+		ID:                        identifier,
+		Description:               description,
+		SemanticErrorDescriptions: errorDescriptions,
+		Deprecation:               deprecation,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: encode canonical documentation: %w", ErrInvalid, err)
+	}
+	return canonical, nil
+}
+
+func canonicalizeExamples(contract interfacecontract.Contract, examples []interfacemeta.Example) ([]byte, error) {
+	identifier := contract.ID().String()
+	if identifier == "" {
+		return nil, fmt.Errorf("%w: a normalized Interface identity is required", ErrInvalid)
+	}
+
+	canonicalExamples := make([]canonicalExample, len(examples))
+	seen := make(map[string]struct{}, len(examples))
+	for index, example := range examples {
+		if example.Name() == "" {
+			return nil, fmt.Errorf("%w: canonical example name is empty", ErrInvalid)
+		}
+		if _, duplicate := seen[example.Name()]; duplicate {
+			return nil, fmt.Errorf("%w: duplicate canonical example name %q", ErrInvalid, example.Name())
+		}
+		seen[example.Name()] = struct{}{}
+
+		request := json.RawMessage(example.Request().CanonicalJSON())
+		if !json.Valid(request) {
+			return nil, fmt.Errorf("%w: example %q has an invalid canonical request", ErrInvalid, example.Name())
+		}
+		normalizedExample := canonicalExample{Name: example.Name(), Request: request}
+		if response, present := example.Response(); present {
+			normalizedExample.Response = json.RawMessage(response.CanonicalJSON())
+			if !json.Valid(normalizedExample.Response) {
+				return nil, fmt.Errorf("%w: example %q has an invalid canonical response", ErrInvalid, example.Name())
+			}
+		} else if code, present := example.ErrorCode(); present {
+			normalizedExample.ErrorCode = code
+		} else {
+			return nil, fmt.Errorf("%w: example %q has no canonical outcome", ErrInvalid, example.Name())
+		}
+		canonicalExamples[index] = normalizedExample
+	}
+	sort.Slice(canonicalExamples, func(left, right int) bool {
+		return canonicalExamples[left].Name < canonicalExamples[right].Name
+	})
+
+	canonical, err := json.Marshal(canonicalExamplesDocument{
+		Schema:   canonicalExamplesSchema,
+		ID:       identifier,
+		Examples: canonicalExamples,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: encode canonical examples: %w", ErrInvalid, err)
+	}
+	return canonical, nil
+}
+
+func digest(canonical []byte) string {
+	sum := sha256.Sum256(canonical)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func stringPointer(value string) *string { return &value }
 
 func canonicalRules(rules interfacemeta.ConstraintRules) []canonicalRule {
 	result := make([]canonicalRule, 0, 7)

@@ -295,6 +295,9 @@ replace example.com/dependency => ../dependency
 	if !present || local.Path() != "interfaces/local/interface.yaml" || string(local.Data()) != localMetadata || byID["local.records.list/v1"].MetadataSource() != "example.com/app@local/interfaces/local/interface.yaml" {
 		t.Fatalf("local metadata = %#v, %t, source %q", local, present, byID["local.records.list/v1"].MetadataSource())
 	}
+	if description, present := byID["local.records.list/v1"].Description(); !present || description != "Lists local records." {
+		t.Fatalf("local description = %q, %t", description, present)
+	}
 	localSemantics, present := byID["local.records.list/v1"].Semantics()
 	if !present || localSemantics.Kind() != interfacemeta.OperationKindCommand {
 		t.Fatalf("local semantics = %#v, %t", localSemantics, present)
@@ -337,9 +340,18 @@ replace example.com/dependency => ../dependency
 	if digest := byID["local.records.list/v1"].ContractDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
 		t.Fatalf("local Interface contract digest = %q", digest)
 	}
+	if digest := byID["local.records.list/v1"].DocumentationDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("local Interface documentation digest = %q", digest)
+	}
+	if digest := byID["local.records.list/v1"].ExampleDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("local Interface example digest = %q", digest)
+	}
 	dependency, present := byID["dependency.records.list/v1"].Metadata()
 	if !present || dependency.Path() != "api/interface.yaml" || string(dependency.Data()) != dependencyMetadata || byID["dependency.records.list/v1"].MetadataSource() != "example.com/dependency@v1.2.3/api/interface.yaml" {
 		t.Fatalf("dependency metadata = %#v, %t, source %q", dependency, present, byID["dependency.records.list/v1"].MetadataSource())
+	}
+	if description, present := byID["dependency.records.list/v1"].Description(); !present || description != "Lists dependency records." {
+		t.Fatalf("dependency description = %q, %t", description, present)
 	}
 	dependencySemantics, present := byID["dependency.records.list/v1"].Semantics()
 	if !present || dependencySemantics.Kind() != interfacemeta.OperationKindQuery {
@@ -377,11 +389,20 @@ replace example.com/dependency => ../dependency
 	if digest := byID["dependency.records.list/v1"].ContractDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
 		t.Fatalf("dependency Interface contract digest = %q", digest)
 	}
+	if digest := byID["dependency.records.list/v1"].DocumentationDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("dependency Interface documentation digest = %q", digest)
+	}
+	if digest := byID["dependency.records.list/v1"].ExampleDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("dependency Interface example digest = %q", digest)
+	}
 	if metadata, present := byID["local.records.get/v1"].Metadata(); present || metadata.Path() != "" || len(metadata.Data()) != 0 || byID["local.records.get/v1"].MetadataSource() != "" {
 		t.Fatalf("absent metadata = %#v, %t", metadata, present)
 	}
 	if semantics, present := byID["local.records.get/v1"].Semantics(); present || semantics.Kind() != "" {
 		t.Fatalf("absent semantics = %#v, %t", semantics, present)
+	}
+	if description, present := byID["local.records.get/v1"].Description(); present || description != "" {
+		t.Fatalf("absent description = %q, %t", description, present)
 	}
 	described, hasMetadata := byID["local.records.describe/v1"].Metadata()
 	if !hasMetadata || described.Path() != "interfaces/described/interface.yaml" {
@@ -445,6 +466,8 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 	}{
 		{name: "empty", want: "document is empty"},
 		{name: "comments only", data: "# empty\n", want: "expected one YAML document"},
+		{name: "invalid description shape", data: "description: []\n", wantError: interfacemeta.ErrInvalidDescription, location: "interfaces/records/interface.yaml:1:14", want: "description must be a string"},
+		{name: "empty description", data: "description: ''\n", wantError: interfacemeta.ErrInvalidDescription, location: "interfaces/records/interface.yaml:1:14", want: "description must not be empty"},
 		{name: "malformed", data: "[\n", want: "decode YAML"},
 		{name: "multiple documents", data: "{}\n---\n{}\n", want: "multiple YAML documents"},
 		{name: "sequence root", data: "- description\n", want: "root must be a mapping"},
@@ -717,27 +740,29 @@ func interfaceIDs(index interfaceinventory.Index) []string {
 }
 
 type interfaceSummary struct {
-	ID              string
-	ModulePath      string
-	ModuleVersion   string
-	PackagePath     string
-	SourcePath      string
-	Source          string
-	Local           bool
-	Method          string
-	Request         string
-	Response        string
-	ContractDigest  string
-	MetadataPath    string
-	MetadataData    string
-	MetadataSource  string
-	SemanticsKind   interfacemeta.OperationKind
-	HasSemantics    bool
-	ErrorCodes      []string
-	ConstraintPaths []string
-	Examples        []string
-	Deprecation     []string
-	Conformance     string
+	ID                  string
+	ModulePath          string
+	ModuleVersion       string
+	PackagePath         string
+	SourcePath          string
+	Source              string
+	Local               bool
+	Method              string
+	Request             string
+	Response            string
+	ContractDigest      string
+	DocumentationDigest string
+	ExampleDigest       string
+	MetadataPath        string
+	MetadataData        string
+	MetadataSource      string
+	SemanticsKind       interfacemeta.OperationKind
+	HasSemantics        bool
+	ErrorCodes          []string
+	ConstraintPaths     []string
+	Examples            []string
+	Deprecation         []string
+	Conformance         string
 }
 
 func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
@@ -761,27 +786,29 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 		deprecation, _ := discovered.Deprecation()
 		conformance, _ := discovered.Conformance()
 		result[position] = interfaceSummary{
-			ID:              discovered.ID(),
-			ModulePath:      discovered.ModulePath(),
-			ModuleVersion:   discovered.ModuleVersion(),
-			PackagePath:     discovered.PackagePath(),
-			SourcePath:      discovered.SourcePath(),
-			Source:          discovered.Source(),
-			Local:           discovered.Local(),
-			Method:          contract.MethodName(),
-			Request:         contract.RequestName(),
-			Response:        contract.ResponseName(),
-			ContractDigest:  discovered.ContractDigest(),
-			MetadataPath:    metadata.Path(),
-			MetadataData:    string(metadata.Data()),
-			MetadataSource:  discovered.MetadataSource(),
-			SemanticsKind:   semantics.Kind(),
-			HasSemantics:    hasSemantics,
-			ErrorCodes:      errorCodes,
-			ConstraintPaths: constraintPaths,
-			Examples:        examples,
-			Deprecation:     inventoryDeprecationSummary(deprecation),
-			Conformance:     conformance.Package(),
+			ID:                  discovered.ID(),
+			ModulePath:          discovered.ModulePath(),
+			ModuleVersion:       discovered.ModuleVersion(),
+			PackagePath:         discovered.PackagePath(),
+			SourcePath:          discovered.SourcePath(),
+			Source:              discovered.Source(),
+			Local:               discovered.Local(),
+			Method:              contract.MethodName(),
+			Request:             contract.RequestName(),
+			Response:            contract.ResponseName(),
+			ContractDigest:      discovered.ContractDigest(),
+			DocumentationDigest: discovered.DocumentationDigest(),
+			ExampleDigest:       discovered.ExampleDigest(),
+			MetadataPath:        metadata.Path(),
+			MetadataData:        string(metadata.Data()),
+			MetadataSource:      discovered.MetadataSource(),
+			SemanticsKind:       semantics.Kind(),
+			HasSemantics:        hasSemantics,
+			ErrorCodes:          errorCodes,
+			ConstraintPaths:     constraintPaths,
+			Examples:            examples,
+			Deprecation:         inventoryDeprecationSummary(deprecation),
+			Conformance:         conformance.Package(),
 		}
 	}
 	return result

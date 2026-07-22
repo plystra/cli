@@ -169,6 +169,15 @@ type Response struct {
 	if digest := discovered.ContractDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
 		t.Fatalf("Interface contract digest = %q", digest)
 	}
+	if digest := discovered.DocumentationDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("Interface documentation digest = %q", digest)
+	}
+	if digest := discovered.ExampleDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("Interface example digest = %q", digest)
+	}
+	if description, present := discovered.Description(); !present || description != "Executes an order." {
+		t.Fatalf("Interface description = %q, %t", description, present)
+	}
 	semantics, present := discovered.Semantics()
 	if !present || semantics.Kind() != interfacemeta.OperationKindCommand || discovered.MetadataSource() != "example.com/interfaces@local/domains/orders/create/v1/interface.yaml" {
 		t.Fatalf("Interface semantics = %#v, %t, source %q", semantics, present, discovered.MetadataSource())
@@ -228,6 +237,31 @@ func TestResolveRejectsInvalidInterfaceOperationSemantics(t *testing.T) {
 		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"}),
 	})
 	if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacemeta.ErrInvalidSemantics) || !strings.Contains(err.Error(), "interfaces/invalid/interface.yaml:2:9") || !strings.Contains(err.Error(), "expected query or command") {
+		t.Fatalf("Resolve error = %v", err)
+	}
+	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+		t.Fatalf("Resolve error exposed private Project root: %v", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("failed resolution mutated Interface Project:\nbefore: %#v\nafter: %#v", before, after)
+	}
+}
+
+func TestResolveRejectsInvalidInterfaceDescriptionWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModule(t, root, "example.com/invalid-interface-description")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	packageRoot := filepath.Join(root, "interfaces", "invalid")
+	writeFile(t, filepath.Join(packageRoot, "interface.go"), interfaceDeclarationSource("invalid", "invalid.description.execute/v1", "Execute"))
+	writeFile(t, filepath.Join(packageRoot, interfacemeta.Name), "description: []\n")
+	before := snapshotTree(t, root)
+	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       root,
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"}),
+	})
+	if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacemeta.ErrInvalidDescription) || !strings.Contains(err.Error(), "interfaces/invalid/interface.yaml:1:14") || !strings.Contains(err.Error(), "description must be a string") {
 		t.Fatalf("Resolve error = %v", err)
 	}
 	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {

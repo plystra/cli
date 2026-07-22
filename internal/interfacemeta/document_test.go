@@ -19,6 +19,9 @@ func TestParseFilePreservesValidMetadataBytes(t *testing.T) {
 	if document.Path() != "interfaces/records/list/v1/interface.yaml" || string(document.Data()) != string(data) {
 		t.Fatalf("document = path %q data %q", document.Path(), document.Data())
 	}
+	if description, present := document.Description(); !present || description != "Lists records." {
+		t.Fatalf("description = %q, %t", description, present)
+	}
 	semantics, present := document.Semantics()
 	if !present || semantics.Kind() != interfacemeta.OperationKindQuery {
 		t.Fatalf("semantics = %#v, %t", semantics, present)
@@ -39,6 +42,9 @@ func TestParseFileAcceptsEmptyMapping(t *testing.T) {
 	}
 	if semantics, present := document.Semantics(); present || semantics.Kind() != "" {
 		t.Fatalf("absent semantics = %#v, %t", semantics, present)
+	}
+	if description, present := document.Description(); present || description != "" {
+		t.Fatalf("absent description = %q, %t", description, present)
 	}
 	if deprecation, present := document.Deprecation(); present || deprecation.Message() != "" {
 		t.Fatalf("absent deprecation = %#v, %t", deprecation, present)
@@ -73,6 +79,9 @@ conformance:
 	document, err := interfacemeta.ParseFile("interfaces/order/create/v1/interface.yaml", data)
 	if err != nil || string(document.Data()) != string(data) {
 		t.Fatalf("ParseFile = %#v, %v", document, err)
+	}
+	if description, present := document.Description(); !present || description != "Creates an order." {
+		t.Fatalf("description = %q, %t", description, present)
 	}
 	semantics, present := document.Semantics()
 	if !present || semantics.Kind() != interfacemeta.OperationKindCommand {
@@ -334,6 +343,9 @@ func FuzzParseFile(f *testing.F) {
 		}
 		if document.Path() == "" || string(document.Data()) != data {
 			t.Fatalf("ParseFile returned inconsistent document: %#v", document)
+		}
+		if description, present := document.Description(); present && (strings.TrimSpace(description) == "" || strings.IndexByte(description, 0) >= 0) {
+			t.Fatalf("ParseFile returned an unsafe description: %q", description)
 		}
 		if semantics, present := document.Semantics(); present && semantics.Kind() != interfacemeta.OperationKindQuery && semantics.Kind() != interfacemeta.OperationKindCommand {
 			t.Fatalf("ParseFile returned unsupported semantics: %#v", semantics)
