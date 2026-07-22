@@ -70,11 +70,12 @@ var authoritativeTopLevelFields = map[string]string{
 // Document is one immutable, syntactically valid optional metadata document
 // with every supported metadata section normalized as its schema is defined.
 type Document struct {
-	path         string
-	data         []byte
-	semantics    Semantics
-	hasSemantics bool
-	errors       []SemanticError
+	path            string
+	data            []byte
+	semantics       Semantics
+	hasSemantics    bool
+	errors          []SemanticError
+	constraintPaths []constraintPathDeclaration
 }
 
 // Path returns the stable slash-separated module-relative source path.
@@ -143,12 +144,17 @@ func ParseFile(sourcePath string, data []byte) (Document, error) {
 	if err != nil {
 		return Document{}, err
 	}
+	constraintPaths, err := parseConstraintPathDeclarations(sourcePath, root)
+	if err != nil {
+		return Document{}, err
+	}
 	return Document{
-		path:         sourcePath,
-		data:         append([]byte(nil), data...),
-		semantics:    semantics,
-		hasSemantics: hasSemantics,
-		errors:       semanticErrors,
+		path:            sourcePath,
+		data:            append([]byte(nil), data...),
+		semantics:       semantics,
+		hasSemantics:    hasSemantics,
+		errors:          semanticErrors,
+		constraintPaths: constraintPaths,
 	}, nil
 }
 
@@ -170,6 +176,16 @@ func validateTopLevelFields(sourcePath string, root *yaml.Node) error {
 }
 
 func rejectNestedAuthoritativeFields(sourcePath, section string, node *yaml.Node) error {
+	if section == "constraints" {
+		if node != nil && node.Kind == yaml.MappingNode {
+			for index := 1; index < len(node.Content); index += 2 {
+				if err := walkAuthoritativeFields(sourcePath, node.Content[index]); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
 	if section != "examples" || node == nil || node.Kind != yaml.SequenceNode {
 		return walkAuthoritativeFields(sourcePath, node)
 	}

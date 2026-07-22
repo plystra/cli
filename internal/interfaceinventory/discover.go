@@ -63,6 +63,7 @@ type Interface struct {
 	contract      interfacecontract.Contract
 	metadata      interfacemeta.Document
 	hasMetadata   bool
+	constraints   []interfacemeta.ConstraintTarget
 }
 
 // ID returns the exact canonical Interface ID.
@@ -122,6 +123,12 @@ func (i Interface) SemanticErrors() []interfacemeta.SemanticError {
 		return nil
 	}
 	return i.metadata.Errors()
+}
+
+// ConstraintTargets returns a defensive path-ordered view of metadata
+// constraint declarations resolved to canonical Go fields.
+func (i Interface) ConstraintTargets() []interfacemeta.ConstraintTarget {
+	return append([]interfacemeta.ConstraintTarget(nil), i.constraints...)
 }
 
 // MetadataSource returns stable module-qualified metadata provenance, or an
@@ -283,6 +290,10 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 			if err != nil {
 				return nil, fmt.Errorf("package %s: %w", candidate.importPath, err)
 			}
+			constraints, err := interfacemeta.ResolveConstraintTargets(metadata, contract)
+			if err != nil {
+				return nil, fmt.Errorf("package %s: %w", candidate.importPath, err)
+			}
 			interfaces = append(interfaces, Interface{
 				modulePath:    candidate.source.path,
 				moduleVersion: candidate.source.version,
@@ -293,6 +304,7 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 				contract:      contract,
 				metadata:      metadata,
 				hasMetadata:   hasMetadata,
+				constraints:   constraints,
 			})
 		}
 	}

@@ -144,7 +144,7 @@ type Response struct {
 	Accepted bool `+"`plystra:\"1\" json:\"accepted\"`"+`
 }
 `)
-	writeFile(t, filepath.Join(root, "domains", "orders", "create", "v1", interfacemeta.Name), "description: Executes an order.\nsemantics:\n  kind: command\nerrors:\n  - code: order_rejected\n    description: The order was rejected.\n")
+	writeFile(t, filepath.Join(root, "domains", "orders", "create", "v1", interfacemeta.Name), "description: Executes an order.\nsemantics:\n  kind: command\nerrors:\n  - code: order_rejected\n    description: The order was rejected.\nconstraints:\n  request.order_id: {min_length: 1}\n")
 	before := snapshotTree(t, root)
 	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
 		Start:       filepath.Join(root, "domains", "orders"),
@@ -172,6 +172,10 @@ type Response struct {
 	semanticErrors := discovered.SemanticErrors()
 	if len(semanticErrors) != 1 || semanticErrors[0].Code() != "order_rejected" {
 		t.Fatalf("Interface semantic errors = %#v", semanticErrors)
+	}
+	constraints := discovered.ConstraintTargets()
+	if len(constraints) != 1 || constraints[0].Path() != "request.order_id" || constraints[0].GoPath() != "Request.OrderID" || constraints[0].Field().Type().Kind() != interfacecontract.TypeString {
+		t.Fatalf("Interface constraint targets = %#v", constraints)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("Resolve mutated Interface Project:\nbefore: %#v\nafter:  %#v", before, after)
@@ -218,6 +222,31 @@ func TestResolveRejectsInvalidInterfaceSemanticErrors(t *testing.T) {
 		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"}),
 	})
 	if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacemeta.ErrInvalidSemanticErrors) || !strings.Contains(err.Error(), "interfaces/invalid/interface.yaml:2:11") || !strings.Contains(err.Error(), "lower snake case") {
+		t.Fatalf("Resolve error = %v", err)
+	}
+	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+		t.Fatalf("Resolve error exposed private Project root: %v", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("failed resolution mutated Interface Project:\nbefore: %#v\nafter: %#v", before, after)
+	}
+}
+
+func TestResolveRejectsInvalidInterfaceConstraintPath(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModule(t, root, "example.com/invalid-interface-constraints")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	packageRoot := filepath.Join(root, "interfaces", "invalid")
+	writeFile(t, filepath.Join(packageRoot, "interface.go"), interfaceDeclarationSource("invalid", "invalid.constraints.execute/v1", "Execute"))
+	writeFile(t, filepath.Join(packageRoot, interfacemeta.Name), "constraints:\n  request.missing: {min_length: 1}\n")
+	before := snapshotTree(t, root)
+	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       root,
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"}),
+	})
+	if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacemeta.ErrInvalidConstraints) || !strings.Contains(err.Error(), "interfaces/invalid/interface.yaml:2:3") || !strings.Contains(err.Error(), "does not identify a canonical") {
 		t.Fatalf("Resolve error = %v", err)
 	}
 	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {

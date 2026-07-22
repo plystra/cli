@@ -257,7 +257,7 @@ func TestDiscoverLoadsOptionalColocatedMetadataWithStableProvenance(t *testing.T
 	dependencyRoot := filepath.Join(root, "dependency")
 	writeProject(t, dependencyRoot, "example.com/dependency")
 	writeFile(t, filepath.Join(dependencyRoot, "api", "interface.go"), interfaceSource("api", "dependency.records.list/v1", "List"))
-	dependencyMetadata := "description: Lists dependency records.\nsemantics:\n  kind: query\nerrors:\n  - code: dependency_unavailable\n"
+	dependencyMetadata := "description: Lists dependency records.\nsemantics:\n  kind: query\nerrors:\n  - code: dependency_unavailable\nconstraints:\n  request.value: {min_length: 1}\n"
 	writeFile(t, filepath.Join(dependencyRoot, "api", interfacemeta.Name), dependencyMetadata)
 
 	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
@@ -270,7 +270,7 @@ replace example.com/dependency => ../dependency
 `)
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
 	writeFile(t, filepath.Join(appRoot, "interfaces", "local", "interface.go"), interfaceSource("local", "local.records.list/v1", "List"))
-	localMetadata := "# local metadata\ndescription: Lists local records.\nsemantics:\n  kind: command\nerrors:\n  - code: records_unavailable\n  - code: invalid_filter\n    description: The filter is invalid.\n"
+	localMetadata := "# local metadata\ndescription: Lists local records.\nsemantics:\n  kind: command\nerrors:\n  - code: records_unavailable\n  - code: invalid_filter\n    description: The filter is invalid.\nconstraints:\n  response.accepted: {}\n  request.value: {min_length: 1}\n"
 	writeFile(t, filepath.Join(appRoot, "interfaces", "local", interfacemeta.Name), localMetadata)
 	writeFile(t, filepath.Join(appRoot, "interfaces", "plain", "interface.go"), interfaceSource("plain", "local.records.get/v1", "Get"))
 	writeFile(t, filepath.Join(appRoot, "interfaces", "described", "interface.go"), interfaceSource("described", "local.records.describe/v1", "Describe"))
@@ -300,6 +300,10 @@ replace example.com/dependency => ../dependency
 	if len(localErrors) != 2 || localErrors[0].Code() != "invalid_filter" || localErrors[1].Code() != "records_unavailable" {
 		t.Fatalf("local semantic errors = %#v", localErrors)
 	}
+	localConstraints := byID["local.records.list/v1"].ConstraintTargets()
+	if len(localConstraints) != 2 || localConstraints[0].Path() != "request.value" || localConstraints[0].GoPath() != "Request.Value" || localConstraints[1].Path() != "response.accepted" || localConstraints[1].GoPath() != "Response.Accepted" {
+		t.Fatalf("local constraint targets = %#v", localConstraints)
+	}
 	dependency, present := byID["dependency.records.list/v1"].Metadata()
 	if !present || dependency.Path() != "api/interface.yaml" || string(dependency.Data()) != dependencyMetadata || byID["dependency.records.list/v1"].MetadataSource() != "example.com/dependency@v1.2.3/api/interface.yaml" {
 		t.Fatalf("dependency metadata = %#v, %t, source %q", dependency, present, byID["dependency.records.list/v1"].MetadataSource())
@@ -311,6 +315,10 @@ replace example.com/dependency => ../dependency
 	dependencyErrors := byID["dependency.records.list/v1"].SemanticErrors()
 	if len(dependencyErrors) != 1 || dependencyErrors[0].Code() != "dependency_unavailable" {
 		t.Fatalf("dependency semantic errors = %#v", dependencyErrors)
+	}
+	dependencyConstraints := byID["dependency.records.list/v1"].ConstraintTargets()
+	if len(dependencyConstraints) != 1 || dependencyConstraints[0].Path() != "request.value" || dependencyConstraints[0].GoPath() != "Request.Value" {
+		t.Fatalf("dependency constraint targets = %#v", dependencyConstraints)
 	}
 	if metadata, present := byID["local.records.get/v1"].Metadata(); present || metadata.Path() != "" || len(metadata.Data()) != 0 || byID["local.records.get/v1"].MetadataSource() != "" {
 		t.Fatalf("absent metadata = %#v, %t", metadata, present)
@@ -328,9 +336,16 @@ replace example.com/dependency => ../dependency
 	if semanticErrors := byID["local.records.describe/v1"].SemanticErrors(); len(semanticErrors) != 0 {
 		t.Fatalf("description-only semantic errors = %#v", semanticErrors)
 	}
+	if constraints := byID["local.records.describe/v1"].ConstraintTargets(); len(constraints) != 0 {
+		t.Fatalf("description-only constraint targets = %#v", constraints)
+	}
 	localErrors[0] = interfacemeta.SemanticError{}
 	if byID["local.records.list/v1"].SemanticErrors()[0].Code() != "invalid_filter" {
 		t.Fatal("SemanticErrors exposed mutable metadata storage")
+	}
+	localConstraints[0] = interfacemeta.ConstraintTarget{}
+	if byID["local.records.list/v1"].ConstraintTargets()[0].Path() != "request.value" {
+		t.Fatal("ConstraintTargets exposed mutable inventory storage")
 	}
 	view := local.Data()
 	view[0] = 'x'
@@ -371,6 +386,9 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 		{name: "invalid semantic errors shape", data: "errors: invalid_value\n", wantError: interfacemeta.ErrInvalidSemanticErrors, want: "errors must be a sequence"},
 		{name: "invalid semantic error field", data: "errors:\n  - code: invalid_value\n    retryable: true\n", wantError: interfacemeta.ErrInvalidSemanticErrors, want: "errors[0].retryable"},
 		{name: "duplicate semantic error", data: "errors:\n  - code: invalid_value\n  - code: invalid_value\n", wantError: interfacemeta.ErrInvalidSemanticErrors, want: "duplicates"},
+		{name: "invalid constraints shape", data: "constraints: []\n", wantError: interfacemeta.ErrInvalidConstraints, want: "constraints must be a mapping"},
+		{name: "invalid constraint rules", data: "constraints:\n  request.value: []\n", wantError: interfacemeta.ErrInvalidConstraints, want: "must be a mapping"},
+		{name: "unknown constraint path", data: "constraints:\n  request.missing: {}\n", wantError: interfacemeta.ErrInvalidConstraints, want: "does not identify a canonical"},
 		{name: "directory", directory: true, want: "regular non-symbolic file"},
 		{name: "oversized", data: strings.Repeat("x", interfacemeta.MaximumSize+1), want: "exceeds"},
 	}
@@ -582,22 +600,23 @@ func interfaceIDs(index interfaceinventory.Index) []string {
 }
 
 type interfaceSummary struct {
-	ID             string
-	ModulePath     string
-	ModuleVersion  string
-	PackagePath    string
-	SourcePath     string
-	Source         string
-	Local          bool
-	Method         string
-	Request        string
-	Response       string
-	MetadataPath   string
-	MetadataData   string
-	MetadataSource string
-	SemanticsKind  interfacemeta.OperationKind
-	HasSemantics   bool
-	ErrorCodes     []string
+	ID              string
+	ModulePath      string
+	ModuleVersion   string
+	PackagePath     string
+	SourcePath      string
+	Source          string
+	Local           bool
+	Method          string
+	Request         string
+	Response        string
+	MetadataPath    string
+	MetadataData    string
+	MetadataSource  string
+	SemanticsKind   interfacemeta.OperationKind
+	HasSemantics    bool
+	ErrorCodes      []string
+	ConstraintPaths []string
 }
 
 func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
@@ -612,23 +631,29 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 		for index, semanticError := range semanticErrors {
 			errorCodes[index] = semanticError.Code()
 		}
+		constraintTargets := discovered.ConstraintTargets()
+		constraintPaths := make([]string, len(constraintTargets))
+		for index, target := range constraintTargets {
+			constraintPaths[index] = target.Path() + "=" + target.GoPath()
+		}
 		result[position] = interfaceSummary{
-			ID:             discovered.ID(),
-			ModulePath:     discovered.ModulePath(),
-			ModuleVersion:  discovered.ModuleVersion(),
-			PackagePath:    discovered.PackagePath(),
-			SourcePath:     discovered.SourcePath(),
-			Source:         discovered.Source(),
-			Local:          discovered.Local(),
-			Method:         contract.MethodName(),
-			Request:        contract.RequestName(),
-			Response:       contract.ResponseName(),
-			MetadataPath:   metadata.Path(),
-			MetadataData:   string(metadata.Data()),
-			MetadataSource: discovered.MetadataSource(),
-			SemanticsKind:  semantics.Kind(),
-			HasSemantics:   hasSemantics,
-			ErrorCodes:     errorCodes,
+			ID:              discovered.ID(),
+			ModulePath:      discovered.ModulePath(),
+			ModuleVersion:   discovered.ModuleVersion(),
+			PackagePath:     discovered.PackagePath(),
+			SourcePath:      discovered.SourcePath(),
+			Source:          discovered.Source(),
+			Local:           discovered.Local(),
+			Method:          contract.MethodName(),
+			Request:         contract.RequestName(),
+			Response:        contract.ResponseName(),
+			MetadataPath:    metadata.Path(),
+			MetadataData:    string(metadata.Data()),
+			MetadataSource:  discovered.MetadataSource(),
+			SemanticsKind:   semantics.Kind(),
+			HasSemantics:    hasSemantics,
+			ErrorCodes:      errorCodes,
+			ConstraintPaths: constraintPaths,
 		}
 	}
 	return result
