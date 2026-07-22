@@ -1162,6 +1162,14 @@ extensions:
 	if len(orderSources) != 1 || orderSources[0].Kind() != providerresolution.RequirementDeclaration || orderSources[0].ProjectModule() != "example.com/extension-app" || orderSources[0].Source().Path() != "plystra.yaml" {
 		t.Fatalf("declaration requirement source = %#v", orderSources)
 	}
+	activations := result.ResolutionEvidence().GenerationActivations()
+	if len(activations) != 1 || activations[0].Namespace() != "authn" || activations[0].SourceCapability() != "order.create/v1" || activations[0].ActivationCapability() != "authn.session.verify/v1" || activations[0].PluginID() != "example.authn" || activations[0].ProjectModule() != "example.com/extension-app" || len(activations[0].Causes()) != 1 || activations[0].Causes()[0].Source().Path() != "plystra.yaml" {
+		t.Fatalf("generation activation evidence = %#v", activations)
+	}
+	generatedEvidence := result.ResolutionEvidence().GeneratedRequirements()
+	if len(generatedEvidence) != 1 || generatedEvidence[0].Capability() != "audit.write/v1" || generatedEvidence[0].SourceCapability() != "order.create/v1" || generatedEvidence[0].ActivationCapability() != "authn.session.verify/v1" || generatedEvidence[0].Namespace() != "authn" || generatedEvidence[0].PluginID() != "example.authn" || generatedEvidence[0].ProjectModule() != "example.com/extension-app" || generatedEvidence[0].RuleID() != "authn.require-audit" || generatedEvidence[0].Source().Path() != "authn/plugin.yaml" || generatedEvidence[0].Source().Kind() != "generation-rule" {
+		t.Fatalf("generated requirement evidence = %#v", generatedEvidence)
+	}
 	entries, err := os.ReadDir(temporaryParent)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("temporary extension artifacts = %v, %v", entries, err)

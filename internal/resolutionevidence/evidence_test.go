@@ -36,8 +36,8 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	if first.SelectedModelDigest() != firstContext.Digest() || first.BuildModelDigest() != firstContext.BuildModelDigest() {
 		t.Fatalf("evidence model digests = selected %q build %q", first.SelectedModelDigest(), first.BuildModelDigest())
 	}
-	if first.SelectedPluginCount() != 1 || first.CanonicalCapabilityCount() != 2 || first.RequirementCount() != 2 || first.ProviderCandidateCount() != 1 || first.RejectedProviderCount() != 0 || first.SelectedProviderCount() != 2 || first.CapabilityAliasCount() != 1 {
-		t.Fatalf("evidence counts = plugins %d capabilities %d requirements %d candidates %d rejected %d providers %d aliases %d", first.SelectedPluginCount(), first.CanonicalCapabilityCount(), first.RequirementCount(), first.ProviderCandidateCount(), first.RejectedProviderCount(), first.SelectedProviderCount(), first.CapabilityAliasCount())
+	if first.SelectedPluginCount() != 1 || first.CanonicalCapabilityCount() != 2 || first.RequirementCount() != 2 || first.ProviderCandidateCount() != 1 || first.RejectedProviderCount() != 0 || first.SelectedProviderCount() != 2 || first.GenerationActivationCount() != 0 || first.GeneratedRequirementCount() != 0 || first.CapabilityAliasCount() != 1 {
+		t.Fatalf("evidence counts = plugins %d capabilities %d requirements %d candidates %d rejected %d providers %d activations %d generated %d aliases %d", first.SelectedPluginCount(), first.CanonicalCapabilityCount(), first.RequirementCount(), first.ProviderCandidateCount(), first.RejectedProviderCount(), first.SelectedProviderCount(), first.GenerationActivationCount(), first.GeneratedRequirementCount(), first.CapabilityAliasCount())
 	}
 	if first.ParticipatingModuleCount() != 3 {
 		t.Fatalf("participating module count = %d", first.ParticipatingModuleCount())
@@ -149,14 +149,16 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 			} `json:"selection_sources"`
 		} `json:"selected_providers"`
 		Counts struct {
-			ParticipatingModules int `json:"participating_modules"`
-			DiscoveredPlugins    int `json:"discovered_plugins"`
-			ProviderCandidates   int `json:"provider_candidates"`
-			RejectedProviders    int `json:"rejected_providers"`
-			SelectedProviders    int `json:"selected_providers"`
+			ParticipatingModules  int `json:"participating_modules"`
+			DiscoveredPlugins     int `json:"discovered_plugins"`
+			ProviderCandidates    int `json:"provider_candidates"`
+			RejectedProviders     int `json:"rejected_providers"`
+			SelectedProviders     int `json:"selected_providers"`
+			GenerationActivations int `json:"generation_activations"`
+			GeneratedRequirements int `json:"generated_requirements"`
 		} `json:"counts"`
 	}
-	if err := json.Unmarshal(first.CanonicalJSON(), &document); err != nil || document.Version != 1 || len(document.Modules) != 3 || document.Counts.ParticipatingModules != 3 || document.Counts.DiscoveredPlugins != 2 || document.Counts.ProviderCandidates != 1 || document.Counts.RejectedProviders != 0 || document.Counts.SelectedProviders != 2 || document.Modules[2].Replacement == nil || document.Modules[2].Replacement.Kind != "module" || document.Modules[2].Source.Module != "corp.example/smtp" || document.Modules[2].Source.Path != "plystra.yaml" || len(document.PluginCandidates) != 2 || document.PluginCandidates[1].ID != "example.smtp" || document.PluginCandidates[1].ModulePath != "example.com/smtp" || document.PluginCandidates[1].Source.Module != "corp.example/smtp" || document.PluginCandidates[1].Source.Path != "smtp/plugin.yaml" || len(document.SelectedPlugins) != 1 || document.SelectedPlugins[0].ID != "example.smtp" || document.SelectedPlugins[0].ModulePath != "example.com/smtp" || document.SelectedPlugins[0].ModuleVersion != "v1.3.0" || len(document.SelectedPlugins[0].Reasons) != 1 || document.SelectedPlugins[0].Reasons[0].Kind != "provider" || document.SelectedPlugins[0].Reasons[0].Capability != "email.send/v1" || len(document.ProviderCandidates) != 1 || document.ProviderCandidates[0].Capability != "email.send/v1" || document.ProviderCandidates[0].PluginID != "example.smtp" || document.ProviderCandidates[0].ProjectModule != "example.com/smtp" || document.ProviderCandidates[0].RejectionReason != "" || document.ProviderCandidates[0].Source.Module != "corp.example/smtp" || document.ProviderCandidates[0].Source.Path != "smtp/capabilities/email.send/v1/capability.yaml" || document.ProviderCandidates[0].Source.Kind != "provider-declaration" || len(document.SelectedProviders) != 2 || document.SelectedProviders[0].Capability != "email.send/v1" || document.SelectedProviders[0].SelectionReason != "sole-provider" || document.SelectedProviders[0].ProviderSource.Module != "corp.example/smtp" || document.SelectedProviders[1].Capability != "kernel.health/v1" || document.SelectedProviders[1].SelectionReason != "intrinsic-kernel" || document.SelectedProviders[1].ProviderSource.Module != "github.com/plystra/kernel" {
+	if err := json.Unmarshal(first.CanonicalJSON(), &document); err != nil || document.Version != 1 || len(document.Modules) != 3 || document.Counts.ParticipatingModules != 3 || document.Counts.DiscoveredPlugins != 2 || document.Counts.ProviderCandidates != 1 || document.Counts.RejectedProviders != 0 || document.Counts.SelectedProviders != 2 || document.Counts.GenerationActivations != 0 || document.Counts.GeneratedRequirements != 0 || document.Modules[2].Replacement == nil || document.Modules[2].Replacement.Kind != "module" || document.Modules[2].Source.Module != "corp.example/smtp" || document.Modules[2].Source.Path != "plystra.yaml" || len(document.PluginCandidates) != 2 || document.PluginCandidates[1].ID != "example.smtp" || document.PluginCandidates[1].ModulePath != "example.com/smtp" || document.PluginCandidates[1].Source.Module != "corp.example/smtp" || document.PluginCandidates[1].Source.Path != "smtp/plugin.yaml" || len(document.SelectedPlugins) != 1 || document.SelectedPlugins[0].ID != "example.smtp" || document.SelectedPlugins[0].ModulePath != "example.com/smtp" || document.SelectedPlugins[0].ModuleVersion != "v1.3.0" || len(document.SelectedPlugins[0].Reasons) != 1 || document.SelectedPlugins[0].Reasons[0].Kind != "provider" || document.SelectedPlugins[0].Reasons[0].Capability != "email.send/v1" || len(document.ProviderCandidates) != 1 || document.ProviderCandidates[0].Capability != "email.send/v1" || document.ProviderCandidates[0].PluginID != "example.smtp" || document.ProviderCandidates[0].ProjectModule != "example.com/smtp" || document.ProviderCandidates[0].RejectionReason != "" || document.ProviderCandidates[0].Source.Module != "corp.example/smtp" || document.ProviderCandidates[0].Source.Path != "smtp/capabilities/email.send/v1/capability.yaml" || document.ProviderCandidates[0].Source.Kind != "provider-declaration" || len(document.SelectedProviders) != 2 || document.SelectedProviders[0].Capability != "email.send/v1" || document.SelectedProviders[0].SelectionReason != "sole-provider" || document.SelectedProviders[0].ProviderSource.Module != "corp.example/smtp" || document.SelectedProviders[1].Capability != "kernel.health/v1" || document.SelectedProviders[1].SelectionReason != "intrinsic-kernel" || document.SelectedProviders[1].ProviderSource.Module != "github.com/plystra/kernel" {
 		t.Fatalf("canonical module evidence = %#v, %v", document, err)
 	}
 	for _, forbidden := range []string{"idempotency_key", "safe_name", "Provider-independent audit"} {
@@ -648,7 +650,7 @@ func TestBuildRecordsCanonicalCapabilityRequirementSources(t *testing.T) {
 			Column:           1,
 			PluginID:         "example.smtp",
 			Namespace:        "authn",
-			SourceCapability: "order.create/v1",
+			SourceCapability: "kernel.health/v1",
 			RuleID:           "authn.require-email",
 		},
 		{
@@ -693,7 +695,7 @@ func TestBuildRecordsCanonicalCapabilityRequirementSources(t *testing.T) {
 			Line:             3,
 			Column:           5,
 			Namespace:        "authn",
-			SourceCapability: "order.create/v1",
+			SourceCapability: "kernel.health/v1",
 		},
 		{
 			Kind:       providerresolution.RequirementAliasTarget,
@@ -707,7 +709,9 @@ func TestBuildRecordsCanonicalCapabilityRequirementSources(t *testing.T) {
 	}
 	duplicateDeclaration := emailSources[3]
 	duplicateDeclaration.Reference = "same declaration through a second diagnostic label"
-	emailSources = append(emailSources, duplicateDeclaration)
+	duplicateActivation := emailSources[5]
+	duplicateActivation.Reference = "same activation through a second diagnostic label"
+	emailSources = append(emailSources, duplicateDeclaration, duplicateActivation)
 	healthSource := providerresolution.RequirementSource{
 		Kind:       providerresolution.RequirementDeclaration,
 		Reference:  `plystra.yaml capabilities.require["kernel.health/v1"]`,
@@ -784,7 +788,7 @@ func TestBuildRecordsCanonicalCapabilityRequirementSources(t *testing.T) {
 			t.Fatalf("source[%d] = %#v, want kind %q", index, sources[index], want)
 		}
 	}
-	if source := sources[0]; source.Namespace() != "authn" || source.SourceCapability() != "order.create/v1" || source.ProjectModule() != "example.com/app" {
+	if source := sources[0]; source.Namespace() != "authn" || source.SourceCapability() != "kernel.health/v1" || source.ProjectModule() != "example.com/app" {
 		t.Fatalf("activation source = %#v", source)
 	}
 	if source := sources[1]; source.Alias() != "mail.send/v1" || source.ProjectModule() != "example.com/app" {
@@ -796,7 +800,7 @@ func TestBuildRecordsCanonicalCapabilityRequirementSources(t *testing.T) {
 	if source := sources[4]; source.PluginID() != "example.smtp" || source.Source().Module() != "corp.example/smtp" || source.Source().Path() != "smtp/internal/client.go" {
 		t.Fatalf("generated-client source = %#v", source)
 	}
-	if source := sources[5]; source.PluginID() != "example.smtp" || source.Namespace() != "authn" || source.SourceCapability() != "order.create/v1" || source.RuleID() != "authn.require-email" || source.Source().Module() != "corp.example/smtp" {
+	if source := sources[5]; source.PluginID() != "example.smtp" || source.Namespace() != "authn" || source.SourceCapability() != "kernel.health/v1" || source.RuleID() != "authn.require-email" || source.Source().Module() != "corp.example/smtp" {
 		t.Fatalf("generation-rule source = %#v", source)
 	}
 	if source := sources[6]; source.PluginID() != "example.smtp" || source.Source().Module() != "corp.example/smtp" || source.Source().Path() != "smtp/plugin.yaml" {
@@ -805,7 +809,44 @@ func TestBuildRecordsCanonicalCapabilityRequirementSources(t *testing.T) {
 	if requirements[1].ContractDigest() != digests["kernel.health/v1"] || !requirements[1].Intrinsic() || len(requirements[1].Sources()) != 1 || requirements[1].Sources()[0].ProjectModule() != "example.com/app" {
 		t.Fatalf("intrinsic requirement = %#v", requirements[1])
 	}
-	for _, forbidden := range []string{"same declaration through a second diagnostic label", "generation plugin example.smtp", `capabilities.require[\"kernel.health/v1\"]`} {
+	activations := first.GenerationActivations()
+	if first.GenerationActivationCount() != 1 || len(activations) != 1 || activations[0].Namespace() != "authn" || activations[0].SourceCapability() != "kernel.health/v1" || activations[0].ActivationCapability() != "email.send/v1" || activations[0].PluginID() != "example.smtp" || activations[0].ProjectModule() != "example.com/smtp" {
+		t.Fatalf("generation activations = %#v", activations)
+	}
+	causes := activations[0].Causes()
+	if len(causes) != 1 || causes[0].ProjectModule() != "example.com/app" || causes[0].Source().Module() != "example.com/app" || causes[0].Source().Path() != "plystra.yaml" || causes[0].Source().Kind() != "activation" || causes[0].Source().Line() != 3 || causes[0].Source().Column() != 5 {
+		t.Fatalf("generation activation causes = %#v", causes)
+	}
+	generated := first.GeneratedRequirements()
+	if first.GeneratedRequirementCount() != 1 || len(generated) != 1 || generated[0].Capability() != "email.send/v1" || generated[0].SourceCapability() != "kernel.health/v1" || generated[0].ActivationCapability() != "email.send/v1" || generated[0].Namespace() != "authn" || generated[0].PluginID() != "example.smtp" || generated[0].ProjectModule() != "example.com/smtp" || generated[0].RuleID() != "authn.require-email" || generated[0].Source().Module() != "corp.example/smtp" || generated[0].Source().Path() != "smtp/plugin.yaml" || generated[0].Source().Kind() != "generation-rule" {
+		t.Fatalf("generated requirements = %#v", generated)
+	}
+	var generationDocument struct {
+		GenerationActivations []struct {
+			Namespace            string `json:"namespace"`
+			SourceCapability     string `json:"source_capability"`
+			ActivationCapability string `json:"activation_capability"`
+			PluginID             string `json:"plugin_id"`
+			Causes               []struct {
+				ProjectModule string `json:"project_module"`
+			} `json:"causes"`
+		} `json:"generation_activations"`
+		GeneratedRequirements []struct {
+			Capability       string `json:"capability"`
+			PluginID         string `json:"plugin_id"`
+			RuleID           string `json:"rule_id"`
+			ProjectModule    string `json:"project_module"`
+			SourceCapability string `json:"source_capability"`
+		} `json:"generated_requirements"`
+		Counts struct {
+			GenerationActivations int `json:"generation_activations"`
+			GeneratedRequirements int `json:"generated_requirements"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal(first.CanonicalJSON(), &generationDocument); err != nil || generationDocument.Counts.GenerationActivations != 1 || generationDocument.Counts.GeneratedRequirements != 1 || len(generationDocument.GenerationActivations) != 1 || generationDocument.GenerationActivations[0].Namespace != "authn" || generationDocument.GenerationActivations[0].SourceCapability != "kernel.health/v1" || generationDocument.GenerationActivations[0].ActivationCapability != "email.send/v1" || generationDocument.GenerationActivations[0].PluginID != "example.smtp" || len(generationDocument.GenerationActivations[0].Causes) != 1 || generationDocument.GenerationActivations[0].Causes[0].ProjectModule != "example.com/app" || len(generationDocument.GeneratedRequirements) != 1 || generationDocument.GeneratedRequirements[0].Capability != "email.send/v1" || generationDocument.GeneratedRequirements[0].SourceCapability != "kernel.health/v1" || generationDocument.GeneratedRequirements[0].PluginID != "example.smtp" || generationDocument.GeneratedRequirements[0].ProjectModule != "example.com/smtp" || generationDocument.GeneratedRequirements[0].RuleID != "authn.require-email" {
+		t.Fatalf("canonical generation evidence = %#v, %v", generationDocument, err)
+	}
+	for _, forbidden := range []string{"same declaration through a second diagnostic label", "same activation through a second diagnostic label", "generation plugin example.smtp", `capabilities.require[\"kernel.health/v1\"]`} {
 		if bytes.Contains(first.CanonicalJSON(), []byte(forbidden)) {
 			t.Fatalf("canonical evidence contains diagnostic reference %q: %s", forbidden, first.CanonicalJSON())
 		}
@@ -813,8 +854,11 @@ func TestBuildRecordsCanonicalCapabilityRequirementSources(t *testing.T) {
 
 	requirements[0] = resolutionevidence.CapabilityRequirement{}
 	sources[0] = resolutionevidence.RequirementSource{}
-	if got := first.Requirements(); got[0].Capability() != "email.send/v1" || got[0].Sources()[0].Kind() != providerresolution.RequirementActivation {
-		t.Fatal("Requirements or Requirement.Sources exposed mutable evidence storage")
+	activations[0] = resolutionevidence.GenerationActivation{}
+	causes[0] = resolutionevidence.GenerationActivationCause{}
+	generated[0] = resolutionevidence.GeneratedRequirement{}
+	if got := first.Requirements(); got[0].Capability() != "email.send/v1" || got[0].Sources()[0].Kind() != providerresolution.RequirementActivation || first.GenerationActivations()[0].Causes()[0].ProjectModule() != "example.com/app" || first.GeneratedRequirements()[0].RuleID() != "authn.require-email" {
+		t.Fatal("resolution evidence records exposed mutable storage")
 	}
 }
 

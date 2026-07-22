@@ -153,6 +153,8 @@ type Evidence struct {
 	requirements             []CapabilityRequirement
 	providerCandidates       []ProviderCandidate
 	selectedProviders        []SelectedProvider
+	generationActivations    []GenerationActivation
+	generatedRequirements    []GeneratedRequirement
 	canonicalJSON            []byte
 	digest                   string
 	prepared                 bool
@@ -167,6 +169,8 @@ type canonicalCounts struct {
 	ProviderCandidates    int `json:"provider_candidates"`
 	RejectedProviders     int `json:"rejected_providers"`
 	SelectedProviders     int `json:"selected_providers"`
+	GenerationActivations int `json:"generation_activations"`
+	GeneratedRequirements int `json:"generated_requirements"`
 	CapabilityAliases     int `json:"capability_aliases"`
 }
 
@@ -454,6 +458,93 @@ func (s ProviderSelectionSource) ProjectModule() string { return s.projectModule
 // Source returns the replacement-safe module-relative configuration location.
 func (s ProviderSelectionSource) Source() Source { return s.source }
 
+// GenerationActivation is one selected extension-namespace edge from an
+// originating required Capability through an ordinary activation Capability.
+type GenerationActivation struct {
+	namespace            string
+	sourceCapability     string
+	activationCapability string
+	pluginID             string
+	projectModule        string
+	causes               []GenerationActivationCause
+}
+
+// Namespace returns the exact extension namespace.
+func (a GenerationActivation) Namespace() string { return a.namespace }
+
+// SourceCapability returns the required Capability whose contract activated
+// the namespace.
+func (a GenerationActivation) SourceCapability() string { return a.sourceCapability }
+
+// ActivationCapability returns the ordinary Capability whose selected
+// Provider owns the extension.
+func (a GenerationActivation) ActivationCapability() string { return a.activationCapability }
+
+// PluginID returns the selected activation Provider and extension owner.
+func (a GenerationActivation) PluginID() string { return a.pluginID }
+
+// ProjectModule returns the participating Project that supplies the selected
+// extension Plugin.
+func (a GenerationActivation) ProjectModule() string { return a.projectModule }
+
+// Causes returns every stable declaration location that introduced the source
+// Capability and therefore the activation edge.
+func (a GenerationActivation) Causes() []GenerationActivationCause {
+	return append([]GenerationActivationCause(nil), a.causes...)
+}
+
+// GenerationActivationCause is one stable Project-owned source for an
+// activation edge.
+type GenerationActivationCause struct {
+	projectModule string
+	source        Source
+}
+
+// ProjectModule returns the participating Project that owns the source.
+func (c GenerationActivationCause) ProjectModule() string { return c.projectModule }
+
+// Source returns the replacement-safe module-relative activation location.
+func (c GenerationActivationCause) Source() Source { return c.source }
+
+// GeneratedRequirement is one selected extension rule edge from an originating
+// Capability through its activation to one exact generated requirement.
+type GeneratedRequirement struct {
+	capability           string
+	sourceCapability     string
+	activationCapability string
+	namespace            string
+	pluginID             string
+	projectModule        string
+	ruleID               string
+	source               Source
+}
+
+// Capability returns the exact generated canonical requirement.
+func (r GeneratedRequirement) Capability() string { return r.capability }
+
+// SourceCapability returns the required Capability whose metadata matched the
+// selected extension rule.
+func (r GeneratedRequirement) SourceCapability() string { return r.sourceCapability }
+
+// ActivationCapability returns the ordinary Capability that selected the
+// extension owner.
+func (r GeneratedRequirement) ActivationCapability() string { return r.activationCapability }
+
+// Namespace returns the interpreted extension namespace.
+func (r GeneratedRequirement) Namespace() string { return r.namespace }
+
+// PluginID returns the selected extension owner.
+func (r GeneratedRequirement) PluginID() string { return r.pluginID }
+
+// ProjectModule returns the participating Project that supplies the extension.
+func (r GeneratedRequirement) ProjectModule() string { return r.projectModule }
+
+// RuleID returns the stable extension rule identity.
+func (r GeneratedRequirement) RuleID() string { return r.ruleID }
+
+// Source returns the replacement-safe generation declaration location.
+func (r GeneratedRequirement) Source() Source { return r.source }
+
 // Source is one stable module-relative declaration reference.
 type Source struct {
 	module string
@@ -571,6 +662,31 @@ type canonicalProviderSelectionSource struct {
 	Source        canonicalSource `json:"source"`
 }
 
+type canonicalGenerationActivation struct {
+	Namespace            string                               `json:"namespace"`
+	SourceCapability     string                               `json:"source_capability"`
+	ActivationCapability string                               `json:"activation_capability"`
+	PluginID             string                               `json:"plugin_id"`
+	ProjectModule        string                               `json:"project_module"`
+	Causes               []canonicalGenerationActivationCause `json:"causes"`
+}
+
+type canonicalGenerationActivationCause struct {
+	ProjectModule string          `json:"project_module"`
+	Source        canonicalSource `json:"source"`
+}
+
+type canonicalGeneratedRequirement struct {
+	Capability           string          `json:"capability"`
+	SourceCapability     string          `json:"source_capability"`
+	ActivationCapability string          `json:"activation_capability"`
+	Namespace            string          `json:"namespace"`
+	PluginID             string          `json:"plugin_id"`
+	ProjectModule        string          `json:"project_module"`
+	RuleID               string          `json:"rule_id"`
+	Source               canonicalSource `json:"source"`
+}
+
 type canonicalReplacement struct {
 	Kind       ReplacementKind `json:"kind"`
 	ModulePath string          `json:"module_path"`
@@ -586,17 +702,19 @@ type canonicalSource struct {
 }
 
 type canonicalEvidence struct {
-	Version             int                              `json:"version"`
-	GenerationAPI       string                           `json:"generation_api"`
-	SelectedModelDigest string                           `json:"selected_model_digest"`
-	BuildModelDigest    string                           `json:"build_model_digest"`
-	Modules             []canonicalModule                `json:"modules"`
-	PluginCandidates    []canonicalPluginCandidate       `json:"plugin_candidates"`
-	SelectedPlugins     []canonicalSelectedPlugin        `json:"selected_plugins"`
-	Requirements        []canonicalCapabilityRequirement `json:"requirements"`
-	ProviderCandidates  []canonicalProviderCandidate     `json:"provider_candidates"`
-	SelectedProviders   []canonicalSelectedProvider      `json:"selected_providers"`
-	Counts              canonicalCounts                  `json:"counts"`
+	Version               int                              `json:"version"`
+	GenerationAPI         string                           `json:"generation_api"`
+	SelectedModelDigest   string                           `json:"selected_model_digest"`
+	BuildModelDigest      string                           `json:"build_model_digest"`
+	Modules               []canonicalModule                `json:"modules"`
+	PluginCandidates      []canonicalPluginCandidate       `json:"plugin_candidates"`
+	SelectedPlugins       []canonicalSelectedPlugin        `json:"selected_plugins"`
+	Requirements          []canonicalCapabilityRequirement `json:"requirements"`
+	ProviderCandidates    []canonicalProviderCandidate     `json:"provider_candidates"`
+	SelectedProviders     []canonicalSelectedProvider      `json:"selected_providers"`
+	GenerationActivations []canonicalGenerationActivation  `json:"generation_activations"`
+	GeneratedRequirements []canonicalGeneratedRequirement  `json:"generated_requirements"`
+	Counts                canonicalCounts                  `json:"counts"`
 }
 
 // Build validates one constructor-produced generation context and derives its
@@ -633,6 +751,10 @@ func Build(source Input) (Evidence, error) {
 	if err != nil {
 		return Evidence{}, fmt.Errorf("%w: selected Providers: %v", ErrBuild, err)
 	}
+	generationActivations, generatedRequirements, err := generationEvidenceFromRequirements(requirements, selectedProviders, pluginCandidates)
+	if err != nil {
+		return Evidence{}, fmt.Errorf("%w: generation provenance: %v", ErrBuild, err)
+	}
 	input := Evidence{
 		generationAPI:            context.APIVersion(),
 		selectedModelDigest:      context.Digest(),
@@ -647,6 +769,8 @@ func Build(source Input) (Evidence, error) {
 		requirements:             requirements,
 		providerCandidates:       providerCandidates,
 		selectedProviders:        selectedProviders,
+		generationActivations:    generationActivations,
+		generatedRequirements:    generatedRequirements,
 		prepared:                 true,
 	}
 	if err := validate(input); err != nil {
@@ -761,6 +885,22 @@ func (e Evidence) SelectedProviders() []SelectedProvider {
 	return values
 }
 
+// GenerationActivations returns every selected extension namespace edge in
+// canonical order with defensive cause storage.
+func (e Evidence) GenerationActivations() []GenerationActivation {
+	values := append([]GenerationActivation(nil), e.generationActivations...)
+	for index := range values {
+		values[index].causes = append([]GenerationActivationCause(nil), values[index].causes...)
+	}
+	return values
+}
+
+// GeneratedRequirements returns every selected extension rule edge in
+// canonical order.
+func (e Evidence) GeneratedRequirements() []GeneratedRequirement {
+	return append([]GeneratedRequirement(nil), e.generatedRequirements...)
+}
+
 // ProviderCandidateCount returns the complete visible Provider declaration
 // count, including Capabilities outside the final requirement closure.
 func (e Evidence) ProviderCandidateCount() int { return len(e.providerCandidates) }
@@ -786,6 +926,13 @@ func (e Evidence) RequirementCount() int { return e.requirementCount }
 // SelectedProviderCount returns the number of successful implementation
 // decisions, including intrinsic Kernel implementations.
 func (e Evidence) SelectedProviderCount() int { return e.selectedProviderCount }
+
+// GenerationActivationCount returns the selected namespace activation edge
+// count.
+func (e Evidence) GenerationActivationCount() int { return len(e.generationActivations) }
+
+// GeneratedRequirementCount returns the selected extension rule edge count.
+func (e Evidence) GeneratedRequirementCount() int { return len(e.generatedRequirements) }
 
 // CapabilityAliasCount returns the number of final application Aliases.
 func (e Evidence) CapabilityAliasCount() int { return e.capabilityAliasCount }
@@ -860,6 +1007,16 @@ func validate(e Evidence) error {
 	}
 	if err := validateSelectedProviders(e.selectedProviders, e.modules, e.providerCandidates, e.requirements); err != nil {
 		return err
+	}
+	activations, generated, err := generationEvidenceFromRequirements(e.requirements, e.selectedProviders, e.pluginCandidates)
+	if err != nil {
+		return err
+	}
+	if !equalGenerationActivations(e.generationActivations, activations) {
+		return errors.New("generation activation records do not match final requirement provenance")
+	}
+	if !equalGeneratedRequirements(e.generatedRequirements, generated) {
+		return errors.New("generated requirement records do not match final requirement provenance")
 	}
 	return nil
 }
@@ -1013,17 +1170,64 @@ func encode(e Evidence) ([]byte, error) {
 			SelectionSources: selectionSources,
 		}
 	}
+	generationActivations := make([]canonicalGenerationActivation, len(e.generationActivations))
+	for index, value := range e.generationActivations {
+		causes := make([]canonicalGenerationActivationCause, len(value.causes))
+		for causeIndex, cause := range value.causes {
+			source := cause.source
+			causes[causeIndex] = canonicalGenerationActivationCause{
+				ProjectModule: cause.projectModule,
+				Source: canonicalSource{
+					Module: source.module,
+					Path:   source.path,
+					Kind:   source.kind,
+					Line:   source.line,
+					Column: source.column,
+				},
+			}
+		}
+		generationActivations[index] = canonicalGenerationActivation{
+			Namespace:            value.namespace,
+			SourceCapability:     value.sourceCapability,
+			ActivationCapability: value.activationCapability,
+			PluginID:             value.pluginID,
+			ProjectModule:        value.projectModule,
+			Causes:               causes,
+		}
+	}
+	generatedRequirements := make([]canonicalGeneratedRequirement, len(e.generatedRequirements))
+	for index, value := range e.generatedRequirements {
+		source := value.source
+		generatedRequirements[index] = canonicalGeneratedRequirement{
+			Capability:           value.capability,
+			SourceCapability:     value.sourceCapability,
+			ActivationCapability: value.activationCapability,
+			Namespace:            value.namespace,
+			PluginID:             value.pluginID,
+			ProjectModule:        value.projectModule,
+			RuleID:               value.ruleID,
+			Source: canonicalSource{
+				Module: source.module,
+				Path:   source.path,
+				Kind:   source.kind,
+				Line:   source.line,
+				Column: source.column,
+			},
+		}
+	}
 	return json.Marshal(canonicalEvidence{
-		Version:             schemaVersion,
-		GenerationAPI:       e.generationAPI,
-		SelectedModelDigest: e.selectedModelDigest,
-		BuildModelDigest:    e.buildModelDigest,
-		Modules:             modules,
-		PluginCandidates:    pluginCandidates,
-		SelectedPlugins:     selectedPlugins,
-		Requirements:        requirements,
-		ProviderCandidates:  providerCandidates,
-		SelectedProviders:   selectedProviders,
+		Version:               schemaVersion,
+		GenerationAPI:         e.generationAPI,
+		SelectedModelDigest:   e.selectedModelDigest,
+		BuildModelDigest:      e.buildModelDigest,
+		Modules:               modules,
+		PluginCandidates:      pluginCandidates,
+		SelectedPlugins:       selectedPlugins,
+		Requirements:          requirements,
+		ProviderCandidates:    providerCandidates,
+		SelectedProviders:     selectedProviders,
+		GenerationActivations: generationActivations,
+		GeneratedRequirements: generatedRequirements,
 		Counts: canonicalCounts{
 			ParticipatingModules:  len(e.modules),
 			DiscoveredPlugins:     len(e.pluginCandidates),
@@ -1033,6 +1237,8 @@ func encode(e Evidence) ([]byte, error) {
 			ProviderCandidates:    len(e.providerCandidates),
 			RejectedProviders:     e.RejectedProviderCount(),
 			SelectedProviders:     e.selectedProviderCount,
+			GenerationActivations: len(e.generationActivations),
+			GeneratedRequirements: len(e.generatedRequirements),
 			CapabilityAliases:     e.capabilityAliasCount,
 		},
 	})
@@ -1967,6 +2173,257 @@ func providerSelectionSourceKey(value ProviderSelectionSource) string {
 		fmt.Sprintf("%010d", value.source.line),
 		fmt.Sprintf("%010d", value.source.column),
 	}, "\x00")
+}
+
+func generationEvidenceFromRequirements(
+	requirements []CapabilityRequirement,
+	providers []SelectedProvider,
+	plugins []PluginCandidate,
+) ([]GenerationActivation, []GeneratedRequirement, error) {
+	requirementByCapability := make(map[string]CapabilityRequirement, len(requirements))
+	for _, requirement := range requirements {
+		requirementByCapability[requirement.capability] = requirement
+	}
+	providerByCapability := make(map[string]SelectedProvider, len(providers))
+	for _, provider := range providers {
+		providerByCapability[provider.capability] = provider
+	}
+	pluginByID := make(map[string]PluginCandidate, len(plugins))
+	for _, plugin := range plugins {
+		pluginByID[plugin.id] = plugin
+	}
+
+	activationByKey := make(map[string]int)
+	activations := make([]GenerationActivation, 0)
+	for _, requirement := range requirements {
+		for _, source := range requirement.sources {
+			if source.kind != providerresolution.RequirementActivation {
+				continue
+			}
+			if !validGenerationNamespace(source.namespace) {
+				return nil, nil, fmt.Errorf("activation for %s has invalid namespace %q", requirement.capability, source.namespace)
+			}
+			if _, exists := requirementByCapability[source.sourceCapability]; !exists {
+				return nil, nil, fmt.Errorf("activation for %s names non-required source Capability %s", requirement.capability, source.sourceCapability)
+			}
+			provider, exists := providerByCapability[requirement.capability]
+			if !exists || provider.Intrinsic() {
+				return nil, nil, fmt.Errorf("activation Capability %s has no selected ordinary Provider", requirement.capability)
+			}
+			plugin, exists := pluginByID[provider.pluginID]
+			if !exists || plugin.modulePath != provider.projectModule {
+				return nil, nil, fmt.Errorf("activation Capability %s selected extension Plugin %q is inconsistent", requirement.capability, provider.pluginID)
+			}
+			key := generationActivationKeyParts(source.namespace, source.sourceCapability, requirement.capability, provider.pluginID)
+			position, exists := activationByKey[key]
+			if !exists {
+				position = len(activations)
+				activationByKey[key] = position
+				activations = append(activations, GenerationActivation{
+					namespace:            source.namespace,
+					sourceCapability:     source.sourceCapability,
+					activationCapability: requirement.capability,
+					pluginID:             provider.pluginID,
+					projectModule:        provider.projectModule,
+				})
+			}
+			activations[position].causes = append(activations[position].causes, GenerationActivationCause{
+				projectModule: source.projectModule,
+				source:        source.source,
+			})
+		}
+	}
+	for index := range activations {
+		causes := activations[index].causes
+		sort.Slice(causes, func(left, right int) bool {
+			return generationActivationCauseKey(causes[left]) < generationActivationCauseKey(causes[right])
+		})
+		unique := causes[:0]
+		for _, cause := range causes {
+			if len(unique) != 0 && unique[len(unique)-1] == cause {
+				continue
+			}
+			unique = append(unique, cause)
+		}
+		activations[index].causes = append([]GenerationActivationCause(nil), unique...)
+	}
+	sort.Slice(activations, func(left, right int) bool {
+		return generationActivationKey(activations[left]) < generationActivationKey(activations[right])
+	})
+	activationByUse := make(map[string]GenerationActivation, len(activations))
+	activationBySource := make(map[string]GenerationActivation, len(activations))
+	for _, activation := range activations {
+		key := generationActivationUseKey(activation.pluginID, activation.namespace, activation.sourceCapability)
+		if previous, duplicate := activationByUse[key]; duplicate && previous.activationCapability != activation.activationCapability {
+			return nil, nil, fmt.Errorf("selected extension %q namespace %q source %s has several activation Capabilities", activation.pluginID, activation.namespace, activation.sourceCapability)
+		}
+		activationByUse[key] = activation
+		sourceKey := generationActivationSourceKey(activation.namespace, activation.sourceCapability)
+		if previous, duplicate := activationBySource[sourceKey]; duplicate && (previous.pluginID != activation.pluginID || previous.activationCapability != activation.activationCapability) {
+			return nil, nil, fmt.Errorf("namespace %q source %s has several selected activations", activation.namespace, activation.sourceCapability)
+		}
+		activationBySource[sourceKey] = activation
+	}
+
+	generatedByKey := make(map[string]GeneratedRequirement)
+	generated := make([]GeneratedRequirement, 0)
+	for _, requirement := range requirements {
+		for _, source := range requirement.sources {
+			if source.kind != providerresolution.RequirementGenerationRule {
+				continue
+			}
+			if !validGenerationNamespace(source.namespace) {
+				return nil, nil, fmt.Errorf("generated requirement %s has invalid namespace %q", requirement.capability, source.namespace)
+			}
+			if !validGenerationRuleID(source.ruleID) {
+				return nil, nil, fmt.Errorf("generated requirement %s has invalid rule ID %q", requirement.capability, source.ruleID)
+			}
+			if _, exists := requirementByCapability[source.sourceCapability]; !exists {
+				return nil, nil, fmt.Errorf("generated requirement %s names non-required source Capability %s", requirement.capability, source.sourceCapability)
+			}
+			plugin, exists := pluginByID[source.pluginID]
+			if !exists || plugin.modulePath != source.projectModule {
+				return nil, nil, fmt.Errorf("generated requirement %s names inconsistent extension Plugin %q", requirement.capability, source.pluginID)
+			}
+			activation, exists := activationByUse[generationActivationUseKey(source.pluginID, source.namespace, source.sourceCapability)]
+			if !exists {
+				if selected, selectedExists := activationBySource[generationActivationSourceKey(source.namespace, source.sourceCapability)]; selectedExists {
+					return nil, nil, fmt.Errorf("generated requirement %s from plugin %q rule %q differs from selected activation Plugin %q", requirement.capability, source.pluginID, source.ruleID, selected.pluginID)
+				}
+				return nil, nil, fmt.Errorf("generated requirement %s from plugin %q rule %q has no matching selected activation", requirement.capability, source.pluginID, source.ruleID)
+			}
+			value := GeneratedRequirement{
+				capability:           requirement.capability,
+				sourceCapability:     source.sourceCapability,
+				activationCapability: activation.activationCapability,
+				namespace:            source.namespace,
+				pluginID:             source.pluginID,
+				projectModule:        source.projectModule,
+				ruleID:               source.ruleID,
+				source:               source.source,
+			}
+			key := generatedRequirementKey(value)
+			if previous, duplicate := generatedByKey[key]; duplicate {
+				if previous != value {
+					return nil, nil, fmt.Errorf("generated requirement %s from plugin %q rule %q has conflicting sources", requirement.capability, source.pluginID, source.ruleID)
+				}
+				continue
+			}
+			generatedByKey[key] = value
+			generated = append(generated, value)
+		}
+	}
+	sort.Slice(generated, func(left, right int) bool {
+		return generatedRequirementKey(generated[left]) < generatedRequirementKey(generated[right])
+	})
+	return activations, generated, nil
+}
+
+func generationActivationKey(value GenerationActivation) string {
+	return generationActivationKeyParts(value.namespace, value.sourceCapability, value.activationCapability, value.pluginID)
+}
+
+func generationActivationKeyParts(namespace, sourceCapability, activationCapability, pluginID string) string {
+	return strings.Join([]string{namespace, sourceCapability, activationCapability, pluginID}, "\x00")
+}
+
+func generationActivationUseKey(pluginID, namespace, sourceCapability string) string {
+	return strings.Join([]string{pluginID, namespace, sourceCapability}, "\x00")
+}
+
+func generationActivationSourceKey(namespace, sourceCapability string) string {
+	return strings.Join([]string{namespace, sourceCapability}, "\x00")
+}
+
+func generationActivationCauseKey(value GenerationActivationCause) string {
+	return strings.Join([]string{
+		value.projectModule,
+		value.source.module,
+		value.source.path,
+		value.source.kind,
+		fmt.Sprintf("%010d", value.source.line),
+		fmt.Sprintf("%010d", value.source.column),
+	}, "\x00")
+}
+
+func generatedRequirementKey(value GeneratedRequirement) string {
+	return strings.Join([]string{
+		value.capability,
+		value.namespace,
+		value.sourceCapability,
+		value.activationCapability,
+		value.pluginID,
+		value.ruleID,
+	}, "\x00")
+}
+
+func equalGenerationActivations(left, right []GenerationActivation) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index].namespace != right[index].namespace ||
+			left[index].sourceCapability != right[index].sourceCapability ||
+			left[index].activationCapability != right[index].activationCapability ||
+			left[index].pluginID != right[index].pluginID ||
+			left[index].projectModule != right[index].projectModule ||
+			len(left[index].causes) != len(right[index].causes) {
+			return false
+		}
+		for causeIndex := range left[index].causes {
+			if left[index].causes[causeIndex] != right[index].causes[causeIndex] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func equalGeneratedRequirements(left, right []GeneratedRequirement) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func validGenerationNamespace(value string) bool {
+	return validLowerKebabSegment(value, 128)
+}
+
+func validGenerationRuleID(value string) bool {
+	if value == "" || len(value) > 256 {
+		return false
+	}
+	for _, segment := range strings.Split(value, ".") {
+		if !validLowerKebabSegment(segment, 128) {
+			return false
+		}
+	}
+	return true
+}
+
+func validLowerKebabSegment(value string, maximum int) bool {
+	if value == "" || len(value) > maximum || value[0] < 'a' || value[0] > 'z' {
+		return false
+	}
+	previousHyphen := false
+	for index := 1; index < len(value); index++ {
+		character := value[index]
+		switch {
+		case character >= 'a' && character <= 'z', character >= '0' && character <= '9':
+			previousHyphen = false
+		case character == '-' && !previousHyphen:
+			previousHyphen = true
+		default:
+			return false
+		}
+	}
+	return !previousHyphen
 }
 
 func providerCapabilityPath(pluginPath string, identifier capabilityid.Identifier) string {
