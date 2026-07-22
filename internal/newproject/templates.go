@@ -45,13 +45,14 @@ plystra inspect
 plystra explain capability records.read/v1
 plystra explain plugin <plugin-id>
 plystra explain config config.<plugin-id>.<field>
+plystra explain alias <alias-name>/vN
 plystra check
 go test ./...
 go build ./...
 go vet ./...
 ` + "```" + `
 
-Mutating Plystra commands regenerate automatically. Add an ordinary Go Module dependency with ` + "`plystra add github.com/acme/platform@v1.0.0`" + `, update it with ` + "`plystra update github.com/acme/platform@v1.1.0`" + `, and remove it with ` + "`plystra remove github.com/acme/platform`" + `. A Project created with ` + "`plystra new app --template github.com/acme/platform@v1.0.0`" + ` retains the selected template as the same kind of ordinary direct dependency: its root declarations, typed local operational values, and Secret-reference placeholders compose into this Project, but its source is not copied and it receives no resolution priority. Creation validates those values without reading referenced ` + "`env`" + ` or ` + "`file`" + ` Secrets; generated source and manifest provenance contain neither reference targets nor resolved values. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate. Use ` + "`plystra inspect`" + ` for a concise read-only summary of the same selected model, ` + "`--verbose`" + ` for complete resolution evidence, or ` + "`--format json`" + ` for deterministic automation output. Use ` + "`plystra explain capability <capability-name>/vN`" + ` with the same selector to see a Capability's selected Provider, direct reason and source, and the exact command or configuration field that changes that decision. Use ` + "`plystra explain plugin <plugin-id>`" + ` to see whether a Plugin is selected from the current Project, selected as an exact Capability Provider, or visible but unselected, together with the direct source and selector-matched change. Use ` + "`plystra explain config config.<plugin-id>.<field>`" + ` to see the typed configuration owner, winning source, explicit removal or ancestor suppression, and exact selected document field to edit without exposing configuration values or Secret-reference targets.
+Mutating Plystra commands regenerate automatically. Add an ordinary Go Module dependency with ` + "`plystra add github.com/acme/platform@v1.0.0`" + `, update it with ` + "`plystra update github.com/acme/platform@v1.1.0`" + `, and remove it with ` + "`plystra remove github.com/acme/platform`" + `. A Project created with ` + "`plystra new app --template github.com/acme/platform@v1.0.0`" + ` retains the selected template as the same kind of ordinary direct dependency: its root declarations, typed local operational values, and Secret-reference placeholders compose into this Project, but its source is not copied and it receives no resolution priority. Creation validates those values without reading referenced ` + "`env`" + ` or ` + "`file`" + ` Secrets; generated source and manifest provenance contain neither reference targets nor resolved values. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate. Use ` + "`plystra inspect`" + ` for a concise read-only summary of the same selected model, ` + "`--verbose`" + ` for complete resolution evidence, or ` + "`--format json`" + ` for deterministic automation output. Use ` + "`plystra explain capability <capability-name>/vN`" + ` with the same selector to see a Capability's selected Provider, direct reason and source, and the exact command or configuration field that changes that decision. Use ` + "`plystra explain plugin <plugin-id>`" + ` to see whether a Plugin is selected from the current Project, selected as an exact Capability Provider, or visible but unselected, together with the direct source and selector-matched change. Use ` + "`plystra explain config config.<plugin-id>.<field>`" + ` to see the typed configuration owner, winning source, explicit removal or ancestor suppression, and exact selected document field to edit without exposing configuration values or Secret-reference targets. Use ` + "`plystra explain alias <alias-name>/vN`" + ` to see its direct canonical target, inherited or narrowed exposure, every compatible application or generation-extension source, and the selector-matched field or activation decision that changes the result.
 
 A template's default Provider model must be unambiguous. If several compatible Plugins provide one required Capability, the template publisher must record one ` + "`capabilities.use`" + ` choice in the template's root ` + "`plystra.yaml`" + ` and publish a corrected version. Creation otherwise reports every candidate and leaves no target Project to repair.
 
@@ -1312,6 +1313,10 @@ Run the narrowest relevant test first, then the complete module checks:
     plystra explain config config.acme.email.smtp.host --env production
     plystra explain config config.acme.email.smtp.host --config deploy/customer-a.yaml
     plystra explain config config.acme.email.smtp.host --format json
+    plystra explain alias mail.send/v1
+    plystra explain alias mail.send/v1 --env production
+    plystra explain alias mail.send/v1 --config deploy/customer-a.yaml
+    plystra explain alias mail.send/v1 --format json
     plystra generate --check
     plystra generate --check --env production
     plystra generate --check --config deploy/customer-a.yaml
@@ -1398,6 +1403,13 @@ build and distribution boundary for every Plystra module.
   suppression, and the exact selected current-Project document field to edit.
   Values and Secret-reference targets remain redacted; use --verbose only when
   the complete provenance graph is needed.
+- Unexpected Alias target, exposure, or origin: run plystra explain alias
+  <alias-name>/vN with the same selector. The result identifies the direct
+  canonical target, inherited or narrowed exposure, every compatible application
+  declaration and selected generation-extension contribution, and the selected
+  configuration field or activation-Provider decision that changes the result.
+  Add --verbose or --format json for the target contract digest and complete
+  redacted generation evidence.
 - Alias error: point directly to a resolved canonical target with the same
   version and exposure no broader than the target.
 - Unclaimed extension namespace: add a compatible selected Plugin whose

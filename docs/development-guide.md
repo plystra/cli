@@ -1479,6 +1479,9 @@ plystra explain plugin acme.email.smtp --config deploy/customer-a.yaml
 plystra explain config config.acme.email.smtp.host
 plystra explain config config.acme.email.smtp.host --env production
 plystra explain config config.acme.email.smtp.host --config deploy/customer-a.yaml
+plystra explain alias mail.send/v1
+plystra explain alias mail.send/v1 --env production
+plystra explain alias mail.send/v1 --config deploy/customer-a.yaml
 plystra generate
 plystra generate --check
 plystra generate --env production
@@ -1531,6 +1534,16 @@ reported as decisions rather than being mistaken for missing fields. Values,
 Secret-reference targets, and resolved Secrets remain outside concise, verbose,
 and JSON output. Keep the same selector for the follow-up edit, generation, and
 validation.
+
+Use `plystra explain alias <alias-name>/vN` when an application-local Alias has
+an unexpected target, exposure, or origin. The concise result names the direct
+canonical target, distinguishes inherited target exposure from an explicit
+narrowing, lists every compatible application and generation-extension source,
+and identifies the selected configuration field or activation-Provider decision
+that changes the result. Keep the same selector for the follow-up edit,
+generation, and validation. Use `--verbose` or `--format json` to inspect the
+target contract digest, generation contribution identity, activation Capability,
+and complete redacted resolution evidence.
 
 Clean check output resembles:
 

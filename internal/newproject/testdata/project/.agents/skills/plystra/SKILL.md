@@ -1159,6 +1159,10 @@ Run the narrowest relevant test first, then the complete module checks:
     plystra explain config config.acme.email.smtp.host --env production
     plystra explain config config.acme.email.smtp.host --config deploy/customer-a.yaml
     plystra explain config config.acme.email.smtp.host --format json
+    plystra explain alias mail.send/v1
+    plystra explain alias mail.send/v1 --env production
+    plystra explain alias mail.send/v1 --config deploy/customer-a.yaml
+    plystra explain alias mail.send/v1 --format json
     plystra generate --check
     plystra generate --check --env production
     plystra generate --check --config deploy/customer-a.yaml
@@ -1245,6 +1249,13 @@ build and distribution boundary for every Plystra module.
   suppression, and the exact selected current-Project document field to edit.
   Values and Secret-reference targets remain redacted; use --verbose only when
   the complete provenance graph is needed.
+- Unexpected Alias target, exposure, or origin: run plystra explain alias
+  <alias-name>/vN with the same selector. The result identifies the direct
+  canonical target, inherited or narrowed exposure, every compatible application
+  declaration and selected generation-extension contribution, and the selected
+  configuration field or activation-Provider decision that changes the result.
+  Add --verbose or --format json for the target contract digest and complete
+  redacted generation evidence.
 - Alias error: point directly to a resolved canonical target with the same
   version and exposure no broader than the target.
 - Unclaimed extension namespace: add a compatible selected Plugin whose

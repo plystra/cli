@@ -43,6 +43,7 @@ const (
   plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain config <field-path> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
+  plystra explain alias <alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra check [--env <environment>|--config <yaml-path>]
   plystra generate [--check] [--env <environment>|--config <yaml-path>]
 `
@@ -136,6 +137,7 @@ beneath --config.
   plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain config <field-path> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
+  plystra explain alias <alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
 
 Options:
   --verbose              Add the complete deterministic resolution evidence to human output.
@@ -143,16 +145,16 @@ Options:
   --env <environment>    Explain the model selected by plystra.<environment>.yaml.
   --config <yaml-path>   Explain one complete current-project configuration instead of root plystra.yaml.
 
-The command is read-only and explains one canonical Capability, Plugin, or
-typed configuration-field decision from the same selected application model
-used by generation and validation. Plugin configuration fields accept the
-dotted form config.<plugin-id>.<field>. JSON stdout contains exactly one schema
-document; progress and diagnostics use stderr. PLYSTRA_ENV and PLYSTRA_CONFIG
-supply equivalent selectors when no explicit selector is present; setting both
-is an error. Explicit --env or --config overrides both variables, and the two
-flags cannot be combined. Relative configuration paths are resolved from the
-detected Plystra Project root. Root plystra.yaml remains mandatory and is not
-merged beneath --config.
+The command is read-only and explains one canonical Capability, Plugin, typed
+configuration-field, or application-local Alias decision from the same selected
+application model used by generation and validation. Plugin configuration fields
+accept the dotted form config.<plugin-id>.<field>. JSON stdout contains exactly
+one schema document; progress and diagnostics use stderr. PLYSTRA_ENV and
+PLYSTRA_CONFIG supply equivalent selectors when no explicit selector is present;
+setting both is an error. Explicit --env or --config overrides both variables,
+and the two flags cannot be combined. Relative configuration paths are resolved
+from the detected Plystra Project root. Root plystra.yaml remains mandatory and
+is not merged beneath --config.
 `
 )
 
@@ -349,7 +351,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		}
 		return runInspect(arguments, stdout, stderr, workingDirectory, environment)
 	case "explain":
-		if len(arguments) == 2 && isHelp(arguments[1]) || len(arguments) == 3 && (arguments[1] == "capability" || arguments[1] == "plugin" || arguments[1] == "config") && isHelp(arguments[2]) {
+		if len(arguments) == 2 && isHelp(arguments[1]) || len(arguments) == 3 && (arguments[1] == "capability" || arguments[1] == "plugin" || arguments[1] == "config" || arguments[1] == "alias") && isHelp(arguments[2]) {
 			_, _ = io.WriteString(stdout, explainUsage)
 			return 0
 		}

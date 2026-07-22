@@ -494,6 +494,9 @@ plystra explain plugin <plugin-id> --format json
 plystra explain config <field-path>
 plystra explain config <field-path> --verbose
 plystra explain config <field-path> --format json
+plystra explain alias <alias-name>/vN
+plystra explain alias <alias-name>/vN --verbose
+plystra explain alias <alias-name>/vN --format json
 plystra check
 plystra fix
 plystra generate
@@ -551,6 +554,14 @@ identifies the owning Plugin when applicable; reports every winning source; and
 points to the exact selected current-Project document and field that changes the
 decision. Configuration values and Secret-reference targets remain redacted in
 concise, verbose, and JSON output.
+
+`plystra explain alias <alias-name>/vN` traces one final application-local Alias
+to its direct canonical target. It reports whether exposure is inherited or
+narrowed, every compatible application declaration and selected
+generation-extension contribution, and one selector-matched configuration field
+or activation-Provider decision that changes the result. Unknown canonical Alias
+IDs fail without modifying the Project; concise output omits contract digests and
+complete generation evidence unless `--verbose` or `--format json` is selected.
 
 The current `plystra check` implementation is read-only. It verifies the
 selected dependency composition and generated fixed point, then runs

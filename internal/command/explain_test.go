@@ -107,6 +107,89 @@ func TestExplainCapabilityJSONOwnsStdoutAndIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestExplainAliasHumanOutputIsConciseCausalAndReadOnly(t *testing.T) {
+	t.Parallel()
+
+	root, nested := createExplainCommandProject(t)
+	before := snapshotInspectProject(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"explain", "alias", "mail.send/v1"}, nested, inspectCommandEnvironment(nil))
+	for _, fragment := range []string{
+		"Alias: mail.send/v1\n",
+		"Decision: maps directly to email.send/v1; inherits target exposure (Go, HTTP, JavaScript)\n",
+		"Reason: application-alias\n",
+		"Source: example.com/acme/provider-use:plystra.yaml:",
+		"(alias-target)\n",
+		`Change: edit plystra.yaml at capabilities.aliases["mail.send/v1"]`,
+	} {
+		if !strings.Contains(stdout, fragment) {
+			t.Fatalf("Alias explanation omits %q:\n%s", fragment, stdout)
+		}
+	}
+	for _, forbidden := range []string{"Resolution evidence:", "target_contract_digest", "resolved-secret-marker", root} {
+		if strings.Contains(stdout, forbidden) {
+			t.Fatalf("concise Alias explanation contains %q:\n%s", forbidden, stdout)
+		}
+	}
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("Alias explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("Alias explanation mutated the Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+
+	exitCode, stdout, stderr = runCommand(t, []string{"explain", "alias", "mail.send/v1", "--env", "production"}, nested, inspectCommandEnvironment(nil))
+	for _, fragment := range []string{
+		"Decision: maps directly to email.send/v1; narrows target exposure to (Go)\n",
+		"Source: example.com/acme/provider-use:plystra.production.yaml:",
+		`Change: edit plystra.production.yaml at capabilities.aliases["mail.send/v1"]`,
+	} {
+		if !strings.Contains(stdout, fragment) {
+			t.Fatalf("narrowed Alias explanation omits %q:\n%s", fragment, stdout)
+		}
+	}
+	if exitCode != 0 || stderr != "" || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
+		t.Fatalf("narrowed Alias explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("selected Alias explanation mutated the Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestExplainAliasJSONIsDeterministicAndSelectorMatched(t *testing.T) {
+	t.Parallel()
+
+	root, nested := createExplainCommandProject(t)
+	tests := []struct {
+		name        string
+		arguments   []string
+		environment map[string]string
+		mode        string
+		path        string
+	}{
+		{name: "default", arguments: []string{"explain", "alias", "mail.send/v1", "--format", "json"}, mode: "default", path: "plystra.yaml"},
+		{name: "explicit environment", arguments: []string{"explain", "alias", "mail.send/v1", "--format", "json", "--env", "production"}, environment: map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"}, mode: "environment", path: "plystra.production.yaml"},
+		{name: "ambient environment", arguments: []string{"explain", "alias", "mail.send/v1", "--format", "json"}, environment: map[string]string{"PLYSTRA_ENV": "production"}, mode: "environment", path: "plystra.production.yaml"},
+		{name: "explicit configuration", arguments: []string{"explain", "alias", "mail.send/v1", "--format", "json", "--config", "deploy/customer.yaml"}, environment: map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"}, mode: "explicit-config", path: "deploy/customer.yaml"},
+		{name: "ambient configuration", arguments: []string{"explain", "alias", "mail.send/v1", "--format", "json"}, environment: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"}, mode: "explicit-config", path: "deploy/customer.yaml"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			firstExit, firstStdout, firstStderr := runCommand(t, test.arguments, nested, inspectCommandEnvironment(test.environment))
+			secondExit, secondStdout, secondStderr := runCommand(t, append(append([]string(nil), test.arguments...), "--verbose"), root, inspectCommandEnvironment(test.environment))
+			if firstExit != 0 || secondExit != 0 || firstStderr != inspectProgress || secondStderr != inspectProgress || firstStdout != secondStdout {
+				t.Fatalf("Alias JSON = first (%d, %q) second (%d, %q)\nfirst: %s\nsecond: %s", firstExit, firstStderr, secondExit, secondStderr, firstStdout, secondStdout)
+			}
+			document := decodeExplainCommandEnvelope(t, firstStdout)
+			if document.ConfigurationMode != test.mode || document.Result.Subject.Kind != "alias" || document.Result.Subject.ID != "mail.send/v1" || document.Result.Decision.Outcome != "valid" || document.Result.Reason.Code != "application-alias" || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != test.path || document.Result.Change.Kind != "file" || document.Result.Change.Path != test.path || document.Result.Change.Field != `capabilities.aliases["mail.send/v1"]` {
+				t.Fatalf("selected Alias explanation = mode %q result %#v", document.ConfigurationMode, document.Result)
+			}
+			if strings.Contains(firstStdout, root) || strings.Contains(firstStdout, "resolved-secret-marker") {
+				t.Fatalf("Alias explanation leaked private input: %s", firstStdout)
+			}
+		})
+	}
+}
+
 func TestExplainPluginCurrentProjectOutputIsConciseCausalAndReadOnly(t *testing.T) {
 	t.Parallel()
 
@@ -518,8 +601,8 @@ func TestExplainCapabilityReportsEveryCompatibleInheritedSelectionSource(t *test
 	bRoot := filepath.Join(root, "b")
 	writeCommandFile(t, filepath.Join(aRoot, "go.mod"), "module example.com/a\n\ngo 1.26\n")
 	writeCommandFile(t, filepath.Join(bRoot, "go.mod"), "module example.com/b\n\ngo 1.26\n")
-	writeCommandFile(t, filepath.Join(aRoot, "plystra.yaml"), "capabilities: {use: {email.send/v1: example.smtp}}\n")
-	writeCommandFile(t, filepath.Join(bRoot, "plystra.yaml"), "capabilities: {use: {email.send/v1: example.smtp}}\n")
+	writeCommandFile(t, filepath.Join(aRoot, "plystra.yaml"), "capabilities: {use: {email.send/v1: example.smtp}, aliases: {mail.send/v1: email.send/v1}}\n")
+	writeCommandFile(t, filepath.Join(bRoot, "plystra.yaml"), "capabilities: {use: {email.send/v1: example.smtp}, aliases: {mail.send/v1: email.send/v1}}\n")
 	writeCommandFile(t, filepath.Join(aRoot, "smtp", "plugin.yaml"), "id: example.smtp\nprovides: [email.send/v1]\n")
 	writeCommandFile(t, filepath.Join(aRoot, "smtp", "capabilities", "email.send", "v1", "capability.yaml"), "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 	writeCommandFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
@@ -551,6 +634,60 @@ replace example.com/b => ../b
 	if document.Result.Change.Kind != "file" || document.Result.Change.Module != "example.com/app" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `capabilities.use["email.send/v1"]` || strings.Contains(stdout, root) {
 		t.Fatalf("inherited explanation change = %#v", document.Result.Change)
 	}
+
+	exitCode, stdout, stderr = runCommand(t, []string{"explain", "alias", "mail.send/v1", "--format", "json"}, nested, inspectCommandEnvironment(nil))
+	document = decodeExplainCommandEnvelope(t, stdout)
+	if exitCode != 0 || stderr != inspectProgress || document.Result.Subject.Kind != "alias" || document.Result.Decision.Outcome != "valid" || document.Result.Reason.Code != "compatible-alias-sources" || len(document.Result.Reason.Sources) != 2 {
+		t.Fatalf("inherited Alias explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
+	}
+	if document.Result.Reason.Sources[0].Module != "example.com/a" || document.Result.Reason.Sources[0].Path != "plystra.yaml" || document.Result.Reason.Sources[1].Module != "example.com/b" || document.Result.Reason.Sources[1].Path != "plystra.yaml" {
+		t.Fatalf("inherited Alias explanation sources = %#v", document.Result.Reason.Sources)
+	}
+	if document.Result.Change.Kind != "file" || document.Result.Change.Module != "example.com/app" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `capabilities.aliases["mail.send/v1"]` || strings.Contains(stdout, root) {
+		t.Fatalf("inherited Alias explanation change = %#v", document.Result.Change)
+	}
+}
+
+func TestExplainAliasCoversGeneratedOnlyAndMixedSources(t *testing.T) {
+	root, nested := createExplainGenerationAliasProject(t)
+	before := snapshotInspectProject(t, root)
+	tests := []struct {
+		name        string
+		alias       string
+		reason      string
+		sourceKinds []string
+	}{
+		{name: "generated only", alias: "orders.start/v1", reason: "generation-extension-alias", sourceKinds: []string{"generation-alias-contribution"}},
+		{name: "application and generation", alias: "orders.submit/v1", reason: "compatible-alias-sources", sourceKinds: []string{"generation-alias-contribution", "alias-target"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			exitCode, stdout, stderr := runCommand(t, []string{"explain", "alias", test.alias, "--format", "json"}, nested, inspectCommandEnvironment(nil))
+			document := decodeExplainCommandEnvelope(t, stdout)
+			if exitCode != 0 || stderr != inspectProgress || document.Result.Subject.Kind != "alias" || document.Result.Subject.ID != test.alias || document.Result.Decision.Outcome != "valid" || document.Result.Reason.Code != test.reason || len(document.Result.Reason.Sources) != len(test.sourceKinds) {
+				t.Fatalf("generated Alias explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
+			}
+			for index, kind := range test.sourceKinds {
+				if document.Result.Reason.Sources[index].Kind != kind {
+					t.Fatalf("generated Alias sources = %#v", document.Result.Reason.Sources)
+				}
+			}
+			if document.Result.Change.Kind != "file" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `capabilities.use["authn.session.verify/v1"]` {
+				t.Fatalf("generated Alias change = %#v", document.Result.Change)
+			}
+			if strings.Contains(stdout, root) || strings.Contains(stdout, "generation-private-marker") {
+				t.Fatalf("generated Alias explanation leaked private input: %s", stdout)
+			}
+		})
+	}
+	exitCode, stdout, stderr := runCommand(t, []string{"explain", "alias", "orders.start/v1", "--format", "json", "--env", "production"}, nested, inspectCommandEnvironment(map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"}))
+	document := decodeExplainCommandEnvelope(t, stdout)
+	if exitCode != 0 || stderr != inspectProgress || document.ConfigurationMode != "environment" || document.Result.Reason.Code != "generation-extension-alias" || document.Result.Change.Kind != "file" || document.Result.Change.Path != "plystra.production.yaml" || document.Result.Change.Field != `capabilities.use["authn.session.verify/v1"]` {
+		t.Fatalf("selected generated Alias explanation = exit %d, stderr %q, mode %q, result %#v", exitCode, stderr, document.ConfigurationMode, document.Result)
+	}
+	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("generated Alias explanations mutated the Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
 }
 
 func TestExplainFailuresKeepJSONStdoutEmptyAndDoNotMutate(t *testing.T) {
@@ -570,6 +707,8 @@ func TestExplainFailuresKeepJSONStdoutEmptyAndDoNotMutate(t *testing.T) {
 		{name: "invalid Plugin identity", arguments: []string{"explain", "plugin", "missing", "--format", "json"}, want: "invalid plugin ID"},
 		{name: "unknown configuration field", arguments: []string{"explain", "config", "http.missing", "--format", "json"}, want: "is not present in the selected application model"},
 		{name: "invalid configuration path", arguments: []string{"explain", "config", "config..host", "--format", "json"}, want: "is not present in the selected application model"},
+		{name: "unknown canonical Alias", arguments: []string{"explain", "alias", "missing.operation/v1", "--format", "json"}, want: "is not present in the selected application model"},
+		{name: "invalid Alias identity", arguments: []string{"explain", "alias", "mail.send", "--format", "json"}, want: "invalid capability ID"},
 		{name: "missing overlay", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json", "--env", "missing"}, want: "plystra.missing.yaml"},
 		{name: "unsafe environment", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json", "--env", "../test"}, want: "safe filename component"},
 		{name: "ambient conflict", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json"}, environment: map[string]string{"PLYSTRA_ENV": "production", "PLYSTRA_CONFIG": "deploy/customer.yaml"}, want: "PLYSTRA_CONFIG and PLYSTRA_ENV cannot be used together"},
@@ -636,15 +775,102 @@ func TestExplainPluginVerboseIncludesCompleteIndentedEvidence(t *testing.T) {
 	}
 }
 
+func TestExplainAliasVerboseIncludesCompleteIndentedEvidence(t *testing.T) {
+	t.Parallel()
+
+	root, _ := createExplainCommandProject(t)
+	exitCode, stdout, stderr := runCommand(t, []string{"explain", "alias", "mail.send/v1", "--verbose", "--env", "production"}, root, inspectCommandEnvironment(nil))
+	for _, fragment := range []string{
+		"Alias: mail.send/v1\n",
+		"Decision: maps directly to email.send/v1; narrows target exposure to (Go)\n",
+		"Reason: application-alias\n",
+		`Change: edit plystra.production.yaml at capabilities.aliases["mail.send/v1"]`,
+		"Resolution evidence:\n  {\n",
+		"    \"capability_aliases\": [",
+		"        \"target_contract_digest\": \"sha256:",
+		"        \"validation_outcome\": \"valid\"",
+		"    \"configuration_selection\": {",
+	} {
+		if !strings.Contains(stdout, fragment) {
+			t.Fatalf("verbose Alias explanation omits %q:\n%s", fragment, stdout)
+		}
+	}
+	if exitCode != 0 || stderr != "" || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
+		t.Fatalf("verbose Alias explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+}
+
 func createExplainCommandProject(t *testing.T) (string, string) {
 	t.Helper()
 	root := writeProviderCommandProject(t)
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "capabilities:\n  require: [email.send/v1]\n  use: {email.send/v1: acme.email.smtp}\nhttp:\n  address: resolved-secret-marker\n")
-	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "capabilities:\n  use: {email.send/v1: acme.email.local}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "capabilities:\n  require: [email.send/v1]\n  use: {email.send/v1: acme.email.smtp}\n  aliases: {mail.send/v1: email.send/v1}\nhttp:\n  address: resolved-secret-marker\n  expose: [email.send/v1]\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "capabilities:\n  use: {email.send/v1: acme.email.local}\n  aliases:\n    mail.send/v1: {target: email.send/v1, expose: {go: true, http: false, javascript: false}}\n")
 	writeCommandFile(t, filepath.Join(root, "plystra.ignored.yaml"), "capabilities:\n  use: {email.send/v1: acme.email.smtp}\n")
-	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), "capabilities:\n  require: [email.send/v1]\n  use: {email.send/v1: acme.email.local}\n")
+	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), "capabilities:\n  require: [email.send/v1]\n  use: {email.send/v1: acme.email.local}\n  aliases: {mail.send/v1: email.send/v1}\nhttp:\n  expose: [email.send/v1]\n")
 	writeCommandFile(t, filepath.Join(root, "deploy", "ignored.yaml"), "capabilities:\n  require: [email.send/v1]\n  use: {email.send/v1: acme.email.smtp}\n")
 	nested := filepath.Join(root, "smtp", "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", nested, err)
+	}
+	return root, nested
+}
+
+func createExplainGenerationAliasProject(t *testing.T) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	cliRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve CLI repository root: %v", err)
+	}
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module example.com/alias-explain
+
+go 1.26
+
+require (
+	github.com/plystra/cli v0.0.0
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace github.com/plystra/cli => %q
+
+replace github.com/plystra/kernel => %q
+`, filepath.ToSlash(cliRoot), filepath.ToSlash(kernelRoot)))
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("read CLI go.sum: %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `capabilities:
+  require: [order.create/v1]
+  aliases:
+    orders.submit/v1: order.create/v1
+http:
+  address: generation-private-marker
+`)
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(root, "business", "plugin.yaml"), "id: example.business\nprovides: [order.create/v1]\n")
+	writeCommandFile(t, filepath.Join(root, "business", "capabilities", "order.create", "v1", "capability.yaml"), `id: order.create/v1
+request: {}
+response: {}
+errors: []
+extensions:
+  authn: {authenticated: true}
+`)
+	writeCommandFile(t, filepath.Join(root, "authn", "plugin.yaml"), `id: example.authn
+provides: [authn.session.verify/v1]
+generation:
+  api: v1
+  package: ./generation
+  activations:
+    - namespace: authn
+      capability: authn.session.verify/v1
+`)
+	writeCommandFile(t, filepath.Join(root, "authn", "capabilities", "authn.session.verify", "v1", "capability.yaml"), "id: authn.session.verify/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	writeCommandFile(t, filepath.Join(root, "authn", "generation", "generate.go"), explainAliasExtensionSource)
+	nested := filepath.Join(root, "business", "nested")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatalf("MkdirAll(%s): %v", nested, err)
 	}
@@ -747,3 +973,21 @@ func assertConfigurationExplanationRedacted(t testing.TB, output, root string) {
 		}
 	}
 }
+
+const explainAliasExtensionSource = `package extension
+
+import generation "github.com/plystra/cli/generation/v1"
+
+func Generate(context generation.GenerationContext) (generation.Output, error) {
+	order, _ := generation.ParseCapabilityID("order.create/v1")
+	start, _ := generation.ParseCapabilityID("orders.start/v1")
+	submit, _ := generation.ParseCapabilityID("orders.submit/v1")
+	if _, exists := context.Capability(order); !exists {
+		return generation.Output{}, nil
+	}
+	return generation.Output{AliasContributions: []generation.CapabilityAliasContribution{
+		{ID: "authn.order-start", Namespace: "authn", Source: order, Alias: start, Target: order},
+		{ID: "authn.order-submit", Namespace: "authn", Source: order, Alias: submit, Target: order},
+	}}, nil
+}
+`

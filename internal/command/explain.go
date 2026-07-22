@@ -66,6 +66,8 @@ func runExplain(arguments []string, stdout, stderr io.Writer, workingDirectory s
 		explanation, err = explainPlugin(resolved, parsed.subject)
 	case diagnosticschema.ExplainSubjectConfiguration:
 		explanation, err = explainConfiguration(resolved, parsed.subject)
+	case diagnosticschema.ExplainSubjectAlias:
+		explanation, err = explainAlias(resolved, parsed.subject)
 	default:
 		err = fmt.Errorf("explanation subject kind %q is not implemented", parsed.subjectKind)
 	}
@@ -91,7 +93,7 @@ func parseExplainArguments(arguments []string) (explainArguments, bool) {
 	}
 	var subjectKind diagnosticschema.ExplainSubjectKind
 	switch diagnosticschema.ExplainSubjectKind(arguments[1]) {
-	case diagnosticschema.ExplainSubjectCapability, diagnosticschema.ExplainSubjectPlugin:
+	case diagnosticschema.ExplainSubjectCapability, diagnosticschema.ExplainSubjectPlugin, diagnosticschema.ExplainSubjectAlias:
 		subjectKind = diagnosticschema.ExplainSubjectKind(arguments[1])
 	default:
 		if arguments[1] != "config" {
@@ -372,6 +374,126 @@ func explainConfiguration(resolved applicationresolve.Result, subject string) (c
 	}
 	explanation.result = result
 	return explanation, nil
+}
+
+func explainAlias(resolved applicationresolve.Result, subject string) (commandExplanation, error) {
+	aliasID, err := generation.ParseCapabilityID(subject)
+	if err != nil {
+		return commandExplanation{}, err
+	}
+	evidence := resolved.ResolutionEvidence()
+	selection, currentModule, err := explanationProjectContext(evidence)
+	if err != nil {
+		return commandExplanation{}, err
+	}
+	var selected resolutionevidence.CapabilityAlias
+	found := false
+	for _, alias := range evidence.CapabilityAliases() {
+		if alias.ID() == aliasID.String() {
+			selected = alias
+			found = true
+			break
+		}
+	}
+	if !found {
+		return commandExplanation{}, fmt.Errorf("alias %q is not present in the selected application model", subject)
+	}
+	sources := selected.Sources()
+	if len(sources) == 0 {
+		return commandExplanation{}, fmt.Errorf("alias %q omits causal source provenance", subject)
+	}
+
+	primarySources := make([]diagnosticjson.Source, len(sources))
+	for index, source := range sources {
+		primarySources[index] = explainSource(source.Source())
+	}
+	change, err := aliasChange(evidence, selection, currentModule, selected)
+	if err != nil {
+		return commandExplanation{}, err
+	}
+	input := diagnosticschema.ExplainInput{
+		Evidence:       evidence,
+		SubjectKind:    diagnosticschema.ExplainSubjectAlias,
+		Subject:        selected.ID(),
+		Outcome:        string(selected.ValidationOutcome()),
+		Reason:         aliasReason(sources),
+		PrimarySources: primarySources,
+		Change:         change,
+	}
+	result, err := diagnosticschema.NewExplain(input)
+	if err != nil {
+		return commandExplanation{}, err
+	}
+	return commandExplanation{
+		result:       result,
+		subjectLabel: "Alias",
+		decision:     fmt.Sprintf("maps directly to %s; %s", selected.Target(), aliasExposureDecision(selected)),
+	}, nil
+}
+
+func aliasReason(sources []resolutionevidence.CapabilityAliasSource) string {
+	applicationSources := 0
+	generationSources := 0
+	for _, source := range sources {
+		switch source.Kind() {
+		case generation.AliasSourceApplication:
+			applicationSources++
+		case generation.AliasSourceGenerationExtension:
+			generationSources++
+		}
+	}
+	if len(sources) == 1 && applicationSources == 1 {
+		return "application-alias"
+	}
+	if len(sources) == 1 && generationSources == 1 {
+		return "generation-extension-alias"
+	}
+	return "compatible-alias-sources"
+}
+
+func aliasChange(evidence resolutionevidence.Evidence, selection resolutionevidence.ConfigurationSelection, currentModule string, alias resolutionevidence.CapabilityAlias) (diagnosticschema.ExplainChange, error) {
+	for _, source := range alias.Sources() {
+		if source.Kind() != generation.AliasSourceGenerationExtension {
+			continue
+		}
+		provider, found := selectedCapabilityProvider(evidence, source.ActivationCapability())
+		if !found || provider.PluginID() != source.PluginID() {
+			return diagnosticschema.ExplainChange{}, fmt.Errorf("alias %q generation source omits its selected activation Provider decision", alias.ID())
+		}
+		return requiredCapabilityChange(evidence, selection, currentModule, source.ActivationCapability(), provider), nil
+	}
+	return diagnosticschema.ExplainChange{
+		Kind:   diagnosticschema.ExplainChangeFile,
+		Module: currentModule,
+		Path:   selection.SelectedPath(),
+		Field:  fmt.Sprintf("capabilities.aliases[%q]", alias.ID()),
+	}, nil
+}
+
+func aliasExposureDecision(alias resolutionevidence.CapabilityAlias) string {
+	exposure := alias.Exposure()
+	if narrowed, explicit := alias.ExposureNarrowing(); explicit {
+		exposure = narrowed
+		return "narrows target exposure to " + explainExposure(exposure)
+	}
+	return "inherits target exposure " + explainExposure(exposure)
+}
+
+func explainExposure(exposure generation.Exposure) string {
+	values := make([]string, 0, 3)
+	if exposure.Go {
+		values = append(values, "Go")
+	}
+	if exposure.HTTP {
+		values = append(values, "HTTP")
+	}
+	if exposure.JavaScript {
+		values = append(values, "JavaScript")
+	}
+	if len(values) == 0 {
+		return "(no generated surfaces)"
+	}
+	return "(" + strings.Join(values, ", ") + ")"
 }
 
 func selectedConfigurationField(evidence resolutionevidence.Evidence, subject string) (resolutionevidence.ConfigurationField, string, bool) {
