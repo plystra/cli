@@ -318,6 +318,7 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 		name      string
 		data      string
 		directory bool
+		wantError error
 		want      string
 	}{
 		{name: "empty", want: "document is empty"},
@@ -327,6 +328,8 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 		{name: "sequence root", data: "- description\n", want: "root must be a mapping"},
 		{name: "anchor", data: "description: &text value\n", want: "anchors and aliases"},
 		{name: "duplicate key", data: "description: one\ndescription: two\n", want: "duplicate mapping key"},
+		{name: "authoritative field", data: "id: records.invalid.list/v1\n", wantError: interfacemeta.ErrAuthoritativeField, want: "Interface ID is authoritative"},
+		{name: "unknown field", data: "custom: value\n", wantError: interfacemeta.ErrUnknownField, want: "unknown top-level field"},
 		{name: "directory", directory: true, want: "regular non-symbolic file"},
 		{name: "oversized", data: strings.Repeat("x", interfacemeta.MaximumSize+1), want: "exceeds"},
 	}
@@ -348,7 +351,7 @@ func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *test
 			}
 			before := snapshotFiles(t, root)
 			_, err := discoverResult(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
-			if !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacemeta.ErrInvalid) || !strings.Contains(err.Error(), test.want) || !strings.Contains(err.Error(), "interfaces/records/interface.yaml") {
+			if !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacemeta.ErrInvalid) || test.wantError != nil && !errors.Is(err, test.wantError) || !strings.Contains(err.Error(), test.want) || !strings.Contains(err.Error(), "interfaces/records/interface.yaml") {
 				t.Fatalf("Discover error = %v, want Interface metadata error containing %q", err, test.want)
 			}
 			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {

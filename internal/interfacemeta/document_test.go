@@ -35,6 +35,126 @@ func TestParseFileAcceptsEmptyMapping(t *testing.T) {
 	}
 }
 
+func TestParseFileAcceptsOnlyNonDuplicatedMetadataFields(t *testing.T) {
+	t.Parallel()
+
+	data := []byte(`description: Creates an order.
+semantics:
+  kind: command
+errors:
+  - code: already_exists
+constraints:
+  request.order_id:
+    min_length: 1
+examples:
+  - name: accepted
+    request:
+      order_id: ord_123
+    response:
+      accepted: true
+deprecation:
+  message: use order.submit/v1
+conformance:
+  package: ./conformance
+`)
+	document, err := interfacemeta.ParseFile("interfaces/order/create/v1/interface.yaml", data)
+	if err != nil || string(document.Data()) != string(data) {
+		t.Fatalf("ParseFile = %#v, %v", document, err)
+	}
+}
+
+func TestParseFileRejectsAuthoritativeGoContractFields(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"id":                "Interface ID",
+		"interface_id":      "Interface ID",
+		"method":            "operation method",
+		"method_name":       "operation method",
+		"request":           "request type",
+		"request_fields":    "request fields",
+		"response":          "response type",
+		"response_fields":   "response fields",
+		"types":             "Go field types",
+		"field_numbers":     "stable field numbers",
+		"required_fields":   "required-field markers",
+		"json_names":        "explicit JSON field names",
+		"implementation":    "Implementation identity",
+		"implementation_id": "Implementation identity",
+		"constructor":       "Implementation constructor identity",
+	}
+	for field, authority := range tests {
+		field, authority := field, authority
+		t.Run(field, func(t *testing.T) {
+			t.Parallel()
+			document, err := interfacemeta.ParseFile("interfaces/order/interface.yaml", []byte(field+": duplicate\n"))
+			if !errors.Is(err, interfacemeta.ErrInvalid) || !errors.Is(err, interfacemeta.ErrAuthoritativeField) || document.Path() != "" || !strings.Contains(err.Error(), "interface.yaml:1:1") || !strings.Contains(err.Error(), authority) {
+				t.Fatalf("ParseFile = %#v, %v", document, err)
+			}
+		})
+	}
+}
+
+func TestParseFileRejectsNestedAuthoritativeFieldsOutsideExamplePayloads(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"semantics":    "semantics:\n  method: Create\n",
+		"errors":       "errors:\n  - request_fields: duplicate\n",
+		"deprecation":  "deprecation:\n  interface_id: order.submit/v1\n",
+		"conformance":  "conformance:\n  constructor: example.com/acme.New\n",
+		"example item": "examples:\n  - name: invalid\n    method_name: Create\n",
+	}
+	for name, data := range tests {
+		name, data := name, data
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			document, err := interfacemeta.ParseFile("interfaces/order/interface.yaml", []byte(data))
+			if !errors.Is(err, interfacemeta.ErrInvalid) || !errors.Is(err, interfacemeta.ErrAuthoritativeField) || document.Path() != "" || !strings.Contains(err.Error(), "authoritative in the Interface Go package") {
+				t.Fatalf("ParseFile = %#v, %v", document, err)
+			}
+		})
+	}
+}
+
+func TestParseFileAllowsContractLikeNamesInsideExampleApplicationData(t *testing.T) {
+	t.Parallel()
+
+	data := []byte(`examples:
+  - name: contract-like-data
+    request:
+      id: value
+      method: value
+      request_fields: value
+      response_fields: value
+      types: value
+      field_numbers: value
+      required_fields: value
+      json_names: value
+      implementation: value
+      constructor: value
+    response:
+      interface_id: value
+    error:
+      code: rejected
+      details:
+        method_name: value
+`)
+	document, err := interfacemeta.ParseFile("interfaces/order/interface.yaml", data)
+	if err != nil || string(document.Data()) != string(data) {
+		t.Fatalf("ParseFile = %#v, %v", document, err)
+	}
+}
+
+func TestParseFileRejectsUnknownTopLevelField(t *testing.T) {
+	t.Parallel()
+
+	document, err := interfacemeta.ParseFile("interfaces/order/interface.yaml", []byte("custom: value\n"))
+	if !errors.Is(err, interfacemeta.ErrInvalid) || !errors.Is(err, interfacemeta.ErrUnknownField) || errors.Is(err, interfacemeta.ErrAuthoritativeField) || document.Path() != "" || !strings.Contains(err.Error(), "unknown top-level field \"custom\"") {
+		t.Fatalf("ParseFile = %#v, %v", document, err)
+	}
+}
+
 func TestParseFileRejectsUnsafeOrMalformedDocuments(t *testing.T) {
 	t.Parallel()
 

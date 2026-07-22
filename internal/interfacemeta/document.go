@@ -20,8 +20,52 @@ const (
 	MaximumSize = 1 << 20
 )
 
-// ErrInvalid reports an unsafe or malformed Interface metadata document.
-var ErrInvalid = errors.New("invalid Interface metadata")
+var (
+	// ErrInvalid reports an unsafe or malformed Interface metadata document.
+	ErrInvalid = errors.New("invalid Interface metadata")
+	// ErrAuthoritativeField reports metadata that attempts to redeclare a
+	// contract fact owned by the canonical Interface Go package.
+	ErrAuthoritativeField = errors.New("authoritative Go contract field in Interface metadata")
+	// ErrUnknownField reports a top-level metadata field outside the closed
+	// Interface metadata vocabulary.
+	ErrUnknownField = errors.New("unknown Interface metadata field")
+)
+
+var allowedTopLevelFields = map[string]struct{}{
+	"description": {},
+	"semantics":   {},
+	"errors":      {},
+	"constraints": {},
+	"examples":    {},
+	"deprecation": {},
+	"conformance": {},
+}
+
+var authoritativeTopLevelFields = map[string]string{
+	"id":                  "Interface ID",
+	"interface":           "Interface declaration",
+	"interface_id":        "Interface ID",
+	"method":              "operation method",
+	"method_name":         "operation method",
+	"operation":           "operation method",
+	"request":             "request type",
+	"request_type":        "request type",
+	"request_fields":      "request fields",
+	"response":            "response type",
+	"response_type":       "response type",
+	"response_fields":     "response fields",
+	"fields":              "request and response fields",
+	"types":               "Go field types",
+	"go_types":            "Go field types",
+	"field_numbers":       "stable field numbers",
+	"required":            "required-field markers",
+	"required_fields":     "required-field markers",
+	"json_names":          "explicit JSON field names",
+	"implementation":      "Implementation identity",
+	"implementation_id":   "Implementation identity",
+	"implementation_type": "Implementation identity",
+	"constructor":         "Implementation constructor identity",
+}
 
 // Document is one immutable, syntactically valid optional metadata document.
 // Semantic normalization is intentionally owned by later validation stages.
@@ -74,7 +118,78 @@ func ParseFile(sourcePath string, data []byte) (Document, error) {
 	if err := validateYAMLTree(sourcePath, root); err != nil {
 		return Document{}, err
 	}
+	if err := validateTopLevelFields(sourcePath, root); err != nil {
+		return Document{}, err
+	}
 	return Document{path: sourcePath, data: append([]byte(nil), data...)}, nil
+}
+
+func validateTopLevelFields(sourcePath string, root *yaml.Node) error {
+	for index := 0; index < len(root.Content); index += 2 {
+		key := root.Content[index]
+		if _, allowed := allowedTopLevelFields[key.Value]; allowed {
+			if err := rejectNestedAuthoritativeFields(sourcePath, key.Value, root.Content[index+1]); err != nil {
+				return err
+			}
+			continue
+		}
+		if authority, duplicated := authoritativeTopLevelFields[key.Value]; duplicated {
+			return invalidWith(sourcePath, key.Line, key.Column, ErrAuthoritativeField, "field %q is not allowed because %s is authoritative in the Interface Go package", key.Value, authority)
+		}
+		return invalidWith(sourcePath, key.Line, key.Column, ErrUnknownField, "unknown top-level field %q; allowed fields are description, semantics, errors, constraints, examples, deprecation, and conformance", key.Value)
+	}
+	return nil
+}
+
+func rejectNestedAuthoritativeFields(sourcePath, section string, node *yaml.Node) error {
+	if section != "examples" || node == nil || node.Kind != yaml.SequenceNode {
+		return walkAuthoritativeFields(sourcePath, node)
+	}
+	for _, example := range node.Content {
+		if example == nil || example.Kind != yaml.MappingNode {
+			if err := walkAuthoritativeFields(sourcePath, example); err != nil {
+				return err
+			}
+			continue
+		}
+		for index := 0; index < len(example.Content); index += 2 {
+			key := example.Content[index]
+			value := example.Content[index+1]
+			if key.Value == "request" || key.Value == "response" || key.Value == "error" {
+				// Request, response, and error examples carry ordinary application data.
+				// Their field names may coincide with metadata vocabulary without
+				// attempting to redeclare the Go contract.
+				continue
+			}
+			if authority, duplicated := authoritativeTopLevelFields[key.Value]; duplicated {
+				return invalidWith(sourcePath, key.Line, key.Column, ErrAuthoritativeField, "field %q is not allowed here because %s is authoritative in the Interface Go package", key.Value, authority)
+			}
+			if err := walkAuthoritativeFields(sourcePath, value); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func walkAuthoritativeFields(sourcePath string, node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.MappingNode {
+		for index := 0; index < len(node.Content); index += 2 {
+			key := node.Content[index]
+			if authority, duplicated := authoritativeTopLevelFields[key.Value]; duplicated {
+				return invalidWith(sourcePath, key.Line, key.Column, ErrAuthoritativeField, "field %q is not allowed here because %s is authoritative in the Interface Go package", key.Value, authority)
+			}
+		}
+	}
+	for _, child := range node.Content {
+		if err := walkAuthoritativeFields(sourcePath, child); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateYAMLTree(sourcePath string, node *yaml.Node) error {
@@ -113,6 +228,10 @@ func validateYAMLTree(sourcePath string, node *yaml.Node) error {
 }
 
 func invalid(sourcePath string, line, column int, format string, arguments ...any) error {
+	return invalidWith(sourcePath, line, column, nil, format, arguments...)
+}
+
+func invalidWith(sourcePath string, line, column int, kind error, format string, arguments ...any) error {
 	location := sourcePath
 	if location == "" {
 		location = Name
@@ -120,5 +239,9 @@ func invalid(sourcePath string, line, column int, format string, arguments ...an
 	if line > 0 {
 		location = fmt.Sprintf("%s:%d:%d", location, line, column)
 	}
-	return fmt.Errorf("%w: %s: %s", ErrInvalid, location, fmt.Sprintf(format, arguments...))
+	message := fmt.Sprintf(format, arguments...)
+	if kind != nil {
+		return fmt.Errorf("%w: %w: %s: %s", ErrInvalid, kind, location, message)
+	}
+	return fmt.Errorf("%w: %s: %s", ErrInvalid, location, message)
 }
