@@ -485,6 +485,9 @@ plystra build
 plystra inspect
 plystra inspect --verbose
 plystra inspect --format json
+plystra explain capability <capability-name>/vN
+plystra explain capability <capability-name>/vN --verbose
+plystra explain capability <capability-name>/vN --format json
 plystra check
 plystra fix
 plystra generate
@@ -511,6 +514,18 @@ evidence. `--format json` writes exactly one `plystra.inspect` v1 schema documen
 to stdout while progress and diagnostics remain on stderr. The command accepts
 the same `--env`, `--config`, `PLYSTRA_ENV`, and `PLYSTRA_CONFIG` selectors as
 generation and check.
+
+`plystra explain capability <capability-name>/vN` is the corresponding causal
+read-only view. For a required Capability it reports the selected ordinary
+Provider or Kernel intrinsic, the exact automatic, current-project, inherited,
+or intrinsic selection reason, its direct module-relative source, and one
+selector-matched command or configuration field that changes the decision. A
+visible but unrequired Capability reports that state and the selected
+configuration's `capabilities.require` field. `--verbose` appends the complete
+deterministic evidence; `--format json` writes exactly one `plystra.explain` v1
+document while progress remains on stderr. The same explicit and ambient
+configuration selectors apply, and unknown canonical Capability IDs fail
+without modifying the Project.
 
 The current `plystra check` implementation is read-only. It verifies the
 selected dependency composition and generated fixed point, then runs

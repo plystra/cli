@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/plystra/cli/internal/diagnosticschema"
 )
 
 func TestParseNewArguments(t *testing.T) {
@@ -223,6 +225,49 @@ func TestParseInspectArguments(t *testing.T) {
 		result, ok := parseInspectArguments(test.arguments)
 		if result.format != test.format || result.verbose != test.verbose || result.configurationPath != test.configurationPath || result.environmentName != test.environmentName || ok != test.ok {
 			t.Errorf("parseInspectArguments(%q) = %#v, %t; want format %q, verbose %t, path %q, environment %q, ok %t", test.arguments, result, ok, test.format, test.verbose, test.configurationPath, test.environmentName, test.ok)
+		}
+	}
+}
+
+func TestParseExplainArguments(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		arguments         []string
+		subject           string
+		format            commandFormat
+		verbose           bool
+		configurationPath string
+		environmentName   string
+		ok                bool
+	}{
+		{arguments: []string{"explain", "capability", "email.send/v1"}, subject: "email.send/v1", format: commandFormatHuman, ok: true},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--verbose"}, subject: "email.send/v1", format: commandFormatHuman, verbose: true, ok: true},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--format", "json", "--verbose"}, subject: "email.send/v1", format: commandFormatJSON, verbose: true, ok: true},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--config", "deploy/customer.yaml", "--format", "human"}, subject: "email.send/v1", format: commandFormatHuman, configurationPath: "deploy/customer.yaml", ok: true},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--env", "production", "--format", "json"}, subject: "email.send/v1", format: commandFormatJSON, environmentName: "production", ok: true},
+		{arguments: nil},
+		{arguments: []string{"explain"}},
+		{arguments: []string{"explain", "capability"}},
+		{arguments: []string{"explain", "plugin", "acme.email"}},
+		{arguments: []string{"explain", "capability", "--verbose"}},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--verbose", "--verbose"}},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--format"}},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--format", "yaml"}},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--format", "json", "--format", "human"}},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--config"}},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--config", "a.yaml", "--config", "b.yaml"}},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--env"}},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--env", "test", "--env", "production"}},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--env", "test", "--config", "deploy.yaml"}},
+	}
+	for _, test := range tests {
+		result, ok := parseExplainArguments(test.arguments)
+		if result.subjectKind != diagnosticschema.ExplainSubjectKind("") && result.subjectKind != diagnosticschema.ExplainSubjectCapability {
+			t.Errorf("parseExplainArguments(%q) subject kind = %q", test.arguments, result.subjectKind)
+		}
+		if result.subject != test.subject || result.format != test.format || result.verbose != test.verbose || result.configurationPath != test.configurationPath || result.environmentName != test.environmentName || ok != test.ok {
+			t.Errorf("parseExplainArguments(%q) = %#v, %t; want subject %q, format %q, verbose %t, path %q, environment %q, ok %t", test.arguments, result, ok, test.subject, test.format, test.verbose, test.configurationPath, test.environmentName, test.ok)
 		}
 	}
 }

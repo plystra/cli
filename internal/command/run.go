@@ -40,6 +40,7 @@ const (
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
   plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
   plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
+  plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra check [--env <environment>|--config <yaml-path>]
   plystra generate [--check] [--env <environment>|--config <yaml-path>]
 `
@@ -128,6 +129,24 @@ error. Explicit --env or --config overrides both variables, and the two flags
 cannot be combined. Relative configuration paths are resolved from the detected
 Plystra Project root. Root plystra.yaml remains mandatory and is not merged
 beneath --config.
+`
+	explainCapabilityUsage = `Usage:
+  plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
+
+Options:
+  --verbose              Add the complete deterministic resolution evidence to human output.
+  --format human|json    Select concise human output or the plystra.explain v1 JSON schema.
+  --env <environment>    Explain the model selected by plystra.<environment>.yaml.
+  --config <yaml-path>   Explain one complete current-project configuration instead of root plystra.yaml.
+
+The command is read-only and explains one canonical Capability decision from
+the same selected application model used by generation and validation. JSON
+stdout contains exactly one schema document; progress and diagnostics use
+stderr. PLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no
+explicit selector is present; setting both is an error. Explicit --env or
+--config overrides both variables, and the two flags cannot be combined.
+Relative configuration paths are resolved from the detected Plystra Project
+root. Root plystra.yaml remains mandatory and is not merged beneath --config.
 `
 )
 
@@ -323,6 +342,12 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			return 0
 		}
 		return runInspect(arguments, stdout, stderr, workingDirectory, environment)
+	case "explain":
+		if len(arguments) == 2 && isHelp(arguments[1]) || len(arguments) == 3 && arguments[1] == "capability" && isHelp(arguments[2]) {
+			_, _ = io.WriteString(stdout, explainCapabilityUsage)
+			return 0
+		}
+		return runExplain(arguments, stdout, stderr, workingDirectory, environment)
 	case "check":
 		if len(arguments) == 2 && isHelp(arguments[1]) {
 			_, _ = io.WriteString(stdout, checkUsage)

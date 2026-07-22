@@ -1147,6 +1147,10 @@ Run the narrowest relevant test first, then the complete module checks:
     plystra inspect --env production
     plystra inspect --config deploy/customer-a.yaml
     plystra inspect --format json
+    plystra explain capability email.send/v1
+    plystra explain capability email.send/v1 --env production
+    plystra explain capability email.send/v1 --config deploy/customer-a.yaml
+    plystra explain capability email.send/v1 --format json
     plystra generate --check
     plystra generate --check --env production
     plystra generate --check --config deploy/customer-a.yaml
@@ -1213,6 +1217,13 @@ build and distribution boundary for every Plystra module.
   automation, set exactly one of
   PLYSTRA_ENV or PLYSTRA_CONFIG. An environment is a sparse overlay above root;
   an explicit file is complete and root plystra.yaml is not merged beneath it.
+- Unexpected Capability Provider or requirement: run plystra explain capability
+  <capability-name>/vN with the same --env or --config selector. The concise
+  result identifies the selected Provider or available-but-unrequired state,
+  direct reason and source, and one exact command or configuration field that
+  changes the decision. Add --verbose for complete candidates, rejections,
+  requiring edges, generation rules, configuration provenance, and assembly
+  evidence, or --format json for deterministic automation output.
 - Alias error: point directly to a resolved canonical target with the same
   version and exposure no broader than the target.
 - Unclaimed extension namespace: add a compatible selected Plugin whose

@@ -1470,6 +1470,9 @@ selection:
 plystra inspect
 plystra inspect --env production
 plystra inspect --config deploy/customer-a.yaml
+plystra explain capability email.send/v1
+plystra explain capability email.send/v1 --env production
+plystra explain capability email.send/v1 --config deploy/customer-a.yaml
 plystra generate
 plystra generate --check
 plystra generate --env production
@@ -1487,6 +1490,19 @@ indented resolution evidence or `--format json` for one deterministic
 stderr. The JSON form is suitable for automation and contains stable
 module-relative provenance rather than unrestricted configuration, Secrets, or
 machine-specific Project paths.
+
+Use `plystra explain capability <capability-name>/vN` when a particular
+Capability's selection is unexpected. A required Capability reports the
+selected Plugin Provider or Kernel intrinsic, the direct selection reason and
+source, and either a concrete `plystra use` command for an available alternative
+or the selected configuration field that owns the decision. A visible but
+unrequired Capability points to the selected document's
+`capabilities.require["<capability-name>/vN"]` field. Keep the same `--env` or
+`--config` selector throughout diagnosis, generation, checking, testing, and
+startup. Add `--verbose` for the complete candidate, rejection, requirement,
+generation, configuration, and assembly evidence, or `--format json` for one
+deterministic `plystra.explain` v1 document. The command is read-only and emits
+neither Secret values nor machine-specific Project paths.
 
 Clean check output resembles:
 
