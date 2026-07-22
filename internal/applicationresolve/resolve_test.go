@@ -166,6 +166,9 @@ type Response struct {
 	if contract.MethodName() != "Execute" || contract.RequestName() != "Request" || contract.ResponseName() != "Response" || len(contract.RequestFields()) != 1 || contract.RequestFields()[0].Number() != 1 || !contract.RequestFields()[0].Required() {
 		t.Fatalf("Interface contract = %#v", contract)
 	}
+	if digest := discovered.ContractDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("Interface contract digest = %q", digest)
+	}
 	semantics, present := discovered.Semantics()
 	if !present || semantics.Kind() != interfacemeta.OperationKindCommand || discovered.MetadataSource() != "example.com/interfaces@local/domains/orders/create/v1/interface.yaml" {
 		t.Fatalf("Interface semantics = %#v, %t, source %q", semantics, present, discovered.MetadataSource())

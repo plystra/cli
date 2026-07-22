@@ -334,6 +334,9 @@ replace example.com/dependency => ../dependency
 	if !present || localConformance.Package() != interfacemeta.CanonicalConformancePackage {
 		t.Fatalf("local conformance = %#v, %t", localConformance, present)
 	}
+	if digest := byID["local.records.list/v1"].ContractDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("local Interface contract digest = %q", digest)
+	}
 	dependency, present := byID["dependency.records.list/v1"].Metadata()
 	if !present || dependency.Path() != "api/interface.yaml" || string(dependency.Data()) != dependencyMetadata || byID["dependency.records.list/v1"].MetadataSource() != "example.com/dependency@v1.2.3/api/interface.yaml" {
 		t.Fatalf("dependency metadata = %#v, %t, source %q", dependency, present, byID["dependency.records.list/v1"].MetadataSource())
@@ -370,6 +373,9 @@ replace example.com/dependency => ../dependency
 	dependencyConformance, present := byID["dependency.records.list/v1"].Conformance()
 	if !present || dependencyConformance.Package() != interfacemeta.CanonicalConformancePackage {
 		t.Fatalf("dependency conformance = %#v, %t", dependencyConformance, present)
+	}
+	if digest := byID["dependency.records.list/v1"].ContractDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("dependency Interface contract digest = %q", digest)
 	}
 	if metadata, present := byID["local.records.get/v1"].Metadata(); present || metadata.Path() != "" || len(metadata.Data()) != 0 || byID["local.records.get/v1"].MetadataSource() != "" {
 		t.Fatalf("absent metadata = %#v, %t", metadata, present)
@@ -721,6 +727,7 @@ type interfaceSummary struct {
 	Method          string
 	Request         string
 	Response        string
+	ContractDigest  string
 	MetadataPath    string
 	MetadataData    string
 	MetadataSource  string
@@ -764,6 +771,7 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 			Method:          contract.MethodName(),
 			Request:         contract.RequestName(),
 			Response:        contract.ResponseName(),
+			ContractDigest:  discovered.ContractDigest(),
 			MetadataPath:    metadata.Path(),
 			MetadataData:    string(metadata.Data()),
 			MetadataSource:  discovered.MetadataSource(),

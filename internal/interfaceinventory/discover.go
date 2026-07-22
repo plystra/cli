@@ -23,6 +23,7 @@ import (
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/interfacecontract"
 	"github.com/plystra/cli/internal/interfacedecl"
+	"github.com/plystra/cli/internal/interfacedigest"
 	"github.com/plystra/cli/internal/interfacemeta"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
@@ -61,6 +62,7 @@ type Interface struct {
 	local          bool
 	declaration    interfacedecl.Declaration
 	contract       interfacecontract.Contract
+	contractDigest string
 	metadata       interfacemeta.Document
 	hasMetadata    bool
 	constraints    []interfacemeta.ConstraintTarget
@@ -104,6 +106,10 @@ func (i Interface) Declaration() interfacedecl.Declaration { return i.declaratio
 
 // Contract returns the immutable normalized type-checked Go contract.
 func (i Interface) Contract() interfacecontract.Contract { return i.contract }
+
+// ContractDigest returns the versioned SHA-256 digest of the exact normalized
+// Go contract and compatibility metadata.
+func (i Interface) ContractDigest() string { return i.contractDigest }
 
 // Metadata returns the optional immutable colocated interface.yaml document.
 func (i Interface) Metadata() (interfacemeta.Document, bool) {
@@ -341,18 +347,23 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 			if err != nil {
 				return nil, fmt.Errorf("package %s: %w", candidate.importPath, err)
 			}
+			contractDigest, err := interfacedigest.Calculate(contract, metadata, constraints)
+			if err != nil {
+				return nil, fmt.Errorf("package %s: calculate Interface contract digest: %w", candidate.importPath, err)
+			}
 			interfaces = append(interfaces, Interface{
-				modulePath:    candidate.source.path,
-				moduleVersion: candidate.source.version,
-				packagePath:   candidate.importPath,
-				sourcePath:    declaration.Position().Path,
-				local:         candidate.source.local,
-				declaration:   declaration,
-				contract:      contract,
-				metadata:      metadata,
-				hasMetadata:   hasMetadata,
-				constraints:   constraints,
-				examples:      examples,
+				modulePath:     candidate.source.path,
+				moduleVersion:  candidate.source.version,
+				packagePath:    candidate.importPath,
+				sourcePath:     declaration.Position().Path,
+				local:          candidate.source.local,
+				declaration:    declaration,
+				contract:       contract,
+				contractDigest: contractDigest,
+				metadata:       metadata,
+				hasMetadata:    hasMetadata,
+				constraints:    constraints,
+				examples:       examples,
 			})
 		}
 	}
