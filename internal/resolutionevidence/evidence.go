@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/aliasresolution"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/pluginid"
@@ -103,6 +104,7 @@ const (
 type Input struct {
 	Context            generation.Context
 	ProviderResolution providerresolution.Result
+	AliasResolution    aliasresolution.Result
 	Modules            []ModuleInput
 	PluginCandidates   []PluginCandidateInput
 }
@@ -146,7 +148,6 @@ type Evidence struct {
 	canonicalCapabilityCount int
 	requirementCount         int
 	selectedProviderCount    int
-	capabilityAliasCount     int
 	modules                  []Module
 	pluginCandidates         []PluginCandidate
 	selectedPlugins          []SelectedPlugin
@@ -155,6 +156,7 @@ type Evidence struct {
 	selectedProviders        []SelectedProvider
 	generationActivations    []GenerationActivation
 	generatedRequirements    []GeneratedRequirement
+	capabilityAliases        []CapabilityAlias
 	canonicalJSON            []byte
 	digest                   string
 	prepared                 bool
@@ -545,6 +547,71 @@ func (r GeneratedRequirement) RuleID() string { return r.ruleID }
 // Source returns the replacement-safe generation declaration location.
 func (r GeneratedRequirement) Source() Source { return r.source }
 
+// CapabilityAlias is one final application-local direct mapping together with
+// its exact canonical target identity and every contributing source.
+type CapabilityAlias struct {
+	id                   string
+	target               string
+	targetContractDigest string
+	sources              []CapabilityAliasSource
+}
+
+// ID returns the exact application-local Alias ID.
+func (a CapabilityAlias) ID() string { return a.id }
+
+// Target returns the exact direct canonical target Capability.
+func (a CapabilityAlias) Target() string { return a.target }
+
+// TargetContractDigest returns the normalized exact target contract identity.
+func (a CapabilityAlias) TargetContractDigest() string { return a.targetContractDigest }
+
+// Sources returns every compatible application or selected-extension source in
+// canonical order.
+func (a CapabilityAlias) Sources() []CapabilityAliasSource {
+	return append([]CapabilityAliasSource(nil), a.sources...)
+}
+
+// CapabilityAliasSource is one stable application declaration or selected
+// generation-extension contribution to a final Alias.
+type CapabilityAliasSource struct {
+	kind                 generation.AliasSourceKind
+	projectModule        string
+	pluginID             string
+	contributionID       string
+	namespace            string
+	sourceCapability     string
+	activationCapability string
+	source               Source
+}
+
+// Kind returns application or generation-extension.
+func (s CapabilityAliasSource) Kind() generation.AliasSourceKind { return s.kind }
+
+// ProjectModule returns the participating Project that owns this source.
+func (s CapabilityAliasSource) ProjectModule() string { return s.projectModule }
+
+// PluginID returns the selected contributing Plugin for a generation source
+// and an empty string for an application declaration.
+func (s CapabilityAliasSource) PluginID() string { return s.pluginID }
+
+// ContributionID returns the stable extension contribution identity when
+// applicable.
+func (s CapabilityAliasSource) ContributionID() string { return s.contributionID }
+
+// Namespace returns the interpreted extension namespace when applicable.
+func (s CapabilityAliasSource) Namespace() string { return s.namespace }
+
+// SourceCapability returns the metadata-bearing required Capability for a
+// generation contribution and an empty string for an application declaration.
+func (s CapabilityAliasSource) SourceCapability() string { return s.sourceCapability }
+
+// ActivationCapability returns the selected extension-owning Capability for a
+// generation contribution and an empty string for an application declaration.
+func (s CapabilityAliasSource) ActivationCapability() string { return s.activationCapability }
+
+// Source returns the replacement-safe module-relative declaration location.
+func (s CapabilityAliasSource) Source() Source { return s.source }
+
 // Source is one stable module-relative declaration reference.
 type Source struct {
 	module string
@@ -687,6 +754,24 @@ type canonicalGeneratedRequirement struct {
 	Source               canonicalSource `json:"source"`
 }
 
+type canonicalCapabilityAlias struct {
+	ID                   string                           `json:"id"`
+	Target               string                           `json:"target"`
+	TargetContractDigest string                           `json:"target_contract_digest"`
+	Sources              []canonicalCapabilityAliasSource `json:"sources"`
+}
+
+type canonicalCapabilityAliasSource struct {
+	Kind                 generation.AliasSourceKind `json:"kind"`
+	ProjectModule        string                     `json:"project_module"`
+	PluginID             string                     `json:"plugin_id,omitempty"`
+	ContributionID       string                     `json:"contribution_id,omitempty"`
+	Namespace            string                     `json:"namespace,omitempty"`
+	SourceCapability     string                     `json:"source_capability,omitempty"`
+	ActivationCapability string                     `json:"activation_capability,omitempty"`
+	Source               canonicalSource            `json:"source"`
+}
+
 type canonicalReplacement struct {
 	Kind       ReplacementKind `json:"kind"`
 	ModulePath string          `json:"module_path"`
@@ -714,6 +799,7 @@ type canonicalEvidence struct {
 	SelectedProviders     []canonicalSelectedProvider      `json:"selected_providers"`
 	GenerationActivations []canonicalGenerationActivation  `json:"generation_activations"`
 	GeneratedRequirements []canonicalGeneratedRequirement  `json:"generated_requirements"`
+	CapabilityAliases     []canonicalCapabilityAlias       `json:"capability_aliases"`
 	Counts                canonicalCounts                  `json:"counts"`
 }
 
@@ -755,6 +841,10 @@ func Build(source Input) (Evidence, error) {
 	if err != nil {
 		return Evidence{}, fmt.Errorf("%w: generation provenance: %v", ErrBuild, err)
 	}
+	capabilityAliases, err := capabilityAliasesFromResolution(context, source.AliasResolution, requirements, pluginCandidates, generationActivations)
+	if err != nil {
+		return Evidence{}, fmt.Errorf("%w: Capability Alias provenance: %v", ErrBuild, err)
+	}
 	input := Evidence{
 		generationAPI:            context.APIVersion(),
 		selectedModelDigest:      context.Digest(),
@@ -762,7 +852,6 @@ func Build(source Input) (Evidence, error) {
 		canonicalCapabilityCount: len(context.Capabilities()),
 		requirementCount:         len(requirements),
 		selectedProviderCount:    len(selectedProviders),
-		capabilityAliasCount:     len(context.CapabilityAliases()),
 		modules:                  modules,
 		pluginCandidates:         pluginCandidates,
 		selectedPlugins:          selectedPlugins,
@@ -771,6 +860,7 @@ func Build(source Input) (Evidence, error) {
 		selectedProviders:        selectedProviders,
 		generationActivations:    generationActivations,
 		generatedRequirements:    generatedRequirements,
+		capabilityAliases:        capabilityAliases,
 		prepared:                 true,
 	}
 	if err := validate(input); err != nil {
@@ -901,6 +991,16 @@ func (e Evidence) GeneratedRequirements() []GeneratedRequirement {
 	return append([]GeneratedRequirement(nil), e.generatedRequirements...)
 }
 
+// CapabilityAliases returns every final direct Alias mapping and its complete
+// compatible source provenance in canonical order.
+func (e Evidence) CapabilityAliases() []CapabilityAlias {
+	values := append([]CapabilityAlias(nil), e.capabilityAliases...)
+	for index := range values {
+		values[index].sources = append([]CapabilityAliasSource(nil), values[index].sources...)
+	}
+	return values
+}
+
 // ProviderCandidateCount returns the complete visible Provider declaration
 // count, including Capabilities outside the final requirement closure.
 func (e Evidence) ProviderCandidateCount() int { return len(e.providerCandidates) }
@@ -935,7 +1035,7 @@ func (e Evidence) GenerationActivationCount() int { return len(e.generationActiv
 func (e Evidence) GeneratedRequirementCount() int { return len(e.generatedRequirements) }
 
 // CapabilityAliasCount returns the number of final application Aliases.
-func (e Evidence) CapabilityAliasCount() int { return e.capabilityAliasCount }
+func (e Evidence) CapabilityAliasCount() int { return len(e.capabilityAliases) }
 
 // CanonicalJSON returns a defensive copy of the deterministic bounded evidence.
 func (e Evidence) CanonicalJSON() []byte { return append([]byte(nil), e.canonicalJSON...) }
@@ -972,7 +1072,6 @@ func validate(e Evidence) error {
 		{name: "canonical Capability", value: e.canonicalCapabilityCount},
 		{name: "requirement", value: e.requirementCount},
 		{name: "selected Provider", value: e.selectedProviderCount},
-		{name: "Capability Alias", value: e.capabilityAliasCount},
 	}
 	for _, count := range counts {
 		if count.value < 0 {
@@ -1017,6 +1116,9 @@ func validate(e Evidence) error {
 	}
 	if !equalGeneratedRequirements(e.generatedRequirements, generated) {
 		return errors.New("generated requirement records do not match final requirement provenance")
+	}
+	if err := validateCapabilityAliases(e.capabilityAliases, e.modules, e.requirements, e.pluginCandidates, e.generationActivations); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1215,6 +1317,35 @@ func encode(e Evidence) ([]byte, error) {
 			},
 		}
 	}
+	capabilityAliases := make([]canonicalCapabilityAlias, len(e.capabilityAliases))
+	for index, value := range e.capabilityAliases {
+		sources := make([]canonicalCapabilityAliasSource, len(value.sources))
+		for sourceIndex, aliasSource := range value.sources {
+			source := aliasSource.source
+			sources[sourceIndex] = canonicalCapabilityAliasSource{
+				Kind:                 aliasSource.kind,
+				ProjectModule:        aliasSource.projectModule,
+				PluginID:             aliasSource.pluginID,
+				ContributionID:       aliasSource.contributionID,
+				Namespace:            aliasSource.namespace,
+				SourceCapability:     aliasSource.sourceCapability,
+				ActivationCapability: aliasSource.activationCapability,
+				Source: canonicalSource{
+					Module: source.module,
+					Path:   source.path,
+					Kind:   source.kind,
+					Line:   source.line,
+					Column: source.column,
+				},
+			}
+		}
+		capabilityAliases[index] = canonicalCapabilityAlias{
+			ID:                   value.id,
+			Target:               value.target,
+			TargetContractDigest: value.targetContractDigest,
+			Sources:              sources,
+		}
+	}
 	return json.Marshal(canonicalEvidence{
 		Version:               schemaVersion,
 		GenerationAPI:         e.generationAPI,
@@ -1228,6 +1359,7 @@ func encode(e Evidence) ([]byte, error) {
 		SelectedProviders:     selectedProviders,
 		GenerationActivations: generationActivations,
 		GeneratedRequirements: generatedRequirements,
+		CapabilityAliases:     capabilityAliases,
 		Counts: canonicalCounts{
 			ParticipatingModules:  len(e.modules),
 			DiscoveredPlugins:     len(e.pluginCandidates),
@@ -1239,7 +1371,7 @@ func encode(e Evidence) ([]byte, error) {
 			SelectedProviders:     e.selectedProviderCount,
 			GenerationActivations: len(e.generationActivations),
 			GeneratedRequirements: len(e.generatedRequirements),
-			CapabilityAliases:     e.capabilityAliasCount,
+			CapabilityAliases:     len(e.capabilityAliases),
 		},
 	})
 }
@@ -2424,6 +2556,332 @@ func validLowerKebabSegment(value string, maximum int) bool {
 		}
 	}
 	return !previousHyphen
+}
+
+func capabilityAliasesFromResolution(
+	context generation.Context,
+	resolution aliasresolution.Result,
+	requirements []CapabilityRequirement,
+	plugins []PluginCandidate,
+	activations []GenerationActivation,
+) ([]CapabilityAlias, error) {
+	canonical := resolution.CanonicalJSON()
+	if len(canonical) == 0 || !json.Valid(canonical) || digest(canonical) != resolution.Digest() {
+		return nil, errors.New("final Alias resolution is absent or has an invalid digest")
+	}
+
+	contextAliases := context.CapabilityAliases()
+	resolvedAliases := resolution.Aliases()
+	contextByID := make(map[string]generation.CapabilityAliasView, len(contextAliases))
+	for _, alias := range contextAliases {
+		contextByID[alias.ID().String()] = alias
+	}
+	requirementByCapability := make(map[string]CapabilityRequirement, len(requirements))
+	applicationSources := make(map[string][]aliasDeclarationSource)
+	for _, requirement := range requirements {
+		requirementByCapability[requirement.capability] = requirement
+		for _, source := range requirement.sources {
+			if source.kind == providerresolution.RequirementAliasTarget {
+				applicationSources[source.alias] = append(applicationSources[source.alias], aliasDeclarationSource{
+					target: requirement.capability,
+					source: source,
+				})
+			}
+		}
+	}
+	pluginByID := make(map[string]PluginCandidate, len(plugins))
+	for _, plugin := range plugins {
+		pluginByID[plugin.id] = plugin
+	}
+	activationByUse := make(map[string]GenerationActivation, len(activations))
+	for _, activation := range activations {
+		activationByUse[generationActivationUseKey(activation.pluginID, activation.namespace, activation.sourceCapability)] = activation
+	}
+
+	usedApplicationSources := make(map[string]struct{})
+	aliases := make([]CapabilityAlias, 0, len(resolvedAliases))
+	for index, resolved := range resolvedAliases {
+		id := resolved.ID().String()
+		target := resolved.Target().String()
+		if _, err := capabilityid.Parse(id); err != nil {
+			return nil, fmt.Errorf("aliases[%d].id %q is invalid", index, id)
+		}
+		if _, err := capabilityid.Parse(target); err != nil {
+			return nil, fmt.Errorf("aliases[%d].target %q is invalid", index, target)
+		}
+		if index > 0 && resolvedAliases[index-1].ID().String() >= id {
+			return nil, fmt.Errorf("final Alias resolution is not in unique canonical order at %q", id)
+		}
+		selected, selectedInContext := contextByID[id]
+		if selectedInContext && (selected.Target().String() != target || selected.Exposure() != resolved.Exposure() || selected.Deprecated() != resolved.Deprecated()) {
+			return nil, fmt.Errorf("final Alias %s differs from the selected model", id)
+		}
+		targetRequirement, exists := requirementByCapability[target]
+		if !exists {
+			return nil, fmt.Errorf("final Alias %s target %s is not required", id, target)
+		}
+		targetView, exists := context.Capability(resolved.Target())
+		if !exists || resolved.TargetContractDigest() != targetView.ContractDigest() || resolved.TargetContractDigest() != targetRequirement.contractDigest {
+			return nil, fmt.Errorf("final Alias %s target %s contract digest is inconsistent", id, target)
+		}
+		resolvedSources := resolved.Sources()
+		if selectedInContext {
+			delete(contextByID, id)
+		}
+		if err := validateAliasSourceIdentity(selectedInContext, selected.Sources(), resolvedSources); err != nil {
+			return nil, fmt.Errorf("final Alias %s sources: %v", id, err)
+		}
+
+		sources := make([]CapabilityAliasSource, 0, len(resolvedSources))
+		for _, source := range resolvedSources {
+			switch source.Kind() {
+			case generation.AliasSourceApplication:
+				if source.ID() != "application" || source.ContributionID() != "" || source.Namespace() != "" || source.SourceCapability().String() != "" {
+					return nil, fmt.Errorf("final Alias %s has invalid application source", id)
+				}
+				if !selectedInContext {
+					return nil, fmt.Errorf("final Alias %s application source is absent from the selected model", id)
+				}
+				declarations := applicationSources[id]
+				if len(declarations) == 0 {
+					return nil, fmt.Errorf("final Alias %s has no typed application declaration source", id)
+				}
+				for _, declaration := range declarations {
+					if declaration.target != target {
+						return nil, fmt.Errorf("final Alias %s application source targets %s instead of %s", id, declaration.target, target)
+					}
+					sources = append(sources, CapabilityAliasSource{
+						kind:          generation.AliasSourceApplication,
+						projectModule: declaration.source.projectModule,
+						source:        declaration.source.source,
+					})
+					usedApplicationSources[capabilityAliasApplicationSourceKey(id, target, declaration.source)] = struct{}{}
+				}
+			case generation.AliasSourceGenerationExtension:
+				plugin, exists := pluginByID[source.ID()]
+				if !exists {
+					return nil, fmt.Errorf("final Alias %s source Plugin %q is not discovered", id, source.ID())
+				}
+				if !validGenerationRuleID(source.ContributionID()) {
+					return nil, fmt.Errorf("final Alias %s contribution ID %q is invalid", id, source.ContributionID())
+				}
+				if !validGenerationNamespace(source.Namespace()) {
+					return nil, fmt.Errorf("final Alias %s contribution namespace %q is invalid", id, source.Namespace())
+				}
+				sourceCapability := source.SourceCapability().String()
+				if _, required := requirementByCapability[sourceCapability]; !required {
+					return nil, fmt.Errorf("final Alias %s contribution names non-required source Capability %s", id, sourceCapability)
+				}
+				activation, selected := activationByUse[generationActivationUseKey(plugin.id, source.Namespace(), sourceCapability)]
+				if !selected {
+					return nil, fmt.Errorf("final Alias %s contribution %q has no matching selected activation", id, source.ContributionID())
+				}
+				sourceLocation := plugin.source
+				sourceLocation.kind = "generation-alias-contribution"
+				sources = append(sources, CapabilityAliasSource{
+					kind:                 generation.AliasSourceGenerationExtension,
+					projectModule:        plugin.modulePath,
+					pluginID:             plugin.id,
+					contributionID:       source.ContributionID(),
+					namespace:            source.Namespace(),
+					sourceCapability:     sourceCapability,
+					activationCapability: activation.activationCapability,
+					source:               sourceLocation,
+				})
+			default:
+				return nil, fmt.Errorf("final Alias %s source kind %q is invalid", id, source.Kind())
+			}
+		}
+		sort.Slice(sources, func(left, right int) bool {
+			return capabilityAliasSourceKey(sources[left]) < capabilityAliasSourceKey(sources[right])
+		})
+		unique := sources[:0]
+		for _, source := range sources {
+			if len(unique) != 0 && unique[len(unique)-1] == source {
+				continue
+			}
+			unique = append(unique, source)
+		}
+		aliases = append(aliases, CapabilityAlias{
+			id:                   id,
+			target:               target,
+			targetContractDigest: resolved.TargetContractDigest(),
+			sources:              append([]CapabilityAliasSource(nil), unique...),
+		})
+	}
+	if len(contextByID) != 0 {
+		ids := make([]string, 0, len(contextByID))
+		for id := range contextByID {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		return nil, fmt.Errorf("selected-model Alias %s is absent from the final Alias resolution", ids[0])
+	}
+	for aliasID, declarations := range applicationSources {
+		for _, declaration := range declarations {
+			key := capabilityAliasApplicationSourceKey(aliasID, declaration.target, declaration.source)
+			if _, used := usedApplicationSources[key]; !used {
+				return nil, fmt.Errorf("application Alias %s source does not contribute to the final Alias map", aliasID)
+			}
+		}
+	}
+	return aliases, nil
+}
+
+type aliasDeclarationSource struct {
+	target string
+	source RequirementSource
+}
+
+func validateAliasSourceIdentity(selected bool, context []generation.AliasSourceView, resolved []aliasresolution.Source) error {
+	if !selected {
+		return nil
+	}
+	contextSet := make(map[string]struct{}, len(context))
+	for _, source := range context {
+		contextSet[string(source.Kind())+"\x00"+source.ID()] = struct{}{}
+	}
+	resolvedSet := make(map[string]struct{}, len(resolved))
+	for _, source := range resolved {
+		resolvedSet[string(source.Kind())+"\x00"+source.ID()] = struct{}{}
+	}
+	for key := range contextSet {
+		if _, exists := resolvedSet[key]; !exists {
+			return errors.New("selected model and final resolution source identities differ")
+		}
+	}
+	return nil
+}
+
+func validateCapabilityAliases(
+	aliases []CapabilityAlias,
+	modules []Module,
+	requirements []CapabilityRequirement,
+	plugins []PluginCandidate,
+	activations []GenerationActivation,
+) error {
+	moduleByPath := make(map[string]Module, len(modules))
+	for _, project := range modules {
+		moduleByPath[project.path] = project
+	}
+	requirementByCapability := make(map[string]CapabilityRequirement, len(requirements))
+	for _, requirement := range requirements {
+		requirementByCapability[requirement.capability] = requirement
+	}
+	pluginByID := make(map[string]PluginCandidate, len(plugins))
+	for _, plugin := range plugins {
+		pluginByID[plugin.id] = plugin
+	}
+	activationByUse := make(map[string]GenerationActivation, len(activations))
+	for _, activation := range activations {
+		activationByUse[generationActivationUseKey(activation.pluginID, activation.namespace, activation.sourceCapability)] = activation
+	}
+	applicationSources := make(map[string]struct{})
+	for _, requirement := range requirements {
+		for _, source := range requirement.sources {
+			if source.kind == providerresolution.RequirementAliasTarget {
+				applicationSources[capabilityAliasApplicationSourceKey(source.alias, requirement.capability, source)] = struct{}{}
+			}
+		}
+	}
+	seenApplicationSources := make(map[string]struct{})
+	for index, alias := range aliases {
+		id, err := capabilityid.Parse(alias.id)
+		if err != nil || strings.HasPrefix(id.Name(), "kernel.") {
+			return fmt.Errorf("aliases[%d].id %q is invalid", index, alias.id)
+		}
+		target, err := capabilityid.Parse(alias.target)
+		if err != nil || id.Major() != target.Major() {
+			return fmt.Errorf("aliases[%d].target %q is invalid", index, alias.target)
+		}
+		if index > 0 && aliases[index-1].id >= alias.id {
+			return fmt.Errorf("Capability Aliases are not in unique canonical order at %q", alias.id)
+		}
+		requirement, exists := requirementByCapability[alias.target]
+		if !exists || !validDigest(alias.targetContractDigest) || alias.targetContractDigest != requirement.contractDigest {
+			return fmt.Errorf("aliases[%d] target %s contract identity is inconsistent", index, alias.target)
+		}
+		if len(alias.sources) == 0 {
+			return fmt.Errorf("aliases[%d].sources must not be empty", index)
+		}
+		for sourceIndex, source := range alias.sources {
+			if sourceIndex > 0 && capabilityAliasSourceKey(alias.sources[sourceIndex-1]) >= capabilityAliasSourceKey(source) {
+				return fmt.Errorf("aliases[%d].sources are not in unique canonical order", index)
+			}
+			if len(modules) != 0 {
+				project, exists := moduleByPath[source.projectModule]
+				if !exists || project.source.module != source.source.module {
+					return fmt.Errorf("aliases[%d].sources[%d] Project provenance is inconsistent", index, sourceIndex)
+				}
+			}
+			if source.source.path == "" || path.IsAbs(source.source.path) || path.Clean(source.source.path) != source.source.path || strings.Contains(source.source.path, "\\") || source.source.line < 1 || source.source.column < 1 {
+				return fmt.Errorf("aliases[%d].sources[%d] has invalid stable location", index, sourceIndex)
+			}
+			switch source.kind {
+			case generation.AliasSourceApplication:
+				if source.pluginID != "" || source.contributionID != "" || source.namespace != "" || source.sourceCapability != "" || source.activationCapability != "" || source.source.kind != string(providerresolution.RequirementAliasTarget) {
+					return fmt.Errorf("aliases[%d].sources[%d] application provenance is invalid", index, sourceIndex)
+				}
+				key := capabilityAliasApplicationSourceKey(alias.id, alias.target, RequirementSource{
+					kind:          providerresolution.RequirementAliasTarget,
+					projectModule: source.projectModule,
+					source:        source.source,
+					alias:         alias.id,
+				})
+				if _, exists := applicationSources[key]; !exists {
+					return fmt.Errorf("aliases[%d].sources[%d] has no matching application declaration", index, sourceIndex)
+				}
+				seenApplicationSources[key] = struct{}{}
+			case generation.AliasSourceGenerationExtension:
+				plugin, exists := pluginByID[source.pluginID]
+				if !exists || plugin.modulePath != source.projectModule || !validGenerationRuleID(source.contributionID) || !validGenerationNamespace(source.namespace) {
+					return fmt.Errorf("aliases[%d].sources[%d] generation contribution is invalid", index, sourceIndex)
+				}
+				if _, required := requirementByCapability[source.sourceCapability]; !required {
+					return fmt.Errorf("aliases[%d].sources[%d] source Capability %s is not required", index, sourceIndex, source.sourceCapability)
+				}
+				activation, selected := activationByUse[generationActivationUseKey(source.pluginID, source.namespace, source.sourceCapability)]
+				if !selected {
+					return fmt.Errorf("aliases[%d].sources[%d] has no matching selected activation", index, sourceIndex)
+				}
+				if source.activationCapability != activation.activationCapability {
+					return fmt.Errorf("aliases[%d].sources[%d] activation Capability is inconsistent", index, sourceIndex)
+				}
+				if source.source.module != plugin.source.module || source.source.path != plugin.source.path || source.source.line != plugin.source.line || source.source.column != plugin.source.column || source.source.kind != "generation-alias-contribution" {
+					return fmt.Errorf("aliases[%d].sources[%d] generation source location is inconsistent", index, sourceIndex)
+				}
+			default:
+				return fmt.Errorf("aliases[%d].sources[%d].kind %q is invalid", index, sourceIndex, source.kind)
+			}
+		}
+	}
+	for key := range applicationSources {
+		if _, exists := seenApplicationSources[key]; !exists {
+			return errors.New("an application Alias declaration is absent from final Alias evidence")
+		}
+	}
+	return nil
+}
+
+func capabilityAliasSourceKey(value CapabilityAliasSource) string {
+	return strings.Join([]string{
+		string(value.kind),
+		value.projectModule,
+		value.pluginID,
+		value.contributionID,
+		value.namespace,
+		value.sourceCapability,
+		value.activationCapability,
+		value.source.module,
+		value.source.path,
+		value.source.kind,
+		fmt.Sprintf("%010d", value.source.line),
+		fmt.Sprintf("%010d", value.source.column),
+	}, "\x00")
+}
+
+func capabilityAliasApplicationSourceKey(aliasID, target string, source RequirementSource) string {
+	return strings.Join([]string{aliasID, target, requirementSourceKey(source)}, "\x00")
 }
 
 func providerCapabilityPath(pluginPath string, identifier capabilityid.Identifier) string {

@@ -1103,7 +1103,7 @@ func TestResolveExecutesSelectedFilesystemGenerationExtension(t *testing.T) {
 		t.Fatalf("ReadFile(go.sum): %v", err)
 	}
 	writeFile(t, filepath.Join(root, "go.sum"), string(goSum))
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "capabilities:\n  require: [order.create/v1]\n")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "capabilities:\n  require: [order.create/v1]\n  aliases:\n    orders.submit/v1: order.create/v1\n")
 	writePlugin(t, root, "business", "id: example.business\nprovides: [order.create/v1]\n")
 	writePlugin(t, root, "authn", `id: example.authn
 provides: [authn.session.verify/v1]
@@ -1159,7 +1159,7 @@ extensions:
 		t.Fatalf("activation requirement source = %#v", authnSources)
 	}
 	orderSources := evidenceRequirements[2].Sources()
-	if len(orderSources) != 1 || orderSources[0].Kind() != providerresolution.RequirementDeclaration || orderSources[0].ProjectModule() != "example.com/extension-app" || orderSources[0].Source().Path() != "plystra.yaml" {
+	if len(orderSources) != 2 || orderSources[0].Kind() != providerresolution.RequirementAliasTarget || orderSources[0].Alias() != "orders.submit/v1" || orderSources[0].ProjectModule() != "example.com/extension-app" || orderSources[0].Source().Path() != "plystra.yaml" || orderSources[1].Kind() != providerresolution.RequirementDeclaration || orderSources[1].ProjectModule() != "example.com/extension-app" || orderSources[1].Source().Path() != "plystra.yaml" {
 		t.Fatalf("declaration requirement source = %#v", orderSources)
 	}
 	activations := result.ResolutionEvidence().GenerationActivations()
@@ -1169,6 +1169,14 @@ extensions:
 	generatedEvidence := result.ResolutionEvidence().GeneratedRequirements()
 	if len(generatedEvidence) != 1 || generatedEvidence[0].Capability() != "audit.write/v1" || generatedEvidence[0].SourceCapability() != "order.create/v1" || generatedEvidence[0].ActivationCapability() != "authn.session.verify/v1" || generatedEvidence[0].Namespace() != "authn" || generatedEvidence[0].PluginID() != "example.authn" || generatedEvidence[0].ProjectModule() != "example.com/extension-app" || generatedEvidence[0].RuleID() != "authn.require-audit" || generatedEvidence[0].Source().Path() != "authn/plugin.yaml" || generatedEvidence[0].Source().Kind() != "generation-rule" {
 		t.Fatalf("generated requirement evidence = %#v", generatedEvidence)
+	}
+	aliasEvidence := result.ResolutionEvidence().CapabilityAliases()
+	if len(aliasEvidence) != 1 || aliasEvidence[0].ID() != "orders.submit/v1" || aliasEvidence[0].Target() != "order.create/v1" || aliasEvidence[0].TargetContractDigest() == "" {
+		t.Fatalf("Capability Alias evidence = %#v", aliasEvidence)
+	}
+	aliasSources := aliasEvidence[0].Sources()
+	if len(aliasSources) != 2 || aliasSources[0].Kind() != generation.AliasSourceApplication || aliasSources[0].ProjectModule() != "example.com/extension-app" || aliasSources[0].ActivationCapability() != "" || aliasSources[0].Source().Module() != "example.com/extension-app" || aliasSources[0].Source().Path() != "plystra.yaml" || aliasSources[0].Source().Kind() != "alias-target" || aliasSources[1].Kind() != generation.AliasSourceGenerationExtension || aliasSources[1].ProjectModule() != "example.com/extension-app" || aliasSources[1].PluginID() != "example.authn" || aliasSources[1].ContributionID() != "authn.order-shortcut" || aliasSources[1].Namespace() != "authn" || aliasSources[1].SourceCapability() != "order.create/v1" || aliasSources[1].ActivationCapability() != "authn.session.verify/v1" || aliasSources[1].Source().Module() != "example.com/extension-app" || aliasSources[1].Source().Path() != "authn/plugin.yaml" || aliasSources[1].Source().Kind() != "generation-alias-contribution" {
+		t.Fatalf("Capability Alias sources = %#v", aliasSources)
 	}
 	entries, err := os.ReadDir(temporaryParent)
 	if err != nil || len(entries) != 0 {
@@ -1512,11 +1520,17 @@ func Generate(context generation.GenerationContext) (generation.Output, error) {
 	}
 	order, _ := generation.ParseCapabilityID("order.create/v1")
 	audit, _ := generation.ParseCapabilityID("audit.write/v1")
+	alias, _ := generation.ParseCapabilityID("orders.submit/v1")
 	if _, exists := context.Capability(order); !exists {
 		return generation.Output{}, nil
 	}
-	return generation.Output{Requirements: []generation.Requirement{{
-		RuleID: "authn.require-audit", Namespace: "authn", Source: order, Capability: audit,
-	}}}, nil
+	return generation.Output{
+		Requirements: []generation.Requirement{{
+			RuleID: "authn.require-audit", Namespace: "authn", Source: order, Capability: audit,
+		}},
+		AliasContributions: []generation.CapabilityAliasContribution{{
+			ID: "authn.order-shortcut", Namespace: "authn", Source: order, Alias: alias, Target: order,
+		}},
+	}, nil
 }
 `

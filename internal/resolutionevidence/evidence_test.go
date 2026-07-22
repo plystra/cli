@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/aliasresolution"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/providerresolution"
 	"github.com/plystra/cli/internal/resolutionevidence"
@@ -81,6 +82,14 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	}
 	if selectedProviders[1].Capability() != "kernel.health/v1" || selectedProviders[1].PluginID() != "" || selectedProviders[1].ProjectModule() != "" || selectedProviders[1].SelectionReason() != resolutionevidence.ProviderSelectionIntrinsic || !selectedProviders[1].Intrinsic() || selectedProviders[1].ProviderSource().Module() != "github.com/plystra/kernel" || selectedProviders[1].ProviderSource().Path() != "capability/catalog/definitions/kernel.health/v1/capability.yaml" || selectedProviders[1].ProviderSource().Kind() != "intrinsic-provider" || len(selectedProviders[1].SelectionSources()) != 0 {
 		t.Fatalf("intrinsic selected Provider = %#v", selectedProviders[1])
+	}
+	aliases := first.CapabilityAliases()
+	if len(aliases) != 1 || aliases[0].ID() != "mail.send/v1" || aliases[0].Target() != "email.send/v1" || aliases[0].TargetContractDigest() != providerCandidates[0].ContractDigest() {
+		t.Fatalf("Capability Aliases = %#v", aliases)
+	}
+	aliasSources := aliases[0].Sources()
+	if len(aliasSources) != 1 || aliasSources[0].Kind() != generation.AliasSourceApplication || aliasSources[0].ProjectModule() != "example.com/app" || aliasSources[0].PluginID() != "" || aliasSources[0].ActivationCapability() != "" || aliasSources[0].Source().Module() != "example.com/app" || aliasSources[0].Source().Path() != "plystra.yaml" || aliasSources[0].Source().Kind() != "alias-target" {
+		t.Fatalf("application Alias sources = %#v", aliasSources)
 	}
 	if !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() {
 		t.Fatalf("input permutation changed evidence:\nfirst:  %s %s\nsecond: %s %s", first.CanonicalJSON(), first.Digest(), second.CanonicalJSON(), second.Digest())
@@ -161,6 +170,27 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	if err := json.Unmarshal(first.CanonicalJSON(), &document); err != nil || document.Version != 1 || len(document.Modules) != 3 || document.Counts.ParticipatingModules != 3 || document.Counts.DiscoveredPlugins != 2 || document.Counts.ProviderCandidates != 1 || document.Counts.RejectedProviders != 0 || document.Counts.SelectedProviders != 2 || document.Counts.GenerationActivations != 0 || document.Counts.GeneratedRequirements != 0 || document.Modules[2].Replacement == nil || document.Modules[2].Replacement.Kind != "module" || document.Modules[2].Source.Module != "corp.example/smtp" || document.Modules[2].Source.Path != "plystra.yaml" || len(document.PluginCandidates) != 2 || document.PluginCandidates[1].ID != "example.smtp" || document.PluginCandidates[1].ModulePath != "example.com/smtp" || document.PluginCandidates[1].Source.Module != "corp.example/smtp" || document.PluginCandidates[1].Source.Path != "smtp/plugin.yaml" || len(document.SelectedPlugins) != 1 || document.SelectedPlugins[0].ID != "example.smtp" || document.SelectedPlugins[0].ModulePath != "example.com/smtp" || document.SelectedPlugins[0].ModuleVersion != "v1.3.0" || len(document.SelectedPlugins[0].Reasons) != 1 || document.SelectedPlugins[0].Reasons[0].Kind != "provider" || document.SelectedPlugins[0].Reasons[0].Capability != "email.send/v1" || len(document.ProviderCandidates) != 1 || document.ProviderCandidates[0].Capability != "email.send/v1" || document.ProviderCandidates[0].PluginID != "example.smtp" || document.ProviderCandidates[0].ProjectModule != "example.com/smtp" || document.ProviderCandidates[0].RejectionReason != "" || document.ProviderCandidates[0].Source.Module != "corp.example/smtp" || document.ProviderCandidates[0].Source.Path != "smtp/capabilities/email.send/v1/capability.yaml" || document.ProviderCandidates[0].Source.Kind != "provider-declaration" || len(document.SelectedProviders) != 2 || document.SelectedProviders[0].Capability != "email.send/v1" || document.SelectedProviders[0].SelectionReason != "sole-provider" || document.SelectedProviders[0].ProviderSource.Module != "corp.example/smtp" || document.SelectedProviders[1].Capability != "kernel.health/v1" || document.SelectedProviders[1].SelectionReason != "intrinsic-kernel" || document.SelectedProviders[1].ProviderSource.Module != "github.com/plystra/kernel" {
 		t.Fatalf("canonical module evidence = %#v, %v", document, err)
 	}
+	var aliasDocument struct {
+		CapabilityAliases []struct {
+			ID                   string `json:"id"`
+			Target               string `json:"target"`
+			TargetContractDigest string `json:"target_contract_digest"`
+			Sources              []struct {
+				Kind          string `json:"kind"`
+				ProjectModule string `json:"project_module"`
+				Source        struct {
+					Path string `json:"path"`
+					Kind string `json:"kind"`
+				} `json:"source"`
+			} `json:"sources"`
+		} `json:"capability_aliases"`
+		Counts struct {
+			CapabilityAliases int `json:"capability_aliases"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal(first.CanonicalJSON(), &aliasDocument); err != nil || aliasDocument.Counts.CapabilityAliases != 1 || len(aliasDocument.CapabilityAliases) != 1 || aliasDocument.CapabilityAliases[0].ID != "mail.send/v1" || aliasDocument.CapabilityAliases[0].Target != "email.send/v1" || aliasDocument.CapabilityAliases[0].TargetContractDigest == "" || len(aliasDocument.CapabilityAliases[0].Sources) != 1 || aliasDocument.CapabilityAliases[0].Sources[0].Kind != "application" || aliasDocument.CapabilityAliases[0].Sources[0].ProjectModule != "example.com/app" || aliasDocument.CapabilityAliases[0].Sources[0].Source.Path != "plystra.yaml" || aliasDocument.CapabilityAliases[0].Sources[0].Source.Kind != "alias-target" {
+		t.Fatalf("canonical Alias evidence = %#v, %v", aliasDocument, err)
+	}
 	for _, forbidden := range []string{"idempotency_key", "safe_name", "Provider-independent audit"} {
 		if bytes.Contains(first.CanonicalJSON(), []byte(forbidden)) {
 			t.Fatalf("bounded evidence contains detailed model value %q: %s", forbidden, first.CanonicalJSON())
@@ -175,7 +205,9 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	reasons[0] = resolutionevidence.PluginSelectionReason{}
 	providerCandidates[0] = resolutionevidence.ProviderCandidate{}
 	selectedProviders[0] = resolutionevidence.SelectedProvider{}
-	if first.CanonicalJSON()[0] != '{' || first.Modules()[0].Path() != "example.com/app" || first.PluginCandidates()[0].ID() != "example.shared" || first.SelectedPlugins()[0].ID() != "example.smtp" || first.SelectedPlugins()[0].Reasons()[0].Capability() != "email.send/v1" || first.ProviderCandidates()[0].PluginID() != "example.smtp" || first.SelectedProviders()[0].PluginID() != "example.smtp" || !first.Valid() {
+	aliases[0] = resolutionevidence.CapabilityAlias{}
+	aliasSources[0] = resolutionevidence.CapabilityAliasSource{}
+	if first.CanonicalJSON()[0] != '{' || first.Modules()[0].Path() != "example.com/app" || first.PluginCandidates()[0].ID() != "example.shared" || first.SelectedPlugins()[0].ID() != "example.smtp" || first.SelectedPlugins()[0].Reasons()[0].Capability() != "email.send/v1" || first.ProviderCandidates()[0].PluginID() != "example.smtp" || first.SelectedProviders()[0].PluginID() != "example.smtp" || first.CapabilityAliases()[0].ID() != "mail.send/v1" || first.CapabilityAliases()[0].Sources()[0].ProjectModule() != "example.com/app" || !first.Valid() {
 		t.Fatal("CanonicalJSON exposed mutable evidence storage")
 	}
 }
@@ -310,6 +342,7 @@ func TestBuildRecordsEveryProviderCandidateAndStableRejectionReason(t *testing.T
 		evidence, err := resolutionevidence.Build(resolutionevidence.Input{
 			Context:            context,
 			ProviderResolution: resolved,
+			AliasResolution:    resolveApplicationAliases(t, context),
 			Modules:            participatingModules(reverse),
 			PluginCandidates:   discovered,
 		})
@@ -430,7 +463,7 @@ func TestBuildRecordsEverySelectedProviderReasonAndChoiceSource(t *testing.T) {
 		if err != nil {
 			t.Fatalf("providerresolution.Resolve: %v", err)
 		}
-		evidence, err := resolutionevidence.Build(resolutionevidence.Input{Context: context, ProviderResolution: resolved, Modules: modules, PluginCandidates: candidateInputs})
+		evidence, err := resolutionevidence.Build(resolutionevidence.Input{Context: context, ProviderResolution: resolved, AliasResolution: resolveApplicationAliases(t, context), Modules: modules, PluginCandidates: candidateInputs})
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
@@ -749,6 +782,7 @@ func TestBuildRecordsCanonicalCapabilityRequirementSources(t *testing.T) {
 		evidence, err := resolutionevidence.Build(resolutionevidence.Input{
 			Context:            context,
 			ProviderResolution: resolved,
+			AliasResolution:    resolveApplicationAliases(t, context),
 			Modules:            participatingModules(reverse),
 			PluginCandidates:   participatingPluginCandidates(reverse),
 		})
@@ -862,6 +896,203 @@ func TestBuildRecordsCanonicalCapabilityRequirementSources(t *testing.T) {
 	}
 }
 
+func TestBuildRecordsCapabilityAliasSourcesAndFinalTargets(t *testing.T) {
+	t.Parallel()
+
+	build := func(reverse bool) resolutionevidence.Evidence {
+		t.Helper()
+		context, contracts := aliasEvidenceContext(t, reverse)
+		applicationSource := providerresolution.RequirementSource{
+			Kind:       providerresolution.RequirementAliasTarget,
+			Reference:  `plystra.yaml capabilities.aliases["orders.submit/v1"] target`,
+			ModulePath: "example.com/app",
+			Path:       "plystra.yaml",
+			Line:       7,
+			Column:     5,
+			Alias:      "orders.submit/v1",
+		}
+		duplicateApplicationSource := applicationSource
+		duplicateApplicationSource.Reference = "same root Alias through another diagnostic label"
+		requirements := []providerresolution.Requirement{
+			{Contract: contracts["order.create/v1"], Source: providerresolution.RequirementSource{Kind: providerresolution.RequirementDeclaration, Reference: "root order requirement", ModulePath: "example.com/app", Path: "plystra.yaml", Line: 2, Column: 3}},
+			{Contract: contracts["order.create/v1"], Source: applicationSource},
+			{Contract: contracts["order.create/v1"], Source: duplicateApplicationSource},
+			{Contract: contracts["order.create/v1"], Source: providerresolution.RequirementSource{Kind: providerresolution.RequirementAliasTarget, Reference: "inherited compatible Alias", ModulePath: "example.com/shared", Path: "plystra.yaml", Line: 11, Column: 7, Alias: "orders.submit/v1"}},
+			{Contract: contracts["authn.session.verify/v1"], Source: providerresolution.RequirementSource{Kind: providerresolution.RequirementActivation, Reference: "extensions.authn on order.create/v1", ModulePath: "example.com/app", Path: "plystra.yaml", Line: 4, Column: 5, Namespace: "authn", SourceCapability: "order.create/v1"}},
+		}
+		candidates := []providerresolution.Candidate{
+			{PluginID: "example.business", Contract: contracts["order.create/v1"], Source: "business diagnostic"},
+			{PluginID: "example.authn", Contract: contracts["authn.session.verify/v1"], Source: "authn diagnostic"},
+		}
+		contributions := []generation.CapabilityAliasContribution{
+			{ID: "authn.order-start", Namespace: "authn", Source: parseGenerationCapability(t, "order.create/v1"), Alias: parseGenerationCapability(t, "orders.start/v1"), Target: parseGenerationCapability(t, "order.create/v1")},
+			{ID: "authn.order-submit", Namespace: "authn", Source: parseGenerationCapability(t, "order.create/v1"), Alias: parseGenerationCapability(t, "orders.submit/v1"), Target: parseGenerationCapability(t, "order.create/v1")},
+		}
+		candidateInputs := []resolutionevidence.PluginCandidateInput{
+			{ID: "example.authn", ModulePath: "example.com/smtp", Path: "authn"},
+			{ID: "example.business", ModulePath: "example.com/app", Path: "business"},
+			{ID: "example.shared", ModulePath: "example.com/shared", Path: "shared"},
+		}
+		if reverse {
+			slices.Reverse(requirements)
+			slices.Reverse(candidates)
+			slices.Reverse(contributions)
+			slices.Reverse(candidateInputs)
+		}
+		providerResult, err := providerresolution.Resolve(providerresolution.Input{Requirements: requirements, Candidates: candidates})
+		if err != nil {
+			t.Fatalf("providerresolution.Resolve: %v", err)
+		}
+		aliasResult := resolveAliasContributions(t, context, "example.authn", contributions)
+		evidence, err := resolutionevidence.Build(resolutionevidence.Input{
+			Context:            context,
+			ProviderResolution: providerResult,
+			AliasResolution:    aliasResult,
+			Modules:            participatingModules(reverse),
+			PluginCandidates:   candidateInputs,
+		})
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		return evidence
+	}
+
+	first := build(false)
+	second := build(true)
+	if !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() {
+		t.Fatalf("Alias input permutation changed evidence:\nfirst:  %s\nsecond: %s", first.CanonicalJSON(), second.CanonicalJSON())
+	}
+	aliases := first.CapabilityAliases()
+	if first.CapabilityAliasCount() != 2 || len(aliases) != 2 || aliases[0].ID() != "orders.start/v1" || aliases[1].ID() != "orders.submit/v1" {
+		t.Fatalf("Capability Aliases = %#v", aliases)
+	}
+	for _, alias := range aliases {
+		if alias.Target() != "order.create/v1" || alias.TargetContractDigest() == "" {
+			t.Fatalf("Alias target = %#v", alias)
+		}
+	}
+	generatedOnly := aliases[0].Sources()
+	if len(generatedOnly) != 1 || generatedOnly[0].Kind() != generation.AliasSourceGenerationExtension || generatedOnly[0].ProjectModule() != "example.com/smtp" || generatedOnly[0].PluginID() != "example.authn" || generatedOnly[0].ContributionID() != "authn.order-start" || generatedOnly[0].Namespace() != "authn" || generatedOnly[0].SourceCapability() != "order.create/v1" || generatedOnly[0].ActivationCapability() != "authn.session.verify/v1" || generatedOnly[0].Source().Module() != "corp.example/smtp" || generatedOnly[0].Source().Path() != "authn/plugin.yaml" || generatedOnly[0].Source().Kind() != "generation-alias-contribution" {
+		t.Fatalf("generated-only Alias source = %#v", generatedOnly)
+	}
+	compatible := aliases[1].Sources()
+	if len(compatible) != 3 || compatible[0].Kind() != generation.AliasSourceApplication || compatible[0].ProjectModule() != "example.com/app" || compatible[0].Source().Module() != "example.com/app" || compatible[0].Source().Line() != 7 || compatible[1].Kind() != generation.AliasSourceApplication || compatible[1].ProjectModule() != "example.com/shared" || compatible[1].Source().Module() != "example.com/shared" || compatible[1].Source().Line() != 11 || compatible[2].Kind() != generation.AliasSourceGenerationExtension || compatible[2].PluginID() != "example.authn" || compatible[2].ContributionID() != "authn.order-submit" {
+		t.Fatalf("compatible Alias sources = %#v", compatible)
+	}
+	var document struct {
+		CapabilityAliases []struct {
+			ID      string `json:"id"`
+			Target  string `json:"target"`
+			Sources []struct {
+				Kind                 string `json:"kind"`
+				ContributionID       string `json:"contribution_id"`
+				ActivationCapability string `json:"activation_capability"`
+			} `json:"sources"`
+		} `json:"capability_aliases"`
+		Counts struct {
+			CapabilityAliases int `json:"capability_aliases"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal(first.CanonicalJSON(), &document); err != nil || document.Counts.CapabilityAliases != 2 || len(document.CapabilityAliases) != 2 || document.CapabilityAliases[0].ID != "orders.start/v1" || document.CapabilityAliases[0].Target != "order.create/v1" || len(document.CapabilityAliases[0].Sources) != 1 || document.CapabilityAliases[0].Sources[0].ContributionID != "authn.order-start" || document.CapabilityAliases[0].Sources[0].ActivationCapability != "authn.session.verify/v1" || len(document.CapabilityAliases[1].Sources) != 3 || document.CapabilityAliases[1].Sources[0].Kind != "application" || document.CapabilityAliases[1].Sources[2].ContributionID != "authn.order-submit" || document.CapabilityAliases[1].Sources[2].ActivationCapability != "authn.session.verify/v1" {
+		t.Fatalf("canonical Alias evidence = %#v, %v", document, err)
+	}
+	for _, forbidden := range []string{"same root Alias through another diagnostic label", "inherited compatible Alias", "business diagnostic", "authn diagnostic"} {
+		if bytes.Contains(first.CanonicalJSON(), []byte(forbidden)) {
+			t.Fatalf("Alias evidence contains diagnostic text %q: %s", forbidden, first.CanonicalJSON())
+		}
+	}
+	aliases[0] = resolutionevidence.CapabilityAlias{}
+	compatible[0] = resolutionevidence.CapabilityAliasSource{}
+	if first.CapabilityAliases()[0].ID() != "orders.start/v1" || first.CapabilityAliases()[1].Sources()[0].ProjectModule() != "example.com/app" {
+		t.Fatal("CapabilityAliases exposed mutable evidence storage")
+	}
+}
+
+func TestBuildRejectsInconsistentCapabilityAliasProvenance(t *testing.T) {
+	t.Parallel()
+
+	t.Run("absent final resolution", func(t *testing.T) {
+		context := selectedContext(t, false, "a", true)
+		input := resolutionEvidenceInput(t, context, participatingModules(false), participatingPluginCandidates(false))
+		input.AliasResolution = aliasresolution.Result{}
+		evidence, err := resolutionevidence.Build(input)
+		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "final Alias resolution is absent or has an invalid digest") || evidence.Valid() {
+			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+	})
+
+	t.Run("selected model disagreement", func(t *testing.T) {
+		context := selectedContext(t, false, "a", false)
+		input := resolutionEvidenceInput(t, context, participatingModules(false), participatingPluginCandidates(false))
+		input.AliasResolution = resolveApplicationAliases(t, selectedContext(t, false, "a", true))
+		evidence, err := resolutionevidence.Build(input)
+		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "final Alias mail.send/v1 differs from the selected model") || evidence.Valid() {
+			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+	})
+
+	t.Run("selected model Alias absent from final resolution", func(t *testing.T) {
+		context := selectedContext(t, false, "a", true)
+		input := resolutionEvidenceInput(t, context, participatingModules(false), participatingPluginCandidates(false))
+		input.AliasResolution = resolveApplicationAliases(t, multiProviderContext(t, false))
+		evidence, err := resolutionevidence.Build(input)
+		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "selected-model Alias mail.send/v1 is absent from the final Alias resolution") || evidence.Valid() {
+			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+	})
+
+	t.Run("missing typed application source", func(t *testing.T) {
+		context := selectedContext(t, false, "a", true)
+		capabilities := make(map[string]generation.CapabilityView)
+		for _, capability := range context.Capabilities() {
+			capabilities[capability.ID().String()] = capability
+		}
+		requirements := make([]providerresolution.Requirement, 0, len(context.Requirements()))
+		for _, id := range context.Requirements() {
+			requirements = append(requirements, providerresolution.Requirement{Contract: capabilities[id.String()].ContractJSON(), Source: providerresolution.RequirementSource{Kind: providerresolution.RequirementDeclaration, Reference: "declaration", ModulePath: "example.com/app", Path: "plystra.yaml", Line: 1, Column: 1}})
+		}
+		providerResult, err := providerresolution.Resolve(providerresolution.Input{Requirements: requirements, Candidates: []providerresolution.Candidate{{PluginID: "example.smtp", Contract: capabilities["email.send/v1"].ContractJSON(), Source: "smtp"}}})
+		if err != nil {
+			t.Fatalf("providerresolution.Resolve: %v", err)
+		}
+		evidence, err := resolutionevidence.Build(resolutionevidence.Input{Context: context, ProviderResolution: providerResult, AliasResolution: resolveApplicationAliases(t, context), Modules: participatingModules(false), PluginCandidates: participatingPluginCandidates(false)})
+		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "final Alias mail.send/v1 has no typed application declaration source") || evidence.Valid() {
+			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+	})
+
+	t.Run("generated contribution without selected activation", func(t *testing.T) {
+		context, _ := aliasEvidenceContext(t, false)
+		input := resolutionEvidenceInput(t, context, participatingModules(false), []resolutionevidence.PluginCandidateInput{{ID: "example.authn", ModulePath: "example.com/smtp", Path: "authn"}, {ID: "example.business", ModulePath: "example.com/app", Path: "business"}})
+		input.AliasResolution = resolveAliasContributions(t, context, "example.authn", []generation.CapabilityAliasContribution{{ID: "authn.order-start", Namespace: "authn", Source: parseGenerationCapability(t, "order.create/v1"), Alias: parseGenerationCapability(t, "orders.start/v1"), Target: parseGenerationCapability(t, "order.create/v1")}, {ID: "authn.order-submit", Namespace: "authn", Source: parseGenerationCapability(t, "order.create/v1"), Alias: parseGenerationCapability(t, "orders.submit/v1"), Target: parseGenerationCapability(t, "order.create/v1")}})
+		evidence, err := resolutionevidence.Build(input)
+		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "contribution \"authn.order-start\" has no matching selected activation") || evidence.Valid() {
+			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+	})
+
+	t.Run("orphan application declaration", func(t *testing.T) {
+		context := multiProviderContext(t, false)
+		capabilities := make(map[string]generation.CapabilityView)
+		for _, capability := range context.Capabilities() {
+			capabilities[capability.ID().String()] = capability
+		}
+		requirements := []providerresolution.Requirement{
+			{Contract: capabilities["audit.write/v1"].ContractJSON(), Source: providerresolution.RequirementSource{Kind: providerresolution.RequirementDeclaration, Reference: "audit", ModulePath: "example.com/app", Path: "plystra.yaml", Line: 1, Column: 1}},
+			{Contract: capabilities["email.send/v1"].ContractJSON(), Source: providerresolution.RequirementSource{Kind: providerresolution.RequirementDeclaration, Reference: "email", ModulePath: "example.com/app", Path: "plystra.yaml", Line: 1, Column: 1}},
+			{Contract: capabilities["email.send/v1"].ContractJSON(), Source: providerresolution.RequirementSource{Kind: providerresolution.RequirementAliasTarget, Reference: "orphan", ModulePath: "example.com/app", Path: "plystra.yaml", Line: 9, Column: 3, Alias: "mail.orphan/v1"}},
+		}
+		providerResult, err := providerresolution.Resolve(providerresolution.Input{Requirements: requirements, Candidates: []providerresolution.Candidate{{PluginID: "example.smtp", Contract: capabilities["audit.write/v1"].ContractJSON(), Source: "audit"}, {PluginID: "example.smtp", Contract: capabilities["email.send/v1"].ContractJSON(), Source: "email"}}})
+		if err != nil {
+			t.Fatalf("providerresolution.Resolve: %v", err)
+		}
+		evidence, err := resolutionevidence.Build(resolutionevidence.Input{Context: context, ProviderResolution: providerResult, AliasResolution: resolveApplicationAliases(t, context), Modules: participatingModules(false), PluginCandidates: participatingPluginCandidates(false)})
+		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "application Alias mail.orphan/v1 source does not contribute to the final Alias map") || evidence.Valid() {
+			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+	})
+}
+
 func TestBuildRejectsRequirementResolutionInconsistentWithSelectedContext(t *testing.T) {
 	t.Parallel()
 
@@ -899,6 +1130,7 @@ func TestBuildRejectsRequirementResolutionInconsistentWithSelectedContext(t *tes
 		return resolutionevidence.Build(resolutionevidence.Input{
 			Context:            context,
 			ProviderResolution: result,
+			AliasResolution:    resolveApplicationAliases(t, context),
 			Modules:            participatingModules(false),
 			PluginCandidates:   participatingPluginCandidates(false),
 		})
@@ -1030,6 +1262,28 @@ func resolutionEvidenceInput(t testing.TB, context generation.Context, modules [
 				Column:     1,
 			},
 		})
+		for _, alias := range context.CapabilityAliases() {
+			if alias.Target() != id {
+				continue
+			}
+			for _, source := range alias.Sources() {
+				if source.Kind() != generation.AliasSourceApplication {
+					continue
+				}
+				requirements = append(requirements, providerresolution.Requirement{
+					Contract: capability.ContractJSON(),
+					Source: providerresolution.RequirementSource{
+						Kind:       providerresolution.RequirementAliasTarget,
+						Reference:  `plystra.yaml capabilities.aliases["` + alias.ID().String() + `"] target`,
+						ModulePath: "example.com/app",
+						Path:       "plystra.yaml",
+						Line:       1,
+						Column:     1,
+						Alias:      alias.ID().String(),
+					},
+				})
+			}
+		}
 	}
 	providerCandidates := make([]providerresolution.Candidate, 0, len(context.Providers()))
 	for _, provider := range context.Providers() {
@@ -1047,9 +1301,103 @@ func resolutionEvidenceInput(t testing.TB, context generation.Context, modules [
 	return resolutionevidence.Input{
 		Context:            context,
 		ProviderResolution: providerResult,
+		AliasResolution:    resolveApplicationAliases(t, context),
 		Modules:            modules,
 		PluginCandidates:   candidates,
 	}
+}
+
+type aliasResolutionOutput struct {
+	pluginID string
+	output   generation.NormalizedOutput
+}
+
+func (o aliasResolutionOutput) PluginID() string                    { return o.pluginID }
+func (o aliasResolutionOutput) Output() generation.NormalizedOutput { return o.output }
+
+func resolveApplicationAliases(t testing.TB, context generation.Context) aliasresolution.Result {
+	t.Helper()
+	result, err := aliasresolution.Resolve[aliasResolutionOutput](context, nil)
+	if err != nil {
+		t.Fatalf("aliasresolution.Resolve: %v", err)
+	}
+	return result
+}
+
+func resolveAliasContributions(t testing.TB, context generation.Context, pluginID string, contributions []generation.CapabilityAliasContribution) aliasresolution.Result {
+	t.Helper()
+	normalized, err := generation.NormalizeOutput(context, generation.Output{AliasContributions: contributions})
+	if err != nil {
+		t.Fatalf("generation.NormalizeOutput: %v", err)
+	}
+	result, err := aliasresolution.Resolve(context, []aliasResolutionOutput{{pluginID: pluginID, output: normalized}})
+	if err != nil {
+		t.Fatalf("aliasresolution.Resolve: %v", err)
+	}
+	return result
+}
+
+func aliasEvidenceContext(t testing.TB, reverse bool) (generation.Context, map[string][]byte) {
+	t.Helper()
+	order := normalizeContract(t, `id: order.create/v1
+request: {}
+response: {}
+extensions:
+  authn: {authenticated: true}
+semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`)
+	authn := queryContract(t, "authn.session.verify/v1")
+	exposure := generation.Exposure{Go: true, HTTP: true, JavaScript: true}
+	plugins := []generation.PluginInput{
+		{ID: "example.business", ModulePath: "example.com/app", Provides: []string{"order.create/v1"}, BuildMetadataJSON: []byte("{}")},
+		{ID: "example.authn", ModulePath: "example.com/smtp", ModuleVersion: "v1.3.0", Provides: []string{"authn.session.verify/v1"}, BuildMetadataJSON: []byte("{}")},
+	}
+	capabilities := []generation.CapabilityInput{
+		{ContractJSON: order, Exposure: exposure},
+		{ContractJSON: authn, Exposure: generation.Exposure{Go: true}},
+	}
+	requirements := []string{"order.create/v1", "authn.session.verify/v1"}
+	providers := []generation.ProviderInput{
+		{Capability: "order.create/v1", Plugin: "example.business"},
+		{Capability: "authn.session.verify/v1", Plugin: "example.authn"},
+	}
+	if reverse {
+		slices.Reverse(plugins)
+		slices.Reverse(capabilities)
+		slices.Reverse(requirements)
+		slices.Reverse(providers)
+	}
+	context, err := generation.NewContext(generation.Input{
+		Plugins:      plugins,
+		Capabilities: capabilities,
+		Requirements: requirements,
+		Providers:    providers,
+		CapabilityAliases: []generation.CapabilityAliasInput{{
+			ID: "orders.submit/v1", Target: "order.create/v1", Exposure: exposure,
+			Sources: []generation.AliasSourceInput{{Kind: generation.AliasSourceApplication, ID: "application"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("generation.NewContext: %v", err)
+	}
+	return context, map[string][]byte{"order.create/v1": order, "authn.session.verify/v1": authn}
+}
+
+func parseGenerationCapability(t testing.TB, value string) generation.CapabilityID {
+	t.Helper()
+	id, err := generation.ParseCapabilityID(value)
+	if err != nil {
+		t.Fatalf("generation.ParseCapabilityID(%q): %v", value, err)
+	}
+	return id
 }
 
 func participatingModules(reverse bool) []resolutionevidence.ModuleInput {

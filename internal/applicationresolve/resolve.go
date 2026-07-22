@@ -288,6 +288,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	evidence, err := resolutionevidence.Build(resolutionevidence.Input{
 		Context:            resolution.Context(),
 		ProviderResolution: resolution.ActivationResolution().ProviderResolution(),
+		AliasResolution:    resolution.AliasResolution(),
 		Modules:            evidenceModules,
 		PluginCandidates:   resolutionEvidencePluginCandidates(inventory),
 	})
