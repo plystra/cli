@@ -1482,6 +1482,9 @@ plystra explain config config.acme.email.smtp.host --config deploy/customer-a.ya
 plystra explain alias mail.send/v1
 plystra explain alias mail.send/v1 --env production
 plystra explain alias mail.send/v1 --config deploy/customer-a.yaml
+plystra explain exposure email.send/v1
+plystra explain exposure mail.send/v1 --env production
+plystra explain exposure mail.send/v1 --config deploy/customer-a.yaml
 plystra generate
 plystra generate --check
 plystra generate --env production
@@ -1544,6 +1547,16 @@ that changes the result. Keep the same selector for the follow-up edit,
 generation, and validation. Use `--verbose` or `--format json` to inspect the
 target contract digest, generation contribution identity, activation Capability,
 and complete redacted resolution evidence.
+
+Use `plystra explain exposure <capability-or-alias-name>/vN` when a generated
+HTTP or JavaScript surface is unexpected or absent. A public canonical
+Capability reports every effective `http.expose` declaration; a public Alias
+reports its direct target and compatible application or generation sources. An
+internal canonical Capability points to the selected `http.expose` field. An
+internal Alias distinguishes an explicit Alias narrowing from a target that is
+not public and points to the selected Alias, activation Provider, or target
+exposure field that controls the result. Keep the same selector for the edit,
+generation, check, and startup workflows.
 
 Clean check output resembles:
 

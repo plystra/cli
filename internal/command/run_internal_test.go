@@ -250,6 +250,7 @@ func TestParseExplainArguments(t *testing.T) {
 		{arguments: []string{"explain", "plugin", "acme.email"}, subjectKind: diagnosticschema.ExplainSubjectPlugin, subject: "acme.email", format: commandFormatHuman, ok: true},
 		{arguments: []string{"explain", "config", "config.acme.email.host", "--env", "production"}, subjectKind: diagnosticschema.ExplainSubjectConfiguration, subject: "config.acme.email.host", format: commandFormatHuman, environmentName: "production", ok: true},
 		{arguments: []string{"explain", "alias", "mail.send/v1", "--config", "deploy/customer.yaml"}, subjectKind: diagnosticschema.ExplainSubjectAlias, subject: "mail.send/v1", format: commandFormatHuman, configurationPath: "deploy/customer.yaml", ok: true},
+		{arguments: []string{"explain", "exposure", "mail.send/v1", "--env", "production"}, subjectKind: diagnosticschema.ExplainSubjectExposure, subject: "mail.send/v1", format: commandFormatHuman, environmentName: "production", ok: true},
 		{arguments: nil},
 		{arguments: []string{"explain"}},
 		{arguments: []string{"explain", "capability"}},

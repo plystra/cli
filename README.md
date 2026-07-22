@@ -497,6 +497,9 @@ plystra explain config <field-path> --format json
 plystra explain alias <alias-name>/vN
 plystra explain alias <alias-name>/vN --verbose
 plystra explain alias <alias-name>/vN --format json
+plystra explain exposure <capability-or-alias-name>/vN
+plystra explain exposure <capability-or-alias-name>/vN --verbose
+plystra explain exposure <capability-or-alias-name>/vN --format json
 plystra check
 plystra fix
 plystra generate
@@ -562,6 +565,15 @@ generation-extension contribution, and one selector-matched configuration field
 or activation-Provider decision that changes the result. Unknown canonical Alias
 IDs fail without modifying the Project; concise output omits contract digests and
 complete generation evidence unless `--verbose` or `--format json` is selected.
+
+`plystra explain exposure <capability-or-alias-name>/vN` reports why one visible
+identity is public through HTTP or JavaScript, or why it remains internal. A
+canonical Capability reports every effective `http.expose` source; an Alias
+reports its direct target and every compatible application or generation source.
+An internal Alias distinguishes its own narrowing from an internal canonical
+target. The result identifies the selected `http.expose`, Alias, or
+activation-Provider decision that changes the surface without exposing contract
+digests in concise output.
 
 The current `plystra check` implementation is read-only. It verifies the
 selected dependency composition and generated fixed point, then runs

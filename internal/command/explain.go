@@ -68,6 +68,8 @@ func runExplain(arguments []string, stdout, stderr io.Writer, workingDirectory s
 		explanation, err = explainConfiguration(resolved, parsed.subject)
 	case diagnosticschema.ExplainSubjectAlias:
 		explanation, err = explainAlias(resolved, parsed.subject)
+	case diagnosticschema.ExplainSubjectExposure:
+		explanation, err = explainPublicExposure(resolved, parsed.subject)
 	default:
 		err = fmt.Errorf("explanation subject kind %q is not implemented", parsed.subjectKind)
 	}
@@ -93,7 +95,7 @@ func parseExplainArguments(arguments []string) (explainArguments, bool) {
 	}
 	var subjectKind diagnosticschema.ExplainSubjectKind
 	switch diagnosticschema.ExplainSubjectKind(arguments[1]) {
-	case diagnosticschema.ExplainSubjectCapability, diagnosticschema.ExplainSubjectPlugin, diagnosticschema.ExplainSubjectAlias:
+	case diagnosticschema.ExplainSubjectCapability, diagnosticschema.ExplainSubjectPlugin, diagnosticschema.ExplainSubjectAlias, diagnosticschema.ExplainSubjectExposure:
 		subjectKind = diagnosticschema.ExplainSubjectKind(arguments[1])
 	default:
 		if arguments[1] != "config" {
@@ -429,6 +431,191 @@ func explainAlias(resolved applicationresolve.Result, subject string) (commandEx
 		subjectLabel: "Alias",
 		decision:     fmt.Sprintf("maps directly to %s; %s", selected.Target(), aliasExposureDecision(selected)),
 	}, nil
+}
+
+func explainPublicExposure(resolved applicationresolve.Result, subject string) (commandExplanation, error) {
+	capabilityID, err := generation.ParseCapabilityID(subject)
+	if err != nil {
+		return commandExplanation{}, err
+	}
+	evidence := resolved.ResolutionEvidence()
+	selection, currentModule, err := explanationProjectContext(evidence)
+	if err != nil {
+		return commandExplanation{}, err
+	}
+	for _, exposure := range evidence.PublicExposures() {
+		if exposure.Capability() != capabilityID.String() {
+			continue
+		}
+		sources := exposure.Sources()
+		if len(sources) == 0 {
+			return commandExplanation{}, fmt.Errorf("public exposure %q omits causal source provenance", subject)
+		}
+		primarySources := make([]diagnosticjson.Source, len(sources))
+		for index, source := range sources {
+			primarySources[index] = explainSource(source.Source())
+		}
+		change, err := publicExposureChange(evidence, selection, currentModule, exposure)
+		if err != nil {
+			return commandExplanation{}, err
+		}
+		input := diagnosticschema.ExplainInput{
+			Evidence:       evidence,
+			SubjectKind:    diagnosticschema.ExplainSubjectExposure,
+			Subject:        exposure.Capability(),
+			Outcome:        "public",
+			Reason:         publicExposureReason(exposure),
+			PrimarySources: primarySources,
+			Change:         change,
+		}
+		result, err := diagnosticschema.NewExplain(input)
+		if err != nil {
+			return commandExplanation{}, err
+		}
+		return commandExplanation{
+			result:       result,
+			subjectLabel: "Exposure",
+			decision:     publicExposureDecision(exposure),
+		}, nil
+	}
+
+	context := resolved.Resolution().Context()
+	if _, visible := context.Capability(capabilityID); visible {
+		input := diagnosticschema.ExplainInput{
+			Evidence:    evidence,
+			SubjectKind: diagnosticschema.ExplainSubjectExposure,
+			Subject:     capabilityID.String(),
+			Outcome:     "internal",
+			Reason:      "not-publicly-exposed",
+			PrimarySources: []diagnosticjson.Source{{
+				Module: currentModule,
+				Path:   selection.SelectedPath(),
+				Kind:   "configuration-selection",
+			}},
+			Change: publicExposureConfigurationChange(selection, currentModule, capabilityID.String()),
+		}
+		result, err := diagnosticschema.NewExplain(input)
+		if err != nil {
+			return commandExplanation{}, err
+		}
+		return commandExplanation{
+			result:       result,
+			subjectLabel: "Exposure",
+			decision:     "internal canonical Capability; no HTTP or JavaScript exposure",
+		}, nil
+	}
+
+	alias, visible := selectedCapabilityAlias(evidence, capabilityID.String())
+	if !visible {
+		return commandExplanation{}, fmt.Errorf("capability or Alias %q is not visible in the selected application model", subject)
+	}
+	sources := alias.Sources()
+	if len(sources) == 0 {
+		return commandExplanation{}, fmt.Errorf("alias exposure %q omits causal source provenance", subject)
+	}
+	primarySources := make([]diagnosticjson.Source, len(sources))
+	for index, source := range sources {
+		primarySources[index] = explainSource(source.Source())
+	}
+	reason := "target-not-publicly-exposed"
+	decision := fmt.Sprintf("internal Alias to %s; target has no HTTP or JavaScript exposure", alias.Target())
+	change := publicExposureConfigurationChange(selection, currentModule, alias.Target())
+	if publicGeneratedExposure(alias.TargetExposure()) && !publicGeneratedExposure(alias.Exposure()) {
+		reason = "alias-exposure-narrowing"
+		decision = fmt.Sprintf("internal Alias to %s; Alias narrows exposure to %s", alias.Target(), explainExposure(alias.Exposure()))
+		change, err = aliasChange(evidence, selection, currentModule, alias)
+		if err != nil {
+			return commandExplanation{}, err
+		}
+	}
+	result, err := diagnosticschema.NewExplain(diagnosticschema.ExplainInput{
+		Evidence:       evidence,
+		SubjectKind:    diagnosticschema.ExplainSubjectExposure,
+		Subject:        alias.ID(),
+		Outcome:        "internal",
+		Reason:         reason,
+		PrimarySources: primarySources,
+		Change:         change,
+	})
+	if err != nil {
+		return commandExplanation{}, err
+	}
+	return commandExplanation{result: result, subjectLabel: "Exposure", decision: decision}, nil
+}
+
+func publicExposureReason(exposure resolutionevidence.PublicExposure) string {
+	if exposure.Kind() == resolutionevidence.PublicExposureCanonical {
+		return "http-expose"
+	}
+	applicationSources := 0
+	generationSources := 0
+	for _, source := range exposure.Sources() {
+		switch source.Kind() {
+		case resolutionevidence.PublicExposureSourceAliasApplication:
+			applicationSources++
+		case resolutionevidence.PublicExposureSourceAliasGeneration:
+			generationSources++
+		}
+	}
+	if len(exposure.Sources()) == 1 && applicationSources == 1 {
+		return "application-alias"
+	}
+	if len(exposure.Sources()) == 1 && generationSources == 1 {
+		return "generation-extension-alias"
+	}
+	return "compatible-alias-sources"
+}
+
+func publicExposureChange(evidence resolutionevidence.Evidence, selection resolutionevidence.ConfigurationSelection, currentModule string, exposure resolutionevidence.PublicExposure) (diagnosticschema.ExplainChange, error) {
+	if exposure.Kind() == resolutionevidence.PublicExposureCanonical {
+		return publicExposureConfigurationChange(selection, currentModule, exposure.Capability()), nil
+	}
+	alias, found := selectedCapabilityAlias(evidence, exposure.Capability())
+	if !found {
+		return diagnosticschema.ExplainChange{}, fmt.Errorf("public Alias exposure %q omits its final Alias decision", exposure.Capability())
+	}
+	return aliasChange(evidence, selection, currentModule, alias)
+}
+
+func publicExposureConfigurationChange(selection resolutionevidence.ConfigurationSelection, currentModule, capability string) diagnosticschema.ExplainChange {
+	return diagnosticschema.ExplainChange{
+		Kind:   diagnosticschema.ExplainChangeFile,
+		Module: currentModule,
+		Path:   selection.SelectedPath(),
+		Field:  fmt.Sprintf("http.expose[%q]", capability),
+	}
+}
+
+func publicExposureDecision(exposure resolutionevidence.PublicExposure) string {
+	surfaces := publicExposureSurfaces(exposure.Exposure())
+	if exposure.Kind() == resolutionevidence.PublicExposureAlias {
+		return fmt.Sprintf("public Alias to %s through %s", exposure.CanonicalTarget(), surfaces)
+	}
+	return "public canonical Capability through " + surfaces
+}
+
+func publicExposureSurfaces(exposure generation.Exposure) string {
+	values := make([]string, 0, 2)
+	if exposure.HTTP {
+		values = append(values, "HTTP")
+	}
+	if exposure.JavaScript {
+		values = append(values, "JavaScript")
+	}
+	return strings.Join(values, " and ")
+}
+
+func publicGeneratedExposure(exposure generation.Exposure) bool {
+	return exposure.HTTP || exposure.JavaScript
+}
+
+func selectedCapabilityAlias(evidence resolutionevidence.Evidence, aliasID string) (resolutionevidence.CapabilityAlias, bool) {
+	for _, alias := range evidence.CapabilityAliases() {
+		if alias.ID() == aliasID {
+			return alias, true
+		}
+	}
+	return resolutionevidence.CapabilityAlias{}, false
 }
 
 func aliasReason(sources []resolutionevidence.CapabilityAliasSource) string {

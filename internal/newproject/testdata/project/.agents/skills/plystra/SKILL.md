@@ -1163,6 +1163,10 @@ Run the narrowest relevant test first, then the complete module checks:
     plystra explain alias mail.send/v1 --env production
     plystra explain alias mail.send/v1 --config deploy/customer-a.yaml
     plystra explain alias mail.send/v1 --format json
+    plystra explain exposure email.send/v1
+    plystra explain exposure mail.send/v1 --env production
+    plystra explain exposure mail.send/v1 --config deploy/customer-a.yaml
+    plystra explain exposure mail.send/v1 --format json
     plystra generate --check
     plystra generate --check --env production
     plystra generate --check --config deploy/customer-a.yaml
@@ -1256,6 +1260,12 @@ build and distribution boundary for every Plystra module.
   configuration field or activation-Provider decision that changes the result.
   Add --verbose or --format json for the target contract digest and complete
   redacted generation evidence.
+- Unexpected or missing HTTP or JavaScript exposure: run plystra explain
+  exposure <capability-or-alias-name>/vN with the same selector. A canonical
+  Capability reports every effective http.expose source or the selected field
+  that would expose it. An Alias reports its direct target and distinguishes an
+  Alias narrowing from an internal target, then identifies the selected Alias,
+  activation-Provider, or target-exposure decision that changes the surface.
 - Alias error: point directly to a resolved canonical target with the same
   version and exposure no broader than the target.
 - Unclaimed extension namespace: add a compatible selected Plugin whose
