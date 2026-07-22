@@ -99,6 +99,45 @@ const (
 	ProviderSelectionIntrinsic ProviderSelectionReason = "intrinsic-kernel"
 )
 
+// CapabilityAliasValidationOutcome identifies the final successful Alias-map
+// validation represented by one evidence record.
+type CapabilityAliasValidationOutcome string
+
+const (
+	// CapabilityAliasValidationValid records that the final Alias passed target,
+	// contract, exposure, source, and collision validation.
+	CapabilityAliasValidationValid CapabilityAliasValidationOutcome = "valid"
+)
+
+// PublicExposureKind distinguishes a canonical Capability from an
+// application-local Alias on an externally reachable generated surface.
+type PublicExposureKind string
+
+const (
+	// PublicExposureCanonical identifies one canonical Capability selected by
+	// the effective http.expose configuration.
+	PublicExposureCanonical PublicExposureKind = "canonical"
+	// PublicExposureAlias identifies one final Alias whose normalized exposure
+	// retains at least one externally reachable surface.
+	PublicExposureAlias PublicExposureKind = "alias"
+)
+
+// PublicExposureSourceKind identifies why one canonical Capability or Alias
+// appears on an externally reachable generated surface.
+type PublicExposureSourceKind string
+
+const (
+	// PublicExposureSourceHTTPExpose identifies an effective http.expose
+	// declaration in a current or dependency Project.
+	PublicExposureSourceHTTPExpose PublicExposureSourceKind = "http-expose"
+	// PublicExposureSourceAliasApplication identifies an application Alias
+	// declaration whose final exposure retains a public surface.
+	PublicExposureSourceAliasApplication PublicExposureSourceKind = "alias-application"
+	// PublicExposureSourceAliasGeneration identifies a selected generation-
+	// extension Alias contribution whose final exposure retains a public surface.
+	PublicExposureSourceAliasGeneration PublicExposureSourceKind = "alias-generation-extension"
+)
+
 // Input is the construction-only selected-model, participating-Project, and
 // discovered-Plugin input for one evidence document.
 type Input struct {
@@ -157,6 +196,7 @@ type Evidence struct {
 	generationActivations    []GenerationActivation
 	generatedRequirements    []GeneratedRequirement
 	capabilityAliases        []CapabilityAlias
+	publicExposures          []PublicExposure
 	canonicalJSON            []byte
 	digest                   string
 	prepared                 bool
@@ -174,6 +214,7 @@ type canonicalCounts struct {
 	GenerationActivations int `json:"generation_activations"`
 	GeneratedRequirements int `json:"generated_requirements"`
 	CapabilityAliases     int `json:"capability_aliases"`
+	PublicExposures       int `json:"public_exposures"`
 }
 
 // Module is one immutable participating Plystra Project identity.
@@ -553,6 +594,9 @@ type CapabilityAlias struct {
 	id                   string
 	target               string
 	targetContractDigest string
+	targetExposure       generation.Exposure
+	exposure             generation.Exposure
+	validationOutcome    CapabilityAliasValidationOutcome
 	sources              []CapabilityAliasSource
 }
 
@@ -564,6 +608,28 @@ func (a CapabilityAlias) Target() string { return a.target }
 
 // TargetContractDigest returns the normalized exact target contract identity.
 func (a CapabilityAlias) TargetContractDigest() string { return a.targetContractDigest }
+
+// TargetExposure returns every normalized generated surface available to the
+// direct canonical target.
+func (a CapabilityAlias) TargetExposure() generation.Exposure { return a.targetExposure }
+
+// Exposure returns the final normalized inherited or narrowed Alias surfaces.
+func (a CapabilityAlias) Exposure() generation.Exposure { return a.exposure }
+
+// ExposureNarrowing returns the final Alias exposure when it differs from the
+// target. A false result means the Alias inherits the target exactly.
+func (a CapabilityAlias) ExposureNarrowing() (generation.Exposure, bool) {
+	if a.exposure == a.targetExposure {
+		return generation.Exposure{}, false
+	}
+	return a.exposure, true
+}
+
+// ValidationOutcome returns the closed successful final Alias validation
+// outcome represented by this evidence document.
+func (a CapabilityAlias) ValidationOutcome() CapabilityAliasValidationOutcome {
+	return a.validationOutcome
+}
 
 // Sources returns every compatible application or selected-extension source in
 // canonical order.
@@ -611,6 +677,84 @@ func (s CapabilityAliasSource) ActivationCapability() string { return s.activati
 
 // Source returns the replacement-safe module-relative declaration location.
 func (s CapabilityAliasSource) Source() Source { return s.source }
+
+// PublicExposure is one canonical Capability or final Alias available through
+// at least one externally reachable generated surface. Exposure retains the
+// complete normalized Go, HTTP, and JavaScript set so internal Go availability
+// is not confused with remote exposure.
+type PublicExposure struct {
+	capability      string
+	kind            PublicExposureKind
+	canonicalTarget string
+	contractDigest  string
+	exposure        generation.Exposure
+	sources         []PublicExposureSource
+}
+
+// Capability returns the exact canonical Capability or application Alias ID.
+func (e PublicExposure) Capability() string { return e.capability }
+
+// Kind returns canonical or alias.
+func (e PublicExposure) Kind() PublicExposureKind { return e.kind }
+
+// CanonicalTarget returns the exact canonical invocation target. It equals the
+// Capability for canonical exposure and names the direct target for an Alias.
+func (e PublicExposure) CanonicalTarget() string { return e.canonicalTarget }
+
+// ContractDigest returns the normalized exact canonical target contract
+// identity.
+func (e PublicExposure) ContractDigest() string { return e.contractDigest }
+
+// Exposure returns the complete normalized generated surface set. At least one
+// of HTTP or JavaScript is true for every PublicExposure record.
+func (e PublicExposure) Exposure() generation.Exposure { return e.exposure }
+
+// Sources returns every deterministic configuration or Alias-contribution
+// source in canonical order.
+func (e PublicExposure) Sources() []PublicExposureSource {
+	return append([]PublicExposureSource(nil), e.sources...)
+}
+
+// PublicExposureSource is one stable configuration declaration or Alias source
+// contributing to a final public exposure record.
+type PublicExposureSource struct {
+	kind                 PublicExposureSourceKind
+	projectModule        string
+	pluginID             string
+	contributionID       string
+	namespace            string
+	sourceCapability     string
+	activationCapability string
+	source               Source
+}
+
+// Kind returns http-expose, alias-application, or
+// alias-generation-extension.
+func (s PublicExposureSource) Kind() PublicExposureSourceKind { return s.kind }
+
+// ProjectModule returns the participating Project that owns this source.
+func (s PublicExposureSource) ProjectModule() string { return s.projectModule }
+
+// PluginID returns the selected extension Plugin for a generated Alias source.
+func (s PublicExposureSource) PluginID() string { return s.pluginID }
+
+// ContributionID returns the stable generation contribution identity when
+// applicable.
+func (s PublicExposureSource) ContributionID() string { return s.contributionID }
+
+// Namespace returns the interpreted extension namespace when applicable.
+func (s PublicExposureSource) Namespace() string { return s.namespace }
+
+// SourceCapability returns the metadata-bearing required Capability for a
+// generated Alias source.
+func (s PublicExposureSource) SourceCapability() string { return s.sourceCapability }
+
+// ActivationCapability returns the selected extension-owning Capability for a
+// generated Alias source.
+func (s PublicExposureSource) ActivationCapability() string { return s.activationCapability }
+
+// Source returns the replacement-safe module-relative declaration location.
+func (s PublicExposureSource) Source() Source { return s.source }
 
 // Source is one stable module-relative declaration reference.
 type Source struct {
@@ -758,6 +902,9 @@ type canonicalCapabilityAlias struct {
 	ID                   string                           `json:"id"`
 	Target               string                           `json:"target"`
 	TargetContractDigest string                           `json:"target_contract_digest"`
+	TargetExposure       generation.Exposure              `json:"target_exposure"`
+	Exposure             generation.Exposure              `json:"exposure"`
+	ValidationOutcome    CapabilityAliasValidationOutcome `json:"validation_outcome"`
 	Sources              []canonicalCapabilityAliasSource `json:"sources"`
 }
 
@@ -770,6 +917,26 @@ type canonicalCapabilityAliasSource struct {
 	SourceCapability     string                     `json:"source_capability,omitempty"`
 	ActivationCapability string                     `json:"activation_capability,omitempty"`
 	Source               canonicalSource            `json:"source"`
+}
+
+type canonicalPublicExposure struct {
+	Capability      string                          `json:"capability"`
+	Kind            PublicExposureKind              `json:"kind"`
+	CanonicalTarget string                          `json:"canonical_target"`
+	ContractDigest  string                          `json:"contract_digest"`
+	Exposure        generation.Exposure             `json:"exposure"`
+	Sources         []canonicalPublicExposureSource `json:"sources"`
+}
+
+type canonicalPublicExposureSource struct {
+	Kind                 PublicExposureSourceKind `json:"kind"`
+	ProjectModule        string                   `json:"project_module"`
+	PluginID             string                   `json:"plugin_id,omitempty"`
+	ContributionID       string                   `json:"contribution_id,omitempty"`
+	Namespace            string                   `json:"namespace,omitempty"`
+	SourceCapability     string                   `json:"source_capability,omitempty"`
+	ActivationCapability string                   `json:"activation_capability,omitempty"`
+	Source               canonicalSource          `json:"source"`
 }
 
 type canonicalReplacement struct {
@@ -800,6 +967,7 @@ type canonicalEvidence struct {
 	GenerationActivations []canonicalGenerationActivation  `json:"generation_activations"`
 	GeneratedRequirements []canonicalGeneratedRequirement  `json:"generated_requirements"`
 	CapabilityAliases     []canonicalCapabilityAlias       `json:"capability_aliases"`
+	PublicExposures       []canonicalPublicExposure        `json:"public_exposures"`
 	Counts                canonicalCounts                  `json:"counts"`
 }
 
@@ -845,6 +1013,10 @@ func Build(source Input) (Evidence, error) {
 	if err != nil {
 		return Evidence{}, fmt.Errorf("%w: Capability Alias provenance: %v", ErrBuild, err)
 	}
+	publicExposures, err := publicExposuresFromModel(context, requirements, capabilityAliases)
+	if err != nil {
+		return Evidence{}, fmt.Errorf("%w: public exposure: %v", ErrBuild, err)
+	}
 	input := Evidence{
 		generationAPI:            context.APIVersion(),
 		selectedModelDigest:      context.Digest(),
@@ -861,6 +1033,7 @@ func Build(source Input) (Evidence, error) {
 		generationActivations:    generationActivations,
 		generatedRequirements:    generatedRequirements,
 		capabilityAliases:        capabilityAliases,
+		publicExposures:          publicExposures,
 		prepared:                 true,
 	}
 	if err := validate(input); err != nil {
@@ -1001,6 +1174,16 @@ func (e Evidence) CapabilityAliases() []CapabilityAlias {
 	return values
 }
 
+// PublicExposures returns every canonical Capability and final Alias available
+// through HTTP or JavaScript in exact Capability-ID order.
+func (e Evidence) PublicExposures() []PublicExposure {
+	values := append([]PublicExposure(nil), e.publicExposures...)
+	for index := range values {
+		values[index].sources = append([]PublicExposureSource(nil), values[index].sources...)
+	}
+	return values
+}
+
 // ProviderCandidateCount returns the complete visible Provider declaration
 // count, including Capabilities outside the final requirement closure.
 func (e Evidence) ProviderCandidateCount() int { return len(e.providerCandidates) }
@@ -1036,6 +1219,10 @@ func (e Evidence) GeneratedRequirementCount() int { return len(e.generatedRequir
 
 // CapabilityAliasCount returns the number of final application Aliases.
 func (e Evidence) CapabilityAliasCount() int { return len(e.capabilityAliases) }
+
+// PublicExposureCount returns the number of canonical Capability and Alias
+// records with at least one externally reachable surface.
+func (e Evidence) PublicExposureCount() int { return len(e.publicExposures) }
 
 // CanonicalJSON returns a defensive copy of the deterministic bounded evidence.
 func (e Evidence) CanonicalJSON() []byte { return append([]byte(nil), e.canonicalJSON...) }
@@ -1118,6 +1305,9 @@ func validate(e Evidence) error {
 		return errors.New("generated requirement records do not match final requirement provenance")
 	}
 	if err := validateCapabilityAliases(e.capabilityAliases, e.modules, e.requirements, e.pluginCandidates, e.generationActivations); err != nil {
+		return err
+	}
+	if err := validatePublicExposures(e.publicExposures, e.requirements, e.capabilityAliases); err != nil {
 		return err
 	}
 	return nil
@@ -1343,7 +1533,41 @@ func encode(e Evidence) ([]byte, error) {
 			ID:                   value.id,
 			Target:               value.target,
 			TargetContractDigest: value.targetContractDigest,
+			TargetExposure:       value.targetExposure,
+			Exposure:             value.exposure,
+			ValidationOutcome:    value.validationOutcome,
 			Sources:              sources,
+		}
+	}
+	publicExposures := make([]canonicalPublicExposure, len(e.publicExposures))
+	for index, value := range e.publicExposures {
+		sources := make([]canonicalPublicExposureSource, len(value.sources))
+		for sourceIndex, exposureSource := range value.sources {
+			source := exposureSource.source
+			sources[sourceIndex] = canonicalPublicExposureSource{
+				Kind:                 exposureSource.kind,
+				ProjectModule:        exposureSource.projectModule,
+				PluginID:             exposureSource.pluginID,
+				ContributionID:       exposureSource.contributionID,
+				Namespace:            exposureSource.namespace,
+				SourceCapability:     exposureSource.sourceCapability,
+				ActivationCapability: exposureSource.activationCapability,
+				Source: canonicalSource{
+					Module: source.module,
+					Path:   source.path,
+					Kind:   source.kind,
+					Line:   source.line,
+					Column: source.column,
+				},
+			}
+		}
+		publicExposures[index] = canonicalPublicExposure{
+			Capability:      value.capability,
+			Kind:            value.kind,
+			CanonicalTarget: value.canonicalTarget,
+			ContractDigest:  value.contractDigest,
+			Exposure:        value.exposure,
+			Sources:         sources,
 		}
 	}
 	return json.Marshal(canonicalEvidence{
@@ -1360,6 +1584,7 @@ func encode(e Evidence) ([]byte, error) {
 		GenerationActivations: generationActivations,
 		GeneratedRequirements: generatedRequirements,
 		CapabilityAliases:     capabilityAliases,
+		PublicExposures:       publicExposures,
 		Counts: canonicalCounts{
 			ParticipatingModules:  len(e.modules),
 			DiscoveredPlugins:     len(e.pluginCandidates),
@@ -1372,6 +1597,7 @@ func encode(e Evidence) ([]byte, error) {
 			GenerationActivations: len(e.generationActivations),
 			GeneratedRequirements: len(e.generatedRequirements),
 			CapabilityAliases:     len(e.capabilityAliases),
+			PublicExposures:       len(e.publicExposures),
 		},
 	})
 }
@@ -2706,6 +2932,9 @@ func capabilityAliasesFromResolution(
 			id:                   id,
 			target:               target,
 			targetContractDigest: resolved.TargetContractDigest(),
+			targetExposure:       targetView.Exposure(),
+			exposure:             resolved.Exposure(),
+			validationOutcome:    CapabilityAliasValidationValid,
 			sources:              append([]CapabilityAliasSource(nil), unique...),
 		})
 	}
@@ -2801,6 +3030,12 @@ func validateCapabilityAliases(
 		if !exists || !validDigest(alias.targetContractDigest) || alias.targetContractDigest != requirement.contractDigest {
 			return fmt.Errorf("aliases[%d] target %s contract identity is inconsistent", index, alias.target)
 		}
+		if !exposureSubset(alias.exposure, alias.targetExposure) {
+			return fmt.Errorf("aliases[%d] exposure broadens target %s", index, alias.target)
+		}
+		if alias.validationOutcome != CapabilityAliasValidationValid {
+			return fmt.Errorf("aliases[%d].validation_outcome %q is invalid", index, alias.validationOutcome)
+		}
 		if len(alias.sources) == 0 {
 			return fmt.Errorf("aliases[%d].sources must not be empty", index)
 		}
@@ -2882,6 +3117,237 @@ func capabilityAliasSourceKey(value CapabilityAliasSource) string {
 
 func capabilityAliasApplicationSourceKey(aliasID, target string, source RequirementSource) string {
 	return strings.Join([]string{aliasID, target, requirementSourceKey(source)}, "\x00")
+}
+
+func publicExposuresFromModel(
+	context generation.Context,
+	requirements []CapabilityRequirement,
+	aliases []CapabilityAlias,
+) ([]PublicExposure, error) {
+	requirementByCapability := make(map[string]CapabilityRequirement, len(requirements))
+	for _, requirement := range requirements {
+		requirementByCapability[requirement.capability] = requirement
+	}
+
+	exposures := make([]PublicExposure, 0)
+	for _, capability := range context.Capabilities() {
+		id := capability.ID().String()
+		requirement, required := requirementByCapability[id]
+		sources := publicExposureSourcesFromRequirement(requirement)
+		if !publicSurface(capability.Exposure()) {
+			if len(sources) != 0 {
+				return nil, fmt.Errorf("canonical Capability %s has http.expose provenance but no public surface", id)
+			}
+			continue
+		}
+		if !required {
+			return nil, fmt.Errorf("public canonical Capability %s is not required", id)
+		}
+		if len(sources) == 0 {
+			return nil, fmt.Errorf("public canonical Capability %s has no typed http.expose source", id)
+		}
+		exposures = append(exposures, PublicExposure{
+			capability:      id,
+			kind:            PublicExposureCanonical,
+			canonicalTarget: id,
+			contractDigest:  capability.ContractDigest(),
+			exposure:        capability.Exposure(),
+			sources:         sources,
+		})
+	}
+	for _, alias := range aliases {
+		if !publicSurface(alias.exposure) {
+			continue
+		}
+		exposures = append(exposures, PublicExposure{
+			capability:      alias.id,
+			kind:            PublicExposureAlias,
+			canonicalTarget: alias.target,
+			contractDigest:  alias.targetContractDigest,
+			exposure:        alias.exposure,
+			sources:         publicExposureSourcesFromAlias(alias),
+		})
+	}
+	sort.Slice(exposures, func(left, right int) bool {
+		return exposures[left].capability < exposures[right].capability
+	})
+	if err := validatePublicExposures(exposures, requirements, aliases); err != nil {
+		return nil, err
+	}
+	return exposures, nil
+}
+
+func publicExposureSourcesFromRequirement(requirement CapabilityRequirement) []PublicExposureSource {
+	sources := make([]PublicExposureSource, 0)
+	for _, source := range requirement.sources {
+		if source.kind != providerresolution.RequirementExposure {
+			continue
+		}
+		sources = append(sources, PublicExposureSource{
+			kind:          PublicExposureSourceHTTPExpose,
+			projectModule: source.projectModule,
+			source:        source.source,
+		})
+	}
+	sort.Slice(sources, func(left, right int) bool {
+		return publicExposureSourceKey(sources[left]) < publicExposureSourceKey(sources[right])
+	})
+	return sources
+}
+
+func publicExposureSourcesFromAlias(alias CapabilityAlias) []PublicExposureSource {
+	sources := make([]PublicExposureSource, 0, len(alias.sources))
+	for _, source := range alias.sources {
+		kind := PublicExposureSourceAliasApplication
+		if source.kind == generation.AliasSourceGenerationExtension {
+			kind = PublicExposureSourceAliasGeneration
+		}
+		sources = append(sources, PublicExposureSource{
+			kind:                 kind,
+			projectModule:        source.projectModule,
+			pluginID:             source.pluginID,
+			contributionID:       source.contributionID,
+			namespace:            source.namespace,
+			sourceCapability:     source.sourceCapability,
+			activationCapability: source.activationCapability,
+			source:               source.source,
+		})
+	}
+	sort.Slice(sources, func(left, right int) bool {
+		return publicExposureSourceKey(sources[left]) < publicExposureSourceKey(sources[right])
+	})
+	return sources
+}
+
+func validatePublicExposures(
+	exposures []PublicExposure,
+	requirements []CapabilityRequirement,
+	aliases []CapabilityAlias,
+) error {
+	requirementByCapability := make(map[string]CapabilityRequirement, len(requirements))
+	for _, requirement := range requirements {
+		requirementByCapability[requirement.capability] = requirement
+	}
+	aliasByID := make(map[string]CapabilityAlias, len(aliases))
+	for _, alias := range aliases {
+		aliasByID[alias.id] = alias
+	}
+	seenCanonical := make(map[string]struct{})
+	seenAliases := make(map[string]struct{})
+	exposureByCapability := make(map[string]PublicExposure, len(exposures))
+	for index, exposure := range exposures {
+		if _, err := capabilityid.Parse(exposure.capability); err != nil {
+			return fmt.Errorf("public_exposures[%d].capability %q is invalid", index, exposure.capability)
+		}
+		if index > 0 && exposures[index-1].capability >= exposure.capability {
+			return fmt.Errorf("public exposures are not in unique canonical order at %q", exposure.capability)
+		}
+		if _, err := capabilityid.Parse(exposure.canonicalTarget); err != nil {
+			return fmt.Errorf("public_exposures[%d].canonical_target %q is invalid", index, exposure.canonicalTarget)
+		}
+		if !validDigest(exposure.contractDigest) {
+			return fmt.Errorf("public_exposures[%d].contract_digest is invalid", index)
+		}
+		if !publicSurface(exposure.exposure) {
+			return fmt.Errorf("public_exposures[%d] has no HTTP or JavaScript surface", index)
+		}
+		if len(exposure.sources) == 0 {
+			return fmt.Errorf("public_exposures[%d].sources must not be empty", index)
+		}
+		for sourceIndex := 1; sourceIndex < len(exposure.sources); sourceIndex++ {
+			if publicExposureSourceKey(exposure.sources[sourceIndex-1]) >= publicExposureSourceKey(exposure.sources[sourceIndex]) {
+				return fmt.Errorf("public_exposures[%d].sources are not in unique canonical order", index)
+			}
+		}
+
+		var expected []PublicExposureSource
+		switch exposure.kind {
+		case PublicExposureCanonical:
+			requirement, exists := requirementByCapability[exposure.capability]
+			if !exists || exposure.canonicalTarget != exposure.capability || exposure.contractDigest != requirement.contractDigest {
+				return fmt.Errorf("public_exposures[%d] canonical identity is inconsistent", index)
+			}
+			expected = publicExposureSourcesFromRequirement(requirement)
+			if len(expected) == 0 {
+				return fmt.Errorf("public_exposures[%d] has no matching http.expose declaration", index)
+			}
+			seenCanonical[exposure.capability] = struct{}{}
+		case PublicExposureAlias:
+			alias, exists := aliasByID[exposure.capability]
+			if !exists || alias.validationOutcome != CapabilityAliasValidationValid || exposure.canonicalTarget != alias.target || exposure.contractDigest != alias.targetContractDigest || exposure.exposure != alias.exposure {
+				return fmt.Errorf("public_exposures[%d] Alias identity is inconsistent", index)
+			}
+			expected = publicExposureSourcesFromAlias(alias)
+			seenAliases[exposure.capability] = struct{}{}
+		default:
+			return fmt.Errorf("public_exposures[%d].kind %q is invalid", index, exposure.kind)
+		}
+		if !equalPublicExposureSources(exposure.sources, expected) {
+			return fmt.Errorf("public_exposures[%d].sources do not match final provenance", index)
+		}
+		exposureByCapability[exposure.capability] = exposure
+	}
+	for _, requirement := range requirements {
+		if len(publicExposureSourcesFromRequirement(requirement)) == 0 {
+			continue
+		}
+		if _, exists := seenCanonical[requirement.capability]; !exists {
+			return fmt.Errorf("canonical Capability %s http.expose provenance is absent from public exposure evidence", requirement.capability)
+		}
+	}
+	for _, alias := range aliases {
+		_, exists := seenAliases[alias.id]
+		if publicSurface(alias.exposure) && !exists {
+			return fmt.Errorf("public Alias %s is absent from public exposure evidence", alias.id)
+		}
+		if !publicSurface(alias.exposure) && exists {
+			return fmt.Errorf("non-public Alias %s appears in public exposure evidence", alias.id)
+		}
+		if publicSurface(alias.exposure) {
+			target, targetExists := exposureByCapability[alias.target]
+			if !targetExists || target.kind != PublicExposureCanonical || target.exposure != alias.targetExposure || target.contractDigest != alias.targetContractDigest {
+				return fmt.Errorf("public Alias %s target exposure evidence is inconsistent", alias.id)
+			}
+		}
+	}
+	return nil
+}
+
+func equalPublicExposureSources(left, right []PublicExposureSource) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func publicSurface(exposure generation.Exposure) bool {
+	return exposure.HTTP || exposure.JavaScript
+}
+
+func exposureSubset(alias, target generation.Exposure) bool {
+	return (!alias.Go || target.Go) && (!alias.HTTP || target.HTTP) && (!alias.JavaScript || target.JavaScript)
+}
+
+func publicExposureSourceKey(value PublicExposureSource) string {
+	return strings.Join([]string{
+		string(value.kind),
+		value.projectModule,
+		value.pluginID,
+		value.contributionID,
+		value.namespace,
+		value.sourceCapability,
+		value.activationCapability,
+		value.source.module,
+		value.source.path,
+		value.source.kind,
+		fmt.Sprintf("%010d", value.source.line),
+		fmt.Sprintf("%010d", value.source.column),
+	}, "\x00")
 }
 
 func providerCapabilityPath(pluginPath string, identifier capabilityid.Identifier) string {

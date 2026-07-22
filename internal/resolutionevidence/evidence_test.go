@@ -37,8 +37,8 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	if first.SelectedModelDigest() != firstContext.Digest() || first.BuildModelDigest() != firstContext.BuildModelDigest() {
 		t.Fatalf("evidence model digests = selected %q build %q", first.SelectedModelDigest(), first.BuildModelDigest())
 	}
-	if first.SelectedPluginCount() != 1 || first.CanonicalCapabilityCount() != 2 || first.RequirementCount() != 2 || first.ProviderCandidateCount() != 1 || first.RejectedProviderCount() != 0 || first.SelectedProviderCount() != 2 || first.GenerationActivationCount() != 0 || first.GeneratedRequirementCount() != 0 || first.CapabilityAliasCount() != 1 {
-		t.Fatalf("evidence counts = plugins %d capabilities %d requirements %d candidates %d rejected %d providers %d activations %d generated %d aliases %d", first.SelectedPluginCount(), first.CanonicalCapabilityCount(), first.RequirementCount(), first.ProviderCandidateCount(), first.RejectedProviderCount(), first.SelectedProviderCount(), first.GenerationActivationCount(), first.GeneratedRequirementCount(), first.CapabilityAliasCount())
+	if first.SelectedPluginCount() != 1 || first.CanonicalCapabilityCount() != 2 || first.RequirementCount() != 2 || first.ProviderCandidateCount() != 1 || first.RejectedProviderCount() != 0 || first.SelectedProviderCount() != 2 || first.GenerationActivationCount() != 0 || first.GeneratedRequirementCount() != 0 || first.CapabilityAliasCount() != 1 || first.PublicExposureCount() != 2 {
+		t.Fatalf("evidence counts = plugins %d capabilities %d requirements %d candidates %d rejected %d providers %d activations %d generated %d aliases %d public %d", first.SelectedPluginCount(), first.CanonicalCapabilityCount(), first.RequirementCount(), first.ProviderCandidateCount(), first.RejectedProviderCount(), first.SelectedProviderCount(), first.GenerationActivationCount(), first.GeneratedRequirementCount(), first.CapabilityAliasCount(), first.PublicExposureCount())
 	}
 	if first.ParticipatingModuleCount() != 3 {
 		t.Fatalf("participating module count = %d", first.ParticipatingModuleCount())
@@ -84,12 +84,27 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 		t.Fatalf("intrinsic selected Provider = %#v", selectedProviders[1])
 	}
 	aliases := first.CapabilityAliases()
-	if len(aliases) != 1 || aliases[0].ID() != "mail.send/v1" || aliases[0].Target() != "email.send/v1" || aliases[0].TargetContractDigest() != providerCandidates[0].ContractDigest() {
+	if len(aliases) != 1 || aliases[0].ID() != "mail.send/v1" || aliases[0].Target() != "email.send/v1" || aliases[0].TargetContractDigest() != providerCandidates[0].ContractDigest() || aliases[0].TargetExposure() != (generation.Exposure{Go: true, HTTP: true, JavaScript: true}) || aliases[0].Exposure() != (generation.Exposure{HTTP: true, JavaScript: true}) || aliases[0].ValidationOutcome() != resolutionevidence.CapabilityAliasValidationValid {
 		t.Fatalf("Capability Aliases = %#v", aliases)
+	}
+	if narrowing, exists := aliases[0].ExposureNarrowing(); !exists || narrowing != (generation.Exposure{HTTP: true, JavaScript: true}) {
+		t.Fatalf("Capability Alias exposure narrowing = %#v, %t", narrowing, exists)
 	}
 	aliasSources := aliases[0].Sources()
 	if len(aliasSources) != 1 || aliasSources[0].Kind() != generation.AliasSourceApplication || aliasSources[0].ProjectModule() != "example.com/app" || aliasSources[0].PluginID() != "" || aliasSources[0].ActivationCapability() != "" || aliasSources[0].Source().Module() != "example.com/app" || aliasSources[0].Source().Path() != "plystra.yaml" || aliasSources[0].Source().Kind() != "alias-target" {
 		t.Fatalf("application Alias sources = %#v", aliasSources)
+	}
+	publicExposures := first.PublicExposures()
+	if len(publicExposures) != 2 || publicExposures[0].Capability() != "email.send/v1" || publicExposures[0].Kind() != resolutionevidence.PublicExposureCanonical || publicExposures[0].CanonicalTarget() != "email.send/v1" || publicExposures[0].ContractDigest() != providerCandidates[0].ContractDigest() || publicExposures[0].Exposure() != (generation.Exposure{Go: true, HTTP: true, JavaScript: true}) || publicExposures[1].Capability() != "mail.send/v1" || publicExposures[1].Kind() != resolutionevidence.PublicExposureAlias || publicExposures[1].CanonicalTarget() != "email.send/v1" || publicExposures[1].ContractDigest() != providerCandidates[0].ContractDigest() || publicExposures[1].Exposure() != (generation.Exposure{HTTP: true, JavaScript: true}) {
+		t.Fatalf("public exposures = %#v", publicExposures)
+	}
+	canonicalExposureSources := publicExposures[0].Sources()
+	if len(canonicalExposureSources) != 1 || canonicalExposureSources[0].Kind() != resolutionevidence.PublicExposureSourceHTTPExpose || canonicalExposureSources[0].ProjectModule() != "example.com/app" || canonicalExposureSources[0].PluginID() != "" || canonicalExposureSources[0].Source().Module() != "example.com/app" || canonicalExposureSources[0].Source().Path() != "plystra.yaml" || canonicalExposureSources[0].Source().Kind() != "exposure" {
+		t.Fatalf("canonical public exposure sources = %#v", canonicalExposureSources)
+	}
+	aliasExposureSources := publicExposures[1].Sources()
+	if len(aliasExposureSources) != 1 || aliasExposureSources[0].Kind() != resolutionevidence.PublicExposureSourceAliasApplication || aliasExposureSources[0].ProjectModule() != "example.com/app" || aliasExposureSources[0].Source() != aliasSources[0].Source() {
+		t.Fatalf("Alias public exposure sources = %#v", aliasExposureSources)
 	}
 	if !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() {
 		t.Fatalf("input permutation changed evidence:\nfirst:  %s %s\nsecond: %s %s", first.CanonicalJSON(), first.Digest(), second.CanonicalJSON(), second.Digest())
@@ -172,9 +187,12 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	}
 	var aliasDocument struct {
 		CapabilityAliases []struct {
-			ID                   string `json:"id"`
-			Target               string `json:"target"`
-			TargetContractDigest string `json:"target_contract_digest"`
+			ID                   string              `json:"id"`
+			Target               string              `json:"target"`
+			TargetContractDigest string              `json:"target_contract_digest"`
+			TargetExposure       generation.Exposure `json:"target_exposure"`
+			Exposure             generation.Exposure `json:"exposure"`
+			ValidationOutcome    string              `json:"validation_outcome"`
 			Sources              []struct {
 				Kind          string `json:"kind"`
 				ProjectModule string `json:"project_module"`
@@ -188,8 +206,27 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 			CapabilityAliases int `json:"capability_aliases"`
 		} `json:"counts"`
 	}
-	if err := json.Unmarshal(first.CanonicalJSON(), &aliasDocument); err != nil || aliasDocument.Counts.CapabilityAliases != 1 || len(aliasDocument.CapabilityAliases) != 1 || aliasDocument.CapabilityAliases[0].ID != "mail.send/v1" || aliasDocument.CapabilityAliases[0].Target != "email.send/v1" || aliasDocument.CapabilityAliases[0].TargetContractDigest == "" || len(aliasDocument.CapabilityAliases[0].Sources) != 1 || aliasDocument.CapabilityAliases[0].Sources[0].Kind != "application" || aliasDocument.CapabilityAliases[0].Sources[0].ProjectModule != "example.com/app" || aliasDocument.CapabilityAliases[0].Sources[0].Source.Path != "plystra.yaml" || aliasDocument.CapabilityAliases[0].Sources[0].Source.Kind != "alias-target" {
+	if err := json.Unmarshal(first.CanonicalJSON(), &aliasDocument); err != nil || aliasDocument.Counts.CapabilityAliases != 1 || len(aliasDocument.CapabilityAliases) != 1 || aliasDocument.CapabilityAliases[0].ID != "mail.send/v1" || aliasDocument.CapabilityAliases[0].Target != "email.send/v1" || aliasDocument.CapabilityAliases[0].TargetContractDigest == "" || aliasDocument.CapabilityAliases[0].TargetExposure != (generation.Exposure{Go: true, HTTP: true, JavaScript: true}) || aliasDocument.CapabilityAliases[0].Exposure != (generation.Exposure{HTTP: true, JavaScript: true}) || aliasDocument.CapabilityAliases[0].ValidationOutcome != "valid" || len(aliasDocument.CapabilityAliases[0].Sources) != 1 || aliasDocument.CapabilityAliases[0].Sources[0].Kind != "application" || aliasDocument.CapabilityAliases[0].Sources[0].ProjectModule != "example.com/app" || aliasDocument.CapabilityAliases[0].Sources[0].Source.Path != "plystra.yaml" || aliasDocument.CapabilityAliases[0].Sources[0].Source.Kind != "alias-target" {
 		t.Fatalf("canonical Alias evidence = %#v, %v", aliasDocument, err)
+	}
+	var exposureDocument struct {
+		PublicExposures []struct {
+			Capability      string              `json:"capability"`
+			Kind            string              `json:"kind"`
+			CanonicalTarget string              `json:"canonical_target"`
+			ContractDigest  string              `json:"contract_digest"`
+			Exposure        generation.Exposure `json:"exposure"`
+			Sources         []struct {
+				Kind          string `json:"kind"`
+				ProjectModule string `json:"project_module"`
+			} `json:"sources"`
+		} `json:"public_exposures"`
+		Counts struct {
+			PublicExposures int `json:"public_exposures"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal(first.CanonicalJSON(), &exposureDocument); err != nil || exposureDocument.Counts.PublicExposures != 2 || len(exposureDocument.PublicExposures) != 2 || exposureDocument.PublicExposures[0].Capability != "email.send/v1" || exposureDocument.PublicExposures[0].Kind != "canonical" || exposureDocument.PublicExposures[0].CanonicalTarget != "email.send/v1" || exposureDocument.PublicExposures[0].ContractDigest == "" || exposureDocument.PublicExposures[0].Exposure != (generation.Exposure{Go: true, HTTP: true, JavaScript: true}) || len(exposureDocument.PublicExposures[0].Sources) != 1 || exposureDocument.PublicExposures[0].Sources[0].Kind != "http-expose" || exposureDocument.PublicExposures[1].Capability != "mail.send/v1" || exposureDocument.PublicExposures[1].Kind != "alias" || exposureDocument.PublicExposures[1].CanonicalTarget != "email.send/v1" || len(exposureDocument.PublicExposures[1].Sources) != 1 || exposureDocument.PublicExposures[1].Sources[0].Kind != "alias-application" {
+		t.Fatalf("canonical public exposure evidence = %#v, %v", exposureDocument, err)
 	}
 	for _, forbidden := range []string{"idempotency_key", "safe_name", "Provider-independent audit"} {
 		if bytes.Contains(first.CanonicalJSON(), []byte(forbidden)) {
@@ -207,7 +244,9 @@ func TestBuildConstructsDeterministicNormalizedModelEvidence(t *testing.T) {
 	selectedProviders[0] = resolutionevidence.SelectedProvider{}
 	aliases[0] = resolutionevidence.CapabilityAlias{}
 	aliasSources[0] = resolutionevidence.CapabilityAliasSource{}
-	if first.CanonicalJSON()[0] != '{' || first.Modules()[0].Path() != "example.com/app" || first.PluginCandidates()[0].ID() != "example.shared" || first.SelectedPlugins()[0].ID() != "example.smtp" || first.SelectedPlugins()[0].Reasons()[0].Capability() != "email.send/v1" || first.ProviderCandidates()[0].PluginID() != "example.smtp" || first.SelectedProviders()[0].PluginID() != "example.smtp" || first.CapabilityAliases()[0].ID() != "mail.send/v1" || first.CapabilityAliases()[0].Sources()[0].ProjectModule() != "example.com/app" || !first.Valid() {
+	publicExposures[0] = resolutionevidence.PublicExposure{}
+	canonicalExposureSources[0] = resolutionevidence.PublicExposureSource{}
+	if first.CanonicalJSON()[0] != '{' || first.Modules()[0].Path() != "example.com/app" || first.PluginCandidates()[0].ID() != "example.shared" || first.SelectedPlugins()[0].ID() != "example.smtp" || first.SelectedPlugins()[0].Reasons()[0].Capability() != "email.send/v1" || first.ProviderCandidates()[0].PluginID() != "example.smtp" || first.SelectedProviders()[0].PluginID() != "example.smtp" || first.CapabilityAliases()[0].ID() != "mail.send/v1" || first.CapabilityAliases()[0].Sources()[0].ProjectModule() != "example.com/app" || first.PublicExposures()[0].Capability() != "email.send/v1" || first.PublicExposures()[0].Sources()[0].Kind() != resolutionevidence.PublicExposureSourceHTTPExpose || !first.Valid() {
 		t.Fatal("CanonicalJSON exposed mutable evidence storage")
 	}
 }
@@ -915,6 +954,7 @@ func TestBuildRecordsCapabilityAliasSourcesAndFinalTargets(t *testing.T) {
 		duplicateApplicationSource.Reference = "same root Alias through another diagnostic label"
 		requirements := []providerresolution.Requirement{
 			{Contract: contracts["order.create/v1"], Source: providerresolution.RequirementSource{Kind: providerresolution.RequirementDeclaration, Reference: "root order requirement", ModulePath: "example.com/app", Path: "plystra.yaml", Line: 2, Column: 3}},
+			{Contract: contracts["order.create/v1"], Source: providerresolution.RequirementSource{Kind: providerresolution.RequirementExposure, Reference: `plystra.yaml http.expose["order.create/v1"]`, ModulePath: "example.com/app", Path: "plystra.yaml", Line: 3, Column: 3}},
 			{Contract: contracts["order.create/v1"], Source: applicationSource},
 			{Contract: contracts["order.create/v1"], Source: duplicateApplicationSource},
 			{Contract: contracts["order.create/v1"], Source: providerresolution.RequirementSource{Kind: providerresolution.RequirementAliasTarget, Reference: "inherited compatible Alias", ModulePath: "example.com/shared", Path: "plystra.yaml", Line: 11, Column: 7, Alias: "orders.submit/v1"}},
@@ -967,8 +1007,11 @@ func TestBuildRecordsCapabilityAliasSourcesAndFinalTargets(t *testing.T) {
 		t.Fatalf("Capability Aliases = %#v", aliases)
 	}
 	for _, alias := range aliases {
-		if alias.Target() != "order.create/v1" || alias.TargetContractDigest() == "" {
+		if alias.Target() != "order.create/v1" || alias.TargetContractDigest() == "" || alias.TargetExposure() != (generation.Exposure{Go: true, HTTP: true, JavaScript: true}) || alias.Exposure() != (generation.Exposure{Go: true, HTTP: true, JavaScript: true}) || alias.ValidationOutcome() != resolutionevidence.CapabilityAliasValidationValid {
 			t.Fatalf("Alias target = %#v", alias)
+		}
+		if narrowing, exists := alias.ExposureNarrowing(); exists || narrowing != (generation.Exposure{}) {
+			t.Fatalf("Alias %s exposure narrowing = %#v, %t", alias.ID(), narrowing, exists)
 		}
 	}
 	generatedOnly := aliases[0].Sources()
@@ -978,6 +1021,18 @@ func TestBuildRecordsCapabilityAliasSourcesAndFinalTargets(t *testing.T) {
 	compatible := aliases[1].Sources()
 	if len(compatible) != 3 || compatible[0].Kind() != generation.AliasSourceApplication || compatible[0].ProjectModule() != "example.com/app" || compatible[0].Source().Module() != "example.com/app" || compatible[0].Source().Line() != 7 || compatible[1].Kind() != generation.AliasSourceApplication || compatible[1].ProjectModule() != "example.com/shared" || compatible[1].Source().Module() != "example.com/shared" || compatible[1].Source().Line() != 11 || compatible[2].Kind() != generation.AliasSourceGenerationExtension || compatible[2].PluginID() != "example.authn" || compatible[2].ContributionID() != "authn.order-submit" {
 		t.Fatalf("compatible Alias sources = %#v", compatible)
+	}
+	publicExposures := first.PublicExposures()
+	if first.PublicExposureCount() != 3 || len(publicExposures) != 3 || publicExposures[0].Capability() != "order.create/v1" || publicExposures[0].Kind() != resolutionevidence.PublicExposureCanonical || publicExposures[1].Capability() != "orders.start/v1" || publicExposures[1].Kind() != resolutionevidence.PublicExposureAlias || publicExposures[2].Capability() != "orders.submit/v1" || publicExposures[2].Kind() != resolutionevidence.PublicExposureAlias {
+		t.Fatalf("public exposures = %#v", publicExposures)
+	}
+	generatedExposureSources := publicExposures[1].Sources()
+	if len(generatedExposureSources) != 1 || generatedExposureSources[0].Kind() != resolutionevidence.PublicExposureSourceAliasGeneration || generatedExposureSources[0].ProjectModule() != "example.com/smtp" || generatedExposureSources[0].PluginID() != "example.authn" || generatedExposureSources[0].ContributionID() != "authn.order-start" || generatedExposureSources[0].Namespace() != "authn" || generatedExposureSources[0].SourceCapability() != "order.create/v1" || generatedExposureSources[0].ActivationCapability() != "authn.session.verify/v1" || generatedExposureSources[0].Source().Kind() != "generation-alias-contribution" {
+		t.Fatalf("generated Alias public exposure sources = %#v", generatedExposureSources)
+	}
+	compatibleExposureSources := publicExposures[2].Sources()
+	if len(compatibleExposureSources) != 3 || compatibleExposureSources[0].Kind() != resolutionevidence.PublicExposureSourceAliasApplication || compatibleExposureSources[1].Kind() != resolutionevidence.PublicExposureSourceAliasApplication || compatibleExposureSources[2].Kind() != resolutionevidence.PublicExposureSourceAliasGeneration || compatibleExposureSources[2].ContributionID() != "authn.order-submit" {
+		t.Fatalf("compatible Alias public exposure sources = %#v", compatibleExposureSources)
 	}
 	var document struct {
 		CapabilityAliases []struct {
@@ -1003,7 +1058,9 @@ func TestBuildRecordsCapabilityAliasSourcesAndFinalTargets(t *testing.T) {
 	}
 	aliases[0] = resolutionevidence.CapabilityAlias{}
 	compatible[0] = resolutionevidence.CapabilityAliasSource{}
-	if first.CapabilityAliases()[0].ID() != "orders.start/v1" || first.CapabilityAliases()[1].Sources()[0].ProjectModule() != "example.com/app" {
+	publicExposures[0] = resolutionevidence.PublicExposure{}
+	generatedExposureSources[0] = resolutionevidence.PublicExposureSource{}
+	if first.CapabilityAliases()[0].ID() != "orders.start/v1" || first.CapabilityAliases()[1].Sources()[0].ProjectModule() != "example.com/app" || first.PublicExposures()[1].Capability() != "orders.start/v1" || first.PublicExposures()[1].Sources()[0].ContributionID() != "authn.order-start" {
 		t.Fatal("CapabilityAliases exposed mutable evidence storage")
 	}
 }
@@ -1088,6 +1145,57 @@ func TestBuildRejectsInconsistentCapabilityAliasProvenance(t *testing.T) {
 		}
 		evidence, err := resolutionevidence.Build(resolutionevidence.Input{Context: context, ProviderResolution: providerResult, AliasResolution: resolveApplicationAliases(t, context), Modules: participatingModules(false), PluginCandidates: participatingPluginCandidates(false)})
 		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "application Alias mail.orphan/v1 source does not contribute to the final Alias map") || evidence.Valid() {
+			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+	})
+}
+
+func TestBuildRejectsInconsistentPublicExposureProvenance(t *testing.T) {
+	t.Parallel()
+
+	build := func(t *testing.T, context generation.Context, emailSource providerresolution.RequirementSource) (resolutionevidence.Evidence, error) {
+		t.Helper()
+		capabilities := make(map[string]generation.CapabilityView)
+		for _, capability := range context.Capabilities() {
+			capabilities[capability.ID().String()] = capability
+		}
+		requirements := []providerresolution.Requirement{
+			{Contract: capabilities["email.send/v1"].ContractJSON(), Source: emailSource},
+			{Contract: capabilities["email.send/v1"].ContractJSON(), Source: providerresolution.RequirementSource{Kind: providerresolution.RequirementAliasTarget, Reference: "Alias target", ModulePath: "example.com/app", Path: "plystra.yaml", Line: 2, Column: 3, Alias: "mail.send/v1"}},
+			{Contract: capabilities["kernel.health/v1"].ContractJSON(), Source: providerresolution.RequirementSource{Kind: providerresolution.RequirementDeclaration, Reference: "health requirement", ModulePath: "example.com/app", Path: "plystra.yaml", Line: 3, Column: 3}},
+		}
+		providerResult, err := providerresolution.Resolve(providerresolution.Input{
+			Requirements: requirements,
+			Candidates: []providerresolution.Candidate{{
+				PluginID: "example.smtp",
+				Contract: capabilities["email.send/v1"].ContractJSON(),
+				Source:   "smtp diagnostic",
+			}},
+		})
+		if err != nil {
+			t.Fatalf("providerresolution.Resolve: %v", err)
+		}
+		return resolutionevidence.Build(resolutionevidence.Input{
+			Context:            context,
+			ProviderResolution: providerResult,
+			AliasResolution:    resolveApplicationAliases(t, context),
+			Modules:            participatingModules(false),
+			PluginCandidates:   participatingPluginCandidates(false),
+		})
+	}
+
+	t.Run("public surface without http.expose source", func(t *testing.T) {
+		context := selectedContext(t, false, "a", true)
+		evidence, err := build(t, context, providerresolution.RequirementSource{Kind: providerresolution.RequirementDeclaration, Reference: "ordinary requirement", ModulePath: "example.com/app", Path: "plystra.yaml", Line: 1, Column: 1})
+		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "public canonical Capability email.send/v1 has no typed http.expose source") || evidence.Valid() {
+			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+	})
+
+	t.Run("http.expose source without public surface", func(t *testing.T) {
+		context := selectedContext(t, false, "a", false)
+		evidence, err := build(t, context, providerresolution.RequirementSource{Kind: providerresolution.RequirementExposure, Reference: "stale exposure", ModulePath: "example.com/app", Path: "plystra.yaml", Line: 1, Column: 1})
+		if !errors.Is(err, resolutionevidence.ErrBuild) || !strings.Contains(err.Error(), "canonical Capability email.send/v1 has http.expose provenance but no public surface") || evidence.Valid() {
 			t.Fatalf("Build = %#v, %v", evidence, err)
 		}
 	})
@@ -1262,6 +1370,19 @@ func resolutionEvidenceInput(t testing.TB, context generation.Context, modules [
 				Column:     1,
 			},
 		})
+		if exposure := capability.Exposure(); exposure.HTTP || exposure.JavaScript {
+			requirements = append(requirements, providerresolution.Requirement{
+				Contract: capability.ContractJSON(),
+				Source: providerresolution.RequirementSource{
+					Kind:       providerresolution.RequirementExposure,
+					Reference:  `plystra.yaml http.expose["` + id.String() + `"]`,
+					ModulePath: "example.com/app",
+					Path:       "plystra.yaml",
+					Line:       1,
+					Column:     1,
+				},
+			})
+		}
 		for _, alias := range context.CapabilityAliases() {
 			if alias.Target() != id {
 				continue

@@ -89,8 +89,8 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if !evidence.Valid() || evidence.SelectedModelDigest() != resolved.Context().Digest() || evidence.BuildModelDigest() != resolved.Context().BuildModelDigest() {
 		t.Fatalf("ResolutionEvidence = valid %t selected %q build %q", evidence.Valid(), evidence.SelectedModelDigest(), evidence.BuildModelDigest())
 	}
-	if evidence.DiscoveredPluginCount() != 0 || evidence.SelectedPluginCount() != 0 || evidence.CanonicalCapabilityCount() != 2 || evidence.RequirementCount() != 0 || evidence.ProviderCandidateCount() != 0 || evidence.RejectedProviderCount() != 0 || evidence.SelectedProviderCount() != 0 || evidence.CapabilityAliasCount() != 0 {
-		t.Fatalf("ResolutionEvidence counts = discovered %d selected %d capabilities %d requirements %d candidates %d rejected %d providers %d aliases %d", evidence.DiscoveredPluginCount(), evidence.SelectedPluginCount(), evidence.CanonicalCapabilityCount(), evidence.RequirementCount(), evidence.ProviderCandidateCount(), evidence.RejectedProviderCount(), evidence.SelectedProviderCount(), evidence.CapabilityAliasCount())
+	if evidence.DiscoveredPluginCount() != 0 || evidence.SelectedPluginCount() != 0 || evidence.CanonicalCapabilityCount() != 2 || evidence.RequirementCount() != 0 || evidence.ProviderCandidateCount() != 0 || evidence.RejectedProviderCount() != 0 || evidence.SelectedProviderCount() != 0 || evidence.CapabilityAliasCount() != 0 || evidence.PublicExposureCount() != 0 {
+		t.Fatalf("ResolutionEvidence counts = discovered %d selected %d capabilities %d requirements %d candidates %d rejected %d providers %d aliases %d public %d", evidence.DiscoveredPluginCount(), evidence.SelectedPluginCount(), evidence.CanonicalCapabilityCount(), evidence.RequirementCount(), evidence.ProviderCandidateCount(), evidence.RejectedProviderCount(), evidence.SelectedProviderCount(), evidence.CapabilityAliasCount(), evidence.PublicExposureCount())
 	}
 	modules := evidence.Modules()
 	if evidence.ParticipatingModuleCount() != 1 || len(modules) != 1 || modules[0].Path() != "example.com/empty" || modules[0].Role() != resolutionevidence.ModuleRoleCurrent || modules[0].Source().Module() != "example.com/empty" || modules[0].Source().Path() != "plystra.yaml" {
@@ -433,6 +433,14 @@ func TestResolveDerivesExposureFromEverySelectedConfigurationMode(t *testing.T) 
 			if !exists || info.Exposure() != (generation.Exposure{Go: true}) {
 				t.Fatalf("unselected info exposure = %#v, %t", info.Exposure(), exists)
 			}
+			publicExposures := result.ResolutionEvidence().PublicExposures()
+			if result.ResolutionEvidence().PublicExposureCount() != 1 || len(publicExposures) != 1 || publicExposures[0].Capability() != "kernel.health/v1" || publicExposures[0].Kind() != resolutionevidence.PublicExposureCanonical || publicExposures[0].CanonicalTarget() != "kernel.health/v1" || publicExposures[0].ContractDigest() != health.ContractDigest() || publicExposures[0].Exposure() != health.Exposure() {
+				t.Fatalf("public exposure evidence = %#v", publicExposures)
+			}
+			exposureSources := publicExposures[0].Sources()
+			if len(exposureSources) != 1 || exposureSources[0].Kind() != resolutionevidence.PublicExposureSourceHTTPExpose || exposureSources[0].ProjectModule() != result.Module().ModulePath() || exposureSources[0].Source().Module() != result.Module().ModulePath() || exposureSources[0].Source().Path() != test.selectedPath || exposureSources[0].Source().Kind() != "exposure" {
+				t.Fatalf("public exposure source = %#v", exposureSources)
+			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("Resolve mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
 			}
@@ -620,6 +628,18 @@ replace example.com/providers => ../providers
 	}
 	if source := evidenceSources[2]; source.ProjectModule() != "example.com/app" || source.Source().Module() != "example.com/app" || source.Source().Path() != "local/plugin.yaml" || source.PluginID() != "example.local" {
 		t.Fatalf("local Plugin requirement source = %#v", source)
+	}
+	publicExposures := first.ResolutionEvidence().PublicExposures()
+	if first.ResolutionEvidence().PublicExposureCount() != 2 || len(publicExposures) != 2 || publicExposures[0].Capability() != "email.send/v1" || publicExposures[0].Kind() != resolutionevidence.PublicExposureCanonical || publicExposures[0].CanonicalTarget() != "email.send/v1" || publicExposures[0].ContractDigest() != target.ContractDigest() || publicExposures[0].Exposure() != target.Exposure() || publicExposures[1].Capability() != "mail.send/v1" || publicExposures[1].Kind() != resolutionevidence.PublicExposureAlias || publicExposures[1].CanonicalTarget() != "email.send/v1" || publicExposures[1].ContractDigest() != target.ContractDigest() || publicExposures[1].Exposure() != target.Exposure() {
+		t.Fatalf("dependency-composed public exposures = %#v", publicExposures)
+	}
+	canonicalExposureSources := publicExposures[0].Sources()
+	if len(canonicalExposureSources) != 1 || canonicalExposureSources[0].Kind() != resolutionevidence.PublicExposureSourceHTTPExpose || canonicalExposureSources[0].ProjectModule() != "example.com/providers" || canonicalExposureSources[0].Source().Module() != "example.com/providers" || canonicalExposureSources[0].Source().Path() != "plystra.yaml" || canonicalExposureSources[0].Source().Kind() != "exposure" {
+		t.Fatalf("dependency canonical public exposure sources = %#v", canonicalExposureSources)
+	}
+	aliasExposureSources := publicExposures[1].Sources()
+	if len(aliasExposureSources) != 1 || aliasExposureSources[0].Kind() != resolutionevidence.PublicExposureSourceAliasApplication || aliasExposureSources[0].ProjectModule() != "example.com/providers" || aliasExposureSources[0].Source().Module() != "example.com/providers" || aliasExposureSources[0].Source().Path() != "plystra.yaml" || aliasExposureSources[0].Source().Kind() != "alias-target" {
+		t.Fatalf("dependency Alias public exposure sources = %#v", aliasExposureSources)
 	}
 	for _, forbidden := range []string{"private.smtp.example.com", "PLYSTRA_APPLICATION_RESOLVE_PRIVATE_SECRET", "resolved-private-secret", appRoot, providerRoot} {
 		if bytes.Contains(resolved.Context().CanonicalJSON(), []byte(forbidden)) || bytes.Contains(first.ResolutionEvidence().CanonicalJSON(), []byte(forbidden)) {
@@ -1171,12 +1191,18 @@ extensions:
 		t.Fatalf("generated requirement evidence = %#v", generatedEvidence)
 	}
 	aliasEvidence := result.ResolutionEvidence().CapabilityAliases()
-	if len(aliasEvidence) != 1 || aliasEvidence[0].ID() != "orders.submit/v1" || aliasEvidence[0].Target() != "order.create/v1" || aliasEvidence[0].TargetContractDigest() == "" {
+	if len(aliasEvidence) != 1 || aliasEvidence[0].ID() != "orders.submit/v1" || aliasEvidence[0].Target() != "order.create/v1" || aliasEvidence[0].TargetContractDigest() == "" || aliasEvidence[0].TargetExposure() != (generation.Exposure{Go: true}) || aliasEvidence[0].Exposure() != (generation.Exposure{Go: true}) || aliasEvidence[0].ValidationOutcome() != resolutionevidence.CapabilityAliasValidationValid {
 		t.Fatalf("Capability Alias evidence = %#v", aliasEvidence)
+	}
+	if narrowing, exists := aliasEvidence[0].ExposureNarrowing(); exists || narrowing != (generation.Exposure{}) {
+		t.Fatalf("Capability Alias exposure narrowing = %#v, %t", narrowing, exists)
 	}
 	aliasSources := aliasEvidence[0].Sources()
 	if len(aliasSources) != 2 || aliasSources[0].Kind() != generation.AliasSourceApplication || aliasSources[0].ProjectModule() != "example.com/extension-app" || aliasSources[0].ActivationCapability() != "" || aliasSources[0].Source().Module() != "example.com/extension-app" || aliasSources[0].Source().Path() != "plystra.yaml" || aliasSources[0].Source().Kind() != "alias-target" || aliasSources[1].Kind() != generation.AliasSourceGenerationExtension || aliasSources[1].ProjectModule() != "example.com/extension-app" || aliasSources[1].PluginID() != "example.authn" || aliasSources[1].ContributionID() != "authn.order-shortcut" || aliasSources[1].Namespace() != "authn" || aliasSources[1].SourceCapability() != "order.create/v1" || aliasSources[1].ActivationCapability() != "authn.session.verify/v1" || aliasSources[1].Source().Module() != "example.com/extension-app" || aliasSources[1].Source().Path() != "authn/plugin.yaml" || aliasSources[1].Source().Kind() != "generation-alias-contribution" {
 		t.Fatalf("Capability Alias sources = %#v", aliasSources)
+	}
+	if publicExposures := result.ResolutionEvidence().PublicExposures(); result.ResolutionEvidence().PublicExposureCount() != 0 || len(publicExposures) != 0 {
+		t.Fatalf("Go-only Alias was recorded as public exposure: %#v", publicExposures)
 	}
 	entries, err := os.ReadDir(temporaryParent)
 	if err != nil || len(entries) != 0 {

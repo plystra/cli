@@ -38,6 +38,20 @@ func TestCapabilityAliasEvidenceRejectsInconsistentFinalProvenance(t *testing.T)
 			},
 		},
 		{
+			name: "exposure broadens target",
+			want: "exposure broadens target order.create/v1",
+			mutate: func(aliases *[]CapabilityAlias, _ *[]Module, _ *[]CapabilityRequirement, _ *[]PluginCandidate, _ *[]GenerationActivation) {
+				(*aliases)[0].targetExposure = generation.Exposure{Go: true}
+			},
+		},
+		{
+			name: "validation outcome invalid",
+			want: `validation_outcome "pending" is invalid`,
+			mutate: func(aliases *[]CapabilityAlias, _ *[]Module, _ *[]CapabilityRequirement, _ *[]PluginCandidate, _ *[]GenerationActivation) {
+				(*aliases)[0].validationOutcome = "pending"
+			},
+		},
+		{
 			name: "sources absent",
 			want: "aliases[0].sources must not be empty",
 			mutate: func(aliases *[]CapabilityAlias, _ *[]Module, requirements *[]CapabilityRequirement, _ *[]PluginCandidate, _ *[]GenerationActivation) {
@@ -186,6 +200,9 @@ func capabilityAliasEvidenceFixture() ([]CapabilityAlias, []Module, []Capability
 		id:                   "orders.submit/v1",
 		target:               "order.create/v1",
 		targetContractDigest: contractDigest,
+		targetExposure:       generation.Exposure{Go: true, HTTP: true, JavaScript: true},
+		exposure:             generation.Exposure{HTTP: true, JavaScript: true},
+		validationOutcome:    CapabilityAliasValidationValid,
 		sources: []CapabilityAliasSource{
 			{kind: generation.AliasSourceApplication, projectModule: "example.com/app", source: applicationRequirementSource.source},
 			{kind: generation.AliasSourceGenerationExtension, projectModule: "example.com/authn", pluginID: "example.authn", contributionID: "authn.order-submit", namespace: "authn", sourceCapability: "order.create/v1", activationCapability: "authn.session.verify/v1", source: Source{module: pluginSource.module, path: pluginSource.path, kind: "generation-alias-contribution", line: pluginSource.line, column: pluginSource.column}},
