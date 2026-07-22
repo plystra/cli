@@ -1467,6 +1467,9 @@ After a manual `plugin.yaml`, `capability.yaml`, selected configuration,
 selection:
 
 ```powershell
+plystra inspect
+plystra inspect --env production
+plystra inspect --config deploy/customer-a.yaml
 plystra generate
 plystra generate --check
 plystra generate --env production
@@ -1474,6 +1477,16 @@ plystra generate --check --env production
 plystra generate --config deploy/customer-a.yaml
 plystra generate --check --config deploy/customer-a.yaml
 ```
+
+`plystra inspect` first resolves that exact selected model without modifying the
+Project. The default view stays concise: Project and configuration identity,
+Plugin and Capability counts, AuthN/AuthZ activation, transports, readiness,
+and the selector-matched `plystra check` action. Use `--verbose` for complete
+indented resolution evidence or `--format json` for one deterministic
+`plystra.inspect` v1 document on stdout; JSON progress and diagnostics use
+stderr. The JSON form is suitable for automation and contains stable
+module-relative provenance rather than unrestricted configuration, Secrets, or
+machine-specific Project paths.
 
 Clean check output resembles:
 
@@ -1533,9 +1546,10 @@ Plugin IDs cannot resolve the conflict.
 ### Wrong configuration selection
 
 If drift or a Provider choice does not match the intended deployment, inspect
-the configuration mode, environment, and project-relative document references
-in `generated/manifest.json`. Run generation and check with the same `--env` or
-`--config`; for automation, set exactly one of `PLYSTRA_ENV` or
+the active model with `plystra inspect` and the intended `--env` or `--config`.
+Use `--verbose` or `--format json` when complete resolution provenance is
+needed, then run generation and check with the same selector; for automation,
+set exactly one of `PLYSTRA_ENV` or
 `PLYSTRA_CONFIG`. An environment is a sparse overlay above root, while an
 explicit file is complete and root `plystra.yaml` is not merged beneath it. A
 missing selected overlay or root Project marker is an error.

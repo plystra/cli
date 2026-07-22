@@ -186,3 +186,43 @@ func TestParseCheckArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestParseInspectArguments(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		arguments         []string
+		format            commandFormat
+		verbose           bool
+		configurationPath string
+		environmentName   string
+		ok                bool
+	}{
+		{arguments: []string{"inspect"}, format: commandFormatHuman, ok: true},
+		{arguments: []string{"inspect", "--verbose"}, format: commandFormatHuman, verbose: true, ok: true},
+		{arguments: []string{"inspect", "--format", "human"}, format: commandFormatHuman, ok: true},
+		{arguments: []string{"inspect", "--format", "json", "--verbose"}, format: commandFormatJSON, verbose: true, ok: true},
+		{arguments: []string{"inspect", "--config", "deploy/customer.yaml", "--format", "json"}, format: commandFormatJSON, configurationPath: "deploy/customer.yaml", ok: true},
+		{arguments: []string{"inspect", "--env", "production", "--verbose"}, format: commandFormatHuman, verbose: true, environmentName: "production", ok: true},
+		{arguments: nil},
+		{arguments: []string{"check"}},
+		{arguments: []string{"inspect", "--verbose", "--verbose"}},
+		{arguments: []string{"inspect", "--format"}},
+		{arguments: []string{"inspect", "--format", ""}},
+		{arguments: []string{"inspect", "--format", "yaml"}},
+		{arguments: []string{"inspect", "--format", "json", "--format", "human"}},
+		{arguments: []string{"inspect", "--config"}},
+		{arguments: []string{"inspect", "--config", ""}},
+		{arguments: []string{"inspect", "--config", "a.yaml", "--config", "b.yaml"}},
+		{arguments: []string{"inspect", "--env"}},
+		{arguments: []string{"inspect", "--env", ""}},
+		{arguments: []string{"inspect", "--env", "test", "--env", "production"}},
+		{arguments: []string{"inspect", "--env", "test", "--config", "deploy.yaml"}},
+	}
+	for _, test := range tests {
+		result, ok := parseInspectArguments(test.arguments)
+		if result.format != test.format || result.verbose != test.verbose || result.configurationPath != test.configurationPath || result.environmentName != test.environmentName || ok != test.ok {
+			t.Errorf("parseInspectArguments(%q) = %#v, %t; want format %q, verbose %t, path %q, environment %q, ok %t", test.arguments, result, ok, test.format, test.verbose, test.configurationPath, test.environmentName, test.ok)
+		}
+	}
+}

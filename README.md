@@ -482,6 +482,9 @@ plystra use
 plystra dev
 plystra test
 plystra build
+plystra inspect
+plystra inspect --verbose
+plystra inspect --format json
 plystra check
 plystra fix
 plystra generate
@@ -498,6 +501,16 @@ plystra release
 ```
 
 Mutating commands perform all derivable generation automatically. Build and generation never publish or release as a side effect.
+
+The current `plystra inspect` implementation is a read-only view over the same
+selected application model used by generation and validation. Its default human
+output reports the Project and selected configuration, Plugin and Capability
+counts, AuthN/AuthZ activation, transports, readiness, and the matching
+`plystra check` action. `--verbose` appends the complete deterministic resolution
+evidence. `--format json` writes exactly one `plystra.inspect` v1 schema document
+to stdout while progress and diagnostics remain on stderr. The command accepts
+the same `--env`, `--config`, `PLYSTRA_ENV`, and `PLYSTRA_CONFIG` selectors as
+generation and check.
 
 The current `plystra check` implementation is read-only. It verifies the
 selected dependency composition and generated fixed point, then runs

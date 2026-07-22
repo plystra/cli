@@ -41,13 +41,14 @@ plystra plugin create records
 plystra capability create records.read --query --plugin records --expose
 plystra generate
 plystra generate --check
+plystra inspect
 plystra check
 go test ./...
 go build ./...
 go vet ./...
 ` + "```" + `
 
-Mutating Plystra commands regenerate automatically. Add an ordinary Go Module dependency with ` + "`plystra add github.com/acme/platform@v1.0.0`" + `, update it with ` + "`plystra update github.com/acme/platform@v1.1.0`" + `, and remove it with ` + "`plystra remove github.com/acme/platform`" + `. A Project created with ` + "`plystra new app --template github.com/acme/platform@v1.0.0`" + ` retains the selected template as the same kind of ordinary direct dependency: its root declarations, typed local operational values, and Secret-reference placeholders compose into this Project, but its source is not copied and it receives no resolution priority. Creation validates those values without reading referenced ` + "`env`" + ` or ` + "`file`" + ` Secrets; generated source and manifest provenance contain neither reference targets nor resolved values. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate.
+Mutating Plystra commands regenerate automatically. Add an ordinary Go Module dependency with ` + "`plystra add github.com/acme/platform@v1.0.0`" + `, update it with ` + "`plystra update github.com/acme/platform@v1.1.0`" + `, and remove it with ` + "`plystra remove github.com/acme/platform`" + `. A Project created with ` + "`plystra new app --template github.com/acme/platform@v1.0.0`" + ` retains the selected template as the same kind of ordinary direct dependency: its root declarations, typed local operational values, and Secret-reference placeholders compose into this Project, but its source is not copied and it receives no resolution priority. Creation validates those values without reading referenced ` + "`env`" + ` or ` + "`file`" + ` Secrets; generated source and manifest provenance contain neither reference targets nor resolved values. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate. Use ` + "`plystra inspect`" + ` for a concise read-only summary of the same selected model, ` + "`--verbose`" + ` for complete resolution evidence, or ` + "`--format json`" + ` for deterministic automation output.
 
 A template's default Provider model must be unambiguous. If several compatible Plugins provide one required Capability, the template publisher must record one ` + "`capabilities.use`" + ` choice in the template's root ` + "`plystra.yaml`" + ` and publish a corrected version. Creation otherwise reports every candidate and leaves no target Project to repair.
 
@@ -1292,6 +1293,10 @@ values must never appear in the browser package.
 
 Run the narrowest relevant test first, then the complete module checks:
 
+    plystra inspect
+    plystra inspect --env production
+    plystra inspect --config deploy/customer-a.yaml
+    plystra inspect --format json
     plystra generate --check
     plystra generate --check --env production
     plystra generate --check --config deploy/customer-a.yaml
@@ -1303,6 +1308,14 @@ Run the narrowest relevant test first, then the complete module checks:
     go vet ./...
     go build ./...
     go mod verify
+
+Plystra inspect resolves the same selected model without modifying the Project.
+Its default output gives the Project and configuration, Plugin and Capability
+counts, AuthN/AuthZ activation, transports, readiness, and the matching plystra
+check action. Add --verbose for complete deterministic resolution evidence or
+--format json for one plystra.inspect v1 document on stdout; JSON progress and
+diagnostics stay on stderr. Use the same --env or --config selector across
+inspect, generate, check, and generated application startup.
 
 Plystra check verifies the selected configuration and generated fixed point,
 then runs go test -mod=readonly ./... from the Project root. Use the same --env
@@ -1344,9 +1357,10 @@ build and distribution boundary for every Plystra module.
 - Invalid configuration: compare the concrete selected Plugin ID and its
   plugin.yaml config schema with the object in the selected current-Project
   document. Keep Secret values behind valid env or file references.
-- Wrong configuration selection: inspect generated/manifest.json mode,
-  environment, and document references, then run generate and generate --check
-  with the same --env or --config. For automation, set exactly one of
+- Wrong configuration selection: run plystra inspect with the intended --env or
+  --config, add --verbose or --format json when complete provenance is needed,
+  then run generate and generate --check with the same selector. For
+  automation, set exactly one of
   PLYSTRA_ENV or PLYSTRA_CONFIG. An environment is a sparse overlay above root;
   an explicit file is complete and root plystra.yaml is not merged beneath it.
 - Alias error: point directly to a resolved canonical target with the same

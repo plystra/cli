@@ -738,6 +738,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"rebuild with the same",
 		"Runtime-only address",
 		"npm run typecheck",
+		"plystra inspect --format json",
 		"plystra generate --check",
 	}
 	for _, phrase := range required {

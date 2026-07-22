@@ -1143,6 +1143,10 @@ values must never appear in the browser package.
 
 Run the narrowest relevant test first, then the complete module checks:
 
+    plystra inspect
+    plystra inspect --env production
+    plystra inspect --config deploy/customer-a.yaml
+    plystra inspect --format json
     plystra generate --check
     plystra generate --check --env production
     plystra generate --check --config deploy/customer-a.yaml
@@ -1154,6 +1158,14 @@ Run the narrowest relevant test first, then the complete module checks:
     go vet ./...
     go build ./...
     go mod verify
+
+Plystra inspect resolves the same selected model without modifying the Project.
+Its default output gives the Project and configuration, Plugin and Capability
+counts, AuthN/AuthZ activation, transports, readiness, and the matching plystra
+check action. Add --verbose for complete deterministic resolution evidence or
+--format json for one plystra.inspect v1 document on stdout; JSON progress and
+diagnostics stay on stderr. Use the same --env or --config selector across
+inspect, generate, check, and generated application startup.
 
 Plystra check verifies the selected configuration and generated fixed point,
 then runs go test -mod=readonly ./... from the Project root. Use the same --env
@@ -1195,9 +1207,10 @@ build and distribution boundary for every Plystra module.
 - Invalid configuration: compare the concrete selected Plugin ID and its
   plugin.yaml config schema with the object in the selected current-Project
   document. Keep Secret values behind valid env or file references.
-- Wrong configuration selection: inspect generated/manifest.json mode,
-  environment, and document references, then run generate and generate --check
-  with the same --env or --config. For automation, set exactly one of
+- Wrong configuration selection: run plystra inspect with the intended --env or
+  --config, add --verbose or --format json when complete provenance is needed,
+  then run generate and generate --check with the same selector. For
+  automation, set exactly one of
   PLYSTRA_ENV or PLYSTRA_CONFIG. An environment is a sparse overlay above root;
   an explicit file is complete and root plystra.yaml is not merged beneath it.
 - Alias error: point directly to a resolved canonical target with the same
