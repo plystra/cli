@@ -138,9 +138,12 @@ func RunIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 }
 
 func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string, environment []string, selectPlugin plugintarget.Selector, promptNew newProjectPrompter) int {
-	if stdout == nil || stderr == nil {
+	output, err := newCommandOutput(commandFormatHuman, stdout, stderr)
+	if err != nil {
 		return 2
 	}
+	stdout = output.resultWriter()
+	stderr = output.diagnosticWriter()
 	if len(arguments) == 0 {
 		_, _ = io.WriteString(stdout, usage)
 		return 0
