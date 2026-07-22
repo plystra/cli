@@ -23,6 +23,7 @@ import (
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/interfacecontract"
 	"github.com/plystra/cli/internal/interfacedecl"
+	"github.com/plystra/cli/internal/interfacemeta"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/modulepath"
@@ -60,6 +61,8 @@ type Interface struct {
 	local         bool
 	declaration   interfacedecl.Declaration
 	contract      interfacecontract.Contract
+	metadata      interfacemeta.Document
+	hasMetadata   bool
 }
 
 // ID returns the exact canonical Interface ID.
@@ -97,6 +100,24 @@ func (i Interface) Declaration() interfacedecl.Declaration { return i.declaratio
 
 // Contract returns the immutable normalized type-checked Go contract.
 func (i Interface) Contract() interfacecontract.Contract { return i.contract }
+
+// Metadata returns the optional immutable colocated interface.yaml document.
+func (i Interface) Metadata() (interfacemeta.Document, bool) {
+	return i.metadata, i.hasMetadata
+}
+
+// MetadataSource returns stable module-qualified metadata provenance, or an
+// empty string when the Interface package has no optional metadata document.
+func (i Interface) MetadataSource() string {
+	if !i.hasMetadata {
+		return ""
+	}
+	version := i.moduleVersion
+	if version == "" {
+		version = "local"
+	}
+	return fmt.Sprintf("%s@%s/%s", i.modulePath, version, i.metadata.Path())
+}
 
 // Index is an immutable deterministic visible Interface inventory. Duplicate
 // IDs remain represented independently so the separate duplicate-identity
@@ -222,6 +243,10 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 		if len(declarations) == 0 {
 			continue
 		}
+		metadata, hasMetadata, err := loadOptionalMetadata(candidate)
+		if err != nil {
+			return nil, fmt.Errorf("package %s: %w", candidate.importPath, err)
+		}
 		if err := validateLoadedPackage(candidate, loaded); err != nil {
 			return nil, err
 		}
@@ -248,10 +273,46 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 				local:         candidate.source.local,
 				declaration:   declaration,
 				contract:      contract,
+				metadata:      metadata,
+				hasMetadata:   hasMetadata,
 			})
 		}
 	}
 	return interfaces, nil
+}
+
+func loadOptionalMetadata(candidate packageCandidate) (interfacemeta.Document, bool, error) {
+	relativeDirectory, err := filepath.Rel(candidate.source.root, candidate.directory)
+	if err != nil || filepath.IsAbs(relativeDirectory) || relativeDirectory == ".." || strings.HasPrefix(relativeDirectory, ".."+string(filepath.Separator)) {
+		return interfacemeta.Document{}, false, fmt.Errorf("%w: metadata package directory escapes its module root", interfacemeta.ErrInvalid)
+	}
+	relativePath := interfacemeta.Name
+	if relativeDirectory != "." {
+		relativePath = path.Join(filepath.ToSlash(relativeDirectory), interfacemeta.Name)
+	}
+	absolutePath := filepath.Join(candidate.directory, interfacemeta.Name)
+	info, err := os.Lstat(absolutePath)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return interfacemeta.Document{}, false, nil
+	case err != nil:
+		message := gocommand.SanitizeOutput(err.Error(), candidate.source.root, candidate.directory, absolutePath)
+		return interfacemeta.Document{}, false, fmt.Errorf("%w: %s: inspect metadata: %s", interfacemeta.ErrInvalid, relativePath, message)
+	case !info.Mode().IsRegular() || info.Mode()&fs.ModeSymlink != 0:
+		return interfacemeta.Document{}, false, fmt.Errorf("%w: %s must be a regular non-symbolic file", interfacemeta.ErrInvalid, relativePath)
+	case info.Size() > interfacemeta.MaximumSize:
+		return interfacemeta.Document{}, false, fmt.Errorf("%w: %s exceeds %d bytes", interfacemeta.ErrInvalid, relativePath, interfacemeta.MaximumSize)
+	}
+	data, err := readRegularFile(absolutePath, interfacemeta.MaximumSize)
+	if err != nil {
+		message := gocommand.SanitizeOutput(err.Error(), candidate.source.root, candidate.directory, absolutePath)
+		return interfacemeta.Document{}, false, fmt.Errorf("%w: %s: read metadata: %s", interfacemeta.ErrInvalid, relativePath, message)
+	}
+	document, err := interfacemeta.ParseFile(relativePath, data)
+	if err != nil {
+		return interfacemeta.Document{}, false, err
+	}
+	return document, true, nil
 }
 
 type moduleSource struct {

@@ -17,6 +17,7 @@ import (
 	"github.com/plystra/cli/internal/interfacecontract"
 	"github.com/plystra/cli/internal/interfacedecl"
 	"github.com/plystra/cli/internal/interfaceinventory"
+	"github.com/plystra/cli/internal/interfacemeta"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/projectlocate"
 )
@@ -30,6 +31,7 @@ func TestDiscoverLoadsOnlyActiveEligiblePackagesDeterministically(t *testing.T) 
 	writeFile(t, filepath.Join(root, "deep", "domain", "records", "alpha", "v2", "interface.go"), interfaceSource("alphav2", "records.alpha.read/v2", "Read"))
 	writeFile(t, filepath.Join(root, "tagged", "interface.go"), "//go:build inventory_active\n\n"+interfaceSource("tagged", "tagged.active.run/v1", "Run"))
 	writeFile(t, filepath.Join(root, "inactive", "interface.go"), "//go:build inventory_inactive\n\n"+interfaceSource("inactive", "tagged.inactive.run/v1", "Run"))
+	writeFile(t, filepath.Join(root, "inactive", interfacemeta.Name), "[\n")
 	writeFile(t, filepath.Join(root, "testonly", "interface_test.go"), interfaceSource("testonly", "test.only.run/v1", "Run"))
 	writeFile(t, filepath.Join(root, "ordinary", "ordinary.go"), "package ordinary\n\nconst markerText = \"//plystra:interface ignored.string.value/v1\"\n")
 
@@ -108,6 +110,7 @@ func TestDiscoverIncludesDirectAndTransitiveDependencyProjectsButNotOrdinaryModu
 
 	writeFile(t, filepath.Join(ordinaryRoot, "go.mod"), "module example.com/ordinary\n\ngo 1.26\n")
 	writeFile(t, filepath.Join(ordinaryRoot, "interface.go"), interfaceSource("ordinary", "dependency.ordinary.run/v1", "Run"))
+	writeFile(t, filepath.Join(ordinaryRoot, interfacemeta.Name), "[\n")
 
 	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
 
@@ -243,6 +246,118 @@ func TestDiscoverSupportsSingleComponentProjectModulePath(t *testing.T) {
 	interfaces := index.Interfaces()
 	if len(interfaces) != 1 || interfaces[0].ModulePath() != "my-app" || interfaces[0].PackagePath() != "my-app/interfaces/local" {
 		t.Fatalf("single-component Project Interface = %#v", inventorySummary(index))
+	}
+}
+
+func TestDiscoverLoadsOptionalColocatedMetadataWithStableProvenance(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	dependencyRoot := filepath.Join(root, "dependency")
+	writeProject(t, dependencyRoot, "example.com/dependency")
+	writeFile(t, filepath.Join(dependencyRoot, "api", "interface.go"), interfaceSource("api", "dependency.records.list/v1", "List"))
+	dependencyMetadata := "description: Lists dependency records.\nsemantics:\n  kind: query\n"
+	writeFile(t, filepath.Join(dependencyRoot, "api", interfacemeta.Name), dependencyMetadata)
+
+	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
+
+go 1.26
+
+require example.com/dependency v1.2.3
+
+replace example.com/dependency => ../dependency
+`)
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(appRoot, "interfaces", "local", "interface.go"), interfaceSource("local", "local.records.list/v1", "List"))
+	localMetadata := "# local metadata\ndescription: Lists local records.\n"
+	writeFile(t, filepath.Join(appRoot, "interfaces", "local", interfacemeta.Name), localMetadata)
+	writeFile(t, filepath.Join(appRoot, "interfaces", "plain", "interface.go"), interfaceSource("plain", "local.records.get/v1", "Get"))
+
+	beforeApp := snapshotFiles(t, appRoot)
+	beforeDependency := snapshotFiles(t, dependencyRoot)
+	environment := goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"})
+	first := discover(t, appRoot, environment)
+	second := discover(t, appRoot, environment)
+	if !reflect.DeepEqual(inventorySummary(first), inventorySummary(second)) {
+		t.Fatalf("metadata discovery was not deterministic:\nfirst: %#v\nsecond: %#v", inventorySummary(first), inventorySummary(second))
+	}
+	byID := make(map[string]interfaceinventory.Interface)
+	for _, discovered := range first.Interfaces() {
+		byID[discovered.ID()] = discovered
+	}
+	local, present := byID["local.records.list/v1"].Metadata()
+	if !present || local.Path() != "interfaces/local/interface.yaml" || string(local.Data()) != localMetadata || byID["local.records.list/v1"].MetadataSource() != "example.com/app@local/interfaces/local/interface.yaml" {
+		t.Fatalf("local metadata = %#v, %t, source %q", local, present, byID["local.records.list/v1"].MetadataSource())
+	}
+	dependency, present := byID["dependency.records.list/v1"].Metadata()
+	if !present || dependency.Path() != "api/interface.yaml" || string(dependency.Data()) != dependencyMetadata || byID["dependency.records.list/v1"].MetadataSource() != "example.com/dependency@v1.2.3/api/interface.yaml" {
+		t.Fatalf("dependency metadata = %#v, %t, source %q", dependency, present, byID["dependency.records.list/v1"].MetadataSource())
+	}
+	if metadata, present := byID["local.records.get/v1"].Metadata(); present || metadata.Path() != "" || len(metadata.Data()) != 0 || byID["local.records.get/v1"].MetadataSource() != "" {
+		t.Fatalf("absent metadata = %#v, %t", metadata, present)
+	}
+	view := local.Data()
+	view[0] = 'x'
+	again, _ := byID["local.records.list/v1"].Metadata()
+	if string(again.Data()) != localMetadata {
+		t.Fatal("Metadata exposed mutable document bytes")
+	}
+	if after := snapshotFiles(t, appRoot); !reflect.DeepEqual(after, beforeApp) {
+		t.Fatalf("metadata discovery mutated current Project:\nbefore: %#v\nafter:  %#v", beforeApp, after)
+	}
+	if after := snapshotFiles(t, dependencyRoot); !reflect.DeepEqual(after, beforeDependency) {
+		t.Fatalf("metadata discovery mutated dependency Project:\nbefore: %#v\nafter:  %#v", beforeDependency, after)
+	}
+}
+
+func TestDiscoverRejectsUnsafeOrMalformedOptionalMetadataWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		data      string
+		directory bool
+		want      string
+	}{
+		{name: "empty", want: "document is empty"},
+		{name: "comments only", data: "# empty\n", want: "expected one YAML document"},
+		{name: "malformed", data: "[\n", want: "decode YAML"},
+		{name: "multiple documents", data: "{}\n---\n{}\n", want: "multiple YAML documents"},
+		{name: "sequence root", data: "- description\n", want: "root must be a mapping"},
+		{name: "anchor", data: "description: &text value\n", want: "anchors and aliases"},
+		{name: "duplicate key", data: "description: one\ndescription: two\n", want: "duplicate mapping key"},
+		{name: "directory", directory: true, want: "regular non-symbolic file"},
+		{name: "oversized", data: strings.Repeat("x", interfacemeta.MaximumSize+1), want: "exceeds"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeProject(t, root, "example.com/invalid-metadata")
+			packageRoot := filepath.Join(root, "interfaces", "records")
+			writeFile(t, filepath.Join(packageRoot, "interface.go"), interfaceSource("records", "records.invalid.list/v1", "List"))
+			metadataPath := filepath.Join(packageRoot, interfacemeta.Name)
+			if test.directory {
+				if err := os.Mkdir(metadataPath, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				writeFile(t, metadataPath, test.data)
+			}
+			before := snapshotFiles(t, root)
+			_, err := discoverResult(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
+			if !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, interfacemeta.ErrInvalid) || !strings.Contains(err.Error(), test.want) || !strings.Contains(err.Error(), "interfaces/records/interface.yaml") {
+				t.Fatalf("Discover error = %v, want Interface metadata error containing %q", err, test.want)
+			}
+			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("metadata error exposed private Project root: %v", err)
+			}
+			if after := snapshotFiles(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed metadata discovery mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
 	}
 }
 
@@ -423,16 +538,19 @@ func interfaceIDs(index interfaceinventory.Index) []string {
 }
 
 type interfaceSummary struct {
-	ID            string
-	ModulePath    string
-	ModuleVersion string
-	PackagePath   string
-	SourcePath    string
-	Source        string
-	Local         bool
-	Method        string
-	Request       string
-	Response      string
+	ID             string
+	ModulePath     string
+	ModuleVersion  string
+	PackagePath    string
+	SourcePath     string
+	Source         string
+	Local          bool
+	Method         string
+	Request        string
+	Response       string
+	MetadataPath   string
+	MetadataData   string
+	MetadataSource string
 }
 
 func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
@@ -440,17 +558,21 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 	result := make([]interfaceSummary, len(interfaces))
 	for position, discovered := range interfaces {
 		contract := discovered.Contract()
+		metadata, _ := discovered.Metadata()
 		result[position] = interfaceSummary{
-			ID:            discovered.ID(),
-			ModulePath:    discovered.ModulePath(),
-			ModuleVersion: discovered.ModuleVersion(),
-			PackagePath:   discovered.PackagePath(),
-			SourcePath:    discovered.SourcePath(),
-			Source:        discovered.Source(),
-			Local:         discovered.Local(),
-			Method:        contract.MethodName(),
-			Request:       contract.RequestName(),
-			Response:      contract.ResponseName(),
+			ID:             discovered.ID(),
+			ModulePath:     discovered.ModulePath(),
+			ModuleVersion:  discovered.ModuleVersion(),
+			PackagePath:    discovered.PackagePath(),
+			SourcePath:     discovered.SourcePath(),
+			Source:         discovered.Source(),
+			Local:          discovered.Local(),
+			Method:         contract.MethodName(),
+			Request:        contract.RequestName(),
+			Response:       contract.ResponseName(),
+			MetadataPath:   metadata.Path(),
+			MetadataData:   string(metadata.Data()),
+			MetadataSource: discovered.MetadataSource(),
 		}
 	}
 	return result
