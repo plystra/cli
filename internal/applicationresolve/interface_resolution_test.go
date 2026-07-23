@@ -192,6 +192,51 @@ func TestResolveAppliesNoDiscoveryOrFilesystemOrderSelectionPriority(t *testing.
 	}
 }
 
+func TestResolveAppliesNoModuleDirectnessOrDepthSelectionPriority(t *testing.T) {
+	t.Parallel()
+
+	topologies := []struct {
+		name   string
+		direct string
+		deep   string
+	}{
+		{name: "alpha direct and zeta deeply transitive", direct: "alpha", deep: "zeta"},
+		{name: "zeta direct and alpha deeply transitive", direct: "zeta", deep: "alpha"},
+	}
+	var baseline string
+	for index, topology := range topologies {
+		parent, root := writeModuleTopologyAmbiguityProject(t, topology.direct, topology.deep)
+		before := snapshotTree(t, parent)
+		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+			Start: root,
+			Environment: goEnvironment(map[string]string{
+				"GOWORK":  "off",
+				"GOPROXY": "off",
+				"GOSUMDB": "off",
+			}),
+		})
+		if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, interfaceresolution.ErrAmbiguousImplementation) {
+			t.Fatalf("Resolve topology %q error = %v", topology.name, err)
+		}
+		var ambiguous *interfaceresolution.AmbiguousImplementationError
+		if !errors.As(err, &ambiguous) {
+			t.Fatalf("Resolve topology %q omitted typed ambiguity: %v", topology.name, err)
+		}
+		candidates := ambiguous.Candidates()
+		if len(candidates) != 2 || candidates[0].Constructor().String() != "example.com/topology-alpha/alpha.New" || candidates[1].Constructor().String() != "example.com/topology-zeta/zeta.New" {
+			t.Fatalf("Resolve topology %q candidates = %#v", topology.name, candidates)
+		}
+		if index == 0 {
+			baseline = err.Error()
+		} else if err.Error() != baseline {
+			t.Fatalf("module directness or transitive depth changed ambiguity:\nfirst:  %s\nsecond: %s", baseline, err)
+		}
+		if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
+			t.Fatalf("Resolve topology %q mutated Projects:\nbefore: %#v\nafter: %#v", topology.name, before, after)
+		}
+	}
+}
+
 func TestResolveCollectsEnvironmentExposureAsInterfaceRequirement(t *testing.T) {
 	t.Parallel()
 
@@ -646,6 +691,72 @@ func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) {
 	return root
 }
 
+func writeModuleTopologyAmbiguityProject(t testing.TB, direct, deep string) (string, string) {
+	t.Helper()
+	parent := t.TempDir()
+
+	contractRoot := filepath.Join(parent, "contract")
+	writeModule(t, contractRoot, "example.com/topology-contract")
+	writeFile(t, filepath.Join(contractRoot, "plystra.yaml"), "{}\n")
+	writeResolvedInterface(t, contractRoot, "app/run/v1", "runv1", "app.run/v1", "Run")
+
+	for _, name := range []string{"alpha", "zeta"} {
+		root := filepath.Join(parent, name)
+		modulePath := "example.com/topology-" + name
+		writeFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module %s
+
+go 1.26
+
+require example.com/topology-contract v1.0.0
+
+replace example.com/topology-contract => ../contract
+`, modulePath))
+		writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+		writeResolvedSimpleImplementationForInterfaceModule(t, root, "example.com/topology-contract", name, "app.run/v1", "app/run/v1", "Run")
+	}
+
+	middleRoot := filepath.Join(parent, "middle")
+	writeFile(t, filepath.Join(middleRoot, "go.mod"), fmt.Sprintf(`module example.com/topology-middle
+
+go 1.16
+
+require example.com/topology-%s v1.0.0
+`, deep))
+	writeFile(t, filepath.Join(middleRoot, "middle.go"), "package middle\n")
+
+	bridgeRoot := filepath.Join(parent, "bridge")
+	writeFile(t, filepath.Join(bridgeRoot, "go.mod"), `module example.com/topology-bridge
+
+go 1.16
+
+require example.com/topology-middle v1.0.0
+`)
+	writeFile(t, filepath.Join(bridgeRoot, "bridge.go"), "package bridge\n")
+
+	applicationRoot := filepath.Join(parent, "application")
+	writeFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/topology-application
+
+go 1.26
+
+require (
+	example.com/topology-%s v1.0.0
+	example.com/topology-bridge v1.0.0
+)
+
+replace example.com/topology-alpha => ../alpha
+
+replace example.com/topology-bridge => ../bridge
+
+replace example.com/topology-contract => ../contract
+
+replace example.com/topology-middle => ../middle
+
+replace example.com/topology-zeta => ../zeta
+`, direct))
+	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "interfaces: {require: [app.run/v1]}\n")
+	return parent, applicationRoot
+}
+
 func writeResolvedInterface(t testing.TB, root, relative, packageName, identifier, method string) {
 	t.Helper()
 	writeFile(t, filepath.Join(root, "interfaces", filepath.FromSlash(relative), "interface.go"), fmt.Sprintf(`package %s
@@ -669,6 +780,11 @@ func writeResolvedSimpleImplementation(t testing.TB, root, packageName, identifi
 
 func writeResolvedSimpleImplementationForModule(t testing.TB, root, modulePath, packageName, identifier, interfacePath, method string) {
 	t.Helper()
+	writeResolvedSimpleImplementationForInterfaceModule(t, root, modulePath, packageName, identifier, interfacePath, method)
+}
+
+func writeResolvedSimpleImplementationForInterfaceModule(t testing.TB, root, interfaceModulePath, packageName, identifier, interfacePath, method string) {
+	t.Helper()
 	writeFile(t, filepath.Join(root, packageName, "service.go"), fmt.Sprintf(`package %s
 
 import (
@@ -685,7 +801,7 @@ func New() (*Service, error) { return &Service{}, nil }
 func (*Service) %s(context.Context, contract.Request) (contract.Response, error) {
 	return contract.Response{}, nil
 }
-`, packageName, modulePath, interfacePath, identifier, method))
+`, packageName, interfaceModulePath, interfacePath, identifier, method))
 }
 
 func resolvedGraphNodes(graph constructorgraph.Graph) []string {
