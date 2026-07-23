@@ -504,7 +504,7 @@ func TestApplicationModelDigestPinsNormalizedConnectProtobufProjection(t *testin
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(Connect Protobuf projection): %v", err)
 	}
-	const expected = "sha256:3212355ddb4ff843c492d40c3e870d7c9179935f463e62d258096e198cae16f0"
+	const expected = "sha256:b2e1d632cb54982f97808c2a2255e74e5136fd9c2300f9b777b76c6215889868"
 	if digest != expected {
 		t.Fatalf("Connect Protobuf projection application-model digest = %q; want %q", digest, expected)
 	}

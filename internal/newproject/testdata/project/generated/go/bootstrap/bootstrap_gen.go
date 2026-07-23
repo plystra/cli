@@ -34,12 +34,12 @@ const (
 	defaultRuntimeDocument = "plystra.yaml"
 	defaultStartupTimeout  = time.Duration(120000000000)
 	// compiledConfigurationSelectionProvenanceJSON records the normalized non-secret build selection.
-	compiledConfigurationSelectionProvenanceJSON   = "{\"version\":1,\"mode\":\"default\",\"root_path\":\"plystra.yaml\",\"root_digest\":\"sha256:54c237bfe7b65ee4f56a05173be2bf81b9310ffb34fbfa5cde1e55b85ebd978f\",\"selected_path\":\"plystra.yaml\",\"selected_digest\":\"sha256:54c237bfe7b65ee4f56a05173be2bf81b9310ffb34fbfa5cde1e55b85ebd978f\",\"dependency_composition_digest\":\"sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130\",\"application_model_digest\":\"sha256:0d3ccfd8d70d4be609bfc7f57adfa197bcc274554b383bb75a502f1b47682f5a\"}"
-	compiledConfigurationSelectionProvenanceDigest = "sha256:b028a8f87a37d75b1a64c7ccb95eb059b392a5cf2e1171c863ae8bb39815ebed"
+	compiledConfigurationSelectionProvenanceJSON   = "{\"version\":1,\"mode\":\"default\",\"root_path\":\"plystra.yaml\",\"root_digest\":\"sha256:54c237bfe7b65ee4f56a05173be2bf81b9310ffb34fbfa5cde1e55b85ebd978f\",\"selected_path\":\"plystra.yaml\",\"selected_digest\":\"sha256:54c237bfe7b65ee4f56a05173be2bf81b9310ffb34fbfa5cde1e55b85ebd978f\",\"dependency_composition_digest\":\"sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130\",\"application_model_digest\":\"sha256:29435c1be4aa85810ed8f45e20a55ea9f8438b0dd45be1db62151c6631040567\"}"
+	compiledConfigurationSelectionProvenanceDigest = "sha256:5c6dab74c864248ad2685949717943f18558009dd45d7d8e7472a149fc8f46cd"
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:0d3ccfd8d70d4be609bfc7f57adfa197bcc274554b383bb75a502f1b47682f5a\",\"projection\":{\"http_cors\":null,\"http_exposures\":[],\"http_transports\":{\"connect\":true,\"rest\":false},\"implementation_choices\":[],\"interface_requirements\":[]},\"version\":1}"
-	compiledApplicationModelCompatibilityDigest = "sha256:d7e99180a17965614bed73f6fca4f34661c59703d3ac59206bb03f028d756e36"
-	compiledApplicationModelDigest              = "sha256:0d3ccfd8d70d4be609bfc7f57adfa197bcc274554b383bb75a502f1b47682f5a"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:29435c1be4aa85810ed8f45e20a55ea9f8438b0dd45be1db62151c6631040567\",\"projection\":{\"http_cors\":null,\"http_exposures\":[],\"http_transports\":{\"connect\":true,\"rest\":false},\"implementation_choices\":[],\"interface_requirements\":[]},\"version\":1}"
+	compiledApplicationModelCompatibilityDigest = "sha256:f8754a53fe2caf960bcc90fa6edffef77c1829d2812a34785d917db1bf2635ef"
+	compiledApplicationModelDigest              = "sha256:29435c1be4aa85810ed8f45e20a55ea9f8438b0dd45be1db62151c6631040567"
 )
 
 var (
@@ -57,9 +57,9 @@ var (
 	ErrRuntimeConfiguration = errors.New("invalid selected runtime configuration")
 	// ErrRuntimeCompatibility reports a runtime document that requires a different compiled application model.
 	ErrRuntimeCompatibility = errors.New("runtime configuration is incompatible with compiled application model")
-	// ErrApplicationStart reports a redacted provider startup failure.
+	// ErrApplicationStart reports a redacted application startup failure.
 	ErrApplicationStart = errors.New("generated application startup failed")
-	// ErrApplicationStop reports a redacted provider shutdown failure.
+	// ErrApplicationStop reports a redacted application shutdown failure.
 	ErrApplicationStop = errors.New("generated application shutdown failed")
 )
 
@@ -69,8 +69,8 @@ type RuntimeOptions struct {
 	Environment []string
 }
 
-// Application is one constructed static Interface runtime and selected-provider lifecycle.
-// Implementation and Provider instances plus resolved runtime configuration remain private.
+// Application is one constructed static Interface runtime and temporary legacy lifecycle boundary.
+// Static Implementation and temporary legacy instances plus resolved runtime configuration remain private.
 type Application struct {
 	interfaces     applicationassembly.InterfaceRuntime
 	providers      applicationassembly.Providers
@@ -80,7 +80,7 @@ type Application struct {
 }
 
 // New loads the selected runtime document, validates its compiled model and startup settings, resolves Secrets,
-// constructs the frozen Interface runtime and every selected legacy provider, then binds available lifecycle order.
+// constructs the frozen Interface runtime and every temporary legacy instance, then binds available lifecycle order.
 func New(ctx context.Context, options RuntimeOptions) (*Application, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("%w: %w", ErrBootstrap, ErrInvalidContext)
@@ -113,7 +113,7 @@ func New(ctx context.Context, options RuntimeOptions) (*Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: bind provider lifecycle: %w", ErrBootstrap, err)
 	}
-	interfaces, err := applicationassembly.NewInterfaceRuntime(applicationassembly.ConstructorConfiguration{})
+	interfaces, err := applicationassembly.NewInterfaceRuntime(applicationassembly.ConstructorConfiguration{}, startupTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("%w: construct static Interface runtime: %w", ErrBootstrap, err)
 	}
@@ -141,15 +141,32 @@ func (a *Application) Invocations() applicationassembly.Invocations {
 	return a.invocations
 }
 
-// State returns the current provider lifecycle state.
+// State returns the current static Implementation lifecycle state.
 func (a *Application) State() kernellifecycle.State {
 	if !a.Valid() {
 		return ""
 	}
-	return a.lifecycle.State()
+	staticState := a.interfaces.State()
+	legacyState := a.lifecycle.State()
+	if staticState == kernellifecycle.StateFailed || legacyState == kernellifecycle.StateFailed {
+		return kernellifecycle.StateFailed
+	}
+	if staticState == kernellifecycle.StateStarting || legacyState == kernellifecycle.StateStarting {
+		return kernellifecycle.StateStarting
+	}
+	if staticState == kernellifecycle.StateStopping || legacyState == kernellifecycle.StateStopping {
+		return kernellifecycle.StateStopping
+	}
+	if staticState == legacyState {
+		return staticState
+	}
+	if staticState == kernellifecycle.StateRunning || legacyState == kernellifecycle.StateRunning {
+		return kernellifecycle.StateStarting
+	}
+	return kernellifecycle.StateStopping
 }
 
-// Start starts selected lifecycle providers within timeouts.startup.
+// Start starts static lifecycle-aware Implementations in dependency order within timeouts.startup.
 func (a *Application) Start(ctx context.Context) error {
 	if !a.Valid() {
 		return fmt.Errorf("%w: %w", ErrApplicationStart, ErrInvalidApplication)
@@ -159,13 +176,19 @@ func (a *Application) Start(ctx context.Context) error {
 	}
 	startupContext, cancel := context.WithTimeout(ctx, a.startupTimeout)
 	defer cancel()
-	if err := a.lifecycle.Start(startupContext); err != nil {
+	if err := a.interfaces.Start(startupContext); err != nil {
 		return fmt.Errorf("%w: %w", ErrApplicationStart, err)
+	}
+	if err := a.lifecycle.Start(startupContext); err != nil {
+		cleanupContext, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), a.startupTimeout)
+		defer cleanupCancel()
+		cleanupError := a.interfaces.Stop(cleanupContext)
+		return errors.Join(fmt.Errorf("%w: legacy lifecycle: %w", ErrApplicationStart, err), cleanupError)
 	}
 	return nil
 }
 
-// Stop stops every active lifecycle provider in reverse generated order.
+// Stop shuts down active lifecycles in reverse startup order.
 func (a *Application) Stop(ctx context.Context) error {
 	if !a.Valid() {
 		return fmt.Errorf("%w: %w", ErrApplicationStop, ErrInvalidApplication)
@@ -173,13 +196,15 @@ func (a *Application) Stop(ctx context.Context) error {
 	if ctx == nil {
 		return fmt.Errorf("%w: %w", ErrApplicationStop, ErrInvalidContext)
 	}
-	if err := a.lifecycle.Stop(ctx); err != nil {
+	legacyError := a.lifecycle.Stop(ctx)
+	interfaceError := a.interfaces.Stop(ctx)
+	if err := errors.Join(legacyError, interfaceError); err != nil {
 		return fmt.Errorf("%w: %w", ErrApplicationStop, err)
 	}
 	return nil
 }
 
-// String redacts providers and runtime configuration.
+// String redacts instances and runtime configuration.
 func (Application) String() string { return "<redacted-generated-application>" }
 
 // GoString prevents Go-syntax formatting from exposing application state.

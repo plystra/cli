@@ -27,7 +27,7 @@ func TestRenderBuildsDependencyFirstGovernedInterfaceRuntime(t *testing.T) {
 	}
 	source := file.Data()
 	for _, required := range []string{
-		`func NewInterfaceRuntime(configuration ConstructorConfiguration) (InterfaceRuntime, error)`,
+		`func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout time.Duration) (InterfaceRuntime, error)`,
 		`kernelinvocation.NewHandle(dispatcher,`,
 		`.Contract(), true)`,
 		`kernelinvocation.BindingKindImplementation`,
@@ -37,6 +37,12 @@ func TestRenderBuildsDependencyFirstGovernedInterfaceRuntime(t *testing.T) {
 		`plystra.Optional[`,
 		`kernelinvocation.NewCatalog(bindings)`,
 		`dispatcher.Publish(catalog)`,
+		`kernellifecycle.NewBinding("example.com/application/audit.New", instance)`,
+		`kernellifecycle.NewBinding("example.com/application/app.New", instance)`,
+		`kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, lifecycleBindings)`,
+		`func (runtime InterfaceRuntime) Start(ctx context.Context) error`,
+		`func (runtime InterfaceRuntime) Stop(ctx context.Context) error`,
+		`runtime.lifecycle.State().Valid()`,
 		`func (runtime InterfaceRuntime) AppRunV1()`,
 	} {
 		if !bytes.Contains(source, []byte(required)) {
@@ -47,6 +53,11 @@ func TestRenderBuildsDependencyFirstGovernedInterfaceRuntime(t *testing.T) {
 	appConstructor := bytes.Index(source, []byte(`.New(interface2, plystra.Optional[`))
 	if auditConstructor < 0 || appConstructor < 0 || auditConstructor >= appConstructor {
 		t.Fatalf("constructors are not dependency-first:\n%s", source)
+	}
+	auditLifecycle := bytes.Index(source, []byte(`kernellifecycle.NewBinding("example.com/application/audit.New", instance)`))
+	appLifecycle := bytes.Index(source, []byte(`kernellifecycle.NewBinding("example.com/application/app.New", instance)`))
+	if auditLifecycle < 0 || appLifecycle < 0 || auditLifecycle >= appLifecycle {
+		t.Fatalf("lifecycle bindings are not dependency-first:\n%s", source)
 	}
 	if bytes.Count(source, []byte(`Constructor:     "example.com/application/app.New"`)) != 2 {
 		t.Fatalf("multi-Interface constructor provenance was not retained for two bindings:\n%s", source)

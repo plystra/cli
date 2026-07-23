@@ -1,7 +1,7 @@
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
-github.com/plystra/kernel v0.0.0-20260723092039-32dfaf8542e0 h1:QBkXaDWS31GEmMY95slHomSPIO8a+uEkb/C0vACCwJQ=
-github.com/plystra/kernel v0.0.0-20260723092039-32dfaf8542e0/go.mod h1:9NpMvVkhP9tR1tqfzIDJQ1Qbe3oj9+CtDnJpLabOqZc=
+github.com/plystra/kernel v0.0.0-20260723121420-350fa43a90a4 h1:/29dt7rLfap8wvOnSCaG9ZgdtfjyGcDhGLScEdEEslY=
+github.com/plystra/kernel v0.0.0-20260723121420-350fa43a90a4/go.mod h1:9NpMvVkhP9tR1tqfzIDJQ1Qbe3oj9+CtDnJpLabOqZc=
 go.yaml.in/yaml/v3 v3.0.4 h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=
 go.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=
 golang.org/x/mod v0.38.0 h1:MECBjubtXD7yj4HrhIUcywNaGeNVUdfVnxmPajOk4yk=

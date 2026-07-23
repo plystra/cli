@@ -3,6 +3,7 @@
 package assembly
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,12 +11,21 @@ import (
 
 	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 	kernelinvocation "github.com/plystra/kernel/invocation"
+	kernellifecycle "github.com/plystra/kernel/lifecycle"
 )
 
 const defaultInterfaceInvocationTimeout = time.Duration(30000000000)
 
-// ErrInterfaceAssembly reports a safe static constructor or binding failure.
-var ErrInterfaceAssembly = errors.New("assemble static Interface runtime")
+var (
+	// ErrInterfaceAssembly reports a safe static constructor or binding failure.
+	ErrInterfaceAssembly = errors.New("assemble static Interface runtime")
+	// ErrInvalidInterfaceRuntime reports an absent or incomplete static Interface runtime.
+	ErrInvalidInterfaceRuntime = errors.New("invalid static Interface runtime")
+	// ErrInterfaceStart reports a safe static Implementation startup failure.
+	ErrInterfaceStart = errors.New("start static Interface runtime")
+	// ErrInterfaceStop reports a safe static Implementation shutdown failure.
+	ErrInterfaceStop = errors.New("stop static Interface runtime")
+)
 
 // ConstructorConfiguration supplies already validated typed Config values to selected constructors.
 type ConstructorConfiguration struct {
@@ -25,12 +35,43 @@ type ConstructorConfiguration struct {
 type InterfaceRuntime struct {
 	catalog     kernelinvocation.Catalog
 	dispatcher  *kernelinvocation.Dispatcher
+	lifecycle   *kernellifecycle.Manager
 	initialized bool
 }
 
 // Valid reports whether the complete immutable catalog is live.
 func (runtime InterfaceRuntime) Valid() bool {
-	return runtime.initialized && runtime.dispatcher != nil && runtime.dispatcher.Published() && len(runtime.catalog.Bindings()) == 2
+	return runtime.initialized && runtime.dispatcher != nil && runtime.dispatcher.Published() && runtime.lifecycle != nil && runtime.lifecycle.State().Valid() && len(runtime.catalog.Bindings()) == 2
+}
+
+// State returns the current static Implementation lifecycle state.
+func (runtime InterfaceRuntime) State() kernellifecycle.State {
+	if !runtime.Valid() {
+		return ""
+	}
+	return runtime.lifecycle.State()
+}
+
+// Start starts lifecycle-aware Implementations in constructor dependency order.
+func (runtime InterfaceRuntime) Start(ctx context.Context) error {
+	if !runtime.Valid() {
+		return fmt.Errorf("%w: %w", ErrInterfaceStart, ErrInvalidInterfaceRuntime)
+	}
+	if err := runtime.lifecycle.Start(ctx); err != nil {
+		return fmt.Errorf("%w: %w", ErrInterfaceStart, err)
+	}
+	return nil
+}
+
+// Stop stops active lifecycle-aware Implementations in reverse dependency order.
+func (runtime InterfaceRuntime) Stop(ctx context.Context) error {
+	if !runtime.Valid() {
+		return fmt.Errorf("%w: %w", ErrInterfaceStop, ErrInvalidInterfaceRuntime)
+	}
+	if err := runtime.lifecycle.Stop(ctx); err != nil {
+		return fmt.Errorf("%w: %w", ErrInterfaceStop, err)
+	}
+	return nil
 }
 
 // Catalog returns the frozen exact Interface binding registry.
@@ -58,7 +99,7 @@ func (InterfaceRuntime) LogValue() slog.Value {
 }
 
 // NewInterfaceRuntime constructs every selected Implementation once in dependency order, then publishes all bindings atomically.
-func NewInterfaceRuntime(configuration ConstructorConfiguration) (InterfaceRuntime, error) {
+func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout time.Duration) (InterfaceRuntime, error) {
 	_ = configuration
 	if err := RequireKernelCompatibility(); err != nil {
 		return InterfaceRuntime{}, fmt.Errorf("%w: Kernel compatibility: %w", ErrInterfaceAssembly, err)
@@ -67,8 +108,13 @@ func NewInterfaceRuntime(configuration ConstructorConfiguration) (InterfaceRunti
 	if err != nil {
 		return InterfaceRuntime{}, fmt.Errorf("%w: governed dispatcher", ErrInterfaceAssembly)
 	}
+	lifecycleBindings := make([]kernellifecycle.Binding, 0, 0)
+	lifecycle, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, lifecycleBindings)
+	if err != nil {
+		return InterfaceRuntime{}, fmt.Errorf("%w: implementation lifecycle: %w", ErrInterfaceAssembly, err)
+	}
 	bindings, err := kernelintrinsic.NewBindings(kernelintrinsic.BindingOptions{
-		ModuleVersion: "v0.0.0-20260723092039-32dfaf8542e0",
+		ModuleVersion: "v0.0.0-20260723121420-350fa43a90a4",
 		BuildIdentity: "",
 	})
 	if err != nil {
@@ -84,6 +130,7 @@ func NewInterfaceRuntime(configuration ConstructorConfiguration) (InterfaceRunti
 	return InterfaceRuntime{
 		catalog:     catalog,
 		dispatcher:  dispatcher,
+		lifecycle:   lifecycle,
 		initialized: true,
 	}, nil
 }

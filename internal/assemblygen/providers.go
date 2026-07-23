@@ -109,9 +109,6 @@ func RenderProviders(applicationModulePath string, inputs []ProviderInput) ([]by
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "\tkernelconfiguration \"github.com/plystra/kernel/configuration\"")
 	fmt.Fprintln(&source, "\tkernellifecycle \"github.com/plystra/kernel/lifecycle\"")
-	if len(providers) != 0 {
-		fmt.Fprintln(&source, "\tkernelplugin \"github.com/plystra/kernel/plugin\"")
-	}
 	for _, imported := range imports {
 		fmt.Fprintf(&source, "\t%s %s\n", imported.alias, strconv.Quote(imported.path))
 	}
@@ -281,12 +278,8 @@ func RenderProviders(applicationModulePath string, inputs []ProviderInput) ([]by
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintf(&source, "\tbindings := make([]kernellifecycle.Binding, 0, %d)\n", len(providers))
 	for index, provider := range providers {
-		fmt.Fprintf(&source, "\tif lifecycleProvider, ok := any(providers.plugin%d).(kernellifecycle.Provider); ok {\n", index)
-		fmt.Fprintf(&source, "\t\tpluginID, err := kernelplugin.ParseID(%s)\n", strconv.Quote(provider.PluginID))
-		fmt.Fprintln(&source, "\t\tif err != nil {")
-		fmt.Fprintf(&source, "\t\t\treturn nil, fmt.Errorf(\"%%w: generated Plugin ID %%q: %%w\", ErrProviderLifecycle, %s, err)\n", strconv.Quote(provider.PluginID))
-		fmt.Fprintln(&source, "\t\t}")
-		fmt.Fprintln(&source, "\t\tbinding, err := kernellifecycle.NewBinding(pluginID, lifecycleProvider)")
+		fmt.Fprintf(&source, "\tif lifecycleInstance, ok := any(providers.plugin%d).(kernellifecycle.Instance); ok {\n", index)
+		fmt.Fprintf(&source, "\t\tbinding, err := kernellifecycle.NewBinding(%s, lifecycleInstance)\n", strconv.Quote(provider.ImportPath+".New"))
 		fmt.Fprintln(&source, "\t\tif err != nil {")
 		fmt.Fprintf(&source, "\t\t\treturn nil, fmt.Errorf(\"%%w: plugin %%q: %%w\", ErrProviderLifecycle, %s, err)\n", strconv.Quote(provider.PluginID))
 		fmt.Fprintln(&source, "\t\t}")

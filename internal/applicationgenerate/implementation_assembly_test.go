@@ -42,22 +42,35 @@ import "sync"
 
 var (
 	mu sync.Mutex
-	order []string
+	events []string
 	next int64
 )
 
 func Constructed(name string) int64 {
 	mu.Lock()
 	defer mu.Unlock()
-	order = append(order, name)
+	events = append(events, "construct:"+name)
 	next++
 	return next
 }
 
-func Order() []string {
+func Lifecycle(event string) {
 	mu.Lock()
 	defer mu.Unlock()
-	return append([]string(nil), order...)
+	events = append(events, event)
+}
+
+func Events() []string {
+	mu.Lock()
+	defer mu.Unlock()
+	return append([]string(nil), events...)
+}
+
+func Reset() {
+	mu.Lock()
+	defer mu.Unlock()
+	events = nil
+	next = 0
 }
 `)
 	writeFile(t, filepath.Join(root, "audit", "service.go"), `package audit
@@ -78,6 +91,16 @@ func New() (*service, error) {
 	return &service{}, nil
 }
 
+func (*service) Start(context.Context) error {
+	probe.Lifecycle("start:audit")
+	return nil
+}
+
+func (*service) Stop(context.Context) error {
+	probe.Lifecycle("stop:audit")
+	return nil
+}
+
 func (*service) Write(ctx context.Context, request writev1.Request) (writev1.Response, error) {
 	if _, governed := kernelinvocation.Current(ctx); !governed {
 		panic("audit call bypassed Kernel governance")
@@ -89,6 +112,8 @@ func (*service) Write(ctx context.Context, request writev1.Request) (writev1.Res
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 
 	plystra "github.com/plystra/kernel"
 	checkv1 "example.com/acme/static-interface-runtime/interfaces/app/check/v1"
@@ -104,10 +129,27 @@ type service struct {
 	instance int64
 }
 
+var failStart atomic.Bool
+
+func SetStartFailure(value bool) { failStart.Store(value) }
+
 //plystra:implements app.check/v1
 //plystra:implements app.run/v1
 func New(audit writev1.Interface, notify plystra.Optional[sendv1.Interface]) (*service, error) {
 	return &service{audit: audit, notify: notify, instance: probe.Constructed("app")}, nil
+}
+
+func (*service) Start(context.Context) error {
+	probe.Lifecycle("start:app")
+	if failStart.Load() {
+		return errors.New("private-startup-secret")
+	}
+	return nil
+}
+
+func (*service) Stop(context.Context) error {
+	probe.Lifecycle("stop:app")
+	return nil
 }
 
 func (service *service) Check(context.Context, checkv1.Request) (checkv1.Response, error) {
@@ -152,13 +194,16 @@ func (service *service) Run(ctx context.Context, request runv1.Request) (runv1.R
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
+	appimplementation "example.com/acme/static-interface-runtime/app"
 	bootstrap "example.com/acme/static-interface-runtime/generated/go/bootstrap"
 	checkv1 "example.com/acme/static-interface-runtime/interfaces/app/check/v1"
 	runv1 "example.com/acme/static-interface-runtime/interfaces/app/run/v1"
 	"example.com/acme/static-interface-runtime/probe"
 	kernelinvocation "github.com/plystra/kernel/invocation"
+	kernellifecycle "github.com/plystra/kernel/lifecycle"
 )
 
 func TestRuntime(t *testing.T) {
@@ -169,17 +214,16 @@ func TestRuntime(t *testing.T) {
 	if err := application.Start(context.Background()); err != nil {
 		t.Fatalf("Application.Start: %v", err)
 	}
-	t.Cleanup(func() {
-		if err := application.Stop(context.Background()); err != nil {
-			t.Errorf("Application.Stop: %v", err)
-		}
-	})
+	if application.State() != kernellifecycle.StateRunning {
+		t.Fatalf("Application.State after Start = %s", application.State())
+	}
 	runtime := application.Interfaces()
 	if !runtime.Valid() {
 		t.Fatal("bootstrap returned an invalid static Interface runtime")
 	}
-	if order := probe.Order(); !reflect.DeepEqual(order, []string{"audit", "app"}) {
-		t.Fatalf("constructor order = %v", order)
+	wantStarted := []string{"construct:audit", "construct:app", "start:audit", "start:app"}
+	if events := probe.Events(); !reflect.DeepEqual(events, wantStarted) {
+		t.Fatalf("constructor and startup order = %v, want %v", events, wantStarted)
 	}
 	checked, err := runtime.AppCheckV1().Check(context.Background(), checkv1.Request{})
 	if err != nil {
@@ -205,6 +249,32 @@ func TestRuntime(t *testing.T) {
 		if !seen[id] {
 			t.Fatalf("catalog omits %s: %v", id, seen)
 		}
+	}
+	if err := application.Stop(context.Background()); err != nil {
+		t.Fatalf("Application.Stop: %v", err)
+	}
+	wantStopped := append(append([]string(nil), wantStarted...), "stop:app", "stop:audit")
+	if events := probe.Events(); !reflect.DeepEqual(events, wantStopped) || application.State() != kernellifecycle.StateStopped {
+		t.Fatalf("shutdown order = %v, State %s; want %v, stopped", events, application.State(), wantStopped)
+	}
+
+	probe.Reset()
+	appimplementation.SetStartFailure(true)
+	defer appimplementation.SetStartFailure(false)
+	failed, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+	if err != nil || !failed.Valid() {
+		t.Fatalf("bootstrap.New(failing) = %#v, %v", failed, err)
+	}
+	err = failed.Start(context.Background())
+	if err == nil || strings.Contains(err.Error(), "private-startup-secret") || failed.State() != kernellifecycle.StateFailed {
+		t.Fatalf("failing Application.Start = %v, State %s", err, failed.State())
+	}
+	wantRollback := []string{"construct:audit", "construct:app", "start:audit", "start:app", "stop:app", "stop:audit"}
+	if events := probe.Events(); !reflect.DeepEqual(events, wantRollback) {
+		t.Fatalf("partial-startup rollback = %v, want %v", events, wantRollback)
+	}
+	if err := failed.Stop(context.Background()); err != nil || failed.State() != kernellifecycle.StateStopped || !reflect.DeepEqual(probe.Events(), wantRollback) {
+		t.Fatalf("post-rollback Stop = %v, State %s, events %v", err, failed.State(), probe.Events())
 	}
 }
 `)

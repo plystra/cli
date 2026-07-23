@@ -41,7 +41,7 @@ import (
 )
 
 // KernelVersion is the exact Kernel release targeted by this CLI release.
-const KernelVersion = "v0.0.0-20260723092039-32dfaf8542e0"
+const KernelVersion = "v0.0.0-20260723121420-350fa43a90a4"
 
 const maximumGoEnvironmentValueBytes = 64 << 10
 
