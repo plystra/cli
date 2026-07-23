@@ -88,6 +88,189 @@ func TestResolveBuildsSelectedInterfaceConstructorGraphFromConfiguration(t *test
 	}
 }
 
+func TestResolveCollectsEnvironmentExposureAsInterfaceRequirement(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModule(t, root, "example.com/interface-app")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {expose: [app.run/v1]}\n")
+	writeResolvedInterface(t, root, "app/run/v1", "runv1", "app.run/v1", "Run")
+	writeResolvedInterface(t, root, "info/read/v1", "readv1", "info.read/v1", "Read")
+	writeResolvedSimpleImplementation(t, root, "app", "app.run/v1", "app/run/v1", "Run")
+	writeResolvedSimpleImplementation(t, root, "info", "info.read/v1", "info/read/v1", "Read")
+	before := snapshotTree(t, root)
+	environment := goEnvironment(map[string]string{
+		"GOWORK":  "off",
+		"GOPROXY": "off",
+		"GOSUMDB": "off",
+	})
+
+	defaultResult, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       root,
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Resolve default: %v", err)
+	}
+	if roots := defaultResult.InterfaceResolution().Graph().Roots(); len(roots) != 0 {
+		t.Fatalf("default Interface roots = %#v", roots)
+	}
+	if selections := defaultResult.InterfaceResolution().Selections(); len(selections) != 0 {
+		t.Fatalf("default Interface selections = %#v", selections)
+	}
+
+	production, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:           root,
+		EnvironmentName: "production",
+		Environment:     environment,
+	})
+	if err != nil {
+		t.Fatalf("Resolve production: %v", err)
+	}
+	roots := production.InterfaceResolution().Graph().Roots()
+	if len(roots) != 1 || roots[0].InterfaceID().String() != "app.run/v1" || !reflect.DeepEqual(roots[0].Sources(), []string{`plystra.production.yaml http.expose["app.run/v1"]`}) {
+		t.Fatalf("production Interface roots = %#v", roots)
+	}
+	if got := resolvedSelectionSummaries(production.InterfaceResolution()); !reflect.DeepEqual(got, []string{
+		"app.run/v1=example.com/interface-app/app.New:unique-compatible",
+	}) {
+		t.Fatalf("production selections = %v", got)
+	}
+	if requirements := production.Resolution().Context().Requirements(); len(requirements) != 0 {
+		t.Fatalf("Interface-only exposure entered legacy Capability requirements: %v", requirements)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("selected Interface exposure resolution mutated files:\nbefore: %#v\nafter: %#v", before, after)
+	}
+}
+
+func TestResolveCollectsDependencyExposureWithComposedProvenance(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	dependencyRoot := filepath.Join(parent, "platform")
+	writeModule(t, dependencyRoot, "example.com/interface-platform")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "http: {expose: [app.run/v1]}\n")
+	writeResolvedInterface(t, dependencyRoot, "app/run/v1", "runv1", "app.run/v1", "Run")
+	writeFile(t, filepath.Join(dependencyRoot, "app", "service.go"), `package app
+
+import (
+	"context"
+
+	runv1 "example.com/interface-platform/interfaces/app/run/v1"
+)
+
+type Service struct{}
+
+//plystra:implements app.run/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) {
+	return runv1.Response{}, nil
+}
+`)
+
+	root := filepath.Join(parent, "application")
+	writeFile(t, filepath.Join(root, "go.mod"), `module example.com/interface-consumer
+
+go 1.26
+
+require example.com/interface-platform v1.2.3
+
+replace example.com/interface-platform => ../platform
+`)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	before := snapshotTree(t, root)
+	dependencyBefore := snapshotTree(t, dependencyRoot)
+	resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start: root,
+		Environment: goEnvironment(map[string]string{
+			"GOWORK":  "off",
+			"GOPROXY": "off",
+			"GOSUMDB": "off",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	roots := resolved.InterfaceResolution().Graph().Roots()
+	wantSource := `example.com/interface-platform@v1.2.3/plystra.yaml http.expose["app.run/v1"]`
+	if len(roots) != 1 || roots[0].InterfaceID().String() != "app.run/v1" || !reflect.DeepEqual(roots[0].Sources(), []string{wantSource}) {
+		t.Fatalf("dependency exposure roots = %#v", roots)
+	}
+	if got := resolvedSelectionSummaries(resolved.InterfaceResolution()); !reflect.DeepEqual(got, []string{
+		"app.run/v1=example.com/interface-platform/app.New:unique-compatible",
+	}) {
+		t.Fatalf("dependency exposure selections = %v", got)
+	}
+	if !resolved.ConfigurationMaintenance().Changed() {
+		t.Fatal("dependency exposure was not represented in planned root maintenance")
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("dependency exposure resolution mutated current Project:\nbefore: %#v\nafter: %#v", before, after)
+	}
+	if after := snapshotTree(t, dependencyRoot); !reflect.DeepEqual(after, dependencyBefore) {
+		t.Fatalf("dependency exposure resolution mutated dependency Project:\nbefore: %#v\nafter: %#v", dependencyBefore, after)
+	}
+}
+
+func TestResolveRejectsInvalidExposedInterfaceBeforeLegacyResolution(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		prepare   func(testing.TB, string)
+		wantError error
+		want      []string
+	}{
+		{
+			name:      "missing canonical Interface",
+			wantError: interfaceresolution.ErrUnknownInterface,
+			want:      []string{"missing.run/v1", "visible canonical package"},
+		},
+		{
+			name: "ambiguous Implementation",
+			prepare: func(t testing.TB, root string) {
+				writeResolvedInterface(t, root, "app/run/v1", "runv1", "app.run/v1", "Run")
+				writeResolvedSimpleImplementation(t, root, "appone", "app.run/v1", "app/run/v1", "Run")
+				writeResolvedSimpleImplementation(t, root, "apptwo", "app.run/v1", "app/run/v1", "Run")
+			},
+			wantError: interfaceresolution.ErrAmbiguousImplementation,
+			want:      []string{"app.run/v1", "appone.New", "apptwo.New", `interfaces.use["app.run/v1"]`},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeModule(t, root, "example.com/interface-app")
+			identifier := "missing.run/v1"
+			if test.prepare != nil {
+				identifier = "app.run/v1"
+				test.prepare(t, root)
+			}
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: ["+identifier+"]}\n")
+			before := snapshotTree(t, root)
+			_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+				Start: root,
+				Environment: goEnvironment(map[string]string{
+					"GOWORK":  "off",
+					"GOPROXY": "off",
+					"GOSUMDB": "off",
+				}),
+			})
+			if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, test.wantError) || !containsResolutionFragments(err.Error(), test.want...) {
+				t.Fatalf("Resolve error = %v", err)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed exposed Interface resolution mutated files:\nbefore: %#v\nafter: %#v", before, after)
+			}
+		})
+	}
+}
+
 func TestResolveRejectsMissingInterfaceImplementationWithCompletePath(t *testing.T) {
 	t.Parallel()
 

@@ -13,6 +13,7 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/modulemutation"
 	"github.com/plystra/cli/internal/projectlocate"
 )
@@ -81,11 +82,15 @@ func SelectedManifestWrite(moduleRoot string, id capabilityid.Identifier, config
 	}
 	snapshot := target.Snapshot()
 	original := snapshot.Data()
+	exposureID, err := interfaceid.Parse(id.String())
+	if err != nil {
+		return atomicfs.Write{}, false, applicationresolve.ConfigurationSelection{}, fmt.Errorf("%w: adapt legacy Capability ID to Interface exposure: %w", ErrManifestWrite, err)
+	}
 	addExposure := applicationmeta.AddHTTPExposure
 	if target.EnvironmentOverlay() {
 		addExposure = applicationmeta.AddHTTPExposureOverlay
 	}
-	updated, changed, err := addExposure(original, id)
+	updated, changed, err := addExposure(original, exposureID)
 	if err != nil {
 		return atomicfs.Write{}, false, applicationresolve.ConfigurationSelection{}, fmt.Errorf("%w: %w", ErrManifestWrite, err)
 	}

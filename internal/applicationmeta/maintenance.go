@@ -239,21 +239,21 @@ func maintenanceDecisions(manifest Manifest, schemas SchemaLookup) ([]maintenanc
 	result := make([]maintenanceDecision, 0)
 	for _, exposure := range manifest.httpExposures {
 		result = append(result, maintenanceDecision{
-			path:   fmt.Sprintf("http.expose[%q]", exposure.id.String()),
-			digest: declarationDigest("http.expose", exposure.id, false),
-			field:  maintenanceHTTPExposure,
-			id:     exposure.id,
-			source: exposure.source,
+			path:        fmt.Sprintf("http.expose[%q]", exposure.id.String()),
+			digest:      interfaceDeclarationDigest("http.expose", exposure.id, false),
+			field:       maintenanceHTTPExposure,
+			interfaceID: exposure.id,
+			source:      exposure.source,
 		})
 	}
 	for _, removal := range manifest.removedHTTPExposures {
 		result = append(result, maintenanceDecision{
-			path:    fmt.Sprintf("http.expose[%q]", removal.id.String()),
-			digest:  declarationDigest("http.expose", removal.id, true),
-			removed: true,
-			field:   maintenanceHTTPExposure,
-			id:      removal.id,
-			source:  removal.source,
+			path:        fmt.Sprintf("http.expose[%q]", removal.id.String()),
+			digest:      interfaceDeclarationDigest("http.expose", removal.id, true),
+			removed:     true,
+			field:       maintenanceHTTPExposure,
+			interfaceID: removal.id,
+			source:      removal.source,
 		})
 	}
 	for _, requirement := range manifest.requirements {
@@ -636,7 +636,7 @@ func applyMaintenanceDecisions(root *yaml.Node, current, target map[string]maint
 func removeMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) error {
 	switch decision.field {
 	case maintenanceHTTPExposure:
-		return removeSetMaintenanceDecision(root, []string{"http", "expose"}, decision.id.String(), decision.removed)
+		return removeSetMaintenanceDecision(root, []string{"http", "expose"}, decision.interfaceID.String(), decision.removed)
 	case maintenanceRequirement:
 		return removeSetMaintenanceDecision(root, []string{"capabilities", "require"}, decision.id.String(), decision.removed)
 	case maintenanceProvider:
@@ -657,7 +657,7 @@ func removeMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) er
 func setMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) error {
 	switch decision.field {
 	case maintenanceHTTPExposure:
-		return setSetMaintenanceDecision(root, []string{"http", "expose"}, decision.id.String(), decision.removed)
+		return setSetMaintenanceDecision(root, []string{"http", "expose"}, decision.interfaceID.String(), decision.removed)
 	case maintenanceRequirement:
 		return setSetMaintenanceDecision(root, []string{"capabilities", "require"}, decision.id.String(), decision.removed)
 	case maintenanceProvider:

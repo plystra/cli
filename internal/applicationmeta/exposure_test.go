@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationmeta"
-	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/interfaceid"
 )
 
 func TestAddHTTPExposurePreservesApplicationSemantics(t *testing.T) {
@@ -177,9 +177,9 @@ func TestAddHTTPExposureRejectsInvalidInputsWithoutPartialOutput(t *testing.T) {
 	tests := []struct {
 		name string
 		data []byte
-		id   capabilityid.Identifier
+		id   interfaceid.Identifier
 	}{
-		{name: "empty Capability", data: []byte("{}\n")},
+		{name: "empty Interface", data: []byte("{}\n")},
 		{name: "invalid manifest", data: []byte("unknown: true\n"), id: mustExposureID(t, "kernel.health/v1")},
 		{name: "duplicate exposure", data: []byte("http: {expose: [kernel.health/v1, kernel.health/v1]}\n"), id: mustExposureID(t, "kernel.info/v1")},
 	}
@@ -195,9 +195,9 @@ func TestAddHTTPExposureRejectsInvalidInputsWithoutPartialOutput(t *testing.T) {
 	}
 }
 
-func mustExposureID(t *testing.T, value string) capabilityid.Identifier {
+func mustExposureID(t *testing.T, value string) interfaceid.Identifier {
 	t.Helper()
-	id, err := capabilityid.Parse(value)
+	id, err := interfaceid.Parse(value)
 	if err != nil {
 		t.Fatalf("Parse(%q): %v", value, err)
 	}

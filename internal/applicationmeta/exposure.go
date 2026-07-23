@@ -7,18 +7,18 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/interfaceid"
 	"go.yaml.in/yaml/v3"
 )
 
 // ErrAddHTTPExposure reports that plystra.yaml could not safely expose one
-// more canonical Capability.
-var ErrAddHTTPExposure = errors.New("add HTTP Capability exposure")
+// more canonical Interface.
+var ErrAddHTTPExposure = errors.New("add HTTP Interface exposure")
 
 // AddHTTPExposure returns deterministic plystra.yaml bytes that include id in
 // http.expose. Existing bytes are returned unchanged when id is already
 // present. Changed documents retain comments and all unrelated YAML values.
-func AddHTTPExposure(data []byte, id capabilityid.Identifier) ([]byte, bool, error) {
+func AddHTTPExposure(data []byte, id interfaceid.Identifier) ([]byte, bool, error) {
 	return addHTTPExposure(data, id, Parse)
 }
 
@@ -26,15 +26,15 @@ func AddHTTPExposure(data []byte, id capabilityid.Identifier) ([]byte, bool, err
 // bytes that include id in http.expose. It preserves the same comments,
 // tombstones, and unrelated values as AddHTTPExposure while validating fields
 // with environment-overlay semantics.
-func AddHTTPExposureOverlay(data []byte, id capabilityid.Identifier) ([]byte, bool, error) {
+func AddHTTPExposureOverlay(data []byte, id interfaceid.Identifier) ([]byte, bool, error) {
 	return addHTTPExposure(data, id, func(input []byte) (Manifest, error) {
 		return ParseOverlaySource("plystra.<environment>.yaml", input)
 	})
 }
 
-func addHTTPExposure(data []byte, id capabilityid.Identifier, parse func([]byte) (Manifest, error)) ([]byte, bool, error) {
+func addHTTPExposure(data []byte, id interfaceid.Identifier, parse func([]byte) (Manifest, error)) ([]byte, bool, error) {
 	if id.String() == "" {
-		return nil, false, fmt.Errorf("%w: Capability is empty", ErrAddHTTPExposure)
+		return nil, false, fmt.Errorf("%w: Interface is empty", ErrAddHTTPExposure)
 	}
 	before, err := parse(data)
 	if err != nil {
@@ -203,9 +203,9 @@ func manifestDifferenceOutsideHTTPExposure(left, right Manifest) string {
 	return ""
 }
 
-func preservedOtherExposureRemovals(before, after []capabilityRemoval, added capabilityid.Identifier) bool {
-	filter := func(values []capabilityRemoval) []capabilityRemoval {
-		result := make([]capabilityRemoval, 0, len(values))
+func preservedOtherExposureRemovals(before, after []interfaceRemoval, added interfaceid.Identifier) bool {
+	filter := func(values []interfaceRemoval) []interfaceRemoval {
+		result := make([]interfaceRemoval, 0, len(values))
 		for _, value := range values {
 			if value.id != added {
 				result = append(result, value)
@@ -221,15 +221,15 @@ func preservedOtherExposureRemovals(before, after []capabilityRemoval, added cap
 	return slices.Equal(filter(before), filter(after))
 }
 
-func hasExactlyOneAddedExposure(before, after []HTTPExposure, added capabilityid.Identifier) bool {
+func hasExactlyOneAddedExposure(before, after []HTTPExposure, added interfaceid.Identifier) bool {
 	if len(after) != len(before)+1 {
 		return false
 	}
-	beforeIDs := make([]capabilityid.Identifier, len(before))
+	beforeIDs := make([]interfaceid.Identifier, len(before))
 	for index, exposure := range before {
 		beforeIDs[index] = exposure.ID()
 	}
-	afterIDs := make([]capabilityid.Identifier, 0, len(after)-1)
+	afterIDs := make([]interfaceid.Identifier, 0, len(after)-1)
 	found := 0
 	for _, exposure := range after {
 		if exposure.ID() == added {

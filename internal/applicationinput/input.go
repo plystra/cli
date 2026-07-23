@@ -187,6 +187,13 @@ func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, s
 	}
 	httpExposures := make([]generationresolution.ApplicationHTTPExposure, 0, len(manifest.HTTPExposures()))
 	for _, exposure := range manifest.HTTPExposures() {
+		legacyID, err := capabilityid.Parse(exposure.ID().String())
+		if err != nil {
+			return generationresolution.ExtensionInput{}, fmt.Errorf("%w: HTTP exposure %s cannot enter the legacy Capability pipeline: %v", ErrBuild, exposure.ID(), err)
+		}
+		if _, legacy := groups[legacyID]; !legacy {
+			continue
+		}
 		field := fmt.Sprintf("http.expose[%q]", exposure.ID().String())
 		sources, err := configurationRequirementSources(sourceContext, exposure.Source(), field, providerresolution.RequirementExposure)
 		if err != nil {

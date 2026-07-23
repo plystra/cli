@@ -68,7 +68,7 @@ config:
 		`http.cors`:                              applicationmeta.ConfigurationSummaryObject,
 		`http.cors.allow_credentials`:            applicationmeta.ConfigurationSummaryBoolean,
 		`http.cors.allowed_origins`:              applicationmeta.ConfigurationSummaryArray,
-		`http.expose["email.send/v1"]`:           applicationmeta.ConfigurationSummaryCapability,
+		`http.expose["email.send/v1"]`:           applicationmeta.ConfigurationSummaryInterface,
 		`http.transports.connect`:                applicationmeta.ConfigurationSummaryBoolean,
 		`http.transports.rest`:                   applicationmeta.ConfigurationSummaryBoolean,
 		`timeouts.startup`:                       applicationmeta.ConfigurationSummaryDuration,

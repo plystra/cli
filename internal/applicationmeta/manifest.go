@@ -19,6 +19,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/pluginid"
 	"go.yaml.in/yaml/v3"
 )
@@ -76,15 +77,15 @@ func (a Alias) Deprecated() string { return a.deprecated }
 // Source returns stable configuration-path provenance for diagnostics.
 func (a Alias) Source() string { return a.source }
 
-// HTTPExposure is one explicit canonical Capability selected for generated
+// HTTPExposure is one explicit canonical Interface selected for generated
 // HTTP and browser-facing application surfaces.
 type HTTPExposure struct {
-	id     capabilityid.Identifier
+	id     interfaceid.Identifier
 	source string
 }
 
-// ID returns the exact canonical Capability ID declared under http.expose.
-func (e HTTPExposure) ID() capabilityid.Identifier { return e.id }
+// ID returns the exact canonical Interface ID declared under http.expose.
+func (e HTTPExposure) ID() interfaceid.Identifier { return e.id }
 
 // Source returns stable configuration-path provenance for diagnostics.
 func (e HTTPExposure) Source() string { return e.source }
@@ -227,7 +228,7 @@ type Manifest struct {
 	httpTransports               httpTransportLayer
 	httpCORS                     httpCORSLayer
 	httpExposures                []HTTPExposure
-	removedHTTPExposures         []capabilityRemoval
+	removedHTTPExposures         []interfaceRemoval
 	requirements                 []CapabilityRequirement
 	removedRequirements          []capabilityRemoval
 	providerChoices              []ProviderChoice
@@ -551,7 +552,7 @@ func parseConfigurations(node *yaml.Node) ([]PluginConfiguration, []pluginConfig
 	return configurations, removals, nil
 }
 
-func parseHTTP(node *yaml.Node, sparseOverlay bool) (string, bool, bool, httpTransportLayer, httpCORSLayer, []HTTPExposure, []capabilityRemoval, error) {
+func parseHTTP(node *yaml.Node, sparseOverlay bool) (string, bool, bool, httpTransportLayer, httpCORSLayer, []HTTPExposure, []interfaceRemoval, error) {
 	if node == nil {
 		return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, nil
 	}
@@ -592,7 +593,7 @@ func parseHTTP(node *yaml.Node, sparseOverlay bool) (string, bool, bool, httpTra
 	if !exists {
 		return address, hasAddress, removeAddress, transports, cors, nil, nil, nil
 	}
-	exposures, removals, err := parseCapabilitySet(exposeNode, "http.expose", func(id capabilityid.Identifier, source string) HTTPExposure {
+	exposures, removals, err := parseInterfaceSet(exposeNode, "http.expose", func(id interfaceid.Identifier, source string) HTTPExposure {
 		return HTTPExposure{id: id, source: source}
 	})
 	if err != nil {

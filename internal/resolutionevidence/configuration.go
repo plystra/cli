@@ -456,7 +456,11 @@ func validConfigurationFieldPath(value string) bool {
 	case "http.address", "http.transports.connect", "http.transports.rest", "http.cors", "http.cors.allowed_origins", "http.cors.allow_credentials", "timeouts.startup":
 		return true
 	}
-	for _, prefix := range []string{"http.expose", "capabilities.require", "capabilities.use", "capabilities.aliases"} {
+	if keys, ok := configurationPathKeys(value, "http.expose"); ok && len(keys) == 1 {
+		_, err := interfaceid.Parse(keys[0])
+		return err == nil
+	}
+	for _, prefix := range []string{"capabilities.require", "capabilities.use", "capabilities.aliases"} {
 		keys, ok := configurationPathKeys(value, prefix)
 		if !ok || len(keys) != 1 {
 			continue

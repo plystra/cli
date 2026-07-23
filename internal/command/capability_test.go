@@ -480,7 +480,7 @@ func TestRunCapabilityRejectsUnexpectedGeneratedOutput(t *testing.T) {
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	missingBefore := commandTree(t, root)
 	exitCode, stdout, stderr := runCommand(t, []string{"capability", "expose", "missing.operation/v1"}, root, environment)
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "missing.operation/v1") || !strings.Contains(stderr, "absent from the visible canonical catalog") {
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "missing.operation/v1") || !strings.Contains(stderr, "unknown Interface") || !strings.Contains(stderr, "not defined by a visible canonical package") {
 		t.Fatalf("missing capability expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, missingBefore) {

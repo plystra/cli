@@ -129,9 +129,9 @@ func overlayHTTPCORS(base, overlay httpCORSLayer) (httpCORSLayer, error) {
 	return result, nil
 }
 
-func overlayExposureSet(base, overlay Manifest) ([]HTTPExposure, []capabilityRemoval) {
-	values := make(map[capabilityid.Identifier]HTTPExposure)
-	removals := make(map[capabilityid.Identifier]capabilityRemoval)
+func overlayExposureSet(base, overlay Manifest) ([]HTTPExposure, []interfaceRemoval) {
+	values := make(map[interfaceid.Identifier]HTTPExposure)
+	removals := make(map[interfaceid.Identifier]interfaceRemoval)
 	for _, value := range base.httpExposures {
 		values[value.id] = value
 	}
@@ -151,7 +151,7 @@ func overlayExposureSet(base, overlay Manifest) ([]HTTPExposure, []capabilityRem
 		result = append(result, value)
 	}
 	sort.Slice(result, func(left, right int) bool { return result[left].id.String() < result[right].id.String() })
-	return result, sortedCapabilityRemovals(removals)
+	return result, sortedInterfaceRemovals(removals)
 }
 
 func overlayRequirementSet(base, overlay Manifest) ([]CapabilityRequirement, []capabilityRemoval) {

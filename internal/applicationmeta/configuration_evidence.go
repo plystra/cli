@@ -79,12 +79,12 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 		summary := ConfigurationSummaryRemoval
 		if !decision.removed {
 			switch decision.field {
-			case maintenanceHTTPExposure, maintenanceRequirement:
+			case maintenanceRequirement:
 				summary = ConfigurationSummaryCapability
+			case maintenanceHTTPExposure, maintenanceInterfaceRequirement:
+				summary = ConfigurationSummaryInterface
 			case maintenanceProvider:
 				summary = ConfigurationSummaryProvider
-			case maintenanceInterfaceRequirement:
-				summary = ConfigurationSummaryInterface
 			case maintenanceImplementationChoice:
 				summary = ConfigurationSummaryImplementation
 			case maintenanceAlias:

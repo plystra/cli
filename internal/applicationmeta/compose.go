@@ -11,6 +11,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/interfaceid"
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 )
 
@@ -246,7 +247,7 @@ func effectiveResolutionSources(manifest Manifest, provenance []Provenance) []Pr
 	effective := make(map[string]string)
 	for _, exposure := range manifest.httpExposures {
 		path := fmt.Sprintf("http.expose[%q]", exposure.id.String())
-		effective[path] = declarationDigest("http.expose", exposure.id, false)
+		effective[path] = interfaceDeclarationDigest("http.expose", exposure.id, false)
 	}
 	for _, requirement := range manifest.requirements {
 		path := fmt.Sprintf("capabilities.require[%q]", requirement.id.String())
@@ -293,7 +294,7 @@ func validateHTTPTransportSelection(manifest Manifest) error {
 		declared[index] = fmt.Sprintf("%s at %s", exposure.ID(), exposure.Source())
 	}
 	return fmt.Errorf(
-		"%w: http.expose is nonempty while http.transports.connect and http.transports.rest are both false; enable at least one transport in the selected current-project configuration; exposed Capabilities: %s",
+		"%w: http.expose is nonempty while http.transports.connect and http.transports.rest are both false; enable at least one transport in the selected current-project configuration; exposed Interfaces: %s",
 		ErrHTTPTransportSelection,
 		strings.Join(declared, ", "),
 	)
@@ -321,30 +322,30 @@ type setCandidate struct {
 	removalSources map[string]struct{}
 }
 
-func composeExposureSet(dependencies []Dependency, current []HTTPExposure, currentRemovals []capabilityRemoval, records map[string]*provenanceRecord) ([]HTTPExposure, error) {
-	inherited := make(map[capabilityid.Identifier]*setCandidate)
+func composeExposureSet(dependencies []Dependency, current []HTTPExposure, currentRemovals []interfaceRemoval, records map[string]*provenanceRecord) ([]HTTPExposure, error) {
+	inherited := make(map[interfaceid.Identifier]*interfaceSetCandidate)
 	for _, dependency := range dependencies {
 		for _, exposure := range dependency.Manifest.HTTPExposures() {
 			path := fmt.Sprintf("http.expose[%q]", exposure.id.String())
 			source := dependencySource(dependency, exposure.source)
-			addProvenance(records, path, declarationDigest("http.expose", exposure.id, false), source, false)
-			candidate := ensureSetCandidate(inherited, exposure.id)
+			addProvenance(records, path, interfaceDeclarationDigest("http.expose", exposure.id, false), source, false)
+			candidate := ensureInterfaceSetCandidate(inherited, exposure.id)
 			candidate.valueSources[source] = struct{}{}
 		}
 		for _, removal := range dependency.Manifest.removedHTTPExposures {
 			path := fmt.Sprintf("http.expose[%q]", removal.id.String())
 			source := dependencySource(dependency, removal.source)
-			addProvenance(records, path, declarationDigest("http.expose", removal.id, true), source, true)
-			candidate := ensureSetCandidate(inherited, removal.id)
+			addProvenance(records, path, interfaceDeclarationDigest("http.expose", removal.id, true), source, true)
+			candidate := ensureInterfaceSetCandidate(inherited, removal.id)
 			candidate.removalSources[source] = struct{}{}
 		}
 	}
-	values := make(map[capabilityid.Identifier]HTTPExposure)
+	values := make(map[interfaceid.Identifier]HTTPExposure)
 	for _, exposure := range current {
 		values[exposure.id] = exposure
 	}
-	removed := capabilityRemovalSet(currentRemovals)
-	ids := sortedCandidateIDs(inherited)
+	removed := interfaceRemovalSet(currentRemovals)
+	ids := sortedInterfaceCandidateIDs(inherited)
 	for _, id := range ids {
 		if _, replaced := values[id]; replaced {
 			continue
@@ -354,7 +355,7 @@ func composeExposureSet(dependencies []Dependency, current []HTTPExposure, curre
 		}
 		candidate := inherited[id]
 		if len(candidate.valueSources) > 0 && len(candidate.removalSources) > 0 {
-			return nil, inheritedSetConflict("http.expose", id, candidate)
+			return nil, inheritedInterfaceSetConflict("http.expose", id, candidate)
 		}
 		if len(candidate.valueSources) > 0 {
 			values[id] = HTTPExposure{id: id, source: sortedSet(candidate.valueSources)[0]}
