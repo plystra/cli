@@ -255,7 +255,7 @@ func Build() (*Service, error) {
 		t.Fatalf("Implementations = %#v", implementations)
 	}
 	discovered := implementations[0]
-	if discovered.ModulePath() != "example.com/implementations" || discovered.ModuleVersion() != "" || discovered.PackagePath() != "example.com/implementations/domains/orders/service" || discovered.PackageName() != "service" || discovered.FunctionName() != "Build" || discovered.SourcePath() != "domains/orders/service/new.go" || !discovered.Local() {
+	if discovered.Symbol().String() != "example.com/implementations/domains/orders/service.Build" || discovered.ModulePath() != "example.com/implementations" || discovered.ModuleVersion() != "" || discovered.PackagePath() != "example.com/implementations/domains/orders/service" || discovered.PackageName() != "service" || discovered.FunctionName() != "Build" || discovered.SourcePath() != "domains/orders/service/new.go" || !discovered.Local() {
 		t.Fatalf("Implementation provenance = %#v", discovered)
 	}
 	declared := discovered.Declaration().ImplementedInterfaces()

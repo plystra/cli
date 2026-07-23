@@ -279,6 +279,9 @@ replace example.com/ordinary => ../ordinary
 		if !strings.Contains(implementation.Source(), implementation.ModulePath()+"@") || !strings.HasSuffix(implementation.SourcePath(), "new.go") {
 			t.Fatalf("Implementation provenance = %#v, source %q", implementation, implementation.Source())
 		}
+		if implementation.Symbol().PackagePath() != implementation.PackagePath() || implementation.Symbol().FunctionName() != implementation.FunctionName() {
+			t.Fatalf("Implementation symbol = %#v for %#v", implementation.Symbol(), implementation)
+		}
 		switch implementation.ModulePath() {
 		case "example.com/app":
 			if !implementation.Local() || implementation.ModuleVersion() != "" {
@@ -947,7 +950,7 @@ func implementationSummaries(implementations []implementationinventory.Implement
 		for declarationIndex, declaration := range declared {
 			identifiers[declarationIndex] = declaration.ID().String()
 		}
-		result[index] = implementation.PackagePath() + "." + implementation.FunctionName() + ":" + strings.Join(identifiers, ",")
+		result[index] = implementation.Symbol().String() + ":" + strings.Join(identifiers, ",")
 	}
 	return result
 }

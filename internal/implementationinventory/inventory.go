@@ -9,12 +9,18 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationdecl"
 )
 
-// ErrInvalidInput reports inconsistent package or source provenance supplied
-// by the shared eligible-package discovery boundary.
-var ErrInvalidInput = errors.New("invalid Implementation inventory input")
+var (
+	// ErrInvalidInput reports inconsistent package or source provenance supplied
+	// by the shared eligible-package discovery boundary.
+	ErrInvalidInput = errors.New("invalid Implementation inventory input")
+	// ErrDuplicateSymbol reports an identity collision that would prevent one
+	// constructor symbol from naming exactly one visible Implementation.
+	ErrDuplicateSymbol = errors.New("duplicate Implementation constructor symbol")
+)
 
 // Input is one parsed constructor declaration and its compiled Go package
 // provenance. Callers obtain these values from the shared eligible-package
@@ -38,6 +44,8 @@ type Implementation struct {
 	local         bool
 	declaration   implementationdecl.Declaration
 	types         *types.Package
+	function      *types.Func
+	symbol        constructorsymbol.Symbol
 }
 
 // ModulePath returns the Go Module path that owns the constructor package.
@@ -73,6 +81,9 @@ func (i Implementation) PackageName() string { return i.declaration.PackageName(
 // FunctionName returns the exported constructor function name.
 func (i Implementation) FunctionName() string { return i.declaration.FunctionName() }
 
+// Symbol returns the canonical fully qualified constructor identity.
+func (i Implementation) Symbol() constructorsymbol.Symbol { return i.symbol }
+
 // Declaration returns the immutable parsed constructor declaration.
 func (i Implementation) Declaration() implementationdecl.Declaration { return i.declaration }
 
@@ -88,17 +99,33 @@ func (i Index) Implementations() []Implementation {
 	return append([]Implementation(nil), i.implementations...)
 }
 
+// BySymbol returns the one Implementation identified by symbol.
+func (i Index) BySymbol(symbol constructorsymbol.Symbol) (Implementation, bool) {
+	value := symbol.String()
+	if value == "" {
+		return Implementation{}, false
+	}
+	index := sort.Search(len(i.implementations), func(index int) bool {
+		return i.implementations[index].symbol.String() >= value
+	})
+	if index == len(i.implementations) || i.implementations[index].symbol != symbol {
+		return Implementation{}, false
+	}
+	return i.implementations[index], true
+}
+
 // Build validates shared-loader provenance and constructs a deterministic
 // immutable inventory without performing another filesystem or Go graph scan.
 func Build(inputs []Input) (Index, error) {
 	implementations := make([]Implementation, len(inputs))
 	for index, input := range inputs {
 		position := input.Declaration.Position()
+		symbol, symbolErr := constructorsymbol.New(input.PackagePath, input.Declaration.FunctionName())
 		switch {
 		case input.ModulePath == "" || strings.IndexByte(input.ModulePath, 0) >= 0:
 			return Index{}, fmt.Errorf("%w: constructor module path is empty or unsafe", ErrInvalidInput)
-		case input.PackagePath == "" || strings.IndexByte(input.PackagePath, 0) >= 0:
-			return Index{}, fmt.Errorf("%w: constructor package path is empty or unsafe", ErrInvalidInput)
+		case symbolErr != nil:
+			return Index{}, fmt.Errorf("%w: %v", ErrInvalidInput, symbolErr)
 		case input.Types == nil:
 			return Index{}, fmt.Errorf("%w: constructor package %q has no compiled type information", ErrInvalidInput, input.PackagePath)
 		case input.Types.Path() != input.PackagePath:
@@ -110,6 +137,11 @@ func Build(inputs []Input) (Index, error) {
 		case position.Path == "" || strings.IndexByte(position.Path, 0) >= 0 || position.Line <= 0 || position.Column <= 0:
 			return Index{}, fmt.Errorf("%w: constructor %s.%s has unsafe source provenance", ErrInvalidInput, input.PackagePath, input.Declaration.FunctionName())
 		}
+		object := input.Types.Scope().Lookup(input.Declaration.FunctionName())
+		function, validFunction := object.(*types.Func)
+		if !validFunction || function.Pkg() != input.Types || !function.Exported() {
+			return Index{}, fmt.Errorf("%w: constructor symbol %s does not identify an exported package-level function in compiled type information", ErrInvalidInput, symbol)
+		}
 		implementations[index] = Implementation{
 			modulePath:    input.ModulePath,
 			moduleVersion: input.ModuleVersion,
@@ -117,15 +149,14 @@ func Build(inputs []Input) (Index, error) {
 			local:         input.Local,
 			declaration:   input.Declaration,
 			types:         input.Types,
+			function:      function,
+			symbol:        symbol,
 		}
 	}
 
 	sort.Slice(implementations, func(left, right int) bool {
-		if implementations[left].packagePath != implementations[right].packagePath {
-			return implementations[left].packagePath < implementations[right].packagePath
-		}
-		if implementations[left].FunctionName() != implementations[right].FunctionName() {
-			return implementations[left].FunctionName() < implementations[right].FunctionName()
+		if implementations[left].symbol != implementations[right].symbol {
+			return implementations[left].symbol.String() < implementations[right].symbol.String()
 		}
 		leftPosition := implementations[left].declaration.Position()
 		rightPosition := implementations[right].declaration.Position()
@@ -143,5 +174,10 @@ func Build(inputs []Input) (Index, error) {
 		}
 		return implementations[left].moduleVersion < implementations[right].moduleVersion
 	})
+	for index := 1; index < len(implementations); index++ {
+		if implementations[index-1].symbol == implementations[index].symbol {
+			return Index{}, fmt.Errorf("%w: %s is declared at %s and %s", ErrDuplicateSymbol, implementations[index].symbol, implementations[index-1].Source(), implementations[index].Source())
+		}
+	}
 	return Index{implementations: implementations}, nil
 }

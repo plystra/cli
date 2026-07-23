@@ -2,10 +2,13 @@ package implementationinventory_test
 
 import (
 	"errors"
+	"go/token"
 	"go/types"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationdecl"
 	"github.com/plystra/cli/internal/implementationinventory"
 )
@@ -21,14 +24,14 @@ func TestBuildOrdersAndProtectsDiscoveredImplementations(t *testing.T) {
 			ModuleVersion: "v1.2.3",
 			PackagePath:   "example.com/dependency/zeta",
 			Declaration:   zeta,
-			Types:         types.NewPackage("example.com/dependency/zeta", "zeta"),
+			Types:         compiledPackage("example.com/dependency/zeta", "zeta", "New"),
 		},
 		{
 			ModulePath:  "example.com/app",
 			PackagePath: "example.com/app/alpha",
 			Local:       true,
 			Declaration: alpha,
-			Types:       types.NewPackage("example.com/app/alpha", "alpha"),
+			Types:       compiledPackage("example.com/app/alpha", "alpha", "Build"),
 		},
 	})
 	if err != nil {
@@ -41,6 +44,19 @@ func TestBuildOrdersAndProtectsDiscoveredImplementations(t *testing.T) {
 	}
 	if !slices.Equal(got, []string{"example.com/app/alpha.Build", "example.com/dependency/zeta.New"}) {
 		t.Fatalf("Implementation order = %v", got)
+	}
+	if implementations[0].Symbol().String() != got[0] || implementations[0].Symbol().PackagePath() != implementations[0].PackagePath() || implementations[0].Symbol().FunctionName() != implementations[0].FunctionName() {
+		t.Fatalf("constructor Symbol = %#v for %#v", implementations[0].Symbol(), implementations[0])
+	}
+	if found, exists := index.BySymbol(implementations[1].Symbol()); !exists || found.Symbol() != implementations[1].Symbol() {
+		t.Fatalf("BySymbol = %#v, %t", found, exists)
+	}
+	missing, err := constructorsymbol.Parse("example.com/missing.New")
+	if err != nil {
+		t.Fatalf("Parse missing symbol: %v", err)
+	}
+	if found, exists := index.BySymbol(missing); exists || found.Symbol().String() != "" {
+		t.Fatalf("BySymbol(missing) = %#v, %t", found, exists)
 	}
 	if !implementations[0].Local() || implementations[0].ModuleVersion() != "" || implementations[0].Source() != "example.com/app@local/alpha/new.go:4:6" {
 		t.Fatalf("local Implementation = %#v, source %q", implementations[0], implementations[0].Source())
@@ -69,6 +85,39 @@ func TestBuildRejectsInconsistentCompiledPackageProvenance(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsConstructorAbsentFromCompiledPackage(t *testing.T) {
+	t.Parallel()
+
+	parsed := declaration(t, "service/new.go", "service", "New", "service.operation.run/v1")
+	_, err := implementationinventory.Build([]implementationinventory.Input{{
+		ModulePath:  "example.com/app",
+		PackagePath: "example.com/app/service",
+		Declaration: parsed,
+		Types:       types.NewPackage("example.com/app/service", "service"),
+	}})
+	if !errors.Is(err, implementationinventory.ErrInvalidInput) {
+		t.Fatalf("Build error = %v", err)
+	}
+}
+
+func TestBuildRejectsDuplicateFullyQualifiedConstructorSymbol(t *testing.T) {
+	t.Parallel()
+
+	parsed := declaration(t, "service/new.go", "service", "New", "service.operation.run/v1")
+	compiled := compiledPackage("example.com/app/service", "service", "New")
+	input := implementationinventory.Input{
+		ModulePath:  "example.com/app",
+		PackagePath: "example.com/app/service",
+		Local:       true,
+		Declaration: parsed,
+		Types:       compiled,
+	}
+	_, err := implementationinventory.Build([]implementationinventory.Input{input, input})
+	if !errors.Is(err, implementationinventory.ErrDuplicateSymbol) || !strings.Contains(err.Error(), "example.com/app/service.New") || !strings.Contains(err.Error(), "example.com/app@local/service/new.go:4:6") {
+		t.Fatalf("Build error = %v", err)
+	}
+}
+
 func declaration(t testing.TB, path, packageName, functionName, interfaceID string) implementationdecl.Declaration {
 	t.Helper()
 	declarations, err := implementationdecl.ParseFile(path, []byte("package "+packageName+"\n\n//plystra:implements "+interfaceID+"\nfunc "+functionName+"() {}\n"))
@@ -76,4 +125,11 @@ func declaration(t testing.TB, path, packageName, functionName, interfaceID stri
 		t.Fatalf("ParseFile = %#v, %v", declarations, err)
 	}
 	return declarations[0]
+}
+
+func compiledPackage(path, name, function string) *types.Package {
+	compiled := types.NewPackage(path, name)
+	signature := types.NewSignatureType(nil, nil, nil, nil, nil, false)
+	compiled.Scope().Insert(types.NewFunc(token.NoPos, compiled, function, signature))
+	return compiled
 }
