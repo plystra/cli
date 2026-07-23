@@ -555,11 +555,13 @@ import (
 
 type Remote = remotev1.Interface
 
-type Service struct{}
+type worker struct{}
+type Concrete = worker
+type Failure = error
 
 //plystra:implements service.local.call/v1
-func New(local plystra.Optional[localv1.Interface], remote plystra.Optional[Remote]) (*Service, error) {
-	return &Service{}, nil
+func New(local plystra.Optional[localv1.Interface], remote plystra.Optional[Remote]) (*Concrete, Failure) {
+	return &Concrete{}, nil
 }
 `)
 	before := snapshotFiles(t, parent)
@@ -574,6 +576,9 @@ func New(local plystra.Optional[localv1.Interface], remote plystra.Optional[Remo
 	}
 	if required := implementation.RequiredInterfaces(); len(required) != 0 {
 		t.Fatalf("RequiredInterfaces = %#v", required)
+	}
+	if concrete := implementation.ConcreteType(); concrete.String() != "*example.com/optional/service.worker" || concrete.PackagePath() != "example.com/optional/service" || concrete.TypeName() != "worker" {
+		t.Fatalf("ConcreteType = %#v (%s)", concrete, concrete.String())
 	}
 	optional := implementation.OptionalInterfaces()
 	if len(optional) != 2 {
@@ -684,6 +689,58 @@ func New(%s) (*Service, error) {
 				t.Fatalf("error exposed private test root: %v", err)
 			}
 			if after := snapshotFiles(t, parent); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed discovery mutated source:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
+func TestDiscoverApplicationRejectsInvalidImplementationConstructorResults(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		declarations string
+		constructor  string
+		want         string
+	}{
+		{name: "no results", constructor: "func New() {}", want: "found 0 results"},
+		{name: "one result", constructor: "func New() *Service { return &Service{} }", want: "found 1 results"},
+		{name: "three results", constructor: "func New() (*Service, error, error) { return &Service{}, nil, nil }", want: "found 3 results"},
+		{name: "non-pointer first result", constructor: "func New() (Service, error) { return Service{}, nil }", want: "first result must be a pointer to a defined concrete type"},
+		{name: "pointer to builtin", constructor: "func New() (*int, error) { return new(int), nil }", want: "first result must point to a defined concrete type"},
+		{name: "pointer to unnamed struct", constructor: "func New() (*struct{}, error) { return &struct{}{}, nil }", want: "first result must point to a defined concrete type"},
+		{name: "pointer to interface", declarations: "type Result interface{ Run() }", constructor: "func New() (*Result, error) { return nil, nil }", want: "must point to a concrete type, not a Go interface"},
+		{name: "generic constructor", constructor: "func New[T any]() (*Service, error) { return &Service{}, nil }", want: "constructor must not declare type parameters"},
+		{name: "defined error interface", declarations: "type Failure interface{ Error() string }", constructor: "func New() (*Service, Failure) { return &Service{}, nil }", want: "second result must be the predeclared error type"},
+		{name: "concrete error result", declarations: "type Failure struct{}\nfunc (*Failure) Error() string { return \"failure\" }", constructor: "func New() (*Service, *Failure) { return &Service{}, nil }", want: "second result must be the predeclared error type"},
+		{name: "reversed results", constructor: "func New() (error, *Service) { return nil, &Service{} }", want: "first result must be a pointer to a defined concrete type"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			writeProject(t, root, "example.com/broken")
+			writeFile(t, filepath.Join(root, "interfaces", "operation", "v1", "interface.go"), interfaceSource("operationv1", "service.operation.call/v1", "Call"))
+			writeFile(t, filepath.Join(root, "service", "new.go"), fmt.Sprintf(`package service
+
+type Service struct{}
+%s
+
+//plystra:implements service.operation.call/v1
+%s
+`, test.declarations, test.constructor))
+			before := snapshotFiles(t, root)
+			_, err := discoverApplicationResult(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
+			if !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, implementationinventory.ErrInvalidResult) || !strings.Contains(err.Error(), "example.com/broken/service.New") || !strings.Contains(err.Error(), "example.com/broken@local/service/new.go") || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("DiscoverApplication error = %v", err)
+			}
+			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("error exposed private Project root: %v", err)
+			}
+			if after := snapshotFiles(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("failed discovery mutated source:\nbefore: %#v\nafter:  %#v", before, after)
 			}
 		})

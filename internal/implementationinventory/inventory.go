@@ -29,6 +29,9 @@ var (
 	// ErrInvalidOptionalInterface reports a constructor parameter that resembles
 	// Optional but is not exact plystra.Optional[canonical Interface].
 	ErrInvalidOptionalInterface = errors.New("invalid optional Interface constructor parameter")
+	// ErrInvalidResult reports a constructor result list that is not exactly one
+	// defined concrete pointer followed by the predeclared error type.
+	ErrInvalidResult = errors.New("invalid Implementation constructor result")
 )
 
 // Input is one parsed constructor declaration and its compiled Go package
@@ -44,8 +47,8 @@ type Input struct {
 }
 
 // Implementation is one active authored constructor declaration with stable
-// module, package, and source provenance. Constructor signature and
-// assignability checks are applied by later structural-conformance stages.
+// module, package, source, parameter, and result provenance. Assignability to
+// each declared Interface is applied by the next structural-conformance stage.
 type Implementation struct {
 	modulePath    string
 	moduleVersion string
@@ -59,6 +62,7 @@ type Implementation struct {
 	hasConfig     bool
 	required      []RequiredInterface
 	optional      []OptionalInterface
+	concrete      ConcreteType
 }
 
 // ModulePath returns the Go Module path that owns the constructor package.
@@ -114,6 +118,10 @@ func (i Implementation) RequiredInterfaces() []RequiredInterface {
 func (i Implementation) OptionalInterfaces() []OptionalInterface {
 	return append([]OptionalInterface(nil), i.optional...)
 }
+
+// ConcreteType returns the exact defined non-interface pointer type produced by
+// the constructor.
+func (i Implementation) ConcreteType() ConcreteType { return i.concrete }
 
 // Declaration returns the immutable parsed constructor declaration.
 func (i Implementation) Declaration() implementationdecl.Declaration { return i.declaration }
@@ -189,6 +197,10 @@ func Build(inputs []Input, interfaces []InterfaceInput) (Index, error) {
 		if requiredErr != nil {
 			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidRequiredInterface, symbol, inputSource(input), requiredErr)
 		}
+		concrete, resultErr := validateConstructorResult(function)
+		if resultErr != nil {
+			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidResult, symbol, inputSource(input), resultErr)
+		}
 		implementations[index] = Implementation{
 			modulePath:    input.ModulePath,
 			moduleVersion: input.ModuleVersion,
@@ -202,6 +214,7 @@ func Build(inputs []Input, interfaces []InterfaceInput) (Index, error) {
 			hasConfig:     hasConfig,
 			required:      required,
 			optional:      optional,
+			concrete:      concrete,
 		}
 	}
 

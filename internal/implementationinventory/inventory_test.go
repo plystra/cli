@@ -52,6 +52,9 @@ func TestBuildOrdersAndProtectsDiscoveredImplementations(t *testing.T) {
 	if configuration, configured := implementations[0].Configuration(); configured || configuration.String() != "" || configuration.PackagePath() != "" || configuration.TypeName() != "" {
 		t.Fatalf("configuration-free Implementation = %#v, %t", configuration, configured)
 	}
+	if concrete := implementations[0].ConcreteType(); concrete.String() != "*example.com/app/alpha.Service" || concrete.PackagePath() != "example.com/app/alpha" || concrete.TypeName() != "Service" {
+		t.Fatalf("concrete type = %#v (%s)", concrete, concrete.String())
+	}
 	if found, exists := index.BySymbol(implementations[1].Symbol()); !exists || found.Symbol() != implementations[1].Symbol() {
 		t.Fatalf("BySymbol = %#v, %t", found, exists)
 	}
@@ -162,7 +165,14 @@ func declaration(t testing.TB, path, packageName, functionName, interfaceID stri
 
 func compiledPackage(path, name, function string) *types.Package {
 	compiled := types.NewPackage(path, name)
-	signature := types.NewSignatureType(nil, nil, nil, nil, nil, false)
+	serviceName := types.NewTypeName(token.NoPos, compiled, "Service", nil)
+	service := types.NewNamed(serviceName, types.NewStruct(nil, nil), nil)
+	compiled.Scope().Insert(serviceName)
+	results := types.NewTuple(
+		types.NewVar(token.NoPos, compiled, "", types.NewPointer(service)),
+		types.NewVar(token.NoPos, compiled, "", types.Universe.Lookup("error").Type()),
+	)
+	signature := types.NewSignatureType(nil, nil, nil, nil, results, false)
 	compiled.Scope().Insert(types.NewFunc(token.NoPos, compiled, function, signature))
 	return compiled
 }

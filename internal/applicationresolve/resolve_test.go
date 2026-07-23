@@ -299,6 +299,10 @@ func Build(cfg Config, create createv1.Interface, cancel Cancel, audit plystra.O
 	if result.Implementations().Implementations()[0].OptionalInterfaces()[0].ID().String() != "orders.cancel.execute/v1" {
 		t.Fatal("OptionalInterfaces exposed mutable inventory storage")
 	}
+	concrete := discovered.ConcreteType()
+	if concrete.String() != "*example.com/implementations/domains/orders/service.Service" || concrete.PackagePath() != discovered.PackagePath() || concrete.TypeName() != "Service" {
+		t.Fatalf("concrete constructor result = %#v (%s)", concrete, concrete.String())
+	}
 	declared := discovered.Declaration().ImplementedInterfaces()
 	if len(declared) != 2 || declared[0].ID().String() != "orders.create.execute/v1" || declared[1].ID().String() != "orders.cancel.execute/v1" {
 		t.Fatalf("implemented Interfaces = %#v", declared)
