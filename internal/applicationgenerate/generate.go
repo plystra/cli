@@ -24,6 +24,7 @@ import (
 	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/protobufmodel"
@@ -290,6 +291,10 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
+	interfaceProxies, err := interfaceProxyInputs(resolved)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
 	httpTransports := resolved.Manifest().HTTPTransports()
 	var httpCORS *applicationmeta.HTTPCORS
 	if selected, exists := resolved.Manifest().HTTPCORS(); exists {
@@ -325,6 +330,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		HTTPCORS:            httpCORS,
 		Configurations:      configurations,
 		Providers:           providers,
+		InterfaceProxies:    interfaceProxies,
 		Resolution:          resolved.Resolution(),
 		ProtobufWireMap:     wireMap,
 	})
@@ -362,6 +368,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		ManifestProvenance:  provenance,
 		Configurations:      configurations,
 		Providers:           providers,
+		InterfaceProxies:    interfaceProxies,
 		ProtobufWireMap:     wireMap,
 	}, resolved.Resolution())
 	if err != nil {
@@ -424,6 +431,36 @@ func kernelBuildProvenance(resolved applicationresolve.Result) (string, string, 
 		return "", "", fmt.Errorf("%w: selected %s build provenance: %v", ErrKernelDependency, kernelintrinsic.ModulePath, err)
 	}
 	return dependency.SelectedVersion(), identity, nil
+}
+
+func interfaceProxyInputs(resolved applicationresolve.Result) ([]interfaceproxygen.Input, error) {
+	visible := resolved.Interfaces().Interfaces()
+	definitions := make(map[string]interfaceproxygen.Input, len(visible))
+	for _, definition := range visible {
+		contract := definition.Contract()
+		identifier := contract.ID().String()
+		if _, duplicate := definitions[identifier]; duplicate {
+			return nil, fmt.Errorf("canonical Interface %s has more than one visible definition while generating typed proxies", identifier)
+		}
+		definitions[identifier] = interfaceproxygen.Input{
+			InterfaceID:  contract.ID(),
+			PackagePath:  contract.PackagePath(),
+			MethodName:   contract.MethodName(),
+			RequestName:  contract.RequestName(),
+			ResponseName: contract.ResponseName(),
+		}
+	}
+
+	selections := resolved.InterfaceResolution().Selections()
+	inputs := make([]interfaceproxygen.Input, len(selections))
+	for index, selection := range selections {
+		input, exists := definitions[selection.InterfaceID.String()]
+		if !exists {
+			return nil, fmt.Errorf("reachable Interface %s has no canonical authored contract for typed proxy generation", selection.InterfaceID)
+		}
+		inputs[index] = input
+	}
+	return inputs, nil
 }
 
 func providerInputs(resolved applicationresolve.Result) ([]assemblygen.ProviderInput, error) {

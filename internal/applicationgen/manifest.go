@@ -20,6 +20,7 @@ import (
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/generationresolution"
+	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"go.yaml.in/yaml/v3"
@@ -402,6 +403,7 @@ type ApplicationModelOptions struct {
 	HTTPCORS            *applicationmeta.HTTPCORS
 	Configurations      []configurationgen.Input
 	Providers           []assemblygen.ProviderInput
+	InterfaceProxies    []interfaceproxygen.Input
 	Resolution          generationresolution.ExtensionResult
 	ProtobufWireMap     protobufwiremap.Map
 }
@@ -418,6 +420,7 @@ type applicationModelDocument struct {
 	AliasDigest            string                                `json:"alias_digest"`
 	Configurations         []applicationModelConfiguration       `json:"configurations"`
 	Providers              []applicationModelProvider            `json:"providers"`
+	InterfaceProxies       []applicationModelInterfaceProxy      `json:"interface_proxies"`
 	GenerationExtensions   []applicationModelGenerationExtension `json:"generation_extensions"`
 	ProtobufProjection     json.RawMessage                       `json:"protobuf_projection"`
 	ProtobufWireProjection json.RawMessage                       `json:"protobuf_wire_projection"`
@@ -452,6 +455,16 @@ type applicationModelProvider struct {
 type applicationModelProviderDependency struct {
 	Capability     string `json:"capability"`
 	ContractDigest string `json:"contract_digest"`
+}
+
+type applicationModelInterfaceProxy struct {
+	InterfaceID  string `json:"interface_id"`
+	PackagePath  string `json:"package_path"`
+	MethodName   string `json:"method_name"`
+	RequestName  string `json:"request_name"`
+	ResponseName string `json:"response_name"`
+	Path         string `json:"path"`
+	Digest       string `json:"digest"`
 }
 
 type applicationModelGenerationExtension struct {
@@ -530,6 +543,28 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 			Dependencies:              dependencyRecords,
 		}
 	}
+	proxyFiles, err := interfaceproxygen.Render(options.InterfaceProxies)
+	if err != nil {
+		return "", fmt.Errorf("typed Interface proxy model: %w", err)
+	}
+	proxyInputs := make(map[string]interfaceproxygen.Input, len(options.InterfaceProxies))
+	for _, input := range options.InterfaceProxies {
+		proxyInputs[input.InterfaceID.String()] = input
+	}
+	proxyRecords := make([]applicationModelInterfaceProxy, len(proxyFiles))
+	for index, file := range proxyFiles {
+		input := proxyInputs[file.InterfaceID().String()]
+		sum := sha256.Sum256(file.Data())
+		proxyRecords[index] = applicationModelInterfaceProxy{
+			InterfaceID:  file.InterfaceID().String(),
+			PackagePath:  input.PackagePath,
+			MethodName:   input.MethodName,
+			RequestName:  input.RequestName,
+			ResponseName: input.ResponseName,
+			Path:         file.Path(),
+			Digest:       "sha256:" + hex.EncodeToString(sum[:]),
+		}
+	}
 	outputs := options.Resolution.Outputs()
 	extensions := make([]applicationModelGenerationExtension, len(outputs))
 	for index, output := range outputs {
@@ -553,7 +588,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		return "", fmt.Errorf("%w: Protobuf wire map is absent or does not match the normalized projection", ErrResolution)
 	}
 	document := applicationModelDocument{
-		Version:             7,
+		Version:             8,
 		ModulePath:          options.ModulePath,
 		JavaScriptPackage:   options.JavaScriptPackage,
 		KernelModuleVersion: options.KernelModuleVersion,
@@ -567,6 +602,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		AliasDigest:            aliases.Digest(),
 		Configurations:         configurationRecords,
 		Providers:              providerRecords,
+		InterfaceProxies:       proxyRecords,
 		GenerationExtensions:   extensions,
 		ProtobufProjection:     json.RawMessage(protobufProjection.CanonicalJSON()),
 		ProtobufWireProjection: json.RawMessage(options.ProtobufWireMap.ActiveJSON()),

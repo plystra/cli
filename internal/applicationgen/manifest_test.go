@@ -10,6 +10,8 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/kernel/plugin/manifest"
 )
@@ -500,9 +502,73 @@ func TestApplicationModelDigestPinsNormalizedConnectProtobufProjection(t *testin
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(Connect Protobuf projection): %v", err)
 	}
-	const expected = "sha256:3d6376e33cb7d3c16df118d8575626f59e337f2eceb50ba86ae4ba3542564a4c"
+	const expected = "sha256:d3c5c80fc37f435c12e2dc274b52dc3d005a9463607f68ca504165cdda668684"
 	if digest != expected {
 		t.Fatalf("Connect Protobuf projection application-model digest = %q; want %q", digest, expected)
+	}
+}
+
+func TestApplicationModelDigestIncludesTypedInterfaceProxiesDeterministically(t *testing.T) {
+	t.Parallel()
+
+	parse := func(value string) interfaceid.Identifier {
+		identifier, err := interfaceid.Parse(value)
+		if err != nil {
+			t.Fatalf("interfaceid.Parse(%q): %v", value, err)
+		}
+		return identifier
+	}
+	order := interfaceproxygen.Input{
+		InterfaceID:  parse("order.create/v1"),
+		PackagePath:  "example.com/acme/application/interfaces/order/create/v1",
+		MethodName:   "Create",
+		RequestName:  "Request",
+		ResponseName: "Response",
+	}
+	audit := interfaceproxygen.Input{
+		InterfaceID:  parse("audit.write/v1"),
+		PackagePath:  "example.com/acme/application/interfaces/audit/write/v1",
+		MethodName:   "Write",
+		RequestName:  "Request",
+		ResponseName: "Response",
+	}
+	options := applicationgen.ApplicationModelOptions{
+		ModulePath:          applicationModulePath,
+		JavaScriptPackage:   applicationSDKPackage,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
+		Providers:           selectedProviderInputs(),
+		Resolution:          resolvedApplication(t, ""),
+	}
+	withoutProxies, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(without proxies): %v", err)
+	}
+	options.InterfaceProxies = []interfaceproxygen.Input{order, audit}
+	withProxies, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(with proxies): %v", err)
+	}
+	if withProxies == withoutProxies {
+		t.Fatal("typed Interface proxies did not alter the application-model digest")
+	}
+	options.InterfaceProxies = []interfaceproxygen.Input{audit, order}
+	reordered, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(reordered proxies): %v", err)
+	}
+	if reordered != withProxies {
+		t.Fatalf("reordered equal proxy inputs changed digest: %q != %q", reordered, withProxies)
+	}
+	changed := order
+	changed.PackagePath = "example.com/acme/application/interfaces/order/create/v1beta"
+	options.InterfaceProxies = []interfaceproxygen.Input{audit, changed}
+	changedDigest, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(changed proxy): %v", err)
+	}
+	if changedDigest == withProxies {
+		t.Fatal("changed proxy contract package did not alter the application-model digest")
 	}
 }
 

@@ -27,6 +27,7 @@ import (
 	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/httpgen"
+	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/invocationgen"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/protobufdescriptor"
@@ -66,6 +67,7 @@ type Options struct {
 	ManifestProvenance  ManifestProvenance
 	Configurations      []configurationgen.Input
 	Providers           []assemblygen.ProviderInput
+	InterfaceProxies    []interfaceproxygen.Input
 	ProtobufWireMap     protobufwiremap.Map
 }
 
@@ -95,6 +97,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		HTTPCORS:            options.HTTPCORS,
 		Configurations:      options.Configurations,
 		Providers:           options.Providers,
+		InterfaceProxies:    options.InterfaceProxies,
 		Resolution:          resolution,
 		ProtobufWireMap:     options.ProtobufWireMap,
 	})
@@ -143,6 +146,15 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		}
 		files = append(files, file)
 		return nil
+	}
+	proxyFiles, err := interfaceproxygen.Render(options.InterfaceProxies)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: typed Interface proxies: %w", ErrRender, err)
+	}
+	for _, file := range proxyFiles {
+		if err := add(file.Path(), file.Data()); err != nil {
+			return generatedfiles.Output{}, fmt.Errorf("%w: typed Interface proxy %s: %w", ErrRender, file.InterfaceID(), err)
+		}
 	}
 	if err := add(protobufwiremap.Path, options.ProtobufWireMap.CanonicalJSON()); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf wire map: %w", ErrRender, err)
