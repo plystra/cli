@@ -232,10 +232,13 @@ func TestResolveIntegratesImplementationConstructorPackageDiscovery(t *testing.T
 	parent := t.TempDir()
 	root := filepath.Join(parent, "app")
 	dependencyRoot := filepath.Join(parent, "contracts")
+	kernelRoot := filepath.Join(parent, "kernel")
 	writeModule(t, dependencyRoot, "example.com/contracts")
 	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
 	writeFile(t, filepath.Join(dependencyRoot, "interfaces", "orders", "cancel", "v1", "interface.go"), interfaceDeclarationSource("cancelv1", "orders.cancel.execute/v1", "Execute"))
-	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/implementations\n\ngo 1.26\n\nrequire example.com/contracts v1.2.3\n\nreplace example.com/contracts => ../contracts\n")
+	writeModule(t, kernelRoot, "github.com/plystra/kernel")
+	writeFile(t, filepath.Join(kernelRoot, "optional.go"), "package plystra\n\ntype Optional[T any] struct{}\n")
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/implementations\n\ngo 1.26\n\nrequire (\n\texample.com/contracts v1.2.3\n\tgithub.com/plystra/kernel v0.0.0\n)\n\nreplace example.com/contracts => ../contracts\nreplace github.com/plystra/kernel => ../kernel\n")
 	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	writeFile(t, filepath.Join(root, "interfaces", "orders", "create", "v1", "interface.go"), interfaceDeclarationSource("createv1", "orders.create.execute/v1", "Execute"))
 	writeFile(t, filepath.Join(root, "domains", "orders", "service", "new.go"), `package service
@@ -243,6 +246,7 @@ func TestResolveIntegratesImplementationConstructorPackageDiscovery(t *testing.T
 import (
 	cancelv1 "example.com/contracts/interfaces/orders/cancel/v1"
 	createv1 "example.com/implementations/interfaces/orders/create/v1"
+	plystra "github.com/plystra/kernel"
 )
 
 type Service struct{}
@@ -255,7 +259,7 @@ type Cancel = cancelv1.Interface
 
 //plystra:implements orders.create.execute/v1
 //plystra:implements orders.cancel.execute/v1
-func Build(cfg Config, create createv1.Interface, cancel Cancel) (*Service, error) {
+func Build(cfg Config, create createv1.Interface, cancel Cancel, audit plystra.Optional[Cancel]) (*Service, error) {
 	return &Service{}, nil
 }
 `)
@@ -286,6 +290,14 @@ func Build(cfg Config, create createv1.Interface, cancel Cancel) (*Service, erro
 	required[0] = implementationinventory.RequiredInterface{}
 	if result.Implementations().Implementations()[0].RequiredInterfaces()[0].ID().String() != "orders.create.execute/v1" {
 		t.Fatal("RequiredInterfaces exposed mutable inventory storage")
+	}
+	optional := discovered.OptionalInterfaces()
+	if len(optional) != 1 || optional[0].ID().String() != "orders.cancel.execute/v1" || optional[0].PackagePath() != "example.com/contracts/interfaces/orders/cancel/v1" || optional[0].ParameterName() != "audit" || optional[0].ParameterPosition() != 4 {
+		t.Fatalf("optional Interfaces = %#v", optional)
+	}
+	optional[0] = implementationinventory.OptionalInterface{}
+	if result.Implementations().Implementations()[0].OptionalInterfaces()[0].ID().String() != "orders.cancel.execute/v1" {
+		t.Fatal("OptionalInterfaces exposed mutable inventory storage")
 	}
 	declared := discovered.Declaration().ImplementedInterfaces()
 	if len(declared) != 2 || declared[0].ID().String() != "orders.create.execute/v1" || declared[1].ID().String() != "orders.cancel.execute/v1" {

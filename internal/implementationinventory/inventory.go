@@ -26,6 +26,9 @@ var (
 	// ErrInvalidRequiredInterface reports a non-Config constructor parameter
 	// that is not one exact visible canonical Interface type.
 	ErrInvalidRequiredInterface = errors.New("invalid required Interface constructor parameter")
+	// ErrInvalidOptionalInterface reports a constructor parameter that resembles
+	// Optional but is not exact plystra.Optional[canonical Interface].
+	ErrInvalidOptionalInterface = errors.New("invalid optional Interface constructor parameter")
 )
 
 // Input is one parsed constructor declaration and its compiled Go package
@@ -55,6 +58,7 @@ type Implementation struct {
 	configuration Configuration
 	hasConfig     bool
 	required      []RequiredInterface
+	optional      []OptionalInterface
 }
 
 // ModulePath returns the Go Module path that owns the constructor package.
@@ -103,6 +107,12 @@ func (i Implementation) Configuration() (Configuration, bool) {
 // canonical Interface dependencies required by the constructor.
 func (i Implementation) RequiredInterfaces() []RequiredInterface {
 	return append([]RequiredInterface(nil), i.required...)
+}
+
+// OptionalInterfaces returns a defensive parameter-ordered view of exact
+// canonical Interface dependencies whose absence does not create a requirement.
+func (i Implementation) OptionalInterfaces() []OptionalInterface {
+	return append([]OptionalInterface(nil), i.optional...)
 }
 
 // Declaration returns the immutable parsed constructor declaration.
@@ -171,7 +181,11 @@ func Build(inputs []Input, interfaces []InterfaceInput) (Index, error) {
 		if configurationErr != nil {
 			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidConfiguration, symbol, inputSource(input), configurationErr)
 		}
-		required, requiredErr := validateRequiredInterfaces(function, hasConfig, interfacePackages)
+		optional, optionalPositions, optionalErr := validateOptionalInterfaces(function, hasConfig, interfacePackages)
+		if optionalErr != nil {
+			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidOptionalInterface, symbol, inputSource(input), optionalErr)
+		}
+		required, requiredErr := validateRequiredInterfaces(function, hasConfig, optionalPositions, interfacePackages)
 		if requiredErr != nil {
 			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidRequiredInterface, symbol, inputSource(input), requiredErr)
 		}
@@ -187,6 +201,7 @@ func Build(inputs []Input, interfaces []InterfaceInput) (Index, error) {
 			configuration: configuration,
 			hasConfig:     hasConfig,
 			required:      required,
+			optional:      optional,
 		}
 	}
 

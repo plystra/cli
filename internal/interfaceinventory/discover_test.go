@@ -520,6 +520,176 @@ func New(operationv1.Interface) (*Service, error) {
 	}
 }
 
+func TestDiscoverApplicationNormalizesOptionalInterfacesWithoutConfig(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	root := filepath.Join(parent, "app")
+	dependencyRoot := filepath.Join(parent, "contracts")
+	kernelRoot := filepath.Join(parent, "kernel")
+	writeProject(t, dependencyRoot, "example.com/contracts")
+	writeFile(t, filepath.Join(dependencyRoot, "interfaces", "remote", "v1", "interface.go"), interfaceSource("remotev1", "service.remote.call/v1", "Call"))
+	writeFile(t, filepath.Join(kernelRoot, "go.mod"), "module github.com/plystra/kernel\n\ngo 1.26\n")
+	writeFile(t, filepath.Join(kernelRoot, "optional.go"), "package plystra\n\ntype Optional[T any] struct{}\n")
+	writeFile(t, filepath.Join(root, "go.mod"), `module example.com/optional
+
+go 1.26
+
+require (
+	example.com/contracts v1.2.3
+	github.com/plystra/kernel v0.0.0
+)
+
+replace example.com/contracts => ../contracts
+replace github.com/plystra/kernel => ../kernel
+`)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(root, "interfaces", "local", "v1", "interface.go"), interfaceSource("localv1", "service.local.call/v1", "Call"))
+	writeFile(t, filepath.Join(root, "service", "new.go"), `package service
+
+import (
+	remotev1 "example.com/contracts/interfaces/remote/v1"
+	localv1 "example.com/optional/interfaces/local/v1"
+	plystra "github.com/plystra/kernel"
+)
+
+type Remote = remotev1.Interface
+
+type Service struct{}
+
+//plystra:implements service.local.call/v1
+func New(local plystra.Optional[localv1.Interface], remote plystra.Optional[Remote]) (*Service, error) {
+	return &Service{}, nil
+}
+`)
+	before := snapshotFiles(t, parent)
+	discovery := discoverApplication(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
+	implementations := discovery.Implementations().Implementations()
+	if len(implementations) != 1 {
+		t.Fatalf("Implementations = %#v", implementations)
+	}
+	implementation := implementations[0]
+	if configuration, configured := implementation.Configuration(); configured || configuration.String() != "" {
+		t.Fatalf("Configuration = %#v, %t", configuration, configured)
+	}
+	if required := implementation.RequiredInterfaces(); len(required) != 0 {
+		t.Fatalf("RequiredInterfaces = %#v", required)
+	}
+	optional := implementation.OptionalInterfaces()
+	if len(optional) != 2 {
+		t.Fatalf("OptionalInterfaces = %#v", optional)
+	}
+	if optional[0].ID().String() != "service.local.call/v1" || optional[0].PackagePath() != "example.com/optional/interfaces/local/v1" || optional[0].ParameterName() != "local" || optional[0].ParameterPosition() != 1 {
+		t.Fatalf("local Optional Interface = %#v", optional[0])
+	}
+	if optional[1].ID().String() != "service.remote.call/v1" || optional[1].PackagePath() != "example.com/contracts/interfaces/remote/v1" || optional[1].ParameterName() != "remote" || optional[1].ParameterPosition() != 2 {
+		t.Fatalf("dependency Optional Interface = %#v", optional[1])
+	}
+	optional[0] = implementationinventory.OptionalInterface{}
+	if implementation.OptionalInterfaces()[0].ID().String() != "service.local.call/v1" {
+		t.Fatal("OptionalInterfaces exposed mutable inventory storage")
+	}
+	if after := snapshotFiles(t, parent); !reflect.DeepEqual(after, before) {
+		t.Fatalf("discovery mutated source:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestDiscoverApplicationRejectsInvalidOptionalInterfaceParameters(t *testing.T) {
+	t.Parallel()
+
+	const (
+		canonicalImport = `import operationv1 "example.com/broken/interfaces/operation/v1"`
+		kernelImport    = `import plystra "github.com/plystra/kernel"`
+		kernelOptional  = "package plystra\n\ntype Optional[T any] struct{}\n"
+	)
+	tests := []struct {
+		name         string
+		kernelSource string
+		prelude      string
+		parameter    string
+		want         string
+		additional   map[string]string
+	}{
+		{
+			name:         "custom package",
+			kernelSource: kernelOptional,
+			prelude:      canonicalImport + "\n" + `import optional "example.com/broken/optional"`,
+			parameter:    "dependency optional.Optional[operationv1.Interface]",
+			want:         "Optional must be github.com/plystra/kernel.Optional[T]",
+			additional: map[string]string{
+				"optional/optional.go": "package optional\n\ntype Optional[T any] struct{}\n",
+			},
+		},
+		{name: "pointer wrapper", kernelSource: kernelOptional, prelude: canonicalImport + "\n" + kernelImport, parameter: "dependency *plystra.Optional[operationv1.Interface]", want: "plystra.Optional[T] must be passed as a value"},
+		{name: "slice wrapper", kernelSource: kernelOptional, prelude: canonicalImport + "\n" + kernelImport, parameter: "dependency []plystra.Optional[operationv1.Interface]", want: "plystra.Optional[T] must be passed as a value"},
+		{name: "array wrapper", kernelSource: kernelOptional, prelude: canonicalImport + "\n" + kernelImport, parameter: "dependency [1]plystra.Optional[operationv1.Interface]", want: "plystra.Optional[T] must be passed as a value"},
+		{name: "missing type argument", kernelSource: "package plystra\n\ntype Optional struct{}\n", prelude: kernelImport, parameter: "dependency plystra.Optional", want: "github.com/plystra/kernel.Optional must have exactly one type argument"},
+		{name: "wrong type argument arity", kernelSource: "package plystra\n\ntype Optional[A, B any] struct{}\n", prelude: canonicalImport + "\n" + kernelImport, parameter: "dependency plystra.Optional[operationv1.Interface, operationv1.Interface]", want: "github.com/plystra/kernel.Optional must have exactly one type argument"},
+		{name: "non-struct Kernel Optional", kernelSource: "package plystra\n\ntype Optional[T any] interface{ optional() }\n", prelude: canonicalImport + "\n" + kernelImport, parameter: "dependency plystra.Optional[operationv1.Interface]", want: "github.com/plystra/kernel.Optional must be the public Kernel struct"},
+		{name: "primitive type argument", kernelSource: kernelOptional, prelude: kernelImport, parameter: "dependency plystra.Optional[string]", want: "type argument must be a canonical Interface"},
+		{name: "request type argument", kernelSource: kernelOptional, prelude: canonicalImport + "\n" + kernelImport, parameter: "dependency plystra.Optional[operationv1.Request]", want: "type argument must be a canonical Interface"},
+		{name: "pointer type argument", kernelSource: kernelOptional, prelude: canonicalImport + "\n" + kernelImport, parameter: "dependency plystra.Optional[*operationv1.Interface]", want: "type argument must be a canonical Interface"},
+		{name: "nested Optional type argument", kernelSource: kernelOptional, prelude: canonicalImport + "\n" + kernelImport, parameter: "dependency plystra.Optional[plystra.Optional[operationv1.Interface]]", want: "type argument must be a canonical Interface"},
+		{
+			name:         "noncanonical lookalike type argument",
+			kernelSource: kernelOptional,
+			prelude:      kernelImport + "\n" + `import fake "example.com/broken/fake"`,
+			parameter:    "dependency plystra.Optional[fake.Interface]",
+			want:         "not a visible canonical Interface package",
+			additional: map[string]string{
+				"fake/interface.go": "package fake\n\ntype Interface interface{ Run() }\n",
+			},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			parent := t.TempDir()
+			root := filepath.Join(parent, "app")
+			kernelRoot := filepath.Join(parent, "kernel")
+			writeFile(t, filepath.Join(root, "go.mod"), `module example.com/broken
+
+go 1.26
+
+require github.com/plystra/kernel v0.0.0
+
+replace github.com/plystra/kernel => ../kernel
+`)
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+			writeFile(t, filepath.Join(root, "interfaces", "operation", "v1", "interface.go"), interfaceSource("operationv1", "service.operation.call/v1", "Call"))
+			writeFile(t, filepath.Join(kernelRoot, "go.mod"), "module github.com/plystra/kernel\n\ngo 1.26\n")
+			writeFile(t, filepath.Join(kernelRoot, "optional.go"), test.kernelSource)
+			for relative, source := range test.additional {
+				writeFile(t, filepath.Join(root, filepath.FromSlash(relative)), source)
+			}
+			writeFile(t, filepath.Join(root, "service", "new.go"), fmt.Sprintf(`package service
+
+%s
+
+type Service struct{}
+
+//plystra:implements service.operation.call/v1
+func New(%s) (*Service, error) {
+	return &Service{}, nil
+}
+`, test.prelude, test.parameter))
+			before := snapshotFiles(t, parent)
+			_, err := discoverApplicationResult(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
+			if !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, implementationinventory.ErrInvalidOptionalInterface) || !strings.Contains(err.Error(), "example.com/broken/service.New") || !strings.Contains(err.Error(), "example.com/broken@local/service/new.go") || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("DiscoverApplication error = %v", err)
+			}
+			if strings.Contains(err.Error(), parent) || strings.Contains(err.Error(), filepath.ToSlash(parent)) {
+				t.Fatalf("error exposed private test root: %v", err)
+			}
+			if after := snapshotFiles(t, parent); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed discovery mutated source:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
 func TestValidateUniqueIDsRejectsEveryDuplicateDefinition(t *testing.T) {
 	t.Parallel()
 
