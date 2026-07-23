@@ -20,6 +20,9 @@ var (
 	// ErrDuplicateSymbol reports an identity collision that would prevent one
 	// constructor symbol from naming exactly one visible Implementation.
 	ErrDuplicateSymbol = errors.New("duplicate Implementation constructor symbol")
+	// ErrInvalidConfiguration reports a constructor Config parameter that does
+	// not use the exact optional same-package exported struct form.
+	ErrInvalidConfiguration = errors.New("invalid Implementation Config parameter")
 )
 
 // Input is one parsed constructor declaration and its compiled Go package
@@ -46,6 +49,8 @@ type Implementation struct {
 	types         *types.Package
 	function      *types.Func
 	symbol        constructorsymbol.Symbol
+	configuration Configuration
+	hasConfig     bool
 }
 
 // ModulePath returns the Go Module path that owns the constructor package.
@@ -83,6 +88,12 @@ func (i Implementation) FunctionName() string { return i.declaration.FunctionNam
 
 // Symbol returns the canonical fully qualified constructor identity.
 func (i Implementation) Symbol() constructorsymbol.Symbol { return i.symbol }
+
+// Configuration returns the optional normalized same-package Config type used
+// as the constructor's first parameter.
+func (i Implementation) Configuration() (Configuration, bool) {
+	return i.configuration, i.hasConfig
+}
 
 // Declaration returns the immutable parsed constructor declaration.
 func (i Implementation) Declaration() implementationdecl.Declaration { return i.declaration }
@@ -142,6 +153,10 @@ func Build(inputs []Input) (Index, error) {
 		if !validFunction || function.Pkg() != input.Types || !function.Exported() {
 			return Index{}, fmt.Errorf("%w: constructor symbol %s does not identify an exported package-level function in compiled type information", ErrInvalidInput, symbol)
 		}
+		configuration, hasConfig, configurationErr := validateConfiguration(input.Types, function)
+		if configurationErr != nil {
+			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidConfiguration, symbol, inputSource(input), configurationErr)
+		}
 		implementations[index] = Implementation{
 			modulePath:    input.ModulePath,
 			moduleVersion: input.ModuleVersion,
@@ -151,6 +166,8 @@ func Build(inputs []Input) (Index, error) {
 			types:         input.Types,
 			function:      function,
 			symbol:        symbol,
+			configuration: configuration,
+			hasConfig:     hasConfig,
 		}
 	}
 
@@ -180,4 +197,13 @@ func Build(inputs []Input) (Index, error) {
 		}
 	}
 	return Index{implementations: implementations}, nil
+}
+
+func inputSource(input Input) string {
+	version := input.ModuleVersion
+	if version == "" {
+		version = "local"
+	}
+	position := input.Declaration.Position()
+	return fmt.Sprintf("%s@%s/%s:%d:%d", input.ModulePath, version, position.Path, position.Line, position.Column)
 }

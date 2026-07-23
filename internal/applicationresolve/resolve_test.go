@@ -236,9 +236,13 @@ func TestResolveIntegratesImplementationConstructorPackageDiscovery(t *testing.T
 
 type Service struct{}
 
+type Config struct {
+	Mode string
+}
+
 //plystra:implements orders.create.execute/v1
 //plystra:implements orders.cancel.execute/v1
-func Build() (*Service, error) {
+func Build(Config) (*Service, error) {
 	return &Service{}, nil
 }
 `)
@@ -257,6 +261,10 @@ func Build() (*Service, error) {
 	discovered := implementations[0]
 	if discovered.Symbol().String() != "example.com/implementations/domains/orders/service.Build" || discovered.ModulePath() != "example.com/implementations" || discovered.ModuleVersion() != "" || discovered.PackagePath() != "example.com/implementations/domains/orders/service" || discovered.PackageName() != "service" || discovered.FunctionName() != "Build" || discovered.SourcePath() != "domains/orders/service/new.go" || !discovered.Local() {
 		t.Fatalf("Implementation provenance = %#v", discovered)
+	}
+	configuration, configured := discovered.Configuration()
+	if !configured || configuration.String() != "example.com/implementations/domains/orders/service.Config" || configuration.PackagePath() != discovered.PackagePath() || configuration.TypeName() != "Config" {
+		t.Fatalf("Implementation configuration = %#v, %t", configuration, configured)
 	}
 	declared := discovered.Declaration().ImplementedInterfaces()
 	if len(declared) != 2 || declared[0].ID().String() != "orders.create.execute/v1" || declared[1].ID().String() != "orders.cancel.execute/v1" {

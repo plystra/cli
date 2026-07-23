@@ -48,6 +48,9 @@ func TestBuildOrdersAndProtectsDiscoveredImplementations(t *testing.T) {
 	if implementations[0].Symbol().String() != got[0] || implementations[0].Symbol().PackagePath() != implementations[0].PackagePath() || implementations[0].Symbol().FunctionName() != implementations[0].FunctionName() {
 		t.Fatalf("constructor Symbol = %#v for %#v", implementations[0].Symbol(), implementations[0])
 	}
+	if configuration, configured := implementations[0].Configuration(); configured || configuration.String() != "" || configuration.PackagePath() != "" || configuration.TypeName() != "" {
+		t.Fatalf("configuration-free Implementation = %#v, %t", configuration, configured)
+	}
 	if found, exists := index.BySymbol(implementations[1].Symbol()); !exists || found.Symbol() != implementations[1].Symbol() {
 		t.Fatalf("BySymbol = %#v, %t", found, exists)
 	}

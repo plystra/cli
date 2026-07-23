@@ -210,7 +210,7 @@ func TestDiscoverApplicationLoadsImplementationConstructorsFromEligiblePackages(
 	writeFile(t, filepath.Join(transitiveRoot, "worker", "new.go"), implementationSource("worker", "New", "dependency.transitive.run/v1"))
 	writeProject(t, directRoot, "example.com/direct")
 	writeFile(t, filepath.Join(directRoot, "go.mod"), "module example.com/direct\n\ngo 1.26\n\nrequire example.com/transitive v1.2.0\n")
-	writeFile(t, filepath.Join(directRoot, "service", "new.go"), implementationSource("service", "New", "dependency.direct.run/v1"))
+	writeFile(t, filepath.Join(directRoot, "service", "new.go"), configuredImplementationSource("service", "New", "dependency.direct.run/v1"))
 	writeFile(t, filepath.Join(directRoot, "internal", "private", "new.go"), "package private\n\n//plystra:implements invalid\nfunc New() {}\n")
 
 	writeFile(t, filepath.Join(ordinaryRoot, "go.mod"), "module example.com/ordinary\n\ngo 1.26\n")
@@ -291,12 +291,21 @@ replace example.com/ordinary => ../ordinary
 			if implementation.Local() || implementation.ModuleVersion() != "v1.1.0" {
 				t.Fatalf("direct Implementation provenance = %#v", implementation)
 			}
+			configuration, configured := implementation.Configuration()
+			if !configured || configuration.String() != "example.com/direct/service.Config" {
+				t.Fatalf("direct Implementation configuration = %#v, %t", configuration, configured)
+			}
 		case "example.com/transitive":
 			if implementation.Local() || implementation.ModuleVersion() != "v1.2.0" {
 				t.Fatalf("transitive Implementation provenance = %#v", implementation)
 			}
 		default:
 			t.Fatalf("unexpected Implementation module = %#v", implementation)
+		}
+		if implementation.ModulePath() != "example.com/direct" {
+			if configuration, configured := implementation.Configuration(); configured || configuration.String() != "" {
+				t.Fatalf("configuration-free Implementation = %#v, %t for %#v", configuration, configured, implementation)
+			}
 		}
 	}
 	view := first.Implementations().Implementations()
@@ -361,6 +370,61 @@ func TestDiscoverApplicationRejectsMalformedActiveImplementationDirective(t *tes
 	}
 	if after := snapshotFiles(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("failed discovery mutated source:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestDiscoverApplicationRejectsInvalidImplementationConfigParameters(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		declaration string
+		parameter   string
+		want        string
+		external    bool
+	}{
+		{name: "pointer", declaration: "type Config struct{}", parameter: "cfg *Config", want: "Config must be passed as a struct value"},
+		{name: "variadic", declaration: "type Config struct{}", parameter: "cfg ...Config", want: "Config must be passed as a struct value"},
+		{name: "not first", declaration: "type Config struct{}", parameter: "dependency int, cfg Config", want: "Config must be the first constructor parameter"},
+		{name: "duplicate", declaration: "type Config struct{}", parameter: "cfg Config, duplicate Config", want: "Config must be the first constructor parameter"},
+		{name: "alias", declaration: "type Settings struct{}\ntype Config = Settings", parameter: "cfg Config", want: "Config must be a defined struct"},
+		{name: "non struct", declaration: "type Config string", parameter: "cfg Config", want: "Config must be a struct"},
+		{name: "generic", declaration: "type Config[T any] struct{}", parameter: "cfg Config[string]", want: "Config must not be generic"},
+		{name: "external", declaration: "import settings \"example.com/broken/settings\"", parameter: "cfg settings.Config", want: "Config must be defined by constructor package", external: true},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeProject(t, root, "example.com/broken")
+			if test.external {
+				writeFile(t, filepath.Join(root, "settings", "config.go"), "package settings\n\ntype Config struct{}\n")
+			}
+			source := fmt.Sprintf(`package service
+
+%s
+
+type Service struct{}
+
+//plystra:implements service.operation.run/v1
+func New(%s) (*Service, error) {
+	return &Service{}, nil
+}
+`, test.declaration, test.parameter)
+			writeFile(t, filepath.Join(root, "service", "new.go"), source)
+			before := snapshotFiles(t, root)
+			_, err := discoverApplicationResult(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
+			if !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, implementationinventory.ErrInvalidConfiguration) || !strings.Contains(err.Error(), "example.com/broken/service.New") || !strings.Contains(err.Error(), "example.com/broken@local/service/new.go") || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("DiscoverApplication error = %v", err)
+			}
+			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("error exposed private Project root: %v", err)
+			}
+			if after := snapshotFiles(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed discovery mutated source:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
 	}
 }
 
@@ -883,6 +947,22 @@ type Service struct{}
 
 //plystra:implements %s
 func %s() (*Service, error) {
+	return &Service{}, nil
+}
+`, packageName, id, constructor)
+}
+
+func configuredImplementationSource(packageName, constructor, id string) string {
+	return fmt.Sprintf(`package %s
+
+type Config struct {
+	Mode string
+}
+
+type Service struct{}
+
+//plystra:implements %s
+func %s(Config) (*Service, error) {
 	return &Service{}, nil
 }
 `, packageName, id, constructor)
