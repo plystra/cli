@@ -37,6 +37,7 @@ const (
   plystra use <capability-name>/vN <plugin-id> [--env <environment>|--config <yaml-path>]
   plystra plugin create <name>
   plystra interface create <interface-name>
+  plystra implement <interface-id> --package <project-relative-package>
   plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
   plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
@@ -351,6 +352,8 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		return 0
 	case "interface":
 		return runInterface(arguments, stdout, stderr, workingDirectory, environment)
+	case "implement":
+		return runImplement(arguments, stdout, stderr, workingDirectory, environment)
 	case "capability":
 		return runCapability(arguments, stdout, stderr, workingDirectory, environment, selectPlugin)
 	case "inspect":

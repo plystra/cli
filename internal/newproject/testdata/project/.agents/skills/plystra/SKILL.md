@@ -775,16 +775,21 @@ it:
 
     plystra capability create records.archive/v3 --query --plugin records --confirm
 
-Implement an exact canonical Capability already visible from an official or
-dependency module with:
+Implement a visible exact Interface as ordinary Go:
 
-    plystra capability implement email.send/v1 --plugin mailer
+    plystra implement email.send/v1 --package ./mailer
 
-That workflow materializes the visible exact contract and adds the local
-provider. It does not create a similar private contract. Never recreate an
-already visible exact version. Before a contract appears in any published tag,
-rewrite it and regenerate local fixtures directly instead of adding a
-compatibility wrapper, decoder, fallback, or parallel old version.
+--package must be one new canonical Project-relative path beginning with ./.
+The scaffold imports the canonical Interface package and adds Service, New, the
+//plystra:implements directive, the operation stub, and a compile-time Interface
+assertion. It creates no copied contract, configuration, generated output, or
+registration. Edit the method, add package tests, and run go test ./.... The CLI
+rediscovers and type-checks the constructor; failure removes the whole scaffold.
+
+Never recreate an already visible exact version.
+Before a contract appears in any published tag, rewrite it and regenerate local
+fixtures directly instead of adding a compatibility wrapper, decoder, fallback,
+or parallel old version.
 A published v0.0.1-rc.N tag and its artifacts are immutable.
 A newer RC may revise the same exact /vN before stable v0.0.1 only by publishing
 a new immutable RC, recording compatibility differences, and re-pinning,

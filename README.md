@@ -389,6 +389,22 @@ Commands below a module root use the nearest real enclosing `go.mod`; nested mod
 
 ## Authoring behavior
 
+Scaffold an ordinary Go package for one visible canonical Interface from the
+Project root or any nested authored package:
+
+```powershell
+plystra implement email.send/v1 --package ./smtp
+```
+
+The package path is a canonical Project-relative path beginning with `./`, and
+the target package must not already exist. The command imports the canonical
+Interface package, creates `Service` and `New`, adds the exact
+`//plystra:implements` directive, scaffolds the one operation method, and adds a
+compile-time Interface assertion. It does not copy the Interface contract,
+write authored registration or configuration, or create generated output.
+Plystra rediscovers and type-checks the new constructor before committing the
+transaction; any failure removes the complete scaffold.
+
 Plugin-target inference resolves an explicit target, the enclosing plugin, the only local plugin, or an interactive choice when several local plugins remain and a terminal is available. Non-interactive ambiguity fails with every candidate and requires `--plugin <directory-or-plugin-id>`.
 
 Capability identities use `<capability-name>/v<number>`. Names contain at least two dot-separated lower-case segments, may use any logical hierarchy depth, and never imply a fixed namespace/operation split.
@@ -474,6 +490,8 @@ plystra add
 plystra remove
 plystra update
 plystra plugin create
+plystra interface create
+plystra implement
 plystra capability create
 plystra capability implement
 plystra capability expose

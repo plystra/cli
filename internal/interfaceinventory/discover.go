@@ -604,7 +604,7 @@ func probeModule(source moduleSource, applicationPath string) ([]packageCandidat
 			if current == root {
 				return nil
 			}
-			if reservedDirectory(entry.Name()) {
+			if ReservedDirectory(entry.Name()) {
 				return filepath.SkipDir
 			}
 			nested, err := nestedModuleRoot(current)
@@ -666,7 +666,9 @@ func probeModule(source moduleSource, applicationPath string) ([]packageCandidat
 	return candidates, nil
 }
 
-func reservedDirectory(name string) bool {
+// ReservedDirectory reports whether authored declaration discovery excludes a
+// directory with the supplied base name.
+func ReservedDirectory(name string) bool {
 	if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
 		return true
 	}

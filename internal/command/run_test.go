@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	wantUsage                  = "Usage:\n  plystra help\n  plystra version\n  plystra new <project-name> [options]\n  plystra add <go-module-query>\n  plystra remove <go-module-path>\n  plystra update <go-module-query>\n  plystra use <capability-name>/vN <plugin-id> [--env <environment>|--config <yaml-path>]\n  plystra plugin create <name>\n  plystra interface create <interface-name>\n  plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n  plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain config <field-path> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain alias <alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain exposure <capability-or-alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra check [--env <environment>|--config <yaml-path>]\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]\n\nCommon actionable failures end with one Recovery block containing the primary\ncommand or file edit and one stable PLYSTRA-* Diagnostic code.\n"
+	wantUsage                  = "Usage:\n  plystra help\n  plystra version\n  plystra new <project-name> [options]\n  plystra add <go-module-query>\n  plystra remove <go-module-path>\n  plystra update <go-module-query>\n  plystra use <capability-name>/vN <plugin-id> [--env <environment>|--config <yaml-path>]\n  plystra plugin create <name>\n  plystra interface create <interface-name>\n  plystra implement <interface-id> --package <project-relative-package>\n  plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n  plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain config <field-path> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain alias <alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain exposure <capability-or-alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra check [--env <environment>|--config <yaml-path>]\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]\n\nCommon actionable failures end with one Recovery block containing the primary\ncommand or file edit and one stable PLYSTRA-* Diagnostic code.\n"
 	wantAddUsage               = "Usage:\n  plystra add <go-module-query>\n\nAdds one ordinary Go Module dependency, recomposes root plystra.yaml, regenerates,\ntidies, and validates the complete Project in one rollback boundary.\n"
 	wantRemoveUsage            = "Usage:\n  plystra remove <go-module-path>\n\nRemoves one ordinary Go Module dependency, recomposes root plystra.yaml,\nregenerates, tidies, and validates the complete Project in one rollback boundary.\n"
 	wantUpdateUsage            = "Usage:\n  plystra update <go-module-query>\n\nUpdates one selected ordinary Go Module dependency, recomposes root plystra.yaml,\nregenerates, tidies, and validates the complete Project in one rollback boundary.\n"
@@ -23,6 +23,7 @@ const (
 	wantCapabilityCreateUsage  = "Usage:\n  plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]\n\nIntent profiles:\n  --query   Create a read-only, safely retryable query contract for a new Capability identity.\n\nA new Capability identity requires one explicit intent profile. A later version\ncopies the complete semantics of its highest visible source contract; omit the\nprofile flag in that case. Names never imply semantics.\n"
 	wantInterfaceUsage         = "Usage:\n  plystra interface create <interface-name>\n"
 	wantInterfaceCreateUsage   = "Usage:\n  plystra interface create <interface-name>\n\nCreates the initial v1 canonical Go package for one unversioned Interface name.\nThe name must contain two or more lower-case dot-separated segments. The command\ndoes not create optional metadata or edit application configuration.\n"
+	wantImplementUsage         = "Usage:\n  plystra implement <interface-id> --package <project-relative-package>\n\nCreates a new ordinary Go package that implements one visible canonical\nInterface. The package path must begin with ./ and its target directory must not\nalready exist. The scaffold imports the canonical Interface package and creates\nno copied contract, generated substitute, configuration, or registration code.\n"
 )
 
 func TestRunHelp(t *testing.T) {
@@ -243,6 +244,18 @@ func TestRunInterfaceHelp(t *testing.T) {
 	}
 }
 
+func TestRunImplementHelp(t *testing.T) {
+	t.Parallel()
+
+	for _, argument := range []string{"help", "-h", "--help"} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		if exitCode := command.Run([]string{"implement", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantImplementUsage || stderr.Len() != 0 {
+			t.Fatalf("Run(implement %s) = exit %d, stdout %q, stderr %q", argument, exitCode, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 	t.Parallel()
 
@@ -285,6 +298,12 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "interface create missing name", arguments: []string{"interface", "create"}, wantError: wantInterfaceCreateUsage},
 		{name: "interface create extra argument", arguments: []string{"interface", "create", "records.list", "extra"}, wantError: wantInterfaceCreateUsage},
 		{name: "interface create unavailable intent option", arguments: []string{"interface", "create", "records.list", "--query"}, wantError: wantInterfaceCreateUsage},
+		{name: "implement missing Interface", arguments: []string{"implement"}, wantError: wantImplementUsage},
+		{name: "implement missing package option", arguments: []string{"implement", "records.list/v1"}, wantError: wantImplementUsage},
+		{name: "implement missing package value", arguments: []string{"implement", "records.list/v1", "--package"}, wantError: wantImplementUsage},
+		{name: "implement unknown option", arguments: []string{"implement", "records.list/v1", "--plugin", "records"}, wantError: wantImplementUsage},
+		{name: "implement duplicate package option", arguments: []string{"implement", "records.list/v1", "--package", "./memory", "--package", "./postgres"}, wantError: wantImplementUsage},
+		{name: "implement extra argument", arguments: []string{"implement", "records.list/v1", "--package", "./postgres", "extra"}, wantError: wantImplementUsage},
 		{name: "capability missing subcommand", arguments: []string{"capability"}, wantError: "usage:\n  plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n"},
 		{name: "capability unknown subcommand", arguments: []string{"capability", "remove", "records.create/v1"}, wantError: "usage:\n  plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n"},
 		{name: "capability create missing reference", arguments: []string{"capability", "create"}, wantError: "usage: plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]\n"},
