@@ -170,6 +170,7 @@ func TestBuildCompilesConfigurationFieldMetadata(t *testing.T) {
 
 	compiled := compiledConfigurationPackage("example.com/app/service", "service", []configurationTestField{
 		{name: "Host", fieldType: types.Typ[types.String], tag: `yaml:"host" plystra:"required,build-visible"`},
+		{name: "Address", fieldType: types.Typ[types.String], tag: `yaml:"address" plystra:"build-visible,required"`},
 		{name: "Mode", fieldType: types.Typ[types.String], tag: `yaml:"mode" plystra-default:"sensitive-default"`},
 		{name: "Label", fieldType: types.Typ[types.String], tag: `yaml:"label" plystra-default:""`},
 		{name: "Enabled", fieldType: types.Typ[types.Bool], tag: `yaml:"enabled" plystra:"build-visible" plystra-default:"true"`},
@@ -206,6 +207,7 @@ func TestBuildCompilesConfigurationFieldMetadata(t *testing.T) {
 		return field
 	}
 	assertField("host", true, true, "")
+	assertField("address", true, true, "")
 	mode := assertField("mode", false, false, `"sensitive-default"`)
 	assertField("label", false, false, `""`)
 	assertField("enabled", false, true, "true")
