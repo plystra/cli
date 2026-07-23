@@ -14,7 +14,6 @@ import (
 
 	"github.com/plystra/kernel/capability"
 	kernelinvocation "github.com/plystra/kernel/invocation"
-	"github.com/plystra/kernel/plugin"
 )
 
 const benchmarkHTTPRoute = "/api/v1/capabilities/benchmark.invoke/v1/invoke"
@@ -146,21 +145,16 @@ func benchmarkHTTPHandle(b testing.TB) kernelinvocation.Handle[benchmarkHTTPRequ
 	if err != nil {
 		b.Fatalf("NewEndpoint: %v", err)
 	}
-	providerID, err := plugin.ParseID("benchmark.provider")
-	if err != nil {
-		b.Fatalf("ParseID: %v", err)
-	}
 	providerBuild, err := kernelinvocation.NewModuleBuild("example.com/benchmark", "v1.0.0", "")
 	if err != nil {
 		b.Fatalf("NewModuleBuild: %v", err)
 	}
 	binding, err := kernelinvocation.NewBinding(kernelinvocation.BindingOptions{
-		ProviderKind:    kernelinvocation.ProviderKindPlugin,
-		ProviderID:      providerID,
-		ProviderPackage: "example.com/benchmark/provider",
-		ProviderBuild:   providerBuild,
-		SelectionReason: kernelinvocation.SelectionReasonSoleProvider,
-		SchemaDigest:    sha256.Sum256([]byte("benchmark.invoke/v1")),
+		Kind:            kernelinvocation.BindingKindImplementation,
+		Constructor:     "example.com/benchmark/provider.New",
+		ModuleBuild:     providerBuild,
+		SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible,
+		ContractDigest:  sha256.Sum256([]byte("benchmark.invoke/v1")),
 	}, endpoint)
 	if err != nil {
 		b.Fatalf("NewBinding: %v", err)

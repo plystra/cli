@@ -22,9 +22,11 @@ import (
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/connectgen"
+	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/implementationadaptergen"
+	"github.com/plystra/cli/internal/implementationassemblygen"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/modulelocate"
@@ -300,6 +302,10 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
+	implementationAssembly, err := implementationAssemblyInput(resolved, kernelVersion, kernelBuildIdentity)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
 	httpTransports := resolved.Manifest().HTTPTransports()
 	var httpCORS *applicationmeta.HTTPCORS
 	if selected, exists := resolved.Manifest().HTTPCORS(); exists {
@@ -337,6 +343,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		Providers:              providers,
 		InterfaceProxies:       interfaceProxies,
 		ImplementationAdapters: implementationAdapters,
+		ImplementationAssembly: implementationAssembly,
 		Resolution:             resolved.Resolution(),
 		ProtobufWireMap:        wireMap,
 	})
@@ -376,6 +383,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		Providers:              providers,
 		InterfaceProxies:       interfaceProxies,
 		ImplementationAdapters: implementationAdapters,
+		ImplementationAssembly: implementationAssembly,
 		ProtobufWireMap:        wireMap,
 	}, resolved.Resolution())
 	if err != nil {
@@ -510,6 +518,104 @@ func implementationAdapterInputs(resolved applicationresolve.Result) ([]implemen
 		inputs[index] = input
 	}
 	return inputs, nil
+}
+
+func implementationAssemblyInput(resolved applicationresolve.Result, kernelVersion, kernelBuildIdentity string) (implementationassemblygen.Options, error) {
+	type interfaceDefinition struct {
+		packagePath string
+		digest      [sha256.Size]byte
+	}
+	definitions := make(map[string]interfaceDefinition)
+	for _, visible := range resolved.Interfaces().Interfaces() {
+		identifier := visible.Contract().ID().String()
+		if _, duplicate := definitions[identifier]; duplicate {
+			return implementationassemblygen.Options{}, fmt.Errorf("canonical Interface %s has more than one visible definition while generating static assembly", identifier)
+		}
+		digest, err := decodeSemanticDigest(visible.ContractDigest())
+		if err != nil {
+			return implementationassemblygen.Options{}, fmt.Errorf("canonical Interface %s contract digest: %v", identifier, err)
+		}
+		definitions[identifier] = interfaceDefinition{packagePath: visible.Contract().PackagePath(), digest: digest}
+	}
+
+	graph := resolved.InterfaceResolution().Graph()
+	graphBindings := graph.Bindings()
+	bindings := make([]implementationassemblygen.BindingInput, len(graphBindings))
+	for index, binding := range graphBindings {
+		definition, exists := definitions[binding.InterfaceID().String()]
+		if !exists {
+			return implementationassemblygen.Options{}, fmt.Errorf("reachable Interface %s has no canonical contract while generating static assembly", binding.InterfaceID())
+		}
+		reason := implementationassemblygen.SelectionReason("")
+		switch binding.Reason() {
+		case constructorgraph.SelectionExplicit:
+			reason = implementationassemblygen.SelectionExplicit
+		case constructorgraph.SelectionUnique:
+			reason = implementationassemblygen.SelectionUniqueCompatible
+		default:
+			return implementationassemblygen.Options{}, fmt.Errorf("reachable Interface %s has unsupported selection reason %q", binding.InterfaceID(), binding.Reason())
+		}
+		bindings[index] = implementationassemblygen.BindingInput{
+			InterfaceID:     binding.InterfaceID(),
+			PackagePath:     definition.packagePath,
+			Constructor:     binding.Constructor(),
+			SelectionReason: reason,
+			ContractDigest:  definition.digest,
+		}
+	}
+
+	nodes := graph.ConstructionOrder()
+	constructors := make([]implementationassemblygen.ConstructorInput, len(nodes))
+	for index, node := range nodes {
+		implementation := node.Implementation()
+		_, hasConfiguration := implementation.Configuration()
+		dependencies := node.Dependencies()
+		inputs := make([]implementationassemblygen.DependencyInput, len(dependencies))
+		for dependencyIndex, dependency := range dependencies {
+			inputs[dependencyIndex] = implementationassemblygen.DependencyInput{
+				InterfaceID:       dependency.InterfaceID(),
+				PackagePath:       dependency.PackagePath(),
+				ParameterName:     dependency.ParameterName(),
+				ParameterPosition: dependency.ParameterPosition(),
+				Optional:          dependency.Optional(),
+				Available:         dependency.Available(),
+			}
+		}
+		constructors[index] = implementationassemblygen.ConstructorInput{
+			Symbol:           node.Symbol(),
+			ModulePath:       implementation.ModulePath(),
+			ModuleVersion:    implementation.ModuleVersion(),
+			HasConfiguration: hasConfiguration,
+			Dependencies:     inputs,
+		}
+	}
+
+	return implementationassemblygen.Options{
+		ModulePath:               resolved.Module().ModulePath(),
+		ApplicationBuildIdentity: resolved.Resolution().Context().BuildModelDigest(),
+		KernelModuleVersion:      kernelVersion,
+		KernelBuildIdentity:      kernelBuildIdentity,
+		DefaultTimeout:           applicationmeta.DefaultInvocationTimeout,
+		Bindings:                 bindings,
+		Constructors:             constructors,
+	}, nil
+}
+
+func decodeSemanticDigest(value string) ([sha256.Size]byte, error) {
+	encoded, found := strings.CutPrefix(value, "sha256:")
+	if !found || len(encoded) != sha256.Size*2 {
+		return [sha256.Size]byte{}, fmt.Errorf("expected canonical sha256 digest")
+	}
+	decoded, err := hex.DecodeString(encoded)
+	if err != nil || len(decoded) != sha256.Size {
+		return [sha256.Size]byte{}, fmt.Errorf("expected canonical sha256 digest")
+	}
+	var digest [sha256.Size]byte
+	copy(digest[:], decoded)
+	if digest == [sha256.Size]byte{} {
+		return [sha256.Size]byte{}, fmt.Errorf("digest must not be zero")
+	}
+	return digest, nil
 }
 
 func providerInputs(resolved applicationresolve.Result) ([]assemblygen.ProviderInput, error) {

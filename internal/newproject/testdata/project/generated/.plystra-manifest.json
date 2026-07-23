@@ -10,8 +10,12 @@
       "sha256": "sha256:f3cd92d2b0829d1fd646c4bf65840d578f784ab5111c6972d3545d31fc847a42"
     },
     {
+      "path": "generated/go/assembly/interfaces_gen.go",
+      "sha256": "sha256:23342a87c040769e0b3920d768d8b8ee03ee77c03db0425ee3141772fede8578"
+    },
+    {
       "path": "generated/go/assembly/invocations_gen.go",
-      "sha256": "sha256:18b7274a013679ce03424a0b90a9c05754a080e4aa9191cf0ee389efd00d9733"
+      "sha256": "sha256:fc1f993645ae43b1c96182948e699a456c7a3979800a66e26898ea6ac2b9a006"
     },
     {
       "path": "generated/go/assembly/providers_gen.go",
@@ -19,11 +23,11 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:ecb9923f2dfb30a8762d673127acf11b59577102f5b58881289dc9ec323dd441"
+      "sha256": "sha256:828f04416dd5bcca5a0b84d28323e96ec6b98b9cad37f82316a4b5b210106326"
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:899572108c04298f6fcf8d61af97726c1c632f751f33c2a89215fb5432aff714"
+      "sha256": "sha256:fb6d60990762d46322dda4d9cffbce1cfc08a455bb1c40f4154b449f760b65c0"
     },
     {
       "path": "generated/proto/descriptor-set.pb",
@@ -70,7 +74,7 @@
         }
       ],
       "protobuf_wire_map_digest": "sha256:e563b91c26485ad548360d3b61bd79104cd76b2ef4771c41e6fbda4660bb525f",
-      "application_model_digest": "sha256:91acbe20eaaa5ba4662e7059f63d3fd0470302e3c9e1430c564ddf641efbcfcf"
+      "application_model_digest": "sha256:0d3ccfd8d70d4be609bfc7f57adfa197bcc274554b383bb75a502f1b47682f5a"
     }
   }
 }

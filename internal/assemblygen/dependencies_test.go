@@ -221,9 +221,9 @@ replace github.com/plystra/kernel => %s
 		DefaultTimeout:           30 * time.Second,
 		Providers:                providers,
 		Invocations: []assemblygen.InvocationInput{
-			{ContractJSON: []byte(wiringLookupSchema), ProviderID: "remote.catalog", SelectionReason: kernelinvocation.SelectionReasonSoleProvider},
-			{ContractJSON: []byte(wiringOrderSchema), ProviderID: "acme.local-orders", SelectionReason: kernelinvocation.SelectionReasonSoleProvider},
-			{ContractJSON: []byte(wiringWorkflowSchema), ProviderID: "remote.workflow", SelectionReason: kernelinvocation.SelectionReasonSoleProvider},
+			{ContractJSON: []byte(wiringLookupSchema), ProviderID: "remote.catalog", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
+			{ContractJSON: []byte(wiringOrderSchema), ProviderID: "acme.local-orders", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
+			{ContractJSON: []byte(wiringWorkflowSchema), ProviderID: "remote.workflow", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
 		},
 	})
 	if err != nil {

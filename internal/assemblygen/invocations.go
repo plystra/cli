@@ -136,9 +136,6 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	fmt.Fprintln(&source, "\tkernelintrinsic \"github.com/plystra/kernel/intrinsic\"")
 	fmt.Fprintln(&source, "\tkernelhealthv1 \"github.com/plystra/kernel/interfaces/kernel/health/v1\"")
 	fmt.Fprintln(&source, "\tkernelinvocation \"github.com/plystra/kernel/invocation\"")
-	if ordinaryCount != 0 {
-		fmt.Fprintln(&source, "\tkernelplugin \"github.com/plystra/kernel/plugin\"")
-	}
 	fmt.Fprintln(&source, ")")
 	fmt.Fprintln(&source)
 	fmt.Fprintf(&source, "const defaultInvocationTimeout = time.Duration(%d)\n", options.DefaultTimeout)
@@ -336,18 +333,14 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	for _, provider := range usedProviders(invocations) {
 		fmt.Fprintf(
 			&source,
-			"\tproviderBuild%d, err := kernelinvocation.NewModuleBuild(%s, %s, %s)\n",
+			"\timplementationBuild%d, err := kernelinvocation.NewModuleBuild(%s, %s, %s)\n",
 			provider.index,
 			strconv.Quote(provider.ModulePath),
 			strconv.Quote(provider.ModuleVersion),
 			strconv.Quote(options.ApplicationBuildIdentity),
 		)
 		fmt.Fprintln(&source, "\tif err != nil {")
-		fmt.Fprintf(&source, "\t\treturn Invocations{}, fmt.Errorf(\"%%w: plugin %%q build provenance: %%w\", ErrInvocationAssembly, %s, err)\n", strconv.Quote(provider.PluginID))
-		fmt.Fprintln(&source, "\t}")
-		fmt.Fprintf(&source, "\tproviderID%d, err := kernelplugin.ParseID(%s)\n", provider.index, strconv.Quote(provider.PluginID))
-		fmt.Fprintln(&source, "\tif err != nil {")
-		fmt.Fprintf(&source, "\t\treturn Invocations{}, fmt.Errorf(\"%%w: generated Plugin ID %%q: %%w\", ErrInvocationAssembly, %s, err)\n", strconv.Quote(provider.PluginID))
+		fmt.Fprintf(&source, "\t\treturn Invocations{}, fmt.Errorf(\"%%w: Implementation constructor %s build provenance: %%w\", ErrInvocationAssembly, err)\n", provider.ImportPath+".New")
 		fmt.Fprintln(&source, "\t}")
 	}
 	for _, invocation := range invocations {
@@ -438,7 +431,7 @@ func planInvocations(options InvocationOptions) ([]plannedInvocation, []int, err
 			if !exists {
 				return nil, nil, fmt.Errorf("%w: Capability %s selects absent plugin %q", ErrInvalidInvocation, identifier, input.ProviderID)
 			}
-			if input.SelectionReason != kernelinvocation.SelectionReasonSoleProvider && input.SelectionReason != kernelinvocation.SelectionReasonExplicit {
+			if input.SelectionReason != kernelinvocation.SelectionReasonUniqueCompatible && input.SelectionReason != kernelinvocation.SelectionReasonExplicit {
 				return nil, nil, fmt.Errorf("%w: Capability %s has invalid ordinary selection reason %q", ErrInvalidInvocation, identifier, input.SelectionReason)
 			}
 			if _, err := kernelinvocation.NewModuleBuild(provider.ModulePath, provider.ModuleVersion, options.ApplicationBuildIdentity); err != nil {
@@ -592,12 +585,11 @@ func renderEndpointBinding(source *strings.Builder, options InvocationOptions, i
 	fmt.Fprintf(source, "\t\treturn Invocations{}, fmt.Errorf(\"%%w: endpoint %s: %%w\", ErrInvocationAssembly, err)\n", invocation.id)
 	fmt.Fprintln(source, "\t}")
 	fmt.Fprintf(source, "\tbinding%d, err := kernelinvocation.NewBinding(kernelinvocation.BindingOptions{\n", invocation.index)
-	fmt.Fprintln(source, "\t\tProviderKind:    kernelinvocation.ProviderKindPlugin,")
-	fmt.Fprintf(source, "\t\tProviderID:      providerID%d,\n", invocation.provider.index)
-	fmt.Fprintf(source, "\t\tProviderPackage: %s,\n", strconv.Quote(invocation.provider.ImportPath))
-	fmt.Fprintf(source, "\t\tProviderBuild:   providerBuild%d,\n", invocation.provider.index)
+	fmt.Fprintln(source, "\t\tKind:            kernelinvocation.BindingKindImplementation,")
+	fmt.Fprintf(source, "\t\tConstructor:     %s,\n", strconv.Quote(invocation.provider.ImportPath+".New"))
+	fmt.Fprintf(source, "\t\tModuleBuild:     implementationBuild%d,\n", invocation.provider.index)
 	fmt.Fprintf(source, "\t\tSelectionReason: kernelinvocation.%s,\n", selectionReasonName(invocation.selectionReason))
-	fmt.Fprintf(source, "\t\tSchemaDigest:    %s,\n", digestLiteral(invocation.digest))
+	fmt.Fprintf(source, "\t\tContractDigest:  %s,\n", digestLiteral(invocation.digest))
 	fmt.Fprintf(source, "\t}, endpoint%d)\n", invocation.index)
 	fmt.Fprintln(source, "\tif err != nil {")
 	fmt.Fprintf(source, "\t\treturn Invocations{}, fmt.Errorf(\"%%w: binding %s to plugin %%q: %%w\", ErrInvocationAssembly, %s, err)\n", invocation.id, strconv.Quote(invocation.provider.PluginID))
@@ -753,8 +745,8 @@ func generatedCapabilityDirectory(category string, identifier capabilityid.Ident
 
 func selectionReasonName(reason kernelinvocation.SelectionReason) string {
 	switch reason {
-	case kernelinvocation.SelectionReasonSoleProvider:
-		return "SelectionReasonSoleProvider"
+	case kernelinvocation.SelectionReasonUniqueCompatible:
+		return "SelectionReasonUniqueCompatible"
 	case kernelinvocation.SelectionReasonExplicit:
 		return "SelectionReasonExplicit"
 	default:

@@ -21,6 +21,7 @@ import (
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/implementationadaptergen"
+	"github.com/plystra/cli/internal/implementationassemblygen"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
@@ -406,6 +407,7 @@ type ApplicationModelOptions struct {
 	Providers              []assemblygen.ProviderInput
 	InterfaceProxies       []interfaceproxygen.Input
 	ImplementationAdapters []implementationadaptergen.Input
+	ImplementationAssembly implementationassemblygen.Options
 	Resolution             generationresolution.ExtensionResult
 	ProtobufWireMap        protobufwiremap.Map
 }
@@ -424,6 +426,7 @@ type applicationModelDocument struct {
 	Providers              []applicationModelProvider              `json:"providers"`
 	InterfaceProxies       []applicationModelInterfaceProxy        `json:"interface_proxies"`
 	ImplementationAdapters []applicationModelImplementationAdapter `json:"implementation_adapters"`
+	ImplementationAssembly applicationModelImplementationAssembly  `json:"implementation_assembly"`
 	GenerationExtensions   []applicationModelGenerationExtension   `json:"generation_extensions"`
 	ProtobufProjection     json.RawMessage                         `json:"protobuf_projection"`
 	ProtobufWireProjection json.RawMessage                         `json:"protobuf_wire_projection"`
@@ -483,6 +486,38 @@ type applicationModelImplementationAdapter struct {
 	Digest         string   `json:"digest"`
 }
 
+type applicationModelImplementationAssembly struct {
+	Path         string                                `json:"path"`
+	Digest       string                                `json:"digest"`
+	Bindings     []applicationModelAssemblyBinding     `json:"bindings"`
+	Constructors []applicationModelAssemblyConstructor `json:"constructors"`
+}
+
+type applicationModelAssemblyBinding struct {
+	InterfaceID     string `json:"interface_id"`
+	PackagePath     string `json:"package_path"`
+	Constructor     string `json:"constructor"`
+	SelectionReason string `json:"selection_reason"`
+	ContractDigest  string `json:"contract_digest"`
+}
+
+type applicationModelAssemblyConstructor struct {
+	Symbol           string                               `json:"symbol"`
+	ModulePath       string                               `json:"module_path"`
+	ModuleVersion    string                               `json:"module_version,omitempty"`
+	HasConfiguration bool                                 `json:"has_configuration"`
+	Dependencies     []applicationModelAssemblyDependency `json:"dependencies"`
+}
+
+type applicationModelAssemblyDependency struct {
+	InterfaceID       string `json:"interface_id"`
+	PackagePath       string `json:"package_path"`
+	ParameterName     string `json:"parameter_name,omitempty"`
+	ParameterPosition int    `json:"parameter_position"`
+	Optional          bool   `json:"optional"`
+	Available         bool   `json:"available"`
+}
+
 type applicationModelGenerationExtension struct {
 	PluginID   string   `json:"plugin_id"`
 	API        string   `json:"api"`
@@ -500,6 +535,13 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 	if !validContext(context) || !validAliases(aliases) {
 		return "", fmt.Errorf("%w: final resolution is absent or invalid", ErrResolution)
 	}
+	options.ImplementationAssembly = normalizeImplementationAssemblyOptions(
+		options.ImplementationAssembly,
+		options.ModulePath,
+		options.KernelModuleVersion,
+		options.KernelBuildIdentity,
+		context.BuildModelDigest(),
+	)
 	var httpCORS *applicationModelHTTPCORS
 	if options.HTTPCORS != nil {
 		normalized, err := applicationmeta.NormalizeHTTPCORS(*options.HTTPCORS)
@@ -607,6 +649,50 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		}
 		sort.Strings(adapterRecords[index].SemanticErrors)
 	}
+	assemblyFile, err := implementationassemblygen.Render(options.ImplementationAssembly)
+	if err != nil {
+		return "", fmt.Errorf("static Implementation assembly model: %w", err)
+	}
+	assemblyBindings := assemblyFile.Bindings()
+	bindingRecords := make([]applicationModelAssemblyBinding, len(assemblyBindings))
+	for index, binding := range assemblyBindings {
+		bindingRecords[index] = applicationModelAssemblyBinding{
+			InterfaceID:     binding.InterfaceID.String(),
+			PackagePath:     binding.PackagePath,
+			Constructor:     binding.Constructor.String(),
+			SelectionReason: string(binding.SelectionReason),
+			ContractDigest:  "sha256:" + hex.EncodeToString(binding.ContractDigest[:]),
+		}
+	}
+	assemblyConstructors := assemblyFile.Constructors()
+	constructorRecords := make([]applicationModelAssemblyConstructor, len(assemblyConstructors))
+	for index, constructor := range assemblyConstructors {
+		dependencies := make([]applicationModelAssemblyDependency, len(constructor.Dependencies))
+		for dependencyIndex, dependency := range constructor.Dependencies {
+			dependencies[dependencyIndex] = applicationModelAssemblyDependency{
+				InterfaceID:       dependency.InterfaceID.String(),
+				PackagePath:       dependency.PackagePath,
+				ParameterName:     dependency.ParameterName,
+				ParameterPosition: dependency.ParameterPosition,
+				Optional:          dependency.Optional,
+				Available:         dependency.Available,
+			}
+		}
+		constructorRecords[index] = applicationModelAssemblyConstructor{
+			Symbol:           constructor.Symbol.String(),
+			ModulePath:       constructor.ModulePath,
+			ModuleVersion:    constructor.ModuleVersion,
+			HasConfiguration: constructor.HasConfiguration,
+			Dependencies:     dependencies,
+		}
+	}
+	assemblySum := sha256.Sum256(assemblyFile.Data())
+	assemblyRecord := applicationModelImplementationAssembly{
+		Path:         assemblyFile.Path(),
+		Digest:       "sha256:" + hex.EncodeToString(assemblySum[:]),
+		Bindings:     bindingRecords,
+		Constructors: constructorRecords,
+	}
 	outputs := options.Resolution.Outputs()
 	extensions := make([]applicationModelGenerationExtension, len(outputs))
 	for index, output := range outputs {
@@ -630,7 +716,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		return "", fmt.Errorf("%w: Protobuf wire map is absent or does not match the normalized projection", ErrResolution)
 	}
 	document := applicationModelDocument{
-		Version:             9,
+		Version:             10,
 		ModulePath:          options.ModulePath,
 		JavaScriptPackage:   options.JavaScriptPackage,
 		KernelModuleVersion: options.KernelModuleVersion,
@@ -646,6 +732,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		Providers:              providerRecords,
 		InterfaceProxies:       proxyRecords,
 		ImplementationAdapters: adapterRecords,
+		ImplementationAssembly: assemblyRecord,
 		GenerationExtensions:   extensions,
 		ProtobufProjection:     json.RawMessage(protobufProjection.CanonicalJSON()),
 		ProtobufWireProjection: json.RawMessage(options.ProtobufWireMap.ActiveJSON()),

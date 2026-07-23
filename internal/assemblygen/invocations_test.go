@@ -92,7 +92,7 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 		{
 			ContractJSON:    []byte(runtimePolicySchema),
 			ProviderID:      provider.PluginID,
-			SelectionReason: kernelinvocation.SelectionReasonSoleProvider,
+			SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible,
 		},
 	}
 	options := assemblygen.InvocationOptions{
@@ -115,9 +115,11 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 		`kernelintrinsic.NewBindings`,
 		`len(i.catalog.Bindings()) != 4`,
 		`kernelinvocation.NewModuleBuild("example.com/runtime-dependency", "v1.2.3", "sha256:0123456789abcdef")`,
+		`Kind:            kernelinvocation.BindingKindImplementation`,
+		`Constructor:     "example.com/runtime-dependency/remote-service.New"`,
+		`ModuleBuild:     implementationBuild0`,
 		`kernelinvocation.SelectionReasonExplicit`,
-		`kernelinvocation.SelectionReasonSoleProvider`,
-		`ProviderPackage: "example.com/runtime-dependency/remote-service"`,
+		`kernelinvocation.SelectionReasonUniqueCompatible`,
 		`kernelcapability.MustParseContractWithSemanticErrors[contract0.Request, contract0.Response](contract0.CapabilityID, "invalid_recipient")`,
 		`kernelcapability.MustParseContractWithSemanticErrors[contract1.Request, contract1.Response](contract1.CapabilityID, "denied")`,
 		`result.Mode = providercontract0.RequestMode(value.Mode)`,
@@ -183,8 +185,8 @@ func TestRenderInvocationsRejectsInvalidRuntimePlans(t *testing.T) {
 		DefaultTimeout:           time.Second,
 		Providers:                []assemblygen.ProviderInput{provider},
 		Invocations: []assemblygen.InvocationInput{
-			{ContractJSON: []byte(runtimeMessageSchema), ProviderID: provider.PluginID, SelectionReason: kernelinvocation.SelectionReasonSoleProvider},
-			{ContractJSON: []byte(runtimePolicySchema), ProviderID: provider.PluginID, SelectionReason: kernelinvocation.SelectionReasonSoleProvider},
+			{ContractJSON: []byte(runtimeMessageSchema), ProviderID: provider.PluginID, SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
+			{ContractJSON: []byte(runtimePolicySchema), ProviderID: provider.PluginID, SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
 		},
 	}
 	tests := []struct {
@@ -378,7 +380,7 @@ replace github.com/plystra/kernel => %s
 			{
 				ContractJSON:    []byte(runtimePolicySchema),
 				ProviderID:      provider.PluginID,
-				SelectionReason: kernelinvocation.SelectionReasonSoleProvider,
+				SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible,
 			},
 		},
 	})
@@ -434,7 +436,7 @@ func FuzzRenderInvocations(f *testing.F) {
 			Invocations: []assemblygen.InvocationInput{{
 				ContractJSON:    schema,
 				ProviderID:      provider.PluginID,
-				SelectionReason: kernelinvocation.SelectionReasonSoleProvider,
+				SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible,
 			}},
 		}
 		generated, err := assemblygen.RenderInvocations(options)
@@ -683,42 +685,40 @@ func TestCanonicalInvocationRuntime(t *testing.T) {
 	}
 	reasons := map[string]kernelinvocation.SelectionReason{
 		"message.send/v1": kernelinvocation.SelectionReasonExplicit,
-		"policy.check/v1": kernelinvocation.SelectionReasonSoleProvider,
+		"policy.check/v1": kernelinvocation.SelectionReasonUniqueCompatible,
 	}
 	for _, binding := range bindings {
-		capabilityID := binding.Capability().String()
-		if capabilityID == "kernel.health/v1" || capabilityID == "kernel.info/v1" {
-			build := binding.ProviderBuild()
-			if binding.ProviderKind() != kernelinvocation.ProviderKindKernel ||
-				binding.ProviderID().String() != "" ||
-				binding.ProviderPackage() != "github.com/plystra/kernel/intrinsic" ||
+		interfaceID := binding.InterfaceID().String()
+		if interfaceID == "kernel.health/v1" || interfaceID == "kernel.info/v1" {
+			build := binding.ModuleBuild()
+			if binding.Kind() != kernelinvocation.BindingKindIntrinsic ||
+				binding.Constructor() != "" ||
 				binding.SelectionReason() != kernelinvocation.SelectionReasonIntrinsic ||
 				build.ModulePath() != "github.com/plystra/kernel" ||
 				build.ModuleVersion() != "v0.0.0" ||
 				build.BuildIdentity() != "runtime-build-123" ||
-				binding.SchemaDigest() == [32]byte{} {
-				t.Fatalf("intrinsic binding provenance for %s is incomplete", binding.Capability())
+				binding.ContractDigest() == [32]byte{} {
+				t.Fatalf("intrinsic binding provenance for %s is incomplete", binding.InterfaceID())
 			}
 			continue
 		}
-		wantReason, exists := reasons[capabilityID]
+		wantReason, exists := reasons[interfaceID]
 		if !exists {
-			t.Fatalf("catalog contains non-canonical ID %q", binding.Capability())
+			t.Fatalf("catalog contains non-canonical ID %q", binding.InterfaceID())
 		}
-		build := binding.ProviderBuild()
-		if binding.ProviderKind() != kernelinvocation.ProviderKindPlugin ||
-			binding.ProviderID().String() != "acme.remote-service" ||
-			binding.ProviderPackage() != "example.com/runtime-dependency/remote-service" ||
+		build := binding.ModuleBuild()
+		if binding.Kind() != kernelinvocation.BindingKindImplementation ||
+			binding.Constructor() != "example.com/runtime-dependency/remote-service.New" ||
 			binding.SelectionReason() != wantReason ||
 			build.ModulePath() != "example.com/runtime-dependency" ||
 			build.ModuleVersion() != "v1.2.3" ||
 			build.BuildIdentity() != "runtime-build-123" ||
-			binding.SchemaDigest() == [32]byte{} {
-			t.Fatalf("binding provenance for %s is incomplete", binding.Capability())
+			binding.ContractDigest() == [32]byte{} {
+			t.Fatalf("binding provenance for %s is incomplete", binding.InterfaceID())
 		}
 	}
 	bindings[0] = kernelinvocation.Binding{}
-	if fresh := invocations.Catalog().Bindings(); len(fresh) != 4 || fresh[0].Capability().String() == "" {
+	if fresh := invocations.Catalog().Bindings(); len(fresh) != 4 || fresh[0].InterfaceID().String() == "" {
 		t.Fatalf("catalog bindings were mutable: %#v", fresh)
 	}
 	health, err := invocations.KernelHealthV1().Invoke(context.Background(), healthcontract.Request{})

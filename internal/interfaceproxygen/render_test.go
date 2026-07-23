@@ -216,11 +216,11 @@ func TestProxyUsesGovernedHandle(t *testing.T) {
 	build, err := invocation.NewModuleBuild("example.com/proxyfixture", "v1.0.0", "")
 	if err != nil { t.Fatal(err) }
 	binding, err := invocation.NewBinding(invocation.BindingOptions{
-		ProviderKind: invocation.ProviderKindKernel,
-		ProviderPackage: "example.com/proxyfixture/implementation",
-		ProviderBuild: build,
-		SelectionReason: invocation.SelectionReasonIntrinsic,
-		SchemaDigest: sha256.Sum256([]byte("order.create/v1")),
+		Kind: invocation.BindingKindImplementation,
+		Constructor: "example.com/proxyfixture/implementation.New",
+		ModuleBuild: build,
+		SelectionReason: invocation.SelectionReasonUniqueCompatible,
+		ContractDigest: sha256.Sum256([]byte("order.create/v1")),
 	}, endpoint)
 	if err != nil { t.Fatal(err) }
 	catalog, err := invocation.NewCatalog([]invocation.Binding{binding})

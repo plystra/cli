@@ -64,6 +64,7 @@ replace github.com/plystra/kernel => %s
 		"  missing generated/.plystra-manifest.json\n" +
 		"  missing generated/go/application/main_gen.go\n" +
 		"  missing generated/go/assembly/compatibility_gen.go\n" +
+		"  missing generated/go/assembly/interfaces_gen.go\n" +
 		"  missing generated/go/assembly/invocations_gen.go\n" +
 		"  missing generated/go/assembly/providers_gen.go\n" +
 		"  missing generated/go/bootstrap/bootstrap_gen.go\n" +
@@ -87,6 +88,7 @@ replace github.com/plystra/kernel => %s
 		"generated/.plystra-manifest.json",
 		"generated/go/application/main_gen.go",
 		"generated/go/assembly/compatibility_gen.go",
+		"generated/go/assembly/interfaces_gen.go",
 		"generated/go/assembly/invocations_gen.go",
 		"generated/go/assembly/providers_gen.go",
 		"generated/go/bootstrap/bootstrap_gen.go",
@@ -674,7 +676,7 @@ func (*Plugin) Read(_ context.Context, _ contract.Request) (contract.Response, e
 		}
 	}
 	invocations := readCommandFile(t, applicationRoot, "generated/go/assembly/invocations_gen.go")
-	if !bytes.Contains(invocations, []byte(`ProviderPackage: "example.com/acme/config-select/selected-mail"`)) || bytes.Contains(invocations, []byte(`ProviderPackage: "example.com/acme/config-select/root-mail"`)) {
+	if !bytes.Contains(invocations, []byte(`Constructor:     "example.com/acme/config-select/selected-mail.New"`)) || bytes.Contains(invocations, []byte(`Constructor:     "example.com/acme/config-select/root-mail.New"`)) {
 		t.Fatalf("selected invocation assembly retained the root-only Provider choice:\n%s", invocations)
 	}
 	apiDocumentation := readCommandFile(t, applicationRoot, "generated/docs/api.md")

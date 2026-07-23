@@ -28,6 +28,7 @@ import (
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/httpgen"
 	"github.com/plystra/cli/internal/implementationadaptergen"
+	"github.com/plystra/cli/internal/implementationassemblygen"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/invocationgen"
 	"github.com/plystra/cli/internal/javascriptgen"
@@ -70,6 +71,7 @@ type Options struct {
 	Providers              []assemblygen.ProviderInput
 	InterfaceProxies       []interfaceproxygen.Input
 	ImplementationAdapters []implementationadaptergen.Input
+	ImplementationAssembly implementationassemblygen.Options
 	ProtobufWireMap        protobufwiremap.Map
 }
 
@@ -90,6 +92,13 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	if !options.Composition.Valid() {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: dependency configuration composition is absent or invalid", ErrRender, ErrResolution)
 	}
+	implementationAssemblyOptions := normalizeImplementationAssemblyOptions(
+		options.ImplementationAssembly,
+		options.ModulePath,
+		options.KernelModuleVersion,
+		options.KernelBuildIdentity,
+		context.BuildModelDigest(),
+	)
 	modelDigest, err := ApplicationModelDigest(ApplicationModelOptions{
 		ModulePath:             options.ModulePath,
 		JavaScriptPackage:      options.JavaScriptPackage,
@@ -101,6 +110,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		Providers:              options.Providers,
 		InterfaceProxies:       options.InterfaceProxies,
 		ImplementationAdapters: options.ImplementationAdapters,
+		ImplementationAssembly: implementationAssemblyOptions,
 		Resolution:             resolution,
 		ProtobufWireMap:        options.ProtobufWireMap,
 	})
@@ -167,6 +177,13 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		if err := add(file.Path(), file.Data()); err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: Implementation adapter %s: %w", ErrRender, file.InterfaceID(), err)
 		}
+	}
+	implementationAssembly, err := implementationassemblygen.Render(implementationAssemblyOptions)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: static Implementation assembly: %w", ErrRender, err)
+	}
+	if err := add(implementationAssembly.Path(), implementationAssembly.Data()); err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: static Implementation assembly output: %w", ErrRender, err)
 	}
 	if err := add(protobufwiremap.Path, options.ProtobufWireMap.CanonicalJSON()); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf wire map: %w", ErrRender, err)
@@ -388,7 +405,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 			if !exists {
 				return generatedfiles.Output{}, fmt.Errorf("%w: %w: required ordinary Capability %s has no selected provider", ErrRender, ErrResolution, id)
 			}
-			reason := kernelinvocation.SelectionReasonSoleProvider
+			reason := kernelinvocation.SelectionReasonUniqueCompatible
 			if selection.Explicit() {
 				reason = kernelinvocation.SelectionReasonExplicit
 			}
@@ -636,6 +653,25 @@ func validateAssemblyClosure(options Options, context generation.Context) error 
 func validContext(context generation.Context) bool {
 	canonical := context.CanonicalJSON()
 	return context.APIVersion() == generation.Version && len(canonical) != 0 && context.Digest() == digest(canonical)
+}
+
+func normalizeImplementationAssemblyOptions(options implementationassemblygen.Options, modulePath, kernelVersion, kernelBuildIdentity, applicationBuildIdentity string) implementationassemblygen.Options {
+	if options.ModulePath == "" {
+		options.ModulePath = modulePath
+	}
+	if options.ApplicationBuildIdentity == "" {
+		options.ApplicationBuildIdentity = applicationBuildIdentity
+	}
+	if options.KernelModuleVersion == "" {
+		options.KernelModuleVersion = kernelVersion
+	}
+	if options.KernelBuildIdentity == "" {
+		options.KernelBuildIdentity = kernelBuildIdentity
+	}
+	if options.DefaultTimeout == 0 {
+		options.DefaultTimeout = applicationmeta.DefaultInvocationTimeout
+	}
+	return options
 }
 
 func validAliases(aliases aliasresolution.Result) bool {

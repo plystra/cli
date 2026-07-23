@@ -70,6 +70,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		"generated/go/adapters/http/kernel/health/v1/handler_gen.go",
 		"generated/go/application/main_gen.go",
 		"generated/go/assembly/compatibility_gen.go",
+		"generated/go/assembly/interfaces_gen.go",
 		"generated/go/assembly/invocations_gen.go",
 		"generated/go/assembly/providers_gen.go",
 		"generated/go/bootstrap/bootstrap_gen.go",
@@ -257,7 +258,7 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render empty: %v", err)
 	}
-	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}) {
+	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}) {
 		t.Fatalf("empty output paths = %v", got)
 	}
 	wantManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), resolution.Context(), options.ManifestProvenance)
@@ -429,6 +430,7 @@ func TestRenderRejectsInvalidResolutionModuleAndPackage(t *testing.T) {
 	resolution := resolvedApplication(t, "")
 	invalidModule := resolvedOptions()
 	invalidModule.ModulePath = "not a module path"
+	invalidModule.ImplementationAssembly.ModulePath = applicationModulePath
 	invalidModule = withManifestProvenance(t, invalidModule, resolution)
 	if _, err := applicationgen.Render(invalidModule, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, assemblygen.ErrRenderProviders) {
 		t.Fatalf("Render invalid module error = %v", err)
@@ -569,16 +571,19 @@ func withManifestProvenanceSelection(t testing.TB, options applicationgen.Option
 	}
 	options.ProtobufWireMap = wireMap
 	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
-		ModulePath:          options.ModulePath,
-		JavaScriptPackage:   options.JavaScriptPackage,
-		KernelModuleVersion: options.KernelModuleVersion,
-		KernelBuildIdentity: options.KernelBuildIdentity,
-		HTTPTransports:      options.HTTPTransports,
-		HTTPCORS:            options.HTTPCORS,
-		Configurations:      options.Configurations,
-		Providers:           options.Providers,
-		Resolution:          resolution,
-		ProtobufWireMap:     wireMap,
+		ModulePath:             options.ModulePath,
+		JavaScriptPackage:      options.JavaScriptPackage,
+		KernelModuleVersion:    options.KernelModuleVersion,
+		KernelBuildIdentity:    options.KernelBuildIdentity,
+		HTTPTransports:         options.HTTPTransports,
+		HTTPCORS:               options.HTTPCORS,
+		Configurations:         options.Configurations,
+		Providers:              options.Providers,
+		InterfaceProxies:       options.InterfaceProxies,
+		ImplementationAdapters: options.ImplementationAdapters,
+		ImplementationAssembly: options.ImplementationAssembly,
+		Resolution:             resolution,
+		ProtobufWireMap:        wireMap,
 	})
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest: %v", err)

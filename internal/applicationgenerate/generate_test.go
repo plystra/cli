@@ -54,7 +54,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	if !checked.Checked() || checked.Module().Path() != root || checked.Module().ModulePath() != "example.com/Acme/empty" {
 		t.Fatalf("checked result = %#v", checked)
 	}
-	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}; !reflect.DeepEqual(got, want) {
+	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("missing files = %v, want %v", got, want)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
@@ -1955,7 +1955,7 @@ func TestUnrequiredCapabilityIsNotRegistered(t *testing.T) {
 		t.Fatalf("bootstrap.New = %#v, %v", application, err)
 	}
 	bindings := application.Invocations().Catalog().Bindings()
-	if len(bindings) != 2 || bindings[0].Capability().String() != "kernel.health/v1" || bindings[1].Capability().String() != "kernel.info/v1" {
+	if len(bindings) != 2 || bindings[0].InterfaceID().String() != "kernel.health/v1" || bindings[1].InterfaceID().String() != "kernel.info/v1" {
 		t.Fatalf("runtime catalog bindings = %#v, want only intrinsic Kernel Capabilities", bindings)
 	}
 }
@@ -2724,19 +2724,18 @@ func TestIntrinsicApplicationRuntime(t *testing.T) {
 	}
 	invocations := application.Invocations()
 	bindings := invocations.Catalog().Bindings()
-	if len(bindings) != 2 || bindings[0].Capability().String() != "kernel.health/v1" || bindings[1].Capability().String() != "kernel.info/v1" {
+	if len(bindings) != 2 || bindings[0].InterfaceID().String() != "kernel.health/v1" || bindings[1].InterfaceID().String() != "kernel.info/v1" {
 		t.Fatalf("intrinsic catalog = %#v", bindings)
 	}
 	for _, binding := range bindings {
-		build := binding.ProviderBuild()
-		if binding.ProviderKind() != kernelinvocation.ProviderKindKernel ||
-			binding.ProviderID().String() != "" ||
-			binding.ProviderPackage() != kernelintrinsic.ProviderPackage ||
+		build := binding.ModuleBuild()
+		if binding.Kind() != kernelinvocation.BindingKindIntrinsic ||
+			binding.Constructor() != "" ||
 			binding.SelectionReason() != kernelinvocation.SelectionReasonIntrinsic ||
 			build.ModulePath() != kernelintrinsic.ModulePath ||
 			build.ModuleVersion() != "v0.0.0" ||
-			build.BuildIdentity() == "" || binding.SchemaDigest() == [32]byte{} {
-			t.Fatalf("intrinsic provenance for %s is incomplete", binding.Capability())
+			build.BuildIdentity() == "" || binding.ContractDigest() == [32]byte{} {
+			t.Fatalf("intrinsic provenance for %s is incomplete", binding.InterfaceID())
 		}
 	}
 
