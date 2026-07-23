@@ -27,6 +27,7 @@ import (
 	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/httpgen"
+	"github.com/plystra/cli/internal/implementationadaptergen"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/invocationgen"
 	"github.com/plystra/cli/internal/javascriptgen"
@@ -57,18 +58,19 @@ var (
 
 // Options carries application-owned generated package identities.
 type Options struct {
-	ModulePath          string
-	JavaScriptPackage   string
-	KernelModuleVersion string
-	KernelBuildIdentity string
-	HTTPTransports      applicationmeta.HTTPTransports
-	HTTPCORS            *applicationmeta.HTTPCORS
-	Composition         applicationmeta.Composition
-	ManifestProvenance  ManifestProvenance
-	Configurations      []configurationgen.Input
-	Providers           []assemblygen.ProviderInput
-	InterfaceProxies    []interfaceproxygen.Input
-	ProtobufWireMap     protobufwiremap.Map
+	ModulePath             string
+	JavaScriptPackage      string
+	KernelModuleVersion    string
+	KernelBuildIdentity    string
+	HTTPTransports         applicationmeta.HTTPTransports
+	HTTPCORS               *applicationmeta.HTTPCORS
+	Composition            applicationmeta.Composition
+	ManifestProvenance     ManifestProvenance
+	Configurations         []configurationgen.Input
+	Providers              []assemblygen.ProviderInput
+	InterfaceProxies       []interfaceproxygen.Input
+	ImplementationAdapters []implementationadaptergen.Input
+	ProtobufWireMap        protobufwiremap.Map
 }
 
 // Render lowers final selected contributions once and renders the Kernel
@@ -89,17 +91,18 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: dependency configuration composition is absent or invalid", ErrRender, ErrResolution)
 	}
 	modelDigest, err := ApplicationModelDigest(ApplicationModelOptions{
-		ModulePath:          options.ModulePath,
-		JavaScriptPackage:   options.JavaScriptPackage,
-		KernelModuleVersion: options.KernelModuleVersion,
-		KernelBuildIdentity: options.KernelBuildIdentity,
-		HTTPTransports:      options.HTTPTransports,
-		HTTPCORS:            options.HTTPCORS,
-		Configurations:      options.Configurations,
-		Providers:           options.Providers,
-		InterfaceProxies:    options.InterfaceProxies,
-		Resolution:          resolution,
-		ProtobufWireMap:     options.ProtobufWireMap,
+		ModulePath:             options.ModulePath,
+		JavaScriptPackage:      options.JavaScriptPackage,
+		KernelModuleVersion:    options.KernelModuleVersion,
+		KernelBuildIdentity:    options.KernelBuildIdentity,
+		HTTPTransports:         options.HTTPTransports,
+		HTTPCORS:               options.HTTPCORS,
+		Configurations:         options.Configurations,
+		Providers:              options.Providers,
+		InterfaceProxies:       options.InterfaceProxies,
+		ImplementationAdapters: options.ImplementationAdapters,
+		Resolution:             resolution,
+		ProtobufWireMap:        options.ProtobufWireMap,
 	})
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: application model: %v", ErrRender, ErrResolution, err)
@@ -154,6 +157,15 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	for _, file := range proxyFiles {
 		if err := add(file.Path(), file.Data()); err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: typed Interface proxy %s: %w", ErrRender, file.InterfaceID(), err)
+		}
+	}
+	adapterFiles, err := implementationadaptergen.Render(options.ImplementationAdapters)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: Implementation adapters: %w", ErrRender, err)
+	}
+	for _, file := range adapterFiles {
+		if err := add(file.Path(), file.Data()); err != nil {
+			return generatedfiles.Output{}, fmt.Errorf("%w: Implementation adapter %s: %w", ErrRender, file.InterfaceID(), err)
 		}
 	}
 	if err := add(protobufwiremap.Path, options.ProtobufWireMap.CanonicalJSON()); err != nil {

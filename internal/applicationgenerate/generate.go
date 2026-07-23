@@ -24,6 +24,7 @@ import (
 	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/implementationadaptergen"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/modulelocate"
@@ -295,6 +296,10 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
+	implementationAdapters, err := implementationAdapterInputs(resolved)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
 	httpTransports := resolved.Manifest().HTTPTransports()
 	var httpCORS *applicationmeta.HTTPCORS
 	if selected, exists := resolved.Manifest().HTTPCORS(); exists {
@@ -322,17 +327,18 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		return preparedGeneration{}, err
 	}
 	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
-		ModulePath:          resolved.Module().ModulePath(),
-		JavaScriptPackage:   javaScriptPackage,
-		KernelModuleVersion: kernelVersion,
-		KernelBuildIdentity: kernelBuildIdentity,
-		HTTPTransports:      httpTransports,
-		HTTPCORS:            httpCORS,
-		Configurations:      configurations,
-		Providers:           providers,
-		InterfaceProxies:    interfaceProxies,
-		Resolution:          resolved.Resolution(),
-		ProtobufWireMap:     wireMap,
+		ModulePath:             resolved.Module().ModulePath(),
+		JavaScriptPackage:      javaScriptPackage,
+		KernelModuleVersion:    kernelVersion,
+		KernelBuildIdentity:    kernelBuildIdentity,
+		HTTPTransports:         httpTransports,
+		HTTPCORS:               httpCORS,
+		Configurations:         configurations,
+		Providers:              providers,
+		InterfaceProxies:       interfaceProxies,
+		ImplementationAdapters: implementationAdapters,
+		Resolution:             resolved.Resolution(),
+		ProtobufWireMap:        wireMap,
 	})
 	if err != nil {
 		return preparedGeneration{}, fmt.Errorf("digest final application model: %w", err)
@@ -358,18 +364,19 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		return preparedGeneration{}, fmt.Errorf("construct application manifest provenance: %w", err)
 	}
 	output, err := applicationgen.Render(applicationgen.Options{
-		ModulePath:          resolved.Module().ModulePath(),
-		JavaScriptPackage:   javaScriptPackage,
-		KernelModuleVersion: kernelVersion,
-		KernelBuildIdentity: kernelBuildIdentity,
-		HTTPTransports:      httpTransports,
-		HTTPCORS:            httpCORS,
-		Composition:         resolved.Composition(),
-		ManifestProvenance:  provenance,
-		Configurations:      configurations,
-		Providers:           providers,
-		InterfaceProxies:    interfaceProxies,
-		ProtobufWireMap:     wireMap,
+		ModulePath:             resolved.Module().ModulePath(),
+		JavaScriptPackage:      javaScriptPackage,
+		KernelModuleVersion:    kernelVersion,
+		KernelBuildIdentity:    kernelBuildIdentity,
+		HTTPTransports:         httpTransports,
+		HTTPCORS:               httpCORS,
+		Composition:            resolved.Composition(),
+		ManifestProvenance:     provenance,
+		Configurations:         configurations,
+		Providers:              providers,
+		InterfaceProxies:       interfaceProxies,
+		ImplementationAdapters: implementationAdapters,
+		ProtobufWireMap:        wireMap,
 	}, resolved.Resolution())
 	if err != nil {
 		return preparedGeneration{}, err
@@ -458,6 +465,48 @@ func interfaceProxyInputs(resolved applicationresolve.Result) ([]interfaceproxyg
 		if !exists {
 			return nil, fmt.Errorf("reachable Interface %s has no canonical authored contract for typed proxy generation", selection.InterfaceID)
 		}
+		inputs[index] = input
+	}
+	return inputs, nil
+}
+
+func implementationAdapterInputs(resolved applicationresolve.Result) ([]implementationadaptergen.Input, error) {
+	visible := resolved.Interfaces().Interfaces()
+	definitions := make(map[string]implementationadaptergen.Input, len(visible))
+	for _, definition := range visible {
+		contract := definition.Contract()
+		identifier := contract.ID().String()
+		if _, duplicate := definitions[identifier]; duplicate {
+			return nil, fmt.Errorf("canonical Interface %s has more than one visible definition while generating Implementation adapters", identifier)
+		}
+		semanticErrors := definition.SemanticErrors()
+		errorCodes := make([]string, len(semanticErrors))
+		for index, semanticError := range semanticErrors {
+			errorCodes[index] = semanticError.Code()
+		}
+		definitions[identifier] = implementationadaptergen.Input{
+			InterfaceID:    contract.ID(),
+			PackagePath:    contract.PackagePath(),
+			MethodName:     contract.MethodName(),
+			RequestName:    contract.RequestName(),
+			ResponseName:   contract.ResponseName(),
+			SemanticErrors: errorCodes,
+		}
+	}
+
+	selections := resolved.InterfaceResolution().Selections()
+	inputs := make([]implementationadaptergen.Input, len(selections))
+	for index, selection := range selections {
+		input, exists := definitions[selection.InterfaceID.String()]
+		if !exists {
+			return nil, fmt.Errorf("reachable Interface %s has no canonical authored contract for Implementation adapter generation", selection.InterfaceID)
+		}
+		implementation, exists := resolved.Implementations().BySymbol(selection.Constructor)
+		if !exists {
+			return nil, fmt.Errorf("reachable Interface %s selects absent Implementation constructor %s while generating its adapter", selection.InterfaceID, selection.Constructor)
+		}
+		input.Constructor = selection.Constructor
+		input.ConcreteType = implementation.ConcreteType().String()
 		inputs[index] = input
 	}
 	return inputs, nil

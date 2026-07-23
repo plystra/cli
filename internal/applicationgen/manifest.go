@@ -20,6 +20,7 @@ import (
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/generationresolution"
+	"github.com/plystra/cli/internal/implementationadaptergen"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
@@ -395,35 +396,37 @@ func DecodeManifestProvenance(data []byte) (ManifestProvenance, error) {
 // change statically generated application output. Configuration path spelling
 // and private runtime values are deliberately absent.
 type ApplicationModelOptions struct {
-	ModulePath          string
-	JavaScriptPackage   string
-	KernelModuleVersion string
-	KernelBuildIdentity string
-	HTTPTransports      applicationmeta.HTTPTransports
-	HTTPCORS            *applicationmeta.HTTPCORS
-	Configurations      []configurationgen.Input
-	Providers           []assemblygen.ProviderInput
-	InterfaceProxies    []interfaceproxygen.Input
-	Resolution          generationresolution.ExtensionResult
-	ProtobufWireMap     protobufwiremap.Map
+	ModulePath             string
+	JavaScriptPackage      string
+	KernelModuleVersion    string
+	KernelBuildIdentity    string
+	HTTPTransports         applicationmeta.HTTPTransports
+	HTTPCORS               *applicationmeta.HTTPCORS
+	Configurations         []configurationgen.Input
+	Providers              []assemblygen.ProviderInput
+	InterfaceProxies       []interfaceproxygen.Input
+	ImplementationAdapters []implementationadaptergen.Input
+	Resolution             generationresolution.ExtensionResult
+	ProtobufWireMap        protobufwiremap.Map
 }
 
 type applicationModelDocument struct {
-	Version                int                                   `json:"version"`
-	ModulePath             string                                `json:"module_path"`
-	JavaScriptPackage      string                                `json:"javascript_package"`
-	KernelModuleVersion    string                                `json:"kernel_module_version"`
-	KernelBuildIdentity    string                                `json:"kernel_build_identity"`
-	HTTPTransports         applicationModelHTTPTransports        `json:"http_transports"`
-	HTTPCORS               *applicationModelHTTPCORS             `json:"http_cors"`
-	ContextDigest          string                                `json:"context_digest"`
-	AliasDigest            string                                `json:"alias_digest"`
-	Configurations         []applicationModelConfiguration       `json:"configurations"`
-	Providers              []applicationModelProvider            `json:"providers"`
-	InterfaceProxies       []applicationModelInterfaceProxy      `json:"interface_proxies"`
-	GenerationExtensions   []applicationModelGenerationExtension `json:"generation_extensions"`
-	ProtobufProjection     json.RawMessage                       `json:"protobuf_projection"`
-	ProtobufWireProjection json.RawMessage                       `json:"protobuf_wire_projection"`
+	Version                int                                     `json:"version"`
+	ModulePath             string                                  `json:"module_path"`
+	JavaScriptPackage      string                                  `json:"javascript_package"`
+	KernelModuleVersion    string                                  `json:"kernel_module_version"`
+	KernelBuildIdentity    string                                  `json:"kernel_build_identity"`
+	HTTPTransports         applicationModelHTTPTransports          `json:"http_transports"`
+	HTTPCORS               *applicationModelHTTPCORS               `json:"http_cors"`
+	ContextDigest          string                                  `json:"context_digest"`
+	AliasDigest            string                                  `json:"alias_digest"`
+	Configurations         []applicationModelConfiguration         `json:"configurations"`
+	Providers              []applicationModelProvider              `json:"providers"`
+	InterfaceProxies       []applicationModelInterfaceProxy        `json:"interface_proxies"`
+	ImplementationAdapters []applicationModelImplementationAdapter `json:"implementation_adapters"`
+	GenerationExtensions   []applicationModelGenerationExtension   `json:"generation_extensions"`
+	ProtobufProjection     json.RawMessage                         `json:"protobuf_projection"`
+	ProtobufWireProjection json.RawMessage                         `json:"protobuf_wire_projection"`
 }
 
 type applicationModelHTTPTransports struct {
@@ -465,6 +468,19 @@ type applicationModelInterfaceProxy struct {
 	ResponseName string `json:"response_name"`
 	Path         string `json:"path"`
 	Digest       string `json:"digest"`
+}
+
+type applicationModelImplementationAdapter struct {
+	InterfaceID    string   `json:"interface_id"`
+	PackagePath    string   `json:"package_path"`
+	MethodName     string   `json:"method_name"`
+	RequestName    string   `json:"request_name"`
+	ResponseName   string   `json:"response_name"`
+	Constructor    string   `json:"constructor"`
+	ConcreteType   string   `json:"concrete_type"`
+	SemanticErrors []string `json:"semantic_errors"`
+	Path           string   `json:"path"`
+	Digest         string   `json:"digest"`
 }
 
 type applicationModelGenerationExtension struct {
@@ -565,6 +581,32 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 			Digest:       "sha256:" + hex.EncodeToString(sum[:]),
 		}
 	}
+	adapterFiles, err := implementationadaptergen.Render(options.ImplementationAdapters)
+	if err != nil {
+		return "", fmt.Errorf("Implementation adapter model: %w", err)
+	}
+	adapterInputs := make(map[string]implementationadaptergen.Input, len(options.ImplementationAdapters))
+	for _, input := range options.ImplementationAdapters {
+		adapterInputs[input.InterfaceID.String()] = input
+	}
+	adapterRecords := make([]applicationModelImplementationAdapter, len(adapterFiles))
+	for index, file := range adapterFiles {
+		input := adapterInputs[file.InterfaceID().String()]
+		sum := sha256.Sum256(file.Data())
+		adapterRecords[index] = applicationModelImplementationAdapter{
+			InterfaceID:    file.InterfaceID().String(),
+			PackagePath:    input.PackagePath,
+			MethodName:     input.MethodName,
+			RequestName:    input.RequestName,
+			ResponseName:   input.ResponseName,
+			Constructor:    file.Constructor().String(),
+			ConcreteType:   file.ConcreteType(),
+			SemanticErrors: append([]string(nil), input.SemanticErrors...),
+			Path:           file.Path(),
+			Digest:         "sha256:" + hex.EncodeToString(sum[:]),
+		}
+		sort.Strings(adapterRecords[index].SemanticErrors)
+	}
 	outputs := options.Resolution.Outputs()
 	extensions := make([]applicationModelGenerationExtension, len(outputs))
 	for index, output := range outputs {
@@ -588,7 +630,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		return "", fmt.Errorf("%w: Protobuf wire map is absent or does not match the normalized projection", ErrResolution)
 	}
 	document := applicationModelDocument{
-		Version:             8,
+		Version:             9,
 		ModulePath:          options.ModulePath,
 		JavaScriptPackage:   options.JavaScriptPackage,
 		KernelModuleVersion: options.KernelModuleVersion,
@@ -603,6 +645,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		Configurations:         configurationRecords,
 		Providers:              providerRecords,
 		InterfaceProxies:       proxyRecords,
+		ImplementationAdapters: adapterRecords,
 		GenerationExtensions:   extensions,
 		ProtobufProjection:     json.RawMessage(protobufProjection.CanonicalJSON()),
 		ProtobufWireProjection: json.RawMessage(options.ProtobufWireMap.ActiveJSON()),

@@ -10,6 +10,8 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/constructorsymbol"
+	"github.com/plystra/cli/internal/implementationadaptergen"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/protobufwiremap"
@@ -502,7 +504,7 @@ func TestApplicationModelDigestPinsNormalizedConnectProtobufProjection(t *testin
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(Connect Protobuf projection): %v", err)
 	}
-	const expected = "sha256:d3c5c80fc37f435c12e2dc274b52dc3d005a9463607f68ca504165cdda668684"
+	const expected = "sha256:14bd6996533572499e344204a4ad9924bce6543942d4989342fa633940aa0883"
 	if digest != expected {
 		t.Fatalf("Connect Protobuf projection application-model digest = %q; want %q", digest, expected)
 	}
@@ -569,6 +571,93 @@ func TestApplicationModelDigestIncludesTypedInterfaceProxiesDeterministically(t 
 	}
 	if changedDigest == withProxies {
 		t.Fatal("changed proxy contract package did not alter the application-model digest")
+	}
+}
+
+func TestApplicationModelDigestIncludesImplementationAdaptersDeterministically(t *testing.T) {
+	t.Parallel()
+
+	parseID := func(value string) interfaceid.Identifier {
+		identifier, err := interfaceid.Parse(value)
+		if err != nil {
+			t.Fatalf("interfaceid.Parse(%q): %v", value, err)
+		}
+		return identifier
+	}
+	parseConstructor := func(value string) constructorsymbol.Symbol {
+		symbol, err := constructorsymbol.Parse(value)
+		if err != nil {
+			t.Fatalf("constructorsymbol.Parse(%q): %v", value, err)
+		}
+		return symbol
+	}
+	constructor := parseConstructor("example.com/acme/application/orders.New")
+	order := implementationadaptergen.Input{
+		InterfaceID:    parseID("order.create/v1"),
+		PackagePath:    "example.com/acme/application/interfaces/order/create/v1",
+		MethodName:     "Create",
+		RequestName:    "Request",
+		ResponseName:   "Response",
+		Constructor:    constructor,
+		ConcreteType:   "*example.com/acme/application/orders.service",
+		SemanticErrors: []string{"order_invalid", "order_already_exists"},
+	}
+	audit := implementationadaptergen.Input{
+		InterfaceID:  parseID("audit.write/v1"),
+		PackagePath:  "example.com/acme/application/interfaces/audit/write/v1",
+		MethodName:   "Write",
+		RequestName:  "Request",
+		ResponseName: "Response",
+		Constructor:  parseConstructor("example.com/acme/application/audit.New"),
+		ConcreteType: "*example.com/acme/application/audit.Service",
+	}
+	options := applicationgen.ApplicationModelOptions{
+		ModulePath:          applicationModulePath,
+		JavaScriptPackage:   applicationSDKPackage,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
+		Providers:           selectedProviderInputs(),
+		Resolution:          resolvedApplication(t, ""),
+	}
+	withoutAdapters, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(without adapters): %v", err)
+	}
+	options.ImplementationAdapters = []implementationadaptergen.Input{order, audit}
+	withAdapters, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(with adapters): %v", err)
+	}
+	if withAdapters == withoutAdapters {
+		t.Fatal("Implementation adapters did not alter the application-model digest")
+	}
+	options.ImplementationAdapters = []implementationadaptergen.Input{audit, order}
+	reordered, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(reordered adapters): %v", err)
+	}
+	if reordered != withAdapters {
+		t.Fatalf("reordered equal adapter inputs changed digest: %q != %q", reordered, withAdapters)
+	}
+	changed := order
+	changed.SemanticErrors = []string{"order_already_exists", "order_rejected"}
+	options.ImplementationAdapters = []implementationadaptergen.Input{audit, changed}
+	changedDigest, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(changed adapter): %v", err)
+	}
+	if changedDigest == withAdapters {
+		t.Fatal("changed adapter semantic contract did not alter the application-model digest")
+	}
+	changed = order
+	changed.ConcreteType = "*example.com/acme/application/orders.replacement"
+	options.ImplementationAdapters = []implementationadaptergen.Input{audit, changed}
+	concreteDigest, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(changed concrete provenance): %v", err)
+	}
+	if concreteDigest == withAdapters {
+		t.Fatal("changed adapter concrete provenance did not alter the application-model digest")
 	}
 }
 

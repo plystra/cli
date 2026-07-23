@@ -19,7 +19,7 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:6cc51383d2d2a701201d8c88ca204f714ca32ad468e4ac42a3986d9e1f374ea0"
+      "sha256": "sha256:f8343e7daa05532564ea8fd8830afe44987f52614075947fb8e3cffd015a1722"
     },
     {
       "path": "generated/go/configuration/account-profile_gen.go",
@@ -27,7 +27,7 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:6c7a5090216e3c8a2f394429128517a26ae2674df470e044b7bce942382c85b4"
+      "sha256": "sha256:a79d165570c6016452ca2fcad2f2bbfa908d48e97ccb6b87eebdbc7120375d56"
     },
     {
       "path": "generated/proto/descriptor-set.pb",
@@ -74,7 +74,7 @@
         }
       ],
       "protobuf_wire_map_digest": "sha256:e563b91c26485ad548360d3b61bd79104cd76b2ef4771c41e6fbda4660bb525f",
-      "application_model_digest": "sha256:fce49bc559915e1dd99ba8840e221a1a5f726b83631fb2c77a4244c495e424d0"
+      "application_model_digest": "sha256:74a1e8115fa5683a501b4c0e1d8063279013c2d7714a65deb2fa4b15e2761cf8"
     }
   }
 }

@@ -151,7 +151,7 @@ replace example.com/platform/unused => %s
 	}
 }
 
-func TestGenerateTypedProxyOutputIsStableAcrossAuthoredFilesystemOrder(t *testing.T) {
+func TestGenerateTypedInterfaceOutputIsStableAcrossAuthoredFilesystemOrder(t *testing.T) {
 	t.Parallel()
 
 	type result struct {
