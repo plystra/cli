@@ -111,6 +111,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		InterfaceProxies:       options.InterfaceProxies,
 		ImplementationAdapters: options.ImplementationAdapters,
 		ImplementationAssembly: implementationAssemblyOptions,
+		InterfacePolicies:      options.Composition.Manifest().InterfacePolicies(),
 		Resolution:             resolution,
 		ProtobufWireMap:        options.ProtobufWireMap,
 	})

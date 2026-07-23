@@ -102,7 +102,7 @@ as non-secret provenance. It also embeds a bounded compatibility projection for
 the build-affecting declarations tied to that full model digest. Startup derives
 the same projection from the selected runtime document and rejects a mismatch
 with rebuild guidance before startup settings, Secret resolution, or application
-construction. Runtime-only address, timeout, ordinary configuration, and Secret-
+construction. Runtime-only address, timeouts.startup, ordinary configuration, and Secret-
 reference changes stay outside that comparison. Neither compiled record contains
 YAML values, Secret-reference targets, resolved Secrets, or machine paths.
 
@@ -380,6 +380,8 @@ as plystra.production.yaml and plystra.test.yaml are never inherited.
 
 Composition uses field-specific rules:
 
+- interfaces.require is a set; interfaces.use and interfaces.policies replace
+  or remove exact keys.
 - http.expose and capabilities.require form deterministic canonical-ID unions.
   Use their sparse add/remove mapping for exact inherited set edits.
 - Identical additions, removals, Provider selections, and Alias declarations
@@ -404,24 +406,27 @@ Prefer the targeted public workflow for ordinary Provider selection:
     plystra use email.send/v1 acme.email.production --env production
     plystra use email.send/v1 acme.email.customer --config deploy/customer-a.yaml
 
-The default form writes root plystra.yaml. Environment mode writes only the
-selected sparse overlay, and full-replacement mode writes only the selected
-complete document. PLYSTRA_ENV and PLYSTRA_CONFIG select the same targets when
-no flag is present; an explicit selector overrides both ambient variables. The
-command preserves comments and unrelated values, regenerates with the same
-selection, and restores configuration, generated output, go.mod, and go.sum
-after any later failure. It rejects intrinsic Capabilities, Aliases, unknown or
-unrequired Capabilities, unknown Plugins, and Plugins that do not provide the
-exact contract.
+The default form writes root plystra.yaml; --env writes only that sparse
+overlay; --config writes only that complete document. Ambient selectors choose
+the same targets unless a flag overrides them. The command preserves unrelated
+content, regenerates with the same selection, rolls back every owned file after
+failure, and rejects an invalid or incompatible target.
 
-The current entry replaces inherited choices for email.send/v1, then normal
-Provider and exact contract validation still runs. Do not reorder dependencies,
-make one direct, invent priority, or copy a dependency Plugin to choose a
-winner. After manual replace or dependency-version changes, run plystra
-generate and plystra generate --check. Inspect generated/manifest.json for the
-non-secret dependency composition digest and path/digest/removal/source
-baseline. An explicit tombstone has removed: true; the manifest never contains
-raw Plugin configuration or Secret reference targets.
+The current entry replaces the inherited choice; normal exact-contract
+validation still runs. Never reorder dependencies, invent priority, or copy a
+dependency Plugin to choose a winner. Regenerate and check after selection or
+dependency changes. generated/manifest.json records only non-secret composition
+digests and path/digest/removal/source baselines.
+
+Configure one exact non-intrinsic Interface policy:
+
+    interfaces:
+      policies:
+        email.send/v1:
+          timeout: 5s
+
+Only positive timeout is accepted. Values normalize and replace the exact key;
+null removes it. Changes cause drift. Enforcement is deferred.
 
 Plystra generate maintains the selected current-Project document with a typed
 three-way update from that selection's previous dependency baseline, the
@@ -447,6 +452,9 @@ tombstones:
         email.send/v1: null
       aliases:
         mail.send/v1: null
+    interfaces:
+      policies:
+        email.send/v1: null
     config:
       acme.email.smtp:
         legacy_host: null
@@ -504,11 +512,11 @@ be an existing nonsymbolic regular file within the runtime Project directory.
 Both modes apply typed validation and reject unsafe or missing selections
 before Provider construction. Generate, check, and start with the same
 selector. Generated startup compares the selected document's normalized
-transport, CORS, public-exposure, requirement, explicit Provider-choice, and
-Alias projection with the projection compiled for the full application-model
+transport, CORS, public-exposure, requirement, explicit Implementation-choice,
+and Interface-policy projection with the projection compiled for the full application-model
 digest. A mismatch fails before startup settings, Secret resolution, or
 Provider construction and instructs the operator to rebuild with the same
-selector. Runtime-only address, timeout, Plugin configuration, and Secret-
+selector. Runtime-only address, timeouts.startup, Plugin configuration, and Secret-
 reference differences remain valid when they pass typed validation.
 
 http.transports is a closed current-Project object. It accepts only boolean

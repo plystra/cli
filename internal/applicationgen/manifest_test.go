@@ -398,6 +398,51 @@ func TestApplicationModelDigestIncludesHTTPTransportsDeterministically(t *testin
 	}
 }
 
+func TestApplicationModelDigestIncludesNormalizedInterfacePolicies(t *testing.T) {
+	t.Parallel()
+
+	options := applicationgen.ApplicationModelOptions{
+		ModulePath:          applicationModulePath,
+		JavaScriptPackage:   applicationSDKPackage,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
+		Providers:           selectedProviderInputs(),
+		Resolution:          resolvedApplication(t, ""),
+	}
+	withoutPolicy, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(without policy): %v", err)
+	}
+	first, err := applicationmeta.Parse([]byte("interfaces: {policies: {email.send/v1: {timeout: 5000ms}}}\n"))
+	if err != nil {
+		t.Fatalf("applicationmeta.Parse(first policy): %v", err)
+	}
+	options.InterfacePolicies = first.InterfacePolicies()
+	withPolicy, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(with policy): %v", err)
+	}
+	if withPolicy == withoutPolicy {
+		t.Fatal("Interface policy did not change the application-model digest")
+	}
+	second, err := applicationmeta.Parse([]byte("interfaces: {policies: {email.send/v1: {timeout: 5s}}}\n"))
+	if err != nil {
+		t.Fatalf("applicationmeta.Parse(second policy): %v", err)
+	}
+	options.InterfacePolicies = second.InterfacePolicies()
+	normalized, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatalf("ApplicationModelDigest(normalized policy): %v", err)
+	}
+	if normalized != withPolicy {
+		t.Fatalf("equivalent Interface timeouts changed model digest: %q != %q", normalized, withPolicy)
+	}
+	options.InterfacePolicies = append(options.InterfacePolicies, options.InterfacePolicies[0])
+	if _, err := applicationModelDigest(t, options); err == nil || !strings.Contains(err.Error(), "duplicated") {
+		t.Fatalf("ApplicationModelDigest(duplicate policy) error = %v", err)
+	}
+}
+
 func TestApplicationModelDigestIncludesNormalizedHTTPCORS(t *testing.T) {
 	t.Parallel()
 
@@ -504,7 +549,7 @@ func TestApplicationModelDigestPinsNormalizedConnectProtobufProjection(t *testin
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(Connect Protobuf projection): %v", err)
 	}
-	const expected = "sha256:b2e1d632cb54982f97808c2a2255e74e5136fd9c2300f9b777b76c6215889868"
+	const expected = "sha256:a4e8edb44ee1357459d7d80cd14a7cabf855639d008d6718f348150aeb315f96"
 	if digest != expected {
 		t.Fatalf("Connect Protobuf projection application-model digest = %q; want %q", digest, expected)
 	}

@@ -179,6 +179,12 @@ func manifestDifferenceOutsideHTTPExposure(left, right Manifest) string {
 	if !slices.Equal(left.removedImplementationChoices, right.removedImplementationChoices) {
 		return "interfaces.use removals"
 	}
+	if !slices.Equal(left.InterfacePolicies(), right.InterfacePolicies()) {
+		return "interfaces.policies"
+	}
+	if !slices.Equal(left.removedInterfacePolicies, right.removedInterfacePolicies) {
+		return "interfaces.policies removals"
+	}
 	if !slices.Equal(left.Aliases(), right.Aliases()) {
 		return "capabilities.aliases"
 	}

@@ -43,6 +43,7 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (Manifest, error
 	choices, removedChoices := overlayProviderChoices(base, overlay)
 	interfaceRequirements, removedInterfaceRequirements := overlayInterfaceRequirementSet(base, overlay)
 	implementationChoices, removedImplementationChoices := overlayImplementationChoices(base, overlay)
+	interfacePolicies, removedInterfacePolicies := overlayInterfacePolicies(base, overlay)
 	aliases, removedAliases := overlayAliases(base, overlay)
 	configurations, removedConfigurations, err := overlayPluginConfigurations(base, overlay, schemas)
 	if err != nil {
@@ -71,6 +72,8 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (Manifest, error
 		removedInterfaceReqs:         removedInterfaceRequirements,
 		implementationChoices:        implementationChoices,
 		removedImplementationChoices: removedImplementationChoices,
+		interfacePolicies:            interfacePolicies,
+		removedInterfacePolicies:     removedInterfacePolicies,
 		aliases:                      aliases,
 		removedAliases:               removedAliases,
 		configurations:               configurations,
@@ -249,6 +252,33 @@ func overlayImplementationChoices(base, overlay Manifest) ([]ImplementationChoic
 		removals[removal.id] = removal
 	}
 	result := make([]ImplementationChoice, 0, len(values))
+	for _, value := range values {
+		result = append(result, value)
+	}
+	sort.Slice(result, func(left, right int) bool {
+		return result[left].interfaceID.String() < result[right].interfaceID.String()
+	})
+	return result, sortedInterfaceRemovals(removals)
+}
+
+func overlayInterfacePolicies(base, overlay Manifest) ([]InterfacePolicy, []interfaceRemoval) {
+	values := make(map[interfaceid.Identifier]InterfacePolicy)
+	removals := make(map[interfaceid.Identifier]interfaceRemoval)
+	for _, value := range base.interfacePolicies {
+		values[value.interfaceID] = value
+	}
+	for _, removal := range base.removedInterfacePolicies {
+		removals[removal.id] = removal
+	}
+	for _, value := range overlay.interfacePolicies {
+		values[value.interfaceID] = value
+		delete(removals, value.interfaceID)
+	}
+	for _, removal := range overlay.removedInterfacePolicies {
+		delete(values, removal.id)
+		removals[removal.id] = removal
+	}
+	result := make([]InterfacePolicy, 0, len(values))
 	for _, value := range values {
 		result = append(result, value)
 	}

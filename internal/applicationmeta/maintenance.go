@@ -30,6 +30,7 @@ const (
 	maintenanceProvider
 	maintenanceInterfaceRequirement
 	maintenanceImplementationChoice
+	maintenanceInterfacePolicy
 	maintenanceAlias
 	maintenancePluginConfig
 )
@@ -44,6 +45,7 @@ type maintenanceDecision struct {
 	pluginID    string
 	providerID  string
 	constructor constructorsymbol.Symbol
+	policy      InterfacePolicy
 	alias       Alias
 	config      pluginConfigDecision
 	source      string
@@ -334,6 +336,26 @@ func maintenanceDecisions(manifest Manifest, schemas SchemaLookup) ([]maintenanc
 			source:      removal.source,
 		})
 	}
+	for _, policy := range manifest.interfacePolicies {
+		result = append(result, maintenanceDecision{
+			path:        interfacePolicyPath(policy.interfaceID),
+			digest:      interfacePolicyDigest(policy),
+			field:       maintenanceInterfacePolicy,
+			interfaceID: policy.interfaceID,
+			policy:      policy,
+			source:      policy.source,
+		})
+	}
+	for _, removal := range manifest.removedInterfacePolicies {
+		result = append(result, maintenanceDecision{
+			path:        interfacePolicyPath(removal.id),
+			digest:      interfacePolicyRemovalDigest(removal.id),
+			removed:     true,
+			field:       maintenanceInterfacePolicy,
+			interfaceID: removal.id,
+			source:      removal.source,
+		})
+	}
 	for _, alias := range manifest.aliases {
 		result = append(result, maintenanceDecision{
 			path:   fmt.Sprintf("capabilities.aliases[%q]", alias.id.String()),
@@ -532,6 +554,8 @@ func maintenanceDecisionDescription(decision maintenanceDecision) string {
 		return "Provider " + decision.providerID
 	case maintenanceImplementationChoice:
 		return "Implementation " + decision.constructor.String()
+	case maintenanceInterfacePolicy:
+		return "Interface timeout " + decision.policy.timeout.String()
 	case maintenanceAlias:
 		return "Alias target " + decision.alias.target.String()
 	case maintenancePluginConfig:
@@ -558,6 +582,7 @@ func supportedMaintenancePath(path string) bool {
 		strings.HasPrefix(path, "capabilities.aliases[") ||
 		strings.HasPrefix(path, "interfaces.require[") ||
 		strings.HasPrefix(path, "interfaces.use[") ||
+		strings.HasPrefix(path, "interfaces.policies[") ||
 		strings.HasPrefix(path, "config[")
 }
 
@@ -645,6 +670,8 @@ func removeMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) er
 		return removeSetMaintenanceDecision(root, []string{"interfaces", "require"}, decision.interfaceID.String(), decision.removed)
 	case maintenanceImplementationChoice:
 		return removeKeyedMaintenanceDecision(root, []string{"interfaces", "use"}, decision.interfaceID.String())
+	case maintenanceInterfacePolicy:
+		return removeKeyedMaintenanceDecision(root, []string{"interfaces", "policies"}, decision.interfaceID.String())
 	case maintenanceAlias:
 		return removeKeyedMaintenanceDecision(root, []string{"capabilities", "aliases"}, decision.id.String())
 	case maintenancePluginConfig:
@@ -674,6 +701,13 @@ func setMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) error
 			value = stringYAMLNode(decision.constructor.String())
 		}
 		return setKeyedMaintenanceDecision(root, []string{"interfaces", "use"}, decision.interfaceID.String(), value)
+	case maintenanceInterfacePolicy:
+		value := nullYAMLNode()
+		if !decision.removed {
+			value = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+			setMappingValue(value, "timeout", stringYAMLNode(decision.policy.timeout.String()))
+		}
+		return setKeyedMaintenanceDecision(root, []string{"interfaces", "policies"}, decision.interfaceID.String(), value)
 	case maintenanceAlias:
 		value := nullYAMLNode()
 		if !decision.removed {

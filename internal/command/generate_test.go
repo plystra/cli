@@ -736,6 +736,190 @@ interfaces:
 	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), rootConfiguration)
 }
 
+func TestRunGenerateCarriesInterfacePoliciesThroughEveryConfigurationMode(t *testing.T) {
+	root := t.TempDir()
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	goMod := fmt.Sprintf(`module example.com/acme/policy
+
+go 1.26
+
+require (
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot))
+	writeCommandFile(t, filepath.Join(root, "go.mod"), goMod)
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("ReadFile(go.sum): %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	writeCommandGraphInterface(t, root, "email/send/v1", "sendv1", "email.send/v1", "Send")
+	writeCommandFile(t, filepath.Join(root, "smtp", "service.go"), `package smtp
+
+import (
+	"context"
+
+	sendv1 "example.com/acme/policy/interfaces/email/send/v1"
+)
+
+type Service struct{}
+
+//plystra:implements email.send/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
+	return sendv1.Response{}, nil
+}
+`)
+	rootConfiguration := `interfaces:
+  require: [email.send/v1]
+  policies:
+    email.send/v1: {timeout: 5000ms}
+`
+	overlayConfiguration := `# environment-specific policy
+interfaces:
+  policies:
+    email.send/v1: {timeout: 2s}
+`
+	replacementConfiguration := `# complete replacement policy
+interfaces:
+  require: [email.send/v1]
+  policies:
+    email.send/v1: {timeout: 7s}
+`
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootConfiguration)
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayConfiguration)
+	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), replacementConfiguration)
+	environment := commandGoEnvironment()
+
+	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, root, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/policy in "+root+"\n" {
+		t.Fatalf("default policy generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	defaultManifest, err := applicationgen.DecodeManifestProvenance(readCommandFile(t, root, "generated/manifest.json"))
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance(default): %v", err)
+	}
+	defaultBootstrap := readCommandFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
+	if !bytes.Contains(defaultBootstrap, []byte(`\"interface_policies\":[{\"interface\":\"email.send/v1\",\"timeout\":\"5s\"}]`)) {
+		t.Fatalf("default generated bootstrap omits normalized Interface policy:\n%s", defaultBootstrap)
+	}
+	beforeDefaultCheck := commandTree(t, root)
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
+	if exitCode != 0 || stderr != "" || !strings.Contains(stdout, "generated output is current") {
+		t.Fatalf("default policy check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeDefaultCheck) {
+		t.Fatal("default policy generate --check mutated the Project")
+	}
+	removedOverlay := `# environment-specific policy removal
+interfaces:
+  policies:
+    email.send/v1: null
+`
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), removedOverlay)
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--env", "production"}, root, environment)
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("removed environment policy generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	removedBootstrap := readCommandFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
+	if !bytes.Contains(removedBootstrap, []byte(`\"interface_policies\":[]`)) || bytes.Contains(removedBootstrap, []byte(`\"timeout\":\"5s\"`)) {
+		t.Fatalf("environment policy removal was not projected exactly:\n%s", removedBootstrap)
+	}
+	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--env", "production")
+	process.Dir = root
+	process.Env = environment
+	if output, runErr := process.CombinedOutput(); runErr != nil {
+		t.Fatalf("generated application rejected matching removed environment policy: %v\n%s", runErr, output)
+	}
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayConfiguration)
+
+	beforeEnvironmentCheck := commandTree(t, root)
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--env", "production"}, root, environment)
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "generated output is not current") {
+		t.Fatalf("environment policy drift check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeEnvironmentCheck) {
+		t.Fatal("environment policy drift check mutated the Project")
+	}
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--env", "production"}, root, environment)
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("environment policy generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	environmentManifest, err := applicationgen.DecodeManifestProvenance(readCommandFile(t, root, "generated/manifest.json"))
+	if err != nil || environmentManifest.Mode() != applicationgen.ConfigurationModeEnvironment || environmentManifest.Environment() != "production" {
+		t.Fatalf("environment policy provenance = %#v, %v", environmentManifest, err)
+	}
+	if environmentManifest.ApplicationModelDigest() == defaultManifest.ApplicationModelDigest() {
+		t.Fatal("environment policy replacement did not change the build-affecting application model")
+	}
+	environmentBootstrap := readCommandFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
+	if !bytes.Contains(environmentBootstrap, []byte(`\"interface_policies\":[{\"interface\":\"email.send/v1\",\"timeout\":\"2s\"}]`)) {
+		t.Fatalf("environment generated bootstrap omits selected Interface policy:\n%s", environmentBootstrap)
+	}
+	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--env", "production")
+	process.Dir = root
+	process.Env = environment
+	if output, runErr := process.CombinedOutput(); runErr != nil {
+		t.Fatalf("generated application rejected matching environment policy: %v\n%s", runErr, output)
+	}
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), strings.Replace(overlayConfiguration, "2s", "3s", 1))
+	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--env", "production")
+	process.Dir = root
+	process.Env = environment
+	output, runErr := process.CombinedOutput()
+	if runErr == nil || !strings.Contains(string(output), "runtime configuration is incompatible with compiled application model") || !strings.Contains(string(output), "rebuild with the same --env or --config selection") {
+		t.Fatalf("generated application accepted build-affecting policy drift: %v\n%s", runErr, output)
+	}
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayConfiguration)
+
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--config", "deploy/customer.yaml"}, root, environment)
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("replacement policy generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	replacementManifest, err := applicationgen.DecodeManifestProvenance(readCommandFile(t, root, "generated/manifest.json"))
+	if err != nil || replacementManifest.Mode() != applicationgen.ConfigurationModeExplicit || replacementManifest.SelectedPath() != "deploy/customer.yaml" {
+		t.Fatalf("replacement policy provenance = %#v, %v", replacementManifest, err)
+	}
+	if replacementManifest.ApplicationModelDigest() == defaultManifest.ApplicationModelDigest() || replacementManifest.ApplicationModelDigest() == environmentManifest.ApplicationModelDigest() {
+		t.Fatal("replacement policy did not produce its own build-affecting application model")
+	}
+	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--config", "deploy/customer.yaml")
+	process.Dir = root
+	process.Env = environment
+	if output, runErr := process.CombinedOutput(); runErr != nil {
+		t.Fatalf("generated application rejected matching replacement policy: %v\n%s", runErr, output)
+	}
+
+	invalidOverlay := `# invalid environment policy must be preserved
+interfaces:
+  policies:
+    email.send/v1: {timeout: 2s, retry: 2}
+`
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), invalidOverlay)
+	beforeInvalid := commandTree(t, root)
+	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--env", "production")
+	process.Dir = root
+	process.Env = environment
+	output, runErr = process.CombinedOutput()
+	if runErr == nil || !strings.Contains(string(output), `interfaces.policies["email.send/v1"] contains unknown key "retry"`) {
+		t.Fatalf("generated application accepted invalid environment policy: %v\n%s", runErr, output)
+	}
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--env", "production"}, root, environment)
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, `interfaces.policies["email.send/v1"] contains unknown key "retry"`) {
+		t.Fatalf("invalid environment policy = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeInvalid) {
+		t.Fatal("invalid environment policy changed the Project")
+	}
+	assertNoCommandTransactions(t, root)
+}
+
 func TestRunGenerateBuildsUnrequiredLocalCapabilityDeveloperSurfaces(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)

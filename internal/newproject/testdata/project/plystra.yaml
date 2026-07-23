@@ -11,5 +11,6 @@ timeouts:
 interfaces:
   require: []
   use: {}
+  policies: {}
 
 config: {}

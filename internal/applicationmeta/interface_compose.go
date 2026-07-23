@@ -200,6 +200,122 @@ func inheritedImplementationConflict(id interfaceid.Identifier, candidates map[s
 	return fmt.Errorf("%w: interfaces.use[%q] has incompatible Implementation declarations: %s; set or remove that exact key in the current Project configuration", ErrInheritedConflict, id.String(), strings.Join(parts, "; "))
 }
 
+type interfacePolicyCandidate struct {
+	policy  InterfacePolicy
+	removed bool
+	sources map[string]struct{}
+}
+
+func composeInterfacePolicies(dependencies []Dependency, current []InterfacePolicy, currentRemovals []interfaceRemoval, records map[string]*provenanceRecord) ([]InterfacePolicy, error) {
+	inherited := make(map[interfaceid.Identifier]map[string]*interfacePolicyCandidate)
+	for _, dependency := range dependencies {
+		for _, policy := range dependency.Manifest.InterfacePolicies() {
+			path := interfacePolicyPath(policy.interfaceID)
+			source := dependencySource(dependency, policy.source)
+			digest := interfacePolicyDigest(policy)
+			addProvenance(records, path, digest, source, false)
+			byDigest := inherited[policy.interfaceID]
+			if byDigest == nil {
+				byDigest = make(map[string]*interfacePolicyCandidate)
+				inherited[policy.interfaceID] = byDigest
+			}
+			candidate := byDigest[digest]
+			if candidate == nil {
+				policy.source = source
+				candidate = &interfacePolicyCandidate{policy: policy, sources: make(map[string]struct{})}
+				byDigest[digest] = candidate
+			}
+			candidate.sources[source] = struct{}{}
+			if source < candidate.policy.source {
+				candidate.policy.source = source
+			}
+		}
+		for _, removal := range dependency.Manifest.removedInterfacePolicies {
+			path := interfacePolicyPath(removal.id)
+			source := dependencySource(dependency, removal.source)
+			digest := interfacePolicyRemovalDigest(removal.id)
+			addProvenance(records, path, digest, source, true)
+			byDigest := inherited[removal.id]
+			if byDigest == nil {
+				byDigest = make(map[string]*interfacePolicyCandidate)
+				inherited[removal.id] = byDigest
+			}
+			candidate := byDigest[digest]
+			if candidate == nil {
+				candidate = &interfacePolicyCandidate{removed: true, sources: make(map[string]struct{})}
+				byDigest[digest] = candidate
+			}
+			candidate.sources[source] = struct{}{}
+		}
+	}
+
+	selected := make(map[interfaceid.Identifier]InterfacePolicy)
+	for _, policy := range current {
+		selected[policy.interfaceID] = policy
+	}
+	removed := interfaceRemovalSet(currentRemovals)
+	ids := make([]interfaceid.Identifier, 0, len(inherited))
+	for id := range inherited {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(left, right int) bool { return ids[left].String() < ids[right].String() })
+	for _, id := range ids {
+		if _, replaced := selected[id]; replaced {
+			continue
+		}
+		if _, explicitlyRemoved := removed[id]; explicitlyRemoved {
+			continue
+		}
+		candidates := inherited[id]
+		if len(candidates) != 1 {
+			return nil, inheritedInterfacePolicyConflict(id, candidates)
+		}
+		for _, candidate := range candidates {
+			if !candidate.removed {
+				selected[id] = candidate.policy
+			}
+		}
+	}
+	result := make([]InterfacePolicy, 0, len(selected))
+	for _, policy := range selected {
+		result = append(result, policy)
+	}
+	sort.Slice(result, func(left, right int) bool {
+		return result[left].interfaceID.String() < result[right].interfaceID.String()
+	})
+	return result, nil
+}
+
+func inheritedInterfacePolicyConflict(id interfaceid.Identifier, candidates map[string]*interfacePolicyCandidate) error {
+	digests := make([]string, 0, len(candidates))
+	for digest := range candidates {
+		digests = append(digests, digest)
+	}
+	sort.Strings(digests)
+	parts := make([]string, 0, len(digests))
+	for _, digest := range digests {
+		candidate := candidates[digest]
+		declaration := candidate.policy.timeout.String()
+		if candidate.removed {
+			declaration = "<removed>"
+		}
+		parts = append(parts, fmt.Sprintf("%s from %s", declaration, strings.Join(sortedSet(candidate.sources), ", ")))
+	}
+	return fmt.Errorf("%w: %s has incompatible timeout declarations: %s; set or remove that exact Interface policy in the current Project configuration", ErrInheritedConflict, interfacePolicyPath(id), strings.Join(parts, "; "))
+}
+
+func interfacePolicyPath(id interfaceid.Identifier) string {
+	return fmt.Sprintf("interfaces.policies[%q].timeout", id.String())
+}
+
+func interfacePolicyDigest(policy InterfacePolicy) string {
+	return digestStrings("interfaces.policies", policy.interfaceID.String(), "timeout", policy.timeout.String())
+}
+
+func interfacePolicyRemovalDigest(id interfaceid.Identifier) string {
+	return digestStrings("interfaces.policies", id.String(), "timeout", "removed")
+}
+
 func interfaceDeclarationDigest(path string, id interfaceid.Identifier, removed bool) string {
 	if removed {
 		return digestStrings(path, id.String(), "removed")

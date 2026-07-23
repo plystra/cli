@@ -310,7 +310,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 			t.Fatalf("project scaffold contains obsolete configuration %q:\n%s", obsolete, directTree["plystra.yaml"])
 		}
 	}
-	for _, required := range [][]byte{[]byte("interfaces:"), []byte("  require: []"), []byte("  use: {}")} {
+	for _, required := range [][]byte{[]byte("interfaces:"), []byte("  require: []"), []byte("  use: {}"), []byte("  policies: {}")} {
 		if !bytes.Contains(directTree["plystra.yaml"], required) {
 			t.Fatalf("project scaffold omits %q:\n%s", required, directTree["plystra.yaml"])
 		}
@@ -1968,13 +1968,17 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra use email.send/v1 acme.email.smtp",
 		"plystra use email.send/v1 acme.email.production --env production",
 		"plystra use email.send/v1 acme.email.customer --config deploy/customer-a.yaml",
-		"restores configuration, generated output, go.mod, and go.sum",
+		"rolls back every owned file after",
 		"Remove only exact inherited declarations with sparse edits and null",
 		"remove: [diagnostics.internal/v1]",
 		"email.send/v1: null",
 		"legacy_host: null",
 		"Declared objects merge recursively",
 		"Dependency http.address, http.transports, http.cors, and timeouts.startup",
+		"interfaces.use and interfaces.policies replace",
+		"Only positive timeout is accepted",
+		"Values normalize and replace",
+		"Enforcement is deferred",
 		"plystra add github.com/acme/email@v1.4.2",
 		"plystra remove github.com/acme/email",
 		"plystra update github.com/acme/email@v1.5.0",
@@ -1982,7 +1986,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"preserves an existing direct requirement",
 		"only that module query",
 		"restores every transaction-owned module",
-		"dependency composition digest",
+		"non-secret composition",
 		"## Select an environment or one complete current-Project configuration",
 		"plystra generate --env production",
 		"plystra generate --check --env production",

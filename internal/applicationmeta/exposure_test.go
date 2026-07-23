@@ -30,6 +30,9 @@ capabilities:
     health.status/v1:
       target: kernel.health/v1
       expose: {go: true, http: false, javascript: false}
+interfaces:
+  policies:
+    email.send/v1: {timeout: 5s} # keep the Interface policy
 config:
   acme.mail:
     password:
@@ -46,6 +49,7 @@ config:
 		[]byte("# keep the CORS origin"),
 		[]byte("startup: 45s"),
 		[]byte("health.status/v1:"),
+		[]byte("email.send/v1: {timeout: 5s} # keep the Interface policy"),
 		[]byte("env: SMTP_PASSWORD"),
 		[]byte("expose:\n    - kernel.health/v1"),
 	} {
@@ -63,6 +67,10 @@ config:
 	cors, exists := manifest.HTTPCORS()
 	if !exists || len(cors.AllowedOrigins) != 1 || cors.AllowedOrigins[0] != "https://app.example.com" || !cors.AllowCredentials {
 		t.Fatalf("updated HTTPCORS = %#v, %t", cors, exists)
+	}
+	policies := manifest.InterfacePolicies()
+	if len(policies) != 1 || policies[0].InterfaceID().String() != "email.send/v1" || policies[0].Timeout().String() != "5s" {
+		t.Fatalf("updated Interface policies = %#v", policies)
 	}
 	updated[0] = 'x'
 	repeated, repeatedChanged, err := applicationmeta.AddHTTPExposure(input, id)

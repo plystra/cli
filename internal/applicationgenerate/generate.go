@@ -344,6 +344,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		InterfaceProxies:       interfaceProxies,
 		ImplementationAdapters: implementationAdapters,
 		ImplementationAssembly: implementationAssembly,
+		InterfacePolicies:      resolved.Manifest().InterfacePolicies(),
 		Resolution:             resolved.Resolution(),
 		ProtobufWireMap:        wireMap,
 	})

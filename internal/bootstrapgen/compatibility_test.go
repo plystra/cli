@@ -25,6 +25,7 @@ timeouts: {startup: 45s}
 interfaces:
   require: [records.read/v1]
   use: {records.read/v1: example.com/acme/records.New}
+  policies: {records.read/v1: {timeout: 5000ms}}
 config:
   acme.records:
     endpoint: runtime-private-one
@@ -36,6 +37,7 @@ config:
     token: {env: PRIVATE_TOKEN_TWO}
     endpoint: runtime-private-two
 interfaces:
+  policies: {records.read/v1: {timeout: 5s}}
   use: {records.read/v1: example.com/acme/records.New}
   require: [records.read/v1]
 timeouts: {startup: 2m}
@@ -67,6 +69,7 @@ http:
 		`"interface_requirements":["records.read/v1"]`,
 		`"interface":"records.read/v1"`,
 		`"constructor":"example.com/acme/records.New"`,
+		`"interface_policies":[{"interface":"records.read/v1","timeout":"5s"}]`,
 	} {
 		if !strings.Contains(canonical, required) {
 			t.Fatalf("canonical projection omits %q: %s", required, canonical)
@@ -77,6 +80,7 @@ http:
 		":9090",
 		"45s",
 		"2m",
+		"5000ms",
 		"runtime-private-one",
 		"runtime-private-two",
 		"PRIVATE_TOKEN_ONE",
@@ -111,6 +115,7 @@ func TestApplicationModelCompatibilityChangesForEveryBuildAffectingDeclaration(t
 		{name: "exposure", yaml: "http: {expose: [kernel.health/v1]}\n"},
 		{name: "Interface requirement", yaml: "interfaces: {require: [records.read/v1]}\n"},
 		{name: "Implementation choice", yaml: "interfaces: {use: {records.read/v1: example.com/acme/records.New}}\n"},
+		{name: "Interface policy", yaml: "interfaces: {policies: {records.read/v1: {timeout: 5s}}}\n"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

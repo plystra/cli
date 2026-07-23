@@ -237,6 +237,8 @@ type Manifest struct {
 	removedInterfaceReqs         []interfaceRemoval
 	implementationChoices        []ImplementationChoice
 	removedImplementationChoices []interfaceRemoval
+	interfacePolicies            []InterfacePolicy
+	removedInterfacePolicies     []interfaceRemoval
 	aliases                      []Alias
 	removedAliases               []capabilityRemoval
 	configurations               []PluginConfiguration
@@ -328,6 +330,12 @@ func (m Manifest) ImplementationChoices() []ImplementationChoice {
 	return append([]ImplementationChoice(nil), m.implementationChoices...)
 }
 
+// InterfacePolicies returns defensive declarations sorted by canonical
+// Interface ID.
+func (m Manifest) InterfacePolicies() []InterfacePolicy {
+	return append([]InterfacePolicy(nil), m.interfacePolicies...)
+}
+
 // Aliases returns defensive declarations sorted by Alias ID.
 func (m Manifest) Aliases() []Alias { return append([]Alias(nil), m.aliases...) }
 
@@ -398,7 +406,7 @@ func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, erro
 	if err != nil {
 		return Manifest{}, err
 	}
-	interfaceRequirements, removedInterfaceRequirements, implementationChoices, removedImplementationChoices, err := parseInterfaces(values["interfaces"])
+	interfaceRequirements, removedInterfaceRequirements, implementationChoices, removedImplementationChoices, interfacePolicies, removedInterfacePolicies, err := parseInterfaces(values["interfaces"])
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -423,6 +431,8 @@ func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, erro
 		removedInterfaceReqs:         removedInterfaceRequirements,
 		implementationChoices:        implementationChoices,
 		removedImplementationChoices: removedImplementationChoices,
+		interfacePolicies:            interfacePolicies,
+		removedInterfacePolicies:     removedInterfacePolicies,
 		aliases:                      aliases,
 		removedAliases:               removedAliases,
 		configurations:               configurations,
@@ -502,6 +512,12 @@ func rewriteManifestSource(manifest *Manifest, source string) {
 	}
 	for index := range manifest.removedImplementationChoices {
 		manifest.removedImplementationChoices[index].source = rewrite(manifest.removedImplementationChoices[index].source)
+	}
+	for index := range manifest.interfacePolicies {
+		manifest.interfacePolicies[index].source = rewrite(manifest.interfacePolicies[index].source)
+	}
+	for index := range manifest.removedInterfacePolicies {
+		manifest.removedInterfacePolicies[index].source = rewrite(manifest.removedInterfacePolicies[index].source)
 	}
 	for index := range manifest.aliases {
 		manifest.aliases[index].source = rewrite(manifest.aliases[index].source)

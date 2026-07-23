@@ -582,6 +582,7 @@ func withManifestProvenanceSelection(t testing.TB, options applicationgen.Option
 		InterfaceProxies:       options.InterfaceProxies,
 		ImplementationAdapters: options.ImplementationAdapters,
 		ImplementationAssembly: options.ImplementationAssembly,
+		InterfacePolicies:      options.Composition.Manifest().InterfacePolicies(),
 		Resolution:             resolution,
 		ProtobufWireMap:        wireMap,
 	})

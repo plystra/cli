@@ -408,6 +408,7 @@ type ApplicationModelOptions struct {
 	InterfaceProxies       []interfaceproxygen.Input
 	ImplementationAdapters []implementationadaptergen.Input
 	ImplementationAssembly implementationassemblygen.Options
+	InterfacePolicies      []applicationmeta.InterfacePolicy
 	Resolution             generationresolution.ExtensionResult
 	ProtobufWireMap        protobufwiremap.Map
 }
@@ -427,6 +428,7 @@ type applicationModelDocument struct {
 	InterfaceProxies       []applicationModelInterfaceProxy        `json:"interface_proxies"`
 	ImplementationAdapters []applicationModelImplementationAdapter `json:"implementation_adapters"`
 	ImplementationAssembly applicationModelImplementationAssembly  `json:"implementation_assembly"`
+	InterfacePolicies      []applicationModelInterfacePolicy       `json:"interface_policies"`
 	GenerationExtensions   []applicationModelGenerationExtension   `json:"generation_extensions"`
 	ProtobufProjection     json.RawMessage                         `json:"protobuf_projection"`
 	ProtobufWireProjection json.RawMessage                         `json:"protobuf_wire_projection"`
@@ -516,6 +518,11 @@ type applicationModelAssemblyDependency struct {
 	ParameterPosition int    `json:"parameter_position"`
 	Optional          bool   `json:"optional"`
 	Available         bool   `json:"available"`
+}
+
+type applicationModelInterfacePolicy struct {
+	InterfaceID string `json:"interface_id"`
+	Timeout     string `json:"timeout"`
 }
 
 type applicationModelGenerationExtension struct {
@@ -693,6 +700,24 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		Bindings:     bindingRecords,
 		Constructors: constructorRecords,
 	}
+	policies := append([]applicationmeta.InterfacePolicy(nil), options.InterfacePolicies...)
+	sort.Slice(policies, func(left, right int) bool {
+		return policies[left].InterfaceID().String() < policies[right].InterfaceID().String()
+	})
+	policyRecords := make([]applicationModelInterfacePolicy, len(policies))
+	for index, policy := range policies {
+		identifier := policy.InterfaceID()
+		if identifier.String() == "" || strings.HasPrefix(identifier.Name(), "kernel.") || policy.Timeout() <= 0 {
+			return "", fmt.Errorf("%w: Interface policy %d is invalid", ErrResolution, index)
+		}
+		if index > 0 && policies[index-1].InterfaceID() == identifier {
+			return "", fmt.Errorf("%w: Interface policy %q is duplicated", ErrResolution, identifier.String())
+		}
+		policyRecords[index] = applicationModelInterfacePolicy{
+			InterfaceID: identifier.String(),
+			Timeout:     policy.Timeout().String(),
+		}
+	}
 	outputs := options.Resolution.Outputs()
 	extensions := make([]applicationModelGenerationExtension, len(outputs))
 	for index, output := range outputs {
@@ -716,7 +741,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		return "", fmt.Errorf("%w: Protobuf wire map is absent or does not match the normalized projection", ErrResolution)
 	}
 	document := applicationModelDocument{
-		Version:             11,
+		Version:             12,
 		ModulePath:          options.ModulePath,
 		JavaScriptPackage:   options.JavaScriptPackage,
 		KernelModuleVersion: options.KernelModuleVersion,
@@ -733,6 +758,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		InterfaceProxies:       proxyRecords,
 		ImplementationAdapters: adapterRecords,
 		ImplementationAssembly: assemblyRecord,
+		InterfacePolicies:      policyRecords,
 		GenerationExtensions:   extensions,
 		ProtobufProjection:     json.RawMessage(protobufProjection.CanonicalJSON()),
 		ProtobufWireProjection: json.RawMessage(options.ProtobufWireMap.ActiveJSON()),

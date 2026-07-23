@@ -42,6 +42,7 @@ type applicationModelCompatibilityProjection struct {
 	HTTPExposures         []string                                      `json:"http_exposures"`
 	InterfaceRequirements []string                                      `json:"interface_requirements"`
 	ImplementationChoices []applicationModelCompatibilityImplementation `json:"implementation_choices"`
+	InterfacePolicies     []applicationModelCompatibilityPolicy         `json:"interface_policies"`
 }
 
 type applicationModelCompatibilityHTTPTransports struct {
@@ -57,6 +58,11 @@ type applicationModelCompatibilityHTTPCORS struct {
 type applicationModelCompatibilityImplementation struct {
 	Interface   string `json:"interface"`
 	Constructor string `json:"constructor"`
+}
+
+type applicationModelCompatibilityPolicy struct {
+	Interface string `json:"interface"`
+	Timeout   string `json:"timeout"`
 }
 
 // NewApplicationModelCompatibility projects one final typed application
@@ -75,6 +81,7 @@ func NewApplicationModelCompatibility(applicationModelDigest string, manifest ap
 		HTTPExposures:         make([]string, 0),
 		InterfaceRequirements: make([]string, 0),
 		ImplementationChoices: make([]applicationModelCompatibilityImplementation, 0),
+		InterfacePolicies:     make([]applicationModelCompatibilityPolicy, 0),
 	}
 	if cors, exists := manifest.HTTPCORS(); exists {
 		normalized, err := applicationmeta.NormalizeHTTPCORS(cors)
@@ -98,10 +105,19 @@ func NewApplicationModelCompatibility(applicationModelDigest string, manifest ap
 			Constructor: choice.Constructor().String(),
 		})
 	}
+	for _, policy := range manifest.InterfacePolicies() {
+		projection.InterfacePolicies = append(projection.InterfacePolicies, applicationModelCompatibilityPolicy{
+			Interface: policy.InterfaceID().String(),
+			Timeout:   policy.Timeout().String(),
+		})
+	}
 	sort.Strings(projection.HTTPExposures)
 	sort.Strings(projection.InterfaceRequirements)
 	sort.Slice(projection.ImplementationChoices, func(left, right int) bool {
 		return projection.ImplementationChoices[left].Interface < projection.ImplementationChoices[right].Interface
+	})
+	sort.Slice(projection.InterfacePolicies, func(left, right int) bool {
+		return projection.InterfacePolicies[left].Interface < projection.InterfacePolicies[right].Interface
 	})
 	document := applicationModelCompatibilityDocument{
 		Version:                applicationModelCompatibilityVersion,
@@ -181,6 +197,13 @@ func encodeApplicationModelCompatibility(document applicationModelCompatibilityD
 			"interface":   implementation.Interface,
 		}
 	}
+	policies := make([]map[string]any, len(document.Projection.InterfacePolicies))
+	for index, policy := range document.Projection.InterfacePolicies {
+		policies[index] = map[string]any{
+			"interface": policy.Interface,
+			"timeout":   policy.Timeout,
+		}
+	}
 	var cors any
 	if document.Projection.HTTPCORS != nil {
 		cors = map[string]any{
@@ -195,6 +218,7 @@ func encodeApplicationModelCompatibility(document applicationModelCompatibilityD
 			"http_exposures":         document.Projection.HTTPExposures,
 			"http_transports":        map[string]any{"connect": document.Projection.HTTPTransports.Connect, "rest": document.Projection.HTTPTransports.REST},
 			"implementation_choices": implementations,
+			"interface_policies":     policies,
 			"interface_requirements": document.Projection.InterfaceRequirements,
 		},
 		"version": document.Version,

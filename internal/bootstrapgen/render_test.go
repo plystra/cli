@@ -77,6 +77,8 @@ token: {type: secret}
 		`"recipients": runtimeConfigurationArray`,
 		`"token":      runtimeConfigurationSecret`,
 		"mergeRuntimeInterfaceSet",
+		"mergeRuntimeInterfacePolicies",
+		"validateRuntimeInterfacePolicyTimeout",
 		"mergeRuntimeOpenObject",
 		"validateRuntimeOpenObjectType",
 		"YAML anchors and aliases are not allowed",

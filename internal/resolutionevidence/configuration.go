@@ -476,6 +476,13 @@ func validConfigurationFieldPath(value string) bool {
 		_, err := interfaceid.Parse(keys[0])
 		return err == nil
 	}
+	if strings.HasSuffix(value, ".timeout") {
+		keys, ok := configurationPathKeys(strings.TrimSuffix(value, ".timeout"), "interfaces.policies")
+		if ok && len(keys) == 1 {
+			identifier, err := interfaceid.Parse(keys[0])
+			return err == nil && !strings.HasPrefix(identifier.Name(), "kernel.")
+		}
+	}
 	keys, ok := configurationPathKeys(value, "config")
 	if !ok || len(keys) == 0 || pluginid.Validate(keys[0]) != nil {
 		return false
@@ -708,7 +715,7 @@ func configurationContributionKey(value ConfigurationContribution) string {
 }
 
 func configurationPathDependencyComposable(value string) bool {
-	return strings.HasPrefix(value, "http.expose[") || strings.HasPrefix(value, "capabilities.require[") || strings.HasPrefix(value, "capabilities.use[") || strings.HasPrefix(value, "capabilities.aliases[") || strings.HasPrefix(value, "interfaces.require[") || strings.HasPrefix(value, "interfaces.use[") || strings.HasPrefix(value, "config[")
+	return strings.HasPrefix(value, "http.expose[") || strings.HasPrefix(value, "capabilities.require[") || strings.HasPrefix(value, "capabilities.use[") || strings.HasPrefix(value, "capabilities.aliases[") || strings.HasPrefix(value, "interfaces.require[") || strings.HasPrefix(value, "interfaces.use[") || strings.HasPrefix(value, "interfaces.policies[") || strings.HasPrefix(value, "config[")
 }
 
 func configurationPathKeys(value, prefix string) ([]string, bool) {

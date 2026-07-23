@@ -180,6 +180,10 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
+	interfacePolicies, err := composeInterfacePolicies(ordered, current.InterfacePolicies(), current.removedInterfacePolicies, records)
+	if err != nil {
+		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+	}
 	aliases, err := composeAliases(ordered, current.Aliases(), current.removedAliases, records)
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
@@ -212,6 +216,7 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 		providerChoices:       choices,
 		interfaceRequirements: interfaceRequirements,
 		implementationChoices: implementationChoices,
+		interfacePolicies:     interfacePolicies,
 		aliases:               aliases,
 		configurations:        configurations,
 		startupTimeout:        current.startupTimeout,

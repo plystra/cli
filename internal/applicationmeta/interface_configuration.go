@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceid"
@@ -42,6 +43,24 @@ func (c ImplementationChoice) Constructor() constructorsymbol.Symbol { return c.
 // Source returns stable configuration-path provenance for diagnostics.
 func (c ImplementationChoice) Source() string { return c.source }
 
+// InterfacePolicy is one closed invocation policy attached to an exact
+// non-intrinsic Interface. Runtime compilation consumes this typed value; the
+// Kernel never parses its YAML source.
+type InterfacePolicy struct {
+	interfaceID interfaceid.Identifier
+	timeout     time.Duration
+	source      string
+}
+
+// InterfaceID returns the exact canonical Interface governed by the policy.
+func (p InterfacePolicy) InterfaceID() interfaceid.Identifier { return p.interfaceID }
+
+// Timeout returns the normalized positive invocation timeout.
+func (p InterfacePolicy) Timeout() time.Duration { return p.timeout }
+
+// Source returns stable configuration-field provenance for diagnostics.
+func (p InterfacePolicy) Source() string { return p.source }
+
 // interfaceRemoval is one typed null or sparse-set tombstone retained until
 // schema-aware overlay or dependency composition applies it.
 type interfaceRemoval struct {
@@ -49,30 +68,34 @@ type interfaceRemoval struct {
 	source string
 }
 
-func parseInterfaces(node *yaml.Node) ([]InterfaceRequirement, []interfaceRemoval, []ImplementationChoice, []interfaceRemoval, error) {
+func parseInterfaces(node *yaml.Node) ([]InterfaceRequirement, []interfaceRemoval, []ImplementationChoice, []interfaceRemoval, []InterfacePolicy, []interfaceRemoval, error) {
 	if node == nil {
-		return nil, nil, nil, nil, nil
+		return nil, nil, nil, nil, nil, nil, nil
 	}
 	values, err := mapping(node, "interfaces")
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	for _, key := range sortedNodeKeys(values) {
 		switch key {
-		case "require", "use":
+		case "require", "use", "policies":
 		default:
-			return nil, nil, nil, nil, invalid("interfaces contains unknown key %q", key)
+			return nil, nil, nil, nil, nil, nil, invalid("interfaces contains unknown key %q", key)
 		}
 	}
 	requirements, removedRequirements, err := parseInterfaceRequirements(values["require"])
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	choices, removedChoices, err := parseImplementationChoices(values["use"])
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
-	return requirements, removedRequirements, choices, removedChoices, nil
+	policies, removedPolicies, err := parseInterfacePolicies(values["policies"])
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, err
+	}
+	return requirements, removedRequirements, choices, removedChoices, policies, removedPolicies, nil
 }
 
 func parseInterfaceRequirements(node *yaml.Node) ([]InterfaceRequirement, []interfaceRemoval, error) {
@@ -205,4 +228,57 @@ func parseImplementationChoices(node *yaml.Node) ([]ImplementationChoice, []inte
 		})
 	}
 	return choices, removals, nil
+}
+
+func parseInterfacePolicies(node *yaml.Node) ([]InterfacePolicy, []interfaceRemoval, error) {
+	if node == nil {
+		return nil, nil, nil
+	}
+	values, err := mapping(node, "interfaces.policies")
+	if err != nil {
+		return nil, nil, err
+	}
+	policies := make([]InterfacePolicy, 0, len(values))
+	removals := make([]interfaceRemoval, 0, len(values))
+	for _, value := range sortedNodeKeys(values) {
+		identifier, err := interfaceid.Parse(value)
+		if err != nil {
+			return nil, nil, invalid("interfaces.policies key %q is not a canonical Interface ID", value)
+		}
+		if strings.HasPrefix(identifier.Name(), "kernel.") {
+			return nil, nil, invalid("interfaces.policies key %q configures an intrinsic kernel.* Interface", value)
+		}
+		path := fmt.Sprintf("interfaces.policies[%q]", identifier.String())
+		if isNull(values[value]) {
+			removals = append(removals, interfaceRemoval{id: identifier, source: "plystra.yaml " + path})
+			continue
+		}
+		fields, err := mapping(values[value], path)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, field := range sortedNodeKeys(fields) {
+			if field != "timeout" {
+				return nil, nil, invalid("%s contains unknown key %q", path, field)
+			}
+		}
+		timeoutNode, exists := fields["timeout"]
+		if !exists {
+			return nil, nil, invalid("%s.timeout is required", path)
+		}
+		timeoutText, err := strictString(timeoutNode)
+		if err != nil || timeoutText == "" || len(timeoutText) > 64 || strings.TrimSpace(timeoutText) != timeoutText || strings.ContainsRune(timeoutText, '\x00') {
+			return nil, nil, invalid("%s.timeout must be a non-empty trimmed Go duration string of at most 64 bytes with no NUL", path)
+		}
+		timeout, err := time.ParseDuration(timeoutText)
+		if err != nil || timeout <= 0 {
+			return nil, nil, invalid("%s.timeout must be a positive Go duration", path)
+		}
+		policies = append(policies, InterfacePolicy{
+			interfaceID: identifier,
+			timeout:     timeout,
+			source:      "plystra.yaml " + path + ".timeout",
+		})
+	}
+	return policies, removals, nil
 }

@@ -45,6 +45,9 @@ func TestResolveBuildsSelectedInterfaceConstructorGraphFromConfiguration(t *test
 	}) {
 		t.Fatalf("default selections = %v", got)
 	}
+	if policies := resolved.Composition().Manifest().InterfacePolicies(); len(policies) != 1 || policies[0].InterfaceID().String() != "audit.write/v1" || policies[0].Timeout().String() != "5s" || policies[0].Source() != `plystra.yaml interfaces.policies["audit.write/v1"].timeout` {
+		t.Fatalf("default Interface policies = %#v", policies)
+	}
 	app := graph.ConstructionOrder()[1]
 	dependencies := app.Dependencies()
 	if len(dependencies) != 2 || dependencies[0].InterfaceID().String() != "audit.write/v1" || dependencies[0].Optional() || !dependencies[0].Available() || dependencies[0].Constructor().String() != "example.com/interface-app/auditone.New" || dependencies[1].InterfaceID().String() != "cache.read/v1" || !dependencies[1].Optional() || dependencies[1].Available() {
@@ -82,6 +85,9 @@ func TestResolveBuildsSelectedInterfaceConstructorGraphFromConfiguration(t *test
 		"cache.read/v1=example.com/interface-cache/cache.New:unique-compatible",
 	}) {
 		t.Fatalf("production selections = %v", got)
+	}
+	if policies := production.Composition().Manifest().InterfacePolicies(); len(policies) != 1 || policies[0].InterfaceID().String() != "audit.write/v1" || policies[0].Timeout().String() != "2s" || policies[0].Source() != `plystra.production.yaml interfaces.policies["audit.write/v1"].timeout` {
+		t.Fatalf("production Interface policies = %#v", policies)
 	}
 	productionDependencies := productionGraph.ConstructionOrder()[2].Dependencies()
 	if !productionDependencies[1].Optional() || !productionDependencies[1].Available() || productionDependencies[1].Constructor().String() != "example.com/interface-cache/cache.New" {
@@ -765,11 +771,15 @@ replace github.com/plystra/kernel => ../kernel
   require: [app.run/v1]
   use:
     audit.write/v1: example.com/interface-app/auditone.New
+  policies:
+    audit.write/v1: {timeout: 5s}
 `)
 	writeFile(t, filepath.Join(root, "plystra.production.yaml"), `interfaces:
   require: [cache.read/v1]
   use:
     audit.write/v1: example.com/interface-app/audittwo.New
+  policies:
+    audit.write/v1: {timeout: 2s}
 `)
 	writeResolvedInterface(t, root, "app/run/v1", "runv1", "app.run/v1", "Run")
 	writeResolvedInterface(t, root, "audit/write/v1", "writev1", "audit.write/v1", "Write")

@@ -34,12 +34,12 @@ const (
 	defaultRuntimeDocument = "plystra.yaml"
 	defaultStartupTimeout  = time.Duration(120000000000)
 	// compiledConfigurationSelectionProvenanceJSON records the normalized non-secret build selection.
-	compiledConfigurationSelectionProvenanceJSON   = "{\"version\":1,\"mode\":\"default\",\"root_path\":\"plystra.yaml\",\"root_digest\":\"sha256:54c237bfe7b65ee4f56a05173be2bf81b9310ffb34fbfa5cde1e55b85ebd978f\",\"selected_path\":\"plystra.yaml\",\"selected_digest\":\"sha256:54c237bfe7b65ee4f56a05173be2bf81b9310ffb34fbfa5cde1e55b85ebd978f\",\"dependency_composition_digest\":\"sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130\",\"application_model_digest\":\"sha256:29435c1be4aa85810ed8f45e20a55ea9f8438b0dd45be1db62151c6631040567\"}"
-	compiledConfigurationSelectionProvenanceDigest = "sha256:5c6dab74c864248ad2685949717943f18558009dd45d7d8e7472a149fc8f46cd"
+	compiledConfigurationSelectionProvenanceJSON   = "{\"version\":1,\"mode\":\"default\",\"root_path\":\"plystra.yaml\",\"root_digest\":\"sha256:84af8f5f7bd7c7b65343b58fd670495b6218aae6170e106548b997bf2944c00b\",\"selected_path\":\"plystra.yaml\",\"selected_digest\":\"sha256:84af8f5f7bd7c7b65343b58fd670495b6218aae6170e106548b997bf2944c00b\",\"dependency_composition_digest\":\"sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130\",\"application_model_digest\":\"sha256:d87e2e051759c3e82870115b1cbce0065b4aadb6a4d57e960b4070d1c965d913\"}"
+	compiledConfigurationSelectionProvenanceDigest = "sha256:b0191832246e9c456172fc2f10c03b0e71a243d5ce78cbc926e18a729938f718"
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:29435c1be4aa85810ed8f45e20a55ea9f8438b0dd45be1db62151c6631040567\",\"projection\":{\"http_cors\":null,\"http_exposures\":[],\"http_transports\":{\"connect\":true,\"rest\":false},\"implementation_choices\":[],\"interface_requirements\":[]},\"version\":1}"
-	compiledApplicationModelCompatibilityDigest = "sha256:f8754a53fe2caf960bcc90fa6edffef77c1829d2812a34785d917db1bf2635ef"
-	compiledApplicationModelDigest              = "sha256:29435c1be4aa85810ed8f45e20a55ea9f8438b0dd45be1db62151c6631040567"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:d87e2e051759c3e82870115b1cbce0065b4aadb6a4d57e960b4070d1c965d913\",\"projection\":{\"http_cors\":null,\"http_exposures\":[],\"http_transports\":{\"connect\":true,\"rest\":false},\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":1}"
+	compiledApplicationModelCompatibilityDigest = "sha256:4980f0ba05b5d70b5ed255cd418f93adbf037e6e8a490e02deaff59169a305fd"
+	compiledApplicationModelDigest              = "sha256:d87e2e051759c3e82870115b1cbce0065b4aadb6a4d57e960b4070d1c965d913"
 )
 
 var (
@@ -317,7 +317,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 	if err != nil {
 		return "", err
 	}
-	requirements, implementations, err := runtimeApplicationModelInterfaces(values["interfaces"])
+	requirements, implementations, policies, err := runtimeApplicationModelInterfaces(values["interfaces"])
 	if err != nil {
 		return "", err
 	}
@@ -328,6 +328,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 			"http_exposures":         exposures,
 			"http_transports":        transports,
 			"implementation_choices": implementations,
+			"interface_policies":     policies,
 			"interface_requirements": requirements,
 		},
 		"version": 1,
@@ -391,18 +392,18 @@ func runtimeApplicationModelHTTP(node *yaml.Node) (map[string]any, any, []string
 	return map[string]any{"connect": connect, "rest": rest}, cors, exposures, nil
 }
 
-func runtimeApplicationModelInterfaces(node *yaml.Node) ([]string, []map[string]any, error) {
-	values, err := runtimeOptionalMapping(node, "interfaces", runtimeKeySet("require", "use"))
+func runtimeApplicationModelInterfaces(node *yaml.Node) ([]string, []map[string]any, []map[string]any, error) {
+	values, err := runtimeOptionalMapping(node, "interfaces", runtimeKeySet("require", "use", "policies"))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	requirements, err := runtimeApplicationModelInterfaceIDs(values["require"], "interfaces.require")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	choices, err := runtimeOptionalMapping(values["use"], "interfaces.use", nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	interfaces := make([]string, 0, len(choices))
 	for interfaceID := range choices {
@@ -412,18 +413,54 @@ func runtimeApplicationModelInterfaces(node *yaml.Node) ([]string, []map[string]
 	implementations := make([]map[string]any, 0, len(interfaces))
 	for _, interfaceID := range interfaces {
 		if !validRuntimeSelectableInterfaceID(interfaceID) {
-			return nil, nil, runtimeConfigurationError("interfaces.use key %q is not a selectable canonical Interface ID", interfaceID)
+			return nil, nil, nil, runtimeConfigurationError("interfaces.use key %q is not a selectable canonical Interface ID", interfaceID)
 		}
 		constructor, valueErr := runtimeString(choices[interfaceID])
 		if valueErr != nil || !validRuntimeConstructorSymbol(constructor) {
-			return nil, nil, runtimeConfigurationError("interfaces.use[%q] must be a fully qualified Implementation constructor symbol", interfaceID)
+			return nil, nil, nil, runtimeConfigurationError("interfaces.use[%q] must be a fully qualified Implementation constructor symbol", interfaceID)
 		}
 		implementations = append(implementations, map[string]any{
 			"constructor": constructor,
 			"interface":   interfaceID,
 		})
 	}
-	return requirements, implementations, nil
+	policies, err := runtimeApplicationModelInterfacePolicies(values["policies"])
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return requirements, implementations, policies, nil
+}
+
+func runtimeApplicationModelInterfacePolicies(node *yaml.Node) ([]map[string]any, error) {
+	values, err := runtimeOptionalMapping(node, "interfaces.policies", nil)
+	if err != nil {
+		return nil, err
+	}
+	interfaces := make([]string, 0, len(values))
+	for interfaceID := range values {
+		interfaces = append(interfaces, interfaceID)
+	}
+	sort.Strings(interfaces)
+	policies := make([]map[string]any, 0, len(interfaces))
+	for _, interfaceID := range interfaces {
+		if !validRuntimeSelectableInterfaceID(interfaceID) {
+			return nil, runtimeConfigurationError("interfaces.policies key %q is not a selectable canonical Interface ID", interfaceID)
+		}
+		path := "interfaces.policies[" + strconv.Quote(interfaceID) + "]"
+		fields, mappingErr := runtimeMapping(values[interfaceID], path, runtimeKeySet("timeout"))
+		if mappingErr != nil {
+			return nil, mappingErr
+		}
+		timeout, timeoutErr := validateRuntimeInterfacePolicyTimeout(fields["timeout"], path+".timeout")
+		if timeoutErr != nil {
+			return nil, timeoutErr
+		}
+		policies = append(policies, map[string]any{
+			"interface": interfaceID,
+			"timeout":   timeout.Value,
+		})
+	}
+	return policies, nil
 }
 
 func runtimeApplicationModelInterfaceIDs(node *yaml.Node, path string) ([]string, error) {
@@ -952,7 +989,7 @@ func mergeRuntimeInterfaces(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, 
 	if lowerNode == nil && upperNode == nil {
 		return nil, false, nil
 	}
-	allowed := runtimeKeySet("require", "use")
+	allowed := runtimeKeySet("require", "use", "policies")
 	lower, err := runtimeOptionalMapping(lowerNode, "interfaces", allowed)
 	if err != nil {
 		return nil, false, err
@@ -975,6 +1012,13 @@ func mergeRuntimeInterfaces(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, 
 	}
 	if hasUses {
 		result["use"] = uses
+	}
+	policies, hasPolicies, err := mergeRuntimeInterfacePolicies(lower["policies"], upper["policies"])
+	if err != nil {
+		return nil, false, err
+	}
+	if hasPolicies {
+		result["policies"] = policies
 	}
 	return runtimeMappingNode(result), true, nil
 }
@@ -1082,6 +1126,39 @@ func mergeRuntimeImplementationChoices(lowerNode, upperNode *yaml.Node) (*yaml.N
 				return nil, false, runtimeConfigurationError("interfaces.use[%q] must be a fully qualified Implementation constructor symbol or null", interfaceID)
 			}
 			values[interfaceID] = runtimeClone(value)
+		}
+	}
+	return runtimeMappingNode(values), true, nil
+}
+
+func mergeRuntimeInterfacePolicies(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error) {
+	if lowerNode == nil && upperNode == nil {
+		return nil, false, nil
+	}
+	values := make(map[string]*yaml.Node)
+	for _, layer := range []*yaml.Node{lowerNode, upperNode} {
+		mapping, err := runtimeOptionalMapping(layer, "interfaces.policies", nil)
+		if err != nil {
+			return nil, false, err
+		}
+		for interfaceID, value := range mapping {
+			if !validRuntimeSelectableInterfaceID(interfaceID) {
+				return nil, false, runtimeConfigurationError("interfaces.policies key %q is not a selectable canonical Interface ID", interfaceID)
+			}
+			if runtimeNull(value) {
+				delete(values, interfaceID)
+				continue
+			}
+			path := "interfaces.policies[" + strconv.Quote(interfaceID) + "]"
+			fields, mappingErr := runtimeMapping(value, path, runtimeKeySet("timeout"))
+			if mappingErr != nil {
+				return nil, false, mappingErr
+			}
+			timeout, timeoutErr := validateRuntimeInterfacePolicyTimeout(fields["timeout"], path+".timeout")
+			if timeoutErr != nil {
+				return nil, false, timeoutErr
+			}
+			values[interfaceID] = runtimeMappingNode(map[string]*yaml.Node{"timeout": timeout})
 		}
 	}
 	return runtimeMappingNode(values), true, nil
@@ -1438,6 +1515,18 @@ func validateRuntimeDuration(node *yaml.Node, path string) (*yaml.Node, error) {
 		return nil, runtimeConfigurationError("%s must be a positive Go duration string", path)
 	}
 	return runtimeClone(node), nil
+}
+
+func validateRuntimeInterfacePolicyTimeout(node *yaml.Node, path string) (*yaml.Node, error) {
+	validated, err := validateRuntimeDuration(node, path)
+	if err != nil {
+		return nil, err
+	}
+	duration, err := time.ParseDuration(validated.Value)
+	if err != nil || duration <= 0 {
+		return nil, runtimeConfigurationError("%s must be a positive Go duration string", path)
+	}
+	return runtimeStringNode(duration.String()), nil
 }
 
 func validateRuntimeOrigins(node *yaml.Node, path string) (*yaml.Node, error) {

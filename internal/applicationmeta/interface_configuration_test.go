@@ -11,7 +11,7 @@ import (
 	"github.com/plystra/cli/internal/applicationmeta"
 )
 
-func TestParseNormalizesTypedInterfaceRequirementsAndImplementationChoices(t *testing.T) {
+func TestParseNormalizesTypedInterfaceConfiguration(t *testing.T) {
 	t.Parallel()
 
 	manifest, err := applicationmeta.ParseSource("deploy/production.yaml", []byte(`
@@ -22,6 +22,9 @@ interfaces:
   use:
     email.send/v1: github.com/acme/app/smtp.New
     cache.read/v1: null
+  policies:
+    email.send/v1: {timeout: 5000ms}
+    audit.write/v1: null
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -39,9 +42,16 @@ interfaces:
 	}) {
 		t.Fatalf("ImplementationChoices = %v", got)
 	}
+	policies := manifest.InterfacePolicies()
+	if got := interfacePolicyStrings(policies); !reflect.DeepEqual(got, []string{
+		`email.send/v1=5s@deploy/production.yaml interfaces.policies["email.send/v1"].timeout`,
+	}) {
+		t.Fatalf("InterfacePolicies = %v", got)
+	}
 	requirements[0] = applicationmeta.InterfaceRequirement{}
 	choices[0] = applicationmeta.ImplementationChoice{}
-	if manifest.InterfaceRequirements()[0].ID().String() != "audit.write/v1" || manifest.ImplementationChoices()[0].Constructor().String() != "github.com/acme/app/smtp.New" {
+	policies[0] = applicationmeta.InterfacePolicy{}
+	if manifest.InterfaceRequirements()[0].ID().String() != "audit.write/v1" || manifest.ImplementationChoices()[0].Constructor().String() != "github.com/acme/app/smtp.New" || manifest.InterfacePolicies()[0].Timeout().String() != "5s" {
 		t.Fatal("Manifest returned aliased Interface configuration storage")
 	}
 
@@ -53,11 +63,13 @@ interfaces:
 		summary applicationmeta.ConfigurationDecisionSummary
 		removed bool
 	}{
-		`interfaces.require["audit.write/v1"]`: {summary: applicationmeta.ConfigurationSummaryInterface},
-		`interfaces.require["email.send/v1"]`:  {summary: applicationmeta.ConfigurationSummaryInterface},
-		`interfaces.require["cache.read/v1"]`:  {summary: applicationmeta.ConfigurationSummaryRemoval, removed: true},
-		`interfaces.use["email.send/v1"]`:      {summary: applicationmeta.ConfigurationSummaryImplementation},
-		`interfaces.use["cache.read/v1"]`:      {summary: applicationmeta.ConfigurationSummaryRemoval, removed: true},
+		`interfaces.require["audit.write/v1"]`:          {summary: applicationmeta.ConfigurationSummaryInterface},
+		`interfaces.require["email.send/v1"]`:           {summary: applicationmeta.ConfigurationSummaryInterface},
+		`interfaces.require["cache.read/v1"]`:           {summary: applicationmeta.ConfigurationSummaryRemoval, removed: true},
+		`interfaces.use["email.send/v1"]`:               {summary: applicationmeta.ConfigurationSummaryImplementation},
+		`interfaces.use["cache.read/v1"]`:               {summary: applicationmeta.ConfigurationSummaryRemoval, removed: true},
+		`interfaces.policies["email.send/v1"].timeout`:  {summary: applicationmeta.ConfigurationSummaryDuration},
+		`interfaces.policies["audit.write/v1"].timeout`: {summary: applicationmeta.ConfigurationSummaryRemoval, removed: true},
 	}
 	if len(decisions) != len(want) {
 		t.Fatalf("ConfigurationDecisions = %#v", decisions)
@@ -79,7 +91,7 @@ func TestParseRejectsInvalidInterfaceConfiguration(t *testing.T) {
 		want string
 	}{
 		{name: "nonmapping", data: "interfaces: []\n", want: "interfaces must be a mapping"},
-		{name: "unknown field", data: "interfaces: {policies: {}}\n", want: `interfaces contains unknown key "policies"`},
+		{name: "unknown field", data: "interfaces: {unknown: {}}\n", want: `interfaces contains unknown key "unknown"`},
 		{name: "invalid requirement", data: "interfaces: {require: [email/v1]}\n", want: "not a canonical Interface ID"},
 		{name: "duplicate requirement", data: "interfaces: {require: [email.send/v1, email.send/v1]}\n", want: "duplicates Interface"},
 		{name: "ambiguous sparse edit", data: "interfaces: {require: {add: [email.send/v1], remove: [email.send/v1]}}\n", want: "cannot both add and remove Interface"},
@@ -88,6 +100,17 @@ func TestParseRejectsInvalidInterfaceConfiguration(t *testing.T) {
 		{name: "invalid constructor", data: "interfaces: {use: {email.send/v1: acme.smtp}}\n", want: "not a fully qualified constructor symbol"},
 		{name: "nonstring constructor", data: "interfaces: {use: {email.send/v1: true}}\n", want: "must be a fully qualified constructor symbol or null"},
 		{name: "intrinsic selection", data: "interfaces: {use: {kernel.health/v1: github.com/acme/health.New}}\n", want: "intrinsic kernel.* Interface"},
+		{name: "policies nonmapping", data: "interfaces: {policies: []}\n", want: "interfaces.policies must be a mapping"},
+		{name: "invalid policy key", data: "interfaces: {policies: {email/v1: {timeout: 1s}}}\n", want: "not a canonical Interface ID"},
+		{name: "intrinsic policy", data: "interfaces: {policies: {kernel.health/v1: {timeout: 1s}}}\n", want: "intrinsic kernel.* Interface"},
+		{name: "policy nonmapping", data: "interfaces: {policies: {email.send/v1: 1s}}\n", want: `interfaces.policies["email.send/v1"] must be a mapping`},
+		{name: "empty policy", data: "interfaces: {policies: {email.send/v1: {}}}\n", want: `.timeout is required`},
+		{name: "unknown policy field", data: "interfaces: {policies: {email.send/v1: {retry: 2}}}\n", want: `contains unknown key "retry"`},
+		{name: "nonstring policy timeout", data: "interfaces: {policies: {email.send/v1: {timeout: 5}}}\n", want: "must be a non-empty trimmed Go duration string"},
+		{name: "null policy timeout", data: "interfaces: {policies: {email.send/v1: {timeout: null}}}\n", want: "must be a non-empty trimmed Go duration string"},
+		{name: "zero policy timeout", data: "interfaces: {policies: {email.send/v1: {timeout: 0s}}}\n", want: "must be a positive Go duration"},
+		{name: "negative policy timeout", data: "interfaces: {policies: {email.send/v1: {timeout: -1s}}}\n", want: "must be a positive Go duration"},
+		{name: "malformed policy timeout", data: "interfaces: {policies: {email.send/v1: {timeout: soon}}}\n", want: "must be a positive Go duration"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -203,6 +226,62 @@ func TestComposeInterfaceRequirementAddRemoveConflictNeedsCurrentDecision(t *tes
 	}
 }
 
+func TestComposeInterfacePoliciesDeterministicallyWithCurrentReplacement(t *testing.T) {
+	t.Parallel()
+
+	dependencies := []applicationmeta.Dependency{
+		{
+			ModulePath:    "example.com/platform-a",
+			ModuleVersion: "v1.0.0",
+			Manifest:      composeManifest(t, "interfaces: {policies: {email.send/v1: {timeout: 5s}}}\n"),
+		},
+		{
+			ModulePath:    "example.com/platform-b",
+			ModuleVersion: "v2.0.0",
+			Manifest:      composeManifest(t, "interfaces: {policies: {email.send/v1: {timeout: 5000ms}}}\n"),
+		},
+	}
+	first, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[1], dependencies[0]}, composeManifest(t, "{}\n"), composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := interfacePolicyStrings(first.Manifest().InterfacePolicies()); !reflect.DeepEqual(got, []string{
+		`email.send/v1=5s@example.com/platform-a@v1.0.0/plystra.yaml interfaces.policies["email.send/v1"].timeout`,
+	}) {
+		t.Fatalf("composed policies = %v", got)
+	}
+	path := `interfaces.policies["email.send/v1"].timeout`
+	provenance := findProvenance(t, first.Provenance(), path)
+	if len(provenance) != 1 || len(provenance[0].Sources()) != 2 || first.DependencyDigest() != second.DependencyDigest() || !reflect.DeepEqual(first.Provenance(), second.Provenance()) {
+		t.Fatalf("policy provenance = %#v / %#v", first.Provenance(), second.Provenance())
+	}
+
+	conflicting := append([]applicationmeta.Dependency(nil), dependencies...)
+	conflicting[1].Manifest = composeManifest(t, "interfaces: {policies: {email.send/v1: {timeout: 10s}}}\n")
+	_, err = applicationmeta.Compose(conflicting, composeManifest(t, "{}\n"), composeSchemaLookup(nil))
+	if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !containsAllFragments(err.Error(), path, "5s", "10s", "example.com/platform-a@v1.0.0", "example.com/platform-b@v2.0.0") {
+		t.Fatalf("inherited policy conflict = %v", err)
+	}
+	current := composeManifest(t, "interfaces: {policies: {email.send/v1: {timeout: 2s}}}\n")
+	resolved, err := applicationmeta.Compose(conflicting, current, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := interfacePolicyStrings(resolved.Manifest().InterfacePolicies()); !reflect.DeepEqual(got, []string{
+		`email.send/v1=2s@plystra.yaml interfaces.policies["email.send/v1"].timeout`,
+	}) {
+		t.Fatalf("current policy replacement = %v", got)
+	}
+	removed, err := applicationmeta.Compose(conflicting, composeManifest(t, "interfaces: {policies: {email.send/v1: null}}\n"), composeSchemaLookup(nil))
+	if err != nil || len(removed.Manifest().InterfacePolicies()) != 0 {
+		t.Fatalf("current policy removal = %#v, %v", removed.Manifest().InterfacePolicies(), err)
+	}
+}
+
 func TestApplyOverlayUsesTypedSparseInterfaceSemantics(t *testing.T) {
 	t.Parallel()
 
@@ -212,6 +291,9 @@ interfaces:
   use:
     audit.write/v1: github.com/acme/audit.New
     email.send/v1: github.com/acme/smtp.New
+  policies:
+    audit.write/v1: {timeout: 1s}
+    email.send/v1: {timeout: 5s}
 `)
 	overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte(`
 interfaces:
@@ -220,6 +302,9 @@ interfaces:
     remove: [audit.write/v1]
   use:
     audit.write/v1: github.com/acme/auditprod.New
+    email.send/v1: null
+  policies:
+    audit.write/v1: {timeout: 2s}
     email.send/v1: null
 `))
 	if err != nil {
@@ -237,6 +322,11 @@ interfaces:
 	}) {
 		t.Fatalf("overlay choices = %v", got)
 	}
+	if got := interfacePolicyStrings(effective.InterfacePolicies()); !reflect.DeepEqual(got, []string{
+		`audit.write/v1=2s@plystra.production.yaml interfaces.policies["audit.write/v1"].timeout`,
+	}) {
+		t.Fatalf("overlay policies = %v", got)
+	}
 	composed, err := applicationmeta.Compose([]applicationmeta.Dependency{{
 		ModulePath:    "example.com/dependency",
 		ModuleVersion: "v1.0.0",
@@ -245,13 +335,15 @@ interfaces:
   require: [audit.write/v1]
   use:
     email.send/v1: github.com/dependency/smtp.New
+  policies:
+    email.send/v1: {timeout: 10s}
 `),
 	}}, effective, composeSchemaLookup(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := interfaceRequirementIDs(composed.Manifest().InterfaceRequirements()); !reflect.DeepEqual(got, []string{"cache.read/v1", "email.send/v1"}) || len(composed.Manifest().ImplementationChoices()) != 1 || composed.Manifest().ImplementationChoices()[0].Constructor().String() != "github.com/acme/auditprod.New" {
-		t.Fatalf("overlay dependency suppression = %v / %v", got, implementationChoiceStrings(composed.Manifest().ImplementationChoices()))
+	if got := interfaceRequirementIDs(composed.Manifest().InterfaceRequirements()); !reflect.DeepEqual(got, []string{"cache.read/v1", "email.send/v1"}) || len(composed.Manifest().ImplementationChoices()) != 1 || composed.Manifest().ImplementationChoices()[0].Constructor().String() != "github.com/acme/auditprod.New" || !reflect.DeepEqual(interfacePolicyStrings(composed.Manifest().InterfacePolicies()), []string{`audit.write/v1=2s@plystra.production.yaml interfaces.policies["audit.write/v1"].timeout`}) {
+		t.Fatalf("overlay dependency suppression = %v / %v / %v", got, implementationChoiceStrings(composed.Manifest().ImplementationChoices()), interfacePolicyStrings(composed.Manifest().InterfacePolicies()))
 	}
 }
 
@@ -339,6 +431,74 @@ interfaces:
 	}
 }
 
+func TestMaintainDependencyConfigurationPreservesLocalInterfacePolicy(t *testing.T) {
+	t.Parallel()
+
+	oldDependencies := []applicationmeta.Dependency{{
+		ModulePath:    "example.com/platform",
+		ModuleVersion: "v1.0.0",
+		Manifest:      composeManifest(t, "interfaces: {policies: {email.send/v1: {timeout: 5s}}}\n"),
+	}}
+	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("# project configuration\n{}\n"), applicationmeta.DependencyBaseline{}, oldDependencies, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !initial.Changed() || !bytes.Contains(initial.Data(), []byte("email.send/v1")) || !bytes.Contains(initial.Data(), []byte("5s")) {
+		t.Fatalf("initial policy maintenance = changed %t\n%s", initial.Changed(), initial.Data())
+	}
+	oldComposition, err := applicationmeta.Compose(oldDependencies, composeManifest(t, string(initial.Data())), composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	locallyEdited := []byte(`# project configuration
+interfaces:
+  policies:
+    email.send/v1:
+      timeout: 2s # explicit local timeout
+`)
+	newDependencies := []applicationmeta.Dependency{{
+		ModulePath:    "example.com/platform",
+		ModuleVersion: "v2.0.0",
+		Manifest: composeManifest(t, `
+interfaces:
+  policies:
+    audit.write/v1: {timeout: 3s}
+    email.send/v1: {timeout: 10s}
+`),
+	}}
+	maintained, err := applicationmeta.MaintainDependencyConfiguration(locallyEdited, oldComposition.DependencyBaseline(), newDependencies, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"# project configuration", "# explicit local timeout", "email.send/v1", "2s", "audit.write/v1", "3s"} {
+		if !bytes.Contains(maintained.Data(), []byte(fragment)) {
+			t.Fatalf("maintained policy YAML omits %q:\n%s", fragment, maintained.Data())
+		}
+	}
+	if bytes.Contains(maintained.Data(), []byte("10s")) {
+		t.Fatalf("dependency timeout overwrote local policy:\n%s", maintained.Data())
+	}
+	localPath := `interfaces.policies["email.send/v1"].timeout`
+	if !slices.Contains(maintained.LocalPaths(), localPath) {
+		t.Fatalf("local paths %v omit %s", maintained.LocalPaths(), localPath)
+	}
+	composition, err := applicationmeta.Compose(newDependencies, composeManifest(t, string(maintained.Data())), composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := interfacePolicyStrings(composition.Manifest().InterfacePolicies()); !reflect.DeepEqual(got, []string{
+		`audit.write/v1=3s@plystra.yaml interfaces.policies["audit.write/v1"].timeout`,
+		`email.send/v1=2s@plystra.yaml interfaces.policies["email.send/v1"].timeout`,
+	}) {
+		t.Fatalf("maintained effective policies = %v", got)
+	}
+	repeated, err := applicationmeta.MaintainDependencyConfiguration(maintained.Data(), composition.DependencyBaseline(), newDependencies, composeSchemaLookup(nil))
+	if err != nil || repeated.Changed() || !bytes.Equal(repeated.Data(), maintained.Data()) {
+		t.Fatalf("repeated policy maintenance = changed %t error %v\n%s", repeated.Changed(), err, repeated.Data())
+	}
+}
+
 func interfaceRequirementStrings(values []applicationmeta.InterfaceRequirement) []string {
 	result := make([]string, len(values))
 	for index, value := range values {
@@ -351,6 +511,14 @@ func implementationChoiceStrings(values []applicationmeta.ImplementationChoice) 
 	result := make([]string, len(values))
 	for index, value := range values {
 		result[index] = value.InterfaceID().String() + "->" + value.Constructor().String() + "@" + value.Source()
+	}
+	return result
+}
+
+func interfacePolicyStrings(values []applicationmeta.InterfacePolicy) []string {
+	result := make([]string, len(values))
+	for index, value := range values {
+		result[index] = value.InterfaceID().String() + "=" + value.Timeout().String() + "@" + value.Source()
 	}
 	return result
 }

@@ -315,7 +315,7 @@ func TestParseAcceptsCurrentGeneratedApplicationManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse generated plystra.yaml: %v\n%s", err, data)
 	}
-	if len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.Configurations()) != 0 || manifest.StartupTimeout() != 2*time.Minute {
+	if len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.InterfacePolicies()) != 0 || len(manifest.Configurations()) != 0 || manifest.StartupTimeout() != 2*time.Minute {
 		t.Fatalf("generated Aliases = %#v", manifest.Aliases())
 	}
 	if address, explicit := manifest.HTTPAddress(); !explicit || address != ":8080" || len(manifest.HTTPExposures()) != 0 {
@@ -336,12 +336,13 @@ func TestParseAllowsEmptyOptionalSections(t *testing.T) {
 		[]byte("capabilities: {}\n"),
 		[]byte("capabilities:\n  aliases: {}\n"),
 		[]byte("capabilities: {require: {add: [], remove: []}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n"),
+		[]byte("interfaces: {policies: {}}\n"),
 		[]byte("config: {acme.plugin: null}\n"),
 		[]byte("timeouts: {startup: null}\n"),
 	} {
 		manifest, err := applicationmeta.Parse(data)
 		address, hasAddress := manifest.HTTPAddress()
-		if err != nil || len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.Configurations()) != 0 || manifest.StartupTimeout() != applicationmeta.DefaultStartupTimeout || manifest.HTTPTransports() != (applicationmeta.HTTPTransports{Connect: true}) || hasAddress || address != "" || len(manifest.HTTPExposures()) != 0 {
+		if err != nil || len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.InterfacePolicies()) != 0 || len(manifest.Configurations()) != 0 || manifest.StartupTimeout() != applicationmeta.DefaultStartupTimeout || manifest.HTTPTransports() != (applicationmeta.HTTPTransports{Connect: true}) || hasAddress || address != "" || len(manifest.HTTPExposures()) != 0 {
 			t.Fatalf("Parse(%q) = %#v, %v", data, manifest, err)
 		}
 	}
@@ -492,6 +493,7 @@ func FuzzParseApplicationManifest(f *testing.F) {
 		"http: {address: null, expose: {add: [kernel.health/v1], remove: [order.create/v1]}}\n",
 		"capabilities: {aliases: {}}\n",
 		"capabilities: {require: {remove: [order.create/v1]}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n",
+		"interfaces: {policies: {email.send/v1: {timeout: 5000ms}, audit.write/v1: null}}\n",
 		"config: {acme.plugin: null}\n",
 		"config: {acme.plugin: {settings: {legacy: null, nested: {enabled: true}}}}\n",
 		"capabilities: {require: [kernel.health/v1, order.create/v1], use: {order.create/v1: acme.orders}, aliases: {}}\n",
@@ -524,6 +526,7 @@ func FuzzParseApplicationManifest(f *testing.F) {
 			!slices.Equal(httpExposureStrings(first.HTTPExposures()), httpExposureStrings(second.HTTPExposures())) ||
 			!slices.Equal(requirementStrings(first.Requirements()), requirementStrings(second.Requirements())) ||
 			!slices.Equal(providerChoiceStrings(first.ProviderChoices()), providerChoiceStrings(second.ProviderChoices())) ||
+			!slices.Equal(interfacePolicyStrings(first.InterfacePolicies()), interfacePolicyStrings(second.InterfacePolicies())) ||
 			firstAddress != secondAddress || firstHasAddress != secondHasAddress ||
 			first.HTTPTransports() != second.HTTPTransports() ||
 			firstHasCORS != secondHasCORS ||
