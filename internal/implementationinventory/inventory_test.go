@@ -1,9 +1,12 @@
 package implementationinventory_test
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"go/token"
 	"go/types"
+	"log/slog"
 	"slices"
 	"strings"
 	"testing"
@@ -142,6 +145,183 @@ func TestBuildRejectsSecretConfigurationContainers(t *testing.T) {
 			}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")})
 			if !errors.Is(err, implementationinventory.ErrInvalidConfiguration) || !strings.Contains(err.Error(), "Secret configuration must be a direct named field") {
 				t.Fatalf("Build error = %v", err)
+			}
+		})
+	}
+}
+
+func TestBuildCompilesConfigurationFieldMetadata(t *testing.T) {
+	t.Parallel()
+
+	secretPackage := types.NewPackage("github.com/plystra/kernel/configuration", "configuration")
+	secretName := types.NewTypeName(token.NoPos, secretPackage, "Secret", nil)
+	secretType := types.NewNamed(secretName, types.NewStruct(nil, nil), nil)
+	secretPackage.Scope().Insert(secretName)
+
+	durationPackage := types.NewPackage("time", "time")
+	durationName := types.NewTypeName(token.NoPos, durationPackage, "Duration", nil)
+	durationType := types.NewNamed(durationName, types.Typ[types.Int64], nil)
+	durationPackage.Scope().Insert(durationName)
+
+	urlPackage := types.NewPackage("net/url", "url")
+	urlName := types.NewTypeName(token.NoPos, urlPackage, "URL", nil)
+	urlType := types.NewNamed(urlName, types.NewStruct(nil, nil), nil)
+	urlPackage.Scope().Insert(urlName)
+
+	compiled := compiledConfigurationPackage("example.com/app/service", "service", []configurationTestField{
+		{name: "Host", fieldType: types.Typ[types.String], tag: `yaml:"host" plystra:"required,build-visible"`},
+		{name: "Mode", fieldType: types.Typ[types.String], tag: `yaml:"mode" plystra-default:"sensitive-default"`},
+		{name: "Label", fieldType: types.Typ[types.String], tag: `yaml:"label" plystra-default:""`},
+		{name: "Enabled", fieldType: types.Typ[types.Bool], tag: `yaml:"enabled" plystra:"build-visible" plystra-default:"true"`},
+		{name: "Retries", fieldType: types.Typ[types.Int8], tag: `yaml:"retries" plystra-default:"+007"`},
+		{name: "Limit", fieldType: types.Typ[types.Int], tag: `yaml:"limit" plystra-default:"2147483647"`},
+		{name: "Ratio", fieldType: types.Typ[types.Float32], tag: `yaml:"ratio" plystra-default:"1.2500"`},
+		{name: "Delay", fieldType: durationType, tag: `yaml:"delay" plystra-default:"5000ms"`},
+		{name: "Endpoint", fieldType: urlType, tag: `yaml:"endpoint" plystra-default:"https://example.test/path"`},
+		{name: "Password", fieldType: secretType, tag: `yaml:"password" plystra:"required"`},
+	})
+	parsed := declaration(t, "service/implementation.go", "service", "New", "service.operation.run/v1")
+	index, err := implementationinventory.Build([]implementationinventory.Input{{
+		ModulePath:  "example.com/app",
+		PackagePath: "example.com/app/service",
+		Local:       true,
+		Declaration: parsed,
+		Types:       compiled,
+	}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	implementation := index.Implementations()[0]
+	configuration, configured := implementation.Configuration()
+	if !configured {
+		t.Fatal("Configuration was not compiled")
+	}
+
+	assertField := func(name string, required, buildVisible bool, defaultJSON string) implementationinventory.ConfigurationField {
+		t.Helper()
+		field, exists := configuration.Lookup(name)
+		if !exists || field.Required() != required || field.BuildVisible() != buildVisible || field.HasDefault() != (defaultJSON != "") || string(field.DefaultJSON()) != defaultJSON {
+			t.Fatalf("Configuration field %q = %#v, default %q", name, field, field.DefaultJSON())
+		}
+		return field
+	}
+	assertField("host", true, true, "")
+	mode := assertField("mode", false, false, `"sensitive-default"`)
+	assertField("label", false, false, `""`)
+	assertField("enabled", false, true, "true")
+	retries := assertField("retries", false, false, "7")
+	limit := assertField("limit", false, false, "2147483647")
+	ratio := assertField("ratio", false, false, "1.25")
+	assertField("delay", false, false, `"5s"`)
+	assertField("endpoint", false, false, `"https://example.test/path"`)
+	assertField("password", true, false, "")
+
+	if bits, numeric := retries.Value().NumericBits(); !numeric || bits != 8 || retries.Value().PlatformSized() {
+		t.Fatalf("Retries numeric metadata = %d, %t, platform %t", bits, numeric, retries.Value().PlatformSized())
+	}
+	if bits, numeric := limit.Value().NumericBits(); !numeric || bits != 0 || !limit.Value().PlatformSized() {
+		t.Fatalf("Limit numeric metadata = %d, %t, platform %t", bits, numeric, limit.Value().PlatformSized())
+	}
+	if bits, numeric := ratio.Value().NumericBits(); !numeric || bits != 32 || ratio.Value().PlatformSized() {
+		t.Fatalf("Ratio numeric metadata = %d, %t, platform %t", bits, numeric, ratio.Value().PlatformSized())
+	}
+	if bits, numeric := mode.Value().NumericBits(); numeric || bits != 0 || mode.Value().PlatformSized() {
+		t.Fatalf("Mode numeric metadata = %d, %t, platform %t", bits, numeric, mode.Value().PlatformSized())
+	}
+
+	defaultCopy := mode.DefaultJSON()
+	defaultCopy[1] = 'X'
+	if string(mode.DefaultJSON()) != `"sensitive-default"` {
+		t.Fatal("DefaultJSON exposed mutable storage")
+	}
+	for _, formatted := range []string{
+		fmt.Sprintf("%v", mode),
+		fmt.Sprintf("%#v", mode),
+		fmt.Sprintf("%#v", mode.Value()),
+		fmt.Sprintf("%#v", configuration),
+		fmt.Sprintf("%#v", configuration.Fields()),
+		fmt.Sprintf("%+v", implementation),
+		fmt.Sprintf("%#v", implementation),
+	} {
+		if strings.Contains(formatted, "sensitive-default") {
+			t.Fatalf("formatted configuration leaked default: %s", formatted)
+		}
+	}
+	var logged bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logged, nil))
+	logger.Info("configuration", "field", mode, "schema", configuration)
+	if strings.Contains(logged.String(), "sensitive-default") || !strings.Contains(logged.String(), `"has_default":true`) {
+		t.Fatalf("structured configuration log = %s", logged.String())
+	}
+}
+
+func TestBuildRejectsInvalidConfigurationFieldMetadata(t *testing.T) {
+	t.Parallel()
+
+	secretPackage := types.NewPackage("github.com/plystra/kernel/configuration", "configuration")
+	secretName := types.NewTypeName(token.NoPos, secretPackage, "Secret", nil)
+	secretType := types.NewNamed(secretName, types.NewStruct(nil, nil), nil)
+	secretPackage.Scope().Insert(secretName)
+	secretObject := types.NewStruct([]*types.Var{types.NewVar(token.NoPos, nil, "Password", secretType)}, []string{`yaml:"password"`})
+	durationPackage := types.NewPackage("time", "time")
+	durationName := types.NewTypeName(token.NoPos, durationPackage, "Duration", nil)
+	durationType := types.NewNamed(durationName, types.Typ[types.Int64], nil)
+	durationPackage.Scope().Insert(durationName)
+	urlPackage := types.NewPackage("net/url", "url")
+	urlName := types.NewTypeName(token.NoPos, urlPackage, "URL", nil)
+	urlType := types.NewNamed(urlName, types.NewStruct(nil, nil), nil)
+	urlPackage.Scope().Insert(urlName)
+
+	tests := []struct {
+		name      string
+		fieldType types.Type
+		tag       string
+		want      string
+	}{
+		{name: "empty policy", fieldType: types.Typ[types.String], tag: `plystra:""`, want: "must name at least one option"},
+		{name: "unknown policy", fieldType: types.Typ[types.String], tag: `plystra:"public"`, want: `unknown plystra configuration option "public"`},
+		{name: "duplicate policy", fieldType: types.Typ[types.String], tag: `plystra:"required,required"`, want: `duplicate plystra configuration option "required"`},
+		{name: "empty option", fieldType: types.Typ[types.String], tag: `plystra:"required,"`, want: `unknown plystra configuration option ""`},
+		{name: "duplicate tag key", fieldType: types.Typ[types.String], tag: `plystra:"required" plystra:"build-visible"`, want: `duplicate Go struct tag key "plystra"`},
+		{name: "duplicate default key", fieldType: types.Typ[types.String], tag: `plystra-default:"first" plystra-default:"second"`, want: `duplicate Go struct tag key "plystra-default"`},
+		{name: "duplicate YAML key", fieldType: types.Typ[types.String], tag: `yaml:"first" yaml:"second"`, want: `duplicate Go struct tag key "yaml"`},
+		{name: "malformed tag", fieldType: types.Typ[types.String], tag: `plystra:"required"broken`, want: "entries must be separated by spaces"},
+		{name: "required default", fieldType: types.Typ[types.String], tag: `plystra:"required" plystra-default:"value"`, want: "required fields must not declare a default"},
+		{name: "Secret default", fieldType: secretType, tag: `plystra-default:"value"`, want: "Secret configuration must not declare a default"},
+		{name: "Secret build visible", fieldType: secretType, tag: `plystra:"build-visible"`, want: "Secret-bearing configuration must remain runtime-only"},
+		{name: "Secret object build visible", fieldType: secretObject, tag: `plystra:"build-visible"`, want: "Secret-bearing configuration must remain runtime-only"},
+		{name: "object default", fieldType: types.NewStruct(nil, nil), tag: `plystra-default:"{}"`, want: "defaults are supported only for scalar configuration fields"},
+		{name: "list default", fieldType: types.NewSlice(types.Typ[types.String]), tag: `plystra-default:"[]"`, want: "defaults are supported only for scalar configuration fields"},
+		{name: "invalid boolean", fieldType: types.Typ[types.Bool], tag: `plystra-default:"TRUE"`, want: "is not a canonical boolean"},
+		{name: "fixed integer overflow", fieldType: types.Typ[types.Int8], tag: `plystra-default:"128"`, want: "outside the 8-bit range"},
+		{name: "platform integer overflow", fieldType: types.Typ[types.Int], tag: `plystra-default:"2147483648"`, want: "outside the portable 32-bit range"},
+		{name: "negative unsigned integer", fieldType: types.Typ[types.Uint16], tag: `plystra-default:"-1"`, want: "is not a base-10 uint16 value"},
+		{name: "nonfinite number", fieldType: types.Typ[types.Float64], tag: `plystra-default:"NaN"`, want: "is not a finite float64 value"},
+		{name: "float overflow", fieldType: types.Typ[types.Float32], tag: `plystra-default:"1e100"`, want: "is not a finite float32 value"},
+		{name: "invalid integer syntax", fieldType: types.Typ[types.Int64], tag: `plystra-default:"5msec"`, want: "is not a base-10 int64 value"},
+		{name: "invalid duration", fieldType: durationType, tag: `plystra-default:"5msec"`, want: "is not a valid time.Duration"},
+		{name: "invalid URL", fieldType: urlType, tag: `plystra-default:"https://example.test/\n"`, want: "is not a valid net/url.URL"},
+		{name: "ignored metadata", fieldType: types.Typ[types.String], tag: `yaml:"-" plystra:"required"`, want: "excluded with yaml:\"-\" must not declare Plystra configuration metadata"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			compiled := compiledConfigurationPackage("example.com/app/service", "service", []configurationTestField{{
+				name:      "Value",
+				fieldType: test.fieldType,
+				tag:       test.tag,
+			}})
+			parsed := declaration(t, "service/implementation.go", "service", "New", "service.operation.run/v1")
+			_, err := implementationinventory.Build([]implementationinventory.Input{{
+				ModulePath:  "example.com/app",
+				PackagePath: "example.com/app/service",
+				Local:       true,
+				Declaration: parsed,
+				Types:       compiled,
+			}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")})
+			if !errors.Is(err, implementationinventory.ErrInvalidConfiguration) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Build error = %v, want %q", err, test.want)
 			}
 		})
 	}
@@ -313,12 +493,29 @@ func compiledPackage(path, name, function string, methods ...string) *types.Pack
 }
 
 func compiledConfiguredPackage(path, name string, fieldType types.Type) *types.Package {
+	return compiledConfigurationPackage(path, name, []configurationTestField{{
+		name:      "Password",
+		fieldType: fieldType,
+		tag:       `yaml:"password"`,
+	}})
+}
+
+type configurationTestField struct {
+	name      string
+	fieldType types.Type
+	tag       string
+}
+
+func compiledConfigurationPackage(path, name string, fields []configurationTestField) *types.Package {
 	compiled := types.NewPackage(path, name)
 	configName := types.NewTypeName(token.NoPos, compiled, "Config", nil)
-	config := types.NewNamed(configName, types.NewStruct(
-		[]*types.Var{types.NewVar(token.NoPos, compiled, "Password", fieldType)},
-		[]string{`yaml:"password"`},
-	), nil)
+	configFields := make([]*types.Var, len(fields))
+	configTags := make([]string, len(fields))
+	for index, field := range fields {
+		configFields[index] = types.NewVar(token.NoPos, compiled, field.name, field.fieldType)
+		configTags[index] = field.tag
+	}
+	config := types.NewNamed(configName, types.NewStruct(configFields, configTags), nil)
 	compiled.Scope().Insert(configName)
 
 	serviceName := types.NewTypeName(token.NoPos, compiled, "Service", nil)

@@ -444,12 +444,12 @@ func TestDiscoverApplicationCompilesConstructorConfigurationFields(t *testing.T)
 	root := t.TempDir()
 	writeProject(t, root, "example.com/configured")
 	writeFile(t, filepath.Join(root, "service", "implementation.go"), configurationImplementationSource(`
-	RetryCount int                 `+"`yaml:\"retry_count\"`"+`
-	Host       string              `+"`yaml:\"host\"`"+`
-	Endpoint   Endpoint            `+"`yaml:\"endpoint\"`"+`
-	Mode       bool
-	Delay      Duration            `+"`yaml:\"delay\"`"+`
-	Target     URL                 `+"`yaml:\"target\"`"+`
+	RetryCount int                 `+"`yaml:\"retry_count\" plystra-default:\"+007\"`"+`
+	Host       string              `+"`yaml:\"host\" plystra:\"required,build-visible\"`"+`
+	Endpoint   Endpoint            `+"`yaml:\"endpoint\" plystra-default:\"primary\"`"+`
+	Mode       bool                `+"`plystra-default:\"true\"`"+`
+	Delay      Duration            `+"`yaml:\"delay\" plystra-default:\"5000ms\"`"+`
+	Target     URL                 `+"`yaml:\"target\" plystra-default:\"https://example.test/service\"`"+`
 	Settings   Settings            `+"`yaml:\"settings\"`"+`
 	Optional   *Settings           `+"`yaml:\"optional\"`"+`
 	Labels     []string            `+"`yaml:\"labels\"`"+`
@@ -492,6 +492,24 @@ func TestDiscoverApplicationCompilesConstructorConfigurationFields(t *testing.T)
 	if field, exists := configuration.Lookup("retry_count"); !exists || field.GoName() != "RetryCount" || field.TypeIdentity() != "int" {
 		t.Fatalf("Lookup(retry_count) = %#v, %t", field, exists)
 	}
+	host, _ := configuration.Lookup("host")
+	if !host.Required() || !host.BuildVisible() || host.HasDefault() || host.DefaultJSON() != nil {
+		t.Fatalf("Host metadata = %#v, default %q", host, host.DefaultJSON())
+	}
+	retryCount, _ := configuration.Lookup("retry_count")
+	if retryCount.Required() || retryCount.BuildVisible() || !retryCount.HasDefault() || string(retryCount.DefaultJSON()) != "7" {
+		t.Fatalf("RetryCount metadata = %#v, default %q", retryCount, retryCount.DefaultJSON())
+	}
+	mode, _ := configuration.Lookup("mode")
+	delay, _ := configuration.Lookup("delay")
+	endpoint, _ := configuration.Lookup("endpoint")
+	target, _ := configuration.Lookup("target")
+	if string(mode.DefaultJSON()) != "true" || string(delay.DefaultJSON()) != `"5s"` || string(endpoint.DefaultJSON()) != `"primary"` || string(target.DefaultJSON()) != `"https://example.test/service"` {
+		t.Fatalf("normalized defaults = mode %q, delay %q, endpoint %q, target %q", mode.DefaultJSON(), delay.DefaultJSON(), endpoint.DefaultJSON(), target.DefaultJSON())
+	}
+	if bits, numeric := retryCount.Value().NumericBits(); !numeric || bits != 0 || !retryCount.Value().PlatformSized() {
+		t.Fatalf("RetryCount numeric metadata = %d, %t, platform %t", bits, numeric, retryCount.Value().PlatformSized())
+	}
 	wantKinds := map[string]implementationinventory.ConfigurationValueKind{
 		"delay":       implementationinventory.ConfigurationValueDuration,
 		"endpoint":    implementationinventory.ConfigurationValueString,
@@ -513,7 +531,7 @@ func TestDiscoverApplicationCompilesConstructorConfigurationFields(t *testing.T)
 	}
 	settings, _ := configuration.Lookup("settings")
 	settingsFields := settings.Value().Fields()
-	if len(settingsFields) != 1 || settingsFields[0].Name() != "enabled" || settingsFields[0].Value().Kind() != implementationinventory.ConfigurationValueBoolean {
+	if len(settingsFields) != 1 || settingsFields[0].Name() != "enabled" || settingsFields[0].Value().Kind() != implementationinventory.ConfigurationValueBoolean || !settingsFields[0].BuildVisible() || string(settingsFields[0].DefaultJSON()) != "true" {
 		t.Fatalf("Settings fields = %#v", settingsFields)
 	}
 	optional, _ := configuration.Lookup("optional")
@@ -556,6 +574,11 @@ func TestDiscoverApplicationRejectsInvalidImplementationConfigFields(t *testing.
 		{name: "tag option", fields: "Host string `yaml:\"host,omitempty\"`", want: "YAML tag options are not supported"},
 		{name: "embedded field", fields: "Settings", want: "embedded Config field Settings is not supported"},
 		{name: "tagged private field", fields: "private string `yaml:\"private\"`", want: "unexported Config field private must not declare a YAML key"},
+		{name: "tagged private metadata", fields: "private string `plystra:\"required\"`", want: "unexported Config field private must not declare Plystra configuration metadata"},
+		{name: "unknown metadata", fields: "Host string `plystra:\"visible\"`", want: "unknown plystra configuration option"},
+		{name: "required default", fields: "Host string `plystra:\"required\" plystra-default:\"localhost\"`", want: "required fields must not declare a default"},
+		{name: "ignored metadata", fields: "Host string `yaml:\"-\" plystra:\"required\"`", want: "must not declare Plystra configuration metadata"},
+		{name: "invalid default", fields: "Retries int8 `plystra-default:\"128\"`", want: "outside the 8-bit range"},
 		{name: "complex", fields: "Value complex64 `yaml:\"value\"`", want: "configuration Go type complex64 is not supported"},
 		{name: "channel", fields: "Value chan string `yaml:\"value\"`", want: "configuration Go type chan string is not supported"},
 		{name: "function", fields: "Value func() `yaml:\"value\"`", want: "configuration Go type func() is not supported"},
@@ -1646,7 +1669,7 @@ type Interface interface {
 type Request struct{}
 type Response struct{}
 type Settings struct {
-	Enabled bool `+"`yaml:\"enabled\"`"+`
+	Enabled bool `+"`yaml:\"enabled\" plystra:\"build-visible\" plystra-default:\"true\"`"+`
 	private string
 }
 type Endpoint string

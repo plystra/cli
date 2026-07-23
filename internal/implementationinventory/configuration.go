@@ -1,11 +1,16 @@
 package implementationinventory
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/types"
-	"reflect"
+	"log/slog"
+	"math"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -64,6 +69,8 @@ type ConfigurationValue struct {
 	fields       []ConfigurationField
 	arrayLength  int64
 	isArray      bool
+	numericBits  int
+	platformSize bool
 }
 
 // Kind returns the closed normalized Go value kind.
@@ -94,6 +101,36 @@ func (v ConfigurationValue) ArrayLength() (int64, bool) {
 	return v.arrayLength, true
 }
 
+// NumericBits returns the exact authored bit width for signed integers,
+// unsigned integers, and floating-point values. A zero width with a true
+// result identifies the platform-sized int or uint type.
+func (v ConfigurationValue) NumericBits() (int, bool) {
+	switch v.kind {
+	case ConfigurationValueSignedInteger, ConfigurationValueUnsignedInteger, ConfigurationValueNumber:
+		return v.numericBits, true
+	default:
+		return 0, false
+	}
+}
+
+// PlatformSized reports whether this value is the authored int or uint type.
+func (v ConfigurationValue) PlatformSized() bool { return v.platformSize }
+
+// LogValue keeps recursively compiled configuration values useful in
+// structured diagnostics without exposing any authored default value.
+func (v ConfigurationValue) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("kind", string(v.kind)),
+		slog.String("type", v.typeIdentity),
+	)
+}
+
+// GoString keeps failure output bounded and excludes recursively stored
+// defaults. Call DefaultJSON explicitly when a trusted parser needs a value.
+func (v ConfigurationValue) GoString() string {
+	return fmt.Sprintf("implementationinventory.ConfigurationValue{kind:%q, typeIdentity:%q}", v.kind, v.typeIdentity)
+}
+
 // Configuration identifies the exact exported same-package Config struct used
 // as an Implementation constructor's optional first parameter.
 type Configuration struct {
@@ -107,9 +144,12 @@ type Configuration struct {
 // Config type. Name is the canonical YAML key while GoName and TypeIdentity
 // retain the exact authored Go field identity for later typed parsing.
 type ConfigurationField struct {
-	name   string
-	goName string
-	value  ConfigurationValue
+	name         string
+	goName       string
+	value        ConfigurationValue
+	required     bool
+	buildVisible bool
+	defaultJSON  func() string
 }
 
 // Name returns the canonical lower-snake-case YAML key.
@@ -123,6 +163,58 @@ func (f ConfigurationField) TypeIdentity() string { return f.value.typeIdentity 
 
 // Value returns the recursively compiled immutable Go value schema.
 func (f ConfigurationField) Value() ConfigurationValue { return f.value }
+
+// Required reports whether the selected current-project configuration must
+// provide this field when no lower schema-owned value exists.
+func (f ConfigurationField) Required() bool { return f.required }
+
+// BuildVisible reports whether the normalized non-secret value may affect
+// generation and static assembly. Fields are runtime-only by default.
+func (f ConfigurationField) BuildVisible() bool { return f.buildVisible }
+
+// HasDefault reports whether the authored field declares a normalized scalar
+// default.
+func (f ConfigurationField) HasDefault() bool { return f.defaultJSON != nil }
+
+// DefaultJSON returns a defensive copy of the normalized scalar default. It
+// returns nil when no default is declared. Callers must not place the returned
+// runtime value in diagnostics, manifests, or logs.
+func (f ConfigurationField) DefaultJSON() []byte {
+	if f.defaultJSON == nil {
+		return nil
+	}
+	return []byte(f.defaultJSON())
+}
+
+// LogValue exposes only schema metadata to structured logging.
+func (f ConfigurationField) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("name", f.name),
+		slog.String("go_name", f.goName),
+		slog.String("type", f.value.typeIdentity),
+		slog.Bool("required", f.required),
+		slog.Bool("build_visible", f.buildVisible),
+		slog.Bool("has_default", f.defaultJSON != nil),
+	)
+}
+
+// String returns safe field-schema identity without the authored default.
+func (f ConfigurationField) String() string {
+	return f.name + ":" + f.value.typeIdentity
+}
+
+// GoString keeps test and diagnostic formatting from exposing defaults.
+func (f ConfigurationField) GoString() string {
+	return fmt.Sprintf(
+		"implementationinventory.ConfigurationField{name:%q, goName:%q, typeIdentity:%q, required:%t, buildVisible:%t, hasDefault:%t}",
+		f.name,
+		f.goName,
+		f.value.typeIdentity,
+		f.required,
+		f.buildVisible,
+		f.defaultJSON != nil,
+	)
+}
 
 // PackagePath returns the Go import path that owns Config.
 func (c Configuration) PackagePath() string { return c.packagePath }
@@ -155,6 +247,20 @@ func (c Configuration) String() string {
 		return ""
 	}
 	return c.packagePath + "." + c.typeName
+}
+
+// GoString keeps recursively stored configuration defaults out of formatted
+// inventory dumps.
+func (c Configuration) GoString() string {
+	return fmt.Sprintf("implementationinventory.Configuration{type:%q, fields:%d}", c.String(), len(c.fields))
+}
+
+// LogValue exposes only configuration schema identity and size.
+func (c Configuration) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("type", c.String()),
+		slog.Int("fields", len(c.fields)),
+	)
 }
 
 func validateConfiguration(compiled *types.Package, function *types.Func) (Configuration, bool, error) {
@@ -217,10 +323,19 @@ func compileConfigurationFields(structure *types.Struct, state *configurationCom
 	for index := 0; index < structure.NumFields(); index++ {
 		field := structure.Field(index)
 		rawTag := structure.Tag(index)
-		yamlTag, tagged := reflect.StructTag(rawTag).Lookup("yaml")
+		tags, err := parseConfigurationStructTags(rawTag)
+		if err != nil {
+			return nil, fmt.Errorf("Config field %s: %v", field.Name(), err)
+		}
+		yamlTag, tagged := tags["yaml"]
+		_, hasPlystraMetadata := tags["plystra"]
+		_, hasDefault := tags["plystra-default"]
 		if !field.Exported() {
 			if tagged && yamlTag != "-" {
 				return nil, fmt.Errorf("unexported Config field %s must not declare a YAML key", field.Name())
+			}
+			if hasPlystraMetadata || hasDefault {
+				return nil, fmt.Errorf("unexported Config field %s must not declare Plystra configuration metadata", field.Name())
 			}
 			continue
 		}
@@ -232,6 +347,9 @@ func compileConfigurationFields(structure *types.Struct, state *configurationCom
 			return nil, fmt.Errorf("Config field %s: %v", field.Name(), err)
 		}
 		if ignored {
+			if hasPlystraMetadata || hasDefault {
+				return nil, fmt.Errorf("Config field %s excluded with yaml:\"-\" must not declare Plystra configuration metadata", field.Name())
+			}
 			continue
 		}
 		if previous, duplicate := seen[name]; duplicate {
@@ -245,11 +363,32 @@ func compileConfigurationFields(structure *types.Struct, state *configurationCom
 		if err != nil {
 			return nil, fmt.Errorf("Config field %s: %v", field.Name(), err)
 		}
+		required, buildVisible, err := configurationFieldPolicy(tags)
+		if err != nil {
+			return nil, fmt.Errorf("Config field %s: %v", field.Name(), err)
+		}
+		var defaultJSON func() string
+		if rawDefault, exists := tags["plystra-default"]; exists {
+			if required {
+				return nil, fmt.Errorf("Config field %s: required fields must not declare a default", field.Name())
+			}
+			normalizedDefault, err := compileConfigurationDefault(value, rawDefault)
+			if err != nil {
+				return nil, fmt.Errorf("Config field %s: %v", field.Name(), err)
+			}
+			defaultJSON = configurationDefaultAccessor(normalizedDefault)
+		}
+		if buildVisible && configurationContainsSecret(value) {
+			return nil, fmt.Errorf("Config field %s: Secret-bearing configuration must remain runtime-only", field.Name())
+		}
 		seen[name] = field.Name()
 		fields = append(fields, ConfigurationField{
-			name:   name,
-			goName: field.Name(),
-			value:  value,
+			name:         name,
+			goName:       field.Name(),
+			value:        value,
+			required:     required,
+			buildVisible: buildVisible,
+			defaultJSON:  defaultJSON,
 		})
 	}
 	sort.Slice(fields, func(left, right int) bool {
@@ -292,11 +431,11 @@ func compileConfigurationValue(value types.Type, state *configurationCompileStat
 
 	switch typed := value.(type) {
 	case *types.Basic:
-		kind, ok := configurationBasicKind(typed.Kind())
+		kind, numericBits, platformSize, ok := configurationBasicKind(typed.Kind())
 		if !ok {
 			return ConfigurationValue{}, fmt.Errorf("configuration Go type %s is not supported", identity)
 		}
-		return ConfigurationValue{kind: kind, typeIdentity: identity}, nil
+		return ConfigurationValue{kind: kind, typeIdentity: identity, numericBits: numericBits, platformSize: platformSize}, nil
 	case *types.Pointer:
 		element, err := compileConfigurationValue(typed.Elem(), state, depth+1)
 		if err != nil {
@@ -361,21 +500,200 @@ func exactConfigurationNamedType(value *types.Named, packagePath, typeName strin
 	return value.Obj().Pkg().Path() == packagePath && value.Obj().Name() == typeName
 }
 
-func configurationBasicKind(kind types.BasicKind) (ConfigurationValueKind, bool) {
+func configurationBasicKind(kind types.BasicKind) (ConfigurationValueKind, int, bool, bool) {
 	switch kind {
 	case types.String:
-		return ConfigurationValueString, true
+		return ConfigurationValueString, 0, false, true
 	case types.Bool:
-		return ConfigurationValueBoolean, true
-	case types.Int, types.Int8, types.Int16, types.Int32, types.Int64:
-		return ConfigurationValueSignedInteger, true
-	case types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64:
-		return ConfigurationValueUnsignedInteger, true
-	case types.Float32, types.Float64:
-		return ConfigurationValueNumber, true
+		return ConfigurationValueBoolean, 0, false, true
+	case types.Int:
+		return ConfigurationValueSignedInteger, 0, true, true
+	case types.Int8:
+		return ConfigurationValueSignedInteger, 8, false, true
+	case types.Int16:
+		return ConfigurationValueSignedInteger, 16, false, true
+	case types.Int32:
+		return ConfigurationValueSignedInteger, 32, false, true
+	case types.Int64:
+		return ConfigurationValueSignedInteger, 64, false, true
+	case types.Uint:
+		return ConfigurationValueUnsignedInteger, 0, true, true
+	case types.Uint8:
+		return ConfigurationValueUnsignedInteger, 8, false, true
+	case types.Uint16:
+		return ConfigurationValueUnsignedInteger, 16, false, true
+	case types.Uint32:
+		return ConfigurationValueUnsignedInteger, 32, false, true
+	case types.Uint64:
+		return ConfigurationValueUnsignedInteger, 64, false, true
+	case types.Float32:
+		return ConfigurationValueNumber, 32, false, true
+	case types.Float64:
+		return ConfigurationValueNumber, 64, false, true
 	default:
-		return "", false
+		return "", 0, false, false
 	}
+}
+
+func configurationFieldPolicy(tags map[string]string) (bool, bool, error) {
+	value, exists := tags["plystra"]
+	if !exists {
+		return false, false, nil
+	}
+	if value == "" {
+		return false, false, fmt.Errorf("plystra configuration tag must name at least one option")
+	}
+	required := false
+	buildVisible := false
+	for _, option := range strings.Split(value, ",") {
+		switch option {
+		case "required":
+			if required {
+				return false, false, fmt.Errorf("duplicate plystra configuration option %q", option)
+			}
+			required = true
+		case "build-visible":
+			if buildVisible {
+				return false, false, fmt.Errorf("duplicate plystra configuration option %q", option)
+			}
+			buildVisible = true
+		default:
+			return false, false, fmt.Errorf("unknown plystra configuration option %q", option)
+		}
+	}
+	return required, buildVisible, nil
+}
+
+func compileConfigurationDefault(value ConfigurationValue, raw string) (string, error) {
+	switch value.kind {
+	case ConfigurationValueString:
+		return marshalConfigurationDefaultString(raw), nil
+	case ConfigurationValueBoolean:
+		switch raw {
+		case "true", "false":
+			return raw, nil
+		default:
+			return "", fmt.Errorf("default %q is not a canonical boolean", raw)
+		}
+	case ConfigurationValueSignedInteger:
+		bits := value.numericBits
+		if value.platformSize {
+			bits = 32
+		}
+		parsed, err := strconv.ParseInt(raw, 10, bits)
+		if err != nil {
+			if numericError, ok := err.(*strconv.NumError); ok && numericError.Err == strconv.ErrSyntax {
+				return "", fmt.Errorf("default %q is not a base-10 %s value", raw, value.typeIdentity)
+			}
+			if value.platformSize {
+				return "", fmt.Errorf("default %q is outside the portable 32-bit range for %s", raw, value.typeIdentity)
+			}
+			return "", fmt.Errorf("default %q is outside the %d-bit range for %s", raw, bits, value.typeIdentity)
+		}
+		return strconv.FormatInt(parsed, 10), nil
+	case ConfigurationValueUnsignedInteger:
+		bits := value.numericBits
+		if value.platformSize {
+			bits = 32
+		}
+		parsed, err := strconv.ParseUint(raw, 10, bits)
+		if err != nil {
+			if numericError, ok := err.(*strconv.NumError); ok && numericError.Err == strconv.ErrSyntax {
+				return "", fmt.Errorf("default %q is not a base-10 %s value", raw, value.typeIdentity)
+			}
+			if value.platformSize {
+				return "", fmt.Errorf("default %q is outside the portable 32-bit range for %s", raw, value.typeIdentity)
+			}
+			return "", fmt.Errorf("default %q is outside the %d-bit range for %s", raw, bits, value.typeIdentity)
+		}
+		return strconv.FormatUint(parsed, 10), nil
+	case ConfigurationValueNumber:
+		parsed, err := strconv.ParseFloat(raw, value.numericBits)
+		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+			return "", fmt.Errorf("default %q is not a finite %s value", raw, value.typeIdentity)
+		}
+		return strconv.FormatFloat(parsed, 'g', -1, value.numericBits), nil
+	case ConfigurationValueDuration:
+		parsed, err := time.ParseDuration(raw)
+		if err != nil {
+			return "", fmt.Errorf("default %q is not a valid time.Duration", raw)
+		}
+		return marshalConfigurationDefaultString(parsed.String()), nil
+	case ConfigurationValueURL:
+		parsed, err := url.Parse(raw)
+		if err != nil {
+			return "", fmt.Errorf("default %q is not a valid net/url.URL", raw)
+		}
+		return marshalConfigurationDefaultString(parsed.String()), nil
+	case ConfigurationValueSecret:
+		return "", fmt.Errorf("Secret configuration must not declare a default")
+	default:
+		return "", fmt.Errorf("defaults are supported only for scalar configuration fields, not %s", value.typeIdentity)
+	}
+}
+
+func marshalConfigurationDefaultString(value string) string {
+	encoded, _ := json.Marshal(value)
+	return string(encoded)
+}
+
+func configurationDefaultAccessor(value string) func() string {
+	return func() string { return value }
+}
+
+func parseConfigurationStructTags(tag string) (map[string]string, error) {
+	values := make(map[string]string)
+	entries := 0
+	for tag != "" {
+		if entries > 0 && tag[0] != ' ' {
+			return nil, fmt.Errorf("invalid Go struct tag syntax: entries must be separated by spaces")
+		}
+		index := 0
+		for index < len(tag) && tag[index] == ' ' {
+			index++
+		}
+		tag = tag[index:]
+		if tag == "" {
+			break
+		}
+
+		index = 0
+		for index < len(tag) && tag[index] > ' ' && tag[index] != ':' && tag[index] != '"' && tag[index] != 0x7f {
+			index++
+		}
+		if index == 0 || index+1 >= len(tag) || tag[index] != ':' || tag[index+1] != '"' {
+			return nil, fmt.Errorf("invalid Go struct tag syntax")
+		}
+		key := tag[:index]
+		tag = tag[index+1:]
+
+		index = 1
+		for index < len(tag) && tag[index] != '"' {
+			if tag[index] == '\\' {
+				index++
+			}
+			index++
+		}
+		if index >= len(tag) {
+			return nil, fmt.Errorf("invalid Go struct tag syntax")
+		}
+		quotedValue := tag[:index+1]
+		tag = tag[index+1:]
+		value, err := strconv.Unquote(quotedValue)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Go struct tag syntax")
+		}
+		if _, duplicate := values[key]; duplicate {
+			switch key {
+			case "yaml", "plystra", "plystra-default":
+				return nil, fmt.Errorf("duplicate Go struct tag key %q", key)
+			}
+		} else {
+			values[key] = value
+		}
+		entries++
+	}
+	return values, nil
 }
 
 func configurationContainsSecret(value ConfigurationValue) bool {
