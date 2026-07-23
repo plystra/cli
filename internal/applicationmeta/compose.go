@@ -111,9 +111,9 @@ func (c Composition) Provenance() []Provenance {
 }
 
 // ResolutionSources returns dependency provenance whose normalized value
-// matches one effective requirement, exposure, Provider choice, or Alias.
-// Superseded and removed dependency declarations remain in Provenance but do
-// not introduce final application requirements.
+// matches one effective Interface or legacy requirement, exposure, selection,
+// or remaining Alias. Superseded and removed dependency declarations remain
+// in Provenance but do not introduce final application requirements.
 func (c Composition) ResolutionSources() []Provenance {
 	if !c.Valid() {
 		return nil
@@ -133,8 +133,9 @@ func (c Composition) DependencyDigest() string {
 
 // Compose applies the typed dependency rules beneath one current-project
 // Manifest. Process settings remain current-project-owned; canonical sets
-// union; keyed Providers, Aliases, and Plugin fields require compatible
-// inherited values unless the current Project replaces that exact key.
+// union; keyed Implementation selections and remaining keyed declarations
+// require compatible inherited values unless the current Project replaces that
+// exact key.
 func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) (Composition, error) {
 	if schemas == nil {
 		return Composition{}, fmt.Errorf("%w: schema lookup is nil", ErrCompose)
@@ -170,6 +171,14 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
+	interfaceRequirements, err := composeInterfaceRequirementSet(ordered, current.InterfaceRequirements(), current.removedInterfaceReqs, records)
+	if err != nil {
+		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+	}
+	implementationChoices, err := composeImplementationChoices(ordered, current.ImplementationChoices(), current.removedImplementationChoices, records)
+	if err != nil {
+		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+	}
 	aliases, err := composeAliases(ordered, current.Aliases(), current.removedAliases, records)
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
@@ -191,20 +200,22 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 		return Composition{}, fmt.Errorf("%w: encode dependency provenance: %v", ErrCompose, err)
 	}
 	manifest := Manifest{
-		source:               current.source,
-		httpAddress:          current.httpAddress,
-		hasHTTPAddress:       current.hasHTTPAddress,
-		removeHTTPAddress:    current.removeHTTPAddress,
-		httpTransports:       current.httpTransports,
-		httpCORS:             cloneHTTPCORSLayer(current.httpCORS),
-		httpExposures:        exposures,
-		requirements:         requirements,
-		providerChoices:      choices,
-		aliases:              aliases,
-		configurations:       configurations,
-		startupTimeout:       current.startupTimeout,
-		hasStartupTimeout:    current.hasStartupTimeout,
-		removeStartupTimeout: current.removeStartupTimeout,
+		source:                current.source,
+		httpAddress:           current.httpAddress,
+		hasHTTPAddress:        current.hasHTTPAddress,
+		removeHTTPAddress:     current.removeHTTPAddress,
+		httpTransports:        current.httpTransports,
+		httpCORS:              cloneHTTPCORSLayer(current.httpCORS),
+		httpExposures:         exposures,
+		requirements:          requirements,
+		providerChoices:       choices,
+		interfaceRequirements: interfaceRequirements,
+		implementationChoices: implementationChoices,
+		aliases:               aliases,
+		configurations:        configurations,
+		startupTimeout:        current.startupTimeout,
+		hasStartupTimeout:     current.hasStartupTimeout,
+		removeStartupTimeout:  current.removeStartupTimeout,
 	}
 	if err := validateHTTPTransportSelection(manifest); err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
@@ -244,6 +255,14 @@ func effectiveResolutionSources(manifest Manifest, provenance []Provenance) []Pr
 	for _, choice := range manifest.providerChoices {
 		path := fmt.Sprintf("capabilities.use[%q]", choice.capability.String())
 		effective[path] = digestStrings("capabilities.use", choice.capability.String(), choice.pluginID)
+	}
+	for _, requirement := range manifest.interfaceRequirements {
+		path := fmt.Sprintf("interfaces.require[%q]", requirement.id.String())
+		effective[path] = interfaceDeclarationDigest("interfaces.require", requirement.id, false)
+	}
+	for _, choice := range manifest.implementationChoices {
+		path := fmt.Sprintf("interfaces.use[%q]", choice.interfaceID.String())
+		effective[path] = implementationChoiceDigest(choice)
 	}
 	for _, alias := range manifest.aliases {
 		path := fmt.Sprintf("capabilities.aliases[%q]", alias.id.String())

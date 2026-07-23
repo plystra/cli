@@ -217,28 +217,32 @@ func (PluginConfiguration) LogValue() slog.Value {
 	return slog.StringValue("<redacted-plugin-configuration>")
 }
 
-// Manifest is the immutable normalized application metadata used by canonical
-// provider, HTTP exposure, and Capability Alias resolution.
+// Manifest is the immutable normalized application metadata used by typed
+// Interface selection, dependency composition, exposure, and runtime input.
 type Manifest struct {
-	source                 string
-	httpAddress            string
-	hasHTTPAddress         bool
-	removeHTTPAddress      bool
-	httpTransports         httpTransportLayer
-	httpCORS               httpCORSLayer
-	httpExposures          []HTTPExposure
-	removedHTTPExposures   []capabilityRemoval
-	requirements           []CapabilityRequirement
-	removedRequirements    []capabilityRemoval
-	providerChoices        []ProviderChoice
-	removedProviderChoices []capabilityRemoval
-	aliases                []Alias
-	removedAliases         []capabilityRemoval
-	configurations         []PluginConfiguration
-	removedConfigurations  []pluginConfigurationRemoval
-	startupTimeout         time.Duration
-	hasStartupTimeout      bool
-	removeStartupTimeout   bool
+	source                       string
+	httpAddress                  string
+	hasHTTPAddress               bool
+	removeHTTPAddress            bool
+	httpTransports               httpTransportLayer
+	httpCORS                     httpCORSLayer
+	httpExposures                []HTTPExposure
+	removedHTTPExposures         []capabilityRemoval
+	requirements                 []CapabilityRequirement
+	removedRequirements          []capabilityRemoval
+	providerChoices              []ProviderChoice
+	removedProviderChoices       []capabilityRemoval
+	interfaceRequirements        []InterfaceRequirement
+	removedInterfaceReqs         []interfaceRemoval
+	implementationChoices        []ImplementationChoice
+	removedImplementationChoices []interfaceRemoval
+	aliases                      []Alias
+	removedAliases               []capabilityRemoval
+	configurations               []PluginConfiguration
+	removedConfigurations        []pluginConfigurationRemoval
+	startupTimeout               time.Duration
+	hasStartupTimeout            bool
+	removeStartupTimeout         bool
 }
 
 // String returns only a redaction marker because the manifest can contain
@@ -311,6 +315,18 @@ func (m Manifest) ProviderChoices() []ProviderChoice {
 	return append([]ProviderChoice(nil), m.providerChoices...)
 }
 
+// InterfaceRequirements returns defensive declarations sorted by canonical
+// Interface ID.
+func (m Manifest) InterfaceRequirements() []InterfaceRequirement {
+	return append([]InterfaceRequirement(nil), m.interfaceRequirements...)
+}
+
+// ImplementationChoices returns defensive declarations sorted by canonical
+// Interface ID.
+func (m Manifest) ImplementationChoices() []ImplementationChoice {
+	return append([]ImplementationChoice(nil), m.implementationChoices...)
+}
+
 // Aliases returns defensive declarations sorted by Alias ID.
 func (m Manifest) Aliases() []Alias { return append([]Alias(nil), m.aliases...) }
 
@@ -364,7 +380,7 @@ func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, erro
 	}
 	for _, key := range sortedNodeKeys(values) {
 		switch key {
-		case "http", "timeouts", "capabilities", "config":
+		case "http", "timeouts", "capabilities", "interfaces", "config":
 		default:
 			return Manifest{}, invalid("unknown key %q", key)
 		}
@@ -381,30 +397,38 @@ func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, erro
 	if err != nil {
 		return Manifest{}, err
 	}
+	interfaceRequirements, removedInterfaceRequirements, implementationChoices, removedImplementationChoices, err := parseInterfaces(values["interfaces"])
+	if err != nil {
+		return Manifest{}, err
+	}
 	configurations, removedConfigurations, err := parseConfigurations(values["config"])
 	if err != nil {
 		return Manifest{}, err
 	}
 	manifest := Manifest{
-		source:                 source,
-		httpAddress:            address,
-		hasHTTPAddress:         hasAddress,
-		removeHTTPAddress:      removeAddress,
-		httpTransports:         transports,
-		httpCORS:               cors,
-		httpExposures:          exposures,
-		removedHTTPExposures:   removedExposures,
-		requirements:           requirements,
-		removedRequirements:    removedRequirements,
-		providerChoices:        choices,
-		removedProviderChoices: removedChoices,
-		aliases:                aliases,
-		removedAliases:         removedAliases,
-		configurations:         configurations,
-		removedConfigurations:  removedConfigurations,
-		startupTimeout:         startupTimeout,
-		hasStartupTimeout:      hasStartupTimeout,
-		removeStartupTimeout:   removeStartupTimeout,
+		source:                       source,
+		httpAddress:                  address,
+		hasHTTPAddress:               hasAddress,
+		removeHTTPAddress:            removeAddress,
+		httpTransports:               transports,
+		httpCORS:                     cors,
+		httpExposures:                exposures,
+		removedHTTPExposures:         removedExposures,
+		requirements:                 requirements,
+		removedRequirements:          removedRequirements,
+		providerChoices:              choices,
+		removedProviderChoices:       removedChoices,
+		interfaceRequirements:        interfaceRequirements,
+		removedInterfaceReqs:         removedInterfaceRequirements,
+		implementationChoices:        implementationChoices,
+		removedImplementationChoices: removedImplementationChoices,
+		aliases:                      aliases,
+		removedAliases:               removedAliases,
+		configurations:               configurations,
+		removedConfigurations:        removedConfigurations,
+		startupTimeout:               startupTimeout,
+		hasStartupTimeout:            hasStartupTimeout,
+		removeStartupTimeout:         removeStartupTimeout,
 	}
 	rewriteManifestSource(&manifest, source)
 	return manifest, nil
@@ -465,6 +489,18 @@ func rewriteManifestSource(manifest *Manifest, source string) {
 	}
 	for index := range manifest.removedProviderChoices {
 		manifest.removedProviderChoices[index].source = rewrite(manifest.removedProviderChoices[index].source)
+	}
+	for index := range manifest.interfaceRequirements {
+		manifest.interfaceRequirements[index].source = rewrite(manifest.interfaceRequirements[index].source)
+	}
+	for index := range manifest.removedInterfaceReqs {
+		manifest.removedInterfaceReqs[index].source = rewrite(manifest.removedInterfaceReqs[index].source)
+	}
+	for index := range manifest.implementationChoices {
+		manifest.implementationChoices[index].source = rewrite(manifest.implementationChoices[index].source)
+	}
+	for index := range manifest.removedImplementationChoices {
+		manifest.removedImplementationChoices[index].source = rewrite(manifest.removedImplementationChoices[index].source)
 	}
 	for index := range manifest.aliases {
 		manifest.aliases[index].source = rewrite(manifest.aliases[index].source)

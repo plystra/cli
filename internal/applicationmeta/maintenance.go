@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/constructorsymbol"
+	"github.com/plystra/cli/internal/interfaceid"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -26,21 +28,25 @@ const (
 	maintenanceHTTPExposure maintenanceField = iota + 1
 	maintenanceRequirement
 	maintenanceProvider
+	maintenanceInterfaceRequirement
+	maintenanceImplementationChoice
 	maintenanceAlias
 	maintenancePluginConfig
 )
 
 type maintenanceDecision struct {
-	path       string
-	digest     string
-	removed    bool
-	field      maintenanceField
-	id         capabilityid.Identifier
-	pluginID   string
-	providerID string
-	alias      Alias
-	config     pluginConfigDecision
-	source     string
+	path        string
+	digest      string
+	removed     bool
+	field       maintenanceField
+	id          capabilityid.Identifier
+	interfaceID interfaceid.Identifier
+	pluginID    string
+	providerID  string
+	constructor constructorsymbol.Symbol
+	alias       Alias
+	config      pluginConfigDecision
+	source      string
 }
 
 type maintenanceCandidate struct {
@@ -289,6 +295,45 @@ func maintenanceDecisions(manifest Manifest, schemas SchemaLookup) ([]maintenanc
 			source:  removal.source,
 		})
 	}
+	for _, requirement := range manifest.interfaceRequirements {
+		result = append(result, maintenanceDecision{
+			path:        fmt.Sprintf("interfaces.require[%q]", requirement.id.String()),
+			digest:      interfaceDeclarationDigest("interfaces.require", requirement.id, false),
+			field:       maintenanceInterfaceRequirement,
+			interfaceID: requirement.id,
+			source:      requirement.source,
+		})
+	}
+	for _, removal := range manifest.removedInterfaceReqs {
+		result = append(result, maintenanceDecision{
+			path:        fmt.Sprintf("interfaces.require[%q]", removal.id.String()),
+			digest:      interfaceDeclarationDigest("interfaces.require", removal.id, true),
+			removed:     true,
+			field:       maintenanceInterfaceRequirement,
+			interfaceID: removal.id,
+			source:      removal.source,
+		})
+	}
+	for _, choice := range manifest.implementationChoices {
+		result = append(result, maintenanceDecision{
+			path:        fmt.Sprintf("interfaces.use[%q]", choice.interfaceID.String()),
+			digest:      implementationChoiceDigest(choice),
+			field:       maintenanceImplementationChoice,
+			interfaceID: choice.interfaceID,
+			constructor: choice.constructor,
+			source:      choice.source,
+		})
+	}
+	for _, removal := range manifest.removedImplementationChoices {
+		result = append(result, maintenanceDecision{
+			path:        fmt.Sprintf("interfaces.use[%q]", removal.id.String()),
+			digest:      interfaceDeclarationDigest("interfaces.use", removal.id, true),
+			removed:     true,
+			field:       maintenanceImplementationChoice,
+			interfaceID: removal.id,
+			source:      removal.source,
+		})
+	}
 	for _, alias := range manifest.aliases {
 		result = append(result, maintenanceDecision{
 			path:   fmt.Sprintf("capabilities.aliases[%q]", alias.id.String()),
@@ -481,10 +526,12 @@ func maintenanceDecisionDescription(decision maintenanceDecision) string {
 		return "removal"
 	}
 	switch decision.field {
-	case maintenanceHTTPExposure, maintenanceRequirement:
+	case maintenanceHTTPExposure, maintenanceRequirement, maintenanceInterfaceRequirement:
 		return "addition"
 	case maintenanceProvider:
 		return "Provider " + decision.providerID
+	case maintenanceImplementationChoice:
+		return "Implementation " + decision.constructor.String()
 	case maintenanceAlias:
 		return "Alias target " + decision.alias.target.String()
 	case maintenancePluginConfig:
@@ -509,6 +556,8 @@ func supportedMaintenancePath(path string) bool {
 		strings.HasPrefix(path, "capabilities.require[") ||
 		strings.HasPrefix(path, "capabilities.use[") ||
 		strings.HasPrefix(path, "capabilities.aliases[") ||
+		strings.HasPrefix(path, "interfaces.require[") ||
+		strings.HasPrefix(path, "interfaces.use[") ||
 		strings.HasPrefix(path, "config[")
 }
 
@@ -592,6 +641,10 @@ func removeMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) er
 		return removeSetMaintenanceDecision(root, []string{"capabilities", "require"}, decision.id.String(), decision.removed)
 	case maintenanceProvider:
 		return removeKeyedMaintenanceDecision(root, []string{"capabilities", "use"}, decision.id.String())
+	case maintenanceInterfaceRequirement:
+		return removeSetMaintenanceDecision(root, []string{"interfaces", "require"}, decision.interfaceID.String(), decision.removed)
+	case maintenanceImplementationChoice:
+		return removeKeyedMaintenanceDecision(root, []string{"interfaces", "use"}, decision.interfaceID.String())
 	case maintenanceAlias:
 		return removeKeyedMaintenanceDecision(root, []string{"capabilities", "aliases"}, decision.id.String())
 	case maintenancePluginConfig:
@@ -613,6 +666,14 @@ func setMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) error
 			value = stringYAMLNode(decision.providerID)
 		}
 		return setKeyedMaintenanceDecision(root, []string{"capabilities", "use"}, decision.id.String(), value)
+	case maintenanceInterfaceRequirement:
+		return setSetMaintenanceDecision(root, []string{"interfaces", "require"}, decision.interfaceID.String(), decision.removed)
+	case maintenanceImplementationChoice:
+		value := nullYAMLNode()
+		if !decision.removed {
+			value = stringYAMLNode(decision.constructor.String())
+		}
+		return setKeyedMaintenanceDecision(root, []string{"interfaces", "use"}, decision.interfaceID.String(), value)
 	case maintenanceAlias:
 		value := nullYAMLNode()
 		if !decision.removed {

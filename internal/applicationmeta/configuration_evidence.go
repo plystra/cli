@@ -13,17 +13,19 @@ import (
 type ConfigurationDecisionSummary string
 
 const (
-	ConfigurationSummaryRemoval    ConfigurationDecisionSummary = "removal"
-	ConfigurationSummaryObject     ConfigurationDecisionSummary = "object"
-	ConfigurationSummaryCapability ConfigurationDecisionSummary = "capability"
-	ConfigurationSummaryProvider   ConfigurationDecisionSummary = "provider"
-	ConfigurationSummaryAlias      ConfigurationDecisionSummary = "alias"
-	ConfigurationSummaryString     ConfigurationDecisionSummary = "string"
-	ConfigurationSummaryBoolean    ConfigurationDecisionSummary = "boolean"
-	ConfigurationSummaryDuration   ConfigurationDecisionSummary = "duration"
-	ConfigurationSummaryArray      ConfigurationDecisionSummary = "array"
-	ConfigurationSummarySecret     ConfigurationDecisionSummary = "secret-reference"
-	ConfigurationSummaryValue      ConfigurationDecisionSummary = "value"
+	ConfigurationSummaryRemoval        ConfigurationDecisionSummary = "removal"
+	ConfigurationSummaryObject         ConfigurationDecisionSummary = "object"
+	ConfigurationSummaryCapability     ConfigurationDecisionSummary = "capability"
+	ConfigurationSummaryProvider       ConfigurationDecisionSummary = "provider"
+	ConfigurationSummaryInterface      ConfigurationDecisionSummary = "interface"
+	ConfigurationSummaryImplementation ConfigurationDecisionSummary = "implementation"
+	ConfigurationSummaryAlias          ConfigurationDecisionSummary = "alias"
+	ConfigurationSummaryString         ConfigurationDecisionSummary = "string"
+	ConfigurationSummaryBoolean        ConfigurationDecisionSummary = "boolean"
+	ConfigurationSummaryDuration       ConfigurationDecisionSummary = "duration"
+	ConfigurationSummaryArray          ConfigurationDecisionSummary = "array"
+	ConfigurationSummarySecret         ConfigurationDecisionSummary = "secret-reference"
+	ConfigurationSummaryValue          ConfigurationDecisionSummary = "value"
 )
 
 // ConfigurationDecision is one typed, non-secret declaration from a single
@@ -81,6 +83,10 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 				summary = ConfigurationSummaryCapability
 			case maintenanceProvider:
 				summary = ConfigurationSummaryProvider
+			case maintenanceInterfaceRequirement:
+				summary = ConfigurationSummaryInterface
+			case maintenanceImplementationChoice:
+				summary = ConfigurationSummaryImplementation
 			case maintenanceAlias:
 				summary = ConfigurationSummaryAlias
 			case maintenancePluginConfig:

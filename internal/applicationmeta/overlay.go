@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/interfaceid"
 )
 
 // ErrApplyOverlay reports an invalid typed current-project overlay.
@@ -40,6 +41,8 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (Manifest, error
 	exposures, removedExposures := overlayExposureSet(base, overlay)
 	requirements, removedRequirements := overlayRequirementSet(base, overlay)
 	choices, removedChoices := overlayProviderChoices(base, overlay)
+	interfaceRequirements, removedInterfaceRequirements := overlayInterfaceRequirementSet(base, overlay)
+	implementationChoices, removedImplementationChoices := overlayImplementationChoices(base, overlay)
 	aliases, removedAliases := overlayAliases(base, overlay)
 	configurations, removedConfigurations, err := overlayPluginConfigurations(base, overlay, schemas)
 	if err != nil {
@@ -53,24 +56,28 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (Manifest, error
 	}
 
 	return Manifest{
-		httpAddress:            httpAddress,
-		hasHTTPAddress:         hasHTTPAddress,
-		removeHTTPAddress:      removeHTTPAddress,
-		httpTransports:         httpTransports,
-		httpCORS:               httpCORS,
-		httpExposures:          exposures,
-		removedHTTPExposures:   removedExposures,
-		requirements:           requirements,
-		removedRequirements:    removedRequirements,
-		providerChoices:        choices,
-		removedProviderChoices: removedChoices,
-		aliases:                aliases,
-		removedAliases:         removedAliases,
-		configurations:         configurations,
-		removedConfigurations:  removedConfigurations,
-		startupTimeout:         startupTimeout,
-		hasStartupTimeout:      hasStartupTimeout,
-		removeStartupTimeout:   removeStartupTimeout,
+		httpAddress:                  httpAddress,
+		hasHTTPAddress:               hasHTTPAddress,
+		removeHTTPAddress:            removeHTTPAddress,
+		httpTransports:               httpTransports,
+		httpCORS:                     httpCORS,
+		httpExposures:                exposures,
+		removedHTTPExposures:         removedExposures,
+		requirements:                 requirements,
+		removedRequirements:          removedRequirements,
+		providerChoices:              choices,
+		removedProviderChoices:       removedChoices,
+		interfaceRequirements:        interfaceRequirements,
+		removedInterfaceReqs:         removedInterfaceRequirements,
+		implementationChoices:        implementationChoices,
+		removedImplementationChoices: removedImplementationChoices,
+		aliases:                      aliases,
+		removedAliases:               removedAliases,
+		configurations:               configurations,
+		removedConfigurations:        removedConfigurations,
+		startupTimeout:               startupTimeout,
+		hasStartupTimeout:            hasStartupTimeout,
+		removeStartupTimeout:         removeStartupTimeout,
 	}, nil
 }
 
@@ -199,6 +206,58 @@ func overlayProviderChoices(base, overlay Manifest) ([]ProviderChoice, []capabil
 	return result, sortedCapabilityRemovals(removals)
 }
 
+func overlayInterfaceRequirementSet(base, overlay Manifest) ([]InterfaceRequirement, []interfaceRemoval) {
+	values := make(map[interfaceid.Identifier]InterfaceRequirement)
+	removals := make(map[interfaceid.Identifier]interfaceRemoval)
+	for _, value := range base.interfaceRequirements {
+		values[value.id] = value
+	}
+	for _, removal := range base.removedInterfaceReqs {
+		removals[removal.id] = removal
+	}
+	for _, value := range overlay.interfaceRequirements {
+		values[value.id] = value
+		delete(removals, value.id)
+	}
+	for _, removal := range overlay.removedInterfaceReqs {
+		delete(values, removal.id)
+		removals[removal.id] = removal
+	}
+	result := make([]InterfaceRequirement, 0, len(values))
+	for _, value := range values {
+		result = append(result, value)
+	}
+	sort.Slice(result, func(left, right int) bool { return result[left].id.String() < result[right].id.String() })
+	return result, sortedInterfaceRemovals(removals)
+}
+
+func overlayImplementationChoices(base, overlay Manifest) ([]ImplementationChoice, []interfaceRemoval) {
+	values := make(map[interfaceid.Identifier]ImplementationChoice)
+	removals := make(map[interfaceid.Identifier]interfaceRemoval)
+	for _, value := range base.implementationChoices {
+		values[value.interfaceID] = value
+	}
+	for _, removal := range base.removedImplementationChoices {
+		removals[removal.id] = removal
+	}
+	for _, value := range overlay.implementationChoices {
+		values[value.interfaceID] = value
+		delete(removals, value.interfaceID)
+	}
+	for _, removal := range overlay.removedImplementationChoices {
+		delete(values, removal.id)
+		removals[removal.id] = removal
+	}
+	result := make([]ImplementationChoice, 0, len(values))
+	for _, value := range values {
+		result = append(result, value)
+	}
+	sort.Slice(result, func(left, right int) bool {
+		return result[left].interfaceID.String() < result[right].interfaceID.String()
+	})
+	return result, sortedInterfaceRemovals(removals)
+}
+
 func overlayAliases(base, overlay Manifest) ([]Alias, []capabilityRemoval) {
 	values := make(map[capabilityid.Identifier]Alias)
 	removals := make(map[capabilityid.Identifier]capabilityRemoval)
@@ -226,6 +285,15 @@ func overlayAliases(base, overlay Manifest) ([]Alias, []capabilityRemoval) {
 
 func sortedCapabilityRemovals(values map[capabilityid.Identifier]capabilityRemoval) []capabilityRemoval {
 	result := make([]capabilityRemoval, 0, len(values))
+	for _, value := range values {
+		result = append(result, value)
+	}
+	sort.Slice(result, func(left, right int) bool { return result[left].id.String() < result[right].id.String() })
+	return result
+}
+
+func sortedInterfaceRemovals(values map[interfaceid.Identifier]interfaceRemoval) []interfaceRemoval {
+	result := make([]interfaceRemoval, 0, len(values))
 	for _, value := range values {
 		result = append(result, value)
 	}
