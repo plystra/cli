@@ -237,6 +237,42 @@ func TestResolveAppliesNoModuleDirectnessOrDepthSelectionPriority(t *testing.T) 
 	}
 }
 
+func TestResolveAppliesNoOfficialOwnershipOrTemplateOriginSelectionPriority(t *testing.T) {
+	t.Parallel()
+
+	parent, root := writeOwnershipAmbiguityProject(t)
+	before := snapshotTree(t, parent)
+	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start: root,
+		Environment: goEnvironment(map[string]string{
+			"GOWORK":  "off",
+			"GOPROXY": "off",
+			"GOSUMDB": "off",
+		}),
+	})
+	if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, interfaceresolution.ErrAmbiguousImplementation) {
+		t.Fatalf("Resolve error = %v", err)
+	}
+	var ambiguous *interfaceresolution.AmbiguousImplementationError
+	if !errors.As(err, &ambiguous) {
+		t.Fatalf("Resolve omitted typed ambiguity: %v", err)
+	}
+	candidates := ambiguous.Candidates()
+	if len(candidates) != 2 || candidates[0].Constructor().String() != "example.com/template-origin/template.New" || candidates[1].Constructor().String() != "github.com/plystra/official-implementation/official.New" {
+		t.Fatalf("candidates = %#v", candidates)
+	}
+	if !containsResolutionFragments(err.Error(),
+		"example.com/template-origin/template.New",
+		"github.com/plystra/official-implementation/official.New",
+		`interfaces.use["app.run/v1"]`,
+	) {
+		t.Fatalf("ambiguity omitted equal candidates or explicit correction: %v", err)
+	}
+	if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
+		t.Fatalf("Resolve mutated Projects:\nbefore: %#v\nafter: %#v", before, after)
+	}
+}
+
 func TestResolveCollectsEnvironmentExposureAsInterfaceRequirement(t *testing.T) {
 	t.Parallel()
 
@@ -753,6 +789,58 @@ replace example.com/topology-middle => ../middle
 
 replace example.com/topology-zeta => ../zeta
 `, direct))
+	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "interfaces: {require: [app.run/v1]}\n")
+	return parent, applicationRoot
+}
+
+func writeOwnershipAmbiguityProject(t testing.TB) (string, string) {
+	t.Helper()
+	parent := t.TempDir()
+
+	contractRoot := filepath.Join(parent, "contract")
+	writeModule(t, contractRoot, "example.com/ownership-contract")
+	writeFile(t, filepath.Join(contractRoot, "plystra.yaml"), "{}\n")
+	writeResolvedInterface(t, contractRoot, "app/run/v1", "runv1", "app.run/v1", "Run")
+
+	implementations := []struct {
+		directory   string
+		modulePath  string
+		packageName string
+	}{
+		{directory: "template", modulePath: "example.com/template-origin", packageName: "template"},
+		{directory: "official", modulePath: "github.com/plystra/official-implementation", packageName: "official"},
+	}
+	for _, implementation := range implementations {
+		root := filepath.Join(parent, implementation.directory)
+		writeFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module %s
+
+go 1.26
+
+require example.com/ownership-contract v1.0.0
+
+replace example.com/ownership-contract => ../contract
+`, implementation.modulePath))
+		writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+		writeResolvedSimpleImplementationForInterfaceModule(t, root, "example.com/ownership-contract", implementation.packageName, "app.run/v1", "app/run/v1", "Run")
+	}
+
+	applicationRoot := filepath.Join(parent, "application")
+	writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/ownership-application
+
+go 1.26
+
+require (
+	example.com/ownership-contract v1.0.0
+	example.com/template-origin v1.0.0
+	github.com/plystra/official-implementation v1.0.0
+)
+
+replace example.com/ownership-contract => ../contract
+
+replace example.com/template-origin => ../template
+
+replace github.com/plystra/official-implementation => ../official
+`)
 	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "interfaces: {require: [app.run/v1]}\n")
 	return parent, applicationRoot
 }
