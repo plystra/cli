@@ -313,7 +313,14 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 		interfaces[index].deprecation = deprecation
 		interfaces[index].hasDeprecation = present
 	}
-	implementations, err := implementationinventory.Build(implementationInputs)
+	canonicalInterfaces := make([]implementationinventory.InterfaceInput, len(interfaces))
+	for index, discovered := range interfaces {
+		canonicalInterfaces[index] = implementationinventory.InterfaceInput{
+			ID:          discovered.Declaration().ID(),
+			PackagePath: discovered.PackagePath(),
+		}
+	}
+	implementations, err := implementationinventory.Build(implementationInputs, canonicalInterfaces)
 	if err != nil {
 		return Discovery{}, fmt.Errorf("%w: %w", ErrDiscover, err)
 	}

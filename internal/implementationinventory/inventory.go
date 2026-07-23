@@ -23,6 +23,9 @@ var (
 	// ErrInvalidConfiguration reports a constructor Config parameter that does
 	// not use the exact optional same-package exported struct form.
 	ErrInvalidConfiguration = errors.New("invalid Implementation Config parameter")
+	// ErrInvalidRequiredInterface reports a non-Config constructor parameter
+	// that is not one exact visible canonical Interface type.
+	ErrInvalidRequiredInterface = errors.New("invalid required Interface constructor parameter")
 )
 
 // Input is one parsed constructor declaration and its compiled Go package
@@ -51,6 +54,7 @@ type Implementation struct {
 	symbol        constructorsymbol.Symbol
 	configuration Configuration
 	hasConfig     bool
+	required      []RequiredInterface
 }
 
 // ModulePath returns the Go Module path that owns the constructor package.
@@ -95,6 +99,12 @@ func (i Implementation) Configuration() (Configuration, bool) {
 	return i.configuration, i.hasConfig
 }
 
+// RequiredInterfaces returns a defensive parameter-ordered view of exact
+// canonical Interface dependencies required by the constructor.
+func (i Implementation) RequiredInterfaces() []RequiredInterface {
+	return append([]RequiredInterface(nil), i.required...)
+}
+
 // Declaration returns the immutable parsed constructor declaration.
 func (i Implementation) Declaration() implementationdecl.Declaration { return i.declaration }
 
@@ -127,7 +137,11 @@ func (i Index) BySymbol(symbol constructorsymbol.Symbol) (Implementation, bool) 
 
 // Build validates shared-loader provenance and constructs a deterministic
 // immutable inventory without performing another filesystem or Go graph scan.
-func Build(inputs []Input) (Index, error) {
+func Build(inputs []Input, interfaces []InterfaceInput) (Index, error) {
+	interfacePackages, err := indexInterfacePackages(interfaces)
+	if err != nil {
+		return Index{}, err
+	}
 	implementations := make([]Implementation, len(inputs))
 	for index, input := range inputs {
 		position := input.Declaration.Position()
@@ -157,6 +171,10 @@ func Build(inputs []Input) (Index, error) {
 		if configurationErr != nil {
 			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidConfiguration, symbol, inputSource(input), configurationErr)
 		}
+		required, requiredErr := validateRequiredInterfaces(function, hasConfig, interfacePackages)
+		if requiredErr != nil {
+			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidRequiredInterface, symbol, inputSource(input), requiredErr)
+		}
 		implementations[index] = Implementation{
 			modulePath:    input.ModulePath,
 			moduleVersion: input.ModuleVersion,
@@ -168,6 +186,7 @@ func Build(inputs []Input) (Index, error) {
 			symbol:        symbol,
 			configuration: configuration,
 			hasConfig:     hasConfig,
+			required:      required,
 		}
 	}
 

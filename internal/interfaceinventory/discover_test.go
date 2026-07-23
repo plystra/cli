@@ -428,6 +428,98 @@ func New(%s) (*Service, error) {
 	}
 }
 
+func TestDiscoverApplicationRejectsInvalidRequiredInterfaceParameters(t *testing.T) {
+	t.Parallel()
+
+	const canonicalImport = `import operationv1 "example.com/broken/interfaces/operation/v1"`
+	tests := []struct {
+		name      string
+		prelude   string
+		parameter string
+		want      string
+		fake      bool
+	}{
+		{name: "primitive", parameter: "value string", want: "parameter 1 must be a canonical Interface type"},
+		{name: "pointer", prelude: canonicalImport, parameter: "dependency *operationv1.Interface", want: "parameter 1 must be a canonical Interface type"},
+		{name: "request struct", prelude: canonicalImport, parameter: "request operationv1.Request", want: "parameter 1 must be a canonical Interface type"},
+		{name: "unnamed interface", parameter: "dependency interface{}", want: "parameter 1 must be a canonical Interface type"},
+		{name: "defined wrapper", prelude: canonicalImport + "\n\ntype Local interface { operationv1.Interface }", parameter: "dependency Local", want: "parameter 1 must be a canonical Interface type"},
+		{name: "generic wrapper", prelude: canonicalImport + "\n\ntype Box[T any] struct{}", parameter: "dependency Box[operationv1.Interface]", want: "parameter 1 must be a canonical Interface type"},
+		{name: "same package lookalike", prelude: "type Interface interface{ Run() }", parameter: "dependency Interface", want: "not a visible canonical Interface package"},
+		{name: "ordinary package lookalike", prelude: `import fake "example.com/broken/fake"`, parameter: "dependency fake.Interface", want: "not a visible canonical Interface package", fake: true},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeProject(t, root, "example.com/broken")
+			writeFile(t, filepath.Join(root, "interfaces", "operation", "v1", "interface.go"), interfaceSource("operationv1", "service.operation.call/v1", "Call"))
+			if test.fake {
+				writeFile(t, filepath.Join(root, "fake", "interface.go"), "package fake\n\ntype Interface interface{ Run() }\n")
+			}
+			source := fmt.Sprintf(`package service
+
+%s
+
+type Service struct{}
+
+//plystra:implements service.operation.call/v1
+func New(%s) (*Service, error) {
+	return &Service{}, nil
+}
+`, test.prelude, test.parameter)
+			writeFile(t, filepath.Join(root, "service", "new.go"), source)
+			before := snapshotFiles(t, root)
+			_, err := discoverApplicationResult(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
+			if !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, implementationinventory.ErrInvalidRequiredInterface) || !strings.Contains(err.Error(), "example.com/broken/service.New") || !strings.Contains(err.Error(), "example.com/broken@local/service/new.go") || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("DiscoverApplication error = %v", err)
+			}
+			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("error exposed private Project root: %v", err)
+			}
+			if after := snapshotFiles(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed discovery mutated source:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
+func TestDiscoverApplicationNormalizesUnnamedRequiredInterfaceWithoutConfig(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeProject(t, root, "example.com/required")
+	writeFile(t, filepath.Join(root, "interfaces", "operation", "v1", "interface.go"), interfaceSource("operationv1", "service.operation.call/v1", "Call"))
+	writeFile(t, filepath.Join(root, "service", "new.go"), `package service
+
+import operationv1 "example.com/required/interfaces/operation/v1"
+
+type Service struct{}
+
+//plystra:implements service.operation.call/v1
+func New(operationv1.Interface) (*Service, error) {
+	return &Service{}, nil
+}
+`)
+	before := snapshotFiles(t, root)
+	discovery := discoverApplication(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
+	implementations := discovery.Implementations().Implementations()
+	if len(implementations) != 1 {
+		t.Fatalf("Implementations = %#v", implementations)
+	}
+	if configuration, configured := implementations[0].Configuration(); configured || configuration.String() != "" {
+		t.Fatalf("Configuration = %#v, %t", configuration, configured)
+	}
+	required := implementations[0].RequiredInterfaces()
+	if len(required) != 1 || required[0].ID().String() != "service.operation.call/v1" || required[0].PackagePath() != "example.com/required/interfaces/operation/v1" || required[0].ParameterName() != "" || required[0].ParameterPosition() != 1 {
+		t.Fatalf("RequiredInterfaces = %#v", required)
+	}
+	if after := snapshotFiles(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("discovery mutated source:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
 func TestValidateUniqueIDsRejectsEveryDuplicateDefinition(t *testing.T) {
 	t.Parallel()
 

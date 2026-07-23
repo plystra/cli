@@ -11,6 +11,7 @@ import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationdecl"
 	"github.com/plystra/cli/internal/implementationinventory"
+	"github.com/plystra/cli/internal/interfaceid"
 )
 
 func TestBuildOrdersAndProtectsDiscoveredImplementations(t *testing.T) {
@@ -33,7 +34,7 @@ func TestBuildOrdersAndProtectsDiscoveredImplementations(t *testing.T) {
 			Declaration: alpha,
 			Types:       compiledPackage("example.com/app/alpha", "alpha", "Build"),
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -82,7 +83,7 @@ func TestBuildRejectsInconsistentCompiledPackageProvenance(t *testing.T) {
 		PackagePath: "example.com/app/service",
 		Declaration: parsed,
 		Types:       types.NewPackage("example.com/other/service", "service"),
-	}})
+	}}, nil)
 	if !errors.Is(err, implementationinventory.ErrInvalidInput) {
 		t.Fatalf("Build error = %v", err)
 	}
@@ -97,7 +98,7 @@ func TestBuildRejectsConstructorAbsentFromCompiledPackage(t *testing.T) {
 		PackagePath: "example.com/app/service",
 		Declaration: parsed,
 		Types:       types.NewPackage("example.com/app/service", "service"),
-	}})
+	}}, nil)
 	if !errors.Is(err, implementationinventory.ErrInvalidInput) {
 		t.Fatalf("Build error = %v", err)
 	}
@@ -115,9 +116,38 @@ func TestBuildRejectsDuplicateFullyQualifiedConstructorSymbol(t *testing.T) {
 		Declaration: parsed,
 		Types:       compiled,
 	}
-	_, err := implementationinventory.Build([]implementationinventory.Input{input, input})
+	_, err := implementationinventory.Build([]implementationinventory.Input{input, input}, nil)
 	if !errors.Is(err, implementationinventory.ErrDuplicateSymbol) || !strings.Contains(err.Error(), "example.com/app/service.New") || !strings.Contains(err.Error(), "example.com/app@local/service/new.go:4:6") {
 		t.Fatalf("Build error = %v", err)
+	}
+}
+
+func TestBuildRejectsInvalidCanonicalInterfaceInputs(t *testing.T) {
+	t.Parallel()
+
+	first, err := interfaceid.Parse("service.first.run/v1")
+	if err != nil {
+		t.Fatalf("Parse first Interface: %v", err)
+	}
+	second, err := interfaceid.Parse("service.second.run/v1")
+	if err != nil {
+		t.Fatalf("Parse second Interface: %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		inputs []implementationinventory.InterfaceInput
+	}{
+		{name: "empty ID", inputs: []implementationinventory.InterfaceInput{{PackagePath: "example.com/interfaces/first"}}},
+		{name: "invalid package", inputs: []implementationinventory.InterfaceInput{{ID: first, PackagePath: "../interfaces"}}},
+		{name: "duplicate package", inputs: []implementationinventory.InterfaceInput{{ID: first, PackagePath: "example.com/interfaces/shared"}, {ID: second, PackagePath: "example.com/interfaces/shared"}}},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := implementationinventory.Build(nil, test.inputs); !errors.Is(err, implementationinventory.ErrInvalidInput) {
+				t.Fatalf("Build error = %v", err)
+			}
+		})
 	}
 }
 

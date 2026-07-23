@@ -229,10 +229,21 @@ type Response struct {
 func TestResolveIntegratesImplementationConstructorPackageDiscovery(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	writeModule(t, root, "example.com/implementations")
+	parent := t.TempDir()
+	root := filepath.Join(parent, "app")
+	dependencyRoot := filepath.Join(parent, "contracts")
+	writeModule(t, dependencyRoot, "example.com/contracts")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(dependencyRoot, "interfaces", "orders", "cancel", "v1", "interface.go"), interfaceDeclarationSource("cancelv1", "orders.cancel.execute/v1", "Execute"))
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/implementations\n\ngo 1.26\n\nrequire example.com/contracts v1.2.3\n\nreplace example.com/contracts => ../contracts\n")
 	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(root, "interfaces", "orders", "create", "v1", "interface.go"), interfaceDeclarationSource("createv1", "orders.create.execute/v1", "Execute"))
 	writeFile(t, filepath.Join(root, "domains", "orders", "service", "new.go"), `package service
+
+import (
+	cancelv1 "example.com/contracts/interfaces/orders/cancel/v1"
+	createv1 "example.com/implementations/interfaces/orders/create/v1"
+)
 
 type Service struct{}
 
@@ -240,13 +251,15 @@ type Config struct {
 	Mode string
 }
 
+type Cancel = cancelv1.Interface
+
 //plystra:implements orders.create.execute/v1
 //plystra:implements orders.cancel.execute/v1
-func Build(Config) (*Service, error) {
+func Build(cfg Config, create createv1.Interface, cancel Cancel) (*Service, error) {
 	return &Service{}, nil
 }
 `)
-	before := snapshotTree(t, root)
+	before := snapshotTree(t, parent)
 	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
 		Start:       filepath.Join(root, "domains", "orders"),
 		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"}),
@@ -266,6 +279,14 @@ func Build(Config) (*Service, error) {
 	if !configured || configuration.String() != "example.com/implementations/domains/orders/service.Config" || configuration.PackagePath() != discovered.PackagePath() || configuration.TypeName() != "Config" {
 		t.Fatalf("Implementation configuration = %#v, %t", configuration, configured)
 	}
+	required := discovered.RequiredInterfaces()
+	if len(required) != 2 || required[0].ID().String() != "orders.create.execute/v1" || required[0].PackagePath() != "example.com/implementations/interfaces/orders/create/v1" || required[0].ParameterName() != "create" || required[0].ParameterPosition() != 2 || required[1].ID().String() != "orders.cancel.execute/v1" || required[1].PackagePath() != "example.com/contracts/interfaces/orders/cancel/v1" || required[1].ParameterName() != "cancel" || required[1].ParameterPosition() != 3 {
+		t.Fatalf("required Interfaces = %#v", required)
+	}
+	required[0] = implementationinventory.RequiredInterface{}
+	if result.Implementations().Implementations()[0].RequiredInterfaces()[0].ID().String() != "orders.create.execute/v1" {
+		t.Fatal("RequiredInterfaces exposed mutable inventory storage")
+	}
 	declared := discovered.Declaration().ImplementedInterfaces()
 	if len(declared) != 2 || declared[0].ID().String() != "orders.create.execute/v1" || declared[1].ID().String() != "orders.cancel.execute/v1" {
 		t.Fatalf("implemented Interfaces = %#v", declared)
@@ -278,7 +299,7 @@ func Build(Config) (*Service, error) {
 	if result.Implementations().Implementations()[0].FunctionName() != "Build" {
 		t.Fatal("Implementations exposed mutable inventory storage")
 	}
-	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+	if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
 		t.Fatalf("Resolve mutated Project source:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 }
