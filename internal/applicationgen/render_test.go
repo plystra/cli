@@ -112,9 +112,9 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 	}
 	healthContract := string(outputData(t, output, "generated/go/contracts/kernel/health/v1/contract_gen.go"))
 	for _, required := range []string{
-		"type Request = kernelintrinsic.HealthRequest",
-		"type Response = kernelintrinsic.HealthResponse",
-		"type ResponseStatus = kernelintrinsic.HealthStatus",
+		"type Request = kernelinterface.Request",
+		"type Response = kernelinterface.Response",
+		"type ResponseStatus = kernelinterface.Status",
 	} {
 		if !strings.Contains(healthContract, required) {
 			t.Fatalf("intrinsic contract omits %q:\n%s", required, healthContract)

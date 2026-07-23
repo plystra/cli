@@ -12,6 +12,7 @@ import (
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceinventory"
+	"github.com/plystra/cli/internal/intrinsicinterface"
 )
 
 type constructorRecord struct {
@@ -23,6 +24,7 @@ type constructorRecord struct {
 
 type catalog struct {
 	interfaces   map[string]interfaceinventory.Interface
+	intrinsics   map[string]intrinsicinterface.Definition
 	constructors map[string]constructorRecord
 	candidates   map[string][]constructorRecord
 }
@@ -46,11 +48,11 @@ type selector struct {
 // create requirements and become available only when their Interface is
 // selected for another reason.
 func Resolve(input Input) (Result, error) {
-	catalog, err := buildCatalog(input.Interfaces, input.Implementations)
+	catalog, err := buildCatalog(input.Interfaces, input.Implementations, intrinsicinterface.Definitions())
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w: %v", ErrResolve, ErrInvalidInput, err)
 	}
-	requirements, err := normalizeRequirements(input.Requirements, catalog.interfaces)
+	requirements, intrinsicRequirements, err := normalizeRequirements(input.Requirements, catalog.interfaces, catalog.intrinsics)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -87,22 +89,40 @@ func Resolve(input Input) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	return Result{graph: graph, selections: cloneSelections(selections)}, nil
+	return Result{
+		graph:                 graph,
+		selections:            cloneSelections(selections),
+		intrinsicRequirements: cloneIntrinsicRequirements(intrinsicRequirements),
+	}, nil
 }
 
-func buildCatalog(interfaces interfaceinventory.Index, implementations implementationinventory.Index) (catalog, error) {
+func buildCatalog(interfaces interfaceinventory.Index, implementations implementationinventory.Index, intrinsicDefinitions []intrinsicinterface.Definition) (catalog, error) {
 	if err := interfaceinventory.ValidateUniqueIDs(interfaces); err != nil {
 		return catalog{}, err
 	}
 	result := catalog{
 		interfaces:   make(map[string]interfaceinventory.Interface),
+		intrinsics:   make(map[string]intrinsicinterface.Definition, len(intrinsicDefinitions)),
 		constructors: make(map[string]constructorRecord),
 		candidates:   make(map[string][]constructorRecord),
+	}
+	for _, definition := range intrinsicDefinitions {
+		identifier := definition.ID()
+		if identifier.String() == "" || !strings.HasPrefix(identifier.Name(), "kernel.") || definition.PackagePath() == "" || definition.Source() == "" {
+			return catalog{}, errors.New("intrinsic Kernel Interface has invalid identity or provenance")
+		}
+		if _, duplicate := result.intrinsics[identifier.String()]; duplicate {
+			return catalog{}, fmt.Errorf("intrinsic Kernel Interface %s appears more than once", identifier)
+		}
+		result.intrinsics[identifier.String()] = definition
 	}
 	for _, definition := range interfaces.Interfaces() {
 		identifier, err := interfaceid.Parse(definition.ID())
 		if err != nil || definition.PackagePath() == "" || definition.Source() == "" {
 			return catalog{}, fmt.Errorf("visible Interface has invalid identity or provenance: %q", definition.ID())
+		}
+		if strings.HasPrefix(identifier.Name(), "kernel.") {
+			return catalog{}, fmt.Errorf("%w %s: application package %q at %s uses the reserved kernel.* namespace; correction: remove the declaration and import the canonical Kernel Interface package", ErrReservedInterface, identifier, definition.PackagePath(), definition.Source())
 		}
 		result.interfaces[identifier.String()] = definition
 	}
@@ -151,21 +171,32 @@ func buildCatalog(interfaces interfaceinventory.Index, implementations implement
 	return result, nil
 }
 
-func normalizeRequirements(inputs []Requirement, interfaces map[string]interfaceinventory.Interface) ([]Requirement, error) {
-	result := make([]Requirement, len(inputs))
+func normalizeRequirements(inputs []Requirement, interfaces map[string]interfaceinventory.Interface, intrinsics map[string]intrinsicinterface.Definition) ([]Requirement, []IntrinsicRequirement, error) {
+	result := make([]Requirement, 0, len(inputs))
+	intrinsicSources := make(map[string][]string, len(intrinsics))
+	for identifier, definition := range intrinsics {
+		intrinsicSources[identifier] = []string{definition.Source()}
+	}
 	for index, input := range inputs {
 		identifier := input.InterfaceID.String()
 		if identifier == "" {
-			return nil, fmt.Errorf("%w: requirements[%d] has an empty Interface ID", ErrInvalidInput, index)
-		}
-		if _, visible := interfaces[identifier]; !visible {
-			return nil, fmt.Errorf("%w: required Interface %s is not defined by a visible canonical package", ErrUnknownInterface, input.InterfaceID)
+			return nil, nil, fmt.Errorf("%w: requirements[%d] has an empty Interface ID", ErrInvalidInput, index)
 		}
 		source, err := normalizeSource(input.Source)
 		if err != nil {
-			return nil, fmt.Errorf("%w: requirements[%d] source %v", ErrInvalidInput, index, err)
+			return nil, nil, fmt.Errorf("%w: requirements[%d] source %v", ErrInvalidInput, index, err)
 		}
-		result[index] = Requirement{InterfaceID: input.InterfaceID, Source: source}
+		if _, intrinsic := intrinsics[identifier]; intrinsic {
+			intrinsicSources[identifier] = append(intrinsicSources[identifier], source)
+			continue
+		}
+		if strings.HasPrefix(input.InterfaceID.Name(), "kernel.") {
+			return nil, nil, fmt.Errorf("%w: required reserved Interface %s is not published by the selected Kernel API", ErrUnknownInterface, input.InterfaceID)
+		}
+		if _, visible := interfaces[identifier]; !visible {
+			return nil, nil, fmt.Errorf("%w: required Interface %s is not defined by a visible canonical package", ErrUnknownInterface, input.InterfaceID)
+		}
+		result = append(result, Requirement{InterfaceID: input.InterfaceID, Source: source})
 	}
 	sort.Slice(result, func(left, right int) bool {
 		if result[left].InterfaceID != result[right].InterfaceID {
@@ -173,7 +204,18 @@ func normalizeRequirements(inputs []Requirement, interfaces map[string]interface
 		}
 		return result[left].Source < result[right].Source
 	})
-	return result, nil
+	intrinsicRequirements := make([]IntrinsicRequirement, 0, len(intrinsics))
+	for identifier, definition := range intrinsics {
+		intrinsicRequirements = append(intrinsicRequirements, IntrinsicRequirement{
+			interfaceID: definition.ID(),
+			packagePath: definition.PackagePath(),
+			sources:     uniqueSorted(intrinsicSources[identifier]),
+		})
+	}
+	sort.Slice(intrinsicRequirements, func(left, right int) bool {
+		return intrinsicRequirements[left].interfaceID.String() < intrinsicRequirements[right].interfaceID.String()
+	})
+	return result, intrinsicRequirements, nil
 }
 
 func normalizeChoices(inputs []Choice, catalog catalog) (map[string]normalizedChoice, error) {
@@ -183,6 +225,9 @@ func normalizeChoices(inputs []Choice, catalog catalog) (map[string]normalizedCh
 		constructorID := input.Constructor.String()
 		if identifier == "" || constructorID == "" {
 			return nil, fmt.Errorf("%w: choices[%d] has an empty Interface or constructor", ErrInvalidInput, index)
+		}
+		if strings.HasPrefix(input.InterfaceID.Name(), "kernel.") {
+			return nil, fmt.Errorf("%w: interfaces.use[%q] names %s", ErrIntrinsicChoice, identifier, input.Constructor)
 		}
 		if _, visible := catalog.interfaces[identifier]; !visible {
 			return nil, fmt.Errorf("%w: interfaces.use[%q] is not defined by a visible canonical package", ErrUnknownInterface, identifier)
@@ -222,6 +267,14 @@ func normalizeChoices(inputs []Choice, catalog catalog) (map[string]normalizedCh
 		result[identifier] = normalized
 	}
 	return result, nil
+}
+
+func cloneIntrinsicRequirements(values []IntrinsicRequirement) []IntrinsicRequirement {
+	result := append([]IntrinsicRequirement(nil), values...)
+	for index := range result {
+		result[index].sources = append([]string(nil), result[index].sources...)
+	}
+	return result
 }
 
 func (s *selector) selectInterface(identifier interfaceid.Identifier) (bool, error) {

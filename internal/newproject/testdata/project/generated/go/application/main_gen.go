@@ -12,7 +12,7 @@ import (
 	"time"
 
 	applicationbootstrap "example.com/acme/my-app/generated/go/bootstrap"
-	kernelintrinsic "github.com/plystra/kernel/intrinsic"
+	kernelhealthv1 "github.com/plystra/kernel/interfaces/kernel/health/v1"
 )
 
 const defaultShutdownTimeout = time.Duration(30000000000)
@@ -71,7 +71,7 @@ func run(ctx context.Context, arguments, environment []string) (result error) {
 		if err != nil {
 			return fmt.Errorf("%w: %w: invoke: %v", ErrRun, ErrHealth, err)
 		}
-		if health.Status != kernelintrinsic.HealthStatusHealthy {
+		if health.Status != kernelhealthv1.StatusHealthy {
 			return fmt.Errorf("%w: %w: unexpected status", ErrRun, ErrHealth)
 		}
 		return nil

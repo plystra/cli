@@ -128,7 +128,7 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 		`handle0 := applicationinvocation0.New(rawHandle0, applicationclient1.New(handle1))`,
 		`func (i Invocations) MessageSendV1()`,
 		`func (i Invocations) PolicyCheckV1()`,
-		`func (i Invocations) IntrinsicHealth(ctx context.Context) (kernelintrinsic.HealthResponse, error)`,
+		`func (i Invocations) IntrinsicHealth(ctx context.Context) (kernelhealthv1.Response, error)`,
 		`kernelinvocation.NewHandle(i.dispatcher, kernelintrinsic.HealthContract(), true)`,
 	} {
 		if !bytes.Contains(generated, []byte(required)) {
@@ -657,7 +657,7 @@ import (
 	messagecontract "example.com/runtime-application/generated/go/contracts/message/send/v1"
 	remoteservice "example.com/runtime-dependency/remote-service"
 	kernelconfiguration "github.com/plystra/kernel/configuration"
-	kernelintrinsic "github.com/plystra/kernel/intrinsic"
+	kernelhealthv1 "github.com/plystra/kernel/interfaces/kernel/health/v1"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
@@ -726,7 +726,7 @@ func TestCanonicalInvocationRuntime(t *testing.T) {
 		t.Fatalf("KernelHealthV1.Invoke = %#v, %v", health, err)
 	}
 	intrinsicHealth, err := invocations.IntrinsicHealth(context.Background())
-	if err != nil || intrinsicHealth.Status != kernelintrinsic.HealthStatusHealthy {
+	if err != nil || intrinsicHealth.Status != kernelhealthv1.StatusHealthy {
 		t.Fatalf("IntrinsicHealth = %#v, %v", intrinsicHealth, err)
 	}
 

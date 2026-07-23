@@ -98,6 +98,55 @@ func TestResolveSelectsDeterministicReachableConstructorClosure(t *testing.T) {
 	}
 }
 
+func TestResolveCollectsIntrinsicKernelRequirementsOutsideImplementationSelection(t *testing.T) {
+	t.Parallel()
+
+	healthID := mustResolutionID(t, "kernel.health/v1")
+	result, err := interfaceresolution.Resolve(interfaceresolution.Input{
+		Requirements: []interfaceresolution.Requirement{
+			{InterfaceID: healthID, Source: `plystra.yaml http.expose["kernel.health/v1"]`},
+			{InterfaceID: healthID, Source: `plystra.yaml interfaces.require["kernel.health/v1"]`},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirements := result.IntrinsicRequirements()
+	if got := intrinsicRequirementSummaries(requirements); !reflect.DeepEqual(got, []string{
+		`kernel.health/v1=github.com/plystra/kernel/interfaces/kernel/health/v1:[github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1 plystra.yaml http.expose["kernel.health/v1"] plystra.yaml interfaces.require["kernel.health/v1"]]`,
+		`kernel.info/v1=github.com/plystra/kernel/interfaces/kernel/info/v1:[github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1]`,
+	}) {
+		t.Fatalf("IntrinsicRequirements = %v", got)
+	}
+	if len(result.Selections()) != 0 || len(result.Graph().Roots()) != 0 || len(result.Graph().Bindings()) != 0 || len(result.Graph().ConstructionOrder()) != 0 {
+		t.Fatalf("intrinsic requirements entered ordinary Implementation selection: %#v", result)
+	}
+	requirements[0] = interfaceresolution.IntrinsicRequirement{}
+	sources := result.IntrinsicRequirements()[0].Sources()
+	sources[0] = "mutated"
+	if repeated := result.IntrinsicRequirements(); repeated[0].InterfaceID() != healthID || repeated[0].Sources()[0] == "mutated" {
+		t.Fatal("IntrinsicRequirements returned aliased storage")
+	}
+
+	unknownID := mustResolutionID(t, "kernel.missing/v1")
+	_, err = interfaceresolution.Resolve(interfaceresolution.Input{Requirements: []interfaceresolution.Requirement{{
+		InterfaceID: unknownID,
+		Source:      `plystra.yaml interfaces.require["kernel.missing/v1"]`,
+	}}})
+	if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, interfaceresolution.ErrUnknownInterface) || !containsAll(err.Error(), unknownID.String(), "selected Kernel API") {
+		t.Fatalf("unknown intrinsic error = %v", err)
+	}
+
+	_, err = interfaceresolution.Resolve(interfaceresolution.Input{Choices: []interfaceresolution.Choice{{
+		InterfaceID: healthID,
+		Constructor: mustResolutionSymbol(t, "example.com/application/health.New"),
+		Sources:     []string{`plystra.yaml interfaces.use["kernel.health/v1"]`},
+	}}})
+	if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, interfaceresolution.ErrIntrinsicChoice) || !containsAll(err.Error(), healthID.String(), "health.New") {
+		t.Fatalf("intrinsic choice error = %v", err)
+	}
+}
+
 func TestResolveAppliesExplicitChoiceBeforeAmbiguity(t *testing.T) {
 	t.Parallel()
 
@@ -487,4 +536,12 @@ func containsAll(value string, fragments ...string) bool {
 		}
 	}
 	return true
+}
+
+func intrinsicRequirementSummaries(requirements []interfaceresolution.IntrinsicRequirement) []string {
+	result := make([]string, len(requirements))
+	for index, requirement := range requirements {
+		result[index] = fmt.Sprintf("%s=%s:%v", requirement.InterfaceID(), requirement.PackagePath(), requirement.Sources())
+	}
+	return result
 }

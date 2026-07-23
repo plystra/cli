@@ -35,7 +35,7 @@ func TestRenderProducesDeterministicSignalAndSmokeLifecycle(t *testing.T) {
 		`Environment: environment`,
 		`application.Start(ctx)`,
 		`application.Invocations().IntrinsicHealth(ctx)`,
-		`health.Status != kernelintrinsic.HealthStatusHealthy`,
+		`health.Status != kernelhealthv1.StatusHealthy`,
 		`application.Stop(stopContext)`,
 		`<-ctx.Done()`,
 		`argument != "--smoke"`,

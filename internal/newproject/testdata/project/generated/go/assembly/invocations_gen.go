@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"time"
 
+	kernelhealthv1 "github.com/plystra/kernel/interfaces/kernel/health/v1"
 	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 )
@@ -43,15 +44,15 @@ func (i Invocations) Catalog() kernelinvocation.Catalog {
 }
 
 // IntrinsicHealth invokes the always-published kernel.health/v1 endpoint through the shared dispatcher.
-func (i Invocations) IntrinsicHealth(ctx context.Context) (kernelintrinsic.HealthResponse, error) {
+func (i Invocations) IntrinsicHealth(ctx context.Context) (kernelhealthv1.Response, error) {
 	if !i.Valid() {
-		return kernelintrinsic.HealthResponse{}, fmt.Errorf("%w: intrinsic health runtime is invalid", ErrInvocationAssembly)
+		return kernelhealthv1.Response{}, fmt.Errorf("%w: intrinsic health runtime is invalid", ErrInvocationAssembly)
 	}
 	handle, err := kernelinvocation.NewHandle(i.dispatcher, kernelintrinsic.HealthContract(), true)
 	if err != nil {
-		return kernelintrinsic.HealthResponse{}, fmt.Errorf("%w: intrinsic health handle: %w", ErrInvocationAssembly, err)
+		return kernelhealthv1.Response{}, fmt.Errorf("%w: intrinsic health handle: %w", ErrInvocationAssembly, err)
 	}
-	return handle.Invoke(ctx, kernelintrinsic.HealthRequest{})
+	return handle.Invoke(ctx, kernelhealthv1.Request{})
 }
 
 // String redacts runtime internals.
@@ -108,7 +109,7 @@ func publishInvocations(pending pendingInvocations, providers Providers) (Invoca
 		return Invocations{}, fmt.Errorf("%w: selected providers are invalid", ErrInvocationAssembly)
 	}
 	bindings, err := kernelintrinsic.NewBindings(kernelintrinsic.BindingOptions{
-		ModuleVersion: "v0.0.0-20260721165653-c7bd8ea1247f",
+		ModuleVersion: "v0.0.0-20260723045535-b876e9bc1b20",
 		BuildIdentity: "",
 	})
 	if err != nil {

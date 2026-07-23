@@ -133,7 +133,7 @@ func TestRenderIntrinsicAliasesAuthoritativeKernelTypes(t *testing.T) {
 		if _, err := parser.ParseFile(token.NewFileSet(), file.Path(), file.Data(), parser.AllErrors); err != nil {
 			t.Fatalf("parse intrinsic contract %s: %v\n%s", definition.ID(), err, file.Data())
 		}
-		for _, required := range []string{"type Request = kernelintrinsic.", "type Response = kernelintrinsic."} {
+		for _, required := range []string{"type Request = kernelinterface.", "type Response = kernelinterface."} {
 			if !strings.Contains(string(file.Data()), required) {
 				t.Fatalf("intrinsic contract %s omits %q:\n%s", definition.ID(), required, file.Data())
 			}

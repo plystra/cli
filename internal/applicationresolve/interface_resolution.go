@@ -8,6 +8,7 @@ import (
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/intrinsiccatalog"
+	"github.com/plystra/cli/internal/intrinsicinterface"
 	"github.com/plystra/cli/internal/plugininventory"
 )
 
@@ -38,9 +39,11 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 		visibleInterfaces[definition.ID()] = struct{}{}
 	}
 	legacyCapabilities := legacyCapabilityIDs(legacyPlugins)
+	intrinsicInterfaces := intrinsicInterfaceIDs()
 	for _, exposure := range exposures {
 		identifier := exposure.ID().String()
-		if _, visible := visibleInterfaces[identifier]; !visible {
+		_, intrinsic := intrinsicInterfaces[identifier]
+		if _, visible := visibleInterfaces[identifier]; !visible && !intrinsic {
 			if _, legacy := legacyCapabilities[identifier]; legacy {
 				continue
 			}
@@ -70,6 +73,14 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 		Requirements:    rootRequirements,
 		Choices:         explicitChoices,
 	})
+}
+
+func intrinsicInterfaceIDs() map[string]struct{} {
+	result := make(map[string]struct{})
+	for _, definition := range intrinsicinterface.Definitions() {
+		result[definition.ID().String()] = struct{}{}
+	}
+	return result
 }
 
 func interfaceRequirementSources(source, path string, provenance map[string][]string, current map[string]struct{}) []string {

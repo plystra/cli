@@ -134,6 +134,7 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 		fmt.Fprintln(&source, "\tkernelcapability \"github.com/plystra/kernel/capability\"")
 	}
 	fmt.Fprintln(&source, "\tkernelintrinsic \"github.com/plystra/kernel/intrinsic\"")
+	fmt.Fprintln(&source, "\tkernelhealthv1 \"github.com/plystra/kernel/interfaces/kernel/health/v1\"")
 	fmt.Fprintln(&source, "\tkernelinvocation \"github.com/plystra/kernel/invocation\"")
 	if ordinaryCount != 0 {
 		fmt.Fprintln(&source, "\tkernelplugin \"github.com/plystra/kernel/plugin\"")
@@ -207,15 +208,15 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// IntrinsicHealth invokes the always-published kernel.health/v1 endpoint through the shared dispatcher.")
-	fmt.Fprintln(&source, "func (i Invocations) IntrinsicHealth(ctx context.Context) (kernelintrinsic.HealthResponse, error) {")
+	fmt.Fprintln(&source, "func (i Invocations) IntrinsicHealth(ctx context.Context) (kernelhealthv1.Response, error) {")
 	fmt.Fprintln(&source, "\tif !i.Valid() {")
-	fmt.Fprintln(&source, "\t\treturn kernelintrinsic.HealthResponse{}, fmt.Errorf(\"%w: intrinsic health runtime is invalid\", ErrInvocationAssembly)")
+	fmt.Fprintln(&source, "\t\treturn kernelhealthv1.Response{}, fmt.Errorf(\"%w: intrinsic health runtime is invalid\", ErrInvocationAssembly)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\thandle, err := kernelinvocation.NewHandle(i.dispatcher, kernelintrinsic.HealthContract(), true)")
 	fmt.Fprintln(&source, "\tif err != nil {")
-	fmt.Fprintln(&source, "\t\treturn kernelintrinsic.HealthResponse{}, fmt.Errorf(\"%w: intrinsic health handle: %w\", ErrInvocationAssembly, err)")
+	fmt.Fprintln(&source, "\t\treturn kernelhealthv1.Response{}, fmt.Errorf(\"%w: intrinsic health handle: %w\", ErrInvocationAssembly, err)")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\treturn handle.Invoke(ctx, kernelintrinsic.HealthRequest{})")
+	fmt.Fprintln(&source, "\treturn handle.Invoke(ctx, kernelhealthv1.Request{})")
 	fmt.Fprintln(&source, "}")
 	for _, invocation := range invocations {
 		fmt.Fprintln(&source)

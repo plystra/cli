@@ -2040,9 +2040,9 @@ capabilities:
 
 	healthContract := readFile(t, root, "generated/go/contracts/kernel/health/v1/contract_gen.go")
 	for _, required := range [][]byte{
-		[]byte("type Request = kernelintrinsic.HealthRequest"),
-		[]byte("type Response = kernelintrinsic.HealthResponse"),
-		[]byte("type ResponseStatus = kernelintrinsic.HealthStatus"),
+		[]byte("type Request = kernelinterface.Request"),
+		[]byte("type Response = kernelinterface.Response"),
+		[]byte("type ResponseStatus = kernelinterface.Status"),
 	} {
 		if !bytes.Contains(healthContract, required) {
 			t.Fatalf("generated health contract omits %q:\n%s", required, healthContract)

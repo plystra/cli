@@ -28,6 +28,12 @@ var (
 	// ErrAmbiguousImplementation reports a required Interface with several
 	// compatible visible constructors and no explicit effective choice.
 	ErrAmbiguousImplementation = errors.New("ambiguous Interface Implementation")
+	// ErrReservedInterface reports application code declaring an Interface in
+	// the intrinsic kernel.* namespace.
+	ErrReservedInterface = errors.New("reserved intrinsic Kernel Interface")
+	// ErrIntrinsicChoice reports an ordinary Implementation selection for an
+	// Interface that Kernel construction supplies intrinsically.
+	ErrIntrinsicChoice = errors.New("intrinsic Kernel Interface cannot select an Implementation")
 )
 
 // Candidate is one compatible visible Implementation retained by an

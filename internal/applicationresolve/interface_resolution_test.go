@@ -145,6 +145,96 @@ func TestResolveCollectsEnvironmentExposureAsInterfaceRequirement(t *testing.T) 
 	}
 }
 
+func TestResolveCollectsIntrinsicKernelRequirementsWithApplicationProvenance(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModule(t, root, "example.com/intrinsic-application")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
+  expose: [kernel.health/v1]
+interfaces:
+  require: [kernel.info/v1]
+`)
+	before := snapshotTree(t, root)
+	resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start: root,
+		Environment: goEnvironment(map[string]string{
+			"GOWORK":  "off",
+			"GOPROXY": "off",
+			"GOSUMDB": "off",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	requirements := resolved.InterfaceResolution().IntrinsicRequirements()
+	if len(requirements) != 2 || requirements[0].InterfaceID().String() != "kernel.health/v1" || requirements[0].PackagePath() != "github.com/plystra/kernel/interfaces/kernel/health/v1" || !reflect.DeepEqual(requirements[0].Sources(), []string{
+		"github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
+		`plystra.yaml http.expose["kernel.health/v1"]`,
+	}) || requirements[1].InterfaceID().String() != "kernel.info/v1" || requirements[1].PackagePath() != "github.com/plystra/kernel/interfaces/kernel/info/v1" || !reflect.DeepEqual(requirements[1].Sources(), []string{
+		"github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
+		`plystra.yaml interfaces.require["kernel.info/v1"]`,
+	}) {
+		t.Fatalf("intrinsic requirements = %#v", requirements)
+	}
+	if len(resolved.InterfaceResolution().Selections()) != 0 || len(resolved.InterfaceResolution().Graph().Roots()) != 0 {
+		t.Fatalf("intrinsic requirements entered ordinary selection: %#v", resolved.InterfaceResolution())
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("intrinsic resolution mutated Project:\nbefore: %#v\nafter: %#v", before, after)
+	}
+}
+
+func TestResolveRejectsUnknownOrShadowedIntrinsicKernelInterfaceWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		prepare func(testing.TB, string)
+		want    []string
+	}{
+		{
+			name: "unknown reserved Interface",
+			prepare: func(t testing.TB, root string) {
+				writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [kernel.missing/v1]}\n")
+			},
+			want: []string{"kernel.missing/v1", "selected Kernel API"},
+		},
+		{
+			name: "application shadow",
+			prepare: func(t testing.TB, root string) {
+				writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+				writeResolvedInterface(t, root, "kernel/health/v1", "healthv1", "kernel.health/v1", "Health")
+			},
+			want: []string{"kernel.health/v1", "reserved kernel.* namespace", "canonical Kernel Interface package"},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeModule(t, root, "example.com/intrinsic-application")
+			test.prepare(t, root)
+			before := snapshotTree(t, root)
+			_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+				Start: root,
+				Environment: goEnvironment(map[string]string{
+					"GOWORK":  "off",
+					"GOPROXY": "off",
+					"GOSUMDB": "off",
+				}),
+			})
+			if !errors.Is(err, applicationresolve.ErrResolve) || !containsResolutionFragments(err.Error(), test.want...) {
+				t.Fatalf("Resolve error = %v", err)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed intrinsic resolution mutated Project:\nbefore: %#v\nafter: %#v", before, after)
+			}
+		})
+	}
+}
+
 func TestResolveCollectsDependencyExposureWithComposedProvenance(t *testing.T) {
 	t.Parallel()
 

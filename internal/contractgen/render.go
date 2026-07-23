@@ -135,7 +135,7 @@ func render(schema []byte, intrinsic bool) (File, error) {
 	fmt.Fprintln(&source)
 	fmt.Fprintf(&source, "package %s\n\n", packageName)
 	if intrinsic {
-		fmt.Fprintln(&source, "import kernelintrinsic \"github.com/plystra/kernel/intrinsic\"")
+		fmt.Fprintf(&source, "import kernelinterface %s\n", strconv.Quote(intrinsicInterfacePackage(identifier)))
 		fmt.Fprintln(&source)
 	}
 	fmt.Fprintf(&source, "const CapabilityID = %s\n\n", strconv.Quote(identifier.String()))
@@ -181,19 +181,30 @@ func validateIntrinsicSchema(identifier capabilityid.Identifier, canonical []byt
 func renderIntrinsicTypes(source *strings.Builder, identifier capabilityid.Identifier) {
 	switch identifier.String() {
 	case "kernel.health/v1":
-		fmt.Fprintln(source, "type Request = kernelintrinsic.HealthRequest")
+		fmt.Fprintln(source, "type Request = kernelinterface.Request")
 		fmt.Fprintln(source)
-		fmt.Fprintln(source, "type Response = kernelintrinsic.HealthResponse")
+		fmt.Fprintln(source, "type Response = kernelinterface.Response")
 		fmt.Fprintln(source)
-		fmt.Fprintln(source, "type ResponseStatus = kernelintrinsic.HealthStatus")
+		fmt.Fprintln(source, "type ResponseStatus = kernelinterface.Status")
 		fmt.Fprintln(source)
-		fmt.Fprintln(source, "const ResponseStatusHealthy ResponseStatus = kernelintrinsic.HealthStatusHealthy")
+		fmt.Fprintln(source, "const ResponseStatusHealthy ResponseStatus = kernelinterface.StatusHealthy")
 		fmt.Fprintln(source)
 	case "kernel.info/v1":
-		fmt.Fprintln(source, "type Request = kernelintrinsic.InfoRequest")
+		fmt.Fprintln(source, "type Request = kernelinterface.Request")
 		fmt.Fprintln(source)
-		fmt.Fprintln(source, "type Response = kernelintrinsic.InfoResponse")
+		fmt.Fprintln(source, "type Response = kernelinterface.Response")
 		fmt.Fprintln(source)
+	}
+}
+
+func intrinsicInterfacePackage(identifier capabilityid.Identifier) string {
+	switch identifier.String() {
+	case "kernel.health/v1":
+		return "github.com/plystra/kernel/interfaces/kernel/health/v1"
+	case "kernel.info/v1":
+		return "github.com/plystra/kernel/interfaces/kernel/info/v1"
+	default:
+		return ""
 	}
 }
 

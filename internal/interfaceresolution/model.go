@@ -35,11 +35,32 @@ type Input struct {
 	Choices         []Choice
 }
 
+// IntrinsicRequirement is one always-present reserved Kernel Interface with
+// its canonical package and complete stable requirement provenance. It has no
+// ordinary Implementation selection.
+type IntrinsicRequirement struct {
+	interfaceID interfaceid.Identifier
+	packagePath string
+	sources     []string
+}
+
+// InterfaceID returns the exact reserved Interface ID.
+func (r IntrinsicRequirement) InterfaceID() interfaceid.Identifier { return r.interfaceID }
+
+// PackagePath returns the canonical Kernel-owned Interface package.
+func (r IntrinsicRequirement) PackagePath() string { return r.packagePath }
+
+// Sources returns sorted unique Kernel and current-application provenance.
+func (r IntrinsicRequirement) Sources() []string {
+	return append([]string(nil), r.sources...)
+}
+
 // Result is one immutable resolved selection closure and validated constructor
 // dependency graph.
 type Result struct {
-	graph      constructorgraph.Graph
-	selections []constructorgraph.Selection
+	graph                 constructorgraph.Graph
+	selections            []constructorgraph.Selection
+	intrinsicRequirements []IntrinsicRequirement
 }
 
 // Graph returns the immutable reachable constructor dependency graph.
@@ -48,6 +69,16 @@ func (r Result) Graph() constructorgraph.Graph { return r.graph }
 // Selections returns every reachable Interface binding in canonical ID order.
 func (r Result) Selections() []constructorgraph.Selection {
 	return cloneSelections(r.selections)
+}
+
+// IntrinsicRequirements returns every reserved Kernel Interface in exact ID
+// order. These requirements never enter ordinary Implementation selection.
+func (r Result) IntrinsicRequirements() []IntrinsicRequirement {
+	result := append([]IntrinsicRequirement(nil), r.intrinsicRequirements...)
+	for index := range result {
+		result[index].sources = append([]string(nil), result[index].sources...)
+	}
+	return result
 }
 
 func cloneSelections(values []constructorgraph.Selection) []constructorgraph.Selection {
