@@ -145,6 +145,53 @@ replace example.com/interface-dependency => ../dependency
 	}
 }
 
+func TestResolveAppliesNoDiscoveryOrFilesystemOrderSelectionPriority(t *testing.T) {
+	t.Parallel()
+
+	orders := [][]string{
+		{"zeta", "alpha"},
+		{"alpha", "zeta"},
+	}
+	var baseline string
+	for index, order := range orders {
+		root := t.TempDir()
+		writeModule(t, root, "example.com/order-independent")
+		writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+		writeResolvedInterface(t, root, "app/run/v1", "runv1", "app.run/v1", "Run")
+		for _, packageName := range order {
+			writeResolvedSimpleImplementationForModule(t, root, "example.com/order-independent", packageName, "app.run/v1", "app/run/v1", "Run")
+		}
+		before := snapshotTree(t, root)
+		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+			Start: root,
+			Environment: goEnvironment(map[string]string{
+				"GOWORK":  "off",
+				"GOPROXY": "off",
+				"GOSUMDB": "off",
+			}),
+		})
+		if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, interfaceresolution.ErrAmbiguousImplementation) {
+			t.Fatalf("Resolve order %v error = %v", order, err)
+		}
+		var ambiguous *interfaceresolution.AmbiguousImplementationError
+		if !errors.As(err, &ambiguous) {
+			t.Fatalf("Resolve order %v omitted typed ambiguity: %v", order, err)
+		}
+		candidates := ambiguous.Candidates()
+		if len(candidates) != 2 || candidates[0].Constructor().String() != "example.com/order-independent/alpha.New" || candidates[1].Constructor().String() != "example.com/order-independent/zeta.New" {
+			t.Fatalf("Resolve order %v candidates = %#v", order, candidates)
+		}
+		if index == 0 {
+			baseline = err.Error()
+		} else if err.Error() != baseline {
+			t.Fatalf("filesystem creation order changed ambiguity:\nfirst:  %s\nsecond: %s", baseline, err)
+		}
+		if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+			t.Fatalf("Resolve order %v mutated Project:\nbefore: %#v\nafter: %#v", order, before, after)
+		}
+	}
+}
+
 func TestResolveCollectsEnvironmentExposureAsInterfaceRequirement(t *testing.T) {
 	t.Parallel()
 
