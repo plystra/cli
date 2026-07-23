@@ -444,11 +444,18 @@ func TestDiscoverApplicationCompilesConstructorConfigurationFields(t *testing.T)
 	root := t.TempDir()
 	writeProject(t, root, "example.com/configured")
 	writeFile(t, filepath.Join(root, "service", "implementation.go"), configurationImplementationSource(`
-	RetryCount int    `+"`yaml:\"retry_count\"`"+`
-	Host       string `+"`yaml:\"host\"`"+`
-	Endpoint   Endpoint `+"`yaml:\"endpoint\"`"+`
+	RetryCount int                 `+"`yaml:\"retry_count\"`"+`
+	Host       string              `+"`yaml:\"host\"`"+`
+	Endpoint   Endpoint            `+"`yaml:\"endpoint\"`"+`
 	Mode       bool
-	Ignored    string `+"`yaml:\"-\"`"+`
+	Delay      Duration            `+"`yaml:\"delay\"`"+`
+	Target     URL                 `+"`yaml:\"target\"`"+`
+	Settings   Settings            `+"`yaml:\"settings\"`"+`
+	Optional   *Settings           `+"`yaml:\"optional\"`"+`
+	Labels     []string            `+"`yaml:\"labels\"`"+`
+	Ports      [2]uint16           `+"`yaml:\"ports\"`"+`
+	Routes     map[string]Endpoint `+"`yaml:\"routes\"`"+`
+	Ignored    string              `+"`yaml:\"-\"`"+`
 	private    string
 `))
 	before := snapshotFiles(t, root)
@@ -466,12 +473,63 @@ func TestDiscoverApplicationCompilesConstructorConfigurationFields(t *testing.T)
 	for index, field := range fields {
 		got[index] = field.Name() + ":" + field.GoName() + ":" + field.TypeIdentity()
 	}
-	want := []string{"endpoint:Endpoint:example.com/configured/service.Endpoint", "host:Host:string", "mode:Mode:bool", "retry_count:RetryCount:int"}
+	want := []string{
+		"delay:Delay:time.Duration",
+		"endpoint:Endpoint:example.com/configured/service.Endpoint",
+		"host:Host:string",
+		"labels:Labels:[]string",
+		"mode:Mode:bool",
+		"optional:Optional:*example.com/configured/service.Settings",
+		"ports:Ports:[2]uint16",
+		"retry_count:RetryCount:int",
+		"routes:Routes:map[string]example.com/configured/service.Endpoint",
+		"settings:Settings:example.com/configured/service.Settings",
+		"target:Target:net/url.URL",
+	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("Config fields = %v, want %v", got, want)
 	}
 	if field, exists := configuration.Lookup("retry_count"); !exists || field.GoName() != "RetryCount" || field.TypeIdentity() != "int" {
 		t.Fatalf("Lookup(retry_count) = %#v, %t", field, exists)
+	}
+	wantKinds := map[string]implementationinventory.ConfigurationValueKind{
+		"delay":       implementationinventory.ConfigurationValueDuration,
+		"endpoint":    implementationinventory.ConfigurationValueString,
+		"host":        implementationinventory.ConfigurationValueString,
+		"labels":      implementationinventory.ConfigurationValueList,
+		"mode":        implementationinventory.ConfigurationValueBoolean,
+		"optional":    implementationinventory.ConfigurationValuePointer,
+		"ports":       implementationinventory.ConfigurationValueList,
+		"retry_count": implementationinventory.ConfigurationValueSignedInteger,
+		"routes":      implementationinventory.ConfigurationValueMap,
+		"settings":    implementationinventory.ConfigurationValueObject,
+		"target":      implementationinventory.ConfigurationValueURL,
+	}
+	for name, wantKind := range wantKinds {
+		field, exists := configuration.Lookup(name)
+		if !exists || !field.Value().Kind().Valid() || field.Value().Kind() != wantKind || field.Value().TypeIdentity() != field.TypeIdentity() {
+			t.Fatalf("Config field %q value = %#v, %t, want kind %s", name, field.Value(), exists, wantKind)
+		}
+	}
+	settings, _ := configuration.Lookup("settings")
+	settingsFields := settings.Value().Fields()
+	if len(settingsFields) != 1 || settingsFields[0].Name() != "enabled" || settingsFields[0].Value().Kind() != implementationinventory.ConfigurationValueBoolean {
+		t.Fatalf("Settings fields = %#v", settingsFields)
+	}
+	optional, _ := configuration.Lookup("optional")
+	if element, exists := optional.Value().Element(); !exists || element.Kind() != implementationinventory.ConfigurationValueObject || len(element.Fields()) != 1 {
+		t.Fatalf("Optional element = %#v, %t", element, exists)
+	}
+	labels, _ := configuration.Lookup("labels")
+	if element, exists := labels.Value().Element(); !exists || element.Kind() != implementationinventory.ConfigurationValueString {
+		t.Fatalf("Labels element = %#v, %t", element, exists)
+	}
+	ports, _ := configuration.Lookup("ports")
+	if length, fixed := ports.Value().ArrayLength(); !fixed || length != 2 {
+		t.Fatalf("Ports array length = %d, %t", length, fixed)
+	}
+	if length, fixed := labels.Value().ArrayLength(); fixed || length != 0 {
+		t.Fatalf("Labels array length = %d, %t", length, fixed)
 	}
 	if field, exists := configuration.Lookup("ignored"); exists || field.Name() != "" || field.GoName() != "" || field.TypeIdentity() != "" {
 		t.Fatalf("Lookup(ignored) = %#v, %t", field, exists)
@@ -498,6 +556,12 @@ func TestDiscoverApplicationRejectsInvalidImplementationConfigFields(t *testing.
 		{name: "tag option", fields: "Host string `yaml:\"host,omitempty\"`", want: "YAML tag options are not supported"},
 		{name: "embedded field", fields: "Settings", want: "embedded Config field Settings is not supported"},
 		{name: "tagged private field", fields: "private string `yaml:\"private\"`", want: "unexported Config field private must not declare a YAML key"},
+		{name: "complex", fields: "Value complex64 `yaml:\"value\"`", want: "configuration Go type complex64 is not supported"},
+		{name: "channel", fields: "Value chan string `yaml:\"value\"`", want: "configuration Go type chan string is not supported"},
+		{name: "function", fields: "Value func() `yaml:\"value\"`", want: "configuration Go type func() is not supported"},
+		{name: "interface", fields: "Value any `yaml:\"value\"`", want: "configuration Go type any is not supported"},
+		{name: "map key", fields: "Value map[int]string `yaml:\"value\"`", want: "must use string keys"},
+		{name: "recursive", fields: "Value *Config `yaml:\"value\"`", want: "configuration Go type example.com/invalid-config/service.Config is recursive"},
 	}
 	for _, test := range tests {
 		test := test
@@ -1568,7 +1632,11 @@ func %s(Config) (*Service, error) {
 func configurationImplementationSource(fields string) string {
 	return fmt.Sprintf(`package service
 
-import "context"
+import (
+	"context"
+	"net/url"
+	"time"
+)
 
 //plystra:interface service.operation.run/v1
 type Interface interface {
@@ -1577,8 +1645,13 @@ type Interface interface {
 
 type Request struct{}
 type Response struct{}
-type Settings struct{}
+type Settings struct {
+	Enabled bool `+"`yaml:\"enabled\"`"+`
+	private string
+}
 type Endpoint string
+type Duration = time.Duration
+type URL = url.URL
 type Config struct {
 %s
 }

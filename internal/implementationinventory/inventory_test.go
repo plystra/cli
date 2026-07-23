@@ -79,6 +79,74 @@ func TestBuildOrdersAndProtectsDiscoveredImplementations(t *testing.T) {
 	}
 }
 
+func TestBuildClassifiesExactKernelSecretConfigurationField(t *testing.T) {
+	t.Parallel()
+
+	secretPackage := types.NewPackage("github.com/plystra/kernel/configuration", "configuration")
+	secretName := types.NewTypeName(token.NoPos, secretPackage, "Secret", nil)
+	secretType := types.NewNamed(secretName, types.NewStruct(nil, nil), nil)
+	secretPackage.Scope().Insert(secretName)
+	compiled := compiledConfiguredPackage("example.com/app/service", "service", secretType)
+	parsed := declaration(t, "service/implementation.go", "service", "New", "service.operation.run/v1")
+	index, err := implementationinventory.Build([]implementationinventory.Input{{
+		ModulePath:  "example.com/app",
+		PackagePath: "example.com/app/service",
+		Local:       true,
+		Declaration: parsed,
+		Types:       compiled,
+	}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	implementations := index.Implementations()
+	if len(implementations) != 1 {
+		t.Fatalf("Implementations = %#v", implementations)
+	}
+	configuration, configured := implementations[0].Configuration()
+	field, exists := configuration.Lookup("password")
+	if !configured || !exists || field.Value().Kind() != implementationinventory.ConfigurationValueSecret || field.TypeIdentity() != "github.com/plystra/kernel/configuration.Secret" || !field.Value().Kind().Valid() {
+		t.Fatalf("Secret configuration = %#v, field %#v, %t, %t", configuration, field, configured, exists)
+	}
+	if implementationinventory.ConfigurationValueKind("").Valid() || implementationinventory.ConfigurationValueKind("unknown").Valid() {
+		t.Fatal("unknown configuration value kind reported valid")
+	}
+}
+
+func TestBuildRejectsSecretConfigurationContainers(t *testing.T) {
+	t.Parallel()
+
+	secretPackage := types.NewPackage("github.com/plystra/kernel/configuration", "configuration")
+	secretName := types.NewTypeName(token.NoPos, secretPackage, "Secret", nil)
+	secretType := types.NewNamed(secretName, types.NewStruct(nil, nil), nil)
+	secretPackage.Scope().Insert(secretName)
+	for _, test := range []struct {
+		name      string
+		fieldType types.Type
+	}{
+		{name: "pointer", fieldType: types.NewPointer(secretType)},
+		{name: "slice", fieldType: types.NewSlice(secretType)},
+		{name: "array", fieldType: types.NewArray(secretType, 2)},
+		{name: "map", fieldType: types.NewMap(types.Typ[types.String], secretType)},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			compiled := compiledConfiguredPackage("example.com/app/service", "service", test.fieldType)
+			parsed := declaration(t, "service/implementation.go", "service", "New", "service.operation.run/v1")
+			_, err := implementationinventory.Build([]implementationinventory.Input{{
+				ModulePath:  "example.com/app",
+				PackagePath: "example.com/app/service",
+				Local:       true,
+				Declaration: parsed,
+				Types:       compiled,
+			}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")})
+			if !errors.Is(err, implementationinventory.ErrInvalidConfiguration) || !strings.Contains(err.Error(), "Secret configuration must be a direct named field") {
+				t.Fatalf("Build error = %v", err)
+			}
+		})
+	}
+}
+
 func TestBuildRejectsInconsistentCompiledPackageProvenance(t *testing.T) {
 	t.Parallel()
 
@@ -241,5 +309,29 @@ func compiledPackage(path, name, function string, methods ...string) *types.Pack
 	)
 	signature := types.NewSignatureType(nil, nil, nil, nil, results, false)
 	compiled.Scope().Insert(types.NewFunc(token.NoPos, compiled, function, signature))
+	return compiled
+}
+
+func compiledConfiguredPackage(path, name string, fieldType types.Type) *types.Package {
+	compiled := types.NewPackage(path, name)
+	configName := types.NewTypeName(token.NoPos, compiled, "Config", nil)
+	config := types.NewNamed(configName, types.NewStruct(
+		[]*types.Var{types.NewVar(token.NoPos, compiled, "Password", fieldType)},
+		[]string{`yaml:"password"`},
+	), nil)
+	compiled.Scope().Insert(configName)
+
+	serviceName := types.NewTypeName(token.NoPos, compiled, "Service", nil)
+	service := types.NewNamed(serviceName, types.NewStruct(nil, nil), nil)
+	compiled.Scope().Insert(serviceName)
+	receiver := types.NewVar(token.NoPos, compiled, "service", types.NewPointer(service))
+	service.AddMethod(types.NewFunc(token.NoPos, compiled, "Run", types.NewSignatureType(receiver, nil, nil, nil, nil, false)))
+
+	parameters := types.NewTuple(types.NewVar(token.NoPos, compiled, "configuration", config))
+	results := types.NewTuple(
+		types.NewVar(token.NoPos, compiled, "", types.NewPointer(service)),
+		types.NewVar(token.NoPos, compiled, "", types.Universe.Lookup("error").Type()),
+	)
+	compiled.Scope().Insert(types.NewFunc(token.NoPos, compiled, "New", types.NewSignatureType(nil, nil, nil, parameters, results, false)))
 	return compiled
 }

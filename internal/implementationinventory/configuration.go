@@ -8,6 +8,92 @@ import (
 	"strings"
 )
 
+const (
+	maximumConfigurationTypeDepth = 64
+	maximumConfigurationFields    = 65_536
+)
+
+// ConfigurationValueKind is one closed authored Go shape accepted for
+// constructor configuration schema compilation.
+type ConfigurationValueKind string
+
+const (
+	ConfigurationValueString          ConfigurationValueKind = "string"
+	ConfigurationValueBoolean         ConfigurationValueKind = "boolean"
+	ConfigurationValueSignedInteger   ConfigurationValueKind = "signed-integer"
+	ConfigurationValueUnsignedInteger ConfigurationValueKind = "unsigned-integer"
+	ConfigurationValueNumber          ConfigurationValueKind = "number"
+	ConfigurationValueDuration        ConfigurationValueKind = "duration"
+	ConfigurationValueURL             ConfigurationValueKind = "url"
+	ConfigurationValueSecret          ConfigurationValueKind = "secret"
+	ConfigurationValueObject          ConfigurationValueKind = "object"
+	ConfigurationValuePointer         ConfigurationValueKind = "pointer"
+	ConfigurationValueList            ConfigurationValueKind = "list"
+	ConfigurationValueMap             ConfigurationValueKind = "map"
+)
+
+// Valid reports whether the value belongs to the closed configuration kind
+// vocabulary.
+func (k ConfigurationValueKind) Valid() bool {
+	switch k {
+	case ConfigurationValueString,
+		ConfigurationValueBoolean,
+		ConfigurationValueSignedInteger,
+		ConfigurationValueUnsignedInteger,
+		ConfigurationValueNumber,
+		ConfigurationValueDuration,
+		ConfigurationValueURL,
+		ConfigurationValueSecret,
+		ConfigurationValueObject,
+		ConfigurationValuePointer,
+		ConfigurationValueList,
+		ConfigurationValueMap:
+		return true
+	default:
+		return false
+	}
+}
+
+// ConfigurationValue is one immutable recursively compiled authored Go type.
+// Objects expose their fixed field schema; pointers, lists, and string-keyed
+// maps expose one element type. An array additionally retains its exact length.
+type ConfigurationValue struct {
+	kind         ConfigurationValueKind
+	typeIdentity string
+	element      *ConfigurationValue
+	fields       []ConfigurationField
+	arrayLength  int64
+	isArray      bool
+}
+
+// Kind returns the closed normalized Go value kind.
+func (v ConfigurationValue) Kind() ConfigurationValueKind { return v.kind }
+
+// TypeIdentity returns the deterministic canonical Go type identity.
+func (v ConfigurationValue) TypeIdentity() string { return v.typeIdentity }
+
+// Element returns the immutable element for a pointer, list, or map.
+func (v ConfigurationValue) Element() (ConfigurationValue, bool) {
+	if v.element == nil {
+		return ConfigurationValue{}, false
+	}
+	return *v.element, true
+}
+
+// Fields returns the defensive name-ordered object field schema.
+func (v ConfigurationValue) Fields() []ConfigurationField {
+	return append([]ConfigurationField(nil), v.fields...)
+}
+
+// ArrayLength returns an authored fixed array length. A false result
+// distinguishes slices and every non-list kind from arrays, including [0]T.
+func (v ConfigurationValue) ArrayLength() (int64, bool) {
+	if v.kind != ConfigurationValueList || !v.isArray {
+		return 0, false
+	}
+	return v.arrayLength, true
+}
+
 // Configuration identifies the exact exported same-package Config struct used
 // as an Implementation constructor's optional first parameter.
 type Configuration struct {
@@ -21,9 +107,9 @@ type Configuration struct {
 // Config type. Name is the canonical YAML key while GoName and TypeIdentity
 // retain the exact authored Go field identity for later typed parsing.
 type ConfigurationField struct {
-	name         string
-	goName       string
-	typeIdentity string
+	name   string
+	goName string
+	value  ConfigurationValue
 }
 
 // Name returns the canonical lower-snake-case YAML key.
@@ -33,7 +119,10 @@ func (f ConfigurationField) Name() string { return f.name }
 func (f ConfigurationField) GoName() string { return f.goName }
 
 // TypeIdentity returns the deterministic fully qualified Go type identity.
-func (f ConfigurationField) TypeIdentity() string { return f.typeIdentity }
+func (f ConfigurationField) TypeIdentity() string { return f.value.typeIdentity }
+
+// Value returns the recursively compiled immutable Go value schema.
+func (f ConfigurationField) Value() ConfigurationValue { return f.value }
 
 // PackagePath returns the Go import path that owns Config.
 func (c Configuration) PackagePath() string { return c.packagePath }
@@ -103,17 +192,26 @@ func validateConfiguration(compiled *types.Package, function *types.Func) (Confi
 		if _, ok := named.Underlying().(*types.Struct); !ok {
 			return Configuration{}, false, fmt.Errorf("Config must be a struct")
 		}
-		fields, err := compileConfigurationFields(named.Underlying().(*types.Struct))
+		value, err := compileConfigurationValue(named, &configurationCompileState{active: make(map[types.Type]struct{})}, 0)
 		if err != nil {
 			return Configuration{}, false, err
 		}
+		if value.kind != ConfigurationValueObject {
+			return Configuration{}, false, fmt.Errorf("Config must compile to an object")
+		}
+		fields := value.fields
 		configuration = Configuration{packagePath: compiled.Path(), typeName: "Config", fields: fields, named: named}
 		hasConfiguration = true
 	}
 	return configuration, hasConfiguration, nil
 }
 
-func compileConfigurationFields(structure *types.Struct) ([]ConfigurationField, error) {
+type configurationCompileState struct {
+	active map[types.Type]struct{}
+	fields int
+}
+
+func compileConfigurationFields(structure *types.Struct, state *configurationCompileState, depth int) ([]ConfigurationField, error) {
 	fields := make([]ConfigurationField, 0, structure.NumFields())
 	seen := make(map[string]string, structure.NumFields())
 	for index := 0; index < structure.NumFields(); index++ {
@@ -139,17 +237,160 @@ func compileConfigurationFields(structure *types.Struct) ([]ConfigurationField, 
 		if previous, duplicate := seen[name]; duplicate {
 			return nil, fmt.Errorf("Config fields %s and %s declare duplicate YAML key %q", previous, field.Name(), name)
 		}
+		state.fields++
+		if state.fields > maximumConfigurationFields {
+			return nil, fmt.Errorf("Config schema exceeds %d fields", maximumConfigurationFields)
+		}
+		value, err := compileConfigurationValue(field.Type(), state, depth+1)
+		if err != nil {
+			return nil, fmt.Errorf("Config field %s: %v", field.Name(), err)
+		}
 		seen[name] = field.Name()
 		fields = append(fields, ConfigurationField{
-			name:         name,
-			goName:       field.Name(),
-			typeIdentity: configurationTypeIdentity(field.Type()),
+			name:   name,
+			goName: field.Name(),
+			value:  value,
 		})
 	}
 	sort.Slice(fields, func(left, right int) bool {
 		return fields[left].name < fields[right].name
 	})
 	return fields, nil
+}
+
+func compileConfigurationValue(value types.Type, state *configurationCompileState, depth int) (ConfigurationValue, error) {
+	if value == nil || state == nil || state.active == nil {
+		return ConfigurationValue{}, fmt.Errorf("configuration Go type is unavailable")
+	}
+	if depth > maximumConfigurationTypeDepth {
+		return ConfigurationValue{}, fmt.Errorf("configuration Go type exceeds %d levels", maximumConfigurationTypeDepth)
+	}
+	value = types.Unalias(value)
+	identity := configurationTypeIdentity(value)
+	if named, ok := value.(*types.Named); ok {
+		if exactConfigurationNamedType(named, "time", "Duration") {
+			return ConfigurationValue{kind: ConfigurationValueDuration, typeIdentity: identity}, nil
+		}
+		if exactConfigurationNamedType(named, "net/url", "URL") {
+			return ConfigurationValue{kind: ConfigurationValueURL, typeIdentity: identity}, nil
+		}
+		if exactConfigurationNamedType(named, "github.com/plystra/kernel/configuration", "Secret") {
+			return ConfigurationValue{kind: ConfigurationValueSecret, typeIdentity: identity}, nil
+		}
+		if _, cycle := state.active[named]; cycle {
+			return ConfigurationValue{}, fmt.Errorf("configuration Go type %s is recursive", identity)
+		}
+		state.active[named] = struct{}{}
+		compiled, err := compileConfigurationValue(named.Underlying(), state, depth)
+		delete(state.active, named)
+		if err != nil {
+			return ConfigurationValue{}, err
+		}
+		compiled.typeIdentity = identity
+		return compiled, nil
+	}
+
+	switch typed := value.(type) {
+	case *types.Basic:
+		kind, ok := configurationBasicKind(typed.Kind())
+		if !ok {
+			return ConfigurationValue{}, fmt.Errorf("configuration Go type %s is not supported", identity)
+		}
+		return ConfigurationValue{kind: kind, typeIdentity: identity}, nil
+	case *types.Pointer:
+		element, err := compileConfigurationValue(typed.Elem(), state, depth+1)
+		if err != nil {
+			return ConfigurationValue{}, err
+		}
+		if configurationContainsSecret(element) {
+			return ConfigurationValue{}, fmt.Errorf("Secret configuration must be a direct named field, not %s", identity)
+		}
+		return ConfigurationValue{kind: ConfigurationValuePointer, typeIdentity: identity, element: &element}, nil
+	case *types.Slice:
+		element, err := compileConfigurationValue(typed.Elem(), state, depth+1)
+		if err != nil {
+			return ConfigurationValue{}, err
+		}
+		if configurationContainsSecret(element) {
+			return ConfigurationValue{}, fmt.Errorf("Secret configuration must be a direct named field, not %s", identity)
+		}
+		return ConfigurationValue{kind: ConfigurationValueList, typeIdentity: identity, element: &element}, nil
+	case *types.Array:
+		element, err := compileConfigurationValue(typed.Elem(), state, depth+1)
+		if err != nil {
+			return ConfigurationValue{}, err
+		}
+		if configurationContainsSecret(element) {
+			return ConfigurationValue{}, fmt.Errorf("Secret configuration must be a direct named field, not %s", identity)
+		}
+		return ConfigurationValue{kind: ConfigurationValueList, typeIdentity: identity, element: &element, arrayLength: typed.Len(), isArray: true}, nil
+	case *types.Map:
+		key := types.Unalias(typed.Key())
+		basic, ok := key.Underlying().(*types.Basic)
+		if !ok || basic.Kind() != types.String {
+			return ConfigurationValue{}, fmt.Errorf("configuration map %s must use string keys", identity)
+		}
+		element, err := compileConfigurationValue(typed.Elem(), state, depth+1)
+		if err != nil {
+			return ConfigurationValue{}, err
+		}
+		if configurationContainsSecret(element) {
+			return ConfigurationValue{}, fmt.Errorf("Secret configuration must be a direct named field, not %s", identity)
+		}
+		return ConfigurationValue{kind: ConfigurationValueMap, typeIdentity: identity, element: &element}, nil
+	case *types.Struct:
+		if _, cycle := state.active[typed]; cycle {
+			return ConfigurationValue{}, fmt.Errorf("configuration Go type %s is recursive", identity)
+		}
+		state.active[typed] = struct{}{}
+		fields, err := compileConfigurationFields(typed, state, depth)
+		delete(state.active, typed)
+		if err != nil {
+			return ConfigurationValue{}, err
+		}
+		return ConfigurationValue{kind: ConfigurationValueObject, typeIdentity: identity, fields: fields}, nil
+	default:
+		return ConfigurationValue{}, fmt.Errorf("configuration Go type %s is not supported", identity)
+	}
+}
+
+func exactConfigurationNamedType(value *types.Named, packagePath, typeName string) bool {
+	if value == nil || value.Obj() == nil || value.Obj().Pkg() == nil {
+		return false
+	}
+	return value.Obj().Pkg().Path() == packagePath && value.Obj().Name() == typeName
+}
+
+func configurationBasicKind(kind types.BasicKind) (ConfigurationValueKind, bool) {
+	switch kind {
+	case types.String:
+		return ConfigurationValueString, true
+	case types.Bool:
+		return ConfigurationValueBoolean, true
+	case types.Int, types.Int8, types.Int16, types.Int32, types.Int64:
+		return ConfigurationValueSignedInteger, true
+	case types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64:
+		return ConfigurationValueUnsignedInteger, true
+	case types.Float32, types.Float64:
+		return ConfigurationValueNumber, true
+	default:
+		return "", false
+	}
+}
+
+func configurationContainsSecret(value ConfigurationValue) bool {
+	if value.kind == ConfigurationValueSecret {
+		return true
+	}
+	if value.element != nil && configurationContainsSecret(*value.element) {
+		return true
+	}
+	for _, field := range value.fields {
+		if configurationContainsSecret(field.value) {
+			return true
+		}
+	}
+	return false
 }
 
 func configurationFieldName(goName, yamlTag string, tagged bool) (string, bool, error) {
@@ -173,6 +414,7 @@ func configurationFieldName(goName, yamlTag string, tagged bool) (string, bool, 
 }
 
 func configurationTypeIdentity(value types.Type) string {
+	value = types.Unalias(value)
 	return types.TypeString(value, func(pkg *types.Package) string {
 		if pkg == nil {
 			return ""
