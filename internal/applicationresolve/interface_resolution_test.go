@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/interfaceresolution"
@@ -91,6 +92,78 @@ func TestResolveBuildsSelectedInterfaceConstructorGraphFromConfiguration(t *test
 	}
 	if after := snapshotTree(t, filepath.Dir(root)); !reflect.DeepEqual(after, before) {
 		t.Fatalf("Interface application resolution mutated files:\nbefore: %#v\nafter: %#v", before, after)
+	}
+}
+
+func TestResolveKeepsGeneratedManifestFromOverridingCurrentInterfaceSelection(t *testing.T) {
+	t.Parallel()
+
+	root := writeResolvedInterfaceProject(t)
+	environment := goEnvironment(map[string]string{
+		"GOWORK":  "off",
+		"GOPROXY": "off",
+		"GOSUMDB": "off",
+	})
+	initial, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       root,
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Resolve initial selection: %v", err)
+	}
+	if got := resolvedSelectionSummaries(initial.InterfaceResolution()); !reflect.DeepEqual(got, []string{
+		"app.run/v1=example.com/interface-app/app.New:unique-compatible",
+		"audit.write/v1=example.com/interface-app/auditone.New:explicit",
+	}) {
+		t.Fatalf("initial selections = %v", got)
+	}
+
+	const staleApplicationModelDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
+		Mode:                   initial.ConfigurationSelection().Mode(),
+		Environment:            initial.ConfigurationSelection().Environment(),
+		RootPath:               "plystra.yaml",
+		RootData:               initial.RootConfigurationData(),
+		SelectedPath:           initial.ConfigurationSelection().Path(),
+		SelectedData:           initial.ConfigurationSource(),
+		Composition:            initial.Composition(),
+		ProtobufWireMapDigest:  "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+		ApplicationModelDigest: staleApplicationModelDigest,
+	})
+	if err != nil {
+		t.Fatalf("NewManifestProvenance: %v", err)
+	}
+	staleManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), initial.Resolution().Context(), provenance)
+	if err != nil {
+		t.Fatalf("RenderManifest: %v", err)
+	}
+	writeFile(t, filepath.Join(root, "generated", "manifest.json"), string(staleManifest))
+	writeFile(t, filepath.Join(root, "plystra.yaml"), `interfaces:
+  require: [app.run/v1]
+  use:
+    audit.write/v1: example.com/interface-app/audittwo.New
+`)
+	before := snapshotTree(t, filepath.Dir(root))
+
+	resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       root,
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Resolve current selection: %v", err)
+	}
+	if got := resolvedSelectionSummaries(resolved.InterfaceResolution()); !reflect.DeepEqual(got, []string{
+		"app.run/v1=example.com/interface-app/app.New:unique-compatible",
+		"audit.write/v1=example.com/interface-app/audittwo.New:explicit",
+	}) {
+		t.Fatalf("current selections = %v", got)
+	}
+	previous := resolved.PreviousManifestProvenance()
+	if previous.ApplicationModelDigest() != staleApplicationModelDigest || previous.RootDigest() == resolved.ConfigurationSelection().Digest() {
+		t.Fatalf("previous manifest was not retained as stale non-authoritative provenance: previous model %q root %q; current root %q", previous.ApplicationModelDigest(), previous.RootDigest(), resolved.ConfigurationSelection().Digest())
+	}
+	if after := snapshotTree(t, filepath.Dir(root)); !reflect.DeepEqual(after, before) {
+		t.Fatalf("Resolve mutated Project or stale generated state:\nbefore: %#v\nafter: %#v", before, after)
 	}
 }
 
