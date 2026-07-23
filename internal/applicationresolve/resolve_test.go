@@ -23,6 +23,7 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/configurationresolve"
+	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfacecontract"
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfacemeta"
@@ -78,6 +79,9 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	}
 	if len(first.Interfaces().Interfaces()) != 0 {
 		t.Fatalf("Interfaces = %#v", first.Interfaces().Interfaces())
+	}
+	if len(first.Implementations().Implementations()) != 0 {
+		t.Fatalf("Implementations = %#v", first.Implementations().Implementations())
 	}
 	resolved := first.Resolution()
 	if resolved.Passes() != 1 || len(resolved.Context().Plugins()) != 0 || len(resolved.Context().Requirements()) != 0 || len(resolved.Context().Providers()) != 0 {
@@ -219,6 +223,55 @@ type Response struct {
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("Resolve mutated Interface Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestResolveIntegratesImplementationConstructorPackageDiscovery(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeModule(t, root, "example.com/implementations")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(root, "domains", "orders", "service", "new.go"), `package service
+
+type Service struct{}
+
+//plystra:implements orders.create.execute/v1
+//plystra:implements orders.cancel.execute/v1
+func Build() (*Service, error) {
+	return &Service{}, nil
+}
+`)
+	before := snapshotTree(t, root)
+	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       filepath.Join(root, "domains", "orders"),
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"}),
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	implementations := result.Implementations().Implementations()
+	if len(implementations) != 1 {
+		t.Fatalf("Implementations = %#v", implementations)
+	}
+	discovered := implementations[0]
+	if discovered.ModulePath() != "example.com/implementations" || discovered.ModuleVersion() != "" || discovered.PackagePath() != "example.com/implementations/domains/orders/service" || discovered.PackageName() != "service" || discovered.FunctionName() != "Build" || discovered.SourcePath() != "domains/orders/service/new.go" || !discovered.Local() {
+		t.Fatalf("Implementation provenance = %#v", discovered)
+	}
+	declared := discovered.Declaration().ImplementedInterfaces()
+	if len(declared) != 2 || declared[0].ID().String() != "orders.create.execute/v1" || declared[1].ID().String() != "orders.cancel.execute/v1" {
+		t.Fatalf("implemented Interfaces = %#v", declared)
+	}
+	if !strings.HasPrefix(discovered.Source(), "example.com/implementations@local/domains/orders/service/new.go:") || strings.Contains(discovered.Source(), root) || strings.Contains(discovered.Source(), filepath.ToSlash(root)) {
+		t.Fatalf("Implementation source = %q", discovered.Source())
+	}
+	view := result.Implementations().Implementations()
+	view[0] = implementationinventory.Implementation{}
+	if result.Implementations().Implementations()[0].FunctionName() != "Build" {
+		t.Fatal("Implementations exposed mutable inventory storage")
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("Resolve mutated Project source:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 }
 

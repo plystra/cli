@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/plystra/cli/internal/implementationdecl"
+	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfacecontract"
 	"github.com/plystra/cli/internal/interfacedecl"
 	"github.com/plystra/cli/internal/interfaceinventory"
@@ -192,6 +194,170 @@ func TestDiscoverUsesExplicitWorkspaceProjectsWithoutAssigningPriority(t *testin
 	}
 	if after := snapshotFiles(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("workspace discovery mutated source:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestDiscoverApplicationLoadsImplementationConstructorsFromEligiblePackages(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	directRoot := filepath.Join(root, "direct")
+	transitiveRoot := filepath.Join(root, "transitive")
+	ordinaryRoot := filepath.Join(root, "ordinary")
+
+	writeProject(t, transitiveRoot, "example.com/transitive")
+	writeFile(t, filepath.Join(transitiveRoot, "worker", "new.go"), implementationSource("worker", "New", "dependency.transitive.run/v1"))
+	writeProject(t, directRoot, "example.com/direct")
+	writeFile(t, filepath.Join(directRoot, "go.mod"), "module example.com/direct\n\ngo 1.26\n\nrequire example.com/transitive v1.2.0\n")
+	writeFile(t, filepath.Join(directRoot, "service", "new.go"), implementationSource("service", "New", "dependency.direct.run/v1"))
+	writeFile(t, filepath.Join(directRoot, "internal", "private", "new.go"), "package private\n\n//plystra:implements invalid\nfunc New() {}\n")
+
+	writeFile(t, filepath.Join(ordinaryRoot, "go.mod"), "module example.com/ordinary\n\ngo 1.26\n")
+	writeFile(t, filepath.Join(ordinaryRoot, "new.go"), "package ordinary\n\n//plystra:implements invalid\nfunc New() {}\n")
+
+	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
+
+go 1.26
+
+require (
+	example.com/direct v1.1.0
+	example.com/ordinary v1.0.0
+)
+
+replace example.com/direct => ../direct
+replace example.com/transitive => ../transitive
+replace example.com/ordinary => ../ordinary
+`)
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(appRoot, "alpha", "new.go"), implementationSource("alpha", "Build", "local.alpha.run/v1"))
+	writeFile(t, filepath.Join(appRoot, "zeta", "new.go"), implementationSource("zeta", "New", "local.zeta.run/v1"))
+	writeFile(t, filepath.Join(appRoot, "tagged", "new.go"), "//go:build implementation_active\n\n"+implementationSource("tagged", "New", "local.tagged.run/v1"))
+	writeFile(t, filepath.Join(appRoot, "inactive", "ordinary.go"), "package inactive\n")
+	writeFile(t, filepath.Join(appRoot, "inactive", "new.go"), "//go:build implementation_inactive\n\npackage inactive\n\n//plystra:implements invalid\nfunc New() {}\n")
+	writeFile(t, filepath.Join(appRoot, "ordinary", "ordinary.go"), "package ordinary\n\nconst markerText = \"//plystra:implements invalid\"\n")
+	writeFile(t, filepath.Join(appRoot, "testonly", "new_test.go"), "package testonly\n\n//plystra:implements invalid\nfunc New() {}\n")
+	for _, reserved := range []string{"generated", "vendor", "testdata", "fixture", "fixtures", ".hidden", "_hidden", "dist"} {
+		writeFile(t, filepath.Join(appRoot, reserved, "bad", "new.go"), "package bad\n\n//plystra:implements invalid\nfunc New() {}\n")
+	}
+	nested := filepath.Join(appRoot, "nested")
+	writeProject(t, nested, "example.com/nested")
+	writeFile(t, filepath.Join(nested, "new.go"), "package nested\n\n//plystra:implements invalid\nfunc New() {}\n")
+
+	before := map[string]map[string]fileState{
+		"app":        snapshotFiles(t, appRoot),
+		"direct":     snapshotFiles(t, directRoot),
+		"transitive": snapshotFiles(t, transitiveRoot),
+		"ordinary":   snapshotFiles(t, ordinaryRoot),
+	}
+	environment := goEnvironment(map[string]string{
+		"GOFLAGS": "-tags=implementation_active",
+		"GOPROXY": "off",
+		"GOSUMDB": "off",
+		"GOWORK":  "off",
+	})
+	first := discoverApplication(t, appRoot, environment)
+	second := discoverApplication(t, appRoot, environment)
+	if interfaces := first.Interfaces().Interfaces(); len(interfaces) != 0 {
+		t.Fatalf("Interfaces = %#v", interfaces)
+	}
+	implementations := first.Implementations().Implementations()
+	want := []string{
+		"example.com/app/alpha.Build:local.alpha.run/v1",
+		"example.com/app/tagged.New:local.tagged.run/v1",
+		"example.com/app/zeta.New:local.zeta.run/v1",
+		"example.com/direct/service.New:dependency.direct.run/v1",
+		"example.com/transitive/worker.New:dependency.transitive.run/v1",
+	}
+	if got := implementationSummaries(implementations); !slices.Equal(got, want) {
+		t.Fatalf("Implementations = %v, want %v", got, want)
+	}
+	if got := implementationSummaries(second.Implementations().Implementations()); !slices.Equal(got, want) {
+		t.Fatalf("repeated Implementations = %v, want %v", got, want)
+	}
+	for _, implementation := range implementations {
+		if !strings.Contains(implementation.Source(), implementation.ModulePath()+"@") || !strings.HasSuffix(implementation.SourcePath(), "new.go") {
+			t.Fatalf("Implementation provenance = %#v, source %q", implementation, implementation.Source())
+		}
+		switch implementation.ModulePath() {
+		case "example.com/app":
+			if !implementation.Local() || implementation.ModuleVersion() != "" {
+				t.Fatalf("local Implementation provenance = %#v", implementation)
+			}
+		case "example.com/direct":
+			if implementation.Local() || implementation.ModuleVersion() != "v1.1.0" {
+				t.Fatalf("direct Implementation provenance = %#v", implementation)
+			}
+		case "example.com/transitive":
+			if implementation.Local() || implementation.ModuleVersion() != "v1.2.0" {
+				t.Fatalf("transitive Implementation provenance = %#v", implementation)
+			}
+		default:
+			t.Fatalf("unexpected Implementation module = %#v", implementation)
+		}
+	}
+	view := first.Implementations().Implementations()
+	view[0] = view[len(view)-1]
+	if got := implementationSummaries(first.Implementations().Implementations()); !slices.Equal(got, want) {
+		t.Fatal("Implementations exposed mutable inventory storage")
+	}
+	for name, rootPath := range map[string]string{"app": appRoot, "direct": directRoot, "transitive": transitiveRoot, "ordinary": ordinaryRoot} {
+		if after := snapshotFiles(t, rootPath); !reflect.DeepEqual(after, before[name]) {
+			t.Fatalf("discovery mutated %s source:\nbefore: %#v\nafter:  %#v", name, before[name], after)
+		}
+	}
+}
+
+func TestDiscoverApplicationUsesExplicitWorkspaceImplementationProjects(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	dependencyRoot := filepath.Join(root, "workspace-dependency")
+	writeProject(t, appRoot, "example.com/app")
+	writeProject(t, dependencyRoot, "example.com/workspace-dependency")
+	writeFile(t, filepath.Join(appRoot, "local", "new.go"), implementationSource("local", "New", "workspace.local.run/v1"))
+	writeFile(t, filepath.Join(dependencyRoot, "remote", "new.go"), implementationSource("remote", "New", "workspace.remote.run/v1"))
+	workspacePath := filepath.Join(root, "go.work")
+	writeFile(t, workspacePath, "go 1.26\n\nuse (\n\t./app\n\t./workspace-dependency\n)\n")
+	before := snapshotFiles(t, root)
+
+	discovery := discoverApplication(t, appRoot, goEnvironment(map[string]string{
+		"GOPROXY": "off",
+		"GOSUMDB": "off",
+		"GOWORK":  workspacePath,
+	}))
+	implementations := discovery.Implementations().Implementations()
+	if got := implementationSummaries(implementations); !slices.Equal(got, []string{
+		"example.com/app/local.New:workspace.local.run/v1",
+		"example.com/workspace-dependency/remote.New:workspace.remote.run/v1",
+	}) {
+		t.Fatalf("workspace Implementations = %v", got)
+	}
+	if implementations[0].ModuleVersion() != "" || !implementations[0].Local() || implementations[1].ModuleVersion() != "" || implementations[1].Local() {
+		t.Fatalf("workspace provenance = %#v", implementations)
+	}
+	if after := snapshotFiles(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("workspace discovery mutated source:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestDiscoverApplicationRejectsMalformedActiveImplementationDirective(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeProject(t, root, "example.com/broken")
+	writeFile(t, filepath.Join(root, "service", "new.go"), "package service\n\n//plystra:implements invalid\nfunc New() {}\n")
+	before := snapshotFiles(t, root)
+	_, err := discoverApplicationResult(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
+	if !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, implementationdecl.ErrInvalid) || !strings.Contains(err.Error(), "service/new.go:3:1") {
+		t.Fatalf("DiscoverApplication error = %v", err)
+	}
+	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+		t.Fatalf("error exposed private Project root: %v", err)
+	}
+	if after := snapshotFiles(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("failed discovery mutated source:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 }
 
@@ -664,6 +830,28 @@ func discoverResult(t testing.TB, root string, environment []string) (interfacei
 	return interfaceinventory.Discover(t.Context(), project, dependencies, interfaceinventory.Options{Environment: environment})
 }
 
+func discoverApplication(t testing.TB, root string, environment []string) interfaceinventory.Discovery {
+	t.Helper()
+	discovery, err := discoverApplicationResult(t, root, environment)
+	if err != nil {
+		t.Fatalf("DiscoverApplication: %v", err)
+	}
+	return discovery
+}
+
+func discoverApplicationResult(t testing.TB, root string, environment []string) (interfaceinventory.Discovery, error) {
+	t.Helper()
+	project, err := projectlocate.Find(root)
+	if err != nil {
+		t.Fatalf("locate Project: %v", err)
+	}
+	dependencies, err := moduledependency.Discover(t.Context(), project, moduledependency.Options{Environment: environment})
+	if err != nil {
+		t.Fatalf("discover modules: %v", err)
+	}
+	return interfaceinventory.DiscoverApplication(t.Context(), project, dependencies, interfaceinventory.Options{Environment: environment})
+}
+
 func interfaceSource(packageName, id, method string) string {
 	return fmt.Sprintf(`package %s
 
@@ -683,6 +871,18 @@ type Response struct {
 	Accepted bool `+"`plystra:\"1\" json:\"accepted\"`"+`
 }
 `, packageName, method, id, method)
+}
+
+func implementationSource(packageName, constructor, id string) string {
+	return fmt.Sprintf(`package %s
+
+type Service struct{}
+
+//plystra:implements %s
+func %s() (*Service, error) {
+	return &Service{}, nil
+}
+`, packageName, id, constructor)
 }
 
 func writeProject(t testing.TB, root, modulePath string) {
@@ -735,6 +935,19 @@ func interfaceIDs(index interfaceinventory.Index) []string {
 	result := make([]string, len(interfaces))
 	for position, discovered := range interfaces {
 		result[position] = discovered.ID()
+	}
+	return result
+}
+
+func implementationSummaries(implementations []implementationinventory.Implementation) []string {
+	result := make([]string, len(implementations))
+	for index, implementation := range implementations {
+		declared := implementation.Declaration().ImplementedInterfaces()
+		identifiers := make([]string, len(declared))
+		for declarationIndex, declaration := range declared {
+			identifiers[declarationIndex] = declaration.ID().String()
+		}
+		result[index] = implementation.PackagePath() + "." + implementation.FunctionName() + ":" + strings.Join(identifiers, ",")
 	}
 	return result
 }

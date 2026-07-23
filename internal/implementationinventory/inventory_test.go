@@ -1,0 +1,79 @@
+package implementationinventory_test
+
+import (
+	"errors"
+	"go/types"
+	"slices"
+	"testing"
+
+	"github.com/plystra/cli/internal/implementationdecl"
+	"github.com/plystra/cli/internal/implementationinventory"
+)
+
+func TestBuildOrdersAndProtectsDiscoveredImplementations(t *testing.T) {
+	t.Parallel()
+
+	alpha := declaration(t, "alpha/new.go", "alpha", "Build", "alpha.service.run/v1")
+	zeta := declaration(t, "zeta/new.go", "zeta", "New", "zeta.service.run/v1")
+	index, err := implementationinventory.Build([]implementationinventory.Input{
+		{
+			ModulePath:    "example.com/dependency",
+			ModuleVersion: "v1.2.3",
+			PackagePath:   "example.com/dependency/zeta",
+			Declaration:   zeta,
+			Types:         types.NewPackage("example.com/dependency/zeta", "zeta"),
+		},
+		{
+			ModulePath:  "example.com/app",
+			PackagePath: "example.com/app/alpha",
+			Local:       true,
+			Declaration: alpha,
+			Types:       types.NewPackage("example.com/app/alpha", "alpha"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	implementations := index.Implementations()
+	got := []string{
+		implementations[0].PackagePath() + "." + implementations[0].FunctionName(),
+		implementations[1].PackagePath() + "." + implementations[1].FunctionName(),
+	}
+	if !slices.Equal(got, []string{"example.com/app/alpha.Build", "example.com/dependency/zeta.New"}) {
+		t.Fatalf("Implementation order = %v", got)
+	}
+	if !implementations[0].Local() || implementations[0].ModuleVersion() != "" || implementations[0].Source() != "example.com/app@local/alpha/new.go:4:6" {
+		t.Fatalf("local Implementation = %#v, source %q", implementations[0], implementations[0].Source())
+	}
+	if implementations[1].Local() || implementations[1].ModuleVersion() != "v1.2.3" || implementations[1].Source() != "example.com/dependency@v1.2.3/zeta/new.go:4:6" {
+		t.Fatalf("dependency Implementation = %#v, source %q", implementations[1], implementations[1].Source())
+	}
+	implementations[0] = implementationinventory.Implementation{}
+	if index.Implementations()[0].FunctionName() != "Build" {
+		t.Fatal("Implementations exposed mutable inventory storage")
+	}
+}
+
+func TestBuildRejectsInconsistentCompiledPackageProvenance(t *testing.T) {
+	t.Parallel()
+
+	parsed := declaration(t, "service/new.go", "service", "New", "service.operation.run/v1")
+	_, err := implementationinventory.Build([]implementationinventory.Input{{
+		ModulePath:  "example.com/app",
+		PackagePath: "example.com/app/service",
+		Declaration: parsed,
+		Types:       types.NewPackage("example.com/other/service", "service"),
+	}})
+	if !errors.Is(err, implementationinventory.ErrInvalidInput) {
+		t.Fatalf("Build error = %v", err)
+	}
+}
+
+func declaration(t testing.TB, path, packageName, functionName, interfaceID string) implementationdecl.Declaration {
+	t.Helper()
+	declarations, err := implementationdecl.ParseFile(path, []byte("package "+packageName+"\n\n//plystra:implements "+interfaceID+"\nfunc "+functionName+"() {}\n"))
+	if err != nil || len(declarations) != 1 {
+		t.Fatalf("ParseFile = %#v, %v", declarations, err)
+	}
+	return declarations[0]
+}

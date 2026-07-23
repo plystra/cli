@@ -1,5 +1,6 @@
 // Package interfaceinventory discovers and validates authored Interface
-// declarations in Go packages visible to one Plystra Project.
+// declarations and shares their eligible Go package-loading boundary with
+// Implementation constructor discovery.
 package interfaceinventory
 
 import (
@@ -21,6 +22,8 @@ import (
 	"strings"
 
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/implementationdecl"
+	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfacecontract"
 	"github.com/plystra/cli/internal/interfacedecl"
 	"github.com/plystra/cli/internal/interfacedigest"
@@ -41,7 +44,8 @@ var (
 	ErrDiscover = errors.New("discover Interface packages")
 	// ErrInvalidOutput reports inconsistent or unsafe go list package output.
 	ErrInvalidOutput = errors.New("invalid go list package output")
-	// ErrPackage reports an eligible Interface package that Go could not load.
+	// ErrPackage reports an eligible Interface or Implementation package that Go
+	// could not load.
 	ErrPackage = errors.New("invalid Interface package")
 )
 
@@ -204,16 +208,42 @@ func (i Index) Interfaces() []Interface {
 	return append([]Interface(nil), i.interfaces...)
 }
 
+// Discovery contains the Interface and Implementation declarations obtained
+// from one shared eligible-package scan and the same Go-selected source files.
+type Discovery struct {
+	interfaces      Index
+	implementations implementationinventory.Index
+}
+
+// Interfaces returns the immutable visible Interface inventory.
+func (d Discovery) Interfaces() Index { return d.interfaces }
+
+// Implementations returns the immutable visible Implementation constructor
+// inventory obtained from the same package-loading operation.
+func (d Discovery) Implementations() implementationinventory.Index { return d.implementations }
+
 // Discover finds candidate authored packages without following links or
 // entering reserved paths, asks ordinary Go tooling which source files are
-// active, and validates every active Interface declaration with compiled type
-// information. It writes neither Project files nor dependency sources.
+// active, and returns the validated Interface view. The shared scan also
+// validates active Implementation directive syntax. It writes neither Project
+// files nor dependency sources.
 func Discover(ctx context.Context, application modulelocate.Module, dependencies moduledependency.Index, options Options) (Index, error) {
+	discovery, err := DiscoverApplication(ctx, application, dependencies, options)
+	if err != nil {
+		return Index{}, err
+	}
+	return discovery.Interfaces(), nil
+}
+
+// DiscoverApplication obtains active Interface and Implementation declarations
+// through one shared eligible-package scan. Go tooling selects source files and
+// supplies compiled type information before either declaration kind is exposed.
+func DiscoverApplication(ctx context.Context, application modulelocate.Module, dependencies moduledependency.Index, options Options) (Discovery, error) {
 	if ctx == nil {
-		return Index{}, fmt.Errorf("%w: context is nil", ErrDiscover)
+		return Discovery{}, fmt.Errorf("%w: context is nil", ErrDiscover)
 	}
 	if application.Path() == "" || application.ModulePath() == "" {
-		return Index{}, fmt.Errorf("%w: application module is empty", ErrDiscover)
+		return Discovery{}, fmt.Errorf("%w: application module is empty", ErrDiscover)
 	}
 
 	sources := []moduleSource{{
@@ -236,16 +266,18 @@ func Discover(ctx context.Context, application modulelocate.Module, dependencies
 	})
 
 	interfaces := make([]Interface, 0)
+	implementationInputs := make([]implementationinventory.Input, 0)
 	for _, source := range sources {
 		candidates, err := probeModule(source, application.ModulePath())
 		if err != nil {
-			return Index{}, fmt.Errorf("%w: inspect %s: %w", ErrDiscover, source.label(), err)
+			return Discovery{}, fmt.Errorf("%w: inspect %s: %w", ErrDiscover, source.label(), err)
 		}
 		found, err := loadCandidates(ctx, candidates, options)
 		if err != nil {
-			return Index{}, fmt.Errorf("%w: inspect %s: %w", ErrDiscover, source.label(), err)
+			return Discovery{}, fmt.Errorf("%w: inspect %s: %w", ErrDiscover, source.label(), err)
 		}
-		interfaces = append(interfaces, found...)
+		interfaces = append(interfaces, found.interfaces...)
+		implementationInputs = append(implementationInputs, found.implementations...)
 	}
 
 	sort.Slice(interfaces, func(left, right int) bool {
@@ -276,24 +308,36 @@ func Discover(ctx context.Context, application modulelocate.Module, dependencies
 			if version == "" {
 				version = "local"
 			}
-			return Index{}, fmt.Errorf("%w: inspect %s@%s: package %s: %w", ErrDiscover, interfaces[index].modulePath, version, interfaces[index].packagePath, err)
+			return Discovery{}, fmt.Errorf("%w: inspect %s@%s: package %s: %w", ErrDiscover, interfaces[index].modulePath, version, interfaces[index].packagePath, err)
 		}
 		interfaces[index].deprecation = deprecation
 		interfaces[index].hasDeprecation = present
 	}
-	return Index{interfaces: interfaces}, nil
+	implementations, err := implementationinventory.Build(implementationInputs)
+	if err != nil {
+		return Discovery{}, fmt.Errorf("%w: %w", ErrDiscover, err)
+	}
+	return Discovery{
+		interfaces:      Index{interfaces: interfaces},
+		implementations: implementations,
+	}, nil
 }
 
-func loadCandidates(ctx context.Context, candidates []packageCandidate, options Options) ([]Interface, error) {
+type loadedInventory struct {
+	interfaces      []Interface
+	implementations []implementationinventory.Input
+}
+
+func loadCandidates(ctx context.Context, candidates []packageCandidate, options Options) (loadedInventory, error) {
 	if len(candidates) == 0 {
-		return nil, nil
+		return loadedInventory{}, nil
 	}
 	sort.Slice(candidates, func(left, right int) bool {
 		return candidates[left].importPath < candidates[right].importPath
 	})
 	for index := 1; index < len(candidates); index++ {
 		if candidates[index-1].importPath == candidates[index].importPath {
-			return nil, fmt.Errorf("duplicate candidate package %q", candidates[index].importPath)
+			return loadedInventory{}, fmt.Errorf("duplicate candidate package %q", candidates[index].importPath)
 		}
 	}
 	limit := options.OutputLimit
@@ -311,73 +355,89 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 		OutputLimit: limit,
 	}, arguments...)
 	if err != nil {
-		return nil, fmt.Errorf("load eligible Go packages: %w", err)
+		return loadedInventory{}, fmt.Errorf("load eligible Go packages: %w", err)
 	}
 
 	listed, exports, err := decodePackages(output)
 	if err != nil {
-		return nil, err
+		return loadedInventory{}, err
 	}
 	checkedImporter := importer.ForCompiler(token.NewFileSet(), runtime.Compiler, exportLookup(exports))
-	interfaces := make([]Interface, 0)
+	result := loadedInventory{}
 	for _, candidate := range candidates {
 		loaded, exists := listed[candidate.importPath]
 		if !exists {
-			return nil, fmt.Errorf("%w: Go omitted candidate package %q", ErrInvalidOutput, candidate.importPath)
+			return loadedInventory{}, fmt.Errorf("%w: Go omitted candidate package %q", ErrInvalidOutput, candidate.importPath)
 		}
 		declarations, err := parseDeclarations(candidate, loaded)
 		if err != nil {
-			return nil, fmt.Errorf("package %s: %w", candidate.importPath, err)
+			return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
 		}
-		if len(declarations) == 0 {
+		if len(declarations.interfaces) == 0 && len(declarations.implementations) == 0 {
+			continue
+		}
+		if err := validateLoadedPackage(candidate, loaded); err != nil {
+			return loadedInventory{}, err
+		}
+		checkedPackage, err := checkedImporter.Import(candidate.importPath)
+		if err != nil {
+			return loadedInventory{}, fmt.Errorf("%w: import compiled package %s: %s", ErrPackage, candidate.importPath, sanitizePackageError(err.Error(), candidate))
+		}
+		if checkedPackage.Path() != candidate.importPath || checkedPackage.Name() != loaded.Name {
+			return loadedInventory{}, fmt.Errorf("%w: compiled package identity for %q is %s %q", ErrInvalidOutput, candidate.importPath, checkedPackage.Path(), checkedPackage.Name())
+		}
+		for _, declaration := range declarations.implementations {
+			if declaration.PackageName() != loaded.Name {
+				return loadedInventory{}, fmt.Errorf("%w: %s declares package %q, Go selected %q", ErrInvalidOutput, declaration.Position().Path, declaration.PackageName(), loaded.Name)
+			}
+			result.implementations = append(result.implementations, implementationinventory.Input{
+				ModulePath:    candidate.source.path,
+				ModuleVersion: candidate.source.version,
+				PackagePath:   candidate.importPath,
+				Local:         candidate.source.local,
+				Declaration:   declaration,
+				Types:         checkedPackage,
+			})
+		}
+		if len(declarations.interfaces) == 0 {
 			continue
 		}
 		metadata, hasMetadata, err := loadOptionalMetadata(candidate)
 		if err != nil {
-			return nil, fmt.Errorf("package %s: %w", candidate.importPath, err)
+			return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
 		}
 		if err := validateConformancePackage(candidate, metadata); err != nil {
-			return nil, fmt.Errorf("package %s: %w", candidate.importPath, err)
+			return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
 		}
-		if err := validateLoadedPackage(candidate, loaded); err != nil {
-			return nil, err
-		}
-		checkedPackage, err := checkedImporter.Import(candidate.importPath)
-		if err != nil {
-			return nil, fmt.Errorf("%w: import compiled package %s: %s", ErrPackage, candidate.importPath, sanitizePackageError(err.Error(), candidate))
-		}
-		if checkedPackage.Path() != candidate.importPath || checkedPackage.Name() != loaded.Name {
-			return nil, fmt.Errorf("%w: compiled package identity for %q is %s %q", ErrInvalidOutput, candidate.importPath, checkedPackage.Path(), checkedPackage.Name())
-		}
-		for _, declaration := range declarations {
+		for _, declaration := range declarations.interfaces {
 			if declaration.PackageName() != loaded.Name {
-				return nil, fmt.Errorf("%w: %s declares package %q, Go selected %q", ErrInvalidOutput, declaration.Position().Path, declaration.PackageName(), loaded.Name)
+				return loadedInventory{}, fmt.Errorf("%w: %s declares package %q, Go selected %q", ErrInvalidOutput, declaration.Position().Path, declaration.PackageName(), loaded.Name)
 			}
 			contract, err := interfacecontract.Validate(declaration, checkedPackage)
 			if err != nil {
-				return nil, fmt.Errorf("package %s: %w", candidate.importPath, err)
+				return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
 			}
 			constraints, err := interfacemeta.ResolveConstraintTargets(metadata, contract)
 			if err != nil {
-				return nil, fmt.Errorf("package %s: %w", candidate.importPath, err)
+				return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
 			}
 			examples, err := interfacemeta.ResolveExamples(metadata, contract)
 			if err != nil {
-				return nil, fmt.Errorf("package %s: %w", candidate.importPath, err)
+				return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
 			}
 			contractDigest, err := interfacedigest.CalculateContract(contract, metadata, constraints)
 			if err != nil {
-				return nil, fmt.Errorf("package %s: calculate Interface contract digest: %w", candidate.importPath, err)
+				return loadedInventory{}, fmt.Errorf("package %s: calculate Interface contract digest: %w", candidate.importPath, err)
 			}
 			documentationDigest, err := interfacedigest.CalculateDocumentation(contract, metadata)
 			if err != nil {
-				return nil, fmt.Errorf("package %s: calculate Interface documentation digest: %w", candidate.importPath, err)
+				return loadedInventory{}, fmt.Errorf("package %s: calculate Interface documentation digest: %w", candidate.importPath, err)
 			}
 			exampleDigest, err := interfacedigest.CalculateExamples(contract, examples)
 			if err != nil {
-				return nil, fmt.Errorf("package %s: calculate Interface example digest: %w", candidate.importPath, err)
+				return loadedInventory{}, fmt.Errorf("package %s: calculate Interface example digest: %w", candidate.importPath, err)
 			}
-			interfaces = append(interfaces, Interface{
+			result.interfaces = append(result.interfaces, Interface{
 				modulePath:          candidate.source.path,
 				moduleVersion:       candidate.source.version,
 				packagePath:         candidate.importPath,
@@ -395,7 +455,7 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 			})
 		}
 	}
-	return interfaces, nil
+	return result, nil
 }
 
 func loadOptionalMetadata(candidate packageCandidate) (interfacemeta.Document, bool, error) {
@@ -551,7 +611,7 @@ func probeModule(source moduleSource, applicationPath string) ([]packageCandidat
 		if err != nil {
 			return err
 		}
-		if hasInterfaceDirectiveComment(current, data) {
+		if hasDeclarationDirectiveComment(current, data) {
 			packageDirectories[filepath.Dir(current)] = struct{}{}
 		}
 		return nil
@@ -633,6 +693,21 @@ func importableFrom(importerPath, importedPath string) bool {
 }
 
 func hasInterfaceDirectiveComment(filename string, source []byte) bool {
+	return hasDirectiveComment(filename, source, "//plystra:interface", "/*plystra:interface")
+}
+
+func hasImplementationDirectiveComment(filename string, source []byte) bool {
+	return hasDirectiveComment(filename, source, "//plystra:implements", "/*plystra:implements")
+}
+
+func hasDeclarationDirectiveComment(filename string, source []byte) bool {
+	return hasDirectiveComment(filename, source,
+		"//plystra:interface", "/*plystra:interface",
+		"//plystra:implements", "/*plystra:implements",
+	)
+}
+
+func hasDirectiveComment(filename string, source []byte, prefixes ...string) bool {
 	files := token.NewFileSet()
 	file := files.AddFile(filename, -1, len(source))
 	var lexical scanner.Scanner
@@ -642,8 +717,13 @@ func hasInterfaceDirectiveComment(filename string, source []byte) bool {
 		if tokenKind == token.EOF {
 			return false
 		}
-		if tokenKind == token.COMMENT && (strings.HasPrefix(literal, "//plystra:interface") || strings.HasPrefix(literal, "/*plystra:interface")) {
-			return true
+		if tokenKind != token.COMMENT {
+			continue
+		}
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(literal, prefix) {
+				return true
+			}
 		}
 	}
 }
@@ -705,41 +785,69 @@ func decodePackages(data []byte) (map[string]listedPackage, map[string]string, e
 	return packages, exports, nil
 }
 
-func parseDeclarations(candidate packageCandidate, loaded listedPackage) ([]interfacedecl.Declaration, error) {
+type packageDeclarations struct {
+	interfaces      []interfacedecl.Declaration
+	implementations []implementationdecl.Declaration
+}
+
+func parseDeclarations(candidate packageCandidate, loaded listedPackage) (packageDeclarations, error) {
 	if !sameDirectory(candidate.directory, loaded.Dir) {
-		return nil, fmt.Errorf("%w: package %q directory does not match its candidate source", ErrInvalidOutput, candidate.importPath)
+		return packageDeclarations{}, fmt.Errorf("%w: package %q directory does not match its candidate source", ErrInvalidOutput, candidate.importPath)
 	}
 	fileNames := append(append([]string(nil), loaded.GoFiles...), loaded.CgoFiles...)
 	sort.Strings(fileNames)
-	declarations := make([]interfacedecl.Declaration, 0)
+	declarations := packageDeclarations{}
 	for index, fileName := range fileNames {
 		if index > 0 && fileNames[index-1] == fileName {
-			return nil, fmt.Errorf("%w: package %q lists source %q more than once", ErrInvalidOutput, candidate.importPath, fileName)
+			return packageDeclarations{}, fmt.Errorf("%w: package %q lists source %q more than once", ErrInvalidOutput, candidate.importPath, fileName)
 		}
 		if fileName == "" || filepath.Base(fileName) != fileName || !strings.HasSuffix(fileName, ".go") {
-			return nil, fmt.Errorf("%w: package %q lists unsafe Go source %q", ErrInvalidOutput, candidate.importPath, fileName)
+			return packageDeclarations{}, fmt.Errorf("%w: package %q lists unsafe Go source %q", ErrInvalidOutput, candidate.importPath, fileName)
 		}
 		absolutePath := filepath.Join(candidate.directory, fileName)
 		data, err := readRegularFile(absolutePath, maximumSourceSize)
 		if err != nil {
-			return nil, fmt.Errorf("read selected Go source %s: %w", fileName, err)
+			return packageDeclarations{}, fmt.Errorf("read selected Go source %s: %w", fileName, err)
 		}
-		if !hasInterfaceDirectiveComment(fileName, data) {
+		hasInterface := hasInterfaceDirectiveComment(fileName, data)
+		hasImplementation := hasImplementationDirectiveComment(fileName, data)
+		if !hasInterface && !hasImplementation {
 			continue
 		}
 		relativePath, err := filepath.Rel(candidate.source.root, absolutePath)
 		if err != nil || relativePath == "." || filepath.IsAbs(relativePath) || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
-			return nil, fmt.Errorf("%w: package %q source %q escapes its module root", ErrInvalidOutput, candidate.importPath, fileName)
+			return packageDeclarations{}, fmt.Errorf("%w: package %q source %q escapes its module root", ErrInvalidOutput, candidate.importPath, fileName)
 		}
-		parsed, err := interfacedecl.ParseFile(filepath.ToSlash(relativePath), data)
-		if err != nil {
-			return nil, err
+		sourcePath := filepath.ToSlash(relativePath)
+		if hasInterface {
+			parsed, err := interfacedecl.ParseFile(sourcePath, data)
+			if err != nil {
+				return packageDeclarations{}, err
+			}
+			declarations.interfaces = append(declarations.interfaces, parsed...)
 		}
-		declarations = append(declarations, parsed...)
+		if hasImplementation {
+			parsed, err := implementationdecl.ParseFile(sourcePath, data)
+			if err != nil {
+				return packageDeclarations{}, err
+			}
+			declarations.implementations = append(declarations.implementations, parsed...)
+		}
 	}
-	sort.Slice(declarations, func(left, right int) bool {
-		leftPosition := declarations[left].Position()
-		rightPosition := declarations[right].Position()
+	sort.Slice(declarations.interfaces, func(left, right int) bool {
+		leftPosition := declarations.interfaces[left].Position()
+		rightPosition := declarations.interfaces[right].Position()
+		if leftPosition.Path != rightPosition.Path {
+			return leftPosition.Path < rightPosition.Path
+		}
+		if leftPosition.Line != rightPosition.Line {
+			return leftPosition.Line < rightPosition.Line
+		}
+		return leftPosition.Column < rightPosition.Column
+	})
+	sort.Slice(declarations.implementations, func(left, right int) bool {
+		leftPosition := declarations.implementations[left].Position()
+		rightPosition := declarations.implementations[right].Position()
 		if leftPosition.Path != rightPosition.Path {
 			return leftPosition.Path < rightPosition.Path
 		}
@@ -756,7 +864,7 @@ func validateLoadedPackage(candidate packageCandidate, loaded listedPackage) err
 		return fmt.Errorf("%w: package %s has no Go package name", ErrInvalidOutput, candidate.importPath)
 	}
 	if loaded.Name == "main" {
-		return fmt.Errorf("%w: package %s is a program and cannot define an importable Interface", ErrPackage, candidate.importPath)
+		return fmt.Errorf("%w: package %s is a program and cannot define an importable Interface or Implementation", ErrPackage, candidate.importPath)
 	}
 	if loaded.Module == nil || loaded.Module.Path != candidate.source.path {
 		return fmt.Errorf("%w: package %q has inconsistent module provenance", ErrInvalidOutput, candidate.importPath)
