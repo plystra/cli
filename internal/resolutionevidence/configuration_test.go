@@ -23,6 +23,9 @@ func TestBuildRecordsConfigurationOwnershipAndReplacementSafeProvenance(t *testi
 			ModuleVersion: "v1.2.0",
 			Manifest: configurationManifest(t, "plystra.yaml", `
 capabilities: {require: [email.send/v1]}
+interfaces:
+  require: [audit.write/v1]
+  use: {email.send/v1: github.com/acme/smtp.New}
 config:
   acme.smtp:
     host: dependency.private.example
@@ -32,6 +35,9 @@ config:
 			ModulePath: "example.com/platform-b",
 			Manifest: configurationManifest(t, "plystra.yaml", `
 capabilities: {require: [email.send/v1]}
+interfaces:
+  require: [audit.write/v1]
+  use: {email.send/v1: github.com/acme/smtp.New}
 config:
   acme.smtp:
     host: dependency.private.example
@@ -40,6 +46,8 @@ config:
 	}
 	root := configurationManifest(t, "plystra.yaml", `
 http: {address: ":8080"}
+interfaces:
+  use: {email.send/v1: example.com/app/local.New}
 config:
   acme.smtp:
     host: current.private.example
@@ -89,6 +97,14 @@ config:
 	contributions := requirement.Contributors()
 	if len(contributions) != 1 || !contributions[0].Effective() || contributions[0].Precedence() != 1 || contributions[0].Owner() != resolutionevidence.ConfigurationOwnerDependency {
 		t.Fatalf("deduplicated inherited contribution = %#v", contributions)
+	}
+	interfaceRequirement := configurationField(t, first, `interfaces.require["audit.write/v1"]`)
+	if !interfaceRequirement.Effective() || interfaceRequirement.Owner() != resolutionevidence.ConfigurationOwnerDependency || interfaceRequirement.Summary() != "redacted" || len(interfaceRequirement.Contributors()) != 1 || len(interfaceRequirement.Contributors()[0].Sources()) != 2 {
+		t.Fatalf("inherited Interface requirement = %#v", interfaceRequirement)
+	}
+	implementationChoice := configurationField(t, first, `interfaces.use["email.send/v1"]`)
+	if !implementationChoice.Effective() || implementationChoice.Owner() != resolutionevidence.ConfigurationOwnerRoot || implementationChoice.Summary() != "implementation" || implementationChoice.Removed() || len(implementationChoice.Contributors()) != 2 || implementationChoice.Contributors()[0].Summary() != "redacted" || implementationChoice.Contributors()[1].Summary() != "implementation" {
+		t.Fatalf("Implementation choice replacement = %#v", implementationChoice)
 	}
 	sources := contributions[0].Sources()
 	if len(sources) != 2 || sources[0].Module() != "corp.example/platform-a" || sources[0].Path() != "plystra.yaml" || sources[0].Kind() != "configuration-value" || sources[1].Module() != "example.com/platform-b" || sources[1].Path() != "plystra.yaml" {

@@ -13,6 +13,7 @@ import (
 	"github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/pluginid"
 )
 
@@ -463,6 +464,14 @@ func validConfigurationFieldPath(value string) bool {
 		_, err := capabilityid.Parse(keys[0])
 		return err == nil
 	}
+	for _, prefix := range []string{"interfaces.require", "interfaces.use"} {
+		keys, ok := configurationPathKeys(value, prefix)
+		if !ok || len(keys) != 1 {
+			continue
+		}
+		_, err := interfaceid.Parse(keys[0])
+		return err == nil
+	}
 	keys, ok := configurationPathKeys(value, "config")
 	if !ok || len(keys) == 0 || pluginid.Validate(keys[0]) != nil {
 		return false
@@ -476,6 +485,8 @@ func validConfigurationSummary(value string) bool {
 		applicationmeta.ConfigurationSummaryObject,
 		applicationmeta.ConfigurationSummaryCapability,
 		applicationmeta.ConfigurationSummaryProvider,
+		applicationmeta.ConfigurationSummaryInterface,
+		applicationmeta.ConfigurationSummaryImplementation,
 		applicationmeta.ConfigurationSummaryAlias,
 		applicationmeta.ConfigurationSummaryString,
 		applicationmeta.ConfigurationSummaryBoolean,
@@ -693,7 +704,7 @@ func configurationContributionKey(value ConfigurationContribution) string {
 }
 
 func configurationPathDependencyComposable(value string) bool {
-	return strings.HasPrefix(value, "http.expose[") || strings.HasPrefix(value, "capabilities.require[") || strings.HasPrefix(value, "capabilities.use[") || strings.HasPrefix(value, "capabilities.aliases[") || strings.HasPrefix(value, "config[")
+	return strings.HasPrefix(value, "http.expose[") || strings.HasPrefix(value, "capabilities.require[") || strings.HasPrefix(value, "capabilities.use[") || strings.HasPrefix(value, "capabilities.aliases[") || strings.HasPrefix(value, "interfaces.require[") || strings.HasPrefix(value, "interfaces.use[") || strings.HasPrefix(value, "config[")
 }
 
 func configurationPathKeys(value, prefix string) ([]string, bool) {

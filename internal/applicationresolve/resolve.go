@@ -19,6 +19,7 @@ import (
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceinventory"
+	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/plugininventory"
@@ -71,6 +72,7 @@ type Result struct {
 	dependencies        moduledependency.Index
 	interfaces          interfaceinventory.Index
 	implementations     implementationinventory.Index
+	interfaceResolution interfaceresolution.Result
 	inventory           plugininventory.Index
 	resolution          generationresolution.ExtensionResult
 	configs             configurationresolve.Result
@@ -110,6 +112,10 @@ func (r Result) Interfaces() interfaceinventory.Index { return r.interfaces }
 // constructor declaration discovered through the same ordinary Go package
 // loading boundary as Interfaces.
 func (r Result) Implementations() implementationinventory.Index { return r.implementations }
+
+// InterfaceResolution returns the immutable selected target-architecture
+// Interface bindings and validated reachable constructor dependency graph.
+func (r Result) InterfaceResolution() interfaceresolution.Result { return r.interfaceResolution }
 
 // Inventory returns every visible local and dependency-Project plugin.
 func (r Result) Inventory() plugininventory.Index { return r.inventory }
@@ -265,6 +271,10 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	manifest := composition.Manifest()
+	interfaceResolution, err := resolveInterfaces(manifest, composition, interfaces, implementations)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
 	selectedData := maintenance.Data()
 	if selector.mode == configurationModeEnvironment {
 		selectedData = configurationSnapshot.Data()
@@ -359,17 +369,18 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	return Result{
-		module:          module,
-		currentManifest: currentManifest,
-		composition:     composition,
-		dependencies:    dependencies,
-		interfaces:      interfaces,
-		implementations: implementations,
-		inventory:       inventory,
-		resolution:      resolution,
-		configs:         configs,
-		maintenance:     maintenance,
-		evidence:        evidence,
+		module:              module,
+		currentManifest:     currentManifest,
+		composition:         composition,
+		dependencies:        dependencies,
+		interfaces:          interfaces,
+		implementations:     implementations,
+		interfaceResolution: interfaceResolution,
+		inventory:           inventory,
+		resolution:          resolution,
+		configs:             configs,
+		maintenance:         maintenance,
+		evidence:            evidence,
 		selection: ConfigurationSelection{
 			mode:        selector.mode,
 			path:        selector.path,
@@ -410,7 +421,7 @@ func applicationInputSourceContext(module modulelocate.Module, dependencies modu
 }
 
 func resolutionDeclarationPaths(manifest applicationmeta.Manifest) []string {
-	paths := make([]string, 0, len(manifest.HTTPExposures())+len(manifest.Requirements())+len(manifest.ProviderChoices())+len(manifest.Aliases()))
+	paths := make([]string, 0, len(manifest.HTTPExposures())+len(manifest.Requirements())+len(manifest.ProviderChoices())+len(manifest.Aliases())+len(manifest.InterfaceRequirements())+len(manifest.ImplementationChoices()))
 	for _, exposure := range manifest.HTTPExposures() {
 		paths = append(paths, fmt.Sprintf("http.expose[%q]", exposure.ID().String()))
 	}
@@ -422,6 +433,12 @@ func resolutionDeclarationPaths(manifest applicationmeta.Manifest) []string {
 	}
 	for _, alias := range manifest.Aliases() {
 		paths = append(paths, fmt.Sprintf("capabilities.aliases[%q]", alias.ID().String()))
+	}
+	for _, requirement := range manifest.InterfaceRequirements() {
+		paths = append(paths, fmt.Sprintf("interfaces.require[%q]", requirement.ID().String()))
+	}
+	for _, choice := range manifest.ImplementationChoices() {
+		paths = append(paths, fmt.Sprintf("interfaces.use[%q]", choice.InterfaceID().String()))
 	}
 	return paths
 }
