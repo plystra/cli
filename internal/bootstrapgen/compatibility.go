@@ -37,12 +37,11 @@ type applicationModelCompatibilityDocument struct {
 }
 
 type applicationModelCompatibilityProjection struct {
-	HTTPTransports  applicationModelCompatibilityHTTPTransports `json:"http_transports"`
-	HTTPCORS        *applicationModelCompatibilityHTTPCORS      `json:"http_cors"`
-	HTTPExposures   []string                                    `json:"http_exposures"`
-	Requirements    []string                                    `json:"requirements"`
-	ProviderChoices []applicationModelCompatibilityProvider     `json:"provider_choices"`
-	Aliases         []applicationModelCompatibilityAlias        `json:"aliases"`
+	HTTPTransports        applicationModelCompatibilityHTTPTransports   `json:"http_transports"`
+	HTTPCORS              *applicationModelCompatibilityHTTPCORS        `json:"http_cors"`
+	HTTPExposures         []string                                      `json:"http_exposures"`
+	InterfaceRequirements []string                                      `json:"interface_requirements"`
+	ImplementationChoices []applicationModelCompatibilityImplementation `json:"implementation_choices"`
 }
 
 type applicationModelCompatibilityHTTPTransports struct {
@@ -55,22 +54,9 @@ type applicationModelCompatibilityHTTPCORS struct {
 	AllowCredentials bool     `json:"allow_credentials"`
 }
 
-type applicationModelCompatibilityProvider struct {
-	Capability string `json:"capability"`
-	PluginID   string `json:"plugin_id"`
-}
-
-type applicationModelCompatibilityAlias struct {
-	ID         string                                 `json:"id"`
-	Target     string                                 `json:"target"`
-	Exposure   *applicationModelCompatibilityExposure `json:"exposure"`
-	Deprecated string                                 `json:"deprecated"`
-}
-
-type applicationModelCompatibilityExposure struct {
-	Go         bool `json:"go"`
-	HTTP       bool `json:"http"`
-	JavaScript bool `json:"javascript"`
+type applicationModelCompatibilityImplementation struct {
+	Interface   string `json:"interface"`
+	Constructor string `json:"constructor"`
 }
 
 // NewApplicationModelCompatibility projects one final typed application
@@ -86,10 +72,9 @@ func NewApplicationModelCompatibility(applicationModelDigest string, manifest ap
 			Connect: transports.Connect,
 			REST:    transports.REST,
 		},
-		HTTPExposures:   make([]string, 0),
-		Requirements:    make([]string, 0),
-		ProviderChoices: make([]applicationModelCompatibilityProvider, 0),
-		Aliases:         make([]applicationModelCompatibilityAlias, 0),
+		HTTPExposures:         make([]string, 0),
+		InterfaceRequirements: make([]string, 0),
+		ImplementationChoices: make([]applicationModelCompatibilityImplementation, 0),
 	}
 	if cors, exists := manifest.HTTPCORS(); exists {
 		normalized, err := applicationmeta.NormalizeHTTPCORS(cors)
@@ -104,37 +89,19 @@ func NewApplicationModelCompatibility(applicationModelDigest string, manifest ap
 	for _, exposure := range manifest.HTTPExposures() {
 		projection.HTTPExposures = append(projection.HTTPExposures, exposure.ID().String())
 	}
-	for _, requirement := range manifest.Requirements() {
-		projection.Requirements = append(projection.Requirements, requirement.ID().String())
+	for _, requirement := range manifest.InterfaceRequirements() {
+		projection.InterfaceRequirements = append(projection.InterfaceRequirements, requirement.ID().String())
 	}
-	for _, choice := range manifest.ProviderChoices() {
-		projection.ProviderChoices = append(projection.ProviderChoices, applicationModelCompatibilityProvider{
-			Capability: choice.Capability().String(),
-			PluginID:   choice.PluginID(),
+	for _, choice := range manifest.ImplementationChoices() {
+		projection.ImplementationChoices = append(projection.ImplementationChoices, applicationModelCompatibilityImplementation{
+			Interface:   choice.InterfaceID().String(),
+			Constructor: choice.Constructor().String(),
 		})
 	}
-	for _, alias := range manifest.Aliases() {
-		record := applicationModelCompatibilityAlias{
-			ID:         alias.ID().String(),
-			Target:     alias.Target().String(),
-			Deprecated: alias.Deprecated(),
-		}
-		if exposure, exists := alias.Exposure(); exists {
-			record.Exposure = &applicationModelCompatibilityExposure{
-				Go:         exposure.Go,
-				HTTP:       exposure.HTTP,
-				JavaScript: exposure.JavaScript,
-			}
-		}
-		projection.Aliases = append(projection.Aliases, record)
-	}
 	sort.Strings(projection.HTTPExposures)
-	sort.Strings(projection.Requirements)
-	sort.Slice(projection.ProviderChoices, func(left, right int) bool {
-		return projection.ProviderChoices[left].Capability < projection.ProviderChoices[right].Capability
-	})
-	sort.Slice(projection.Aliases, func(left, right int) bool {
-		return projection.Aliases[left].ID < projection.Aliases[right].ID
+	sort.Strings(projection.InterfaceRequirements)
+	sort.Slice(projection.ImplementationChoices, func(left, right int) bool {
+		return projection.ImplementationChoices[left].Interface < projection.ImplementationChoices[right].Interface
 	})
 	document := applicationModelCompatibilityDocument{
 		Version:                applicationModelCompatibilityVersion,
@@ -207,28 +174,11 @@ func applicationModelCompatibilityDigest(canonical []byte) string {
 }
 
 func encodeApplicationModelCompatibility(document applicationModelCompatibilityDocument) ([]byte, error) {
-	providers := make([]map[string]any, len(document.Projection.ProviderChoices))
-	for index, provider := range document.Projection.ProviderChoices {
-		providers[index] = map[string]any{
-			"capability": provider.Capability,
-			"plugin_id":  provider.PluginID,
-		}
-	}
-	aliases := make([]map[string]any, len(document.Projection.Aliases))
-	for index, alias := range document.Projection.Aliases {
-		var exposure any
-		if alias.Exposure != nil {
-			exposure = map[string]any{
-				"go":         alias.Exposure.Go,
-				"http":       alias.Exposure.HTTP,
-				"javascript": alias.Exposure.JavaScript,
-			}
-		}
-		aliases[index] = map[string]any{
-			"deprecated": alias.Deprecated,
-			"exposure":   exposure,
-			"id":         alias.ID,
-			"target":     alias.Target,
+	implementations := make([]map[string]any, len(document.Projection.ImplementationChoices))
+	for index, implementation := range document.Projection.ImplementationChoices {
+		implementations[index] = map[string]any{
+			"constructor": implementation.Constructor,
+			"interface":   implementation.Interface,
 		}
 	}
 	var cors any
@@ -241,12 +191,11 @@ func encodeApplicationModelCompatibility(document applicationModelCompatibilityD
 	return json.Marshal(map[string]any{
 		"application_model_digest": document.ApplicationModelDigest,
 		"projection": map[string]any{
-			"aliases":          aliases,
-			"http_cors":        cors,
-			"http_exposures":   document.Projection.HTTPExposures,
-			"http_transports":  map[string]any{"connect": document.Projection.HTTPTransports.Connect, "rest": document.Projection.HTTPTransports.REST},
-			"provider_choices": providers,
-			"requirements":     document.Projection.Requirements,
+			"http_cors":              cors,
+			"http_exposures":         document.Projection.HTTPExposures,
+			"http_transports":        map[string]any{"connect": document.Projection.HTTPTransports.Connect, "rest": document.Projection.HTTPTransports.REST},
+			"implementation_choices": implementations,
+			"interface_requirements": document.Projection.InterfaceRequirements,
 		},
 		"version": document.Version,
 	})

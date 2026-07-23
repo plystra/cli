@@ -23,11 +23,11 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:828f04416dd5bcca5a0b84d28323e96ec6b98b9cad37f82316a4b5b210106326"
+      "sha256": "sha256:af0127ff375b4c5c385cf2229337f5b7d8e8f9ad576e83cbfb0a01c57cc544f4"
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:fb6d60990762d46322dda4d9cffbce1cfc08a455bb1c40f4154b449f760b65c0"
+      "sha256": "sha256:f7f2c108c95e3bdaa13dcbb673c3804fd549a39fc95eb7dfb934246a135afb58"
     },
     {
       "path": "generated/proto/descriptor-set.pb",
@@ -63,7 +63,7 @@
       "mode": "default",
       "root": {
         "path": "plystra.yaml",
-        "digest": "sha256:b183097574f85f18bbbda8533504fbb59077ced4a3560a599dfc1272525f593c"
+        "digest": "sha256:54c237bfe7b65ee4f56a05173be2bf81b9310ffb34fbfa5cde1e55b85ebd978f"
       },
       "dependency_baselines": [
         {

@@ -147,7 +147,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 	if err != nil {
 		return "", err
 	}
-	values, err := runtimeMapping(root, "effective runtime configuration", runtimeKeySet("http", "timeouts", "capabilities", "config"))
+	values, err := runtimeMapping(root, "effective runtime configuration", runtimeKeySet("http", "timeouts", "interfaces", "config"))
 	if err != nil {
 		return "", err
 	}
@@ -155,19 +155,18 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 	if err != nil {
 		return "", err
 	}
-	requirements, providers, aliases, err := runtimeApplicationModelCapabilities(values["capabilities"])
+	requirements, implementations, err := runtimeApplicationModelInterfaces(values["interfaces"])
 	if err != nil {
 		return "", err
 	}
 	canonical, err := json.Marshal(map[string]any{
 		"application_model_digest": compiledApplicationModelDigest,
 		"projection": map[string]any{
-			"aliases":          aliases,
-			"http_cors":        cors,
-			"http_exposures":   exposures,
-			"http_transports": transports,
-			"provider_choices": providers,
-			"requirements":     requirements,
+			"http_cors":              cors,
+			"http_exposures":         exposures,
+			"http_transports":        transports,
+			"implementation_choices": implementations,
+			"interface_requirements": requirements,
 		},
 		"version": 1,
 	})
@@ -230,111 +229,52 @@ func runtimeApplicationModelHTTP(node *yaml.Node) (map[string]any, any, []string
 	return map[string]any{"connect": connect, "rest": rest}, cors, exposures, nil
 }
 
-func runtimeApplicationModelCapabilities(node *yaml.Node) ([]string, []map[string]any, []map[string]any, error) {
-	values, err := runtimeOptionalMapping(node, "capabilities", runtimeKeySet("require", "use", "aliases"))
+func runtimeApplicationModelInterfaces(node *yaml.Node) ([]string, []map[string]any, error) {
+	values, err := runtimeOptionalMapping(node, "interfaces", runtimeKeySet("require", "use"))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	requirements, err := runtimeApplicationModelStrings(values["require"], "capabilities.require")
+	requirements, err := runtimeApplicationModelInterfaceIDs(values["require"], "interfaces.require")
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	choices, err := runtimeOptionalMapping(values["use"], "capabilities.use", nil)
+	choices, err := runtimeOptionalMapping(values["use"], "interfaces.use", nil)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	capabilities := make([]string, 0, len(choices))
-	for capability := range choices {
-		capabilities = append(capabilities, capability)
+	interfaces := make([]string, 0, len(choices))
+	for interfaceID := range choices {
+		interfaces = append(interfaces, interfaceID)
 	}
-	sort.Strings(capabilities)
-	providers := make([]map[string]any, 0, len(capabilities))
-	for _, capability := range capabilities {
-		pluginID, valueErr := runtimeString(choices[capability])
-		if valueErr != nil {
-			return nil, nil, nil, runtimeConfigurationError("capabilities.use[%q] must be a canonical Plugin ID string", capability)
+	sort.Strings(interfaces)
+	implementations := make([]map[string]any, 0, len(interfaces))
+	for _, interfaceID := range interfaces {
+		if !validRuntimeSelectableInterfaceID(interfaceID) {
+			return nil, nil, runtimeConfigurationError("interfaces.use key %q is not a selectable canonical Interface ID", interfaceID)
 		}
-		providers = append(providers, map[string]any{
-			"capability": capability,
-			"plugin_id":  pluginID,
+		constructor, valueErr := runtimeString(choices[interfaceID])
+		if valueErr != nil || !validRuntimeConstructorSymbol(constructor) {
+			return nil, nil, runtimeConfigurationError("interfaces.use[%q] must be a fully qualified Implementation constructor symbol", interfaceID)
+		}
+		implementations = append(implementations, map[string]any{
+			"constructor": constructor,
+			"interface":   interfaceID,
 		})
 	}
-	aliases, err := runtimeApplicationModelAliases(values["aliases"])
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return requirements, providers, aliases, nil
+	return requirements, implementations, nil
 }
 
-func runtimeApplicationModelAliases(node *yaml.Node) ([]map[string]any, error) {
-	values, err := runtimeOptionalMapping(node, "capabilities.aliases", nil)
+func runtimeApplicationModelInterfaceIDs(node *yaml.Node, path string) ([]string, error) {
+	values, err := runtimeInterfaceSequence(node, path)
 	if err != nil {
 		return nil, err
 	}
-	identifiers := make([]string, 0, len(values))
-	for identifier := range values {
-		identifiers = append(identifiers, identifier)
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
 	}
-	sort.Strings(identifiers)
-	aliases := make([]map[string]any, 0, len(identifiers))
-	for _, identifier := range identifiers {
-		value := values[identifier]
-		target := ""
-		deprecated := ""
-		var exposure any
-		if value.Kind == yaml.ScalarNode && value.Tag == "!!str" {
-			target = value.Value
-		} else {
-			fields, mappingErr := runtimeMapping(value, "capabilities.aliases["+strconv.Quote(identifier)+"]", runtimeKeySet("target", "expose", "deprecated"))
-			if mappingErr != nil {
-				return nil, mappingErr
-			}
-			target, err = runtimeString(fields["target"])
-			if err != nil {
-				return nil, runtimeConfigurationError("capabilities.aliases[%q].target must be a canonical Capability ID", identifier)
-			}
-			if expose := fields["expose"]; expose != nil {
-				exposureFields, exposureErr := runtimeMapping(expose, "capabilities.aliases["+strconv.Quote(identifier)+"].expose", runtimeKeySet("go", "http", "javascript"))
-				if exposureErr != nil {
-					return nil, exposureErr
-				}
-				goExposure, booleanErr := runtimeApplicationModelBoolean(exposureFields["go"], "capabilities.aliases.expose.go")
-				if booleanErr != nil {
-					return nil, booleanErr
-				}
-				httpExposure, booleanErr := runtimeApplicationModelBoolean(exposureFields["http"], "capabilities.aliases.expose.http")
-				if booleanErr != nil {
-					return nil, booleanErr
-				}
-				javaScriptExposure, booleanErr := runtimeApplicationModelBoolean(exposureFields["javascript"], "capabilities.aliases.expose.javascript")
-				if booleanErr != nil {
-					return nil, booleanErr
-				}
-				exposure = map[string]any{
-					"go":         goExposure,
-					"http":       httpExposure,
-					"javascript": javaScriptExposure,
-				}
-			}
-			if deprecation := fields["deprecated"]; deprecation != nil {
-				deprecationFields, deprecationErr := runtimeMapping(deprecation, "capabilities.aliases["+strconv.Quote(identifier)+"].deprecated", runtimeKeySet("message"))
-				if deprecationErr != nil {
-					return nil, deprecationErr
-				}
-				deprecated, err = runtimeString(deprecationFields["message"])
-				if err != nil {
-					return nil, runtimeConfigurationError("capabilities.aliases[%q].deprecated.message must be a string", identifier)
-				}
-			}
-		}
-		aliases = append(aliases, map[string]any{
-			"deprecated": deprecated,
-			"exposure":   exposure,
-			"id":         identifier,
-			"target":     target,
-		})
-	}
-	return aliases, nil
+	sort.Strings(result)
+	return result, nil
 }
 
 func runtimeApplicationModelStrings(node *yaml.Node, path string) ([]string, error) {
@@ -669,7 +609,7 @@ func rejectRuntimeYAMLReferences(root *yaml.Node) error {
 }
 
 func mergeRuntimeDocument(root, overlay *yaml.Node) (*yaml.Node, error) {
-	allowed := runtimeKeySet("http", "timeouts", "capabilities", "config")
+	allowed := runtimeKeySet("http", "timeouts", "interfaces", "config")
 	lower, err := runtimeMapping(root, "document", allowed)
 	if err != nil {
 		return nil, err
@@ -694,12 +634,12 @@ func mergeRuntimeDocument(root, overlay *yaml.Node) (*yaml.Node, error) {
 	if present {
 		result["timeouts"] = timeouts
 	}
-	capabilities, present, err := mergeRuntimeCapabilities(lower["capabilities"], upper["capabilities"])
+	interfaces, present, err := mergeRuntimeInterfaces(lower["interfaces"], upper["interfaces"])
 	if err != nil {
 		return nil, err
 	}
 	if present {
-		result["capabilities"] = capabilities
+		result["interfaces"] = interfaces
 	}
 	configuration, present, err := mergeRuntimeConfigurations(lower["config"], upper["config"])
 	if err != nil {
@@ -746,7 +686,7 @@ func mergeRuntimeHTTP(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error)
 	if present {
 		result["cors"] = cors
 	}
-	expose, present, err := mergeRuntimeCapabilitySet(lower["expose"], upper["expose"], "http.expose")
+	expose, present, err := mergeRuntimeInterfaceSet(lower["expose"], upper["expose"], "http.expose")
 	if err != nil {
 		return nil, false, err
 	}
@@ -846,65 +786,46 @@ func mergeRuntimeTimeouts(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, er
 	return runtimeMappingNode(result), true, nil
 }
 
-func mergeRuntimeCapabilities(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error) {
+func mergeRuntimeInterfaces(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error) {
 	if lowerNode == nil && upperNode == nil {
 		return nil, false, nil
 	}
-	allowed := runtimeKeySet("require", "use", "aliases")
-	lower, err := runtimeOptionalMapping(lowerNode, "capabilities", allowed)
+	allowed := runtimeKeySet("require", "use")
+	lower, err := runtimeOptionalMapping(lowerNode, "interfaces", allowed)
 	if err != nil {
 		return nil, false, err
 	}
-	upper, err := runtimeOptionalMapping(upperNode, "capabilities", allowed)
+	upper, err := runtimeOptionalMapping(upperNode, "interfaces", allowed)
 	if err != nil {
 		return nil, false, err
 	}
 	result := make(map[string]*yaml.Node)
-	requirements, hasRequirements, err := mergeRuntimeCapabilitySet(lower["require"], upper["require"], "capabilities.require")
+	requirements, hasRequirements, err := mergeRuntimeInterfaceSet(lower["require"], upper["require"], "interfaces.require")
 	if err != nil {
 		return nil, false, err
 	}
 	if hasRequirements {
 		result["require"] = requirements
 	}
-	uses, hasUses, err := mergeRuntimeProviderChoices(lower["use"], upper["use"])
+	uses, hasUses, err := mergeRuntimeImplementationChoices(lower["use"], upper["use"])
 	if err != nil {
 		return nil, false, err
 	}
 	if hasUses {
 		result["use"] = uses
 	}
-	aliases, hasAliases, aliasTargets, err := mergeRuntimeAliases(lower["aliases"], upper["aliases"])
-	if err != nil {
-		return nil, false, err
-	}
-	if hasAliases {
-		result["aliases"] = aliases
-	}
-	for alias := range aliasTargets {
-		if runtimeSequenceContains(requirements, alias) {
-			return nil, false, runtimeConfigurationError("capabilities.require contains application Alias %q", alias)
-		}
-		if uses != nil {
-			if values, mappingErr := runtimeMapping(uses, "capabilities.use", nil); mappingErr == nil {
-				if _, exists := values[alias]; exists {
-					return nil, false, runtimeConfigurationError("capabilities.use contains application Alias %q", alias)
-				}
-			}
-		}
-	}
 	return runtimeMappingNode(result), true, nil
 }
 
-func mergeRuntimeCapabilitySet(lowerNode, upperNode *yaml.Node, path string) (*yaml.Node, bool, error) {
+func mergeRuntimeInterfaceSet(lowerNode, upperNode *yaml.Node, path string) (*yaml.Node, bool, error) {
 	if lowerNode == nil && upperNode == nil {
 		return nil, false, nil
 	}
 	values := make(map[string]struct{})
-	if err := applyRuntimeCapabilitySet(values, lowerNode, path); err != nil {
+	if err := applyRuntimeInterfaceSet(values, lowerNode, path); err != nil {
 		return nil, false, err
 	}
-	if err := applyRuntimeCapabilitySet(values, upperNode, path); err != nil {
+	if err := applyRuntimeInterfaceSet(values, upperNode, path); err != nil {
 		return nil, false, err
 	}
 	ordered := make([]string, 0, len(values))
@@ -915,7 +836,7 @@ func mergeRuntimeCapabilitySet(lowerNode, upperNode *yaml.Node, path string) (*y
 	return runtimeStringSequence(ordered), true, nil
 }
 
-func applyRuntimeCapabilitySet(values map[string]struct{}, node *yaml.Node, path string) error {
+func applyRuntimeInterfaceSet(values map[string]struct{}, node *yaml.Node, path string) error {
 	if node == nil {
 		return nil
 	}
@@ -932,17 +853,17 @@ func applyRuntimeCapabilitySet(values map[string]struct{}, node *yaml.Node, path
 	default:
 		return runtimeConfigurationError("%s must be a sequence or sparse {add, remove} mapping", path)
 	}
-	adds, err := runtimeCapabilitySequence(addNode, path+".add")
+	adds, err := runtimeInterfaceSequence(addNode, path+".add")
 	if err != nil {
 		return err
 	}
-	removes, err := runtimeCapabilitySequence(removeNode, path+".remove")
+	removes, err := runtimeInterfaceSequence(removeNode, path+".remove")
 	if err != nil {
 		return err
 	}
 	for value := range adds {
 		if _, conflict := removes[value]; conflict {
-			return runtimeConfigurationError("%s cannot both add and remove Capability %q", path, value)
+			return runtimeConfigurationError("%s cannot both add and remove Interface %q", path, value)
 		}
 		values[value] = struct{}{}
 	}
@@ -952,153 +873,147 @@ func applyRuntimeCapabilitySet(values map[string]struct{}, node *yaml.Node, path
 	return nil
 }
 
-func runtimeCapabilitySequence(node *yaml.Node, path string) (map[string]struct{}, error) {
+func runtimeInterfaceSequence(node *yaml.Node, path string) (map[string]struct{}, error) {
 	result := make(map[string]struct{})
 	if node == nil {
 		return result, nil
 	}
 	if node.Kind != yaml.SequenceNode {
-		return nil, runtimeConfigurationError("%s must be a sequence of canonical Capability IDs", path)
+		return nil, runtimeConfigurationError("%s must be a sequence of canonical Interface IDs", path)
 	}
 	for index, item := range node.Content {
 		value, err := runtimeString(item)
 		if err != nil {
-			return nil, runtimeConfigurationError("%s[%d] must be a canonical Capability ID string", path, index)
+			return nil, runtimeConfigurationError("%s[%d] must be a canonical Interface ID string", path, index)
 		}
-		identifier, err := kernelcapability.ParseIdentifier(value)
-		if err != nil || identifier.String() != value {
-			return nil, runtimeConfigurationError("%s[%d] is not a canonical Capability ID", path, index)
+		if !validRuntimeInterfaceID(value) {
+			return nil, runtimeConfigurationError("%s[%d] is not a canonical Interface ID", path, index)
 		}
 		if _, duplicate := result[value]; duplicate {
-			return nil, runtimeConfigurationError("%s repeats Capability %q", path, value)
+			return nil, runtimeConfigurationError("%s repeats Interface %q", path, value)
 		}
 		result[value] = struct{}{}
 	}
 	return result, nil
 }
 
-func mergeRuntimeProviderChoices(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error) {
+func mergeRuntimeImplementationChoices(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error) {
 	if lowerNode == nil && upperNode == nil {
 		return nil, false, nil
 	}
 	values := make(map[string]*yaml.Node)
 	for _, layer := range []*yaml.Node{lowerNode, upperNode} {
-		mapping, err := runtimeOptionalMapping(layer, "capabilities.use", nil)
+		mapping, err := runtimeOptionalMapping(layer, "interfaces.use", nil)
 		if err != nil {
 			return nil, false, err
 		}
-		for capability, value := range mapping {
-			identifier, parseErr := kernelcapability.ParseIdentifier(capability)
-			if parseErr != nil || identifier.String() != capability || strings.HasPrefix(identifier.Name(), "kernel.") {
-				return nil, false, runtimeConfigurationError("capabilities.use key %q is not a selectable canonical Capability", capability)
+		for interfaceID, value := range mapping {
+			if !validRuntimeSelectableInterfaceID(interfaceID) {
+				return nil, false, runtimeConfigurationError("interfaces.use key %q is not a selectable canonical Interface ID", interfaceID)
 			}
 			if runtimeNull(value) {
-				delete(values, capability)
+				delete(values, interfaceID)
 				continue
 			}
-			plugin, valueErr := runtimeString(value)
-			if valueErr != nil {
-				return nil, false, runtimeConfigurationError("capabilities.use[%q] must be a canonical Plugin ID string or null", capability)
+			constructor, valueErr := runtimeString(value)
+			if valueErr != nil || !validRuntimeConstructorSymbol(constructor) {
+				return nil, false, runtimeConfigurationError("interfaces.use[%q] must be a fully qualified Implementation constructor symbol or null", interfaceID)
 			}
-			if parsed, parseErr := kernelplugin.ParseID(plugin); parseErr != nil || parsed.String() != plugin {
-				return nil, false, runtimeConfigurationError("capabilities.use[%q] must be a canonical Plugin ID string or null", capability)
-			}
-			values[capability] = runtimeClone(value)
+			values[interfaceID] = runtimeClone(value)
 		}
 	}
 	return runtimeMappingNode(values), true, nil
 }
 
-func mergeRuntimeAliases(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, map[string]string, error) {
-	if lowerNode == nil && upperNode == nil {
-		return nil, false, nil, nil
+func validRuntimeInterfaceID(value string) bool {
+	name, version, found := strings.Cut(value, "/")
+	if !found || strings.Contains(version, "/") || len(version) < 2 || version[0] != 'v' || version[1] == '0' {
+		return false
 	}
-	values := make(map[string]*yaml.Node)
-	for _, layer := range []*yaml.Node{lowerNode, upperNode} {
-		mapping, err := runtimeOptionalMapping(layer, "capabilities.aliases", nil)
-		if err != nil {
-			return nil, false, nil, err
+	major, err := strconv.ParseUint(version[1:], 10, 64)
+	if err != nil || major == 0 {
+		return false
+	}
+	segments := strings.Split(name, ".")
+	if len(segments) < 2 {
+		return false
+	}
+	for _, segment := range segments {
+		if segment == "" || segment[0] < 'a' || segment[0] > 'z' {
+			return false
 		}
-		for alias, value := range mapping {
-			if runtimeNull(value) {
-				delete(values, alias)
-				continue
+		for index := 1; index < len(segment); index++ {
+			character := segment[index]
+			if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+				return false
 			}
-			values[alias] = runtimeClone(value)
 		}
 	}
-	targets := make(map[string]string, len(values))
-	for alias, value := range values {
-		target, err := validateRuntimeAlias(alias, value)
-		if err != nil {
-			return nil, false, nil, err
-		}
-		targets[alias] = target
-	}
-	for alias, target := range targets {
-		if _, chain := targets[target]; chain {
-			return nil, false, nil, runtimeConfigurationError("capabilities.aliases[%q] targets Alias %q; Alias chains are not allowed", alias, target)
-		}
-	}
-	return runtimeMappingNode(values), true, targets, nil
+	return true
 }
 
-func validateRuntimeAlias(alias string, node *yaml.Node) (string, error) {
-	identifier, err := kernelcapability.ParseIdentifier(alias)
-	if err != nil || identifier.String() != alias || strings.HasPrefix(identifier.Name(), "kernel.") {
-		return "", runtimeConfigurationError("capabilities.aliases key %q is not a valid application Alias", alias)
+func validRuntimeSelectableInterfaceID(value string) bool {
+	if !validRuntimeInterfaceID(value) {
+		return false
 	}
-	var target string
-	if node.Kind == yaml.ScalarNode && node.Tag == "!!str" {
-		target = node.Value
-	} else {
-		values, mappingErr := runtimeMapping(node, "capabilities.aliases["+strconv.Quote(alias)+"]", runtimeKeySet("target", "expose", "deprecated"))
-		if mappingErr != nil {
-			return "", mappingErr
+	name, _, _ := strings.Cut(value, "/")
+	return !strings.HasPrefix(name, "kernel.")
+}
+
+func validRuntimeConstructorSymbol(value string) bool {
+	separator := strings.LastIndexByte(value, '.')
+	if separator <= 0 || separator == len(value)-1 || !validRuntimeImportPath(value[:separator]) {
+		return false
+	}
+	function := value[separator+1:]
+	if !token.IsIdentifier(function) {
+		return false
+	}
+	for _, first := range function {
+		return unicode.IsUpper(first)
+	}
+	return false
+}
+
+func validRuntimeImportPath(value string) bool {
+	if value == "" || value[0] == '-' || strings.Contains(value, "//") || strings.HasSuffix(value, "/") {
+		return false
+	}
+	for _, element := range strings.Split(value, "/") {
+		if element == "" || strings.Count(element, ".") == len(element) || strings.HasSuffix(element, ".") {
+			return false
 		}
-		targetNode, exists := values["target"]
-		if !exists {
-			return "", runtimeConfigurationError("capabilities.aliases[%q].target is required", alias)
-		}
-		target, err = runtimeString(targetNode)
-		if err != nil {
-			return "", runtimeConfigurationError("capabilities.aliases[%q].target must be a canonical Capability ID", alias)
-		}
-		if expose := values["expose"]; expose != nil {
-			fields, exposeErr := runtimeMapping(expose, "capabilities.aliases["+strconv.Quote(alias)+"].expose", runtimeKeySet("go", "http", "javascript"))
-			if exposeErr != nil {
-				return "", exposeErr
+		for _, character := range element {
+			if (character < 'a' || character > 'z') &&
+				(character < 'A' || character > 'Z') &&
+				(character < '0' || character > '9') &&
+				!strings.ContainsRune("-._~+", character) {
+				return false
 			}
-			for _, field := range []string{"go", "http", "javascript"} {
-				value, exists := fields[field]
-				if !exists {
-					return "", runtimeConfigurationError("capabilities.aliases[%q].expose.%s is required", alias, field)
+		}
+		short := element
+		if dot := strings.IndexByte(short, '.'); dot >= 0 {
+			short = short[:dot]
+		}
+		for _, reserved := range []string{"CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"} {
+			if strings.EqualFold(short, reserved) {
+				return false
+			}
+		}
+		if tilde := strings.LastIndexByte(short, '~'); tilde >= 0 && tilde < len(short)-1 {
+			digits := true
+			for _, character := range short[tilde+1:] {
+				if character < '0' || character > '9' {
+					digits = false
+					break
 				}
-				if _, validateErr := validateRuntimeBoolean(value, "capabilities.aliases.expose."+field); validateErr != nil {
-					return "", validateErr
-				}
 			}
-		}
-		if deprecated := values["deprecated"]; deprecated != nil {
-			fields, deprecatedErr := runtimeMapping(deprecated, "capabilities.aliases["+strconv.Quote(alias)+"].deprecated", runtimeKeySet("message"))
-			if deprecatedErr != nil {
-				return "", deprecatedErr
-			}
-			message, exists := fields["message"]
-			if !exists {
-				return "", runtimeConfigurationError("capabilities.aliases[%q].deprecated.message is required", alias)
-			}
-			text, textErr := runtimeString(message)
-			if textErr != nil || text == "" || len(text) > 1024 || strings.ContainsRune(text, '\x00') {
-				return "", runtimeConfigurationError("capabilities.aliases[%q].deprecated.message is invalid", alias)
+			if digits {
+				return false
 			}
 		}
 	}
-	targetID, err := kernelcapability.ParseIdentifier(target)
-	if err != nil || targetID.String() != target || targetID.Major() != identifier.Major() || target == alias {
-		return "", runtimeConfigurationError("capabilities.aliases[%q] must directly target another canonical Capability at the same major version", alias)
-	}
-	return target, nil
+	return true
 }
 
 func mergeRuntimeConfigurations(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error) {

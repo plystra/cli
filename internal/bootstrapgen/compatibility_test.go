@@ -22,14 +22,9 @@ http:
     allow_credentials: true
   expose: [records.read/v1]
 timeouts: {startup: 45s}
-capabilities:
+interfaces:
   require: [records.read/v1]
-  use: {records.read/v1: acme.records}
-  aliases:
-    public.records/v1:
-      target: records.read/v1
-      expose: {go: true, http: true, javascript: false}
-      deprecated: {message: use records.read/v1}
+  use: {records.read/v1: example.com/acme/records.New}
 config:
   acme.records:
     endpoint: runtime-private-one
@@ -40,13 +35,8 @@ config:
   acme.records:
     token: {env: PRIVATE_TOKEN_TWO}
     endpoint: runtime-private-two
-capabilities:
-  aliases:
-    public.records/v1:
-      deprecated: {message: use records.read/v1}
-      expose: {javascript: false, http: true, go: true}
-      target: records.read/v1
-  use: {records.read/v1: acme.records}
+interfaces:
+  use: {records.read/v1: example.com/acme/records.New}
   require: [records.read/v1]
 timeouts: {startup: 2m}
 http:
@@ -74,9 +64,9 @@ http:
 		`"application_model_digest":"` + digest + `"`,
 		`"http_transports":{"connect":true,"rest":true}`,
 		`"http_exposures":["records.read/v1"]`,
-		`"requirements":["records.read/v1"]`,
-		`"plugin_id":"acme.records"`,
-		`"id":"public.records/v1"`,
+		`"interface_requirements":["records.read/v1"]`,
+		`"interface":"records.read/v1"`,
+		`"constructor":"example.com/acme/records.New"`,
 	} {
 		if !strings.Contains(canonical, required) {
 			t.Fatalf("canonical projection omits %q: %s", required, canonical)
@@ -119,9 +109,8 @@ func TestApplicationModelCompatibilityChangesForEveryBuildAffectingDeclaration(t
 		{name: "transport", yaml: "http: {transports: {connect: false}}\n"},
 		{name: "CORS", yaml: "http: {cors: {allowed_origins: [https://app.example]}}\n"},
 		{name: "exposure", yaml: "http: {expose: [kernel.health/v1]}\n"},
-		{name: "requirement", yaml: "capabilities: {require: [records.read/v1]}\n"},
-		{name: "Provider", yaml: "capabilities: {use: {records.read/v1: acme.records}}\n"},
-		{name: "Alias", yaml: "capabilities: {aliases: {public.records/v1: records.read/v1}}\n"},
+		{name: "Interface requirement", yaml: "interfaces: {require: [records.read/v1]}\n"},
+		{name: "Implementation choice", yaml: "interfaces: {use: {records.read/v1: example.com/acme/records.New}}\n"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

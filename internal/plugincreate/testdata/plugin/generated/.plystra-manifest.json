@@ -23,7 +23,7 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:1f9b01be262f19d8bd1317db534342c64e7571e845ccc9ca8c5c0bd99e5211d7"
+      "sha256": "sha256:3279b509c3aa23561d9a1cc4f99a1e4d85341aff9c99521ddc4f1a49e228e1b7"
     },
     {
       "path": "generated/go/configuration/account-profile_gen.go",

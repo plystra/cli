@@ -310,8 +310,15 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 			t.Fatalf("project scaffold contains obsolete configuration %q:\n%s", obsolete, directTree["plystra.yaml"])
 		}
 	}
-	if !bytes.Contains(directTree["plystra.yaml"], []byte("  aliases: {}")) {
-		t.Fatalf("project scaffold omits capabilities.aliases:\n%s", directTree["plystra.yaml"])
+	for _, required := range [][]byte{[]byte("interfaces:"), []byte("  require: []"), []byte("  use: {}")} {
+		if !bytes.Contains(directTree["plystra.yaml"], required) {
+			t.Fatalf("project scaffold omits %q:\n%s", required, directTree["plystra.yaml"])
+		}
+	}
+	for _, obsolete := range [][]byte{[]byte("capabilities:"), []byte("aliases:")} {
+		if bytes.Contains(directTree["plystra.yaml"], obsolete) {
+			t.Fatalf("project scaffold retains obsolete declaration %q:\n%s", obsolete, directTree["plystra.yaml"])
+		}
 	}
 	assertDefaultTransportScaffold(t, directTree["plystra.yaml"])
 	assertReadmeUsesAvailableCommands(t, directTree["README.md"])
@@ -366,23 +373,54 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
 	const templatePath = "example.com/acme/platform"
 	const templateVersion = "v1.2.3"
 	const templateQuery = templatePath + "@" + templateVersion
-	const secretReference = "PLYSTRA_TEMPLATE_SMTP_PASSWORD"
-	const resolvedSecret = "resolved-template-secret-must-not-leak"
 	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
-		"template.go":             []byte("package platform\n\nconst Identity = \"template-source-only\"\n"),
-		"TEMPLATE_ONLY.md":        []byte("This file must remain in the dependency source.\n"),
-		"plystra.yaml":            []byte("http:\n  expose:\n    - kernel.health/v1\n\ncapabilities:\n  require:\n    - email.send/v1\n    - kernel.info/v1\n  use:\n    email.send/v1: acme.platform.mailer\n  aliases: {}\n\nconfig:\n  acme.platform.mailer:\n    host: smtp.localhost\n    password:\n      env: " + secretReference + "\n"),
-		"plystra.production.yaml": []byte("capabilities:\n  require:\n    - missing.overlay/v1\n"),
-		"mailer/plugin.yaml":      []byte("id: acme.platform.mailer\nprovides: [email.send/v1]\nconfig:\n  host: {type: string, required: true}\n  password: {type: secret, required: true}\n"),
-		"mailer/capabilities/email.send/v1/capability.yaml": []byte("id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n" + newProjectQuerySemanticsYAML),
-		"mailer/plugin.go":                                     []byte("package mailer\n\nimport (\n\t\"context\"\n\t\"fmt\"\n\t\"os\"\n\n\tconfiguration \"example.com/acme/platform/generated/go/configuration\"\n\tcontract \"example.com/acme/platform/generated/go/contracts/email/send/v1\"\n)\n\ntype Config = configuration.MailerConfig\ntype Plugin struct{}\nfunc New(Config) *Plugin { return &Plugin{} }\nfunc (*Plugin) Send(context.Context, contract.Request) (contract.Response, error) { return contract.Response{}, nil }\nfunc (*Plugin) Start(context.Context) error { return recordLifecycle(\"start\") }\nfunc (*Plugin) Stop(context.Context) error { return recordLifecycle(\"stop\") }\nfunc recordLifecycle(event string) error {\n\tpath := os.Getenv(\"PLYSTRA_TEMPLATE_LIFECYCLE_LOG\")\n\tif path == \"\" { return nil }\n\tfile, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)\n\tif err != nil { return err }\n\tdefer file.Close()\n\t_, err = fmt.Fprintln(file, event)\n\treturn err\n}\n"),
-		"generated/go/configuration/mailer_gen.go":             []byte("package configuration\n\nimport (\n\t\"context\"\n\n\tkernelconfiguration \"github.com/plystra/kernel/configuration\"\n)\n\ntype MailerConfig struct { Host string; Password kernelconfiguration.Secret }\nfunc DecodeMailer(context.Context, *kernelconfiguration.Resolver, []byte) (MailerConfig, error) { return MailerConfig{}, nil }\n"),
-		"generated/go/contracts/email/send/v1/contract_gen.go": []byte("package emailsendv1\n\nconst CapabilityID = \"email.send/v1\"\ntype Request struct{}\ntype Response struct{}\n"),
+		"template.go":      []byte("package platform\n\nconst Identity = \"template-source-only\"\n"),
+		"TEMPLATE_ONLY.md": []byte("This file must remain in the dependency source.\n"),
+		"plystra.yaml": []byte(`http:
+  expose:
+    - kernel.health/v1
+
+interfaces:
+  require:
+    - email.send/v1
+    - kernel.info/v1
+  use:
+    email.send/v1: example.com/acme/platform/mailer.New
+`),
+		"plystra.production.yaml": []byte("interfaces:\n  require:\n    - missing.overlay/v1\n"),
+		"interfaces/email/send/v1/interface.go": []byte(`package sendv1
+
+import "context"
+
+//plystra:interface email.send/v1
+type Interface interface {
+	Send(context.Context, Request) (Response, error)
+}
+
+type Request struct{}
+type Response struct{}
+`),
+		"mailer/mailer.go": []byte(`package mailer
+
+import (
+	"context"
+
+	sendv1 "example.com/acme/platform/interfaces/email/send/v1"
+)
+
+type Service struct{}
+
+//plystra:implements email.send/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
+	return sendv1.Response{}, nil
+}
+
+var _ sendv1.Interface = (*Service)(nil)
+`),
 	})
-	lifecycleLog := filepath.Join(t.TempDir(), "lifecycle.log")
 	environment := setEnvironmentValue(isolatedGoEnvironment(t, proxy), "GOPRIVATE", "corp.example.com")
-	environment = setEnvironmentValue(environment, "PLYSTRA_TEMPLATE_LIFECYCLE_LOG", lifecycleLog)
-	environment = append(environment, secretReference+"="+resolvedSecret)
 	if err := gocommand.Run(t.Context(), gocommand.Options{
 		Directory:   t.TempDir(),
 		Environment: environment,
@@ -413,10 +451,6 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
 	if stdout.String() != wantOutput || stderr.Len() != 0 {
 		t.Fatalf("RunIn output = stdout %q, stderr %q", stdout.String(), stderr.String())
 	}
-	if lifecycle, err := os.ReadFile(lifecycleLog); err != nil || string(lifecycle) != "start\nstop\n" {
-		t.Fatalf("template lifecycle smoke = %q, %v", lifecycle, err)
-	}
-
 	assertDirectRequirement(t, target, templatePath, templateVersion)
 	configuration, err := os.ReadFile(filepath.Join(target, "plystra.yaml"))
 	if err != nil {
@@ -434,26 +468,18 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
 	if transports := model.HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
 		t.Fatalf("composed HTTP transports = %#v, want Connect enabled and REST disabled", transports)
 	}
-	requirements := model.Requirements()
+	requirements := model.InterfaceRequirements()
 	if len(requirements) != 2 || requirements[0].ID().String() != "email.send/v1" || requirements[1].ID().String() != "kernel.info/v1" {
 		t.Fatalf("composed requirements = %#v, want email.send/v1 and kernel.info/v1", requirements)
 	}
-	choices := model.ProviderChoices()
-	if len(choices) != 1 || choices[0].Capability().String() != "email.send/v1" || choices[0].PluginID() != "acme.platform.mailer" {
-		t.Fatalf("composed Provider choices = %#v, want email.send/v1 -> acme.platform.mailer", choices)
-	}
-	pluginConfiguration, exists := model.Configuration("acme.platform.mailer")
-	if !exists {
-		t.Fatal("composed configuration omits acme.platform.mailer")
-	}
-	privateConfiguration := pluginConfiguration.YAML()
-	if !bytes.Contains(privateConfiguration, []byte("smtp.localhost")) || !bytes.Contains(privateConfiguration, []byte(secretReference)) || bytes.Contains(privateConfiguration, []byte(resolvedSecret)) {
-		t.Fatalf("composed Plugin configuration did not preserve unresolved local inputs: %s", privateConfiguration)
+	choices := model.ImplementationChoices()
+	if len(choices) != 1 || choices[0].InterfaceID().String() != "email.send/v1" || choices[0].Constructor().String() != "example.com/acme/platform/mailer.New" {
+		t.Fatalf("composed Implementation choices = %#v, want email.send/v1 -> example.com/acme/platform/mailer.New", choices)
 	}
 	if bytes.Contains(configuration, []byte("missing.overlay/v1")) {
 		t.Fatalf("dependency environment overlay was inherited:\n%s", configuration)
 	}
-	for _, copied := range []string{"template.go", "TEMPLATE_ONLY.md", "plystra.production.yaml", "go.work"} {
+	for _, copied := range []string{"template.go", "TEMPLATE_ONLY.md", "plystra.production.yaml", "interfaces", "mailer", "go.work"} {
 		if _, err := os.Lstat(filepath.Join(target, copied)); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("template source path %s was copied into the Project: %v", copied, err)
 		}
@@ -461,14 +487,6 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
 	manifest, err := os.ReadFile(filepath.Join(target, "generated", "manifest.json"))
 	if err != nil || !bytes.Contains(manifest, []byte(templatePath)) {
 		t.Fatalf("generated manifest template provenance = %q, %v", manifest, err)
-	}
-	if bytes.Contains(manifest, []byte(secretReference)) || bytes.Contains(manifest, []byte(resolvedSecret)) {
-		t.Fatalf("generated manifest leaked a Secret reference or resolved value: %s", manifest)
-	}
-	for name, data := range snapshotTree(t, filepath.Join(target, "generated")) {
-		if bytes.Contains(data, []byte(secretReference)) || bytes.Contains(data, []byte(resolvedSecret)) {
-			t.Fatalf("generated path %s leaked a Secret reference or resolved value", name)
-		}
 	}
 	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       target,

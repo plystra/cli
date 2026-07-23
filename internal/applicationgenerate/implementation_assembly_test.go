@@ -147,14 +147,14 @@ func (service *service) Run(ctx context.Context, request runv1.Request) (runv1.R
 			t.Fatalf("generated static assembly omits %q:\n%s", required, assemblySource)
 		}
 	}
-	writeFile(t, filepath.Join(root, "acceptance", "runtime_test.go"), `package acceptance_test
+	writeFile(t, filepath.Join(root, "static_interface_runtime_test.go"), `package staticinterfaceruntime_test
 
 import (
 	"context"
 	"reflect"
 	"testing"
 
-	assembly "example.com/acme/static-interface-runtime/generated/go/assembly"
+	bootstrap "example.com/acme/static-interface-runtime/generated/go/bootstrap"
 	checkv1 "example.com/acme/static-interface-runtime/interfaces/app/check/v1"
 	runv1 "example.com/acme/static-interface-runtime/interfaces/app/run/v1"
 	"example.com/acme/static-interface-runtime/probe"
@@ -162,9 +162,21 @@ import (
 )
 
 func TestRuntime(t *testing.T) {
-	runtime, err := assembly.NewInterfaceRuntime(assembly.ConstructorConfiguration{})
-	if err != nil || !runtime.Valid() {
-		t.Fatalf("NewInterfaceRuntime = %#v, %v", runtime, err)
+	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+	if err != nil || !application.Valid() {
+		t.Fatalf("bootstrap.New = %#v, %v", application, err)
+	}
+	if err := application.Start(context.Background()); err != nil {
+		t.Fatalf("Application.Start: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := application.Stop(context.Background()); err != nil {
+			t.Errorf("Application.Stop: %v", err)
+		}
+	})
+	runtime := application.Interfaces()
+	if !runtime.Valid() {
+		t.Fatal("bootstrap returned an invalid static Interface runtime")
 	}
 	if order := probe.Order(); !reflect.DeepEqual(order, []string{"audit", "app"}) {
 		t.Fatalf("constructor order = %v", order)

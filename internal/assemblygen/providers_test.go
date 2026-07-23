@@ -20,6 +20,7 @@ import (
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/configurationgen"
+	"github.com/plystra/cli/internal/implementationassemblygen"
 	"github.com/plystra/cli/internal/transportprovenance"
 	"github.com/plystra/kernel/plugin/manifest"
 )
@@ -221,8 +222,10 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 	if err != nil {
 		t.Fatalf("Render bootstrap: %v", err)
 	}
+	interfaces := renderEmptyInterfaceAssembly(t, "example.com/assemblyapp")
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(assemblygen.ProvidersPath)), providers)
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(assemblygen.InvocationsPath)), invocations)
+	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(interfaces.Path())), interfaces.Data())
 	writeBytes(t, filepath.Join(applicationRoot, "generated", "go", "assembly", "compatibility_gen.go"), compatibility)
 	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "assembly", "providers_gen_test.go"), generatedProvidersRuntimeTest)
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(bootstrapgen.Path)), bootstrap)
@@ -289,8 +292,10 @@ replace github.com/plystra/kernel => %s
 	if err != nil {
 		t.Fatalf("Render bootstrap: %v", err)
 	}
+	interfaces := renderEmptyInterfaceAssembly(t, "example.com/emptyapp")
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(assemblygen.ProvidersPath)), providers)
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(assemblygen.InvocationsPath)), invocations)
+	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(interfaces.Path())), interfaces.Data())
 	writeBytes(t, filepath.Join(applicationRoot, "generated", "go", "assembly", "compatibility_gen.go"), compatibility)
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(bootstrapgen.Path)), bootstrap)
 	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "bootstrap", "bootstrap_gen_test.go"), emptyGeneratedBootstrapRuntimeTest)
@@ -311,6 +316,21 @@ func renderConfiguration(t testing.TB, input configurationgen.Input) configurati
 	generated, err := configurationgen.Render(input)
 	if err != nil {
 		t.Fatalf("configurationgen.Render(%s): %v", input.PluginID, err)
+	}
+	return generated
+}
+
+func renderEmptyInterfaceAssembly(t testing.TB, modulePath string) implementationassemblygen.File {
+	t.Helper()
+	generated, err := implementationassemblygen.Render(implementationassemblygen.Options{
+		ModulePath:               modulePath,
+		ApplicationBuildIdentity: "test-build",
+		KernelModuleVersion:      "v0.0.0",
+		KernelBuildIdentity:      "test-build",
+		DefaultTimeout:           30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("implementationassemblygen.Render: %v", err)
 	}
 	return generated
 }
@@ -898,13 +918,9 @@ func TestRuntimeEnvironmentComposesEveryApplicationField(t *testing.T) {
     allow_credentials: true
   expose: [kernel.health/v1]
 timeouts: {startup: 1m}
-capabilities:
+interfaces:
   require: [records.read/v1]
-  use: {records.read/v1: acme.local-service}
-  aliases:
-    public.records/v1:
-      target: records.read/v1
-      expose: {go: true, http: true, javascript: false}
+  use: {records.read/v1: example.com/assemblyapp/local-service.New}
 config: {}
 ` + "`" + `
 	overlay := ` + "`" + `http:
@@ -916,15 +932,11 @@ config: {}
     add: [kernel.info/v1]
     remove: [kernel.health/v1]
 timeouts: {startup: 45s}
-capabilities:
+interfaces:
   require:
     add: [records.write/v1]
     remove: [records.read/v1]
-  use: {records.read/v1: zeta.remote-store}
-  aliases:
-    public.records/v1:
-      target: records.write/v1
-      expose: {go: false, http: true, javascript: false}
+  use: {records.read/v1: example.com/assemblydependency/remote-store.New}
 ` + "`" + `
 	writeRuntimeDocument(t, root)
 	writeEnvironmentDocument(t, "production", overlay)
@@ -946,30 +958,22 @@ capabilities:
 		Timeouts struct {
 			Startup string ` + "`" + `yaml:"startup"` + "`" + `
 		} ` + "`" + `yaml:"timeouts"` + "`" + `
-		Capabilities struct {
+		Interfaces struct {
 			Require []string          ` + "`" + `yaml:"require"` + "`" + `
 			Use     map[string]string ` + "`" + `yaml:"use"` + "`" + `
-			Aliases map[string]struct {
-				Target string          ` + "`" + `yaml:"target"` + "`" + `
-				Expose map[string]bool ` + "`" + `yaml:"expose"` + "`" + `
-			} ` + "`" + `yaml:"aliases"` + "`" + `
-		} ` + "`" + `yaml:"capabilities"` + "`" + `
+		} ` + "`" + `yaml:"interfaces"` + "`" + `
 	}
 	if err := yaml.Unmarshal(document, &effective); err != nil {
 		t.Fatalf("decode effective runtime configuration: %v", err)
 	}
-	alias := effective.Capabilities.Aliases["public.records/v1"]
 	if effective.HTTP.Address != ":9090" || !effective.HTTP.Transports["connect"] || !effective.HTTP.Transports["rest"] || !effective.HTTP.CORS.AllowCredentials {
 		t.Fatalf("HTTP composition = %#v", effective.HTTP)
 	}
 	if strings.Join(effective.HTTP.CORS.AllowedOrigins, ",") != "https://production.example" || strings.Join(effective.HTTP.Expose, ",") != "kernel.info/v1" {
 		t.Fatalf("HTTP set composition = %#v", effective.HTTP)
 	}
-	if effective.Timeouts.Startup != "45s" || strings.Join(effective.Capabilities.Require, ",") != "records.write/v1" || effective.Capabilities.Use["records.read/v1"] != "zeta.remote-store" {
-		t.Fatalf("application composition = %#v, %#v", effective.Timeouts, effective.Capabilities)
-	}
-	if alias.Target != "records.write/v1" || alias.Expose["go"] || !alias.Expose["http"] || alias.Expose["javascript"] {
-		t.Fatalf("Alias composition = %#v", alias)
+	if effective.Timeouts.Startup != "45s" || strings.Join(effective.Interfaces.Require, ",") != "records.write/v1" || effective.Interfaces.Use["records.read/v1"] != "example.com/assemblydependency/remote-store.New" {
+		t.Fatalf("application composition = %#v, %#v", effective.Timeouts, effective.Interfaces)
 	}
 }
 
@@ -998,7 +1002,7 @@ func TestApplicationRejectsBuildAffectingRuntimeChangesBeforeConstructors(t *tes
 			name: "full replacement",
 			prepare: func(t *testing.T) {
 				writeRuntimeDocument(t, validRuntimeDocument)
-				writeReplacementDocument(t, "changed-model.yaml", "capabilities: {require: [kernel.health/v1]}\n"+validRuntimeDocument)
+				writeReplacementDocument(t, "changed-model.yaml", "interfaces: {require: [kernel.health/v1]}\n"+validRuntimeDocument)
 			},
 			options: RuntimeOptions{Arguments: []string{"--config", "changed-model.yaml"}},
 		},
@@ -1027,6 +1031,9 @@ func TestApplicationRejectsInvalidEnvironmentSelectionBeforeConstructors(t *test
 	writeEnvironmentDocument(t, "type-change", "config:\n  zeta.remote-store:\n    endpoint: {nested: value}\n")
 	writeEnvironmentDocument(t, "unknown-field", "config:\n  zeta.remote-store:\n    unknown: value\n")
 	writeEnvironmentDocument(t, "alias", "config:\n  zeta.remote-store: &shared\n    endpoint: value\n")
+	writeEnvironmentDocument(t, "invalid-interface", "interfaces: {require: [Records.read/v1]}\n")
+	writeEnvironmentDocument(t, "invalid-constructor", "interfaces: {use: {records.read/v1: acme.records}}\n")
+	writeEnvironmentDocument(t, "obsolete-capabilities", "capabilities: {require: [records.read/v1]}\n")
 
 	tests := []struct {
 		name    string
@@ -1039,6 +1046,9 @@ func TestApplicationRejectsInvalidEnvironmentSelectionBeforeConstructors(t *test
 		{name: "type change", options: RuntimeOptions{Arguments: []string{"--env", "type-change"}}, reason: ErrRuntimeConfiguration},
 		{name: "unknown field", options: RuntimeOptions{Arguments: []string{"--env", "unknown-field"}}, reason: ErrRuntimeConfiguration},
 		{name: "YAML reference", options: RuntimeOptions{Arguments: []string{"--env", "alias"}}, reason: ErrRuntimeConfiguration},
+		{name: "invalid Interface ID", options: RuntimeOptions{Arguments: []string{"--env", "invalid-interface"}}, reason: ErrRuntimeConfiguration},
+		{name: "invalid Implementation constructor", options: RuntimeOptions{Arguments: []string{"--env", "invalid-constructor"}}, reason: ErrRuntimeConfiguration},
+		{name: "obsolete capabilities schema", options: RuntimeOptions{Arguments: []string{"--env", "obsolete-capabilities"}}, reason: ErrRuntimeConfiguration},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -20,10 +20,9 @@ const plystraTemplate = `http:
 timeouts:
   startup: 2m
 
-capabilities:
+interfaces:
   require: []
   use: {}
-  aliases: {}
 
 config: {}
 `

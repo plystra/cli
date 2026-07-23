@@ -347,8 +347,8 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("ReadFile(go.sum): %v", err)
 	}
 	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
-	rootConfiguration := "# shared root\nhttp: {cors: {allowed_origins: [https://app.example.com], allow_credentials: true}}\ncapabilities: {require: [kernel.health/v1]}\n"
-	overlayConfiguration := "# sparse production overlay\nhttp: {cors: {allow_credentials: null}}\ncapabilities:\n  require:\n    add: [kernel.info/v1]\n    remove: [kernel.health/v1]\n"
+	rootConfiguration := "# shared root\nhttp: {cors: {allowed_origins: [https://app.example.com], allow_credentials: true}}\ninterfaces: {require: [kernel.health/v1]}\n"
+	overlayConfiguration := "# sparse production overlay\nhttp: {cors: {allow_credentials: null}}\ninterfaces:\n  require:\n    add: [kernel.info/v1]\n    remove: [kernel.health/v1]\n"
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootConfiguration)
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayConfiguration)
 	start := filepath.Join(root, "nested")
@@ -514,7 +514,7 @@ func TestRunGenerateSelectsCompleteConfigurationThroughPublicCommand(t *testing.
 	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
 
 	writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), "module example.com/platform\n\ngo 1.26\n")
-	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities: {require: [kernel.health/v1]}\n")
+	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "interfaces: {require: [kernel.health/v1]}\n")
 	goMod := fmt.Sprintf(`module example.com/acme/config-select
 
 go 1.26
@@ -539,103 +539,27 @@ replace github.com/plystra/kernel => %s
 	writeCommandFile(t, filepath.Join(applicationRoot, "go.sum"), string(goSum))
 	rootConfiguration := `# shared root configuration must be excluded in replacement mode
 http:
-  expose: [email.send/v1]
-capabilities:
-  require: [email.send/v1]
-  use: {email.send/v1: acme.root-mail}
+  expose: [kernel.health/v1]
+interfaces:
+  require: [kernel.health/v1]
 `
 	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), rootConfiguration)
 	selectedConfiguration := `# complete customer configuration
 http:
-  expose: [reports.read/v1]
-capabilities:
-  require: [email.send/v1, reports.read/v1]
-  use: {email.send/v1: acme.selected-mail}
-config:
-  acme.selected-mail:
-    endpoint: https://selected-runtime.invalid
-    token: {env: SELECTED_MAIL_TOKEN}
+  expose: [kernel.info/v1]
+interfaces:
+  require: [kernel.info/v1]
 `
 	selectedPath := filepath.Join(applicationRoot, "deploy", "customer.yaml")
 	writeCommandFile(t, selectedPath, selectedConfiguration)
 	ambientPath := filepath.Join(applicationRoot, "deploy", "ambient.yaml")
 	writeCommandFile(t, ambientPath, rootConfiguration)
 
-	emailContract := `id: email.send/v1
-request:
-  to: {type: string, required: true}
-response:
-  accepted: {type: boolean, required: true}
-errors: [invalid_recipient]
-`
-	for _, plugin := range []string{"root-mail", "selected-mail"} {
-		pluginID := "acme." + plugin
-		manifest := "id: " + pluginID + "\nprovides: [email.send/v1]\n"
-		if plugin == "selected-mail" {
-			manifest += "config:\n  endpoint: {type: string}\n  token: {type: secret}\n"
-		}
-		writeCommandFile(t, filepath.Join(applicationRoot, plugin, "plugin.yaml"), manifest)
-		writeCommandFile(t, filepath.Join(applicationRoot, plugin, "capabilities", "email.send", "v1", "capability.yaml"), emailContract)
+	nestedStart := filepath.Join(applicationRoot, "nested")
+	if err := os.MkdirAll(nestedStart, 0o755); err != nil {
+		t.Fatalf("MkdirAll nested start: %v", err)
 	}
-	writeCommandFile(t, filepath.Join(applicationRoot, "selected-mail", "plugin.go"), `package selectedmail
-
-import (
-	"context"
-
-	configuration "example.com/acme/config-select/generated/go/configuration"
-	contract "example.com/acme/config-select/generated/go/contracts/email/send/v1"
-)
-
-type Config = configuration.SelectedMailConfig
-type Plugin struct{}
-
-func New(_ Config) *Plugin { return &Plugin{} }
-
-func (*Plugin) Send(_ context.Context, request contract.Request) (contract.Response, error) {
-	return contract.Response{Accepted: request.To != ""}, nil
-}
-`)
-	writeCommandFile(t, filepath.Join(applicationRoot, "root-mail", "plugin.go"), `package rootmail
-
-import (
-	"context"
-
-	configuration "example.com/acme/config-select/generated/go/configuration"
-	contract "example.com/acme/config-select/generated/go/contracts/email/send/v1"
-)
-
-type Config = configuration.RootMailConfig
-type Plugin struct{}
-
-func New(_ Config) *Plugin { return &Plugin{} }
-
-func (*Plugin) Send(_ context.Context, request contract.Request) (contract.Response, error) {
-	return contract.Response{Accepted: request.To != ""}, nil
-}
-`)
-	writeCommandFile(t, filepath.Join(applicationRoot, "reports", "plugin.yaml"), "id: acme.reports\nprovides: [reports.read/v1]\n")
-	writeCommandFile(t, filepath.Join(applicationRoot, "reports", "capabilities", "reports.read", "v1", "capability.yaml"), "id: reports.read/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
-	writeCommandFile(t, filepath.Join(applicationRoot, "reports", "plugin.go"), `package reports
-
-import (
-	"context"
-
-	configuration "example.com/acme/config-select/generated/go/configuration"
-	contract "example.com/acme/config-select/generated/go/contracts/reports/read/v1"
-)
-
-type Config = configuration.ReportsConfig
-type Plugin struct{}
-
-func New(_ Config) *Plugin { return &Plugin{} }
-
-func (*Plugin) Read(_ context.Context, _ contract.Request) (contract.Response, error) {
-	return contract.Response{}, nil
-}
-`)
-
-	nestedStart := filepath.Join(applicationRoot, "selected-mail")
-	environment := commandGoEnvironmentWith(map[string]string{"SELECTED_MAIL_TOKEN": "resolved-super-secret"})
+	environment := commandGoEnvironment()
 	exitCode, stdout, stderr := runCommand(t, []string{"generate", "--config", selectedPath}, nestedStart, environment)
 	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/config-select in "+applicationRoot+"\n" {
 		t.Fatalf("generate --config from nested Plugin = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
@@ -644,7 +568,7 @@ func (*Plugin) Read(_ context.Context, _ contract.Request) (contract.Response, e
 		t.Fatalf("replacement generation changed root configuration:\n%s", got)
 	}
 	selected := readCommandFile(t, applicationRoot, "deploy/customer.yaml")
-	for _, required := range [][]byte{[]byte("# complete customer configuration"), []byte("kernel.health/v1"), []byte("SELECTED_MAIL_TOKEN"), []byte("https://selected-runtime.invalid")} {
+	for _, required := range [][]byte{[]byte("# complete customer configuration"), []byte("kernel.health/v1"), []byte("kernel.info/v1")} {
 		if !bytes.Contains(selected, required) {
 			t.Fatalf("maintained selected configuration omits %q:\n%s", required, selected)
 		}
@@ -658,33 +582,29 @@ func (*Plugin) Read(_ context.Context, _ contract.Request) (contract.Response, e
 	}
 	assertCommandBootstrapProvenanceMatchesManifest(t, applicationRoot)
 	for _, name := range []string{
-		"generated/go/adapters/http/reports/read/v1/handler_gen.go",
-		"generated/go/clients/reports/read/v1/client_gen.go",
-		"generated/go/invocation/reports/read/v1/invocation_gen.go",
-		"generated/sdk/javascript/src/operations/reports/read/v1.ts",
+		"generated/go/adapters/http/kernel/info/v1/handler_gen.go",
+		"generated/go/clients/kernel/info/v1/client_gen.go",
+		"generated/go/invocation/kernel/info/v1/invocation_gen.go",
+		"generated/sdk/javascript/src/operations/kernel/info/v1.ts",
 		"generated/docs/api.md",
 		"generated/docs/openapi.json",
 	} {
 		assertCommandFile(t, applicationRoot, name)
 	}
 	for _, name := range []string{
-		"generated/go/adapters/http/email/send/v1/handler_gen.go",
-		"generated/sdk/javascript/src/operations/email/send/v1.ts",
+		"generated/go/adapters/http/kernel/health/v1/handler_gen.go",
+		"generated/sdk/javascript/src/operations/kernel/health/v1.ts",
 	} {
 		if _, statErr := os.Lstat(filepath.Join(applicationRoot, filepath.FromSlash(name))); !errors.Is(statErr, os.ErrNotExist) {
 			t.Fatalf("root-only exposure generated %s: %v", name, statErr)
 		}
 	}
-	invocations := readCommandFile(t, applicationRoot, "generated/go/assembly/invocations_gen.go")
-	if !bytes.Contains(invocations, []byte(`Constructor:     "example.com/acme/config-select/selected-mail.New"`)) || bytes.Contains(invocations, []byte(`Constructor:     "example.com/acme/config-select/root-mail.New"`)) {
-		t.Fatalf("selected invocation assembly retained the root-only Provider choice:\n%s", invocations)
-	}
 	apiDocumentation := readCommandFile(t, applicationRoot, "generated/docs/api.md")
-	if !bytes.Contains(apiDocumentation, []byte("reports.read/v1")) || bytes.Contains(apiDocumentation, []byte("email.send/v1")) {
+	if !bytes.Contains(apiDocumentation, []byte("kernel.info/v1")) || bytes.Contains(apiDocumentation, []byte("kernel.health/v1")) {
 		t.Fatalf("selected API documentation does not match replacement exposure:\n%s", apiDocumentation)
 	}
 	for name, content := range commandTree(t, filepath.Join(applicationRoot, "generated")) {
-		for _, forbidden := range []string{applicationRoot, "https://selected-runtime.invalid", "SELECTED_MAIL_TOKEN", "resolved-super-secret"} {
+		for _, forbidden := range []string{applicationRoot, "runtime-private", "resolved-secret"} {
 			if bytes.Contains(content, []byte(forbidden)) {
 				t.Fatalf("generated/%s leaked %q", name, forbidden)
 			}
@@ -700,7 +620,7 @@ func (*Plugin) Read(_ context.Context, _ contract.Request) (contract.Response, e
 		{
 			name:        "explicit relative replacement overrides ambient selectors",
 			arguments:   []string{"run", "./generated/go/application", "--smoke", "--config", "deploy/customer.yaml"},
-			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_CONFIG": "missing.yaml", "PLYSTRA_ENV": "missing", "SELECTED_MAIL_TOKEN": "resolved-super-secret"}),
+			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_CONFIG": "missing.yaml", "PLYSTRA_ENV": "missing"}),
 		},
 		{
 			name:        "explicit absolute replacement",
@@ -710,7 +630,7 @@ func (*Plugin) Read(_ context.Context, _ contract.Request) (contract.Response, e
 		{
 			name:        "ambient replacement",
 			arguments:   []string{"run", "./generated/go/application", "--smoke"},
-			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml", "SELECTED_MAIL_TOKEN": "resolved-super-secret"}),
+			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"}),
 		},
 	} {
 		t.Run("generated binary "+runtime.name, func(t *testing.T) {
@@ -722,7 +642,7 @@ func (*Plugin) Read(_ context.Context, _ contract.Request) (contract.Response, e
 			}
 		})
 	}
-	changedSelected := bytes.Replace(selected, []byte("expose: [reports.read/v1]"), []byte("expose: [kernel.info/v1]"), 1)
+	changedSelected := bytes.Replace(selected, []byte("expose: [kernel.info/v1]"), []byte("expose: [kernel.health/v1]"), 1)
 	if bytes.Equal(changedSelected, selected) {
 		t.Fatal("test replacement did not contain the compiled exposure declaration")
 	}
@@ -742,13 +662,10 @@ func (*Plugin) Read(_ context.Context, _ contract.Request) (contract.Response, e
 		t.Fatalf("clean generate --check --config = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 
-	ambientEnvironment := commandGoEnvironmentWith(map[string]string{
-		"PLYSTRA_CONFIG":      "deploy/ambient.yaml",
-		"SELECTED_MAIL_TOKEN": "resolved-super-secret",
-	})
+	ambientEnvironment := commandGoEnvironmentWith(map[string]string{"PLYSTRA_CONFIG": "deploy/ambient.yaml"})
 	beforeAmbientCheck := commandTree(t, applicationRoot)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, nestedStart, ambientEnvironment)
-	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed deploy/ambient.yaml (dependency composition)\n") || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate --config \"deploy/ambient.yaml\"` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.ConfigurationCompositionDrift+"\n") || strings.Count(stderr, "Recovery:") != 1 {
+	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "generated output is not current:\n") || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate --config \"deploy/ambient.yaml\"` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.GeneratedDrift+"\n") || strings.Count(stderr, "Recovery:") != 1 {
 		t.Fatalf("PLYSTRA_CONFIG check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, beforeAmbientCheck) {
@@ -759,7 +676,7 @@ func (*Plugin) Read(_ context.Context, _ contract.Request) (contract.Response, e
 		t.Fatalf("explicit --config did not override PLYSTRA_CONFIG = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 
-	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities: {require: [kernel.info/v1]}\n")
+	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "interfaces: {require: [kernel.info/v1]}\n")
 	beforeCompositionCheck := commandTree(t, applicationRoot)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--config", "deploy/customer.yaml"}, nestedStart, environment)
 	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed deploy/customer.yaml (dependency composition)\n") || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate --config \"deploy/customer.yaml\"` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.ConfigurationCompositionDrift+"\n") || strings.Count(stderr, "Recovery:") != 1 {
