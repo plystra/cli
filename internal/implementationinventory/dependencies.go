@@ -15,6 +15,18 @@ const kernelOptionalPackagePath = "github.com/plystra/kernel"
 type InterfaceInput struct {
 	ID          interfaceid.Identifier
 	PackagePath string
+	Types       *types.Package
+}
+
+type canonicalInterfaceDefinition struct {
+	id            interfaceid.Identifier
+	packagePath   string
+	interfaceType *types.Named
+}
+
+type canonicalInterfaceIndex struct {
+	packages   map[string]canonicalInterfaceDefinition
+	identities map[string][]canonicalInterfaceDefinition
 }
 
 // RequiredInterface is one exact canonical Interface constructor parameter.
@@ -60,24 +72,44 @@ func (o OptionalInterface) ParameterName() string { return o.parameterName }
 // ParameterPosition returns the one-based constructor parameter position.
 func (o OptionalInterface) ParameterPosition() int { return o.parameterPosition }
 
-func indexInterfacePackages(inputs []InterfaceInput) (map[string]interfaceid.Identifier, error) {
-	result := make(map[string]interfaceid.Identifier, len(inputs))
+func indexInterfacePackages(inputs []InterfaceInput) (canonicalInterfaceIndex, error) {
+	result := canonicalInterfaceIndex{
+		packages:   make(map[string]canonicalInterfaceDefinition, len(inputs)),
+		identities: make(map[string][]canonicalInterfaceDefinition, len(inputs)),
+	}
 	for _, input := range inputs {
 		if input.ID.String() == "" {
-			return nil, fmt.Errorf("%w: visible Interface has an empty ID", ErrInvalidInput)
+			return canonicalInterfaceIndex{}, fmt.Errorf("%w: visible Interface has an empty ID", ErrInvalidInput)
 		}
 		if err := module.CheckImportPath(input.PackagePath); err != nil {
-			return nil, fmt.Errorf("%w: visible Interface %s has invalid package path %q: %v", ErrInvalidInput, input.ID, input.PackagePath, err)
+			return canonicalInterfaceIndex{}, fmt.Errorf("%w: visible Interface %s has invalid package path %q: %v", ErrInvalidInput, input.ID, input.PackagePath, err)
 		}
-		if existing, duplicate := result[input.PackagePath]; duplicate {
-			return nil, fmt.Errorf("%w: package %s declares both Interface %s and %s", ErrInvalidInput, input.PackagePath, existing, input.ID)
+		if input.Types == nil {
+			return canonicalInterfaceIndex{}, fmt.Errorf("%w: visible Interface %s package %s has no compiled type information", ErrInvalidInput, input.ID, input.PackagePath)
 		}
-		result[input.PackagePath] = input.ID
+		if input.Types.Path() != input.PackagePath {
+			return canonicalInterfaceIndex{}, fmt.Errorf("%w: visible Interface %s package path %q does not match compiled package %q", ErrInvalidInput, input.ID, input.PackagePath, input.Types.Path())
+		}
+		named, err := interfaceType(input.Types)
+		if err != nil {
+			return canonicalInterfaceIndex{}, fmt.Errorf("%w: visible Interface %s: %v", ErrInvalidInput, input.ID, err)
+		}
+		if existing, duplicate := result.packages[input.PackagePath]; duplicate {
+			return canonicalInterfaceIndex{}, fmt.Errorf("%w: package %s declares both Interface %s and %s", ErrInvalidInput, input.PackagePath, existing.id, input.ID)
+		}
+		canonical := canonicalInterfaceDefinition{
+			id:            input.ID,
+			packagePath:   input.PackagePath,
+			interfaceType: named,
+		}
+		result.packages[input.PackagePath] = canonical
+		identifier := input.ID.String()
+		result.identities[identifier] = append(result.identities[identifier], canonical)
 	}
 	return result, nil
 }
 
-func validateRequiredInterfaces(function *types.Func, hasConfig bool, optionalPositions map[int]struct{}, interfaces map[string]interfaceid.Identifier) ([]RequiredInterface, error) {
+func validateRequiredInterfaces(function *types.Func, hasConfig bool, optionalPositions map[int]struct{}, interfaces canonicalInterfaceIndex) ([]RequiredInterface, error) {
 	signature, ok := function.Type().(*types.Signature)
 	if !ok {
 		return nil, fmt.Errorf("compiled constructor is not a Go function")
@@ -106,7 +138,7 @@ func validateRequiredInterfaces(function *types.Func, hasConfig bool, optionalPo
 	return required, nil
 }
 
-func validateOptionalInterfaces(function *types.Func, hasConfig bool, interfaces map[string]interfaceid.Identifier) ([]OptionalInterface, map[int]struct{}, error) {
+func validateOptionalInterfaces(function *types.Func, hasConfig bool, interfaces canonicalInterfaceIndex) ([]OptionalInterface, map[int]struct{}, error) {
 	signature, ok := function.Type().(*types.Signature)
 	if !ok {
 		return nil, nil, fmt.Errorf("compiled constructor is not a Go function")
@@ -182,7 +214,7 @@ func optionalReference(value types.Type) (optionalTypeReference, bool) {
 	return optionalTypeReference{named: named}, true
 }
 
-func canonicalInterface(value types.Type, interfaces map[string]interfaceid.Identifier) (interfaceid.Identifier, string, error) {
+func canonicalInterface(value types.Type, interfaces canonicalInterfaceIndex) (interfaceid.Identifier, string, error) {
 	named, ok := types.Unalias(value).(*types.Named)
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Name() != "Interface" || !named.Obj().Exported() {
 		return interfaceid.Identifier{}, "", fmt.Errorf("type is not the exported named Interface")
@@ -191,9 +223,9 @@ func canonicalInterface(value types.Type, interfaces map[string]interfaceid.Iden
 		return interfaceid.Identifier{}, "", fmt.Errorf("type %s.Interface is not a Go interface", named.Obj().Pkg().Path())
 	}
 	packagePath := named.Obj().Pkg().Path()
-	identifier, visible := interfaces[packagePath]
+	canonical, visible := interfaces.packages[packagePath]
 	if !visible {
 		return interfaceid.Identifier{}, "", fmt.Errorf("type %s.Interface is not a visible canonical Interface package", packagePath)
 	}
-	return identifier, packagePath, nil
+	return canonical.id, packagePath, nil
 }

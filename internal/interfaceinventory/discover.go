@@ -12,6 +12,7 @@ import (
 	"go/importer"
 	"go/scanner"
 	"go/token"
+	"go/types"
 	"io"
 	"io/fs"
 	"os"
@@ -69,6 +70,7 @@ type Interface struct {
 	contractDigest      string
 	documentationDigest string
 	exampleDigest       string
+	types               *types.Package
 	metadata            interfacemeta.Document
 	hasMetadata         bool
 	constraints         []interfacemeta.ConstraintTarget
@@ -318,6 +320,7 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 		canonicalInterfaces[index] = implementationinventory.InterfaceInput{
 			ID:          discovered.Declaration().ID(),
 			PackagePath: discovered.PackagePath(),
+			Types:       discovered.types,
 		}
 	}
 	implementations, err := implementationinventory.Build(implementationInputs, canonicalInterfaces)
@@ -404,6 +407,7 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 				Local:         candidate.source.local,
 				Declaration:   declaration,
 				Types:         checkedPackage,
+				Importer:      checkedImporter,
 			})
 		}
 		if len(declarations.interfaces) == 0 {
@@ -455,6 +459,7 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 				contractDigest:      contractDigest,
 				documentationDigest: documentationDigest,
 				exampleDigest:       exampleDigest,
+				types:               checkedPackage,
 				metadata:            metadata,
 				hasMetadata:         hasMetadata,
 				constraints:         constraints,

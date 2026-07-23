@@ -258,8 +258,18 @@ replace example.com/ordinary => ../ordinary
 	})
 	first := discoverApplication(t, appRoot, environment)
 	second := discoverApplication(t, appRoot, environment)
-	if interfaces := first.Interfaces().Interfaces(); len(interfaces) != 0 {
-		t.Fatalf("Interfaces = %#v", interfaces)
+	wantInterfaces := []string{
+		"dependency.direct.run/v1",
+		"dependency.transitive.run/v1",
+		"local.alpha.run/v1",
+		"local.tagged.run/v1",
+		"local.zeta.run/v1",
+	}
+	if got := interfaceIDs(first.Interfaces()); !slices.Equal(got, wantInterfaces) {
+		t.Fatalf("Interfaces = %v, want %v", got, wantInterfaces)
+	}
+	if got := interfaceIDs(second.Interfaces()); !slices.Equal(got, wantInterfaces) {
+		t.Fatalf("repeated Interfaces = %v, want %v", got, wantInterfaces)
 	}
 	implementations := first.Implementations().Implementations()
 	want := []string{
@@ -493,9 +503,16 @@ func TestDiscoverApplicationNormalizesUnnamedRequiredInterfaceWithoutConfig(t *t
 	writeFile(t, filepath.Join(root, "interfaces", "operation", "v1", "interface.go"), interfaceSource("operationv1", "service.operation.call/v1", "Call"))
 	writeFile(t, filepath.Join(root, "service", "new.go"), `package service
 
-import operationv1 "example.com/required/interfaces/operation/v1"
+import (
+	"context"
+	operationv1 "example.com/required/interfaces/operation/v1"
+)
 
 type Service struct{}
+
+func (*Service) Call(context.Context, operationv1.Request) (operationv1.Response, error) {
+	return operationv1.Response{}, nil
+}
 
 //plystra:implements service.operation.call/v1
 func New(operationv1.Interface) (*Service, error) {
@@ -548,6 +565,7 @@ replace github.com/plystra/kernel => ../kernel
 	writeFile(t, filepath.Join(root, "service", "new.go"), `package service
 
 import (
+	"context"
 	remotev1 "example.com/contracts/interfaces/remote/v1"
 	localv1 "example.com/optional/interfaces/local/v1"
 	plystra "github.com/plystra/kernel"
@@ -558,6 +576,10 @@ type Remote = remotev1.Interface
 type worker struct{}
 type Concrete = worker
 type Failure = error
+
+func (*worker) Call(context.Context, localv1.Request) (localv1.Response, error) {
+	return localv1.Response{}, nil
+}
 
 //plystra:implements service.local.call/v1
 func New(local plystra.Optional[localv1.Interface], remote plystra.Optional[Remote]) (*Concrete, Failure) {
@@ -747,6 +769,152 @@ type Service struct{}
 	}
 }
 
+func TestDiscoverApplicationValidatesStructuralImplementationConformance(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	root := filepath.Join(parent, "app")
+	dependencyRoot := filepath.Join(parent, "contracts")
+	writeProject(t, dependencyRoot, "example.com/contracts")
+	writeFile(t, filepath.Join(dependencyRoot, "interfaces", "remote", "v1", "interface.go"), interfaceSource("remotev1", "service.remote.call/v1", "Call"))
+	writeFile(t, filepath.Join(root, "go.mod"), `module example.com/app
+
+go 1.26
+
+require example.com/contracts v1.2.3
+
+replace example.com/contracts => ../contracts
+`)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(root, "interfaces", "local", "v1", "interface.go"), interfaceSource("localv1", "service.local.store/v1", "Store"))
+	writeFile(t, filepath.Join(root, "service", "new.go"), `package service
+
+import (
+	"context"
+	remotev1 "example.com/contracts/interfaces/remote/v1"
+	localv1 "example.com/app/interfaces/local/v1"
+)
+
+type Service struct{}
+
+func (Service) Store(context.Context, localv1.Request) (localv1.Response, error) {
+	return localv1.Response{}, nil
+}
+
+func (*Service) Call(context.Context, remotev1.Request) (remotev1.Response, error) {
+	return remotev1.Response{}, nil
+}
+
+//plystra:implements service.local.store/v1
+//plystra:implements service.remote.call/v1
+func New() (*Service, error) {
+	return &Service{}, nil
+}
+`)
+	before := snapshotFiles(t, parent)
+	discovery := discoverApplication(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
+	implementations := discovery.Implementations().Implementations()
+	if len(implementations) != 1 || implementations[0].Symbol().String() != "example.com/app/service.New" {
+		t.Fatalf("Implementations = %#v", implementations)
+	}
+	if after := snapshotFiles(t, parent); !reflect.DeepEqual(after, before) {
+		t.Fatalf("conformance validation mutated source:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestDiscoverApplicationRejectsInvalidStructuralImplementationConformance(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		canonical  bool
+		dependency bool
+		method     string
+		identifier string
+		want       []string
+	}{
+		{
+			name:       "unknown Interface",
+			identifier: "service.unknown.call/v1",
+			want:       []string{"service.unknown.call/v1", "has no visible canonical Interface"},
+		},
+		{
+			name:       "missing method",
+			canonical:  true,
+			identifier: "service.operation.call/v1",
+			want:       []string{"example.com/broken/interfaces/operation/v1.Interface", "missing method Call"},
+		},
+		{
+			name:       "missing dependency method without import",
+			canonical:  true,
+			dependency: true,
+			identifier: "service.operation.call/v1",
+			want:       []string{"example.com/contracts/interfaces/operation/v1.Interface", "missing method Call"},
+		},
+		{
+			name:       "incompatible method signature",
+			canonical:  true,
+			identifier: "service.operation.call/v1",
+			method:     "func (*Service) Call(context.Context, operationv1.Request) (string, error) { return \"\", nil }",
+			want:       []string{"method Call has an incompatible signature", "have func(context.Context, example.com/broken/interfaces/operation/v1.Request) (string, error)", "want func(context.Context, example.com/broken/interfaces/operation/v1.Request) (example.com/broken/interfaces/operation/v1.Response, error)"},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			parent := t.TempDir()
+			root := filepath.Join(parent, "app")
+			if test.dependency {
+				dependencyRoot := filepath.Join(parent, "contracts")
+				writeProject(t, dependencyRoot, "example.com/contracts")
+				writeFile(t, filepath.Join(root, "go.mod"), "module example.com/broken\n\ngo 1.26\n\nrequire example.com/contracts v1.2.3\n\nreplace example.com/contracts => ../contracts\n")
+				writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+				writeFile(t, filepath.Join(dependencyRoot, "interfaces", "operation", "v1", "interface.go"), interfaceSource("operationv1", "service.operation.call/v1", "Call"))
+			} else {
+				writeProject(t, root, "example.com/broken")
+			}
+			if test.canonical {
+				if !test.dependency {
+					writeFile(t, filepath.Join(root, "interfaces", "operation", "v1", "interface.go"), interfaceSource("operationv1", "service.operation.call/v1", "Call"))
+				}
+			}
+			imports := ""
+			if test.method != "" {
+				imports = "import (\n\t\"context\"\n\toperationv1 \"example.com/broken/interfaces/operation/v1\"\n)\n"
+			}
+			writeFile(t, filepath.Join(root, "service", "new.go"), fmt.Sprintf(`package service
+
+%s
+type Service struct{}
+
+%s
+
+//plystra:implements %s
+func New() (*Service, error) {
+	return &Service{}, nil
+}
+`, imports, test.method, test.identifier))
+			before := snapshotFiles(t, parent)
+			_, err := discoverApplicationResult(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
+			if !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, implementationinventory.ErrInvalidConformance) || !strings.Contains(err.Error(), "example.com/broken/service.New") || !strings.Contains(err.Error(), "example.com/broken@local/service/new.go") {
+				t.Fatalf("DiscoverApplication error = %v", err)
+			}
+			for _, want := range test.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("DiscoverApplication error = %v, want %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), parent) || strings.Contains(err.Error(), filepath.ToSlash(parent)) {
+				t.Fatalf("error exposed private Project root: %v", err)
+			}
+			if after := snapshotFiles(t, parent); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed conformance validation mutated source:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
 func TestValidateUniqueIDsRejectsEveryDuplicateDefinition(t *testing.T) {
 	t.Parallel()
 
@@ -755,6 +923,7 @@ func TestValidateUniqueIDsRejectsEveryDuplicateDefinition(t *testing.T) {
 	writeFile(t, filepath.Join(root, "zeta", "interface.go"), interfaceSource("zeta", "duplicate.visible.run/v1", "Run"))
 	writeFile(t, filepath.Join(root, "alpha", "interface.go"), interfaceSource("alpha", "duplicate.visible.run/v1", "Run"))
 	writeFile(t, filepath.Join(root, "middle", "interface.go"), interfaceSource("middle", "duplicate.visible.run/v1", "Run"))
+	writeFile(t, filepath.Join(root, "service", "new.go"), "package service\n\ntype Service struct{}\n\n//plystra:implements duplicate.visible.run/v1\nfunc New() (*Service, error) { return &Service{}, nil }\n")
 
 	index := discover(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
 	interfaces := index.Interfaces()
@@ -1262,29 +1431,55 @@ type Response struct {
 func implementationSource(packageName, constructor, id string) string {
 	return fmt.Sprintf(`package %s
 
+import "context"
+
+//plystra:interface %s
+type Interface interface {
+	Run(context.Context, Request) (Response, error)
+}
+
+type Request struct{}
+type Response struct{}
 type Service struct{}
+
+func (*Service) Run(context.Context, Request) (Response, error) {
+	return Response{}, nil
+}
 
 //plystra:implements %s
 func %s() (*Service, error) {
 	return &Service{}, nil
 }
-`, packageName, id, constructor)
+`, packageName, id, id, constructor)
 }
 
 func configuredImplementationSource(packageName, constructor, id string) string {
 	return fmt.Sprintf(`package %s
 
+import "context"
+
+//plystra:interface %s
+type Interface interface {
+	Run(context.Context, Request) (Response, error)
+}
+
+type Request struct{}
+type Response struct{}
 type Config struct {
 	Mode string
 }
 
 type Service struct{}
 
+func (*Service) Run(context.Context, Request) (Response, error) {
+	return Response{}, nil
+}
+
 //plystra:implements %s
 func %s(Config) (*Service, error) {
 	return &Service{}, nil
 }
-`, packageName, id, constructor)
+`, packageName, id, id, constructor)
 }
 
 func writeProject(t testing.TB, root, modulePath string) {

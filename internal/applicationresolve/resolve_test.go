@@ -235,15 +235,16 @@ func TestResolveIntegratesImplementationConstructorPackageDiscovery(t *testing.T
 	kernelRoot := filepath.Join(parent, "kernel")
 	writeModule(t, dependencyRoot, "example.com/contracts")
 	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
-	writeFile(t, filepath.Join(dependencyRoot, "interfaces", "orders", "cancel", "v1", "interface.go"), interfaceDeclarationSource("cancelv1", "orders.cancel.execute/v1", "Execute"))
+	writeFile(t, filepath.Join(dependencyRoot, "interfaces", "orders", "cancel", "v1", "interface.go"), interfaceDeclarationSource("cancelv1", "orders.cancel.execute/v1", "Cancel"))
 	writeModule(t, kernelRoot, "github.com/plystra/kernel")
 	writeFile(t, filepath.Join(kernelRoot, "optional.go"), "package plystra\n\ntype Optional[T any] struct{}\n")
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/implementations\n\ngo 1.26\n\nrequire (\n\texample.com/contracts v1.2.3\n\tgithub.com/plystra/kernel v0.0.0\n)\n\nreplace example.com/contracts => ../contracts\nreplace github.com/plystra/kernel => ../kernel\n")
 	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "interfaces", "orders", "create", "v1", "interface.go"), interfaceDeclarationSource("createv1", "orders.create.execute/v1", "Execute"))
+	writeFile(t, filepath.Join(root, "interfaces", "orders", "create", "v1", "interface.go"), interfaceDeclarationSource("createv1", "orders.create.execute/v1", "Create"))
 	writeFile(t, filepath.Join(root, "domains", "orders", "service", "new.go"), `package service
 
 import (
+	"context"
 	cancelv1 "example.com/contracts/interfaces/orders/cancel/v1"
 	createv1 "example.com/implementations/interfaces/orders/create/v1"
 	plystra "github.com/plystra/kernel"
@@ -256,6 +257,14 @@ type Config struct {
 }
 
 type Cancel = cancelv1.Interface
+
+func (*Service) Create(context.Context, createv1.Request) (createv1.Response, error) {
+	return createv1.Response{}, nil
+}
+
+func (*Service) Cancel(context.Context, cancelv1.Request) (cancelv1.Response, error) {
+	return cancelv1.Response{}, nil
+}
 
 //plystra:implements orders.create.execute/v1
 //plystra:implements orders.cancel.execute/v1

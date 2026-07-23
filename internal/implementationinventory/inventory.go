@@ -32,11 +32,15 @@ var (
 	// ErrInvalidResult reports a constructor result list that is not exactly one
 	// defined concrete pointer followed by the predeclared error type.
 	ErrInvalidResult = errors.New("invalid Implementation constructor result")
+	// ErrInvalidConformance reports a constructor result that is not assignable
+	// to every uniquely defined canonical Interface named by its directives.
+	ErrInvalidConformance = errors.New("invalid structural Implementation conformance")
 )
 
 // Input is one parsed constructor declaration and its compiled Go package
-// provenance. Callers obtain these values from the shared eligible-package
-// loader rather than scanning source independently.
+// provenance. Importer retains that loader's package-identity cache for exact
+// cross-package conformance checks. Callers obtain these values from the shared
+// eligible-package loader rather than scanning source independently.
 type Input struct {
 	ModulePath    string
 	ModuleVersion string
@@ -44,11 +48,12 @@ type Input struct {
 	Local         bool
 	Declaration   implementationdecl.Declaration
 	Types         *types.Package
+	Importer      types.Importer
 }
 
 // Implementation is one active authored constructor declaration with stable
-// module, package, source, parameter, and result provenance. Assignability to
-// each declared Interface is applied by the next structural-conformance stage.
+// module, package, source, parameter, result, and structural-conformance
+// provenance.
 type Implementation struct {
 	modulePath    string
 	moduleVersion string
@@ -200,6 +205,9 @@ func Build(inputs []Input, interfaces []InterfaceInput) (Index, error) {
 		concrete, resultErr := validateConstructorResult(function)
 		if resultErr != nil {
 			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidResult, symbol, inputSource(input), resultErr)
+		}
+		if conformanceErr := validateStructuralConformance(input, concrete, interfacePackages); conformanceErr != nil {
+			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidConformance, symbol, inputSource(input), conformanceErr)
 		}
 		implementations[index] = Implementation{
 			modulePath:    input.ModulePath,
