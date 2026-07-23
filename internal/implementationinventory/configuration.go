@@ -3,6 +3,9 @@ package implementationinventory
 import (
 	"fmt"
 	"go/types"
+	"reflect"
+	"sort"
+	"strings"
 )
 
 // Configuration identifies the exact exported same-package Config struct used
@@ -10,14 +13,51 @@ import (
 type Configuration struct {
 	packagePath string
 	typeName    string
+	fields      []ConfigurationField
 	named       *types.Named
 }
+
+// ConfigurationField is one immutable exported field in a constructor-owned
+// Config type. Name is the canonical YAML key while GoName and TypeIdentity
+// retain the exact authored Go field identity for later typed parsing.
+type ConfigurationField struct {
+	name         string
+	goName       string
+	typeIdentity string
+}
+
+// Name returns the canonical lower-snake-case YAML key.
+func (f ConfigurationField) Name() string { return f.name }
+
+// GoName returns the exact exported authored Go field name.
+func (f ConfigurationField) GoName() string { return f.goName }
+
+// TypeIdentity returns the deterministic fully qualified Go type identity.
+func (f ConfigurationField) TypeIdentity() string { return f.typeIdentity }
 
 // PackagePath returns the Go import path that owns Config.
 func (c Configuration) PackagePath() string { return c.packagePath }
 
 // TypeName returns the exact exported Go type name, Config.
 func (c Configuration) TypeName() string { return c.typeName }
+
+// Fields returns a defensive field-name-ordered copy of the compiled Config
+// schema. Fields excluded with yaml:"-" and unexported implementation details
+// do not participate in constructor configuration.
+func (c Configuration) Fields() []ConfigurationField {
+	return append([]ConfigurationField(nil), c.fields...)
+}
+
+// Lookup returns one field by exact canonical YAML name.
+func (c Configuration) Lookup(name string) (ConfigurationField, bool) {
+	index := sort.Search(len(c.fields), func(index int) bool {
+		return c.fields[index].name >= name
+	})
+	if index >= len(c.fields) || c.fields[index].name != name {
+		return ConfigurationField{}, false
+	}
+	return c.fields[index], true
+}
 
 // String returns the fully qualified Go configuration type, or an empty string
 // for the zero value.
@@ -63,10 +103,101 @@ func validateConfiguration(compiled *types.Package, function *types.Func) (Confi
 		if _, ok := named.Underlying().(*types.Struct); !ok {
 			return Configuration{}, false, fmt.Errorf("Config must be a struct")
 		}
-		configuration = Configuration{packagePath: compiled.Path(), typeName: "Config", named: named}
+		fields, err := compileConfigurationFields(named.Underlying().(*types.Struct))
+		if err != nil {
+			return Configuration{}, false, err
+		}
+		configuration = Configuration{packagePath: compiled.Path(), typeName: "Config", fields: fields, named: named}
 		hasConfiguration = true
 	}
 	return configuration, hasConfiguration, nil
+}
+
+func compileConfigurationFields(structure *types.Struct) ([]ConfigurationField, error) {
+	fields := make([]ConfigurationField, 0, structure.NumFields())
+	seen := make(map[string]string, structure.NumFields())
+	for index := 0; index < structure.NumFields(); index++ {
+		field := structure.Field(index)
+		rawTag := structure.Tag(index)
+		yamlTag, tagged := reflect.StructTag(rawTag).Lookup("yaml")
+		if !field.Exported() {
+			if tagged && yamlTag != "-" {
+				return nil, fmt.Errorf("unexported Config field %s must not declare a YAML key", field.Name())
+			}
+			continue
+		}
+		if field.Anonymous() {
+			return nil, fmt.Errorf("embedded Config field %s is not supported; declare an explicit named field", field.Name())
+		}
+		name, ignored, err := configurationFieldName(field.Name(), yamlTag, tagged)
+		if err != nil {
+			return nil, fmt.Errorf("Config field %s: %v", field.Name(), err)
+		}
+		if ignored {
+			continue
+		}
+		if previous, duplicate := seen[name]; duplicate {
+			return nil, fmt.Errorf("Config fields %s and %s declare duplicate YAML key %q", previous, field.Name(), name)
+		}
+		seen[name] = field.Name()
+		fields = append(fields, ConfigurationField{
+			name:         name,
+			goName:       field.Name(),
+			typeIdentity: configurationTypeIdentity(field.Type()),
+		})
+	}
+	sort.Slice(fields, func(left, right int) bool {
+		return fields[left].name < fields[right].name
+	})
+	return fields, nil
+}
+
+func configurationFieldName(goName, yamlTag string, tagged bool) (string, bool, error) {
+	name := strings.ToLower(goName)
+	if tagged {
+		parts := strings.Split(yamlTag, ",")
+		if len(parts) != 1 {
+			return "", false, fmt.Errorf("YAML tag options are not supported; use yaml:%q", parts[0])
+		}
+		if parts[0] == "-" {
+			return "", true, nil
+		}
+		if parts[0] != "" {
+			name = parts[0]
+		}
+	}
+	if !validConfigurationFieldName(name) {
+		return "", false, fmt.Errorf("YAML key %q is not canonical lower snake case", name)
+	}
+	return name, false, nil
+}
+
+func configurationTypeIdentity(value types.Type) string {
+	return types.TypeString(value, func(pkg *types.Package) string {
+		if pkg == nil {
+			return ""
+		}
+		return pkg.Path()
+	})
+}
+
+func validConfigurationFieldName(value string) bool {
+	if value == "" || len(value) > 128 || value[0] < 'a' || value[0] > 'z' {
+		return false
+	}
+	previousUnderscore := false
+	for index := 1; index < len(value); index++ {
+		character := value[index]
+		switch {
+		case character >= 'a' && character <= 'z', character >= '0' && character <= '9':
+			previousUnderscore = false
+		case character == '_' && !previousUnderscore:
+			previousUnderscore = true
+		default:
+			return false
+		}
+	}
+	return !previousUnderscore
 }
 
 type configTypeReference struct {

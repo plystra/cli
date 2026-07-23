@@ -438,6 +438,89 @@ func New(%s) (*Service, error) {
 	}
 }
 
+func TestDiscoverApplicationCompilesConstructorConfigurationFields(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeProject(t, root, "example.com/configured")
+	writeFile(t, filepath.Join(root, "service", "implementation.go"), configurationImplementationSource(`
+	RetryCount int    `+"`yaml:\"retry_count\"`"+`
+	Host       string `+"`yaml:\"host\"`"+`
+	Endpoint   Endpoint `+"`yaml:\"endpoint\"`"+`
+	Mode       bool
+	Ignored    string `+"`yaml:\"-\"`"+`
+	private    string
+`))
+	before := snapshotFiles(t, root)
+	discovery := discoverApplication(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
+	implementations := discovery.Implementations().Implementations()
+	if len(implementations) != 1 {
+		t.Fatalf("Implementations = %#v", implementations)
+	}
+	configuration, configured := implementations[0].Configuration()
+	if !configured || configuration.String() != "example.com/configured/service.Config" {
+		t.Fatalf("Configuration = %#v, %t", configuration, configured)
+	}
+	fields := configuration.Fields()
+	got := make([]string, len(fields))
+	for index, field := range fields {
+		got[index] = field.Name() + ":" + field.GoName() + ":" + field.TypeIdentity()
+	}
+	want := []string{"endpoint:Endpoint:example.com/configured/service.Endpoint", "host:Host:string", "mode:Mode:bool", "retry_count:RetryCount:int"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Config fields = %v, want %v", got, want)
+	}
+	if field, exists := configuration.Lookup("retry_count"); !exists || field.GoName() != "RetryCount" || field.TypeIdentity() != "int" {
+		t.Fatalf("Lookup(retry_count) = %#v, %t", field, exists)
+	}
+	if field, exists := configuration.Lookup("ignored"); exists || field.Name() != "" || field.GoName() != "" || field.TypeIdentity() != "" {
+		t.Fatalf("Lookup(ignored) = %#v, %t", field, exists)
+	}
+	fields[0] = implementationinventory.ConfigurationField{}
+	if field, exists := configuration.Lookup("host"); !exists || field.GoName() != "Host" {
+		t.Fatal("Config Fields exposed mutable schema storage")
+	}
+	if after := snapshotFiles(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("configuration discovery mutated source:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestDiscoverApplicationRejectsInvalidImplementationConfigFields(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		fields string
+		want   string
+	}{
+		{name: "noncanonical key", fields: "Host string `yaml:\"Host\"`", want: "not canonical lower snake case"},
+		{name: "duplicate key", fields: "Host string `yaml:\"host\"`\nOther string `yaml:\"host\"`", want: "duplicate YAML key"},
+		{name: "tag option", fields: "Host string `yaml:\"host,omitempty\"`", want: "YAML tag options are not supported"},
+		{name: "embedded field", fields: "Settings", want: "embedded Config field Settings is not supported"},
+		{name: "tagged private field", fields: "private string `yaml:\"private\"`", want: "unexported Config field private must not declare a YAML key"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeProject(t, root, "example.com/invalid-config")
+			writeFile(t, filepath.Join(root, "service", "implementation.go"), configurationImplementationSource(test.fields))
+			before := snapshotFiles(t, root)
+			_, err := discoverApplicationResult(t, root, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
+			if !errors.Is(err, interfaceinventory.ErrDiscover) || !errors.Is(err, implementationinventory.ErrInvalidConfiguration) || !strings.Contains(err.Error(), "example.com/invalid-config/service.New") || !strings.Contains(err.Error(), "example.com/invalid-config@local/service/implementation.go") || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("DiscoverApplication error = %v", err)
+			}
+			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("error exposed private Project root: %v", err)
+			}
+			if after := snapshotFiles(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed discovery mutated source:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
 func TestDiscoverApplicationRejectsInvalidRequiredInterfaceParameters(t *testing.T) {
 	t.Parallel()
 
@@ -1480,6 +1563,37 @@ func %s(Config) (*Service, error) {
 	return &Service{}, nil
 }
 `, packageName, id, id, constructor)
+}
+
+func configurationImplementationSource(fields string) string {
+	return fmt.Sprintf(`package service
+
+import "context"
+
+//plystra:interface service.operation.run/v1
+type Interface interface {
+	Run(context.Context, Request) (Response, error)
+}
+
+type Request struct{}
+type Response struct{}
+type Settings struct{}
+type Endpoint string
+type Config struct {
+%s
+}
+
+type Service struct{}
+
+func (*Service) Run(context.Context, Request) (Response, error) {
+	return Response{}, nil
+}
+
+//plystra:implements service.operation.run/v1
+func New(Config) (*Service, error) {
+	return &Service{}, nil
+}
+`, fields)
 }
 
 func writeProject(t testing.TB, root, modulePath string) {
