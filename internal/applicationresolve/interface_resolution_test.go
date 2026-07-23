@@ -49,7 +49,13 @@ func TestResolveBuildsSelectedInterfaceConstructorGraphFromConfiguration(t *test
 	if len(dependencies) != 2 || dependencies[0].InterfaceID().String() != "audit.write/v1" || dependencies[0].Optional() || !dependencies[0].Available() || dependencies[0].Constructor().String() != "example.com/interface-app/auditone.New" || dependencies[1].InterfaceID().String() != "cache.read/v1" || !dependencies[1].Optional() || dependencies[1].Available() {
 		t.Fatalf("default app dependencies = %#v", dependencies)
 	}
-	if roots := graph.Roots(); len(roots) != 1 || roots[0].InterfaceID().String() != "app.run/v1" || len(roots[0].Sources()) != 1 || roots[0].Sources()[0] != `plystra.yaml interfaces.require["app.run/v1"]` {
+	if roots := graph.Roots(); len(roots) != 2 || roots[0].InterfaceID().String() != "app.run/v1" || !reflect.DeepEqual(roots[0].Sources(), []string{
+		"example.com/interface-app@local/app/service.go:14:1 //plystra:implements app.run/v1",
+		`plystra.yaml interfaces.require["app.run/v1"]`,
+	}) || roots[1].InterfaceID().String() != "audit.write/v1" || !reflect.DeepEqual(roots[1].Sources(), []string{
+		"example.com/interface-app@local/auditone/service.go:11:1 //plystra:implements audit.write/v1",
+		"example.com/interface-app@local/audittwo/service.go:11:1 //plystra:implements audit.write/v1",
+	}) {
 		t.Fatalf("default roots = %#v", roots)
 	}
 
@@ -64,7 +70,7 @@ func TestResolveBuildsSelectedInterfaceConstructorGraphFromConfiguration(t *test
 	productionGraph := production.InterfaceResolution().Graph()
 	if got := resolvedGraphNodes(productionGraph); !reflect.DeepEqual(got, []string{
 		"example.com/interface-app/audittwo.New",
-		"example.com/interface-app/cache.New",
+		"example.com/interface-cache/cache.New",
 		"example.com/interface-app/app.New",
 	}) {
 		t.Fatalf("production construction order = %v", got)
@@ -72,12 +78,12 @@ func TestResolveBuildsSelectedInterfaceConstructorGraphFromConfiguration(t *test
 	if got := resolvedSelectionSummaries(production.InterfaceResolution()); !reflect.DeepEqual(got, []string{
 		"app.run/v1=example.com/interface-app/app.New:unique-compatible",
 		"audit.write/v1=example.com/interface-app/audittwo.New:explicit",
-		"cache.read/v1=example.com/interface-app/cache.New:unique-compatible",
+		"cache.read/v1=example.com/interface-cache/cache.New:unique-compatible",
 	}) {
 		t.Fatalf("production selections = %v", got)
 	}
 	productionDependencies := productionGraph.ConstructionOrder()[2].Dependencies()
-	if !productionDependencies[1].Optional() || !productionDependencies[1].Available() || productionDependencies[1].Constructor().String() != "example.com/interface-app/cache.New" {
+	if !productionDependencies[1].Optional() || !productionDependencies[1].Available() || productionDependencies[1].Constructor().String() != "example.com/interface-cache/cache.New" {
 		t.Fatalf("production optional cache = %#v", productionDependencies[1])
 	}
 	if selection := production.ConfigurationSelection(); selection.Mode() != "environment" || selection.Environment() != "production" || selection.Path() != "plystra.production.yaml" {
@@ -88,18 +94,81 @@ func TestResolveBuildsSelectedInterfaceConstructorGraphFromConfiguration(t *test
 	}
 }
 
+func TestResolveCollectsLocalImplementationDeclarationsAsApplicationRoots(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	dependencyRoot := filepath.Join(parent, "dependency")
+	writeModule(t, dependencyRoot, "example.com/interface-dependency")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
+	writeResolvedInterface(t, dependencyRoot, "unused/read/v1", "readv1", "unused.read/v1", "Read")
+	writeResolvedSimpleImplementationForModule(t, dependencyRoot, "example.com/interface-dependency", "unused", "unused.read/v1", "unused/read/v1", "Read")
+
+	root := filepath.Join(parent, "application")
+	writeFile(t, filepath.Join(root, "go.mod"), `module example.com/local-application
+
+go 1.26
+
+require example.com/interface-dependency v1.2.3
+
+replace example.com/interface-dependency => ../dependency
+`)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeResolvedInterface(t, root, "app/run/v1", "runv1", "app.run/v1", "Run")
+	writeResolvedSimpleImplementationForModule(t, root, "example.com/local-application", "app", "app.run/v1", "app/run/v1", "Run")
+	before := snapshotTree(t, parent)
+
+	resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start: root,
+		Environment: goEnvironment(map[string]string{
+			"GOWORK":  "off",
+			"GOPROXY": "off",
+			"GOSUMDB": "off",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	roots := resolved.InterfaceResolution().Graph().Roots()
+	if len(roots) != 1 || roots[0].InterfaceID().String() != "app.run/v1" || !reflect.DeepEqual(roots[0].Sources(), []string{
+		"example.com/local-application@local/app/service.go:11:1 //plystra:implements app.run/v1",
+	}) {
+		t.Fatalf("local application roots = %#v", roots)
+	}
+	if got := resolvedSelectionSummaries(resolved.InterfaceResolution()); !reflect.DeepEqual(got, []string{
+		"app.run/v1=example.com/local-application/app.New:unique-compatible",
+	}) {
+		t.Fatalf("local application selections = %v", got)
+	}
+	if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
+		t.Fatalf("local application-root resolution mutated files:\nbefore: %#v\nafter: %#v", before, after)
+	}
+}
+
 func TestResolveCollectsEnvironmentExposureAsInterfaceRequirement(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	writeModule(t, root, "example.com/interface-app")
+	parent := t.TempDir()
+	dependencyRoot := filepath.Join(parent, "implementations")
+	writeModule(t, dependencyRoot, "example.com/interface-implementations")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
+	writeResolvedInterface(t, dependencyRoot, "app/run/v1", "runv1", "app.run/v1", "Run")
+	writeResolvedInterface(t, dependencyRoot, "info/read/v1", "readv1", "info.read/v1", "Read")
+	writeResolvedSimpleImplementationForModule(t, dependencyRoot, "example.com/interface-implementations", "app", "app.run/v1", "app/run/v1", "Run")
+	writeResolvedSimpleImplementationForModule(t, dependencyRoot, "example.com/interface-implementations", "info", "info.read/v1", "info/read/v1", "Read")
+
+	root := filepath.Join(parent, "application")
+	writeFile(t, filepath.Join(root, "go.mod"), `module example.com/interface-app
+
+go 1.26
+
+require example.com/interface-implementations v1.2.3
+
+replace example.com/interface-implementations => ../implementations
+`)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	writeFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {expose: [app.run/v1]}\n")
-	writeResolvedInterface(t, root, "app/run/v1", "runv1", "app.run/v1", "Run")
-	writeResolvedInterface(t, root, "info/read/v1", "readv1", "info.read/v1", "Read")
-	writeResolvedSimpleImplementation(t, root, "app", "app.run/v1", "app/run/v1", "Run")
-	writeResolvedSimpleImplementation(t, root, "info", "info.read/v1", "info/read/v1", "Read")
-	before := snapshotTree(t, root)
+	before := snapshotTree(t, parent)
 	environment := goEnvironment(map[string]string{
 		"GOWORK":  "off",
 		"GOPROXY": "off",
@@ -133,14 +202,14 @@ func TestResolveCollectsEnvironmentExposureAsInterfaceRequirement(t *testing.T) 
 		t.Fatalf("production Interface roots = %#v", roots)
 	}
 	if got := resolvedSelectionSummaries(production.InterfaceResolution()); !reflect.DeepEqual(got, []string{
-		"app.run/v1=example.com/interface-app/app.New:unique-compatible",
+		"app.run/v1=example.com/interface-implementations/app.New:unique-compatible",
 	}) {
 		t.Fatalf("production selections = %v", got)
 	}
 	if requirements := production.Resolution().Context().Requirements(); len(requirements) != 0 {
 		t.Fatalf("Interface-only exposure entered legacy Capability requirements: %v", requirements)
 	}
-	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+	if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
 		t.Fatalf("selected Interface exposure resolution mutated files:\nbefore: %#v\nafter: %#v", before, after)
 	}
 }
@@ -471,9 +540,26 @@ func writeResolvedInterfaceProject(t testing.TB) string {
 	kernelRoot := filepath.Join(parent, "kernel")
 	writeModule(t, kernelRoot, "github.com/plystra/kernel")
 	writeFile(t, filepath.Join(kernelRoot, "optional.go"), "package plystra\n\ntype Optional[T any] struct{}\n")
+	cacheRoot := filepath.Join(parent, "cache")
+	writeModule(t, cacheRoot, "example.com/interface-cache")
+	writeFile(t, filepath.Join(cacheRoot, "plystra.yaml"), "{}\n")
+	writeResolvedInterface(t, cacheRoot, "cache/read/v1", "readv1", "cache.read/v1", "Read")
+	writeResolvedSimpleImplementationForModule(t, cacheRoot, "example.com/interface-cache", "cache", "cache.read/v1", "cache/read/v1", "Read")
 
 	root := filepath.Join(parent, "application")
-	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/interface-app\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\n\nreplace github.com/plystra/kernel => ../kernel\n")
+	writeFile(t, filepath.Join(root, "go.mod"), `module example.com/interface-app
+
+go 1.26
+
+require (
+	example.com/interface-cache v1.0.0
+	github.com/plystra/kernel v0.0.0
+)
+
+replace example.com/interface-cache => ../cache
+
+replace github.com/plystra/kernel => ../kernel
+`)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `interfaces:
   require: [app.run/v1]
   use:
@@ -486,16 +572,15 @@ func writeResolvedInterfaceProject(t testing.TB) string {
 `)
 	writeResolvedInterface(t, root, "app/run/v1", "runv1", "app.run/v1", "Run")
 	writeResolvedInterface(t, root, "audit/write/v1", "writev1", "audit.write/v1", "Write")
-	writeResolvedInterface(t, root, "cache/read/v1", "readv1", "cache.read/v1", "Read")
 	writeFile(t, filepath.Join(root, "app", "service.go"), `package app
 
 import (
 	"context"
 
 	plystra "github.com/plystra/kernel"
+	readv1 "example.com/interface-cache/interfaces/cache/read/v1"
 	runv1 "example.com/interface-app/interfaces/app/run/v1"
 	writev1 "example.com/interface-app/interfaces/audit/write/v1"
-	readv1 "example.com/interface-app/interfaces/cache/read/v1"
 )
 
 type Service struct{}
@@ -511,7 +596,6 @@ func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) {
 `)
 	writeResolvedSimpleImplementation(t, root, "auditone", "audit.write/v1", "audit/write/v1", "Write")
 	writeResolvedSimpleImplementation(t, root, "audittwo", "audit.write/v1", "audit/write/v1", "Write")
-	writeResolvedSimpleImplementation(t, root, "cache", "cache.read/v1", "cache/read/v1", "Read")
 	return root
 }
 
@@ -533,12 +617,17 @@ type Response struct{}
 
 func writeResolvedSimpleImplementation(t testing.TB, root, packageName, identifier, interfacePath, method string) {
 	t.Helper()
+	writeResolvedSimpleImplementationForModule(t, root, "example.com/interface-app", packageName, identifier, interfacePath, method)
+}
+
+func writeResolvedSimpleImplementationForModule(t testing.TB, root, modulePath, packageName, identifier, interfacePath, method string) {
+	t.Helper()
 	writeFile(t, filepath.Join(root, packageName, "service.go"), fmt.Sprintf(`package %s
 
 import (
 	"context"
 
-	contract "example.com/interface-app/interfaces/%s"
+	contract "%s/interfaces/%s"
 )
 
 type Service struct{}
@@ -549,7 +638,7 @@ func New() (*Service, error) { return &Service{}, nil }
 func (*Service) %s(context.Context, contract.Request) (contract.Response, error) {
 	return contract.Response{}, nil
 }
-`, packageName, interfacePath, identifier, method))
+`, packageName, modulePath, interfacePath, identifier, method))
 }
 
 func resolvedGraphNodes(graph constructorgraph.Graph) []string {

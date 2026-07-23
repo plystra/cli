@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestPublicResolvingCommandsRejectInvalidConstructorGraphWithoutMutation(t *testing.T) {
+func TestPublicResolvingCommandsCollectLocalApplicationRootsAndRejectInvalidGraphWithoutMutation(t *testing.T) {
 	t.Parallel()
 
 	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
@@ -18,7 +18,7 @@ func TestPublicResolvingCommandsRejectInvalidConstructorGraphWithoutMutation(t *
 			root := writeCommandGraphFailureProject(t)
 			before := commandTree(t, root)
 			exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "app"), commandGoEnvironment())
-			if exitCode != 1 || stdout != "" || !commandContainsAll(stderr, "app.run/v1", "audit.write/v1", "example.com/command-graph/app.New", "before generation") {
+			if exitCode != 1 || stdout != "" || !commandContainsAll(stderr, "app.run/v1", "audit.write/v1", "example.com/command-graph/app.New", "//plystra:implements app.run/v1", "before generation") {
 				t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
 			}
 			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
@@ -80,7 +80,7 @@ func writeCommandGraphFailureProject(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/command-graph\n\ngo 1.26\n")
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [app.run/v1]}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	writeCommandFile(t, filepath.Join(root, "generated", "sentinel.txt"), "must remain unchanged\n")
 	writeCommandGraphInterface(t, root, "app/run/v1", "runv1", "app.run/v1", "Run")
 	writeCommandGraphInterface(t, root, "audit/write/v1", "writev1", "audit.write/v1", "Write")

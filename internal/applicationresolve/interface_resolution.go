@@ -23,7 +23,9 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 	}
 	requirements := manifest.InterfaceRequirements()
 	exposures := manifest.HTTPExposures()
-	rootRequirements := make([]interfaceresolution.Requirement, 0, len(requirements)+len(exposures))
+	localRoots := localApplicationRootRequirements(implementations)
+	rootRequirements := make([]interfaceresolution.Requirement, 0, len(requirements)+len(exposures)+len(localRoots))
+	rootRequirements = append(rootRequirements, localRoots...)
 	for _, requirement := range requirements {
 		path := fmt.Sprintf("interfaces.require[%q]", requirement.ID().String())
 		sources := interfaceRequirementSources(requirement.Source(), path, provenance, current)
@@ -73,6 +75,35 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 		Requirements:    rootRequirements,
 		Choices:         explicitChoices,
 	})
+}
+
+func localApplicationRootRequirements(implementations implementationinventory.Index) []interfaceresolution.Requirement {
+	result := make([]interfaceresolution.Requirement, 0)
+	for _, implementation := range implementations.Implementations() {
+		if !implementation.Local() {
+			continue
+		}
+		version := implementation.ModuleVersion()
+		if version == "" {
+			version = "local"
+		}
+		for _, declaration := range implementation.Declaration().ImplementedInterfaces() {
+			position := declaration.Position()
+			result = append(result, interfaceresolution.Requirement{
+				InterfaceID: declaration.ID(),
+				Source: fmt.Sprintf(
+					"%s@%s/%s:%d:%d //plystra:implements %s",
+					implementation.ModulePath(),
+					version,
+					position.Path,
+					position.Line,
+					position.Column,
+					declaration.ID(),
+				),
+			})
+		}
+	}
+	return result
 }
 
 func intrinsicInterfaceIDs() map[string]struct{} {
