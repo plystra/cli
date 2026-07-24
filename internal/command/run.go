@@ -34,7 +34,7 @@ const (
   plystra add <go-module-query>
   plystra remove <go-module-path>
   plystra update <go-module-query>
-  plystra use <capability-name>/vN <plugin-id> [--env <environment>|--config <yaml-path>]
+  plystra use <interface-id> <constructor-symbol> [--env <environment>|--config <yaml-path>]
   plystra plugin create <name>
   plystra interface create <interface-name>
   plystra implement <interface-id> --package <project-relative-package>

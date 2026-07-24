@@ -1,16 +1,16 @@
 ---
 name: plystra
-description: Operate and develop Plystra Projects through Go Modules, Plugins, versioned Capabilities, and plystra.yaml. Use when starting from a template or creating, implementing, configuring, exposing, consuming, testing, or debugging a Plugin or Capability.
+description: Develop Plystra Projects through ordinary Go Modules, versioned Interfaces, Implementations, and plystra.yaml. Use when creating, configuring, consuming, testing, or debugging an Interface or Implementation.
 ---
 
-# Plystra Module Development
+# Plystra Project Development
 
 ## Choose the smallest workflow
 
-Start here and use only the workflow that matches the requested task. The
-ordinary path uses four public concepts: Go Module, Plugin, Capability, and
-plystra.yaml. Do not begin by studying the detailed mechanisms later in this
-guide unless the task or a Plystra diagnostic specifically requires them.
+Use the workflow matching the task. Plystra adds two public concepts: a Plystra
+Project is a Go Module with root plystra.yaml; an Interface is a versioned,
+single-operation Go interface. Implementations are ordinary Go. Read details
+only when the task or a diagnostic requires them.
 
 ### Operate a Project created from a template
 
@@ -42,29 +42,29 @@ grant that label.
 
 ### Change ordinary business behavior
 
-Stay inside the four-concept model:
+Start with ordinary Go:
 
-- The Go Module is the dependency and import boundary.
-- A Plugin is one root-level implementation unit declared by plugin.yaml.
-- A Capability is one exact versioned contract declared by capability.yaml.
-- plystra.yaml selects the application configuration and public surface.
+- Go Module remains the dependency and import boundary.
+- Define the one-operation Interface in an authored Go package.
+- Implement it with a `//plystra:implements` constructor.
+- Keep shared application choices in root plystra.yaml.
 
 For a new local behavior, use this sequence:
 
-    plystra plugin create records
-    plystra capability create records.read --query --plugin records --expose
-    # Edit the authored contract and Plugin method.
+    plystra interface create records.read
+    plystra implement records.read/v1 --package ./records
+    # Edit the authored Interface and Implementation.
     plystra generate
     go test ./...
     plystra check
 
-When one Plugin needs behavior from another, declare the exact Capability in
-the caller's plugin.yaml, regenerate, and call the generated dependency client.
-Never import the other concrete Plugin package. If Plystra reports several
-compatible implementing Plugins for one required Capability, select the exact
-one requested by the application:
+When one Implementation needs another Interface, accept the canonical Interface
+type as a constructor parameter and call its ordinary Go method. Never import
+the other concrete Implementation package. If Plystra reports several
+compatible Implementations for one required Interface, select the exact
+constructor requested by the application:
 
-    plystra use email.send/v1 acme.email.smtp
+    plystra use email.send/v1 example.com/acme/email/smtp.New
 
 The detailed reference below contains complete file shapes and variants. Open
 only the section needed for the current command or authored file.
@@ -394,17 +394,17 @@ Composition uses field-specific rules:
 - Incompatible Provider, Alias, or Plugin-field values fail with every
   contributing module@version/plystra.yaml source.
 
-Resolve an inherited Provider conflict with one exact current-Project choice:
+Resolve an inherited Implementation conflict with one exact current-Project choice:
 
-    capabilities:
+    interfaces:
       use:
-        email.send/v1: acme.email.smtp
+        email.send/v1: example.com/acme/email/smtp.New
 
-Prefer the targeted public workflow for ordinary Provider selection:
+Prefer the targeted public workflow for ordinary Implementation selection:
 
-    plystra use email.send/v1 acme.email.smtp
-    plystra use email.send/v1 acme.email.production --env production
-    plystra use email.send/v1 acme.email.customer --config deploy/customer-a.yaml
+    plystra use email.send/v1 example.com/acme/email/smtp.New
+    plystra use email.send/v1 example.com/acme/email/production.New --env production
+    plystra use email.send/v1 example.com/acme/email/customer.New --config deploy/customer-a.yaml
 
 The default form writes root plystra.yaml; --env writes only that sparse
 overlay; --config writes only that complete document. Ambient selectors choose
@@ -412,11 +412,10 @@ the same targets unless a flag overrides them. The command preserves unrelated
 content, regenerates with the same selection, rolls back every owned file after
 failure, and rejects an invalid or incompatible target.
 
-The current entry replaces the inherited choice; normal exact-contract
-validation still runs. Never reorder dependencies, invent priority, or copy a
-dependency Plugin to choose a winner. Regenerate and check after selection or
-dependency changes. generated/manifest.json records only non-secret composition
-digests and path/digest/removal/source baselines.
+The current entry replaces the inherited choice; Interface and conformance
+validation still runs. Never reorder dependencies or invent priority.
+Regenerate and check after selection or dependency changes.
+generated/manifest.json records only non-secret composition provenance.
 
 Configure one exact non-intrinsic Interface policy:
 
@@ -1229,12 +1228,11 @@ ambient selectors, but substitutes <environment> or <yaml-path> for unsafe or
 absolute selector input. An unclassified internal error receives no guessed
 recovery action or code.
 
-- Missing provider: require or expose the intended canonical ID and make a
-  compatible provider visible through a local Plugin or a dependency Plystra
-  Project in the effective Go Module graph. Markerless dependencies are not
-  scanned for Plugins.
-- Ambiguous provider: run plystra use <capability-name>/vN <plugin-id> with the
-  same --env or --config selector used for the application. Do not add
+- Missing Implementation: require or expose the Interface and make a compatible
+  constructor visible in the effective Plystra Project graph. Markerless
+  dependencies are not broadly scanned for Plystra declarations.
+- Ambiguous Implementation: run plystra use <interface-id> <constructor-symbol>
+  with the same --env or --config selector used for the application. Do not add
   priorities or rely on discovery order.
 - Incompatible contract: compare exact request, response, closed field
   constraints, semantic errors, typed semantics, and extension metadata.

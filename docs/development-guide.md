@@ -29,7 +29,7 @@ plystra new <project-name> [--module <go-module-path>] [--template <go-module-qu
 plystra add <go-module-query>
 plystra remove <go-module-path>
 plystra update <go-module-query>
-plystra use <capability-name>/vN <plugin-id> [--env <environment>|--config <yaml-path>]
+plystra use <interface-id> <constructor-symbol> [--env <environment>|--config <yaml-path>]
 plystra plugin create <name>
 plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]
 plystra capability implement <capability-name>/vN [--plugin <plugin>]
@@ -1078,39 +1078,39 @@ replacement and run the same application contributions as external calls.
 Dispatch is intentionally unavailable during constructors until every selected
 provider is built and the canonical catalog publishes atomically.
 
-If several compatible Plugins provide the same required ID, generation fails
-until `plystra.yaml` selects one canonical provider:
+If several compatible Implementations satisfy the same required Interface,
+generation fails until the selected current-Project configuration chooses one
+fully qualified constructor:
 
 ```yaml
-capabilities:
+interfaces:
   require:
     - email.send/v1
   use:
-    email.send/v1: acme.email.smtp
-  aliases: {}
+    email.send/v1: example.com/acme/email/smtp.New
 ```
 
 Use the targeted command for the same explicit current-Project decision:
 
 ```powershell
-plystra use email.send/v1 acme.email.smtp
-plystra use email.send/v1 acme.email.production --env production
-plystra use email.send/v1 acme.email.customer --config deploy/customer-a.yaml
+plystra use email.send/v1 example.com/acme/email/smtp.New
+plystra use email.send/v1 example.com/acme/email/production.New --env production
+plystra use email.send/v1 example.com/acme/email/customer.New --config deploy/customer-a.yaml
 ```
 
 The default form writes root `plystra.yaml`; `--env` writes only the selected
 sparse project-root overlay; and `--config` writes only the selected complete
 replacement document. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` provide the same
 selection when no flag is present, while an explicit flag overrides both
-variables. The command may start inside a Plugin, preserves comments and
+variables. The command may start inside a nested package, preserves comments and
 unrelated values, regenerates and validates with the same selection, and
 restores the selected YAML, generated output, `go.mod`, and `go.sum` if any
-later step fails. It rejects intrinsic Capabilities, application Aliases,
-unknown or unrequired Capabilities, unknown Plugins, and Plugins that do not
-provide the exact contract.
+later step fails. It rejects intrinsic Interfaces, unknown Interfaces, unknown
+constructors, and constructors that do not implement the exact canonical
+Interface.
 
-There is no provider priority, discovery-order winner, enabled-Plugin file, or
-runtime selection fallback.
+There is no constructor priority, discovery-order winner, or runtime selection
+fallback.
 
 ## Declare Capability Aliases
 
@@ -1617,14 +1617,15 @@ as the stable automation and support identity; the concise problem and recovery
 wording may improve without changing that identity. The CLI does not invent
 advice or a code for an unclassified internal error.
 
-### No provider or ambiguous provider
+### No Implementation or ambiguous Implementation
 
-Confirm the exact canonical ID is visible and provided by a local Plugin or a
-dependency Plystra Project anywhere in the effective Go Module graph. A
-markerless Go dependency is intentionally not scanned. If several compatible
-Providers remain, run `plystra use <capability-name>/vN <plugin-id>` with the
-same `--env` or `--config` selection used to generate the application. Do not
-add a priority or fallback.
+Confirm the exact Interface is visible and that a local or dependency package
+contains a compatible `//plystra:implements` constructor in a Plystra Project
+from the effective Go Module graph. A markerless Go dependency is intentionally
+not broadly scanned. If several compatible Implementations remain, run
+`plystra use <interface-id> <constructor-symbol>` with the same `--env` or
+`--config` selection used to generate the application. Do not add a priority or
+fallback.
 
 ### Inherited configuration conflict
 

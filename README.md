@@ -448,15 +448,15 @@ plystra capability create records.update --query --plugin records --expose
 
 `capability expose` requires an exact `<capability-name>/vN`. With no selector it updates root `plystra.yaml`; `--env production` updates only the sparse `plystra.production.yaml` overlay; and `--config deploy/customer-a.yaml` updates only that complete replacement document. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` provide the same two selector modes when neither flag is present, while either explicit flag overrides both ambient variables. The command preserves comments, unrelated values, and exact add/remove tombstones, then regenerates every affected Go, HTTP, JavaScript, documentation, assembly, and manifest surface with the same selected configuration. Invocation from a nested Plugin still resolves relative configuration paths from the Project root. Repeating the command is byte-idempotent when generated output is current, and no unselected configuration file is synchronized.
 
-When several compatible Plugins provide one required canonical Capability, select the intended Provider through the targeted public workflow:
+When several compatible Implementations satisfy one required Interface, select the intended constructor through the targeted public workflow:
 
 ```powershell
-plystra use email.send/v1 acme.email.smtp
-plystra use email.send/v1 acme.email.production --env production
-plystra use email.send/v1 acme.email.customer --config deploy/customer-a.yaml
+plystra use email.send/v1 example.com/acme/email/smtp.New
+plystra use email.send/v1 example.com/acme/email/production.New --env production
+plystra use email.send/v1 example.com/acme/email/customer.New --config deploy/customer-a.yaml
 ```
 
-The default form writes an explicit current-Project replacement under root `plystra.yaml` `capabilities.use`; `--env` writes only the selected sparse overlay; and `--config` writes only the selected complete replacement document. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` select the same targets when no explicit flag is present, while an explicit selector overrides both variables. The command requires an exact canonical `<capability-name>/vN` and a visible Plugin that provides that exact contract; intrinsic Capabilities, application Aliases, absent or unrequired Capabilities, unknown Plugins, and non-providers fail without mutation. It preserves comments and unrelated YAML, regenerates with the same selection, validates the complete Project, is byte-idempotent when already selected, and restores the selected YAML, generated tree, `go.mod`, and `go.sum` after any later failure.
+The default form writes an explicit current-Project replacement under root `plystra.yaml` `interfaces.use`; `--env` writes only the selected sparse overlay; and `--config` writes only the selected complete replacement document. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` select the same targets when no explicit flag is present, while an explicit selector overrides both variables. The command requires one exact Interface ID and one visible fully qualified constructor that declares and implements that Interface; intrinsic Interfaces, unknown Interfaces or constructors, and incompatible constructors fail without mutation. It preserves comments and unrelated YAML, regenerates with the same selection, validates the complete Project, is byte-idempotent when already selected, and restores the selected YAML, generated tree, `go.mod`, and `go.sum` after any later failure.
 
 An ordinary Go Module without root `plystra.yaml`, an absent visible contract or provider, a missing or unsafe selected file, conflicting selectors, concurrently changed configuration, unexpected generated output, generation failure, untidy module state, or validation failure leaves the selected configuration and every generated or module-owned file unchanged. `capability create --expose` remains the default-configuration authoring shortcut and uses the same rollback boundary for the new schema, Plugin declaration, implementation scaffold, root application exposure, module metadata, and generated output.
 

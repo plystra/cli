@@ -697,14 +697,14 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		return errors.New("generated Plystra skill is incomplete")
 	}
 	required := []string{
-		"description: Operate and develop Plystra Projects through Go Modules, Plugins, versioned Capabilities, and plystra.yaml",
+		"description: Develop Plystra Projects through ordinary Go Modules, versioned Interfaces, Implementations, and plystra.yaml",
 		"The current Go Module path is " + modulePath,
 		"## Choose the smallest workflow",
 		"### Operate a Project created from a template",
 		"The current CLI does not advertise any template as qualified",
 		"### Change ordinary business behavior",
-		"ordinary path uses four public concepts",
-		"Never import the other concrete Plugin package",
+		"adds two public concepts",
+		"the other concrete Implementation package",
 		"### Select one environment",
 		"Use --config only when the task",
 		"one complete replacement document; it is an advanced",

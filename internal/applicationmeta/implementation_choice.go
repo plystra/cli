@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/plystra/cli/internal/constructorsymbol"
@@ -137,4 +138,40 @@ func hasInterfaceRemoval(values []interfaceRemoval, id interfaceid.Identifier) b
 	return slices.ContainsFunc(values, func(value interfaceRemoval) bool {
 		return value.id == id
 	})
+}
+
+func setMappingString(node *yaml.Node, key, value string) {
+	for index := 0; index < len(node.Content); index += 2 {
+		if node.Content[index].Kind != yaml.ScalarNode || node.Content[index].Tag != "!!str" || node.Content[index].Value != key {
+			continue
+		}
+		target := node.Content[index+1]
+		target.Kind = yaml.ScalarNode
+		target.Tag = "!!str"
+		target.Value = value
+		target.Content = nil
+		return
+	}
+	node.Content = append(node.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value},
+	)
+}
+
+func sortScalarMapping(node *yaml.Node) {
+	type pair struct {
+		key   *yaml.Node
+		value *yaml.Node
+	}
+	pairs := make([]pair, 0, len(node.Content)/2)
+	for index := 0; index < len(node.Content); index += 2 {
+		pairs = append(pairs, pair{key: node.Content[index], value: node.Content[index+1]})
+	}
+	sort.SliceStable(pairs, func(left, right int) bool {
+		return pairs[left].key.Value < pairs[right].key.Value
+	})
+	node.Content = node.Content[:0]
+	for _, entry := range pairs {
+		node.Content = append(node.Content, entry.key, entry.value)
+	}
 }

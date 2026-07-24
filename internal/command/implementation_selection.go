@@ -6,17 +6,17 @@ import (
 	"io"
 	"strings"
 
-	"github.com/plystra/cli/internal/providerselect"
+	"github.com/plystra/cli/internal/implementationselect"
 )
 
 const (
-	useSynopsis = "plystra use <capability-name>/vN <plugin-id> [--env <environment>|--config <yaml-path>]"
+	useSynopsis = "plystra use <interface-id> <constructor-symbol> [--env <environment>|--config <yaml-path>]"
 	useUsage    = `Usage:
   ` + useSynopsis + `
 
 Options:
-  --env <environment>    Write the Provider choice to plystra.<environment>.yaml.
-  --config <yaml-path>   Write the Provider choice to one complete replacement configuration.
+  --env <environment>    Write the Implementation choice to plystra.<environment>.yaml.
+  --config <yaml-path>   Write the Implementation choice to one complete replacement configuration.
 
 PLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit
 selector is present; setting both is an error. Explicit --env or --config
@@ -26,8 +26,8 @@ configuration paths are resolved from the detected Plystra Project root.
 )
 
 type useArguments struct {
-	capability  string
-	pluginID    string
+	interfaceID string
+	constructor string
 	config      string
 	environment string
 }
@@ -44,10 +44,10 @@ func runUse(arguments []string, stdout, stderr io.Writer, workingDirectory strin
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
 	defer cancel()
-	result, err := providerselect.Select(ctx, providerselect.Options{
+	result, err := implementationselect.Select(ctx, implementationselect.Options{
 		Start:             workingDirectory,
-		Capability:        parsed.capability,
-		PluginID:          parsed.pluginID,
+		InterfaceID:       parsed.interfaceID,
+		Constructor:       parsed.constructor,
 		ConfigurationPath: parsed.config,
 		EnvironmentName:   parsed.environment,
 		Environment:       environment,
@@ -57,9 +57,9 @@ func runUse(arguments []string, stdout, stderr io.Writer, workingDirectory strin
 		return 1
 	}
 	if result.Changed() {
-		_, _ = fmt.Fprintf(stdout, "selected Provider %s for %s in %s\n", result.PluginID(), result.Capability(), result.ManifestPath())
+		_, _ = fmt.Fprintf(stdout, "selected Implementation %s for %s in %s\n", result.Constructor(), result.InterfaceID(), result.ManifestPath())
 	} else {
-		_, _ = fmt.Fprintf(stdout, "Provider %s is already selected for %s in %s\n", result.PluginID(), result.Capability(), result.ManifestPath())
+		_, _ = fmt.Fprintf(stdout, "Implementation %s is already selected for %s in %s\n", result.Constructor(), result.InterfaceID(), result.ManifestPath())
 	}
 	return 0
 }
@@ -68,7 +68,7 @@ func parseUseArguments(arguments []string) (useArguments, bool) {
 	if len(arguments) < 3 || arguments[0] != "use" || arguments[1] == "" || arguments[2] == "" || strings.HasPrefix(arguments[1], "--") || strings.HasPrefix(arguments[2], "--") {
 		return useArguments{}, false
 	}
-	result := useArguments{capability: arguments[1], pluginID: arguments[2]}
+	result := useArguments{interfaceID: arguments[1], constructor: arguments[2]}
 	configurationSet := false
 	environmentSet := false
 	for index := 3; index < len(arguments); index++ {
