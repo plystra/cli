@@ -116,6 +116,82 @@ replace github.com/plystra/kernel => %s
 	}
 }
 
+func TestRunCheckReportsEveryInheritedConfigurationConflictSource(t *testing.T) {
+	parent := t.TempDir()
+	dependencies := []struct {
+		module      string
+		version     string
+		directory   string
+		constructor string
+	}{
+		{module: "example.com/a", version: "v1.0.0", directory: "a", constructor: "example.com/implementation/primary.New"},
+		{module: "example.com/b", version: "v1.1.0", directory: "b", constructor: "example.com/implementation/primary.New"},
+		{module: "example.com/c", version: "v1.2.0", directory: "c", constructor: "example.com/implementation/secondary.New"},
+	}
+	dependencyTrees := make(map[string]map[string][]byte, len(dependencies))
+	for _, dependency := range dependencies {
+		root := filepath.Join(parent, dependency.directory)
+		writeCommandFile(t, filepath.Join(root, "go.mod"), "module "+dependency.module+"\n\ngo 1.26\n")
+		writeCommandFile(t, filepath.Join(root, "package.go"), "package placeholder\n")
+		writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {use: {email.send/v1: "+dependency.constructor+"}}\n")
+		dependencyTrees[root] = commandTree(t, root)
+	}
+
+	orders := [][]int{{0, 1, 2}, {2, 1, 0}}
+	outputs := make([]string, len(orders))
+	for orderIndex, order := range orders {
+		root := filepath.Join(parent, fmt.Sprintf("application-%d", orderIndex))
+		var moduleFile strings.Builder
+		moduleFile.WriteString("module example.com/application\n\ngo 1.26\n\nrequire (\n")
+		for _, dependencyIndex := range order {
+			dependency := dependencies[dependencyIndex]
+			fmt.Fprintf(&moduleFile, "\t%s %s\n", dependency.module, dependency.version)
+		}
+		moduleFile.WriteString(")\n\n")
+		for _, dependencyIndex := range order {
+			dependency := dependencies[dependencyIndex]
+			fmt.Fprintf(&moduleFile, "replace %s => ../%s\n", dependency.module, dependency.directory)
+		}
+		writeCommandFile(t, filepath.Join(root, "go.mod"), moduleFile.String())
+		writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+		before := commandTree(t, root)
+
+		exitCode, stdout, stderr := runCommand(t, []string{"check"}, root, commandGoEnvironment())
+		if exitCode != 1 || stdout != "" {
+			t.Fatalf("check order %d = exit %d, stdout %q, stderr %q", orderIndex, exitCode, stdout, stderr)
+		}
+		for _, fragment := range []string{
+			`interfaces.use["email.send/v1"]`,
+			"example.com/implementation/primary.New",
+			"example.com/implementation/secondary.New",
+			`example.com/a@v1.0.0/plystra.yaml interfaces.use["email.send/v1"]`,
+			`example.com/b@v1.1.0/plystra.yaml interfaces.use["email.send/v1"]`,
+			`example.com/c@v1.2.0/plystra.yaml interfaces.use["email.send/v1"]`,
+			"Set or remove the conflicting field explicitly in plystra.yaml, then rerun the command.",
+			"Diagnostic: " + diagnosticcode.ConfigurationInheritedConflict,
+		} {
+			if !strings.Contains(stderr, fragment) {
+				t.Fatalf("check order %d omits %q: %s", orderIndex, fragment, stderr)
+			}
+		}
+		if strings.Count(stderr, "example.com/implementation/primary.New") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+			t.Fatalf("check order %d has unstable deduplication or recovery: %s", orderIndex, stderr)
+		}
+		if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+			t.Fatalf("conflicting check order %d mutated the Project", orderIndex)
+		}
+		outputs[orderIndex] = stderr
+	}
+	if outputs[0] != outputs[1] {
+		t.Fatalf("conflict diagnostic depends on module declaration order:\nfirst: %s\nsecond: %s", outputs[0], outputs[1])
+	}
+	for root, before := range dependencyTrees {
+		if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+			t.Fatalf("conflicting check mutated dependency Project %s", root)
+		}
+	}
+}
+
 func TestRunCheckReportsGoTestFailureWithoutMutation(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)

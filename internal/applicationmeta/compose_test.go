@@ -592,15 +592,29 @@ func TestComposeMergesConfigurationByDeclaredFieldAndRedactsConflicts(t *testing
 	dependencies := []applicationmeta.Dependency{
 		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {host: private-a.example, token: {env: PRIVATE_A}}}\n")},
 		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {host: private-b.example, token: {env: PRIVATE_B}}}\n")},
+		{ModulePath: "example.com/c", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {host: private-a.example, token: {env: PRIVATE_A}}}\n")},
 	}
 	_, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), lookup)
 	if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), `config["example.com/acme/smtp.New"]["host"]`) {
 		t.Fatalf("configuration conflict error = %v", err)
 	}
+	for _, source := range []string{
+		`example.com/a@v1.0.0/plystra.yaml config["example.com/acme/smtp.New"]["host"]`,
+		`example.com/b@v1.0.0/plystra.yaml config["example.com/acme/smtp.New"]["host"]`,
+		`example.com/c@v1.0.0/plystra.yaml config["example.com/acme/smtp.New"]["host"]`,
+	} {
+		if !strings.Contains(err.Error(), source) {
+			t.Fatalf("configuration conflict omits source %q: %v", source, err)
+		}
+	}
 	for _, forbidden := range []string{"private-a.example", "private-b.example", "PRIVATE_A", "PRIVATE_B"} {
 		if strings.Contains(err.Error(), forbidden) {
 			t.Fatalf("configuration conflict exposed %q: %v", forbidden, err)
 		}
+	}
+	_, reorderedErr := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[2], dependencies[1], dependencies[0]}, composeManifest(t, "{}\n"), lookup)
+	if reorderedErr == nil || reorderedErr.Error() != err.Error() {
+		t.Fatalf("configuration conflict depends on dependency order:\nfirst: %v\nsecond: %v", err, reorderedErr)
 	}
 
 	current := composeManifest(t, "config: {example.com/acme/smtp.New: {host: current.example, token: {env: CURRENT_TOKEN}}}\n")
