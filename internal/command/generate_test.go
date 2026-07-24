@@ -325,6 +325,170 @@ replace github.com/plystra/kernel => %s
 	}
 }
 
+func TestRunGeneratePreservesCurrentProjectInterfaceEditAcrossDependencyBaselineChange(t *testing.T) {
+	parent := t.TempDir()
+	applicationRoot := filepath.Join(parent, "application")
+	dependencyRoot := filepath.Join(parent, "platform")
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+
+	writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), "module example.com/platform\n\ngo 1.26\n")
+	writeCommandGraphInterface(t, dependencyRoot, "email/send/v1", "sendv1", "email.send/v1", "Send")
+	writeCommandGraphInterface(t, dependencyRoot, "audit/write/v1", "writev1", "audit.write/v1", "Write")
+	writeCommandFile(t, filepath.Join(dependencyRoot, "smtp", "service.go"), `package smtp
+
+import (
+	"context"
+
+	sendv1 "example.com/platform/interfaces/email/send/v1"
+)
+
+type Service struct{}
+
+//plystra:implements email.send/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
+	return sendv1.Response{}, nil
+}
+`)
+	writeCommandFile(t, filepath.Join(dependencyRoot, "other", "service.go"), `package other
+
+import (
+	"context"
+
+	sendv1 "example.com/platform/interfaces/email/send/v1"
+)
+
+type Service struct{}
+
+//plystra:implements email.send/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
+	return sendv1.Response{}, nil
+}
+`)
+	writeCommandFile(t, filepath.Join(dependencyRoot, "audit", "service.go"), `package audit
+
+import (
+	"context"
+
+	writev1 "example.com/platform/interfaces/audit/write/v1"
+)
+
+type Service struct{}
+
+//plystra:implements audit.write/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) Write(context.Context, writev1.Request) (writev1.Response, error) {
+	return writev1.Response{}, nil
+}
+`)
+	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), `interfaces:
+  require: [email.send/v1]
+  use:
+    email.send/v1: example.com/platform/smtp.New
+`)
+
+	goMod := fmt.Sprintf(`module example.com/acme/maintenance
+
+go 1.26
+
+require (
+	example.com/platform v1.0.0
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace example.com/platform => %s
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(dependencyRoot), filepath.ToSlash(kernelRoot))
+	writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), goMod)
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("ReadFile(go.sum): %v", err)
+	}
+	writeCommandFile(t, filepath.Join(applicationRoot, "go.sum"), string(goSum))
+	writeCommandFile(t, filepath.Join(applicationRoot, "local", "service.go"), `package local
+
+import (
+	"context"
+
+	sendv1 "example.com/platform/interfaces/email/send/v1"
+)
+
+type Service struct{}
+
+//plystra:implements email.send/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
+	return sendv1.Response{}, nil
+}
+`)
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "# shared application configuration\n{}\n")
+	environment := commandGoEnvironment()
+
+	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, applicationRoot, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/maintenance in "+applicationRoot+"\n" {
+		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	oldRoot := readCommandFile(t, applicationRoot, "plystra.yaml")
+	locallyEdited := bytes.Replace(oldRoot, []byte("example.com/platform/smtp.New"), []byte("example.com/acme/maintenance/local.New"), 1)
+	if bytes.Equal(locallyEdited, oldRoot) {
+		t.Fatalf("initial dependency baseline omitted selected Implementation:\n%s", oldRoot)
+	}
+	locallyEdited = bytes.Replace(locallyEdited, []byte("# shared application configuration"), []byte("# shared application configuration\n# explicit local selection"), 1)
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), string(locallyEdited))
+	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), `interfaces:
+  require: [audit.write/v1, email.send/v1]
+  use:
+    audit.write/v1: example.com/platform/audit.New
+    email.send/v1: example.com/platform/other.New
+`)
+
+	exitCode, stdout, stderr = runCommand(t, []string{"generate"}, applicationRoot, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/maintenance in "+applicationRoot+"\n" {
+		t.Fatalf("updated generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	maintained := readCommandFile(t, applicationRoot, "plystra.yaml")
+	for _, expected := range [][]byte{
+		[]byte("# shared application configuration"),
+		[]byte("# explicit local selection"),
+		[]byte("audit.write/v1"),
+		[]byte("example.com/platform/audit.New"),
+		[]byte("example.com/acme/maintenance/local.New"),
+	} {
+		if !bytes.Contains(maintained, expected) {
+			t.Fatalf("maintained root omits %q:\n%s", expected, maintained)
+		}
+	}
+	for _, overwritten := range [][]byte{[]byte("example.com/platform/smtp.New"), []byte("example.com/platform/other.New")} {
+		if bytes.Contains(maintained, overwritten) {
+			t.Fatalf("dependency baseline overwrote local selection with %q:\n%s", overwritten, maintained)
+		}
+	}
+	generatedAssembly := readCommandFile(t, applicationRoot, "generated/go/assembly/interfaces_gen.go")
+	for _, selected := range [][]byte{[]byte("example.com/platform/audit.New"), []byte("example.com/acme/maintenance/local.New")} {
+		if !bytes.Contains(generatedAssembly, selected) {
+			t.Fatalf("generated assembly omits selected constructor %q:\n%s", selected, generatedAssembly)
+		}
+	}
+	beforeCheck := commandTree(t, applicationRoot)
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, applicationRoot, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/maintenance in "+applicationRoot+"\n" {
+		t.Fatalf("generate --check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, beforeCheck) {
+		t.Fatal("generate --check mutated the maintained Project")
+	}
+	assertNoCommandTransactions(t, applicationRoot)
+}
+
 func TestRunGenerateSelectsEnvironmentOverlayThroughPublicCommand(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
