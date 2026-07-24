@@ -1,5 +1,5 @@
-// Package protobufwiremap owns deterministic committed Protobuf field and enum
-// wire history for canonical Capability request and response messages.
+// Package protobufwiremap owns deterministic committed Protobuf wire history
+// for canonical Interface messages and the temporary legacy transport bridge.
 package protobufwiremap
 
 import (
@@ -26,17 +26,18 @@ const (
 	// Path is the one CLI-owned committed Protobuf field-history artifact.
 	Path = "generated/proto/wire-map.json"
 	// ProjectionSchema identifies the strict initial-release wire-map schema.
-	ProjectionSchema = "plystra.proto-wire-map/v2"
+	ProjectionSchema = "plystra.proto-wire-map/v3"
 	// MaximumBytes bounds managed history before parsing.
 	MaximumBytes int64 = 16 << 20
 
-	minimumFieldNumber  = 1
-	maximumFieldNumber  = 536870911
-	reservedRangeStart  = 19000
-	reservedRangeEnd    = 19999
-	maximumEnumNumber   = 2147483647
-	maximumCapabilities = 4096
-	maximumFields       = 16384
+	minimumFieldNumber        = 1
+	maximumFieldNumber        = 536870911
+	reservedRangeStart        = 19000
+	reservedRangeEnd          = 19999
+	maximumEnumNumber         = 2147483647
+	maximumInterfaces         = 4096
+	maximumLegacyCapabilities = 4096
+	maximumFields             = 16384
 )
 
 var (
@@ -53,18 +54,30 @@ var (
 // Map is one immutable validated current wire map. CanonicalJSON is committed
 // history; ActiveJSON contains only build-affecting active assignments.
 type Map struct {
-	canonicalJSON    []byte
-	activeJSON       []byte
-	active           []CapabilityProjection
-	digest           string
-	activeDigest     string
-	projectionDigest string
-	prepared         bool
+	canonicalJSON             []byte
+	activeJSON                []byte
+	activeInterfaces          []InterfaceProjection
+	activeLegacyCapabilities  []CapabilityProjection
+	digest                    string
+	activeDigest              string
+	projectionDigest          string
+	legacyProjectionDigest    string
+	interfaceProjectionDigest string
+	prepared                  bool
 }
 
 // Valid reports whether Build produced the map.
 func (m Map) Valid() bool {
-	return m.prepared && len(m.canonicalJSON) != 0 && len(m.activeJSON) != 0 && m.active != nil && validDigest(m.digest) && validDigest(m.activeDigest) && validDigest(m.projectionDigest)
+	return m.prepared &&
+		len(m.canonicalJSON) != 0 &&
+		len(m.activeJSON) != 0 &&
+		m.activeInterfaces != nil &&
+		m.activeLegacyCapabilities != nil &&
+		validDigest(m.digest) &&
+		validDigest(m.activeDigest) &&
+		validDigest(m.projectionDigest) &&
+		validDigest(m.legacyProjectionDigest) &&
+		validDigest(m.interfaceProjectionDigest)
 }
 
 // CanonicalJSON returns defensive canonical committed history bytes.
@@ -79,12 +92,31 @@ func (m Map) Digest() string { return m.digest }
 // ActiveDigest returns the digest of ActiveJSON.
 func (m Map) ActiveDigest() string { return m.activeDigest }
 
-// ProjectionDigest identifies the exact normalized current Protobuf model
-// against which this map was reconciled. It is intentionally not serialized.
+// ProjectionDigest identifies the exact normalized current Interface and
+// temporary legacy Protobuf models against which this map was reconciled. It
+// is intentionally not serialized.
 func (m Map) ProjectionDigest() string { return m.projectionDigest }
 
-// CapabilityProjection is one active canonical Capability's validated wire
-// assignments. It contains no Provider, Plugin, Module, or runtime identity.
+// LegacyProjectionDigest identifies the temporary legacy transport model.
+func (m Map) LegacyProjectionDigest() string { return m.legacyProjectionDigest }
+
+// InterfaceProjectionDigest identifies the canonical Interface model.
+func (m Map) InterfaceProjectionDigest() string { return m.interfaceProjectionDigest }
+
+// Matches reports whether the map was reconciled against both exact models.
+func (m Map) Matches(legacy protobufmodel.Model, interfaces protobufmodel.InterfaceModel) bool {
+	return m.Valid() &&
+		legacy.Valid() &&
+		interfaces.Valid() &&
+		legacy.Enabled() == interfaces.Enabled() &&
+		m.legacyProjectionDigest == legacy.Digest() &&
+		m.interfaceProjectionDigest == interfaces.Digest() &&
+		m.projectionDigest == combinedProjectionDigest(legacy.Digest(), interfaces.Digest())
+}
+
+// CapabilityProjection is one active temporary legacy transport target's
+// validated wire assignments. Canonical Interface history is exposed through
+// InterfaceProjection.
 type CapabilityProjection struct {
 	id             string
 	contractDigest string
@@ -107,12 +139,17 @@ func (p CapabilityProjection) Response() MessageProjection { return cloneMessage
 // MessageProjection is one active canonical message plus permanent field and
 // enum reservations retained from earlier projections.
 type MessageProjection struct {
+	canonicalName   string
 	name            string
 	fields          []FieldProjection
 	enums           []EnumProjection
 	reservedNumbers []int
 	reservedNames   []string
 }
+
+// CanonicalName returns the authored Go message name for an Interface
+// projection. It is empty for a temporary legacy transport message.
+func (p MessageProjection) CanonicalName() string { return p.canonicalName }
 
 // Name returns the unqualified generated message name.
 func (p MessageProjection) Name() string { return p.name }
@@ -220,19 +257,21 @@ func (p EnumValueProjection) Name() string { return p.name }
 // Number returns the stable enum numeric value.
 func (p EnumValueProjection) Number() int { return p.number }
 
-// ActiveCapabilities returns exact-ID-sorted active wire projections with
-// defensive storage. Inactive Capability history remains only in CanonicalJSON.
+// ActiveCapabilities returns exact-ID-sorted temporary legacy transport
+// projections with defensive storage. Inactive history remains only in
+// CanonicalJSON.
 func (m Map) ActiveCapabilities() []CapabilityProjection {
-	result := make([]CapabilityProjection, len(m.active))
-	for index, capability := range m.active {
+	result := make([]CapabilityProjection, len(m.activeLegacyCapabilities))
+	for index, capability := range m.activeLegacyCapabilities {
 		result[index] = cloneCapabilityProjection(capability)
 	}
 	return result
 }
 
 type document struct {
-	ProjectionSchema string                `json:"projection_schema"`
-	Capabilities     map[string]capability `json:"capabilities"`
+	ProjectionSchema   string                      `json:"projection_schema"`
+	Interfaces         map[string]interfaceHistory `json:"interfaces"`
+	LegacyCapabilities map[string]capability       `json:"legacy_capabilities"`
 }
 
 type capability struct {
@@ -278,8 +317,9 @@ type enumMember struct {
 }
 
 type activeDocument struct {
-	ProjectionSchema string                      `json:"projection_schema"`
-	Capabilities     map[string]activeCapability `json:"capabilities"`
+	ProjectionSchema   string                      `json:"projection_schema"`
+	Interfaces         map[string]activeInterface  `json:"interfaces"`
+	LegacyCapabilities map[string]activeCapability `json:"legacy_capabilities"`
 }
 
 type activeCapability struct {
@@ -288,15 +328,32 @@ type activeCapability struct {
 	Response                message `json:"response"`
 }
 
-// Build reconciles current canonical operations with exact prior managed
-// history. previousDigest must be the digest retained in the prior generated
+// Build reconciles current canonical Interface messages and the temporary
+// legacy transport projection with exact prior managed history.
+// previousDigest must be the digest retained in the prior generated
 // application manifest whenever previousExists is true. A digest without a
 // file, or a file without that baseline, fails rather than guessing.
-func Build(model protobufmodel.Model, previous []byte, previousExists bool, previousDigest string) (Map, error) {
-	if !model.Valid() {
-		return Map{}, fmt.Errorf("%w: %w: normalized Protobuf model is absent", ErrBuild, ErrProjection)
+func Build(
+	legacy protobufmodel.Model,
+	interfaces protobufmodel.InterfaceModel,
+	previous []byte,
+	previousExists bool,
+	previousDigest string,
+) (Map, error) {
+	if !legacy.Valid() {
+		return Map{}, fmt.Errorf("%w: %w: normalized legacy Protobuf model is absent", ErrBuild, ErrProjection)
 	}
-	current := document{ProjectionSchema: ProjectionSchema, Capabilities: make(map[string]capability)}
+	if !interfaces.Valid() {
+		return Map{}, fmt.Errorf("%w: %w: normalized Interface Protobuf model is absent", ErrBuild, ErrProjection)
+	}
+	if legacy.Enabled() != interfaces.Enabled() {
+		return Map{}, fmt.Errorf("%w: %w: Interface and legacy Protobuf transport selection disagree", ErrBuild, ErrProjection)
+	}
+	current := document{
+		ProjectionSchema:   ProjectionSchema,
+		Interfaces:         make(map[string]interfaceHistory),
+		LegacyCapabilities: make(map[string]capability),
+	}
 	if previousExists {
 		if !validDigest(previousDigest) {
 			return Map{}, fmt.Errorf("%w: %w: owned %s has no valid generated-manifest baseline digest", ErrBuild, ErrHistory, Path)
@@ -316,11 +373,14 @@ func Build(model protobufmodel.Model, previous []byte, previousExists bool, prev
 		return Map{}, fmt.Errorf("%w: %w: generated-manifest baseline %s exists but owned %s is missing", ErrBuild, ErrHistory, previousDigest, Path)
 	}
 
-	for id, existing := range current.Capabilities {
-		existing.Active = false
-		current.Capabilities[id] = existing
+	if err := reconcileInterfaces(current.Interfaces, interfaces); err != nil {
+		return Map{}, fmt.Errorf("%w: %w: %v", ErrBuild, ErrHistory, err)
 	}
-	for _, operation := range model.Operations() {
+	for id, existing := range current.LegacyCapabilities {
+		existing.Active = false
+		current.LegacyCapabilities[id] = existing
+	}
+	for _, operation := range legacy.Operations() {
 		id := operation.ID().String()
 		identity := operation.Identity()
 		requestName, err := unqualifiedMessage(identity.Package(), identity.RequestType())
@@ -331,7 +391,7 @@ func Build(model protobufmodel.Model, previous []byte, previousExists bool, prev
 		if err != nil {
 			return Map{}, fmt.Errorf("%w: %w: %s response identity: %v", ErrBuild, ErrProjection, id, err)
 		}
-		record, exists := current.Capabilities[id]
+		record, exists := current.LegacyCapabilities[id]
 		if !exists {
 			record = capability{
 				Request:  emptyMessage(requestName),
@@ -352,7 +412,7 @@ func Build(model protobufmodel.Model, previous []byte, previousExists bool, prev
 		record.Active = true
 		record.CanonicalContractDigest = operation.ContractDigest()
 		record.Provenance = operation.Sources()
-		current.Capabilities[id] = record
+		current.LegacyCapabilities[id] = record
 	}
 	if err := validateDocument(current); err != nil {
 		return Map{}, fmt.Errorf("%w: %w: reconciled map: %v", ErrBuild, ErrHistory, err)
@@ -366,19 +426,22 @@ func Build(model protobufmodel.Model, previous []byte, previousExists bool, prev
 		return Map{}, fmt.Errorf("%w: encode active assignments: %v", ErrBuild, err)
 	}
 	return Map{
-		canonicalJSON:    canonical,
-		activeJSON:       active,
-		active:           activeProjections(current),
-		digest:           digest(canonical),
-		activeDigest:     digest(active),
-		projectionDigest: model.Digest(),
-		prepared:         true,
+		canonicalJSON:             canonical,
+		activeJSON:                active,
+		activeInterfaces:          activeInterfaceProjections(current.Interfaces),
+		activeLegacyCapabilities:  activeProjections(current),
+		digest:                    digest(canonical),
+		activeDigest:              digest(active),
+		projectionDigest:          combinedProjectionDigest(legacy.Digest(), interfaces.Digest()),
+		legacyProjectionDigest:    legacy.Digest(),
+		interfaceProjectionDigest: interfaces.Digest(),
+		prepared:                  true,
 	}, nil
 }
 
 func activeProjections(value document) []CapabilityProjection {
-	identifiers := make([]string, 0, len(value.Capabilities))
-	for identifier, capability := range value.Capabilities {
+	identifiers := make([]string, 0, len(value.LegacyCapabilities))
+	for identifier, capability := range value.LegacyCapabilities {
 		if capability.Active {
 			identifiers = append(identifiers, identifier)
 		}
@@ -386,7 +449,7 @@ func activeProjections(value document) []CapabilityProjection {
 	sort.Strings(identifiers)
 	result := make([]CapabilityProjection, len(identifiers))
 	for index, identifier := range identifiers {
-		capability := value.Capabilities[identifier]
+		capability := value.LegacyCapabilities[identifier]
 		result[index] = CapabilityProjection{
 			id:             identifier,
 			contractDigest: capability.CanonicalContractDigest,
@@ -433,6 +496,7 @@ func projectMessage(value message) MessageProjection {
 		}
 	}
 	return MessageProjection{
+		canonicalName:   "",
 		name:            value.Message,
 		fields:          fields,
 		enums:           enums,
@@ -452,6 +516,7 @@ func cloneCapabilityProjection(value CapabilityProjection) CapabilityProjection 
 
 func cloneMessageProjection(value MessageProjection) MessageProjection {
 	result := MessageProjection{
+		canonicalName:   value.canonicalName,
 		name:            value.name,
 		fields:          append([]FieldProjection(nil), value.fields...),
 		reservedNumbers: append([]int(nil), value.reservedNumbers...),
@@ -704,12 +769,15 @@ func validateDocument(value document) error {
 	if value.ProjectionSchema != ProjectionSchema {
 		return fmt.Errorf("projection_schema must equal %q", ProjectionSchema)
 	}
-	if value.Capabilities == nil || len(value.Capabilities) > maximumCapabilities {
-		return fmt.Errorf("capabilities must be an object with at most %d entries", maximumCapabilities)
+	if err := validateInterfaceHistories(value.Interfaces); err != nil {
+		return err
 	}
-	for id, record := range value.Capabilities {
+	if value.LegacyCapabilities == nil || len(value.LegacyCapabilities) > maximumLegacyCapabilities {
+		return fmt.Errorf("legacy_capabilities must be an object with at most %d entries", maximumLegacyCapabilities)
+	}
+	for id, record := range value.LegacyCapabilities {
 		if id == "" || len(id) > 1024 || !utf8.ValidString(id) {
-			return fmt.Errorf("capabilities contains invalid identity %q", id)
+			return fmt.Errorf("legacy_capabilities contains invalid identity %q", id)
 		}
 		packageName, requestName, responseName, err := canonicalMessageNames(id)
 		if err != nil {
@@ -923,12 +991,16 @@ func encode(value document, pretty bool) ([]byte, error) {
 }
 
 func encodeActive(value document) ([]byte, error) {
-	active := activeDocument{ProjectionSchema: ProjectionSchema, Capabilities: make(map[string]activeCapability)}
-	for id, record := range value.Capabilities {
+	active := activeDocument{
+		ProjectionSchema:   ProjectionSchema,
+		Interfaces:         activeInterfaceHistory(value.Interfaces),
+		LegacyCapabilities: make(map[string]activeCapability),
+	}
+	for id, record := range value.LegacyCapabilities {
 		if !record.Active {
 			continue
 		}
-		active.Capabilities[id] = activeCapability{
+		active.LegacyCapabilities[id] = activeCapability{
 			CanonicalContractDigest: record.CanonicalContractDigest,
 			Request:                 cloneActiveMessage(record.Request),
 			Response:                cloneActiveMessage(record.Response),
@@ -938,12 +1010,16 @@ func encodeActive(value document) ([]byte, error) {
 }
 
 func cloneDocument(value document) document {
-	result := document{ProjectionSchema: value.ProjectionSchema, Capabilities: make(map[string]capability, len(value.Capabilities))}
-	for id, record := range value.Capabilities {
+	result := document{
+		ProjectionSchema:   value.ProjectionSchema,
+		Interfaces:         cloneInterfaceHistories(value.Interfaces),
+		LegacyCapabilities: make(map[string]capability, len(value.LegacyCapabilities)),
+	}
+	for id, record := range value.LegacyCapabilities {
 		record.Provenance = append([]string(nil), record.Provenance...)
 		record.Request = cloneMessage(record.Request)
 		record.Response = cloneMessage(record.Response)
-		result.Capabilities[id] = record
+		result.LegacyCapabilities[id] = record
 	}
 	return result
 }
@@ -1185,6 +1261,10 @@ func validDigest(value string) bool {
 func digest(value []byte) string {
 	sum := sha256.Sum256(value)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func combinedProjectionDigest(legacy, interfaces string) string {
+	return digest([]byte("plystra.proto-wire-map.projection/v1\x00" + legacy + "\x00" + interfaces))
 }
 
 func hasControl(value string) bool {

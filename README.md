@@ -22,28 +22,25 @@ The CLI owns:
 The CLI is the sole writer of final `generated/` source.
 
 `generated/proto/wire-map.json` is committed, CLI-owned compatibility history
-for canonical Capability request and response messages selected for Connect.
-Generation assigns the lowest permitted positive field number, preserves that
-assignment across declaration reordering, allocates new fields without
-renumbering existing fields, and permanently reserves both the name and number
-of every removed field. Scalar contract enums additionally receive a numeric
-zero `*_UNSPECIFIED` sentinel and deterministic positive member numbers.
-Existing members keep their assignments across declaration reordering and
-additions; removed member names and numbers remain permanently reserved. The
-ledger retains inactive canonical field and enum histories when Connect,
-exposure, or an enum is later disabled. Capability Aliases reuse their
-canonical target's messages and enums and never receive separate ledger
-entries. The ownership manifest records the exact ledger digest, and
-generation rejects a missing, manually changed, corrupt, or inconsistent prior
-ledger instead of guessing. Never edit or delete this file; restore its exact
-last committed content before regenerating. Generation also emits one
-deterministic `.proto` schema for each selected canonical Connect Capability,
-one service-only Alias schema that imports the canonical messages, and a
-self-contained `generated/proto/descriptor-set.pb` containing any required
-well-known descriptors. A Project without a selected Connect surface retains a
-valid empty descriptor set. These schema and descriptor files are CLI-owned,
-exclude Provider, Plugin, Go Module, configuration, and Secret data, and are
-checked for drift with the rest of `generated/`; never edit them manually.
+for every canonical Interface message projected to Connect, including
+request, response, and reachable same-package message types. Authored positive
+`plystra` field numbers are the wire numbers. Generation rejects renumbering,
+permanently reserves both the Protobuf name and number of every removed field,
+and carries those reservations into generated source and the descriptor set.
+Inactive Interface and message history remains when exposure or Connect is
+disabled. The same ledger temporarily retains separately labelled legacy
+transport history required by pre-Gate-14 handlers; that bridge is not
+Interface contract authority. The ownership manifest records the exact ledger
+digest, and generation rejects a missing, manually changed, corrupt, reused,
+or projection-inconsistent prior ledger instead of guessing. Never edit or
+delete this file; restore its exact last committed content before
+regenerating. Generation also emits one deterministic message schema for each
+exposed canonical Interface and a self-contained
+`generated/proto/descriptor-set.pb` containing any required well-known
+descriptors. A Project without a selected Connect surface retains a valid
+empty descriptor set. These schema and descriptor files are CLI-owned, contain
+no Implementation, configuration, or Secret data, and are checked for drift
+with the rest of `generated/`; never edit them manually.
 For every selected Connect surface, generation also emits a Go handler under
 `generated/go/adapters/connect/`. Canonical handlers bind one exact procedure
 to the generated canonical application-invocation handle; Alias handlers are
@@ -111,7 +108,7 @@ Generation emits one managed typed proxy for every reachable authored Interface 
 
 Each `http.expose` entry backed by a canonical Interface package emits one deterministic message schema at `generated/proto/plystra/generated/<interface-id>/interface.proto` and contributes it to the existing self-contained descriptor set. Authored non-intrinsic packages come from the visible Project graph; intrinsic `kernel.*` packages are loaded only by their exact Kernel-owned inventory paths from the selected Kernel module. The canonical Go request, response, and nested message graph supplies the exact scalar widths, collection and map shapes, well-known types, effective JSON names, required markers, and authored `plystra` field numbers. During the pre-Gate-14 transport transition, an overlapping legacy service schema imports these canonical messages and declares no competing message or enum types. This message-only boundary does not invent a new Connect procedure before procedure generation is implemented.
 
-Generation also owns `generated/go/assembly/interfaces_gen.go`. Its `NewInterfaceRuntime` creates each selected constructor exactly once in dependency-first order, injects required proxies plus available or unavailable `plystra.Optional[T]` values, shares one concrete instance across every Interface declared by that constructor, creates exact Implementation bindings with constructor, module, selection-reason, and contract-digest provenance, and publishes one complete immutable Kernel catalog before returning typed root Interface accessors. It binds lifecycle-aware instances by exact constructor symbol in the same dependency-first order; startup is bounded, a failed or panicking start rolls back every active instance in reverse order, and normal shutdown also runs in reverse order. Internal calls remain ordinary typed in-process method calls through the governed proxies. Proxy, adapter, static-assembly, lifecycle, normalized Interface timeout-policy, and canonical Interface Protobuf projection identity and source digests participate in application-model schema version 13; `plystra generate --check` reports a missing or modified file without changing the Project. Generated bootstrap constructs this `InterfaceRuntime`, includes it in application validity, exposes it through `Application.Interfaces`, and coordinates startup and shutdown with the temporary legacy lifecycle boundary.
+Generation also owns `generated/go/assembly/interfaces_gen.go`. Its `NewInterfaceRuntime` creates each selected constructor exactly once in dependency-first order, injects required proxies plus available or unavailable `plystra.Optional[T]` values, shares one concrete instance across every Interface declared by that constructor, creates exact Implementation bindings with constructor, module, selection-reason, and contract-digest provenance, and publishes one complete immutable Kernel catalog before returning typed root Interface accessors. It binds lifecycle-aware instances by exact constructor symbol in the same dependency-first order; startup is bounded, a failed or panicking start rolls back every active instance in reverse order, and normal shutdown also runs in reverse order. Internal calls remain ordinary typed in-process method calls through the governed proxies. Proxy, adapter, static-assembly, lifecycle, normalized Interface timeout-policy, canonical Interface Protobuf projection identity and source digests, and active Interface wire history participate in application-model schema version 14; `plystra generate --check` reports a missing or modified file without changing the Project. Generated bootstrap constructs this `InterfaceRuntime`, includes it in application validity, exposes it through `Application.Interfaces`, and coordinates startup and shutdown with the temporary legacy lifecycle boundary.
 
 Reserved `kernel.*` Interfaces are always collected as intrinsic requirements outside ordinary Implementation selection. The versioned `github.com/plystra/kernel/intrinsic.InterfaceDefinitions` inventory names their canonical `github.com/plystra/kernel/interfaces/kernel/...` packages; the CLI adapts that Kernel-owned inventory and maintains no second intrinsic Interface list. Explicit `interfaces.require` and `http.expose` declarations add deterministic requirement provenance without creating an Implementation choice. An unknown reserved ID, an application-authored `kernel.*` Interface declaration, or an explicit `interfaces.use` choice for an intrinsic Interface fails before generation. A Plystra Project directly requires `github.com/plystra/kernel` in `go.mod`, and generation retains that selected module version or a deterministic local-workspace build identity for intrinsic runtime provenance. Ordinary Implementations are never chosen by priority, official status, discovery order, or filesystem order.
 

@@ -34,12 +34,12 @@ const (
 	defaultRuntimeDocument = "plystra.yaml"
 	defaultStartupTimeout  = time.Duration(120000000000)
 	// compiledConfigurationSelectionProvenanceJSON records the normalized non-secret build selection.
-	compiledConfigurationSelectionProvenanceJSON   = "{\"version\":1,\"mode\":\"default\",\"root_path\":\"plystra.yaml\",\"root_digest\":\"sha256:84af8f5f7bd7c7b65343b58fd670495b6218aae6170e106548b997bf2944c00b\",\"selected_path\":\"plystra.yaml\",\"selected_digest\":\"sha256:84af8f5f7bd7c7b65343b58fd670495b6218aae6170e106548b997bf2944c00b\",\"dependency_composition_digest\":\"sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130\",\"application_model_digest\":\"sha256:6008f99b3534af0608182354b3c3fad77e6ad68a11d2ccf0206121570bc52b2f\"}"
-	compiledConfigurationSelectionProvenanceDigest = "sha256:23d2d04f3588025419944764f3b86af4c2e3d8ed86d613148c8f14e8b68661e9"
+	compiledConfigurationSelectionProvenanceJSON   = "{\"version\":1,\"mode\":\"default\",\"root_path\":\"plystra.yaml\",\"root_digest\":\"sha256:84af8f5f7bd7c7b65343b58fd670495b6218aae6170e106548b997bf2944c00b\",\"selected_path\":\"plystra.yaml\",\"selected_digest\":\"sha256:84af8f5f7bd7c7b65343b58fd670495b6218aae6170e106548b997bf2944c00b\",\"dependency_composition_digest\":\"sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130\",\"application_model_digest\":\"sha256:021b3f3d20b6e3bb45a78eefedec0366e5baa17cf0051d4b075e3a14e7bece45\"}"
+	compiledConfigurationSelectionProvenanceDigest = "sha256:06fa0eae9a176ffe08b7b4f630967ba54ae7f32af3f47dabce519a9a38885a82"
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:6008f99b3534af0608182354b3c3fad77e6ad68a11d2ccf0206121570bc52b2f\",\"projection\":{\"http_cors\":null,\"http_exposures\":[],\"http_transports\":{\"connect\":true,\"rest\":false},\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":1}"
-	compiledApplicationModelCompatibilityDigest = "sha256:0fa0d4afde778a0fd86a20103706e2d832cb6f2b589fe67f0566c6c3058fd26b"
-	compiledApplicationModelDigest              = "sha256:6008f99b3534af0608182354b3c3fad77e6ad68a11d2ccf0206121570bc52b2f"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:021b3f3d20b6e3bb45a78eefedec0366e5baa17cf0051d4b075e3a14e7bece45\",\"projection\":{\"http_cors\":null,\"http_exposures\":[],\"http_transports\":{\"connect\":true,\"rest\":false},\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":1}"
+	compiledApplicationModelCompatibilityDigest = "sha256:ed48bd4b5225105df01edfe63d6a77f93eaa0ea9b9f6efbb94c6bcee4143ff88"
+	compiledApplicationModelDigest              = "sha256:021b3f3d20b6e3bb45a78eefedec0366e5baa17cf0051d4b075e3a14e7bece45"
 )
 
 var (

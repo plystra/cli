@@ -89,7 +89,9 @@ Import the generated JavaScript SDK only through its package root. Internal runt
 
 Pass an AbortSignal as the generated operation's second argument to cancel before dispatch or while fetch is in flight. Cancellation rejects with PlystraError code cancelled. Once server invocation has begun, the generated Connect handler preserves that caller cancellation through the trusted Kernel root, canonical application invocation, and Provider context. The same handler preserves the earlier caller or trusted-root Go context deadline and reports deadline_exceeded without a response when invocation observes it. Cancellation and deadlines are best-effort interruption and do not promise Provider rollback or compensation.
 
-` + "`generated/proto/wire-map.json`" + ` is committed compatibility history for canonical Capability request and response messages selected for Connect. Generation preserves field numbers across declaration reordering, allocates new fields without renumbering existing fields, and permanently reserves removed field names and numbers. Scalar contract enums receive a numeric zero ` + "`*_UNSPECIFIED`" + ` sentinel and stable positive member numbers; reordering and additions preserve existing assignments, while removed member names and numbers remain permanently reserved. Inactive field and enum history remains when exposure, Connect, or an enum is disabled. Capability Aliases reuse their canonical target messages and enums and have no separate ledger entry. Never edit or delete the ledger; restore its exact last committed content before regenerating. Generation emits deterministic ` + "`.proto`" + ` schemas for the selected canonical and Alias Connect surfaces plus a self-contained ` + "`generated/proto/descriptor-set.pb`" + `; these CLI-owned files contain no Provider, Plugin, Go Module, configuration, or Secret data and must not be edited. A Project without a selected Connect surface retains a valid empty descriptor set. A selected Connect surface also emits a Go handler under ` + "`generated/go/adapters/connect/`" + `. Canonical handlers bind one exact procedure to the generated canonical application-invocation handle, while Alias handlers forward through that canonical handler without owning a Provider or Alias dispatch entry. The current Connect boundary accepts canonical contracts whose explicit ` + "`semantics.kind`" + ` is ` + "`query`" + ` or ` + "`command`" + ` and projects each as one unary procedure; an Alias reuses that canonical target. Selecting an ` + "`event`" + ` or ` + "`stream`" + ` for Connect fails before generated output and identifies the Capability, declared kind, supported unary kinds, and ` + "`http.expose`" + ` remediation. Do not relabel an event or stream to bypass validation. Both handlers accept only Connect POST requests encoded as binary Protobuf or ProtoJSON, require ` + "`Connect-Protocol-Version: 1`" + `, and reject gRPC and gRPC-Web before root-context or Provider invocation. Generation installs direct ` + "`connectrpc.com/connect`" + ` and ` + "`google.golang.org/protobuf`" + ` requirements at the supported versions inside the existing module transaction. The generated JavaScript package uses the same descriptor graph and declares pinned direct ` + "`@bufbuild/protobuf`" + `, ` + "`@connectrpc/connect`" + `, and ` + "`@connectrpc/connect-web`" + ` dependencies; application callers use only the Plystra wrapper rather than raw descriptors, messages, clients, or Connect errors. The generated application entrypoint does not yet mount an HTTP server; server mounting and the remaining protocol projections remain later transport work. Generation also rejects canonical fields in the same request or response when they derive the same ProtoJSON name or generated enum type. The diagnostic identifies both authored field names; rename one field in ` + "`capability.yaml`" + ` rather than editing generated output.
+` + "`generated/proto/wire-map.json`" + ` is committed compatibility history for every canonical Interface message projected to Connect, including request, response, and reachable same-package messages. Authored positive ` + "`plystra`" + ` field numbers are the wire numbers. Generation rejects renumbering, permanently reserves every removed Protobuf field name and number, carries those reservations into generated source and the descriptor set, and retains inactive Interface and message history when exposure or Connect is disabled. The ledger temporarily retains separately labelled legacy transport history required by pre-Gate-14 handlers; that bridge is not Interface contract authority. Never edit or delete the ledger. If it drifts, recover the exact previously generated content before running ` + "`plystra generate`" + `.
+
+Generation emits one deterministic message-only ` + "`.proto`" + ` schema from every exposed canonical Interface package plus a self-contained ` + "`generated/proto/descriptor-set.pb`" + `. A Project without a selected Connect surface retains a valid empty descriptor set. These files contain no Implementation, configuration, or Secret data, are CLI-owned, and are checked by ` + "`plystra generate --check`" + `.
 
 Every selected Connect application failure carries one shared ` + "`PlystraErrorDetail`" + ` with the requested canonical or Alias ID, the canonical target, and exactly one declared semantic code or closed Kernel class. Alias handlers preserve the requested Alias while invoking only the canonical target. Provider text, causes, payloads, panic data, configuration, credentials, Secrets, and internal Kernel detail codes never enter this descriptor. The generated JavaScript wrapper exposes only the validated immutable Plystra detail; a missing, duplicate, malformed, unknown, mismatched, or undeclared detail fails closed to ` + "`internal`" + `.
 
@@ -339,26 +341,23 @@ under generated as CLI-owned. Never repair generated output by hand; change the
 authored declaration or implementation and run plystra generate.
 
 generated/proto/wire-map.json is durable CLI-owned compatibility history for
-canonical Capability request and response messages selected for Connect. It
-keeps field assignments stable across declaration reordering, allocates new
-fields without renumbering existing fields, permanently reserves removed field
-names and numbers, and retains inactive canonical history when exposure or
-Connect is disabled. Scalar contract enums use a numeric zero UNSPECIFIED
-sentinel and stable positive member numbers. Reordering and additions preserve
-existing assignments; removed member names and numbers remain permanently
-reserved, and enum history becomes inactive when the field stops using it. An
-application Alias reuses its canonical target messages and enums and never owns
-a separate ledger entry. Never edit or delete the ledger. If it drifts, recover
-the exact previously generated content before running plystra generate.
+every canonical Interface message projected to Connect, including request,
+response, and reachable same-package messages. Authored positive plystra field
+numbers are the wire numbers. Generation rejects renumbering, permanently
+reserves every removed Protobuf field name and number, carries those
+reservations into generated source and descriptors, and retains inactive
+Interface and message history when exposure or Connect is disabled. Never edit
+or delete the ledger. If it drifts, recover the exact previously generated
+content before running plystra generate.
 
-Generation emits one deterministic .proto schema for every canonical
-Capability on the selected Connect surface. An Alias emits a service-only
-schema that imports and reuses the canonical target messages.
+Generation emits one deterministic message-only .proto schema from every
+exposed canonical Interface package. The temporary legacy procedure bridge
+imports those messages rather than defining a competing contract.
 generated/proto/descriptor-set.pb is the self-contained deterministic binary
 descriptor graph, including required well-known descriptors. With no selected
 Connect surface it remains present as a valid empty descriptor set. These files
-contain no Provider, Plugin, Go Module, configuration, or Secret data. They are
-CLI-owned; never edit them, and use plystra generate --check to detect drift.
+contain no Implementation, configuration, or Secret data. They are CLI-owned;
+never edit them, and use plystra generate --check to detect drift.
 A selected Connect surface also emits a Go handler under
 generated/go/adapters/connect/. Canonical handlers bind one exact procedure to
 the generated canonical application-invocation handle, while Alias handlers
@@ -1453,16 +1452,18 @@ recovery action or code.
   regenerate. Do not overwrite the reported path manually.
 - Protobuf wire-history drift: recover the exact previously generated
   generated/proto/wire-map.json. Never edit or delete it to force new field
-  or enum-member numbers; generation rejects missing, modified, corrupt, reused,
-  or inconsistent history instead of guessing.
+  or enum-member numbers. Change an authored Interface field number only before
+  the ledger records it; afterward define a new Interface version for a wire
+  change. Generation rejects missing, modified, corrupt, renumbered, reused, or
+  projection-inconsistent history instead of guessing.
 - Protobuf schema or descriptor drift: never patch generated .proto files or
   generated/proto/descriptor-set.pb. Restore or regenerate the complete
   CLI-owned output, then rerun plystra generate --check.
 - Protobuf naming collision: rename one of the two canonical fields named by
-  the diagnostic in the authored capability.yaml. ProtoJSON collapses names
-  such as foo1 and foo_1, and generated enum initialisms can collapse names such
-  as http_status and h_t_t_p_status. Do not patch generated names or the wire
-  map; ordinary generation and generate --check leave the Project unchanged.
+  the diagnostic in the authored Interface Go package. ProtoJSON can collapse
+  distinct Go names to one generated field identity. Do not patch generated
+  names or the wire map; ordinary generation and generate --check leave the
+  Project unchanged.
 - Unsupported Connect operation kind: the current unary boundary accepts a
   canonical contract with semantics.kind: query or command. Remove the named
   event or stream from http.expose until its operation kind is supported; do

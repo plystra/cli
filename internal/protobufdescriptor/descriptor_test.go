@@ -386,7 +386,11 @@ func descriptorModel(t testing.TB, targets []descriptorTargetView, aliases []des
 
 func descriptorWireMap(t testing.TB, model protobufmodel.Model, previous []byte, previousExists bool, previousDigest string) protobufwiremap.Map {
 	t.Helper()
-	wireMap, err := protobufwiremap.Build(model, previous, previousExists, previousDigest)
+	interfaces, err := protobufmodel.BuildInterfaces(model.Enabled(), nil)
+	if err != nil {
+		t.Fatalf("protobufmodel.BuildInterfaces: %v", err)
+	}
+	wireMap, err := protobufwiremap.Build(model, interfaces, previous, previousExists, previousDigest)
 	if err != nil {
 		t.Fatalf("protobufwiremap.Build: %v", err)
 	}

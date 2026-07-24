@@ -59,9 +59,6 @@ func bindTransport(operations []renderedOperation, options TransportOptions) ([]
 	if !options.Projection.Valid() {
 		return nil, fmt.Errorf("%w: normalized Protobuf transport projection is absent", ErrRender)
 	}
-	if !options.WireMap.Valid() || options.WireMap.ProjectionDigest() != options.Projection.Digest() {
-		return nil, fmt.Errorf("%w: Protobuf wire map is absent or does not match the transport projection", ErrRender)
-	}
 	if len(operations) != 0 && !options.Projection.Enabled() {
 		return nil, fmt.Errorf("%w: JavaScript operations require an enabled Connect transport projection", ErrRender)
 	}
@@ -72,6 +69,9 @@ func bindTransport(operations []renderedOperation, options TransportOptions) ([]
 			return nil, fmt.Errorf("%w: normalize empty Interface projection: %v", ErrRender, err)
 		}
 		interfaceProjection = normalized
+	}
+	if !options.WireMap.Matches(options.Projection, interfaceProjection) {
+		return nil, fmt.Errorf("%w: Protobuf wire map is absent or does not match the Interface and legacy transport projections", ErrRender)
 	}
 	expected, err := protobufdescriptor.BuildWithInterfaces(options.Projection, options.WireMap, interfaceProjection)
 	if err != nil {

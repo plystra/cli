@@ -25,19 +25,30 @@ const (
 // current application transport model. Connect services are added by their
 // later dedicated generation boundary.
 func BuildWithInterfaces(model protobufmodel.Model, wireMap protobufwiremap.Map, interfaces protobufmodel.InterfaceModel) (Evidence, error) {
-	base, err := Build(model, wireMap)
-	if err != nil {
-		return Evidence{}, err
-	}
 	if !interfaces.Valid() {
 		return Evidence{}, fmt.Errorf("%w: %w: Interface Protobuf model is absent", ErrBuild, ErrProjection)
 	}
 	if interfaces.Enabled() != model.Enabled() {
 		return Evidence{}, fmt.Errorf("%w: %w: Interface and legacy Protobuf transport selection disagree", ErrBuild, ErrProjection)
 	}
+	if !wireMap.Matches(model, interfaces) {
+		return Evidence{}, fmt.Errorf("%w: %w: wire map is absent or does not match the normalized Interface and legacy projections", ErrBuild, ErrProjection)
+	}
+	base, err := Build(model, wireMap)
+	if err != nil {
+		return Evidence{}, err
+	}
 	operations := interfaces.Operations()
 	if len(operations) == 0 {
 		return base, nil
+	}
+	wireInterfaces := wireMap.ActiveInterfaces()
+	if len(wireInterfaces) != len(operations) {
+		return Evidence{}, fmt.Errorf("%w: %w: wire map has %d active Interfaces for %d projected Interfaces", ErrBuild, ErrProjection, len(wireInterfaces), len(operations))
+	}
+	wireByID := make(map[string]protobufwiremap.InterfaceProjection, len(wireInterfaces))
+	for _, projection := range wireInterfaces {
+		wireByID[projection.ID()] = projection
 	}
 
 	var set descriptorpb.FileDescriptorSet
@@ -67,7 +78,11 @@ func BuildWithInterfaces(model protobufmodel.Model, wireMap protobufwiremap.Map,
 	needTimestamp := false
 	needDuration := false
 	for _, operation := range operations {
-		file, usesTimestamp, usesDuration, err := interfaceDescriptor(operation)
+		wire, exists := wireByID[operation.ID().String()]
+		if !exists {
+			return Evidence{}, fmt.Errorf("%w: %w: Interface %s is absent from active wire history", ErrBuild, ErrProjection, operation.ID())
+		}
+		file, usesTimestamp, usesDuration, err := interfaceDescriptor(operation, wire)
 		if err != nil {
 			return Evidence{}, fmt.Errorf("%w: Interface %s: %v", ErrBuild, operation.ID(), err)
 		}
@@ -162,17 +177,46 @@ func bridgeLegacyInterfaceDescriptor(files map[string]*descriptorpb.FileDescript
 	return nil
 }
 
-func interfaceDescriptor(operation protobufmodel.InterfaceOperation) (*descriptorpb.FileDescriptorProto, bool, bool, error) {
+func interfaceDescriptor(
+	operation protobufmodel.InterfaceOperation,
+	wire protobufwiremap.InterfaceProjection,
+) (*descriptorpb.FileDescriptorProto, bool, bool, error) {
 	identity := operation.Identity()
 	if identity.PublicID() != operation.ID().String() || identity.CanonicalID() != operation.ID().String() {
 		return nil, false, false, fmt.Errorf("%w: generated identity is inconsistent", ErrProjection)
 	}
+	requestMessage, err := unqualified(identity.Package(), identity.RequestType())
+	if err != nil {
+		return nil, false, false, fmt.Errorf("%w: request identity: %v", ErrProjection, err)
+	}
+	responseMessage, err := unqualified(identity.Package(), identity.ResponseType())
+	if err != nil {
+		return nil, false, false, fmt.Errorf("%w: response identity: %v", ErrProjection, err)
+	}
+	if wire.ID() != operation.ID().String() ||
+		wire.ContractDigest() != operation.ContractDigest() ||
+		wire.ProtobufPackage() != identity.Package() ||
+		wire.RequestMessage() != requestMessage ||
+		wire.ResponseMessage() != responseMessage {
+		return nil, false, false, fmt.Errorf("%w: active Interface wire identity or contract digest is inconsistent", ErrProjection)
+	}
+	wireMessages := make(map[string]protobufwiremap.MessageProjection, len(wire.Messages()))
+	for _, message := range wire.Messages() {
+		wireMessages[message.Name()] = message
+	}
 	messages := operation.Messages()
+	if len(wireMessages) != len(messages) {
+		return nil, false, false, fmt.Errorf("%w: wire map has %d messages for %d canonical messages", ErrProjection, len(wireMessages), len(messages))
+	}
 	descriptors := make([]*descriptorpb.DescriptorProto, len(messages))
 	usesTimestamp := false
 	usesDuration := false
 	for index, message := range messages {
-		descriptor, messageUsesTimestamp, messageUsesDuration, err := interfaceMessageDescriptor(operation, message)
+		wireMessage, exists := wireMessages[message.ProtobufName()]
+		if !exists {
+			return nil, false, false, fmt.Errorf("%w: message %s is absent from active wire history", ErrProjection, message.GoName())
+		}
+		descriptor, messageUsesTimestamp, messageUsesDuration, err := interfaceMessageDescriptor(operation, message, wireMessage)
 		if err != nil {
 			return nil, false, false, fmt.Errorf("%w: message %s: %v", ErrProjection, message.GoName(), err)
 		}
@@ -199,12 +243,36 @@ func interfaceDescriptor(operation protobufmodel.InterfaceOperation) (*descripto
 	}, usesTimestamp, usesDuration, nil
 }
 
-func interfaceMessageDescriptor(operation protobufmodel.InterfaceOperation, message protobufmodel.InterfaceMessage) (*descriptorpb.DescriptorProto, bool, bool, error) {
+func interfaceMessageDescriptor(
+	operation protobufmodel.InterfaceOperation,
+	message protobufmodel.InterfaceMessage,
+	wire protobufwiremap.MessageProjection,
+) (*descriptorpb.DescriptorProto, bool, bool, error) {
+	if wire.CanonicalName() != message.GoName() || wire.Name() != message.ProtobufName() {
+		return nil, false, false, fmt.Errorf("message identity does not match active wire history")
+	}
+	wireFields := make(map[string]protobufwiremap.FieldProjection, len(wire.Fields()))
+	for _, field := range wire.Fields() {
+		wireFields[field.Name()] = field
+	}
+	if len(wireFields) != len(message.Fields()) {
+		return nil, false, false, fmt.Errorf("wire map has %d fields for %d canonical fields", len(wireFields), len(message.Fields()))
+	}
 	descriptor := &descriptorpb.DescriptorProto{Name: proto.String(message.ProtobufName())}
+	for _, number := range wire.ReservedNumbers() {
+		start := int32(number)
+		end := start + 1
+		descriptor.ReservedRange = append(descriptor.ReservedRange, &descriptorpb.DescriptorProto_ReservedRange{Start: &start, End: &end})
+	}
+	descriptor.ReservedName = wire.ReservedNames()
 	usesTimestamp := false
 	usesDuration := false
 	for _, field := range message.Fields() {
-		projected, mapEntry, fieldUsesTimestamp, fieldUsesDuration, err := interfaceFieldDescriptor(operation, message, field)
+		assignment, exists := wireFields[field.ProtobufName()]
+		if !exists {
+			return nil, false, false, fmt.Errorf("field %s is absent from active wire history", field.GoName())
+		}
+		projected, mapEntry, fieldUsesTimestamp, fieldUsesDuration, err := interfaceFieldDescriptor(operation, message, field, assignment)
 		if err != nil {
 			return nil, false, false, err
 		}
@@ -233,11 +301,17 @@ func interfaceFieldDescriptor(
 	operation protobufmodel.InterfaceOperation,
 	message protobufmodel.InterfaceMessage,
 	field protobufmodel.InterfaceField,
+	wire protobufwiremap.FieldProjection,
 ) (*descriptorpb.FieldDescriptorProto, *descriptorpb.DescriptorProto, bool, bool, error) {
+	if wire.CanonicalName() != field.GoName() ||
+		wire.Name() != field.ProtobufName() ||
+		wire.Number() != int(field.Number()) {
+		return nil, nil, false, false, fmt.Errorf("field %s does not match active wire history", field.GoName())
+	}
 	descriptor := &descriptorpb.FieldDescriptorProto{
-		Name:     proto.String(field.ProtobufName()),
+		Name:     proto.String(wire.Name()),
 		JsonName: proto.String(field.JSONName()),
-		Number:   proto.Int32(int32(field.Number())),
+		Number:   proto.Int32(int32(wire.Number())),
 		Label:    descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
 	}
 	fieldType := field.Type()

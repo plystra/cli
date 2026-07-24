@@ -365,7 +365,11 @@ func renderAliasOutput(t testing.TB, options aliasRenderOptions) generatedfiles.
 	if err != nil {
 		t.Fatalf("Build Protobuf projection: %v", err)
 	}
-	wireMap, err := protobufwiremap.Build(projection, nil, false, "")
+	interfaces, err := protobufmodel.BuildInterfaces(true, nil)
+	if err != nil {
+		t.Fatalf("Build Interface Protobuf projection: %v", err)
+	}
+	wireMap, err := protobufwiremap.Build(projection, interfaces, nil, false, "")
 	if err != nil {
 		t.Fatalf("Build Protobuf wire map: %v", err)
 	}

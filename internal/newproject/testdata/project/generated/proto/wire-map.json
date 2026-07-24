@@ -1,4 +1,5 @@
 {
-  "projection_schema": "plystra.proto-wire-map/v2",
-  "capabilities": {}
+  "projection_schema": "plystra.proto-wire-map/v3",
+  "interfaces": {},
+  "legacy_capabilities": {}
 }

@@ -90,8 +90,8 @@ func Render(
 	if !model.Valid() {
 		return nil, fmt.Errorf("%w: %w: normalized Protobuf model is absent", ErrRender, ErrProjection)
 	}
-	if !wireMap.Valid() || wireMap.ProjectionDigest() != model.Digest() {
-		return nil, fmt.Errorf("%w: %w: wire map is absent or does not match the normalized Protobuf model", ErrRender, ErrProjection)
+	if !wireMap.Valid() || wireMap.LegacyProjectionDigest() != model.Digest() {
+		return nil, fmt.Errorf("%w: %w: wire map is absent or does not match the normalized legacy Protobuf model", ErrRender, ErrProjection)
 	}
 	if plan.ModulePath() != modulePath {
 		return nil, fmt.Errorf("%w: %w: invocation plan module %q does not match %q", ErrRender, ErrProjection, plan.ModulePath(), modulePath)

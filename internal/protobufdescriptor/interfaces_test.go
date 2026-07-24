@@ -68,7 +68,7 @@ type Record struct {
 	if err != nil {
 		t.Fatalf("protobufmodel.Build: %v", err)
 	}
-	wireMap, err := protobufwiremap.Build(legacy, nil, false, "")
+	wireMap, err := protobufwiremap.Build(legacy, interfaces, nil, false, "")
 	if err != nil {
 		t.Fatalf("protobufwiremap.Build: %v", err)
 	}
@@ -143,6 +143,93 @@ type Record struct {
 	}
 }
 
+func TestBuildWithInterfacesProjectsHistoricalFieldReservations(t *testing.T) {
+	t.Parallel()
+
+	initialInput := descriptorInterfaceInput(t, `package listv1
+
+import "context"
+
+//plystra:interface records.list/v1
+type Interface interface {
+	List(context.Context, Request) (Response, error)
+}
+
+type Request struct {
+	Keep    string `+"`json:\"keep\" plystra:\"1\"`"+`
+	Removed string `+"`json:\"removed\" plystra:\"7\"`"+`
+}
+
+type Response struct{}
+`)
+	initialInterfaces, err := protobufmodel.BuildInterfaces(true, []protobufmodel.InterfaceInput{initialInput})
+	if err != nil {
+		t.Fatalf("BuildInterfaces(initial): %v", err)
+	}
+	legacy, err := protobufmodel.Build(true, nil, nil)
+	if err != nil {
+		t.Fatalf("protobufmodel.Build: %v", err)
+	}
+	initialWireMap, err := protobufwiremap.Build(legacy, initialInterfaces, nil, false, "")
+	if err != nil {
+		t.Fatalf("protobufwiremap.Build(initial): %v", err)
+	}
+
+	currentInput := descriptorInterfaceInput(t, `package listv1
+
+import "context"
+
+//plystra:interface records.list/v1
+type Interface interface {
+	List(context.Context, Request) (Response, error)
+}
+
+type Request struct {
+	Keep string `+"`json:\"keep\" plystra:\"1\"`"+`
+}
+
+type Response struct{}
+`)
+	currentInterfaces, err := protobufmodel.BuildInterfaces(true, []protobufmodel.InterfaceInput{currentInput})
+	if err != nil {
+		t.Fatalf("BuildInterfaces(current): %v", err)
+	}
+	currentWireMap, err := protobufwiremap.Build(
+		legacy,
+		currentInterfaces,
+		initialWireMap.CanonicalJSON(),
+		true,
+		initialWireMap.Digest(),
+	)
+	if err != nil {
+		t.Fatalf("protobufwiremap.Build(current): %v", err)
+	}
+	evidence, err := protobufdescriptor.BuildWithInterfaces(legacy, currentWireMap, currentInterfaces)
+	if err != nil {
+		t.Fatalf("BuildWithInterfaces: %v", err)
+	}
+	source := interfaceDescriptorFile(t, evidence, "generated/proto/plystra/generated/records/list/v1/interface.proto")
+	for _, fragment := range []string{
+		"reserved 7;",
+		`reserved "removed";`,
+		`optional string keep = 1 [json_name = "keep"];`,
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("generated Interface schema omits %q:\n%s", fragment, source)
+		}
+	}
+
+	set := decodeDescriptorSet(t, evidence.DescriptorSet())
+	file := descriptorFile(t, set, "plystra/generated/records/list/v1/interface.proto")
+	request := descriptorMessage(t, file, "RecordsListV1Request")
+	if request.ReservedNames().Len() != 1 ||
+		request.ReservedNames().Get(0) != "removed" ||
+		request.ReservedRanges().Len() != 1 ||
+		request.ReservedRanges().Get(0)[0] != 7 {
+		t.Fatalf("request reservations = names %v ranges %v", request.ReservedNames(), request.ReservedRanges())
+	}
+}
+
 func TestBuildWithInterfacesRejectsTransportSelectionMismatch(t *testing.T) {
 	t.Parallel()
 
@@ -150,7 +237,11 @@ func TestBuildWithInterfacesRejectsTransportSelectionMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("protobufmodel.Build: %v", err)
 	}
-	wireMap, err := protobufwiremap.Build(legacy, nil, false, "")
+	emptyInterfaces, err := protobufmodel.BuildInterfaces(false, nil)
+	if err != nil {
+		t.Fatalf("BuildInterfaces(empty): %v", err)
+	}
+	wireMap, err := protobufwiremap.Build(legacy, emptyInterfaces, nil, false, "")
 	if err != nil {
 		t.Fatalf("protobufwiremap.Build: %v", err)
 	}
@@ -175,8 +266,6 @@ errors: []
 `)
 	legacyAlias := descriptorAlias(t, "health.status/v1", legacyTarget)
 	legacy := descriptorModel(t, []descriptorTargetView{legacyTarget}, []descriptorAliasView{legacyAlias})
-	wireMap := descriptorWireMap(t, legacy, nil, false, "")
-
 	input := descriptorInterfaceInput(t, `package healthv1
 
 import "context"
@@ -194,6 +283,10 @@ type Response struct {
 	interfaces, err := protobufmodel.BuildInterfaces(true, []protobufmodel.InterfaceInput{input})
 	if err != nil {
 		t.Fatalf("BuildInterfaces: %v", err)
+	}
+	wireMap, err := protobufwiremap.Build(legacy, interfaces, nil, false, "")
+	if err != nil {
+		t.Fatalf("protobufwiremap.Build: %v", err)
 	}
 	evidence, err := protobufdescriptor.BuildWithInterfaces(legacy, wireMap, interfaces)
 	if err != nil {

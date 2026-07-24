@@ -103,7 +103,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProtobufProjection(default): %v", err)
 	}
-	wireMap, err := protobufwiremap.Build(projection, nil, false, "")
+	wireMap, err := protobufwiremap.Build(projection, emptyInterfaceWireProjection(t, projection), nil, false, "")
 	if err != nil {
 		t.Fatalf("protobufwiremap.Build(default): %v", err)
 	}
@@ -549,7 +549,7 @@ func TestApplicationModelDigestPinsNormalizedConnectProtobufProjection(t *testin
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(Connect Protobuf projection): %v", err)
 	}
-	const expected = "sha256:3ea81a73e1ebd69d0d10c6e239b626faf03467d1414581a70f031cb260d86181"
+	const expected = "sha256:1a0f27a2242be370f97ad4faa11cca5126e24baf5497f79929d266272b930617"
 	if digest != expected {
 		t.Fatalf("Connect Protobuf projection application-model digest = %q; want %q", digest, expected)
 	}
@@ -723,7 +723,7 @@ func TestApplicationModelDigestIncludesActiveWireHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProtobufProjection(current): %v", err)
 	}
-	cleanMap, err := protobufwiremap.Build(currentProjection, nil, false, "")
+	cleanMap, err := protobufwiremap.Build(currentProjection, emptyInterfaceWireProjection(t, currentProjection), nil, false, "")
 	if err != nil {
 		t.Fatalf("Build(clean): %v", err)
 	}
@@ -745,11 +745,11 @@ errors: [invalid_recipient]
 	if err != nil {
 		t.Fatalf("ProtobufProjection(historical): %v", err)
 	}
-	history, err := protobufwiremap.Build(historicalProjection, nil, false, "")
+	history, err := protobufwiremap.Build(historicalProjection, emptyInterfaceWireProjection(t, historicalProjection), nil, false, "")
 	if err != nil {
 		t.Fatalf("Build(history): %v", err)
 	}
-	reconciled, err := protobufwiremap.Build(currentProjection, history.CanonicalJSON(), true, history.Digest())
+	reconciled, err := protobufwiremap.Build(currentProjection, emptyInterfaceWireProjection(t, currentProjection), history.CanonicalJSON(), true, history.Digest())
 	if err != nil {
 		t.Fatalf("Build(reconciled): %v", err)
 	}
@@ -790,7 +790,7 @@ errors: [invalid_recipient]
 	if err != nil {
 		t.Fatalf("ProtobufProjection(current): %v", err)
 	}
-	cleanMap, err := protobufwiremap.Build(currentProjection, nil, false, "")
+	cleanMap, err := protobufwiremap.Build(currentProjection, emptyInterfaceWireProjection(t, currentProjection), nil, false, "")
 	if err != nil {
 		t.Fatalf("Build(clean): %v", err)
 	}
@@ -812,11 +812,11 @@ errors: [invalid_recipient]
 	if err != nil {
 		t.Fatalf("ProtobufProjection(historical): %v", err)
 	}
-	history, err := protobufwiremap.Build(historicalProjection, nil, false, "")
+	history, err := protobufwiremap.Build(historicalProjection, emptyInterfaceWireProjection(t, historicalProjection), nil, false, "")
 	if err != nil {
 		t.Fatalf("Build(history): %v", err)
 	}
-	reconciled, err := protobufwiremap.Build(currentProjection, history.CanonicalJSON(), true, history.Digest())
+	reconciled, err := protobufwiremap.Build(currentProjection, emptyInterfaceWireProjection(t, currentProjection), history.CanonicalJSON(), true, history.Digest())
 	if err != nil {
 		t.Fatalf("Build(reconciled): %v", err)
 	}

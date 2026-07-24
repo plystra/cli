@@ -739,15 +739,15 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w: Protobuf projection: %w", ErrResolution, err)
 	}
-	if !options.ProtobufWireMap.Valid() || options.ProtobufWireMap.ProjectionDigest() != protobufProjection.Digest() {
-		return "", fmt.Errorf("%w: Protobuf wire map is absent or does not match the normalized projection", ErrResolution)
-	}
 	interfaceProtobufModel, err := normalizeInterfaceProtobufModel(options.HTTPTransports, options.InterfaceProtobufModel)
 	if err != nil {
 		return "", fmt.Errorf("%w: Interface Protobuf projection: %w", ErrResolution, err)
 	}
+	if !options.ProtobufWireMap.Matches(protobufProjection, interfaceProtobufModel) {
+		return "", fmt.Errorf("%w: Protobuf wire map is absent or does not match the normalized Interface and legacy projections", ErrResolution)
+	}
 	document := applicationModelDocument{
-		Version:             13,
+		Version:             14,
 		ModulePath:          options.ModulePath,
 		JavaScriptPackage:   options.JavaScriptPackage,
 		KernelModuleVersion: options.KernelModuleVersion,

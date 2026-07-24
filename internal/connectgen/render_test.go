@@ -438,7 +438,11 @@ func buildFixture(t testing.TB, source, aliasID string) connectFixture {
 	if err != nil {
 		t.Fatalf("Build Protobuf model: %v", err)
 	}
-	wireMap, err := protobufwiremap.Build(model, nil, false, "")
+	interfaces, err := protobufmodel.BuildInterfaces(model.Enabled(), nil)
+	if err != nil {
+		t.Fatalf("protobufmodel.BuildInterfaces: %v", err)
+	}
+	wireMap, err := protobufwiremap.Build(model, interfaces, nil, false, "")
 	if err != nil {
 		t.Fatalf("Build wire map: %v", err)
 	}

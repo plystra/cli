@@ -791,7 +791,7 @@ type wireEnumAssignments struct {
 func decodeWireEnumAssignments(t testing.TB, data []byte, capabilityID, fieldName string) wireEnumAssignments {
 	t.Helper()
 	var document struct {
-		Capabilities map[string]struct {
+		LegacyCapabilities map[string]struct {
 			Request struct {
 				Enums map[string]struct {
 					Sentinel struct {
@@ -806,12 +806,12 @@ func decodeWireEnumAssignments(t testing.TB, data []byte, capabilityID, fieldNam
 					ReservedNames   []string `json:"reserved_names"`
 				} `json:"enums"`
 			} `json:"request"`
-		} `json:"capabilities"`
+		} `json:"legacy_capabilities"`
 	}
 	if err := json.Unmarshal(data, &document); err != nil {
 		t.Fatalf("decode wire map: %v", err)
 	}
-	record, exists := document.Capabilities[capabilityID]
+	record, exists := document.LegacyCapabilities[capabilityID]
 	if !exists {
 		t.Fatalf("wire map omits %s: %s", capabilityID, data)
 	}
@@ -834,7 +834,7 @@ func decodeWireEnumAssignments(t testing.TB, data []byte, capabilityID, fieldNam
 func decodeWireAssignments(t testing.TB, data []byte, capabilityID string) wireAssignments {
 	t.Helper()
 	var document struct {
-		Capabilities map[string]struct {
+		LegacyCapabilities map[string]struct {
 			Request struct {
 				Fields map[string]struct {
 					Number int `json:"number"`
@@ -847,12 +847,12 @@ func decodeWireAssignments(t testing.TB, data []byte, capabilityID string) wireA
 					Number int `json:"number"`
 				} `json:"fields"`
 			} `json:"response"`
-		} `json:"capabilities"`
+		} `json:"legacy_capabilities"`
 	}
 	if err := json.Unmarshal(data, &document); err != nil {
 		t.Fatalf("decode wire map: %v", err)
 	}
-	record, exists := document.Capabilities[capabilityID]
+	record, exists := document.LegacyCapabilities[capabilityID]
 	if !exists {
 		t.Fatalf("wire map omits %s: %s", capabilityID, data)
 	}

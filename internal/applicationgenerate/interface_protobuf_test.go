@@ -2,6 +2,8 @@ package applicationgenerate_test
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -12,6 +14,7 @@ import (
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/protobufdescriptor"
+	"github.com/plystra/cli/internal/protobufwiremap"
 )
 
 func TestGenerateProjectsExposedAuthoredInterfaceMessages(t *testing.T) {
@@ -70,6 +73,13 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 	if descriptor := readFile(t, root, protobufdescriptor.DescriptorSetPath); len(descriptor) == 0 {
 		t.Fatal("combined descriptor set is empty")
 	}
+	initialWireHistory := decodeInterfaceWireHistory(t, readFile(t, root, protobufwiremap.Path), "records.list/v1", "RecordsListV1Request")
+	if len(initialWireHistory.Fields) != 2 ||
+		initialWireHistory.Fields["page_size"].Number != 7 ||
+		len(initialWireHistory.ReservedNumbers) != 0 ||
+		len(initialWireHistory.ReservedNames) != 0 {
+		t.Fatalf("initial Interface wire history = %#v", initialWireHistory)
+	}
 	beforeProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance(initial): %v", err)
@@ -89,17 +99,39 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 	writeFile(t, interfacePath, interfaceProtobufSource(9))
 	beforeCheck := snapshotTree(t, root)
 	options.Check = true
-	drift, err := applicationgenerate.Generate(t.Context(), options)
-	if err != nil {
-		t.Fatalf("Generate --check: %v", err)
-	}
-	if !slicesContains(drift.Report().Changed(), protoPath) ||
-		!slicesContains(drift.Report().Changed(), protobufdescriptor.DescriptorSetPath) ||
-		!slicesContains(drift.Report().Changed(), "generated/manifest.json") {
-		t.Fatalf("Interface field-number drift = %#v", drift.Report().Changes())
+	if result, err := applicationgenerate.Generate(t.Context(), options); !errors.Is(err, protobufwiremap.ErrHistory) ||
+		!strings.Contains(err.Error(), `field "page_size" authored number changed from 7 to 9`) {
+		t.Fatalf("Generate --check(renumbered) = %#v, %v", result, err)
 	}
 	if afterCheck := snapshotTree(t, root); !reflect.DeepEqual(afterCheck, beforeCheck) {
-		t.Fatal("Generate --check mutated the authored Interface Project")
+		t.Fatal("Generate --check mutated the renumbered Interface Project")
+	}
+
+	options.Check = false
+	if result, err := applicationgenerate.Generate(t.Context(), options); !errors.Is(err, protobufwiremap.ErrHistory) ||
+		!reflect.DeepEqual(snapshotTree(t, root), beforeCheck) {
+		t.Fatalf("Generate(renumbered) = %#v, %v", result, err)
+	}
+
+	writeFile(t, interfacePath, interfaceProtobufSource(0))
+	beforeRemovalCheck := snapshotTree(t, root)
+	options.Check = true
+	drift, err := applicationgenerate.Generate(t.Context(), options)
+	if err != nil {
+		t.Fatalf("Generate --check(removed): %v", err)
+	}
+	for _, changed := range []string{
+		protoPath,
+		protobufdescriptor.DescriptorSetPath,
+		protobufwiremap.Path,
+		"generated/manifest.json",
+	} {
+		if !slicesContains(drift.Report().Changed(), changed) {
+			t.Fatalf("Interface field-removal drift omits %s: %#v", changed, drift.Report().Changes())
+		}
+	}
+	if afterCheck := snapshotTree(t, root); !reflect.DeepEqual(afterCheck, beforeRemovalCheck) {
+		t.Fatal("Generate --check mutated the Interface Project after a field removal")
 	}
 
 	options.Check = false
@@ -108,18 +140,39 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 		t.Fatalf("Generate(updated) = changes %#v, %v", updated.Report().Changes(), err)
 	}
 	updatedSource := readFile(t, root, protoPath)
-	if !bytes.Contains(updatedSource, []byte(`optional sint32 page_size = 9 [json_name = "page_size"];`)) ||
-		bytes.Contains(updatedSource, []byte(`page_size = 7`)) {
-		t.Fatalf("updated Interface schema did not preserve the authored field number:\n%s", updatedSource)
+	for _, fragment := range []string{`reserved 7;`, `reserved "page_size";`} {
+		if !bytes.Contains(updatedSource, []byte(fragment)) {
+			t.Fatalf("updated Interface schema omits %q:\n%s", fragment, updatedSource)
+		}
+	}
+	if bytes.Contains(updatedSource, []byte(`page_size =`)) {
+		t.Fatalf("updated Interface schema retained the removed field:\n%s", updatedSource)
+	}
+	removedWireHistory := decodeInterfaceWireHistory(t, readFile(t, root, protobufwiremap.Path), "records.list/v1", "RecordsListV1Request")
+	if len(removedWireHistory.Fields) != 1 ||
+		!reflect.DeepEqual(removedWireHistory.ReservedNumbers, []int{7}) ||
+		!reflect.DeepEqual(removedWireHistory.ReservedNames, []string{"page_size"}) {
+		t.Fatalf("removed Interface wire history = %#v", removedWireHistory)
 	}
 	afterProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance(updated): %v", err)
 	}
 	if beforeProvenance.ApplicationModelDigest() == afterProvenance.ApplicationModelDigest() {
-		t.Fatal("authored Interface field-number change did not alter application_model_digest")
+		t.Fatal("authored Interface field removal did not alter application_model_digest")
 	}
 
+	writeFile(t, interfacePath, interfaceProtobufSource(9))
+	beforeReuse := snapshotTree(t, root)
+	if result, err := applicationgenerate.Generate(t.Context(), options); !errors.Is(err, protobufwiremap.ErrHistory) ||
+		!strings.Contains(err.Error(), `field "page_size" reuses a permanently reserved Protobuf name`) {
+		t.Fatalf("Generate(reused field) = %#v, %v", result, err)
+	}
+	if afterReuse := snapshotTree(t, root); !reflect.DeepEqual(afterReuse, beforeReuse) {
+		t.Fatal("failed reserved-name reuse mutated the Interface Project")
+	}
+
+	writeFile(t, interfacePath, interfaceProtobufSource(0))
 	options.Check = true
 	clean, err := applicationgenerate.Generate(t.Context(), options)
 	if err != nil || !clean.Report().Clean() {
@@ -212,6 +265,10 @@ func TestGenerateProjectsExposedIntrinsicKernelInterfaceMessages(t *testing.T) {
 }
 
 func interfaceProtobufSource(pageSizeNumber int) string {
+	pageSizeField := ""
+	if pageSizeNumber > 0 {
+		pageSizeField = "\tPageSize int32            `json:\"page_size\" plystra:\"" + strconv.Itoa(pageSizeNumber) + ",required\"`\n"
+	}
 	return strings.ReplaceAll(`package listv1
 
 import "context"
@@ -222,7 +279,7 @@ type Interface interface {
 }
 
 type Request struct {
-	PageSize int32            `+"`json:\"page_size\" plystra:\"FIELD_NUMBER,required\"`"+`
+PAGE_SIZE_FIELD
 	Labels   map[string]int64 `+"`json:\"labels\" plystra:\"2\"`"+`
 }
 
@@ -233,5 +290,34 @@ type Response struct {
 type Record struct {
 	ID string `+"`json:\"id\" plystra:\"1,required\"`"+`
 }
-`, "FIELD_NUMBER", strconv.Itoa(pageSizeNumber))
+`, "PAGE_SIZE_FIELD\n", pageSizeField)
+}
+
+type interfaceWireHistory struct {
+	Fields map[string]struct {
+		Number int `json:"number"`
+	} `json:"fields"`
+	ReservedNumbers []int    `json:"reserved_numbers"`
+	ReservedNames   []string `json:"reserved_names"`
+}
+
+func decodeInterfaceWireHistory(t testing.TB, data []byte, identifier, message string) interfaceWireHistory {
+	t.Helper()
+	var document struct {
+		Interfaces map[string]struct {
+			Messages map[string]interfaceWireHistory `json:"messages"`
+		} `json:"interfaces"`
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("decode Interface wire history: %v", err)
+	}
+	record, exists := document.Interfaces[identifier]
+	if !exists {
+		t.Fatalf("Interface %s is absent from wire history", identifier)
+	}
+	history, exists := record.Messages[message]
+	if !exists {
+		t.Fatalf("message %s is absent from Interface %s wire history", message, identifier)
+	}
+	return history
 }

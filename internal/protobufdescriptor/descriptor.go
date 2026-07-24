@@ -108,8 +108,8 @@ func Build(model protobufmodel.Model, wireMap protobufwiremap.Map) (Evidence, er
 	if !model.Valid() {
 		return Evidence{}, fmt.Errorf("%w: %w: normalized Protobuf model is absent", ErrBuild, ErrProjection)
 	}
-	if !wireMap.Valid() || wireMap.ProjectionDigest() != model.Digest() {
-		return Evidence{}, fmt.Errorf("%w: %w: wire map is absent or does not match the normalized projection", ErrBuild, ErrProjection)
+	if !wireMap.Valid() || wireMap.LegacyProjectionDigest() != model.Digest() {
+		return Evidence{}, fmt.Errorf("%w: %w: wire map is absent or does not match the normalized legacy projection", ErrBuild, ErrProjection)
 	}
 
 	wireCapabilities := wireMap.ActiveCapabilities()

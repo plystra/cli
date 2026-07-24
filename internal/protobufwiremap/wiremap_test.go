@@ -26,12 +26,12 @@ response:
   result: {type: boolean}
 errors: []
 `))
-	initial, err := Build(initialModel, nil, false, "")
+	initial, err := Build(initialModel, emptyInterfaceProjection(t, initialModel), nil, false, "")
 	if err != nil || !initial.Valid() {
 		t.Fatalf("Build(initial) = %#v, %v", initial, err)
 	}
 	initialDocument := decodeTestDocument(t, initial.CanonicalJSON())
-	entry := initialDocument.Capabilities["customer.enroll/v1"]
+	entry := initialDocument.LegacyCapabilities["customer.enroll/v1"]
 	if !entry.Active || entry.Request.Fields["alpha"].Number != 1 || entry.Request.Fields["beta"].Number != 2 || entry.Response.Fields["result"].Number != 1 {
 		t.Fatalf("initial assignments = %#v", entry)
 	}
@@ -47,11 +47,11 @@ request:
   beta: {type: string}
 id: customer.enroll/v1
 `))
-	added, err := Build(reordered, initial.CanonicalJSON(), true, initial.Digest())
+	added, err := Build(reordered, emptyInterfaceProjection(t, reordered), initial.CanonicalJSON(), true, initial.Digest())
 	if err != nil {
 		t.Fatalf("Build(added): %v", err)
 	}
-	addedEntry := decodeTestDocument(t, added.CanonicalJSON()).Capabilities["customer.enroll/v1"]
+	addedEntry := decodeTestDocument(t, added.CanonicalJSON()).LegacyCapabilities["customer.enroll/v1"]
 	if addedEntry.Request.Fields["alpha"].Number != 1 || addedEntry.Request.Fields["beta"].Number != 2 || addedEntry.Request.Fields["gamma"].Number != 3 {
 		t.Fatalf("added assignments = %#v", addedEntry.Request.Fields)
 	}
@@ -64,11 +64,11 @@ request:
 response: {result: {type: boolean}}
 errors: []
 `))
-	removed, err := Build(removedModel, added.CanonicalJSON(), true, added.Digest())
+	removed, err := Build(removedModel, emptyInterfaceProjection(t, removedModel), added.CanonicalJSON(), true, added.Digest())
 	if err != nil {
 		t.Fatalf("Build(removed): %v", err)
 	}
-	removedEntry := decodeTestDocument(t, removed.CanonicalJSON()).Capabilities["customer.enroll/v1"]
+	removedEntry := decodeTestDocument(t, removed.CanonicalJSON()).LegacyCapabilities["customer.enroll/v1"]
 	if removedEntry.Request.Fields["alpha"].Number != 1 || removedEntry.Request.Fields["gamma"].Number != 3 || removedEntry.Request.Fields["delta"].Number != 4 {
 		t.Fatalf("post-removal assignments = %#v", removedEntry.Request.Fields)
 	}
@@ -77,16 +77,16 @@ errors: []
 	}
 
 	disabledModel := wireModel(t, false, wireTarget(t, `id: ignored.invalid/v1`))
-	disabled, err := Build(disabledModel, removed.CanonicalJSON(), true, removed.Digest())
+	disabled, err := Build(disabledModel, emptyInterfaceProjection(t, disabledModel), removed.CanonicalJSON(), true, removed.Digest())
 	if err != nil {
 		t.Fatalf("Build(disabled): %v", err)
 	}
-	inactive := decodeTestDocument(t, disabled.CanonicalJSON()).Capabilities["customer.enroll/v1"]
+	inactive := decodeTestDocument(t, disabled.CanonicalJSON()).LegacyCapabilities["customer.enroll/v1"]
 	if inactive.Active || inactive.Request.Fields["delta"].Number != 4 || !slices.Equal(inactive.Request.ReservedNumbers, []int{2}) {
 		t.Fatalf("inactive history = %#v", inactive)
 	}
 	var active activeDocument
-	if err := json.Unmarshal(disabled.ActiveJSON(), &active); err != nil || len(active.Capabilities) != 0 {
+	if err := json.Unmarshal(disabled.ActiveJSON(), &active); err != nil || len(active.LegacyCapabilities) != 0 {
 		t.Fatalf("disabled ActiveJSON = %s, %v", disabled.ActiveJSON(), err)
 	}
 
@@ -99,7 +99,7 @@ request:
 response: {result: {type: boolean}}
 errors: []
 `))
-	if result, err := Build(reusedName, disabled.CanonicalJSON(), true, disabled.Digest()); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "permanently reserved") {
+	if result, err := Build(reusedName, emptyInterfaceProjection(t, reusedName), disabled.CanonicalJSON(), true, disabled.Digest()); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "permanently reserved") {
 		t.Fatalf("Build(reused name) = %#v, %v", result, err)
 	}
 }
@@ -114,7 +114,7 @@ request:
 response:
   accepted: {type: boolean}
 `))
-	wireMap, err := Build(model, nil, false, "")
+	wireMap, err := Build(model, emptyInterfaceProjection(t, model), nil, false, "")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -157,11 +157,11 @@ request:
 response: {}
 errors: []
 `))
-	initial, err := Build(initialModel, nil, false, "")
+	initial, err := Build(initialModel, emptyInterfaceProjection(t, initialModel), nil, false, "")
 	if err != nil {
 		t.Fatalf("Build(initial): %v", err)
 	}
-	initialAssignment := decodeTestDocument(t, initial.CanonicalJSON()).Capabilities["delivery.route/v1"].Request.Enums["mode"]
+	initialAssignment := decodeTestDocument(t, initial.CanonicalJSON()).LegacyCapabilities["delivery.route/v1"].Request.Enums["mode"]
 	const identity = "plystra.generated.delivery.route.v1.DeliveryRouteV1RequestModeEnum"
 	const sentinel = "DELIVERYROUTEV1REQUESTMODEENUM_UNSPECIFIED"
 	if !initialAssignment.Active || initialAssignment.Identity != identity || initialAssignment.Kind != "string" || initialAssignment.Sentinel != (enumSymbol{Name: sentinel, Number: 0}) {
@@ -183,7 +183,7 @@ request:
 response: {}
 errors: []
 `))
-	if result, err := Build(kindChanged, initial.CanonicalJSON(), true, initial.Digest()); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "enum kind changed") {
+	if result, err := Build(kindChanged, emptyInterfaceProjection(t, kindChanged), initial.CanonicalJSON(), true, initial.Digest()); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "enum kind changed") {
 		t.Fatalf("Build(changed enum kind) = %#v, %v", result, err)
 	}
 
@@ -193,11 +193,11 @@ request:
 response: {}
 errors: []
 `))
-	added, err := Build(addedModel, initial.CanonicalJSON(), true, initial.Digest())
+	added, err := Build(addedModel, emptyInterfaceProjection(t, addedModel), initial.CanonicalJSON(), true, initial.Digest())
 	if err != nil {
 		t.Fatalf("Build(added): %v", err)
 	}
-	addedAssignment := decodeTestDocument(t, added.CanonicalJSON()).Capabilities["delivery.route/v1"].Request.Enums["mode"]
+	addedAssignment := decodeTestDocument(t, added.CanonicalJSON()).LegacyCapabilities["delivery.route/v1"].Request.Enums["mode"]
 	if got := enumNumbers(addedAssignment); !equalStringIntMap(got, map[string]int{`"express"`: 3, `"fast"`: 1, `"slow"`: 2}) {
 		t.Fatalf("added enum numbers = %v", got)
 	}
@@ -208,11 +208,11 @@ request:
 response: {}
 errors: []
 `))
-	removed, err := Build(removedModel, added.CanonicalJSON(), true, added.Digest())
+	removed, err := Build(removedModel, emptyInterfaceProjection(t, removedModel), added.CanonicalJSON(), true, added.Digest())
 	if err != nil {
 		t.Fatalf("Build(removed): %v", err)
 	}
-	removedAssignment := decodeTestDocument(t, removed.CanonicalJSON()).Capabilities["delivery.route/v1"].Request.Enums["mode"]
+	removedAssignment := decodeTestDocument(t, removed.CanonicalJSON()).LegacyCapabilities["delivery.route/v1"].Request.Enums["mode"]
 	if got := enumNumbers(removedAssignment); !equalStringIntMap(got, map[string]int{`"express"`: 3, `"later"`: 4, `"slow"`: 2}) {
 		t.Fatalf("post-removal enum numbers = %v", got)
 	}
@@ -227,7 +227,7 @@ request:
 response: {}
 errors: []
 `))
-	if result, err := Build(readdedModel, removed.CanonicalJSON(), true, removed.Digest()); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "permanently occupied generated name") {
+	if result, err := Build(readdedModel, emptyInterfaceProjection(t, readdedModel), removed.CanonicalJSON(), true, removed.Digest()); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "permanently occupied generated name") {
 		t.Fatalf("Build(re-added member) = %#v, %v", result, err)
 	}
 }
@@ -244,11 +244,11 @@ request:
 response: {}
 errors: []
 `))
-	result, err := Build(model, nil, false, "")
+	result, err := Build(model, emptyInterfaceProjection(t, model), nil, false, "")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	enums := decodeTestDocument(t, result.CanonicalJSON()).Capabilities["scalar.enum/v1"].Request.Enums
+	enums := decodeTestDocument(t, result.CanonicalJSON()).LegacyCapabilities["scalar.enum/v1"].Request.Enums
 	for field, kind := range map[string]string{"text": "string", "count": "integer", "ratio": "number", "enabled": "boolean"} {
 		assignment := enums[field]
 		if !assignment.Active || string(assignment.Kind) != kind || assignment.Sentinel.Number != 0 || len(assignment.Members) < 2 {
@@ -273,22 +273,22 @@ request: {state: {type: string, enum: [active, disabled]}}
 response: {}
 errors: []
 `))
-	initial, err := Build(withEnum, nil, false, "")
+	initial, err := Build(withEnum, emptyInterfaceProjection(t, withEnum), nil, false, "")
 	if err != nil {
 		t.Fatalf("Build(initial): %v", err)
 	}
-	initialAssignment := decodeTestDocument(t, initial.CanonicalJSON()).Capabilities["account.state/v1"].Request.Enums["state"]
+	initialAssignment := decodeTestDocument(t, initial.CanonicalJSON()).LegacyCapabilities["account.state/v1"].Request.Enums["state"]
 
 	withoutEnum := wireModel(t, true, wireTarget(t, `id: account.state/v1
 request: {state: {type: string}}
 response: {}
 errors: []
 `))
-	inactive, err := Build(withoutEnum, initial.CanonicalJSON(), true, initial.Digest())
+	inactive, err := Build(withoutEnum, emptyInterfaceProjection(t, withoutEnum), initial.CanonicalJSON(), true, initial.Digest())
 	if err != nil {
 		t.Fatalf("Build(without enum): %v", err)
 	}
-	inactiveAssignment := decodeTestDocument(t, inactive.CanonicalJSON()).Capabilities["account.state/v1"].Request.Enums["state"]
+	inactiveAssignment := decodeTestDocument(t, inactive.CanonicalJSON()).LegacyCapabilities["account.state/v1"].Request.Enums["state"]
 	if inactiveAssignment.Active || !equalStringIntMap(enumNumbers(inactiveAssignment), enumNumbers(initialAssignment)) {
 		t.Fatalf("inactive enum history = %#v", inactiveAssignment)
 	}
@@ -296,15 +296,15 @@ errors: []
 	if err := json.Unmarshal(inactive.ActiveJSON(), &active); err != nil {
 		t.Fatalf("decode ActiveJSON: %v", err)
 	}
-	if enums := active.Capabilities["account.state/v1"].Request.Enums; len(enums) != 0 {
+	if enums := active.LegacyCapabilities["account.state/v1"].Request.Enums; len(enums) != 0 {
 		t.Fatalf("active projection retained inactive enum history: %#v", enums)
 	}
 
-	reactivated, err := Build(withEnum, inactive.CanonicalJSON(), true, inactive.Digest())
+	reactivated, err := Build(withEnum, emptyInterfaceProjection(t, withEnum), inactive.CanonicalJSON(), true, inactive.Digest())
 	if err != nil {
 		t.Fatalf("Build(reactivated): %v", err)
 	}
-	reactivatedAssignment := decodeTestDocument(t, reactivated.CanonicalJSON()).Capabilities["account.state/v1"].Request.Enums["state"]
+	reactivatedAssignment := decodeTestDocument(t, reactivated.CanonicalJSON()).LegacyCapabilities["account.state/v1"].Request.Enums["state"]
 	if !reactivatedAssignment.Active || !equalStringIntMap(enumNumbers(reactivatedAssignment), enumNumbers(initialAssignment)) {
 		t.Fatalf("reactivated enum history = %#v", reactivatedAssignment)
 	}
@@ -324,29 +324,31 @@ errors: []
 	if err != nil {
 		t.Fatalf("protobufmodel.Build: %v", err)
 	}
-	first, err := Build(model, nil, false, "")
+	first, err := Build(model, emptyInterfaceProjection(t, model), nil, false, "")
 	if err != nil {
 		t.Fatalf("Build(first): %v", err)
 	}
-	second, err := Build(model, nil, false, "")
+	second, err := Build(model, emptyInterfaceProjection(t, model), nil, false, "")
 	if err != nil || !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() || first.ActiveDigest() != second.ActiveDigest() {
 		t.Fatalf("Build(second) = %s, %v", second.CanonicalJSON(), err)
 	}
 	document := decodeTestDocument(t, first.CanonicalJSON())
-	if len(document.Capabilities) != 1 {
-		t.Fatalf("Capabilities = %#v", document.Capabilities)
+	if len(document.LegacyCapabilities) != 1 {
+		t.Fatalf("LegacyCapabilities = %#v", document.LegacyCapabilities)
 	}
-	if _, allocated := document.Capabilities["account.profile/v1"]; allocated {
+	if _, allocated := document.LegacyCapabilities["account.profile/v1"]; allocated {
 		t.Fatal("Alias allocated a field-number ledger")
 	}
-	if enums := document.Capabilities["customer.profile.get/v1"].Request.Enums; len(enums) != 1 || len(enums["view"].Members) != 2 {
+	if enums := document.LegacyCapabilities["customer.profile.get/v1"].Request.Enums; len(enums) != 1 || len(enums["view"].Members) != 2 {
 		t.Fatalf("canonical target enum ledger = %#v", enums)
 	}
 	canonical := first.CanonicalJSON()
 	active := first.ActiveJSON()
 	canonical[0] = 'x'
 	active[0] = 'x'
-	if first.CanonicalJSON()[0] != '{' || first.ActiveJSON()[0] != '{' || first.ProjectionDigest() != model.Digest() {
+	if first.CanonicalJSON()[0] != '{' ||
+		first.ActiveJSON()[0] != '{' ||
+		!first.Matches(model, emptyInterfaceProjection(t, model)) {
 		t.Fatal("Map exposed mutable or inconsistent state")
 	}
 }
@@ -358,7 +360,7 @@ request: {to: {type: string}}
 response: {}
 errors: []
 `))
-	valid, err := Build(model, nil, false, "")
+	valid, err := Build(model, emptyInterfaceProjection(t, model), nil, false, "")
 	if err != nil {
 		t.Fatalf("Build(valid): %v", err)
 	}
@@ -377,7 +379,7 @@ errors: []
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			result, err := Build(model, test.data, test.exists, test.digest)
+			result, err := Build(model, emptyInterfaceProjection(t, model), test.data, test.exists, test.digest)
 			if !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), test.contains) {
 				t.Fatalf("Build = %#v, %v", result, err)
 			}
@@ -385,18 +387,18 @@ errors: []
 	}
 
 	inconsistent := decodeTestDocument(t, valid.CanonicalJSON())
-	record := inconsistent.Capabilities["email.send/v1"]
+	record := inconsistent.LegacyCapabilities["email.send/v1"]
 	record.Request.Message = "WrongRequest"
-	inconsistent.Capabilities["email.send/v1"] = record
+	inconsistent.LegacyCapabilities["email.send/v1"] = record
 	data, err := encode(inconsistent, true)
 	if err != nil {
 		t.Fatalf("encode inconsistent: %v", err)
 	}
-	if result, err := Build(model, data, true, digest(data)); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "message identities") {
+	if result, err := Build(model, emptyInterfaceProjection(t, model), data, true, digest(data)); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "message identities") {
 		t.Fatalf("Build(inconsistent) = %#v, %v", result, err)
 	}
 	oldSchema := bytes.Replace(valid.CanonicalJSON(), []byte(ProjectionSchema), []byte("plystra.proto-wire-map/v1"), 1)
-	if result, err := Build(model, oldSchema, true, digest(oldSchema)); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "projection_schema") {
+	if result, err := Build(model, emptyInterfaceProjection(t, model), oldSchema, true, digest(oldSchema)); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "projection_schema") {
 		t.Fatalf("Build(old schema) = %#v, %v", result, err)
 	}
 }
@@ -409,7 +411,7 @@ request: {priority: {type: string, enum: [normal, urgent]}}
 response: {}
 errors: []
 `))
-	valid, err := Build(model, nil, false, "")
+	valid, err := Build(model, emptyInterfaceProjection(t, model), nil, false, "")
 	if err != nil {
 		t.Fatalf("Build(valid): %v", err)
 	}
@@ -434,16 +436,16 @@ errors: []
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			document := decodeTestDocument(t, valid.CanonicalJSON())
-			record := document.Capabilities["email.send/v1"]
+			record := document.LegacyCapabilities["email.send/v1"]
 			assignment := record.Request.Enums["priority"]
 			test.mutate(&assignment)
 			record.Request.Enums["priority"] = assignment
-			document.Capabilities["email.send/v1"] = record
+			document.LegacyCapabilities["email.send/v1"] = record
 			data, encodeErr := encode(document, true)
 			if encodeErr != nil {
 				t.Fatalf("encode corrupt history: %v", encodeErr)
 			}
-			result, buildErr := Build(model, data, true, digest(data))
+			result, buildErr := Build(model, emptyInterfaceProjection(t, model), data, true, digest(data))
 			if !errors.Is(buildErr, ErrHistory) || result.Valid() || !strings.Contains(buildErr.Error(), test.contains) {
 				t.Fatalf("Build(corrupt enum) = %#v, %v; want %q", result, buildErr, test.contains)
 			}
@@ -459,22 +461,22 @@ request: {kind: {type: string, enum: [primary, secondary]}}
 response: {}
 errors: []
 `))
-	result, err := Build(model, nil, false, "")
+	result, err := Build(model, emptyInterfaceProjection(t, model), nil, false, "")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	document := decodeTestDocument(t, result.CanonicalJSON())
 	cloned := cloneDocument(document)
-	record := cloned.Capabilities["records.create/v1"]
+	record := cloned.LegacyCapabilities["records.create/v1"]
 	assignment := record.Request.Enums["kind"]
 	assignment.Members[0].Canonical[0] = 'x'
 	assignment.Members[0].Name = "changed"
 	assignment.ReservedNumbers = append(assignment.ReservedNumbers, 99)
 	assignment.ReservedNames = append(assignment.ReservedNames, "changed")
 	record.Request.Enums["kind"] = assignment
-	cloned.Capabilities["records.create/v1"] = record
+	cloned.LegacyCapabilities["records.create/v1"] = record
 
-	original := document.Capabilities["records.create/v1"].Request.Enums["kind"]
+	original := document.LegacyCapabilities["records.create/v1"].Request.Enums["kind"]
 	if original.Members[0].Canonical[0] != '"' || original.Members[0].Name == "changed" || len(original.ReservedNumbers) != 0 || len(original.ReservedNames) != 0 {
 		t.Fatalf("clone mutated source enum history: %#v", original)
 	}
@@ -588,6 +590,15 @@ func wireModel(t testing.TB, enabled bool, targets ...wireTargetView) protobufmo
 	model, err := protobufmodel.Build(enabled, views, nil)
 	if err != nil {
 		t.Fatalf("protobufmodel.Build: %v", err)
+	}
+	return model
+}
+
+func emptyInterfaceProjection(t testing.TB, legacy protobufmodel.Model) protobufmodel.InterfaceModel {
+	t.Helper()
+	model, err := protobufmodel.BuildInterfaces(legacy.Enabled(), nil)
+	if err != nil {
+		t.Fatalf("protobufmodel.BuildInterfaces: %v", err)
 	}
 	return model
 }

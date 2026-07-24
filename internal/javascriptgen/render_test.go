@@ -582,13 +582,13 @@ func javascriptOptions(t testing.TB, packageName string, targets []javascriptTar
 	if err != nil {
 		t.Fatalf("protobufmodel.Build: %v", err)
 	}
-	wireMap, err := protobufwiremap.Build(projection, nil, false, "")
-	if err != nil {
-		t.Fatalf("protobufwiremap.Build: %v", err)
-	}
 	interfaceProjection, err := protobufmodel.BuildInterfaces(true, nil)
 	if err != nil {
 		t.Fatalf("protobufmodel.BuildInterfaces: %v", err)
+	}
+	wireMap, err := protobufwiremap.Build(projection, interfaceProjection, nil, false, "")
+	if err != nil {
+		t.Fatalf("protobufwiremap.Build: %v", err)
 	}
 	evidence, err := protobufdescriptor.BuildWithInterfaces(projection, wireMap, interfaceProjection)
 	if err != nil {

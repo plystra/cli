@@ -24,6 +24,7 @@ import (
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/javascriptgen"
+	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
 	"github.com/plystra/cli/internal/transportprovenance"
@@ -568,7 +569,7 @@ func withManifestProvenanceSelection(t testing.TB, options applicationgen.Option
 	if err != nil {
 		t.Fatalf("ProtobufProjection: %v", err)
 	}
-	wireMap, err := protobufwiremap.Build(projection, nil, false, "")
+	wireMap, err := protobufwiremap.Build(projection, emptyInterfaceWireProjection(t, projection), nil, false, "")
 	if err != nil {
 		t.Fatalf("protobufwiremap.Build: %v", err)
 	}
@@ -672,7 +673,7 @@ func applicationModelDigest(t testing.TB, options applicationgen.ApplicationMode
 	if err != nil {
 		return "", err
 	}
-	wireMap, err := protobufwiremap.Build(projection, nil, false, "")
+	wireMap, err := protobufwiremap.Build(projection, emptyInterfaceWireProjection(t, projection), nil, false, "")
 	if err != nil {
 		return "", err
 	}
@@ -998,4 +999,13 @@ func transportPath(filePath string) bool {
 		strings.HasPrefix(filePath, "generated/go/adapters/http/") ||
 		strings.HasPrefix(filePath, "generated/sdk/javascript/") ||
 		strings.HasPrefix(filePath, "generated/docs/")
+}
+
+func emptyInterfaceWireProjection(t testing.TB, legacy protobufmodel.Model) protobufmodel.InterfaceModel {
+	t.Helper()
+	model, err := protobufmodel.BuildInterfaces(legacy.Enabled(), nil)
+	if err != nil {
+		t.Fatalf("protobufmodel.BuildInterfaces: %v", err)
+	}
+	return model
 }

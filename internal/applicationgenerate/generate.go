@@ -328,6 +328,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	}
 	wireMap, err := protobufwiremap.Build(
 		protobufProjection,
+		interfaceProtobufModel,
 		previousWireMap,
 		previousWireMapExists,
 		resolved.PreviousManifestProvenance().ProtobufWireMapDigest(),

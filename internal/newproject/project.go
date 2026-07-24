@@ -35,6 +35,7 @@ import (
 	"github.com/plystra/cli/internal/projectcheck"
 	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/projectsmoke"
+	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
 	"golang.org/x/mod/modfile"
@@ -552,7 +553,11 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if err != nil {
 		return fmt.Errorf("build initial Protobuf projection: %w", err)
 	}
-	wireMap, err := protobufwiremap.Build(protobufProjection, nil, false, "")
+	interfaceProtobufModel, err := protobufmodel.BuildInterfaces(currentManifest.HTTPTransports().Connect, nil)
+	if err != nil {
+		return fmt.Errorf("build initial Interface Protobuf projection: %w", err)
+	}
+	wireMap, err := protobufwiremap.Build(protobufProjection, interfaceProtobufModel, nil, false, "")
 	if err != nil {
 		return fmt.Errorf("build initial Protobuf wire map: %w", err)
 	}
@@ -561,12 +566,13 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 		httpCORS = &selected
 	}
 	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
-		ModulePath:          modulePath,
-		KernelModuleVersion: KernelVersion,
-		HTTPTransports:      currentManifest.HTTPTransports(),
-		HTTPCORS:            httpCORS,
-		Resolution:          resolution,
-		ProtobufWireMap:     wireMap,
+		ModulePath:             modulePath,
+		KernelModuleVersion:    KernelVersion,
+		HTTPTransports:         currentManifest.HTTPTransports(),
+		HTTPCORS:               httpCORS,
+		Resolution:             resolution,
+		ProtobufWireMap:        wireMap,
+		InterfaceProtobufModel: interfaceProtobufModel,
 	})
 	if err != nil {
 		return fmt.Errorf("digest initial application model: %w", err)
@@ -585,13 +591,14 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 		return fmt.Errorf("construct initial application manifest provenance: %w", err)
 	}
 	generated, err := applicationgen.Render(applicationgen.Options{
-		ModulePath:          modulePath,
-		KernelModuleVersion: KernelVersion,
-		HTTPTransports:      currentManifest.HTTPTransports(),
-		HTTPCORS:            httpCORS,
-		Composition:         composition,
-		ManifestProvenance:  provenance,
-		ProtobufWireMap:     wireMap,
+		ModulePath:             modulePath,
+		KernelModuleVersion:    KernelVersion,
+		HTTPTransports:         currentManifest.HTTPTransports(),
+		HTTPCORS:               httpCORS,
+		Composition:            composition,
+		ManifestProvenance:     provenance,
+		ProtobufWireMap:        wireMap,
+		InterfaceProtobufModel: interfaceProtobufModel,
 	}, resolution)
 	if err != nil {
 		return fmt.Errorf("render initial generated output: %w", err)

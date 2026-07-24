@@ -23,11 +23,11 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:4eb8f1b139f23a651ddaf37dfbd04b21bffb27a94ea378f42487c16b5baad2be"
+      "sha256": "sha256:0a67cbb76f0ce05d5d230887b8cefb5267c6e345961c8be60e4e2700c9a4430a"
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:0192b10d4b439126b817c19fa4eebcdba6b52f2ac2ee3c2e62cc5fc615032751"
+      "sha256": "sha256:3ed78ded13727c5f1b729e23595f266d81d621a0065a9a78e216eeafd283d70f"
     },
     {
       "path": "generated/proto/descriptor-set.pb",
@@ -35,7 +35,7 @@
     },
     {
       "path": "generated/proto/wire-map.json",
-      "sha256": "sha256:e563b91c26485ad548360d3b61bd79104cd76b2ef4771c41e6fbda4660bb525f"
+      "sha256": "sha256:8fb5b0696e1c40a979f02b41149b736896e5295acb843731e7e403d21f372243"
     }
   ],
   "application_manifest": {
@@ -73,8 +73,8 @@
           "dependency_baseline": []
         }
       ],
-      "protobuf_wire_map_digest": "sha256:e563b91c26485ad548360d3b61bd79104cd76b2ef4771c41e6fbda4660bb525f",
-      "application_model_digest": "sha256:6008f99b3534af0608182354b3c3fad77e6ad68a11d2ccf0206121570bc52b2f"
+      "protobuf_wire_map_digest": "sha256:8fb5b0696e1c40a979f02b41149b736896e5295acb843731e7e403d21f372243",
+      "application_model_digest": "sha256:021b3f3d20b6e3bb45a78eefedec0366e5baa17cf0051d4b075e3a14e7bece45"
     }
   }
 }
