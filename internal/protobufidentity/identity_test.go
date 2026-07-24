@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/protobufidentity"
 )
 
@@ -82,7 +82,7 @@ func TestPackageEncodingIsCanonicalAndReversible(t *testing.T) {
 		"oauth2.device-code.exchange/v3",
 		"oauth2.device--code.exchange/v3",
 	} {
-		identifier, err := capabilityid.Parse(value)
+		identifier, err := interfaceid.Parse(value)
 		if err != nil {
 			t.Fatalf("Parse(%s): %v", value, err)
 		}
@@ -143,7 +143,7 @@ func TestBuildRejectsInvalidDuplicateAndCrossVersionSurfaces(t *testing.T) {
 		{name: "invalid public", surfaces: []protobufidentity.Surface{{PublicID: "Customer.Profile/v1", CanonicalID: "customer.profile/v1"}}, want: "public_id"},
 		{name: "invalid canonical", surfaces: []protobufidentity.Surface{{PublicID: "customer.profile/v1", CanonicalID: "Customer.Profile/v1"}}, want: "canonical_id"},
 		{name: "cross version Alias", surfaces: []protobufidentity.Surface{{PublicID: "account.profile/v2", CanonicalID: "customer.profile/v1"}}, want: "same major version"},
-		{name: "duplicate public", surfaces: []protobufidentity.Surface{{PublicID: "customer.profile/v1", CanonicalID: "customer.profile/v1"}, {PublicID: "customer.profile/v1", CanonicalID: "customer.profile/v1"}}, collision: true, want: "public Capability"},
+		{name: "duplicate public", surfaces: []protobufidentity.Surface{{PublicID: "customer.profile/v1", CanonicalID: "customer.profile/v1"}, {PublicID: "customer.profile/v1", CanonicalID: "customer.profile/v1"}}, collision: true, want: "public Interface"},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {

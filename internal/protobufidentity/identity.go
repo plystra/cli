@@ -1,4 +1,4 @@
-// Package protobufidentity projects exact Plystra Capability identities into
+// Package protobufidentity projects exact Plystra Interface identities into
 // deterministic, reversible Protobuf and Connect surface identities.
 package protobufidentity
 
@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/goname"
+	"github.com/plystra/cli/internal/interfaceid"
 )
 
 const (
@@ -30,16 +30,14 @@ var (
 	ErrCollision = errors.New("generated Protobuf identity collision")
 )
 
-// Surface binds one public canonical or Alias ID to the canonical target whose
-// request and response messages it reuses.
+// Surface binds one public Interface ID to the canonical Interface whose
+// request and response messages it uses.
 type Surface struct {
 	PublicID    string
 	CanonicalID string
 }
 
-// Identity is one immutable public Protobuf service and Connect procedure
-// projection. Alias services use their public package while reusing the exact
-// canonical target message identities.
+// Identity is one immutable public Protobuf and Connect identity projection.
 type Identity struct {
 	publicID     string
 	canonicalID  string
@@ -51,10 +49,10 @@ type Identity struct {
 	procedure    string
 }
 
-// PublicID returns the exact canonical or Alias identity used by callers.
+// PublicID returns the exact public Interface identity used by callers.
 func (i Identity) PublicID() string { return i.publicID }
 
-// CanonicalID returns the exact canonical Capability dispatched by the
+// CanonicalID returns the exact canonical Interface dispatched by the
 // generated application path.
 func (i Identity) CanonicalID() string { return i.canonicalID }
 
@@ -132,21 +130,21 @@ func Build(surfaces []Surface) (Set, error) {
 	requestOwners := make(map[string]string, len(ordered))
 	responseOwners := make(map[string]string, len(ordered))
 	for index, surface := range ordered {
-		publicID, err := capabilityid.Parse(surface.PublicID)
+		publicID, err := interfaceid.Parse(surface.PublicID)
 		if err != nil {
 			return Set{}, fmt.Errorf("%w: surfaces[%d].public_id %q is not canonical: %v", ErrBuild, index, surface.PublicID, err)
 		}
-		canonicalID, err := capabilityid.Parse(surface.CanonicalID)
+		canonicalID, err := interfaceid.Parse(surface.CanonicalID)
 		if err != nil {
 			return Set{}, fmt.Errorf("%w: surfaces[%d].canonical_id %q is not canonical: %v", ErrBuild, index, surface.CanonicalID, err)
 		}
 		if publicID.Major() != canonicalID.Major() {
-			return Set{}, fmt.Errorf("%w: public Capability %s and canonical target %s must use the same major version", ErrBuild, publicID, canonicalID)
+			return Set{}, fmt.Errorf("%w: public Interface %s and canonical target %s must use the same major version", ErrBuild, publicID, canonicalID)
 		}
 
 		identity := project(publicID, canonicalID)
 		if previous, duplicate := publicOwners[identity.publicID]; duplicate {
-			return Set{}, collision("public Capability", identity.publicID, previous, identity.publicID)
+			return Set{}, collision("public Interface", identity.publicID, previous, identity.publicID)
 		}
 		publicOwners[identity.publicID] = identity.publicID
 		if err := registerUnique(packageOwners, "package", identity.packageName, identity.publicID); err != nil {
@@ -194,7 +192,7 @@ func Build(surfaces []Surface) (Set, error) {
 	}, nil
 }
 
-func project(publicID, canonicalID capabilityid.Identifier) Identity {
+func project(publicID, canonicalID interfaceid.Identifier) Identity {
 	publicPackage := Package(publicID)
 	canonicalPackage := Package(canonicalID)
 	publicBase := typeBase(publicID)
@@ -213,7 +211,7 @@ func project(publicID, canonicalID capabilityid.Identifier) Identity {
 }
 
 // Package returns the reversible Protobuf package for one exact canonical ID.
-func Package(identifier capabilityid.Identifier) string {
+func Package(identifier interfaceid.Identifier) string {
 	segments := strings.Split(identifier.Name(), ".")
 	for index := range segments {
 		segments[index] = strings.ReplaceAll(segments[index], "-", "_h_")
@@ -250,7 +248,7 @@ func EnumType(messageType, fieldName string) string {
 }
 
 // DecodePackage reverses a generated package identity into its exact canonical
-// Capability ID and rejects noncanonical encodings.
+// Interface ID and rejects noncanonical encodings.
 func DecodePackage(value string) (string, error) {
 	encoded, found := strings.CutPrefix(value, packagePrefix)
 	if !found {
@@ -276,14 +274,14 @@ func DecodePackage(value string) (string, error) {
 		}
 		nameSegments[index] = decoded
 	}
-	identifier, err := capabilityid.New(strings.Join(nameSegments, "."), major)
+	identifier, err := interfaceid.New(strings.Join(nameSegments, "."), major)
 	if err != nil || Package(identifier) != value {
 		return "", fmt.Errorf("%w: package %q is not a canonical reversible encoding", ErrBuild, value)
 	}
 	return identifier.String(), nil
 }
 
-func typeBase(identifier capabilityid.Identifier) string {
+func typeBase(identifier interfaceid.Identifier) string {
 	words := strings.FieldsFunc(identifier.Name(), func(character rune) bool {
 		return character == '.' || character == '-'
 	})

@@ -130,6 +130,88 @@ replace github.com/plystra/kernel => %s
 	assertNoCommandTransactions(t, root)
 }
 
+func TestRunGenerateProjectsAuthoredInterfaceMessages(t *testing.T) {
+	root := t.TempDir()
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module example.com/acme/interface-protobuf
+
+go 1.26
+
+require (
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot)))
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("ReadFile(go.sum): %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: [records.list/v1]}\n")
+	writeCommandFile(t, filepath.Join(root, "interfaces", "records", "list", "v1", "interface.go"), `package listv1
+
+import "context"
+
+//plystra:interface records.list/v1
+type Interface interface {
+	List(context.Context, Request) (Response, error)
+}
+
+type Request struct {
+	PageSize int32 `+"`json:\"page_size\" plystra:\"7,required\"`"+`
+}
+
+type Response struct {
+	Count uint64 `+"`json:\"count\" plystra:\"3,required\"`"+`
+}
+`)
+	writeCommandFile(t, filepath.Join(root, "records", "service.go"), `package records
+
+import (
+	"context"
+
+	listv1 "example.com/acme/interface-protobuf/interfaces/records/list/v1"
+)
+
+type Service struct{}
+
+//plystra:implements records.list/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
+	return listv1.Response{}, nil
+}
+`)
+	environment := commandGoEnvironment()
+	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, root, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/interface-protobuf in "+root+"\n" {
+		t.Fatalf("generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+
+	path := "generated/proto/plystra/generated/records/list/v1/interface.proto"
+	source := readCommandFile(t, root, path)
+	for _, want := range []string{
+		`optional sint32 page_size = 7 [json_name = "page_size"];`,
+		`optional uint64 count = 3 [json_name = "count"];`,
+	} {
+		if !bytes.Contains(source, []byte(want)) {
+			t.Fatalf("%s omits %q:\n%s", path, want, source)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "generated", "proto", "plystra", "generated", "records", "list", "v1", "capability.proto")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("obsolete capability.proto exists or could not be inspected: %v", err)
+	}
+
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/interface-protobuf in "+root+"\n" {
+		t.Fatalf("generate --check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+}
+
 func TestRunGenerateInstallsConnectRuntimeRequirementsAndCheckIsReadOnly(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)

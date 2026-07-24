@@ -33,6 +33,7 @@ import (
 	"github.com/plystra/cli/internal/invocationgen"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/protobufdescriptor"
+	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providergen"
 	"github.com/plystra/cli/internal/sdkmodel"
@@ -72,6 +73,7 @@ type Options struct {
 	InterfaceProxies       []interfaceproxygen.Input
 	ImplementationAdapters []implementationadaptergen.Input
 	ImplementationAssembly implementationassemblygen.Options
+	InterfaceProtobufModel protobufmodel.InterfaceModel
 	ProtobufWireMap        protobufwiremap.Map
 }
 
@@ -91,6 +93,10 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	if !options.Composition.Valid() {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: dependency configuration composition is absent or invalid", ErrRender, ErrResolution)
+	}
+	interfaceProtobufModel, err := normalizeInterfaceProtobufModel(options.HTTPTransports, options.InterfaceProtobufModel)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: %w: Interface Protobuf projection: %v", ErrRender, ErrResolution, err)
 	}
 	implementationAssemblyOptions := normalizeImplementationAssemblyOptions(
 		options.ImplementationAssembly,
@@ -114,6 +120,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		InterfacePolicies:      options.Composition.Manifest().InterfacePolicies(),
 		Resolution:             resolution,
 		ProtobufWireMap:        options.ProtobufWireMap,
+		InterfaceProtobufModel: interfaceProtobufModel,
 	})
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: application model: %v", ErrRender, ErrResolution, err)
@@ -143,7 +150,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf projection: %w", ErrRender, err)
 	}
-	descriptorEvidence, err := protobufdescriptor.Build(protobufProjection, options.ProtobufWireMap)
+	descriptorEvidence, err := protobufdescriptor.BuildWithInterfaces(protobufProjection, options.ProtobufWireMap, interfaceProtobufModel)
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf descriptor evidence: %w", ErrRender, err)
 	}

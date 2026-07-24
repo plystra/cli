@@ -411,6 +411,7 @@ type ApplicationModelOptions struct {
 	InterfacePolicies      []applicationmeta.InterfacePolicy
 	Resolution             generationresolution.ExtensionResult
 	ProtobufWireMap        protobufwiremap.Map
+	InterfaceProtobufModel protobufmodel.InterfaceModel
 }
 
 type applicationModelDocument struct {
@@ -431,6 +432,7 @@ type applicationModelDocument struct {
 	InterfacePolicies      []applicationModelInterfacePolicy       `json:"interface_policies"`
 	GenerationExtensions   []applicationModelGenerationExtension   `json:"generation_extensions"`
 	ProtobufProjection     json.RawMessage                         `json:"protobuf_projection"`
+	InterfaceProtobufModel json.RawMessage                         `json:"interface_protobuf_projection"`
 	ProtobufWireProjection json.RawMessage                         `json:"protobuf_wire_projection"`
 }
 
@@ -740,8 +742,12 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 	if !options.ProtobufWireMap.Valid() || options.ProtobufWireMap.ProjectionDigest() != protobufProjection.Digest() {
 		return "", fmt.Errorf("%w: Protobuf wire map is absent or does not match the normalized projection", ErrResolution)
 	}
+	interfaceProtobufModel, err := normalizeInterfaceProtobufModel(options.HTTPTransports, options.InterfaceProtobufModel)
+	if err != nil {
+		return "", fmt.Errorf("%w: Interface Protobuf projection: %w", ErrResolution, err)
+	}
 	document := applicationModelDocument{
-		Version:             12,
+		Version:             13,
 		ModulePath:          options.ModulePath,
 		JavaScriptPackage:   options.JavaScriptPackage,
 		KernelModuleVersion: options.KernelModuleVersion,
@@ -761,6 +767,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		InterfacePolicies:      policyRecords,
 		GenerationExtensions:   extensions,
 		ProtobufProjection:     json.RawMessage(protobufProjection.CanonicalJSON()),
+		InterfaceProtobufModel: json.RawMessage(interfaceProtobufModel.CanonicalJSON()),
 		ProtobufWireProjection: json.RawMessage(options.ProtobufWireMap.ActiveJSON()),
 	}
 	canonical, err := json.Marshal(document)
@@ -769,6 +776,16 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 	}
 	sum := sha256.Sum256(canonical)
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+func normalizeInterfaceProtobufModel(transports applicationmeta.HTTPTransports, model protobufmodel.InterfaceModel) (protobufmodel.InterfaceModel, error) {
+	if !model.Valid() {
+		return protobufmodel.BuildInterfaces(transports.Connect, nil)
+	}
+	if model.Enabled() != transports.Connect {
+		return protobufmodel.InterfaceModel{}, errors.New("Interface Protobuf model transport selection does not match http.transports.connect")
+	}
+	return model, nil
 }
 
 // ProtobufProjection returns the exact provider-independent transport model

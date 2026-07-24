@@ -538,15 +538,9 @@ func renderMessage(output *bytes.Buffer, value *descriptorpb.DescriptorProto) er
 		output.WriteString("  reserved " + strings.Join(quoted, ", ") + ";\n")
 	}
 	for _, field := range value.Field {
-		fieldType, err := sourceType(field)
+		fieldType, label, err := sourceFieldType(value, field)
 		if err != nil {
 			return err
-		}
-		label := ""
-		if field.GetLabel() == descriptorpb.FieldDescriptorProto_LABEL_REPEATED {
-			label = "repeated "
-		} else if field.GetProto3Optional() {
-			label = "optional "
 		}
 		output.WriteString(fmt.Sprintf("  %s%s %s = %d [json_name = %s];\n", label, fieldType, field.GetName(), field.GetNumber(), strconv.Quote(field.GetJsonName())))
 	}
@@ -554,16 +548,62 @@ func renderMessage(output *bytes.Buffer, value *descriptorpb.DescriptorProto) er
 	return nil
 }
 
+func sourceFieldType(message *descriptorpb.DescriptorProto, field *descriptorpb.FieldDescriptorProto) (string, string, error) {
+	if field.GetLabel() == descriptorpb.FieldDescriptorProto_LABEL_REPEATED &&
+		field.GetType() == descriptorpb.FieldDescriptorProto_TYPE_MESSAGE {
+		typeName := field.GetTypeName()
+		nestedName := typeName[strings.LastIndex(typeName, ".")+1:]
+		for _, nested := range message.NestedType {
+			if nested.GetName() != nestedName || nested.GetOptions() == nil || !nested.GetOptions().GetMapEntry() {
+				continue
+			}
+			if len(nested.Field) != 2 || nested.Field[0].GetName() != "key" || nested.Field[1].GetName() != "value" {
+				return "", "", errors.New("map-entry descriptor is incomplete")
+			}
+			keyType, err := sourceType(nested.Field[0])
+			if err != nil {
+				return "", "", err
+			}
+			valueType, err := sourceType(nested.Field[1])
+			if err != nil {
+				return "", "", err
+			}
+			return "map<" + keyType + ", " + valueType + ">", "", nil
+		}
+	}
+	fieldType, err := sourceType(field)
+	if err != nil {
+		return "", "", err
+	}
+	if field.GetLabel() == descriptorpb.FieldDescriptorProto_LABEL_REPEATED {
+		return fieldType, "repeated ", nil
+	}
+	if field.GetProto3Optional() {
+		return fieldType, "optional ", nil
+	}
+	return fieldType, "", nil
+}
+
 func sourceType(field *descriptorpb.FieldDescriptorProto) (string, error) {
 	switch field.GetType() {
-	case descriptorpb.FieldDescriptorProto_TYPE_STRING:
-		return "string", nil
-	case descriptorpb.FieldDescriptorProto_TYPE_SINT64:
-		return "sint64", nil
-	case descriptorpb.FieldDescriptorProto_TYPE_DOUBLE:
-		return "double", nil
 	case descriptorpb.FieldDescriptorProto_TYPE_BOOL:
 		return "bool", nil
+	case descriptorpb.FieldDescriptorProto_TYPE_BYTES:
+		return "bytes", nil
+	case descriptorpb.FieldDescriptorProto_TYPE_DOUBLE:
+		return "double", nil
+	case descriptorpb.FieldDescriptorProto_TYPE_FLOAT:
+		return "float", nil
+	case descriptorpb.FieldDescriptorProto_TYPE_SINT32:
+		return "sint32", nil
+	case descriptorpb.FieldDescriptorProto_TYPE_SINT64:
+		return "sint64", nil
+	case descriptorpb.FieldDescriptorProto_TYPE_STRING:
+		return "string", nil
+	case descriptorpb.FieldDescriptorProto_TYPE_UINT32:
+		return "uint32", nil
+	case descriptorpb.FieldDescriptorProto_TYPE_UINT64:
+		return "uint64", nil
 	case descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, descriptorpb.FieldDescriptorProto_TYPE_ENUM:
 		if field.GetTypeName() == "" {
 			return "", errors.New("message or enum field has no type name")

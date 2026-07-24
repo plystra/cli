@@ -311,6 +311,10 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if selected, exists := resolved.Manifest().HTTPCORS(); exists {
 		httpCORS = &selected
 	}
+	interfaceProtobufModel, err := interfaceProtobufProjection(resolved, httpTransports)
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("build authored Interface Protobuf projection: %w", err)
+	}
 	protobufProjection, err := applicationgen.ProtobufProjection(httpTransports, resolved.Resolution())
 	if err != nil {
 		return preparedGeneration{}, fmt.Errorf("build final Protobuf projection: %w", err)
@@ -347,6 +351,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		InterfacePolicies:      resolved.Manifest().InterfacePolicies(),
 		Resolution:             resolved.Resolution(),
 		ProtobufWireMap:        wireMap,
+		InterfaceProtobufModel: interfaceProtobufModel,
 	})
 	if err != nil {
 		return preparedGeneration{}, fmt.Errorf("digest final application model: %w", err)
@@ -385,6 +390,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		InterfaceProxies:       interfaceProxies,
 		ImplementationAdapters: implementationAdapters,
 		ImplementationAssembly: implementationAssembly,
+		InterfaceProtobufModel: interfaceProtobufModel,
 		ProtobufWireMap:        wireMap,
 	}, resolved.Resolution())
 	if err != nil {
@@ -395,6 +401,51 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		return preparedGeneration{}, err
 	}
 	return preparedGeneration{resolved: resolved, output: output, runtimeRequirements: runtimeRequirements, fingerprint: fingerprint}, nil
+}
+
+func interfaceProtobufProjection(resolved applicationresolve.Result, transports applicationmeta.HTTPTransports) (protobufmodel.InterfaceModel, error) {
+	if !transports.Connect {
+		return protobufmodel.BuildInterfaces(false, nil)
+	}
+	definitions := make(map[string]protobufmodel.InterfaceInput)
+	for _, definition := range resolved.Interfaces().Interfaces() {
+		contract := definition.Contract()
+		identifier := contract.ID().String()
+		if _, duplicate := definitions[identifier]; duplicate {
+			return protobufmodel.InterfaceModel{}, fmt.Errorf("canonical Interface %s has more than one visible definition while projecting Protobuf messages", identifier)
+		}
+		semanticErrors := definition.SemanticErrors()
+		errorCodes := make([]string, len(semanticErrors))
+		for index, semanticError := range semanticErrors {
+			errorCodes[index] = semanticError.Code()
+		}
+		definitions[identifier] = protobufmodel.InterfaceInput{
+			InterfaceID:    contract.ID(),
+			PackagePath:    contract.PackagePath(),
+			Source:         definition.Source(),
+			MetadataSource: definition.MetadataSource(),
+			Contract:       contract,
+			ContractDigest: definition.ContractDigest(),
+			SemanticErrors: errorCodes,
+		}
+	}
+
+	exposures := resolved.Manifest().HTTPExposures()
+	inputs := make([]protobufmodel.InterfaceInput, 0, len(exposures))
+	for _, exposure := range exposures {
+		identifier := exposure.ID()
+		if strings.HasPrefix(identifier.Name(), "kernel.") {
+			continue
+		}
+		input, exists := definitions[identifier.String()]
+		if !exists {
+			// Pre-Gate-14 legacy-only exposures are deliberately excluded by
+			// resolveInterfaces and remain on the existing transport path.
+			continue
+		}
+		inputs = append(inputs, input)
+	}
+	return protobufmodel.BuildInterfaces(true, inputs)
 }
 
 func generatedRuntimeRequirements(model protobufmodel.Model) ([]ModuleRequirement, error) {
