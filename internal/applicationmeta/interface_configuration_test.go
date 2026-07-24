@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/implementationinventory"
 )
 
 func TestParseNormalizesTypedInterfaceConfiguration(t *testing.T) {
@@ -428,6 +429,117 @@ interfaces:
 	repeated, err := applicationmeta.MaintainDependencyConfiguration(maintained.Data(), composition.DependencyBaseline(), newDependencies, composeSchemaLookup(nil))
 	if err != nil || repeated.Changed() || !bytes.Equal(repeated.Data(), maintained.Data()) {
 		t.Fatalf("repeated maintenance = changed %t error %v\n%s", repeated.Changed(), err, repeated.Data())
+	}
+}
+
+func TestMaintainDependencyConfigurationPreservesExplicitInheritedRemovals(t *testing.T) {
+	t.Parallel()
+
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
+		"example.com/platform/smtp.New": composeSchema(t, "\tHost string\n"),
+	})
+	oldDependencies := []applicationmeta.Dependency{{
+		ModulePath:    "example.com/platform",
+		ModuleVersion: "v1.0.0",
+		Manifest: composeManifest(t, `
+interfaces:
+  require: [audit.write/v1]
+  use:
+    email.send/v1: example.com/platform/smtp.New
+  policies:
+    email.send/v1: {timeout: 5s}
+config:
+  example.com/platform/smtp.New:
+    host: old.example
+`),
+	}}
+	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("# shared configuration\n{}\n"), applicationmeta.DependencyBaseline{}, oldDependencies, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldComposition, err := applicationmeta.Compose(oldDependencies, composeManifest(t, string(initial.Data())), lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	explicitRemovals := []byte(`# shared configuration
+interfaces:
+  require:
+    remove:
+      - audit.write/v1 # explicit requirement removal
+  use:
+    email.send/v1: null # explicit selection removal
+  policies:
+    email.send/v1: null # explicit policy removal
+config:
+  example.com/platform/smtp.New:
+    host: null # explicit field removal
+`)
+	newDependencies := []applicationmeta.Dependency{{
+		ModulePath:    "example.com/platform",
+		ModuleVersion: "v2.0.0",
+		Manifest: composeManifest(t, `
+interfaces:
+  require: [audit.write/v1, cache.read/v1]
+  use:
+    email.send/v1: example.com/platform/smtp.New
+  policies:
+    email.send/v1: {timeout: 10s}
+config:
+  example.com/platform/smtp.New:
+    host: new.example
+`),
+	}}
+	maintained, err := applicationmeta.MaintainDependencyConfiguration(explicitRemovals, oldComposition.DependencyBaseline(), newDependencies, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{
+		"# shared configuration",
+		"# explicit requirement removal",
+		"# explicit selection removal",
+		"# explicit policy removal",
+		"# explicit field removal",
+		"cache.read/v1",
+		"audit.write/v1",
+		"email.send/v1: null",
+		"host: null",
+	} {
+		if !bytes.Contains(maintained.Data(), []byte(fragment)) {
+			t.Fatalf("maintained removals omit %q:\n%s", fragment, maintained.Data())
+		}
+	}
+	for _, inherited := range []string{"10s", "new.example", "email.send/v1: example.com/platform/smtp.New"} {
+		if bytes.Contains(maintained.Data(), []byte(inherited)) {
+			t.Fatalf("maintained removals materialized inherited value %q:\n%s", inherited, maintained.Data())
+		}
+	}
+	for _, path := range []string{
+		`interfaces.require["audit.write/v1"]`,
+		`interfaces.use["email.send/v1"]`,
+		`interfaces.policies["email.send/v1"].timeout`,
+		`config["example.com/platform/smtp.New"]["host"]`,
+	} {
+		if !slices.Contains(maintained.LocalPaths(), path) {
+			t.Fatalf("local paths %v omit explicit removal %s", maintained.LocalPaths(), path)
+		}
+	}
+	composition, err := applicationmeta.Compose(newDependencies, composeManifest(t, string(maintained.Data())), lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := interfaceRequirementIDs(composition.Manifest().InterfaceRequirements()); !reflect.DeepEqual(got, []string{"cache.read/v1"}) {
+		t.Fatalf("effective requirements after removal = %v", got)
+	}
+	if len(composition.Manifest().ImplementationChoices()) != 0 || len(composition.Manifest().InterfacePolicies()) != 0 {
+		t.Fatalf("effective keyed declarations retained removed values: choices %#v policies %#v", composition.Manifest().ImplementationChoices(), composition.Manifest().InterfacePolicies())
+	}
+	if configured, exists := composition.Manifest().Configuration(mustConstructorSymbol(t, "example.com/platform/smtp.New")); exists && bytes.Contains(configured.YAML(), []byte("host")) {
+		t.Fatalf("effective constructor configuration retained removed host:\n%s", configured.YAML())
+	}
+	repeated, err := applicationmeta.MaintainDependencyConfiguration(maintained.Data(), composition.DependencyBaseline(), newDependencies, lookup)
+	if err != nil || repeated.Changed() || !bytes.Equal(repeated.Data(), maintained.Data()) || !slices.Equal(repeated.LocalPaths(), maintained.LocalPaths()) {
+		t.Fatalf("repeated removal maintenance = changed %t error %v local %v want %v\n%s", repeated.Changed(), err, repeated.LocalPaths(), maintained.LocalPaths(), repeated.Data())
 	}
 }
 
