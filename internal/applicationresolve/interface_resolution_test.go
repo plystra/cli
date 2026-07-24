@@ -18,6 +18,7 @@ func TestResolveBuildsSelectedInterfaceConstructorGraphFromConfiguration(t *test
 	t.Parallel()
 
 	root := writeResolvedInterfaceProject(t)
+	writeFile(t, filepath.Join(filepath.Dir(root), "cache", "plystra.production.yaml"), "this: [dependency overlay is deliberately invalid\n")
 	before := snapshotTree(t, filepath.Dir(root))
 	environment := goEnvironment(map[string]string{
 		"GOWORK":  "off",
