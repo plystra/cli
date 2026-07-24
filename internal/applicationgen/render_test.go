@@ -118,7 +118,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 	for _, required := range []string{
 		"type Request = kernelinterface.Request",
 		"type Response = kernelinterface.Response",
-		"type ResponseStatus = kernelinterface.Status",
+		"type ResponseStatus = string",
 	} {
 		if !strings.Contains(healthContract, required) {
 			t.Fatalf("intrinsic contract omits %q:\n%s", required, healthContract)
@@ -829,7 +829,6 @@ request: {}
 response:
   status:
     type: string
-    enum: [healthy]
     required: true
 errors: []
 `)

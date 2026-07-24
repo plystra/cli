@@ -488,9 +488,10 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 			PackageName:             options.JavaScriptPackage,
 			ConfigurationProvenance: transportProvenance,
 			Transport: javascriptgen.TransportOptions{
-				Projection:    protobufProjection,
-				WireMap:       options.ProtobufWireMap,
-				DescriptorSet: descriptorEvidence.DescriptorSet(),
+				Projection:          protobufProjection,
+				InterfaceProjection: interfaceProtobufModel,
+				WireMap:             options.ProtobufWireMap,
+				DescriptorSet:       descriptorEvidence.DescriptorSet(),
 			},
 		}, model)
 		if err != nil {

@@ -164,12 +164,95 @@ func TestBuildWithInterfacesRejectsTransportSelectionMismatch(t *testing.T) {
 	}
 }
 
+func TestBuildWithInterfacesMovesOverlappingLegacyMessagesToCanonicalInterfaceSchema(t *testing.T) {
+	t.Parallel()
+
+	legacyTarget := descriptorTarget(t, `id: kernel.health/v1
+request: {}
+response:
+  status: {type: string, enum: [healthy], required: true}
+errors: []
+`)
+	legacyAlias := descriptorAlias(t, "health.status/v1", legacyTarget)
+	legacy := descriptorModel(t, []descriptorTargetView{legacyTarget}, []descriptorAliasView{legacyAlias})
+	wireMap := descriptorWireMap(t, legacy, nil, false, "")
+
+	input := descriptorInterfaceInput(t, `package healthv1
+
+import "context"
+
+//plystra:interface kernel.health/v1
+type Interface interface {
+	Health(context.Context, Request) (Response, error)
+}
+
+type Request struct{}
+type Response struct {
+	Status string `+"`json:\"status\" plystra:\"1,required\"`"+`
+}
+`)
+	interfaces, err := protobufmodel.BuildInterfaces(true, []protobufmodel.InterfaceInput{input})
+	if err != nil {
+		t.Fatalf("BuildInterfaces: %v", err)
+	}
+	evidence, err := protobufdescriptor.BuildWithInterfaces(legacy, wireMap, interfaces)
+	if err != nil {
+		t.Fatalf("BuildWithInterfaces: %v", err)
+	}
+	if !evidence.Valid() || evidence.DescriptorCount() != 4 {
+		t.Fatalf("evidence = valid %t count %d", evidence.Valid(), evidence.DescriptorCount())
+	}
+
+	interfaceSource := interfaceDescriptorFile(t, evidence, "generated/proto/plystra/generated/kernel/health/v1/interface.proto")
+	for _, required := range []string{
+		"message KernelHealthV1Request {",
+		"message KernelHealthV1Response {",
+		`optional string status = 1 [json_name = "status"];`,
+	} {
+		if !strings.Contains(interfaceSource, required) {
+			t.Fatalf("canonical Interface schema omits %q:\n%s", required, interfaceSource)
+		}
+	}
+	legacySource := interfaceDescriptorFile(t, evidence, "generated/proto/plystra/generated/kernel/health/v1/capability.proto")
+	if !strings.Contains(legacySource, `import "plystra/generated/kernel/health/v1/interface.proto";`) ||
+		!strings.Contains(legacySource, "service KernelHealthV1Service {") ||
+		strings.Contains(legacySource, "message ") ||
+		strings.Contains(legacySource, "enum ") {
+		t.Fatalf("legacy service bridge retained a competing message contract:\n%s", legacySource)
+	}
+	aliasSource := interfaceDescriptorFile(t, evidence, "generated/proto/plystra/generated/health/status/v1/capability.proto")
+	if !strings.Contains(aliasSource, `import "plystra/generated/kernel/health/v1/interface.proto";`) ||
+		strings.Contains(aliasSource, `import "plystra/generated/kernel/health/v1/capability.proto";`) {
+		t.Fatalf("legacy Alias does not import the canonical Interface messages directly:\n%s", aliasSource)
+	}
+
+	set := decodeDescriptorSet(t, evidence.DescriptorSet())
+	interfaceFile := descriptorFile(t, set, "plystra/generated/kernel/health/v1/interface.proto")
+	response := descriptorMessage(t, interfaceFile, "KernelHealthV1Response")
+	assertInterfaceDescriptorField(t, response, "status", 1, protoreflect.StringKind, true, "status")
+	legacyFile := descriptorFile(t, set, "plystra/generated/kernel/health/v1/capability.proto")
+	if legacyFile.Messages().Len() != 0 || legacyFile.Enums().Len() != 0 || legacyFile.Services().Len() != 1 {
+		t.Fatalf("legacy bridge descriptor = messages %d enums %d services %d", legacyFile.Messages().Len(), legacyFile.Enums().Len(), legacyFile.Services().Len())
+	}
+}
+
 func assertInterfaceDescriptorField(t testing.TB, message protoreflect.MessageDescriptor, name protoreflect.Name, number protoreflect.FieldNumber, kind protoreflect.Kind, presence bool, jsonName string) {
 	t.Helper()
 	field := message.Fields().ByName(name)
 	if field == nil || field.Number() != number || field.Kind() != kind || field.HasPresence() != presence || field.JSONName() != jsonName {
 		t.Fatalf("field %s = %#v", name, field)
 	}
+}
+
+func interfaceDescriptorFile(t testing.TB, evidence protobufdescriptor.Evidence, path string) string {
+	t.Helper()
+	for _, file := range evidence.Files() {
+		if file.Path() == path {
+			return string(file.Data())
+		}
+	}
+	t.Fatalf("descriptor source %s is absent", path)
+	return ""
 }
 
 func descriptorInterfaceInput(t testing.TB, source string) protobufmodel.InterfaceInput {

@@ -185,7 +185,7 @@ func renderIntrinsicTypes(source *strings.Builder, identifier capabilityid.Ident
 		fmt.Fprintln(source)
 		fmt.Fprintln(source, "type Response = kernelinterface.Response")
 		fmt.Fprintln(source)
-		fmt.Fprintln(source, "type ResponseStatus = kernelinterface.Status")
+		fmt.Fprintln(source, "type ResponseStatus = string")
 		fmt.Fprintln(source)
 		fmt.Fprintln(source, "const ResponseStatusHealthy ResponseStatus = kernelinterface.StatusHealthy")
 		fmt.Fprintln(source)

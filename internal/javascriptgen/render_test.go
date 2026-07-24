@@ -586,17 +586,22 @@ func javascriptOptions(t testing.TB, packageName string, targets []javascriptTar
 	if err != nil {
 		t.Fatalf("protobufwiremap.Build: %v", err)
 	}
-	evidence, err := protobufdescriptor.Build(projection, wireMap)
+	interfaceProjection, err := protobufmodel.BuildInterfaces(true, nil)
 	if err != nil {
-		t.Fatalf("protobufdescriptor.Build: %v", err)
+		t.Fatalf("protobufmodel.BuildInterfaces: %v", err)
+	}
+	evidence, err := protobufdescriptor.BuildWithInterfaces(projection, wireMap, interfaceProjection)
+	if err != nil {
+		t.Fatalf("protobufdescriptor.BuildWithInterfaces: %v", err)
 	}
 	return javascriptgen.Options{
 		PackageName:             packageName,
 		ConfigurationProvenance: javascriptConfigurationProvenance(t, generation.ConfigurationModeDefault),
 		Transport: javascriptgen.TransportOptions{
-			Projection:    projection,
-			WireMap:       wireMap,
-			DescriptorSet: evidence.DescriptorSet(),
+			Projection:          projection,
+			InterfaceProjection: interfaceProjection,
+			WireMap:             wireMap,
+			DescriptorSet:       evidence.DescriptorSet(),
 		},
 	}
 }

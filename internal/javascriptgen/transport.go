@@ -22,9 +22,10 @@ import (
 // Protobuf projection, stable wire map, and descriptor graph used by the
 // generated Connect handlers.
 type TransportOptions struct {
-	Projection    protobufmodel.Model
-	WireMap       protobufwiremap.Map
-	DescriptorSet []byte
+	Projection          protobufmodel.Model
+	InterfaceProjection protobufmodel.InterfaceModel
+	WireMap             protobufwiremap.Map
+	DescriptorSet       []byte
 }
 
 type transportOperation struct {
@@ -64,7 +65,15 @@ func bindTransport(operations []renderedOperation, options TransportOptions) ([]
 	if len(operations) != 0 && !options.Projection.Enabled() {
 		return nil, fmt.Errorf("%w: JavaScript operations require an enabled Connect transport projection", ErrRender)
 	}
-	expected, err := protobufdescriptor.Build(options.Projection, options.WireMap)
+	interfaceProjection := options.InterfaceProjection
+	if !interfaceProjection.Valid() {
+		normalized, err := protobufmodel.BuildInterfaces(options.Projection.Enabled(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("%w: normalize empty Interface projection: %v", ErrRender, err)
+		}
+		interfaceProjection = normalized
+	}
+	expected, err := protobufdescriptor.BuildWithInterfaces(options.Projection, options.WireMap, interfaceProjection)
 	if err != nil {
 		return nil, fmt.Errorf("%w: rebuild JavaScript Connect descriptors: %v", ErrRender, err)
 	}

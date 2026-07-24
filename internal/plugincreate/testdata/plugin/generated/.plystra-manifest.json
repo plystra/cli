@@ -11,11 +11,11 @@
     },
     {
       "path": "generated/go/assembly/interfaces_gen.go",
-      "sha256": "sha256:123a730f16f56927b6b6265b5450a97af374f38a79dd7d9496114c23b12ebf02"
+      "sha256": "sha256:089cbd365ea73125f0796160e976b2c8a2ce592b12888dc857e86fe5b1f0e73d"
     },
     {
       "path": "generated/go/assembly/invocations_gen.go",
-      "sha256": "sha256:732ca11a18df152d66824e9b7fc2bdcb351b2d5d5329b02197b119f7f6b34c87"
+      "sha256": "sha256:c425d13de78a287a3c11aaeae88a760923f66672c9b7ce1b4766f4ebaea7ae2d"
     },
     {
       "path": "generated/go/assembly/providers_gen.go",
@@ -23,7 +23,7 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:fd523b70ae3ed22b8b8f14117975360eb5c2531d3e58cfaf8345b34c5cb5315c"
+      "sha256": "sha256:a9f7a66ae9e8ce95db024a998f3c55eb30b70d359ed986d64d51c976f1386cee"
     },
     {
       "path": "generated/go/configuration/account-profile_gen.go",
@@ -31,7 +31,7 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:08e01e9e118f462dd6d4f7e23100b23f5d1221ec1df4a70f1c3d462c73b1c709"
+      "sha256": "sha256:f6230588e21893d744341022a7771cd69ec271eea87ea0223169f3bc87e03407"
     },
     {
       "path": "generated/proto/descriptor-set.pb",
@@ -50,7 +50,7 @@
       "capabilities": [
         {
           "id": "kernel.health/v1",
-          "contract_digest": "sha256:24b3601547ebd37da37341a86699a51b2e8a2d1706662bafed0b4d6d3a1548a9",
+          "contract_digest": "sha256:83ae98630f252c7bb58cffa403e1f4aac55376224b430001dad34266bdccb80c",
           "constraint_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
           "fields": []
         },
@@ -78,7 +78,7 @@
         }
       ],
       "protobuf_wire_map_digest": "sha256:e563b91c26485ad548360d3b61bd79104cd76b2ef4771c41e6fbda4660bb525f",
-      "application_model_digest": "sha256:0669e6bd54c6a4d172f476bdcba9ac04c032d044d360750ed64895faa51aa04c"
+      "application_model_digest": "sha256:a0e1f836dfea56e308b5ef55dd81bb6866663f7320c7841e25c1a641d84b6922"
     }
   }
 }

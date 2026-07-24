@@ -17,7 +17,7 @@ func TestDefinitionsAdaptAuthoritativeKernelCatalog(t *testing.T) {
 		t.Fatalf("Definitions = %v", got)
 	}
 	wantDigests := []string{
-		"sha256:24b3601547ebd37da37341a86699a51b2e8a2d1706662bafed0b4d6d3a1548a9",
+		"sha256:83ae98630f252c7bb58cffa403e1f4aac55376224b430001dad34266bdccb80c",
 		"sha256:3ec0d8f2bfda17c88d8bf5e724f8612049fb0779074999f3a7c9fc9495d3695b",
 	}
 	for index, definition := range definitions {

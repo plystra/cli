@@ -156,8 +156,8 @@ func (o InterfaceOperation) SemanticErrors() []string {
 	return append([]string(nil), o.semanticErrors...)
 }
 
-// InterfaceModel is the immutable normalized authored-Interface portion of the
-// selected Protobuf projection. A disabled or empty model remains valid.
+// InterfaceModel is the immutable normalized canonical-Interface portion of
+// the selected Protobuf projection. A disabled or empty model remains valid.
 type InterfaceModel struct {
 	enabled       bool
 	operations    []InterfaceOperation
@@ -226,9 +226,9 @@ type canonicalInterfaceField struct {
 	Type         string `json:"type"`
 }
 
-// BuildInterfaces validates and normalizes exposed authored Interface
-// contracts independently of discovery order. Callers supply only effective
-// non-intrinsic exposures selected for this application model.
+// BuildInterfaces validates and normalizes exposed canonical Interface
+// contracts independently of discovery order. Inputs may come from authored
+// Project packages or exact intrinsic Kernel packages selected for this model.
 func BuildInterfaces(connect bool, inputs []InterfaceInput) (InterfaceModel, error) {
 	if !connect {
 		return finalizeInterfaces(false, nil)

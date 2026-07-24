@@ -27,7 +27,10 @@ import (
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/implementationadaptergen"
 	"github.com/plystra/cli/internal/implementationassemblygen"
+	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfaceproxygen"
+	"github.com/plystra/cli/internal/intrinsicinterface"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/protobufmodel"
@@ -311,9 +314,9 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if selected, exists := resolved.Manifest().HTTPCORS(); exists {
 		httpCORS = &selected
 	}
-	interfaceProtobufModel, err := interfaceProtobufProjection(resolved, httpTransports)
+	interfaceProtobufModel, err := interfaceProtobufProjection(ctx, resolved, httpTransports, options)
 	if err != nil {
-		return preparedGeneration{}, fmt.Errorf("build authored Interface Protobuf projection: %w", err)
+		return preparedGeneration{}, fmt.Errorf("build Interface Protobuf projection: %w", err)
 	}
 	protobufProjection, err := applicationgen.ProtobufProjection(httpTransports, resolved.Resolution())
 	if err != nil {
@@ -403,7 +406,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	return preparedGeneration{resolved: resolved, output: output, runtimeRequirements: runtimeRequirements, fingerprint: fingerprint}, nil
 }
 
-func interfaceProtobufProjection(resolved applicationresolve.Result, transports applicationmeta.HTTPTransports) (protobufmodel.InterfaceModel, error) {
+func interfaceProtobufProjection(ctx context.Context, resolved applicationresolve.Result, transports applicationmeta.HTTPTransports, options Options) (protobufmodel.InterfaceModel, error) {
 	if !transports.Connect {
 		return protobufmodel.BuildInterfaces(false, nil)
 	}
@@ -431,12 +434,27 @@ func interfaceProtobufProjection(resolved applicationresolve.Result, transports 
 	}
 
 	exposures := resolved.Manifest().HTTPExposures()
+	intrinsicIDs := make([]string, 0, len(exposures))
+	for _, exposure := range exposures {
+		if strings.HasPrefix(exposure.ID().Name(), "kernel.") {
+			intrinsicIDs = append(intrinsicIDs, exposure.ID().String())
+		}
+	}
+	intrinsics, err := intrinsicInterfaceProtobufInputs(ctx, resolved, intrinsicIDs, options)
+	if err != nil {
+		return protobufmodel.InterfaceModel{}, err
+	}
+	for _, input := range intrinsics {
+		identifier := input.InterfaceID.String()
+		if previous, duplicate := definitions[identifier]; duplicate {
+			return protobufmodel.InterfaceModel{}, fmt.Errorf("intrinsic Interface %s at %s duplicates visible authored definition at %s", identifier, input.Source, previous.Source)
+		}
+		definitions[identifier] = input
+	}
+
 	inputs := make([]protobufmodel.InterfaceInput, 0, len(exposures))
 	for _, exposure := range exposures {
 		identifier := exposure.ID()
-		if strings.HasPrefix(identifier.Name(), "kernel.") {
-			continue
-		}
 		input, exists := definitions[identifier.String()]
 		if !exists {
 			// Pre-Gate-14 legacy-only exposures are deliberately excluded by
@@ -446,6 +464,100 @@ func interfaceProtobufProjection(resolved applicationresolve.Result, transports 
 		inputs = append(inputs, input)
 	}
 	return protobufmodel.BuildInterfaces(true, inputs)
+}
+
+func intrinsicInterfaceProtobufInputs(
+	ctx context.Context,
+	resolved applicationresolve.Result,
+	identifiers []string,
+	options Options,
+) ([]protobufmodel.InterfaceInput, error) {
+	if len(identifiers) == 0 {
+		return nil, nil
+	}
+	dependency, exists := resolved.Dependencies().ByPath(kernelintrinsic.ModulePath)
+	if !exists {
+		return nil, fmt.Errorf("selected application graph omits intrinsic Interface module %s", kernelintrinsic.ModulePath)
+	}
+
+	expected := make(map[string]intrinsicinterface.Definition, len(identifiers))
+	packagePaths := make([]string, 0, len(identifiers))
+	selectedPackages := make(map[string]struct{}, len(identifiers))
+	for _, value := range identifiers {
+		identifier, err := interfaceid.Parse(value)
+		if err != nil {
+			return nil, fmt.Errorf("intrinsic Interface exposure %q is invalid: %v", value, err)
+		}
+		definition, exists := intrinsicinterface.Lookup(identifier)
+		if !exists {
+			return nil, fmt.Errorf("intrinsic Interface exposure %s is absent from the selected Kernel API", identifier)
+		}
+		if _, duplicate := expected[value]; duplicate {
+			return nil, fmt.Errorf("intrinsic Interface exposure %s appears more than once", identifier)
+		}
+		expected[value] = definition
+		if _, selected := selectedPackages[definition.PackagePath()]; !selected {
+			selectedPackages[definition.PackagePath()] = struct{}{}
+			packagePaths = append(packagePaths, definition.PackagePath())
+		}
+	}
+
+	discovered, err := interfaceinventory.DiscoverExactInterfaces(ctx, interfaceinventory.ExactInterfacePackages{
+		ModulePath:            dependency.Path(),
+		ModuleVersion:         dependency.SelectedVersion(),
+		ModuleRoot:            dependency.Root(),
+		ApplicationModulePath: resolved.Module().ModulePath(),
+		PackagePaths:          packagePaths,
+	}, interfaceinventory.Options{
+		GoCommand:   options.GoCommand,
+		Environment: append([]string(nil), options.Environment...),
+		OutputLimit: options.DependencyOutputLimit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load selected Kernel Interface packages: %w", err)
+	}
+	interfaces := discovered.Interfaces()
+	inputs := make([]protobufmodel.InterfaceInput, 0, len(expected))
+	for _, discovered := range interfaces {
+		definition, exists := expected[discovered.ID()]
+		if !exists {
+			identifier, parseErr := interfaceid.Parse(discovered.ID())
+			known, knownDefinition := intrinsicinterface.Lookup(identifier)
+			if parseErr == nil && knownDefinition && known.PackagePath() == discovered.PackagePath() {
+				continue
+			}
+			return nil, fmt.Errorf("selected Kernel package %s declares unexpected intrinsic Interface %s", discovered.PackagePath(), discovered.ID())
+		}
+		if discovered.ModulePath() != kernelintrinsic.ModulePath || discovered.PackagePath() != definition.PackagePath() {
+			return nil, fmt.Errorf(
+				"intrinsic Interface %s resolved to package %s in module %s; selected Kernel API requires %s in %s",
+				discovered.ID(),
+				discovered.PackagePath(),
+				discovered.ModulePath(),
+				definition.PackagePath(),
+				kernelintrinsic.ModulePath,
+			)
+		}
+		semanticErrors := discovered.SemanticErrors()
+		errorCodes := make([]string, len(semanticErrors))
+		for errorIndex, semanticError := range semanticErrors {
+			errorCodes[errorIndex] = semanticError.Code()
+		}
+		contract := discovered.Contract()
+		inputs = append(inputs, protobufmodel.InterfaceInput{
+			InterfaceID:    contract.ID(),
+			PackagePath:    contract.PackagePath(),
+			Source:         discovered.Source(),
+			MetadataSource: discovered.MetadataSource(),
+			Contract:       contract,
+			ContractDigest: discovered.ContractDigest(),
+			SemanticErrors: errorCodes,
+		})
+	}
+	if len(inputs) != len(expected) {
+		return nil, fmt.Errorf("selected Kernel exposes %d requested Interface definitions for %d intrinsic exposures", len(inputs), len(expected))
+	}
+	return inputs, nil
 }
 
 func generatedRuntimeRequirements(model protobufmodel.Model) ([]ModuleRequirement, error) {

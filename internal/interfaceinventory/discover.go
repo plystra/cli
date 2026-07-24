@@ -57,6 +57,18 @@ type Options struct {
 	OutputLimit int
 }
 
+// ExactInterfacePackages identifies an explicit bounded set of canonical
+// Interface packages inside one already-selected Go Module. It exists for
+// Kernel-owned intrinsic packages that ordinary dependency-Project discovery
+// must not infer by scanning unrelated Go dependencies.
+type ExactInterfacePackages struct {
+	ModulePath            string
+	ModuleVersion         string
+	ModuleRoot            string
+	ApplicationModulePath string
+	PackagePaths          []string
+}
+
 // Interface is one parsed and type-checked Interface declaration with stable
 // public module, package, and source provenance.
 type Interface struct {
@@ -237,6 +249,55 @@ func Discover(ctx context.Context, application modulelocate.Module, dependencies
 	return discovery.Interfaces(), nil
 }
 
+// DiscoverExactInterfaces loads only the explicitly named canonical Interface
+// packages from one selected module root. It uses the same Go-selected source,
+// syntax, type, metadata, and digest validation as Project discovery without
+// treating the module as a dependency Plystra Project or scanning any other
+// ordinary dependency.
+func DiscoverExactInterfaces(ctx context.Context, selection ExactInterfacePackages, options Options) (Index, error) {
+	if ctx == nil {
+		return Index{}, fmt.Errorf("%w: context is nil", ErrDiscover)
+	}
+	if selection.ModulePath == "" || selection.ModuleRoot == "" || selection.ApplicationModulePath == "" {
+		return Index{}, fmt.Errorf("%w: exact Interface module selection is incomplete", ErrDiscover)
+	}
+	source := moduleSource{
+		path:    selection.ModulePath,
+		version: selection.ModuleVersion,
+		root:    selection.ModuleRoot,
+	}
+	packagePaths := append([]string(nil), selection.PackagePaths...)
+	sort.Strings(packagePaths)
+	for index, packagePath := range packagePaths {
+		if index > 0 && packagePaths[index-1] == packagePath {
+			return Index{}, fmt.Errorf("%w: exact Interface package %q is selected more than once", ErrDiscover, packagePath)
+		}
+	}
+	candidates, err := exactPackageCandidates(source, selection.ApplicationModulePath, packagePaths)
+	if err != nil {
+		return Index{}, fmt.Errorf("%w: inspect exact Interface module %s: %w", ErrDiscover, source.label(), err)
+	}
+	loaded, err := loadCandidates(ctx, candidates, options)
+	if err != nil {
+		return Index{}, fmt.Errorf("%w: inspect exact Interface module %s: %w", ErrDiscover, source.label(), err)
+	}
+	foundPackages := make(map[string]struct{}, len(loaded.interfaces))
+	for _, discovered := range loaded.interfaces {
+		foundPackages[discovered.PackagePath()] = struct{}{}
+	}
+	for _, packagePath := range packagePaths {
+		if _, found := foundPackages[packagePath]; !found {
+			return Index{}, fmt.Errorf("%w: exact Interface package %q is absent from the selected Interface inventory in module %s", ErrDiscover, packagePath, source.label())
+		}
+	}
+	sortDiscoveredInterfaces(loaded.interfaces)
+	index := Index{interfaces: loaded.interfaces}
+	if err := ValidateUniqueIDs(index); err != nil {
+		return Index{}, fmt.Errorf("%w: %w", ErrDiscover, err)
+	}
+	return index, nil
+}
+
 // DiscoverApplication obtains active Interface and Implementation declarations
 // through one shared eligible-package scan. Go tooling selects source files and
 // supplies compiled type information before either declaration kind is exposed.
@@ -282,23 +343,7 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 		implementationInputs = append(implementationInputs, found.implementations...)
 	}
 
-	sort.Slice(interfaces, func(left, right int) bool {
-		if interfaces[left].ID() != interfaces[right].ID() {
-			return interfaces[left].ID() < interfaces[right].ID()
-		}
-		if interfaces[left].PackagePath() != interfaces[right].PackagePath() {
-			return interfaces[left].PackagePath() < interfaces[right].PackagePath()
-		}
-		if interfaces[left].SourcePath() != interfaces[right].SourcePath() {
-			return interfaces[left].SourcePath() < interfaces[right].SourcePath()
-		}
-		leftPosition := interfaces[left].declaration.Position()
-		rightPosition := interfaces[right].declaration.Position()
-		if leftPosition.Line != rightPosition.Line {
-			return leftPosition.Line < rightPosition.Line
-		}
-		return leftPosition.Column < rightPosition.Column
-	})
+	sortDiscoveredInterfaces(interfaces)
 	visibleIDs := make(map[string]struct{}, len(interfaces))
 	for index := range interfaces {
 		visibleIDs[interfaces[index].ID()] = struct{}{}
@@ -331,6 +376,26 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 		interfaces:      Index{interfaces: interfaces},
 		implementations: implementations,
 	}, nil
+}
+
+func sortDiscoveredInterfaces(interfaces []Interface) {
+	sort.Slice(interfaces, func(left, right int) bool {
+		if interfaces[left].ID() != interfaces[right].ID() {
+			return interfaces[left].ID() < interfaces[right].ID()
+		}
+		if interfaces[left].PackagePath() != interfaces[right].PackagePath() {
+			return interfaces[left].PackagePath() < interfaces[right].PackagePath()
+		}
+		if interfaces[left].SourcePath() != interfaces[right].SourcePath() {
+			return interfaces[left].SourcePath() < interfaces[right].SourcePath()
+		}
+		leftPosition := interfaces[left].declaration.Position()
+		rightPosition := interfaces[right].declaration.Position()
+		if leftPosition.Line != rightPosition.Line {
+			return leftPosition.Line < rightPosition.Line
+		}
+		return leftPosition.Column < rightPosition.Column
+	})
 }
 
 type loadedInventory struct {
@@ -570,23 +635,9 @@ type packageCandidate struct {
 }
 
 func probeModule(source moduleSource, applicationPath string) ([]packageCandidate, error) {
-	if source.path == "" || source.root == "" {
-		return nil, errors.New("module source is empty")
-	}
-	if err := modulepath.CheckProject(source.path); err != nil {
-		return nil, fmt.Errorf("invalid module path %q: %v", source.path, err)
-	}
-	root, err := filepath.Abs(source.root)
+	root, err := resolveModuleSourceRoot(source)
 	if err != nil {
-		return nil, fmt.Errorf("resolve module root: %w", err)
-	}
-	root, err = filepath.EvalSymlinks(root)
-	if err != nil {
-		return nil, fmt.Errorf("resolve module root links: %w", err)
-	}
-	rootInfo, err := os.Lstat(root)
-	if err != nil || !rootInfo.IsDir() || rootInfo.Mode()&fs.ModeSymlink != 0 {
-		return nil, errors.New("module root is not a regular non-symbolic directory")
+		return nil, err
 	}
 
 	packageDirectories := make(map[string]struct{})
@@ -664,6 +715,93 @@ func probeModule(source moduleSource, applicationPath string) ([]packageCandidat
 		})
 	}
 	return candidates, nil
+}
+
+func exactPackageCandidates(source moduleSource, applicationPath string, packagePaths []string) ([]packageCandidate, error) {
+	root, err := resolveModuleSourceRoot(source)
+	if err != nil {
+		return nil, err
+	}
+	if err := modulepath.CheckProject(applicationPath); err != nil {
+		return nil, fmt.Errorf("invalid application module path %q: %v", applicationPath, err)
+	}
+	source.root = root
+
+	candidates := make([]packageCandidate, len(packagePaths))
+	for index, packagePath := range packagePaths {
+		if err := module.CheckImportPath(packagePath); err != nil {
+			return nil, fmt.Errorf("exact Interface package %q has an invalid import path: %v", packagePath, err)
+		}
+		relative := "."
+		switch {
+		case packagePath == source.path:
+		case strings.HasPrefix(packagePath, source.path+"/"):
+			relative = strings.TrimPrefix(packagePath, source.path+"/")
+		default:
+			return nil, fmt.Errorf("exact Interface package %q is outside selected module %s", packagePath, source.label())
+		}
+		if !importableFrom(applicationPath, packagePath) {
+			return nil, fmt.Errorf("exact Interface package %q is not importable from %s", packagePath, applicationPath)
+		}
+
+		directory := root
+		pattern := "."
+		if relative != "." {
+			pattern = "./" + relative
+			for _, component := range strings.Split(relative, "/") {
+				if ReservedDirectory(component) {
+					return nil, fmt.Errorf("exact Interface package %q is inside reserved directory %q", packagePath, component)
+				}
+				directory = filepath.Join(directory, component)
+				info, statErr := os.Lstat(directory)
+				if errors.Is(statErr, fs.ErrNotExist) {
+					return nil, fmt.Errorf("exact Interface package %q is absent from selected module %s", packagePath, source.label())
+				}
+				if statErr != nil {
+					return nil, fmt.Errorf("inspect exact Interface package %q: %w", packagePath, statErr)
+				}
+				if !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
+					return nil, fmt.Errorf("exact Interface package %q is not a regular non-symbolic directory", packagePath)
+				}
+				nested, nestedErr := nestedModuleRoot(directory)
+				if nestedErr != nil {
+					return nil, fmt.Errorf("inspect exact Interface package %q: %w", packagePath, nestedErr)
+				}
+				if nested {
+					return nil, fmt.Errorf("exact Interface package %q belongs to a nested Go Module", packagePath)
+				}
+			}
+		}
+		candidates[index] = packageCandidate{
+			source:     source,
+			importPath: packagePath,
+			pattern:    pattern,
+			directory:  directory,
+		}
+	}
+	return candidates, nil
+}
+
+func resolveModuleSourceRoot(source moduleSource) (string, error) {
+	if source.path == "" || source.root == "" {
+		return "", errors.New("module source is empty")
+	}
+	if err := modulepath.CheckProject(source.path); err != nil {
+		return "", fmt.Errorf("invalid module path %q: %v", source.path, err)
+	}
+	root, err := filepath.Abs(source.root)
+	if err != nil {
+		return "", fmt.Errorf("resolve module root: %w", err)
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve module root links: %w", err)
+	}
+	rootInfo, err := os.Lstat(root)
+	if err != nil || !rootInfo.IsDir() || rootInfo.Mode()&fs.ModeSymlink != 0 {
+		return "", errors.New("module root is not a regular non-symbolic directory")
+	}
+	return root, nil
 }
 
 // ReservedDirectory reports whether authored declaration discovery excludes a

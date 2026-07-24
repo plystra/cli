@@ -21,8 +21,8 @@ const (
 )
 
 // BuildWithInterfaces adds message-only schemas projected from canonical
-// authored Interface packages to the same deterministic descriptor evidence as
-// the current application transport model. Connect services are added by their
+// Interface packages to the same deterministic descriptor evidence as the
+// current application transport model. Connect services are added by their
 // later dedicated generation boundary.
 func BuildWithInterfaces(model protobufmodel.Model, wireMap protobufwiremap.Map, interfaces protobufmodel.InterfaceModel) (Evidence, error) {
 	base, err := Build(model, wireMap)
@@ -48,11 +48,25 @@ func BuildWithInterfaces(model protobufmodel.Model, wireMap protobufwiremap.Map,
 	for _, file := range set.File {
 		knownFiles[file.GetName()] = file
 	}
+	generatedNames := make(map[string]struct{}, base.descriptors+len(operations))
+	for _, file := range base.files {
+		if file.path == DescriptorSetPath {
+			continue
+		}
+		name, found := strings.CutPrefix(file.path, generatedRoot)
+		if !found || name == "" {
+			return Evidence{}, fmt.Errorf("%w: %w: base descriptor source path %q is outside %s", ErrBuild, ErrDescriptor, file.path, generatedRoot)
+		}
+		generatedNames[name] = struct{}{}
+	}
+	legacyOperations := make(map[string]protobufmodel.Operation, len(model.Operations()))
+	for _, operation := range model.Operations() {
+		legacyOperations[operation.ID().String()] = operation
+	}
 
-	interfaceDescriptors := make([]*descriptorpb.FileDescriptorProto, len(operations))
 	needTimestamp := false
 	needDuration := false
-	for index, operation := range operations {
+	for _, operation := range operations {
 		file, usesTimestamp, usesDuration, err := interfaceDescriptor(operation)
 		if err != nil {
 			return Evidence{}, fmt.Errorf("%w: Interface %s: %v", ErrBuild, operation.ID(), err)
@@ -61,7 +75,12 @@ func BuildWithInterfaces(model protobufmodel.Model, wireMap protobufwiremap.Map,
 			return Evidence{}, fmt.Errorf("%w: %w: Interface %s descriptor path %s collides with %s", ErrBuild, ErrProjection, operation.ID(), file.GetName(), previous.GetPackage())
 		}
 		knownFiles[file.GetName()] = file
-		interfaceDescriptors[index] = file
+		generatedNames[file.GetName()] = struct{}{}
+		if _, overlapsLegacy := legacyOperations[operation.ID().String()]; overlapsLegacy {
+			if err := bridgeLegacyInterfaceDescriptor(knownFiles, operation, file.GetName()); err != nil {
+				return Evidence{}, fmt.Errorf("%w: Interface %s: %v", ErrBuild, operation.ID(), err)
+			}
+		}
 		needTimestamp = needTimestamp || usesTimestamp
 		needDuration = needDuration || usesDuration
 	}
@@ -88,13 +107,11 @@ func BuildWithInterfaces(model protobufmodel.Model, wireMap protobufwiremap.Map,
 		return Evidence{}, fmt.Errorf("%w: %w: descriptor set exceeds %d bytes", ErrBuild, ErrDescriptor, maximumSetBytes)
 	}
 
-	files := make([]File, 0, len(base.files)+len(interfaceDescriptors))
-	for _, file := range base.files {
-		if file.path != DescriptorSetPath {
-			files = append(files, File{path: file.path, data: append([]byte(nil), file.data...)})
+	files := make([]File, 0, len(generatedNames)+1)
+	for _, descriptor := range set.File {
+		if _, generated := generatedNames[descriptor.GetName()]; !generated {
+			continue
 		}
-	}
-	for _, descriptor := range interfaceDescriptors {
 		source, err := renderSource(descriptor)
 		if err != nil {
 			return Evidence{}, fmt.Errorf("%w: %w: render %s: %v", ErrBuild, ErrDescriptor, descriptor.GetName(), err)
@@ -107,8 +124,42 @@ func BuildWithInterfaces(model protobufmodel.Model, wireMap protobufwiremap.Map,
 		files:       files,
 		digest:      digest(binary),
 		prepared:    true,
-		descriptors: base.descriptors + len(interfaceDescriptors),
+		descriptors: len(generatedNames),
 	}, nil
+}
+
+func bridgeLegacyInterfaceDescriptor(files map[string]*descriptorpb.FileDescriptorProto, operation protobufmodel.InterfaceOperation, interfaceFile string) error {
+	identity := operation.Identity()
+	legacyName := descriptorName(identity.Package())
+	legacy := files[legacyName]
+	if legacy == nil {
+		return fmt.Errorf("%w: overlapping legacy descriptor %s is absent", ErrDescriptor, legacyName)
+	}
+	if legacy.GetPackage() != identity.Package() || len(legacy.Service) != 1 || len(legacy.Service[0].Method) != 1 {
+		return fmt.Errorf("%w: overlapping legacy descriptor %s has an incompatible service boundary", ErrDescriptor, legacyName)
+	}
+	method := legacy.Service[0].Method[0]
+	if method.GetInputType() != qualified(identity.RequestType()) || method.GetOutputType() != qualified(identity.ResponseType()) {
+		return fmt.Errorf("%w: overlapping legacy descriptor %s has incompatible request or response identity", ErrDescriptor, legacyName)
+	}
+
+	legacy.MessageType = nil
+	legacy.EnumType = nil
+	legacy.Extension = nil
+	legacy.Dependency = []string{interfaceFile}
+	legacy.PublicDependency = nil
+	legacy.WeakDependency = nil
+	for name, file := range files {
+		if name == legacyName || name == interfaceFile {
+			continue
+		}
+		for index, dependency := range file.Dependency {
+			if dependency == legacyName {
+				file.Dependency[index] = interfaceFile
+			}
+		}
+	}
+	return nil
 }
 
 func interfaceDescriptor(operation protobufmodel.InterfaceOperation) (*descriptorpb.FileDescriptorProto, bool, bool, error) {
