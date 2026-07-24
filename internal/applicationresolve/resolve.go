@@ -14,6 +14,7 @@ import (
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/configurationresolve"
+	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
@@ -25,7 +26,6 @@ import (
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/resolutionevidence"
-	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 	"golang.org/x/mod/modfile"
 )
 
@@ -231,12 +231,12 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	schemaLookup := func(pluginID string) (kernelmanifest.Config, bool) {
-		plugin, exists := inventory.ByID(pluginID)
+	schemaLookup := func(symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		implementation, exists := implementations.BySymbol(symbol)
 		if !exists {
-			return kernelmanifest.Config{}, false
+			return implementationinventory.Configuration{}, false
 		}
-		return plugin.Config(), true
+		return implementation.Configuration()
 	}
 	previousBaseline, previousProvenance, err := loadGeneratedDependencyBaseline(module.Path(), selector)
 	if err != nil {

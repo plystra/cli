@@ -45,7 +45,7 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (Manifest, error
 	implementationChoices, removedImplementationChoices := overlayImplementationChoices(base, overlay)
 	interfacePolicies, removedInterfacePolicies := overlayInterfacePolicies(base, overlay)
 	aliases, removedAliases := overlayAliases(base, overlay)
-	configurations, removedConfigurations, err := overlayPluginConfigurations(base, overlay, schemas)
+	configurations, removedConfigurations, err := overlayConstructorConfigurations(base, overlay, schemas)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("%w: %w", ErrApplyOverlay, err)
 	}
@@ -331,7 +331,7 @@ func sortedInterfaceRemovals(values map[interfaceid.Identifier]interfaceRemoval)
 	return result
 }
 
-func overlayPluginConfigurations(base, overlay Manifest, schemas SchemaLookup) ([]PluginConfiguration, []pluginConfigurationRemoval, error) {
+func overlayConstructorConfigurations(base, overlay Manifest, schemas SchemaLookup) ([]ConstructorConfiguration, []constructorConfigurationRemoval, error) {
 	lower, err := manifestConfigDecisions(base, schemas)
 	if err != nil {
 		return nil, nil, err
@@ -340,8 +340,8 @@ func overlayPluginConfigurations(base, overlay Manifest, schemas SchemaLookup) (
 	if err != nil {
 		return nil, nil, err
 	}
-	lowerByPath := pluginConfigDecisionsByPath(lower)
-	upperByPath := pluginConfigDecisionsByPath(upper)
+	lowerByPath := constructorConfigDecisionsByPath(lower)
+	upperByPath := constructorConfigDecisionsByPath(upper)
 	paths := make(map[string]struct{}, len(lowerByPath)+len(upperByPath))
 	for path := range lowerByPath {
 		paths[path] = struct{}{}
@@ -355,7 +355,7 @@ func overlayPluginConfigurations(base, overlay Manifest, schemas SchemaLookup) (
 	}
 	sort.Strings(ordered)
 
-	selected := make(map[string]pluginConfigDecision, len(ordered))
+	selected := make(map[string]constructorConfigDecision, len(ordered))
 	for _, path := range ordered {
 		upperDecision, hasUpper := upperByPath[path]
 		prototype := upperDecision
@@ -364,33 +364,33 @@ func overlayPluginConfigurations(base, overlay Manifest, schemas SchemaLookup) (
 		}
 		if hasUpper {
 			for length := 0; length < len(prototype.segments); length++ {
-				ancestorPath := pluginConfigPath(prototype.pluginID, prototype.segments[:length])
-				if ancestor, exists := selected[ancestorPath]; exists && ancestor.kind != pluginConfigObject {
-					return nil, nil, fmt.Errorf("%w: %s has incompatible lower %s and overlay %s types from %s and %s", ErrInheritedConflict, path, pluginConfigDecisionDescription(ancestor), pluginConfigDecisionDescription(prototype), ancestor.source, prototype.source)
+				ancestorPath := constructorConfigPath(prototype.constructor, prototype.segments[:length])
+				if ancestor, exists := selected[ancestorPath]; exists && ancestor.kind != constructorConfigObject {
+					return nil, nil, fmt.Errorf("%w: %s has incompatible lower %s and overlay %s types from %s and %s", ErrInheritedConflict, path, constructorConfigDecisionDescription(ancestor), constructorConfigDecisionDescription(prototype), ancestor.source, prototype.source)
 				}
 			}
-			candidates := map[string]*pluginConfigCandidate{}
+			candidates := map[string]*constructorConfigCandidate{}
 			if lowerDecision, exists := lowerByPath[path]; exists {
-				candidates[pluginConfigCandidateKey(lowerDecision)] = &pluginConfigCandidate{decision: lowerDecision, sources: map[string]struct{}{lowerDecision.source: {}}}
+				candidates[constructorConfigCandidateKey(lowerDecision)] = &constructorConfigCandidate{decision: lowerDecision, sources: map[string]struct{}{lowerDecision.source: {}}}
 			}
-			if err := validateCurrentConfigDecision(path, upperDecision, candidates); err != nil {
+			if err := validateCurrentConstructorConfigDecision(path, upperDecision, candidates); err != nil {
 				return nil, nil, err
 			}
-			selected[path] = clonePluginConfigDecision(upperDecision)
+			selected[path] = cloneConstructorConfigDecision(upperDecision)
 			continue
 		}
-		if suppressedByConfigAncestor(selected, prototype) {
+		if suppressedByConstructorConfigAncestor(selected, prototype) {
 			continue
 		}
-		selected[path] = clonePluginConfigDecision(prototype)
+		selected[path] = cloneConstructorConfigDecision(prototype)
 	}
-	return renderPluginConfigurationLayer(selected)
+	return renderConstructorConfigurationLayer(selected)
 }
 
-func pluginConfigDecisionsByPath(values []pluginConfigDecision) map[string]pluginConfigDecision {
-	result := make(map[string]pluginConfigDecision, len(values))
+func constructorConfigDecisionsByPath(values []constructorConfigDecision) map[string]constructorConfigDecision {
+	result := make(map[string]constructorConfigDecision, len(values))
 	for _, value := range values {
-		result[pluginConfigPath(value.pluginID, value.segments)] = clonePluginConfigDecision(value)
+		result[constructorConfigPath(value.constructor, value.segments)] = cloneConstructorConfigDecision(value)
 	}
 	return result
 }

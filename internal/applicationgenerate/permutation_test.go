@@ -38,15 +38,18 @@ func TestGenerateIsDeterministicAcrossEffectiveGraphPermutations(t *testing.T) {
 		writeFile(t, filepath.Join(dependencyRoots["c"], "plystra.yaml"), "capabilities: {require: [kernel.info/v1]}\n")
 
 		writeModule(t, dependencyRoots["a"], "example.com/platform/a", "require example.com/platform/b v1.0.0\n")
-		writeFile(t, filepath.Join(dependencyRoots["a"], "plystra.yaml"), `http:
+		configurationOwner := writeConstructorConfigurationOwner(t, dependencyRoots["a"], "example.com/platform/a", false)
+		writeFile(t, filepath.Join(dependencyRoots["a"], "plystra.yaml"), fmt.Sprintf(`interfaces:
+  require: [configuration.owner/v1]
+http:
   expose: [email.send/v1]
 capabilities:
   require: [email.send/v1]
   use: {email.send/v1: example.smtp}
   aliases: {mail.send/v1: email.send/v1}
 config:
-  example.smtp: {endpoint: smtp.example}
-`)
+  %s: {endpoint: smtp.example}
+`, configurationOwner))
 		writePlugin(t, dependencyRoots["a"], "smtp", "id: example.smtp\nprovides: [email.send/v1]\nconfig:\n  endpoint: {type: string}\n")
 		writeCapability(t, dependencyRoots["a"], "smtp", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 

@@ -200,7 +200,7 @@ func manifestDifferenceOutsideHTTPExposure(left, right Manifest) string {
 		return "config"
 	}
 	for index := range leftConfigurations {
-		if leftConfigurations[index].pluginID != rightConfigurations[index].pluginID ||
+		if leftConfigurations[index].constructor != rightConfigurations[index].constructor ||
 			leftConfigurations[index].source != rightConfigurations[index].source ||
 			!bytes.Equal(leftConfigurations[index].yaml, rightConfigurations[index].yaml) {
 			return "config"

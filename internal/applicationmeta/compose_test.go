@@ -3,27 +3,32 @@ package applicationmeta_test
 import (
 	"bytes"
 	"errors"
+	"go/ast"
+	"go/importer"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationmeta"
-	"github.com/plystra/kernel/configuration"
-	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
+	"github.com/plystra/cli/internal/constructorsymbol"
+	"github.com/plystra/cli/internal/implementationinventory"
 )
 
 func TestComposeDeterministicallyAppliesTypedDependencyDeclarations(t *testing.T) {
 	t.Parallel()
 
 	schema := composeSchema(t, `
-host: {type: string, required: true}
-labels: {type: object}
-port: {type: integer, required: true}
-ratio: {type: number}
-token: {type: secret, required: true}
+	Host string `+"`plystra:\"required\"`"+`
+	Labels map[string]string
+	Port int64 `+"`plystra:\"required\"`"+`
+	Ratio float64
+	Token configuration.Secret `+"`plystra:\"required\"`"+`
 `)
-	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{"acme.email.smtp": schema})
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	dependencyA := applicationmeta.Dependency{
 		ModulePath:    "example.com/a",
 		ModuleVersion: "v1.2.0",
@@ -37,7 +42,7 @@ capabilities:
   use: {email.send/v1: acme.email.smtp}
   aliases: {mail.send/v1: email.send/v1}
 config:
-  acme.email.smtp:
+  example.com/acme/smtp.New:
     host: smtp.example.com
     ratio: 1
     token: {env: SMTP_TOKEN}
@@ -56,7 +61,7 @@ capabilities:
   use: {email.send/v1: acme.email.smtp}
   aliases: {mail.send/v1: email.send/v1}
 config:
-  acme.email.smtp:
+  example.com/acme/smtp.New:
     port: 587
     ratio: 1.0
     token: {env: SMTP_TOKEN}
@@ -71,7 +76,7 @@ capabilities:
   require: [kernel.info/v1]
   aliases: {}
 config:
-  acme.email.smtp:
+  example.com/acme/smtp.New:
     labels: {region: primary}
 `)
 
@@ -105,12 +110,9 @@ config:
 	if len(aliases) != 1 || aliases[0].ID().String() != "mail.send/v1" || aliases[0].Target().String() != "email.send/v1" || !strings.HasPrefix(aliases[0].Source(), "example.com/a@v1.2.0/plystra.yaml") {
 		t.Fatalf("Aliases = %#v", aliases)
 	}
-	configured, exists := manifest.Configuration("acme.email.smtp")
+	configured, exists := manifest.Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
 	if !exists {
 		t.Fatal("composed configuration is absent")
-	}
-	if err := configuration.Validate(schema, configured.YAML()); err != nil {
-		t.Fatalf("composed configuration is invalid: %v\n%s", err, configured.YAML())
 	}
 	for _, expected := range [][]byte{[]byte("host: smtp.example.com"), []byte("labels:"), []byte("port: 587"), []byte("ratio: 1"), []byte("token:"), []byte("env: SMTP_TOKEN")} {
 		if !bytes.Contains(configured.YAML(), expected) {
@@ -131,7 +133,7 @@ config:
 			t.Fatalf("current-project declaration entered dependency resolution provenance: %#v", provenanceStrings(records))
 		}
 	}
-	ratio := findProvenance(t, first.Provenance(), `config["acme.email.smtp"]["ratio"]`)
+	ratio := findProvenance(t, first.Provenance(), `config["example.com/acme/smtp.New"]["ratio"]`)
 	if len(ratio) != 1 || len(ratio[0].Sources()) != 2 {
 		t.Fatalf("normalized ratio provenance = %#v", provenanceStrings(ratio))
 	}
@@ -583,16 +585,16 @@ func TestComposeMergesConfigurationByDeclaredFieldAndRedactsConflicts(t *testing
 	t.Parallel()
 
 	schema := composeSchema(t, `
-host: {type: string}
-token: {type: secret}
+	Host string
+	Token configuration.Secret
 `)
-	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{"acme.smtp": schema})
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {acme.smtp: {host: private-a.example, token: {env: PRIVATE_A}}}\n")},
-		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {acme.smtp: {host: private-b.example, token: {env: PRIVATE_B}}}\n")},
+		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {host: private-a.example, token: {env: PRIVATE_A}}}\n")},
+		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {host: private-b.example, token: {env: PRIVATE_B}}}\n")},
 	}
 	_, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), lookup)
-	if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), `config["acme.smtp"]["host"]`) {
+	if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), `config["example.com/acme/smtp.New"]["host"]`) {
 		t.Fatalf("configuration conflict error = %v", err)
 	}
 	for _, forbidden := range []string{"private-a.example", "private-b.example", "PRIVATE_A", "PRIVATE_B"} {
@@ -601,16 +603,16 @@ token: {type: secret}
 		}
 	}
 
-	current := composeManifest(t, "config: {acme.smtp: {host: current.example, token: {env: CURRENT_TOKEN}}}\n")
+	current := composeManifest(t, "config: {example.com/acme/smtp.New: {host: current.example, token: {env: CURRENT_TOKEN}}}\n")
 	composed, err := applicationmeta.Compose(dependencies, current, lookup)
 	if err != nil {
 		t.Fatalf("Compose with configuration replacements: %v", err)
 	}
-	configured, _ := composed.Manifest().Configuration("acme.smtp")
+	configured, _ := composed.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
 	if !bytes.Contains(configured.YAML(), []byte("host: current.example")) || !bytes.Contains(configured.YAML(), []byte("CURRENT_TOKEN")) {
 		t.Fatalf("current configuration replacement = %s", configured.YAML())
 	}
-	if records := findProvenance(t, composed.Provenance(), `config["acme.smtp"]["token"]`); len(records) != 2 {
+	if records := findProvenance(t, composed.Provenance(), `config["example.com/acme/smtp.New"]["token"]`); len(records) != 2 {
 		t.Fatalf("configuration baseline provenance = %#v", provenanceStrings(records))
 	}
 }
@@ -619,19 +621,29 @@ func TestComposeRecursivelyMergesObjectConfigurationAndAppliesTombstones(t *test
 	t.Parallel()
 
 	schema := composeSchema(t, `
-host: {type: string}
-hosts: {type: array, items: string}
-settings: {type: object}
-token: {type: secret}
+	Host string
+	Hosts []string
+	Settings struct {
+		Legacy string
+		Nested struct {
+			Keep string
+			Remove string
+			Other bool
+		}
+		Ratio float64
+		Region string
+		Zone int64
+	}
+	Token configuration.Secret
 `)
-	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{"acme.smtp": schema})
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	dependencies := []applicationmeta.Dependency{
 		{
 			ModulePath:    "example.com/a",
 			ModuleVersion: "v1.0.0",
 			Manifest: composeManifest(t, `
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: dependency.example
     hosts: [smtp-a.example]
     settings:
@@ -649,7 +661,7 @@ config:
 			ModuleVersion: "v1.0.0",
 			Manifest: composeManifest(t, `
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     hosts: [smtp-b.example]
     settings:
       legacy: null
@@ -662,7 +674,7 @@ config:
 	}
 	current := composeManifest(t, `
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: null
     hosts: [smtp-current.example]
     settings:
@@ -680,14 +692,11 @@ config:
 	if err != nil || reordered.DependencyDigest() != composed.DependencyDigest() {
 		t.Fatalf("reordered recursive configuration = %s, %v; want %s", reordered.DependencyDigest(), err, composed.DependencyDigest())
 	}
-	configured, exists := composed.Manifest().Configuration("acme.smtp")
+	configured, exists := composed.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
 	if !exists {
 		t.Fatal("composed configuration is absent")
 	}
-	if err := configuration.Validate(schema, configured.YAML()); err != nil {
-		t.Fatalf("composed configuration is invalid: %v\n%s", err, configured.YAML())
-	}
-	reorderedConfiguration, reorderedExists := reordered.Manifest().Configuration("acme.smtp")
+	reorderedConfiguration, reorderedExists := reordered.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
 	if !reorderedExists || !bytes.Equal(reorderedConfiguration.YAML(), configured.YAML()) {
 		t.Fatalf("recursive configuration depends on order:\nfirst: %s\nsecond: %s", configured.YAML(), reorderedConfiguration.YAML())
 	}
@@ -713,7 +722,7 @@ config:
 			t.Fatalf("composed configuration retained removed value %q:\n%s", removed, configured.YAML())
 		}
 	}
-	records := findProvenance(t, composed.Provenance(), `config["acme.smtp"]["settings"]["legacy"]`)
+	records := findProvenance(t, composed.Provenance(), `config["example.com/acme/smtp.New"]["settings"]["legacy"]`)
 	if len(records) != 2 || records[0].Removed() == records[1].Removed() {
 		t.Fatalf("nested removal provenance = %#v", provenanceStrings(records))
 	}
@@ -722,41 +731,41 @@ config:
 			t.Fatalf("nested removal sources = %#v", provenanceStrings(records))
 		}
 	}
-	ratioRecords := findProvenance(t, composed.Provenance(), `config["acme.smtp"]["settings"]["ratio"]`)
+	ratioRecords := findProvenance(t, composed.Provenance(), `config["example.com/acme/smtp.New"]["settings"]["ratio"]`)
 	if len(ratioRecords) != 1 || ratioRecords[0].Removed() || len(ratioRecords[0].Sources()) != 2 {
 		t.Fatalf("normalized nested ratio provenance = %#v", provenanceStrings(ratioRecords))
 	}
 }
 
-func TestComposePluginConfigurationRemovalResolvesWholeObjectConflict(t *testing.T) {
+func TestComposeConstructorConfigurationRemovalResolvesWholeObjectConflict(t *testing.T) {
 	t.Parallel()
 
-	schema := composeSchema(t, "host: {type: string}\n")
-	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{"acme.smtp": schema})
+	schema := composeSchema(t, "\tHost string\n")
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/value", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {acme.smtp: {host: dependency.example}}\n")},
-		{ModulePath: "example.com/remove", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {acme.smtp: null}\n")},
+		{ModulePath: "example.com/value", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {host: dependency.example}}\n")},
+		{ModulePath: "example.com/remove", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: null}\n")},
 	}
 	_, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), lookup)
-	if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), `config["acme.smtp"]`) || !strings.Contains(err.Error(), "object") || !strings.Contains(err.Error(), "removal") {
+	if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), `config["example.com/acme/smtp.New"]`) || !strings.Contains(err.Error(), "object") || !strings.Contains(err.Error(), "removal") {
 		t.Fatalf("whole configuration conflict = %v", err)
 	}
-	removed, err := applicationmeta.Compose(dependencies, composeManifest(t, "config: {acme.smtp: null}\n"), lookup)
+	removed, err := applicationmeta.Compose(dependencies, composeManifest(t, "config: {example.com/acme/smtp.New: null}\n"), lookup)
 	if err != nil {
 		t.Fatalf("Compose whole removal: %v", err)
 	}
-	if _, exists := removed.Manifest().Configuration("acme.smtp"); exists {
-		t.Fatal("whole Plugin configuration removal retained an object")
+	if _, exists := removed.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New")); exists {
+		t.Fatal("whole constructor configuration removal retained an object")
 	}
-	replaced, err := applicationmeta.Compose(dependencies, composeManifest(t, "config: {acme.smtp: {host: current.example}}\n"), lookup)
+	replaced, err := applicationmeta.Compose(dependencies, composeManifest(t, "config: {example.com/acme/smtp.New: {host: current.example}}\n"), lookup)
 	if err != nil {
 		t.Fatalf("Compose whole replacement: %v", err)
 	}
-	configured, exists := replaced.Manifest().Configuration("acme.smtp")
+	configured, exists := replaced.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
 	if !exists || !bytes.Contains(configured.YAML(), []byte("host: current.example")) {
-		t.Fatalf("whole Plugin configuration replacement = %s, %t", configured.YAML(), exists)
+		t.Fatalf("whole constructor configuration replacement = %s, %t", configured.YAML(), exists)
 	}
-	records := findProvenance(t, replaced.Provenance(), `config["acme.smtp"]`)
+	records := findProvenance(t, replaced.Provenance(), `config["example.com/acme/smtp.New"]`)
 	if len(records) != 2 || records[0].Removed() == records[1].Removed() {
 		t.Fatalf("whole configuration provenance = %#v", provenanceStrings(records))
 	}
@@ -767,16 +776,16 @@ func TestComposeRejectsNestedConfigurationTypeMismatchWithoutValues(t *testing.T
 
 	privateValue := "private-lower-value"
 	privateCurrent := "private-current-value"
-	schema := composeSchema(t, "settings: {type: object}\n")
-	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{"acme.smtp": schema})
+	schema := composeSchema(t, "\tSettings struct { Mode string }\n")
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	dependency := applicationmeta.Dependency{
 		ModulePath:    "example.com/lower",
 		ModuleVersion: "v1.0.0",
-		Manifest:      composeManifest(t, "config: {acme.smtp: {settings: {mode: "+privateValue+"}}}\n"),
+		Manifest:      composeManifest(t, "config: {example.com/acme/smtp.New: {settings: {mode: "+privateValue+"}}}\n"),
 	}
-	current := composeManifest(t, "config: {acme.smtp: {settings: {mode: {name: "+privateCurrent+"}}}}\n")
+	current := composeManifest(t, "config: {example.com/acme/smtp.New: {settings: {mode: {name: "+privateCurrent+"}}}}\n")
 	_, err := applicationmeta.Compose([]applicationmeta.Dependency{dependency}, current, lookup)
-	if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), `config["acme.smtp"]["settings"]["mode"]`) || !strings.Contains(err.Error(), "types") {
+	if !errors.Is(err, applicationmeta.ErrConfigurationValues) || !errors.Is(err, applicationmeta.ErrConfigurationInvalidValue) || !strings.Contains(err.Error(), `config["example.com/acme/smtp.New"]["settings"]["mode"]`) {
 		t.Fatalf("nested type mismatch = %v", err)
 	}
 	for _, forbidden := range []string{privateValue, privateCurrent} {
@@ -789,8 +798,8 @@ func TestComposeRejectsNestedConfigurationTypeMismatchWithoutValues(t *testing.T
 func TestComposeRejectsInvalidConfigurationAndCrossDocumentAliasChains(t *testing.T) {
 	t.Parallel()
 
-	schema := composeSchema(t, "host: {type: string}\n")
-	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{"acme.smtp": schema})
+	schema := composeSchema(t, "\tHost string\n")
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	tests := []struct {
 		name         string
 		dependencies []applicationmeta.Dependency
@@ -800,17 +809,17 @@ func TestComposeRejectsInvalidConfigurationAndCrossDocumentAliasChains(t *testin
 	}{
 		{
 			name:         "unknown configuration field",
-			dependencies: []applicationmeta.Dependency{{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {acme.smtp: {private_unknown: hidden}}\n")}},
+			dependencies: []applicationmeta.Dependency{{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {private_unknown: hidden}}\n")}},
 			current:      composeManifest(t, "{}\n"),
 			lookup:       lookup,
-			want:         "unknown plugin configuration field",
+			want:         "unknown constructor configuration field",
 		},
 		{
 			name:         "unknown removed configuration field",
-			dependencies: []applicationmeta.Dependency{{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {acme.smtp: {private_unknown: null}}\n")}},
+			dependencies: []applicationmeta.Dependency{{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {private_unknown: null}}\n")}},
 			current:      composeManifest(t, "{}\n"),
 			lookup:       lookup,
-			want:         "unknown plugin configuration field",
+			want:         "unknown constructor configuration field",
 		},
 		{
 			name: "Alias chain",
@@ -845,31 +854,36 @@ func TestComposeRejectsInvalidConfigurationAndCrossDocumentAliasChains(t *testin
 	}
 }
 
-func FuzzComposePluginConfigurationDeterminism(f *testing.F) {
+func FuzzComposeConstructorConfigurationDeterminism(f *testing.F) {
 	schema := composeSchema(f, `
-hosts: {type: array, items: string}
-settings: {type: object}
-token: {type: secret}
+	Hosts []string
+	Settings struct {
+		Region string
+		Zone string
+		Legacy string
+		Enabled bool
+	}
+	Token configuration.Secret
 `)
-	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{"acme.smtp": schema})
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	seeds := [][3]string{
 		{
-			"config: {acme.smtp: {settings: {region: one}, hosts: [a]}}\n",
-			"config: {acme.smtp: {settings: {zone: two}}}\n",
-			"config: {acme.smtp: {settings: {region: current}}}\n",
+			"config: {example.com/acme/smtp.New: {settings: {region: one}, hosts: [a]}}\n",
+			"config: {example.com/acme/smtp.New: {settings: {zone: two}}}\n",
+			"config: {example.com/acme/smtp.New: {settings: {region: current}}}\n",
 		},
 		{
-			"config: {acme.smtp: {settings: {legacy: value}, token: {env: PRIVATE_TOKEN}}}\n",
-			"config: {acme.smtp: {settings: {legacy: null}}}\n",
-			"config: {acme.smtp: {settings: {legacy: null}, token: null}}\n",
+			"config: {example.com/acme/smtp.New: {settings: {legacy: value}, token: {env: PRIVATE_TOKEN}}}\n",
+			"config: {example.com/acme/smtp.New: {settings: {legacy: null}}}\n",
+			"config: {example.com/acme/smtp.New: {settings: {legacy: null}, token: null}}\n",
 		},
 		{
-			"config: {acme.smtp: null}\n",
-			"config: {acme.smtp: {settings: {enabled: true}}}\n",
-			"config: {acme.smtp: {}}\n",
+			"config: {example.com/acme/smtp.New: null}\n",
+			"config: {example.com/acme/smtp.New: {settings: {enabled: true}}}\n",
+			"config: {example.com/acme/smtp.New: {}}\n",
 		},
 		{
-			"config: {acme.smtp: {settings: ,token: {}}}",
+			"config: {example.com/acme/smtp.New: {settings: ,token: {}}}",
 			"config: {c.b2c0: {2}}",
 			"config: {}",
 		},
@@ -905,8 +919,8 @@ token: {type: secret}
 		if first.DependencyDigest() != second.DependencyDigest() || !reflect.DeepEqual(provenanceStrings(first.Provenance()), provenanceStrings(second.Provenance())) {
 			t.Fatalf("Compose changed provenance across order: %s %#v then %s %#v", first.DependencyDigest(), provenanceStrings(first.Provenance()), second.DependencyDigest(), provenanceStrings(second.Provenance()))
 		}
-		firstConfig, firstExists := first.Manifest().Configuration("acme.smtp")
-		secondConfig, secondExists := second.Manifest().Configuration("acme.smtp")
+		firstConfig, firstExists := first.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
+		secondConfig, secondExists := second.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
 		if firstExists != secondExists || firstExists && !bytes.Equal(firstConfig.YAML(), secondConfig.YAML()) {
 			t.Fatalf("Compose changed redacted configuration across order: present %t then %t", firstExists, secondExists)
 		}
@@ -922,20 +936,75 @@ func composeManifest(t testing.TB, source string) applicationmeta.Manifest {
 	return manifest
 }
 
-func composeSchema(t testing.TB, source string) kernelmanifest.Config {
+func composeSchema(t testing.TB, fields string) implementationinventory.Configuration {
 	t.Helper()
-	schema, err := kernelmanifest.ParseConfig([]byte(source))
+	source := `package fixture
+
+import (
+	"net/url"
+	"time"
+	"github.com/plystra/kernel/configuration"
+)
+
+var (
+	_ time.Duration
+	_ url.URL
+	_ configuration.Secret
+)
+
+type Config struct {
+` + fields + `
+}
+
+func New(Config) {}
+`
+	files := token.NewFileSet()
+	parsed, err := parser.ParseFile(files, "config.go", source, parser.AllErrors)
 	if err != nil {
-		t.Fatalf("ParseConfig: %v\n%s", err, source)
+		t.Fatalf("parse Config fixture: %v\n%s", err, source)
+	}
+	compiled, err := (&types.Config{Importer: composeConfigurationImporter{standard: importer.Default()}}).Check("example.com/acme/smtp", files, []*ast.File{parsed}, nil)
+	if err != nil {
+		t.Fatalf("compile Config fixture: %v\n%s", err, source)
+	}
+	constructor, _ := compiled.Scope().Lookup("New").(*types.Func)
+	schema, exists, err := implementationinventory.CompileConfiguration(compiled, constructor)
+	if err != nil || !exists {
+		t.Fatalf("CompileConfiguration = %#v, %t, %v\n%s", schema, exists, err, source)
 	}
 	return schema
 }
 
-func composeSchemaLookup(schemas map[string]kernelmanifest.Config) applicationmeta.SchemaLookup {
-	return func(pluginID string) (kernelmanifest.Config, bool) {
-		schema, exists := schemas[pluginID]
+func composeSchemaLookup(schemas map[string]implementationinventory.Configuration) applicationmeta.SchemaLookup {
+	return func(constructor constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		schema, exists := schemas[constructor.String()]
 		return schema, exists
 	}
+}
+
+type composeConfigurationImporter struct {
+	standard types.Importer
+}
+
+func (i composeConfigurationImporter) Import(path string) (*types.Package, error) {
+	if path != "github.com/plystra/kernel/configuration" {
+		return i.standard.Import(path)
+	}
+	pkg := types.NewPackage(path, "configuration")
+	name := types.NewTypeName(token.NoPos, pkg, "Secret", nil)
+	types.NewNamed(name, types.NewStruct(nil, nil), nil)
+	pkg.Scope().Insert(name)
+	pkg.MarkComplete()
+	return pkg, nil
+}
+
+func mustConstructorSymbol(t testing.TB, value string) constructorsymbol.Symbol {
+	t.Helper()
+	symbol, err := constructorsymbol.Parse(value)
+	if err != nil {
+		t.Fatalf("constructorsymbol.Parse(%q): %v", value, err)
+	}
+	return symbol
 }
 
 func exposureIDs(manifest applicationmeta.Manifest) []string {

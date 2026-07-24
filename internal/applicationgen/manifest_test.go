@@ -29,12 +29,12 @@ capabilities:
 http:
   expose: []
 config:
-  acme.mailer:
+  example.com/acme/mailer.New:
     retries: 1
     enabled: true
 `)
 	right := []byte(`config:
-  acme.mailer: {enabled: true, retries: 01}
+  example.com/acme/mailer.New: {enabled: true, retries: 01}
 http: {expose: []}
 capabilities:
   require: [email.send/v1]
@@ -115,9 +115,9 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 	defaultProvenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
 		Mode:                   applicationgen.ConfigurationModeDefault,
 		RootPath:               "plystra.yaml",
-		RootData:               []byte("config: {acme.business: {legacy: 'C:/private/root-config', password: {env: ROOT_PRIVATE_TOKEN}}}\n"),
+		RootData:               []byte("config: {example.com/acme/business.New: {legacy: 'C:/private/root-config', password: {env: ROOT_PRIVATE_TOKEN}}}\n"),
 		SelectedPath:           "plystra.yaml",
-		SelectedData:           []byte("config: {acme.business: {legacy: 'C:/private/root-config', password: {env: ROOT_PRIVATE_TOKEN}}}\n"),
+		SelectedData:           []byte("config: {example.com/acme/business.New: {legacy: 'C:/private/root-config', password: {env: ROOT_PRIVATE_TOKEN}}}\n"),
 		Composition:            dependencyComposition(t),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,
@@ -129,9 +129,9 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 		Mode:                   applicationgen.ConfigurationModeEnvironment,
 		Environment:            "production",
 		RootPath:               "plystra.yaml",
-		RootData:               []byte("config: {acme.business: {legacy: 'C:/private/root-config', password: {env: ROOT_PRIVATE_TOKEN}}}\n"),
+		RootData:               []byte("config: {example.com/acme/business.New: {legacy: 'C:/private/root-config', password: {env: ROOT_PRIVATE_TOKEN}}}\n"),
 		SelectedPath:           "plystra.production.yaml",
-		SelectedData:           []byte("config: {acme.business: {password: {env: PRODUCTION_PRIVATE_TOKEN}}}\n"),
+		SelectedData:           []byte("config: {example.com/acme/business.New: {password: {env: PRODUCTION_PRIVATE_TOKEN}}}\n"),
 		Composition:            dependencyComposition(t),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,
@@ -161,9 +161,9 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 	explicitProvenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
 		Mode:                   applicationgen.ConfigurationModeExplicit,
 		RootPath:               "plystra.yaml",
-		RootData:               []byte("config: {acme.business: {legacy: 'C:/private/root-config', password: {env: ROOT_PRIVATE_TOKEN}}}\n"),
+		RootData:               []byte("config: {example.com/acme/business.New: {legacy: 'C:/private/root-config', password: {env: ROOT_PRIVATE_TOKEN}}}\n"),
 		SelectedPath:           "deploy/customer-a.yaml",
-		SelectedData:           []byte("# independent complete configuration\nconfig: {acme.business: {legacy: customer-runtime-value, password: {env: CUSTOMER_PRIVATE_TOKEN}}}\n"),
+		SelectedData:           []byte("# independent complete configuration\nconfig: {example.com/acme/business.New: {legacy: customer-runtime-value, password: {env: CUSTOMER_PRIVATE_TOKEN}}}\n"),
 		Composition:            testComposition(),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,

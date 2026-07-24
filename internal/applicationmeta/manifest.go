@@ -19,6 +19,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/pluginid"
 	"go.yaml.in/yaml/v3"
@@ -177,45 +178,45 @@ func (c ProviderChoice) PluginID() string { return c.pluginID }
 // Source returns stable configuration-path provenance for diagnostics.
 func (c ProviderChoice) Source() string { return c.source }
 
-// PluginConfiguration is one immutable plugin-owned runtime configuration
-// mapping. Its values and Secret reference targets remain redacted from
-// formatting and are never part of generation-extension input.
-type PluginConfiguration struct {
-	pluginID string
-	source   string
-	yaml     []byte
+// ConstructorConfiguration is one immutable constructor-owned runtime
+// configuration mapping. Values and Secret reference targets remain redacted
+// from formatting and are available only through the deliberate YAML accessor.
+type ConstructorConfiguration struct {
+	constructor constructorsymbol.Symbol
+	source      string
+	yaml        []byte
 }
 
-type pluginConfigurationRemoval struct {
-	pluginID string
-	source   string
+type constructorConfigurationRemoval struct {
+	constructor constructorsymbol.Symbol
+	source      string
 }
 
-// PluginID returns the canonical configured Plugin ID.
-func (c PluginConfiguration) PluginID() string { return c.pluginID }
+// Constructor returns the exact fully qualified Implementation constructor.
+func (c ConstructorConfiguration) Constructor() constructorsymbol.Symbol { return c.constructor }
 
 // Source returns stable configuration-path provenance for diagnostics.
-func (c PluginConfiguration) Source() string { return c.source }
+func (c ConstructorConfiguration) Source() string { return c.source }
 
-// YAML returns defensive bytes for CLI-owned validation and generated runtime
-// binding. Callers must not copy them into diagnostics or extension input.
-func (c PluginConfiguration) YAML() []byte { return append([]byte(nil), c.yaml...) }
+// YAML returns defensive normalized bytes for CLI-owned validation and later
+// generated runtime binding. Callers must not copy them into diagnostics.
+func (c ConstructorConfiguration) YAML() []byte { return append([]byte(nil), c.yaml...) }
 
 // String returns only a redaction marker.
-func (PluginConfiguration) String() string { return "<redacted-plugin-configuration>" }
+func (ConstructorConfiguration) String() string { return "<redacted-constructor-configuration>" }
 
 // GoString prevents Go-syntax formatting from exposing configuration values.
-func (PluginConfiguration) GoString() string { return "<redacted-plugin-configuration>" }
+func (ConstructorConfiguration) GoString() string { return "<redacted-constructor-configuration>" }
 
 // Format redacts configuration values for every fmt verb.
-func (PluginConfiguration) Format(state fmt.State, _ rune) {
-	_, _ = state.Write([]byte("<redacted-plugin-configuration>"))
+func (ConstructorConfiguration) Format(state fmt.State, _ rune) {
+	_, _ = state.Write([]byte("<redacted-constructor-configuration>"))
 }
 
 // LogValue redacts configuration values for structured standard-library
 // logging.
-func (PluginConfiguration) LogValue() slog.Value {
-	return slog.StringValue("<redacted-plugin-configuration>")
+func (ConstructorConfiguration) LogValue() slog.Value {
+	return slog.StringValue("<redacted-constructor-configuration>")
 }
 
 // Manifest is the immutable normalized application metadata used by typed
@@ -241,8 +242,8 @@ type Manifest struct {
 	removedInterfacePolicies     []interfaceRemoval
 	aliases                      []Alias
 	removedAliases               []capabilityRemoval
-	configurations               []PluginConfiguration
-	removedConfigurations        []pluginConfigurationRemoval
+	configurations               []ConstructorConfiguration
+	removedConfigurations        []constructorConfigurationRemoval
 	startupTimeout               time.Duration
 	hasStartupTimeout            bool
 	removeStartupTimeout         bool
@@ -339,19 +340,23 @@ func (m Manifest) InterfacePolicies() []InterfacePolicy {
 // Aliases returns defensive declarations sorted by Alias ID.
 func (m Manifest) Aliases() []Alias { return append([]Alias(nil), m.aliases...) }
 
-// Configurations returns defensive Plugin-ID-sorted runtime configuration
-// declarations. Each value retains its own defensive YAML accessor.
-func (m Manifest) Configurations() []PluginConfiguration {
-	return append([]PluginConfiguration(nil), m.configurations...)
+// Configurations returns defensive constructor-symbol-sorted runtime
+// configuration declarations. Each value retains a defensive YAML accessor.
+func (m Manifest) Configurations() []ConstructorConfiguration {
+	return append([]ConstructorConfiguration(nil), m.configurations...)
 }
 
-// Configuration returns one exact Plugin ID's runtime configuration.
-func (m Manifest) Configuration(pluginID string) (PluginConfiguration, bool) {
+// Configuration returns one exact constructor's runtime configuration.
+func (m Manifest) Configuration(constructor constructorsymbol.Symbol) (ConstructorConfiguration, bool) {
+	value := constructor.String()
+	if value == "" {
+		return ConstructorConfiguration{}, false
+	}
 	index := sort.Search(len(m.configurations), func(index int) bool {
-		return m.configurations[index].pluginID >= pluginID
+		return m.configurations[index].constructor.String() >= value
 	})
-	if index >= len(m.configurations) || m.configurations[index].pluginID != pluginID {
-		return PluginConfiguration{}, false
+	if index >= len(m.configurations) || m.configurations[index].constructor != constructor {
+		return ConstructorConfiguration{}, false
 	}
 	return m.configurations[index], true
 }
@@ -533,7 +538,7 @@ func rewriteManifestSource(manifest *Manifest, source string) {
 	}
 }
 
-func parseConfigurations(node *yaml.Node) ([]PluginConfiguration, []pluginConfigurationRemoval, error) {
+func parseConfigurations(node *yaml.Node) ([]ConstructorConfiguration, []constructorConfigurationRemoval, error) {
 	if node == nil {
 		return nil, nil, nil
 	}
@@ -541,28 +546,29 @@ func parseConfigurations(node *yaml.Node) ([]PluginConfiguration, []pluginConfig
 	if err != nil {
 		return nil, nil, err
 	}
-	configurations := make([]PluginConfiguration, 0, len(values))
-	removals := make([]pluginConfigurationRemoval, 0, len(values))
-	for _, pluginID := range sortedNodeKeys(values) {
-		if err := pluginid.Validate(pluginID); err != nil {
-			return nil, nil, invalid("config key %q is not a canonical Plugin ID", pluginID)
+	configurations := make([]ConstructorConfiguration, 0, len(values))
+	removals := make([]constructorConfigurationRemoval, 0, len(values))
+	for _, value := range sortedNodeKeys(values) {
+		constructor, err := constructorsymbol.Parse(value)
+		if err != nil {
+			return nil, nil, invalid("config key %q is not a fully qualified constructor symbol", value)
 		}
-		source := fmt.Sprintf("plystra.yaml config[%q]", pluginID)
-		if isNull(values[pluginID]) {
-			removals = append(removals, pluginConfigurationRemoval{pluginID: pluginID, source: source})
+		source := fmt.Sprintf("plystra.yaml config[%q]", value)
+		if isNull(values[value]) {
+			removals = append(removals, constructorConfigurationRemoval{constructor: constructor, source: source})
 			continue
 		}
-		if values[pluginID].Kind != yaml.MappingNode {
-			return nil, nil, invalid("config[%q] must be a mapping or null", pluginID)
+		if values[value].Kind != yaml.MappingNode {
+			return nil, nil, invalid("config[%q] must be a mapping or null", value)
 		}
-		data, err := yaml.Marshal(values[pluginID])
+		data, err := yaml.Marshal(values[value])
 		if err != nil {
-			return nil, nil, invalid("config[%q] cannot be normalized", pluginID)
+			return nil, nil, invalid("config[%q] cannot be normalized", value)
 		}
-		configurations = append(configurations, PluginConfiguration{
-			pluginID: pluginID,
-			source:   source,
-			yaml:     append([]byte(nil), data...),
+		configurations = append(configurations, ConstructorConfiguration{
+			constructor: constructor,
+			source:      source,
+			yaml:        append([]byte(nil), data...),
 		})
 	}
 	return configurations, removals, nil

@@ -34,7 +34,7 @@ interfaces:
   policies:
     email.send/v1: {timeout: 5s} # keep the Interface policy
 config:
-  acme.mail:
+  example.com/acme/mail.New:
     password:
       env: SMTP_PASSWORD
 `)

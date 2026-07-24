@@ -32,7 +32,6 @@ import (
 	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/providerresolution"
 	"github.com/plystra/cli/internal/resolutionevidence"
-	kernelconfiguration "github.com/plystra/kernel/configuration"
 )
 
 func TestMain(main *testing.M) {
@@ -258,7 +257,7 @@ func (*Service) Audit(context.Context, auditv1.Request) (auditv1.Response, error
 	writeModule(t, kernelRoot, "github.com/plystra/kernel")
 	writeFile(t, filepath.Join(kernelRoot, "optional.go"), "package plystra\n\ntype Optional[T any] struct{}\n")
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/implementations\n\ngo 1.26\n\nrequire (\n\texample.com/contracts v1.2.3\n\tgithub.com/plystra/kernel v0.0.0\n)\n\nreplace example.com/contracts => ../contracts\nreplace github.com/plystra/kernel => ../kernel\n")
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "config: {example.com/implementations/domains/orders/service.Build: {mode: current}}\n")
 	writeFile(t, filepath.Join(root, "interfaces", "orders", "create", "v1", "interface.go"), interfaceDeclarationSource("createv1", "orders.create.execute/v1", "Create"))
 	writeFile(t, filepath.Join(root, "domains", "orders", "service", "new.go"), `package service
 
@@ -317,6 +316,10 @@ func Build(cfg Config, audit auditv1.Interface, notify plystra.Optional[Notify])
 	configuration, configured := discovered.Configuration()
 	if !configured || configuration.String() != "example.com/implementations/domains/orders/service.Config" || configuration.PackagePath() != discovered.PackagePath() || configuration.TypeName() != "Config" {
 		t.Fatalf("Implementation configuration = %#v, %t", configuration, configured)
+	}
+	configuredValue, exists := result.Manifest().Configuration(discovered.Symbol())
+	if !exists || !bytes.Contains(configuredValue.YAML(), []byte("mode: current")) {
+		t.Fatalf("current-Project constructor configuration = %s, %t", configuredValue.YAML(), exists)
 	}
 	required := discovered.RequiredInterfaces()
 	if len(required) != 1 || required[0].ID().String() != "orders.audit.execute/v1" || required[0].PackagePath() != "example.com/contracts/interfaces/orders/audit/v1" || required[0].ParameterName() != "audit" || required[0].ParameterPosition() != 2 {
@@ -1114,13 +1117,9 @@ capabilities:
   use: {email.send/v1: example.smtp}
   aliases:
     mail.send/v1: email.send/v1
-config:
-  example.smtp:
-    host: private.smtp.example.com
-    password: {env: PLYSTRA_APPLICATION_RESOLVE_PRIVATE_SECRET}
 `)
 	writeFile(t, filepath.Join(providerRoot, "plystra.production.yaml"), "not: [a valid dependency overlay\n")
-	writePlugin(t, providerRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\nconfig: {host: {type: string, required: true}, password: {type: secret, required: true}}\n")
+	writePlugin(t, providerRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\n")
 	writeCapability(t, providerRoot, "smtp", "email.send/v1", `id: email.send/v1
 request:
   to: {type: string, required: true}
@@ -1142,7 +1141,7 @@ replace example.com/providers => ../providers
 	dependencyBefore := snapshotTree(t, providerRoot)
 	options := applicationresolve.Options{
 		Start:       filepath.Join(appRoot, "local"),
-		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "PLYSTRA_APPLICATION_RESOLVE_PRIVATE_SECRET": "resolved-private-secret"}),
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
 	}
 
 	first, err := applicationresolve.Resolve(t.Context(), options)
@@ -1150,11 +1149,6 @@ replace example.com/providers => ../providers
 		t.Fatalf("Resolve: %v", err)
 	}
 	assertResolvedConfigurationProvenance(t, first)
-	hostEvidence := resolvedConfigurationField(t, first, `config["example.smtp"]["host"]`)
-	passwordEvidence := resolvedConfigurationField(t, first, `config["example.smtp"]["password"]`)
-	if hostEvidence.Owner() != resolutionevidence.ConfigurationOwnerDependency || passwordEvidence.Owner() != resolutionevidence.ConfigurationOwnerDependency || len(hostEvidence.Contributors()) != 1 || len(passwordEvidence.Contributors()) != 1 || hostEvidence.Contributors()[0].Sources()[0].Module() != "example.com/providers" || passwordEvidence.Contributors()[0].Sources()[0].Path() != "plystra.yaml" {
-		t.Fatalf("dependency Plugin configuration evidence = host %#v password %#v", hostEvidence, passwordEvidence)
-	}
 	httpAddressEvidence := resolvedConfigurationField(t, first, "http.address")
 	if httpAddressEvidence.Owner() != resolutionevidence.ConfigurationOwnerRoot || len(httpAddressEvidence.Contributors()) != 1 {
 		t.Fatalf("current process configuration evidence = %#v", httpAddressEvidence)
@@ -1561,17 +1555,36 @@ replace example.com/smtp => ../smtp
 	}
 }
 
-func TestResolveConfigurationRemovalStillRunsFinalRequiredFieldValidation(t *testing.T) {
+func TestResolveParsesConstructorConfigurationThroughDiscoveredGoSchema(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	appRoot := filepath.Join(root, "app")
 	dependencyRoot := filepath.Join(root, "smtp")
 	writeModule(t, dependencyRoot, "example.com/smtp")
-	privateHost := "private-dependency.example"
-	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities: {use: {email.send/v1: example.smtp}}\nconfig: {example.smtp: {host: "+privateHost+"}}\n")
-	writePlugin(t, dependencyRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\nconfig:\n  host: {type: string, required: true}\n")
-	writeCapability(t, dependencyRoot, "smtp", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(dependencyRoot, "interfaces", "email", "send", "v1", "interface.go"), interfaceDeclarationSource("sendv1", "email.send/v1", "Send"))
+	writeFile(t, filepath.Join(dependencyRoot, "smtp", "service.go"), `package smtp
+
+import (
+	"context"
+
+	sendv1 "example.com/smtp/interfaces/email/send/v1"
+)
+
+type Config struct {
+	Host string `+"`plystra:\"required\"`"+`
+}
+
+type Service struct{}
+
+//plystra:implements email.send/v1
+func New(Config) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
+	return sendv1.Response{}, nil
+}
+`)
 	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
 
 go 1.26
@@ -1581,24 +1594,28 @@ require example.com/smtp v1.0.0
 replace example.com/smtp => ../smtp
 `)
 	manifestPath := filepath.Join(appRoot, "plystra.yaml")
-	writeFile(t, manifestPath, "capabilities: {require: [email.send/v1]}\nconfig: {example.smtp: {host: null}}\n")
+	writeFile(t, manifestPath, "interfaces: {require: [email.send/v1], use: {email.send/v1: example.com/smtp/smtp.New}}\nconfig: {example.com/smtp/smtp.New: {host: true}}\n")
 	options := applicationresolve.Options{
 		Start:       appRoot,
 		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
 	}
 
 	_, err := applicationresolve.Resolve(t.Context(), options)
-	if !errors.Is(err, kernelconfiguration.ErrMissingField) || strings.Contains(err.Error(), privateHost) {
-		t.Fatalf("Resolve removed required field error = %v", err)
+	if !errors.Is(err, applicationmeta.ErrConfigurationValues) || !errors.Is(err, applicationmeta.ErrConfigurationInvalidValue) || strings.Contains(err.Error(), "true") {
+		t.Fatalf("Resolve invalid typed constructor configuration error = %v", err)
 	}
-	writeFile(t, manifestPath, "capabilities: {require: [email.send/v1]}\nconfig: {example.smtp: {host: current.example}}\n")
+	writeFile(t, manifestPath, "interfaces: {require: [email.send/v1], use: {email.send/v1: example.com/smtp/smtp.New}}\nconfig: {example.com/smtp/smtp.New: {host: current.example}}\n")
 	result, err := applicationresolve.Resolve(t.Context(), options)
 	if err != nil {
-		t.Fatalf("Resolve replacement field: %v", err)
+		t.Fatalf("Resolve typed constructor configuration: %v", err)
 	}
-	configured, exists := result.Manifest().Configuration("example.smtp")
+	implementation, exists := result.Implementations().BySymbol(result.InterfaceResolution().Selections()[0].Constructor)
+	if !exists {
+		t.Fatal("selected Implementation is absent from inventory")
+	}
+	configured, exists := result.Manifest().Configuration(implementation.Symbol())
 	if !exists || !bytes.Contains(configured.YAML(), []byte("host: current.example")) {
-		t.Fatalf("effective replacement configuration = %s, %t", configured.YAML(), exists)
+		t.Fatalf("effective constructor configuration = %s, %t", configured.YAML(), exists)
 	}
 }
 

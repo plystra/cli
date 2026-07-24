@@ -263,7 +263,10 @@ func (c Configuration) LogValue() slog.Value {
 	)
 }
 
-func validateConfiguration(compiled *types.Package, function *types.Func) (Configuration, bool, error) {
+// CompileConfiguration validates and compiles the optional constructor-owned
+// Config parameter from exact Go type information. The returned schema is the
+// single authority used by application configuration parsing and generation.
+func CompileConfiguration(compiled *types.Package, function *types.Func) (Configuration, bool, error) {
 	signature, ok := function.Type().(*types.Signature)
 	if !ok {
 		return Configuration{}, false, fmt.Errorf("compiled constructor is not a Go function")

@@ -1620,12 +1620,14 @@ func TestGenerateRequiresConnectForSelectedJavaScriptSDK(t *testing.T) {
 }
 
 func TestGenerateApplicationModelDigestExcludesRuntimeValuesAndMachinePaths(t *testing.T) {
+	const modulePath = "example.com/acme/private-runtime-values"
 	root := t.TempDir()
-	writeApplicationModule(t, root, "example.com/acme/private-runtime-values")
-	writePlugin(t, root, "mailer", "id: acme.mailer\nprovides: [email.send/v1]\nconfig:\n  endpoint: {type: string, required: true}\n  password: {type: secret, required: true}\n")
+	writeApplicationModule(t, root, modulePath)
+	configurationOwner := writeConstructorConfigurationOwner(t, root, modulePath, true)
+	writePlugin(t, root, "mailer", "id: acme.mailer\nprovides: [email.send/v1]\n")
 	writeCapability(t, root, "mailer", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 	configurationPath := filepath.Join(root, "plystra.yaml")
-	writeFile(t, configurationPath, "http:\n  transports: {connect: true, rest: false}\ncapabilities: {require: [email.send/v1]}\nconfig:\n  acme.mailer:\n    endpoint: 'C:/private/machine-one'\n    password: {env: PRIVATE_TOKEN_ONE}\n")
+	writeFile(t, configurationPath, fmt.Sprintf("http:\n  transports: {connect: true, rest: false}\ncapabilities: {require: [email.send/v1]}\nconfig:\n  %s:\n    endpoint: 'C:/private/machine-one'\n    password: {env: PRIVATE_TOKEN_ONE}\n", configurationOwner))
 	options := applicationgenerate.Options{
 		Start:       root,
 		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "PRIVATE_TOKEN_ONE": "resolved-super-secret-one", "PRIVATE_TOKEN_TWO": "resolved-super-secret-two"}),
@@ -1640,7 +1642,7 @@ func TestGenerateApplicationModelDigestExcludesRuntimeValuesAndMachinePaths(t *t
 		t.Fatalf("DecodeManifestProvenance(initial): %v", err)
 	}
 
-	writeFile(t, configurationPath, "http:\n  transports: {connect: true, rest: false}\ncapabilities: {require: [email.send/v1]}\nconfig:\n  acme.mailer:\n    endpoint: 'D:/private/machine-two'\n    password: {env: PRIVATE_TOKEN_TWO}\n")
+	writeFile(t, configurationPath, fmt.Sprintf("http:\n  transports: {connect: true, rest: false}\ncapabilities: {require: [email.send/v1]}\nconfig:\n  %s:\n    endpoint: 'D:/private/machine-two'\n    password: {env: PRIVATE_TOKEN_TWO}\n", configurationOwner))
 	updated, err := applicationgenerate.Generate(t.Context(), options)
 	if err != nil || !updated.Report().Clean() {
 		t.Fatalf("updated Generate = changes %#v, %v", updated.Report().Changes(), err)
@@ -2107,12 +2109,14 @@ func TestGenerateRollsBackValidationFailureAndPreservesConcurrentSourceEdit(t *t
 func TestGenerateDetectsConcurrentPrivateConfigurationChange(t *testing.T) {
 	t.Parallel()
 
+	const modulePath = "example.com/acme/config-change-app"
 	root := t.TempDir()
-	writeApplicationModule(t, root, "example.com/acme/config-change-app")
+	writeApplicationModule(t, root, modulePath)
+	configurationOwner := writeConstructorConfigurationOwner(t, root, modulePath, false)
 	writePlugin(t, root, "business", "id: acme.business\nconfig: {label: {type: string}}\n")
 	manifestPath := filepath.Join(root, "plystra.yaml")
-	first := "config:\n  acme.business:\n    label: private-one\n"
-	second := "config:\n  acme.business:\n    label: private-two\n"
+	first := fmt.Sprintf("config:\n  %s:\n    label: private-one\n", configurationOwner)
+	second := fmt.Sprintf("config:\n  %s:\n    label: private-two\n", configurationOwner)
 	writeFile(t, manifestPath, first)
 	environment := goEnvironment(nil)
 	noValidation := func(_ context.Context, _ string) error { return nil }
@@ -2250,6 +2254,55 @@ func writeApplicationModule(t testing.TB, root, modulePath string) {
 	t.Helper()
 	writeApplicationModuleDefinition(t, root, modulePath)
 	downloadModuleDependencies(t, root)
+}
+
+func writeConstructorConfigurationOwner(t testing.TB, root, modulePath string, includeSecret bool) string {
+	t.Helper()
+	writeFile(t, filepath.Join(root, "interfaces", "configuration", "owner", "v1", "interface.go"), `package ownerv1
+
+import "context"
+
+//plystra:interface configuration.owner/v1
+type Interface interface {
+	Load(context.Context, Request) (Response, error)
+}
+
+type Request struct{}
+type Response struct{}
+`)
+
+	imports := `import (
+	"context"
+
+	ownerv1 "` + modulePath + `/interfaces/configuration/owner/v1"
+)`
+	fields := "\tEndpoint string\n\tLabel string\n"
+	if includeSecret {
+		imports = `import (
+	"context"
+
+	ownerv1 "` + modulePath + `/interfaces/configuration/owner/v1"
+	"github.com/plystra/kernel/configuration"
+)`
+		fields += "\tPassword configuration.Secret\n"
+	}
+	writeFile(t, filepath.Join(root, "configowner", "implementation.go"), `package configowner
+
+`+imports+`
+
+type Config struct {
+`+fields+`}
+
+type Service struct{}
+
+//plystra:implements configuration.owner/v1
+func New(Config) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Load(context.Context, ownerv1.Request) (ownerv1.Response, error) {
+	return ownerv1.Response{}, nil
+}
+`)
+	return modulePath + "/configowner.New"
 }
 
 func writeApplicationModuleDefinition(t testing.TB, root, modulePath string) {

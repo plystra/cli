@@ -17,16 +17,15 @@ import (
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/kernel/configuration"
-	"github.com/plystra/kernel/plugin/manifest"
 )
 
-func TestResolveBindsExactlyOneValidatedObjectPerSelectedPlugin(t *testing.T) {
+func TestResolveKeepsConstructorConfigurationOutOfLegacyPluginBindings(t *testing.T) {
 	t.Parallel()
 
 	inventory := configurationInventory(t)
-	context := configurationContext(t, inventory, "acme.email.smtp", "acme.optional")
+	context := configurationContext(t, inventory, "acme.optional")
 	application := configurationApplication(t, `config:
-  acme.email.smtp:
+  example.com/app/smtp.New:
     host: private.smtp.example.com
     password: {env: PLYSTRA_CONFIGURATION_RESOLUTION_MISSING}
 `)
@@ -35,37 +34,26 @@ func TestResolveBindsExactlyOneValidatedObjectPerSelectedPlugin(t *testing.T) {
 		t.Fatalf("Resolve = %#v, %v", result, err)
 	}
 	bindings := result.Bindings()
-	if got := bindingIDs(bindings); !reflect.DeepEqual(got, []string{"acme.email.smtp", "acme.optional"}) {
+	if got := bindingIDs(bindings); !reflect.DeepEqual(got, []string{"acme.optional"}) {
 		t.Fatalf("Bindings = %v", got)
-	}
-	smtp, ok := result.Binding("acme.email.smtp")
-	if !ok || !smtp.Explicit() || smtp.ModulePath() != "example.com/app" || smtp.ImportPath() != "example.com/app/smtp" || smtp.Source() != `plystra.yaml config["acme.email.smtp"]` {
-		t.Fatalf("smtp Binding = %#v, %t", smtp, ok)
-	}
-	password, ok := smtp.Schema().Lookup("password")
-	if !ok || password.Type() != manifest.ConfigSecret || !password.Required() {
-		t.Fatalf("smtp password schema = %#v, %t", password, ok)
-	}
-	data := smtp.YAML()
-	if !bytes.Contains(data, []byte("private.smtp.example.com")) || !bytes.Contains(data, []byte("PLYSTRA_CONFIGURATION_RESOLUTION_MISSING")) {
-		t.Fatalf("smtp YAML = %q", data)
-	}
-	data[0] = 'X'
-	if bytes.Equal(data, smtp.YAML()) {
-		t.Fatal("Binding YAML exposed mutable storage")
 	}
 	optional, ok := result.Binding("acme.optional")
 	if !ok || optional.Explicit() || string(optional.YAML()) != "{}\n" || !strings.Contains(optional.Source(), "implicit empty configuration") {
 		t.Fatalf("optional Binding = %#v, %t, YAML %q", optional, ok, optional.YAML())
 	}
+	data := optional.YAML()
+	data[0] = 'X'
+	if bytes.Equal(data, optional.YAML()) {
+		t.Fatal("Binding YAML exposed mutable storage")
+	}
 	if _, exists := result.Binding("acme.missing"); exists {
 		t.Fatal("Binding(missing) succeeded")
 	}
 	bindings[0] = configurationresolve.Binding{}
-	if result.Bindings()[0].PluginID() != "acme.email.smtp" {
+	if result.Bindings()[0].PluginID() != "acme.optional" {
 		t.Fatal("Bindings exposed mutable result storage")
 	}
-	for _, value := range []any{smtp, result} {
+	for _, value := range []any{optional, result} {
 		for _, formatted := range []string{fmt.Sprintf("%v", value), fmt.Sprintf("%+v", value), fmt.Sprintf("%#v", value), fmt.Sprintf("%q", value)} {
 			if !strings.Contains(formatted, "redacted") || strings.Contains(formatted, "private.smtp.example.com") || strings.Contains(formatted, "PLYSTRA_CONFIGURATION_RESOLUTION_MISSING") {
 				t.Fatalf("configuration formatting = %q", formatted)
@@ -74,75 +62,28 @@ func TestResolveBindsExactlyOneValidatedObjectPerSelectedPlugin(t *testing.T) {
 	}
 
 	changed, err := configurationresolve.Resolve(configurationApplication(t, `config:
-  acme.email.smtp:
+  example.com/app/smtp.New:
     host: changed.smtp.example.com
     password: {env: PLYSTRA_CONFIGURATION_RESOLUTION_MISSING}
 `), inventory, context)
-	if err != nil || changed.Digest() == result.Digest() {
-		t.Fatalf("changed configuration digest = %q, original %q, error %v", changed.Digest(), result.Digest(), err)
+	if err != nil || changed.Digest() != result.Digest() {
+		t.Fatalf("constructor configuration changed legacy digest = %q, original %q, error %v", changed.Digest(), result.Digest(), err)
 	}
 }
 
-func TestResolveRejectsUnselectedAndInvalidConfigurationSafely(t *testing.T) {
+func TestResolveRejectsRequiredLegacyPluginConfigurationWithoutReadingConstructorValues(t *testing.T) {
 	t.Parallel()
 
 	inventory := configurationInventory(t)
-	tests := []struct {
-		name        string
-		selected    []string
-		application string
-		reason      error
-		also        error
-	}{
-		{
-			name:        "unselected",
-			selected:    []string{"acme.optional"},
-			application: "config: {acme.email.smtp: {host: private, password: {env: SECRET_TARGET}}}\n",
-			reason:      configurationresolve.ErrUnselectedConfiguration,
-		},
-		{
-			name:        "missing required",
-			selected:    []string{"acme.email.smtp"},
-			application: "config: {}\n",
-			reason:      configurationresolve.ErrInvalidConfiguration,
-			also:        configuration.ErrMissingField,
-		},
-		{
-			name:        "unknown field",
-			selected:    []string{"acme.email.smtp"},
-			application: "config: {acme.email.smtp: {host: private, password: {env: SECRET_TARGET}, private_value: hidden-secret-value}}\n",
-			reason:      configurationresolve.ErrInvalidConfiguration,
-			also:        configuration.ErrUnknownField,
-		},
-		{
-			name:        "invalid type",
-			selected:    []string{"acme.email.smtp"},
-			application: "config: {acme.email.smtp: {host: 1, password: {env: SECRET_TARGET}}}\n",
-			reason:      configurationresolve.ErrInvalidConfiguration,
-			also:        configuration.ErrInvalidValue,
-		},
-		{
-			name:        "invalid Secret reference",
-			selected:    []string{"acme.email.smtp"},
-			application: "config: {acme.email.smtp: {host: private, password: {env: BAD=SECRET_TARGET}}}\n",
-			reason:      configurationresolve.ErrInvalidConfiguration,
-			also:        configuration.ErrInvalidValue,
-		},
+	application := configurationApplication(t, "config: {example.com/app/smtp.New: {host: private, password: {env: SECRET_TARGET}}}\n")
+	result, err := configurationresolve.Resolve(application, inventory, configurationContext(t, inventory, "acme.email.smtp"))
+	if result.Valid() || !errors.Is(err, configurationresolve.ErrResolve) || !errors.Is(err, configurationresolve.ErrInvalidConfiguration) || !errors.Is(err, configuration.ErrMissingField) {
+		t.Fatalf("Resolve = %#v, %v", result, err)
 	}
-	for _, test := range tests {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			result, err := configurationresolve.Resolve(configurationApplication(t, test.application), inventory, configurationContext(t, inventory, test.selected...))
-			if result.Valid() || !errors.Is(err, configurationresolve.ErrResolve) || !errors.Is(err, test.reason) || test.also != nil && !errors.Is(err, test.also) {
-				t.Fatalf("Resolve = %#v, %v", result, err)
-			}
-			for _, forbidden := range []string{"SECRET_TARGET", "BAD=SECRET_TARGET", "hidden-secret-value"} {
-				if strings.Contains(err.Error(), forbidden) {
-					t.Fatalf("error exposed %q: %v", forbidden, err)
-				}
-			}
-		})
+	for _, forbidden := range []string{"private", "SECRET_TARGET"} {
+		if strings.Contains(err.Error(), forbidden) {
+			t.Fatalf("error exposed %q: %v", forbidden, err)
+		}
 	}
 }
 

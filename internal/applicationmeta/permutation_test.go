@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationmeta"
-	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
+	"github.com/plystra/cli/internal/implementationinventory"
 )
 
 func TestCompositionAndMaintenanceAreDeterministicAcrossAllDependencyPermutations(t *testing.T) {
@@ -67,7 +67,7 @@ capabilities:
   use: {email.send/v1: acme.smtp.dependency-a}
   aliases: {mail.send/v1: email.send/v1}
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     endpoint: a.example
     settings: {mode: dependency-a, region: global}
     token: {env: A_TOKEN}
@@ -78,7 +78,7 @@ config:
 			ModuleVersion: "v2.0.0",
 			Manifest: composeManifest(t, `
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     port: 587
     settings:
       region: global
@@ -101,7 +101,7 @@ http: {expose: [order.create/v1]}
 capabilities:
   require: [billing.charge/v1]
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     settings:
       legacy: dependency-value
       zone: 3
@@ -114,7 +114,7 @@ config:
 capabilities:
   require: {remove: [inventory.read/v1]}
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     settings: {legacy: null}
 http:
   expose: {remove: [reports.read/v1]}
@@ -143,7 +143,7 @@ capabilities:
   use: {email.send/v1: acme.smtp.local}
   aliases: {mail.send/v1: email.send/v1}
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     endpoint: current.example
     settings: {legacy: null, mode: current}
     token: null
@@ -161,7 +161,7 @@ http:
 capabilities:
   use: {email.send/v1: acme.smtp.production}
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     endpoint: production.example
     settings: {mode: production}
 `))
@@ -186,7 +186,7 @@ capabilities:
   use: {email.send/v1: acme.smtp.customer}
   aliases: {mail.send/v1: email.send/v1}
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     endpoint: customer.example
     settings: {legacy: null, mode: customer}
     token: null
@@ -196,12 +196,17 @@ config:
 func permutationSchemaLookup(t testing.TB) applicationmeta.SchemaLookup {
 	t.Helper()
 	schema := composeSchema(t, `
-endpoint: {type: string}
-port: {type: integer}
-settings: {type: object}
-token: {type: secret}
+	Endpoint string
+	Port int64
+	Settings struct {
+		Mode string
+		Region string
+		Legacy string
+		Zone int64
+	}
+	Token configuration.Secret
 `)
-	return composeSchemaLookup(map[string]kernelmanifest.Config{"acme.smtp": schema})
+	return composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 }
 
 func compositionSnapshot(composition applicationmeta.Composition) []string {
@@ -233,7 +238,7 @@ func compositionSnapshot(composition applicationmeta.Composition) []string {
 		result = append(result, fmt.Sprintf("alias=%s=%s:%v/%t:%s@%s", alias.ID(), alias.Target(), exposure, explicit, alias.Deprecated(), alias.Source()))
 	}
 	for _, configured := range manifest.Configurations() {
-		result = append(result, fmt.Sprintf("config=%s@%s:%q", configured.PluginID(), configured.Source(), configured.YAML()))
+		result = append(result, fmt.Sprintf("config=%s@%s:%q", configured.Constructor(), configured.Source(), configured.YAML()))
 	}
 	return result
 }
@@ -242,9 +247,9 @@ func assertMaintenancePermutationDeterminism(t testing.TB, lookup applicationmet
 	t.Helper()
 	oldDependencies := []applicationmeta.Dependency{
 		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "http: {expose: [email.send/v1]}\ncapabilities: {require: [audit.write/v1]}\n")},
-		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {require: [inventory.read/v1], use: {email.send/v1: acme.smtp}, aliases: {mail.send/v1: email.send/v1}}\nconfig: {acme.smtp: {endpoint: dependency.example}}\n")},
-		{ModulePath: "example.com/c", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {require: [audit.write/v1], use: {email.send/v1: acme.smtp}, aliases: {mail.send/v1: email.send/v1}}\nconfig: {acme.smtp: {endpoint: dependency.example}}\n")},
-		{ModulePath: "example.com/d", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {acme.smtp: {port: 587}}\n")},
+		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {require: [inventory.read/v1], use: {email.send/v1: acme.smtp}, aliases: {mail.send/v1: email.send/v1}}\nconfig: {example.com/acme/smtp.New: {endpoint: dependency.example}}\n")},
+		{ModulePath: "example.com/c", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {require: [audit.write/v1], use: {email.send/v1: acme.smtp}, aliases: {mail.send/v1: email.send/v1}}\nconfig: {example.com/acme/smtp.New: {endpoint: dependency.example}}\n")},
+		{ModulePath: "example.com/d", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {port: 587}}\n")},
 	}
 	data := []byte("# current-project comment\nhttp:\n  address: \":8080\" # retained\n  expose: [kernel.health/v1]\ncapabilities:\n  require: [kernel.info/v1]\n")
 	var maintained []byte
@@ -269,9 +274,9 @@ func assertMaintenancePermutationDeterminism(t testing.TB, lookup applicationmet
 	}
 	newDependencies := []applicationmeta.Dependency{
 		{ModulePath: "example.com/a", ModuleVersion: "v1.1.0", Manifest: composeManifest(t, "capabilities: {require: [audit.write/v1, billing.charge/v1]}\n")},
-		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {use: {email.send/v1: acme.smtp}, aliases: {mail.send/v1: email.send/v1}}\nconfig: {acme.smtp: {endpoint: dependency.example}}\n")},
-		{ModulePath: "example.com/c", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {require: [audit.write/v1], use: {email.send/v1: acme.smtp}, aliases: {mail.send/v1: email.send/v1}}\nconfig: {acme.smtp: {endpoint: dependency.example}}\n")},
-		{ModulePath: "example.com/d", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {acme.smtp: {port: 587}}\n")},
+		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {use: {email.send/v1: acme.smtp}, aliases: {mail.send/v1: email.send/v1}}\nconfig: {example.com/acme/smtp.New: {endpoint: dependency.example}}\n")},
+		{ModulePath: "example.com/c", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {require: [audit.write/v1], use: {email.send/v1: acme.smtp}, aliases: {mail.send/v1: email.send/v1}}\nconfig: {example.com/acme/smtp.New: {endpoint: dependency.example}}\n")},
+		{ModulePath: "example.com/d", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {port: 587}}\n")},
 	}
 	var recomposed []byte
 	for index, ordered := range dependencyPermutations(newDependencies) {
@@ -327,10 +332,10 @@ func assertConflictPermutationDeterminism(t testing.TB, lookup applicationmeta.S
 		{
 			name: "configuration",
 			dependencies: conflictDependencies(t,
-				"config: {acme.smtp: {endpoint: one.example}}\n",
-				"config: {acme.smtp: {endpoint: two.example}}\n",
+				"config: {example.com/acme/smtp.New: {endpoint: one.example}}\n",
+				"config: {example.com/acme/smtp.New: {endpoint: two.example}}\n",
 			),
-			wantPath: `config["acme.smtp"]["endpoint"]`,
+			wantPath: `config["example.com/acme/smtp.New"]["endpoint"]`,
 		},
 		{
 			name: "set tombstone",

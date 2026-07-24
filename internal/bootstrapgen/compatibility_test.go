@@ -27,13 +27,13 @@ interfaces:
   use: {records.read/v1: example.com/acme/records.New}
   policies: {records.read/v1: {timeout: 5000ms}}
 config:
-  acme.records:
+  example.com/acme/records.New:
     endpoint: runtime-private-one
     token: {env: PRIVATE_TOKEN_ONE}
 `)
 	second := compatibilityManifest(t, `
 config:
-  acme.records:
+  example.com/acme/records.New:
     token: {env: PRIVATE_TOKEN_TWO}
     endpoint: runtime-private-two
 interfaces:

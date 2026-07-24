@@ -11,8 +11,9 @@ import (
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/generatedfiles"
-	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
+	"github.com/plystra/cli/internal/implementationinventory"
 )
 
 func TestLoadGeneratedDependencyBaselinePrefersOwnershipRecovery(t *testing.T) {
@@ -105,8 +106,8 @@ func renderDependencyBaseline(t testing.TB, capability string) ([]byte, applicat
 		ModulePath:    "example.com/platform",
 		ModuleVersion: "v1.0.0",
 		Manifest:      dependencyManifest,
-	}}, currentManifest, func(string) (kernelmanifest.Config, bool) {
-		return kernelmanifest.Config{}, false
+	}}, currentManifest, func(constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		return implementationinventory.Configuration{}, false
 	})
 	if err != nil {
 		t.Fatalf("Compose: %v", err)

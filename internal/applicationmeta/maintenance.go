@@ -32,7 +32,7 @@ const (
 	maintenanceImplementationChoice
 	maintenanceInterfacePolicy
 	maintenanceAlias
-	maintenancePluginConfig
+	maintenanceConstructorConfig
 )
 
 type maintenanceDecision struct {
@@ -42,12 +42,11 @@ type maintenanceDecision struct {
 	field       maintenanceField
 	id          capabilityid.Identifier
 	interfaceID interfaceid.Identifier
-	pluginID    string
 	providerID  string
 	constructor constructorsymbol.Symbol
 	policy      InterfacePolicy
 	alias       Alias
-	config      pluginConfigDecision
+	config      constructorConfigDecision
 	source      string
 }
 
@@ -382,13 +381,13 @@ func maintenanceDecisions(manifest Manifest, schemas SchemaLookup) ([]maintenanc
 	}
 	for _, configuration := range configurations {
 		result = append(result, maintenanceDecision{
-			path:     pluginConfigPath(configuration.pluginID, configuration.segments),
-			digest:   configuration.digest,
-			removed:  configuration.kind == pluginConfigRemoval,
-			field:    maintenancePluginConfig,
-			pluginID: configuration.pluginID,
-			config:   clonePluginConfigDecision(configuration),
-			source:   configuration.source,
+			path:        constructorConfigPath(configuration.constructor, configuration.segments),
+			digest:      configuration.digest,
+			removed:     configuration.kind == constructorConfigRemoval,
+			field:       maintenanceConstructorConfig,
+			constructor: configuration.constructor,
+			config:      cloneConstructorConfigDecision(configuration),
+			source:      configuration.source,
 		})
 	}
 	sort.Slice(result, func(left, right int) bool { return result[left].path < result[right].path })
@@ -456,7 +455,7 @@ func baselineMatchesDecision(records map[string]BaselineRecord, decision mainten
 }
 
 func cloneMaintenanceDecision(decision maintenanceDecision) maintenanceDecision {
-	decision.config = clonePluginConfigDecision(decision.config)
+	decision.config = cloneConstructorConfigDecision(decision.config)
 	return decision
 }
 
@@ -465,7 +464,7 @@ func propagateLocalConfigObjects(current, local map[string]maintenanceDecision) 
 	for changed {
 		changed = false
 		for path, decision := range current {
-			if decision.field != maintenancePluginConfig || decision.config.kind != pluginConfigObject {
+			if decision.field != maintenanceConstructorConfig || decision.config.kind != constructorConfigObject {
 				continue
 			}
 			if _, exists := local[path]; exists {
@@ -487,7 +486,7 @@ func suppressedByMaintenanceAncestor(decisions map[string]maintenanceDecision, p
 		return false
 	}
 	for candidatePath, candidate := range decisions {
-		if candidate.field != maintenancePluginConfig || candidate.config.kind == pluginConfigObject {
+		if candidate.field != maintenanceConstructorConfig || candidate.config.kind == constructorConfigObject {
 			continue
 		}
 		if strings.HasPrefix(path, candidatePath+"[") {
@@ -558,8 +557,8 @@ func maintenanceDecisionDescription(decision maintenanceDecision) string {
 		return "Interface timeout " + decision.policy.timeout.String()
 	case maintenanceAlias:
 		return "Alias target " + decision.alias.target.String()
-	case maintenancePluginConfig:
-		return pluginConfigDecisionDescription(decision.config)
+	case maintenanceConstructorConfig:
+		return constructorConfigDecisionDescription(decision.config)
 	default:
 		return "invalid decision"
 	}
@@ -674,7 +673,7 @@ func removeMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) er
 		return removeKeyedMaintenanceDecision(root, []string{"interfaces", "policies"}, decision.interfaceID.String())
 	case maintenanceAlias:
 		return removeKeyedMaintenanceDecision(root, []string{"capabilities", "aliases"}, decision.id.String())
-	case maintenancePluginConfig:
+	case maintenanceConstructorConfig:
 		return removeConfigMaintenanceDecision(root, decision.config)
 	default:
 		return errors.New("unknown configuration decision field")
@@ -714,7 +713,7 @@ func setMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) error
 			value = aliasYAMLNode(decision.alias)
 		}
 		return setKeyedMaintenanceDecision(root, []string{"capabilities", "aliases"}, decision.id.String(), value)
-	case maintenancePluginConfig:
+	case maintenanceConstructorConfig:
 		return setConfigMaintenanceDecision(root, decision.config)
 	default:
 		return errors.New("unknown configuration decision field")
@@ -818,8 +817,8 @@ func removeKeyedMaintenanceDecision(root *yaml.Node, path []string, key string) 
 	return nil
 }
 
-func setConfigMaintenanceDecision(root *yaml.Node, decision pluginConfigDecision) error {
-	path := append([]string{"config", decision.pluginID}, decision.segments...)
+func setConfigMaintenanceDecision(root *yaml.Node, decision constructorConfigDecision) error {
+	path := append([]string{"config", decision.constructor.String()}, decision.segments...)
 	parent, err := ensureMappingPath(root, path[:len(path)-1])
 	if err != nil {
 		return err
@@ -827,29 +826,29 @@ func setConfigMaintenanceDecision(root *yaml.Node, decision pluginConfigDecision
 	name := path[len(path)-1]
 	var value *yaml.Node
 	switch decision.kind {
-	case pluginConfigObject:
+	case constructorConfigObject:
 		value = mappingChild(parent, name)
 		if value != nil && value.Kind == yaml.MappingNode {
 			return nil
 		}
 		value = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	case pluginConfigRemoval:
+	case constructorConfigRemoval:
 		value = nullYAMLNode()
-	case pluginConfigValue:
+	case constructorConfigValue:
 		value, err = decodeNormalizedConfigNode(decision.yaml)
 		if err != nil {
 			return err
 		}
 	default:
-		return errors.New("invalid Plugin configuration decision")
+		return errors.New("invalid constructor configuration decision")
 	}
 	setMappingValue(parent, name, value)
 	sortYAMLMapping(parent)
 	return nil
 }
 
-func removeConfigMaintenanceDecision(root *yaml.Node, decision pluginConfigDecision) error {
-	path := append([]string{"config", decision.pluginID}, decision.segments...)
+func removeConfigMaintenanceDecision(root *yaml.Node, decision constructorConfigDecision) error {
+	path := append([]string{"config", decision.constructor.String()}, decision.segments...)
 	parent := mappingPath(root, path[:len(path)-1])
 	if parent == nil {
 		return nil

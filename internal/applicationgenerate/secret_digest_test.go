@@ -17,9 +17,10 @@ import (
 func TestResolvedSecretEnvironmentValueDoesNotAffectAnyDigest(t *testing.T) {
 	t.Parallel()
 
+	const modulePath = "example.com/acme/secret-free-digests"
 	root := t.TempDir()
-	writeApplicationModule(t, root, "example.com/acme/secret-free-digests")
-	writePlugin(t, root, "mailer", "id: acme.mailer\nprovides: [email.send/v1]\nconfig:\n  password: {type: secret, required: true}\n")
+	writeApplicationModule(t, root, modulePath)
+	writePlugin(t, root, "mailer", "id: acme.mailer\nprovides: [email.send/v1]\n")
 	writeCapability(t, root, "mailer", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 	writeFile(t, filepath.Join(root, "interfaces", "order", "create", "v1", "interface.go"), `package createv1
 
@@ -50,9 +51,31 @@ examples:
     request: {order_id: ord_123}
     response: {accepted: true}
 `)
+	writeFile(t, filepath.Join(root, "configowner", "implementation.go"), `package configowner
+
+import (
+	"context"
+
+	createv1 "example.com/acme/secret-free-digests/interfaces/order/create/v1"
+	"github.com/plystra/kernel/configuration"
+)
+
+type Config struct {
+	Password configuration.Secret
+}
+
+type Service struct{}
+
+//plystra:implements order.create/v1
+func New(Config) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Create(context.Context, createv1.Request) (createv1.Response, error) {
+	return createv1.Response{}, nil
+}
+`)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `capabilities: {require: [email.send/v1]}
 config:
-  acme.mailer:
+  example.com/acme/secret-free-digests/configowner.New:
     password: {env: PLYSTRA_DIGEST_SECRET}
 `)
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -17,9 +18,11 @@ import (
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/configurationgen"
+	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationactivation"
 	"github.com/plystra/cli/internal/generationresolution"
+	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
@@ -157,9 +160,9 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		`"protobuf_wire_map_digest":"` + options.ManifestProvenance.ProtobufWireMapDigest() + `"`,
 		`"path":"http.expose[\"diagnostics.internal/v1\"]"`,
 		`"removed":true`,
-		`"path":"config[\"acme.business\"][\"password\"]"`,
-		`"path":"config[\"acme.business\"][\"legacy\"]"`,
-		`example.com/platform@v1.2.3/plystra.yaml config[\"acme.business\"][\"password\"]`,
+		`"path":"config[\"example.com/acme/business.New\"][\"password\"]"`,
+		`"path":"config[\"example.com/acme/business.New\"][\"legacy\"]"`,
+		`example.com/platform@v1.2.3/plystra.yaml config[\"example.com/acme/business.New\"][\"password\"]`,
 	} {
 		if !strings.Contains(manifest, required) {
 			t.Fatalf("Alias manifest omits %q:\n%s", required, manifest)
@@ -678,8 +681,8 @@ func applicationModelDigest(t testing.TB, options applicationgen.ApplicationMode
 }
 
 func testComposition() applicationmeta.Composition {
-	composition, err := applicationmeta.Compose(nil, applicationmeta.Manifest{}, func(string) (manifest.Config, bool) {
-		return manifest.Config{}, false
+	composition, err := applicationmeta.Compose(nil, applicationmeta.Manifest{}, func(constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		return implementationinventory.Configuration{}, false
 	})
 	if err != nil {
 		panic(err)
@@ -689,11 +692,8 @@ func testComposition() applicationmeta.Composition {
 
 func dependencyComposition(t testing.TB) applicationmeta.Composition {
 	t.Helper()
-	schema, err := manifest.ParseConfig([]byte("legacy: {type: string}\npassword: {type: secret}\n"))
-	if err != nil {
-		t.Fatalf("manifest.ParseConfig: %v", err)
-	}
-	dependency, err := applicationmeta.Parse([]byte("http: {expose: {remove: [diagnostics.internal/v1]}}\nconfig: {acme.business: {legacy: null, password: {env: PRIVATE_APPLICATION_TOKEN}}}\n"))
+	schema := applicationConfigurationSchema(t)
+	dependency, err := applicationmeta.Parse([]byte("http: {expose: {remove: [diagnostics.internal/v1]}}\nconfig: {example.com/acme/business.New: {legacy: null, password: {env: PRIVATE_APPLICATION_TOKEN}}}\n"))
 	if err != nil {
 		t.Fatalf("applicationmeta.Parse dependency: %v", err)
 	}
@@ -701,13 +701,39 @@ func dependencyComposition(t testing.TB) applicationmeta.Composition {
 		ModulePath:    "example.com/platform",
 		ModuleVersion: "v1.2.3",
 		Manifest:      dependency,
-	}}, applicationmeta.Manifest{}, func(pluginID string) (manifest.Config, bool) {
-		return schema, pluginID == "acme.business"
+	}}, applicationmeta.Manifest{}, func(constructor constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		return schema, constructor.String() == businessModulePath+".New"
 	})
 	if err != nil {
 		t.Fatalf("applicationmeta.Compose: %v", err)
 	}
 	return composition
+}
+
+func applicationConfigurationSchema(t testing.TB) implementationinventory.Configuration {
+	t.Helper()
+	compiled := types.NewPackage(businessModulePath, "business")
+	secretPackage := types.NewPackage("github.com/plystra/kernel/configuration", "configuration")
+	secretName := types.NewTypeName(token.NoPos, secretPackage, "Secret", nil)
+	secret := types.NewNamed(secretName, types.NewStruct(nil, nil), nil)
+	secretPackage.Scope().Insert(secretName)
+	secretPackage.MarkComplete()
+
+	configName := types.NewTypeName(token.NoPos, compiled, "Config", nil)
+	config := types.NewNamed(configName, types.NewStruct([]*types.Var{
+		types.NewVar(token.NoPos, compiled, "Legacy", types.Typ[types.String]),
+		types.NewVar(token.NoPos, compiled, "Password", secret),
+	}, []string{`yaml:"legacy"`, `yaml:"password"`}), nil)
+	compiled.Scope().Insert(configName)
+	parameters := types.NewTuple(types.NewVar(token.NoPos, compiled, "configuration", config))
+	constructor := types.NewFunc(token.NoPos, compiled, "New", types.NewSignatureType(nil, nil, nil, parameters, nil, false))
+	compiled.Scope().Insert(constructor)
+
+	schema, exists, err := implementationinventory.CompileConfiguration(compiled, constructor)
+	if err != nil || !exists {
+		t.Fatalf("CompileConfiguration = %#v, %t, %v", schema, exists, err)
+	}
+	return schema
 }
 
 func selectedProviderInputs() []assemblygen.ProviderInput {

@@ -24,7 +24,7 @@ capabilities:
   aliases:
     mail.send/v1: email.send/v1
 config:
-  acme.email.old:
+  example.com/acme/email/old.New:
     token: {env: SMTP_TOKEN}
 `)
 	id := mustProviderChoiceID(t, "email.send/v1")

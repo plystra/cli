@@ -245,7 +245,7 @@ http:
 	}
 }
 
-func TestParseNormalizesAndRedactsPluginConfiguration(t *testing.T) {
+func TestParseNormalizesAndRedactsConstructorConfiguration(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -253,9 +253,9 @@ func TestParseNormalizesAndRedactsPluginConfiguration(t *testing.T) {
 		privateHost = "private.smtp.example.com"
 	)
 	manifest, err := applicationmeta.Parse([]byte(`config:
-  acme.profile:
+  example.com/acme/profile.New:
     enabled: true
-  acme.email.smtp:
+  example.com/acme/email/smtp.New:
     host: private.smtp.example.com
     password: {env: SMTP_PASSWORD_PRIVATE_TARGET}
 `))
@@ -263,11 +263,11 @@ func TestParseNormalizesAndRedactsPluginConfiguration(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 	configurations := manifest.Configurations()
-	if len(configurations) != 2 || configurations[0].PluginID() != "acme.email.smtp" || configurations[1].PluginID() != "acme.profile" {
+	if len(configurations) != 2 || configurations[0].Constructor().String() != "example.com/acme/email/smtp.New" || configurations[1].Constructor().String() != "example.com/acme/profile.New" {
 		t.Fatalf("Configurations = %#v", configurations)
 	}
-	smtp, ok := manifest.Configuration("acme.email.smtp")
-	if !ok || smtp.Source() != `plystra.yaml config["acme.email.smtp"]` {
+	smtp, ok := manifest.Configuration(mustConstructorSymbol(t, "example.com/acme/email/smtp.New"))
+	if !ok || smtp.Source() != `plystra.yaml config["example.com/acme/email/smtp.New"]` {
 		t.Fatalf("Configuration(smtp) = %#v, %t", smtp, ok)
 	}
 	data := smtp.YAML()
@@ -278,11 +278,11 @@ func TestParseNormalizesAndRedactsPluginConfiguration(t *testing.T) {
 	if bytes.Equal(data, smtp.YAML()) {
 		t.Fatal("Configuration YAML exposed mutable storage")
 	}
-	configurations[0] = applicationmeta.PluginConfiguration{}
-	if manifest.Configurations()[0].PluginID() != "acme.email.smtp" {
+	configurations[0] = applicationmeta.ConstructorConfiguration{}
+	if manifest.Configurations()[0].Constructor().String() != "example.com/acme/email/smtp.New" {
 		t.Fatal("Configurations exposed mutable storage")
 	}
-	if _, exists := manifest.Configuration("acme.missing"); exists {
+	if _, exists := manifest.Configuration(mustConstructorSymbol(t, "example.com/acme/missing.New")); exists {
 		t.Fatal("Configuration(missing) succeeded")
 	}
 	for _, value := range []any{smtp, manifest} {
@@ -337,7 +337,7 @@ func TestParseAllowsEmptyOptionalSections(t *testing.T) {
 		[]byte("capabilities:\n  aliases: {}\n"),
 		[]byte("capabilities: {require: {add: [], remove: []}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n"),
 		[]byte("interfaces: {policies: {}}\n"),
-		[]byte("config: {acme.plugin: null}\n"),
+		[]byte("config: {example.com/acme/plugin.New: null}\n"),
 		[]byte("timeouts: {startup: null}\n"),
 	} {
 		manifest, err := applicationmeta.Parse(data)
@@ -409,9 +409,9 @@ func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 		{name: "NUL startup timeout", data: `timeouts: {startup: "2m\0"}` + "\n", want: "no NUL"},
 		{name: "config type", data: "config: []\n", want: "config must be a mapping"},
 		{name: "non-string config key", data: "config:\n  ? [one, two]\n  : {}\n", want: "non-string key"},
-		{name: "invalid config Plugin ID", data: "config: {Acme.Plugin: {}}\n", want: "not a canonical Plugin ID"},
-		{name: "duplicate config Plugin ID", data: "config:\n  acme.plugin: {}\n  acme.plugin: {}\n", want: "duplicate key"},
-		{name: "plugin config type", data: "config: {acme.plugin: []}\n", want: `config["acme.plugin"] must be a mapping`},
+		{name: "invalid config constructor", data: "config: {example.com/acme/plugin.new: {}}\n", want: "not a fully qualified constructor symbol"},
+		{name: "duplicate config constructor", data: "config:\n  example.com/acme/plugin.New: {}\n  example.com/acme/plugin.New: {}\n", want: "duplicate key"},
+		{name: "constructor config type", data: "config: {example.com/acme/plugin.New: []}\n", want: `config["example.com/acme/plugin.New"] must be a mapping`},
 		{name: "capabilities type", data: "capabilities: []\n", want: "capabilities must be a mapping"},
 		{name: "unknown capabilities key", data: "capabilities: {providers: {}}\n", want: `unknown key "providers"`},
 		{name: "require sparse key", data: "capabilities: {require: {append: []}}\n", want: `unknown sparse-edit key "append"`},
@@ -494,8 +494,8 @@ func FuzzParseApplicationManifest(f *testing.F) {
 		"capabilities: {aliases: {}}\n",
 		"capabilities: {require: {remove: [order.create/v1]}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n",
 		"interfaces: {policies: {email.send/v1: {timeout: 5000ms}, audit.write/v1: null}}\n",
-		"config: {acme.plugin: null}\n",
-		"config: {acme.plugin: {settings: {legacy: null, nested: {enabled: true}}}}\n",
+		"config: {example.com/acme/plugin.New: null}\n",
+		"config: {example.com/acme/plugin.New: {settings: {legacy: null, nested: {enabled: true}}}}\n",
 		"capabilities: {require: [kernel.health/v1, order.create/v1], use: {order.create/v1: acme.orders}, aliases: {}}\n",
 		aliasYAML("authn.login/v1: authn.login.password/v1"),
 		aliasYAML("account.sign-in/v1: {target: authn.login.password/v1, expose: {go: true, http: false, javascript: false}, deprecated: {message: old}}"),

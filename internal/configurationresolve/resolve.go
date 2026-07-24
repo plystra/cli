@@ -144,25 +144,15 @@ func (Result) LogValue() slog.Value {
 	return slog.StringValue("<redacted-plugin-configurations>")
 }
 
-// Resolve validates exactly one private runtime object for every final
-// selected Plugin ID. Omitted objects normalize to an empty mapping so
-// declaration defaults and optional fields work; required fields still fail.
-// Objects for unselected plugins are rejected as stale configuration.
-func Resolve(application applicationmeta.Manifest, inventory plugininventory.Index, context generation.Context) (Result, error) {
+// Resolve retains the legacy selected-Plugin assembly boundary while the
+// Interface architecture is removed gate by gate. Constructor-keyed Config
+// belongs exclusively to generated Implementation assembly and is never
+// interpreted as legacy Plugin configuration here.
+func Resolve(_ applicationmeta.Manifest, inventory plugininventory.Index, context generation.Context) (Result, error) {
 	if len(context.CanonicalJSON()) == 0 || context.Digest() == "" {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, ErrInvalidContext)
 	}
 	selected := context.Plugins()
-	selectedIDs := make(map[string]struct{}, len(selected))
-	for _, plugin := range selected {
-		selectedIDs[plugin.ID().String()] = struct{}{}
-	}
-	for _, configured := range application.Configurations() {
-		if _, exists := selectedIDs[configured.PluginID()]; !exists {
-			return Result{}, fmt.Errorf("%w: %w %q", ErrResolve, ErrUnselectedConfiguration, configured.PluginID())
-		}
-	}
-
 	bindings := make([]Binding, 0, len(selected))
 	hash := sha256.New()
 	writeDigestRecord(hash, []byte("plystra-configuration-resolution-v1"))
@@ -172,13 +162,8 @@ func Resolve(application applicationmeta.Manifest, inventory plugininventory.Ind
 		if !exists {
 			return Result{}, fmt.Errorf("%w: %w %q", ErrResolve, ErrMissingPlugin, pluginID)
 		}
-		configured, explicit := application.Configuration(pluginID)
 		data := []byte("{}\n")
 		source := "implicit empty configuration for selected plugin " + pluginID
-		if explicit {
-			data = configured.YAML()
-			source = configured.Source()
-		}
 		if err := configuration.Validate(plugin.Config(), data); err != nil {
 			return Result{}, fmt.Errorf("%w: %w for plugin %q at %s: %w", ErrResolve, ErrInvalidConfiguration, pluginID, source, err)
 		}
@@ -190,7 +175,7 @@ func Resolve(application applicationmeta.Manifest, inventory plugininventory.Ind
 			source:        source,
 			schema:        plugin.Config(),
 			yaml:          append([]byte(nil), data...),
-			explicit:      explicit,
+			explicit:      false,
 		}
 		bindings = append(bindings, binding)
 		writeDigestRecord(hash, []byte(pluginID))

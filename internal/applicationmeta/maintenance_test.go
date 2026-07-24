@@ -8,14 +8,14 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationmeta"
-	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
+	"github.com/plystra/cli/internal/implementationinventory"
 )
 
 func TestMaintainDependencyConfigurationMaterializesBaselineWithoutOverwritingLocalValues(t *testing.T) {
 	t.Parallel()
 
-	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{
-		"acme.smtp": composeSchema(t, "host: {type: string}\nsettings: {type: object}\ntoken: {type: secret}\n"),
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
+		"example.com/acme/smtp.New": composeSchema(t, "\tHost string\n\tSettings struct { Region string }\n\tToken configuration.Secret\n"),
 	})
 	dependencies := []applicationmeta.Dependency{{
 		ModulePath:    "example.com/platform",
@@ -31,7 +31,7 @@ capabilities:
   aliases:
     mail.send/v1: email.send/v1
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: dependency.example
     settings:
       region: dependency
@@ -55,7 +55,7 @@ capabilities:
     email.send/v1: local.smtp # explicit local Provider
   aliases: {}
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: local.example # explicit local value
 `)
 
@@ -67,7 +67,7 @@ config:
 		t.Fatal("initial dependency baseline was not materialized")
 	}
 	localPaths := maintained.LocalPaths()
-	for _, expected := range []string{`http.expose["local.health/v1"]`, `capabilities.use["email.send/v1"]`, `config["acme.smtp"]["host"]`} {
+	for _, expected := range []string{`http.expose["local.health/v1"]`, `capabilities.use["email.send/v1"]`, `config["example.com/acme/smtp.New"]["host"]`} {
 		if !slices.Contains(localPaths, expected) {
 			t.Fatalf("local paths %v omit %s", localPaths, expected)
 		}
@@ -128,8 +128,8 @@ config:
 func TestMaintainDependencyConfigurationFollowsChangedBaselineAndPreservesExplicitEdits(t *testing.T) {
 	t.Parallel()
 
-	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{
-		"acme.smtp": composeSchema(t, "host: {type: string}\nsettings: {type: object}\ntoken: {type: secret}\n"),
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
+		"example.com/acme/smtp.New": composeSchema(t, "\tHost string\n\tSettings struct { Inherited string; Introduced string; Retained string }\n\tToken configuration.Secret\n"),
 	})
 	oldDependencies := []applicationmeta.Dependency{{
 		ModulePath:    "example.com/platform",
@@ -140,7 +140,7 @@ capabilities:
   require: [email.send/v1]
   use: {email.send/v1: acme.smtp}
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: old.example
     settings:
       inherited: old
@@ -168,7 +168,7 @@ capabilities:
   require: [email.send/v1, audit.write/v1]
   use: {email.send/v1: acme.smtp}
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: new.example
     settings:
       inherited: new
@@ -213,13 +213,13 @@ config:
 func TestMaintainDependencyConfigurationRequiresExplicitRemovalAndConflictResolution(t *testing.T) {
 	t.Parallel()
 
-	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{
-		"acme.smtp": composeSchema(t, "host: {type: string}\n"),
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
+		"example.com/acme/smtp.New": composeSchema(t, "\tHost string\n"),
 	})
 	oldDependencies := []applicationmeta.Dependency{{
 		ModulePath:    "example.com/old",
 		ModuleVersion: "v1.0.0",
-		Manifest:      composeManifest(t, "capabilities: {use: {email.send/v1: acme.smtp}}\nconfig: {acme.smtp: {host: old.example}}\n"),
+		Manifest:      composeManifest(t, "capabilities: {use: {email.send/v1: acme.smtp}}\nconfig: {example.com/acme/smtp.New: {host: old.example}}\n"),
 	}}
 	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("{}\n"), applicationmeta.DependencyBaseline{}, oldDependencies, lookup)
 	if err != nil {
@@ -234,11 +234,11 @@ func TestMaintainDependencyConfigurationRequiresExplicitRemovalAndConflictResolu
 		t.Fatalf("test did not remove inherited host:\n%s", initial.Data())
 	}
 	_, err = applicationmeta.MaintainDependencyConfiguration(withoutHost, oldComposition.DependencyBaseline(), oldDependencies, lookup)
-	if !errors.Is(err, applicationmeta.ErrAmbiguousConfigurationOwnership) || !strings.Contains(err.Error(), `config["acme.smtp"]["host"]`) {
+	if !errors.Is(err, applicationmeta.ErrAmbiguousConfigurationOwnership) || !strings.Contains(err.Error(), `config["example.com/acme/smtp.New"]["host"]`) {
 		t.Fatalf("implicit deletion error = %v", err)
 	}
 	conflicting := []applicationmeta.Dependency{
-		{ModulePath: "example.com/a", ModuleVersion: "v2.0.0", Manifest: composeManifest(t, "capabilities: {use: {email.send/v1: acme.smtp}}\nconfig: {acme.smtp: {host: new.example}}\n")},
+		{ModulePath: "example.com/a", ModuleVersion: "v2.0.0", Manifest: composeManifest(t, "capabilities: {use: {email.send/v1: acme.smtp}}\nconfig: {example.com/acme/smtp.New: {host: new.example}}\n")},
 		{ModulePath: "example.com/b", ModuleVersion: "v2.0.0", Manifest: composeManifest(t, "capabilities: {use: {email.send/v1: acme.other}}\n")},
 	}
 	_, err = applicationmeta.MaintainDependencyConfiguration(initial.Data(), oldComposition.DependencyBaseline(), conflicting, lookup)

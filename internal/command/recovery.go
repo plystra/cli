@@ -62,7 +62,6 @@ const (
 	diagnosticConfigurationInheritedConflict     = diagnosticcode.ConfigurationInheritedConflict
 	diagnosticConfigurationOwnershipAmbiguous    = diagnosticcode.ConfigurationOwnershipAmbiguous
 	diagnosticHTTPTransportSelectionInvalid      = diagnosticcode.HTTPTransportSelectionInvalid
-	diagnosticPluginConfigurationSchemaInvalid   = diagnosticcode.PluginConfigurationSchemaInvalid
 	diagnosticEnvironmentOverlayInvalid          = diagnosticcode.EnvironmentOverlayInvalid
 	diagnosticConfigurationInvalid               = diagnosticcode.ConfigurationInvalid
 	diagnosticPluginConfigurationUnselected      = diagnosticcode.PluginConfigurationUnselected
@@ -113,6 +112,11 @@ const (
 	diagnosticProjectConcurrentChange            = diagnosticcode.ProjectConcurrentChange
 	diagnosticConfigurationCompositionDrift      = diagnosticcode.ConfigurationCompositionDrift
 	diagnosticGeneratedDrift                     = diagnosticcode.GeneratedDrift
+)
+
+const (
+	diagnosticConstructorConfigurationSchemaInvalid = diagnosticcode.ConstructorConfigurationSchemaInvalid
+	diagnosticConstructorConfigurationValuesInvalid = diagnosticcode.ConstructorConfigurationValuesInvalid
 )
 
 func commandRecoveryContext(configurationPath, environmentName string, environment []string) recoveryContext {
@@ -241,7 +245,9 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, applicationmeta.ErrHTTPTransportSelection):
 		return recoveryDiagnostic(diagnosticHTTPTransportSelectionInvalid, "Enable a supported transport in "+context.configurationTarget()+" or remove the public exposure, then regenerate.")
 	case errors.Is(err, applicationmeta.ErrConfigurationSchema):
-		return recoveryDiagnostic(diagnosticPluginConfigurationSchemaInvalid, "Declare the reported Plugin configuration field in plugin.yaml, then rerun the command.")
+		return recoveryDiagnostic(diagnosticConstructorConfigurationSchemaInvalid, "Use the fully qualified symbol of a discovered constructor with a compiled Go Config schema in "+context.configurationTarget()+", or remove that constructor configuration entry, then rerun the command.")
+	case errors.Is(err, applicationmeta.ErrConfigurationValues):
+		return recoveryDiagnostic(diagnosticConstructorConfigurationValuesInvalid, "Correct the reported constructor configuration field in "+context.configurationTarget()+" to match its compiled Go Config field type, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrApplyOverlay):
 		return recoveryDiagnostic(diagnosticEnvironmentOverlayInvalid, invalidConfigurationRecovery(context))
 	case errors.Is(err, applicationmeta.ErrInvalidManifest), errors.Is(err, configurationresolve.ErrInvalidConfiguration):

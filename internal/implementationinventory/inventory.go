@@ -190,7 +190,7 @@ func Build(inputs []Input, interfaces []InterfaceInput) (Index, error) {
 		if !validFunction || function.Pkg() != input.Types || !function.Exported() {
 			return Index{}, fmt.Errorf("%w: constructor symbol %s does not identify an exported package-level function in compiled type information", ErrInvalidInput, symbol)
 		}
-		configuration, hasConfig, configurationErr := validateConfiguration(input.Types, function)
+		configuration, hasConfig, configurationErr := CompileConfiguration(input.Types, function)
 		if configurationErr != nil {
 			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidConfiguration, symbol, inputSource(input), configurationErr)
 		}

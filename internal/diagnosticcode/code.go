@@ -20,7 +20,6 @@ const (
 	ConfigurationInheritedConflict     = Prefix + "CONFIGURATION-INHERITED-CONFLICT"
 	ConfigurationOwnershipAmbiguous    = Prefix + "CONFIGURATION-OWNERSHIP-AMBIGUOUS"
 	HTTPTransportSelectionInvalid      = Prefix + "HTTP-TRANSPORT-SELECTION-INVALID"
-	PluginConfigurationSchemaInvalid   = Prefix + "PLUGIN-CONFIGURATION-SCHEMA-INVALID"
 	EnvironmentOverlayInvalid          = Prefix + "ENVIRONMENT-OVERLAY-INVALID"
 	ConfigurationInvalid               = Prefix + "CONFIGURATION-INVALID"
 	PluginConfigurationUnselected      = Prefix + "PLUGIN-CONFIGURATION-UNSELECTED"
@@ -71,6 +70,11 @@ const (
 	ProjectConcurrentChange            = Prefix + "PROJECT-CONCURRENT-CHANGE"
 	ConfigurationCompositionDrift      = Prefix + "CONFIGURATION-COMPOSITION-DRIFT"
 	GeneratedDrift                     = Prefix + "GENERATED-DRIFT"
+)
+
+const (
+	ConstructorConfigurationSchemaInvalid = Prefix + "CONSTRUCTOR-CONFIGURATION-SCHEMA-INVALID"
+	ConstructorConfigurationValuesInvalid = Prefix + "CONSTRUCTOR-CONFIGURATION-VALUES-INVALID"
 )
 
 // Valid reports whether value is one bounded canonical Plystra diagnostic

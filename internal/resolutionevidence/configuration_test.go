@@ -2,15 +2,18 @@ package resolutionevidence_test
 
 import (
 	"bytes"
+	"go/token"
+	"go/types"
 	"slices"
 	"strings"
 	"testing"
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/constructorsymbol"
+	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/providerresolution"
 	"github.com/plystra/cli/internal/resolutionevidence"
-	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 )
 
 func TestBuildRecordsConfigurationOwnershipAndReplacementSafeProvenance(t *testing.T) {
@@ -27,7 +30,7 @@ interfaces:
   require: [audit.write/v1]
   use: {email.send/v1: github.com/acme/smtp.New}
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: dependency.private.example
 `),
 		},
@@ -39,7 +42,7 @@ interfaces:
   require: [audit.write/v1]
   use: {email.send/v1: github.com/acme/smtp.New}
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: dependency.private.example
 `),
 		},
@@ -49,7 +52,7 @@ http: {address: ":8080"}
 interfaces:
   use: {email.send/v1: example.com/app/local.New}
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: current.private.example
     password: {env: CURRENT_PRIVATE_PASSWORD}
 `)
@@ -111,7 +114,7 @@ config:
 		t.Fatalf("replacement-safe dependency sources = %#v", sources)
 	}
 
-	host := configurationField(t, first, `config["acme.smtp"]["host"]`)
+	host := configurationField(t, first, `config["example.com/acme/smtp.New"]["host"]`)
 	if !host.Effective() || host.Owner() != resolutionevidence.ConfigurationOwnerRoot || host.Summary() != "string" || host.Removed() {
 		t.Fatalf("root replacement = %#v", host)
 	}
@@ -119,7 +122,7 @@ config:
 	if len(contributions) != 2 || contributions[0].Owner() != resolutionevidence.ConfigurationOwnerDependency || contributions[0].Effective() || contributions[1].Owner() != resolutionevidence.ConfigurationOwnerRoot || !contributions[1].Effective() || contributions[1].Sources()[0].Path() != "plystra.yaml" {
 		t.Fatalf("root replacement contributions = %#v", contributions)
 	}
-	password := configurationField(t, first, `config["acme.smtp"]["password"]`)
+	password := configurationField(t, first, `config["example.com/acme/smtp.New"]["password"]`)
 	if password.Summary() != "secret-reference" || password.Owner() != resolutionevidence.ConfigurationOwnerRoot {
 		t.Fatalf("Secret reference evidence = %#v", password)
 	}
@@ -169,7 +172,7 @@ func TestBuildRecordsEnvironmentRemovalAndSuppressedDescendants(t *testing.T) {
 		ModuleVersion: "v1.0.0",
 		Manifest: configurationManifest(t, "plystra.yaml", `
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: dependency.private.example
     settings:
       nested:
@@ -178,7 +181,7 @@ config:
 	}}
 	root := configurationManifest(t, "plystra.yaml", `
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: root.private.example
     settings:
       nested:
@@ -186,7 +189,7 @@ config:
 `)
 	overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte(`
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: production.private.example
     settings: null
 `))
@@ -216,18 +219,18 @@ config:
 	if !exists || selection.Mode() != generation.ConfigurationModeEnvironment || selection.Environment() != "production" || selection.SelectedPath() != "plystra.production.yaml" {
 		t.Fatalf("environment selection = %#v, %t", selection, exists)
 	}
-	host := configurationField(t, evidence, `config["acme.smtp"]["host"]`)
+	host := configurationField(t, evidence, `config["example.com/acme/smtp.New"]["host"]`)
 	if host.Owner() != resolutionevidence.ConfigurationOwnerEnvironment || host.Summary() != "string" || len(host.Contributors()) != 3 {
 		t.Fatalf("environment replacement = %#v", host)
 	}
-	settings := configurationField(t, evidence, `config["acme.smtp"]["settings"]`)
+	settings := configurationField(t, evidence, `config["example.com/acme/smtp.New"]["settings"]`)
 	if !settings.Effective() || !settings.Removed() || settings.Owner() != resolutionevidence.ConfigurationOwnerEnvironment || settings.Summary() != "removal" {
 		t.Fatalf("environment removal = %#v", settings)
 	}
 	for _, path := range []string{
-		`config["acme.smtp"]["settings"]["nested"]`,
-		`config["acme.smtp"]["settings"]["nested"]["dependency"]`,
-		`config["acme.smtp"]["settings"]["nested"]["root"]`,
+		`config["example.com/acme/smtp.New"]["settings"]["nested"]`,
+		`config["example.com/acme/smtp.New"]["settings"]["nested"]["dependency"]`,
+		`config["example.com/acme/smtp.New"]["settings"]["nested"]["root"]`,
 	} {
 		field := configurationField(t, evidence, path)
 		if field.Effective() || field.Owner() != "" || field.Digest() != "" || field.Summary() != "" {
@@ -253,9 +256,9 @@ func TestBuildFullReplacementExcludesRootConfigurationLayer(t *testing.T) {
 	dependencies := []applicationmeta.Dependency{{
 		ModulePath:    "example.com/platform",
 		ModuleVersion: "v1.0.0",
-		Manifest:      configurationManifest(t, "plystra.yaml", "config: {acme.smtp: {host: dependency.private.example}}\n"),
+		Manifest:      configurationManifest(t, "plystra.yaml", "config: {example.com/acme/smtp.New: {host: dependency.private.example}}\n"),
 	}}
-	selected := configurationManifest(t, "deploy/customer config.yaml", "config: {acme.smtp: {host: customer.private.example, password: {env: CUSTOMER_PRIVATE_PASSWORD}}}\n")
+	selected := configurationManifest(t, "deploy/customer config.yaml", "config: {example.com/acme/smtp.New: {host: customer.private.example, password: {env: CUSTOMER_PRIVATE_PASSWORD}}}\n")
 	composition, err := applicationmeta.Compose(dependencies, selected, lookup)
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
@@ -282,7 +285,7 @@ func TestBuildFullReplacementExcludesRootConfigurationLayer(t *testing.T) {
 			}
 		}
 	}
-	host := configurationField(t, evidence, `config["acme.smtp"]["host"]`)
+	host := configurationField(t, evidence, `config["example.com/acme/smtp.New"]["host"]`)
 	if host.Owner() != resolutionevidence.ConfigurationOwnerExplicit || host.Contributors()[len(host.Contributors())-1].Sources()[0].Path() != "deploy/customer config.yaml" {
 		t.Fatalf("full-replacement host = %#v", host)
 	}
@@ -399,16 +402,36 @@ func configurationEvidenceInput(
 
 func configurationSchemaLookup(t testing.TB) applicationmeta.SchemaLookup {
 	t.Helper()
-	schema, err := kernelmanifest.ParseConfig([]byte(`
-host: {type: string}
-password: {type: secret}
-settings: {type: object}
-`))
-	if err != nil {
-		t.Fatalf("ParseConfig: %v", err)
+	compiled := types.NewPackage("example.com/acme/smtp", "smtp")
+	secretPackage := types.NewPackage("github.com/plystra/kernel/configuration", "configuration")
+	secretName := types.NewTypeName(token.NoPos, secretPackage, "Secret", nil)
+	secret := types.NewNamed(secretName, types.NewStruct(nil, nil), nil)
+	secretPackage.Scope().Insert(secretName)
+	secretPackage.MarkComplete()
+
+	nested := types.NewStruct([]*types.Var{
+		types.NewVar(token.NoPos, compiled, "Dependency", types.Typ[types.String]),
+		types.NewVar(token.NoPos, compiled, "Root", types.Typ[types.String]),
+	}, []string{`yaml:"dependency"`, `yaml:"root"`})
+	settings := types.NewStruct([]*types.Var{
+		types.NewVar(token.NoPos, compiled, "Nested", nested),
+	}, []string{`yaml:"nested"`})
+	configName := types.NewTypeName(token.NoPos, compiled, "Config", nil)
+	config := types.NewNamed(configName, types.NewStruct([]*types.Var{
+		types.NewVar(token.NoPos, compiled, "Host", types.Typ[types.String]),
+		types.NewVar(token.NoPos, compiled, "Password", secret),
+		types.NewVar(token.NoPos, compiled, "Settings", settings),
+	}, []string{`yaml:"host"`, `yaml:"password"`, `yaml:"settings"`}), nil)
+	compiled.Scope().Insert(configName)
+	parameters := types.NewTuple(types.NewVar(token.NoPos, compiled, "configuration", config))
+	constructor := types.NewFunc(token.NoPos, compiled, "New", types.NewSignatureType(nil, nil, nil, parameters, nil, false))
+	compiled.Scope().Insert(constructor)
+	schema, exists, err := implementationinventory.CompileConfiguration(compiled, constructor)
+	if err != nil || !exists {
+		t.Fatalf("CompileConfiguration = %#v, %t, %v", schema, exists, err)
 	}
-	return func(pluginID string) (kernelmanifest.Config, bool) {
-		return schema, pluginID == "acme.smtp"
+	return func(symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		return schema, symbol.String() == "example.com/acme/smtp.New"
 	}
 }
 

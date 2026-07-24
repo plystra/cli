@@ -13,8 +13,8 @@ import (
 	"github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceid"
-	"github.com/plystra/cli/internal/pluginid"
 )
 
 type configurationCandidate struct {
@@ -484,7 +484,10 @@ func validConfigurationFieldPath(value string) bool {
 		}
 	}
 	keys, ok := configurationPathKeys(value, "config")
-	if !ok || len(keys) == 0 || pluginid.Validate(keys[0]) != nil {
+	if !ok || len(keys) == 0 {
+		return false
+	}
+	if _, err := constructorsymbol.Parse(keys[0]); err != nil {
 		return false
 	}
 	return true

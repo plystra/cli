@@ -11,8 +11,9 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/constructorsymbol"
+	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceid"
-	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 )
 
 var (
@@ -24,9 +25,17 @@ var (
 	// ErrInheritedConflict reports incompatible dependency declarations that
 	// the current Project did not explicitly replace.
 	ErrInheritedConflict = errors.New("inherited Project configuration conflict")
-	// ErrConfigurationSchema reports configuration for a Plugin without one
-	// visible machine-readable declaration.
-	ErrConfigurationSchema = errors.New("plugin configuration schema unavailable")
+	// ErrConfigurationSchema reports configuration for a constructor without
+	// one compiled same-package Config schema.
+	ErrConfigurationSchema = errors.New("constructor configuration schema unavailable")
+	// ErrConfigurationValues reports constructor configuration that does not
+	// conform to its compiled Go Config schema. Values never enter this error.
+	ErrConfigurationValues = errors.New("invalid constructor configuration values")
+	// ErrConfigurationUnknownField reports an undeclared configuration field.
+	ErrConfigurationUnknownField = errors.New("unknown constructor configuration field")
+	// ErrConfigurationInvalidValue reports a value that does not match its
+	// compiled Go type. The value and Secret reference target remain redacted.
+	ErrConfigurationInvalidValue = errors.New("invalid constructor configuration field value")
 )
 
 // Dependency is one dependency Project's parsed root configuration and stable
@@ -38,9 +47,9 @@ type Dependency struct {
 	Manifest      Manifest
 }
 
-// SchemaLookup returns the machine-readable configuration declaration for one
-// exact visible Plugin ID.
-type SchemaLookup func(pluginID string) (kernelmanifest.Config, bool)
+// SchemaLookup returns the compiled same-package Config schema for one exact
+// visible Implementation constructor.
+type SchemaLookup func(constructor constructorsymbol.Symbol) (implementationinventory.Configuration, bool)
 
 // Provenance records one dependency-derived typed field value without storing
 // the value itself. Several records may share a Path when dependencies
@@ -188,7 +197,7 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
-	configurations, err := composePluginConfigurations(ordered, current, schemas, records)
+	configurations, err := composeConstructorConfigurations(ordered, current, schemas, records)
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}

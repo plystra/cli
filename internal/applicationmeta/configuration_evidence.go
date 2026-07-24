@@ -91,7 +91,7 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 				summary = ConfigurationSummaryDuration
 			case maintenanceAlias:
 				summary = ConfigurationSummaryAlias
-			case maintenancePluginConfig:
+			case maintenanceConstructorConfig:
 				summary = configurationDecisionSummary(decision.config)
 			}
 		}
@@ -124,30 +124,30 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 	return result, nil
 }
 
-func configurationDecisionSummary(decision pluginConfigDecision) ConfigurationDecisionSummary {
-	if decision.kind == pluginConfigObject {
+func configurationDecisionSummary(decision constructorConfigDecision) ConfigurationDecisionSummary {
+	if decision.kind == constructorConfigObject {
 		return ConfigurationSummaryObject
 	}
-	if decision.kind == pluginConfigRemoval {
+	if decision.kind == constructorConfigRemoval {
 		return ConfigurationSummaryRemoval
 	}
-	if decision.valueType == string(ConfigurationSummarySecret) || decision.valueType == "secret" {
+	if strings.HasPrefix(decision.valueType, "secret:") {
 		return ConfigurationSummarySecret
 	}
-	if decision.valueType == "array" || strings.HasPrefix(decision.valueType, "array:") {
+	if strings.HasPrefix(decision.valueType, "list:") {
 		return ConfigurationSummaryArray
 	}
-	switch decision.valueType {
-	case "string", "url", "email":
+	switch {
+	case strings.HasPrefix(decision.valueType, "string:"), strings.HasPrefix(decision.valueType, "url:"):
 		return ConfigurationSummaryString
-	case "boolean":
+	case strings.HasPrefix(decision.valueType, "boolean:"):
 		return ConfigurationSummaryBoolean
-	case "duration":
+	case strings.HasPrefix(decision.valueType, "duration:"):
 		return ConfigurationSummaryDuration
 	default:
-		// The machine-readable schema is extensible within the closed Kernel
-		// vocabulary. Keep an unknown future value redacted rather than leaking
-		// a raw schema token into diagnostics.
+		// Compiled Go Config schemas may gain additional supported value kinds.
+		// Keep an unknown future kind redacted rather than leaking a raw type
+		// descriptor into diagnostics.
 		return ConfigurationSummaryValue
 	}
 }

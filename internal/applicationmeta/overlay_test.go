@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/plystra/cli/internal/applicationmeta"
-	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
+	"github.com/plystra/cli/internal/implementationinventory"
 )
 
 func TestParseSourceRetainsSelectedDocumentProvenance(t *testing.T) {
@@ -21,7 +21,7 @@ capabilities:
   require: [email.send/v1]
   use: {email.send/v1: acme.smtp}
   aliases: {mail.send/v1: email.send/v1}
-config: {acme.smtp: {host: production.example}}
+config: {example.com/acme/smtp.New: {host: production.example}}
 `))
 	if err != nil {
 		t.Fatalf("ParseSource: %v", err)
@@ -36,8 +36,8 @@ config: {acme.smtp: {host: production.example}}
 			t.Fatalf("declaration source = %q", source)
 		}
 	}
-	configured, exists := manifest.Configuration("acme.smtp")
-	if !exists || configured.Source() != `plystra.production.yaml config["acme.smtp"]` {
+	configured, exists := manifest.Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
+	if !exists || configured.Source() != `plystra.production.yaml config["example.com/acme/smtp.New"]` {
 		t.Fatalf("configuration source = %q, %t", configured.Source(), exists)
 	}
 	if _, err := applicationmeta.ParseSource("bad\nsource", []byte("{}\n")); !errors.Is(err, applicationmeta.ErrInvalidManifest) {
@@ -49,11 +49,16 @@ func TestApplyOverlayUsesTypedFieldPrecedenceAndPreservesRemovals(t *testing.T) 
 	t.Parallel()
 
 	schema := composeSchema(t, `
-host: {type: string}
-hosts: {type: array, items: string}
-settings: {type: object}
+	Host string
+	Hosts []string
+	Settings struct {
+		Keep string
+		Remove string
+		Add string
+		Zone string
+	}
 `)
-	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{"acme.smtp": schema})
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	base := parseOverlayManifest(t, "plystra.yaml", `
 http:
   address: ":8080"
@@ -71,7 +76,7 @@ capabilities:
     mail.send/v1: email.send/v1
     old.audit/v1: audit.write/v1
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: shared.example
     hosts: [shared-a.example]
     settings:
@@ -100,7 +105,7 @@ capabilities:
     mail.send/v1: reports.read/v1
     old.audit/v1: null
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: production.example
     hosts: [production-a.example]
     settings:
@@ -151,7 +156,7 @@ capabilities:
     email.send/v1: acme.smtp.a
   aliases: {old.audit/v1: audit.write/v1}
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     settings:
       remove: dependency-private-value
       zone: inherited
@@ -184,7 +189,7 @@ config:
 	if got := overlayProviderStrings(effective); !reflect.DeepEqual(got, []string{"email.send/v1=acme.smtp.production"}) {
 		t.Fatalf("effective Providers = %v", got)
 	}
-	configured, exists := effective.Configuration("acme.smtp")
+	configured, exists := effective.Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
 	if !exists {
 		t.Fatal("effective acme.smtp configuration is absent")
 	}
@@ -209,8 +214,8 @@ config:
 func TestApplyOverlayInheritsOmittedFieldsAndRejectsInvalidChanges(t *testing.T) {
 	t.Parallel()
 
-	schema := composeSchema(t, "host: {type: string}\nsettings: {type: object}\n")
-	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{"acme.smtp": schema})
+	schema := composeSchema(t, "\tHost string\n\tSettings struct { Mode string }\n")
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	base := parseOverlayManifest(t, "plystra.yaml", `
 http:
   address: ":8080"
@@ -219,7 +224,7 @@ http:
   expose: [email.send/v1]
 timeouts: {startup: 45s}
 capabilities: {require: [email.send/v1]}
-config: {acme.smtp: {host: shared.example, settings: {mode: shared}}}
+config: {example.com/acme/smtp.New: {host: shared.example, settings: {mode: shared}}}
 `)
 	inherited, err := applicationmeta.ApplyOverlay(base, parseOverlayManifest(t, "plystra.test.yaml", "{}\n"), lookup)
 	if err != nil {
@@ -239,12 +244,12 @@ config: {acme.smtp: {host: shared.example, settings: {mode: shared}}}
 		t.Fatalf("inherited requirements = %v", got)
 	}
 
-	unknown := parseOverlayManifest(t, "plystra.test.yaml", "config: {acme.smtp: {unknown: private-value}}\n")
+	unknown := parseOverlayManifest(t, "plystra.test.yaml", "config: {example.com/acme/smtp.New: {unknown: private-value}}\n")
 	if _, err := applicationmeta.ApplyOverlay(base, unknown, lookup); !errors.Is(err, applicationmeta.ErrApplyOverlay) || !strings.Contains(err.Error(), "unknown") || strings.Contains(err.Error(), "private-value") {
 		t.Fatalf("unknown field error = %v", err)
 	}
-	typeMismatch := parseOverlayManifest(t, "plystra.test.yaml", "config: {acme.smtp: {settings: {mode: {name: private-value}}}}\n")
-	if _, err := applicationmeta.ApplyOverlay(base, typeMismatch, lookup); !errors.Is(err, applicationmeta.ErrApplyOverlay) || !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), "types") || strings.Contains(err.Error(), "private-value") {
+	typeMismatch := parseOverlayManifest(t, "plystra.test.yaml", "config: {example.com/acme/smtp.New: {settings: {mode: {name: private-value}}}}\n")
+	if _, err := applicationmeta.ApplyOverlay(base, typeMismatch, lookup); !errors.Is(err, applicationmeta.ErrApplyOverlay) || !errors.Is(err, applicationmeta.ErrConfigurationValues) || !errors.Is(err, applicationmeta.ErrConfigurationInvalidValue) || strings.Contains(err.Error(), "private-value") {
 		t.Fatalf("type mismatch error = %v", err)
 	}
 	aliasChain := parseOverlayManifest(t, "plystra.test.yaml", "capabilities: {aliases: {email.send/v1: reports.read/v1}}\n")

@@ -6,20 +6,20 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationmeta"
-	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
+	"github.com/plystra/cli/internal/implementationinventory"
 )
 
 func TestConfigurationDecisionsAreTypedDeterministicAndRedacted(t *testing.T) {
 	t.Parallel()
 
 	schema := composeSchema(t, `
-enabled: {type: boolean}
-host: {type: string}
-password: {type: secret}
-settings: {type: object}
-targets: {type: array, items: string}
+	Enabled bool
+	Host string
+	Password configuration.Secret
+	Settings struct { Nested string }
+	Targets []string
 `)
-	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{"acme.smtp": schema})
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	data := []byte(`
 http:
   address: ":9123"
@@ -34,7 +34,7 @@ capabilities:
   use: {email.send/v1: acme.smtp}
   aliases: {mail.send/v1: email.send/v1}
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     enabled: true
     host: private.smtp.example
     password: {env: PRIVATE_SMTP_PASSWORD}
@@ -55,23 +55,23 @@ config:
 	}
 
 	wantSummaries := map[string]applicationmeta.ConfigurationDecisionSummary{
-		`capabilities.aliases["mail.send/v1"]`:   applicationmeta.ConfigurationSummaryAlias,
-		`capabilities.require["audit.write/v1"]`: applicationmeta.ConfigurationSummaryCapability,
-		`capabilities.use["email.send/v1"]`:      applicationmeta.ConfigurationSummaryProvider,
-		`config["acme.smtp"]`:                    applicationmeta.ConfigurationSummaryObject,
-		`config["acme.smtp"]["enabled"]`:         applicationmeta.ConfigurationSummaryBoolean,
-		`config["acme.smtp"]["host"]`:            applicationmeta.ConfigurationSummaryString,
-		`config["acme.smtp"]["password"]`:        applicationmeta.ConfigurationSummarySecret,
-		`config["acme.smtp"]["settings"]`:        applicationmeta.ConfigurationSummaryObject,
-		`config["acme.smtp"]["targets"]`:         applicationmeta.ConfigurationSummaryArray,
-		`http.address`:                           applicationmeta.ConfigurationSummaryString,
-		`http.cors`:                              applicationmeta.ConfigurationSummaryObject,
-		`http.cors.allow_credentials`:            applicationmeta.ConfigurationSummaryBoolean,
-		`http.cors.allowed_origins`:              applicationmeta.ConfigurationSummaryArray,
-		`http.expose["email.send/v1"]`:           applicationmeta.ConfigurationSummaryInterface,
-		`http.transports.connect`:                applicationmeta.ConfigurationSummaryBoolean,
-		`http.transports.rest`:                   applicationmeta.ConfigurationSummaryBoolean,
-		`timeouts.startup`:                       applicationmeta.ConfigurationSummaryDuration,
+		`capabilities.aliases["mail.send/v1"]`:            applicationmeta.ConfigurationSummaryAlias,
+		`capabilities.require["audit.write/v1"]`:          applicationmeta.ConfigurationSummaryCapability,
+		`capabilities.use["email.send/v1"]`:               applicationmeta.ConfigurationSummaryProvider,
+		`config["example.com/acme/smtp.New"]`:             applicationmeta.ConfigurationSummaryObject,
+		`config["example.com/acme/smtp.New"]["enabled"]`:  applicationmeta.ConfigurationSummaryBoolean,
+		`config["example.com/acme/smtp.New"]["host"]`:     applicationmeta.ConfigurationSummaryString,
+		`config["example.com/acme/smtp.New"]["password"]`: applicationmeta.ConfigurationSummarySecret,
+		`config["example.com/acme/smtp.New"]["settings"]`: applicationmeta.ConfigurationSummaryObject,
+		`config["example.com/acme/smtp.New"]["targets"]`:  applicationmeta.ConfigurationSummaryArray,
+		`http.address`:                 applicationmeta.ConfigurationSummaryString,
+		`http.cors`:                    applicationmeta.ConfigurationSummaryObject,
+		`http.cors.allow_credentials`:  applicationmeta.ConfigurationSummaryBoolean,
+		`http.cors.allowed_origins`:    applicationmeta.ConfigurationSummaryArray,
+		`http.expose["email.send/v1"]`: applicationmeta.ConfigurationSummaryInterface,
+		`http.transports.connect`:      applicationmeta.ConfigurationSummaryBoolean,
+		`http.transports.rest`:         applicationmeta.ConfigurationSummaryBoolean,
+		`timeouts.startup`:             applicationmeta.ConfigurationSummaryDuration,
 	}
 	seen := make(map[string]struct{}, len(first))
 	var bounded strings.Builder
@@ -114,8 +114,8 @@ config:
 func TestConfigurationDecisionsRecordTypedRemovals(t *testing.T) {
 	t.Parallel()
 
-	schema := composeSchema(t, "host: {type: string}\nsettings: {type: object}\n")
-	lookup := composeSchemaLookup(map[string]kernelmanifest.Config{"acme.smtp": schema})
+	schema := composeSchema(t, "\tHost string\n\tSettings struct { Mode string }\n")
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	manifest, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte(`
 http: {address: null, cors: null}
 capabilities:
@@ -123,7 +123,7 @@ capabilities:
   use: {email.send/v1: null}
   aliases: {mail.send/v1: null}
 config:
-  acme.smtp:
+  example.com/acme/smtp.New:
     host: null
     settings: null
 `))
@@ -135,13 +135,13 @@ config:
 		t.Fatalf("ConfigurationDecisions: %v", err)
 	}
 	want := map[string]bool{
-		`capabilities.aliases["mail.send/v1"]`:   true,
-		`capabilities.require["audit.write/v1"]`: true,
-		`capabilities.use["email.send/v1"]`:      true,
-		`config["acme.smtp"]["host"]`:            true,
-		`config["acme.smtp"]["settings"]`:        true,
-		`http.address`:                           true,
-		`http.cors`:                              true,
+		`capabilities.aliases["mail.send/v1"]`:            true,
+		`capabilities.require["audit.write/v1"]`:          true,
+		`capabilities.use["email.send/v1"]`:               true,
+		`config["example.com/acme/smtp.New"]["host"]`:     true,
+		`config["example.com/acme/smtp.New"]["settings"]`: true,
+		`http.address`: true,
+		`http.cors`:    true,
 	}
 	for _, decision := range decisions {
 		if !want[decision.Path()] {

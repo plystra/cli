@@ -20,10 +20,12 @@ import (
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/bootstrapgen"
+	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/moduleargument"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulemutation"
@@ -35,7 +37,6 @@ import (
 	"github.com/plystra/cli/internal/projectsmoke"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
-	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
@@ -522,8 +523,8 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if err != nil {
 		return fmt.Errorf("parse initial Project configuration: %w", err)
 	}
-	composition, err := applicationmeta.Compose(nil, currentManifest, func(string) (kernelmanifest.Config, bool) {
-		return kernelmanifest.Config{}, false
+	composition, err := applicationmeta.Compose(nil, currentManifest, func(constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		return implementationinventory.Configuration{}, false
 	})
 	if err != nil {
 		return fmt.Errorf("compose initial Project configuration: %w", err)
