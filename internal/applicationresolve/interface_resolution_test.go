@@ -581,6 +581,202 @@ replace example.com/interface-platform => ../platform
 	}
 }
 
+func TestResolveComposesEveryDependencyProjectRootThroughInterfaceModel(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	applicationRoot := filepath.Join(parent, "application")
+	directRoot := filepath.Join(parent, "direct")
+	transitiveRoot := filepath.Join(parent, "transitive")
+	ordinaryRoot := filepath.Join(parent, "ordinary")
+
+	writeModule(t, transitiveRoot, "example.com/transitive")
+	writeResolvedInterface(t, transitiveRoot, "audit/write/v1", "writev1", "audit.write/v1", "Write")
+	writeFile(t, filepath.Join(transitiveRoot, "audit", "service.go"), `package audit
+
+import (
+	"context"
+
+	writev1 "example.com/transitive/interfaces/audit/write/v1"
+)
+
+type Config struct {
+	Endpoint string `+"`plystra:\"required\"`"+`
+}
+
+type Service struct{}
+
+//plystra:implements audit.write/v1
+func New(Config) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Write(context.Context, writev1.Request) (writev1.Response, error) {
+	return writev1.Response{}, nil
+}
+`)
+	writeFile(t, filepath.Join(transitiveRoot, "plystra.yaml"), `http:
+  address: ":7101"
+interfaces:
+  require: [audit.write/v1]
+  use:
+    audit.write/v1: example.com/transitive/audit.New
+config:
+  example.com/transitive/audit.New:
+    endpoint: audit.internal
+`)
+	writeFile(t, filepath.Join(transitiveRoot, "plystra.production.yaml"), "this: [dependency overlay is deliberately invalid\n")
+
+	writeFile(t, filepath.Join(directRoot, "go.mod"), `module example.com/direct
+
+go 1.26
+
+require example.com/transitive v1.4.0
+`)
+	writeResolvedInterface(t, directRoot, "app/run/v1", "runv1", "app.run/v1", "Run")
+	writeFile(t, filepath.Join(directRoot, "app", "service.go"), `package app
+
+import (
+	"context"
+
+	runv1 "example.com/direct/interfaces/app/run/v1"
+)
+
+type Config struct {
+	Message string
+}
+
+type Service struct{}
+
+//plystra:implements app.run/v1
+func New(Config) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) {
+	return runv1.Response{}, nil
+}
+`)
+	writeFile(t, filepath.Join(directRoot, "plystra.yaml"), `http:
+  address: ":7102"
+  expose: [app.run/v1]
+interfaces:
+  use:
+    app.run/v1: example.com/direct/app.New
+  policies:
+    app.run/v1: {timeout: 5s}
+config:
+  example.com/direct/app.New:
+    message: direct-root
+`)
+	writeFile(t, filepath.Join(directRoot, "plystra.production.yaml"), "this: [dependency overlay is deliberately invalid\n")
+
+	writeModule(t, ordinaryRoot, "example.com/ordinary")
+	writeFile(t, filepath.Join(ordinaryRoot, "plystra.production.yaml"), "this: [ordinary module overlay is deliberately invalid\n")
+	writeFile(t, filepath.Join(ordinaryRoot, "broken.go"), "package ordinary\n")
+
+	writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/application
+
+go 1.26
+
+require (
+	example.com/direct v1.2.0
+	example.com/ordinary v1.0.0
+)
+
+replace example.com/direct => ../direct
+replace example.com/transitive => ../transitive
+replace example.com/ordinary => ../ordinary
+`)
+	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `http:
+  address: ":9090"
+  transports: {connect: true}
+timeouts:
+  startup: 7s
+`)
+
+	applicationBefore := snapshotTree(t, applicationRoot)
+	directBefore := snapshotTree(t, directRoot)
+	transitiveBefore := snapshotTree(t, transitiveRoot)
+	ordinaryBefore := snapshotTree(t, ordinaryRoot)
+	options := applicationresolve.Options{
+		Start: applicationRoot,
+		Environment: goEnvironment(map[string]string{
+			"GOWORK":  "off",
+			"GOPROXY": "off",
+			"GOSUMDB": "off",
+			"GOFLAGS": "-mod=readonly",
+		}),
+	}
+
+	first, err := applicationresolve.Resolve(t.Context(), options)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	second, err := applicationresolve.Resolve(t.Context(), options)
+	if err != nil {
+		t.Fatalf("Resolve repeated: %v", err)
+	}
+	projects := first.Dependencies().Projects()
+	if len(projects) != 2 || projects[0].Path() != "example.com/direct" || projects[0].SelectedVersion() != "v1.2.0" || projects[1].Path() != "example.com/transitive" || projects[1].SelectedVersion() != "v1.4.0" || projects[1].Direct() {
+		t.Fatalf("dependency Projects = %#v", projects)
+	}
+	if address, exists := first.Manifest().HTTPAddress(); !exists || address != ":9090" || first.Manifest().StartupTimeout().String() != "7s" {
+		t.Fatalf("current-project process settings = address %q/%t startup %s", address, exists, first.Manifest().StartupTimeout())
+	}
+	if got := resolvedSelectionSummaries(first.InterfaceResolution()); !reflect.DeepEqual(got, []string{
+		"app.run/v1=example.com/direct/app.New:explicit",
+		"audit.write/v1=example.com/transitive/audit.New:explicit",
+	}) {
+		t.Fatalf("dependency selections = %v", got)
+	}
+	policies := first.Manifest().InterfacePolicies()
+	if len(policies) != 1 || policies[0].InterfaceID().String() != "app.run/v1" || policies[0].Timeout().String() != "5s" {
+		t.Fatalf("dependency policies = %#v", policies)
+	}
+	for _, selection := range first.InterfaceResolution().Selections() {
+		configured, exists := first.Manifest().Configuration(selection.Constructor)
+		switch selection.InterfaceID.String() {
+		case "app.run/v1":
+			if !exists || !strings.Contains(string(configured.YAML()), "message: direct-root") {
+				t.Fatalf("direct constructor configuration = %s, %t", configured.YAML(), exists)
+			}
+		case "audit.write/v1":
+			if !exists || !strings.Contains(string(configured.YAML()), "endpoint: audit.internal") {
+				t.Fatalf("transitive constructor configuration = %s, %t", configured.YAML(), exists)
+			}
+		default:
+			t.Fatalf("unexpected selected Interface %s", selection.InterfaceID)
+		}
+	}
+	for path, module := range map[string]string{
+		`http.expose["app.run/v1"]`:                              "example.com/direct@v1.2.0",
+		`interfaces.require["audit.write/v1"]`:                   "example.com/transitive@v1.4.0",
+		`interfaces.use["app.run/v1"]`:                           "example.com/direct@v1.2.0",
+		`interfaces.use["audit.write/v1"]`:                       "example.com/transitive@v1.4.0",
+		`interfaces.policies["app.run/v1"].timeout`:              "example.com/direct@v1.2.0",
+		`config["example.com/direct/app.New"]["message"]`:        "example.com/direct@v1.2.0",
+		`config["example.com/transitive/audit.New"]["endpoint"]`: "example.com/transitive@v1.4.0",
+	} {
+		records := compositionProvenance(first.Composition().Provenance(), path)
+		if len(records) != 1 || len(records[0].Sources()) != 1 || !strings.Contains(records[0].Sources()[0], module+"/plystra.yaml") {
+			t.Fatalf("dependency provenance for %s = %#v", path, records)
+		}
+	}
+	if first.Composition().DependencyDigest() == "" || first.Composition().DependencyDigest() != second.Composition().DependencyDigest() || !reflect.DeepEqual(first.Composition().Provenance(), second.Composition().Provenance()) {
+		t.Fatalf("dependency composition is not deterministic: first %#v second %#v", first.Composition().Provenance(), second.Composition().Provenance())
+	}
+	for name, snapshot := range map[string]struct {
+		root   string
+		before []treeEntry
+	}{
+		"application": {root: applicationRoot, before: applicationBefore},
+		"direct":      {root: directRoot, before: directBefore},
+		"transitive":  {root: transitiveRoot, before: transitiveBefore},
+		"ordinary":    {root: ordinaryRoot, before: ordinaryBefore},
+	} {
+		if after := snapshotTree(t, snapshot.root); !reflect.DeepEqual(after, snapshot.before) {
+			t.Fatalf("Resolve mutated %s module:\nbefore: %#v\nafter: %#v", name, snapshot.before, after)
+		}
+	}
+}
+
 func TestResolveRejectsInvalidExposedInterfaceBeforeLegacyResolution(t *testing.T) {
 	t.Parallel()
 
