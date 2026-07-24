@@ -101,6 +101,97 @@ func TestResolveBuildsSelectedInterfaceConstructorGraphFromConfiguration(t *test
 	}
 }
 
+func TestResolveUsesCompleteReplacementForInterfaceConfiguration(t *testing.T) {
+	t.Parallel()
+
+	root := writeResolvedInterfaceProject(t)
+	parent := filepath.Dir(root)
+	rootConfiguration := `http: {address: ":8080"}
+interfaces:
+  require: [missing.read/v1]
+  use:
+    audit.write/v1: example.com/interface-app/auditone.New
+  policies:
+    app.run/v1: {timeout: 7s}
+    audit.write/v1: {timeout: 5s}
+`
+	selectedConfiguration := `# Complete customer configuration.
+http: {address: ":9090"}
+interfaces:
+  require: [app.run/v1]
+  use:
+    audit.write/v1: example.com/interface-app/audittwo.New
+  policies:
+    audit.write/v1: {timeout: 2s}
+`
+	writeFile(t, filepath.Join(root, "plystra.yaml"), rootConfiguration)
+	writeFile(t, filepath.Join(parent, "cache", "plystra.yaml"), "interfaces: {require: [cache.read/v1]}\n")
+	writeFile(t, filepath.Join(root, "deploy", "customer.yaml"), selectedConfiguration)
+	before := snapshotTree(t, parent)
+
+	resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:             filepath.Join(root, "app"),
+		ConfigurationPath: "deploy/customer.yaml",
+		Environment: goEnvironment(map[string]string{
+			"GOWORK":  "off",
+			"GOPROXY": "off",
+			"GOSUMDB": "off",
+			"GOFLAGS": "-mod=readonly",
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection := resolved.ConfigurationSelection(); selection.Mode() != applicationgen.ConfigurationModeExplicit || selection.Path() != "deploy/customer.yaml" || selection.Environment() != "" {
+		t.Fatalf("full-replacement selection = mode %q path %q environment %q", selection.Mode(), selection.Path(), selection.Environment())
+	}
+	if address, exists := resolved.Composition().Manifest().HTTPAddress(); !exists || address != ":9090" {
+		t.Fatalf("full-replacement HTTP address = %q, %t", address, exists)
+	}
+	requirements := resolved.Composition().Manifest().InterfaceRequirements()
+	if len(requirements) != 2 || requirements[0].ID().String() != "app.run/v1" || requirements[0].Source() != `deploy/customer.yaml interfaces.require["app.run/v1"]` || requirements[1].ID().String() != "cache.read/v1" || requirements[1].Source() != `deploy/customer.yaml interfaces.require["cache.read/v1"]` {
+		t.Fatalf("full-replacement Interface requirements = %#v", requirements)
+	}
+	if maintenance := resolved.ConfigurationMaintenance(); !maintenance.Changed() || resolved.ConfigurationMaintenancePath() != "deploy/customer.yaml" || !strings.Contains(string(maintenance.Data()), "cache.read/v1") {
+		t.Fatalf("full-replacement dependency maintenance = changed %t path %q data %q", maintenance.Changed(), resolved.ConfigurationMaintenancePath(), maintenance.Data())
+	}
+	if policies := resolved.Composition().Manifest().InterfacePolicies(); len(policies) != 1 || policies[0].InterfaceID().String() != "audit.write/v1" || policies[0].Timeout().String() != "2s" || policies[0].Source() != `deploy/customer.yaml interfaces.policies["audit.write/v1"].timeout` {
+		t.Fatalf("full-replacement Interface policies = %#v", policies)
+	}
+	if got := resolvedSelectionSummaries(resolved.InterfaceResolution()); !reflect.DeepEqual(got, []string{
+		"app.run/v1=example.com/interface-app/app.New:unique-compatible",
+		"audit.write/v1=example.com/interface-app/audittwo.New:explicit",
+		"cache.read/v1=example.com/interface-cache/cache.New:unique-compatible",
+	}) {
+		t.Fatalf("full-replacement selections = %v", got)
+	}
+	graph := resolved.InterfaceResolution().Graph()
+	if got := resolvedGraphNodes(graph); !reflect.DeepEqual(got, []string{
+		"example.com/interface-app/audittwo.New",
+		"example.com/interface-cache/cache.New",
+		"example.com/interface-app/app.New",
+	}) {
+		t.Fatalf("full-replacement construction order = %v", got)
+	}
+	dependencies := graph.ConstructionOrder()[2].Dependencies()
+	if len(dependencies) != 2 || dependencies[1].InterfaceID().String() != "cache.read/v1" || !dependencies[1].Optional() || !dependencies[1].Available() || dependencies[1].Constructor().String() != "example.com/interface-cache/cache.New" {
+		t.Fatalf("full-replacement optional dependency = %#v", dependencies)
+	}
+	for _, rootRequirement := range graph.Roots() {
+		for _, source := range rootRequirement.Sources() {
+			if strings.Contains(source, "missing.read/v1") || strings.HasPrefix(source, "plystra.yaml interfaces.require") {
+				t.Fatalf("full replacement retained root current-project source %q", source)
+			}
+		}
+	}
+	if !reflect.DeepEqual(resolved.RootConfigurationData(), []byte(rootConfiguration)) || !reflect.DeepEqual(resolved.ConfigurationSource(), []byte(selectedConfiguration)) {
+		t.Fatal("full replacement did not preserve root and selected documents independently")
+	}
+	if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
+		t.Fatalf("full-replacement resolution mutated files:\nbefore: %#v\nafter: %#v", before, after)
+	}
+}
+
 func TestResolveKeepsGeneratedManifestFromOverridingCurrentInterfaceSelection(t *testing.T) {
 	t.Parallel()
 
