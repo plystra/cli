@@ -72,7 +72,7 @@ func bindTransport(operations []renderedOperation, options TransportOptions) ([]
 	}
 	interfaceOperations := interfaceProjection.Operations()
 	if len(interfaceOperations) != 0 && !interfaceProjection.Enabled() {
-		return nil, fmt.Errorf("%w: JavaScript Interface types require an enabled Connect transport projection", ErrRender)
+		return nil, fmt.Errorf("%w: JavaScript Interface methods require an enabled Connect transport projection", ErrRender)
 	}
 	if !options.WireMap.Matches(options.Projection, interfaceProjection) {
 		return nil, fmt.Errorf("%w: Protobuf wire map is absent or does not match the Interface and legacy transport projections", ErrRender)

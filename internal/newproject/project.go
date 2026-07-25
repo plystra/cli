@@ -746,6 +746,8 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"bounded compatibility projection",
 		"rebuild with the same",
 		"Runtime-only address",
+		"client.records.echo.v1(request)",
+		"createRecordsEchoV1(options)(request)",
 		"npm run typecheck",
 		"plystra inspect --format json",
 		"plystra generate --check",

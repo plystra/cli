@@ -83,7 +83,7 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
-For each Interface exposed through Connect, the generated JavaScript SDK publishes deterministic request, response, and reachable nested-message types from the authored Go contract. Effective JSON names and required markers remain exact. ` + "`int32`" + ` and ` + "`uint32`" + ` become JavaScript ` + "`number`" + `; ` + "`int64`" + ` and ` + "`uint64`" + ` become ` + "`bigint`" + `; floating-point fields become ` + "`number`" + `; bytes become ` + "`Uint8Array`" + `; timestamps and durations use their canonical transport strings; repeated values are readonly arrays; and maps are readonly string-keyed records.
+For each Interface exposed through Connect, the generated JavaScript SDK publishes one nested client method, one tree-shakable factory, its declared semantic-error-code union, and deterministic request, response, and reachable nested-message types from the authored Go contract. For ` + "`records.echo/v1`" + `, call ` + "`client.records.echo.v1(request)`" + ` or ` + "`createRecordsEchoV1(options)(request)`" + `. Both forms use the same exact Connect procedure and safe runtime boundary. Effective JSON names and required markers remain exact. ` + "`int32`" + ` and ` + "`uint32`" + ` become JavaScript ` + "`number`" + `; ` + "`int64`" + ` and ` + "`uint64`" + ` become ` + "`bigint`" + `; floating-point fields become ` + "`number`" + `; bytes become ` + "`Uint8Array`" + `; timestamps and durations use their canonical transport strings; repeated values are readonly arrays; and maps are readonly string-keyed records. The unsafe JavaScript object key ` + "`__proto__`" + ` is rejected before dispatch rather than silently changed or dropped.
 
 Import the generated JavaScript SDK only through its package root. Internal runtime, descriptor, codec, operation-binder, and raw Connect surfaces are blocked by the package export map and omitted from public declarations.
 
@@ -357,12 +357,19 @@ Connect surface it remains present as a valid empty descriptor set. These files
 contain no Implementation, configuration, or Secret data. They are CLI-owned;
 never edit them, and use plystra generate --check to detect drift.
 
-Connect exposure generates Interface request, response, and nested-message
-types under generated/sdk/javascript and exports them from the package root.
-Properties preserve JSON names and required markers. int32/uint32 use number,
-int64/uint64 use bigint, floats use number, bytes use Uint8Array, timestamp and
-duration use transport strings, repeated values use readonly arrays, and maps
-use readonly string-keyed records. Do not edit these CLI-owned types.
+Connect exposure generates one nested JavaScript method, one tree-shakable
+factory, the declared semantic-error-code union, and Interface request,
+response, and nested-message types under generated/sdk/javascript. Import only
+the package root. For records.echo/v1, the representative calls are
+client.records.echo.v1(request) and createRecordsEchoV1(options)(request);
+substitute the actual generated symbols exported by
+generated/sdk/javascript/src/index.ts. Both forms use the same exact Connect
+procedure and safe runtime boundary. Properties preserve JSON names and
+required markers. int32/uint32 use number, int64/uint64 use bigint, floats use
+number, bytes use Uint8Array, timestamp and duration use transport strings,
+repeated values use readonly arrays, and maps use readonly string-keyed
+records. The unsafe JavaScript object key __proto__ is rejected before dispatch
+rather than silently changed or dropped. Do not edit these CLI-owned sources.
 A selected Connect surface also emits a Go handler under
 generated/go/adapters/connect/. Canonical handlers bind one exact procedure to
 the generated canonical application-invocation handle, while Alias handlers

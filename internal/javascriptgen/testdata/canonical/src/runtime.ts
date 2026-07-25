@@ -15,8 +15,13 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 const maximumPayloadBytes = 1_048_576;
 const maximumCredentialBytes = 65_536;
 const maximumJSONDepth = 64;
+const maximumJSONNodes = 65_536;
+const minimumInt32 = -2_147_483_648;
+const maximumInt32 = 2_147_483_647;
+const maximumUint32 = 4_294_967_295;
 const minimumSignedInteger = -9_223_372_036_854_775_808n;
 const maximumSignedInteger = 9_223_372_036_854_775_807n;
+const maximumUnsignedInteger = 18_446_744_073_709_551_615n;
 const plystraErrorDetailType = "plystra.generated.transport.v1.PlystraErrorDetail";
 const maximumTraceIDBytes = 128;
 
@@ -119,6 +124,60 @@ export interface MessageCodec {
 }
 
 /** @internal */
+export type InterfaceScalarKind =
+  | "boolean"
+  | "string"
+  | "int32"
+  | "int64"
+  | "uint32"
+  | "uint64"
+  | "float32"
+  | "float64"
+  | "bytes"
+  | "timestamp"
+  | "duration";
+
+/** @internal */
+export type InterfaceMapKeyKind =
+  | "boolean"
+  | "string"
+  | "int32"
+  | "int64"
+  | "uint32"
+  | "uint64";
+
+/** @internal */
+export type InterfaceValueCodec =
+  | { readonly kind: InterfaceScalarKind }
+  | { readonly kind: "message"; readonly message: string }
+  | { readonly kind: "repeated"; readonly element: InterfaceValueCodec }
+  | {
+      readonly kind: "map";
+      readonly key: InterfaceMapKeyKind;
+      readonly value: InterfaceValueCodec;
+    };
+
+/** @internal */
+export interface InterfaceFieldCodec {
+  readonly canonicalName: string;
+  readonly protobufJSONName: string;
+  readonly required: boolean;
+  readonly value: InterfaceValueCodec;
+}
+
+/** @internal */
+export interface InterfaceMessageCodec {
+  readonly fields: readonly InterfaceFieldCodec[];
+}
+
+/** @internal */
+export interface InterfaceCodec {
+  readonly request: string;
+  readonly response: string;
+  readonly messages: Readonly<Record<string, InterfaceMessageCodec>>;
+}
+
+/** @internal */
 export interface ErrorContract {
   readonly requestedCapabilityID: string;
   readonly canonicalCapabilityID: string;
@@ -194,6 +253,64 @@ export async function invoke(
     throw new TypeError("request cannot be encoded for the generated Connect contract");
   }
 
+  return invokePrepared(
+    runtime,
+    method,
+    errorContract,
+    requestMessage,
+    options,
+    (message) => decodeMessage(method.output, responseCodec, message),
+  );
+}
+
+/** @internal */
+export async function invokeInterface(
+  runtime: Runtime,
+  method: DescMethodUnary,
+  codec: InterfaceCodec,
+  errorContract: ErrorContract,
+  request: unknown,
+  options: RequestOptions,
+): Promise<unknown> {
+  if (signalAborted(options.signal)) {
+    throw new PlystraError(0, "cancelled");
+  }
+
+  let requestMessage: MessageShape<typeof method.input>;
+  try {
+    requestMessage = encodeInterfaceMessage(method.input, codec, request);
+    if (toBinary(method.input, requestMessage).byteLength > maximumPayloadBytes) {
+      throw new RangeError("request exceeds the 1 MiB transport limit");
+    }
+  } catch (error) {
+    if (error instanceof RangeError) {
+      throw error;
+    }
+    throw new TypeError("request cannot be encoded for the generated Connect contract");
+  }
+
+  return invokePrepared(
+    runtime,
+    method,
+    errorContract,
+    requestMessage,
+    options,
+    (message) => decodeInterfaceMessage(method.output, codec, message),
+  );
+}
+
+async function invokePrepared(
+  runtime: Runtime,
+  method: DescMethodUnary,
+  errorContract: ErrorContract,
+  requestMessage: MessageShape<typeof method.input>,
+  options: RequestOptions,
+  decodeResponse: (message: MessageShape<typeof method.output>) => unknown,
+): Promise<unknown> {
+  if (signalAborted(options.signal)) {
+    throw new PlystraError(0, "cancelled");
+  }
+
   const headers = new Headers();
   if (runtime.getAccessToken !== undefined) {
     let token: string | null | undefined;
@@ -238,7 +355,7 @@ export async function invoke(
   }
 
   try {
-    return decodeMessage(method.output, responseCodec, responseMessage);
+    return decodeResponse(responseMessage);
   } catch {
     throw new PlystraError(200, "invalid_response");
   }
@@ -533,6 +650,580 @@ function decodeInteger(value: unknown): bigint {
     throw new TypeError("response integer is outside the signed 64-bit range");
   }
   return decoded;
+}
+
+interface InterfaceTraversalState {
+  nodes: number;
+  readonly stack: Set<object>;
+}
+
+function encodeInterfaceMessage<Desc extends DescMessage>(
+  descriptor: Desc,
+  codec: InterfaceCodec,
+  value: unknown,
+): MessageShape<Desc> {
+  const json = encodeInterfaceMessageValue(
+    codec,
+    codec.request,
+    value,
+    0,
+    { nodes: 0, stack: new Set<object>() },
+  );
+  return fromJson(descriptor, json, {
+    ignoreUnknownFields: false,
+    recursionLimit: maximumJSONDepth,
+  });
+}
+
+function decodeInterfaceMessage<Desc extends DescMessage>(
+  descriptor: Desc,
+  codec: InterfaceCodec,
+  message: MessageShape<Desc>,
+): unknown {
+  const json = toJson(descriptor, message, {
+    alwaysEmitImplicit: true,
+    enumAsInteger: false,
+    useProtoFieldName: false,
+  });
+  return decodeInterfaceMessageValue(
+    codec,
+    codec.response,
+    json,
+    0,
+    { nodes: 0, stack: new Set<object>() },
+  );
+}
+
+function encodeInterfaceMessageValue(
+  codec: InterfaceCodec,
+  messageName: string,
+  value: unknown,
+  depth: number,
+  state: InterfaceTraversalState,
+): { [key: string]: ProtobufJSONValue } {
+  if (!isPlainObject(value)) {
+    throw new TypeError("request message is invalid");
+  }
+  const release = enterInterfaceContainer(value, depth, state);
+  try {
+    const message = resolveInterfaceMessageCodec(codec, messageName);
+    const canonicalNames = new Set(
+      message.fields.map((field) => field.canonicalName),
+    );
+    const protobufNames = new Set(
+      message.fields.map((field) => field.protobufJSONName),
+    );
+    if (
+      canonicalNames.size !== message.fields.length ||
+      protobufNames.size !== message.fields.length ||
+      !Object.keys(value).every((key) => canonicalNames.has(key))
+    ) {
+      throw new TypeError("request message fields are invalid");
+    }
+    const result: { [key: string]: ProtobufJSONValue } =
+      Object.create(null);
+    for (const field of message.fields) {
+      if (!hasOwn(value, field.canonicalName)) {
+        if (field.required) {
+          throw new TypeError("required request field is absent");
+        }
+        continue;
+      }
+      result[field.protobufJSONName] = encodeInterfaceValue(
+        codec,
+        field.value,
+        value[field.canonicalName],
+        depth + 1,
+        state,
+      );
+    }
+    return result;
+  } finally {
+    release();
+  }
+}
+
+function decodeInterfaceMessageValue(
+  codec: InterfaceCodec,
+  messageName: string,
+  value: unknown,
+  depth: number,
+  state: InterfaceTraversalState,
+): Readonly<Record<string, unknown>> {
+  if (!isPlainObject(value)) {
+    throw new TypeError("response message is invalid");
+  }
+  const release = enterInterfaceContainer(value, depth, state);
+  try {
+    const message = resolveInterfaceMessageCodec(codec, messageName);
+    const canonicalNames = new Set(
+      message.fields.map((field) => field.canonicalName),
+    );
+    const protobufNames = new Set(
+      message.fields.map((field) => field.protobufJSONName),
+    );
+    if (
+      canonicalNames.size !== message.fields.length ||
+      protobufNames.size !== message.fields.length ||
+      !Object.keys(value).every((key) => protobufNames.has(key))
+    ) {
+      throw new TypeError("response message fields are invalid");
+    }
+    const result: Record<string, unknown> = {};
+    for (const field of message.fields) {
+      if (!hasOwn(value, field.protobufJSONName)) {
+        if (field.required) {
+          throw new TypeError("required response field is absent");
+        }
+        continue;
+      }
+      defineInterfaceProperty(
+        result,
+        field.canonicalName,
+        decodeInterfaceValue(
+          codec,
+          field.value,
+          value[field.protobufJSONName],
+          depth + 1,
+          state,
+        ),
+      );
+    }
+    return result;
+  } finally {
+    release();
+  }
+}
+
+function resolveInterfaceMessageCodec(
+  codec: InterfaceCodec,
+  name: string,
+): InterfaceMessageCodec {
+  const message = codec.messages[name];
+  if (name === "" || message === undefined) {
+    throw new TypeError("generated Interface message codec is inconsistent");
+  }
+  return message;
+}
+
+function encodeInterfaceValue(
+  codec: InterfaceCodec,
+  valueCodec: InterfaceValueCodec,
+  value: unknown,
+  depth: number,
+  state: InterfaceTraversalState,
+): ProtobufJSONValue {
+  switch (valueCodec.kind) {
+    case "message":
+      return encodeInterfaceMessageValue(
+        codec,
+        valueCodec.message,
+        value,
+        depth,
+        state,
+      );
+    case "repeated": {
+      if (!Array.isArray(value)) {
+        throw new TypeError("request repeated value is invalid");
+      }
+      const release = enterInterfaceContainer(value, depth, state);
+      try {
+        return value.map((item) =>
+          encodeInterfaceValue(
+            codec,
+            valueCodec.element,
+            item,
+            depth + 1,
+            state,
+          ),
+        );
+      } finally {
+        release();
+      }
+    }
+    case "map": {
+      if (!isPlainObject(value)) {
+        throw new TypeError("request map is invalid");
+      }
+      const release = enterInterfaceContainer(value, depth, state);
+      try {
+        const result: { [key: string]: ProtobufJSONValue } =
+          Object.create(null);
+        for (const key of Object.keys(value).sort()) {
+          countInterfaceNode(depth + 1, state);
+          if (!validInterfaceMapKey(valueCodec.key, key)) {
+            throw new TypeError("request map key is invalid");
+          }
+          result[key] = encodeInterfaceValue(
+            codec,
+            valueCodec.value,
+            value[key],
+            depth + 1,
+            state,
+          );
+        }
+        return result;
+      } finally {
+        release();
+      }
+    }
+    default:
+      countInterfaceNode(depth, state);
+      return encodeInterfaceScalar(valueCodec.kind, value);
+  }
+}
+
+function decodeInterfaceValue(
+  codec: InterfaceCodec,
+  valueCodec: InterfaceValueCodec,
+  value: unknown,
+  depth: number,
+  state: InterfaceTraversalState,
+): unknown {
+  switch (valueCodec.kind) {
+    case "message":
+      return decodeInterfaceMessageValue(
+        codec,
+        valueCodec.message,
+        value,
+        depth,
+        state,
+      );
+    case "repeated": {
+      if (!Array.isArray(value)) {
+        throw new TypeError("response repeated value is invalid");
+      }
+      const release = enterInterfaceContainer(value, depth, state);
+      try {
+        return value.map((item) =>
+          decodeInterfaceValue(
+            codec,
+            valueCodec.element,
+            item,
+            depth + 1,
+            state,
+          ),
+        );
+      } finally {
+        release();
+      }
+    }
+    case "map": {
+      if (!isPlainObject(value)) {
+        throw new TypeError("response map is invalid");
+      }
+      const release = enterInterfaceContainer(value, depth, state);
+      try {
+        const result: Record<string, unknown> = {};
+        for (const key of Object.keys(value).sort()) {
+          countInterfaceNode(depth + 1, state);
+          if (!validInterfaceMapKey(valueCodec.key, key)) {
+            throw new TypeError("response map key is invalid");
+          }
+          defineInterfaceProperty(
+            result,
+            key,
+            decodeInterfaceValue(
+              codec,
+              valueCodec.value,
+              value[key],
+              depth + 1,
+              state,
+            ),
+          );
+        }
+        return result;
+      } finally {
+        release();
+      }
+    }
+    default:
+      countInterfaceNode(depth, state);
+      return decodeInterfaceScalar(valueCodec.kind, value);
+  }
+}
+
+function encodeInterfaceScalar(
+  kind: InterfaceScalarKind,
+  value: unknown,
+): ProtobufJSONValue {
+  switch (kind) {
+    case "boolean":
+      if (typeof value !== "boolean") throw new TypeError("request boolean is invalid");
+      return value;
+    case "string":
+    case "timestamp":
+    case "duration":
+      if (typeof value !== "string") throw new TypeError("request string is invalid");
+      return value;
+    case "int32":
+      if (
+        typeof value !== "number" ||
+        !Number.isInteger(value) ||
+        value < minimumInt32 ||
+        value > maximumInt32
+      ) {
+        throw new TypeError("request int32 is invalid");
+      }
+      return value;
+    case "uint32":
+      if (
+        typeof value !== "number" ||
+        !Number.isInteger(value) ||
+        value < 0 ||
+        value > maximumUint32
+      ) {
+        throw new TypeError("request uint32 is invalid");
+      }
+      return value;
+    case "int64":
+      if (
+        typeof value !== "bigint" ||
+        value < minimumSignedInteger ||
+        value > maximumSignedInteger
+      ) {
+        throw new TypeError("request int64 is invalid");
+      }
+      return value.toString();
+    case "uint64":
+      if (
+        typeof value !== "bigint" ||
+        value < 0n ||
+        value > maximumUnsignedInteger
+      ) {
+        throw new TypeError("request uint64 is invalid");
+      }
+      return value.toString();
+    case "float32":
+      if (
+        typeof value !== "number" ||
+        !Number.isFinite(value) ||
+        !Number.isFinite(Math.fround(value))
+      ) {
+        throw new TypeError("request float32 is invalid");
+      }
+      return value;
+    case "float64":
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        throw new TypeError("request float64 is invalid");
+      }
+      return value;
+    case "bytes":
+      return encodeInterfaceBytes(value);
+  }
+}
+
+function decodeInterfaceScalar(
+  kind: InterfaceScalarKind,
+  value: unknown,
+): unknown {
+  switch (kind) {
+    case "boolean":
+      if (typeof value !== "boolean") throw new TypeError("response boolean is invalid");
+      return value;
+    case "string":
+    case "timestamp":
+    case "duration":
+      if (typeof value !== "string") throw new TypeError("response string is invalid");
+      return value;
+    case "int32":
+      if (
+        typeof value !== "number" ||
+        !Number.isInteger(value) ||
+        value < minimumInt32 ||
+        value > maximumInt32
+      ) {
+        throw new TypeError("response int32 is invalid");
+      }
+      return value;
+    case "uint32":
+      if (
+        typeof value !== "number" ||
+        !Number.isInteger(value) ||
+        value < 0 ||
+        value > maximumUint32
+      ) {
+        throw new TypeError("response uint32 is invalid");
+      }
+      return value;
+    case "int64":
+      return decodeInterfaceInteger(value, true);
+    case "uint64":
+      return decodeInterfaceInteger(value, false);
+    case "float32":
+      if (
+        typeof value !== "number" ||
+        !Number.isFinite(value) ||
+        !Number.isFinite(Math.fround(value))
+      ) {
+        throw new TypeError("response float32 is invalid");
+      }
+      return value;
+    case "float64":
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        throw new TypeError("response float64 is invalid");
+      }
+      return value;
+    case "bytes":
+      return decodeInterfaceBytes(value);
+  }
+}
+
+function decodeInterfaceInteger(value: unknown, signed: boolean): bigint {
+  if (typeof value !== "string" || !/^(?:0|-?[1-9][0-9]*)$/.test(value)) {
+    throw new TypeError("response integer is invalid");
+  }
+  let decoded: bigint;
+  try {
+    decoded = BigInt(value);
+  } catch {
+    throw new TypeError("response integer is invalid");
+  }
+  if (
+    signed
+      ? decoded < minimumSignedInteger || decoded > maximumSignedInteger
+      : decoded < 0n || decoded > maximumUnsignedInteger
+  ) {
+    throw new TypeError("response integer is outside its canonical range");
+  }
+  return decoded;
+}
+
+function validInterfaceMapKey(
+  kind: InterfaceMapKeyKind,
+  value: string,
+): boolean {
+  switch (kind) {
+    case "string":
+      // The pinned Protobuf runtime stores maps in ordinary objects, where
+      // __proto__ cannot be preserved as an ordinary assignment.
+      return value !== "__proto__";
+    case "boolean":
+      return value === "true" || value === "false";
+    case "int32":
+      return interfaceIntegerMapKeyInRange(
+        value,
+        BigInt(minimumInt32),
+        BigInt(maximumInt32),
+        true,
+      );
+    case "uint32":
+      return interfaceIntegerMapKeyInRange(
+        value,
+        0n,
+        BigInt(maximumUint32),
+        false,
+      );
+    case "int64":
+      return interfaceIntegerMapKeyInRange(
+        value,
+        minimumSignedInteger,
+        maximumSignedInteger,
+        true,
+      );
+    case "uint64":
+      return interfaceIntegerMapKeyInRange(
+        value,
+        0n,
+        maximumUnsignedInteger,
+        false,
+      );
+  }
+}
+
+function interfaceIntegerMapKeyInRange(
+  value: string,
+  minimum: bigint,
+  maximum: bigint,
+  signed: boolean,
+): boolean {
+  const pattern = signed
+    ? /^(?:0|-?[1-9][0-9]*)$/
+    : /^(?:0|[1-9][0-9]*)$/;
+  if (!pattern.test(value)) {
+    return false;
+  }
+  try {
+    const decoded = BigInt(value);
+    return decoded >= minimum && decoded <= maximum;
+  } catch {
+    return false;
+  }
+}
+
+function encodeInterfaceBytes(value: unknown): string {
+  if (!(value instanceof Uint8Array)) {
+    throw new TypeError("request bytes are invalid");
+  }
+  let binary = "";
+  const chunkSize = 32_768;
+  for (let offset = 0; offset < value.length; offset += chunkSize) {
+    binary += String.fromCharCode(
+      ...value.subarray(offset, offset + chunkSize),
+    );
+  }
+  return globalThis.btoa(binary);
+}
+
+function decodeInterfaceBytes(value: unknown): Uint8Array {
+  if (typeof value !== "string") {
+    throw new TypeError("response bytes are invalid");
+  }
+  let binary: string;
+  try {
+    binary = globalThis.atob(value);
+  } catch {
+    throw new TypeError("response bytes are invalid");
+  }
+  const decoded = Uint8Array.from(
+    binary,
+    (character) => character.charCodeAt(0),
+  );
+  if (encodeInterfaceBytes(decoded) !== value) {
+    throw new TypeError("response bytes are not canonical base64");
+  }
+  return decoded;
+}
+
+function enterInterfaceContainer(
+  value: object,
+  depth: number,
+  state: InterfaceTraversalState,
+): () => void {
+  countInterfaceNode(depth, state);
+  if (state.stack.has(value)) {
+    throw new TypeError("Interface value contains a cycle");
+  }
+  state.stack.add(value);
+  return () => {
+    state.stack.delete(value);
+  };
+}
+
+function defineInterfaceProperty(
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  Object.defineProperty(target, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
+function countInterfaceNode(
+  depth: number,
+  state: InterfaceTraversalState,
+): void {
+  if (depth > maximumJSONDepth) {
+    throw new RangeError("Interface value exceeds the maximum nesting depth");
+  }
+  state.nodes++;
+  if (state.nodes > maximumJSONNodes) {
+    throw new RangeError("Interface value exceeds the maximum node count");
+  }
 }
 
 function normalizeBaseUrl(input: string | URL): URL {

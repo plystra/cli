@@ -65,7 +65,15 @@ func (o renderedOperation) isAlias() bool { return o.id != o.target }
 
 type clientNode struct {
 	children  map[string]*clientNode
-	operation *renderedOperation
+	operation *clientOperation
+}
+
+type clientOperation struct {
+	id         string
+	segments   []string
+	version    string
+	symbol     string
+	deprecated string
 }
 
 // Render validates package identity and renders a complete source package.
@@ -469,7 +477,7 @@ func renderValidator(source *strings.Builder, functionName, typeName string, fie
 }
 
 func renderIndex(operations []renderedOperation, interfaces []renderedInterface) ([]byte, error) {
-	root, err := buildClientTree(operations)
+	root, err := buildClientTree(operations, interfaces)
 	if err != nil {
 		return nil, err
 	}
@@ -491,15 +499,10 @@ func renderIndex(operations []renderedOperation, interfaces []renderedInterface)
 	}
 	for _, operation := range interfaces {
 		importPath := interfaceIndexImportPath(operation)
-		fmt.Fprintln(&source, "export type {")
-		for _, message := range operation.operation.Messages() {
-			publicName := interfacePublicTypeName(operation, message)
-			if publicName == message.ProtobufName() {
-				fmt.Fprintf(&source, "  %s,\n", publicName)
-			} else {
-				fmt.Fprintf(&source, "  %s as %s,\n", message.ProtobufName(), publicName)
-			}
-		}
+		fmt.Fprintln(&source, "import {")
+		fmt.Fprintf(&source, "  bindOperation as bind%s,\n", operation.symbol)
+		fmt.Fprintf(&source, "  createOperation as create%s,\n", operation.symbol)
+		fmt.Fprintf(&source, "  type Operation as %sOperation,\n", operation.symbol)
 		fmt.Fprintf(&source, "} from %s;\n", jsString(importPath))
 	}
 	fmt.Fprintln(&source)
@@ -519,9 +522,24 @@ func renderIndex(operations []renderedOperation, interfaces []renderedInterface)
 		fmt.Fprintf(&source, "  Response as %sResponse,\n", operation.symbol)
 		fmt.Fprintf(&source, "} from %s;\n", jsString(importPath))
 	}
+	for _, operation := range interfaces {
+		importPath := interfaceIndexImportPath(operation)
+		fmt.Fprintf(&source, "export { create%s };\n", operation.symbol)
+		fmt.Fprintln(&source, "export type {")
+		fmt.Fprintf(&source, "  ErrorCode as %sErrorCode,\n", operation.symbol)
+		for _, message := range operation.operation.Messages() {
+			publicName := interfacePublicTypeName(operation, message)
+			if publicName == message.ProtobufName() {
+				fmt.Fprintf(&source, "  %s,\n", publicName)
+			} else {
+				fmt.Fprintf(&source, "  %s as %s,\n", message.ProtobufName(), publicName)
+			}
+		}
+		fmt.Fprintf(&source, "} from %s;\n", jsString(importPath))
+	}
 	fmt.Fprintln(&source)
 	fmt.Fprint(&source, "export type PlystraClient = ")
-	if len(operations) == 0 {
+	if len(operations) == 0 && len(interfaces) == 0 {
 		fmt.Fprintln(&source, "Readonly<Record<string, never>>;")
 	} else {
 		renderNodeType(&source, root, "")
@@ -541,10 +559,9 @@ func indexImportPath(operation renderedOperation) string {
 	return "./" + strings.TrimSuffix(strings.TrimPrefix(operation.source, "src/"), ".ts") + ".js"
 }
 
-func buildClientTree(operations []renderedOperation) (*clientNode, error) {
+func buildClientTree(operations []renderedOperation, interfaces []renderedInterface) (*clientNode, error) {
 	root := &clientNode{children: make(map[string]*clientNode)}
-	for index := range operations {
-		operation := &operations[index]
+	add := func(operation clientOperation) error {
 		components := append(append([]string(nil), operation.segments...), operation.version)
 		node := root
 		for _, component := range components {
@@ -556,9 +573,31 @@ func buildClientTree(operations []renderedOperation) (*clientNode, error) {
 			node = child
 		}
 		if node.operation != nil {
-			return nil, fmt.Errorf("%w: client path collision for %s and %s", ErrRender, node.operation.id, operation.id)
+			return fmt.Errorf("%w: client path collision for %s and %s", ErrRender, node.operation.id, operation.id)
 		}
-		node.operation = operation
+		node.operation = &operation
+		return nil
+	}
+	for _, operation := range operations {
+		if err := add(clientOperation{
+			id:         operation.id.String(),
+			segments:   operation.segments,
+			version:    operation.version,
+			symbol:     operation.symbol,
+			deprecated: operation.deprecated,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	for _, operation := range interfaces {
+		if err := add(clientOperation{
+			id:       operation.operation.ID().String(),
+			segments: operation.segments,
+			version:  operation.version,
+			symbol:   operation.symbol,
+		}); err != nil {
+			return nil, err
+		}
 	}
 	return root, nil
 }
@@ -649,14 +688,14 @@ func renderREADME(packageName string, operations []renderedOperation, interfaces
 		fmt.Fprintln(&readme)
 	}
 	if len(interfaces) != 0 {
-		fmt.Fprintln(&readme, "Canonical Interface types preserve exact authored widths: `int32` and `uint32` are JavaScript `number`; `int64` and `uint64` are `bigint`; `float32` and `float64` are `number`; bytes are `Uint8Array`; timestamps are RFC 3339 strings; durations are Protobuf JSON duration strings; repeated values are readonly arrays; and maps are readonly string-keyed records. Boolean and integer Go map keys use their canonical ProtoJSON string form.")
+		fmt.Fprintln(&readme, "Canonical Interface types preserve exact authored widths: `int32` and `uint32` are JavaScript `number`; `int64` and `uint64` are `bigint`; `float32` and `float64` are `number`; bytes are `Uint8Array`; timestamps are RFC 3339 strings; durations are Protobuf JSON duration strings; repeated values are readonly arrays; and maps are readonly string-keyed records. Boolean and integer Go map keys use their canonical ProtoJSON string form. The unsafe JavaScript object key `__proto__` is rejected before dispatch rather than being silently changed or dropped by the Protobuf object representation.")
 		fmt.Fprintln(&readme)
-		fmt.Fprintln(&readme, "Every property uses the Interface field's effective JSON name. Authored required markers produce required readonly properties; every other field remains optional. Nested same-package messages are exported from the package root together with the canonical request and response types.")
+		fmt.Fprintln(&readme, "Every property uses the Interface field's effective JSON name. Authored required markers produce required readonly properties; every other field remains optional. Nested same-package messages and the declared semantic-error-code union are exported from the package root together with the canonical request and response types.")
 		fmt.Fprintln(&readme)
-		fmt.Fprintln(&readme, "## Exposed Interface types")
+		fmt.Fprintln(&readme, "## Exposed Interface methods")
 		fmt.Fprintln(&readme)
 		for _, operation := range interfaces {
-			fmt.Fprintf(&readme, "- `%s` (`%s`)\n", operation.operation.ID(), operation.operation.ContractDigest())
+			fmt.Fprintf(&readme, "- `%s`: `client%s(request)` or `create%s(options)(request)` (`%s`)\n", operation.operation.ID(), interfaceClientAccessor(operation), operation.symbol, operation.operation.ContractDigest())
 		}
 		fmt.Fprintln(&readme)
 	}
@@ -664,41 +703,54 @@ func renderREADME(packageName string, operations []renderedOperation, interfaces
 		fmt.Fprintln(&readme, "Transitional legacy request and response declarations retain each exact normalized constraint object in a `@plystraConstraints` field annotation. The wrapper preflights Unicode scalar-value length, numeric bounds, and array item counts before sending a request and applies the same portable checks to decoded responses. Canonical `pattern` uses Go regular-expression semantics, so it is declared for tools and developers but remains enforced authoritatively by the generated server rather than reinterpreted through JavaScript `RegExp`.")
 		fmt.Fprintln(&readme)
 	}
-	if len(operations) == 0 {
-		fmt.Fprintln(&readme, "This application currently publishes Interface types but no generated JavaScript methods.")
+	if len(operations) == 0 && len(interfaces) == 0 {
+		fmt.Fprintln(&readme, "This application currently exposes no JavaScript Interface methods.")
 		return []byte(readme.String())
-	}
-	first := operations[0]
-	for _, operation := range operations {
-		if !operation.isAlias() {
-			first = operation
-			break
-		}
 	}
 	fmt.Fprintln(&readme, "## Usage")
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "```ts")
-	fmt.Fprintf(&readme, "import { createPlystraClient } from %s;\n\n", jsString(packageName))
+	if len(interfaces) != 0 {
+		first := interfaces[0]
+		request := interfacePublicTypeNameByGoName(first, first.operation.RequestGoName())
+		fmt.Fprintf(&readme, "import { createPlystraClient, type %s } from %s;\n\n", request, jsString(packageName))
+		fmt.Fprintf(&readme, "declare const request: %s;\n\n", request)
+	} else {
+		fmt.Fprintf(&readme, "import { createPlystraClient } from %s;\n\n", jsString(packageName))
+	}
 	fmt.Fprintln(&readme, "const client = createPlystraClient({")
 	fmt.Fprintln(&readme, "  baseUrl: \"https://api.example.com\",")
 	fmt.Fprintln(&readme, "  getAccessToken: async () => rawAccessToken,")
 	fmt.Fprintln(&readme, "});")
 	fmt.Fprintln(&readme)
-	request := exampleRequest(first.operation.Request())
-	fmt.Fprintf(&readme, "const response = await client%s(%s);\n", clientAccessor(first), request)
+	if len(interfaces) != 0 {
+		fmt.Fprintf(&readme, "const response = await client%s(request);\n", interfaceClientAccessor(interfaces[0]))
+	} else {
+		first := operations[0]
+		for _, operation := range operations {
+			if !operation.isAlias() {
+				first = operation
+				break
+			}
+		}
+		request := exampleRequest(first.operation.Request())
+		fmt.Fprintf(&readme, "const response = await client%s(%s);\n", clientAccessor(first), request)
+	}
 	fmt.Fprintln(&readme, "```")
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "`getAccessToken` returns only the raw token value. The generated transport adds the `Bearer` authorization scheme; returning a value that already includes that scheme fails before the request is sent.")
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "Pass an `AbortSignal` as the operation's second argument to cancel before dispatch or while the request is in flight. Cancellation rejects with `PlystraError` code `cancelled`; once server invocation has begun, it reaches the generated Connect handler, canonical invocation, and Provider context. Cancellation is best-effort interruption and does not promise Provider rollback.")
 	fmt.Fprintln(&readme)
-	fmt.Fprintln(&readme, "Only explicitly exposed canonical operations and validated application-local Alias surfaces are generated. Alias methods reuse their direct canonical target contract and invoke the matching generated Alias Connect procedure. Provider packages, server configuration, verified internal context, and Secret values are never included.")
-	fmt.Fprintln(&readme)
-	fmt.Fprintln(&readme, "## Canonical operations")
-	fmt.Fprintln(&readme)
-	for _, operation := range operations {
-		if !operation.isAlias() {
-			fmt.Fprintf(&readme, "- `%s` (`%s`)\n", operation.id, operation.operation.ContractDigest())
+	fmt.Fprintln(&readme, "Only explicitly exposed Interfaces receive generated methods. The nested client and each tree-shakable `create<InterfaceName>V<major>` factory use the same typed request, typed response, safe error mapping, credential callback, cancellation behavior, and exact Connect procedure derived from the canonical Interface ID. Implementation packages, server configuration, verified internal context, and Secret values are never included.")
+	if len(operations) != 0 {
+		fmt.Fprintln(&readme)
+		fmt.Fprintln(&readme, "## Transitional legacy operations")
+		fmt.Fprintln(&readme)
+		for _, operation := range operations {
+			if !operation.isAlias() {
+				fmt.Fprintf(&readme, "- `%s` (`%s`)\n", operation.id, operation.operation.ContractDigest())
+			}
 		}
 	}
 	aliasCount := 0

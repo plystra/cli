@@ -110,8 +110,27 @@ type Envelope struct {
 }
 
 type Detail struct {
-	Code   string ` + "`json:\"code\" plystra:\"1,required\"`" + `
-	Amount int64  ` + "`json:\"amount\" plystra:\"2\"`" + `
+	Code     string   ` + "`json:\"code\" plystra:\"1,required\"`" + `
+	Amount   int64    ` + "`json:\"amount\" plystra:\"2\"`" + `
+	Children []Detail ` + "`json:\"children\" plystra:\"3\"`" + `
+}
+`
+
+const javascriptAuditInterfaceSource = `package recordv1
+
+import "context"
+
+//plystra:interface audit.record/v1
+type Interface interface {
+	Record(context.Context, Request) (Response, error)
+}
+
+type Request struct {
+	Event string ` + "`json:\"event\" plystra:\"1,required\"`" + `
+}
+
+type Response struct {
+	Accepted bool ` + "`json:\"accepted\" plystra:\"1,required\"`" + `
 }
 `
 
@@ -169,6 +188,12 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		`RecordsEchoV1Request,`,
 		`RecordsEchoV1Response,`,
 		`RecordsEchoV1Envelope,`,
+		`RecordsEchoV1ErrorCode,`,
+		`createRecordsEchoV1`,
+		`readonly "v1": RecordsEchoV1Operation;`,
+		`"v1": bindRecordsEchoV1(runtime),`,
+		`export type ErrorCode = "record_rejected";`,
+		`invokeInterface(runtime, method, interfaceCodec, errorContract, request, options)`,
 		`createEmailSendV1`,
 		`plystra.generated.email.send.v1.EmailSendV1Service`,
 		`plystra.generated.compat.send.v1.CompatSendV1Service`,
@@ -208,6 +233,7 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		`readonly "payloads"?: ReadonlyArray<Uint8Array>;`,
 		`readonly "scores"?: Readonly<Record<string, bigint>>;`,
 		`readonly "identifiers"?: Readonly<Record<string, bigint>>;`,
+		`readonly "children"?: ReadonlyArray<RecordsEchoV1Detail>;`,
 		`readonly "DefaultName"?: string;`,
 		`readonly "at": string;`,
 		`readonly "delay": string;`,
@@ -295,9 +321,86 @@ response:
 	}
 	index := fileData(t, files, "generated/sdk/javascript/src/index.ts")
 	if bytes.Count(index, []byte("RecordsEchoV1Request")) != 1 ||
-		bytes.Contains(index, []byte("RecordsEchoV1Operation")) ||
-		bytes.Contains(index, []byte(`readonly "records"`)) {
+		!bytes.Contains(index, []byte("export { createRecordsEchoV1 };")) ||
+		bytes.Count(index, []byte(`readonly "records"`)) != 1 ||
+		bytes.Count(index, []byte(`readonly "v1": RecordsEchoV1Operation;`)) != 1 ||
+		bytes.Count(index, []byte(`"v1": bindRecordsEchoV1(runtime),`)) != 1 {
 		t.Fatalf("exact-ID legacy surface competes with canonical Interface types:\n%s", index)
+	}
+	for _, required := range []string{
+		`export type ErrorCode = "record_rejected";`,
+		`export function createOperation(options: ClientOptions): Operation`,
+		`"plystra.generated.records.echo.v1.RecordsEchoV1Service"`,
+		`invokeInterface(runtime, method, interfaceCodec, errorContract, request, options)`,
+	} {
+		if !bytes.Contains(types, []byte(required)) {
+			t.Fatalf("canonical Interface method omits %q:\n%s", required, types)
+		}
+	}
+}
+
+func TestRenderCanonicalInterfaceMethodsForEveryExposure(t *testing.T) {
+	t.Parallel()
+
+	records := javascriptInterfaceProjectionInput(t)
+	audit := javascriptInterfaceProjectionInputFromSource(
+		t,
+		"example.com/interfaces/audit/record/v1",
+		"audit.record/v1/interface.go:5:1",
+		javascriptAuditInterfaceSource,
+		nil,
+	)
+	model := javascriptModel(t)
+	options := javascriptOptionsWithInterfaces(
+		t,
+		"interfaces-sdk",
+		nil,
+		nil,
+		[]protobufmodel.InterfaceInput{records, audit},
+	)
+	files, err := javascriptgen.Render(options, model)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	index := fileData(t, files, "generated/sdk/javascript/src/index.ts")
+	for _, required := range []string{
+		`export { createAuditRecordV1 };`,
+		`export { createRecordsEchoV1 };`,
+		`readonly "v1": AuditRecordV1Operation;`,
+		`readonly "v1": RecordsEchoV1Operation;`,
+		`"v1": bindAuditRecordV1(runtime),`,
+		`"v1": bindRecordsEchoV1(runtime),`,
+	} {
+		if !bytes.Contains(index, []byte(required)) {
+			t.Fatalf("generated Interface index omits %q:\n%s", required, index)
+		}
+	}
+	auditSource := fileData(t, files, "generated/sdk/javascript/src/interfaces/audit/record/v1.ts")
+	for _, required := range []string{
+		`export type ErrorCode = never;`,
+		`export function createOperation(options: ClientOptions): Operation`,
+		`"plystra.generated.audit.record.v1.AuditRecordV1Service"`,
+		`invokeInterface(runtime, method, interfaceCodec, errorContract, request, options)`,
+	} {
+		if !bytes.Contains(auditSource, []byte(required)) {
+			t.Fatalf("generated audit.record/v1 method omits %q:\n%s", required, auditSource)
+		}
+	}
+	for _, file := range files {
+		if strings.Contains(file.Path(), "/operations/") {
+			t.Fatalf("Interface-only SDK generated transitional operation %s", file.Path())
+		}
+	}
+	reversed := javascriptOptionsWithInterfaces(
+		t,
+		"interfaces-sdk",
+		nil,
+		nil,
+		[]protobufmodel.InterfaceInput{audit, records},
+	)
+	repeated, err := javascriptgen.Render(reversed, model)
+	if err != nil || !equalFiles(repeated, files) {
+		t.Fatalf("reversed Interface input order changed methods: %v", err)
 	}
 }
 
@@ -725,13 +828,29 @@ func javascriptOptionsWithInterfaces(
 
 func javascriptInterfaceProjectionInput(t testing.TB) protobufmodel.InterfaceInput {
 	t.Helper()
-	const packagePath = "example.com/interfaces/records/echo/v1"
-	declarations, err := interfacedecl.ParseFile("interface.go", []byte(javascriptInterfaceSource))
+	return javascriptInterfaceProjectionInputFromSource(
+		t,
+		"example.com/interfaces/records/echo/v1",
+		"example.com/interfaces@v1.0.0/records/echo/v1/interface.go:8:1",
+		javascriptInterfaceSource,
+		[]string{"record_rejected"},
+	)
+}
+
+func javascriptInterfaceProjectionInputFromSource(
+	t testing.TB,
+	packagePath string,
+	sourceLocation string,
+	source string,
+	semanticErrors []string,
+) protobufmodel.InterfaceInput {
+	t.Helper()
+	declarations, err := interfacedecl.ParseFile("interface.go", []byte(source))
 	if err != nil || len(declarations) != 1 {
 		t.Fatalf("interfacedecl.ParseFile = %#v, %v", declarations, err)
 	}
 	files := token.NewFileSet()
-	file, err := parser.ParseFile(files, "interface.go", javascriptInterfaceSource, parser.AllErrors)
+	file, err := parser.ParseFile(files, "interface.go", source, parser.AllErrors)
 	if err != nil {
 		t.Fatalf("parser.ParseFile: %v", err)
 	}
@@ -746,10 +865,10 @@ func javascriptInterfaceProjectionInput(t testing.TB) protobufmodel.InterfaceInp
 	return protobufmodel.InterfaceInput{
 		InterfaceID:    contract.ID(),
 		PackagePath:    packagePath,
-		Source:         "example.com/interfaces@v1.0.0/records/echo/v1/interface.go:8:1",
+		Source:         sourceLocation,
 		Contract:       contract,
-		ContractDigest: hash([]byte("records.echo/v1 Interface contract")),
-		SemanticErrors: []string{"record_rejected"},
+		ContractDigest: hash([]byte(contract.ID().String() + " Interface contract")),
+		SemanticErrors: semanticErrors,
 	}
 }
 

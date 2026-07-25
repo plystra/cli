@@ -196,12 +196,19 @@ Connect surface it remains present as a valid empty descriptor set. These files
 contain no Implementation, configuration, or Secret data. They are CLI-owned;
 never edit them, and use plystra generate --check to detect drift.
 
-Connect exposure generates Interface request, response, and nested-message
-types under generated/sdk/javascript and exports them from the package root.
-Properties preserve JSON names and required markers. int32/uint32 use number,
-int64/uint64 use bigint, floats use number, bytes use Uint8Array, timestamp and
-duration use transport strings, repeated values use readonly arrays, and maps
-use readonly string-keyed records. Do not edit these CLI-owned types.
+Connect exposure generates one nested JavaScript method, one tree-shakable
+factory, the declared semantic-error-code union, and Interface request,
+response, and nested-message types under generated/sdk/javascript. Import only
+the package root. For records.echo/v1, the representative calls are
+client.records.echo.v1(request) and createRecordsEchoV1(options)(request);
+substitute the actual generated symbols exported by
+generated/sdk/javascript/src/index.ts. Both forms use the same exact Connect
+procedure and safe runtime boundary. Properties preserve JSON names and
+required markers. int32/uint32 use number, int64/uint64 use bigint, floats use
+number, bytes use Uint8Array, timestamp and duration use transport strings,
+repeated values use readonly arrays, and maps use readonly string-keyed
+records. The unsafe JavaScript object key __proto__ is rejected before dispatch
+rather than silently changed or dropped. Do not edit these CLI-owned sources.
 A selected Connect surface also emits a Go handler under
 generated/go/adapters/connect/. Canonical handlers bind one exact procedure to
 the generated canonical application-invocation handle, while Alias handlers

@@ -228,6 +228,11 @@ http:
 		`readonly "at": string;`,
 		`readonly "delay": string;`,
 		`readonly "DefaultName"?: string;`,
+		`export type ErrorCode = "record_rejected";`,
+		`export type Operation = (`,
+		`export function createOperation(options: ClientOptions): Operation`,
+		`"plystra.generated.records.echo.v1.RecordsEchoV1Service"`,
+		`invokeInterface(runtime, method, interfaceCodec, errorContract, request, options)`,
 	} {
 		if !bytes.Contains(interfaceTypes, []byte(required)) {
 			t.Fatalf("%s omits %q:\n%s", interfaceTypesPath, required, interfaceTypes)
@@ -238,11 +243,27 @@ http:
 		"RecordsEchoV1Request,",
 		"RecordsEchoV1Response,",
 		"RecordsEchoV1Envelope,",
+		"ErrorCode as RecordsEchoV1ErrorCode,",
+		"export { createRecordsEchoV1 };",
+		`readonly "v1": RecordsEchoV1Operation;`,
+		`"v1": bindRecordsEchoV1(runtime),`,
 		`from "./interfaces/records/echo/v1.js"`,
 	} {
 		if !bytes.Contains(interfaceIndex, []byte(required)) {
 			t.Fatalf("generated JavaScript index omits %q:\n%s", required, interfaceIndex)
 		}
+	}
+	for _, unique := range []string{
+		"export { createRecordsEchoV1 };",
+		`readonly "v1": RecordsEchoV1Operation;`,
+		`"v1": bindRecordsEchoV1(runtime),`,
+	} {
+		if bytes.Count(interfaceIndex, []byte(unique)) != 1 {
+			t.Fatalf("generated JavaScript index does not own %q exactly once:\n%s", unique, interfaceIndex)
+		}
+	}
+	if bytes.Contains(interfaceIndex, []byte(`from "./operations/records/echo/v1.js"`)) {
+		t.Fatalf("generated JavaScript index retains a competing legacy records.echo/v1 operation:\n%s", interfaceIndex)
 	}
 	assertFileMissing(t, root, "generated/sdk/javascript/src/operations/records/echo/v1.ts")
 

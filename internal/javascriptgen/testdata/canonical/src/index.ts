@@ -41,11 +41,10 @@ import {
   createOperation as createMailDeliverV1Operation,
   type Operation as MailDeliverV1Operation,
 } from "./operations/mail/deliver/v1.js";
-export type {
-  RecordsEchoV1Detail,
-  RecordsEchoV1Envelope,
-  RecordsEchoV1Request,
-  RecordsEchoV1Response,
+import {
+  bindOperation as bindRecordsEchoV1,
+  createOperation as createRecordsEchoV1,
+  type Operation as RecordsEchoV1Operation,
 } from "./interfaces/records/echo/v1.js";
 
 export { PlystraError } from "./runtime.js";
@@ -99,6 +98,14 @@ export type {
   Request as MailDeliverV1Request,
   Response as MailDeliverV1Response,
 } from "./operations/mail/deliver/v1.js";
+export { createRecordsEchoV1 };
+export type {
+  ErrorCode as RecordsEchoV1ErrorCode,
+  RecordsEchoV1Detail,
+  RecordsEchoV1Envelope,
+  RecordsEchoV1Request,
+  RecordsEchoV1Response,
+} from "./interfaces/records/echo/v1.js";
 
 export type PlystraClient = {
   readonly "account": {
@@ -141,6 +148,11 @@ export type PlystraClient = {
     readonly "deliver": {
       /** @deprecated Use email.send/v1 instead. */
       readonly "v1": MailDeliverV1Operation;
+    };
+  };
+  readonly "records": {
+    readonly "echo": {
+      readonly "v1": RecordsEchoV1Operation;
     };
   };
 };
@@ -187,6 +199,11 @@ export function createPlystraClient(options: ClientOptions): PlystraClient {
     "mail": Object.freeze({
       "deliver": Object.freeze({
         "v1": bindMailDeliverV1(runtime),
+      }),
+    }),
+    "records": Object.freeze({
+      "echo": Object.freeze({
+        "v1": bindRecordsEchoV1(runtime),
       }),
     }),
   });

@@ -4,6 +4,7 @@ import {
   createEmailSendV1,
   createMailDeliverV1,
   createPlystraClient,
+  createRecordsEchoV1,
   type ClientOptions,
   type CompatSendV1Request,
   type CompatSendV1Response,
@@ -15,6 +16,7 @@ import {
   type PlystraErrorDetail,
   type RecordsEchoV1Detail,
   type RecordsEchoV1Envelope,
+  type RecordsEchoV1ErrorCode,
   type RecordsEchoV1Request,
   type RecordsEchoV1Response,
 } from "@acme/project-sdk";
@@ -69,6 +71,7 @@ const classified = new PlystraError(422, "capability_error", safeDetail);
 const interfaceDetail: RecordsEchoV1Detail = {
   code: "nested",
   amount: -9_223_372_036_854_775_808n,
+  children: [{ code: "leaf" }],
 };
 const interfaceEnvelope: RecordsEchoV1Envelope = {
   active: true,
@@ -92,6 +95,11 @@ const interfaceEnvelope: RecordsEchoV1Envelope = {
 };
 const interfaceRequest: RecordsEchoV1Request = { value: interfaceEnvelope };
 const interfaceResponse: RecordsEchoV1Response = { value: interfaceEnvelope };
+const interfaceErrorCode: RecordsEchoV1ErrorCode = "record_rejected";
+const interfaceMethodResponse: Promise<RecordsEchoV1Response> =
+  client.records.echo.v1(interfaceRequest);
+const interfaceStandaloneResponse: Promise<RecordsEchoV1Response> =
+  createRecordsEchoV1(options)(interfaceRequest);
 declare const typedResponse: EmailSendV1Response;
 const revision: bigint | undefined = typedResponse.revision;
 const positions: ReadonlyArray<bigint> | undefined = typedResponse.positions;
@@ -114,6 +122,10 @@ client.compat.send.v1({});
 client.email.send.v2(request);
 // @ts-expect-error loose detail codes are not part of the Plystra error API.
 classified.detailCode;
+// @ts-expect-error canonical Interface methods require their exact request shape.
+client.records.echo.v1({});
+// @ts-expect-error only declared canonical Interface semantic errors are accepted.
+const invalidInterfaceErrorCode: RecordsEchoV1ErrorCode = "private_failure";
 const invalidInterfaceInteger: RecordsEchoV1Envelope = {
   ...interfaceEnvelope,
   // @ts-expect-error canonical int64 fields require exact bigint values.
@@ -135,6 +147,10 @@ void deprecatedError;
 void classified;
 void interfaceRequest;
 void interfaceResponse;
+void interfaceErrorCode;
+void interfaceMethodResponse;
+void interfaceStandaloneResponse;
+void invalidInterfaceErrorCode;
 void invalidInterfaceInteger;
 void invalidInterfaceBytes;
 void kernelClass;

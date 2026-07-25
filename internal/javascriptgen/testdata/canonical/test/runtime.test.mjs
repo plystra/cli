@@ -10,6 +10,7 @@ import {
   createEmailSendV1,
   createMailDeliverV1,
   createPlystraClient,
+  createRecordsEchoV1,
 } from "@acme/project-sdk";
 import { resolveMessage, resolveUnaryMethod } from "../dist/descriptors.js";
 
@@ -18,6 +19,12 @@ const emailMethod = resolveUnaryMethod(
   "Invoke",
   "plystra.generated.email.send.v1.EmailSendV1Request",
   "plystra.generated.email.send.v1.EmailSendV1Response",
+);
+const recordsMethod = resolveUnaryMethod(
+  "plystra.generated.records.echo.v1.RecordsEchoV1Service",
+  "Invoke",
+  "plystra.generated.records.echo.v1.RecordsEchoV1Request",
+  "plystra.generated.records.echo.v1.RecordsEchoV1Response",
 );
 const errorDetailDescriptor = resolveMessage(
   "plystra.generated.transport.v1.PlystraErrorDetail",
@@ -75,6 +82,84 @@ function safeErrorDetail({
   };
 }
 
+function recordsEnvelope(overrides = {}) {
+  return {
+    active: true,
+    count_32: -2_147_483_648,
+    count_64: -9_223_372_036_854_775_808n,
+    unsigned_32: 4_294_967_295,
+    unsigned_64: 18_446_744_073_709_551_615n,
+    ratio_32: 1.25,
+    ratio_64: -9.5,
+    name: "canonical",
+    payload: new Uint8Array([0, 255, 1]),
+    tags: ["one", "two"],
+    scores: {
+      low: -9_223_372_036_854_775_808n,
+      high: 9_223_372_036_854_775_807n,
+    },
+    detail: {
+      code: "root",
+      amount: -1n,
+      children: [{ code: "leaf", children: [] }],
+    },
+    items: [{
+      code: "item",
+      amount: 9_223_372_036_854_775_807n,
+      children: [],
+    }],
+    lookup: { nested: { code: "lookup", amount: 2n, children: [] } },
+    at: "2026-07-25T01:02:03.456Z",
+    delay: "1.500s",
+    payloads: [new Uint8Array([2, 3]), new Uint8Array()],
+    identifiers: {
+      "-9223372036854775808": 0n,
+      "9223372036854775807": 18_446_744_073_709_551_615n,
+    },
+    DefaultName: "authored-json-name",
+    ...overrides,
+  };
+}
+
+function recordsEnvelopeJSON(overrides = {}) {
+  return {
+    active: true,
+    count_32: -2_147_483_648,
+    count_64: "-9223372036854775808",
+    unsigned_32: 4_294_967_295,
+    unsigned_64: "18446744073709551615",
+    ratio_32: 1.25,
+    ratio_64: -9.5,
+    name: "canonical",
+    payload: "AP8B",
+    tags: ["one", "two"],
+    scores: {
+      low: "-9223372036854775808",
+      high: "9223372036854775807",
+    },
+    detail: {
+      code: "root",
+      amount: "-1",
+      children: [{ code: "leaf", children: [] }],
+    },
+    items: [{
+      code: "item",
+      amount: "9223372036854775807",
+      children: [],
+    }],
+    lookup: { nested: { code: "lookup", amount: "2", children: [] } },
+    at: "2026-07-25T01:02:03.456Z",
+    delay: "1.500s",
+    payloads: ["AgM=", ""],
+    identifiers: {
+      "-9223372036854775808": "0",
+      "9223372036854775807": "18446744073709551615",
+    },
+    DefaultName: "authored-json-name",
+    ...overrides,
+  };
+}
+
 test("package exports and declarations hide Connect internals", async () => {
   for (const specifier of [
     "@acme/project-sdk/runtime.js",
@@ -87,7 +172,12 @@ test("package exports and declarations hide Connect internals", async () => {
     );
   }
 
-  const [runtimeDeclaration, descriptorDeclaration, operationDeclaration] =
+  const [
+    runtimeDeclaration,
+    descriptorDeclaration,
+    operationDeclaration,
+    interfaceDeclaration,
+  ] =
     await Promise.all([
       readFile(new URL("../dist/runtime.d.ts", import.meta.url), "utf8"),
       readFile(new URL("../dist/descriptors.d.ts", import.meta.url), "utf8"),
@@ -95,10 +185,14 @@ test("package exports and declarations hide Connect internals", async () => {
         new URL("../dist/operations/email/send/v1.d.ts", import.meta.url),
         "utf8",
       ),
+      readFile(
+        new URL("../dist/interfaces/records/echo/v1.d.ts", import.meta.url),
+        "utf8",
+      ),
     ]);
   assert.doesNotMatch(
     runtimeDeclaration,
-    /\b(?:ConnectError|Transport|Runtime|MessageCodec|createRuntime|invoke)\b/,
+    /\b(?:ConnectError|Transport|Runtime|MessageCodec|InterfaceCodec|InterfaceValueCodec|createRuntime|invoke|invokeInterface)\b/,
   );
   assert.doesNotMatch(
     descriptorDeclaration,
@@ -108,6 +202,14 @@ test("package exports and declarations hide Connect internals", async () => {
     operationDeclaration,
     /\bbindOperation(?:Method)?\b/,
   );
+  assert.doesNotMatch(
+    interfaceDeclaration,
+    /\b(?:bindOperation|invokeInterface|InterfaceCodec|Runtime|resolveMessage|resolveUnaryMethod)\b/,
+  );
+  assert.match(
+    interfaceDeclaration,
+    /export declare function createOperation\(options: ClientOptions\): Operation;/,
+  );
   assert.match(
     operationDeclaration,
     /@plystraConstraints \{"min_length":2,"max_length":254,"pattern":"\^\[\^@\]\+@\[\^@\]\+\$"\}/,
@@ -115,6 +217,254 @@ test("package exports and declarations hide Connect internals", async () => {
   assert.doesNotMatch(
     runtimeDeclaration,
     /\bisStringWithinUnicodeScalarBounds\b/,
+  );
+});
+
+test("canonical Interface method preserves every authored field over Connect", async () => {
+  const paths = [];
+  const requests = [];
+  const expectedRequest = recordsEnvelopeJSON();
+  const expectedResponse = recordsEnvelope();
+  const options = {
+    baseUrl: "https://api.example.test/root",
+    fetch: async (input, init) => {
+      paths.push(new URL(input).pathname);
+      requests.push(await requestJSON(recordsMethod, init.body));
+      return protobufResponse(recordsMethod, { value: expectedRequest });
+    },
+  };
+  const client = createPlystraClient(options);
+
+  assert.deepEqual(
+    await client.records.echo.v1({ value: recordsEnvelope() }),
+    { value: expectedResponse },
+  );
+  assert.deepEqual(
+    await createRecordsEchoV1(options)({ value: recordsEnvelope() }),
+    { value: expectedResponse },
+  );
+  assert.deepEqual(paths, [
+    "/root/plystra.generated.records.echo.v1.RecordsEchoV1Service/Invoke",
+    "/root/plystra.generated.records.echo.v1.RecordsEchoV1Service/Invoke",
+  ]);
+  assert.deepEqual(requests, [
+    { value: expectedRequest },
+    { value: expectedRequest },
+  ]);
+  for (const response of [
+    await client.records.echo.v1({ value: recordsEnvelope() }),
+  ]) {
+    assert.equal(Object.getPrototypeOf(response), Object.prototype);
+    assert.equal(Object.getPrototypeOf(response.value), Object.prototype);
+    assert.equal(
+      Object.getPrototypeOf(response.value.detail),
+      Object.prototype,
+    );
+    assert.equal(Object.getPrototypeOf(response.value.scores), Object.prototype);
+    assert.equal(Object.getPrototypeOf(response.value.lookup), Object.prototype);
+  }
+  assert.equal(Object.isFrozen(client.records), true);
+  assert.equal(Object.isFrozen(client.records.echo), true);
+});
+
+test("canonical Interface method safely preserves dynamic object-property keys", async () => {
+  const lookup = {};
+  Object.defineProperty(lookup, "constructor", {
+    value: { code: "constructor", children: [] },
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+  Object.defineProperty(lookup, "prototype", {
+    value: { code: "prototype", children: [] },
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+  const protobufLookup = {
+    constructor: { code: "constructor", children: [] },
+    prototype: { code: "prototype", children: [] },
+  };
+  let encoded;
+  const echo = createRecordsEchoV1({
+    baseUrl: "https://api.example.test",
+    fetch: async (_input, init) => {
+      encoded = await requestJSON(recordsMethod, init.body);
+      return protobufResponse(recordsMethod, {
+        value: recordsEnvelopeJSON({ lookup: protobufLookup }),
+      });
+    },
+  });
+
+  const response = await echo({
+    value: recordsEnvelope({ lookup }),
+  });
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(encoded.value.lookup, "constructor"),
+    true,
+  );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(response.value.lookup, "constructor"),
+    true,
+  );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(response.value.lookup, "prototype"),
+    true,
+  );
+  assert.deepEqual(response.value.lookup.constructor, {
+    code: "constructor",
+    children: [],
+  });
+  assert.deepEqual(response.value.lookup.prototype, {
+    code: "prototype",
+    children: [],
+  });
+  assert.equal(Object.getPrototypeOf(response.value.lookup), Object.prototype);
+});
+
+test("canonical Interface request validation rejects invalid shapes and widths before fetch", async () => {
+  let calls = 0;
+  const echo = createRecordsEchoV1({
+    baseUrl: "https://api.example.test",
+    fetch: async () => {
+      calls++;
+      return protobufResponse(recordsMethod, { value: recordsEnvelopeJSON() });
+    },
+  });
+  const request = (overrides) => ({
+    value: recordsEnvelope(overrides),
+  });
+  const invalid = [
+    {},
+    { value: {} },
+    { value: recordsEnvelope(), unexpected: true },
+    request({ unexpected: true }),
+    request({ active: "true" }),
+    request({ count_32: -2_147_483_649 }),
+    request({ count_32: 2_147_483_648 }),
+    request({ count_32: 1.5 }),
+    request({ count_64: 1 }),
+    request({ count_64: -9_223_372_036_854_775_809n }),
+    request({ count_64: 9_223_372_036_854_775_808n }),
+    request({ unsigned_32: -1 }),
+    request({ unsigned_32: 4_294_967_296 }),
+    request({ unsigned_64: -1n }),
+    request({ unsigned_64: 18_446_744_073_709_551_616n }),
+    request({ ratio_32: Number.NaN }),
+    request({ ratio_32: 3.5e38 }),
+    request({ ratio_64: Number.POSITIVE_INFINITY }),
+    request({ name: 1 }),
+    request({ payload: "AP8B" }),
+    request({ tags: {} }),
+    request({ tags: ["valid", 1] }),
+    request({ scores: [] }),
+    request({ scores: { invalid: 1 } }),
+    request({ detail: [] }),
+    request({ detail: { amount: 1n } }),
+    request({ detail: { code: "nested", children: {} } }),
+    request({ items: {} }),
+    request({ items: [{ code: "valid", unexpected: true }] }),
+    request({ lookup: [] }),
+    request({ lookup: { nested: { amount: 1n } } }),
+    request({ at: "not-a-timestamp" }),
+    request({ delay: "not-a-duration" }),
+    request({ payloads: ["AgM="] }),
+    request({ identifiers: { "-0": 1n } }),
+    request({ identifiers: { "01": 1n } }),
+    request({ identifiers: { "+1": 1n } }),
+    request({ identifiers: { "-9223372036854775809": 1n } }),
+    request({ identifiers: { "9223372036854775808": 1n } }),
+    request({ identifiers: { "1": -1n } }),
+    request({ identifiers: { "1": 18_446_744_073_709_551_616n } }),
+    request({ DefaultName: 1 }),
+  ];
+  const unsafeStringMap = {};
+  Object.defineProperty(unsafeStringMap, "__proto__", {
+    value: 1n,
+    enumerable: true,
+  });
+  invalid.push(request({ scores: unsafeStringMap }));
+  for (const value of invalid) {
+    await assert.rejects(() => echo(value), TypeError);
+  }
+
+  const cyclic = { code: "cycle" };
+  cyclic.children = [cyclic];
+  await assert.rejects(
+    () => echo(request({ detail: cyclic })),
+    TypeError,
+  );
+
+  let deep = { code: "leaf" };
+  for (let index = 0; index < 40; index++) {
+    deep = { code: `depth-${index}`, children: [deep] };
+  }
+  await assert.rejects(
+    () => echo(request({ detail: deep })),
+    (error) =>
+      error instanceof RangeError &&
+      error.message === "Interface value exceeds the maximum nesting depth",
+  );
+  await assert.rejects(
+    () => echo(request({ tags: Array(65_536).fill("") })),
+    (error) =>
+      error instanceof RangeError &&
+      error.message === "Interface value exceeds the maximum node count",
+  );
+  await assert.rejects(
+    () => echo(request({ payload: new Uint8Array(1_048_576) })),
+    (error) =>
+      error instanceof RangeError &&
+      error.message === "request exceeds the 1 MiB transport limit",
+  );
+  assert.equal(calls, 0);
+});
+
+test("canonical Interface responses and semantic failures remain safe", async () => {
+  const responses = [
+    protobufResponse(recordsMethod, {}),
+    protobufResponse(recordsMethod, {
+      value: recordsEnvelopeJSON({ detail: { amount: "1" } }),
+    }),
+  ];
+  const invalidResponse = createRecordsEchoV1({
+    baseUrl: "https://api.example.test",
+    fetch: async () => responses.shift(),
+  });
+  for (let index = 0; index < 2; index++) {
+    await assert.rejects(
+      () => invalidResponse({ value: recordsEnvelope() }),
+      (error) =>
+        error instanceof PlystraError &&
+        error.code === "invalid_response" &&
+        error.message === "invalid_response",
+    );
+  }
+
+  const semantic = createRecordsEchoV1({
+    baseUrl: "https://api.example.test",
+    fetch: async () =>
+      connectErrorResponse("failed_precondition", "implementation secret", 400, [
+        safeErrorDetail({
+          requestedCapabilityID: "records.echo/v1",
+          canonicalCapabilityID: "records.echo/v1",
+          semanticErrorCode: "record_rejected",
+          traceID: "trace-records",
+        }),
+      ]),
+  });
+  await assert.rejects(
+    () => semantic({ value: recordsEnvelope() }),
+    (error) =>
+      error instanceof PlystraError &&
+      error.status === 422 &&
+      error.code === "capability_error" &&
+      error.message === "capability_error" &&
+      error.detail?.requestedCapabilityID === "records.echo/v1" &&
+      error.detail?.canonicalCapabilityID === "records.echo/v1" &&
+      error.detail?.semanticErrorCode === "record_rejected" &&
+      error.detail?.traceID === "trace-records" &&
+      !error.message.includes("implementation secret"),
   );
 });
 
