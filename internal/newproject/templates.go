@@ -83,7 +83,7 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
-The generated JavaScript SDK exposes every canonical ` + "`integer`" + ` field, integer array item, and integer enum member as a signed 64-bit ` + "`bigint`" + `. Use literals such as ` + "`42n`" + ` rather than JavaScript ` + "`number`" + ` values so requests and responses remain exact across the complete range.
+For each Interface exposed through Connect, the generated JavaScript SDK publishes deterministic request, response, and reachable nested-message types from the authored Go contract. Effective JSON names and required markers remain exact. ` + "`int32`" + ` and ` + "`uint32`" + ` become JavaScript ` + "`number`" + `; ` + "`int64`" + ` and ` + "`uint64`" + ` become ` + "`bigint`" + `; floating-point fields become ` + "`number`" + `; bytes become ` + "`Uint8Array`" + `; timestamps and durations use their canonical transport strings; repeated values are readonly arrays; and maps are readonly string-keyed records.
 
 Import the generated JavaScript SDK only through its package root. Internal runtime, descriptor, codec, operation-binder, and raw Connect surfaces are blocked by the package export map and omitted from public declarations.
 
@@ -269,13 +269,9 @@ YAML values, Secret-reference targets, resolved Secrets, or machine paths.
 
 ## Detailed task reference
 
-Read only the section that matches the current task. Ordinary Project and
-business-Plugin work does not require Generation Extensions, fixed-point
-resolution, contribution graphs, normalized application models, wire-map
-allocation, release evidence, or Kernel assembly internals. Those are
-CLI-owned or maintainer mechanisms. They remain documented here only where an
-infrastructure task, compatibility change, or specific diagnostic makes them
-necessary.
+Read only the section that matches the current task. Start with authored Go and
+plystra.yaml; inspect generated transport or assembly internals only when a
+specific diagnostic or infrastructure task requires them.
 
 ## Start from the module boundary
 
@@ -333,12 +329,12 @@ A typical Plystra Project evolves into this layout:
       sdk/javascript/
         package.json
         src/descriptors.ts
+        src/interfaces/<interface-id>.ts
         src/runtime.ts
 
-Author plugin.yaml, capability.yaml, Plugin Go implementation, tests, entry
-points, and optional Plugin-owned assets outside generated. Treat every path
-under generated as CLI-owned. Never repair generated output by hand; change the
-authored declaration or implementation and run plystra generate.
+Treat every path under generated as CLI-owned. Never repair generated output by
+hand; change the authored declaration or implementation and run plystra
+generate.
 
 generated/proto/wire-map.json is durable CLI-owned compatibility history for
 every canonical Interface message projected to Connect, including request,
@@ -360,6 +356,13 @@ descriptor graph, including required well-known descriptors. With no selected
 Connect surface it remains present as a valid empty descriptor set. These files
 contain no Implementation, configuration, or Secret data. They are CLI-owned;
 never edit them, and use plystra generate --check to detect drift.
+
+Connect exposure generates Interface request, response, and nested-message
+types under generated/sdk/javascript and exports them from the package root.
+Properties preserve JSON names and required markers. int32/uint32 use number,
+int64/uint64 use bigint, floats use number, bytes use Uint8Array, timestamp and
+duration use transport strings, repeated values use readonly arrays, and maps
+use readonly string-keyed records. Do not edit these CLI-owned types.
 A selected Connect surface also emits a Go handler under
 generated/go/adapters/connect/. Canonical handlers bind one exact procedure to
 the generated canonical application-invocation handle, while Alias handlers
@@ -409,22 +412,6 @@ missing, duplicate, malformed, unknown, identity-mismatched, outer-code-
 mismatched, or undeclared detail fails closed to internal. Implementation text,
 causes, payloads, panic data, configuration, credentials, Secrets, and internal
 Kernel detail codes never enter the safe detail.
-
-The generated application entrypoint does not
-yet mount an HTTP server; server mounting and the remaining protocol
-projections remain later transport work.
-
-Protobuf-derived names must be unique within each request and response. For
-example, foo1 and foo_1 both derive the ProtoJSON name foo1, while enum fields
-http_status and h_t_t_p_status both derive one HTTPStatusEnum type. Generation
-reports the Capability, request or response, both canonical field names, and the
-colliding identity before writing output. Rename one authored capability.yaml
-field and regenerate; never repair the collision in generated files.
-
-The CLI currently does not create or execute database migrations. When a Plugin
-owns migrations, keep them inside that Plugin and make its runtime lifecycle or
-provider implementation apply them deliberately. Do not place migrations under
-generated.
 
 ## Compose dependency Project configuration
 
@@ -1462,11 +1449,12 @@ recovery action or code.
 - Protobuf schema or descriptor drift: never patch generated .proto files or
   generated/proto/descriptor-set.pb. Restore or regenerate the complete
   CLI-owned output, then rerun plystra generate --check.
-- Protobuf naming collision: rename one of the two canonical fields named by
-  the diagnostic in the authored Interface Go package. ProtoJSON can collapse
-  distinct Go names to one generated field identity. Do not patch generated
-  names or the wire map; ordinary generation and generate --check leave the
-  Project unchanged.
+- Protobuf naming collision: Protobuf-derived names must be unique within each request and response.
+  For example, foo1 and foo_1 both derive the ProtoJSON name foo1.
+  Likewise, http_status and h_t_t_p_status both derive one HTTPStatusEnum type.
+  Rename one of the two canonical fields named by the diagnostic in the
+  authored Interface Go package. Do not patch generated names or the wire map;
+  ordinary generation and generate --check leave the Project unchanged.
 - Unsupported Connect operation kind: the current unary boundary accepts a
   canonical contract with semantics.kind: query or command. Remove the named
   event or stream from http.expose until its operation kind is supported; do

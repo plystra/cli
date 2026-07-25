@@ -484,7 +484,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: SDK model: %w", ErrRender, err)
 	}
-	if len(javaScriptTargets) != 0 {
+	if len(javaScriptTargets) != 0 || len(interfaceProtobufModel.Operations()) != 0 {
 		javaScript, err := javascriptgen.Render(javascriptgen.Options{
 			PackageName:             options.JavaScriptPackage,
 			ConfigurationProvenance: transportProvenance,

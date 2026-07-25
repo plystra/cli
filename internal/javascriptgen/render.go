@@ -1,5 +1,5 @@
 // Package javascriptgen renders deterministic ESM TypeScript application SDKs
-// from the provider-independent shared SDK model.
+// from canonical Interface and transitional legacy transport projections.
 package javascriptgen
 
 import (
@@ -86,6 +86,12 @@ func Render(options Options, model sdkmodel.Model) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
+	interfaces, err := prepareInterfaces(options.Transport.InterfaceProjection)
+	if err != nil {
+		return nil, err
+	}
+	operations = discardSupersededLegacyOperations(operations, interfaces)
+	assignSurfaceSymbols(operations, interfaces)
 	operations, err = bindTransport(operations, options.Transport)
 	if err != nil {
 		return nil, err
@@ -97,13 +103,13 @@ func Render(options Options, model sdkmodel.Model) ([]File, error) {
 		newFile(path.Join(generatedRoot, "src", "descriptors.ts"), renderDescriptorSource(options.Transport.DescriptorSet)),
 		newFile(path.Join(generatedRoot, "src", "runtime.ts"), []byte(runtimeSource)),
 	}
-	index, err := renderIndex(operations)
+	index, err := renderIndex(operations, interfaces)
 	if err != nil {
 		return nil, err
 	}
 	files = append(files,
 		newFile(path.Join(generatedRoot, "src", "index.ts"), index),
-		newFile(path.Join(generatedRoot, "README.md"), renderREADME(options.PackageName, operations)),
+		newFile(path.Join(generatedRoot, "README.md"), renderREADME(options.PackageName, operations, interfaces)),
 	)
 	for _, operation := range operations {
 		var source []byte
@@ -112,6 +118,13 @@ func Render(options Options, model sdkmodel.Model) ([]File, error) {
 		} else {
 			source, err = renderOperation(operation)
 		}
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, newFile(path.Join(generatedRoot, operation.source), source))
+	}
+	for _, operation := range interfaces {
+		source, err := renderInterfaceTypes(operation)
 		if err != nil {
 			return nil, err
 		}
@@ -147,7 +160,6 @@ func prepareOperations(values []sdkmodel.Operation, aliases []sdkmodel.Alias) ([
 			deprecated: alias.Deprecated(),
 		})
 	}
-	baseCounts := make(map[string]int, len(operations))
 	seen := make(map[string]struct{}, len(operations))
 	for index := range operations {
 		id := operations[index].id
@@ -160,23 +172,15 @@ func prepareOperations(values []sdkmodel.Operation, aliases []sdkmodel.Alias) ([
 		seen[id.String()] = struct{}{}
 		segments := strings.Split(id.Name(), ".")
 		version := "v" + strconv.FormatUint(id.Major(), 10)
-		symbol := operationSymbol(id.Name(), version)
-		baseCounts[symbol]++
 		sourceComponents := append([]string{"src", "operations"}, segments...)
 		sourceComponents = append(sourceComponents, version+".ts")
 		operations[index].segments = segments
 		operations[index].version = version
-		operations[index].symbol = symbol
 		operations[index].source = path.Join(sourceComponents...)
 	}
 	sort.Slice(operations, func(left, right int) bool {
 		return operations[left].id.String() < operations[right].id.String()
 	})
-	for index := range operations {
-		if baseCounts[operations[index].symbol] > 1 {
-			operations[index].symbol += "_" + hex.EncodeToString([]byte(operations[index].id.String()))
-		}
-	}
 	return operations, nil
 }
 
@@ -464,7 +468,7 @@ func renderValidator(source *strings.Builder, functionName, typeName string, fie
 	fmt.Fprintln(source)
 }
 
-func renderIndex(operations []renderedOperation) ([]byte, error) {
+func renderIndex(operations []renderedOperation, interfaces []renderedInterface) ([]byte, error) {
 	root, err := buildClientTree(operations)
 	if err != nil {
 		return nil, err
@@ -483,6 +487,19 @@ func renderIndex(operations []renderedOperation) ([]byte, error) {
 			fmt.Fprintf(&source, "  createOperation as create%s,\n", operation.symbol)
 		}
 		fmt.Fprintf(&source, "  type Operation as %sOperation,\n", operation.symbol)
+		fmt.Fprintf(&source, "} from %s;\n", jsString(importPath))
+	}
+	for _, operation := range interfaces {
+		importPath := interfaceIndexImportPath(operation)
+		fmt.Fprintln(&source, "export type {")
+		for _, message := range operation.operation.Messages() {
+			publicName := interfacePublicTypeName(operation, message)
+			if publicName == message.ProtobufName() {
+				fmt.Fprintf(&source, "  %s,\n", publicName)
+			} else {
+				fmt.Fprintf(&source, "  %s as %s,\n", message.ProtobufName(), publicName)
+			}
+		}
 		fmt.Fprintf(&source, "} from %s;\n", jsString(importPath))
 	}
 	fmt.Fprintln(&source)
@@ -607,7 +624,7 @@ func sortedChildNames(node *clientNode) []string {
 	return names
 }
 
-func renderREADME(packageName string, operations []renderedOperation) []byte {
+func renderREADME(packageName string, operations []renderedOperation, interfaces []renderedInterface) []byte {
 	var readme strings.Builder
 	fmt.Fprintf(&readme, "# %s\n\n", packageName)
 	fmt.Fprintln(&readme, "Generated Plystra application SDK. Do not edit generated files.")
@@ -627,12 +644,28 @@ func renderREADME(packageName string, operations []renderedOperation) []byte {
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "Generated application failures expose only an immutable Plystra-owned safe detail. On the wire, `requested_interface_id` records the requested canonical Interface or temporary pre-removal Alias, `canonical_interface_id` records the canonical Interface target, and exactly one declared semantic code or closed Kernel class is present. Implementation text, causes, payloads, panic data, configuration, credentials, Secrets, internal Kernel detail codes, and raw Connect details are excluded. Missing, duplicate, malformed, unknown, mismatched, or undeclared details fail closed to `internal`; inspect `PlystraError.detail` rather than parsing an error message.")
 	fmt.Fprintln(&readme)
-	fmt.Fprintln(&readme, "Canonical `integer` fields and integer array items are signed 64-bit values exposed as JavaScript `bigint`, including enum literals such as `0n`. Pass `bigint`, not `number`, so request and response values remain exact across the full range.")
-	fmt.Fprintln(&readme)
-	fmt.Fprintln(&readme, "Generated request and response declarations retain each exact normalized constraint object in a `@plystraConstraints` field annotation. The wrapper preflights Unicode scalar-value length, numeric bounds, and array item counts before sending a request and applies the same portable checks to decoded responses. Canonical `pattern` uses Go regular-expression semantics, so it is declared for tools and developers but remains enforced authoritatively by the generated server rather than reinterpreted through JavaScript `RegExp`.")
-	fmt.Fprintln(&readme)
+	if len(operations) != 0 {
+		fmt.Fprintln(&readme, "Transitional legacy `integer` fields and integer array items are signed 64-bit values exposed as JavaScript `bigint`, including enum literals such as `0n`. Pass `bigint`, not `number`, so request and response values remain exact across the full range.")
+		fmt.Fprintln(&readme)
+	}
+	if len(interfaces) != 0 {
+		fmt.Fprintln(&readme, "Canonical Interface types preserve exact authored widths: `int32` and `uint32` are JavaScript `number`; `int64` and `uint64` are `bigint`; `float32` and `float64` are `number`; bytes are `Uint8Array`; timestamps are RFC 3339 strings; durations are Protobuf JSON duration strings; repeated values are readonly arrays; and maps are readonly string-keyed records. Boolean and integer Go map keys use their canonical ProtoJSON string form.")
+		fmt.Fprintln(&readme)
+		fmt.Fprintln(&readme, "Every property uses the Interface field's effective JSON name. Authored required markers produce required readonly properties; every other field remains optional. Nested same-package messages are exported from the package root together with the canonical request and response types.")
+		fmt.Fprintln(&readme)
+		fmt.Fprintln(&readme, "## Exposed Interface types")
+		fmt.Fprintln(&readme)
+		for _, operation := range interfaces {
+			fmt.Fprintf(&readme, "- `%s` (`%s`)\n", operation.operation.ID(), operation.operation.ContractDigest())
+		}
+		fmt.Fprintln(&readme)
+	}
+	if len(operations) != 0 {
+		fmt.Fprintln(&readme, "Transitional legacy request and response declarations retain each exact normalized constraint object in a `@plystraConstraints` field annotation. The wrapper preflights Unicode scalar-value length, numeric bounds, and array item counts before sending a request and applies the same portable checks to decoded responses. Canonical `pattern` uses Go regular-expression semantics, so it is declared for tools and developers but remains enforced authoritatively by the generated server rather than reinterpreted through JavaScript `RegExp`.")
+		fmt.Fprintln(&readme)
+	}
 	if len(operations) == 0 {
-		fmt.Fprintln(&readme, "This application currently exposes no JavaScript Capability operations.")
+		fmt.Fprintln(&readme, "This application currently publishes Interface types but no generated JavaScript methods.")
 		return []byte(readme.String())
 	}
 	first := operations[0]

@@ -7,6 +7,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"flag"
+	"go/ast"
+	"go/importer"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +21,8 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/capabilitymeta"
+	"github.com/plystra/cli/internal/interfacecontract"
+	"github.com/plystra/cli/internal/interfacedecl"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
@@ -60,6 +67,54 @@ const javascriptQuerySemantics = `semantics:
   data: {request: public, response: public}
 `
 
+const javascriptInterfaceSource = `package echov1
+
+import (
+	"context"
+	"time"
+)
+
+//plystra:interface records.echo/v1
+type Interface interface {
+	Echo(context.Context, Request) (Response, error)
+}
+
+type Request struct {
+	Value Envelope ` + "`json:\"value\" plystra:\"1,required\"`" + `
+}
+
+type Response struct {
+	Value Envelope ` + "`json:\"value\" plystra:\"1,required\"`" + `
+}
+
+type Envelope struct {
+	Active      bool              ` + "`json:\"active\" plystra:\"1,required\"`" + `
+	Count32     int32             ` + "`json:\"count_32\" plystra:\"2\"`" + `
+	Count64     int64             ` + "`json:\"count_64\" plystra:\"3\"`" + `
+	Unsigned32  uint32            ` + "`json:\"unsigned_32\" plystra:\"4\"`" + `
+	Unsigned64  uint64            ` + "`json:\"unsigned_64\" plystra:\"5\"`" + `
+	Ratio32     float32           ` + "`json:\"ratio_32\" plystra:\"6\"`" + `
+	Ratio64     float64           ` + "`json:\"ratio_64\" plystra:\"7\"`" + `
+	Name        string            ` + "`json:\"name\" plystra:\"8,required\"`" + `
+	Payload     []byte            ` + "`json:\"payload\" plystra:\"9,required\"`" + `
+	Tags        []string          ` + "`json:\"tags\" plystra:\"10\"`" + `
+	Scores      map[string]int64  ` + "`json:\"scores\" plystra:\"11\"`" + `
+	Detail      Detail            ` + "`json:\"detail\" plystra:\"12,required\"`" + `
+	Items       []Detail          ` + "`json:\"items\" plystra:\"13\"`" + `
+	Lookup      map[string]Detail ` + "`json:\"lookup\" plystra:\"14\"`" + `
+	At          time.Time         ` + "`json:\"at\" plystra:\"15,required\"`" + `
+	Delay       time.Duration     ` + "`json:\"delay\" plystra:\"16,required\"`" + `
+	Payloads    [][]byte          ` + "`json:\"payloads\" plystra:\"17\"`" + `
+	Identifiers map[int64]uint64  ` + "`json:\"identifiers\" plystra:\"18\"`" + `
+	DefaultName string            ` + "`plystra:\"19\"`" + `
+}
+
+type Detail struct {
+	Code   string ` + "`json:\"code\" plystra:\"1,required\"`" + `
+	Amount int64  ` + "`json:\"amount\" plystra:\"2\"`" + `
+}
+`
+
 func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 	t.Parallel()
 
@@ -78,7 +133,8 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		javascriptHiddenAlias(t, "internal.send/v1", email),
 	}
 	model := javascriptModelWithAliases(t, targets, aliases)
-	options := javascriptOptions(t, "@acme/project-sdk", targets, aliases)
+	interfaceInput := javascriptInterfaceProjectionInput(t)
+	options := javascriptOptionsWithInterfaces(t, "@acme/project-sdk", targets, aliases, []protobufmodel.InterfaceInput{interfaceInput})
 	files, err := javascriptgen.Render(options, model)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -89,6 +145,7 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		"generated/sdk/javascript/package.json",
 		"generated/sdk/javascript/src/descriptors.ts",
 		"generated/sdk/javascript/src/index.ts",
+		"generated/sdk/javascript/src/interfaces/records/echo/v1.ts",
 		"generated/sdk/javascript/src/operations/account/profile/get/v2.ts",
 		"generated/sdk/javascript/src/operations/alpha/beta/v1.ts",
 		"generated/sdk/javascript/src/operations/alpha/beta/v1/check/v1.ts",
@@ -109,6 +166,9 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		`readonly "email":`,
 		`readonly "send":`,
 		`readonly "v1": EmailSendV1Operation`,
+		`RecordsEchoV1Request,`,
+		`RecordsEchoV1Response,`,
+		`RecordsEchoV1Envelope,`,
 		`createEmailSendV1`,
 		`plystra.generated.email.send.v1.EmailSendV1Service`,
 		`plystra.generated.compat.send.v1.CompatSendV1Service`,
@@ -140,6 +200,18 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		`value["revision"] >= -9223372036854775808n`,
 		`value["revision"] <= 9223372036854775807n`,
 		`bigint`,
+		`readonly "count_32"?: number;`,
+		`readonly "count_64"?: bigint;`,
+		`readonly "unsigned_32"?: number;`,
+		`readonly "unsigned_64"?: bigint;`,
+		`readonly "payload": Uint8Array;`,
+		`readonly "payloads"?: ReadonlyArray<Uint8Array>;`,
+		`readonly "scores"?: Readonly<Record<string, bigint>>;`,
+		`readonly "identifiers"?: Readonly<Record<string, bigint>>;`,
+		`readonly "DefaultName"?: string;`,
+		`readonly "at": string;`,
+		`readonly "delay": string;`,
+		`Canonical Interface types preserve exact authored widths`,
 		`9223372036854775807n`,
 		`getAccessToken`,
 		`raw token without the Bearer scheme`,
@@ -192,6 +264,40 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 	files[0] = javascriptgen.File{}
 	if repeated[0].Path() == "" {
 		t.Fatal("Render exposed shared File slice storage")
+	}
+}
+
+func TestRenderCanonicalInterfaceTypesSupersedeExactLegacySurface(t *testing.T) {
+	t.Parallel()
+
+	legacy := javascriptTarget(t, `id: records.echo/v1
+request:
+  value: {type: string, required: true}
+response:
+  value: {type: string, required: true}
+`)
+	model := javascriptModel(t, legacy)
+	options := javascriptOptionsWithInterfaces(
+		t,
+		"records-sdk",
+		[]javascriptTargetView{legacy},
+		nil,
+		[]protobufmodel.InterfaceInput{javascriptInterfaceProjectionInput(t)},
+	)
+	files, err := javascriptgen.Render(options, model)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	assertFilePathMissing(t, files, "generated/sdk/javascript/src/operations/records/echo/v1.ts")
+	types := fileData(t, files, "generated/sdk/javascript/src/interfaces/records/echo/v1.ts")
+	if !bytes.Contains(types, []byte(`export interface RecordsEchoV1Request`)) {
+		t.Fatalf("canonical Interface types are absent:\n%s", types)
+	}
+	index := fileData(t, files, "generated/sdk/javascript/src/index.ts")
+	if bytes.Count(index, []byte("RecordsEchoV1Request")) != 1 ||
+		bytes.Contains(index, []byte("RecordsEchoV1Operation")) ||
+		bytes.Contains(index, []byte(`readonly "records"`)) {
+		t.Fatalf("exact-ID legacy surface competes with canonical Interface types:\n%s", index)
 	}
 }
 
@@ -570,6 +676,17 @@ func javascriptModelWithAliases(t testing.TB, targets []javascriptTargetView, al
 
 func javascriptOptions(t testing.TB, packageName string, targets []javascriptTargetView, aliases []javascriptAliasView) javascriptgen.Options {
 	t.Helper()
+	return javascriptOptionsWithInterfaces(t, packageName, targets, aliases, nil)
+}
+
+func javascriptOptionsWithInterfaces(
+	t testing.TB,
+	packageName string,
+	targets []javascriptTargetView,
+	aliases []javascriptAliasView,
+	interfaceInputs []protobufmodel.InterfaceInput,
+) javascriptgen.Options {
+	t.Helper()
 	targetViews := make([]protobufmodel.CanonicalTargetView, len(targets))
 	for index, target := range targets {
 		targetViews[index] = target
@@ -582,7 +699,7 @@ func javascriptOptions(t testing.TB, packageName string, targets []javascriptTar
 	if err != nil {
 		t.Fatalf("protobufmodel.Build: %v", err)
 	}
-	interfaceProjection, err := protobufmodel.BuildInterfaces(true, nil)
+	interfaceProjection, err := protobufmodel.BuildInterfaces(true, interfaceInputs)
 	if err != nil {
 		t.Fatalf("protobufmodel.BuildInterfaces: %v", err)
 	}
@@ -603,6 +720,36 @@ func javascriptOptions(t testing.TB, packageName string, targets []javascriptTar
 			WireMap:             wireMap,
 			DescriptorSet:       evidence.DescriptorSet(),
 		},
+	}
+}
+
+func javascriptInterfaceProjectionInput(t testing.TB) protobufmodel.InterfaceInput {
+	t.Helper()
+	const packagePath = "example.com/interfaces/records/echo/v1"
+	declarations, err := interfacedecl.ParseFile("interface.go", []byte(javascriptInterfaceSource))
+	if err != nil || len(declarations) != 1 {
+		t.Fatalf("interfacedecl.ParseFile = %#v, %v", declarations, err)
+	}
+	files := token.NewFileSet()
+	file, err := parser.ParseFile(files, "interface.go", javascriptInterfaceSource, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("parser.ParseFile: %v", err)
+	}
+	checked, err := (&types.Config{Importer: importer.Default()}).Check(packagePath, files, []*ast.File{file}, nil)
+	if err != nil {
+		t.Fatalf("types.Check: %v", err)
+	}
+	contract, err := interfacecontract.Validate(declarations[0], checked)
+	if err != nil {
+		t.Fatalf("interfacecontract.Validate: %v", err)
+	}
+	return protobufmodel.InterfaceInput{
+		InterfaceID:    contract.ID(),
+		PackagePath:    packagePath,
+		Source:         "example.com/interfaces@v1.0.0/records/echo/v1/interface.go:8:1",
+		Contract:       contract,
+		ContractDigest: hash([]byte("records.echo/v1 Interface contract")),
+		SemanticErrors: []string{"record_rejected"},
 	}
 }
 
@@ -674,6 +821,15 @@ func fileData(t testing.TB, files []javascriptgen.File, wanted string) []byte {
 	}
 	t.Fatalf("generated package omits %s", wanted)
 	return nil
+}
+
+func assertFilePathMissing(t testing.TB, files []javascriptgen.File, unwanted string) {
+	t.Helper()
+	for _, file := range files {
+		if file.Path() == unwanted {
+			t.Fatalf("generated package unexpectedly contains %s", unwanted)
+		}
+	}
 }
 
 func joinFiles(files []javascriptgen.File) []byte {

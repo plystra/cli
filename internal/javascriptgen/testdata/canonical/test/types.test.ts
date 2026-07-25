@@ -13,6 +13,10 @@ import {
   type MailDeliverV1ErrorCode,
   type KernelErrorClass,
   type PlystraErrorDetail,
+  type RecordsEchoV1Detail,
+  type RecordsEchoV1Envelope,
+  type RecordsEchoV1Request,
+  type RecordsEchoV1Response,
 } from "@acme/project-sdk";
 
 // @ts-expect-error raw Connect errors are not exported by the Plystra SDK.
@@ -62,6 +66,32 @@ const safeDetail: PlystraErrorDetail = {
 };
 const kernelClass: KernelErrorClass = "unavailable";
 const classified = new PlystraError(422, "capability_error", safeDetail);
+const interfaceDetail: RecordsEchoV1Detail = {
+  code: "nested",
+  amount: -9_223_372_036_854_775_808n,
+};
+const interfaceEnvelope: RecordsEchoV1Envelope = {
+  active: true,
+  count_32: -2_147_483_648,
+  count_64: -9_223_372_036_854_775_808n,
+  unsigned_32: 4_294_967_295,
+  unsigned_64: 18_446_744_073_709_551_615n,
+  ratio_32: 1.25,
+  ratio_64: -9.5,
+  name: "canonical",
+  payload: new Uint8Array([0, 1, 2]),
+  tags: ["one", "two"],
+  scores: { first: 10n, second: -20n },
+  detail: interfaceDetail,
+  items: [interfaceDetail],
+  lookup: { nested: interfaceDetail },
+  at: "2026-07-25T01:02:03.456Z",
+  delay: "1.500s",
+  payloads: [new Uint8Array([3, 4])],
+  identifiers: { "-1": 9n },
+};
+const interfaceRequest: RecordsEchoV1Request = { value: interfaceEnvelope };
+const interfaceResponse: RecordsEchoV1Response = { value: interfaceEnvelope };
 declare const typedResponse: EmailSendV1Response;
 const revision: bigint | undefined = typedResponse.revision;
 const positions: ReadonlyArray<bigint> | undefined = typedResponse.positions;
@@ -84,6 +114,16 @@ client.compat.send.v1({});
 client.email.send.v2(request);
 // @ts-expect-error loose detail codes are not part of the Plystra error API.
 classified.detailCode;
+const invalidInterfaceInteger: RecordsEchoV1Envelope = {
+  ...interfaceEnvelope,
+  // @ts-expect-error canonical int64 fields require exact bigint values.
+  count_64: 1,
+};
+const invalidInterfaceBytes: RecordsEchoV1Envelope = {
+  ...interfaceEnvelope,
+  // @ts-expect-error canonical byte fields use Uint8Array rather than base64 strings.
+  payload: "AAEC",
+};
 
 void response;
 void standaloneResponse;
@@ -93,6 +133,10 @@ void deprecatedResponse;
 void deprecatedStandalone;
 void deprecatedError;
 void classified;
+void interfaceRequest;
+void interfaceResponse;
+void invalidInterfaceInteger;
+void invalidInterfaceBytes;
 void kernelClass;
 void revision;
 void positions;

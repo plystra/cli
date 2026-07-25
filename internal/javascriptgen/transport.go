@@ -70,6 +70,10 @@ func bindTransport(operations []renderedOperation, options TransportOptions) ([]
 		}
 		interfaceProjection = normalized
 	}
+	interfaceOperations := interfaceProjection.Operations()
+	if len(interfaceOperations) != 0 && !interfaceProjection.Enabled() {
+		return nil, fmt.Errorf("%w: JavaScript Interface types require an enabled Connect transport projection", ErrRender)
+	}
 	if !options.WireMap.Matches(options.Projection, interfaceProjection) {
 		return nil, fmt.Errorf("%w: Protobuf wire map is absent or does not match the Interface and legacy transport projections", ErrRender)
 	}
@@ -95,7 +99,7 @@ func bindTransport(operations []renderedOperation, options TransportOptions) ([]
 	}
 
 	result := append([]renderedOperation(nil), operations...)
-	identities := make([]protobufidentity.Identity, len(result))
+	identities := make([]protobufidentity.Identity, 0, len(result)+len(interfaceOperations))
 	for index := range result {
 		operation := &result[index]
 		projected, exists := canonical[operation.target.String()]
@@ -131,7 +135,10 @@ func bindTransport(operations []renderedOperation, options TransportOptions) ([]
 			request:      request,
 			response:     response,
 		}
-		identities[index] = identity
+		identities = append(identities, identity)
+	}
+	for _, operation := range interfaceOperations {
+		identities = append(identities, operation.Identity())
 	}
 	if err := validateDescriptorSet(options.DescriptorSet, identities); err != nil {
 		return nil, fmt.Errorf("%w: JavaScript Connect descriptors: %v", ErrRender, err)

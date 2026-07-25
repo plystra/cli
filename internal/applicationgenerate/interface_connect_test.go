@@ -59,6 +59,7 @@ type Envelope struct {
 	Lookup     map[string]Detail `+"`json:\"lookup\" plystra:\"14\"`"+`
 	At         time.Time         `+"`json:\"at\" plystra:\"15,required\"`"+`
 	Delay      time.Duration     `+"`json:\"delay\" plystra:\"16,required\"`"+`
+	DefaultName string           `+"`plystra:\"17\"`"+`
 }
 
 type Detail struct {
@@ -164,6 +165,7 @@ func kernelError(code kernelinvocation.ErrorCode) error {
 	}
 	const handlerPath = "generated/go/adapters/connect/records/echo/v1/handler_gen.go"
 	assertFileMissing(t, root, handlerPath)
+	assertFileMissing(t, root, "generated/sdk/javascript/package.json")
 	internalPaths := []string{
 		"generated/go/proxies/records/echo/v1/proxy_gen.go",
 		"generated/go/adapters/implementations/records/echo/v1/adapter_gen.go",
@@ -203,6 +205,46 @@ http:
 			t.Fatalf("enabling external Connect exposure changed internal Interface path %s:\nbefore:\n%s\nafter:\n%s", internalPath, internalSources[internalPath], source)
 		}
 	}
+
+	const interfaceTypesPath = "generated/sdk/javascript/src/interfaces/records/echo/v1.ts"
+	interfaceTypes := readFile(t, root, interfaceTypesPath)
+	for _, required := range []string{
+		"export interface RecordsEchoV1Request",
+		"export interface RecordsEchoV1Response",
+		"export interface RecordsEchoV1Envelope",
+		`readonly "active": boolean;`,
+		`readonly "count_32"?: number;`,
+		`readonly "count_64"?: bigint;`,
+		`readonly "unsigned_32"?: number;`,
+		`readonly "unsigned_64"?: bigint;`,
+		`readonly "ratio_32"?: number;`,
+		`readonly "ratio_64"?: number;`,
+		`readonly "payload": Uint8Array;`,
+		`readonly "tags"?: ReadonlyArray<string>;`,
+		`readonly "scores"?: Readonly<Record<string, bigint>>;`,
+		`readonly "detail": RecordsEchoV1Detail;`,
+		`readonly "items"?: ReadonlyArray<RecordsEchoV1Detail>;`,
+		`readonly "lookup"?: Readonly<Record<string, RecordsEchoV1Detail>>;`,
+		`readonly "at": string;`,
+		`readonly "delay": string;`,
+		`readonly "DefaultName"?: string;`,
+	} {
+		if !bytes.Contains(interfaceTypes, []byte(required)) {
+			t.Fatalf("%s omits %q:\n%s", interfaceTypesPath, required, interfaceTypes)
+		}
+	}
+	interfaceIndex := readFile(t, root, "generated/sdk/javascript/src/index.ts")
+	for _, required := range []string{
+		"RecordsEchoV1Request,",
+		"RecordsEchoV1Response,",
+		"RecordsEchoV1Envelope,",
+		`from "./interfaces/records/echo/v1.js"`,
+	} {
+		if !bytes.Contains(interfaceIndex, []byte(required)) {
+			t.Fatalf("generated JavaScript index omits %q:\n%s", required, interfaceIndex)
+		}
+	}
+	assertFileMissing(t, root, "generated/sdk/javascript/src/operations/records/echo/v1.ts")
 
 	handlerSource := readFile(t, root, handlerPath)
 	for _, required := range []string{
@@ -389,7 +431,8 @@ const requestJSON = ` + "`" + `{
 		"items": [{"code": "item", "amount": "8"}],
 		"lookup": {"nested": {"code": "map", "amount": "9"}},
 		"at": "2026-07-25T01:02:03.456Z",
-		"delay": "1.500s"
+		"delay": "1.500s",
+		"DefaultName": ""
 	}
 }` + "`" + `
 

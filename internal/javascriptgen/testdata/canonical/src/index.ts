@@ -41,6 +41,12 @@ import {
   createOperation as createMailDeliverV1Operation,
   type Operation as MailDeliverV1Operation,
 } from "./operations/mail/deliver/v1.js";
+export type {
+  RecordsEchoV1Detail,
+  RecordsEchoV1Envelope,
+  RecordsEchoV1Request,
+  RecordsEchoV1Response,
+} from "./interfaces/records/echo/v1.js";
 
 export { PlystraError } from "./runtime.js";
 export type { ClientOptions, JSONValue, KernelErrorClass, PlystraErrorDetail, RequestOptions } from "./runtime.js";

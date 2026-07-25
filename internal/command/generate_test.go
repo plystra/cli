@@ -831,7 +831,7 @@ interfaces:
 		"generated/go/adapters/http/kernel/info/v1/handler_gen.go",
 		"generated/go/clients/kernel/info/v1/client_gen.go",
 		"generated/go/invocation/kernel/info/v1/invocation_gen.go",
-		"generated/sdk/javascript/src/operations/kernel/info/v1.ts",
+		"generated/sdk/javascript/src/interfaces/kernel/info/v1.ts",
 		"generated/docs/api.md",
 		"generated/docs/openapi.json",
 	} {
@@ -839,7 +839,7 @@ interfaces:
 	}
 	for _, name := range []string{
 		"generated/go/adapters/http/kernel/health/v1/handler_gen.go",
-		"generated/sdk/javascript/src/operations/kernel/health/v1.ts",
+		"generated/sdk/javascript/src/interfaces/kernel/health/v1.ts",
 	} {
 		if _, statErr := os.Lstat(filepath.Join(applicationRoot, filepath.FromSlash(name))); !errors.Is(statErr, os.ErrNotExist) {
 			t.Fatalf("root-only exposure generated %s: %v", name, statErr)

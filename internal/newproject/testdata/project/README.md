@@ -53,7 +53,7 @@ Common actionable Plystra CLI failures end with exactly one `Recovery:` block fo
 
 Generated source under `generated/` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
-The generated JavaScript SDK exposes every canonical `integer` field, integer array item, and integer enum member as a signed 64-bit `bigint`. Use literals such as `42n` rather than JavaScript `number` values so requests and responses remain exact across the complete range.
+For each Interface exposed through Connect, the generated JavaScript SDK publishes deterministic request, response, and reachable nested-message types from the authored Go contract. Effective JSON names and required markers remain exact. `int32` and `uint32` become JavaScript `number`; `int64` and `uint64` become `bigint`; floating-point fields become `number`; bytes become `Uint8Array`; timestamps and durations use their canonical transport strings; repeated values are readonly arrays; and maps are readonly string-keyed records.
 
 Import the generated JavaScript SDK only through its package root. Internal runtime, descriptor, codec, operation-binder, and raw Connect surfaces are blocked by the package export map and omitted from public declarations.
 

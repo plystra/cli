@@ -17,9 +17,17 @@ The Plystra wrapper resolves generated Protobuf descriptors and sends binary Con
 
 Generated application failures expose only an immutable Plystra-owned safe detail. On the wire, `requested_interface_id` records the requested canonical Interface or temporary pre-removal Alias, `canonical_interface_id` records the canonical Interface target, and exactly one declared semantic code or closed Kernel class is present. Implementation text, causes, payloads, panic data, configuration, credentials, Secrets, internal Kernel detail codes, and raw Connect details are excluded. Missing, duplicate, malformed, unknown, mismatched, or undeclared details fail closed to `internal`; inspect `PlystraError.detail` rather than parsing an error message.
 
-Canonical `integer` fields and integer array items are signed 64-bit values exposed as JavaScript `bigint`, including enum literals such as `0n`. Pass `bigint`, not `number`, so request and response values remain exact across the full range.
+Transitional legacy `integer` fields and integer array items are signed 64-bit values exposed as JavaScript `bigint`, including enum literals such as `0n`. Pass `bigint`, not `number`, so request and response values remain exact across the full range.
 
-Generated request and response declarations retain each exact normalized constraint object in a `@plystraConstraints` field annotation. The wrapper preflights Unicode scalar-value length, numeric bounds, and array item counts before sending a request and applies the same portable checks to decoded responses. Canonical `pattern` uses Go regular-expression semantics, so it is declared for tools and developers but remains enforced authoritatively by the generated server rather than reinterpreted through JavaScript `RegExp`.
+Canonical Interface types preserve exact authored widths: `int32` and `uint32` are JavaScript `number`; `int64` and `uint64` are `bigint`; `float32` and `float64` are `number`; bytes are `Uint8Array`; timestamps are RFC 3339 strings; durations are Protobuf JSON duration strings; repeated values are readonly arrays; and maps are readonly string-keyed records. Boolean and integer Go map keys use their canonical ProtoJSON string form.
+
+Every property uses the Interface field's effective JSON name. Authored required markers produce required readonly properties; every other field remains optional. Nested same-package messages are exported from the package root together with the canonical request and response types.
+
+## Exposed Interface types
+
+- `records.echo/v1` (`sha256:9edac981e07d60dff81938719b99315face2aa89e8111426f76030fc1de6fe4d`)
+
+Transitional legacy request and response declarations retain each exact normalized constraint object in a `@plystraConstraints` field annotation. The wrapper preflights Unicode scalar-value length, numeric bounds, and array item counts before sending a request and applies the same portable checks to decoded responses. Canonical `pattern` uses Go regular-expression semantics, so it is declared for tools and developers but remains enforced authoritatively by the generated server rather than reinterpreted through JavaScript `RegExp`.
 
 ## Usage
 

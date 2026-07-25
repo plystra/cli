@@ -1491,8 +1491,8 @@ func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
 			if err != nil {
 				t.Fatalf("DecodeManifestProvenance(initial): %v", err)
 			}
-			assertFileExists(t, root, "generated/sdk/javascript/src/operations/kernel/info/v1.ts")
-			assertFileMissing(t, root, "generated/sdk/javascript/src/operations/kernel/health/v1.ts")
+			assertFileExists(t, root, "generated/sdk/javascript/src/interfaces/kernel/info/v1.ts")
+			assertFileMissing(t, root, "generated/sdk/javascript/src/interfaces/kernel/health/v1.ts")
 			assertFileExists(t, root, "generated/proto/plystra/generated/kernel/info/v1/capability.proto")
 			assertFileMissing(t, root, "generated/proto/plystra/generated/kernel/health/v1/capability.proto")
 
@@ -1511,8 +1511,8 @@ func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
 				!slicesContains(checked.Report().Changed(), "generated/proto/descriptor-set.pb") ||
 				!slicesContains(checked.Report().Missing(), "generated/proto/plystra/generated/kernel/health/v1/capability.proto") ||
 				!slicesContains(checked.Report().Obsolete(), "generated/proto/plystra/generated/kernel/info/v1/capability.proto") ||
-				!slicesContains(checked.Report().Missing(), "generated/sdk/javascript/src/operations/kernel/health/v1.ts") ||
-				!slicesContains(checked.Report().Obsolete(), "generated/sdk/javascript/src/operations/kernel/info/v1.ts") {
+				!slicesContains(checked.Report().Missing(), "generated/sdk/javascript/src/interfaces/kernel/health/v1.ts") ||
+				!slicesContains(checked.Report().Obsolete(), "generated/sdk/javascript/src/interfaces/kernel/info/v1.ts") {
 				t.Fatalf("exposure change report = %#v", checked.Report().Changes())
 			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, beforeCheck) {
@@ -1530,8 +1530,8 @@ func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
 			if updatedProvenance.ApplicationModelDigest() == initialProvenance.ApplicationModelDigest() {
 				t.Fatal("selected exposure change preserved application_model_digest")
 			}
-			assertFileExists(t, root, "generated/sdk/javascript/src/operations/kernel/health/v1.ts")
-			assertFileMissing(t, root, "generated/sdk/javascript/src/operations/kernel/info/v1.ts")
+			assertFileExists(t, root, "generated/sdk/javascript/src/interfaces/kernel/health/v1.ts")
+			assertFileMissing(t, root, "generated/sdk/javascript/src/interfaces/kernel/info/v1.ts")
 			assertFileExists(t, root, "generated/proto/plystra/generated/kernel/health/v1/capability.proto")
 			assertFileMissing(t, root, "generated/proto/plystra/generated/kernel/info/v1/capability.proto")
 		})

@@ -278,13 +278,6 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
-	javaScriptPackage := ""
-	if exposesJavaScript(resolved.Resolution().Context()) {
-		javaScriptPackage, err = javascriptgen.InferPackageName(resolved.Module().ModulePath())
-		if err != nil {
-			return preparedGeneration{}, err
-		}
-	}
 	configurations, err := localConfigurationInputs(resolved.Module().ModulePath(), resolved.Configurations())
 	if err != nil {
 		return preparedGeneration{}, err
@@ -305,6 +298,13 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	interfaceProtobufModel, err := interfaceProtobufProjection(ctx, resolved, httpTransports, options)
 	if err != nil {
 		return preparedGeneration{}, fmt.Errorf("build Interface Protobuf projection: %w", err)
+	}
+	javaScriptPackage := ""
+	if exposesJavaScript(resolved.Resolution().Context()) || len(interfaceProtobufModel.Operations()) != 0 {
+		javaScriptPackage, err = javascriptgen.InferPackageName(resolved.Module().ModulePath())
+		if err != nil {
+			return preparedGeneration{}, err
+		}
 	}
 	interfaceProxies, err := interfaceProxyInputs(resolved, interfaceProtobufModel)
 	if err != nil {
