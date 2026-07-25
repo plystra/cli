@@ -8,6 +8,7 @@ import {
   type ClientOptions,
   type CompatSendV1Request,
   type CompatSendV1Response,
+  type CredentialPolicy,
   type EmailSendV1ErrorCode,
   type EmailSendV1Request,
   type EmailSendV1Response,
@@ -30,10 +31,30 @@ import { createRuntime } from "@acme/project-sdk/dist/runtime.js";
 
 const options: ClientOptions = {
   baseUrl: "https://api.example.test",
+  credentialPolicy: { mode: "anonymous" },
   fetch: async () =>
     new Response('{"accepted":true}', {
       headers: { "Content-Type": "application/json" },
     }),
+};
+const cookieCredentialPolicy: CredentialPolicy = {
+  mode: "cookie",
+  fetchCredentials: "include",
+};
+const bearerCredentialPolicy: CredentialPolicy = {
+  mode: "bearer",
+  getAccessToken: async () => "raw-token",
+};
+// @ts-expect-error every client must explicitly select one credential mode.
+const missingCredentialPolicy: ClientOptions = {
+  baseUrl: "https://api.example.test",
+};
+// @ts-expect-error cookie mode requires an exact Fetch credential policy.
+const incompleteCookieCredentialPolicy: CredentialPolicy = { mode: "cookie" };
+const invalidBearerCredentialPolicy: CredentialPolicy = {
+  mode: "bearer",
+  // @ts-expect-error bearer mode cannot silently become anonymous.
+  getAccessToken: async () => null,
 };
 const client = createPlystraClient(options);
 const request: EmailSendV1Request = {
@@ -153,6 +174,11 @@ void interfaceStandaloneResponse;
 void invalidInterfaceErrorCode;
 void invalidInterfaceInteger;
 void invalidInterfaceBytes;
+void cookieCredentialPolicy;
+void bearerCredentialPolicy;
+void missingCredentialPolicy;
+void incompleteCookieCredentialPolicy;
+void invalidBearerCredentialPolicy;
 void kernelClass;
 void revision;
 void positions;

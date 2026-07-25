@@ -1288,7 +1288,10 @@ import { createPlystraClient } from "@acme/orders-sdk";
 
 const client = createPlystraClient({
   baseUrl: "http://localhost:8080",
-  getAccessToken: async () => rawAccessToken,
+  credentialPolicy: {
+    mode: "bearer",
+    getAccessToken: async () => rawAccessToken,
+  },
 });
 
 const item = await client.catalog.item.get.v1({item_id: "coffee"});
@@ -1300,9 +1303,16 @@ values such as `42n`; passing a JavaScript `number` is rejected even when it is
 currently within the safe-number range, so the same API remains exact across
 the complete contract range.
 
-`getAccessToken` returns the raw token only. The generated transport adds the
-`Bearer` authorization scheme; do not include `Bearer` in the callback result.
-An already-prefixed value fails locally before any request is sent.
+`credentialPolicy` is required. Use `{mode: "anonymous"}` for no browser
+credentials, `{mode: "cookie", fetchCredentials: "same-origin"}` or
+`{mode: "cookie", fetchCredentials: "include"}` for the exact cookie policy,
+or the bearer policy above. Anonymous and bearer modes set Fetch credentials to
+`omit`; cookie mode sends no bearer header. `getAccessToken` returns one raw
+token only. The generated transport adds the `Bearer` authorization scheme.
+Rejected, nullish, empty, malformed, already-prefixed, control-containing,
+non-string, or larger-than-64-KiB results fail before dispatch as
+`PlystraError` code `credential_error` without exposing the credential. A mode
+never falls back to another mode.
 
 The SDK validates Plystra request and response values, resolves the exact unary
 method from the generated self-contained Protobuf descriptor graph, and sends
@@ -1328,10 +1338,11 @@ controller.abort();
 await pending; // rejects with PlystraError code "cancelled"
 ```
 
-The same signal cancels a request already in `fetch`; once server invocation
-has started, the generated Connect boundary propagates that cancellation to the
-canonical invocation and Provider context. Treat it as interruption, not as a
-Provider rollback guarantee.
+The same signal cancels pending bearer-token acquisition and a request already
+in `fetch`; once server invocation has started, the generated Connect boundary
+propagates that cancellation to the canonical invocation and Implementation
+context. Treat it as interruption, not as an Implementation rollback
+guarantee.
 
 Generated Connect application failures carry one closed
 `plystra.generated.transport.v1.PlystraErrorDetail`. The detail identifies the

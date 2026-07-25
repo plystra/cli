@@ -1173,6 +1173,20 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 	if !bytes.Contains(readme, []byte("JavaScript SDK generation requires Connect")) {
 		t.Fatalf("generated README omits the JavaScript Connect requirement:\n%s", readme)
 	}
+	for _, credentialGuidance := range [][]byte{
+		[]byte("requires one explicit `credentialPolicy`"),
+		[]byte(`{mode: "anonymous"}`),
+		[]byte(`{mode: "cookie", fetchCredentials: "same-origin"}`),
+		[]byte(`{mode: "bearer", getAccessToken}`),
+		[]byte("Fetch credentials `omit`"),
+		[]byte("code `credential_error`"),
+		[]byte("while bearer acquisition is pending"),
+		[]byte("never falls back to another"),
+	} {
+		if !bytes.Contains(readme, credentialGuidance) {
+			t.Fatalf("generated README omits JavaScript credential guidance %q:\n%s", credentialGuidance, readme)
+		}
+	}
 	for _, wireHistory := range [][]byte{
 		[]byte("generated/proto/wire-map.json"),
 		[]byte("every canonical Interface message projected to Connect"),
@@ -2079,9 +2093,20 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"Cancellation and deadlines are best-effort",
 		"@bufbuild/protobuf, @connectrpc/connect, and @connectrpc/connect-web runtime",
 		"never receive ConnectError as the public error model",
-		"Pass an AbortSignal in the operation's second argument",
-		"in-flight signal reaches fetch",
-		"rollback guarantee",
+		"ClientOptions requires credentialPolicy",
+		"Cookie uses",
+		"fetchCredentials same-origin or include",
+		"Bearer is",
+		"getAccessToken for one bounded raw token",
+		"Fetch omit",
+		"fail before dispatch as PlystraError",
+		"PlystraError credential_error",
+		"without token data",
+		"AbortSignal in the second argument",
+		"bearer acquisition",
+		"in-flight cancellation",
+		"reaches fetch",
+		"Implementation rollback guarantee",
 		"plystra.generated.transport.v1.PlystraErrorDetail",
 		"requested_interface_id",
 		"canonical_interface_id",

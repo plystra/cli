@@ -1134,15 +1134,15 @@ and binder modules are not public package subpaths or declaration exports.
 Canonical integer fields, integer array items, and integer enum members are
 signed 64-bit bigint values in this public API. Use literals such as 42n and
 never coerce them to JavaScript number values.
-When configuring getAccessToken, return only the raw token. The generated
-transport adds the Bearer authorization scheme and rejects a callback value
-that already includes the Bearer scheme before sending a request.
-Pass an AbortSignal in the operation's second argument when the caller may stop
-waiting. Verify both a pre-aborted signal and an in-flight abort: each rejects
-with PlystraError code cancelled, and the in-flight signal reaches fetch and the
-generated server cancellation path. Do not treat cancellation as a Provider
-rollback guarantee.
-Provider packages, runtime configuration, verified internal context, and Secret
+ClientOptions requires credentialPolicy. Anonymous is Fetch omit/no
+Authorization. Cookie uses fetchCredentials same-origin or include and no
+bearer. Bearer is Fetch omit plus getAccessToken for one bounded raw token.
+Rejected or invalid tokens fail before dispatch as PlystraError credential_error
+without token data; modes never fall back.
+AbortSignal in the second argument cancels pre-dispatch, bearer acquisition, or
+fetch as PlystraError cancelled; in-flight cancellation reaches fetch/server.
+Cancellation is not an Implementation rollback guarantee.
+Implementation packages, runtime configuration, verified internal context, and Secret
 values must never appear in the browser package.
 
 ## Validate every change

@@ -239,11 +239,19 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 		`readonly "delay": string;`,
 		`Canonical Interface types preserve exact authored widths`,
 		`9223372036854775807n`,
+		`export type CredentialPolicy =`,
+		`readonly credentialPolicy: CredentialPolicy;`,
+		`readonly mode: "anonymous";`,
+		`readonly mode: "cookie";`,
+		`readonly fetchCredentials: "same-origin" | "include";`,
+		`readonly mode: "bearer";`,
 		`getAccessToken`,
-		`raw token without the Bearer scheme`,
+		`one nonempty bounded raw bearer token`,
+		`A selected mode never falls back to another mode`,
 		"Pass an `AbortSignal`",
+		"while bearer acquisition is pending",
 		"PlystraError` code `cancelled`",
-		"does not promise Provider rollback",
+		"does not promise Implementation rollback",
 		`"typescript": "7.0.2"`,
 		`"@bufbuild/protobuf": "2.12.1"`,
 		`"@connectrpc/connect": "2.1.2"`,
@@ -264,6 +272,12 @@ func TestRenderCanonicalJavaScriptPackage(t *testing.T) {
 	}
 	if bytes.Contains(combined, []byte("detailCode")) {
 		t.Fatal("generated JavaScript SDK retains the superseded loose detailCode API")
+	}
+	if bytes.Contains(combined, []byte("readonly getAccessToken?:")) {
+		t.Fatal("generated JavaScript SDK retains the optional top-level bearer callback")
+	}
+	if bytes.Contains(combined, []byte(`credentials: "same-origin"`)) {
+		t.Fatal("generated JavaScript SDK silently hard-codes same-origin credentials")
 	}
 	descriptors := fileData(t, files, "generated/sdk/javascript/src/descriptors.ts")
 	encodedDescriptorSet := base64.StdEncoding.EncodeToString(options.Transport.DescriptorSet)

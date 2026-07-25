@@ -29,6 +29,7 @@ const recordsMethod = resolveUnaryMethod(
 const errorDetailDescriptor = resolveMessage(
   "plystra.generated.transport.v1.PlystraErrorDetail",
 );
+const anonymousCredentialPolicy = Object.freeze({ mode: "anonymous" });
 
 function methodFor(capabilityPackage, typeBase) {
   return resolveUnaryMethod(
@@ -227,6 +228,7 @@ test("canonical Interface method preserves every authored field over Connect", a
   const expectedResponse = recordsEnvelope();
   const options = {
     baseUrl: "https://api.example.test/root",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async (input, init) => {
       paths.push(new URL(input).pathname);
       requests.push(await requestJSON(recordsMethod, init.body));
@@ -288,6 +290,7 @@ test("canonical Interface method safely preserves dynamic object-property keys",
   let encoded;
   const echo = createRecordsEchoV1({
     baseUrl: "https://api.example.test",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async (_input, init) => {
       encoded = await requestJSON(recordsMethod, init.body);
       return protobufResponse(recordsMethod, {
@@ -326,6 +329,7 @@ test("canonical Interface request validation rejects invalid shapes and widths b
   let calls = 0;
   const echo = createRecordsEchoV1({
     baseUrl: "https://api.example.test",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async () => {
       calls++;
       return protobufResponse(recordsMethod, { value: recordsEnvelopeJSON() });
@@ -429,6 +433,7 @@ test("canonical Interface responses and semantic failures remain safe", async ()
   ];
   const invalidResponse = createRecordsEchoV1({
     baseUrl: "https://api.example.test",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async () => responses.shift(),
   });
   for (let index = 0; index < 2; index++) {
@@ -443,6 +448,7 @@ test("canonical Interface responses and semantic failures remain safe", async ()
 
   const semantic = createRecordsEchoV1({
     baseUrl: "https://api.example.test",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async () =>
       connectErrorResponse("failed_precondition", "implementation secret", 400, [
         safeErrorDetail({
@@ -477,12 +483,15 @@ async function requestJSON(method, body) {
   });
 }
 
-test("nested client sends binary Connect with one access token", async () => {
+test("nested client sends binary Connect with one bearer credential", async () => {
   const calls = [];
   const controller = new AbortController();
   const client = createPlystraClient({
     baseUrl: "https://api.example.test/root",
-    getAccessToken: async () => "browser-token",
+    credentialPolicy: {
+      mode: "bearer",
+      getAccessToken: async () => "browser-token",
+    },
     fetch: async (input, init) => {
       calls.push({ input, init, signalAborted: init.signal?.aborted });
       return protobufResponse(emailMethod, {
@@ -529,7 +538,7 @@ test("nested client sends binary Connect with one access token", async () => {
   );
   assert.equal(init.method, "POST");
   assert.equal(init.cache, "no-store");
-  assert.equal(init.credentials, "same-origin");
+  assert.equal(init.credentials, "omit");
   assert.equal(init.redirect, "error");
   assert.equal(init.signal instanceof AbortSignal, true);
   assert.equal(signalAborted, false);
@@ -558,6 +567,7 @@ test("tree-shakable operation factory uses the same Connect descriptor", async (
   let requested = "";
   const send = createEmailSendV1({
     baseUrl: new URL("https://api.example.test/"),
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async (input) => {
       requested = new URL(input).href;
       return protobufResponse(emailMethod, { accepted: true });
@@ -577,6 +587,7 @@ test("aliases reuse the canonical messages over their own Connect procedures", a
   const paths = [];
   const options = {
     baseUrl: "https://api.example.test/root",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async (input) => {
       paths.push(new URL(input).pathname);
       return protobufResponse(emailMethod, { accepted: true });
@@ -612,6 +623,7 @@ test("request validation rejects malformed and oversized values before fetch", a
   let calls = 0;
   const send = createEmailSendV1({
     baseUrl: "https://api.example.test",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async () => {
       calls++;
       return protobufResponse(emailMethod, { accepted: true });
@@ -709,6 +721,7 @@ test("response validation enforces canonical field constraints", async () => {
   ];
   const send = createEmailSendV1({
     baseUrl: "https://api.example.test",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async () => protobufResponse(emailMethod, responses.shift()),
   });
   for (let index = 0; index < 6; index++) {
@@ -736,6 +749,7 @@ test("response and Connect errors expose only Plystra-owned stable fields", asyn
   ];
   const send = createEmailSendV1({
     baseUrl: "https://api.example.test",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async () => responses.shift(),
   });
   for (let index = 0; index < 3; index++) {
@@ -750,6 +764,7 @@ test("response and Connect errors expose only Plystra-owned stable fields", asyn
 
   const semantic = createEmailSendV1({
     baseUrl: "https://api.example.test",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async () =>
       connectErrorResponse(
         "failed_precondition",
@@ -789,6 +804,7 @@ test("response and Connect errors expose only Plystra-owned stable fields", asyn
 
   const aliasSemantic = createMailDeliverV1({
     baseUrl: "https://api.example.test",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async () =>
       connectErrorResponse("failed_precondition", "hidden", 400, [
         safeErrorDetail({
@@ -814,6 +830,7 @@ test("response and Connect errors expose only Plystra-owned stable fields", asyn
 
   const malformedError = createEmailSendV1({
     baseUrl: "https://api.example.test",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async () =>
       connectErrorResponse("provider_secret", "unsafe detail", 500),
   });
@@ -848,6 +865,7 @@ test("closed Kernel error classes retain typed safe details", async () => {
   for (const [connectCode, kernelErrorClass, status, publicCode] of cases) {
     const send = createEmailSendV1({
       baseUrl: "https://api.example.test",
+      credentialPolicy: anonymousCredentialPolicy,
       fetch: async () =>
         connectErrorResponse(connectCode, "provider secret", 400, [
           safeErrorDetail({ kernelErrorClass }),
@@ -959,6 +977,7 @@ test("missing, malformed, duplicate, and mismatched details fail closed", async 
   for (const response of invalid) {
     const send = createEmailSendV1({
       baseUrl: "https://api.example.test",
+      credentialPolicy: anonymousCredentialPolicy,
       fetch: async () =>
         connectErrorResponse(
           response.code,
@@ -985,105 +1004,313 @@ test("missing, malformed, duplicate, and mismatched details fail closed", async 
   }
 });
 
-test("credentials, cancellation, and network failures are bounded and normalized", async () => {
-  let calls = 0;
-  const invalidCredential = createEmailSendV1({
-    baseUrl: "https://api.example.test",
-    getAccessToken: () => " bad-token",
-    fetch: async () => {
-      calls++;
-      return protobufResponse(emailMethod, { accepted: true });
+test("credential policies select exact Fetch behavior without fallback", async () => {
+  let bearerCalls = 0;
+  const cases = [
+    {
+      name: "anonymous",
+      credentialPolicy: { mode: "anonymous" },
+      fetchCredentials: "omit",
+      authorization: null,
     },
-  });
-  await assert.rejects(
-    () =>
-      invalidCredential({
-        to: "person@example.com",
-        tags: [],
-        priority: "normal",
-      }),
-    TypeError,
-  );
+    {
+      name: "cookie same-origin",
+      credentialPolicy: {
+        mode: "cookie",
+        fetchCredentials: "same-origin",
+      },
+      fetchCredentials: "same-origin",
+      authorization: null,
+    },
+    {
+      name: "cookie include",
+      credentialPolicy: {
+        mode: "cookie",
+        fetchCredentials: "include",
+      },
+      fetchCredentials: "include",
+      authorization: null,
+    },
+    {
+      name: "bearer",
+      credentialPolicy: {
+        mode: "bearer",
+        getAccessToken: async () => {
+          bearerCalls++;
+          return "browser-token";
+        },
+      },
+      fetchCredentials: "omit",
+      authorization: "Bearer browser-token",
+    },
+  ];
 
-  const prefixedCredential = createEmailSendV1({
-    baseUrl: "https://api.example.test",
-    getAccessToken: () => "Bearer browser-token",
-    fetch: async () => {
-      calls++;
-      return protobufResponse(emailMethod, { accepted: true });
-    },
-  });
-  await assert.rejects(
-    () =>
-      prefixedCredential({
-        to: "person@example.com",
-        tags: [],
-        priority: "normal",
-      }),
-    (error) =>
-      error instanceof TypeError &&
-      error.message ===
-        "getAccessToken must return the raw token without the Bearer scheme",
-  );
+  for (const policyCase of cases) {
+    let observed;
+    const client = createRecordsEchoV1({
+      baseUrl: "https://api.example.test",
+      credentialPolicy: policyCase.credentialPolicy,
+      fetch: async (_input, init) => {
+        observed = init;
+        return protobufResponse(recordsMethod, {
+          value: recordsEnvelopeJSON(),
+        });
+      },
+    });
+    await client({ value: recordsEnvelope() });
 
-  const credentialFailure = createEmailSendV1({
+    assert.equal(observed.credentials, policyCase.fetchCredentials, policyCase.name);
+    assert.equal(
+      new Headers(observed.headers).get("Authorization"),
+      policyCase.authorization,
+      policyCase.name,
+    );
+  }
+  assert.equal(bearerCalls, 1);
+});
+
+test("credential policy is required and malformed policies fail at construction", () => {
+  const baseUrl = "https://api.example.test";
+  const invalidOptions = [
+    null,
+    { baseUrl },
+    { baseUrl, credentialPolicy: null },
+    { baseUrl, credentialPolicy: [] },
+    { baseUrl, credentialPolicy: {} },
+    { baseUrl, credentialPolicy: { mode: "unknown" } },
+    {
+      baseUrl,
+      credentialPolicy: { mode: "anonymous", getAccessToken: () => "token" },
+    },
+    { baseUrl, credentialPolicy: { mode: "cookie" } },
+    {
+      baseUrl,
+      credentialPolicy: { mode: "cookie", fetchCredentials: "omit" },
+    },
+    { baseUrl, credentialPolicy: { mode: "bearer" } },
+    {
+      baseUrl,
+      credentialPolicy: { mode: "bearer", getAccessToken: "token" },
+    },
+    {
+      baseUrl,
+      credentialPolicy: anonymousCredentialPolicy,
+      getAccessToken: () => "token",
+    },
+    {
+      baseUrl,
+      credentialPolicy: anonymousCredentialPolicy,
+      unexpected: true,
+    },
+  ];
+
+  for (const options of invalidOptions) {
+    assert.throws(() => createRecordsEchoV1(options), TypeError);
+  }
+});
+
+test("bearer results are bounded, validated, and normalized without dispatch", async () => {
+  const invalidResults = [
+    null,
+    undefined,
+    "",
+    "Bearer browser-token",
+    "bearer",
+    " browser-token",
+    "browser-token ",
+    "browser\ttoken",
+    "browser\ntoken",
+    "browser:token",
+    42,
+    { token: "browser-token" },
+    "a".repeat(65_537),
+  ];
+  let fetchCalls = 0;
+
+  for (const result of invalidResults) {
+    const client = createRecordsEchoV1({
+      baseUrl: "https://api.example.test",
+      credentialPolicy: {
+        mode: "bearer",
+        getAccessToken: () => result,
+      },
+      fetch: async () => {
+        fetchCalls++;
+        return protobufResponse(recordsMethod, {
+          value: recordsEnvelopeJSON(),
+        });
+      },
+    });
+    await assert.rejects(
+      () => client({ value: recordsEnvelope() }),
+      (error) =>
+        error instanceof PlystraError &&
+        error.status === 0 &&
+        error.code === "credential_error" &&
+        error.message === "credential_error" &&
+        error.detail === undefined &&
+        !("cause" in error),
+    );
+  }
+  assert.equal(fetchCalls, 0);
+});
+
+test("bearer callback failures do not expose credential details", async () => {
+  const secret = "credential secret must not escape";
+  let fetchCalls = 0;
+  for (const getAccessToken of [
+    () => {
+      throw new Error(secret);
+    },
+    async () => {
+      throw new Error(secret);
+    },
+    () => {
+      throw new PlystraError(0, "cancelled");
+    },
+  ]) {
+    const client = createRecordsEchoV1({
+      baseUrl: "https://api.example.test",
+      credentialPolicy: { mode: "bearer", getAccessToken },
+      fetch: async () => {
+        fetchCalls++;
+        return protobufResponse(recordsMethod, {
+          value: recordsEnvelopeJSON(),
+        });
+      },
+    });
+    await assert.rejects(
+      () => client({ value: recordsEnvelope() }),
+      (error) =>
+        error instanceof PlystraError &&
+        error.code === "credential_error" &&
+        error.message === "credential_error" &&
+        !String(error).includes(secret) &&
+        !JSON.stringify(error).includes(secret) &&
+        !("cause" in error),
+    );
+  }
+  assert.equal(fetchCalls, 0);
+});
+
+test("AbortSignal cancels before and during bearer token acquisition", async () => {
+  let tokenCalls = 0;
+  let fetchCalls = 0;
+  const preCancelled = createRecordsEchoV1({
     baseUrl: "https://api.example.test",
-    getAccessToken: () => {
-      throw new Error("credential secret");
+    credentialPolicy: {
+      mode: "bearer",
+      getAccessToken: () => {
+        tokenCalls++;
+        return "browser-token";
+      },
     },
     fetch: async () => {
-      calls++;
-      return protobufResponse(emailMethod, { accepted: true });
+      fetchCalls++;
+      return protobufResponse(recordsMethod, {
+        value: recordsEnvelopeJSON(),
+      });
     },
   });
+  const beforeController = new AbortController();
+  beforeController.abort();
   await assert.rejects(
     () =>
-      credentialFailure({
-        to: "person@example.com",
-        tags: [],
-        priority: "normal",
-      }),
+      preCancelled(
+        { value: recordsEnvelope() },
+        { signal: beforeController.signal },
+      ),
     (error) =>
       error instanceof PlystraError &&
-      error.code === "credential_error" &&
-      error.message === "credential_error",
+      error.code === "cancelled" &&
+      error.message === "cancelled",
   );
+  assert.equal(tokenCalls, 0);
+  assert.equal(fetchCalls, 0);
 
-  const controller = new AbortController();
-  controller.abort();
-  const cancelled = createEmailSendV1({
+  let resolveStarted;
+  let resolveToken;
+  const started = new Promise((resolve) => {
+    resolveStarted = resolve;
+  });
+  const token = new Promise((resolve) => {
+    resolveToken = resolve;
+  });
+  const pendingToken = createRecordsEchoV1({
     baseUrl: "https://api.example.test",
+    credentialPolicy: {
+      mode: "bearer",
+      getAccessToken: () => {
+        tokenCalls++;
+        resolveStarted();
+        return token;
+      },
+    },
     fetch: async () => {
-      calls++;
-      return protobufResponse(emailMethod, { accepted: true });
+      fetchCalls++;
+      return protobufResponse(recordsMethod, {
+        value: recordsEnvelopeJSON(),
+      });
     },
   });
-  await assert.rejects(
-    () =>
-      cancelled(
-        { to: "person@example.com", tags: [], priority: "normal" },
-        { signal: controller.signal },
-      ),
-    (error) => error instanceof PlystraError && error.code === "cancelled",
+  const duringController = new AbortController();
+  const pending = pendingToken(
+    { value: recordsEnvelope() },
+    { signal: duringController.signal },
   );
+  await Promise.race([
+    started,
+    new Promise((_resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error("token callback did not start")),
+        5_000,
+      );
+      started.then(() => clearTimeout(timeout));
+    }),
+  ]);
+  duringController.abort();
+  await assert.rejects(
+    () => pending,
+    (error) =>
+      error instanceof PlystraError &&
+      error.code === "cancelled" &&
+      error.message === "cancelled",
+  );
+  resolveToken("late-browser-token");
+  await Promise.resolve();
+  assert.equal(tokenCalls, 1);
+  assert.equal(fetchCalls, 0);
+});
 
-  const network = createEmailSendV1({
+test("malformed request options and network failures remain safe", async () => {
+  let calls = 0;
+  const client = createRecordsEchoV1({
     baseUrl: "https://api.example.test",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async () => {
+      calls++;
       throw new Error("network detail");
     },
   });
+  for (const options of [null, { signal: null }, { unexpected: true }]) {
+    await assert.rejects(
+      () => client({ value: recordsEnvelope() }, options),
+      TypeError,
+    );
+  }
+  assert.equal(calls, 0);
   await assert.rejects(
-    () => network({ to: "person@example.com", tags: [], priority: "normal" }),
+    () => client({ value: recordsEnvelope() }),
     (error) =>
       error instanceof PlystraError &&
       error.code === "network_error" &&
-      error.message === "network_error",
+      error.message === "network_error" &&
+      !error.message.includes("network detail"),
   );
-  assert.equal(calls, 0);
+  assert.equal(calls, 1);
 });
 
-test("in-flight AbortSignal cancellation reaches the transport", async () => {
+test("in-flight AbortSignal cancellation reaches the canonical Interface transport", async () => {
   const controller = new AbortController();
   let calls = 0;
   let resolveStarted;
@@ -1091,8 +1318,9 @@ test("in-flight AbortSignal cancellation reaches the transport", async () => {
   const started = new Promise((resolve) => {
     resolveStarted = resolve;
   });
-  const client = createEmailSendV1({
+  const client = createRecordsEchoV1({
     baseUrl: "https://api.example.test",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async (_input, init) => {
       calls++;
       const signal = init.signal;
@@ -1117,7 +1345,7 @@ test("in-flight AbortSignal cancellation reaches the transport", async () => {
   });
 
   const pending = client(
-    { to: "person@example.com", tags: [], priority: "normal" },
+    { value: recordsEnvelope() },
     { signal: controller.signal },
   );
   await Promise.race([
@@ -1148,6 +1376,7 @@ test("empty contracts remain exact and base URLs reject unsafe components", asyn
     () =>
       createPlystraClient({
         baseUrl: "https://user:password@example.test/?query=secret",
+        credentialPolicy: anonymousCredentialPolicy,
       }),
     TypeError,
   );
@@ -1158,6 +1387,7 @@ test("empty contracts remain exact and base URLs reject unsafe components", asyn
   let calls = 0;
   const client = createPlystraClient({
     baseUrl: "https://api.example.test",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async () => {
       calls++;
       return protobufResponse(accountMethod, {});
@@ -1196,6 +1426,7 @@ test("prefix and hyphenated Capability identities remain collision-free", async 
   const paths = [];
   const client = createPlystraClient({
     baseUrl: "https://api.example.test",
+    credentialPolicy: anonymousCredentialPolicy,
     fetch: async (input) => {
       const path = new URL(input).pathname;
       paths.push(path);

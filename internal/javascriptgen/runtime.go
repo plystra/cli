@@ -34,10 +34,23 @@ export type JSONValue =
   | { readonly [key: string]: JSONValue }
   | readonly JSONValue[];
 
+export type CredentialPolicy =
+  | {
+      readonly mode: "anonymous";
+    }
+  | {
+      readonly mode: "cookie";
+      readonly fetchCredentials: "same-origin" | "include";
+    }
+  | {
+      readonly mode: "bearer";
+      /** Returns a raw bearer token without the authorization scheme. */
+      readonly getAccessToken: () => Awaitable<string>;
+    };
+
 export interface ClientOptions {
   readonly baseUrl: string | URL;
-  /** Returns the raw access token; Plystra adds the Bearer authorization scheme. */
-  readonly getAccessToken?: () => Awaitable<string | null | undefined>;
+  readonly credentialPolicy: CredentialPolicy;
   readonly fetch?: typeof globalThis.fetch;
 }
 
@@ -190,32 +203,42 @@ export interface ErrorContract {
 /** @internal */
 export interface Runtime {
   readonly transport: Transport;
-  readonly getAccessToken:
-    | (() => Awaitable<string | null | undefined>)
-    | undefined;
+  readonly credentialPolicy: CredentialPolicy;
 }
 
 /** @internal */
 export function createRuntime(options: ClientOptions): Runtime {
-  if (options === null || typeof options !== "object") {
+  if (!isPlainObject(options)) {
     throw new TypeError("Plystra client options must be an object");
   }
+  assertOnlyOwnKeys(
+    options,
+    ["baseUrl", "credentialPolicy", "fetch"],
+    "Plystra client options",
+  );
+  if (!hasOwn(options, "baseUrl")) {
+    throw new TypeError("Plystra client options require baseUrl");
+  }
+  if (!hasOwn(options, "credentialPolicy")) {
+    throw new TypeError("Plystra client options require credentialPolicy");
+  }
   const baseUrl = normalizeBaseUrl(options.baseUrl);
-  const fetcher = options.fetch ?? globalThis.fetch;
+  const credentialPolicy = normalizeCredentialPolicy(options.credentialPolicy);
+  const configuredFetch = hasOwn(options, "fetch") ? options.fetch : undefined;
+  const fetcher =
+    configuredFetch === undefined ? globalThis.fetch : configuredFetch;
   if (typeof fetcher !== "function") {
     throw new TypeError("Plystra client requires a Fetch-compatible function");
   }
-  if (
-    options.getAccessToken !== undefined &&
-    typeof options.getAccessToken !== "function"
-  ) {
-    throw new TypeError("getAccessToken must be a function");
-  }
+  const fetchCredentials =
+    credentialPolicy.mode === "cookie"
+      ? credentialPolicy.fetchCredentials
+      : "omit";
   const transportFetch: typeof globalThis.fetch = (input, init) =>
     fetcher(input, {
       ...init,
       cache: "no-store",
-      credentials: "same-origin",
+      credentials: fetchCredentials,
       redirect: "error",
     });
   return Object.freeze({
@@ -224,7 +247,178 @@ export function createRuntime(options: ClientOptions): Runtime {
       useBinaryFormat: true,
       fetch: transportFetch,
     }),
-    getAccessToken: options.getAccessToken,
+    credentialPolicy,
+  });
+}
+
+function normalizeCredentialPolicy(value: unknown): CredentialPolicy {
+  if (!isPlainObject(value)) {
+    throw new TypeError("credentialPolicy must be an object");
+  }
+  const mode = hasOwn(value, "mode") ? value["mode"] : undefined;
+  switch (mode) {
+    case "anonymous":
+      assertOnlyOwnKeys(value, ["mode"], "anonymous credentialPolicy");
+      return Object.freeze({ mode: "anonymous" });
+    case "cookie": {
+      assertOnlyOwnKeys(
+        value,
+        ["mode", "fetchCredentials"],
+        "cookie credentialPolicy",
+      );
+      const fetchCredentials = hasOwn(value, "fetchCredentials")
+        ? value["fetchCredentials"]
+        : undefined;
+      if (
+        fetchCredentials !== "same-origin" &&
+        fetchCredentials !== "include"
+      ) {
+        throw new TypeError(
+          "cookie credentialPolicy requires fetchCredentials to be same-origin or include",
+        );
+      }
+      return Object.freeze({ mode: "cookie", fetchCredentials });
+    }
+    case "bearer": {
+      assertOnlyOwnKeys(
+        value,
+        ["mode", "getAccessToken"],
+        "bearer credentialPolicy",
+      );
+      const getAccessToken = hasOwn(value, "getAccessToken")
+        ? value["getAccessToken"]
+        : undefined;
+      if (typeof getAccessToken !== "function") {
+        throw new TypeError(
+          "bearer credentialPolicy requires getAccessToken to be a function",
+        );
+      }
+      return Object.freeze({
+        mode: "bearer",
+        getAccessToken: getAccessToken as () => Awaitable<string>,
+      });
+    }
+    default:
+      throw new TypeError(
+        "credentialPolicy.mode must be anonymous, cookie, or bearer",
+      );
+  }
+}
+
+function normalizeRequestSignal(options: RequestOptions): AbortSignal | undefined {
+  if (!isPlainObject(options)) {
+    throw new TypeError("Plystra request options must be an object");
+  }
+  assertOnlyOwnKeys(options, ["signal"], "Plystra request options");
+  const signal = hasOwn(options, "signal") ? options["signal"] : undefined;
+  if (signal !== undefined && !isAbortSignal(signal)) {
+    throw new TypeError("signal must be an AbortSignal");
+  }
+  return signal;
+}
+
+function assertOnlyOwnKeys(
+  value: object,
+  allowed: readonly string[],
+  subject: string,
+): void {
+  const allowedKeys = new Set(allowed);
+  if (
+    Reflect.ownKeys(value).some(
+      (key) => typeof key !== "string" || !allowedKeys.has(key),
+    )
+  ) {
+    throw new TypeError(subject + " contains unsupported fields");
+  }
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  try {
+    const signal = value as AbortSignal;
+    return (
+      typeof signal.aborted === "boolean" &&
+      typeof signal.addEventListener === "function" &&
+      typeof signal.removeEventListener === "function"
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function resolveBearerToken(
+  getAccessToken: () => Awaitable<string>,
+  signal: AbortSignal | undefined,
+): Promise<string> {
+  if (signalAborted(signal)) {
+    throw new PlystraError(0, "cancelled");
+  }
+
+  let pending: Awaitable<string>;
+  try {
+    pending = getAccessToken();
+  } catch {
+    if (signalAborted(signal)) {
+      throw new PlystraError(0, "cancelled");
+    }
+    throw new PlystraError(0, "credential_error");
+  }
+
+  let token: unknown;
+  try {
+    token = await awaitWithSignal(pending, signal);
+  } catch {
+    if (signalAborted(signal)) {
+      throw new PlystraError(0, "cancelled");
+    }
+    throw new PlystraError(0, "credential_error");
+  }
+  if (signalAborted(signal)) {
+    throw new PlystraError(0, "cancelled");
+  }
+  if (
+    typeof token !== "string" ||
+    token === "" ||
+    /^Bearer(?: |$)/i.test(token) ||
+    !/^[A-Za-z0-9._~+\/-]+=*$/.test(token) ||
+    new TextEncoder().encode(token).byteLength > maximumCredentialBytes
+  ) {
+    throw new PlystraError(0, "credential_error");
+  }
+  return token;
+}
+
+function awaitWithSignal<T>(
+  value: Awaitable<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  const pending = Promise.resolve(value);
+  if (signal === undefined) {
+    return pending;
+  }
+  return new Promise<T>((resolve, reject) => {
+    let finished = false;
+    const settle = (action: () => void): void => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      signal.removeEventListener("abort", onAbort);
+      action();
+    };
+    const onAbort = (): void => {
+      settle(() => reject(new PlystraError(0, "cancelled")));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    pending.then(
+      (result) => settle(() => resolve(result)),
+      (error: unknown) => settle(() => reject(error)),
+    );
+    if (signal.aborted) {
+      onAbort();
+    }
   });
 }
 
@@ -238,7 +432,8 @@ export async function invoke(
   request: unknown,
   options: RequestOptions,
 ): Promise<unknown> {
-  if (signalAborted(options.signal)) {
+  const signal = normalizeRequestSignal(options);
+  if (signalAborted(signal)) {
     throw new PlystraError(0, "cancelled");
   }
 
@@ -260,7 +455,7 @@ export async function invoke(
     method,
     errorContract,
     requestMessage,
-    options,
+    signal,
     (message) => decodeMessage(method.output, responseCodec, message),
   );
 }
@@ -274,7 +469,8 @@ export async function invokeInterface(
   request: unknown,
   options: RequestOptions,
 ): Promise<unknown> {
-  if (signalAborted(options.signal)) {
+  const signal = normalizeRequestSignal(options);
+  if (signalAborted(signal)) {
     throw new PlystraError(0, "cancelled");
   }
 
@@ -296,7 +492,7 @@ export async function invokeInterface(
     method,
     errorContract,
     requestMessage,
-    options,
+    signal,
     (message) => decodeInterfaceMessage(method.output, codec, message),
   );
 }
@@ -306,51 +502,37 @@ async function invokePrepared(
   method: DescMethodUnary,
   errorContract: ErrorContract,
   requestMessage: MessageShape<typeof method.input>,
-  options: RequestOptions,
+  signal: AbortSignal | undefined,
   decodeResponse: (message: MessageShape<typeof method.output>) => unknown,
 ): Promise<unknown> {
-  if (signalAborted(options.signal)) {
+  if (signalAborted(signal)) {
     throw new PlystraError(0, "cancelled");
   }
 
   const headers = new Headers();
-  if (runtime.getAccessToken !== undefined) {
-    let token: string | null | undefined;
-    try {
-      token = await runtime.getAccessToken();
-    } catch {
-      throw new PlystraError(0, "credential_error");
-    }
-    if (token !== null && token !== undefined && token !== "") {
-      if (
-        typeof token !== "string" ||
-        token.trim() !== token ||
-        /[\u0000-\u001f\u007f]/.test(token) ||
-        new TextEncoder().encode(token).byteLength > maximumCredentialBytes
-      ) {
-        throw new TypeError("getAccessToken returned an invalid credential");
-      }
-      if (/^Bearer(?: |$)/i.test(token)) {
-        throw new TypeError(
-          "getAccessToken must return the raw token without the Bearer scheme",
-        );
-      }
-      headers.set("Authorization", "Bearer " + token);
-    }
+  if (runtime.credentialPolicy.mode === "bearer") {
+    const token = await resolveBearerToken(
+      runtime.credentialPolicy.getAccessToken,
+      signal,
+    );
+    headers.set("Authorization", "Bearer " + token);
+  }
+  if (signalAborted(signal)) {
+    throw new PlystraError(0, "cancelled");
   }
 
   let responseMessage: MessageShape<typeof method.output>;
   try {
     const response = await runtime.transport.unary(
       method,
-      options.signal,
+      signal,
       undefined,
       headers,
       requestMessage,
     );
     responseMessage = response.message;
   } catch (error) {
-    if (signalAborted(options.signal)) {
+    if (signalAborted(signal)) {
       throw new PlystraError(0, "cancelled");
     }
     throw normalizeTransportError(error, errorContract);

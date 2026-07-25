@@ -87,7 +87,9 @@ For each Interface exposed through Connect, the generated JavaScript SDK publish
 
 Import the generated JavaScript SDK only through its package root. Internal runtime, descriptor, codec, operation-binder, and raw Connect surfaces are blocked by the package export map and omitted from public declarations.
 
-Pass an AbortSignal as the generated operation's second argument to cancel before dispatch or while fetch is in flight. Cancellation rejects with PlystraError code cancelled. Once server invocation has begun, the generated Connect handler preserves that caller cancellation through the trusted Kernel root, canonical application invocation, and Provider context. The same handler preserves the earlier caller or trusted-root Go context deadline and reports deadline_exceeded without a response when invocation observes it. Cancellation and deadlines are best-effort interruption and do not promise Provider rollback or compensation.
+Generated client construction requires one explicit ` + "`credentialPolicy`" + `. Select ` + "`{mode: \"anonymous\"}`" + ` for no browser credentials, ` + "`{mode: \"cookie\", fetchCredentials: \"same-origin\"}`" + ` or ` + "`include`" + ` for an exact cookie policy, or ` + "`{mode: \"bearer\", getAccessToken}`" + ` for one bounded raw bearer token. Anonymous and bearer modes use Fetch credentials ` + "`omit`" + `; cookie mode sends no bearer header. Bearer callback rejection and nullish, empty, malformed, prefixed, control-containing, non-string, or oversized results fail before dispatch as ` + "`PlystraError`" + ` code ` + "`credential_error`" + ` without exposing credential data. A selected mode never falls back to another.
+
+Pass an AbortSignal as the generated operation's second argument to cancel before dispatch, while bearer acquisition is pending, or while fetch is in flight. Cancellation rejects with PlystraError code cancelled. Once server invocation has begun, the generated Connect handler preserves that caller cancellation through the trusted Kernel root, canonical application invocation, and Implementation context. The same handler preserves the earlier caller or trusted-root Go context deadline and reports deadline_exceeded without a response when invocation observes it. Cancellation and deadlines are best-effort interruption and do not promise Implementation rollback or compensation.
 
 ` + "`generated/proto/wire-map.json`" + ` is committed compatibility history for every canonical Interface message projected to Connect, including request, response, and reachable same-package messages, plus the exact stable service, method, and Connect procedure identity. Authored positive ` + "`plystra`" + ` field numbers are the wire numbers. Generation rejects renumbering, permanently reserves every removed Protobuf field name and number, carries those reservations into generated source and the descriptor set, and retains inactive Interface and message history when exposure or Connect is disabled. The ledger temporarily retains separately labelled legacy transport history required by pre-Gate-14 handlers; that bridge is not Interface contract authority. Never edit or delete the ledger. If it drifts, recover the exact previously generated content before running ` + "`plystra generate`" + `.
 
@@ -1295,15 +1297,15 @@ and binder modules are not public package subpaths or declaration exports.
 Canonical integer fields, integer array items, and integer enum members are
 signed 64-bit bigint values in this public API. Use literals such as 42n and
 never coerce them to JavaScript number values.
-When configuring getAccessToken, return only the raw token. The generated
-transport adds the Bearer authorization scheme and rejects a callback value
-that already includes the Bearer scheme before sending a request.
-Pass an AbortSignal in the operation's second argument when the caller may stop
-waiting. Verify both a pre-aborted signal and an in-flight abort: each rejects
-with PlystraError code cancelled, and the in-flight signal reaches fetch and the
-generated server cancellation path. Do not treat cancellation as a Provider
-rollback guarantee.
-Provider packages, runtime configuration, verified internal context, and Secret
+ClientOptions requires credentialPolicy. Anonymous is Fetch omit/no
+Authorization. Cookie uses fetchCredentials same-origin or include and no
+bearer. Bearer is Fetch omit plus getAccessToken for one bounded raw token.
+Rejected or invalid tokens fail before dispatch as PlystraError credential_error
+without token data; modes never fall back.
+AbortSignal in the second argument cancels pre-dispatch, bearer acquisition, or
+fetch as PlystraError cancelled; in-flight cancellation reaches fetch/server.
+Cancellation is not an Implementation rollback guarantee.
+Implementation packages, runtime configuration, verified internal context, and Secret
 values must never appear in the browser package.
 
 ## Validate every change

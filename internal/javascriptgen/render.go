@@ -507,7 +507,7 @@ func renderIndex(operations []renderedOperation, interfaces []renderedInterface)
 	}
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "export { PlystraError } from \"./runtime.js\";")
-	fmt.Fprintln(&source, "export type { ClientOptions, JSONValue, KernelErrorClass, PlystraErrorDetail, RequestOptions } from \"./runtime.js\";")
+	fmt.Fprintln(&source, "export type { ClientOptions, CredentialPolicy, JSONValue, KernelErrorClass, PlystraErrorDetail, RequestOptions } from \"./runtime.js\";")
 	for _, operation := range operations {
 		importPath := indexImportPath(operation)
 		if operation.isAlias() {
@@ -720,7 +720,7 @@ func renderREADME(packageName string, operations []renderedOperation, interfaces
 	}
 	fmt.Fprintln(&readme, "const client = createPlystraClient({")
 	fmt.Fprintln(&readme, "  baseUrl: \"https://api.example.com\",")
-	fmt.Fprintln(&readme, "  getAccessToken: async () => rawAccessToken,")
+	fmt.Fprintln(&readme, "  credentialPolicy: { mode: \"anonymous\" },")
 	fmt.Fprintln(&readme, "});")
 	fmt.Fprintln(&readme)
 	if len(interfaces) != 0 {
@@ -738,11 +738,11 @@ func renderREADME(packageName string, operations []renderedOperation, interfaces
 	}
 	fmt.Fprintln(&readme, "```")
 	fmt.Fprintln(&readme)
-	fmt.Fprintln(&readme, "`getAccessToken` returns only the raw token value. The generated transport adds the `Bearer` authorization scheme; returning a value that already includes that scheme fails before the request is sent.")
+	fmt.Fprintln(&readme, "`credentialPolicy` is required and selects exactly one mode. `{ mode: \"anonymous\" }` sets Fetch credentials to `omit` and sends no `Authorization` header. `{ mode: \"cookie\", fetchCredentials: \"same-origin\" | \"include\" }` sends only browser-managed credentials using that exact Fetch policy. `{ mode: \"bearer\", getAccessToken }` also uses Fetch credentials `omit`, requires one nonempty bounded raw bearer token, and sends exactly one `Authorization: Bearer ...` header. Bearer callback rejection, nullish or empty results from untyped JavaScript, whitespace, control characters, an existing scheme, malformed token syntax, and oversized values fail as `PlystraError` code `credential_error` before dispatch without exposing the credential. A selected mode never falls back to another mode.")
 	fmt.Fprintln(&readme)
-	fmt.Fprintln(&readme, "Pass an `AbortSignal` as the operation's second argument to cancel before dispatch or while the request is in flight. Cancellation rejects with `PlystraError` code `cancelled`; once server invocation has begun, it reaches the generated Connect handler, canonical invocation, and Provider context. Cancellation is best-effort interruption and does not promise Provider rollback.")
+	fmt.Fprintln(&readme, "Pass an `AbortSignal` as the operation's second argument to cancel before dispatch, while bearer acquisition is pending, or while the request is in flight. Cancellation rejects with `PlystraError` code `cancelled`; once server invocation has begun, it reaches the generated Connect handler, canonical invocation, and Implementation context. Cancellation is best-effort interruption and does not promise Implementation rollback.")
 	fmt.Fprintln(&readme)
-	fmt.Fprintln(&readme, "Only explicitly exposed Interfaces receive generated methods. The nested client and each tree-shakable `create<InterfaceName>V<major>` factory use the same typed request, typed response, safe error mapping, credential callback, cancellation behavior, and exact Connect procedure derived from the canonical Interface ID. Implementation packages, server configuration, verified internal context, and Secret values are never included.")
+	fmt.Fprintln(&readme, "Only explicitly exposed Interfaces receive generated methods. The nested client and each tree-shakable `create<InterfaceName>V<major>` factory use the same typed request, typed response, safe error mapping, explicit credential policy, cancellation behavior, and exact Connect procedure derived from the canonical Interface ID. Implementation packages, server configuration, verified internal context, and Secret values are never included.")
 	if len(operations) != 0 {
 		fmt.Fprintln(&readme)
 		fmt.Fprintln(&readme, "## Transitional legacy operations")

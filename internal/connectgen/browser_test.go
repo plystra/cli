@@ -151,7 +151,10 @@ const browserCanonicalPage = `<!doctype html>
   try {
     const client = createPlystraClient({
       baseUrl: window.location.origin,
-      getAccessToken: async () => "browser-token"
+      credentialPolicy: {
+        mode: "bearer",
+        getAccessToken: async () => "browser-token"
+      }
     });
     const canonical = await client.customer.profile.sync.v1({
       active: true,
