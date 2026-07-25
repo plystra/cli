@@ -12,6 +12,7 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/interfaceresolution"
+	"github.com/plystra/cli/internal/transporttoolchain"
 )
 
 func TestResolveBuildsSelectedInterfaceConstructorGraphFromConfiguration(t *testing.T) {
@@ -217,6 +218,10 @@ func TestResolveKeepsGeneratedManifestFromOverridingCurrentInterfaceSelection(t 
 	}
 
 	const staleApplicationModelDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	toolchain, err := transporttoolchain.Current()
+	if err != nil {
+		t.Fatalf("transporttoolchain.Current: %v", err)
+	}
 	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
 		Mode:                   initial.ConfigurationSelection().Mode(),
 		Environment:            initial.ConfigurationSelection().Environment(),
@@ -227,6 +232,7 @@ func TestResolveKeepsGeneratedManifestFromOverridingCurrentInterfaceSelection(t 
 		Composition:            initial.Composition(),
 		ProtobufWireMapDigest:  "sha256:2222222222222222222222222222222222222222222222222222222222222222",
 		ApplicationModelDigest: staleApplicationModelDigest,
+		TransportToolchain:     toolchain,
 	})
 	if err != nil {
 		t.Fatalf("NewManifestProvenance: %v", err)

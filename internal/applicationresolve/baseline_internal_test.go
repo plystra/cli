@@ -14,6 +14,7 @@ import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/implementationinventory"
+	"github.com/plystra/cli/internal/transporttoolchain"
 )
 
 func TestLoadGeneratedDependencyBaselinePrefersOwnershipRecovery(t *testing.T) {
@@ -112,6 +113,10 @@ func renderDependencyBaseline(t testing.TB, capability string) ([]byte, applicat
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
+	toolchain, err := transporttoolchain.Current()
+	if err != nil {
+		t.Fatalf("transporttoolchain.Current: %v", err)
+	}
 	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
 		Mode:                   applicationgen.ConfigurationModeDefault,
 		RootPath:               applicationManifestName,
@@ -121,6 +126,7 @@ func renderDependencyBaseline(t testing.TB, capability string) ([]byte, applicat
 		Composition:            composition,
 		ProtobufWireMapDigest:  "sha256:" + strings.Repeat("2", 64),
 		ApplicationModelDigest: "sha256:" + strings.Repeat("1", 64),
+		TransportToolchain:     toolchain,
 	})
 	if err != nil {
 		t.Fatalf("NewManifestProvenance: %v", err)

@@ -20,10 +20,23 @@ import (
 )
 
 const (
-	generatedRoot             = "generated/sdk/javascript"
-	protobufJavaScriptVersion = "2.12.1"
-	connectJavaScriptVersion  = "2.1.2"
-	typescriptVersion         = "7.0.2"
+	// GeneratorVersion identifies the embedded JavaScript SDK generator.
+	GeneratorVersion = "plystra.javascript-generator/v1"
+	// ProtobufPackageName and ProtobufPackageVersion identify the generated
+	// JavaScript Protobuf runtime dependency.
+	ProtobufPackageName    = "@bufbuild/protobuf"
+	ProtobufPackageVersion = "2.12.1"
+	// ConnectPackageName, ConnectWebPackageName, and ConnectPackageVersion
+	// identify the generated JavaScript Connect runtime dependencies.
+	ConnectPackageName       = "@connectrpc/connect"
+	ConnectWebPackageName    = "@connectrpc/connect-web"
+	ConnectPackageVersion    = "2.1.2"
+	ConnectWebPackageVersion = ConnectPackageVersion
+	// TypeScriptPackageVersion identifies the generated package's development
+	// compiler dependency.
+	TypeScriptPackageVersion = "7.0.2"
+
+	generatedRoot = "generated/sdk/javascript"
 )
 
 // ErrRender reports that a normalized SDK model could not produce a complete
@@ -245,11 +258,11 @@ func renderPackageJSON(packageName string) []byte {
 			Typecheck: "tsc -p tsconfig.json --noEmit",
 		},
 		Dependencies: packageRuntimeDependencies{
-			Protobuf:   protobufJavaScriptVersion,
-			Connect:    connectJavaScriptVersion,
-			ConnectWeb: connectJavaScriptVersion,
+			Protobuf:   ProtobufPackageVersion,
+			Connect:    ConnectPackageVersion,
+			ConnectWeb: ConnectWebPackageVersion,
 		},
-		DevDependencies: packageDevelopmentDependencies{TypeScript: typescriptVersion},
+		DevDependencies: packageDevelopmentDependencies{TypeScript: TypeScriptPackageVersion},
 	}
 	encoded, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {

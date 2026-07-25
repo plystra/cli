@@ -28,6 +28,7 @@ import (
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
 	"github.com/plystra/cli/internal/transportprovenance"
+	"github.com/plystra/cli/internal/transporttoolchain"
 	"github.com/plystra/kernel/plugin/manifest"
 )
 
@@ -603,12 +604,22 @@ func withManifestProvenanceSelection(t testing.TB, options applicationgen.Option
 		Composition:            options.Composition,
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: modelDigest,
+		TransportToolchain:     currentTransportToolchain(t),
 	})
 	if err != nil {
 		t.Fatalf("NewManifestProvenance: %v", err)
 	}
 	options.ManifestProvenance = provenance
 	return options
+}
+
+func currentTransportToolchain(t testing.TB) transporttoolchain.Identity {
+	t.Helper()
+	toolchain, err := transporttoolchain.Current()
+	if err != nil {
+		t.Fatalf("transporttoolchain.Current: %v", err)
+	}
+	return toolchain
 }
 
 func defaultConfigurationProvenance(t testing.TB, composition applicationmeta.Composition) *generation.ConfigurationProvenanceInput {

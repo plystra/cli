@@ -808,8 +808,16 @@ reference when applicable; project-relative paths; normalized document
 digests; dependency baseline history; the committed Protobuf wire-map digest;
 and the final build-affecting application-model digest. Environment mode reuses
 the root dependency baseline because overlays do not own dependency
-maintenance. The manifest excludes raw configuration, Secret reference
-targets, resolved Secrets, and machine-specific absolute paths. Use the same
+maintenance. The required top-level `transport_toolchain` record identifies
+the exact embedded `go/format` runtime; built-in Protobuf-model, descriptor,
+wire-map, Connect, and JavaScript generator versions; pinned generated Go and
+npm dependencies; and its canonical SHA-256 digest. The CLI does not invoke an
+implicit global `protoc` or generator and does not use a hosted generation
+service. A CLI or supported-toolchain change therefore changes the generated
+manifest and `plystra generate --check` reports drift without modifying the
+Project. The manifest excludes raw configuration, Secret reference targets,
+resolved Secrets, environment selectors outside their declared provenance,
+VCS state, timestamps, and machine-specific absolute paths. Use the same
 selection for generation and its check; selecting another build-affecting
 model correctly reports generated drift.
 

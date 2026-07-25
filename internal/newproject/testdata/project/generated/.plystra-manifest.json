@@ -27,7 +27,7 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:51f1f534a0bea73bf946ce424c3c9b0123604a64b2c514cf3f2941149aa52a10"
+      "sha256": "sha256:6885c07adc9d7efaaad571281989be1b2273c6a0b0ff3f62458f6456b3aef056"
     },
     {
       "path": "generated/proto/descriptor-set.pb",
@@ -75,6 +75,72 @@
       ],
       "protobuf_wire_map_digest": "sha256:571ae981f350a67cd5fd182c8094be8decdd2637577d33b1dd3856d6cd23e899",
       "application_model_digest": "sha256:62299afa4c5eb0eeb60f96b2b6d267c582ce438c4df676b7850abe7f5d5d5f2a"
+    },
+    "transport_toolchain": {
+      "schema": "plystra.transport-toolchain/v1",
+      "components": [
+        {
+          "kind": "embedded-runtime",
+          "name": "go/format",
+          "version": "go1.26.5"
+        },
+        {
+          "kind": "generator",
+          "name": "connect",
+          "version": "plystra.connect-generator/v1"
+        },
+        {
+          "kind": "generator",
+          "name": "javascript",
+          "version": "plystra.javascript-generator/v1"
+        },
+        {
+          "kind": "generator",
+          "name": "protobuf-descriptor",
+          "version": "plystra.protobuf-descriptor/v1"
+        },
+        {
+          "kind": "generator",
+          "name": "protobuf-model",
+          "version": "plystra.protobuf-model/v1"
+        },
+        {
+          "kind": "generator",
+          "name": "protobuf-wire-map",
+          "version": "plystra.proto-wire-map/v4"
+        },
+        {
+          "kind": "generated-go-dependency",
+          "name": "connectrpc.com/connect",
+          "version": "v1.20.0"
+        },
+        {
+          "kind": "generated-go-dependency",
+          "name": "google.golang.org/protobuf",
+          "version": "v1.36.11"
+        },
+        {
+          "kind": "generated-npm-dependency",
+          "name": "@bufbuild/protobuf",
+          "version": "2.12.1"
+        },
+        {
+          "kind": "generated-npm-dependency",
+          "name": "@connectrpc/connect",
+          "version": "2.1.2"
+        },
+        {
+          "kind": "generated-npm-dependency",
+          "name": "@connectrpc/connect-web",
+          "version": "2.1.2"
+        },
+        {
+          "kind": "generated-npm-development-dependency",
+          "name": "typescript",
+          "version": "7.0.2"
+        }
+      ],
+      "digest": "sha256:9e56f49397625180fd89310f11bcf07b4e15f1b19e4cbde39a9c88311cdd7690"
     }
   }
 }

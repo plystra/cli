@@ -32,6 +32,7 @@ import (
 	"github.com/plystra/cli/internal/protobufidentity"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
+	"github.com/plystra/cli/internal/transporttoolchain"
 )
 
 func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *testing.T) {
@@ -82,10 +83,20 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 		`"dependency_baseline":[]`,
 		`"protobuf_wire_map_digest":"sha256:`,
 		`"application_model_digest":"sha256:`,
+		`"transport_toolchain":{"schema":"plystra.transport-toolchain/v1"`,
 	} {
 		if !bytes.Contains(applicationManifest, []byte(required)) {
 			t.Fatalf("generated application manifest omits %q: %s", required, applicationManifest)
 		}
+	}
+	manifestProvenance, err := applicationgen.DecodeManifestProvenance(applicationManifest)
+	if err != nil || !manifestProvenance.TransportToolchain().Valid() {
+		t.Fatalf("generated transport toolchain = %#v, %v", manifestProvenance.TransportToolchain(), err)
+	}
+	ownershipManifest := readFile(t, root, generatedfiles.ManifestPath)
+	if !bytes.Contains(ownershipManifest, []byte(`"transport_toolchain"`)) ||
+		!bytes.Contains(ownershipManifest, []byte(manifestProvenance.TransportToolchain().Digest())) {
+		t.Fatalf("ownership manifest omits embedded transport toolchain: %s", ownershipManifest)
 	}
 	assertFileExists(t, root, generatedfiles.ManifestPath)
 	assertFileExists(t, root, "generated/go/application/main_gen.go")
@@ -122,7 +133,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	}
 	assertFileMissing(t, root, "generated/sdk/javascript/package.json")
 
-	writeFile(t, filepath.Join(root, "generated", "manifest.json"), "drift\n")
+	writeFile(t, filepath.Join(root, "generated", "manifest.json"), string(changedTransportToolchainManifest(t, applicationManifest)))
 	driftedBefore := snapshotTree(t, root)
 	drifted, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       root,
@@ -133,7 +144,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 		t.Fatalf("drift check = %#v, %v", drifted.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, driftedBefore) {
-		t.Fatalf("drift check mutated application:\nbefore: %#v\nafter:  %#v", driftedBefore, after)
+		t.Fatalf("transport-toolchain drift check mutated application:\nbefore: %#v\nafter:  %#v", driftedBefore, after)
 	}
 	if repaired, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Environment: environment, Validate: func(_ context.Context, _ string) error { return nil }}); err != nil || !repaired.Report().Clean() {
 		t.Fatalf("repair drift = %#v, %v", repaired.Report().Changes(), err)
@@ -147,6 +158,40 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	if err != nil || !clean.Report().Clean() {
 		t.Fatalf("clean check = %#v, %v", clean.Report().Changes(), err)
 	}
+}
+
+func changedTransportToolchainManifest(t testing.TB, data []byte) []byte {
+	t.Helper()
+	provenance, err := applicationgen.DecodeManifestProvenance(data)
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance: %v", err)
+	}
+	components := provenance.TransportToolchain().Components()
+	inputs := make([]transporttoolchain.ComponentInput, len(components))
+	for index, component := range components {
+		inputs[index] = transporttoolchain.ComponentInput{
+			Kind:    component.Kind(),
+			Name:    component.Name(),
+			Version: component.Version(),
+		}
+		if component.Kind() == transporttoolchain.KindGenerator && component.Name() == "javascript" {
+			inputs[index].Version = "plystra.javascript-generator/v2"
+		}
+	}
+	changed, err := transporttoolchain.New(inputs)
+	if err != nil {
+		t.Fatalf("transporttoolchain.New: %v", err)
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("decode generated manifest: %v", err)
+	}
+	document["transport_toolchain"] = json.RawMessage(changed.RecordJSON())
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatalf("encode generated manifest: %v", err)
+	}
+	return append(encoded, '\n')
 }
 
 func TestModuleRequirementRejectsInvalidPathOrMinimumVersion(t *testing.T) {

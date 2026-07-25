@@ -18,6 +18,10 @@ import (
 	"github.com/plystra/cli/internal/sdkmodel"
 )
 
+// GeneratorVersion identifies the embedded normalized Protobuf model
+// generator shared by legacy and Interface projections.
+const GeneratorVersion = "plystra.protobuf-model/v1"
+
 var (
 	// ErrBuild reports invalid or internally inconsistent normalized
 	// Protobuf projection input.

@@ -15,6 +15,7 @@ import (
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/protobufwiremap"
+	"github.com/plystra/cli/internal/transporttoolchain"
 	"github.com/plystra/kernel/plugin/manifest"
 )
 
@@ -121,6 +122,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 		Composition:            dependencyComposition(t),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,
+		TransportToolchain:     currentTransportToolchain(t),
 	})
 	if err != nil {
 		t.Fatalf("NewManifestProvenance(default): %v", err)
@@ -135,6 +137,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 		Composition:            dependencyComposition(t),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,
+		TransportToolchain:     currentTransportToolchain(t),
 		Previous:               defaultProvenance,
 	})
 	if err != nil {
@@ -167,6 +170,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 		Composition:            testComposition(),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,
+		TransportToolchain:     currentTransportToolchain(t),
 		Previous:               environmentProvenance,
 	})
 	if err != nil {
@@ -334,6 +338,94 @@ id: email.send/v1
 	}
 }
 
+func TestGeneratedManifestRequiresAndValidatesTransportToolchain(t *testing.T) {
+	t.Parallel()
+
+	current := currentTransportToolchain(t)
+	options := applicationgen.ManifestProvenanceOptions{
+		Mode:                   applicationgen.ConfigurationModeDefault,
+		RootPath:               "plystra.yaml",
+		RootData:               []byte("{}\n"),
+		SelectedPath:           "plystra.yaml",
+		SelectedData:           []byte("{}\n"),
+		Composition:            testComposition(),
+		ProtobufWireMapDigest:  "sha256:" + strings.Repeat("2", 64),
+		ApplicationModelDigest: "sha256:" + strings.Repeat("1", 64),
+		TransportToolchain:     current,
+	}
+	provenance, err := applicationgen.NewManifestProvenance(options)
+	if err != nil {
+		t.Fatalf("NewManifestProvenance: %v", err)
+	}
+	resolution := emptyApplication(t)
+	data, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), resolution.Context(), provenance)
+	if err != nil {
+		t.Fatalf("RenderManifest: %v", err)
+	}
+	decoded, err := applicationgen.DecodeManifestProvenance(data)
+	if err != nil || !decoded.TransportToolchain().Valid() || decoded.TransportToolchain().Digest() != current.Digest() {
+		t.Fatalf("DecodeManifestProvenance transport toolchain = %#v, %v", decoded.TransportToolchain(), err)
+	}
+	if !bytes.Contains(data, []byte(`"transport_toolchain":{"schema":"plystra.transport-toolchain/v1"`)) {
+		t.Fatalf("generated manifest omits top-level transport_toolchain: %s", data)
+	}
+
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("decode manifest document: %v", err)
+	}
+	delete(document, "transport_toolchain")
+	missing, err := json.Marshal(document)
+	if err != nil {
+		t.Fatalf("encode missing transport toolchain: %v", err)
+	}
+	if _, err := applicationgen.DecodeManifestProvenance(missing); err == nil || !strings.Contains(err.Error(), "transport_toolchain") {
+		t.Fatalf("DecodeManifestProvenance(missing toolchain) error = %v", err)
+	}
+
+	var toolchainRecord map[string]json.RawMessage
+	if err := json.Unmarshal(current.RecordJSON(), &toolchainRecord); err != nil {
+		t.Fatalf("decode toolchain record: %v", err)
+	}
+	toolchainRecord["digest"] = json.RawMessage(`"sha256:0000000000000000000000000000000000000000000000000000000000000000"`)
+	document["transport_toolchain"], err = json.Marshal(toolchainRecord)
+	if err != nil {
+		t.Fatalf("encode tampered transport toolchain: %v", err)
+	}
+	tampered, err := json.Marshal(document)
+	if err != nil {
+		t.Fatalf("encode tampered manifest: %v", err)
+	}
+	if _, err := applicationgen.DecodeManifestProvenance(tampered); err == nil ||
+		!strings.Contains(err.Error(), "transport_toolchain") ||
+		!strings.Contains(err.Error(), "digest") {
+		t.Fatalf("DecodeManifestProvenance(tampered toolchain) error = %v", err)
+	}
+
+	changedInputs := transportToolchainInputs(current)
+	for index := range changedInputs {
+		if changedInputs[index].Kind == transporttoolchain.KindGenerator && changedInputs[index].Name == "connect" {
+			changedInputs[index].Version = "plystra.connect-generator/v2"
+		}
+	}
+	changedToolchain, err := transporttoolchain.New(changedInputs)
+	if err != nil {
+		t.Fatalf("transporttoolchain.New(changed): %v", err)
+	}
+	options.TransportToolchain = changedToolchain
+	changedProvenance, err := applicationgen.NewManifestProvenance(options)
+	if err != nil {
+		t.Fatalf("NewManifestProvenance(changed): %v", err)
+	}
+	changedData, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), resolution.Context(), changedProvenance)
+	if err != nil {
+		t.Fatalf("RenderManifest(changed): %v", err)
+	}
+	if bytes.Equal(data, changedData) || !bytes.Contains(changedData, []byte(`"version":"plystra.connect-generator/v2"`)) {
+		t.Fatal("transport toolchain change did not alter generated manifest bytes")
+	}
+}
+
 func TestApplicationModelDigestIncludesAliasesAndExcludesSelectionPath(t *testing.T) {
 	t.Parallel()
 
@@ -362,6 +454,19 @@ func TestApplicationModelDigestIncludesAliasesAndExcludesSelectionPath(t *testin
 	if !strings.HasPrefix(withDigest, "sha256:") || len(withDigest) != 71 {
 		t.Fatalf("application-model digest = %q", withDigest)
 	}
+}
+
+func transportToolchainInputs(identity transporttoolchain.Identity) []transporttoolchain.ComponentInput {
+	components := identity.Components()
+	result := make([]transporttoolchain.ComponentInput, len(components))
+	for index, component := range components {
+		result[index] = transporttoolchain.ComponentInput{
+			Kind:    component.Kind(),
+			Name:    component.Name(),
+			Version: component.Version(),
+		}
+	}
+	return result
 }
 
 func TestApplicationModelDigestIncludesHTTPTransportsDeterministically(t *testing.T) {

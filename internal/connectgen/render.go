@@ -29,6 +29,8 @@ import (
 )
 
 const (
+	// GeneratorVersion identifies the embedded Connect source generator.
+	GeneratorVersion = "plystra.connect-generator/v1"
 	// ConnectModulePath and ConnectModuleVersion identify the generated Go
 	// runtime dependency supported by this CLI build.
 	ConnectModulePath    = "connectrpc.com/connect"

@@ -38,6 +38,7 @@ import (
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
+	"github.com/plystra/cli/internal/transporttoolchain"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
@@ -577,6 +578,10 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if err != nil {
 		return fmt.Errorf("digest initial application model: %w", err)
 	}
+	toolchain, err := transporttoolchain.Current()
+	if err != nil {
+		return fmt.Errorf("identify embedded transport toolchain: %w", err)
+	}
 	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
 		Mode:                   applicationgen.ConfigurationModeDefault,
 		RootPath:               "plystra.yaml",
@@ -586,6 +591,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 		Composition:            composition,
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: modelDigest,
+		TransportToolchain:     toolchain,
 	})
 	if err != nil {
 		return fmt.Errorf("construct initial application manifest provenance: %w", err)

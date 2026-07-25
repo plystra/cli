@@ -589,8 +589,13 @@ digests; dependency baseline history; the Protobuf wire-map digest; and final
 application-model digest. Environment mode retains the root dependency baseline
 because the overlay does not own dependency maintenance. The manifest never
 records raw configuration, Secret reference targets, resolved Secrets, or
-machine-specific absolute paths. Switching a build-affecting selection
-correctly creates generated drift.
+machine-specific absolute paths. Its required top-level transport_toolchain
+record identifies the exact embedded go/format runtime; built-in Protobuf-model,
+descriptor, wire-map, Connect, and JavaScript generator versions; pinned
+generated Go and npm dependency versions; and a canonical digest. Generation
+does not invoke an implicit global protoc or generator executable and does not
+use a hosted generation service. Switching a build-affecting selection or
+toolchain identity correctly creates generated drift.
 
 ## Naming and identity rules
 

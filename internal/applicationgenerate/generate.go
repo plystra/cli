@@ -35,6 +35,7 @@ import (
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
+	"github.com/plystra/cli/internal/transporttoolchain"
 	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 	"golang.org/x/mod/module"
@@ -365,6 +366,10 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if selection.Mode() == applicationgen.ConfigurationModeEnvironment {
 		selectedData = resolved.ConfigurationSource()
 	}
+	toolchain, err := transporttoolchain.Current()
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("identify embedded transport toolchain: %w", err)
+	}
 	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
 		Mode:                   selection.Mode(),
 		Environment:            selection.Environment(),
@@ -375,6 +380,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		Composition:            resolved.Composition(),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: modelDigest,
+		TransportToolchain:     toolchain,
 		Previous:               resolved.PreviousManifestProvenance(),
 	})
 	if err != nil {

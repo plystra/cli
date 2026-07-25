@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/bootstrapgen"
@@ -324,6 +325,13 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	assertReadmeUsesAvailableCommands(t, directTree["README.md"])
 	assertCIUsesCurrentActions(t, directTree[".github/workflows/ci.yml"])
 	assertPlystraSkill(t, direct.Path(), modulePath)
+	provenance, err := applicationgen.DecodeManifestProvenance(directTree["generated/manifest.json"])
+	if err != nil || !provenance.TransportToolchain().Valid() {
+		t.Fatalf("generated Project transport toolchain = %#v, %v", provenance.TransportToolchain(), err)
+	}
+	if !bytes.Contains(directTree["generated/.plystra-manifest.json"], []byte(provenance.TransportToolchain().Digest())) {
+		t.Fatalf("generated Project ownership manifest omits toolchain digest %q", provenance.TransportToolchain().Digest())
+	}
 	assertGitInitialized(t, direct.Path())
 	assertGitInitialized(t, commandTarget)
 	for name, content := range directTree {
@@ -1172,6 +1180,18 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 	}
 	if !bytes.Contains(readme, []byte("JavaScript SDK generation requires Connect")) {
 		t.Fatalf("generated README omits the JavaScript Connect requirement:\n%s", readme)
+	}
+	for _, toolchainGuidance := range [][]byte{
+		[]byte("top-level `transport_toolchain` record"),
+		[]byte("exact embedded `go/format` runtime"),
+		[]byte("pinned generated Go and npm dependency versions"),
+		[]byte("implicit global `protoc`"),
+		[]byte("hosted generation service"),
+		[]byte("`plystra generate --check` reports drift"),
+	} {
+		if !bytes.Contains(readme, toolchainGuidance) {
+			t.Fatalf("generated README omits transport-toolchain guidance %q:\n%s", toolchainGuidance, readme)
+		}
 	}
 	for _, credentialGuidance := range [][]byte{
 		[]byte("requires one explicit `credentialPolicy`"),
@@ -2123,6 +2143,11 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"constraint digests",
 		"configuration schema v4",
 		"Protobuf wire-map digest",
+		"top-level transport_toolchain",
+		"exact embedded go/format runtime",
+		"generated Go and npm dependency versions",
+		"implicit global protoc",
+		"hosted generation service",
 		"environment, or explicit-config mode",
 		"root dependency baseline",
 		"merged beneath deploy/customer-a.yaml",

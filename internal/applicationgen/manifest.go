@@ -25,6 +25,7 @@ import (
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
+	"github.com/plystra/cli/internal/transporttoolchain"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -76,6 +77,7 @@ type applicationManifestDocument struct {
 	CapabilityAliases    json.RawMessage                         `json:"capability_aliases"`
 	ConstraintProjection applicationManifestConstraintProjection `json:"constraint_projection"`
 	Configuration        applicationManifestConfiguration        `json:"configuration"`
+	TransportToolchain   json.RawMessage                         `json:"transport_toolchain"`
 }
 
 // ManifestProvenanceOptions contains the complete non-secret generation
@@ -91,6 +93,7 @@ type ManifestProvenanceOptions struct {
 	Composition            applicationmeta.Composition
 	ProtobufWireMapDigest  string
 	ApplicationModelDigest string
+	TransportToolchain     transporttoolchain.Identity
 	Previous               ManifestProvenance
 }
 
@@ -106,6 +109,7 @@ type ManifestProvenance struct {
 	baselines              []manifestSelectionBaseline
 	protobufWireMapDigest  string
 	applicationModelDigest string
+	transportToolchain     transporttoolchain.Identity
 }
 
 type manifestSelectionBaseline struct {
@@ -166,6 +170,7 @@ func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenanc
 		baselines:              baselines,
 		protobufWireMapDigest:  options.ProtobufWireMapDigest,
 		applicationModelDigest: options.ApplicationModelDigest,
+		transportToolchain:     options.TransportToolchain,
 	}
 	if err := validateManifestProvenance(provenance); err != nil {
 		return ManifestProvenance{}, err
@@ -219,6 +224,12 @@ func (p ManifestProvenance) ApplicationModelDigest() string {
 
 // ProtobufWireMapDigest returns the full committed historical wire-map digest.
 func (p ManifestProvenance) ProtobufWireMapDigest() string { return p.protobufWireMapDigest }
+
+// TransportToolchain returns the immutable exact embedded generator and
+// generated-dependency identity.
+func (p ManifestProvenance) TransportToolchain() transporttoolchain.Identity {
+	return p.transportToolchain
+}
 
 // MatchesSelection reports whether this provenance owns the baseline for the
 // exact current-project selection.
@@ -274,6 +285,7 @@ func RenderManifest(aliasJSON []byte, context generation.Context, provenance Man
 	document := applicationManifestDocument{
 		CapabilityAliases:    aliases.CapabilityAliases,
 		ConstraintProjection: constraintProjection,
+		TransportToolchain:   json.RawMessage(provenance.transportToolchain.RecordJSON()),
 		Configuration: applicationManifestConfiguration{
 			Version:     applicationManifestConfigurationVersion,
 			Mode:        provenance.mode,
@@ -318,6 +330,10 @@ func DecodeManifestProvenance(data []byte) (ManifestProvenance, error) {
 	}
 	if err := validateManifestConstraintProjection(document.ConstraintProjection); err != nil {
 		return ManifestProvenance{}, fmt.Errorf("generated application manifest constraint_projection: %w", err)
+	}
+	toolchain, err := transporttoolchain.Decode(document.TransportToolchain)
+	if err != nil {
+		return ManifestProvenance{}, fmt.Errorf("generated application manifest transport_toolchain: %w", err)
 	}
 	configuration := document.Configuration
 	if configuration.Version != applicationManifestConfigurationVersion {
@@ -386,6 +402,7 @@ func DecodeManifestProvenance(data []byte) (ManifestProvenance, error) {
 		baselines:              baselines,
 		protobufWireMapDigest:  configuration.ProtobufWireMapDigest,
 		applicationModelDigest: configuration.ApplicationModelDigest,
+		transportToolchain:     toolchain,
 	}
 	if err := validateManifestProvenance(provenance); err != nil {
 		return ManifestProvenance{}, fmt.Errorf("generated application manifest configuration provenance: %w", err)
@@ -928,6 +945,9 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 	}
 	if !validSHA256(provenance.applicationModelDigest) {
 		return errors.New("application-model digest must be a lower-case SHA-256 digest")
+	}
+	if !provenance.transportToolchain.Valid() {
+		return errors.New("transport toolchain identity is absent or invalid")
 	}
 	return nil
 }
