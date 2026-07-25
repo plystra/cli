@@ -641,7 +641,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 	}
 	adapterFiles, err := implementationadaptergen.Render(options.ImplementationAdapters)
 	if err != nil {
-		return "", fmt.Errorf("Implementation adapter model: %w", err)
+		return "", fmt.Errorf("implementation adapter model: %w", err)
 	}
 	adapterInputs := make(map[string]implementationadaptergen.Input, len(options.ImplementationAdapters))
 	for _, input := range options.ImplementationAdapters {
@@ -800,7 +800,7 @@ func normalizeInterfaceProtobufModel(transports applicationmeta.HTTPTransports, 
 		return protobufmodel.BuildInterfaces(transports.Connect, nil)
 	}
 	if model.Enabled() != transports.Connect {
-		return protobufmodel.InterfaceModel{}, errors.New("Interface Protobuf model transport selection does not match http.transports.connect")
+		return protobufmodel.InterfaceModel{}, errors.New("interface Protobuf model transport selection does not match http.transports.connect")
 	}
 	return model, nil
 }
