@@ -108,6 +108,9 @@ type Request struct {
 	record := document.Interfaces["records.list/v1"]
 	if !record.Active ||
 		record.ProtobufPackage != "plystra.generated.records.list.v1" ||
+		record.Service != "RecordsListV1Service" ||
+		record.Method != "Invoke" ||
+		record.Procedure != "/plystra.generated.records.list.v1.RecordsListV1Service/Invoke" ||
 		record.RequestMessage != "RecordsListV1Request" ||
 		record.ResponseMessage != "RecordsListV1Response" ||
 		len(record.Messages) != 4 {
@@ -126,6 +129,9 @@ type Request struct {
 		active[0].ID() != "records.list/v1" ||
 		active[0].ContractDigest() != firstInput.ContractDigest ||
 		active[0].ProtobufPackage() != "plystra.generated.records.list.v1" ||
+		active[0].Service() != "RecordsListV1Service" ||
+		active[0].Method() != "Invoke" ||
+		active[0].Procedure() != "/plystra.generated.records.list.v1.RecordsListV1Service/Invoke" ||
 		active[0].RequestMessage() != "RecordsListV1Request" ||
 		active[0].ResponseMessage() != "RecordsListV1Response" ||
 		len(active[0].Messages()) != 4 {
@@ -151,6 +157,36 @@ type Request struct {
 	fresh := first.ActiveInterfaces()[0]
 	if fresh.ID() != "records.list/v1" || len(fresh.Messages()) != 4 {
 		t.Fatal("ActiveInterfaces exposed mutable projection storage")
+	}
+}
+
+func TestBuildRejectsChangedInterfaceProcedureHistory(t *testing.T) {
+	t.Parallel()
+
+	input := interfaceHistoryInput(t, `package listv1
+import "context"
+//plystra:interface records.list/v1
+type Interface interface { List(context.Context, Request) (Response, error) }
+type Request struct{}
+type Response struct{}
+`)
+	legacy := wireModel(t, true)
+	interfaces := interfaceHistoryModel(t, true, input)
+	initial, err := Build(legacy, interfaces, nil, false, "")
+	if err != nil {
+		t.Fatalf("Build(initial): %v", err)
+	}
+	document := decodeTestDocument(t, initial.CanonicalJSON())
+	record := document.Interfaces["records.list/v1"]
+	record.Procedure = "/plystra.generated.records.list.v1.RecordsListV1Service/Changed"
+	document.Interfaces["records.list/v1"] = record
+	corrupt, err := encode(document, true)
+	if err != nil {
+		t.Fatalf("encode corrupt procedure history: %v", err)
+	}
+	result, err := Build(legacy, interfaces, corrupt, true, digest(corrupt))
+	if !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "procedure and message identities") {
+		t.Fatalf("Build(corrupt procedure) = %#v, %v", result, err)
 	}
 }
 

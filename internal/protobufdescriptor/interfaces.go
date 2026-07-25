@@ -20,10 +20,9 @@ const (
 	durationDependency  = "google/protobuf/duration.proto"
 )
 
-// BuildWithInterfaces adds message-only schemas projected from canonical
-// Interface packages to the same deterministic descriptor evidence as the
-// current application transport model. Connect services are added by their
-// later dedicated generation boundary.
+// BuildWithInterfaces adds canonical messages and one unary service projected
+// from each exposed Interface package to the same deterministic descriptor
+// evidence as the current application transport model.
 func BuildWithInterfaces(model protobufmodel.Model, wireMap protobufwiremap.Map, interfaces protobufmodel.InterfaceModel) (Evidence, error) {
 	if !interfaces.Valid() {
 		return Evidence{}, fmt.Errorf("%w: %w: Interface Protobuf model is absent", ErrBuild, ErrProjection)
@@ -161,6 +160,7 @@ func bridgeLegacyInterfaceDescriptor(files map[string]*descriptorpb.FileDescript
 	legacy.MessageType = nil
 	legacy.EnumType = nil
 	legacy.Extension = nil
+	legacy.Service = nil
 	legacy.Dependency = []string{interfaceFile}
 	legacy.PublicDependency = nil
 	legacy.WeakDependency = nil
@@ -196,6 +196,9 @@ func interfaceDescriptor(
 	if wire.ID() != operation.ID().String() ||
 		wire.ContractDigest() != operation.ContractDigest() ||
 		wire.ProtobufPackage() != identity.Package() ||
+		wire.Service() != identity.Service() ||
+		wire.Method() != identity.Method() ||
+		wire.Procedure() != identity.Procedure() ||
 		wire.RequestMessage() != requestMessage ||
 		wire.ResponseMessage() != responseMessage {
 		return nil, false, false, fmt.Errorf("%w: active Interface wire identity or contract digest is inconsistent", ErrProjection)
@@ -240,6 +243,14 @@ func interfaceDescriptor(
 		Syntax:      proto.String("proto3"),
 		Dependency:  dependencies,
 		MessageType: descriptors,
+		Service: []*descriptorpb.ServiceDescriptorProto{{
+			Name: proto.String(wire.Service()),
+			Method: []*descriptorpb.MethodDescriptorProto{{
+				Name:       proto.String(wire.Method()),
+				InputType:  proto.String(qualified(identity.Package() + "." + wire.RequestMessage())),
+				OutputType: proto.String(qualified(identity.Package() + "." + wire.ResponseMessage())),
+			}},
+		}},
 	}, usesTimestamp, usesDuration, nil
 }
 

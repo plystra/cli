@@ -6,16 +6,20 @@ import (
 	"sort"
 	"unicode/utf8"
 
+	"github.com/plystra/cli/internal/protobufidentity"
 	"github.com/plystra/cli/internal/protobufmodel"
 )
 
-// InterfaceProjection is one active canonical Interface's validated message
-// wire history. It contains no Implementation, module, configuration, or
-// runtime identity.
+// InterfaceProjection is one active canonical Interface's validated procedure
+// and message wire history. It contains no Implementation, module,
+// configuration, or runtime identity.
 type InterfaceProjection struct {
 	id                 string
 	contractDigest     string
 	protobufPackage    string
+	service            string
+	method             string
+	procedure          string
 	requestMessage     string
 	responseMessage    string
 	messageProjections []MessageProjection
@@ -29,6 +33,15 @@ func (p InterfaceProjection) ContractDigest() string { return p.contractDigest }
 
 // ProtobufPackage returns the deterministic generated Protobuf package.
 func (p InterfaceProjection) ProtobufPackage() string { return p.protobufPackage }
+
+// Service returns the unqualified stable Protobuf service name.
+func (p InterfaceProjection) Service() string { return p.service }
+
+// Method returns the stable unary Protobuf method name.
+func (p InterfaceProjection) Method() string { return p.method }
+
+// Procedure returns the exact stable Connect HTTP procedure path.
+func (p InterfaceProjection) Procedure() string { return p.procedure }
 
 // RequestMessage returns the unqualified generated request message name.
 func (p InterfaceProjection) RequestMessage() string { return p.requestMessage }
@@ -60,6 +73,9 @@ type interfaceHistory struct {
 	Active          bool                               `json:"active"`
 	ContractDigest  string                             `json:"contract_digest"`
 	ProtobufPackage string                             `json:"protobuf_package"`
+	Service         string                             `json:"service"`
+	Method          string                             `json:"method"`
+	Procedure       string                             `json:"procedure"`
 	RequestMessage  string                             `json:"request_message"`
 	ResponseMessage string                             `json:"response_message"`
 	Messages        map[string]interfaceMessageHistory `json:"messages"`
@@ -81,6 +97,9 @@ type interfaceFieldAssignment struct {
 type activeInterface struct {
 	ContractDigest  string                            `json:"contract_digest"`
 	ProtobufPackage string                            `json:"protobuf_package"`
+	Service         string                            `json:"service"`
+	Method          string                            `json:"method"`
+	Procedure       string                            `json:"procedure"`
 	RequestMessage  string                            `json:"request_message"`
 	ResponseMessage string                            `json:"response_message"`
 	Messages        map[string]activeInterfaceMessage `json:"messages"`
@@ -122,21 +141,33 @@ func reconcileInterfaces(current map[string]interfaceHistory, model protobufmode
 		if !exists {
 			record = interfaceHistory{
 				ProtobufPackage: identity.Package(),
+				Service:         identity.Service(),
+				Method:          identity.Method(),
+				Procedure:       identity.Procedure(),
 				RequestMessage:  requestMessage,
 				ResponseMessage: responseMessage,
 				Messages:        make(map[string]interfaceMessageHistory),
 			}
 		}
 		if record.ProtobufPackage != identity.Package() ||
+			record.Service != identity.Service() ||
+			record.Method != identity.Method() ||
+			record.Procedure != identity.Procedure() ||
 			record.RequestMessage != requestMessage ||
 			record.ResponseMessage != responseMessage {
 			return fmt.Errorf(
-				"Interface %s message identity changed from %s/%s/%s to %s/%s/%s",
+				"Interface %s procedure or message identity changed from %s/%s/%s/%s/%s/%s to %s/%s/%s/%s/%s/%s",
 				identifier,
 				record.ProtobufPackage,
+				record.Service,
+				record.Method,
+				record.Procedure,
 				record.RequestMessage,
 				record.ResponseMessage,
 				identity.Package(),
+				identity.Service(),
+				identity.Method(),
+				identity.Procedure(),
 				requestMessage,
 				responseMessage,
 			)
@@ -262,17 +293,31 @@ func validateInterfaceHistories(values map[string]interfaceHistory) error {
 		if identifier == "" || len(identifier) > 1024 || !utf8.ValidString(identifier) {
 			return fmt.Errorf("interfaces contains invalid identity %q", identifier)
 		}
-		protobufPackage, requestMessage, responseMessage, err := canonicalMessageNames(identifier)
+		identity, err := canonicalInterfaceIdentity(identifier)
 		if err != nil {
 			return fmt.Errorf("invalid Interface identity %q: %v", identifier, err)
 		}
-		if record.ProtobufPackage != protobufPackage ||
+		requestMessage, err := unqualifiedMessage(identity.Package(), identity.RequestType())
+		if err != nil {
+			return fmt.Errorf("invalid Interface %s request identity: %v", identifier, err)
+		}
+		responseMessage, err := unqualifiedMessage(identity.Package(), identity.ResponseType())
+		if err != nil {
+			return fmt.Errorf("invalid Interface %s response identity: %v", identifier, err)
+		}
+		if record.ProtobufPackage != identity.Package() ||
+			record.Service != identity.Service() ||
+			record.Method != identity.Method() ||
+			record.Procedure != identity.Procedure() ||
 			record.RequestMessage != requestMessage ||
 			record.ResponseMessage != responseMessage {
 			return fmt.Errorf(
-				"invalid Interface %s message identities: must be %s/%s/%s",
+				"invalid Interface %s procedure and message identities: must be %s/%s/%s/%s/%s/%s",
 				identifier,
-				protobufPackage,
+				identity.Package(),
+				identity.Service(),
+				identity.Method(),
+				identity.Procedure(),
 				requestMessage,
 				responseMessage,
 			)
@@ -413,6 +458,9 @@ func activeInterfaceProjections(values map[string]interfaceHistory) []InterfaceP
 			id:                 identifier,
 			contractDigest:     record.ContractDigest,
 			protobufPackage:    record.ProtobufPackage,
+			service:            record.Service,
+			method:             record.Method,
+			procedure:          record.Procedure,
 			requestMessage:     record.RequestMessage,
 			responseMessage:    record.ResponseMessage,
 			messageProjections: messages,
@@ -446,6 +494,9 @@ func activeInterfaceHistory(values map[string]interfaceHistory) map[string]activ
 		result[identifier] = activeInterface{
 			ContractDigest:  record.ContractDigest,
 			ProtobufPackage: record.ProtobufPackage,
+			Service:         record.Service,
+			Method:          record.Method,
+			Procedure:       record.Procedure,
 			RequestMessage:  record.RequestMessage,
 			ResponseMessage: record.ResponseMessage,
 			Messages:        messages,
@@ -496,4 +547,19 @@ func validInterfaceGoName(value string) bool {
 		utf8.ValidString(value) &&
 		!hasControl(value) &&
 		validMessageName(value)
+}
+
+func canonicalInterfaceIdentity(identifier string) (protobufidentity.Identity, error) {
+	identities, err := protobufidentity.Build([]protobufidentity.Surface{{
+		PublicID:    identifier,
+		CanonicalID: identifier,
+	}})
+	if err != nil {
+		return protobufidentity.Identity{}, err
+	}
+	values := identities.Identities()
+	if len(values) != 1 {
+		return protobufidentity.Identity{}, errors.New("canonical Interface procedure identity is absent")
+	}
+	return values[0], nil
 }

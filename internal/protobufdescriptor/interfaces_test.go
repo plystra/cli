@@ -102,13 +102,15 @@ type Record struct {
 		`optional sint32 page_size = 7 [json_name = "page_size"];`,
 		`plystra.generated.records.list.v1.RecordsListV1Filter filter = 8 [json_name = "filter"];`,
 		`repeated .plystra.generated.records.list.v1.RecordsListV1Record records = 11 [json_name = "records"];`,
+		"service RecordsListV1Service {",
+		"rpc Invoke(.plystra.generated.records.list.v1.RecordsListV1Request) returns (.plystra.generated.records.list.v1.RecordsListV1Response);",
 	} {
 		if !strings.Contains(source, fragment) {
 			t.Fatalf("generated Interface schema omits %q:\n%s", fragment, source)
 		}
 	}
-	if strings.Contains(source, "service ") || strings.Contains(source, "rpc ") || strings.Contains(source, "capability") {
-		t.Fatalf("message-only Interface projection contains a premature procedure or obsolete identity:\n%s", source)
+	if strings.Contains(source, "capability") {
+		t.Fatalf("Interface procedure projection contains an obsolete identity:\n%s", source)
 	}
 
 	var set descriptorpb.FileDescriptorSet
@@ -123,8 +125,19 @@ type Record struct {
 	if err != nil {
 		t.Fatalf("FindFileByPath: %v", err)
 	}
-	if file.Services().Len() != 0 {
-		t.Fatalf("Interface message file services = %d", file.Services().Len())
+	if file.Services().Len() != 1 {
+		t.Fatalf("Interface file services = %d", file.Services().Len())
+	}
+	service := file.Services().Get(0)
+	method := service.Methods().ByName("Invoke")
+	if service.Name() != "RecordsListV1Service" ||
+		service.Methods().Len() != 1 ||
+		method == nil ||
+		method.IsStreamingClient() ||
+		method.IsStreamingServer() ||
+		method.Input().FullName() != "plystra.generated.records.list.v1.RecordsListV1Request" ||
+		method.Output().FullName() != "plystra.generated.records.list.v1.RecordsListV1Response" {
+		t.Fatalf("Interface unary procedure = %#v", service)
 	}
 	request := file.Messages().ByName("RecordsListV1Request")
 	if request == nil {
@@ -301,6 +314,8 @@ type Response struct {
 		"message KernelHealthV1Request {",
 		"message KernelHealthV1Response {",
 		`optional string status = 1 [json_name = "status"];`,
+		"service KernelHealthV1Service {",
+		"rpc Invoke(.plystra.generated.kernel.health.v1.KernelHealthV1Request) returns (.plystra.generated.kernel.health.v1.KernelHealthV1Response);",
 	} {
 		if !strings.Contains(interfaceSource, required) {
 			t.Fatalf("canonical Interface schema omits %q:\n%s", required, interfaceSource)
@@ -308,7 +323,8 @@ type Response struct {
 	}
 	legacySource := interfaceDescriptorFile(t, evidence, "generated/proto/plystra/generated/kernel/health/v1/capability.proto")
 	if !strings.Contains(legacySource, `import "plystra/generated/kernel/health/v1/interface.proto";`) ||
-		!strings.Contains(legacySource, "service KernelHealthV1Service {") ||
+		strings.Contains(legacySource, "service ") ||
+		strings.Contains(legacySource, "rpc ") ||
 		strings.Contains(legacySource, "message ") ||
 		strings.Contains(legacySource, "enum ") {
 		t.Fatalf("legacy service bridge retained a competing message contract:\n%s", legacySource)
@@ -324,8 +340,11 @@ type Response struct {
 	response := descriptorMessage(t, interfaceFile, "KernelHealthV1Response")
 	assertInterfaceDescriptorField(t, response, "status", 1, protoreflect.StringKind, true, "status")
 	legacyFile := descriptorFile(t, set, "plystra/generated/kernel/health/v1/capability.proto")
-	if legacyFile.Messages().Len() != 0 || legacyFile.Enums().Len() != 0 || legacyFile.Services().Len() != 1 {
+	if legacyFile.Messages().Len() != 0 || legacyFile.Enums().Len() != 0 || legacyFile.Services().Len() != 0 {
 		t.Fatalf("legacy bridge descriptor = messages %d enums %d services %d", legacyFile.Messages().Len(), legacyFile.Enums().Len(), legacyFile.Services().Len())
+	}
+	if interfaceFile.Services().Len() != 1 || interfaceFile.Services().Get(0).Name() != "KernelHealthV1Service" {
+		t.Fatalf("canonical Interface descriptor does not own the unary service: %#v", interfaceFile.Services())
 	}
 }
 

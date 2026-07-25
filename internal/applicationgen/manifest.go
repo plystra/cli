@@ -747,7 +747,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		return "", fmt.Errorf("%w: Protobuf wire map is absent or does not match the normalized Interface and legacy projections", ErrResolution)
 	}
 	document := applicationModelDocument{
-		Version:             14,
+		Version:             15,
 		ModulePath:          options.ModulePath,
 		JavaScriptPackage:   options.JavaScriptPackage,
 		KernelModuleVersion: options.KernelModuleVersion,

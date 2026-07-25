@@ -397,7 +397,7 @@ errors: []
 	if result, err := Build(model, emptyInterfaceProjection(t, model), data, true, digest(data)); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "message identities") {
 		t.Fatalf("Build(inconsistent) = %#v, %v", result, err)
 	}
-	oldSchema := bytes.Replace(valid.CanonicalJSON(), []byte(ProjectionSchema), []byte("plystra.proto-wire-map/v1"), 1)
+	oldSchema := bytes.Replace(valid.CanonicalJSON(), []byte(ProjectionSchema), []byte("plystra.proto-wire-map/v3"), 1)
 	if result, err := Build(model, emptyInterfaceProjection(t, model), oldSchema, true, digest(oldSchema)); !errors.Is(err, ErrHistory) || result.Valid() || !strings.Contains(err.Error(), "projection_schema") {
 		t.Fatalf("Build(old schema) = %#v, %v", result, err)
 	}

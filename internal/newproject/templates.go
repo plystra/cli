@@ -89,9 +89,9 @@ Import the generated JavaScript SDK only through its package root. Internal runt
 
 Pass an AbortSignal as the generated operation's second argument to cancel before dispatch or while fetch is in flight. Cancellation rejects with PlystraError code cancelled. Once server invocation has begun, the generated Connect handler preserves that caller cancellation through the trusted Kernel root, canonical application invocation, and Provider context. The same handler preserves the earlier caller or trusted-root Go context deadline and reports deadline_exceeded without a response when invocation observes it. Cancellation and deadlines are best-effort interruption and do not promise Provider rollback or compensation.
 
-` + "`generated/proto/wire-map.json`" + ` is committed compatibility history for every canonical Interface message projected to Connect, including request, response, and reachable same-package messages. Authored positive ` + "`plystra`" + ` field numbers are the wire numbers. Generation rejects renumbering, permanently reserves every removed Protobuf field name and number, carries those reservations into generated source and the descriptor set, and retains inactive Interface and message history when exposure or Connect is disabled. The ledger temporarily retains separately labelled legacy transport history required by pre-Gate-14 handlers; that bridge is not Interface contract authority. Never edit or delete the ledger. If it drifts, recover the exact previously generated content before running ` + "`plystra generate`" + `.
+` + "`generated/proto/wire-map.json`" + ` is committed compatibility history for every canonical Interface message projected to Connect, including request, response, and reachable same-package messages, plus the exact stable service, method, and Connect procedure identity. Authored positive ` + "`plystra`" + ` field numbers are the wire numbers. Generation rejects renumbering, permanently reserves every removed Protobuf field name and number, carries those reservations into generated source and the descriptor set, and retains inactive Interface and message history when exposure or Connect is disabled. The ledger temporarily retains separately labelled legacy transport history required by pre-Gate-14 handlers; that bridge is not Interface contract authority. Never edit or delete the ledger. If it drifts, recover the exact previously generated content before running ` + "`plystra generate`" + `.
 
-Generation emits one deterministic message-only ` + "`.proto`" + ` schema from every exposed canonical Interface package plus a self-contained ` + "`generated/proto/descriptor-set.pb`" + `. A Project without a selected Connect surface retains a valid empty descriptor set. These files contain no Implementation, configuration, or Secret data, are CLI-owned, and are checked by ` + "`plystra generate --check`" + `.
+Generation emits one deterministic ` + "`.proto`" + ` schema with the canonical messages and exactly one unary service from every exposed Interface package, plus a self-contained ` + "`generated/proto/descriptor-set.pb`" + `. The Connect procedure path is derived from the exact Interface ID. An overlapping pre-Gate-14 legacy schema is import-only and owns no competing service. A Project without a selected Connect surface retains a valid empty descriptor set. These files contain no Implementation, configuration, or Secret data, are CLI-owned, and are checked by ` + "`plystra generate --check`" + `.
 
 Every selected Connect application failure carries one shared ` + "`PlystraErrorDetail`" + ` with the requested canonical or Alias ID, the canonical target, and exactly one declared semantic code or closed Kernel class. Alias handlers preserve the requested Alias while invoking only the canonical target. Provider text, causes, payloads, panic data, configuration, credentials, Secrets, and internal Kernel detail codes never enter this descriptor. The generated JavaScript wrapper exposes only the validated immutable Plystra detail; a missing, duplicate, malformed, unknown, mismatched, or undeclared detail fails closed to ` + "`internal`" + `.
 
@@ -342,7 +342,8 @@ authored declaration or implementation and run plystra generate.
 
 generated/proto/wire-map.json is durable CLI-owned compatibility history for
 every canonical Interface message projected to Connect, including request,
-response, and reachable same-package messages. Authored positive plystra field
+response, and reachable same-package messages, plus the exact stable service,
+method, and Connect procedure identity. Authored positive plystra field
 numbers are the wire numbers. Generation rejects renumbering, permanently
 reserves every removed Protobuf field name and number, carries those
 reservations into generated source and descriptors, and retains inactive
@@ -350,9 +351,10 @@ Interface and message history when exposure or Connect is disabled. Never edit
 or delete the ledger. If it drifts, recover the exact previously generated
 content before running plystra generate.
 
-Generation emits one deterministic message-only .proto schema from every
-exposed canonical Interface package. The temporary legacy procedure bridge
-imports those messages rather than defining a competing contract.
+Generation emits one deterministic .proto schema with canonical messages and
+exactly one unary service from every exposed Interface package. The Connect
+procedure path is derived from the exact Interface ID. The temporary legacy
+schema imports that file and owns no competing messages, service, or procedure.
 generated/proto/descriptor-set.pb is the self-contained deterministic binary
 descriptor graph, including required well-known descriptors. With no selected
 Connect surface it remains present as a valid empty descriptor set. These files

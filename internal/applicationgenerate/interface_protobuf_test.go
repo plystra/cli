@@ -61,13 +61,15 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 		`map<string, sint64> labels = 2 [json_name = "labels"];`,
 		`optional sint32 page_size = 7 [json_name = "page_size"];`,
 		"message RecordsListV1Response {",
+		"service RecordsListV1Service {",
+		"rpc Invoke(.plystra.generated.records.list.v1.RecordsListV1Request) returns (.plystra.generated.records.list.v1.RecordsListV1Response);",
 	} {
 		if !bytes.Contains(source, []byte(fragment)) {
 			t.Fatalf("%s omits %q:\n%s", protoPath, fragment, source)
 		}
 	}
-	if bytes.Contains(source, []byte("service ")) || bytes.Contains(source, []byte("Capability")) {
-		t.Fatalf("%s contains a premature procedure or obsolete contract identity:\n%s", protoPath, source)
+	if bytes.Contains(source, []byte("Capability")) {
+		t.Fatalf("%s contains an obsolete contract identity:\n%s", protoPath, source)
 	}
 	assertFileMissing(t, root, "generated/proto/plystra/generated/records/list/v1/capability.proto")
 	if descriptor := readFile(t, root, protobufdescriptor.DescriptorSetPath); len(descriptor) == 0 {
@@ -79,6 +81,12 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 		len(initialWireHistory.ReservedNumbers) != 0 ||
 		len(initialWireHistory.ReservedNames) != 0 {
 		t.Fatalf("initial Interface wire history = %#v", initialWireHistory)
+	}
+	initialProcedure := decodeInterfaceProcedureHistory(t, readFile(t, root, protobufwiremap.Path), "records.list/v1")
+	if initialProcedure.Service != "RecordsListV1Service" ||
+		initialProcedure.Method != "Invoke" ||
+		initialProcedure.Procedure != "/plystra.generated.records.list.v1.RecordsListV1Service/Invoke" {
+		t.Fatalf("initial Interface procedure history = %#v", initialProcedure)
 	}
 	beforeProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
 	if err != nil {
@@ -209,6 +217,8 @@ func TestGenerateProjectsExposedIntrinsicKernelInterfaceMessages(t *testing.T) {
 				"message KernelHealthV1Request {",
 				"message KernelHealthV1Response {",
 				`optional string status = 1 [json_name = "status"];`,
+				"service KernelHealthV1Service {",
+				"rpc Invoke(.plystra.generated.kernel.health.v1.KernelHealthV1Request) returns (.plystra.generated.kernel.health.v1.KernelHealthV1Response);",
 			},
 		},
 		{
@@ -217,6 +227,8 @@ func TestGenerateProjectsExposedIntrinsicKernelInterfaceMessages(t *testing.T) {
 				`optional string assembly_api = 1 [json_name = "assembly_api"];`,
 				`optional string kernel_module = 2 [json_name = "kernel_module"];`,
 				`optional string kernel_version = 3 [json_name = "kernel_version"];`,
+				"service KernelInfoV1Service {",
+				"rpc Invoke(.plystra.generated.kernel.info.v1.KernelInfoV1Request) returns (.plystra.generated.kernel.info.v1.KernelInfoV1Response);",
 			},
 		},
 	}
@@ -227,15 +239,13 @@ func TestGenerateProjectsExposedIntrinsicKernelInterfaceMessages(t *testing.T) {
 				t.Fatalf("%s omits %q:\n%s", test.path, fragment, source)
 			}
 		}
-		if bytes.Contains(source, []byte("service ")) || bytes.Contains(source, []byte("rpc ")) {
-			t.Fatalf("%s contains a premature Connect procedure:\n%s", test.path, source)
-		}
 	}
 	for _, identifier := range []string{"health", "info"} {
 		path := "generated/proto/plystra/generated/kernel/" + identifier + "/v1/capability.proto"
 		source := readFile(t, root, path)
 		if !bytes.Contains(source, []byte(`import "plystra/generated/kernel/`+identifier+`/v1/interface.proto";`)) ||
-			!bytes.Contains(source, []byte("service Kernel")) ||
+			bytes.Contains(source, []byte("service ")) ||
+			bytes.Contains(source, []byte("rpc ")) ||
 			bytes.Contains(source, []byte("message ")) ||
 			bytes.Contains(source, []byte("enum ")) {
 			t.Fatalf("%s retained a competing legacy message contract:\n%s", path, source)
@@ -299,6 +309,27 @@ type interfaceWireHistory struct {
 	} `json:"fields"`
 	ReservedNumbers []int    `json:"reserved_numbers"`
 	ReservedNames   []string `json:"reserved_names"`
+}
+
+type interfaceProcedureHistory struct {
+	Service   string `json:"service"`
+	Method    string `json:"method"`
+	Procedure string `json:"procedure"`
+}
+
+func decodeInterfaceProcedureHistory(t testing.TB, data []byte, identifier string) interfaceProcedureHistory {
+	t.Helper()
+	var document struct {
+		Interfaces map[string]interfaceProcedureHistory `json:"interfaces"`
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("decode Interface procedure history: %v", err)
+	}
+	history, exists := document.Interfaces[identifier]
+	if !exists {
+		t.Fatalf("Interface %s is absent from procedure history", identifier)
+	}
+	return history
 }
 
 func decodeInterfaceWireHistory(t testing.TB, data []byte, identifier, message string) interfaceWireHistory {

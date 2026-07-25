@@ -181,7 +181,8 @@ authored declaration or implementation and run plystra generate.
 
 generated/proto/wire-map.json is durable CLI-owned compatibility history for
 every canonical Interface message projected to Connect, including request,
-response, and reachable same-package messages. Authored positive plystra field
+response, and reachable same-package messages, plus the exact stable service,
+method, and Connect procedure identity. Authored positive plystra field
 numbers are the wire numbers. Generation rejects renumbering, permanently
 reserves every removed Protobuf field name and number, carries those
 reservations into generated source and descriptors, and retains inactive
@@ -189,9 +190,10 @@ Interface and message history when exposure or Connect is disabled. Never edit
 or delete the ledger. If it drifts, recover the exact previously generated
 content before running plystra generate.
 
-Generation emits one deterministic message-only .proto schema from every
-exposed canonical Interface package. The temporary legacy procedure bridge
-imports those messages rather than defining a competing contract.
+Generation emits one deterministic .proto schema with canonical messages and
+exactly one unary service from every exposed Interface package. The Connect
+procedure path is derived from the exact Interface ID. The temporary legacy
+schema imports that file and owns no competing messages, service, or procedure.
 generated/proto/descriptor-set.pb is the self-contained deterministic binary
 descriptor graph, including required well-known descriptors. With no selected
 Connect surface it remains present as a valid empty descriptor set. These files

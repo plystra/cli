@@ -1,5 +1,6 @@
-// Package protobufwiremap owns deterministic committed Protobuf wire history
-// for canonical Interface messages and the temporary legacy transport bridge.
+// Package protobufwiremap owns deterministic committed Protobuf procedure and
+// message history for canonical Interfaces and the temporary legacy transport
+// bridge.
 package protobufwiremap
 
 import (
@@ -23,10 +24,10 @@ import (
 )
 
 const (
-	// Path is the one CLI-owned committed Protobuf field-history artifact.
+	// Path is the one CLI-owned committed Protobuf wire-history artifact.
 	Path = "generated/proto/wire-map.json"
 	// ProjectionSchema identifies the strict initial-release wire-map schema.
-	ProjectionSchema = "plystra.proto-wire-map/v3"
+	ProjectionSchema = "plystra.proto-wire-map/v4"
 	// MaximumBytes bounds managed history before parsing.
 	MaximumBytes int64 = 16 << 20
 
