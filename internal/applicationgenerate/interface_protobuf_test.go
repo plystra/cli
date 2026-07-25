@@ -20,7 +20,7 @@ import (
 func TestGenerateProjectsExposedAuthoredInterfaceMessages(t *testing.T) {
 	root := t.TempDir()
 	const modulePath = "example.com/interface-protobuf"
-	writeApplicationModule(t, root, modulePath)
+	writeConnectApplicationModule(t, root, modulePath)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
   expose:
     - records.list/v1
@@ -251,6 +251,70 @@ func TestGenerateProjectsExposedIntrinsicKernelInterfaceMessages(t *testing.T) {
 			t.Fatalf("%s retained a competing legacy message contract:\n%s", path, source)
 		}
 	}
+	assemblySource := readFile(t, root, "generated/go/assembly/interfaces_gen.go")
+	for _, fragment := range []string{
+		"func (runtime InterfaceRuntime) KernelHealthV1()",
+		"func (runtime InterfaceRuntime) KernelInfoV1()",
+		"kernelintrinsic.HealthContract()",
+		"kernelintrinsic.InfoContract()",
+	} {
+		if !bytes.Contains(assemblySource, []byte(fragment)) {
+			t.Fatalf("intrinsic Interface assembly omits %q:\n%s", fragment, assemblySource)
+		}
+	}
+	writeFile(t, filepath.Join(root, "intrinsic_connect_test.go"), `package intrinsicinterfaceprotobuf_test
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	healthadapter "example.com/intrinsic-interface-protobuf/generated/go/adapters/connect/kernel/health/v1"
+	infoadapter "example.com/intrinsic-interface-protobuf/generated/go/adapters/connect/kernel/info/v1"
+	bootstrap "example.com/intrinsic-interface-protobuf/generated/go/bootstrap"
+	healthv1 "github.com/plystra/kernel/interfaces/kernel/health/v1"
+)
+
+func TestIntrinsicConnectHandlersUseGovernedInterfaceAccessors(t *testing.T) {
+	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+	if err != nil || !application.Valid() {
+		t.Fatalf("bootstrap.New = %#v, %v", application, err)
+	}
+	health, err := application.Interfaces().KernelHealthV1().Health(context.Background(), healthv1.Request{})
+	if err != nil || health.Status != healthv1.StatusHealthy {
+		t.Fatalf("internal health = %#v, %v", health, err)
+	}
+	root := func(parent context.Context, _ http.Header) (context.Context, error) { return parent, nil }
+	healthHandler, err := healthadapter.New(root, application.Interfaces().KernelHealthV1())
+	if err != nil || !healthadapter.Available(healthHandler) {
+		t.Fatalf("healthadapter.New = %#v, %v", healthHandler, err)
+	}
+	infoHandler, err := infoadapter.New(root, application.Interfaces().KernelInfoV1())
+	if err != nil || !infoadapter.Available(infoHandler) {
+		t.Fatalf("infoadapter.New = %#v, %v", infoHandler, err)
+	}
+	server := httptest.NewServer(healthHandler)
+	defer server.Close()
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL+healthadapter.Procedure, bytes.NewBufferString("{}"))
+	if err != nil {
+		t.Fatalf("http.NewRequestWithContext: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Connect-Protocol-Version", "1")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatalf("Connect health: %v", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`+"`"+`"status":"healthy"`+"`"+`)) {
+		t.Fatalf("Connect health = status %d body %s, %v", response.StatusCode, body, err)
+	}
+}
+`)
 
 	command := exec.CommandContext(t.Context(), "go", "test", "./...", "-count=1")
 	command.Dir = root
@@ -271,6 +335,32 @@ func TestGenerateProjectsExposedIntrinsicKernelInterfaceMessages(t *testing.T) {
 	}
 	if afterCheck := snapshotTree(t, root); !reflect.DeepEqual(afterCheck, beforeCheck) {
 		t.Fatal("Generate --check mutated the intrinsic Interface Project")
+	}
+}
+
+func TestGenerateTransitionalAliasAgainstIntrinsicInterfaceCompiles(t *testing.T) {
+	root := t.TempDir()
+	writeConnectApplicationModule(t, root, "example.com/intrinsic-interface-alias")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
+  expose: [kernel.health/v1]
+capabilities:
+  aliases:
+    health.status/v1: kernel.health/v1
+`)
+
+	generated, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: goEnvironment(nil),
+	})
+	if err != nil || !generated.Report().Clean() {
+		t.Fatalf("Generate = changes %#v, %v", generated.Report().Changes(), err)
+	}
+	aliasSource := readFile(t, root, "generated/go/adapters/connect/health/status/v1/handler_gen.go")
+	canonicalSource := readFile(t, root, "generated/go/adapters/connect/kernel/health/v1/handler_gen.go")
+	if !bytes.Contains(aliasSource, []byte("target.InvokeRequested")) ||
+		!bytes.Contains(canonicalSource, []byte(`case "health.status/v1":`)) ||
+		bytes.Contains(canonicalSource, []byte("applicationinvocation")) {
+		t.Fatalf("transitional Alias does not remain on the canonical governed Interface handler:\nAlias:\n%s\nCanonical:\n%s", aliasSource, canonicalSource)
 	}
 }
 

@@ -491,10 +491,11 @@ type applicationModelImplementationAdapter struct {
 }
 
 type applicationModelImplementationAssembly struct {
-	Path         string                                `json:"path"`
-	Digest       string                                `json:"digest"`
-	Bindings     []applicationModelAssemblyBinding     `json:"bindings"`
-	Constructors []applicationModelAssemblyConstructor `json:"constructors"`
+	Path              string                                     `json:"path"`
+	Digest            string                                     `json:"digest"`
+	Bindings          []applicationModelAssemblyBinding          `json:"bindings"`
+	IntrinsicBindings []applicationModelAssemblyIntrinsicBinding `json:"intrinsic_bindings"`
+	Constructors      []applicationModelAssemblyConstructor      `json:"constructors"`
 }
 
 type applicationModelAssemblyBinding struct {
@@ -503,6 +504,12 @@ type applicationModelAssemblyBinding struct {
 	Constructor     string `json:"constructor"`
 	SelectionReason string `json:"selection_reason"`
 	ContractDigest  string `json:"contract_digest"`
+}
+
+type applicationModelAssemblyIntrinsicBinding struct {
+	InterfaceID string `json:"interface_id"`
+	PackagePath string `json:"package_path"`
+	MethodName  string `json:"method_name"`
 }
 
 type applicationModelAssemblyConstructor struct {
@@ -673,6 +680,15 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 			ContractDigest:  "sha256:" + hex.EncodeToString(binding.ContractDigest[:]),
 		}
 	}
+	assemblyIntrinsics := assemblyFile.IntrinsicBindings()
+	intrinsicBindingRecords := make([]applicationModelAssemblyIntrinsicBinding, len(assemblyIntrinsics))
+	for index, binding := range assemblyIntrinsics {
+		intrinsicBindingRecords[index] = applicationModelAssemblyIntrinsicBinding{
+			InterfaceID: binding.InterfaceID.String(),
+			PackagePath: binding.PackagePath,
+			MethodName:  binding.MethodName,
+		}
+	}
 	assemblyConstructors := assemblyFile.Constructors()
 	constructorRecords := make([]applicationModelAssemblyConstructor, len(assemblyConstructors))
 	for index, constructor := range assemblyConstructors {
@@ -697,10 +713,11 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 	}
 	assemblySum := sha256.Sum256(assemblyFile.Data())
 	assemblyRecord := applicationModelImplementationAssembly{
-		Path:         assemblyFile.Path(),
-		Digest:       "sha256:" + hex.EncodeToString(assemblySum[:]),
-		Bindings:     bindingRecords,
-		Constructors: constructorRecords,
+		Path:              assemblyFile.Path(),
+		Digest:            "sha256:" + hex.EncodeToString(assemblySum[:]),
+		Bindings:          bindingRecords,
+		IntrinsicBindings: intrinsicBindingRecords,
+		Constructors:      constructorRecords,
 	}
 	policies := append([]applicationmeta.InterfacePolicy(nil), options.InterfacePolicies...)
 	sort.Slice(policies, func(left, right int) bool {
@@ -747,7 +764,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		return "", fmt.Errorf("%w: Protobuf wire map is absent or does not match the normalized Interface and legacy projections", ErrResolution)
 	}
 	document := applicationModelDocument{
-		Version:             15,
+		Version:             16,
 		ModulePath:          options.ModulePath,
 		JavaScriptPackage:   options.JavaScriptPackage,
 		KernelModuleVersion: options.KernelModuleVersion,

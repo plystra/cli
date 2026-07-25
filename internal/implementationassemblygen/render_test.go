@@ -78,6 +78,56 @@ func TestRenderBuildsDependencyFirstGovernedInterfaceRuntime(t *testing.T) {
 	}
 }
 
+func TestRenderExposesKernelOwnedIntrinsicInterfacesThroughGovernedProxies(t *testing.T) {
+	t.Parallel()
+
+	options := validOptions(t)
+	options.IntrinsicBindings = []implementationassemblygen.IntrinsicBindingInput{
+		{
+			InterfaceID: mustInterfaceID(t, "kernel.info/v1"),
+			PackagePath: "github.com/plystra/kernel/interfaces/kernel/info/v1",
+			MethodName:  "Info",
+		},
+		{
+			InterfaceID: mustInterfaceID(t, "kernel.health/v1"),
+			PackagePath: "github.com/plystra/kernel/interfaces/kernel/health/v1",
+			MethodName:  "Health",
+		},
+	}
+	file, err := implementationassemblygen.Render(options)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for _, required := range []string{
+		"kernelintrinsic.HealthContract()",
+		"kernelintrinsic.InfoContract()",
+		"func (runtime InterfaceRuntime) KernelHealthV1()",
+		"func (runtime InterfaceRuntime) KernelInfoV1()",
+		"return runtime.intrinsic0",
+		"return runtime.intrinsic1",
+	} {
+		if !bytes.Contains(file.Data(), []byte(required)) {
+			t.Fatalf("generated intrinsic assembly omits %q:\n%s", required, file.Data())
+		}
+	}
+	intrinsics := file.IntrinsicBindings()
+	if len(intrinsics) != 2 || intrinsics[0].InterfaceID.String() != "kernel.health/v1" || intrinsics[1].InterfaceID.String() != "kernel.info/v1" {
+		t.Fatalf("IntrinsicBindings = %#v", intrinsics)
+	}
+	intrinsics[0] = implementationassemblygen.IntrinsicBindingInput{}
+	if file.IntrinsicBindings()[0].InterfaceID.String() == "" {
+		t.Fatal("IntrinsicBindings shares mutable storage")
+	}
+
+	reversed := options
+	reversed.IntrinsicBindings = append([]implementationassemblygen.IntrinsicBindingInput(nil), options.IntrinsicBindings...)
+	reversed.IntrinsicBindings[0], reversed.IntrinsicBindings[1] = reversed.IntrinsicBindings[1], reversed.IntrinsicBindings[0]
+	repeated, err := implementationassemblygen.Render(reversed)
+	if err != nil || !bytes.Equal(file.Data(), repeated.Data()) || !reflect.DeepEqual(file.IntrinsicBindings(), repeated.IntrinsicBindings()) {
+		t.Fatalf("reordered intrinsic bindings changed assembly: %v", err)
+	}
+}
+
 func TestRenderIsDeterministicAcrossInputOrder(t *testing.T) {
 	t.Parallel()
 
@@ -135,6 +185,29 @@ func TestRenderRejectsContradictoryOrCyclicGraph(t *testing.T) {
 				}}
 			},
 			want: implementationassemblygen.ErrConstructorGraph,
+		},
+		{
+			name: "non-Kernel intrinsic binding",
+			mutate: func(options *implementationassemblygen.Options) {
+				options.IntrinsicBindings = []implementationassemblygen.IntrinsicBindingInput{{
+					InterfaceID: mustInterfaceID(t, "kernel.health/v1"),
+					PackagePath: "example.com/application/interfaces/kernel/health/v1",
+					MethodName:  "Health",
+				}}
+			},
+			want: implementationassemblygen.ErrInvalidInput,
+		},
+		{
+			name: "duplicate intrinsic binding",
+			mutate: func(options *implementationassemblygen.Options) {
+				binding := implementationassemblygen.IntrinsicBindingInput{
+					InterfaceID: mustInterfaceID(t, "kernel.health/v1"),
+					PackagePath: "github.com/plystra/kernel/interfaces/kernel/health/v1",
+					MethodName:  "Health",
+				}
+				options.IntrinsicBindings = []implementationassemblygen.IntrinsicBindingInput{binding, binding}
+			},
+			want: implementationassemblygen.ErrInvalidInput,
 		},
 	}
 	for _, test := range tests {

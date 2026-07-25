@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"go/ast"
 	"go/format"
 	"go/token"
 	"path"
@@ -17,6 +18,7 @@ import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/goname"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/intrinsicinterface"
 	"github.com/plystra/cli/internal/modulepath"
 	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 	kernelinvocation "github.com/plystra/kernel/invocation"
@@ -63,6 +65,15 @@ type BindingInput struct {
 	ContractDigest  [sha256.Size]byte
 }
 
+// IntrinsicBindingInput is one exposed reserved Kernel Interface that needs a
+// governed typed root accessor. Its binding remains Kernel-owned and never
+// enters ordinary Implementation selection.
+type IntrinsicBindingInput struct {
+	InterfaceID interfaceid.Identifier
+	PackagePath string
+	MethodName  string
+}
+
 // DependencyInput is one parameter-ordered required or optional constructor
 // dependency. An unavailable optional dependency has no binding.
 type DependencyInput struct {
@@ -92,6 +103,7 @@ type Options struct {
 	KernelBuildIdentity      string
 	DefaultTimeout           time.Duration
 	Bindings                 []BindingInput
+	IntrinsicBindings        []IntrinsicBindingInput
 	Constructors             []ConstructorInput
 }
 
@@ -99,6 +111,7 @@ type Options struct {
 type File struct {
 	data         []byte
 	bindings     []BindingInput
+	intrinsics   []IntrinsicBindingInput
 	constructors []ConstructorInput
 }
 
@@ -111,17 +124,24 @@ func (f File) Data() []byte { return append([]byte(nil), f.data...) }
 // Bindings returns the normalized Interface-ID-ordered binding plan.
 func (f File) Bindings() []BindingInput { return append([]BindingInput(nil), f.bindings...) }
 
+// IntrinsicBindings returns the normalized exposed intrinsic Interface plan.
+func (f File) IntrinsicBindings() []IntrinsicBindingInput {
+	return append([]IntrinsicBindingInput(nil), f.intrinsics...)
+}
+
 // Constructors returns the normalized dependency-first constructor plan.
 func (f File) Constructors() []ConstructorInput { return cloneConstructors(f.constructors) }
 
 type plan struct {
-	options      Options
-	bindings     []BindingInput
-	constructors []ConstructorInput
-	bindingByID  map[string]BindingInput
-	contractPath map[string]string
-	accessors    []string
-	imports      map[string]string
+	options            Options
+	bindings           []BindingInput
+	intrinsics         []IntrinsicBindingInput
+	constructors       []ConstructorInput
+	bindingByID        map[string]BindingInput
+	contractPath       map[string]string
+	accessors          []string
+	intrinsicAccessors []string
+	imports            map[string]string
 }
 
 // Render validates, canonicalizes, and renders one static constructor
@@ -138,6 +158,7 @@ func Render(options Options) (File, error) {
 	return File{
 		data:         data,
 		bindings:     append([]BindingInput(nil), planned.bindings...),
+		intrinsics:   append([]IntrinsicBindingInput(nil), planned.intrinsics...),
 		constructors: cloneConstructors(planned.constructors),
 	}, nil
 }
@@ -180,6 +201,34 @@ func planAssembly(options Options) (plan, error) {
 		}
 		accessorOwners[accessor] = identifier
 		accessors[index] = accessor
+	}
+
+	intrinsics := append([]IntrinsicBindingInput(nil), options.IntrinsicBindings...)
+	slices.SortFunc(intrinsics, func(left, right IntrinsicBindingInput) int {
+		return strings.Compare(left.InterfaceID.String(), right.InterfaceID.String())
+	})
+	intrinsicAccessors := make([]string, len(intrinsics))
+	for index, intrinsic := range intrinsics {
+		identifier := intrinsic.InterfaceID.String()
+		definition, known := intrinsicinterface.Lookup(intrinsic.InterfaceID)
+		expectedMethod, knownMethod := intrinsicMethodName(intrinsic.InterfaceID)
+		if !known || definition.PackagePath() != intrinsic.PackagePath ||
+			!knownMethod || intrinsic.MethodName != expectedMethod ||
+			!token.IsIdentifier(intrinsic.MethodName) || !ast.IsExported(intrinsic.MethodName) {
+			return plan{}, fmt.Errorf("%w: intrinsic Interface binding %d is incomplete or not Kernel-owned", ErrInvalidInput, index)
+		}
+		if _, ordinary := bindingByID[identifier]; ordinary {
+			return plan{}, fmt.Errorf("%w: intrinsic Interface %s also appears in ordinary Implementation bindings", ErrInvalidInput, identifier)
+		}
+		if index > 0 && intrinsics[index-1].InterfaceID == intrinsic.InterfaceID {
+			return plan{}, fmt.Errorf("%w: duplicate intrinsic Interface binding %s", ErrInvalidInput, identifier)
+		}
+		accessor := interfaceAccessor(intrinsic.InterfaceID)
+		if owner, collision := accessorOwners[accessor]; collision {
+			return plan{}, fmt.Errorf("%w: Interfaces %s and %s produce accessor %s", ErrInvalidInput, owner, identifier, accessor)
+		}
+		accessorOwners[accessor] = identifier
+		intrinsicAccessors[index] = accessor
 	}
 
 	constructors := cloneConstructors(options.Constructors)
@@ -248,15 +297,17 @@ func planAssembly(options Options) (plan, error) {
 	if err != nil {
 		return plan{}, err
 	}
-	imports := planImports(options.ModulePath, bindings, ordered, contractPath)
+	imports := planImports(options.ModulePath, bindings, intrinsics, ordered, contractPath)
 	return plan{
-		options:      options,
-		bindings:     bindings,
-		constructors: ordered,
-		bindingByID:  bindingByID,
-		contractPath: contractPath,
-		accessors:    accessors,
-		imports:      imports,
+		options:            options,
+		bindings:           bindings,
+		intrinsics:         intrinsics,
+		constructors:       ordered,
+		bindingByID:        bindingByID,
+		contractPath:       contractPath,
+		accessors:          accessors,
+		intrinsicAccessors: intrinsicAccessors,
+		imports:            imports,
 	}, nil
 }
 
@@ -315,8 +366,8 @@ func orderConstructors(constructors []ConstructorInput, bindings map[string]Bind
 	return ordered, nil
 }
 
-func planImports(modulePath string, bindings []BindingInput, constructors []ConstructorInput, contracts map[string]string) map[string]string {
-	paths := make([]string, 0, len(bindings)*3+len(constructors)+len(contracts))
+func planImports(modulePath string, bindings []BindingInput, intrinsics []IntrinsicBindingInput, constructors []ConstructorInput, contracts map[string]string) map[string]string {
+	paths := make([]string, 0, len(bindings)*3+len(intrinsics)*2+len(constructors)+len(contracts))
 	for _, packagePath := range contracts {
 		paths = append(paths, packagePath)
 	}
@@ -325,6 +376,9 @@ func planImports(modulePath string, bindings []BindingInput, constructors []Cons
 	}
 	for _, binding := range bindings {
 		paths = append(paths, adapterPath(modulePath, binding.InterfaceID), proxyPath(modulePath, binding.InterfaceID))
+	}
+	for _, intrinsic := range intrinsics {
+		paths = append(paths, intrinsic.PackagePath, proxyPath(modulePath, intrinsic.InterfaceID))
 	}
 	slices.Sort(paths)
 	paths = slices.Compact(paths)
@@ -396,6 +450,9 @@ func render(planned plan) ([]byte, error) {
 	for index, binding := range planned.bindings {
 		fmt.Fprintf(&source, "\tinterface%d %s.Interface\n", index, planned.imports[binding.PackagePath])
 	}
+	for index, intrinsic := range planned.intrinsics {
+		fmt.Fprintf(&source, "\tintrinsic%d %s.Interface\n", index, planned.imports[intrinsic.PackagePath])
+	}
 	fmt.Fprintln(&source, "\tinitialized bool")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
@@ -451,6 +508,16 @@ func render(planned plan) ([]byte, error) {
 		fmt.Fprintf(&source, "\treturn runtime.interface%d\n", index)
 		fmt.Fprintln(&source, "}")
 	}
+	for index, intrinsic := range planned.intrinsics {
+		fmt.Fprintln(&source)
+		fmt.Fprintf(&source, "// %s returns the governed typed Interface for intrinsic %s.\n", planned.intrinsicAccessors[index], intrinsic.InterfaceID)
+		fmt.Fprintf(&source, "func (runtime InterfaceRuntime) %s() %s.Interface {\n", planned.intrinsicAccessors[index], planned.imports[intrinsic.PackagePath])
+		fmt.Fprintln(&source, "\tif !runtime.Valid() {")
+		fmt.Fprintln(&source, "\t\treturn nil")
+		fmt.Fprintln(&source, "\t}")
+		fmt.Fprintf(&source, "\treturn runtime.intrinsic%d\n", index)
+		fmt.Fprintln(&source, "}")
+	}
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// String redacts runtime internals.")
 	fmt.Fprintln(&source, "func (InterfaceRuntime) String() string { return \"<generated-interface-runtime>\" }")
@@ -475,6 +542,15 @@ func render(planned plan) ([]byte, error) {
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%w: governed dispatcher\", ErrInterfaceAssembly)")
 	fmt.Fprintln(&source, "\t}")
+	for index, intrinsic := range planned.intrinsics {
+		contract := planned.imports[intrinsic.PackagePath]
+		proxy := planned.imports[proxyPath(planned.options.ModulePath, intrinsic.InterfaceID)]
+		fmt.Fprintf(&source, "\tintrinsicHandle%d, err := kernelinvocation.NewHandle(dispatcher, kernelintrinsic.%sContract(), true)\n", index, intrinsic.MethodName)
+		fmt.Fprintln(&source, "\tif err != nil {")
+		fmt.Fprintf(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%%w: governed intrinsic handle %s\", ErrInterfaceAssembly)\n", intrinsic.InterfaceID)
+		fmt.Fprintln(&source, "\t}")
+		fmt.Fprintf(&source, "\tintrinsic%d := %s.Interface(%s.New(intrinsicHandle%d))\n", index, contract, proxy, index)
+	}
 	for index, binding := range planned.bindings {
 		adapter := planned.imports[adapterPath(planned.options.ModulePath, binding.InterfaceID)]
 		proxy := planned.imports[proxyPath(planned.options.ModulePath, binding.InterfaceID)]
@@ -573,6 +649,9 @@ func render(planned plan) ([]byte, error) {
 	for index := range planned.bindings {
 		fmt.Fprintf(&source, "\t\tinterface%d:  interface%d,\n", index, index)
 	}
+	for index := range planned.intrinsics {
+		fmt.Fprintf(&source, "\t\tintrinsic%d:  intrinsic%d,\n", index, index)
+	}
 	fmt.Fprintln(&source, "\t\tinitialized: true,")
 	fmt.Fprintln(&source, "\t}, nil")
 	fmt.Fprintln(&source, "}")
@@ -594,6 +673,17 @@ func interfaceAccessor(identifier interfaceid.Identifier) string {
 		return ""
 	}
 	return accessor
+}
+
+func intrinsicMethodName(identifier interfaceid.Identifier) (string, bool) {
+	switch identifier.String() {
+	case "kernel.health/v1":
+		return "Health", true
+	case "kernel.info/v1":
+		return "Info", true
+	default:
+		return "", false
+	}
 }
 
 func adapterPath(modulePath string, identifier interfaceid.Identifier) string {

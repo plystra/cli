@@ -1,6 +1,6 @@
 // Package connectgen renders deterministic procedure-specific Connect handlers
-// over the CLI-owned Protobuf descriptor graph and canonical application
-// invocation handles.
+// over the CLI-owned Protobuf descriptor graph and governed typed Interface
+// values.
 package connectgen
 
 import (
@@ -69,12 +69,14 @@ func (f File) PackageName() string { return f.packageName }
 func (f File) Data() []byte { return append([]byte(nil), f.data...) }
 
 // Render validates the exact descriptor graph and emits one shared descriptor
-// runtime, one canonical handler per operation, and one thin forwarding handler
-// per Alias. Every handler binds only to the generated canonical invocation
-// handle; Provider packages are not an input to this renderer.
+// runtime, one canonical handler per exposed Interface, and temporary legacy
+// handlers for surfaces that have not yet migrated to an authored Interface.
+// Canonical Interface handlers accept the same authored Interface value used by
+// in-process callers; Implementation packages are not an input to this renderer.
 func Render(
 	modulePath string,
 	model protobufmodel.Model,
+	interfaceModel protobufmodel.InterfaceModel,
 	wireMap protobufwiremap.Map,
 	descriptorSet []byte,
 	plan generationlowering.Plan,
@@ -90,8 +92,11 @@ func Render(
 	if !model.Valid() {
 		return nil, fmt.Errorf("%w: %w: normalized Protobuf model is absent", ErrRender, ErrProjection)
 	}
-	if !wireMap.Valid() || wireMap.LegacyProjectionDigest() != model.Digest() {
-		return nil, fmt.Errorf("%w: %w: wire map is absent or does not match the normalized legacy Protobuf model", ErrRender, ErrProjection)
+	if !interfaceModel.Valid() || interfaceModel.Enabled() != model.Enabled() {
+		return nil, fmt.Errorf("%w: %w: normalized Interface Protobuf model is absent or disagrees with the selected transport", ErrRender, ErrProjection)
+	}
+	if !wireMap.Matches(model, interfaceModel) {
+		return nil, fmt.Errorf("%w: %w: wire map is absent or does not match the normalized Interface and legacy Protobuf models", ErrRender, ErrProjection)
 	}
 	if plan.ModulePath() != modulePath {
 		return nil, fmt.Errorf("%w: %w: invocation plan module %q does not match %q", ErrRender, ErrProjection, plan.ModulePath(), modulePath)
@@ -106,10 +111,11 @@ func Render(
 	}
 	operations := model.Operations()
 	aliases := model.Aliases()
-	if len(operations) == 0 && len(aliases) == 0 {
+	interfaceOperations := interfaceModel.Operations()
+	if len(operations) == 0 && len(aliases) == 0 && len(interfaceOperations) == 0 {
 		return []File{}, nil
 	}
-	if !model.Enabled() {
+	if !model.Enabled() || !interfaceModel.Enabled() {
 		return nil, fmt.Errorf("%w: %w: disabled Connect model contains public surfaces", ErrRender, ErrProjection)
 	}
 
@@ -117,9 +123,44 @@ func Render(
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrRender, err)
 	}
-	errorDetail, err := exactErrorDetail(registry)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrRender, err)
+	interfaceByID := make(map[string]protobufmodel.InterfaceOperation, len(interfaceOperations))
+	interfaceWireByID := make(map[string]protobufwiremap.InterfaceProjection, len(interfaceOperations))
+	for _, projection := range wireMap.ActiveInterfaces() {
+		interfaceWireByID[projection.ID()] = projection
+	}
+	interfaceMethodByID := make(map[string]protoreflect.MethodDescriptor, len(interfaceOperations))
+	for _, operation := range interfaceOperations {
+		identifier := operation.ID().String()
+		if _, duplicate := interfaceByID[identifier]; duplicate {
+			return nil, fmt.Errorf("%w: %w: Interface %s appears more than once", ErrRender, ErrProjection, operation.ID())
+		}
+		method, err := exactMethod(registry, operation.Identity())
+		if err != nil {
+			return nil, fmt.Errorf("%w: Interface %s: %w", ErrRender, operation.ID(), err)
+		}
+		projection, exists := interfaceWireByID[identifier]
+		if !exists || projection.ContractDigest() != operation.ContractDigest() {
+			return nil, fmt.Errorf("%w: %w: Interface %s has no matching active wire projection", ErrRender, ErrProjection, operation.ID())
+		}
+		interfaceByID[identifier] = operation
+		interfaceMethodByID[identifier] = method
+	}
+	if len(interfaceWireByID) != len(interfaceOperations) {
+		return nil, fmt.Errorf("%w: %w: active Interface wire projection count %d does not match Interface operation count %d", ErrRender, ErrProjection, len(interfaceWireByID), len(interfaceOperations))
+	}
+
+	legacyHandlerCount := len(aliases)
+	for _, operation := range operations {
+		if _, migrated := interfaceByID[operation.ID().String()]; !migrated {
+			legacyHandlerCount++
+		}
+	}
+	var errorDetail protoreflect.MessageDescriptor
+	if legacyHandlerCount != 0 {
+		errorDetail, err = exactErrorDetail(registry)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrRender, err)
+		}
 	}
 	wireByID := make(map[string]protobufwiremap.CapabilityProjection, len(operations))
 	for _, projection := range wireMap.ActiveCapabilities() {
@@ -158,13 +199,30 @@ func Render(
 		aliasesByTarget[alias.Target().String()] = append(aliasesByTarget[alias.Target().String()], alias)
 	}
 
-	files := make([]File, 0, 1+len(operations)+len(aliases))
+	files := make([]File, 0, 1+len(interfaceOperations)+legacyHandlerCount)
 	schemaSource, err := renderSchemaRuntime(descriptorSet)
 	if err != nil {
 		return nil, fmt.Errorf("%w: descriptor runtime: %w", ErrRender, err)
 	}
 	files = append(files, File{path: schemaRuntimePath, packageName: "connectschema", data: schemaSource})
+	for _, operation := range interfaceOperations {
+		file, err := renderInterfaceCanonical(
+			modulePath,
+			operation,
+			aliasesByTarget[operation.ID().String()],
+			interfaceWireByID[operation.ID().String()],
+			interfaceMethodByID[operation.ID().String()],
+			normalizedCORS,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("%w: Interface %s: %w", ErrRender, operation.ID(), err)
+		}
+		files = append(files, file)
+	}
 	for _, operation := range operations {
+		if _, migrated := interfaceByID[operation.ID().String()]; migrated {
+			continue
+		}
 		wire := wireByID[operation.ID().String()]
 		file, err := renderCanonical(modulePath, operation, aliasesByTarget[operation.ID().String()], wire, methodByPublicID[operation.ID().String()], errorDetail, plan.RequiresHTTPPath(operation.ID()), normalizedCORS)
 		if err != nil {

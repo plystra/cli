@@ -19,7 +19,7 @@ import (
 func TestGeneratedBrowserInvokesCanonicalCapabilityAndAlias(t *testing.T) {
 	fixture := buildFixture(t, connectContract, "account.profile/v1")
 	provenance := connectConfigurationProvenance(t, generation.ConfigurationModeDefault)
-	handlers, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, provenance)
+	handlers, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, provenance)
 	if err != nil {
 		t.Fatalf("Render Connect handlers: %v", err)
 	}

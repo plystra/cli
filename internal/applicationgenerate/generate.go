@@ -297,18 +297,6 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
-	interfaceProxies, err := interfaceProxyInputs(resolved)
-	if err != nil {
-		return preparedGeneration{}, err
-	}
-	implementationAdapters, err := implementationAdapterInputs(resolved)
-	if err != nil {
-		return preparedGeneration{}, err
-	}
-	implementationAssembly, err := implementationAssemblyInput(resolved, kernelVersion, kernelBuildIdentity)
-	if err != nil {
-		return preparedGeneration{}, err
-	}
 	httpTransports := resolved.Manifest().HTTPTransports()
 	var httpCORS *applicationmeta.HTTPCORS
 	if selected, exists := resolved.Manifest().HTTPCORS(); exists {
@@ -317,6 +305,18 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	interfaceProtobufModel, err := interfaceProtobufProjection(ctx, resolved, httpTransports, options)
 	if err != nil {
 		return preparedGeneration{}, fmt.Errorf("build Interface Protobuf projection: %w", err)
+	}
+	interfaceProxies, err := interfaceProxyInputs(resolved, interfaceProtobufModel)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
+	implementationAdapters, err := implementationAdapterInputs(resolved)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
+	implementationAssembly, err := implementationAssemblyInput(resolved, interfaceProtobufModel, kernelVersion, kernelBuildIdentity)
+	if err != nil {
+		return preparedGeneration{}, err
 	}
 	protobufProjection, err := applicationgen.ProtobufProjection(httpTransports, resolved.Resolution())
 	if err != nil {
@@ -336,7 +336,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
-	runtimeRequirements, err := generatedRuntimeRequirements(protobufProjection)
+	runtimeRequirements, err := generatedRuntimeRequirements(protobufProjection, interfaceProtobufModel)
 	if err != nil {
 		return preparedGeneration{}, err
 	}
@@ -561,9 +561,9 @@ func intrinsicInterfaceProtobufInputs(
 	return inputs, nil
 }
 
-func generatedRuntimeRequirements(model protobufmodel.Model) ([]ModuleRequirement, error) {
+func generatedRuntimeRequirements(model protobufmodel.Model, interfaces protobufmodel.InterfaceModel) ([]ModuleRequirement, error) {
 	inputs := make([][2]string, 0, 3)
-	if len(model.Operations()) != 0 || len(model.Aliases()) != 0 {
+	if len(model.Operations()) != 0 || len(model.Aliases()) != 0 || len(interfaces.Operations()) != 0 {
 		inputs = append(inputs,
 			[2]string{connectgen.ConnectModulePath, connectgen.ConnectModuleVersion},
 			[2]string{connectgen.ProtobufModulePath, connectgen.ProtobufModuleVersion},
@@ -613,7 +613,7 @@ func kernelBuildProvenance(resolved applicationresolve.Result) (string, string, 
 	return dependency.SelectedVersion(), identity, nil
 }
 
-func interfaceProxyInputs(resolved applicationresolve.Result) ([]interfaceproxygen.Input, error) {
+func interfaceProxyInputs(resolved applicationresolve.Result, interfaceModel protobufmodel.InterfaceModel) ([]interfaceproxygen.Input, error) {
 	visible := resolved.Interfaces().Interfaces()
 	definitions := make(map[string]interfaceproxygen.Input, len(visible))
 	for _, definition := range visible {
@@ -632,13 +632,28 @@ func interfaceProxyInputs(resolved applicationresolve.Result) ([]interfaceproxyg
 	}
 
 	selections := resolved.InterfaceResolution().Selections()
-	inputs := make([]interfaceproxygen.Input, len(selections))
-	for index, selection := range selections {
+	inputs := make([]interfaceproxygen.Input, 0, len(selections)+len(interfaceModel.Operations()))
+	for _, selection := range selections {
 		input, exists := definitions[selection.InterfaceID.String()]
 		if !exists {
 			return nil, fmt.Errorf("reachable Interface %s has no canonical authored contract for typed proxy generation", selection.InterfaceID)
 		}
-		inputs[index] = input
+		inputs = append(inputs, input)
+	}
+	for _, operation := range interfaceModel.Operations() {
+		if !strings.HasPrefix(operation.ID().Name(), "kernel.") {
+			continue
+		}
+		if _, duplicate := definitions[operation.ID().String()]; duplicate {
+			return nil, fmt.Errorf("intrinsic Interface %s duplicates an authored Interface while generating typed proxies", operation.ID())
+		}
+		inputs = append(inputs, interfaceproxygen.Input{
+			InterfaceID:  operation.ID(),
+			PackagePath:  operation.PackagePath(),
+			MethodName:   operation.MethodName(),
+			RequestName:  operation.RequestGoName(),
+			ResponseName: operation.ResponseGoName(),
+		})
 	}
 	return inputs, nil
 }
@@ -685,7 +700,7 @@ func implementationAdapterInputs(resolved applicationresolve.Result) ([]implemen
 	return inputs, nil
 }
 
-func implementationAssemblyInput(resolved applicationresolve.Result, kernelVersion, kernelBuildIdentity string) (implementationassemblygen.Options, error) {
+func implementationAssemblyInput(resolved applicationresolve.Result, interfaceModel protobufmodel.InterfaceModel, kernelVersion, kernelBuildIdentity string) (implementationassemblygen.Options, error) {
 	type interfaceDefinition struct {
 		packagePath string
 		digest      [sha256.Size]byte
@@ -754,6 +769,17 @@ func implementationAssemblyInput(resolved applicationresolve.Result, kernelVersi
 			Dependencies:     inputs,
 		}
 	}
+	intrinsics := make([]implementationassemblygen.IntrinsicBindingInput, 0, len(interfaceModel.Operations()))
+	for _, operation := range interfaceModel.Operations() {
+		if !strings.HasPrefix(operation.ID().Name(), "kernel.") {
+			continue
+		}
+		intrinsics = append(intrinsics, implementationassemblygen.IntrinsicBindingInput{
+			InterfaceID: operation.ID(),
+			PackagePath: operation.PackagePath(),
+			MethodName:  operation.MethodName(),
+		})
+	}
 
 	return implementationassemblygen.Options{
 		ModulePath:               resolved.Module().ModulePath(),
@@ -762,6 +788,7 @@ func implementationAssemblyInput(resolved applicationresolve.Result, kernelVersi
 		KernelBuildIdentity:      kernelBuildIdentity,
 		DefaultTimeout:           applicationmeta.DefaultInvocationTimeout,
 		Bindings:                 bindings,
+		IntrinsicBindings:        intrinsics,
 		Constructors:             constructors,
 	}, nil
 }

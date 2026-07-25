@@ -92,7 +92,7 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		AllowedOrigins:   []string{"https://app.example.com", "https://admin.example.com"},
 		AllowCredentials: true,
 	}
-	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, &cors, provenance)
+	files, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, fixture.descriptorSet, fixture.plan, &cors, provenance)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 			t.Fatalf("parse %s: %v\n%s", file.Path(), err, file.Data())
 		}
 	}
-	repeated, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, &cors, provenance)
+	repeated, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, fixture.descriptorSet, fixture.plan, &cors, provenance)
 	if err != nil || !connectFilesEqual(files, repeated) {
 		t.Fatalf("repeated Render drifted: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 func TestRenderOmitsImplicitCORSAndProjectsWildcardPolicy(t *testing.T) {
 	fixture := buildFixture(t, connectContract, "account.profile/v1")
 	provenance := connectConfigurationProvenance(t, generation.ConfigurationModeDefault)
-	withoutCORS, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, provenance)
+	withoutCORS, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, provenance)
 	if err != nil {
 		t.Fatalf("Render(without CORS): %v", err)
 	}
@@ -241,7 +241,7 @@ func TestRenderOmitsImplicitCORSAndProjectsWildcardPolicy(t *testing.T) {
 	}
 
 	wildcard := applicationmeta.HTTPCORS{AllowedOrigins: []string{"*"}}
-	withWildcard, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, &wildcard, provenance)
+	withWildcard, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, fixture.descriptorSet, fixture.plan, &wildcard, provenance)
 	if err != nil {
 		t.Fatalf("Render(wildcard CORS): %v", err)
 	}
@@ -272,7 +272,7 @@ func TestRenderSelectsHTTPAwareCanonicalInvocationOnlyWhenRequired(t *testing.T)
 
 	fixture := buildFixture(t, connectContract, "")
 	httpPlan := buildHTTPPlan(t, fixture.target)
-	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, httpPlan, nil, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
+	files, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, fixture.descriptorSet, httpPlan, nil, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil {
 		t.Fatalf("Render(HTTP plan): %v", err)
 	}
@@ -311,7 +311,7 @@ func TestRenderRejectsInconsistentDescriptorAndPlanEvidence(t *testing.T) {
 		t.Fatalf("Marshal inconsistent descriptor set: %v", err)
 	}
 	provenance := connectConfigurationProvenance(t, generation.ConfigurationModeDefault)
-	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, inconsistent, fixture.plan, nil, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrRender) || !errors.Is(err, connectgen.ErrDescriptor) || !strings.Contains(err.Error(), "method") {
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, inconsistent, fixture.plan, nil, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrRender) || !errors.Is(err, connectgen.ErrDescriptor) || !strings.Contains(err.Error(), "method") {
 		t.Fatalf("Render(inconsistent descriptor) = %#v, %v", files, err)
 	}
 	var missingErrorDetail descriptorpb.FileDescriptorSet
@@ -325,17 +325,17 @@ func TestRenderRejectsInconsistentDescriptorAndPlanEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal descriptor set without safe detail: %v", err)
 	}
-	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, withoutErrorDetail, fixture.plan, nil, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrDescriptor) || !strings.Contains(err.Error(), "safe error detail") {
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, withoutErrorDetail, fixture.plan, nil, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrDescriptor) || !strings.Contains(err.Error(), "safe error detail") {
 		t.Fatalf("Render(missing safe error detail) = %#v, %v", files, err)
 	}
 	otherPlan, err := generationlowering.Lower("example.com/other", []generation.NormalizedContribution{})
 	if err != nil {
 		t.Fatalf("Lower(other): %v", err)
 	}
-	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, otherPlan, nil, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrRender) || !errors.Is(err, connectgen.ErrProjection) || !strings.Contains(err.Error(), "example.com/other") {
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, fixture.descriptorSet, otherPlan, nil, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrRender) || !errors.Is(err, connectgen.ErrProjection) || !strings.Contains(err.Error(), "example.com/other") {
 		t.Fatalf("Render(module-drift plan) = %#v, %v", files, err)
 	}
-	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, []byte("not a descriptor set"), fixture.plan, nil, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrDescriptor) {
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, []byte("not a descriptor set"), fixture.plan, nil, provenance); len(files) != 0 || !errors.Is(err, connectgen.ErrDescriptor) {
 		t.Fatalf("Render(corrupt descriptor) = %#v, %v", files, err)
 	}
 }
@@ -344,14 +344,14 @@ func TestRenderRequiresConfigurationProvenanceWithoutEmbeddingSelection(t *testi
 	t.Parallel()
 
 	fixture := buildFixture(t, connectContract, "account.profile/v1")
-	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, transportprovenance.Provenance{}); len(files) != 0 || !errors.Is(err, connectgen.ErrProjection) || !strings.Contains(err.Error(), "configuration provenance") {
+	if files, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, transportprovenance.Provenance{}); len(files) != 0 || !errors.Is(err, connectgen.ErrProjection) || !strings.Contains(err.Error(), "configuration provenance") {
 		t.Fatalf("Render(missing provenance) = %#v, %v", files, err)
 	}
-	defaultFiles, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
+	defaultFiles, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil {
 		t.Fatalf("Render(default): %v", err)
 	}
-	environmentFiles, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, connectConfigurationProvenance(t, generation.ConfigurationModeEnvironment))
+	environmentFiles, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, connectConfigurationProvenance(t, generation.ConfigurationModeEnvironment))
 	if err != nil || !connectFilesEqual(defaultFiles, environmentFiles) {
 		t.Fatalf("environment selection changed equal-model Connect source: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestRenderRequiresConfigurationProvenanceWithoutEmbeddingSelection(t *testi
 		{AllowedOrigins: []string{"https://example.com/path"}},
 		{AllowedOrigins: []string{"*"}, AllowCredentials: true},
 	} {
-		if files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, &invalid, connectConfigurationProvenance(t, generation.ConfigurationModeDefault)); len(files) != 0 || !errors.Is(err, connectgen.ErrProjection) || !strings.Contains(err.Error(), "selected CORS policy") {
+		if files, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, fixture.descriptorSet, fixture.plan, &invalid, connectConfigurationProvenance(t, generation.ConfigurationModeDefault)); len(files) != 0 || !errors.Is(err, connectgen.ErrProjection) || !strings.Contains(err.Error(), "selected CORS policy") {
 			t.Fatalf("Render(invalid CORS %#v) = %#v, %v", invalid, files, err)
 		}
 	}
@@ -385,7 +385,7 @@ func TestGeneratedUnaryQueryAndCommandHandlersInvokeOneCanonicalTarget(t *testin
 				AllowedOrigins:   []string{"https://app.example.com", "https://admin.example.com"},
 				AllowCredentials: true,
 			}
-			files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, &cors, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
+			files, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, fixture.descriptorSet, fixture.plan, &cors, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
 			if err != nil {
 				t.Fatalf("Render: %v", err)
 			}
@@ -404,7 +404,7 @@ func TestGeneratedUnaryQueryAndCommandHandlersInvokeOneCanonicalTarget(t *testin
 
 func TestGeneratedHandlersOmitCORSWithoutSelectedPolicy(t *testing.T) {
 	fixture := buildFixture(t, connectContract, "")
-	files, err := connectgen.Render(testModulePath, fixture.model, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
+	files, err := connectgen.Render(testModulePath, fixture.model, fixture.interfaces, fixture.wireMap, fixture.descriptorSet, fixture.plan, nil, connectConfigurationProvenance(t, generation.ConfigurationModeDefault))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -422,6 +422,7 @@ func TestGeneratedHandlersOmitCORSWithoutSelectedPolicy(t *testing.T) {
 type connectFixture struct {
 	target        targetView
 	model         protobufmodel.Model
+	interfaces    protobufmodel.InterfaceModel
 	wireMap       protobufwiremap.Map
 	descriptorSet []byte
 	plan          generationlowering.Plan
@@ -458,7 +459,7 @@ func buildFixture(t testing.TB, source, aliasID string) connectFixture {
 	if err != nil {
 		t.Fatalf("Lower empty plan: %v", err)
 	}
-	return connectFixture{target: target, model: model, wireMap: wireMap, descriptorSet: descriptorSet, plan: plan}
+	return connectFixture{target: target, model: model, interfaces: interfaces, wireMap: wireMap, descriptorSet: descriptorSet, plan: plan}
 }
 
 type targetView struct {

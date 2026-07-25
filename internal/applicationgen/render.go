@@ -204,6 +204,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	connectFiles, err := connectgen.Render(
 		options.ModulePath,
 		protobufProjection,
+		interfaceProtobufModel,
 		options.ProtobufWireMap,
 		descriptorEvidence.DescriptorSet(),
 		plan,
