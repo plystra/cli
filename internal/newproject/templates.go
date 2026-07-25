@@ -93,7 +93,7 @@ Pass an AbortSignal as the generated operation's second argument to cancel befor
 
 Generation emits one deterministic ` + "`.proto`" + ` schema with the canonical messages and exactly one unary service from every exposed Interface package, plus a self-contained ` + "`generated/proto/descriptor-set.pb`" + `. The Connect procedure path is derived from the exact Interface ID. An overlapping pre-Gate-14 legacy schema is import-only and owns no competing service. A Project without a selected Connect surface retains a valid empty descriptor set. These files contain no Implementation, configuration, or Secret data, are CLI-owned, and are checked by ` + "`plystra generate --check`" + `.
 
-Every selected Connect application failure carries one shared ` + "`PlystraErrorDetail`" + ` with the requested canonical or Alias ID, the canonical target, and exactly one declared semantic code or closed Kernel class. Alias handlers preserve the requested Alias while invoking only the canonical target. Provider text, causes, payloads, panic data, configuration, credentials, Secrets, and internal Kernel detail codes never enter this descriptor. The generated JavaScript wrapper exposes only the validated immutable Plystra detail; a missing, duplicate, malformed, unknown, mismatched, or undeclared detail fails closed to ` + "`internal`" + `.
+Every selected Connect application failure carries one shared ` + "`PlystraErrorDetail`" + `. Its ` + "`requested_interface_id`" + ` records the requested canonical Interface or temporary pre-removal Alias, ` + "`canonical_interface_id`" + ` records the canonical Interface target, and exactly one declared semantic code or closed Kernel class is present. Alias handlers preserve the requested Alias while invoking only the canonical target. Implementation text, causes, payloads, panic data, configuration, credentials, Secrets, and internal Kernel detail codes never enter this descriptor. The generated JavaScript wrapper exposes only the validated immutable Plystra detail; a missing, duplicate, malformed, unknown, mismatched, or undeclared detail fails closed to ` + "`internal`" + `.
 
 Binary Protobuf requests are limited to 1 MiB, decoded with a maximum message depth of 64, and validated with a 65,536-node budget. Malformed or truncated wire data, unknown fields at any message depth, and requests that exceed any bound fail before root-context creation or Provider invocation; direct handler calls apply the same recursive validation. Binary Protobuf responses use the same size, depth, and node bounds. Generated conversion preflights canonical content before proportional wire-projection allocation, validates the exact response message, and serializes deterministically. Invalid or oversized responses produce only the safe internal response failure and no partial response on canonical, Alias, or direct handler paths. ProtoJSON requests independently accept at most 1 MiB, 64 nested JSON containers, and 65,536 structural tokens before strict decoding and the same canonical validation. Unknown or duplicate fields, malformed or trailing documents, invalid UTF-8, invalid required nulls, enum sentinels, non-finite numbers, and breached bounds fail before root-context creation or Provider invocation. Optional non-nullable null becomes absence, explicit zero values remain present, and full-range integers remain exact. ProtoJSON responses use the same exact generated message and canonical response validation plus an independent 1 MiB serialized limit, with no partial response. Canonical and Alias binary and ProtoJSON paths agree.
 `
@@ -399,13 +399,14 @@ JavaScript wrapper loads that same descriptor graph and declares pinned direct
 @bufbuild/protobuf, @connectrpc/connect, and @connectrpc/connect-web runtime
 dependencies. Callers never construct raw descriptors, Protobuf messages, or
 Connect clients and never receive ConnectError as the public error model. The
-shared plystra.generated.transport.v1.PlystraErrorDetail carries the requested
-canonical or Alias ID, canonical target, and exactly one declared semantic
-code or closed Kernel class. Alias handlers preserve the requested Alias while
-entering only the canonical target. In JavaScript, catch PlystraError and
+shared plystra.generated.transport.v1.PlystraErrorDetail carries
+requested_interface_id for the requested canonical Interface or temporary
+pre-removal Alias, canonical_interface_id for the canonical Interface target,
+and exactly one declared semantic code or closed Kernel class. Alias handlers
+preserve the requested Alias while entering only the canonical target. In JavaScript, catch PlystraError and
 inspect its immutable detail; do not parse messages or Connect internals. A
 missing, duplicate, malformed, unknown, identity-mismatched, outer-code-
-mismatched, or undeclared detail fails closed to internal. Provider text,
+mismatched, or undeclared detail fails closed to internal. Implementation text,
 causes, payloads, panic data, configuration, credentials, Secrets, and internal
 Kernel detail codes never enter the safe detail.
 

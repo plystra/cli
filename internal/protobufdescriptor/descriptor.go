@@ -189,8 +189,8 @@ func errorDetailDescriptor() *descriptorpb.FileDescriptorProto {
 		jsonName string
 		number   int32
 	}{
-		{name: "requested_capability_id", jsonName: "requestedCapabilityId", number: 1},
-		{name: "canonical_capability_id", jsonName: "canonicalCapabilityId", number: 2},
+		{name: "requested_interface_id", jsonName: "requestedInterfaceId", number: 1},
+		{name: "canonical_interface_id", jsonName: "canonicalInterfaceId", number: 2},
 		{name: "semantic_error_code", jsonName: "semanticErrorCode", number: 3},
 		{name: "kernel_error_class", jsonName: "kernelErrorClass", number: 4},
 		{name: "trace_id", jsonName: "traceId", number: 5},

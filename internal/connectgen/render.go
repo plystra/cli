@@ -156,7 +156,7 @@ func Render(
 		}
 	}
 	var errorDetail protoreflect.MessageDescriptor
-	if legacyHandlerCount != 0 {
+	if legacyHandlerCount != 0 || len(interfaceOperations) != 0 {
 		errorDetail, err = exactErrorDetail(registry)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrRender, err)
@@ -212,6 +212,7 @@ func Render(
 			aliasesByTarget[operation.ID().String()],
 			interfaceWireByID[operation.ID().String()],
 			interfaceMethodByID[operation.ID().String()],
+			errorDetail,
 			normalizedCORS,
 		)
 		if err != nil {
@@ -263,8 +264,8 @@ func exactErrorDetail(registry *protoregistry.Files) (protoreflect.MessageDescri
 		name   protoreflect.Name
 		number protoreflect.FieldNumber
 	}{
-		{name: "requested_capability_id", number: 1},
-		{name: "canonical_capability_id", number: 2},
+		{name: "requested_interface_id", number: 1},
+		{name: "canonical_interface_id", number: 2},
 		{name: "semantic_error_code", number: 3},
 		{name: "kernel_error_class", number: 4},
 		{name: "trace_id", number: 5},

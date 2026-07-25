@@ -114,8 +114,8 @@ func TestBuildRendersDeterministicSchemasAndSelfContainedDescriptors(t *testing.
 		name   protoreflect.Name
 		number protoreflect.FieldNumber
 	}{
-		{name: "requested_capability_id", number: 1},
-		{name: "canonical_capability_id", number: 2},
+		{name: "requested_interface_id", number: 1},
+		{name: "canonical_interface_id", number: 2},
 		{name: "semantic_error_code", number: 3},
 		{name: "kernel_error_class", number: 4},
 		{name: "trace_id", number: 5},
@@ -154,8 +154,8 @@ func TestBuildRendersDeterministicSchemasAndSelfContainedDescriptors(t *testing.
 	for _, required := range []string{
 		"package plystra.generated.transport.v1;",
 		"message PlystraErrorDetail {",
-		"string requested_capability_id = 1",
-		"string canonical_capability_id = 2",
+		"string requested_interface_id = 1",
+		"string canonical_interface_id = 2",
 		"string semantic_error_code = 3",
 		"string kernel_error_class = 4",
 		"string trace_id = 5",

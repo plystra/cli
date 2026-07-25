@@ -69,6 +69,10 @@ func BuildWithInterfaces(model protobufmodel.Model, wireMap protobufwiremap.Map,
 		}
 		generatedNames[name] = struct{}{}
 	}
+	if knownFiles[ErrorDetailFileName] == nil {
+		knownFiles[ErrorDetailFileName] = errorDetailDescriptor()
+		generatedNames[ErrorDetailFileName] = struct{}{}
+	}
 	legacyOperations := make(map[string]protobufmodel.Operation, len(model.Operations()))
 	for _, operation := range model.Operations() {
 		legacyOperations[operation.ID().String()] = operation

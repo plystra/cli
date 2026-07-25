@@ -625,16 +625,16 @@ function decodeSafeErrorDetail(
   if (
     !isPlainObject(json) ||
     Object.keys(json).length !== 5 ||
-    !hasOwn(json, "requested_capability_id") ||
-    !hasOwn(json, "canonical_capability_id") ||
+    !hasOwn(json, "requested_interface_id") ||
+    !hasOwn(json, "canonical_interface_id") ||
     !hasOwn(json, "semantic_error_code") ||
     !hasOwn(json, "kernel_error_class") ||
     !hasOwn(json, "trace_id")
   ) {
     return undefined;
   }
-  const requestedCapabilityID = json["requested_capability_id"];
-  const canonicalCapabilityID = json["canonical_capability_id"];
+  const requestedCapabilityID = json["requested_interface_id"];
+  const canonicalCapabilityID = json["canonical_interface_id"];
   const semanticErrorCode = json["semantic_error_code"];
   const kernelErrorClass = json["kernel_error_class"];
   const traceID = json["trace_id"];

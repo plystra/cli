@@ -137,6 +137,8 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 		"plystraCancelFromParent",
 		"parent.Err() == context.Canceled",
 		"connect.NewErrorDetail(message)",
+		`"requested_interface_id"`,
+		`"canonical_interface_id"`,
 		`const CapabilityID = "customer.profile.sync/v1"`,
 		`const plystraErrorDetailType = "plystra.generated.transport.v1.PlystraErrorDetail"`,
 		"protoreflect.ValueOfEnum(",
@@ -147,7 +149,7 @@ func TestRenderEmitsDeterministicCanonicalAndAliasHandlers(t *testing.T) {
 			t.Fatalf("canonical handler omits %q:\n%s", required, canonical.Data())
 		}
 	}
-	for _, forbidden := range []string{"generated/go/providers", "github.com/plystra/kernel", "Provider", "Dispatcher"} {
+	for _, forbidden := range []string{"generated/go/providers", "github.com/plystra/kernel", "Provider", "Dispatcher", "requested_capability_id", "canonical_capability_id"} {
 		if bytes.Contains(canonical.Data(), []byte(forbidden)) {
 			t.Fatalf("canonical handler contains forbidden provider boundary %q:\n%s", forbidden, canonical.Data())
 		}

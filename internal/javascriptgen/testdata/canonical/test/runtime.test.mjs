@@ -59,8 +59,8 @@ function safeErrorDetail({
   const message = fromJson(
     errorDetailDescriptor,
     {
-      requestedCapabilityId: requestedCapabilityID,
-      canonicalCapabilityId: canonicalCapabilityID,
+      requestedInterfaceId: requestedCapabilityID,
+      canonicalInterfaceId: canonicalCapabilityID,
       semanticErrorCode,
       kernelErrorClass,
       traceId: traceID,

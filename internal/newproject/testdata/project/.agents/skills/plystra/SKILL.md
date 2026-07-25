@@ -238,13 +238,14 @@ JavaScript wrapper loads that same descriptor graph and declares pinned direct
 @bufbuild/protobuf, @connectrpc/connect, and @connectrpc/connect-web runtime
 dependencies. Callers never construct raw descriptors, Protobuf messages, or
 Connect clients and never receive ConnectError as the public error model. The
-shared plystra.generated.transport.v1.PlystraErrorDetail carries the requested
-canonical or Alias ID, canonical target, and exactly one declared semantic
-code or closed Kernel class. Alias handlers preserve the requested Alias while
-entering only the canonical target. In JavaScript, catch PlystraError and
+shared plystra.generated.transport.v1.PlystraErrorDetail carries
+requested_interface_id for the requested canonical Interface or temporary
+pre-removal Alias, canonical_interface_id for the canonical Interface target,
+and exactly one declared semantic code or closed Kernel class. Alias handlers
+preserve the requested Alias while entering only the canonical target. In JavaScript, catch PlystraError and
 inspect its immutable detail; do not parse messages or Connect internals. A
 missing, duplicate, malformed, unknown, identity-mismatched, outer-code-
-mismatched, or undeclared detail fails closed to internal. Provider text,
+mismatched, or undeclared detail fails closed to internal. Implementation text,
 causes, payloads, panic data, configuration, credentials, Secrets, and internal
 Kernel detail codes never enter the safe detail.
 

@@ -81,12 +81,15 @@ type Record struct {
 	if err != nil {
 		t.Fatalf("BuildWithInterfaces(repeated): %v", err)
 	}
-	if !evidence.Valid() || evidence.DescriptorCount() != 1 || evidence.Digest() != repeated.Digest() || !reflect.DeepEqual(evidence.Files(), repeated.Files()) {
+	if !evidence.Valid() || evidence.DescriptorCount() != 2 || evidence.Digest() != repeated.Digest() || !reflect.DeepEqual(evidence.Files(), repeated.Files()) {
 		t.Fatalf("evidence = count %d digest %q files %#v", evidence.DescriptorCount(), evidence.Digest(), evidence.Files())
 	}
 
 	files := evidence.Files()
-	if len(files) != 2 || files[0].Path() != protobufdescriptor.DescriptorSetPath || files[1].Path() != "generated/proto/plystra/generated/records/list/v1/interface.proto" {
+	if len(files) != 3 ||
+		files[0].Path() != protobufdescriptor.DescriptorSetPath ||
+		files[1].Path() != "generated/proto/plystra/generated/records/list/v1/interface.proto" ||
+		files[2].Path() != "generated/proto/"+protobufdescriptor.ErrorDetailFileName {
 		t.Fatalf("files = %#v", files)
 	}
 	source := string(files[1].Data())
@@ -111,6 +114,19 @@ type Record struct {
 	}
 	if strings.Contains(source, "capability") {
 		t.Fatalf("Interface procedure projection contains an obsolete identity:\n%s", source)
+	}
+	errorSource := string(files[2].Data())
+	for _, fragment := range []string{
+		"message PlystraErrorDetail {",
+		"string requested_interface_id = 1",
+		"string canonical_interface_id = 2",
+		"string semantic_error_code = 3",
+		"string kernel_error_class = 4",
+		"string trace_id = 5",
+	} {
+		if !strings.Contains(errorSource, fragment) {
+			t.Fatalf("generated Interface safe-error schema omits %q:\n%s", fragment, errorSource)
+		}
 	}
 
 	var set descriptorpb.FileDescriptorSet
