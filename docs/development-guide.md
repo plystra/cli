@@ -735,19 +735,23 @@ The normalized selected CORS policy is build-affecting and participates in the
 generated application-model digest. Changing its origins or credential choice
 therefore produces deterministic generation drift, while reordered,
 deduplicated equivalent origins retain one static model identity. Generated
-canonical and Alias Connect handlers enforce that policy before protocol
-dispatch. A valid preflight must use one allowed origin, request `POST`, and
-request only `Authorization`, `Connect-Protocol-Version`,
-`Connect-Timeout-Ms`, or `Content-Type`; success returns `204` with deterministic
-allow headers. Allowed actual requests receive `Access-Control-Allow-Origin`
-on successful and safe error responses, plus
-`Access-Control-Allow-Credentials: true` only when configured. Malformed or
-disallowed origins, methods, and requested headers return `403` before trusted
-root creation or Provider invocation. Exact-origin responses and preflights
-emit the required `Vary` fields. A non-credentialed wildcard emits `*`.
-Without `http.cors`, handlers emit no CORS response headers and do not accept a
-cross-origin preflight. Server mounting and the optional REST projection remain
-later transport work.
+Connect handlers enforce that policy before protocol dispatch. Each request
+origin must be one canonical normalized HTTP/HTTPS origin serialization of at
+most 4096 bytes. Literal `null` is accepted only through a noncredentialed
+wildcard policy; `Origin: *` is never valid request input. A valid preflight
+must request `POST` and may request only `Authorization`,
+`Connect-Protocol-Version`, `Connect-Timeout-Ms`, or `Content-Type`. Those
+case-insensitive names must be unique across at most four
+`Access-Control-Request-Headers` field values totaling at most 4096 bytes;
+success returns `204` with deterministic allow headers. Allowed actual requests
+receive `Access-Control-Allow-Origin` on successful and safe error responses,
+plus `Access-Control-Allow-Credentials: true` only when configured. Malformed,
+noncanonical, duplicate, over-bound, or disallowed origins, methods, and
+requested headers return `403` before trusted-root creation or Implementation
+invocation. Exact-origin responses and preflights emit the required `Vary`
+fields. A noncredentialed wildcard emits `*`. Without `http.cors`, handlers
+emit no CORS response headers and do not accept a cross-origin preflight.
+Server mounting and the optional REST projection remain later transport work.
 
 For automation, select the same environment name with:
 

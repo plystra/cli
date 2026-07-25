@@ -90,8 +90,13 @@ func renderInterfaceCanonical(
 	fmt.Fprintln(&source, "\t\"context\"")
 	fmt.Fprintln(&source, "\t\"errors\"")
 	fmt.Fprintln(&source, "\t\"mime\"")
+	if cors != nil {
+		fmt.Fprintln(&source, "\t\"net\"")
+	}
 	fmt.Fprintln(&source, "\t\"net/http\"")
 	if cors != nil {
+		fmt.Fprintln(&source, "\t\"net/url\"")
+		fmt.Fprintln(&source, "\t\"strconv\"")
 		fmt.Fprintln(&source, "\t\"strings\"")
 	}
 	if usesTime {

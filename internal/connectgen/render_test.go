@@ -758,12 +758,56 @@ func TestWildcardCORS(t *testing.T) {
 		t.Fatalf("wildcard actual response origin=%q credentials=%q", actualResponse.Header().Get("Access-Control-Allow-Origin"), actualResponse.Header().Get("Access-Control-Allow-Credentials"))
 	}
 
-	malformed := httptest.NewRequest(http.MethodOptions, Procedure, nil)
-	malformed.Header.Set("Origin", "https://first.example, https://second.example")
-	malformed.Header.Set("Access-Control-Request-Method", http.MethodPost)
-	malformedResponse := httptest.NewRecorder()
-	if !plystraServeCORS(malformedResponse, malformed) || malformedResponse.Code != http.StatusForbidden || malformedResponse.Header().Get("Access-Control-Allow-Origin") != "" {
-		t.Fatalf("malformed wildcard origin response = %d origin=%q", malformedResponse.Code, malformedResponse.Header().Get("Access-Control-Allow-Origin"))
+	for _, origin := range []string{
+		"*",
+		"not-an-origin",
+		"ftp://example.com",
+		"https://example.com/path",
+		"https://EXAMPLE.com",
+		"HTTPS://example.com",
+		"https://example.com:443",
+		"https://example.com?",
+		"https://m\u00fcnich.example",
+		"https://first.example, https://second.example",
+		"https://" + strings.Repeat("a", plystraCORSMaximumOriginBytes),
+	} {
+		malformed := httptest.NewRequest(http.MethodOptions, Procedure, nil)
+		malformed.Header.Set("Origin", origin)
+		malformed.Header.Set("Access-Control-Request-Method", http.MethodPost)
+		malformed.Header.Set("Access-Control-Request-Headers", "content-type")
+		malformedResponse := httptest.NewRecorder()
+		if !plystraServeCORS(malformedResponse, malformed) || malformedResponse.Code != http.StatusForbidden || malformedResponse.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Fatalf("malformed wildcard origin %q response = %d origin=%q", origin, malformedResponse.Code, malformedResponse.Header().Get("Access-Control-Allow-Origin"))
+		}
+	}
+
+	multilineHeaders := httptest.NewRequest(http.MethodOptions, Procedure, nil)
+	multilineHeaders.Header.Set("Origin", "https://any.example")
+	multilineHeaders.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	multilineHeaders.Header.Add("Access-Control-Request-Headers", "content-type")
+	multilineHeaders.Header.Add("Access-Control-Request-Headers", "connect-protocol-version")
+	multilineHeaders.Header.Add("Access-Control-Request-Headers", "connect-timeout-ms")
+	multilineHeaders.Header.Add("Access-Control-Request-Headers", "authorization")
+	multilineResponse := httptest.NewRecorder()
+	if !plystraServeCORS(multilineResponse, multilineHeaders) || multilineResponse.Code != http.StatusNoContent {
+		t.Fatalf("valid multiline requested headers response = %d", multilineResponse.Code)
+	}
+
+	for _, headers := range [][]string{
+		{"Content-Type, content-type"},
+		{"authorization", "connect-protocol-version", "connect-timeout-ms", "content-type", "authorization"},
+		{strings.Repeat("content-type,", 410)},
+	} {
+		malformed := httptest.NewRequest(http.MethodOptions, Procedure, nil)
+		malformed.Header.Set("Origin", "https://any.example")
+		malformed.Header.Set("Access-Control-Request-Method", http.MethodPost)
+		for _, value := range headers {
+			malformed.Header.Add("Access-Control-Request-Headers", value)
+		}
+		malformedResponse := httptest.NewRecorder()
+		if !plystraServeCORS(malformedResponse, malformed) || malformedResponse.Code != http.StatusForbidden || malformedResponse.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Fatalf("malformed requested headers %#v response = %d origin=%q", headers, malformedResponse.Code, malformedResponse.Header().Get("Access-Control-Allow-Origin"))
+		}
 	}
 }
 `
@@ -1164,6 +1208,7 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 			{name: "origin", origin: "https://evil.example", method: http.MethodPost, headers: "content-type"},
 			{name: "method", origin: "https://app.example.com", method: http.MethodDelete, headers: "content-type"},
 			{name: "header", origin: "https://app.example.com", method: http.MethodPost, headers: "content-type, x-unsafe"},
+			{name: "duplicate header", origin: "https://app.example.com", method: http.MethodPost, headers: "content-type, content-type"},
 			{name: "multiple origins", origin: "https://app.example.com", secondOrigin: "https://admin.example.com", method: http.MethodPost, headers: "content-type"},
 		} {
 			t.Run(route.name+" rejects CORS preflight "+denied.name, func(t *testing.T) {
