@@ -124,6 +124,7 @@ type Result struct {
 	configurationPath    string
 	maintenancePath      string
 	interfaceComparison  interfacecompatibility.Comparison
+	metadataComparison   interfacecompatibility.MetadataComparison
 }
 
 // Module returns the nearest enclosing Go Module.
@@ -155,6 +156,12 @@ func (r Result) InterfaceShapeComparison() interfacecompatibility.Comparison {
 	return r.interfaceComparison
 }
 
+// InterfaceMetadataComparison returns the Interface digest-class differences
+// observed against the prior owned metadata compatibility baseline.
+func (r Result) InterfaceMetadataComparison() interfacecompatibility.MetadataComparison {
+	return r.metadataComparison
+}
+
 // Generate resolves and renders the nearest Plystra Project. Check mode
 // compares without mutation. Install mode atomically installs desired files,
 // validates the updated Project, and re-resolves inside the transaction so a
@@ -184,6 +191,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			configurationPath:    prepared.resolved.ConfigurationSelection().Path(),
 			maintenancePath:      prepared.resolved.ConfigurationMaintenancePath(),
 			interfaceComparison:  prepared.interfaceComparison,
+			metadataComparison:   prepared.metadataComparison,
 		}, nil
 	}
 
@@ -244,6 +252,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		configurationPath:    prepared.resolved.ConfigurationSelection().Path(),
 		maintenancePath:      prepared.resolved.ConfigurationMaintenancePath(),
 		interfaceComparison:  prepared.interfaceComparison,
+		metadataComparison:   prepared.metadataComparison,
 	}, nil
 }
 
@@ -273,6 +282,7 @@ type preparedGeneration struct {
 	output              generatedfiles.Output
 	runtimeRequirements []ModuleRequirement
 	interfaceComparison interfacecompatibility.Comparison
+	metadataComparison  interfacecompatibility.MetadataComparison
 	fingerprint         string
 }
 
@@ -291,9 +301,17 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
-	contracts := make([]interfacecontract.Contract, 0, len(resolved.Interfaces().Interfaces()))
-	for _, definition := range resolved.Interfaces().Interfaces() {
+	definitions := resolved.Interfaces().Interfaces()
+	contracts := make([]interfacecontract.Contract, 0, len(definitions))
+	metadataInputs := make([]interfacecompatibility.MetadataInput, 0, len(definitions))
+	for _, definition := range definitions {
 		contracts = append(contracts, definition.Contract())
+		metadataInputs = append(metadataInputs, interfacecompatibility.MetadataInput{
+			ID:                  definition.Contract().ID().String(),
+			ContractDigest:      definition.ContractDigest(),
+			DocumentationDigest: definition.DocumentationDigest(),
+			ExampleDigest:       definition.ExampleDigest(),
+		})
 	}
 	previousInterfaceBaseline, previousInterfaceBaselineExists, err := generatedfiles.ReadOwnedFile(
 		resolved.Module().Path(),
@@ -307,6 +325,22 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		contracts,
 		previousInterfaceBaseline,
 		previousInterfaceBaselineExists,
+	)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
+	previousMetadataBaseline, previousMetadataBaselineExists, err := generatedfiles.ReadOwnedFile(
+		resolved.Module().Path(),
+		interfacecompatibility.MetadataPath,
+		interfacecompatibility.MetadataMaximumBytes,
+	)
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("read prior Interface metadata compatibility baseline: %w", err)
+	}
+	metadataBaseline, metadataComparison, err := interfacecompatibility.ReconcileMetadata(
+		metadataInputs,
+		previousMetadataBaseline,
+		previousMetadataBaselineExists,
 	)
 	if err != nil {
 		return preparedGeneration{}, err
@@ -433,6 +467,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		ImplementationAdapters: implementationAdapters,
 		ImplementationAssembly: implementationAssembly,
 		InterfaceCompatibility: interfaceBaseline,
+		InterfaceMetadata:      metadataBaseline,
 		InterfaceProtobufModel: interfaceProtobufModel,
 		ProtobufWireMap:        wireMap,
 	}, resolved.Resolution())
@@ -448,6 +483,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		output:              output,
 		runtimeRequirements: runtimeRequirements,
 		interfaceComparison: interfaceComparison,
+		metadataComparison:  metadataComparison,
 		fingerprint:         fingerprint,
 	}, nil
 }

@@ -32,6 +32,16 @@ Secrets, source paths, and module versions. During prerelease development,
 `plystra generate --check` reports its drift without mutation. Never edit it
 manually.
 
+`generated/compatibility/interface-metadata.json` is the matching committed,
+CLI-owned compatibility-class baseline for every visible authored Interface.
+It stores only the already normalized exact-contract, documentation, and
+example digests, never the metadata values themselves. The contract class
+covers Go shape, semantics, semantic-error codes, constraints, and Behavioral
+Conformance declarations; the documentation class covers descriptions and
+deprecation; and the example class covers validated request-and-outcome
+examples. `plystra generate` refreshes it in the same transaction, while
+`plystra generate --check` compares each class without mutation.
+
 `generated/proto/wire-map.json` is committed, CLI-owned compatibility history
 for every canonical Interface message projected to Connect, including
 request, response, and reachable same-package message types, plus the exact

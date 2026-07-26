@@ -171,9 +171,9 @@ A typical Plystra Project evolves into this layout:
         src/interfaces/<interface-id>.ts
         src/runtime.ts
 
-Generated files are CLI-owned; change authored inputs and run plystra generate,
-never edit output. generated/compatibility/interfaces.json is the Interface
-shape baseline; use plystra generate --check to compare it.
+generated/compatibility/interfaces.json and interface-metadata.json are
+CLI-owned baselines. Run plystra generate to update them, use plystra generate
+--check to compare them, and never edit them.
 
 generated/proto/wire-map.json is durable CLI-owned compatibility history for
 every canonical Interface message projected to Connect, including request,

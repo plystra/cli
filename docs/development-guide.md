@@ -385,6 +385,7 @@ orders/
     .plystra-manifest.json                CLI ownership manifest
     manifest.json                         resolved application manifest
     compatibility/
+      interface-metadata.json             classified metadata digest baseline
       interfaces.json                     authored Interface shape baseline
     proto/
       descriptor-set.pb                   self-contained descriptor evidence
@@ -421,6 +422,16 @@ development, run `plystra generate` to refresh it transactionally after an
 intentional authored shape change. Use `plystra generate --check` to compare the
 current authored shapes without changing either the baseline or other Project
 files. Never edit the baseline by hand.
+
+`generated/compatibility/interface-metadata.json` classifies changes without
+copying authored metadata into generated output. Its exact-contract digest
+covers Go shape, semantics, semantic-error codes, constraints, and Behavioral
+Conformance declarations. Its documentation digest covers descriptions and
+deprecation, and its example digest covers validated request-and-outcome
+examples. Generation maintains this committed CLI-owned file in the same
+transaction as the shape baseline; `plystra generate --check` reports which
+classified digest changed without mutation. Change `interface.go` or
+`interface.yaml`, then regenerate—never patch either compatibility file.
 
 `generated/proto/wire-map.json` is durable compatibility history, not a
 disposable cache. For each canonical Capability on the selected Connect

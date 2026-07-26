@@ -75,6 +75,7 @@ type Options struct {
 	ImplementationAdapters []implementationadaptergen.Input
 	ImplementationAssembly implementationassemblygen.Options
 	InterfaceCompatibility interfacecompatibility.Baseline
+	InterfaceMetadata      interfacecompatibility.MetadataBaseline
 	InterfaceProtobufModel protobufmodel.InterfaceModel
 	ProtobufWireMap        protobufwiremap.Map
 }
@@ -98,6 +99,9 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	if !options.InterfaceCompatibility.Valid() {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: authored Interface compatibility baseline is absent or invalid", ErrRender, ErrResolution)
+	}
+	if !options.InterfaceMetadata.Valid() {
+		return generatedfiles.Output{}, fmt.Errorf("%w: %w: Interface metadata compatibility baseline is absent or invalid", ErrRender, ErrResolution)
 	}
 	interfaceProtobufModel, err := normalizeInterfaceProtobufModel(options.HTTPTransports, options.InterfaceProtobufModel)
 	if err != nil {
@@ -200,6 +204,9 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	if err := add(interfacecompatibility.Path, options.InterfaceCompatibility.RecordJSON()); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: authored Interface compatibility baseline: %w", ErrRender, err)
+	}
+	if err := add(interfacecompatibility.MetadataPath, options.InterfaceMetadata.RecordJSON()); err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: Interface metadata compatibility baseline: %w", ErrRender, err)
 	}
 	if err := add(protobufwiremap.Path, options.ProtobufWireMap.CanonicalJSON()); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf wire map: %w", ErrRender, err)

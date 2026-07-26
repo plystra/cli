@@ -583,6 +583,10 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if err != nil {
 		return fmt.Errorf("construct initial Interface compatibility baseline: %w", err)
 	}
+	metadataBaseline, err := interfacecompatibility.NewMetadata(nil)
+	if err != nil {
+		return fmt.Errorf("construct initial Interface metadata compatibility baseline: %w", err)
+	}
 	toolchain, err := transporttoolchain.Current()
 	if err != nil {
 		return fmt.Errorf("identify embedded transport toolchain: %w", err)
@@ -609,6 +613,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 		Composition:            composition,
 		ManifestProvenance:     provenance,
 		InterfaceCompatibility: interfaceBaseline,
+		InterfaceMetadata:      metadataBaseline,
 		ProtobufWireMap:        wireMap,
 		InterfaceProtobufModel: interfaceProtobufModel,
 	}, resolution)

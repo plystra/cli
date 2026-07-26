@@ -64,6 +64,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 	}
 	assertBootstrapMatchesManifestProvenance(t, output, options)
 	wantPaths := []string{
+		"generated/compatibility/interface-metadata.json",
 		"generated/compatibility/interfaces.json",
 		"generated/docs/api.md",
 		"generated/docs/openapi.json",
@@ -265,7 +266,7 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render empty: %v", err)
 	}
-	if got := outputPaths(output); !slices.Equal(got, []string{"generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}) {
+	if got := outputPaths(output); !slices.Equal(got, []string{"generated/compatibility/interface-metadata.json", "generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}) {
 		t.Fatalf("empty output paths = %v", got)
 	}
 	wantManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), resolution.Context(), options.ManifestProvenance)
@@ -574,6 +575,13 @@ func withManifestProvenanceSelection(t testing.TB, options applicationgen.Option
 			t.Fatalf("interfacecompatibility.New: %v", err)
 		}
 		options.InterfaceCompatibility = baseline
+	}
+	if !options.InterfaceMetadata.Valid() {
+		baseline, err := interfacecompatibility.NewMetadata(nil)
+		if err != nil {
+			t.Fatalf("interfacecompatibility.NewMetadata: %v", err)
+		}
+		options.InterfaceMetadata = baseline
 	}
 	projection, err := applicationgen.ProtobufProjection(options.HTTPTransports, resolution)
 	if err != nil {
