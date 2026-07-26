@@ -164,7 +164,13 @@ root workspace for source integration. Do not add a permanent `replace` or make
 
 ## Validate Kernel and CLI changes
 
-Run the narrowest affected package first, then the full module suite.
+During ordinary implementation work, run normal or `-race` tests for files and
+packages added or modified by the current change, plus directly affected
+packages when necessary. Do not run the entire unchanged suite by default.
+Reserve the full module suite for an explicitly required release or acceptance
+gate, or for a change with genuinely repository-wide impact. The commands
+below show the complete release/acceptance validation set; use the targeted
+subset first during normal development.
 
 Kernel:
 
@@ -1808,17 +1814,23 @@ For each smallest coherent feature:
 5. Review and stage only that feature.
 6. Commit with `type(scope): description` using the most specific subsystem,
    such as `feat(invocation): ...` or `fix(generation): ...`.
-7. Push immediately to the configured upstream branch.
-8. Resolve configured CI failures before the next feature in the normal
-   repository workflow.
+7. Keep the validated commit local and record its exact revision for handoff.
+   Agents and automation must never run `git push` or any equivalent ref
+   publication; the project owner performs all remote pushes manually.
+8. Do not treat GitHub CI or a release publisher as an Agent operation. Resolve
+   local validation failures before the next feature and hand the clean local
+   state to the project owner for any external publication.
 
-Apply the contract lifecycle above: untagged development may replace a
-conflicting API directly; a published RC remains immutable while a newer RC may
-replace its contract only with complete downstream revalidation; a stable exact
-contract changes only through a new `/vN`. Do not retain compatibility wrappers,
-deprecated active APIs, migration shims, legacy configuration readers, old
-command aliases, transitional abstractions, fallbacks, or obsolete paths solely
-for an untagged snapshot or obsolete RC. Regenerate local fixtures as needed.
+Apply the pre-stable change policy: breaking and destructive changes are
+allowed by default, and untagged development may replace conflicting APIs,
+configuration, generated formats, schemas, tests, fixtures, and internal
+architecture directly. Do not retain compatibility wrappers, deprecated active
+APIs, migration shims, legacy configuration readers, old command aliases,
+transitional abstractions, fallbacks, or obsolete paths unless an active
+specification explicitly requires them. This remains the default until the
+project owner states otherwise. A published RC remains immutable; a stable
+exact contract changes only through a new `/vN`. Regenerate local fixtures as
+needed.
 
 Generated project `SKILL.md` files deliberately contain no Git workflow rules;
 repository process belongs in contributor documentation such as this guide.
