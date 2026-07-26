@@ -72,14 +72,16 @@ surface. `plystra generate --check` reports documentation drift without
 modifying the Project.
 
 `generated/proto/wire-map.json` is committed, CLI-owned compatibility history
-for every canonical Interface message projected to Connect, including
-request, response, and reachable same-package message types, plus the exact
-stable service, method, and Connect procedure identity. Authored positive
-`plystra` field numbers are the wire numbers. Generation rejects renumbering,
-permanently reserves both the Protobuf name and number of every removed field,
-and carries those reservations into generated source and the descriptor set.
-Inactive Interface and message history remains when exposure or Connect is
-disabled. The same ledger temporarily retains separately labelled legacy
+for the request, response, and reachable same-package messages of every visible
+authored Interface, whether or not that Interface is exposed or Connect is
+enabled. Exposed Connect Interfaces additionally retain their exact stable
+service, method, and procedure identity. Authored positive `plystra` field
+numbers are the wire numbers. Generation rejects renumbering and reuse across
+all visible Interface history, permanently reserves both the Protobuf name and
+number of every removed field, and carries active reservations into generated
+source and the descriptor set. Never-exposed Interfaces, removed exposure, and
+disabled Connect remain inactive and create no schema, descriptor, handler, or
+SDK output. The same ledger temporarily retains separately labelled legacy
 transport history required by pre-Gate-14 handlers; that bridge is not
 Interface contract authority. The ownership manifest records the exact ledger
 digest, and generation rejects a missing, manually changed, corrupt, reused,

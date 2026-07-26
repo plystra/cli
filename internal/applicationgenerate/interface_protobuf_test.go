@@ -188,6 +188,150 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 	}
 }
 
+func TestGenerateRejectsFieldNumberReuseFromUnexposedInterfaceHistory(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		manifest string
+	}{
+		{name: "connect enabled", manifest: "{}\n"},
+		{
+			name: "connect disabled",
+			manifest: `http:
+  transports:
+    connect: false
+    rest: false
+`,
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeConnectApplicationModule(t, root, "example.com/interface-history")
+			writeFile(t, filepath.Join(root, "plystra.yaml"), test.manifest)
+			interfacePath := filepath.Join(root, "interfaces", "records", "list", "v1", "interface.go")
+			writeFile(t, interfacePath, interfaceProtobufHistorySource("Legacy", 7))
+
+			options := applicationgenerate.Options{
+				Start:       root,
+				Environment: goEnvironment(nil),
+			}
+			initial, err := applicationgenerate.Generate(t.Context(), options)
+			if err != nil || !initial.Report().Clean() {
+				t.Fatalf("Generate(initial) = changes %#v, %v", initial.Report().Changes(), err)
+			}
+			for _, inactivePath := range []string{
+				"generated/proto/plystra/generated/records/list/v1/interface.proto",
+				"generated/go/adapters/connect/records/list/v1/handler_gen.go",
+				"generated/sdk/javascript/src/interfaces/records/list/v1.ts",
+			} {
+				assertFileMissing(t, root, inactivePath)
+			}
+			if descriptor := readFile(t, root, protobufdescriptor.DescriptorSetPath); bytes.Contains(descriptor, []byte("records.list")) {
+				t.Fatalf("unexposed Interface entered descriptor output: %q", descriptor)
+			}
+			initialHistory := decodeInterfaceWireHistory(
+				t,
+				readFile(t, root, protobufwiremap.Path),
+				"records.list/v1",
+				"RecordsListV1Request",
+			)
+			if initialHistory.Active ||
+				initialHistory.Fields["legacy"].Number != 7 ||
+				len(initialHistory.ReservedNumbers) != 0 ||
+				len(initialHistory.ReservedNames) != 0 {
+				t.Fatalf("initial unexposed Interface history = %#v", initialHistory)
+			}
+			initialProvenance, err := applicationgen.DecodeManifestProvenance(
+				readFile(t, root, "generated/manifest.json"),
+			)
+			if err != nil {
+				t.Fatalf("DecodeManifestProvenance(initial): %v", err)
+			}
+
+			writeFile(t, interfacePath, interfaceProtobufHistorySource("Replacement", 7))
+			beforeImmediateReuse := snapshotTree(t, root)
+			options.Check = true
+			if result, generateErr := applicationgenerate.Generate(t.Context(), options); !errors.Is(generateErr, protobufwiremap.ErrHistory) ||
+				!strings.Contains(generateErr.Error(), `field "replacement" authored number 7 is permanently occupied by legacy`) {
+				t.Fatalf("Generate --check(immediate reuse) = %#v, %v", result, generateErr)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, beforeImmediateReuse) {
+				t.Fatal("Generate --check mutated the Project after immediate unexposed field-number reuse")
+			}
+
+			writeFile(t, interfacePath, interfaceProtobufHistorySource("", 0))
+			beforeRemovalCheck := snapshotTree(t, root)
+			removedCheck, err := applicationgenerate.Generate(t.Context(), options)
+			if err != nil {
+				t.Fatalf("Generate --check(removed): %v", err)
+			}
+			for _, changed := range []string{
+				"generated/compatibility/interfaces.json",
+				protobufwiremap.Path,
+				"generated/manifest.json",
+			} {
+				if !slicesContains(removedCheck.Report().Changed(), changed) {
+					t.Fatalf("unexposed field removal drift omits %s: %#v", changed, removedCheck.Report().Changes())
+				}
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, beforeRemovalCheck) {
+				t.Fatal("Generate --check mutated the Project after an unexposed field removal")
+			}
+
+			options.Check = false
+			removed, err := applicationgenerate.Generate(t.Context(), options)
+			if err != nil || !removed.Report().Clean() {
+				t.Fatalf("Generate(removed) = changes %#v, %v", removed.Report().Changes(), err)
+			}
+			removedHistory := decodeInterfaceWireHistory(
+				t,
+				readFile(t, root, protobufwiremap.Path),
+				"records.list/v1",
+				"RecordsListV1Request",
+			)
+			if removedHistory.Active ||
+				len(removedHistory.Fields) != 0 ||
+				!reflect.DeepEqual(removedHistory.ReservedNumbers, []int{7}) ||
+				!reflect.DeepEqual(removedHistory.ReservedNames, []string{"legacy"}) {
+				t.Fatalf("removed unexposed Interface history = %#v", removedHistory)
+			}
+			removedProvenance, err := applicationgen.DecodeManifestProvenance(
+				readFile(t, root, "generated/manifest.json"),
+			)
+			if err != nil {
+				t.Fatalf("DecodeManifestProvenance(removed): %v", err)
+			}
+			if initialProvenance.ApplicationModelDigest() != removedProvenance.ApplicationModelDigest() {
+				t.Fatal("inactive Interface history changed the build-affecting application model")
+			}
+
+			writeFile(t, interfacePath, interfaceProtobufHistorySource("Replacement", 7))
+			beforeReservedReuse := snapshotTree(t, root)
+			options.Check = true
+			if result, generateErr := applicationgenerate.Generate(t.Context(), options); !errors.Is(generateErr, protobufwiremap.ErrHistory) ||
+				!strings.Contains(generateErr.Error(), `field "replacement" authored number 7 is permanently occupied by reserved`) {
+				t.Fatalf("Generate --check(reserved reuse) = %#v, %v", result, generateErr)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, beforeReservedReuse) {
+				t.Fatal("Generate --check mutated the Project after reserved unexposed field-number reuse")
+			}
+
+			options.Check = false
+			if result, generateErr := applicationgenerate.Generate(t.Context(), options); !errors.Is(generateErr, protobufwiremap.ErrHistory) ||
+				!reflect.DeepEqual(snapshotTree(t, root), beforeReservedReuse) {
+				t.Fatalf("Generate(reserved reuse) = %#v, %v", result, generateErr)
+			}
+
+			writeFile(t, interfacePath, interfaceProtobufHistorySource("", 0))
+			options.Check = true
+			clean, err := applicationgenerate.Generate(t.Context(), options)
+			if err != nil || !clean.Report().Clean() {
+				t.Fatalf("Generate --check(clean) = changes %#v, %v", clean.Report().Changes(), err)
+			}
+		})
+	}
+}
+
 func TestGenerateProjectsExposedIntrinsicKernelInterfaceMessages(t *testing.T) {
 	root := t.TempDir()
 	const modulePath = "example.com/intrinsic-interface-protobuf"
@@ -394,11 +538,38 @@ type Record struct {
 }
 
 type interfaceWireHistory struct {
+	Active bool `json:"active"`
 	Fields map[string]struct {
 		Number int `json:"number"`
 	} `json:"fields"`
 	ReservedNumbers []int    `json:"reserved_numbers"`
 	ReservedNames   []string `json:"reserved_names"`
+}
+
+func interfaceProtobufHistorySource(fieldName string, fieldNumber int) string {
+	field := ""
+	if fieldName != "" && fieldNumber > 0 {
+		field = "\t" + fieldName + " string `json:\"" +
+			strings.ToLower(fieldName) +
+			"\" plystra:\"" +
+			strconv.Itoa(fieldNumber) +
+			"\"`\n"
+	}
+	return strings.ReplaceAll(`package listv1
+
+import "context"
+
+//plystra:interface records.list/v1
+type Interface interface {
+	List(context.Context, Request) (Response, error)
+}
+
+type Request struct {
+FIELD
+}
+
+type Response struct{}
+`, "FIELD\n", field)
 }
 
 type interfaceProcedureHistory struct {

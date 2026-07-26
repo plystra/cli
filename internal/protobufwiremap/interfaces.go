@@ -116,6 +116,10 @@ func reconcileInterfaces(current map[string]interfaceHistory, model protobufmode
 	if current == nil {
 		return errors.New("interfaces history is absent")
 	}
+	active := make(map[string]struct{}, len(model.Operations()))
+	for _, operation := range model.Operations() {
+		active[operation.ID().String()] = struct{}{}
+	}
 	for identifier, record := range current {
 		record.Active = false
 		for name, message := range record.Messages {
@@ -125,8 +129,9 @@ func reconcileInterfaces(current map[string]interfaceHistory, model protobufmode
 		current[identifier] = record
 	}
 
-	for _, operation := range model.Operations() {
+	for _, operation := range model.HistoryOperations() {
 		identifier := operation.ID().String()
+		_, selected := active[identifier]
 		identity := operation.Identity()
 		requestMessage, err := unqualifiedMessage(identity.Package(), identity.RequestType())
 		if err != nil {
@@ -193,16 +198,19 @@ func reconcileInterfaces(current map[string]interfaceHistory, model protobufmode
 			if err != nil {
 				return fmt.Errorf("Interface %s message %s: %v", identifier, name, err)
 			}
-			history.Active = true
+			history.Active = selected
 			record.Messages[name] = history
 		}
 
 		request, requestExists := record.Messages[record.RequestMessage]
 		response, responseExists := record.Messages[record.ResponseMessage]
-		if !requestExists || !request.Active || !responseExists || !response.Active {
+		if !requestExists || !responseExists {
 			return fmt.Errorf("Interface %s request or response message is absent from the current projection", identifier)
 		}
-		record.Active = true
+		if selected && (!request.Active || !response.Active) {
+			return fmt.Errorf("active Interface %s request or response message is absent from the current projection", identifier)
+		}
+		record.Active = selected
 		record.ContractDigest = operation.ContractDigest()
 		current[identifier] = record
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/importer"
 	"go/parser"
@@ -288,6 +289,118 @@ type Response struct{}
 			result, buildErr := Build(legacy, model, removed.CanonicalJSON(), true, removed.Digest())
 			if !errors.Is(buildErr, ErrHistory) || result.Valid() || !strings.Contains(buildErr.Error(), test.contains) {
 				t.Fatalf("Build = %#v, %v; want %q", result, buildErr, test.contains)
+			}
+		})
+	}
+}
+
+func TestBuildRejectsWireReuseFromInactiveVisibleInterfaceHistory(t *testing.T) {
+	t.Parallel()
+
+	initialInput := interfaceHistoryInput(t, `package listv1
+import "context"
+//plystra:interface records.list/v1
+type Interface interface { List(context.Context, Request) (Response, error) }
+type Request struct {
+	Keep    string `+"`plystra:\"1\"`"+`
+	Removed string `+"`plystra:\"7\"`"+`
+}
+type Response struct{}
+`)
+	removedInput := interfaceHistoryInput(t, `package listv1
+import "context"
+//plystra:interface records.list/v1
+type Interface interface { List(context.Context, Request) (Response, error) }
+type Request struct { Keep string `+"`plystra:\"1\"`"+` }
+type Response struct{}
+`)
+	reusedInput := interfaceHistoryInput(t, `package listv1
+import "context"
+//plystra:interface records.list/v1
+type Interface interface { List(context.Context, Request) (Response, error) }
+type Request struct {
+	Keep  string `+"`plystra:\"1\"`"+`
+	Other string `+"`plystra:\"7\"`"+`
+}
+type Response struct{}
+`)
+
+	for _, connect := range []bool{false, true} {
+		connect := connect
+		t.Run(fmt.Sprintf("connect=%t", connect), func(t *testing.T) {
+			t.Parallel()
+
+			legacy := wireModel(t, connect)
+			initialModel, err := protobufmodel.BuildInterfaceSelection(
+				connect,
+				nil,
+				[]protobufmodel.InterfaceInput{initialInput},
+			)
+			if err != nil {
+				t.Fatalf("BuildInterfaceSelection(initial): %v", err)
+			}
+			initial, err := Build(legacy, initialModel, nil, false, "")
+			if err != nil {
+				t.Fatalf("Build(initial): %v", err)
+			}
+			if len(initial.ActiveInterfaces()) != 0 {
+				t.Fatalf("inactive visible Interface became active: %#v", initial.ActiveInterfaces())
+			}
+
+			removedModel, err := protobufmodel.BuildInterfaceSelection(
+				connect,
+				nil,
+				[]protobufmodel.InterfaceInput{removedInput},
+			)
+			if err != nil {
+				t.Fatalf("BuildInterfaceSelection(removed): %v", err)
+			}
+			removed, err := Build(
+				legacy,
+				removedModel,
+				initial.CanonicalJSON(),
+				true,
+				initial.Digest(),
+			)
+			if err != nil {
+				t.Fatalf("Build(removed): %v", err)
+			}
+			if !bytes.Equal(initial.ActiveJSON(), removed.ActiveJSON()) ||
+				initial.Digest() == removed.Digest() {
+				t.Fatalf(
+					"inactive history altered active output or failed to change committed history:\n%s\n%s",
+					initial.CanonicalJSON(),
+					removed.CanonicalJSON(),
+				)
+			}
+			request := decodeTestDocument(t, removed.CanonicalJSON()).
+				Interfaces["records.list/v1"].
+				Messages["RecordsListV1Request"]
+			if request.Active ||
+				!reflect.DeepEqual(request.ReservedNumbers, []int{7}) ||
+				!reflect.DeepEqual(request.ReservedNames, []string{"removed"}) {
+				t.Fatalf("inactive visible history = %#v", request)
+			}
+
+			reusedModel, err := protobufmodel.BuildInterfaceSelection(
+				connect,
+				nil,
+				[]protobufmodel.InterfaceInput{reusedInput},
+			)
+			if err != nil {
+				t.Fatalf("BuildInterfaceSelection(reused): %v", err)
+			}
+			result, buildErr := Build(
+				legacy,
+				reusedModel,
+				removed.CanonicalJSON(),
+				true,
+				removed.Digest(),
+			)
+			if !errors.Is(buildErr, ErrHistory) ||
+				result.Valid() ||
+				!strings.Contains(buildErr.Error(), `field "other" authored number 7 is permanently occupied by reserved`) {
+				t.Fatalf("Build(reused) = %#v, %v", result, buildErr)
 			}
 		})
 	}

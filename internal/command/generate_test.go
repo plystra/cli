@@ -222,6 +222,80 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 	}
 }
 
+func TestRunGenerateRejectsFieldNumberReuseFromUnexposedInterfaceHistory(t *testing.T) {
+	root := t.TempDir()
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module example.com/acme/interface-history
+
+go 1.26
+
+require (
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot)))
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("ReadFile(go.sum): %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	interfacePath := filepath.Join(root, "interfaces", "records", "list", "v1", "interface.go")
+	writeInterface := func(fieldName string) {
+		t.Helper()
+		jsonName := strings.ToLower(fieldName)
+		writeCommandFile(t, interfacePath, `package listv1
+
+import "context"
+
+//plystra:interface records.list/v1
+type Interface interface {
+	List(context.Context, Request) (Response, error)
+}
+
+type Request struct {
+	`+fieldName+` string `+"`json:\""+jsonName+"\" plystra:\"7\"`"+`
+}
+
+type Response struct{}
+`)
+	}
+	writeInterface("Legacy")
+
+	environment := commandGoEnvironment()
+	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, root, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/interface-history in "+root+"\n" {
+		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "generated", "proto", "plystra", "generated", "records", "list", "v1", "interface.proto")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("unexposed Interface schema exists or could not be inspected: %v", err)
+	}
+
+	writeInterface("Replacement")
+	before := commandTree(t, root)
+	for _, arguments := range [][]string{
+		{"generate", "--check"},
+		{"generate"},
+	} {
+		exitCode, stdout, stderr = runCommand(t, arguments, root, environment)
+		if exitCode != 1 ||
+			stdout != "" ||
+			!strings.Contains(stderr, `field "replacement" authored number 7 is permanently occupied by legacy`) ||
+			!strings.Contains(stderr, "\n\nRecovery:\nRestore generated/proto/wire-map.json from its last known-good generated state, then regenerate.\n\nDiagnostic: "+diagnosticcode.ProtobufWireHistoryInvalid+"\n") ||
+			strings.Count(stderr, "Recovery:") != 1 {
+			t.Fatalf("%v = exit %d, stdout %q, stderr %q", arguments, exitCode, stdout, stderr)
+		}
+		if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+			t.Fatalf("%v mutated the Project after unexposed field-number reuse", arguments)
+		}
+		assertNoCommandTransactions(t, root)
+	}
+}
+
 func TestRunGenerateInstallsConnectRuntimeRequirementsAndCheckIsReadOnly(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)

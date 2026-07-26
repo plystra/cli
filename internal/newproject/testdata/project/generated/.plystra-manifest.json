@@ -43,11 +43,11 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:00e7b1a5e7c1f51c0e3963b0af25b06642701e384723d1a44f4d748d45373981"
+      "sha256": "sha256:2f3a86cf4ba31a7ace43374a155e129d8aa42f7d992584c2779da433302fc016"
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:650a88657c6fce9ee247c9bbfe5d54b8cb7a92af8efde1c3de1d7b8cc69cea56"
+      "sha256": "sha256:eba3a724ee6076519f7400211fef3bd2e51af5ef70dfa6df2126cc25ab3a57ef"
     },
     {
       "path": "generated/proto/descriptor-set.pb",
@@ -55,7 +55,7 @@
     },
     {
       "path": "generated/proto/wire-map.json",
-      "sha256": "sha256:571ae981f350a67cd5fd182c8094be8decdd2637577d33b1dd3856d6cd23e899"
+      "sha256": "sha256:291fb979cc47f081f48f964b9addaace1aa6dc1c7fb03bb29d16794509461183"
     }
   ],
   "application_manifest": {
@@ -93,8 +93,8 @@
           "dependency_baseline": []
         }
       ],
-      "protobuf_wire_map_digest": "sha256:571ae981f350a67cd5fd182c8094be8decdd2637577d33b1dd3856d6cd23e899",
-      "application_model_digest": "sha256:62299afa4c5eb0eeb60f96b2b6d267c582ce438c4df676b7850abe7f5d5d5f2a"
+      "protobuf_wire_map_digest": "sha256:291fb979cc47f081f48f964b9addaace1aa6dc1c7fb03bb29d16794509461183",
+      "application_model_digest": "sha256:42841c7f77ca73646234782cba79d92a75509e5d65e52ea261c1054b065cf302"
     },
     "transport_toolchain": {
       "schema": "plystra.transport-toolchain/v2",
@@ -132,7 +132,7 @@
         {
           "kind": "generator",
           "name": "protobuf-wire-map",
-          "version": "plystra.proto-wire-map/v4"
+          "version": "plystra.proto-wire-map/v5"
         },
         {
           "kind": "generated-go-dependency",
@@ -165,7 +165,7 @@
           "version": "7.0.2"
         }
       ],
-      "digest": "sha256:94827c9ac86023a73bd176709fb6de8295f36f74f4ddcf276a3490169e94ca76"
+      "digest": "sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
     }
   }
 }

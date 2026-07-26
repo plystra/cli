@@ -27,7 +27,7 @@ const (
 	// Path is the one CLI-owned committed Protobuf wire-history artifact.
 	Path = "generated/proto/wire-map.json"
 	// ProjectionSchema identifies the strict initial-release wire-map schema.
-	ProjectionSchema = "plystra.proto-wire-map/v4"
+	ProjectionSchema = "plystra.proto-wire-map/v5"
 	// MaximumBytes bounds managed history before parsing.
 	MaximumBytes int64 = 16 << 20
 
@@ -64,6 +64,7 @@ type Map struct {
 	projectionDigest          string
 	legacyProjectionDigest    string
 	interfaceProjectionDigest string
+	interfaceHistoryDigest    string
 	prepared                  bool
 }
 
@@ -78,7 +79,8 @@ func (m Map) Valid() bool {
 		validDigest(m.activeDigest) &&
 		validDigest(m.projectionDigest) &&
 		validDigest(m.legacyProjectionDigest) &&
-		validDigest(m.interfaceProjectionDigest)
+		validDigest(m.interfaceProjectionDigest) &&
+		validDigest(m.interfaceHistoryDigest)
 }
 
 // CanonicalJSON returns defensive canonical committed history bytes.
@@ -104,6 +106,10 @@ func (m Map) LegacyProjectionDigest() string { return m.legacyProjectionDigest }
 // InterfaceProjectionDigest identifies the canonical Interface model.
 func (m Map) InterfaceProjectionDigest() string { return m.interfaceProjectionDigest }
 
+// InterfaceHistoryDigest identifies the all-visible authored Interface
+// history input reconciled into the committed map.
+func (m Map) InterfaceHistoryDigest() string { return m.interfaceHistoryDigest }
+
 // Matches reports whether the map was reconciled against both exact models.
 func (m Map) Matches(legacy protobufmodel.Model, interfaces protobufmodel.InterfaceModel) bool {
 	return m.Valid() &&
@@ -112,7 +118,12 @@ func (m Map) Matches(legacy protobufmodel.Model, interfaces protobufmodel.Interf
 		legacy.Enabled() == interfaces.Enabled() &&
 		m.legacyProjectionDigest == legacy.Digest() &&
 		m.interfaceProjectionDigest == interfaces.Digest() &&
-		m.projectionDigest == combinedProjectionDigest(legacy.Digest(), interfaces.Digest())
+		m.interfaceHistoryDigest == interfaces.HistoryDigest() &&
+		m.projectionDigest == combinedProjectionDigest(
+			legacy.Digest(),
+			interfaces.Digest(),
+			interfaces.HistoryDigest(),
+		)
 }
 
 // CapabilityProjection is one active temporary legacy transport target's
@@ -427,15 +438,20 @@ func Build(
 		return Map{}, fmt.Errorf("%w: encode active assignments: %v", ErrBuild, err)
 	}
 	return Map{
-		canonicalJSON:             canonical,
-		activeJSON:                active,
-		activeInterfaces:          activeInterfaceProjections(current.Interfaces),
-		activeLegacyCapabilities:  activeProjections(current),
-		digest:                    digest(canonical),
-		activeDigest:              digest(active),
-		projectionDigest:          combinedProjectionDigest(legacy.Digest(), interfaces.Digest()),
+		canonicalJSON:            canonical,
+		activeJSON:               active,
+		activeInterfaces:         activeInterfaceProjections(current.Interfaces),
+		activeLegacyCapabilities: activeProjections(current),
+		digest:                   digest(canonical),
+		activeDigest:             digest(active),
+		projectionDigest: combinedProjectionDigest(
+			legacy.Digest(),
+			interfaces.Digest(),
+			interfaces.HistoryDigest(),
+		),
 		legacyProjectionDigest:    legacy.Digest(),
 		interfaceProjectionDigest: interfaces.Digest(),
+		interfaceHistoryDigest:    interfaces.HistoryDigest(),
 		prepared:                  true,
 	}, nil
 }
@@ -1264,8 +1280,13 @@ func digest(value []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-func combinedProjectionDigest(legacy, interfaces string) string {
-	return digest([]byte("plystra.proto-wire-map.projection/v1\x00" + legacy + "\x00" + interfaces))
+func combinedProjectionDigest(legacy, interfaces, history string) string {
+	return digest([]byte(
+		"plystra.proto-wire-map.projection/v2\x00" +
+			legacy + "\x00" +
+			interfaces + "\x00" +
+			history,
+	))
 }
 
 func hasControl(value string) bool {

@@ -155,8 +155,84 @@ func TestBuildInterfacesDisabledModelIgnoresInputs(t *testing.T) {
 
 	model, err := protobufmodel.BuildInterfaces(false, []protobufmodel.InterfaceInput{{}})
 	if err != nil || !model.Valid() || model.Enabled() || len(model.Operations()) != 0 ||
-		string(model.CanonicalJSON()) != `{"version":1,"enabled":false,"interfaces":[]}` {
+		len(model.HistoryOperations()) != 0 ||
+		string(model.CanonicalJSON()) != `{"version":1,"enabled":false,"interfaces":[]}` ||
+		string(model.HistoryCanonicalJSON()) != `{"version":1,"interfaces":[]}` {
 		t.Fatalf("BuildInterfaces(false) = %s, %#v, %v", model.CanonicalJSON(), model.Operations(), err)
+	}
+}
+
+func TestBuildInterfaceSelectionKeepsAllVisibleHistoryOutOfActiveProjection(t *testing.T) {
+	t.Parallel()
+
+	exposed := interfaceProjectionInput(t, "records.exposed/v1", "example.com/interfaces/records/exposed/v1", `package exposedv1
+import "context"
+//plystra:interface records.exposed/v1
+type Interface interface { Read(context.Context, Request) (Response, error) }
+type Request struct { Value string `+"`plystra:\"1\"`"+` }
+type Response struct{}
+`)
+	unexposed := interfaceProjectionInput(t, "records.internal/v1", "example.com/interfaces/records/internal/v1", `package internalv1
+import "context"
+//plystra:interface records.internal/v1
+type Interface interface { Read(context.Context, Request) (Response, error) }
+type Request struct { Legacy string `+"`plystra:\"7\"`"+` }
+type Response struct{}
+`)
+
+	selected, err := protobufmodel.BuildInterfaceSelection(
+		true,
+		[]protobufmodel.InterfaceInput{exposed},
+		[]protobufmodel.InterfaceInput{unexposed, exposed},
+	)
+	if err != nil {
+		t.Fatalf("BuildInterfaceSelection: %v", err)
+	}
+	activeOnly, err := protobufmodel.BuildInterfaces(true, []protobufmodel.InterfaceInput{exposed})
+	if err != nil {
+		t.Fatalf("BuildInterfaces(active): %v", err)
+	}
+	if !selected.Valid() ||
+		!bytes.Equal(selected.CanonicalJSON(), activeOnly.CanonicalJSON()) ||
+		selected.Digest() != activeOnly.Digest() ||
+		len(selected.Operations()) != 1 ||
+		len(selected.HistoryOperations()) != 2 ||
+		selected.HistoryDigest() == activeOnly.HistoryDigest() ||
+		!bytes.Contains(selected.HistoryCanonicalJSON(), []byte(`"interface_id":"records.internal/v1"`)) {
+		t.Fatalf(
+			"selected model = active %s history %s",
+			selected.CanonicalJSON(),
+			selected.HistoryCanonicalJSON(),
+		)
+	}
+
+	disabled, err := protobufmodel.BuildInterfaceSelection(
+		false,
+		[]protobufmodel.InterfaceInput{{}},
+		[]protobufmodel.InterfaceInput{unexposed},
+	)
+	if err != nil ||
+		disabled.Enabled() ||
+		len(disabled.Operations()) != 0 ||
+		len(disabled.HistoryOperations()) != 1 ||
+		!bytes.Equal(disabled.CanonicalJSON(), []byte(`{"version":1,"enabled":false,"interfaces":[]}`)) {
+		t.Fatalf(
+			"BuildInterfaceSelection(disabled) = active %s history %s, %v",
+			disabled.CanonicalJSON(),
+			disabled.HistoryCanonicalJSON(),
+			err,
+		)
+	}
+
+	withoutHistory, err := protobufmodel.BuildInterfaceSelection(
+		true,
+		[]protobufmodel.InterfaceInput{exposed},
+		nil,
+	)
+	if !errorsAreInterfaceProjection(err) ||
+		withoutHistory.Valid() ||
+		!strings.Contains(errString(err), "absent from all-visible history") {
+		t.Fatalf("BuildInterfaceSelection(missing history) = %#v, %v", withoutHistory, err)
 	}
 }
 

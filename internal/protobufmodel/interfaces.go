@@ -159,16 +159,23 @@ func (o InterfaceOperation) SemanticErrors() []string {
 // InterfaceModel is the immutable normalized canonical-Interface portion of
 // the selected Protobuf projection. A disabled or empty model remains valid.
 type InterfaceModel struct {
-	enabled       bool
-	operations    []InterfaceOperation
-	canonicalJSON []byte
-	digest        string
-	prepared      bool
+	enabled              bool
+	operations           []InterfaceOperation
+	historyOperations    []InterfaceOperation
+	canonicalJSON        []byte
+	historyCanonicalJSON []byte
+	digest               string
+	historyDigest        string
+	prepared             bool
 }
 
 // Valid reports whether BuildInterfaces produced the model.
 func (m InterfaceModel) Valid() bool {
-	return m.prepared && len(m.canonicalJSON) != 0 && validInterfaceDigest(m.digest)
+	return m.prepared &&
+		len(m.canonicalJSON) != 0 &&
+		len(m.historyCanonicalJSON) != 0 &&
+		validInterfaceDigest(m.digest) &&
+		validInterfaceDigest(m.historyDigest)
 }
 
 // Enabled reports whether Connect projection was selected.
@@ -183,6 +190,17 @@ func (m InterfaceModel) Operations() []InterfaceOperation {
 	return result
 }
 
+// HistoryOperations returns every visible authored Interface plus any active
+// intrinsic Interface in canonical ID order. Only Operations participate in
+// generated transport output.
+func (m InterfaceModel) HistoryOperations() []InterfaceOperation {
+	result := make([]InterfaceOperation, len(m.historyOperations))
+	for index, operation := range m.historyOperations {
+		result[index] = cloneInterfaceOperation(operation)
+	}
+	return result
+}
+
 // CanonicalJSON returns defensive deterministic projection evidence.
 func (m InterfaceModel) CanonicalJSON() []byte {
 	return append([]byte(nil), m.canonicalJSON...)
@@ -191,9 +209,23 @@ func (m InterfaceModel) CanonicalJSON() []byte {
 // Digest returns the SHA-256 digest of CanonicalJSON.
 func (m InterfaceModel) Digest() string { return m.digest }
 
+// HistoryCanonicalJSON returns defensive deterministic all-visible Interface
+// history input. It is compatibility evidence, not active transport output.
+func (m InterfaceModel) HistoryCanonicalJSON() []byte {
+	return append([]byte(nil), m.historyCanonicalJSON...)
+}
+
+// HistoryDigest returns the SHA-256 digest of HistoryCanonicalJSON.
+func (m InterfaceModel) HistoryDigest() string { return m.historyDigest }
+
 type canonicalInterfaceModel struct {
 	Version    int                           `json:"version"`
 	Enabled    bool                          `json:"enabled"`
+	Interfaces []canonicalInterfaceOperation `json:"interfaces"`
+}
+
+type canonicalInterfaceHistoryModel struct {
+	Version    int                           `json:"version"`
 	Interfaces []canonicalInterfaceOperation `json:"interfaces"`
 }
 
@@ -231,9 +263,38 @@ type canonicalInterfaceField struct {
 // Project packages or exact intrinsic Kernel packages selected for this model.
 func BuildInterfaces(connect bool, inputs []InterfaceInput) (InterfaceModel, error) {
 	if !connect {
-		return finalizeInterfaces(false, nil)
+		return finalizeInterfaceSelection(false, nil, nil)
 	}
+	return BuildInterfaceSelection(true, inputs, inputs)
+}
 
+// BuildInterfaceSelection validates active Connect Interfaces and the broader
+// all-visible history set independently of discovery order. Active Interfaces
+// must appear identically in history. A disabled Connect selection retains
+// history while producing no active transport operations.
+func BuildInterfaceSelection(
+	connect bool,
+	activeInputs []InterfaceInput,
+	historyInputs []InterfaceInput,
+) (InterfaceModel, error) {
+	history, err := normalizeInterfaceInputs(historyInputs)
+	if err != nil {
+		return InterfaceModel{}, err
+	}
+	var active []InterfaceOperation
+	if connect {
+		active, err = normalizeInterfaceInputs(activeInputs)
+		if err != nil {
+			return InterfaceModel{}, err
+		}
+	}
+	if err := validateActiveInterfaceHistory(active, history); err != nil {
+		return InterfaceModel{}, fmt.Errorf("%w: %w: %v", ErrInterfaceBuild, ErrInterfaceInput, err)
+	}
+	return finalizeInterfaceSelection(connect, active, history)
+}
+
+func normalizeInterfaceInputs(inputs []InterfaceInput) ([]InterfaceOperation, error) {
 	ordered := append([]InterfaceInput(nil), inputs...)
 	sort.Slice(ordered, func(left, right int) bool {
 		if ordered[left].InterfaceID != ordered[right].InterfaceID {
@@ -243,14 +304,14 @@ func BuildInterfaces(connect bool, inputs []InterfaceInput) (InterfaceModel, err
 	})
 	for index := 1; index < len(ordered); index++ {
 		if ordered[index-1].InterfaceID == ordered[index].InterfaceID {
-			return InterfaceModel{}, fmt.Errorf("%w: %w: Interface %s appears more than once at %s and %s", ErrInterfaceBuild, ErrInterfaceInput, ordered[index].InterfaceID, ordered[index-1].Source, ordered[index].Source)
+			return nil, fmt.Errorf("%w: %w: Interface %s appears more than once at %s and %s", ErrInterfaceBuild, ErrInterfaceInput, ordered[index].InterfaceID, ordered[index-1].Source, ordered[index].Source)
 		}
 	}
 
 	surfaces := make([]protobufidentity.Surface, len(ordered))
 	for index, input := range ordered {
 		if input.InterfaceID.String() == "" {
-			return InterfaceModel{}, fmt.Errorf("%w: %w: inputs[%d] has an empty Interface ID", ErrInterfaceBuild, ErrInterfaceInput, index)
+			return nil, fmt.Errorf("%w: %w: inputs[%d] has an empty Interface ID", ErrInterfaceBuild, ErrInterfaceInput, index)
 		}
 		surfaces[index] = protobufidentity.Surface{
 			PublicID:    input.InterfaceID.String(),
@@ -259,7 +320,7 @@ func BuildInterfaces(connect bool, inputs []InterfaceInput) (InterfaceModel, err
 	}
 	identities, err := protobufidentity.Build(surfaces)
 	if err != nil {
-		return InterfaceModel{}, fmt.Errorf("%w: %w", ErrInterfaceBuild, err)
+		return nil, fmt.Errorf("%w: %w", ErrInterfaceBuild, err)
 	}
 	identityByID := make(map[string]protobufidentity.Identity, len(ordered))
 	for _, identity := range identities.Identities() {
@@ -270,11 +331,11 @@ func BuildInterfaces(connect bool, inputs []InterfaceInput) (InterfaceModel, err
 	for index, input := range ordered {
 		operation, err := normalizeInterfaceInput(input, identityByID[input.InterfaceID.String()])
 		if err != nil {
-			return InterfaceModel{}, fmt.Errorf("%w: %w: inputs[%d] Interface %s: %v", ErrInterfaceBuild, ErrInterfaceInput, index, input.InterfaceID, err)
+			return nil, fmt.Errorf("%w: %w: inputs[%d] Interface %s: %v", ErrInterfaceBuild, ErrInterfaceInput, index, input.InterfaceID, err)
 		}
 		operations[index] = operation
 	}
-	return finalizeInterfaces(true, operations)
+	return operations, nil
 }
 
 func normalizeInterfaceInput(input InterfaceInput, identity protobufidentity.Identity) (InterfaceOperation, error) {
@@ -450,61 +511,111 @@ func validateInterfaceType(value interfacecontract.Type, messageNames map[string
 	}
 }
 
-func finalizeInterfaces(enabled bool, operations []InterfaceOperation) (InterfaceModel, error) {
+func validateActiveInterfaceHistory(active, history []InterfaceOperation) error {
+	historyByID := make(map[string]canonicalInterfaceOperation, len(history))
+	for _, operation := range history {
+		historyByID[operation.ID().String()] = canonicalizeInterfaceOperation(operation)
+	}
+	for _, operation := range active {
+		identifier := operation.ID().String()
+		historical, exists := historyByID[identifier]
+		if !exists {
+			return fmt.Errorf("active Interface %s is absent from all-visible history", identifier)
+		}
+		current := canonicalizeInterfaceOperation(operation)
+		currentJSON, err := json.Marshal(current)
+		if err != nil {
+			return fmt.Errorf("encode active Interface %s: %v", identifier, err)
+		}
+		historyJSON, err := json.Marshal(historical)
+		if err != nil {
+			return fmt.Errorf("encode historical Interface %s: %v", identifier, err)
+		}
+		if string(currentJSON) != string(historyJSON) {
+			return fmt.Errorf("active Interface %s differs from its all-visible history input", identifier)
+		}
+	}
+	return nil
+}
+
+func finalizeInterfaceSelection(
+	enabled bool,
+	operations []InterfaceOperation,
+	historyOperations []InterfaceOperation,
+) (InterfaceModel, error) {
 	document := canonicalInterfaceModel{
 		Version:    1,
 		Enabled:    enabled,
 		Interfaces: make([]canonicalInterfaceOperation, len(operations)),
 	}
 	for index, operation := range operations {
-		messages := operation.Messages()
-		messageRecords := make([]canonicalInterfaceMessage, len(messages))
-		for messageIndex, message := range messages {
-			fields := message.Fields()
-			fieldRecords := make([]canonicalInterfaceField, len(fields))
-			for fieldIndex, field := range fields {
-				fieldRecords[fieldIndex] = canonicalInterfaceField{
-					GoName:       field.GoName(),
-					ProtobufName: field.ProtobufName(),
-					JSONName:     field.JSONName(),
-					Number:       field.Number(),
-					Required:     field.Required(),
-					Type:         field.Type().Canonical(),
-				}
-			}
-			messageRecords[messageIndex] = canonicalInterfaceMessage{
-				GoName:       message.GoName(),
-				ProtobufName: message.ProtobufName(),
-				Fields:       fieldRecords,
-			}
-		}
-		identity := operation.Identity()
-		document.Interfaces[index] = canonicalInterfaceOperation{
-			InterfaceID:    operation.ID().String(),
-			PackagePath:    operation.PackagePath(),
-			Source:         operation.Source(),
-			MetadataSource: operation.MetadataSource(),
-			ContractDigest: operation.ContractDigest(),
-			Package:        identity.Package(),
-			RequestType:    identity.RequestType(),
-			ResponseType:   identity.ResponseType(),
-			MethodName:     operation.MethodName(),
-			Messages:       messageRecords,
-			SemanticErrors: operation.SemanticErrors(),
-		}
+		document.Interfaces[index] = canonicalizeInterfaceOperation(operation)
 	}
 	canonical, err := json.Marshal(document)
 	if err != nil {
 		return InterfaceModel{}, fmt.Errorf("%w: encode canonical model: %v", ErrInterfaceBuild, err)
 	}
 	sum := sha256.Sum256(canonical)
+	historyDocument := canonicalInterfaceHistoryModel{
+		Version:    1,
+		Interfaces: make([]canonicalInterfaceOperation, len(historyOperations)),
+	}
+	for index, operation := range historyOperations {
+		historyDocument.Interfaces[index] = canonicalizeInterfaceOperation(operation)
+	}
+	historyCanonical, err := json.Marshal(historyDocument)
+	if err != nil {
+		return InterfaceModel{}, fmt.Errorf("%w: encode canonical history model: %v", ErrInterfaceBuild, err)
+	}
+	historySum := sha256.Sum256(historyCanonical)
 	return InterfaceModel{
-		enabled:       enabled,
-		operations:    cloneInterfaceOperations(operations),
-		canonicalJSON: canonical,
-		digest:        "sha256:" + hex.EncodeToString(sum[:]),
-		prepared:      true,
+		enabled:              enabled,
+		operations:           cloneInterfaceOperations(operations),
+		historyOperations:    cloneInterfaceOperations(historyOperations),
+		canonicalJSON:        canonical,
+		historyCanonicalJSON: historyCanonical,
+		digest:               "sha256:" + hex.EncodeToString(sum[:]),
+		historyDigest:        "sha256:" + hex.EncodeToString(historySum[:]),
+		prepared:             true,
 	}, nil
+}
+
+func canonicalizeInterfaceOperation(operation InterfaceOperation) canonicalInterfaceOperation {
+	messages := operation.Messages()
+	messageRecords := make([]canonicalInterfaceMessage, len(messages))
+	for messageIndex, message := range messages {
+		fields := message.Fields()
+		fieldRecords := make([]canonicalInterfaceField, len(fields))
+		for fieldIndex, field := range fields {
+			fieldRecords[fieldIndex] = canonicalInterfaceField{
+				GoName:       field.GoName(),
+				ProtobufName: field.ProtobufName(),
+				JSONName:     field.JSONName(),
+				Number:       field.Number(),
+				Required:     field.Required(),
+				Type:         field.Type().Canonical(),
+			}
+		}
+		messageRecords[messageIndex] = canonicalInterfaceMessage{
+			GoName:       message.GoName(),
+			ProtobufName: message.ProtobufName(),
+			Fields:       fieldRecords,
+		}
+	}
+	identity := operation.Identity()
+	return canonicalInterfaceOperation{
+		InterfaceID:    operation.ID().String(),
+		PackagePath:    operation.PackagePath(),
+		Source:         operation.Source(),
+		MetadataSource: operation.MetadataSource(),
+		ContractDigest: operation.ContractDigest(),
+		Package:        identity.Package(),
+		RequestType:    identity.RequestType(),
+		ResponseType:   identity.ResponseType(),
+		MethodName:     operation.MethodName(),
+		Messages:       messageRecords,
+		SemanticErrors: operation.SemanticErrors(),
+	}
 }
 
 func cloneInterfaceOperations(values []InterfaceOperation) []InterfaceOperation {

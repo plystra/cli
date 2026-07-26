@@ -103,7 +103,7 @@ Generated client construction requires one explicit ` + "`credentialPolicy`" + `
 
 Pass an AbortSignal as the generated operation's second argument to cancel before dispatch, while bearer acquisition is pending, or while fetch is in flight. Cancellation rejects with PlystraError code cancelled. Once server invocation has begun, the generated Connect handler preserves that caller cancellation through the trusted Kernel root, canonical application invocation, and Implementation context. The same handler preserves the earlier caller or trusted-root Go context deadline and reports deadline_exceeded without a response when invocation observes it. Cancellation and deadlines are best-effort interruption and do not promise Implementation rollback or compensation.
 
-` + "`generated/proto/wire-map.json`" + ` is committed compatibility history for every canonical Interface message projected to Connect, including request, response, and reachable same-package messages, plus the exact stable service, method, and Connect procedure identity. Authored positive ` + "`plystra`" + ` field numbers are the wire numbers. Generation rejects renumbering, permanently reserves every removed Protobuf field name and number, carries those reservations into generated source and the descriptor set, and retains inactive Interface and message history when exposure or Connect is disabled. The ledger temporarily retains separately labelled legacy transport history required by pre-Gate-14 handlers; that bridge is not Interface contract authority. Never edit or delete the ledger. If it drifts, recover the exact previously generated content before running ` + "`plystra generate`" + `.
+` + "`generated/proto/wire-map.json`" + ` is committed compatibility history for the request, response, and reachable same-package messages of every visible authored Interface, whether or not the Interface is exposed or Connect is enabled. Exposed Connect Interfaces additionally retain their exact stable service, method, and procedure identity. Authored positive ` + "`plystra`" + ` field numbers are the wire numbers. Generation rejects renumbering and reuse across all visible Interface history, permanently reserves every removed Protobuf field name and number, and carries active reservations into generated source and the descriptor set. Never-exposed Interfaces, removed exposure, and disabled Connect remain inactive and create no schema, descriptor, handler, or SDK output. The ledger temporarily retains separately labelled legacy transport history required by pre-Gate-14 handlers; that bridge is not Interface contract authority. Never edit or delete the ledger. If it drifts, recover the exact previously generated content before running ` + "`plystra generate`" + `.
 
 Generation emits one deterministic ` + "`.proto`" + ` schema with the canonical messages and exactly one unary service from every exposed Interface package, plus a self-contained ` + "`generated/proto/descriptor-set.pb`" + `. The Connect procedure path is derived from the exact Interface ID. An overlapping pre-Gate-14 legacy schema is import-only and owns no competing service. A Project without a selected Connect surface retains a valid empty descriptor set. These files contain no Implementation, configuration, or Secret data, are CLI-owned, and are checked by ` + "`plystra generate --check`" + `.
 
@@ -352,15 +352,12 @@ or an empty state. Refresh with plystra generate; check with
 plystra generate --check.
 
 generated/proto/wire-map.json is durable CLI-owned compatibility history for
-every canonical Interface message projected to Connect, including request,
-response, and reachable same-package messages, plus the exact stable service,
-method, and Connect procedure identity. Authored positive plystra field
-numbers are the wire numbers. Generation rejects renumbering, permanently
-reserves every removed Protobuf field name and number, carries those
-reservations into generated source and descriptors, and retains inactive
-Interface and message history when exposure or Connect is disabled. Never edit
-or delete the ledger. If it drifts, recover the exact previously generated
-content before running plystra generate.
+every visible authored Interface message, exposed or not and even with Connect
+disabled. Authored positive plystra numbers are wire numbers. Generation
+rejects renumbering or reuse and permanently reserves removed Protobuf names
+and numbers. Only exposed Connect Interfaces become active and emit schemas,
+descriptors, handlers, or SDK output. Never edit or delete the ledger; recover
+its exact previous generated content before running plystra generate.
 
 Generation emits one deterministic .proto schema with canonical messages and
 exactly one unary service from every exposed Interface package. The Connect
@@ -1462,9 +1459,10 @@ recovery action or code.
   regenerate. Do not overwrite the reported path manually.
 - Protobuf wire-history drift: recover the exact previously generated
   generated/proto/wire-map.json. Never edit or delete it to force new field
-  or enum-member numbers. Change an authored Interface field number only before
-  the ledger records it; afterward define a new Interface version for a wire
-  change. Generation rejects missing, modified, corrupt, renumbered, reused, or
+  or enum-member numbers. Every visible authored Interface enters the ledger
+  after successful generation, even before exposure. Use an unused field number
+  for an additive field; define a new Interface version for a wire change.
+  Generation rejects missing, modified, corrupt, renumbered, reused, or
   projection-inconsistent history instead of guessing.
 - Protobuf schema or descriptor drift: never patch generated .proto files or
   generated/proto/descriptor-set.pb. Restore or regenerate the complete

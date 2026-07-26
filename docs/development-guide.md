@@ -483,11 +483,14 @@ version. Regenerate after intentional documentation-input changes; use
 record directly.
 
 `generated/proto/wire-map.json` is durable compatibility history, not a
-disposable cache. For each canonical Capability on the selected Connect
-surface, it preserves request and response field numbers across declaration
-reordering and allocates new fields without renumbering existing ones. Removing
-a field permanently reserves both its generated name and number, and removing
-exposure or disabling Connect retains the canonical history as inactive.
+disposable cache. It preserves field numbers for every visible authored
+Interface request, response, and reachable same-package message, even when the
+Interface has never been exposed or Connect is disabled. Removing a field
+permanently reserves both its Protobuf name and number; renaming a field cannot
+reuse the old number. Only selected Connect Interfaces are active and produce
+schemas, descriptors, handlers, or SDK output. Removing exposure or disabling
+Connect therefore retains history without expanding the generated public
+surface.
 Every scalar contract enum receives a numeric zero `*_UNSPECIFIED` sentinel.
 Its canonical members receive stable positive numbers: reordering does not
 change them, additions use unused positive values without renumbering existing
@@ -1762,7 +1765,7 @@ decoder.
 
 Do not repair `generated/proto/wire-map.json` by hand or delete it to force new
 numbers. Restore the exact last committed file, then regenerate from the
-authored Capability contracts. A missing ownership baseline, changed digest,
+authored Interface contracts. A missing ownership baseline, changed digest,
 noncanonical JSON, reused removed field or enum-member name or number,
 inconsistent message or enum identity, or invalid zero sentinel is a
 compatibility error that generation intentionally refuses to guess through.

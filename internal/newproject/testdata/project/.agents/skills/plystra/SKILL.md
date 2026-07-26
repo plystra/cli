@@ -177,15 +177,12 @@ or an empty state. Refresh with plystra generate; check with
 plystra generate --check.
 
 generated/proto/wire-map.json is durable CLI-owned compatibility history for
-every canonical Interface message projected to Connect, including request,
-response, and reachable same-package messages, plus the exact stable service,
-method, and Connect procedure identity. Authored positive plystra field
-numbers are the wire numbers. Generation rejects renumbering, permanently
-reserves every removed Protobuf field name and number, carries those
-reservations into generated source and descriptors, and retains inactive
-Interface and message history when exposure or Connect is disabled. Never edit
-or delete the ledger. If it drifts, recover the exact previously generated
-content before running plystra generate.
+every visible authored Interface message, exposed or not and even with Connect
+disabled. Authored positive plystra numbers are wire numbers. Generation
+rejects renumbering or reuse and permanently reserves removed Protobuf names
+and numbers. Only exposed Connect Interfaces become active and emit schemas,
+descriptors, handlers, or SDK output. Never edit or delete the ledger; recover
+its exact previous generated content before running plystra generate.
 
 Generation emits one deterministic .proto schema with canonical messages and
 exactly one unary service from every exposed Interface package. The Connect
@@ -1287,9 +1284,10 @@ recovery action or code.
   regenerate. Do not overwrite the reported path manually.
 - Protobuf wire-history drift: recover the exact previously generated
   generated/proto/wire-map.json. Never edit or delete it to force new field
-  or enum-member numbers. Change an authored Interface field number only before
-  the ledger records it; afterward define a new Interface version for a wire
-  change. Generation rejects missing, modified, corrupt, renumbered, reused, or
+  or enum-member numbers. Every visible authored Interface enters the ledger
+  after successful generation, even before exposure. Use an unused field number
+  for an additive field; define a new Interface version for a wire change.
+  Generation rejects missing, modified, corrupt, renumbered, reused, or
   projection-inconsistent history instead of guessing.
 - Protobuf schema or descriptor drift: never patch generated .proto files or
   generated/proto/descriptor-set.pb. Restore or regenerate the complete

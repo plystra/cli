@@ -43,7 +43,7 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:68b9c931cacbed07bb3faa771f8504d5d424b27e006746f4d168a6ee9ae68597"
+      "sha256": "sha256:c7b181b3a1bc516998c7d492945375a07175cb535f9633811264c819cb60b9f3"
     },
     {
       "path": "generated/go/configuration/account-profile_gen.go",
@@ -51,7 +51,7 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:982c4c2df401b8df50ba95ae09225971bde172c23c3eeadbaee45b7805c9f14d"
+      "sha256": "sha256:7202875e83cbebed7a980f1023a592978b17bfdce9e27b3307c4b05d9799ad86"
     },
     {
       "path": "generated/proto/descriptor-set.pb",
@@ -59,7 +59,7 @@
     },
     {
       "path": "generated/proto/wire-map.json",
-      "sha256": "sha256:571ae981f350a67cd5fd182c8094be8decdd2637577d33b1dd3856d6cd23e899"
+      "sha256": "sha256:291fb979cc47f081f48f964b9addaace1aa6dc1c7fb03bb29d16794509461183"
     }
   ],
   "application_manifest": {
@@ -97,8 +97,8 @@
           "dependency_baseline": []
         }
       ],
-      "protobuf_wire_map_digest": "sha256:571ae981f350a67cd5fd182c8094be8decdd2637577d33b1dd3856d6cd23e899",
-      "application_model_digest": "sha256:c45fc60273d1dde240c4e4e204fbc9c57f94e6442682e492e4e4fa9be6e2cec9"
+      "protobuf_wire_map_digest": "sha256:291fb979cc47f081f48f964b9addaace1aa6dc1c7fb03bb29d16794509461183",
+      "application_model_digest": "sha256:b3b799ecdc0c41742ce0783292ae14e33b4b896e56ec17e6d23ea659ef8420ee"
     },
     "transport_toolchain": {
       "schema": "plystra.transport-toolchain/v2",
@@ -136,7 +136,7 @@
         {
           "kind": "generator",
           "name": "protobuf-wire-map",
-          "version": "plystra.proto-wire-map/v4"
+          "version": "plystra.proto-wire-map/v5"
         },
         {
           "kind": "generated-go-dependency",
@@ -169,7 +169,7 @@
           "version": "7.0.2"
         }
       ],
-      "digest": "sha256:94827c9ac86023a73bd176709fb6de8295f36f74f4ddcf276a3490169e94ca76"
+      "digest": "sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
     }
   }
 }

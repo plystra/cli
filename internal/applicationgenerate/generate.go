@@ -621,9 +621,6 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 }
 
 func interfaceProtobufProjection(ctx context.Context, resolved applicationresolve.Result, transports applicationmeta.HTTPTransports, options Options) (protobufmodel.InterfaceModel, error) {
-	if !transports.Connect {
-		return protobufmodel.BuildInterfaces(false, nil)
-	}
 	definitions := make(map[string]protobufmodel.InterfaceInput)
 	for _, definition := range resolved.Interfaces().Interfaces() {
 		contract := definition.Contract()
@@ -645,6 +642,13 @@ func interfaceProtobufProjection(ctx context.Context, resolved applicationresolv
 			ContractDigest: definition.ContractDigest(),
 			SemanticErrors: errorCodes,
 		}
+	}
+	if !transports.Connect {
+		history := make([]protobufmodel.InterfaceInput, 0, len(definitions))
+		for _, input := range definitions {
+			history = append(history, input)
+		}
+		return protobufmodel.BuildInterfaceSelection(false, nil, history)
 	}
 
 	exposures := resolved.Manifest().HTTPExposures()
@@ -677,7 +681,11 @@ func interfaceProtobufProjection(ctx context.Context, resolved applicationresolv
 		}
 		inputs = append(inputs, input)
 	}
-	return protobufmodel.BuildInterfaces(true, inputs)
+	history := make([]protobufmodel.InterfaceInput, 0, len(definitions))
+	for _, input := range definitions {
+		history = append(history, input)
+	}
+	return protobufmodel.BuildInterfaceSelection(true, inputs, history)
 }
 
 func intrinsicInterfaceProtobufInputs(
