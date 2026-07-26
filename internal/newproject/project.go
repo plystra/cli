@@ -26,6 +26,7 @@ import (
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/implementationinventory"
+	"github.com/plystra/cli/internal/interfacecompatibility"
 	"github.com/plystra/cli/internal/moduleargument"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulemutation"
@@ -578,6 +579,10 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if err != nil {
 		return fmt.Errorf("digest initial application model: %w", err)
 	}
+	interfaceBaseline, err := interfacecompatibility.New(nil)
+	if err != nil {
+		return fmt.Errorf("construct initial Interface compatibility baseline: %w", err)
+	}
 	toolchain, err := transporttoolchain.Current()
 	if err != nil {
 		return fmt.Errorf("identify embedded transport toolchain: %w", err)
@@ -603,6 +608,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 		HTTPCORS:               httpCORS,
 		Composition:            composition,
 		ManifestProvenance:     provenance,
+		InterfaceCompatibility: interfaceBaseline,
 		ProtobufWireMap:        wireMap,
 		InterfaceProtobufModel: interfaceProtobufModel,
 	}, resolution)

@@ -273,6 +273,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 		".gitignore",
 		"README.md",
 		"generated/.plystra-manifest.json",
+		"generated/compatibility/interfaces.json",
 		"generated/go/application/main_gen.go",
 		"generated/go/assembly/compatibility_gen.go",
 		"generated/go/assembly/interfaces_gen.go",
@@ -1193,6 +1194,20 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 			t.Fatalf("generated README omits transport-toolchain guidance %q:\n%s", toolchainGuidance, readme)
 		}
 	}
+	for _, compatibilityGuidance := range [][]byte{
+		[]byte("`generated/compatibility/interfaces.json`"),
+		[]byte("every visible authored Interface"),
+		[]byte("whether or not it is selected or exposed"),
+		[]byte("stable field numbers, Go and JSON names, requiredness, and canonical Go types"),
+		[]byte("excluding metadata, projections, Implementations, configuration, Secrets, source paths, and module versions"),
+		[]byte("`plystra generate` refreshes it transactionally"),
+		[]byte("`plystra generate --check` reports drift without mutation"),
+		[]byte("Never edit it manually"),
+	} {
+		if !bytes.Contains(readme, compatibilityGuidance) {
+			t.Fatalf("generated README omits Interface compatibility guidance %q:\n%s", compatibilityGuidance, readme)
+		}
+	}
 	for _, credentialGuidance := range [][]byte{
 		[]byte("requires one explicit `credentialPolicy`"),
 		[]byte(`{mode: "anonymous"}`),
@@ -2062,6 +2077,12 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra generate --config deploy/customer-a.yaml",
 		"plystra generate --check --config deploy/customer-a.yaml",
 		"PLYSTRA_CONFIG supplies the same path",
+		"generated/compatibility/interfaces.json is the Interface",
+		"shape baseline",
+		"change authored inputs and run plystra generate",
+		"use",
+		"plystra generate --check",
+		"never edit output",
 		"generated/proto/wire-map.json is durable CLI-owned compatibility history",
 		"every canonical Interface message projected to Connect",
 		"projected to Connect, including request",

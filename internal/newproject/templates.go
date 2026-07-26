@@ -83,6 +83,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
+` + "`generated/compatibility/interfaces.json`" + ` is the committed, CLI-owned shape baseline for every visible authored Interface, whether or not it is selected or exposed. It records package and method identity, request and response names, reachable messages, stable field numbers, Go and JSON names, requiredness, and canonical Go types while excluding metadata, projections, Implementations, configuration, Secrets, source paths, and module versions. During prerelease development, ` + "`plystra generate`" + ` refreshes it transactionally and ` + "`plystra generate --check`" + ` reports drift without mutation. Never edit it manually.
+
 The required top-level ` + "`transport_toolchain`" + ` record in ` + "`generated/manifest.json`" + ` identifies the exact embedded ` + "`go/format`" + ` runtime; built-in Protobuf-model, descriptor, wire-map, Connect, and JavaScript generator versions; pinned generated Go and npm dependency versions; and its canonical digest. ` + "`plystra generate --check`" + ` reports drift when that identity changes. Plystra generation does not invoke an implicit global ` + "`protoc`" + ` or generator executable and does not use a hosted generation service.
 
 For each Interface exposed through Connect, the generated JavaScript SDK publishes one nested client method, one tree-shakable factory, its declared semantic-error-code union, and deterministic request, response, and reachable nested-message types from the authored Go contract. For ` + "`records.echo/v1`" + `, call ` + "`client.records.echo.v1(request)`" + ` or ` + "`createRecordsEchoV1(options)(request)`" + `. Both forms use the same exact Connect procedure and safe runtime boundary. Effective JSON names and required markers remain exact. ` + "`int32`" + ` and ` + "`uint32`" + ` become JavaScript ` + "`number`" + `; ` + "`int64`" + ` and ` + "`uint64`" + ` become ` + "`bigint`" + `; floating-point fields become ` + "`number`" + `; bytes become ` + "`Uint8Array`" + `; timestamps and durations use their canonical transport strings; repeated values are readonly arrays; and maps are readonly string-keyed records. The unsafe JavaScript object key ` + "`__proto__`" + ` is rejected before dispatch rather than silently changed or dropped.
@@ -336,9 +338,9 @@ A typical Plystra Project evolves into this layout:
         src/interfaces/<interface-id>.ts
         src/runtime.ts
 
-Treat every path under generated as CLI-owned. Never repair generated output by
-hand; change the authored declaration or implementation and run plystra
-generate.
+Generated files are CLI-owned; change authored inputs and run plystra generate,
+never edit output. generated/compatibility/interfaces.json is the Interface
+shape baseline; use plystra generate --check to compare it.
 
 generated/proto/wire-map.json is durable CLI-owned compatibility history for
 every canonical Interface message projected to Connect, including request,

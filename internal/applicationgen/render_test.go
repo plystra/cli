@@ -23,6 +23,7 @@ import (
 	"github.com/plystra/cli/internal/generationactivation"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/implementationinventory"
+	"github.com/plystra/cli/internal/interfacecompatibility"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
@@ -63,6 +64,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 	}
 	assertBootstrapMatchesManifestProvenance(t, output, options)
 	wantPaths := []string{
+		"generated/compatibility/interfaces.json",
 		"generated/docs/api.md",
 		"generated/docs/openapi.json",
 		"generated/go/adapters/connect/compat/send/v1/handler_gen.go",
@@ -263,7 +265,7 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render empty: %v", err)
 	}
-	if got := outputPaths(output); !slices.Equal(got, []string{"generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}) {
+	if got := outputPaths(output); !slices.Equal(got, []string{"generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}) {
 		t.Fatalf("empty output paths = %v", got)
 	}
 	wantManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), resolution.Context(), options.ManifestProvenance)
@@ -566,6 +568,13 @@ func withManifestProvenance(t testing.TB, options applicationgen.Options, resolu
 
 func withManifestProvenanceSelection(t testing.TB, options applicationgen.Options, resolution generationresolution.ExtensionResult, mode, environment, selectedPath string, selectedData []byte) applicationgen.Options {
 	t.Helper()
+	if !options.InterfaceCompatibility.Valid() {
+		baseline, err := interfacecompatibility.New(nil)
+		if err != nil {
+			t.Fatalf("interfacecompatibility.New: %v", err)
+		}
+		options.InterfaceCompatibility = baseline
+	}
 	projection, err := applicationgen.ProtobufProjection(options.HTTPTransports, resolution)
 	if err != nil {
 		t.Fatalf("ProtobufProjection: %v", err)

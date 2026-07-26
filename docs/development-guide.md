@@ -384,6 +384,8 @@ orders/
   generated/
     .plystra-manifest.json                CLI ownership manifest
     manifest.json                         resolved application manifest
+    compatibility/
+      interfaces.json                     authored Interface shape baseline
     proto/
       descriptor-set.pb                   self-contained descriptor evidence
       plystra/generated/.../capability.proto
@@ -408,6 +410,17 @@ orders/
 Edit declarations, Plugin Go code, tests, entry points, and Plugin-owned assets
 outside `generated/`. Every path under `generated/` is CLI-owned. Fix its
 authored input and regenerate; never patch generated output by hand.
+
+`generated/compatibility/interfaces.json` is committed compatibility evidence
+for every visible authored Interface, independent of selection and exposure.
+It snapshots the authored package and method, request and response names,
+reachable messages, stable field numbers, Go and JSON names, requiredness, and
+canonical Go types. It excludes metadata, projections, Implementations,
+configuration, Secrets, source paths, and module versions. During prerelease
+development, run `plystra generate` to refresh it transactionally after an
+intentional authored shape change. Use `plystra generate --check` to compare the
+current authored shapes without changing either the baseline or other Project
+files. Never edit the baseline by hand.
 
 `generated/proto/wire-map.json` is durable compatibility history, not a
 disposable cache. For each canonical Capability on the selected Connect

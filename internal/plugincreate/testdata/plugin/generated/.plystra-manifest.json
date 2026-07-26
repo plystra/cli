@@ -2,6 +2,10 @@
   "version": 2,
   "files": [
     {
+      "path": "generated/compatibility/interfaces.json",
+      "sha256": "sha256:892403f2ccf7a2c1ce5e37edb9706ab840bad6e47bc7e58ba13bcc2387194c70"
+    },
+    {
       "path": "generated/go/application/main_gen.go",
       "sha256": "sha256:c3760154a0481d0eba8d5ef8afe69963fb7907d4518bbdbc23c383c2f5ed0d06"
     },

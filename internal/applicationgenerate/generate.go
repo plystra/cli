@@ -27,6 +27,8 @@ import (
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/implementationadaptergen"
 	"github.com/plystra/cli/internal/implementationassemblygen"
+	"github.com/plystra/cli/internal/interfacecompatibility"
+	"github.com/plystra/cli/internal/interfacecontract"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfaceproxygen"
@@ -121,6 +123,7 @@ type Result struct {
 	configurationChanged bool
 	configurationPath    string
 	maintenancePath      string
+	interfaceComparison  interfacecompatibility.Comparison
 }
 
 // Module returns the nearest enclosing Go Module.
@@ -145,6 +148,12 @@ func (r Result) ConfigurationPath() string { return r.configurationPath }
 // ConfigurationMaintenancePath returns the dependency-baseline-owned document
 // that changed or would change during this operation.
 func (r Result) ConfigurationMaintenancePath() string { return r.maintenancePath }
+
+// InterfaceShapeComparison returns the authored Interface Go-shape
+// differences observed against the prior owned compatibility baseline.
+func (r Result) InterfaceShapeComparison() interfacecompatibility.Comparison {
+	return r.interfaceComparison
+}
 
 // Generate resolves and renders the nearest Plystra Project. Check mode
 // compares without mutation. Install mode atomically installs desired files,
@@ -174,6 +183,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			configurationChanged: prepared.resolved.ConfigurationMaintenance().Changed(),
 			configurationPath:    prepared.resolved.ConfigurationSelection().Path(),
 			maintenancePath:      prepared.resolved.ConfigurationMaintenancePath(),
+			interfaceComparison:  prepared.interfaceComparison,
 		}, nil
 	}
 
@@ -233,6 +243,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		configurationChanged: maintenance.Changed(),
 		configurationPath:    prepared.resolved.ConfigurationSelection().Path(),
 		maintenancePath:      prepared.resolved.ConfigurationMaintenancePath(),
+		interfaceComparison:  prepared.interfaceComparison,
 	}, nil
 }
 
@@ -261,6 +272,7 @@ type preparedGeneration struct {
 	resolved            applicationresolve.Result
 	output              generatedfiles.Output
 	runtimeRequirements []ModuleRequirement
+	interfaceComparison interfacecompatibility.Comparison
 	fingerprint         string
 }
 
@@ -276,6 +288,26 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		ExecutionTimeout:      options.ExecutionTimeout,
 		TemporaryParent:       options.TemporaryParent,
 	})
+	if err != nil {
+		return preparedGeneration{}, err
+	}
+	contracts := make([]interfacecontract.Contract, 0, len(resolved.Interfaces().Interfaces()))
+	for _, definition := range resolved.Interfaces().Interfaces() {
+		contracts = append(contracts, definition.Contract())
+	}
+	previousInterfaceBaseline, previousInterfaceBaselineExists, err := generatedfiles.ReadOwnedFile(
+		resolved.Module().Path(),
+		interfacecompatibility.Path,
+		interfacecompatibility.MaximumBytes,
+	)
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("read prior authored Interface compatibility baseline: %w", err)
+	}
+	interfaceBaseline, interfaceComparison, err := interfacecompatibility.Reconcile(
+		contracts,
+		previousInterfaceBaseline,
+		previousInterfaceBaselineExists,
+	)
 	if err != nil {
 		return preparedGeneration{}, err
 	}
@@ -400,6 +432,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		InterfaceProxies:       interfaceProxies,
 		ImplementationAdapters: implementationAdapters,
 		ImplementationAssembly: implementationAssembly,
+		InterfaceCompatibility: interfaceBaseline,
 		InterfaceProtobufModel: interfaceProtobufModel,
 		ProtobufWireMap:        wireMap,
 	}, resolved.Resolution())
@@ -410,7 +443,13 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
-	return preparedGeneration{resolved: resolved, output: output, runtimeRequirements: runtimeRequirements, fingerprint: fingerprint}, nil
+	return preparedGeneration{
+		resolved:            resolved,
+		output:              output,
+		runtimeRequirements: runtimeRequirements,
+		interfaceComparison: interfaceComparison,
+		fingerprint:         fingerprint,
+	}, nil
 }
 
 func interfaceProtobufProjection(ctx context.Context, resolved applicationresolve.Result, transports applicationmeta.HTTPTransports, options Options) (protobufmodel.InterfaceModel, error) {

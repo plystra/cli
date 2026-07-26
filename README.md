@@ -21,6 +21,17 @@ The CLI owns:
 
 The CLI is the sole writer of final `generated/` source.
 
+`generated/compatibility/interfaces.json` is the committed, CLI-owned
+compatibility baseline for every visible authored Interface, whether or not it
+is selected or exposed. It records each Interface package and method, request
+and response names, reachable messages, stable field numbers, Go and JSON
+names, requiredness, and canonical Go types. It deliberately excludes
+Interface metadata, generated projections, Implementations, configuration,
+Secrets, source paths, and module versions. During prerelease development,
+`plystra generate` refreshes this baseline transactionally and
+`plystra generate --check` reports its drift without mutation. Never edit it
+manually.
+
 `generated/proto/wire-map.json` is committed, CLI-owned compatibility history
 for every canonical Interface message projected to Connect, including
 request, response, and reachable same-package message types, plus the exact
