@@ -16,9 +16,12 @@ Plystra Core is exactly the Kernel plus the CLI:
 - `github.com/plystra/kernel` is the intrinsic in-process runtime.
 - `github.com/plystra/cli` resolves applications and generates their typed Go,
   HTTP, JavaScript, documentation, assembly, bootstrap, and manifest surfaces.
-- `github.com/plystra/authn` and `github.com/plystra/authz` are optional official
-  Plugin modules. Their implementation begins at Gates 16 and 23; at this
-  boundary they contain architecture documentation, not usable providers.
+- `github.com/plystra/data` is the separate relational compiler and Resource
+  provider module planned after Core Gate 15.
+- `github.com/plystra/authn` and `github.com/plystra/authz` are separate
+  official modules whose Data-backed implementation begins after the Data
+  gates; at this boundary they contain architecture documentation, not usable
+  persistence implementations.
 
 The public command surface currently implemented by the `plystra` binary is:
 
@@ -261,40 +264,47 @@ source repository, copy Plugin directories, inspect dependency environment
 overlays, modify Module Cache source, generate `go.work`, or assign the template
 special Provider or configuration precedence after creation.
 
+The CLI validates and prepares module state; it never publishes refs. Any
+corrected template, dependency, or release version is handed to the project
+owner for manual publication.
+
 The template's default application model must resolve without Provider
 ambiguity. When several compatible Plugins provide one required Capability,
-the template publisher must select one under `capabilities.use` in the
-template's root `plystra.yaml` and publish that corrected module version.
+the template author must select one under `capabilities.use` in the template's
+root `plystra.yaml` and prepare a corrected module version for owner
+publication.
 Creation otherwise reports every candidate and leaves no target directory for
 the consumer to repair.
 
 Template dependencies must not match the effective `GOPRIVATE` setting. The
 CLI checks the complete direct and transitive graph, reports every selected
-private `path@version`, and rolls back creation. A publisher must publish or
-replace a genuinely private dependency before releasing the template. If the
-reported module is already public, correct the overbroad Go privacy setting and
-retry creation.
+private `path@version`, and rolls back creation. The template author must
+replace a genuinely private dependency before requesting owner publication.
+If the reported module is already public, correct the overbroad Go privacy
+setting and retry creation.
 
 Template dependency Projects must not declare relative `replace` directives in
-their `go.mod` files. Publish the referenced module version first, replace the
-local path with that ordinary requirement, and publish a corrected Project
-version. Creation checks the template and every transitive dependency Project,
-reports stable `module@version/go.mod` provenance, and leaves no target when a
-relative replacement remains.
+their `go.mod` files. Prepare the referenced module version first, replace the
+local path with that ordinary requirement, and prepare a corrected Project
+version for owner publication. Creation checks the template and every
+transitive dependency Project, reports stable `module@version/go.mod`
+provenance, and leaves no target when a relative replacement remains.
 
 The staged generated application must also be a fixed point. Creation installs
 the generated output and immediately runs the equivalent of
 `plystra generate --check`. Dependency-composition drift or any changed,
 missing, unexpected, or obsolete generated path rejects the template and
-restores the transaction. The publisher must make generation deterministic,
-run `plystra generate` followed by `plystra generate --check` in a fresh
-Project directory, and publish a corrected module version.
+restores the transaction. The template author must make generation
+deterministic, run `plystra generate` followed by `plystra generate --check` in
+a fresh Project directory, and prepare a corrected module version for owner
+publication.
 
 Creation next runs the same read-only workflow as `plystra check`. It verifies
 the selected configuration and generated output again, then runs
 `go test -mod=readonly ./...` from the staged Project root. A failure restores
-the creation transaction; the publisher must make the public check pass in a
-fresh Project directory before publishing a corrected version.
+the creation transaction; the template author must make the public check pass
+in a fresh Project directory before requesting owner publication of a corrected
+version.
 
 The qualification stage then runs `go build -mod=readonly ./...` from the staged
 Project root. Every generated and authored Go package must compile without
@@ -552,20 +562,19 @@ changes generated output. Rename one authored `capability.yaml` field and
 regenerate; request and response names are checked independently.
 
 `.agents/skills/plystra/` is a creation-time project guide that the project may
-maintain as its authored workflows evolve. It is outside `generated/` and is not
-part of `plystra generate --check` ownership. The generated guide begins with
-the currently supported template-create-and-check path and an ordinary
-business-development sequence using only Go Module, Plugin, Capability, and
-`plystra.yaml`. It teaches one selected environment on that path, marks complete
-`--config` replacement as advanced, and puts resolver, generation,
-wire-history, and maintainer mechanics behind a detailed-reference boundary.
-It does not advertise a template as qualified while the complete qualification
-suite remains unfinished.
+maintain as its authored workflows evolve. It is outside `generated/` and is
+not part of `plystra generate --check` ownership. The current guide begins with
+the supported Project, Interface, Implementation, configuration, and generation
+path. Once Gates 16-18 implement Data, the generated guide must add only the
+implemented Resource declaration, named-instance binding, selected-dialect
+generation, and migration workflows; it must not ask users to precreate every
+environment or expose unresolved Secrets.
 
-The current CLI does not scaffold or run database migrations. A Plugin that
-owns migrations keeps them under that Plugin, and its lifecycle or provider
-logic applies them explicitly. Migration commands and reusable database Plugin
-workflows remain deferred; do not place migration assets under `generated/`.
+The current CLI does not scaffold or run Data migrations. Resource contracts,
+the official Data compiler, PostgreSQL/D1 generation, and explicit
+`data migration plan|apply|status` operations remain deferred to Gates 16-18.
+Do not work around that boundary by placing database or migration behavior in a
+legacy Plugin or in `generated/`.
 
 ## Compose dependency Project configuration
 
@@ -1835,15 +1844,26 @@ needed.
 Generated project `SKILL.md` files deliberately contain no Git workflow rules;
 repository process belongs in contributor documentation such as this guide.
 
+While Data, AuthN, or AuthZ is being developed, Kernel and CLI changes are
+allowed whenever their APIs, runtime, assembly, generation, configuration,
+testing, or developer experience must evolve for integration. These changes are
+not limited to bug fixes. Once Gate 15 and the release workflow are
+implemented, agents may publish immutable Kernel and CLI RC versions locally
+by preparing exact release state for downstream testing; remote ref publication
+remains a manual project-owner operation and no Agent may run `git push` or an
+equivalent publisher.
+
 ## Architectural boundaries that must not be crossed
 
 - Go Modules are distribution and dependency boundaries; `go.work` is optional.
-- Plugins are root-level module directories; there is no root `plugins/` tree.
-- Capabilities are exact, provider-independent, versioned contracts.
-- Ordinary Plugins depend on generated Capability clients, not concrete Plugins.
+- Interfaces are canonical ordinary Go contracts with exact versioned identity.
+- Implementations depend on injected Interfaces, not concrete implementations
+  in other packages.
+- Resources are advanced shared infrastructure contracts and are never external
+  transports.
 - The CLI resolves providers and writes all final generated source.
 - The Kernel receives one immutable already-resolved registry and never scans,
-  selects, or activates Plugins dynamically.
+  selects, or activates application packages dynamically.
 - The Kernel has no User, AuthN, AuthZ, Space, business audit, or application
   identity model.
 - No ordinary Plugin provides a Kernel function.
@@ -1860,18 +1880,20 @@ repository process belongs in contributor documentation such as this guide.
 The following remain roadmap work and must not be represented as complete:
 
 - Gate 15 Core foundation closure and the real Kernel and CLI prerelease pair.
-- Gates 16 through 22 official AuthN implementation, complete product
-  acceptance, and the accepted AuthN prerelease.
-- Gates 23 through 25 official AuthZ implementation, layered acceptance, the
-  accepted AuthZ prerelease, and three-layer development-Goal closure.
+- Gates 16 through 18 Data Resource/compiler implementation, PostgreSQL/D1
+  acceptance, and the Data stable candidate.
+- Gates 19 through 25 official AuthN implementation, complete Data-backed
+  acceptance, and the AuthN stable candidate.
+- Gates 26 through 28 official AuthZ implementation, layered acceptance, and
+  the Core + Data + AuthN + AuthZ development-goal closure.
 - Complete CLI dependency-management, development, test, build, check, fix,
   doctor, SDK packaging/publication, and release commands.
 - Generated documentation, compatibility, Behavioral Conformance, manifest,
   and release-evidence constraint projection.
-- CLI-managed database migration workflows and an official persistence Plugin.
-- Gate 26 final cross-platform acceptance, packaging, release metadata,
-  public-source readiness, and coordinated stable Kernel, CLI, AuthN, and AuthZ
-  `v0.0.1` publication.
+- CLI-managed Data migration workflows and selected-backend generation.
+- Gate 29 final cross-platform acceptance, packaging, release metadata,
+  public-source readiness, and coordinated stable Kernel, CLI, Data, AuthN, and
+  AuthZ `v0.0.1` publication after explicit owner authorization.
 
 Do not fill a deferred boundary with a placeholder, fake adapter, compatibility
 layer, skipped test, or undocumented manual edit to CLI-owned files.
