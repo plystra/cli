@@ -77,6 +77,7 @@ type Options struct {
 	InterfaceCompatibility interfacecompatibility.Baseline
 	InterfaceMetadata      interfacecompatibility.MetadataBaseline
 	InterfaceTransport     interfacecompatibility.TransportBaseline
+	InterfaceJavaScript    interfacecompatibility.JavaScriptBaseline
 	InterfaceProtobufModel protobufmodel.InterfaceModel
 	ProtobufWireMap        protobufwiremap.Map
 }
@@ -106,6 +107,9 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	if !options.InterfaceTransport.Valid() {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: Interface transport compatibility baseline is absent or invalid", ErrRender, ErrResolution)
+	}
+	if !options.InterfaceJavaScript.Valid() {
+		return generatedfiles.Output{}, fmt.Errorf("%w: %w: Interface JavaScript compatibility baseline is absent or invalid", ErrRender, ErrResolution)
 	}
 	interfaceProtobufModel, err := normalizeInterfaceProtobufModel(options.HTTPTransports, options.InterfaceProtobufModel)
 	if err != nil {
@@ -221,6 +225,9 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	if err := add(interfacecompatibility.TransportPath, options.InterfaceTransport.RecordJSON()); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Interface transport compatibility baseline: %w", ErrRender, err)
+	}
+	if err := add(interfacecompatibility.JavaScriptPath, options.InterfaceJavaScript.RecordJSON()); err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: Interface JavaScript compatibility baseline: %w", ErrRender, err)
 	}
 	if err := add(protobufwiremap.Path, options.ProtobufWireMap.CanonicalJSON()); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf wire map: %w", ErrRender, err)
@@ -512,6 +519,25 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	model, err := sdkmodel.Build(javaScriptTargets, aliasViews)
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: SDK model: %w", ErrRender, err)
+	}
+	javaScriptAPI, err := javascriptgen.BuildPublicAPI(
+		options.JavaScriptPackage,
+		model,
+		interfaceProtobufModel,
+	)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: JavaScript public API: %w", ErrRender, err)
+	}
+	javaScriptBaseline, err := interfacecompatibility.NewJavaScript(javaScriptAPI)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: Interface JavaScript compatibility baseline: %w", ErrRender, err)
+	}
+	if javaScriptBaseline.Digest() != options.InterfaceJavaScript.Digest() {
+		return generatedfiles.Output{}, fmt.Errorf(
+			"%w: %w: Interface JavaScript compatibility baseline does not match the generated package, client, type, and semantic-error API",
+			ErrRender,
+			ErrResolution,
+		)
 	}
 	if len(javaScriptTargets) != 0 || len(interfaceProtobufModel.Operations()) != 0 {
 		javaScript, err := javascriptgen.Render(javascriptgen.Options{

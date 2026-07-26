@@ -127,6 +127,7 @@ type Result struct {
 	interfaceComparison  interfacecompatibility.Comparison
 	metadataComparison   interfacecompatibility.MetadataComparison
 	transportComparison  interfacecompatibility.TransportComparison
+	javaScriptComparison interfacecompatibility.JavaScriptComparison
 }
 
 // Module returns the nearest enclosing Go Module.
@@ -171,6 +172,13 @@ func (r Result) InterfaceTransportComparison() interfacecompatibility.TransportC
 	return r.transportComparison
 }
 
+// InterfaceJavaScriptComparison returns shared package-root plus per-Interface
+// generated JavaScript API differences observed against the prior owned
+// compatibility baseline.
+func (r Result) InterfaceJavaScriptComparison() interfacecompatibility.JavaScriptComparison {
+	return r.javaScriptComparison
+}
+
 // Generate resolves and renders the nearest Plystra Project. Check mode
 // compares without mutation. Install mode atomically installs desired files,
 // validates the updated Project, and re-resolves inside the transaction so a
@@ -202,6 +210,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			interfaceComparison:  prepared.interfaceComparison,
 			metadataComparison:   prepared.metadataComparison,
 			transportComparison:  prepared.transportComparison,
+			javaScriptComparison: prepared.javaScriptComparison,
 		}, nil
 	}
 
@@ -264,6 +273,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		interfaceComparison:  prepared.interfaceComparison,
 		metadataComparison:   prepared.metadataComparison,
 		transportComparison:  prepared.transportComparison,
+		javaScriptComparison: prepared.javaScriptComparison,
 	}, nil
 }
 
@@ -289,13 +299,14 @@ func runModuleMutation(ctx context.Context, options Options, root string, requir
 }
 
 type preparedGeneration struct {
-	resolved            applicationresolve.Result
-	output              generatedfiles.Output
-	runtimeRequirements []ModuleRequirement
-	interfaceComparison interfacecompatibility.Comparison
-	metadataComparison  interfacecompatibility.MetadataComparison
-	transportComparison interfacecompatibility.TransportComparison
-	fingerprint         string
+	resolved             applicationresolve.Result
+	output               generatedfiles.Output
+	runtimeRequirements  []ModuleRequirement
+	interfaceComparison  interfacecompatibility.Comparison
+	metadataComparison   interfacecompatibility.MetadataComparison
+	transportComparison  interfacecompatibility.TransportComparison
+	javaScriptComparison interfacecompatibility.JavaScriptComparison
+	fingerprint          string
 }
 
 func prepare(ctx context.Context, options Options, start string) (preparedGeneration, error) {
@@ -384,6 +395,34 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		if err != nil {
 			return preparedGeneration{}, err
 		}
+	}
+	javaScriptModel, err := applicationgen.JavaScriptModel(resolved.Resolution())
+	if err != nil {
+		return preparedGeneration{}, err
+	}
+	javaScriptAPI, err := javascriptgen.BuildPublicAPI(
+		javaScriptPackage,
+		javaScriptModel,
+		interfaceProtobufModel,
+	)
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("build generated JavaScript public API: %w", err)
+	}
+	previousJavaScriptBaseline, previousJavaScriptBaselineExists, err := generatedfiles.ReadOwnedFile(
+		resolved.Module().Path(),
+		interfacecompatibility.JavaScriptPath,
+		interfacecompatibility.JavaScriptMaximumBytes,
+	)
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("read prior Interface JavaScript compatibility baseline: %w", err)
+	}
+	javaScriptBaseline, javaScriptComparison, err := interfacecompatibility.ReconcileJavaScript(
+		javaScriptAPI,
+		previousJavaScriptBaseline,
+		previousJavaScriptBaselineExists,
+	)
+	if err != nil {
+		return preparedGeneration{}, err
 	}
 	interfaceProxies, err := interfaceProxyInputs(resolved, interfaceProtobufModel)
 	if err != nil {
@@ -506,6 +545,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		InterfaceCompatibility: interfaceBaseline,
 		InterfaceMetadata:      metadataBaseline,
 		InterfaceTransport:     transportBaseline,
+		InterfaceJavaScript:    javaScriptBaseline,
 		InterfaceProtobufModel: interfaceProtobufModel,
 		ProtobufWireMap:        wireMap,
 	}, resolved.Resolution())
@@ -517,13 +557,14 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		return preparedGeneration{}, err
 	}
 	return preparedGeneration{
-		resolved:            resolved,
-		output:              output,
-		runtimeRequirements: runtimeRequirements,
-		interfaceComparison: interfaceComparison,
-		metadataComparison:  metadataComparison,
-		transportComparison: transportComparison,
-		fingerprint:         fingerprint,
+		resolved:             resolved,
+		output:               output,
+		runtimeRequirements:  runtimeRequirements,
+		interfaceComparison:  interfaceComparison,
+		metadataComparison:   metadataComparison,
+		transportComparison:  transportComparison,
+		javaScriptComparison: javaScriptComparison,
+		fingerprint:          fingerprint,
 	}, nil
 }
 

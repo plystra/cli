@@ -27,6 +27,7 @@ import (
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfacecompatibility"
+	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/moduleargument"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulemutation"
@@ -596,6 +597,18 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if err != nil {
 		return fmt.Errorf("construct initial Interface transport compatibility baseline: %w", err)
 	}
+	javaScriptModel, err := applicationgen.JavaScriptModel(resolution)
+	if err != nil {
+		return fmt.Errorf("construct initial JavaScript SDK model: %w", err)
+	}
+	javaScriptAPI, err := javascriptgen.BuildPublicAPI("", javaScriptModel, interfaceProtobufModel)
+	if err != nil {
+		return fmt.Errorf("construct initial JavaScript public API: %w", err)
+	}
+	javaScriptBaseline, err := interfacecompatibility.NewJavaScript(javaScriptAPI)
+	if err != nil {
+		return fmt.Errorf("construct initial Interface JavaScript compatibility baseline: %w", err)
+	}
 	toolchain, err := transporttoolchain.Current()
 	if err != nil {
 		return fmt.Errorf("identify embedded transport toolchain: %w", err)
@@ -624,6 +637,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 		InterfaceCompatibility: interfaceBaseline,
 		InterfaceMetadata:      metadataBaseline,
 		InterfaceTransport:     transportBaseline,
+		InterfaceJavaScript:    javaScriptBaseline,
 		ProtobufWireMap:        wireMap,
 		InterfaceProtobufModel: interfaceProtobufModel,
 	}, resolution)

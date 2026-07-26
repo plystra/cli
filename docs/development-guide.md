@@ -385,6 +385,7 @@ orders/
     .plystra-manifest.json                CLI ownership manifest
     manifest.json                         resolved application manifest
     compatibility/
+      interface-javascript.json           public JavaScript API baseline
       interface-metadata.json             classified metadata digest baseline
       interface-transport.json            Protobuf, procedure, wire baseline
       interfaces.json                     authored Interface shape baseline
@@ -443,6 +444,16 @@ path, or module-version values, and includes the shared safe-error descriptor
 in each exposed Interface descriptor digest. Generation updates it
 transactionally; `plystra generate --check` classifies transport drift without
 mutation. Never edit this baseline.
+
+`generated/compatibility/interface-javascript.json` records the caller-visible
+JavaScript projection for each exposed Interface. Its shared package digest
+covers the npm root export contract and public runtime types. Per-Interface
+digests independently cover the nested client path and factory/export surface,
+request/response/reachable-message TypeScript shapes with requiredness and
+exact scalar mappings, and declared semantic-error union. It stores no
+Implementation, configuration, Secret, source location, or module version.
+Use `plystra generate --check` to compare it without mutation; update authored
+Interface inputs and regenerate instead of editing this history.
 
 `generated/proto/wire-map.json` is durable compatibility history, not a
 disposable cache. For each canonical Capability on the selected Connect

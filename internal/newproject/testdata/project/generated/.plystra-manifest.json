@@ -2,6 +2,10 @@
   "version": 2,
   "files": [
     {
+      "path": "generated/compatibility/interface-javascript.json",
+      "sha256": "sha256:2b11d6f9a1c4a9be74f47450e16cc3913f184c2d35288ac05564a7bedbe90f8c"
+    },
+    {
       "path": "generated/compatibility/interface-metadata.json",
       "sha256": "sha256:91697cb69708e08b33d62caf3a3854160feda6694afa380e150b61019163e380"
     },

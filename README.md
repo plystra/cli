@@ -51,6 +51,16 @@ baseline in the same transaction as its source projections, and
 `plystra generate --check` reports the exact changed transport classes without
 modifying generated output.
 
+`generated/compatibility/interface-javascript.json` is the committed,
+CLI-owned caller-visible JavaScript API baseline for every exposed Interface.
+It compares the shared package-root exports and public runtime types separately
+from each Interface's client path and factory, request/response/reachable
+TypeScript shapes, requiredness and exact scalar mappings, and semantic-error
+union. The record stores only classified digests and exact Interface IDs; it
+contains no Implementation, configuration, Secret, source-location, or
+module-version data. Generation refreshes it in the same transaction, and
+`plystra generate --check` reports API drift without modifying the Project.
+
 `generated/proto/wire-map.json` is committed, CLI-owned compatibility history
 for every canonical Interface message projected to Connect, including
 request, response, and reachable same-package message types, plus the exact

@@ -62,6 +62,7 @@ replace github.com/plystra/kernel => %s
 	}
 	wantMissing := "generated output is not current:\n" +
 		"  missing generated/.plystra-manifest.json\n" +
+		"  missing generated/compatibility/interface-javascript.json\n" +
 		"  missing generated/compatibility/interface-metadata.json\n" +
 		"  missing generated/compatibility/interface-transport.json\n" +
 		"  missing generated/compatibility/interfaces.json\n" +
@@ -89,6 +90,7 @@ replace github.com/plystra/kernel => %s
 	}
 	for _, name := range []string{
 		"generated/.plystra-manifest.json",
+		"generated/compatibility/interface-javascript.json",
 		"generated/compatibility/interface-metadata.json",
 		"generated/compatibility/interface-transport.json",
 		"generated/compatibility/interfaces.json",
