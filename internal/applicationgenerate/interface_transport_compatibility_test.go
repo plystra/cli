@@ -53,6 +53,7 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 	if !initialComparison.Valid() || initialComparison.Clean() {
 		t.Fatalf("initial transport comparison = %#v", initialComparison)
 	}
+	assertEvolutionVersionNeutral(t, initial)
 	initialBaselineData := readFile(t, root, interfacecompatibility.TransportPath)
 	initialBaseline, err := interfacecompatibility.DecodeTransport(initialBaselineData)
 	if err != nil || !initialBaseline.Valid() || len(initialBaseline.Interfaces()) != 1 {
@@ -102,6 +103,18 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 		) {
 		t.Fatalf("transport changes = %#v", changes)
 	}
+	assertEvolutionVersionRequired(
+		t,
+		drift,
+		"records.list/v1",
+		[]interfacecompatibility.VersionSurface{
+			interfacecompatibility.VersionSurfaceGoShape,
+			interfacecompatibility.VersionSurfaceContract,
+			interfacecompatibility.VersionSurfaceProtobufDescriptor,
+			interfacecompatibility.VersionSurfaceWireMap,
+			interfacecompatibility.VersionSurfaceJavaScriptTypes,
+		},
+	)
 	if afterCheck := snapshotTree(t, root); !reflect.DeepEqual(afterCheck, beforeCheck) {
 		t.Fatal("transport compatibility check mutated the Project")
 	}
@@ -120,6 +133,18 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 	if err != nil || !updated.Report().Clean() || updated.InterfaceTransportComparison().Clean() {
 		t.Fatalf("Generate(updated) = changes %#v transport %#v, %v", updated.Report().Changes(), updated.InterfaceTransportComparison().Changes(), err)
 	}
+	assertEvolutionVersionRequired(
+		t,
+		updated,
+		"records.list/v1",
+		[]interfacecompatibility.VersionSurface{
+			interfacecompatibility.VersionSurfaceGoShape,
+			interfacecompatibility.VersionSurfaceContract,
+			interfacecompatibility.VersionSurfaceProtobufDescriptor,
+			interfacecompatibility.VersionSurfaceWireMap,
+			interfacecompatibility.VersionSurfaceJavaScriptTypes,
+		},
+	)
 	updatedBaseline, err := interfacecompatibility.DecodeTransport(readFile(t, root, interfacecompatibility.TransportPath))
 	if err != nil || updatedBaseline.Digest() == initialBaseline.Digest() {
 		t.Fatalf("updated transport baseline = digest %q, %v", updatedBaseline.Digest(), err)
@@ -130,4 +155,5 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 	if err != nil || !clean.Report().Clean() || !clean.InterfaceTransportComparison().Clean() {
 		t.Fatalf("Generate --check(clean) = changes %#v transport %#v, %v", clean.Report().Changes(), clean.InterfaceTransportComparison().Changes(), err)
 	}
+	assertEvolutionVersionNeutral(t, clean)
 }

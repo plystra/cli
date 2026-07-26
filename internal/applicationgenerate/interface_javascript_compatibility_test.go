@@ -59,6 +59,7 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 		initialComparison.Changes()[0].Kind() != interfacecompatibility.ChangeAdded {
 		t.Fatalf("initial JavaScript comparison = %#v", initialComparison)
 	}
+	assertEvolutionVersionNeutral(t, initial)
 	initialBaselineData := readFile(t, root, interfacecompatibility.JavaScriptPath)
 	initialBaseline, err := interfacecompatibility.DecodeJavaScript(initialBaselineData)
 	if err != nil || !initialBaseline.Valid() || len(initialBaseline.Interfaces()) != 1 {
@@ -106,6 +107,18 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 		) {
 		t.Fatalf("JavaScript changes = %#v", changes)
 	}
+	assertEvolutionVersionRequired(
+		t,
+		drift,
+		"records.list/v1",
+		[]interfacecompatibility.VersionSurface{
+			interfacecompatibility.VersionSurfaceGoShape,
+			interfacecompatibility.VersionSurfaceContract,
+			interfacecompatibility.VersionSurfaceProtobufDescriptor,
+			interfacecompatibility.VersionSurfaceWireMap,
+			interfacecompatibility.VersionSurfaceJavaScriptTypes,
+		},
+	)
 	if afterCheck := snapshotTree(t, root); !reflect.DeepEqual(afterCheck, beforeCheck) {
 		t.Fatal("JavaScript compatibility check mutated the Project")
 	}
@@ -129,6 +142,18 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 			err,
 		)
 	}
+	assertEvolutionVersionRequired(
+		t,
+		updated,
+		"records.list/v1",
+		[]interfacecompatibility.VersionSurface{
+			interfacecompatibility.VersionSurfaceGoShape,
+			interfacecompatibility.VersionSurfaceContract,
+			interfacecompatibility.VersionSurfaceProtobufDescriptor,
+			interfacecompatibility.VersionSurfaceWireMap,
+			interfacecompatibility.VersionSurfaceJavaScriptTypes,
+		},
+	)
 	updatedBaseline, err := interfacecompatibility.DecodeJavaScript(
 		readFile(t, root, interfacecompatibility.JavaScriptPath),
 	)
@@ -146,4 +171,5 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 			err,
 		)
 	}
+	assertEvolutionVersionNeutral(t, clean)
 }

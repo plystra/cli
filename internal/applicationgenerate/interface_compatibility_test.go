@@ -39,6 +39,7 @@ func TestGenerateComparesAuthoredInterfaceShapeAgainstOwnedBaseline(t *testing.T
 		changes[0].ID() != "records.echo/v1" {
 		t.Fatalf("initial comparison changes = %#v", changes)
 	}
+	assertEvolutionVersionNeutral(t, initial)
 	initialBaselineData := readFile(t, root, interfacecompatibility.Path)
 	initialBaseline, err := interfacecompatibility.Decode(initialBaselineData)
 	if err != nil || !initialBaseline.Valid() || len(initialBaseline.Interfaces()) != 1 {
@@ -77,6 +78,15 @@ func TestGenerateComparesAuthoredInterfaceShapeAgainstOwnedBaseline(t *testing.T
 		shapeChanges[0].PreviousDigest() == shapeChanges[0].CurrentDigest() {
 		t.Fatalf("shape changes = %#v", shapeChanges)
 	}
+	assertEvolutionVersionRequired(
+		t,
+		drift,
+		"records.echo/v1",
+		[]interfacecompatibility.VersionSurface{
+			interfacecompatibility.VersionSurfaceGoShape,
+			interfacecompatibility.VersionSurfaceContract,
+		},
+	)
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, driftBefore) {
 		t.Fatal("Generate --check changed the Project while reporting Interface compatibility drift")
 	}
@@ -86,6 +96,15 @@ func TestGenerateComparesAuthoredInterfaceShapeAgainstOwnedBaseline(t *testing.T
 	if err != nil || !updated.Report().Clean() || updated.InterfaceShapeComparison().Clean() {
 		t.Fatalf("Generate(updated) = changes %#v comparison %#v, %v", updated.Report().Changes(), updated.InterfaceShapeComparison().Changes(), err)
 	}
+	assertEvolutionVersionRequired(
+		t,
+		updated,
+		"records.echo/v1",
+		[]interfacecompatibility.VersionSurface{
+			interfacecompatibility.VersionSurfaceGoShape,
+			interfacecompatibility.VersionSurfaceContract,
+		},
+	)
 	updatedBaseline, err := interfacecompatibility.Decode(readFile(t, root, interfacecompatibility.Path))
 	if err != nil || updatedBaseline.Digest() == initialBaseline.Digest() {
 		t.Fatalf("updated baseline = digest %q, %v", updatedBaseline.Digest(), err)
@@ -95,6 +114,7 @@ func TestGenerateComparesAuthoredInterfaceShapeAgainstOwnedBaseline(t *testing.T
 	if err != nil || !clean.Report().Clean() || !clean.InterfaceShapeComparison().Clean() {
 		t.Fatalf("Generate --check(clean) = changes %#v comparison %#v, %v", clean.Report().Changes(), clean.InterfaceShapeComparison().Changes(), err)
 	}
+	assertEvolutionVersionNeutral(t, clean)
 
 	writeFile(t, interfacePath, strings.Replace(compatibilityInterfaceSource(true, "value"), "Name string", "Name []byte", 1))
 	rollbackBefore := snapshotTree(t, root)
@@ -103,6 +123,64 @@ func TestGenerateComparesAuthoredInterfaceShapeAgainstOwnedBaseline(t *testing.T
 	options.Validate = func(context.Context, string) error { return sentinel }
 	if result, err := applicationgenerate.Generate(t.Context(), options); !errors.Is(err, sentinel) || !reflect.DeepEqual(snapshotTree(t, root), rollbackBefore) {
 		t.Fatalf("Generate(rollback) = %#v, %v", result, err)
+	}
+}
+
+func assertEvolutionVersionNeutral(
+	t testing.TB,
+	result applicationgenerate.Result,
+) {
+	t.Helper()
+
+	assessment := result.InterfaceEvolutionAssessment()
+	if !assessment.Valid() ||
+		assessment.RequiresNewVersion() ||
+		len(assessment.Requirements()) != 0 {
+		t.Fatalf("Interface evolution assessment = %#v", assessment.Requirements())
+	}
+	if err := assessment.ValidateStableVersioning(); err != nil {
+		t.Fatalf("ValidateStableVersioning = %v", err)
+	}
+}
+
+func assertEvolutionVersionRequired(
+	t testing.TB,
+	result applicationgenerate.Result,
+	identifier string,
+	wantSurfaces []interfacecompatibility.VersionSurface,
+) {
+	t.Helper()
+
+	assessment := result.InterfaceEvolutionAssessment()
+	if !assessment.Valid() || !assessment.RequiresNewVersion() {
+		t.Fatalf("Interface evolution assessment = %#v", assessment.Requirements())
+	}
+	requirements := assessment.Requirements()
+	if len(requirements) != 1 || requirements[0].ID() != identifier {
+		t.Fatalf("Interface evolution requirements = %#v", requirements)
+	}
+	changes := requirements[0].Changes()
+	gotSurfaces := make([]interfacecompatibility.VersionSurface, len(changes))
+	for index, change := range changes {
+		gotSurfaces[index] = change.Surface()
+		if change.Kind() != interfacecompatibility.ChangeChanged {
+			t.Fatalf("Interface evolution change = %#v", change)
+		}
+	}
+	if !reflect.DeepEqual(gotSurfaces, wantSurfaces) {
+		t.Fatalf("Interface evolution surfaces = %#v, want %#v", gotSurfaces, wantSurfaces)
+	}
+	stableErr := assessment.ValidateStableVersioning()
+	if !errors.Is(stableErr, interfacecompatibility.ErrStableVersionRequired) ||
+		!strings.Contains(stableErr.Error(), identifier) ||
+		!strings.Contains(stableErr.Error(), "new higher /vN") {
+		t.Fatalf("ValidateStableVersioning = %v", stableErr)
+	}
+	var typed *interfacecompatibility.StableVersionError
+	if !errors.As(stableErr, &typed) ||
+		len(typed.Requirements()) != 1 ||
+		typed.Requirements()[0].ID() != identifier {
+		t.Fatalf("stable version evidence = %#v, %v", typed, stableErr)
 	}
 }
 

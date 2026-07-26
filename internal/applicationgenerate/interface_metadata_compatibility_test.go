@@ -87,6 +87,7 @@ func TestGenerateComparesInterfaceMetadataByDeclaredCompatibilityClass(t *testin
 			if !initialComparison.Valid() || initialComparison.Clean() {
 				t.Fatalf("initial metadata comparison = %#v", initialComparison)
 			}
+			assertEvolutionVersionNeutral(t, initial)
 			initialBaselineData := readFile(t, root, interfacecompatibility.MetadataPath)
 			initialBaseline, err := interfacecompatibility.DecodeMetadata(initialBaselineData)
 			if err != nil || !initialBaseline.Valid() || len(initialBaseline.Interfaces()) != 1 {
@@ -136,6 +137,18 @@ func TestGenerateComparesInterfaceMetadataByDeclaredCompatibilityClass(t *testin
 			if !previousExists || !currentExists || previousDigest == currentDigest {
 				t.Fatalf("class %s digests = %q, %t -> %q, %t", test.class, previousDigest, previousExists, currentDigest, currentExists)
 			}
+			if test.class == interfacecompatibility.MetadataClassContract {
+				assertEvolutionVersionRequired(
+					t,
+					drift,
+					"records.echo/v1",
+					[]interfacecompatibility.VersionSurface{
+						interfacecompatibility.VersionSurfaceContract,
+					},
+				)
+			} else {
+				assertEvolutionVersionNeutral(t, drift)
+			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatal("metadata compatibility check mutated the Project")
 			}
@@ -148,6 +161,7 @@ func TestGenerateComparesInterfaceMetadataByDeclaredCompatibilityClass(t *testin
 			if err != nil || !updated.Report().Clean() || updated.InterfaceMetadataComparison().Clean() {
 				t.Fatalf("Generate(updated) = changes %#v metadata %#v, %v", updated.Report().Changes(), updated.InterfaceMetadataComparison().Changes(), err)
 			}
+			assertEvolutionVersionNeutral(t, updated)
 			updatedBaseline, err := interfacecompatibility.DecodeMetadata(readFile(t, root, interfacecompatibility.MetadataPath))
 			if err != nil || updatedBaseline.Digest() == initialBaseline.Digest() {
 				t.Fatalf("updated metadata baseline = digest %q, %v", updatedBaseline.Digest(), err)
@@ -157,6 +171,7 @@ func TestGenerateComparesInterfaceMetadataByDeclaredCompatibilityClass(t *testin
 			if err != nil || !clean.Report().Clean() || !clean.InterfaceMetadataComparison().Clean() {
 				t.Fatalf("Generate --check(clean) = changes %#v metadata %#v, %v", clean.Report().Changes(), clean.InterfaceMetadataComparison().Changes(), err)
 			}
+			assertEvolutionVersionNeutral(t, clean)
 		})
 	}
 }

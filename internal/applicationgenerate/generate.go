@@ -129,6 +129,7 @@ type Result struct {
 	transportComparison     interfacecompatibility.TransportComparison
 	javaScriptComparison    interfacecompatibility.JavaScriptComparison
 	documentationComparison interfacecompatibility.DocumentationComparison
+	evolutionAssessment     interfacecompatibility.EvolutionAssessment
 }
 
 // Module returns the nearest enclosing Go Module.
@@ -186,6 +187,12 @@ func (r Result) InterfaceDocumentationComparison() interfacecompatibility.Docume
 	return r.documentationComparison
 }
 
+// InterfaceEvolutionAssessment returns the deterministic aggregate
+// compatibility classification consumed by stable release policy.
+func (r Result) InterfaceEvolutionAssessment() interfacecompatibility.EvolutionAssessment {
+	return r.evolutionAssessment
+}
+
 // Generate resolves and renders the nearest Plystra Project. Check mode
 // compares without mutation. Install mode atomically installs desired files,
 // validates the updated Project, and re-resolves inside the transaction so a
@@ -219,6 +226,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			transportComparison:     prepared.transportComparison,
 			javaScriptComparison:    prepared.javaScriptComparison,
 			documentationComparison: prepared.documentationComparison,
+			evolutionAssessment:     prepared.evolutionAssessment,
 		}, nil
 	}
 
@@ -283,6 +291,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		transportComparison:     prepared.transportComparison,
 		javaScriptComparison:    prepared.javaScriptComparison,
 		documentationComparison: prepared.documentationComparison,
+		evolutionAssessment:     prepared.evolutionAssessment,
 	}, nil
 }
 
@@ -316,6 +325,7 @@ type preparedGeneration struct {
 	transportComparison     interfacecompatibility.TransportComparison
 	javaScriptComparison    interfacecompatibility.JavaScriptComparison
 	documentationComparison interfacecompatibility.DocumentationComparison
+	evolutionAssessment     interfacecompatibility.EvolutionAssessment
 	fingerprint             string
 }
 
@@ -603,6 +613,18 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
+	evolutionAssessment, err := interfacecompatibility.AssessEvolution(
+		interfacecompatibility.EvolutionInput{
+			Shape:         interfaceComparison,
+			Metadata:      metadataComparison,
+			Transport:     transportComparison,
+			JavaScript:    javaScriptComparison,
+			Documentation: documentationComparison,
+		},
+	)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
 	fingerprint, err := generationFingerprint(resolved, output)
 	if err != nil {
 		return preparedGeneration{}, err
@@ -616,6 +638,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		transportComparison:     transportComparison,
 		javaScriptComparison:    javaScriptComparison,
 		documentationComparison: documentationComparison,
+		evolutionAssessment:     evolutionAssessment,
 		fingerprint:             fingerprint,
 	}, nil
 }
