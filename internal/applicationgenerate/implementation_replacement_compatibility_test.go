@@ -49,6 +49,7 @@ http:
 	if err != nil || !initial.Report().Clean() {
 		t.Fatalf("Generate(initial) = changes %#v, %v", initial.Report().Changes(), err)
 	}
+	assertCanonicalInterfaceArtifactTaxonomy(t, root)
 	options.Check = true
 	cleanBeforeReplacement, err := applicationgenerate.Generate(t.Context(), options)
 	if err != nil || !cleanBeforeReplacement.Report().Clean() {
@@ -298,5 +299,64 @@ func assertNoInterfaceProjectionReportDrift(
 				t.Fatalf("compatible Implementation replacement reported Interface projection drift at %s", path)
 			}
 		}
+	}
+}
+
+func assertCanonicalInterfaceArtifactTaxonomy(t testing.TB, root string) {
+	t.Helper()
+	required := map[string]bool{
+		"proxy":     false,
+		"adapter":   false,
+		"assembly":  false,
+		"bootstrap": false,
+		"transport": false,
+		"sdk":       false,
+		"manifest":  false,
+	}
+	for _, entry := range snapshotGenerated(t, root) {
+		if !entry.mode.IsRegular() {
+			continue
+		}
+		class := canonicalInterfaceArtifactClass(entry.path)
+		if class == "" {
+			t.Fatalf("canonical Interface generation emitted unclassified artifact %s", entry.path)
+		}
+		if _, exists := required[class]; exists {
+			required[class] = true
+		}
+	}
+	for class, seen := range required {
+		if !seen {
+			t.Fatalf("canonical Interface generation emitted no %s artifact", class)
+		}
+	}
+}
+
+func canonicalInterfaceArtifactClass(path string) string {
+	switch {
+	case path == "generated/.plystra-manifest.json",
+		path == "generated/manifest.json",
+		strings.HasPrefix(path, "generated/compatibility/"):
+		return "manifest"
+	case strings.HasPrefix(path, "generated/go/proxies/"):
+		return "proxy"
+	case strings.HasPrefix(path, "generated/go/adapters/"):
+		return "adapter"
+	case strings.HasPrefix(path, "generated/go/assembly/"):
+		return "assembly"
+	case strings.HasPrefix(path, "generated/go/application/"),
+		strings.HasPrefix(path, "generated/go/bootstrap/"),
+		strings.HasPrefix(path, "generated/go/configuration/"):
+		return "bootstrap"
+	case strings.HasPrefix(path, "generated/go/internal/connectschema/"),
+		strings.HasPrefix(path, "generated/go/internal/invocationcontext/"),
+		strings.HasPrefix(path, "generated/proto/"):
+		return "transport"
+	case strings.HasPrefix(path, "generated/sdk/"):
+		return "sdk"
+	case strings.HasPrefix(path, "generated/docs/"):
+		return "documentation"
+	default:
+		return ""
 	}
 }
