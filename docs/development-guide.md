@@ -386,6 +386,7 @@ orders/
     manifest.json                         resolved application manifest
     compatibility/
       interface-metadata.json             classified metadata digest baseline
+      interface-transport.json            Protobuf, procedure, wire baseline
       interfaces.json                     authored Interface shape baseline
     proto/
       descriptor-set.pb                   self-contained descriptor evidence
@@ -431,7 +432,17 @@ deprecation, and its example digest covers validated request-and-outcome
 examples. Generation maintains this committed CLI-owned file in the same
 transaction as the shape baseline; `plystra generate --check` reports which
 classified digest changed without mutation. Change `interface.go` or
-`interface.yaml`, then regenerate—never patch either compatibility file.
+`interface.yaml`, then regenerate—never patch a compatibility file.
+
+`generated/compatibility/interface-transport.json` records separate
+Protobuf-descriptor, Connect-procedure, and active wire-map digests for every
+Interface on the selected Connect surface. It is derived from the same
+descriptor evidence and durable wire map consumed by the built-in transport
+generators, contains no raw contract, Implementation, configuration, Secret,
+path, or module-version values, and includes the shared safe-error descriptor
+in each exposed Interface descriptor digest. Generation updates it
+transactionally; `plystra generate --check` classifies transport drift without
+mutation. Never edit this baseline.
 
 `generated/proto/wire-map.json` is durable compatibility history, not a
 disposable cache. For each canonical Capability on the selected Connect

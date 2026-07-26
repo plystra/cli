@@ -25,6 +25,7 @@ import (
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfacecompatibility"
 	"github.com/plystra/cli/internal/javascriptgen"
+	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
@@ -65,6 +66,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 	assertBootstrapMatchesManifestProvenance(t, output, options)
 	wantPaths := []string{
 		"generated/compatibility/interface-metadata.json",
+		"generated/compatibility/interface-transport.json",
 		"generated/compatibility/interfaces.json",
 		"generated/docs/api.md",
 		"generated/docs/openapi.json",
@@ -266,7 +268,7 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render empty: %v", err)
 	}
-	if got := outputPaths(output); !slices.Equal(got, []string{"generated/compatibility/interface-metadata.json", "generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}) {
+	if got := outputPaths(output); !slices.Equal(got, []string{"generated/compatibility/interface-metadata.json", "generated/compatibility/interface-transport.json", "generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}) {
 		t.Fatalf("empty output paths = %v", got)
 	}
 	wantManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), resolution.Context(), options.ManifestProvenance)
@@ -454,6 +456,13 @@ func TestRenderRejectsInvalidResolutionModuleAndPackage(t *testing.T) {
 	if _, err := applicationgen.Render(missingProvider, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, applicationgen.ErrResolution) {
 		t.Fatalf("missing selected provider error = %v", err)
 	}
+	missingTransportBaseline := withManifestProvenance(t, resolvedOptions(), resolution)
+	missingTransportBaseline.InterfaceTransport = interfacecompatibility.TransportBaseline{}
+	if _, err := applicationgen.Render(missingTransportBaseline, resolution); !errors.Is(err, applicationgen.ErrRender) ||
+		!errors.Is(err, applicationgen.ErrResolution) ||
+		!strings.Contains(err.Error(), "transport compatibility baseline is absent or invalid") {
+		t.Fatalf("missing Interface transport baseline error = %v", err)
+	}
 }
 
 func TestRenderRequiresMatchingTransportConfigurationProvenance(t *testing.T) {
@@ -587,11 +596,21 @@ func withManifestProvenanceSelection(t testing.TB, options applicationgen.Option
 	if err != nil {
 		t.Fatalf("ProtobufProjection: %v", err)
 	}
-	wireMap, err := protobufwiremap.Build(projection, emptyInterfaceWireProjection(t, projection), nil, false, "")
+	interfaceProjection := emptyInterfaceWireProjection(t, projection)
+	wireMap, err := protobufwiremap.Build(projection, interfaceProjection, nil, false, "")
 	if err != nil {
 		t.Fatalf("protobufwiremap.Build: %v", err)
 	}
 	options.ProtobufWireMap = wireMap
+	descriptorEvidence, err := protobufdescriptor.BuildWithInterfaces(projection, wireMap, interfaceProjection)
+	if err != nil {
+		t.Fatalf("protobufdescriptor.BuildWithInterfaces: %v", err)
+	}
+	transportBaseline, err := interfacecompatibility.BuildTransport(wireMap, descriptorEvidence)
+	if err != nil {
+		t.Fatalf("interfacecompatibility.BuildTransport: %v", err)
+	}
+	options.InterfaceTransport = transportBaseline
 	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
 		ModulePath:             options.ModulePath,
 		JavaScriptPackage:      options.JavaScriptPackage,

@@ -76,6 +76,7 @@ type Options struct {
 	ImplementationAssembly implementationassemblygen.Options
 	InterfaceCompatibility interfacecompatibility.Baseline
 	InterfaceMetadata      interfacecompatibility.MetadataBaseline
+	InterfaceTransport     interfacecompatibility.TransportBaseline
 	InterfaceProtobufModel protobufmodel.InterfaceModel
 	ProtobufWireMap        protobufwiremap.Map
 }
@@ -102,6 +103,9 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	if !options.InterfaceMetadata.Valid() {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: Interface metadata compatibility baseline is absent or invalid", ErrRender, ErrResolution)
+	}
+	if !options.InterfaceTransport.Valid() {
+		return generatedfiles.Output{}, fmt.Errorf("%w: %w: Interface transport compatibility baseline is absent or invalid", ErrRender, ErrResolution)
 	}
 	interfaceProtobufModel, err := normalizeInterfaceProtobufModel(options.HTTPTransports, options.InterfaceProtobufModel)
 	if err != nil {
@@ -163,6 +167,13 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf descriptor evidence: %w", ErrRender, err)
 	}
+	transportBaseline, err := interfacecompatibility.BuildTransport(options.ProtobufWireMap, descriptorEvidence)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: Interface transport compatibility baseline: %w", ErrRender, err)
+	}
+	if transportBaseline.Digest() != options.InterfaceTransport.Digest() {
+		return generatedfiles.Output{}, fmt.Errorf("%w: %w: Interface transport compatibility baseline does not match generated descriptor, procedure, and wire-map projections", ErrRender, ErrResolution)
+	}
 	plan, err := generationlowering.Lower(options.ModulePath, resolution.Contributions())
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: lower contributions: %w", ErrRender, err)
@@ -207,6 +218,9 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	if err := add(interfacecompatibility.MetadataPath, options.InterfaceMetadata.RecordJSON()); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Interface metadata compatibility baseline: %w", ErrRender, err)
+	}
+	if err := add(interfacecompatibility.TransportPath, options.InterfaceTransport.RecordJSON()); err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: Interface transport compatibility baseline: %w", ErrRender, err)
 	}
 	if err := add(protobufwiremap.Path, options.ProtobufWireMap.CanonicalJSON()); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf wire map: %w", ErrRender, err)

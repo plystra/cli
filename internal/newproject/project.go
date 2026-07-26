@@ -36,6 +36,7 @@ import (
 	"github.com/plystra/cli/internal/projectcheck"
 	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/projectsmoke"
+	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
@@ -587,6 +588,14 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if err != nil {
 		return fmt.Errorf("construct initial Interface metadata compatibility baseline: %w", err)
 	}
+	descriptorEvidence, err := protobufdescriptor.BuildWithInterfaces(protobufProjection, wireMap, interfaceProtobufModel)
+	if err != nil {
+		return fmt.Errorf("build initial Protobuf descriptor evidence: %w", err)
+	}
+	transportBaseline, err := interfacecompatibility.BuildTransport(wireMap, descriptorEvidence)
+	if err != nil {
+		return fmt.Errorf("construct initial Interface transport compatibility baseline: %w", err)
+	}
 	toolchain, err := transporttoolchain.Current()
 	if err != nil {
 		return fmt.Errorf("identify embedded transport toolchain: %w", err)
@@ -614,6 +623,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 		ManifestProvenance:     provenance,
 		InterfaceCompatibility: interfaceBaseline,
 		InterfaceMetadata:      metadataBaseline,
+		InterfaceTransport:     transportBaseline,
 		ProtobufWireMap:        wireMap,
 		InterfaceProtobufModel: interfaceProtobufModel,
 	}, resolution)

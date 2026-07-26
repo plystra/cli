@@ -42,6 +42,15 @@ deprecation; and the example class covers validated request-and-outcome
 examples. `plystra generate` refreshes it in the same transaction, while
 `plystra generate --check` compares each class without mutation.
 
+`generated/compatibility/interface-transport.json` is the committed,
+CLI-owned transport baseline for each Interface on the selected Connect
+surface. It stores only separate digests for the exact Protobuf descriptor,
+Connect procedure, and active wire-map projection. The descriptor digest also
+covers the shared safe-error descriptor. `plystra generate` refreshes this
+baseline in the same transaction as its source projections, and
+`plystra generate --check` reports the exact changed transport classes without
+modifying generated output.
+
 `generated/proto/wire-map.json` is committed, CLI-owned compatibility history
 for every canonical Interface message projected to Connect, including
 request, response, and reachable same-package message types, plus the exact

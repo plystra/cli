@@ -6,6 +6,10 @@
       "sha256": "sha256:91697cb69708e08b33d62caf3a3854160feda6694afa380e150b61019163e380"
     },
     {
+      "path": "generated/compatibility/interface-transport.json",
+      "sha256": "sha256:28e8b97e949ae145f3bda99ab830d793b3d6f8ed38f0b848d8881b0ed61ddd04"
+    },
+    {
       "path": "generated/compatibility/interfaces.json",
       "sha256": "sha256:892403f2ccf7a2c1ce5e37edb9706ab840bad6e47bc7e58ba13bcc2387194c70"
     },

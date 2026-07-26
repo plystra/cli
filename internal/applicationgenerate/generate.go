@@ -35,6 +35,7 @@ import (
 	"github.com/plystra/cli/internal/intrinsicinterface"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/modulelocate"
+	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/transporttoolchain"
@@ -125,6 +126,7 @@ type Result struct {
 	maintenancePath      string
 	interfaceComparison  interfacecompatibility.Comparison
 	metadataComparison   interfacecompatibility.MetadataComparison
+	transportComparison  interfacecompatibility.TransportComparison
 }
 
 // Module returns the nearest enclosing Go Module.
@@ -162,6 +164,13 @@ func (r Result) InterfaceMetadataComparison() interfacecompatibility.MetadataCom
 	return r.metadataComparison
 }
 
+// InterfaceTransportComparison returns the generated Protobuf descriptor,
+// Connect procedure, and wire-map differences observed against the prior owned
+// transport compatibility baseline.
+func (r Result) InterfaceTransportComparison() interfacecompatibility.TransportComparison {
+	return r.transportComparison
+}
+
 // Generate resolves and renders the nearest Plystra Project. Check mode
 // compares without mutation. Install mode atomically installs desired files,
 // validates the updated Project, and re-resolves inside the transaction so a
@@ -192,6 +201,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			maintenancePath:      prepared.resolved.ConfigurationMaintenancePath(),
 			interfaceComparison:  prepared.interfaceComparison,
 			metadataComparison:   prepared.metadataComparison,
+			transportComparison:  prepared.transportComparison,
 		}, nil
 	}
 
@@ -253,6 +263,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		maintenancePath:      prepared.resolved.ConfigurationMaintenancePath(),
 		interfaceComparison:  prepared.interfaceComparison,
 		metadataComparison:   prepared.metadataComparison,
+		transportComparison:  prepared.transportComparison,
 	}, nil
 }
 
@@ -283,6 +294,7 @@ type preparedGeneration struct {
 	runtimeRequirements []ModuleRequirement
 	interfaceComparison interfacecompatibility.Comparison
 	metadataComparison  interfacecompatibility.MetadataComparison
+	transportComparison interfacecompatibility.TransportComparison
 	fingerprint         string
 }
 
@@ -403,6 +415,31 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
+	descriptorEvidence, err := protobufdescriptor.BuildWithInterfaces(
+		protobufProjection,
+		wireMap,
+		interfaceProtobufModel,
+	)
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("build Protobuf descriptor evidence: %w", err)
+	}
+	previousTransportBaseline, previousTransportBaselineExists, err := generatedfiles.ReadOwnedFile(
+		resolved.Module().Path(),
+		interfacecompatibility.TransportPath,
+		interfacecompatibility.TransportMaximumBytes,
+	)
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("read prior Interface transport compatibility baseline: %w", err)
+	}
+	transportBaseline, transportComparison, err := interfacecompatibility.ReconcileTransport(
+		wireMap,
+		descriptorEvidence,
+		previousTransportBaseline,
+		previousTransportBaselineExists,
+	)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
 	runtimeRequirements, err := generatedRuntimeRequirements(protobufProjection, interfaceProtobufModel)
 	if err != nil {
 		return preparedGeneration{}, err
@@ -468,6 +505,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		ImplementationAssembly: implementationAssembly,
 		InterfaceCompatibility: interfaceBaseline,
 		InterfaceMetadata:      metadataBaseline,
+		InterfaceTransport:     transportBaseline,
 		InterfaceProtobufModel: interfaceProtobufModel,
 		ProtobufWireMap:        wireMap,
 	}, resolved.Resolution())
@@ -484,6 +522,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		runtimeRequirements: runtimeRequirements,
 		interfaceComparison: interfaceComparison,
 		metadataComparison:  metadataComparison,
+		transportComparison: transportComparison,
 		fingerprint:         fingerprint,
 	}, nil
 }
