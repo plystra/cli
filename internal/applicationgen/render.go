@@ -406,7 +406,6 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	targets := make(map[generation.CapabilityID]generation.CapabilityView, len(requirements))
 	invocationInputs := make([]assemblygen.InvocationInput, 0, len(requirements))
 	javaScriptTargets := make([]sdkmodel.CanonicalTargetView, 0)
-	httpTargets := 0
 	for _, id := range requirements {
 		target, exists := context.Capability(id)
 		if !exists {
@@ -416,10 +415,6 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		if target.Exposure().JavaScript {
 			javaScriptTargets = append(javaScriptTargets, target)
 		}
-		if target.Exposure().HTTP {
-			httpTargets++
-		}
-
 		client, err := clientgen.Render(options.ModulePath, target.ContractJSON())
 		if err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: client %s: %w", ErrRender, id, err)
@@ -487,7 +482,6 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	resolvedAliases := aliases.Aliases()
 	aliasViews := make([]sdkmodel.AliasView, len(resolvedAliases))
 	docAliasViews := make([]apidocgen.AliasView, len(resolvedAliases))
-	httpAliases := 0
 	for index, alias := range resolvedAliases {
 		aliasViews[index] = alias
 		docAliasViews[index] = alias
@@ -505,7 +499,6 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 			}
 		}
 		if alias.Exposure().HTTP {
-			httpAliases++
 			handler, err := httpgen.RenderAlias(options.ModulePath, alias, target, transportProvenance)
 			if err != nil {
 				return generatedfiles.Output{}, fmt.Errorf("%w: Alias HTTP adapter %s: %w", ErrRender, alias.ID(), err)
@@ -559,16 +552,54 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 			}
 		}
 	}
-	if httpTargets != 0 || httpAliases != 0 {
-		docs, err := apidocgen.Render(model, docAliasViews, transportProvenance)
+	documentationModel, err := DocumentationModel(resolution)
+	if err != nil {
+		return generatedfiles.Output{}, err
+	}
+	documentationInputs := make([]interfacecompatibility.DocumentationInput, 0, 2)
+	if len(documentationModel.Operations()) != 0 || len(documentationModel.Aliases()) != 0 {
+		docs, err := apidocgen.Render(documentationModel, docAliasViews, transportProvenance)
 		if err != nil {
 			return generatedfiles.Output{}, fmt.Errorf("%w: API documentation: %w", ErrRender, err)
 		}
 		for _, file := range docs {
+			var kind interfacecompatibility.DocumentationKind
+			switch file.Path() {
+			case apidocgen.InterfaceReferencePath:
+				kind = interfacecompatibility.DocumentationKindInterfaceReference
+			case apidocgen.OpenAPIPath:
+				kind = interfacecompatibility.DocumentationKindOpenAPI
+			default:
+				return generatedfiles.Output{}, fmt.Errorf(
+					"%w: API documentation: unsupported managed artifact %s",
+					ErrRender,
+					file.Path(),
+				)
+			}
+			documentationInputs = append(documentationInputs, interfacecompatibility.DocumentationInput{
+				Path: file.Path(),
+				Kind: kind,
+				Data: file.Data(),
+			})
 			if err := add(file.Path(), file.Data()); err != nil {
 				return generatedfiles.Output{}, fmt.Errorf("%w: API documentation: %w", ErrRender, err)
 			}
 		}
+	}
+	documentationBaseline, err := interfacecompatibility.NewDocumentation(documentationInputs)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf(
+			"%w: Interface documentation compatibility baseline: %w",
+			ErrRender,
+			err,
+		)
+	}
+	if err := add(interfacecompatibility.DocumentationPath, documentationBaseline.RecordJSON()); err != nil {
+		return generatedfiles.Output{}, fmt.Errorf(
+			"%w: Interface documentation compatibility baseline: %w",
+			ErrRender,
+			err,
+		)
 	}
 
 	output, err := generatedfiles.NewOutput(files)

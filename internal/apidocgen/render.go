@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"path"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -22,7 +21,13 @@ import (
 )
 
 const (
-	generatedRoot      = "generated/docs"
+	// GeneratorVersion is the exact built-in documentation projection version
+	// recorded in generated application provenance.
+	GeneratorVersion = "plystra.api-documentation/v1"
+	// InterfaceReferencePath is the managed application-local API reference.
+	InterfaceReferencePath = "generated/docs/api.md"
+	// OpenAPIPath is the managed application-local OpenAPI projection.
+	OpenAPIPath        = "generated/docs/openapi.json"
 	maximumOperations  = 4096
 	openAPIVersion     = "3.1.0"
 	applicationVersion = "0.0.0"
@@ -86,8 +91,8 @@ func Render(model sdkmodel.Model, aliases []AliasView, configurationProvenance t
 		return nil, err
 	}
 	files := []File{
-		newFile(path.Join(generatedRoot, "api.md"), renderMarkdown(operations)),
-		newFile(path.Join(generatedRoot, "openapi.json"), openAPI),
+		newFile(InterfaceReferencePath, renderMarkdown(operations)),
+		newFile(OpenAPIPath, openAPI),
 	}
 	return files, nil
 }
@@ -136,7 +141,7 @@ func prepareOperations(model sdkmodel.Model, aliasViews []AliasView) ([]rendered
 	for _, expected := range model.Aliases() {
 		actual, exists := finalAliases[expected.ID()]
 		if !exists || actual.target != expected.Target() || actual.operation.ContractDigest() != expected.TargetContractDigest() || actual.deprecated != expected.Deprecated() || actual.exposure != expected.Exposure() {
-			return nil, fmt.Errorf("%w: final Alias map disagrees with JavaScript SDK Alias %s", ErrRender, expected.ID())
+			return nil, fmt.Errorf("%w: final Alias map disagrees with HTTP documentation Alias %s", ErrRender, expected.ID())
 		}
 	}
 	sort.Slice(operations, func(left, right int) bool {

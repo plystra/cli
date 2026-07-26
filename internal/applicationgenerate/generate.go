@@ -118,16 +118,17 @@ type Options struct {
 // output comparison. A successful installation can retain unexpected unowned
 // files, which remain visible in Report rather than being overwritten.
 type Result struct {
-	module               modulelocate.Module
-	report               generatedfiles.Report
-	checked              bool
-	configurationChanged bool
-	configurationPath    string
-	maintenancePath      string
-	interfaceComparison  interfacecompatibility.Comparison
-	metadataComparison   interfacecompatibility.MetadataComparison
-	transportComparison  interfacecompatibility.TransportComparison
-	javaScriptComparison interfacecompatibility.JavaScriptComparison
+	module                  modulelocate.Module
+	report                  generatedfiles.Report
+	checked                 bool
+	configurationChanged    bool
+	configurationPath       string
+	maintenancePath         string
+	interfaceComparison     interfacecompatibility.Comparison
+	metadataComparison      interfacecompatibility.MetadataComparison
+	transportComparison     interfacecompatibility.TransportComparison
+	javaScriptComparison    interfacecompatibility.JavaScriptComparison
+	documentationComparison interfacecompatibility.DocumentationComparison
 }
 
 // Module returns the nearest enclosing Go Module.
@@ -179,6 +180,12 @@ func (r Result) InterfaceJavaScriptComparison() interfacecompatibility.JavaScrip
 	return r.javaScriptComparison
 }
 
+// InterfaceDocumentationComparison returns generated documentation artifact
+// differences observed against the prior owned compatibility baseline.
+func (r Result) InterfaceDocumentationComparison() interfacecompatibility.DocumentationComparison {
+	return r.documentationComparison
+}
+
 // Generate resolves and renders the nearest Plystra Project. Check mode
 // compares without mutation. Install mode atomically installs desired files,
 // validates the updated Project, and re-resolves inside the transaction so a
@@ -201,16 +208,17 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
 		}
 		return Result{
-			module:               prepared.resolved.Module(),
-			report:               report,
-			checked:              true,
-			configurationChanged: prepared.resolved.ConfigurationMaintenance().Changed(),
-			configurationPath:    prepared.resolved.ConfigurationSelection().Path(),
-			maintenancePath:      prepared.resolved.ConfigurationMaintenancePath(),
-			interfaceComparison:  prepared.interfaceComparison,
-			metadataComparison:   prepared.metadataComparison,
-			transportComparison:  prepared.transportComparison,
-			javaScriptComparison: prepared.javaScriptComparison,
+			module:                  prepared.resolved.Module(),
+			report:                  report,
+			checked:                 true,
+			configurationChanged:    prepared.resolved.ConfigurationMaintenance().Changed(),
+			configurationPath:       prepared.resolved.ConfigurationSelection().Path(),
+			maintenancePath:         prepared.resolved.ConfigurationMaintenancePath(),
+			interfaceComparison:     prepared.interfaceComparison,
+			metadataComparison:      prepared.metadataComparison,
+			transportComparison:     prepared.transportComparison,
+			javaScriptComparison:    prepared.javaScriptComparison,
+			documentationComparison: prepared.documentationComparison,
 		}, nil
 	}
 
@@ -265,15 +273,16 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
 	}
 	return Result{
-		module:               prepared.resolved.Module(),
-		report:               report,
-		configurationChanged: maintenance.Changed(),
-		configurationPath:    prepared.resolved.ConfigurationSelection().Path(),
-		maintenancePath:      prepared.resolved.ConfigurationMaintenancePath(),
-		interfaceComparison:  prepared.interfaceComparison,
-		metadataComparison:   prepared.metadataComparison,
-		transportComparison:  prepared.transportComparison,
-		javaScriptComparison: prepared.javaScriptComparison,
+		module:                  prepared.resolved.Module(),
+		report:                  report,
+		configurationChanged:    maintenance.Changed(),
+		configurationPath:       prepared.resolved.ConfigurationSelection().Path(),
+		maintenancePath:         prepared.resolved.ConfigurationMaintenancePath(),
+		interfaceComparison:     prepared.interfaceComparison,
+		metadataComparison:      prepared.metadataComparison,
+		transportComparison:     prepared.transportComparison,
+		javaScriptComparison:    prepared.javaScriptComparison,
+		documentationComparison: prepared.documentationComparison,
 	}, nil
 }
 
@@ -299,14 +308,15 @@ func runModuleMutation(ctx context.Context, options Options, root string, requir
 }
 
 type preparedGeneration struct {
-	resolved             applicationresolve.Result
-	output               generatedfiles.Output
-	runtimeRequirements  []ModuleRequirement
-	interfaceComparison  interfacecompatibility.Comparison
-	metadataComparison   interfacecompatibility.MetadataComparison
-	transportComparison  interfacecompatibility.TransportComparison
-	javaScriptComparison interfacecompatibility.JavaScriptComparison
-	fingerprint          string
+	resolved                applicationresolve.Result
+	output                  generatedfiles.Output
+	runtimeRequirements     []ModuleRequirement
+	interfaceComparison     interfacecompatibility.Comparison
+	metadataComparison      interfacecompatibility.MetadataComparison
+	transportComparison     interfacecompatibility.TransportComparison
+	javaScriptComparison    interfacecompatibility.JavaScriptComparison
+	documentationComparison interfacecompatibility.DocumentationComparison
+	fingerprint             string
 }
 
 func prepare(ctx context.Context, options Options, start string) (preparedGeneration, error) {
@@ -423,6 +433,14 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	)
 	if err != nil {
 		return preparedGeneration{}, err
+	}
+	previousDocumentationData, previousDocumentationExists, err := generatedfiles.ReadOwnedFile(
+		resolved.Module().Path(),
+		interfacecompatibility.DocumentationPath,
+		interfacecompatibility.DocumentationMaximumBytes,
+	)
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("read prior Interface documentation compatibility baseline: %w", err)
 	}
 	interfaceProxies, err := interfaceProxyInputs(resolved, interfaceProtobufModel)
 	if err != nil {
@@ -552,19 +570,53 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
+	var currentDocumentationData []byte
+	for _, file := range output.Files() {
+		if file.Path() == interfacecompatibility.DocumentationPath {
+			currentDocumentationData = file.Data()
+			break
+		}
+	}
+	if len(currentDocumentationData) == 0 {
+		return preparedGeneration{}, errors.New("rendered output omits the Interface documentation compatibility baseline")
+	}
+	currentDocumentationBaseline, err := interfacecompatibility.DecodeDocumentation(currentDocumentationData)
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("restore rendered Interface documentation compatibility baseline: %w", err)
+	}
+	previousDocumentationBaseline, err := interfacecompatibility.NewDocumentation(nil)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
+	if previousDocumentationExists {
+		previousDocumentationBaseline, err = interfacecompatibility.DecodeDocumentation(previousDocumentationData)
+		if err != nil {
+			return preparedGeneration{}, err
+		}
+	} else if len(previousDocumentationData) != 0 {
+		return preparedGeneration{}, fmt.Errorf("%w: absent prior documentation record has bytes", interfacecompatibility.ErrHistory)
+	}
+	documentationComparison, err := interfacecompatibility.CompareDocumentation(
+		previousDocumentationBaseline,
+		currentDocumentationBaseline,
+	)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
 	fingerprint, err := generationFingerprint(resolved, output)
 	if err != nil {
 		return preparedGeneration{}, err
 	}
 	return preparedGeneration{
-		resolved:             resolved,
-		output:               output,
-		runtimeRequirements:  runtimeRequirements,
-		interfaceComparison:  interfaceComparison,
-		metadataComparison:   metadataComparison,
-		transportComparison:  transportComparison,
-		javaScriptComparison: javaScriptComparison,
-		fingerprint:          fingerprint,
+		resolved:                resolved,
+		output:                  output,
+		runtimeRequirements:     runtimeRequirements,
+		interfaceComparison:     interfaceComparison,
+		metadataComparison:      metadataComparison,
+		transportComparison:     transportComparison,
+		javaScriptComparison:    javaScriptComparison,
+		documentationComparison: documentationComparison,
+		fingerprint:             fingerprint,
 	}, nil
 }
 

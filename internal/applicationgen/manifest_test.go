@@ -366,7 +366,7 @@ func TestGeneratedManifestRequiresAndValidatesTransportToolchain(t *testing.T) {
 	if err != nil || !decoded.TransportToolchain().Valid() || decoded.TransportToolchain().Digest() != current.Digest() {
 		t.Fatalf("DecodeManifestProvenance transport toolchain = %#v, %v", decoded.TransportToolchain(), err)
 	}
-	if !bytes.Contains(data, []byte(`"transport_toolchain":{"schema":"plystra.transport-toolchain/v1"`)) {
+	if !bytes.Contains(data, []byte(`"transport_toolchain":{"schema":"plystra.transport-toolchain/v2"`)) {
 		t.Fatalf("generated manifest omits top-level transport_toolchain: %s", data)
 	}
 

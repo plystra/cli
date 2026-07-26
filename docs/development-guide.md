@@ -401,6 +401,7 @@ orders/
     .plystra-manifest.json                CLI ownership manifest
     manifest.json                         resolved application manifest
     compatibility/
+      interface-documentation.json        generated documentation baseline
       interface-javascript.json           public JavaScript API baseline
       interface-metadata.json             classified metadata digest baseline
       interface-transport.json            Protobuf, procedure, wire baseline
@@ -470,6 +471,16 @@ exact scalar mappings, and declared semantic-error union. It stores no
 Implementation, configuration, Secret, source location, or module version.
 Use `plystra generate --check` to compare it without mutation; update authored
 Interface inputs and regenerate instead of editing this history.
+
+`generated/compatibility/interface-documentation.json` records the current
+managed documentation surface without copying its contents. Each
+`generated/docs/api.md` or `generated/docs/openapi.json` artifact contributes
+its closed kind, stable managed path, and exact content digest. A Project with
+no selected documentation surface retains a valid empty record. The baseline
+contains no Implementation, configuration, Secret, source location, or module
+version. Regenerate after intentional documentation-input changes; use
+`plystra generate --check` for a non-mutating comparison and never edit the
+record directly.
 
 `generated/proto/wire-map.json` is durable compatibility history, not a
 disposable cache. For each canonical Capability on the selected Connect
@@ -871,16 +882,16 @@ and the final build-affecting application-model digest. Environment mode reuses
 the root dependency baseline because overlays do not own dependency
 maintenance. The required top-level `transport_toolchain` record identifies
 the exact embedded `go/format` runtime; built-in Protobuf-model, descriptor,
-wire-map, Connect, and JavaScript generator versions; pinned generated Go and
-npm dependencies; and its canonical SHA-256 digest. The CLI does not invoke an
-implicit global `protoc` or generator and does not use a hosted generation
-service. A CLI or supported-toolchain change therefore changes the generated
-manifest and `plystra generate --check` reports drift without modifying the
-Project. The manifest excludes raw configuration, Secret reference targets,
-resolved Secrets, environment selectors outside their declared provenance,
-VCS state, timestamps, and machine-specific absolute paths. Use the same
-selection for generation and its check; selecting another build-affecting
-model correctly reports generated drift.
+wire-map, Connect, JavaScript, and API-documentation generator versions;
+pinned generated Go and npm dependencies; and its canonical SHA-256 digest.
+The CLI does not invoke an implicit global `protoc` or generator and does not
+use a hosted generation service. A CLI or supported-toolchain change therefore
+changes the generated manifest and `plystra generate --check` reports drift
+without modifying the Project. The manifest excludes raw configuration, Secret
+reference targets, resolved Secrets, environment selectors outside their
+declared provenance, VCS state, timestamps, and machine-specific absolute
+paths. Use the same selection for generation and its check; selecting another
+build-affecting model correctly reports generated drift.
 
 ## Create and configure a Plugin
 

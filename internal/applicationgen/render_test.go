@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/apidocgen"
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/assemblygen"
@@ -65,6 +66,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 	}
 	assertBootstrapMatchesManifestProvenance(t, output, options)
 	wantPaths := []string{
+		"generated/compatibility/interface-documentation.json",
 		"generated/compatibility/interface-javascript.json",
 		"generated/compatibility/interface-metadata.json",
 		"generated/compatibility/interface-transport.json",
@@ -269,7 +271,7 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render empty: %v", err)
 	}
-	if got := outputPaths(output); !slices.Equal(got, []string{"generated/compatibility/interface-javascript.json", "generated/compatibility/interface-metadata.json", "generated/compatibility/interface-transport.json", "generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}) {
+	if got := outputPaths(output); !slices.Equal(got, []string{"generated/compatibility/interface-documentation.json", "generated/compatibility/interface-javascript.json", "generated/compatibility/interface-metadata.json", "generated/compatibility/interface-transport.json", "generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}) {
 		t.Fatalf("empty output paths = %v", got)
 	}
 	wantManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), resolution.Context(), options.ManifestProvenance)
@@ -278,6 +280,46 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	}
 	if !bytes.Equal(outputData(t, output, "generated/manifest.json"), wantManifest) {
 		t.Fatalf("empty application manifest = %s", outputData(t, output, "generated/manifest.json"))
+	}
+	documentation, err := interfacecompatibility.DecodeDocumentation(
+		outputData(t, output, interfacecompatibility.DocumentationPath),
+	)
+	if err != nil || len(documentation.Artifacts()) != 0 {
+		t.Fatalf("empty documentation baseline = %#v, %v", documentation.Artifacts(), err)
+	}
+}
+
+func TestRenderDocumentsHTTPOnlyCanonicalTargets(t *testing.T) {
+	t.Parallel()
+
+	resolution := resolvedHTTPOnlyApplication(t)
+	options := withManifestProvenance(t, resolvedOptions(), resolution)
+	output, err := applicationgen.Render(options, resolution)
+	if err != nil {
+		t.Fatalf("Render HTTP-only application: %v", err)
+	}
+	if _, exists := outputFile(output, "generated/sdk/javascript/package.json"); exists {
+		t.Fatal("HTTP-only application unexpectedly generated a JavaScript package")
+	}
+	for _, path := range []string{
+		apidocgen.InterfaceReferencePath,
+		apidocgen.OpenAPIPath,
+	} {
+		data, exists := outputFile(output, path)
+		if !exists {
+			t.Fatalf("HTTP-only application omits %s", path)
+		}
+		for _, id := range []string{"email.send/v1", "kernel.health/v1"} {
+			if !bytes.Contains(data, []byte(id)) {
+				t.Fatalf("%s omits HTTP-only target %s:\n%s", path, id, data)
+			}
+		}
+	}
+	documentation, err := interfacecompatibility.DecodeDocumentation(
+		outputData(t, output, interfacecompatibility.DocumentationPath),
+	)
+	if err != nil || len(documentation.Artifacts()) != 2 {
+		t.Fatalf("HTTP-only documentation baseline = %#v, %v", documentation.Artifacts(), err)
 	}
 }
 
@@ -879,6 +921,22 @@ func resolvedApplication(t testing.TB, applicationYAML string) generationresolut
 	return resolvedApplicationWithComposition(t, applicationYAML, testComposition())
 }
 
+func resolvedHTTPOnlyApplication(t testing.TB) generationresolution.ExtensionResult {
+	return resolvedApplicationWithEmailExposure(
+		t,
+		"",
+		`id: email.send/v1
+request:
+  to: {type: string, required: true}
+response:
+  accepted: {type: boolean, required: true}
+errors: [invalid_recipient]
+`,
+		defaultConfigurationProvenance(t, testComposition()),
+		false,
+	)
+}
+
 func resolvedApplicationWithComposition(t testing.TB, applicationYAML string, composition applicationmeta.Composition) generationresolution.ExtensionResult {
 	return resolvedApplicationWithConfigurationProvenance(t, applicationYAML, defaultConfigurationProvenance(t, composition))
 }
@@ -894,6 +952,16 @@ errors: [invalid_recipient]
 }
 
 func resolvedApplicationWithEmail(t testing.TB, applicationYAML, emailSource string, configurationProvenance *generation.ConfigurationProvenanceInput) generationresolution.ExtensionResult {
+	return resolvedApplicationWithEmailExposure(
+		t,
+		applicationYAML,
+		emailSource,
+		configurationProvenance,
+		true,
+	)
+}
+
+func resolvedApplicationWithEmailExposure(t testing.TB, applicationYAML, emailSource string, configurationProvenance *generation.ConfigurationProvenanceInput, javaScript bool) generationresolution.ExtensionResult {
 	t.Helper()
 	email := normalizedContract(t, emailSource)
 	health := normalizedContract(t, `id: kernel.health/v1
@@ -957,8 +1025,8 @@ errors: []
 			PluginPath: "business",
 		}},
 		Capabilities: []generation.CapabilityInput{
-			{ContractJSON: email, Sources: []string{"business-module/business/capabilities/email.send/v1/capability.yaml"}, Exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: true}},
-			{ContractJSON: health, Sources: []string{"github.com/plystra/kernel/capability/catalog kernel.health/v1"}, Intrinsic: true, Exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: true}},
+			{ContractJSON: email, Sources: []string{"business-module/business/capabilities/email.send/v1/capability.yaml"}, Exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: javaScript}},
+			{ContractJSON: health, Sources: []string{"github.com/plystra/kernel/capability/catalog kernel.health/v1"}, Intrinsic: true, Exposure: generation.Exposure{Go: true, HTTP: true, JavaScript: javaScript}},
 		},
 		ApplicationAliases: applicationAliases,
 	})

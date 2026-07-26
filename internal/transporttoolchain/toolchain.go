@@ -15,6 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/plystra/cli/internal/apidocgen"
 	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/protobufdescriptor"
@@ -23,8 +24,9 @@ import (
 )
 
 const (
-	// Schema identifies the strict initial transport-toolchain record.
-	Schema = "plystra.transport-toolchain/v1"
+	// Schema identifies the strict transport-toolchain record that includes the
+	// application documentation generator.
+	Schema = "plystra.transport-toolchain/v2"
 
 	maximumRecordBytes  = 64 << 10
 	maximumVersionBytes = 256
@@ -42,13 +44,14 @@ const (
 )
 
 const (
-	goFormatComponent             = "go/format"
-	protobufModelComponent        = "protobuf-model"
-	protobufDescriptorComponent   = "protobuf-descriptor"
-	protobufWireMapComponent      = "protobuf-wire-map"
-	connectGeneratorComponent     = "connect"
-	javaScriptGeneratorComponent  = "javascript"
-	typeScriptDependencyComponent = "typescript"
+	goFormatComponent               = "go/format"
+	protobufModelComponent          = "protobuf-model"
+	protobufDescriptorComponent     = "protobuf-descriptor"
+	protobufWireMapComponent        = "protobuf-wire-map"
+	connectGeneratorComponent       = "connect"
+	javaScriptGeneratorComponent    = "javascript"
+	documentationGeneratorComponent = "api-documentation"
+	typeScriptDependencyComponent   = "typescript"
 )
 
 // ErrInvalid reports a missing, malformed, noncanonical, or tampered
@@ -146,6 +149,7 @@ func Current() (Identity, error) {
 		{Kind: KindGenerator, Name: protobufWireMapComponent, Version: protobufwiremap.ProjectionSchema},
 		{Kind: KindGenerator, Name: connectGeneratorComponent, Version: connectgen.GeneratorVersion},
 		{Kind: KindGenerator, Name: javaScriptGeneratorComponent, Version: javascriptgen.GeneratorVersion},
+		{Kind: KindGenerator, Name: documentationGeneratorComponent, Version: apidocgen.GeneratorVersion},
 		{Kind: KindGeneratedGoDependency, Name: connectgen.ConnectModulePath, Version: connectgen.ConnectModuleVersion},
 		{Kind: KindGeneratedGoDependency, Name: connectgen.ProtobufModulePath, Version: connectgen.ProtobufModuleVersion},
 		{Kind: KindGeneratedNPMDependency, Name: javascriptgen.ProtobufPackageName, Version: javascriptgen.ProtobufPackageVersion},
@@ -211,6 +215,7 @@ type componentKey struct {
 var expectedComponents = []componentKey{
 	{kind: KindEmbeddedRuntime, name: goFormatComponent},
 	{kind: KindGenerator, name: connectGeneratorComponent},
+	{kind: KindGenerator, name: documentationGeneratorComponent},
 	{kind: KindGenerator, name: javaScriptGeneratorComponent},
 	{kind: KindGenerator, name: protobufDescriptorComponent},
 	{kind: KindGenerator, name: protobufModelComponent},

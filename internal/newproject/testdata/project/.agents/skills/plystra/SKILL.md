@@ -171,9 +171,10 @@ A typical Plystra Project evolves into this layout:
         src/interfaces/<interface-id>.ts
         src/runtime.ts
 
-generated/compatibility/{interfaces,interface-metadata,interface-transport,interface-javascript}.json
-are CLI-owned baselines for shape, metadata, transport, and JavaScript APIs.
-Refresh with plystra generate; verify with plystra generate --check; never edit.
+CLI owns generated/compatibility/{interfaces,interface-metadata,interface-transport,interface-javascript,interface-documentation}.json;
+never edit them. interface-documentation.json records doc kind, path, digest,
+or an empty state. Refresh with plystra generate; check with
+plystra generate --check.
 
 generated/proto/wire-map.json is durable CLI-owned compatibility history for
 every canonical Interface message projected to Connect, including request,
@@ -589,13 +590,11 @@ digests; dependency baseline history; the Protobuf wire-map digest; and final
 application-model digest. Environment mode retains the root dependency baseline
 because the overlay does not own dependency maintenance. The manifest never
 records raw configuration, Secret reference targets, resolved Secrets, or
-machine-specific absolute paths. Its required top-level transport_toolchain
-record identifies the exact embedded go/format runtime; built-in Protobuf-model,
-descriptor, wire-map, Connect, and JavaScript generator versions; pinned
-generated Go and npm dependency versions; and a canonical digest. Generation
-does not invoke an implicit global protoc or generator executable and does not
-use a hosted generation service. Switching a build-affecting selection or
-toolchain identity correctly creates generated drift.
+machine-specific absolute paths. Its top-level transport_toolchain record identifies
+embedded go/format; Protobuf-model, descriptor, wire-map, Connect, JavaScript,
+and API-documentation generator versions; pinned generated Go/npm dependencies;
+and its digest. Generation invokes neither global protoc nor a hosted generator.
+A changed build-affecting selection or toolchain identity creates drift.
 
 ## Naming and identity rules
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/apidocgen"
 	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/protobufdescriptor"
@@ -27,6 +28,7 @@ func TestCurrentRecordsExactEmbeddedGeneratorsAndGeneratedDependencies(t *testin
 	got := componentSummaries(identity)
 	want := []string{
 		"embedded-runtime|go/format|" + runtime.Version(),
+		"generator|api-documentation|" + apidocgen.GeneratorVersion,
 		"generator|connect|" + connectgen.GeneratorVersion,
 		"generator|javascript|" + javascriptgen.GeneratorVersion,
 		"generator|protobuf-descriptor|" + protobufdescriptor.ProjectionSchema,
@@ -61,8 +63,8 @@ func TestIdentityHasKnownCanonicalDigestAndDefensiveAccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const wantCanonical = `{"schema":"plystra.transport-toolchain/v1","components":[{"kind":"embedded-runtime","name":"go/format","version":"go1.99.1"},{"kind":"generator","name":"connect","version":"generator-01"},{"kind":"generator","name":"javascript","version":"generator-02"},{"kind":"generator","name":"protobuf-descriptor","version":"generator-03"},{"kind":"generator","name":"protobuf-model","version":"generator-04"},{"kind":"generator","name":"protobuf-wire-map","version":"generator-05"},{"kind":"generated-go-dependency","name":"connectrpc.com/connect","version":"v9.1.0"},{"kind":"generated-go-dependency","name":"google.golang.org/protobuf","version":"v9.2.0"},{"kind":"generated-npm-dependency","name":"@bufbuild/protobuf","version":"9.3.0"},{"kind":"generated-npm-dependency","name":"@connectrpc/connect","version":"9.4.0"},{"kind":"generated-npm-dependency","name":"@connectrpc/connect-web","version":"9.5.0"},{"kind":"generated-npm-development-dependency","name":"typescript","version":"9.6.0"}]}`
-	const wantDigest = "sha256:2399c6b0af9b92e2cb2ea5bb3490db3fea93ca8f97ffd84e4e606bd3d53860d2"
+	const wantCanonical = `{"schema":"plystra.transport-toolchain/v2","components":[{"kind":"embedded-runtime","name":"go/format","version":"go1.99.1"},{"kind":"generator","name":"api-documentation","version":"generator-00"},{"kind":"generator","name":"connect","version":"generator-01"},{"kind":"generator","name":"javascript","version":"generator-02"},{"kind":"generator","name":"protobuf-descriptor","version":"generator-03"},{"kind":"generator","name":"protobuf-model","version":"generator-04"},{"kind":"generator","name":"protobuf-wire-map","version":"generator-05"},{"kind":"generated-go-dependency","name":"connectrpc.com/connect","version":"v9.1.0"},{"kind":"generated-go-dependency","name":"google.golang.org/protobuf","version":"v9.2.0"},{"kind":"generated-npm-dependency","name":"@bufbuild/protobuf","version":"9.3.0"},{"kind":"generated-npm-dependency","name":"@connectrpc/connect","version":"9.4.0"},{"kind":"generated-npm-dependency","name":"@connectrpc/connect-web","version":"9.5.0"},{"kind":"generated-npm-development-dependency","name":"typescript","version":"9.6.0"}]}`
+	const wantDigest = "sha256:0969199584fbd923e21ba49e56ca6e7c25bb2405ccdb1336507c5a0e019f4b55"
 	if string(identity.CanonicalJSON()) != wantCanonical || identity.Digest() != wantDigest {
 		t.Fatalf("identity = digest %q canonical %s", identity.Digest(), identity.CanonicalJSON())
 	}
@@ -201,11 +203,24 @@ func TestDecodeRejectsNoncanonicalOrTamperedRecords(t *testing.T) {
 		t.Fatalf("Decode(tampered) error = %v", err)
 	}
 
+	legacyV1 := bytes.Replace(
+		identity.RecordJSON(),
+		[]byte(transporttoolchain.Schema),
+		[]byte("plystra.transport-toolchain/v1"),
+		1,
+	)
+	if _, err := transporttoolchain.Decode(legacyV1); !errors.Is(
+		err,
+		transporttoolchain.ErrInvalid,
+	) || !strings.Contains(err.Error(), `schema must equal "plystra.transport-toolchain/v2"`) {
+		t.Fatalf("Decode(legacy v1) error = %v", err)
+	}
+
 	for name, data := range map[string][]byte{
 		"unknown top-level field": bytes.Replace(identity.RecordJSON(), []byte(`"schema":`), []byte(`"unknown":true,"schema":`), 1),
 		"unknown component field": bytes.Replace(identity.RecordJSON(), []byte(`"kind":`), []byte(`"unknown":true,"kind":`), 1),
-		"unknown schema":          bytes.Replace(identity.RecordJSON(), []byte(transporttoolchain.Schema), []byte("plystra.transport-toolchain/v2"), 1),
-		"missing components":      []byte(`{"schema":"plystra.transport-toolchain/v1","digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}`),
+		"unknown schema":          bytes.Replace(identity.RecordJSON(), []byte(transporttoolchain.Schema), []byte("plystra.transport-toolchain/v3"), 1),
+		"missing components":      []byte(`{"schema":"plystra.transport-toolchain/v2","digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}`),
 		"trailing JSON":           append(identity.RecordJSON(), []byte(` {}`)...),
 		"malformed JSON":          []byte(`{"schema":`),
 	} {
@@ -254,6 +269,7 @@ type transporttoolchainRecordComponent struct {
 func knownInputs() []transporttoolchain.ComponentInput {
 	return []transporttoolchain.ComponentInput{
 		{Kind: transporttoolchain.KindEmbeddedRuntime, Name: "go/format", Version: "go1.99.1"},
+		{Kind: transporttoolchain.KindGenerator, Name: "api-documentation", Version: "generator-00"},
 		{Kind: transporttoolchain.KindGenerator, Name: "connect", Version: "generator-01"},
 		{Kind: transporttoolchain.KindGenerator, Name: "javascript", Version: "generator-02"},
 		{Kind: transporttoolchain.KindGenerator, Name: "protobuf-descriptor", Version: "generator-03"},

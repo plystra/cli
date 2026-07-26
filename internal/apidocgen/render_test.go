@@ -202,9 +202,9 @@ func TestRenderApplicationAPIDocumentationRejectsInvalidAliases(t *testing.T) {
 		})
 	}
 
-	javaScriptAlias := apiAlias(t, "compat.send/v1", target, generation.Exposure{HTTP: true, JavaScript: true}, "")
-	model := apiModel(t, []apiTargetView{target}, []apiAliasView{javaScriptAlias})
-	if files, err := apidocgen.Render(model, nil, apiConfigurationProvenance(t, generation.ConfigurationModeDefault)); !errors.Is(err, apidocgen.ErrRender) || !strings.Contains(err.Error(), "disagrees") || len(files) != 0 {
+	httpAlias := apiAlias(t, "compat.send/v1", target, generation.Exposure{HTTP: true}, "")
+	model := apiModel(t, []apiTargetView{target}, []apiAliasView{httpAlias})
+	if files, err := apidocgen.Render(model, nil, apiConfigurationProvenance(t, generation.ConfigurationModeDefault)); !errors.Is(err, apidocgen.ErrRender) || !strings.Contains(err.Error(), "HTTP documentation Alias") || len(files) != 0 {
 		t.Fatalf("Render missing final Alias = %#v, %v", files, err)
 	}
 	if files, err := apidocgen.Render(sdkmodel.Model{}, nil, apiConfigurationProvenance(t, generation.ConfigurationModeDefault)); !errors.Is(err, apidocgen.ErrRender) || !strings.Contains(err.Error(), "model") || len(files) != 0 {
@@ -347,9 +347,9 @@ func apiModel(t testing.TB, targets []apiTargetView, aliases []apiAliasView) sdk
 	for index, target := range targets {
 		canonical[index] = target
 	}
-	model, err := sdkmodel.Build(canonical, sdkAliasViews(aliases))
+	model, err := sdkmodel.BuildHTTP(canonical, sdkAliasViews(aliases))
 	if err != nil {
-		t.Fatalf("Build SDK model: %v", err)
+		t.Fatalf("Build HTTP documentation model: %v", err)
 	}
 	return model
 }

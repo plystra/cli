@@ -2,6 +2,10 @@
   "version": 2,
   "files": [
     {
+      "path": "generated/compatibility/interface-documentation.json",
+      "sha256": "sha256:63adbc27b9b79354450da8aeaaf64ce16daa7948a95e732f8f98d2a0cf163dda"
+    },
+    {
       "path": "generated/compatibility/interface-javascript.json",
       "sha256": "sha256:2b11d6f9a1c4a9be74f47450e16cc3913f184c2d35288ac05564a7bedbe90f8c"
     },
@@ -47,7 +51,7 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:985846f35bfb14addee9c719375a92dffee3dfe2b589bb74b20a9a90d83186c7"
+      "sha256": "sha256:982c4c2df401b8df50ba95ae09225971bde172c23c3eeadbaee45b7805c9f14d"
     },
     {
       "path": "generated/proto/descriptor-set.pb",
@@ -97,12 +101,17 @@
       "application_model_digest": "sha256:c45fc60273d1dde240c4e4e204fbc9c57f94e6442682e492e4e4fa9be6e2cec9"
     },
     "transport_toolchain": {
-      "schema": "plystra.transport-toolchain/v1",
+      "schema": "plystra.transport-toolchain/v2",
       "components": [
         {
           "kind": "embedded-runtime",
           "name": "go/format",
           "version": "go1.26.5"
+        },
+        {
+          "kind": "generator",
+          "name": "api-documentation",
+          "version": "plystra.api-documentation/v1"
         },
         {
           "kind": "generator",
@@ -160,7 +169,7 @@
           "version": "7.0.2"
         }
       ],
-      "digest": "sha256:9e56f49397625180fd89310f11bcf07b4e15f1b19e4cbde39a9c88311cdd7690"
+      "digest": "sha256:94827c9ac86023a73bd176709fb6de8295f36f74f4ddcf276a3490169e94ca76"
     }
   }
 }
