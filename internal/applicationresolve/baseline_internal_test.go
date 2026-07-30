@@ -121,9 +121,9 @@ func renderDependencyBaseline(t testing.TB, capability string) ([]byte, applicat
 	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
 		Mode:                   applicationgen.ConfigurationModeDefault,
 		RootPath:               applicationManifestName,
-		RootData:               []byte("{}\n"),
+		RootDigest:             "sha256:" + strings.Repeat("3", 64),
 		SelectedPath:           applicationManifestName,
-		SelectedData:           []byte("{}\n"),
+		SelectedDigest:         "sha256:" + strings.Repeat("3", 64),
 		Composition:            composition,
 		ProtobufWireMapDigest:  "sha256:" + strings.Repeat("2", 64),
 		ApplicationModelDigest: "sha256:" + strings.Repeat("1", 64),

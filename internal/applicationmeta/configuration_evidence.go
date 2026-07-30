@@ -1,10 +1,14 @@
 package applicationmeta
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // ConfigurationDecisionSummary is a redacted description of one typed
@@ -122,6 +126,193 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 		}
 	}
 	return result, nil
+}
+
+// ConfigurationLayerDigest returns the canonical identity of one parsed
+// configuration document after current-layer validation. YAML presentation,
+// declaration order for schema-defined sets, equivalent typed scalar
+// spellings, and the source filename do not enter the digest. Explicit
+// removals and ordered values do. Constructor configuration without a
+// discoverable valid schema is structurally normalized only so explicit-config
+// mode can record its mandatory but excluded root document without granting
+// that document current-project authority.
+func ConfigurationLayerDigest(manifest Manifest, schemas SchemaLookup) (string, error) {
+	decisions, err := ConfigurationDecisions(manifest, schemas)
+	if err != nil {
+		if !errors.Is(err, ErrConfigurationSchema) && !errors.Is(err, ErrConfigurationValues) {
+			return "", err
+		}
+		decisions, err = configurationLayerDigestDecisions(manifest, schemas)
+		if err != nil {
+			return "", err
+		}
+	}
+	values := make([]string, 1, 1+len(decisions)*5)
+	values[0] = "plystra.configuration-layer/v1"
+	for _, decision := range decisions {
+		values = append(values,
+			decision.path,
+			decision.digest,
+			string(decision.summary),
+			strconv.FormatBool(decision.removed),
+			strconv.FormatBool(decision.dependencyComposable),
+		)
+	}
+	return digestStrings(values...), nil
+}
+
+func configurationLayerDigestDecisions(manifest Manifest, schemas SchemaLookup) ([]ConfigurationDecision, error) {
+	withoutConstructorConfiguration := manifest
+	withoutConstructorConfiguration.configurations = nil
+	withoutConstructorConfiguration.removedConfigurations = nil
+	result, err := ConfigurationDecisions(withoutConstructorConfiguration, schemas)
+	if err != nil {
+		return nil, err
+	}
+	for _, configured := range manifest.configurations {
+		decisions, normalizeErr := normalizeConstructorConfigDecisions(configured, schemas)
+		if normalizeErr == nil {
+			for _, decision := range decisions {
+				result = append(result, constructorConfigurationDecision(decision))
+			}
+			continue
+		}
+		digest, digestErr := untypedConstructorConfigurationDigest(configured)
+		if digestErr != nil {
+			return nil, digestErr
+		}
+		result = append(result, ConfigurationDecision{
+			path:                 constructorConfigPath(configured.constructor, nil),
+			digest:               digest,
+			summary:              ConfigurationSummaryObject,
+			source:               configured.source,
+			dependencyComposable: true,
+		})
+	}
+	for _, removal := range manifest.removedConfigurations {
+		result = append(result, constructorConfigurationDecision(newConstructorConfigDecision(
+			removal.constructor,
+			nil,
+			constructorConfigRemoval,
+			"",
+			nil,
+			removal.source,
+		)))
+	}
+	sortConfigurationDecisions(result)
+	for index := 1; index < len(result); index++ {
+		if result[index-1].path == result[index].path {
+			return nil, fmt.Errorf("configuration path %s has duplicate decisions", result[index].path)
+		}
+	}
+	return result, nil
+}
+
+func constructorConfigurationDecision(decision constructorConfigDecision) ConfigurationDecision {
+	summary := configurationDecisionSummary(decision)
+	removed := decision.kind == constructorConfigRemoval
+	if removed {
+		summary = ConfigurationSummaryRemoval
+	}
+	return ConfigurationDecision{
+		path:                 constructorConfigPath(decision.constructor, decision.segments),
+		digest:               decision.digest,
+		summary:              summary,
+		removed:              removed,
+		source:               decision.source,
+		dependencyComposable: true,
+	}
+}
+
+func untypedConstructorConfigurationDigest(configured ConstructorConfiguration) (string, error) {
+	root, err := decodeNormalizedConfigNode(configured.yaml)
+	if err != nil {
+		return "", fmt.Errorf("normalize excluded constructor configuration %q: %w", configured.constructor, err)
+	}
+	values, err := appendUntypedConfigurationTokens(
+		[]string{"plystra.untyped-constructor-configuration/v1", configured.constructor.String()},
+		root,
+		&constructorConfigNormalizeState{},
+		0,
+	)
+	if err != nil {
+		return "", fmt.Errorf("normalize excluded constructor configuration %q: %w", configured.constructor, err)
+	}
+	return digestStrings(values...), nil
+}
+
+func appendUntypedConfigurationTokens(values []string, node *yaml.Node, state *constructorConfigNormalizeState, depth int) ([]string, error) {
+	if err := enterConstructorConfigNode(node, state, depth); err != nil || node.Alias != nil || node.Anchor != "" {
+		return nil, ErrConfigurationInvalidValue
+	}
+	switch node.Kind {
+	case yaml.MappingNode:
+		mapping, err := safeConstructorConfigMapping(node)
+		if err != nil {
+			return nil, err
+		}
+		keys := sortedNodeKeys(mapping)
+		values = append(values, "mapping", strconv.Itoa(len(keys)))
+		for _, key := range keys {
+			values = append(values, "key", key)
+			values, err = appendUntypedConfigurationTokens(values, mapping[key], state, depth+1)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return values, nil
+	case yaml.SequenceNode:
+		values = append(values, "sequence", strconv.Itoa(len(node.Content)))
+		var err error
+		for _, child := range node.Content {
+			values, err = appendUntypedConfigurationTokens(values, child, state, depth+1)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return values, nil
+	case yaml.ScalarNode:
+		normalized, err := normalizedUntypedConfigurationScalar(node)
+		if err != nil {
+			return nil, err
+		}
+		return append(values, "scalar", node.Tag, normalized), nil
+	default:
+		return nil, ErrConfigurationInvalidValue
+	}
+}
+
+func normalizedUntypedConfigurationScalar(node *yaml.Node) (string, error) {
+	switch node.Tag {
+	case "!!null":
+		return "null", nil
+	case "!!bool":
+		var value bool
+		if err := node.Decode(&value); err != nil {
+			return "", ErrConfigurationInvalidValue
+		}
+		return strconv.FormatBool(value), nil
+	case "!!int":
+		var value any
+		if err := node.Decode(&value); err != nil {
+			return "", ErrConfigurationInvalidValue
+		}
+		return fmt.Sprint(value), nil
+	case "!!float":
+		var value float64
+		if err := node.Decode(&value); err != nil {
+			return "", ErrConfigurationInvalidValue
+		}
+		return strconv.FormatFloat(value, 'g', -1, 64), nil
+	case "!!timestamp":
+		var value time.Time
+		if err := node.Decode(&value); err != nil {
+			return "", ErrConfigurationInvalidValue
+		}
+		return value.UTC().Format(time.RFC3339Nano), nil
+	default:
+		return node.Value, nil
+	}
 }
 
 func configurationDecisionSummary(decision constructorConfigDecision) ConfigurationDecisionSummary {

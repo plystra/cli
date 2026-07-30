@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -65,6 +66,20 @@ func runRollbackHelper() int {
 		}
 		if err := encoder.Encode(listed); err != nil {
 			return 16
+		}
+		return 0
+	case len(os.Args) >= 8 && os.Args[1] == "list" && os.Args[2] == "-deps" && os.Args[3] == "-export" && os.Args[4] == "-json" && os.Args[5] == "-e" && os.Args[6] == "-mod=readonly":
+		goCommand, err := exec.LookPath("go")
+		if err != nil {
+			return 17
+		}
+		command := exec.Command(goCommand, os.Args[1:]...)
+		command.Stdin = os.Stdin
+		command.Stdout = os.Stdout
+		command.Stderr = os.Stderr
+		command.Env = os.Environ()
+		if err := command.Run(); err != nil {
+			return 18
 		}
 		return 0
 	case len(os.Args) == 3 && os.Args[1] == "mod" && os.Args[2] == "tidy":

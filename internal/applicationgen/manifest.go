@@ -83,15 +83,16 @@ type applicationManifestDocument struct {
 }
 
 // ManifestProvenanceOptions contains the complete non-secret generation
-// provenance. RootData and SelectedData are normalized semantically; raw YAML
-// values and Secret reference targets are never retained.
+// provenance. RootDigest and SelectedDigest must come from the typed
+// configuration-layer model; raw YAML values and Secret reference targets are
+// never retained.
 type ManifestProvenanceOptions struct {
 	Mode                   string
 	Environment            string
 	RootPath               string
-	RootData               []byte
+	RootDigest             string
 	SelectedPath           string
-	SelectedData           []byte
+	SelectedDigest         string
 	Composition            applicationmeta.Composition
 	ProtobufWireMapDigest  string
 	ApplicationModelDigest string
@@ -123,20 +124,9 @@ type manifestSelectionBaseline struct {
 }
 
 // NewManifestProvenance constructs the only supported generated-manifest
-// provenance schema and computes semantic configuration digests centrally.
+// provenance schema from already normalized typed configuration-layer
+// identities.
 func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenance, error) {
-	rootDigest, err := ConfigurationDigest(options.RootData)
-	if err != nil {
-		return ManifestProvenance{}, fmt.Errorf("root configuration: %w", err)
-	}
-	selectedDigestFunction := ConfigurationDigest
-	if options.Mode == ConfigurationModeEnvironment {
-		selectedDigestFunction = EnvironmentOverlayDigest
-	}
-	selectedDigest, err := selectedDigestFunction(options.SelectedData)
-	if err != nil {
-		return ManifestProvenance{}, fmt.Errorf("selected configuration: %w", err)
-	}
 	baselines := make([]manifestSelectionBaseline, 0, len(options.Previous.baselines)+1)
 	if validateManifestProvenance(options.Previous) == nil {
 		baselines = cloneSelectionBaselines(options.Previous.baselines)
@@ -168,9 +158,9 @@ func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenanc
 		mode:                   options.Mode,
 		environment:            options.Environment,
 		rootPath:               options.RootPath,
-		rootDigest:             rootDigest,
+		rootDigest:             options.RootDigest,
 		selectedPath:           options.SelectedPath,
-		selectedDigest:         selectedDigest,
+		selectedDigest:         options.SelectedDigest,
 		baselines:              baselines,
 		protobufWireMapDigest:  options.ProtobufWireMapDigest,
 		applicationModelDigest: options.ApplicationModelDigest,

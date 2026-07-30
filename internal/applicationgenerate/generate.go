@@ -548,10 +548,6 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		return preparedGeneration{}, fmt.Errorf("digest final application model: %w", err)
 	}
 	selection := resolved.ConfigurationSelection()
-	selectedData := resolved.ConfigurationMaintenance().Data()
-	if selection.Mode() == applicationgen.ConfigurationModeEnvironment {
-		selectedData = resolved.ConfigurationSource()
-	}
 	toolchain, err := transporttoolchain.Current()
 	if err != nil {
 		return preparedGeneration{}, fmt.Errorf("identify embedded transport toolchain: %w", err)
@@ -560,9 +556,9 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		Mode:                   selection.Mode(),
 		Environment:            selection.Environment(),
 		RootPath:               "plystra.yaml",
-		RootData:               resolved.RootConfigurationData(),
+		RootDigest:             resolved.RootConfigurationDigest(),
 		SelectedPath:           selection.Path(),
-		SelectedData:           selectedData,
+		SelectedDigest:         selection.Digest(),
 		Composition:            resolved.Composition(),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: modelDigest,

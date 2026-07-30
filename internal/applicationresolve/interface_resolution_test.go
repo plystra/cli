@@ -117,6 +117,8 @@ interfaces:
   policies:
     app.run/v1: {timeout: 7s}
     audit.write/v1: {timeout: 5s}
+config:
+  example.com/excluded/root.New: {ignored: root-only}
 `
 	selectedConfiguration := `# Complete customer configuration.
 http: {address: ":9090"}
@@ -227,9 +229,9 @@ func TestResolveKeepsGeneratedManifestFromOverridingCurrentInterfaceSelection(t 
 		Mode:                   initial.ConfigurationSelection().Mode(),
 		Environment:            initial.ConfigurationSelection().Environment(),
 		RootPath:               "plystra.yaml",
-		RootData:               initial.RootConfigurationData(),
+		RootDigest:             initial.RootConfigurationDigest(),
 		SelectedPath:           initial.ConfigurationSelection().Path(),
-		SelectedData:           initial.ConfigurationSource(),
+		SelectedDigest:         initial.ConfigurationSelection().Digest(),
 		Composition:            initial.Composition(),
 		ProtobufWireMapDigest:  "sha256:2222222222222222222222222222222222222222222222222222222222222222",
 		ApplicationModelDigest: staleApplicationModelDigest,

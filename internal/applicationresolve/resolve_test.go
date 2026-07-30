@@ -2051,10 +2051,7 @@ func assertResolvedConfigurationProvenance(t testing.TB, result applicationresol
 	if !exists {
 		t.Fatal("filesystem-backed resolution omitted configuration provenance")
 	}
-	rootDigest, err := applicationgen.ConfigurationDigest(result.RootConfigurationData())
-	if err != nil {
-		t.Fatalf("ConfigurationDigest(root): %v", err)
-	}
+	rootDigest := result.RootConfigurationDigest()
 	if provenance.Mode() != generation.ConfigurationMode(selection.Mode()) || provenance.Environment() != selection.Environment() || provenance.RootPath() != "plystra.yaml" || provenance.RootDigest() != rootDigest || provenance.SelectedPath() != selection.Path() || provenance.SelectedDigest() != selection.Digest() || provenance.DependencyCompositionDigest() != result.Composition().DependencyDigest() {
 		t.Fatalf("configuration provenance = mode %q environment %q root %q/%q selected %q/%q dependency %q; selection = mode %q environment %q path %q digest %q", provenance.Mode(), provenance.Environment(), provenance.RootPath(), provenance.RootDigest(), provenance.SelectedPath(), provenance.SelectedDigest(), provenance.DependencyCompositionDigest(), selection.Mode(), selection.Environment(), selection.Path(), selection.Digest())
 	}

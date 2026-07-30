@@ -698,13 +698,15 @@ func withManifestProvenanceSelection(t testing.TB, options applicationgen.Option
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest: %v", err)
 	}
+	rootDigest := testConfigurationLayerDigest(t, []byte("{}\n"), false)
+	selectedDigest := testConfigurationLayerDigest(t, selectedData, mode == applicationgen.ConfigurationModeEnvironment)
 	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
 		Mode:                   mode,
 		Environment:            environment,
 		RootPath:               "plystra.yaml",
-		RootData:               []byte("{}\n"),
+		RootDigest:             rootDigest,
 		SelectedPath:           selectedPath,
-		SelectedData:           selectedData,
+		SelectedDigest:         selectedDigest,
 		Composition:            options.Composition,
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: modelDigest,
@@ -742,18 +744,8 @@ func defaultConfigurationProvenance(t testing.TB, composition applicationmeta.Co
 
 func selectedConfigurationProvenance(t testing.TB, composition applicationmeta.Composition, mode generation.ConfigurationMode, environment, selectedPath string, selectedData []byte) *generation.ConfigurationProvenanceInput {
 	t.Helper()
-	rootDigest, err := applicationgen.ConfigurationDigest([]byte("{}\n"))
-	if err != nil {
-		t.Fatalf("ConfigurationDigest: %v", err)
-	}
-	selectedDigestFunction := applicationgen.ConfigurationDigest
-	if mode == generation.ConfigurationModeEnvironment {
-		selectedDigestFunction = applicationgen.EnvironmentOverlayDigest
-	}
-	selectedDigest, err := selectedDigestFunction(selectedData)
-	if err != nil {
-		t.Fatalf("selected ConfigurationDigest: %v", err)
-	}
+	rootDigest := testConfigurationLayerDigest(t, []byte("{}\n"), false)
+	selectedDigest := testConfigurationLayerDigest(t, selectedData, mode == generation.ConfigurationModeEnvironment)
 	return &generation.ConfigurationProvenanceInput{
 		Mode:                        mode,
 		Environment:                 environment,
@@ -763,6 +755,29 @@ func selectedConfigurationProvenance(t testing.TB, composition applicationmeta.C
 		SelectedDigest:              selectedDigest,
 		DependencyCompositionDigest: composition.DependencyDigest(),
 	}
+}
+
+func testConfigurationLayerDigest(t testing.TB, data []byte, overlay bool) string {
+	t.Helper()
+	var (
+		configuration applicationmeta.Manifest
+		err           error
+	)
+	if overlay {
+		configuration, err = applicationmeta.ParseOverlaySource("plystra.environment.yaml", data)
+	} else {
+		configuration, err = applicationmeta.Parse(data)
+	}
+	if err != nil {
+		t.Fatalf("parse typed configuration layer: %v", err)
+	}
+	digest, err := applicationmeta.ConfigurationLayerDigest(configuration, func(constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		return implementationinventory.Configuration{}, false
+	})
+	if err != nil {
+		t.Fatalf("ConfigurationLayerDigest: %v", err)
+	}
+	return digest
 }
 
 func assertBootstrapMatchesManifestProvenance(t testing.TB, output generatedfiles.Output, options applicationgen.Options) {

@@ -43,7 +43,7 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:c7b181b3a1bc516998c7d492945375a07175cb535f9633811264c819cb60b9f3"
+      "sha256": "sha256:173f1683a077707490ab5e83221edfa91d758bc44126cb0a076e3295a976831d"
     },
     {
       "path": "generated/go/configuration/account-profile_gen.go",
@@ -51,7 +51,7 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:7202875e83cbebed7a980f1023a592978b17bfdce9e27b3307c4b05d9799ad86"
+      "sha256": "sha256:47e1f071eebfd47537db987e20fd565f5e56c17270aad60e0a47af0c90ae9934"
     },
     {
       "path": "generated/proto/descriptor-set.pb",
@@ -87,7 +87,7 @@
       "mode": "default",
       "root": {
         "path": "plystra.yaml",
-        "digest": "sha256:cbbb94de2a5161c0036dc48c00181eedee0129e846e40d0dda7f7bf55b879b5f"
+        "digest": "sha256:d13c9b06a753179095308ba82e914b17c49dd2f04196d1efbeb9cde8d3dc5359"
       },
       "dependency_baselines": [
         {
@@ -99,6 +99,65 @@
       ],
       "protobuf_wire_map_digest": "sha256:291fb979cc47f081f48f964b9addaace1aa6dc1c7fb03bb29d16794509461183",
       "application_model_digest": "sha256:b3b799ecdc0c41742ce0783292ae14e33b4b896e56ec17e6d23ea659ef8420ee"
+    },
+    "interface_provenance": {
+      "schema": "plystra.interface-provenance/v1",
+      "interfaces": [],
+      "bindings": [],
+      "constructors": [],
+      "intrinsics": [
+        {
+          "interface": {
+            "id": "kernel.health/v1",
+            "package_path": "github.com/plystra/kernel/interfaces/kernel/health/v1",
+            "module_path": "github.com/plystra/kernel",
+            "module_version": "v0.0.0",
+            "directive_source": "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
+            "metadata_source": "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.yaml",
+            "shape_digest": "sha256:aac916b801b4577784b6b80b4f7f64168e1e0b29237ef81b7b9afca2c7add994",
+            "contract_digest": "sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
+            "documentation_digest": "sha256:4a2825ae70f4f485be68e62ab7fdbf18075afa194e434967637bf164fae3b325",
+            "example_digest": "sha256:194c766b4fe6c98a27946dbe93025248af4e3e7b11a3e23c4c069366918cb155"
+          },
+          "requirement_sources": [
+            "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1"
+          ],
+          "exposure_sources": [],
+          "policy": {
+            "timeout": "30s",
+            "sources": [
+              "built-in Plystra default Interface invocation timeout"
+            ]
+          },
+          "mappings": {}
+        },
+        {
+          "interface": {
+            "id": "kernel.info/v1",
+            "package_path": "github.com/plystra/kernel/interfaces/kernel/info/v1",
+            "module_path": "github.com/plystra/kernel",
+            "module_version": "v0.0.0",
+            "directive_source": "github.com/plystra/kernel@v0.0.0/interfaces/kernel/info/v1/interface.go:11:1",
+            "metadata_source": "github.com/plystra/kernel@v0.0.0/interfaces/kernel/info/v1/interface.yaml",
+            "shape_digest": "sha256:45f3e298d08b64a145be1e03549efeb9dfa8c34f8abd0cde2b95732a57e297e9",
+            "contract_digest": "sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
+            "documentation_digest": "sha256:69a1583352beb2398c1049435e5c460428fde2e2d3c9a09b9d8b2140887bc886",
+            "example_digest": "sha256:ab5ed5d9dc1313c51b4530bf4a1c788ef38222d61504d7463d1dd06e758588db"
+          },
+          "requirement_sources": [
+            "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1"
+          ],
+          "exposure_sources": [],
+          "policy": {
+            "timeout": "30s",
+            "sources": [
+              "built-in Plystra default Interface invocation timeout"
+            ]
+          },
+          "mappings": {}
+        }
+      ],
+      "digest": "sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2"
     },
     "transport_toolchain": {
       "schema": "plystra.transport-toolchain/v2",

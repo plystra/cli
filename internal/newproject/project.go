@@ -538,13 +538,14 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if err != nil {
 		return fmt.Errorf("parse initial Project configuration: %w", err)
 	}
-	composition, err := applicationmeta.Compose(nil, currentManifest, func(constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+	schemaLookup := func(constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
 		return implementationinventory.Configuration{}, false
-	})
+	}
+	composition, err := applicationmeta.Compose(nil, currentManifest, schemaLookup)
 	if err != nil {
 		return fmt.Errorf("compose initial Project configuration: %w", err)
 	}
-	configurationDigest, err := applicationgen.ConfigurationDigest([]byte(plystraTemplate))
+	configurationDigest, err := applicationmeta.ConfigurationLayerDigest(currentManifest, schemaLookup)
 	if err != nil {
 		return fmt.Errorf("digest initial Project configuration: %w", err)
 	}
@@ -630,9 +631,9 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
 		Mode:                   applicationgen.ConfigurationModeDefault,
 		RootPath:               "plystra.yaml",
-		RootData:               []byte(plystraTemplate),
+		RootDigest:             configurationDigest,
 		SelectedPath:           "plystra.yaml",
-		SelectedData:           []byte(plystraTemplate),
+		SelectedDigest:         configurationDigest,
 		Composition:            composition,
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: modelDigest,

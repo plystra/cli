@@ -1,6 +1,7 @@
 package applicationmeta_test
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -188,5 +189,142 @@ func TestConfigurationDecisionsPreserveProcessOwnershipThroughComposition(t *tes
 	}
 	if len(want) != 0 {
 		t.Fatalf("composed process decisions are missing: %v", want)
+	}
+}
+
+func TestConfigurationLayerDigestUsesTypedNormalizedDecisions(t *testing.T) {
+	t.Parallel()
+
+	schema := composeSchema(t, `
+	Delay time.Duration
+	Endpoint string
+	Targets []string
+`)
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/service.New": schema})
+	leftData := []byte(`# presentation and set order are not semantic
+interfaces:
+  require: [email.send/v1, audit.write/v1]
+  policies:
+    email.send/v1: {timeout: 5s}
+http:
+  address: ":8080"
+  transports: {connect: true, rest: false}
+  cors:
+    allowed_origins: [https://B.example:443, https://a.example, https://a.example:443]
+    allow_credentials: false
+  expose: [email.send/v1, audit.write/v1]
+timeouts: {startup: 5s}
+config:
+  example.com/acme/service.New:
+    delay: 5s
+    endpoint: service.example
+    targets: [primary, secondary]
+`)
+	left, err := applicationmeta.ParseSource("plystra.yaml", leftData)
+	if err != nil {
+		t.Fatalf("ParseSource(left): %v", err)
+	}
+	right, err := applicationmeta.ParseSource("deploy/equivalent.yaml", []byte(`config:
+  example.com/acme/service.New: {targets: [primary, secondary], endpoint: "service.example", delay: 5000ms}
+timeouts:
+  startup: 5000ms
+http:
+  expose:
+    - audit.write/v1
+    - email.send/v1
+  cors: {allow_credentials: false, allowed_origins: [https://a.example:443, https://b.example]}
+  transports:
+    rest: false
+    connect: true
+  address: ':8080'
+interfaces:
+  policies:
+    email.send/v1:
+      timeout: 5000ms
+  require: [audit.write/v1, email.send/v1]
+`))
+	if err != nil {
+		t.Fatalf("ParseSource(right): %v", err)
+	}
+	leftDigest, err := applicationmeta.ConfigurationLayerDigest(left, lookup)
+	if err != nil {
+		t.Fatalf("ConfigurationLayerDigest(left): %v", err)
+	}
+	rightDigest, err := applicationmeta.ConfigurationLayerDigest(right, lookup)
+	if err != nil {
+		t.Fatalf("ConfigurationLayerDigest(right): %v", err)
+	}
+	if leftDigest != rightDigest {
+		t.Fatalf("equivalent typed layer digests differ: %q != %q", leftDigest, rightDigest)
+	}
+
+	changed, err := applicationmeta.ParseSource("plystra.yaml", []byte(strings.Replace(
+		string(leftData),
+		"delay: 5s",
+		"delay: 5001ms",
+		1,
+	)))
+	if err != nil {
+		t.Fatalf("ParseSource(changed): %v", err)
+	}
+	changedDigest, err := applicationmeta.ConfigurationLayerDigest(changed, lookup)
+	if err != nil {
+		t.Fatalf("ConfigurationLayerDigest(changed): %v", err)
+	}
+	if changedDigest == leftDigest {
+		t.Fatal("changed typed configuration value did not alter the layer digest")
+	}
+}
+
+func TestConfigurationLayerDigestStructurallyHashesExcludedUnresolvedConfiguration(t *testing.T) {
+	t.Parallel()
+
+	lookup := composeSchemaLookup(nil)
+	left, err := applicationmeta.ParseSource("plystra.yaml", []byte(`config:
+  example.com/excluded/root.New:
+    enabled: TRUE
+    nested: {second: 2, first: 1}
+    ordered: [primary, secondary]
+`))
+	if err != nil {
+		t.Fatalf("ParseSource(left): %v", err)
+	}
+	right, err := applicationmeta.ParseSource("deploy/customer.yaml", []byte(`# presentation-only differences
+config:
+  example.com/excluded/root.New: {ordered: [primary, secondary], nested: {first: 1, second: 2}, enabled: true}
+`))
+	if err != nil {
+		t.Fatalf("ParseSource(right): %v", err)
+	}
+	if _, err := applicationmeta.ConfigurationDecisions(left, lookup); !errors.Is(err, applicationmeta.ErrConfigurationSchema) {
+		t.Fatalf("ConfigurationDecisions(left) error = %v, want unavailable schema", err)
+	}
+	leftDigest, err := applicationmeta.ConfigurationLayerDigest(left, lookup)
+	if err != nil {
+		t.Fatalf("ConfigurationLayerDigest(left): %v", err)
+	}
+	rightDigest, err := applicationmeta.ConfigurationLayerDigest(right, lookup)
+	if err != nil {
+		t.Fatalf("ConfigurationLayerDigest(right): %v", err)
+	}
+	if leftDigest != rightDigest {
+		t.Fatalf("equivalent excluded layer digests differ: %q != %q", leftDigest, rightDigest)
+	}
+
+	changed, err := applicationmeta.ParseSource("plystra.yaml", []byte(`config:
+  example.com/excluded/root.New:
+    enabled: true
+    nested: {first: 1, second: 2}
+    ordered: [secondary, primary]
+`))
+	if err != nil {
+		t.Fatalf("ParseSource(changed): %v", err)
+	}
+	changedDigest, err := applicationmeta.ConfigurationLayerDigest(changed, lookup)
+	if err != nil {
+		t.Fatalf("ConfigurationLayerDigest(changed): %v", err)
+	}
+	if changedDigest == leftDigest {
+		t.Fatal("changed ordered value did not alter the excluded layer digest")
 	}
 }

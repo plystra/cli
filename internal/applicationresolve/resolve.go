@@ -80,6 +80,7 @@ type Result struct {
 	selection           ConfigurationSelection
 	evidence            resolutionevidence.Evidence
 	rootData            []byte
+	rootDigest          string
 	configurationSource []byte
 	maintenancePath     string
 	maintenanceSource   []byte
@@ -146,6 +147,10 @@ func (r Result) ResolutionEvidence() resolutionevidence.Evidence { return r.evid
 // generated provenance. It includes planned root maintenance in default and
 // environment modes.
 func (r Result) RootConfigurationData() []byte { return append([]byte(nil), r.rootData...) }
+
+// RootConfigurationDigest returns the normalized identity of the mandatory
+// root configuration document represented by generated provenance.
+func (r Result) RootConfigurationDigest() string { return r.rootDigest }
 
 // ConfigurationSource returns defensive original selected-document bytes.
 func (r Result) ConfigurationSource() []byte {
@@ -279,15 +284,15 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	selectedData := maintenance.Data()
-	if selector.mode == configurationModeEnvironment {
-		selectedData = configurationSnapshot.Data()
+	rootLayerManifest := rootManifest
+	if maintenanceSnapshot.path == applicationManifestName {
+		rootLayerManifest = maintainedManifest
 	}
-	selectedDigestFunction := applicationgen.ConfigurationDigest
+	selectedLayerManifest := maintainedManifest
 	if selector.mode == configurationModeEnvironment {
-		selectedDigestFunction = applicationgen.EnvironmentOverlayDigest
+		selectedLayerManifest = selectedManifest
 	}
-	selectedDigest, err := selectedDigestFunction(selectedData)
+	selectedDigest, err := applicationmeta.ConfigurationLayerDigest(selectedLayerManifest, schemaLookup)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: digest selected configuration %s: %w", ErrResolve, selector.path, err)
 	}
@@ -295,7 +300,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if maintenanceSnapshot.path == applicationManifestName {
 		rootData = maintenance.Data()
 	}
-	rootDigest, err := applicationgen.ConfigurationDigest(rootData)
+	rootDigest, err := applicationmeta.ConfigurationLayerDigest(rootLayerManifest, schemaLookup)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: digest root configuration %s: %w", ErrResolve, applicationManifestName, err)
 	}
@@ -388,6 +393,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 			digest:      selectedDigest,
 		},
 		rootData:            append([]byte(nil), rootData...),
+		rootDigest:          rootDigest,
 		configurationSource: configurationSnapshot.Data(),
 		maintenancePath:     maintenanceSnapshot.path,
 		maintenanceSource:   maintenanceSnapshot.Data(),
