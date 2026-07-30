@@ -256,7 +256,7 @@ func renderInterfaceCanonical(
 		return File{}, fmt.Errorf("format generated Interface handler: %w", err)
 	}
 	return File{
-		path:        path.Join(interfaceHandlerDirectory(operation.ID()), "handler_gen.go"),
+		path:        InterfaceHandlerPath(operation.ID()),
 		packageName: interfaceHandlerPackage(operation.ID()),
 		data:        append([]byte(nil), formatted...),
 	}, nil
@@ -974,6 +974,12 @@ func interfaceHandlerDirectory(identifier interfaceid.Identifier) string {
 	segments := append([]string{"generated", "go", "adapters", "connect"}, strings.Split(identifier.Name(), ".")...)
 	segments = append(segments, "v"+strconv.FormatUint(identifier.Major(), 10))
 	return path.Join(segments...)
+}
+
+// InterfaceHandlerPath returns the one managed Connect adapter source path for
+// an exposed canonical Interface.
+func InterfaceHandlerPath(identifier interfaceid.Identifier) string {
+	return path.Join(interfaceHandlerDirectory(identifier), "handler_gen.go")
 }
 
 func interfaceHandlerPackage(identifier interfaceid.Identifier) string {

@@ -9,6 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +34,7 @@ import (
 	"github.com/plystra/cli/internal/interfacecontract"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceinventory"
+	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/intrinsicinterface"
 	"github.com/plystra/cli/internal/javascriptgen"
@@ -405,7 +409,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if selected, exists := resolved.Manifest().HTTPCORS(); exists {
 		httpCORS = &selected
 	}
-	interfaceProtobufModel, err := interfaceProtobufProjection(ctx, resolved, httpTransports, options)
+	interfaceProtobufModel, intrinsicInterfaces, err := interfaceProtobufProjection(ctx, resolved, httpTransports, options)
 	if err != nil {
 		return preparedGeneration{}, fmt.Errorf("build Interface Protobuf projection: %w", err)
 	}
@@ -507,6 +511,18 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
+	interfaceProvenance, err := buildInterfaceProvenance(
+		resolved,
+		intrinsicInterfaces,
+		interfaceBaseline,
+		transportBaseline,
+		javaScriptAPI,
+		interfaceProtobufModel,
+		wireMap,
+	)
+	if err != nil {
+		return preparedGeneration{}, fmt.Errorf("construct Interface and constructor provenance: %w", err)
+	}
 	runtimeRequirements, err := generatedRuntimeRequirements(protobufProjection, interfaceProtobufModel)
 	if err != nil {
 		return preparedGeneration{}, err
@@ -550,6 +566,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		Composition:            resolved.Composition(),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: modelDigest,
+		InterfaceProvenance:    interfaceProvenance,
 		TransportToolchain:     toolchain,
 		Previous:               resolved.PreviousManifestProvenance(),
 	})
@@ -643,13 +660,13 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	}, nil
 }
 
-func interfaceProtobufProjection(ctx context.Context, resolved applicationresolve.Result, transports applicationmeta.HTTPTransports, options Options) (protobufmodel.InterfaceModel, error) {
+func interfaceProtobufProjection(ctx context.Context, resolved applicationresolve.Result, transports applicationmeta.HTTPTransports, options Options) (protobufmodel.InterfaceModel, []interfaceinventory.Interface, error) {
 	definitions := make(map[string]protobufmodel.InterfaceInput)
 	for _, definition := range resolved.Interfaces().Interfaces() {
 		contract := definition.Contract()
 		identifier := contract.ID().String()
 		if _, duplicate := definitions[identifier]; duplicate {
-			return protobufmodel.InterfaceModel{}, fmt.Errorf("canonical Interface %s has more than one visible definition while projecting Protobuf messages", identifier)
+			return protobufmodel.InterfaceModel{}, nil, fmt.Errorf("canonical Interface %s has more than one visible definition while projecting Protobuf messages", identifier)
 		}
 		semanticErrors := definition.SemanticErrors()
 		errorCodes := make([]string, len(semanticErrors))
@@ -666,31 +683,47 @@ func interfaceProtobufProjection(ctx context.Context, resolved applicationresolv
 			SemanticErrors: errorCodes,
 		}
 	}
+
+	exposures := resolved.Manifest().HTTPExposures()
+	intrinsicIDs := make(map[string]struct{})
+	for _, requirement := range resolved.InterfaceResolution().IntrinsicRequirements() {
+		intrinsicIDs[requirement.InterfaceID().String()] = struct{}{}
+	}
+	activeIntrinsics := make(map[string]struct{})
+	for _, exposure := range exposures {
+		if strings.HasPrefix(exposure.ID().Name(), "kernel.") {
+			identifier := exposure.ID().String()
+			intrinsicIDs[identifier] = struct{}{}
+			activeIntrinsics[identifier] = struct{}{}
+		}
+	}
+	orderedIntrinsicIDs := make([]string, 0, len(intrinsicIDs))
+	for identifier := range intrinsicIDs {
+		orderedIntrinsicIDs = append(orderedIntrinsicIDs, identifier)
+	}
+	sort.Strings(orderedIntrinsicIDs)
+	intrinsics, intrinsicDefinitions, err := intrinsicInterfaceProtobufInputs(ctx, resolved, orderedIntrinsicIDs, options)
+	if err != nil {
+		return protobufmodel.InterfaceModel{}, nil, err
+	}
+	for _, input := range intrinsics {
+		if _, active := activeIntrinsics[input.InterfaceID.String()]; !active {
+			continue
+		}
+		identifier := input.InterfaceID.String()
+		if previous, duplicate := definitions[identifier]; duplicate {
+			return protobufmodel.InterfaceModel{}, nil, fmt.Errorf("intrinsic Interface %s at %s duplicates visible authored definition at %s", identifier, input.Source, previous.Source)
+		}
+		definitions[identifier] = input
+	}
+
 	if !transports.Connect {
 		history := make([]protobufmodel.InterfaceInput, 0, len(definitions))
 		for _, input := range definitions {
 			history = append(history, input)
 		}
-		return protobufmodel.BuildInterfaceSelection(false, nil, history)
-	}
-
-	exposures := resolved.Manifest().HTTPExposures()
-	intrinsicIDs := make([]string, 0, len(exposures))
-	for _, exposure := range exposures {
-		if strings.HasPrefix(exposure.ID().Name(), "kernel.") {
-			intrinsicIDs = append(intrinsicIDs, exposure.ID().String())
-		}
-	}
-	intrinsics, err := intrinsicInterfaceProtobufInputs(ctx, resolved, intrinsicIDs, options)
-	if err != nil {
-		return protobufmodel.InterfaceModel{}, err
-	}
-	for _, input := range intrinsics {
-		identifier := input.InterfaceID.String()
-		if previous, duplicate := definitions[identifier]; duplicate {
-			return protobufmodel.InterfaceModel{}, fmt.Errorf("intrinsic Interface %s at %s duplicates visible authored definition at %s", identifier, input.Source, previous.Source)
-		}
-		definitions[identifier] = input
+		model, err := protobufmodel.BuildInterfaceSelection(false, nil, history)
+		return model, intrinsicDefinitions, err
 	}
 
 	inputs := make([]protobufmodel.InterfaceInput, 0, len(exposures))
@@ -708,7 +741,8 @@ func interfaceProtobufProjection(ctx context.Context, resolved applicationresolv
 	for _, input := range definitions {
 		history = append(history, input)
 	}
-	return protobufmodel.BuildInterfaceSelection(true, inputs, history)
+	model, err := protobufmodel.BuildInterfaceSelection(true, inputs, history)
+	return model, intrinsicDefinitions, err
 }
 
 func intrinsicInterfaceProtobufInputs(
@@ -716,13 +750,13 @@ func intrinsicInterfaceProtobufInputs(
 	resolved applicationresolve.Result,
 	identifiers []string,
 	options Options,
-) ([]protobufmodel.InterfaceInput, error) {
+) ([]protobufmodel.InterfaceInput, []interfaceinventory.Interface, error) {
 	if len(identifiers) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	dependency, exists := resolved.Dependencies().ByPath(kernelintrinsic.ModulePath)
 	if !exists {
-		return nil, fmt.Errorf("selected application graph omits intrinsic Interface module %s", kernelintrinsic.ModulePath)
+		return nil, nil, fmt.Errorf("selected application graph omits intrinsic Interface module %s", kernelintrinsic.ModulePath)
 	}
 
 	expected := make(map[string]intrinsicinterface.Definition, len(identifiers))
@@ -731,14 +765,14 @@ func intrinsicInterfaceProtobufInputs(
 	for _, value := range identifiers {
 		identifier, err := interfaceid.Parse(value)
 		if err != nil {
-			return nil, fmt.Errorf("intrinsic Interface exposure %q is invalid: %v", value, err)
+			return nil, nil, fmt.Errorf("intrinsic Interface requirement %q is invalid: %v", value, err)
 		}
 		definition, exists := intrinsicinterface.Lookup(identifier)
 		if !exists {
-			return nil, fmt.Errorf("intrinsic Interface exposure %s is absent from the selected Kernel API", identifier)
+			return nil, nil, fmt.Errorf("intrinsic Interface requirement %s is absent from the selected Kernel API", identifier)
 		}
 		if _, duplicate := expected[value]; duplicate {
-			return nil, fmt.Errorf("intrinsic Interface exposure %s appears more than once", identifier)
+			return nil, nil, fmt.Errorf("intrinsic Interface requirement %s appears more than once", identifier)
 		}
 		expected[value] = definition
 		if _, selected := selectedPackages[definition.PackagePath()]; !selected {
@@ -759,7 +793,7 @@ func intrinsicInterfaceProtobufInputs(
 		OutputLimit: options.DependencyOutputLimit,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("load selected Kernel Interface packages: %w", err)
+		return nil, nil, fmt.Errorf("load selected Kernel Interface packages: %w", err)
 	}
 	interfaces := discovered.Interfaces()
 	inputs := make([]protobufmodel.InterfaceInput, 0, len(expected))
@@ -771,10 +805,10 @@ func intrinsicInterfaceProtobufInputs(
 			if parseErr == nil && knownDefinition && known.PackagePath() == discovered.PackagePath() {
 				continue
 			}
-			return nil, fmt.Errorf("selected Kernel package %s declares unexpected intrinsic Interface %s", discovered.PackagePath(), discovered.ID())
+			return nil, nil, fmt.Errorf("selected Kernel package %s declares unexpected intrinsic Interface %s", discovered.PackagePath(), discovered.ID())
 		}
 		if discovered.ModulePath() != kernelintrinsic.ModulePath || discovered.PackagePath() != definition.PackagePath() {
-			return nil, fmt.Errorf(
+			return nil, nil, fmt.Errorf(
 				"intrinsic Interface %s resolved to package %s in module %s; selected Kernel API requires %s in %s",
 				discovered.ID(),
 				discovered.PackagePath(),
@@ -800,9 +834,9 @@ func intrinsicInterfaceProtobufInputs(
 		})
 	}
 	if len(inputs) != len(expected) {
-		return nil, fmt.Errorf("selected Kernel exposes %d requested Interface definitions for %d intrinsic exposures", len(inputs), len(expected))
+		return nil, nil, fmt.Errorf("selected Kernel exposes %d requested Interface definitions for %d intrinsic requirements", len(inputs), len(expected))
 	}
-	return inputs, nil
+	return inputs, interfaces, nil
 }
 
 func generatedRuntimeRequirements(model protobufmodel.Model, interfaces protobufmodel.InterfaceModel) ([]ModuleRequirement, error) {
@@ -1035,6 +1069,359 @@ func implementationAssemblyInput(resolved applicationresolve.Result, interfaceMo
 		IntrinsicBindings:        intrinsics,
 		Constructors:             constructors,
 	}, nil
+}
+
+func buildInterfaceProvenance(
+	resolved applicationresolve.Result,
+	intrinsicDefinitions []interfaceinventory.Interface,
+	shapeBaseline interfacecompatibility.Baseline,
+	transportBaseline interfacecompatibility.TransportBaseline,
+	javaScriptAPI javascriptgen.PublicAPI,
+	interfaceModel protobufmodel.InterfaceModel,
+	wireMap protobufwiremap.Map,
+) (interfaceprovenance.Provenance, error) {
+	if !shapeBaseline.Valid() || !transportBaseline.Valid() || !javaScriptAPI.Valid() || !interfaceModel.Valid() {
+		return interfaceprovenance.Provenance{}, errors.New("interface provenance inputs are absent or invalid")
+	}
+
+	shapeDigests := make(map[string]string)
+	for _, shape := range shapeBaseline.Interfaces() {
+		shapeDigests[shape.ID()] = shape.Digest()
+	}
+	interfaces := resolved.Interfaces().Interfaces()
+	interfaceInputs := make([]interfaceprovenance.InterfaceInput, len(interfaces))
+	interfaceDefinitions := make(map[string]interfaceinventory.Interface, len(interfaces))
+	for index, definition := range interfaces {
+		identifier := definition.ID()
+		shapeDigest, exists := shapeDigests[identifier]
+		if !exists {
+			return interfaceprovenance.Provenance{}, fmt.Errorf("visible Interface %s is absent from the authored shape baseline", identifier)
+		}
+		if _, duplicate := interfaceDefinitions[identifier]; duplicate {
+			return interfaceprovenance.Provenance{}, fmt.Errorf("visible Interface %s appears more than once", identifier)
+		}
+		interfaceDefinitions[identifier] = definition
+		interfaceInputs[index] = provenanceInterfaceInput(definition, shapeDigest)
+	}
+	if len(shapeDigests) != len(interfaceInputs) {
+		return interfaceprovenance.Provenance{}, errors.New("authored shape baseline and visible Interface inventory disagree")
+	}
+
+	intrinsicContracts := make([]interfacecontract.Contract, len(intrinsicDefinitions))
+	for index, definition := range intrinsicDefinitions {
+		intrinsicContracts[index] = definition.Contract()
+	}
+	intrinsicShapes, err := interfacecompatibility.New(intrinsicContracts)
+	if err != nil {
+		return interfaceprovenance.Provenance{}, fmt.Errorf("construct intrinsic Interface shape identities: %w", err)
+	}
+	intrinsicShapeDigests := make(map[string]string, len(intrinsicDefinitions))
+	for _, shape := range intrinsicShapes.Interfaces() {
+		intrinsicShapeDigests[shape.ID()] = shape.Digest()
+	}
+	intrinsicByID := make(map[string]interfaceinventory.Interface, len(intrinsicDefinitions))
+	for _, definition := range intrinsicDefinitions {
+		if _, duplicate := intrinsicByID[definition.ID()]; duplicate {
+			return interfaceprovenance.Provenance{}, fmt.Errorf("intrinsic Interface %s appears more than once", definition.ID())
+		}
+		intrinsicByID[definition.ID()] = definition
+	}
+
+	exposureSources := make(map[string][]string)
+	for _, exposure := range resolved.Manifest().HTTPExposures() {
+		identifier := exposure.ID().String()
+		field := fmt.Sprintf("http.expose[%q]", identifier)
+		exposureSources[identifier] = provenanceSources(resolved, field, exposure.Source())
+	}
+	policies := make(map[string]applicationmeta.InterfacePolicy)
+	for _, policy := range resolved.Manifest().InterfacePolicies() {
+		policies[policy.InterfaceID().String()] = policy
+	}
+	policyInput := func(identifier string) interfaceprovenance.PolicyInput {
+		if policy, exists := policies[identifier]; exists {
+			field := fmt.Sprintf("interfaces.policies[%q].timeout", identifier)
+			return interfaceprovenance.PolicyInput{
+				Timeout: policy.Timeout().String(),
+				Sources: provenanceSources(resolved, field, policy.Source()),
+			}
+		}
+		return interfaceprovenance.PolicyInput{
+			Timeout: applicationmeta.DefaultInvocationTimeout.String(),
+			Sources: []string{"built-in Plystra default Interface invocation timeout"},
+		}
+	}
+
+	operations := make(map[string]protobufmodel.InterfaceOperation)
+	for _, operation := range interfaceModel.Operations() {
+		operations[operation.ID().String()] = operation
+	}
+	transports := make(map[string]interfacecompatibility.TransportInterface)
+	for _, transport := range transportBaseline.Interfaces() {
+		transports[transport.ID()] = transport
+	}
+	wires := make(map[string]protobufwiremap.InterfaceProjection)
+	for _, projection := range wireMap.ActiveInterfaces() {
+		wires[projection.ID()] = projection
+	}
+	javaScript := make(map[string]javascriptgen.PublicInterfaceAPI)
+	for _, projection := range javaScriptAPI.Interfaces() {
+		javaScript[projection.ID()] = projection
+	}
+	mappingInput := func(identifier interfaceid.Identifier, ordinary bool) (interfaceprovenance.MappingInput, error) {
+		mapping := interfaceprovenance.MappingInput{}
+		if ordinary {
+			mapping.ProxyPath = interfaceproxygen.OutputPath(identifier)
+			mapping.AdapterPath = implementationadaptergen.OutputPath(identifier)
+			mapping.AssemblyPath = implementationassemblygen.Path
+		}
+		operation, exposed := operations[identifier.String()]
+		if !exposed {
+			return mapping, nil
+		}
+		transport, transportExists := transports[identifier.String()]
+		wire, wireExists := wires[identifier.String()]
+		javaScriptProjection, javaScriptExists := javaScript[identifier.String()]
+		if !transportExists || !wireExists || !javaScriptExists {
+			return interfaceprovenance.MappingInput{}, fmt.Errorf("exposed Interface %s has incomplete transport or JavaScript provenance", identifier)
+		}
+		if !ordinary {
+			mapping.ProxyPath = interfaceproxygen.OutputPath(identifier)
+			mapping.AssemblyPath = implementationassemblygen.Path
+		}
+		mapping.ProtobufSchemaPath = path.Join(
+			"generated/proto",
+			strings.ReplaceAll(operation.Identity().Package(), ".", "/"),
+			"interface.proto",
+		)
+		mapping.ProtobufDescriptorSetPath = protobufdescriptor.DescriptorSetPath
+		mapping.ProtobufDescriptorDigest = transport.DescriptorDigest()
+		mapping.WireMapPath = protobufwiremap.Path
+		mapping.WireMapDigest = transport.WireMapDigest()
+		mapping.ConnectHandlerPath = connectgen.InterfaceHandlerPath(identifier)
+		mapping.ConnectProcedure = wire.Procedure()
+		mapping.ConnectProcedureDigest = transport.ProcedureDigest()
+		mapping.HTTPRoute = wire.Procedure()
+		mapping.JavaScriptModulePath = javascriptgen.InterfaceModulePath(identifier)
+		mapping.JavaScriptSurfaceDigest = javaScriptProjection.SurfaceDigest()
+		mapping.JavaScriptTypesDigest = javaScriptProjection.TypesDigest()
+		mapping.JavaScriptSemanticErrorsDigest = javaScriptProjection.SemanticErrorsDigest()
+		return mapping, nil
+	}
+
+	graph := resolved.InterfaceResolution().Graph()
+	rootSources := make(map[string][]string)
+	for _, root := range graph.Roots() {
+		rootSources[root.InterfaceID().String()] = root.Sources()
+	}
+	requiringConstructors := make(map[string][]string)
+	nodes := graph.ConstructionOrder()
+	for _, node := range nodes {
+		symbol := node.Symbol().String()
+		for _, dependency := range node.Dependencies() {
+			if dependency.Available() {
+				identifier := dependency.InterfaceID().String()
+				requiringConstructors[identifier] = append(requiringConstructors[identifier], symbol)
+			}
+		}
+	}
+	for identifier, values := range requiringConstructors {
+		requiringConstructors[identifier] = sortedUniqueStrings(values)
+	}
+
+	graphBindings := graph.Bindings()
+	provides := make(map[string][]string)
+	for _, binding := range graphBindings {
+		identifier := binding.InterfaceID().String()
+		symbol := binding.Constructor().String()
+		provides[symbol] = append(provides[symbol], identifier)
+	}
+	for symbol, values := range provides {
+		provides[symbol] = sortedUniqueStrings(values)
+	}
+
+	configurationByConstructor := make(map[string][]string)
+	for _, configuration := range resolved.Manifest().Configurations() {
+		symbol := configuration.Constructor().String()
+		field := fmt.Sprintf("config[%q]", symbol)
+		configurationByConstructor[symbol] = append(
+			configurationByConstructor[symbol],
+			provenanceSourcesWithPrefix(resolved, field, configuration.Source())...,
+		)
+	}
+
+	constructorInputs := make([]interfaceprovenance.ConstructorInput, len(nodes))
+	constructorSelections := make(map[string]interfaceprovenance.SelectionInput, len(nodes))
+	constructorConfigurationOwners := make(map[string]string, len(nodes))
+	for index, node := range nodes {
+		implementation := node.Implementation()
+		symbol := node.Symbol().String()
+		moduleVersion := provenanceModuleVersion(implementation.ModuleVersion())
+		configurationOwner := ""
+		configurationSources := []string{}
+		if _, hasConfiguration := implementation.Configuration(); hasConfiguration {
+			configurationOwner = fmt.Sprintf("config[%s]", strconv.Quote(symbol))
+			configurationSources = sortedUniqueStrings(append(
+				configurationByConstructor[symbol],
+				implementation.Source()+" Config",
+			))
+		}
+		dependencies := node.Dependencies()
+		dependencyInputs := make([]interfaceprovenance.DependencyInput, len(dependencies))
+		for dependencyIndex, dependency := range dependencies {
+			selectedConstructor := ""
+			if dependency.Available() {
+				selectedConstructor = dependency.Constructor().String()
+			}
+			dependencyInputs[dependencyIndex] = interfaceprovenance.DependencyInput{
+				InterfaceID:         dependency.InterfaceID().String(),
+				PackagePath:         dependency.PackagePath(),
+				ParameterName:       dependency.ParameterName(),
+				ParameterPosition:   dependency.ParameterPosition(),
+				Optional:            dependency.Optional(),
+				Available:           dependency.Available(),
+				SelectedConstructor: selectedConstructor,
+			}
+		}
+		constructorInputs[index] = interfaceprovenance.ConstructorInput{
+			Symbol:               symbol,
+			ModulePath:           implementation.ModulePath(),
+			ModuleVersion:        moduleVersion,
+			Source:               node.Source(),
+			ConcreteType:         implementation.ConcreteType().String(),
+			ConstructionOrder:    index + 1,
+			Provides:             provides[symbol],
+			ConfigurationOwner:   configurationOwner,
+			ConfigurationSources: configurationSources,
+			Dependencies:         dependencyInputs,
+		}
+		constructorSelections[symbol] = interfaceprovenance.SelectionInput{
+			Constructor:       symbol,
+			ModulePath:        implementation.ModulePath(),
+			ModuleVersion:     moduleVersion,
+			Source:            node.Source(),
+			ConcreteType:      implementation.ConcreteType().String(),
+			ConstructionOrder: index + 1,
+		}
+		constructorConfigurationOwners[symbol] = configurationOwner
+	}
+
+	bindingInputs := make([]interfaceprovenance.BindingInput, len(graphBindings))
+	for index, binding := range graphBindings {
+		identifier := binding.InterfaceID()
+		selection := constructorSelections[binding.Constructor().String()]
+		switch binding.Reason() {
+		case constructorgraph.SelectionExplicit:
+			selection.Reason = interfaceprovenance.SelectionExplicit
+		case constructorgraph.SelectionUnique:
+			selection.Reason = interfaceprovenance.SelectionUniqueCompatible
+		default:
+			return interfaceprovenance.Provenance{}, fmt.Errorf("interface %s has unsupported selection reason %q", identifier, binding.Reason())
+		}
+		selection.Sources = binding.Sources()
+		mapping, err := mappingInput(identifier, true)
+		if err != nil {
+			return interfaceprovenance.Provenance{}, err
+		}
+		bindingInputs[index] = interfaceprovenance.BindingInput{
+			InterfaceID:           identifier.String(),
+			RootSources:           rootSources[identifier.String()],
+			ExposureSources:       exposureSources[identifier.String()],
+			RequiringConstructors: requiringConstructors[identifier.String()],
+			Selection:             selection,
+			ConfigurationOwner:    constructorConfigurationOwners[binding.Constructor().String()],
+			Policy:                policyInput(identifier.String()),
+			Mappings:              mapping,
+		}
+	}
+
+	intrinsicRequirements := resolved.InterfaceResolution().IntrinsicRequirements()
+	intrinsicInputs := make([]interfaceprovenance.IntrinsicInput, len(intrinsicRequirements))
+	for index, requirement := range intrinsicRequirements {
+		identifier := requirement.InterfaceID()
+		definition, exists := intrinsicByID[identifier.String()]
+		if !exists {
+			return interfaceprovenance.Provenance{}, fmt.Errorf("required intrinsic Interface %s has no loaded Kernel definition", identifier)
+		}
+		shapeDigest, exists := intrinsicShapeDigests[identifier.String()]
+		if !exists {
+			return interfaceprovenance.Provenance{}, fmt.Errorf("required intrinsic Interface %s has no shape identity", identifier)
+		}
+		mapping, err := mappingInput(identifier, false)
+		if err != nil {
+			return interfaceprovenance.Provenance{}, err
+		}
+		intrinsicInputs[index] = interfaceprovenance.IntrinsicInput{
+			Interface:          provenanceInterfaceInput(definition, shapeDigest),
+			RequirementSources: requirement.Sources(),
+			ExposureSources:    exposureSources[identifier.String()],
+			Policy:             policyInput(identifier.String()),
+			Mappings:           mapping,
+		}
+	}
+
+	return interfaceprovenance.New(interfaceprovenance.Input{
+		Interfaces:   interfaceInputs,
+		Bindings:     bindingInputs,
+		Constructors: constructorInputs,
+		Intrinsics:   intrinsicInputs,
+	})
+}
+
+func provenanceInterfaceInput(definition interfaceinventory.Interface, shapeDigest string) interfaceprovenance.InterfaceInput {
+	return interfaceprovenance.InterfaceInput{
+		ID:                  definition.ID(),
+		PackagePath:         definition.PackagePath(),
+		ModulePath:          definition.ModulePath(),
+		ModuleVersion:       provenanceModuleVersion(definition.ModuleVersion()),
+		DirectiveSource:     definition.Source(),
+		MetadataSource:      definition.MetadataSource(),
+		ShapeDigest:         shapeDigest,
+		ContractDigest:      definition.ContractDigest(),
+		DocumentationDigest: definition.DocumentationDigest(),
+		ExampleDigest:       definition.ExampleDigest(),
+	}
+}
+
+func provenanceModuleVersion(value string) string {
+	if value == "" {
+		return "local"
+	}
+	return value
+}
+
+func provenanceSources(resolved applicationresolve.Result, field string, fallbacks ...string) []string {
+	values := append([]string(nil), fallbacks...)
+	for _, record := range resolved.Composition().ResolutionSources() {
+		if record.Path() == field {
+			values = append(values, record.Sources()...)
+		}
+	}
+	return sortedUniqueStrings(values)
+}
+
+func provenanceSourcesWithPrefix(resolved applicationresolve.Result, field string, fallbacks ...string) []string {
+	values := append([]string(nil), fallbacks...)
+	prefix := field + "["
+	for _, record := range resolved.Composition().ResolutionSources() {
+		if record.Path() == field || strings.HasPrefix(record.Path(), prefix) {
+			values = append(values, record.Sources()...)
+		}
+	}
+	return sortedUniqueStrings(values)
+}
+
+func sortedUniqueStrings(values []string) []string {
+	result := append([]string(nil), values...)
+	sort.Strings(result)
+	write := 0
+	for _, value := range result {
+		if value == "" || write != 0 && result[write-1] == value {
+			continue
+		}
+		result[write] = value
+		write++
+	}
+	return result[:write]
 }
 
 func decodeSemanticDigest(value string) ([sha256.Size]byte, error) {

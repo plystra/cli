@@ -22,6 +22,7 @@ import (
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/implementationadaptergen"
 	"github.com/plystra/cli/internal/implementationassemblygen"
+	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
@@ -77,6 +78,7 @@ type applicationManifestDocument struct {
 	CapabilityAliases    json.RawMessage                         `json:"capability_aliases"`
 	ConstraintProjection applicationManifestConstraintProjection `json:"constraint_projection"`
 	Configuration        applicationManifestConfiguration        `json:"configuration"`
+	InterfaceProvenance  json.RawMessage                         `json:"interface_provenance"`
 	TransportToolchain   json.RawMessage                         `json:"transport_toolchain"`
 }
 
@@ -93,6 +95,7 @@ type ManifestProvenanceOptions struct {
 	Composition            applicationmeta.Composition
 	ProtobufWireMapDigest  string
 	ApplicationModelDigest string
+	InterfaceProvenance    interfaceprovenance.Provenance
 	TransportToolchain     transporttoolchain.Identity
 	Previous               ManifestProvenance
 }
@@ -109,6 +112,7 @@ type ManifestProvenance struct {
 	baselines              []manifestSelectionBaseline
 	protobufWireMapDigest  string
 	applicationModelDigest string
+	interfaceProvenance    interfaceprovenance.Provenance
 	transportToolchain     transporttoolchain.Identity
 }
 
@@ -170,6 +174,7 @@ func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenanc
 		baselines:              baselines,
 		protobufWireMapDigest:  options.ProtobufWireMapDigest,
 		applicationModelDigest: options.ApplicationModelDigest,
+		interfaceProvenance:    options.InterfaceProvenance,
 		transportToolchain:     options.TransportToolchain,
 	}
 	if err := validateManifestProvenance(provenance); err != nil {
@@ -224,6 +229,13 @@ func (p ManifestProvenance) ApplicationModelDigest() string {
 
 // ProtobufWireMapDigest returns the full committed historical wire-map digest.
 func (p ManifestProvenance) ProtobufWireMapDigest() string { return p.protobufWireMapDigest }
+
+// InterfaceProvenance returns the immutable complete authored Interface,
+// ordinary binding, constructor-graph, intrinsic, and generated-mapping
+// provenance record.
+func (p ManifestProvenance) InterfaceProvenance() interfaceprovenance.Provenance {
+	return p.interfaceProvenance
+}
 
 // TransportToolchain returns the immutable exact embedded generator and
 // generated-dependency identity.
@@ -285,6 +297,7 @@ func RenderManifest(aliasJSON []byte, context generation.Context, provenance Man
 	document := applicationManifestDocument{
 		CapabilityAliases:    aliases.CapabilityAliases,
 		ConstraintProjection: constraintProjection,
+		InterfaceProvenance:  json.RawMessage(provenance.interfaceProvenance.RecordJSON()),
 		TransportToolchain:   json.RawMessage(provenance.transportToolchain.RecordJSON()),
 		Configuration: applicationManifestConfiguration{
 			Version:     applicationManifestConfigurationVersion,
@@ -330,6 +343,10 @@ func DecodeManifestProvenance(data []byte) (ManifestProvenance, error) {
 	}
 	if err := validateManifestConstraintProjection(document.ConstraintProjection); err != nil {
 		return ManifestProvenance{}, fmt.Errorf("generated application manifest constraint_projection: %w", err)
+	}
+	interfaceRecord, err := interfaceprovenance.Decode(document.InterfaceProvenance)
+	if err != nil {
+		return ManifestProvenance{}, fmt.Errorf("generated application manifest interface_provenance: %w", err)
 	}
 	toolchain, err := transporttoolchain.Decode(document.TransportToolchain)
 	if err != nil {
@@ -402,6 +419,7 @@ func DecodeManifestProvenance(data []byte) (ManifestProvenance, error) {
 		baselines:              baselines,
 		protobufWireMapDigest:  configuration.ProtobufWireMapDigest,
 		applicationModelDigest: configuration.ApplicationModelDigest,
+		interfaceProvenance:    interfaceRecord,
 		transportToolchain:     toolchain,
 	}
 	if err := validateManifestProvenance(provenance); err != nil {
@@ -948,6 +966,9 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 	}
 	if !provenance.transportToolchain.Valid() {
 		return errors.New("transport toolchain identity is absent or invalid")
+	}
+	if !provenance.interfaceProvenance.Valid() {
+		return errors.New("interface and constructor provenance is absent or invalid")
 	}
 	return nil
 }

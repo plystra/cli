@@ -25,6 +25,7 @@ import (
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfacecompatibility"
+	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
@@ -707,6 +708,7 @@ func withManifestProvenanceSelection(t testing.TB, options applicationgen.Option
 		Composition:            options.Composition,
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: modelDigest,
+		InterfaceProvenance:    emptyInterfaceProvenance(t),
 		TransportToolchain:     currentTransportToolchain(t),
 	})
 	if err != nil {
@@ -714,6 +716,15 @@ func withManifestProvenanceSelection(t testing.TB, options applicationgen.Option
 	}
 	options.ManifestProvenance = provenance
 	return options
+}
+
+func emptyInterfaceProvenance(t testing.TB) interfaceprovenance.Provenance {
+	t.Helper()
+	provenance, err := interfaceprovenance.New(interfaceprovenance.Input{})
+	if err != nil {
+		t.Fatalf("interfaceprovenance.New: %v", err)
+	}
+	return provenance
 }
 
 func currentTransportToolchain(t testing.TB) transporttoolchain.Identity {

@@ -14,6 +14,7 @@ import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/implementationinventory"
+	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/transporttoolchain"
 )
 
@@ -126,6 +127,7 @@ func renderDependencyBaseline(t testing.TB, capability string) ([]byte, applicat
 		Composition:            composition,
 		ProtobufWireMapDigest:  "sha256:" + strings.Repeat("2", 64),
 		ApplicationModelDigest: "sha256:" + strings.Repeat("1", 64),
+		InterfaceProvenance:    emptyTestInterfaceProvenance(t),
 		TransportToolchain:     toolchain,
 	})
 	if err != nil {
@@ -140,6 +142,15 @@ func renderDependencyBaseline(t testing.TB, capability string) ([]byte, applicat
 		t.Fatalf("RenderManifest: %v", err)
 	}
 	return data, composition.DependencyBaseline()
+}
+
+func emptyTestInterfaceProvenance(t testing.TB) interfaceprovenance.Provenance {
+	t.Helper()
+	provenance, err := interfaceprovenance.New(interfaceprovenance.Input{})
+	if err != nil {
+		t.Fatalf("interfaceprovenance.New: %v", err)
+	}
+	return provenance
 }
 
 func defaultConfigurationSelector() configurationSelector {

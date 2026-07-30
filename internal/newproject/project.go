@@ -27,6 +27,7 @@ import (
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfacecompatibility"
+	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/moduleargument"
 	"github.com/plystra/cli/internal/moduledependency"
@@ -142,6 +143,15 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		for _, arguments := range [][]string{{"mod", "download"}, {"mod", "tidy"}} {
 			if err := gocommand.Run(ctx, gocommand.Options{Command: goCommand, Directory: stagingRoot, Environment: environment}, arguments...); err != nil {
 				return err
+			}
+		}
+		if options.Plugin == "" && templateQuery == "" {
+			if _, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
+				Start:       stagingRoot,
+				GoCommand:   goCommand,
+				Environment: environment,
+			}); err != nil {
+				return fmt.Errorf("generate resolved initial Project: %w", err)
 			}
 		}
 		if options.Plugin != "" {
@@ -609,6 +619,10 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if err != nil {
 		return fmt.Errorf("construct initial Interface JavaScript compatibility baseline: %w", err)
 	}
+	interfaceProvenance, err := interfaceprovenance.New(interfaceprovenance.Input{})
+	if err != nil {
+		return fmt.Errorf("construct initial Interface provenance: %w", err)
+	}
 	toolchain, err := transporttoolchain.Current()
 	if err != nil {
 		return fmt.Errorf("identify embedded transport toolchain: %w", err)
@@ -622,6 +636,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 		Composition:            composition,
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: modelDigest,
+		InterfaceProvenance:    interfaceProvenance,
 		TransportToolchain:     toolchain,
 	})
 	if err != nil {

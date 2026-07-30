@@ -407,7 +407,9 @@ failure, and rejects an invalid or incompatible target.
 The current entry replaces the inherited choice; Interface and conformance
 validation still runs. Never reorder dependencies or invent priority.
 Regenerate and check after selection or dependency changes.
-generated/manifest.json records only non-secret composition provenance.
+Both generated manifests share non-secret composition plus strict
+plystra.interface-provenance/v1 for Interfaces, bindings, constructors,
+intrinsics, and generated mappings. Inspect; never edit.
 
 Configure one exact non-intrinsic Interface policy:
 

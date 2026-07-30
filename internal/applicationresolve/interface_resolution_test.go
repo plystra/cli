@@ -11,6 +11,7 @@ import (
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/constructorgraph"
+	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/transporttoolchain"
 )
@@ -232,6 +233,7 @@ func TestResolveKeepsGeneratedManifestFromOverridingCurrentInterfaceSelection(t 
 		Composition:            initial.Composition(),
 		ProtobufWireMapDigest:  "sha256:2222222222222222222222222222222222222222222222222222222222222222",
 		ApplicationModelDigest: staleApplicationModelDigest,
+		InterfaceProvenance:    emptyResolvedInterfaceProvenance(t),
 		TransportToolchain:     toolchain,
 	})
 	if err != nil {
@@ -1294,4 +1296,13 @@ func containsResolutionFragments(value string, fragments ...string) bool {
 		}
 	}
 	return true
+}
+
+func emptyResolvedInterfaceProvenance(t testing.TB) interfaceprovenance.Provenance {
+	t.Helper()
+	provenance, err := interfaceprovenance.New(interfaceprovenance.Input{})
+	if err != nil {
+		t.Fatalf("interfaceprovenance.New: %v", err)
+	}
+	return provenance
 }

@@ -117,7 +117,7 @@ func Render(inputs []Input) ([]File, error) {
 			interfaceID: input.InterfaceID,
 			constructor: input.Constructor,
 			concrete:    input.ConcreteType,
-			path:        outputPath(input.InterfaceID),
+			path:        OutputPath(input.InterfaceID),
 			data:        data,
 		}
 	}
@@ -175,7 +175,9 @@ func sortInputs(inputs []Input) {
 	})
 }
 
-func outputPath(identifier interfaceid.Identifier) string {
+// OutputPath returns the one managed adapter source path for an exact
+// Interface binding.
+func OutputPath(identifier interfaceid.Identifier) string {
 	segments := strings.Split(identifier.Name(), ".")
 	segments = append([]string{"generated", "go", "adapters", "implementations"}, segments...)
 	segments = append(segments, "v"+strconv.FormatUint(identifier.Major(), 10), "adapter_gen.go")

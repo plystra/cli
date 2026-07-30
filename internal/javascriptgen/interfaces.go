@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/plystra/cli/internal/interfacecontract"
+	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
 )
@@ -19,6 +20,14 @@ type renderedInterface struct {
 	symbol    string
 	source    string
 	transport transportOperation
+}
+
+// InterfaceModulePath returns the managed JavaScript source module for one
+// exposed canonical Interface.
+func InterfaceModulePath(identifier interfaceid.Identifier) string {
+	segments := append([]string{"generated", "sdk", "javascript", "src", "interfaces"}, strings.Split(identifier.Name(), ".")...)
+	segments = append(segments, "v"+strconv.FormatUint(identifier.Major(), 10)+".ts")
+	return path.Join(segments...)
 }
 
 func prepareInterfaces(model protobufmodel.InterfaceModel) ([]renderedInterface, error) {

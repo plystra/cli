@@ -896,6 +896,44 @@ declared provenance, VCS state, timestamps, and machine-specific absolute
 paths. Use the same selection for generation and its check; selecting another
 build-affecting model correctly reports generated drift.
 
+The same manifest requires `interface_provenance` schema
+`plystra.interface-provenance/v1`. This is the non-secret join between authored
+Interfaces and generated assembly. It records:
+
+- every visible authored Interface and its module, source, shape, contract,
+  documentation, and example identities;
+- every reachable ordinary binding, its root, exposure and requiring
+  constructors, explicit or unique-compatible selection, configuration owner,
+  effective timeout-policy input, and selected constructor;
+- every reachable constructor exactly once in dependency-first order,
+  including parameter-ordered required and optional Interface dependencies;
+- required intrinsic `kernel.*` Interfaces in a separate collection, without
+  ordinary constructor or Implementation-adapter fields;
+- exact managed proxy, Implementation-adapter, assembly, Protobuf descriptor,
+  wire-map, Connect procedure, HTTP route, and JavaScript paths and digests
+  when those projections apply.
+
+Inspect the record after generation from PowerShell:
+
+```powershell
+$manifest = Get-Content generated/manifest.json -Raw | ConvertFrom-Json
+$manifest.interface_provenance.schema
+$manifest.interface_provenance.bindings |
+  Select-Object interface_id, selection, mappings
+$manifest.interface_provenance.constructors |
+  Select-Object symbol, construction_order, dependencies
+```
+
+The first command prints `plystra.interface-provenance/v1`. The exact same
+record is embedded under `application_manifest` in
+`generated/.plystra-manifest.json` so recovery and ownership validation use
+the same evidence. Neither copy contains configuration values,
+Secret-reference targets, resolved Secrets, process environment, or
+machine-specific absolute paths. Do not edit either copy. Change authored Go
+or the selected configuration, run `plystra generate` with that same selector,
+then require a clean `plystra generate --check`; malformed, incomplete,
+reordered, or digest-tampered provenance is rejected.
+
 ## Create and configure a Plugin
 
 From a module root:

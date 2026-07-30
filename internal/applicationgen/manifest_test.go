@@ -13,6 +13,7 @@ import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationadaptergen"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/transporttoolchain"
@@ -122,6 +123,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 		Composition:            dependencyComposition(t),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,
+		InterfaceProvenance:    emptyInterfaceProvenance(t),
 		TransportToolchain:     currentTransportToolchain(t),
 	})
 	if err != nil {
@@ -137,6 +139,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 		Composition:            dependencyComposition(t),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,
+		InterfaceProvenance:    emptyInterfaceProvenance(t),
 		TransportToolchain:     currentTransportToolchain(t),
 		Previous:               defaultProvenance,
 	})
@@ -170,6 +173,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 		Composition:            testComposition(),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,
+		InterfaceProvenance:    emptyInterfaceProvenance(t),
 		TransportToolchain:     currentTransportToolchain(t),
 		Previous:               environmentProvenance,
 	})
@@ -351,6 +355,7 @@ func TestGeneratedManifestRequiresAndValidatesTransportToolchain(t *testing.T) {
 		Composition:            testComposition(),
 		ProtobufWireMapDigest:  "sha256:" + strings.Repeat("2", 64),
 		ApplicationModelDigest: "sha256:" + strings.Repeat("1", 64),
+		InterfaceProvenance:    emptyInterfaceProvenance(t),
 		TransportToolchain:     current,
 	}
 	provenance, err := applicationgen.NewManifestProvenance(options)
@@ -454,6 +459,144 @@ func TestApplicationModelDigestIncludesAliasesAndExcludesSelectionPath(t *testin
 	if !strings.HasPrefix(withDigest, "sha256:") || len(withDigest) != 71 {
 		t.Fatalf("application-model digest = %q", withDigest)
 	}
+}
+
+func TestGeneratedManifestRequiresAndValidatesInterfaceProvenance(t *testing.T) {
+	t.Parallel()
+
+	interfaceRecord := manifestInterfaceProvenance(t)
+	options := applicationgen.ManifestProvenanceOptions{
+		Mode:                   applicationgen.ConfigurationModeDefault,
+		RootPath:               "plystra.yaml",
+		RootData:               []byte("{}\n"),
+		SelectedPath:           "plystra.yaml",
+		SelectedData:           []byte("{}\n"),
+		Composition:            testComposition(),
+		ProtobufWireMapDigest:  "sha256:" + strings.Repeat("2", 64),
+		ApplicationModelDigest: "sha256:" + strings.Repeat("1", 64),
+		InterfaceProvenance:    interfaceRecord,
+		TransportToolchain:     currentTransportToolchain(t),
+	}
+	provenance, err := applicationgen.NewManifestProvenance(options)
+	if err != nil {
+		t.Fatalf("NewManifestProvenance: %v", err)
+	}
+	resolution := emptyApplication(t)
+	data, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), resolution.Context(), provenance)
+	if err != nil {
+		t.Fatalf("RenderManifest: %v", err)
+	}
+	decoded, err := applicationgen.DecodeManifestProvenance(data)
+	if err != nil ||
+		!decoded.InterfaceProvenance().Valid() ||
+		decoded.InterfaceProvenance().Digest() != interfaceRecord.Digest() ||
+		len(decoded.InterfaceProvenance().Intrinsics()) != 2 {
+		t.Fatalf("DecodeManifestProvenance Interface provenance = %#v, %v", decoded.InterfaceProvenance(), err)
+	}
+
+	render := func(t *testing.T, record json.RawMessage, present bool) []byte {
+		t.Helper()
+		var document map[string]json.RawMessage
+		if err := json.Unmarshal(data, &document); err != nil {
+			t.Fatalf("decode valid manifest: %v", err)
+		}
+		if present {
+			document["interface_provenance"] = append(json.RawMessage(nil), record...)
+		} else {
+			delete(document, "interface_provenance")
+		}
+		result, err := json.Marshal(document)
+		if err != nil {
+			t.Fatalf("encode edited manifest: %v", err)
+		}
+		return result
+	}
+	assertRejected := func(t *testing.T, edited []byte, want string) {
+		t.Helper()
+		if _, err := applicationgen.DecodeManifestProvenance(edited); err == nil ||
+			!strings.Contains(err.Error(), "interface_provenance") ||
+			!strings.Contains(err.Error(), want) {
+			t.Fatalf("DecodeManifestProvenance error = %v; want interface_provenance containing %q", err, want)
+		}
+	}
+
+	t.Run("missing", func(t *testing.T) {
+		assertRejected(t, render(t, nil, false), "record must contain")
+	})
+	t.Run("malformed", func(t *testing.T) {
+		assertRejected(t, render(t, json.RawMessage(`{}`), true), "schema")
+	})
+	t.Run("unknown field", func(t *testing.T) {
+		unknown := bytes.Replace(interfaceRecord.RecordJSON(), []byte(`"schema":`), []byte(`"unknown":true,"schema":`), 1)
+		assertRejected(t, render(t, unknown, true), "unknown field")
+	})
+	t.Run("reordered", func(t *testing.T) {
+		var record map[string]json.RawMessage
+		if err := json.Unmarshal(interfaceRecord.RecordJSON(), &record); err != nil {
+			t.Fatalf("decode Interface provenance: %v", err)
+		}
+		var intrinsics []json.RawMessage
+		if err := json.Unmarshal(record["intrinsics"], &intrinsics); err != nil {
+			t.Fatalf("decode Interface intrinsics: %v", err)
+		}
+		slices.Reverse(intrinsics)
+		record["intrinsics"], err = json.Marshal(intrinsics)
+		if err != nil {
+			t.Fatalf("encode reordered Interface intrinsics: %v", err)
+		}
+		reordered, err := json.Marshal(record)
+		if err != nil {
+			t.Fatalf("encode reordered Interface provenance: %v", err)
+		}
+		assertRejected(t, render(t, reordered, true), "sorted by exact Interface ID")
+	})
+	t.Run("tampered digest", func(t *testing.T) {
+		var record map[string]json.RawMessage
+		if err := json.Unmarshal(interfaceRecord.RecordJSON(), &record); err != nil {
+			t.Fatalf("decode Interface provenance: %v", err)
+		}
+		record["digest"] = json.RawMessage(`"sha256:0000000000000000000000000000000000000000000000000000000000000000"`)
+		tampered, err := json.Marshal(record)
+		if err != nil {
+			t.Fatalf("encode tampered Interface provenance: %v", err)
+		}
+		assertRejected(t, render(t, tampered, true), "digest")
+	})
+}
+
+func manifestInterfaceProvenance(t testing.TB) interfaceprovenance.Provenance {
+	t.Helper()
+	intrinsic := func(identifier, packagePath, character string) interfaceprovenance.IntrinsicInput {
+		return interfaceprovenance.IntrinsicInput{
+			Interface: interfaceprovenance.InterfaceInput{
+				ID:                  identifier,
+				PackagePath:         packagePath,
+				ModulePath:          "github.com/plystra/kernel",
+				ModuleVersion:       "v0.0.1-rc.1",
+				DirectiveSource:     packagePath + "/interface.go:7:1",
+				ShapeDigest:         "sha256:" + strings.Repeat(character, 64),
+				ContractDigest:      "sha256:" + strings.Repeat(character, 64),
+				DocumentationDigest: "sha256:" + strings.Repeat(character, 64),
+				ExampleDigest:       "sha256:" + strings.Repeat(character, 64),
+			},
+			RequirementSources: []string{packagePath + " //plystra:interface " + identifier},
+			ExposureSources:    []string{},
+			Policy: interfaceprovenance.PolicyInput{
+				Timeout: "30s",
+				Sources: []string{"built-in Plystra default Interface invocation timeout"},
+			},
+		}
+	}
+	provenance, err := interfaceprovenance.New(interfaceprovenance.Input{
+		Intrinsics: []interfaceprovenance.IntrinsicInput{
+			intrinsic("kernel.info/v1", "github.com/plystra/kernel/interfaces/kernel/info/v1", "2"),
+			intrinsic("kernel.health/v1", "github.com/plystra/kernel/interfaces/kernel/health/v1", "1"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("interfaceprovenance.New: %v", err)
+	}
+	return provenance
 }
 
 func transportToolchainInputs(identity transporttoolchain.Identity) []transporttoolchain.ComponentInput {

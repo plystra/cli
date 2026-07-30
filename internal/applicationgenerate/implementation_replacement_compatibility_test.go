@@ -84,6 +84,19 @@ http:
 		provenanceBefore.SelectedPath() != "plystra.test.yaml" {
 		t.Fatalf("initial manifest provenance = %#v, %v", provenanceBefore, err)
 	}
+	beforeInterfaceProvenance := provenanceBefore.InterfaceProvenance()
+	if !beforeInterfaceProvenance.Valid() ||
+		len(beforeInterfaceProvenance.Interfaces()) != 1 ||
+		beforeInterfaceProvenance.Interfaces()[0].ID() != "records.list/v1" ||
+		len(beforeInterfaceProvenance.Bindings()) != 1 ||
+		beforeInterfaceProvenance.Bindings()[0].Selection().Constructor() != modulePath+"/smtp.New" ||
+		len(beforeInterfaceProvenance.Constructors()) != 1 ||
+		beforeInterfaceProvenance.Constructors()[0].Symbol() != modulePath+"/smtp.New" ||
+		len(beforeInterfaceProvenance.Intrinsics()) != 2 {
+		t.Fatalf("initial Interface and constructor provenance = %#v", beforeInterfaceProvenance)
+	}
+	beforeBinding := beforeInterfaceProvenance.Bindings()[0]
+	assertExposedMapping(t, beforeBinding.Mappings(), "records/list/v1", "/plystra.generated.records.list.v1.RecordsListV1Service/Invoke", true)
 	if !bytes.Contains(assemblyBefore, []byte(modulePath+"/smtp.New")) ||
 		bytes.Contains(assemblyBefore, []byte(modulePath+"/memory.New")) ||
 		!bytes.Contains(adapterBefore, []byte(modulePath+"/smtp.New")) ||
@@ -181,6 +194,29 @@ interfaces:
 			err,
 		)
 	}
+	afterInterfaceProvenance := provenanceAfter.InterfaceProvenance()
+	if !afterInterfaceProvenance.Valid() ||
+		!reflect.DeepEqual(beforeInterfaceProvenance.Interfaces(), afterInterfaceProvenance.Interfaces()) ||
+		!reflect.DeepEqual(beforeInterfaceProvenance.Intrinsics(), afterInterfaceProvenance.Intrinsics()) ||
+		len(afterInterfaceProvenance.Bindings()) != 1 ||
+		len(afterInterfaceProvenance.Constructors()) != 1 {
+		t.Fatalf("compatible replacement changed Interface identities or intrinsic separation:\nbefore: %#v\nafter: %#v", beforeInterfaceProvenance, afterInterfaceProvenance)
+	}
+	afterBinding := afterInterfaceProvenance.Bindings()[0]
+	if afterBinding.InterfaceID() != beforeBinding.InterfaceID() ||
+		afterBinding.Selection().Constructor() != modulePath+"/memory.New" ||
+		afterBinding.Selection().Reason() != beforeBinding.Selection().Reason() ||
+		!reflect.DeepEqual(afterBinding.RootSources(), beforeBinding.RootSources()) ||
+		!reflect.DeepEqual(afterBinding.ExposureSources(), beforeBinding.ExposureSources()) ||
+		!reflect.DeepEqual(afterBinding.Policy(), beforeBinding.Policy()) ||
+		!reflect.DeepEqual(afterBinding.Mappings(), beforeBinding.Mappings()) {
+		t.Fatalf("compatible replacement changed wire or source provenance:\nbefore: %#v\nafter: %#v", beforeBinding, afterBinding)
+	}
+	if afterInterfaceProvenance.Constructors()[0].Symbol() != modulePath+"/memory.New" ||
+		afterInterfaceProvenance.Constructors()[0].ConstructionOrder() != 1 {
+		t.Fatalf("compatible replacement constructor provenance = %#v", afterInterfaceProvenance.Constructors())
+	}
+	assertExposedMapping(t, afterBinding.Mappings(), "records/list/v1", "/plystra.generated.records.list.v1.RecordsListV1Service/Invoke", true)
 
 	options.Check = true
 	cleanAfterReplacement, err := applicationgenerate.Generate(t.Context(), options)
