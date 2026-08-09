@@ -30,15 +30,33 @@ func TestNewOutputRendersDeterministicOwnershipManifest(t *testing.T) {
 		t.Fatalf("NewOutput: %v", err)
 	}
 	wantManifest := fmt.Sprintf(`{
-  "version": 2,
+  "version": 3,
   "files": [
     {
       "path": "generated/a/first.txt",
-      "sha256": %q
+      "sha256": %q,
+      "generator": "plystra.test-generator/v1",
+      "output_kind": "go-source",
+      "input_record_ids": [
+        "test:generated/a/first.txt"
+      ],
+      "sources": [
+        "test fixture"
+      ],
+      "cleanup_ownership": "cli-owned"
     },
     {
       "path": "generated/z/second.txt",
-      "sha256": %q
+      "sha256": %q,
+      "generator": "plystra.test-generator/v1",
+      "output_kind": "go-source",
+      "input_record_ids": [
+        "test:generated/z/second.txt"
+      ],
+      "sources": [
+        "test fixture"
+      ],
+      "cleanup_ownership": "cli-owned"
     }
   ]
 }
@@ -70,6 +88,122 @@ func TestNewOutputRendersDeterministicOwnershipManifest(t *testing.T) {
 	}
 }
 
+func TestNewFileNormalizesAndDefensivelyCopiesArtifactProvenance(t *testing.T) {
+	t.Parallel()
+
+	input := generatedfiles.ArtifactInput{
+		Generator:      "plystra.test-generator/v7",
+		Kind:           generatedfiles.ArtifactKindDocumentation,
+		InputRecordIDs: []string{"record:z", "record:a"},
+		Sources:        []string{"z/source.go:9:1", "a/source.go:3:2"},
+	}
+	file, err := generatedfiles.NewFile("generated/docs/reference.md", []byte("reference\n"), input)
+	if err != nil {
+		t.Fatalf("NewFile: %v", err)
+	}
+	input.InputRecordIDs[0] = "mutated"
+	input.Sources[0] = "mutated"
+
+	artifact := file.Artifact()
+	if !artifact.Valid() ||
+		artifact.Path() != "generated/docs/reference.md" ||
+		artifact.SHA256() != testDigest([]byte("reference\n")) ||
+		artifact.Generator() != "plystra.test-generator/v7" ||
+		artifact.Kind() != generatedfiles.ArtifactKindDocumentation ||
+		artifact.CleanupOwnership() != generatedfiles.CleanupOwnershipCLI ||
+		!slices.Equal(artifact.InputRecordIDs(), []string{"record:a", "record:z"}) ||
+		!slices.Equal(artifact.Sources(), []string{"a/source.go:3:2", "z/source.go:9:1"}) {
+		t.Fatalf("Artifact = %#v", artifact)
+	}
+	inputs := artifact.InputRecordIDs()
+	sources := artifact.Sources()
+	inputs[0] = "mutated"
+	sources[0] = "mutated"
+	if file.Artifact().InputRecordIDs()[0] == "mutated" || file.Artifact().Sources()[0] == "mutated" {
+		t.Fatal("Artifact accessors exposed mutable storage")
+	}
+
+	output, err := generatedfiles.NewOutput([]generatedfiles.File{file})
+	if err != nil {
+		t.Fatalf("NewOutput: %v", err)
+	}
+	artifacts := output.Artifacts()
+	if len(artifacts) != 2 || artifacts[0].Path() != generatedfiles.ManifestPath || !artifacts[0].Valid() || artifacts[1].Path() != file.Path() {
+		t.Fatalf("Output.Artifacts = %#v", artifacts)
+	}
+	artifacts[1] = generatedfiles.Artifact{}
+	if !output.Artifacts()[1].Valid() {
+		t.Fatal("Output.Artifacts exposed mutable storage")
+	}
+}
+
+func TestNewFileRejectsIncompleteOrNoncanonicalArtifactProvenance(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input generatedfiles.ArtifactInput
+	}{
+		{name: "missing generator", input: generatedfiles.ArtifactInput{Kind: generatedfiles.ArtifactKindGoSource, InputRecordIDs: []string{"input"}, Sources: []string{"source"}}},
+		{name: "invalid generator", input: generatedfiles.ArtifactInput{Generator: "test/v1", Kind: generatedfiles.ArtifactKindGoSource, InputRecordIDs: []string{"input"}, Sources: []string{"source"}}},
+		{name: "missing output kind", input: generatedfiles.ArtifactInput{Generator: "plystra.test/v1", InputRecordIDs: []string{"input"}, Sources: []string{"source"}}},
+		{name: "missing inputs", input: generatedfiles.ArtifactInput{Generator: "plystra.test/v1", Kind: generatedfiles.ArtifactKindGoSource, Sources: []string{"source"}}},
+		{name: "duplicate inputs", input: generatedfiles.ArtifactInput{Generator: "plystra.test/v1", Kind: generatedfiles.ArtifactKindGoSource, InputRecordIDs: []string{"input", "input"}, Sources: []string{"source"}}},
+		{name: "missing sources", input: generatedfiles.ArtifactInput{Generator: "plystra.test/v1", Kind: generatedfiles.ArtifactKindGoSource, InputRecordIDs: []string{"input"}}},
+		{name: "control source", input: generatedfiles.ArtifactInput{Generator: "plystra.test/v1", Kind: generatedfiles.ArtifactKindGoSource, InputRecordIDs: []string{"input"}, Sources: []string{"source\nsecret"}}},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := generatedfiles.NewFile("generated/test.go", []byte("package generated\n"), test.input); !errors.Is(err, generatedfiles.ErrOutput) {
+				t.Fatalf("NewFile error = %v", err)
+			}
+		})
+	}
+}
+
+func TestNewOutputRequiresCanonicalApplicationManifestAndLinksSnapshot(t *testing.T) {
+	t.Parallel()
+
+	pretty := []byte("{\n  \"configuration\": {\"version\": 1}\n}\n")
+	prettyFile, err := generatedfiles.NewFile(generatedfiles.ApplicationManifestPath, pretty, testArtifactInput(generatedfiles.ApplicationManifestPath))
+	if err != nil {
+		t.Fatalf("NewFile(pretty application manifest): %v", err)
+	}
+	if _, err := generatedfiles.NewOutput([]generatedfiles.File{prettyFile}); !errors.Is(err, generatedfiles.ErrOutput) || !strings.Contains(err.Error(), "canonical compact JSON") {
+		t.Fatalf("NewOutput(pretty application manifest) error = %v", err)
+	}
+
+	applicationManifest := []byte("{\"configuration\":{\"version\":1}}\n")
+	file := managedFile(t, generatedfiles.ApplicationManifestPath, applicationManifest)
+	output, err := generatedfiles.NewOutput([]generatedfiles.File{file})
+	if err != nil {
+		t.Fatalf("NewOutput: %v", err)
+	}
+	root := t.TempDir()
+	writeOutput(t, root, output)
+	artifact, exists, err := generatedfiles.ReadArtifact(root, generatedfiles.ApplicationManifestPath)
+	if err != nil || !exists || artifact.SHA256() != testDigest(applicationManifest) {
+		t.Fatalf("ReadArtifact(application manifest) = %#v, %t, %v", artifact, exists, err)
+	}
+
+	var ownership struct {
+		ApplicationManifest json.RawMessage `json:"application_manifest"`
+	}
+	if err := json.Unmarshal(output.ManifestJSON(), &ownership); err != nil || !bytes.Equal(compactJSON(t, ownership.ApplicationManifest), compactJSON(t, applicationManifest)) {
+		t.Fatalf("application_manifest snapshot = %s, %v", ownership.ApplicationManifest, err)
+	}
+
+	corrupt := mutateOwnershipManifest(t, output.ManifestJSON(), func(document map[string]any) {
+		document["application_manifest"] = map[string]any{"configuration": map[string]any{"version": float64(2)}}
+	})
+	writeFileBytes(t, root, generatedfiles.ManifestPath, corrupt)
+	if _, _, err := generatedfiles.ReadArtifact(root, generatedfiles.ApplicationManifestPath); !errors.Is(err, generatedfiles.ErrManifest) || !strings.Contains(err.Error(), "snapshot digest") {
+		t.Fatalf("ReadArtifact(corrupt snapshot) error = %v", err)
+	}
+}
+
 func TestNewOutputRejectsUnsafeIgnoredAndDuplicatePaths(t *testing.T) {
 	t.Parallel()
 
@@ -89,7 +223,7 @@ func TestNewOutputRejectsUnsafeIgnoredAndDuplicatePaths(t *testing.T) {
 		filePath := filePath
 		t.Run(strings.ReplaceAll(filePath, "/", "_"), func(t *testing.T) {
 			t.Parallel()
-			if _, err := generatedfiles.NewFile(filePath, []byte("data")); !errors.Is(err, generatedfiles.ErrOutput) || !errors.Is(err, generatedfiles.ErrPath) {
+			if _, err := generatedfiles.NewFile(filePath, []byte("data"), testArtifactInput(filePath)); !errors.Is(err, generatedfiles.ErrOutput) || !errors.Is(err, generatedfiles.ErrPath) {
 				t.Fatalf("NewFile(%q) error = %v", filePath, err)
 			}
 		})
@@ -198,14 +332,14 @@ func TestCheckRejectsInvalidOwnershipManifest(t *testing.T) {
 		data string
 	}{
 		{name: "malformed", data: `{`},
-		{name: "unknown field", data: `{"version":2,"files":[],"extra":true}`},
-		{name: "unsupported version", data: `{"version":1,"files":[]}`},
-		{name: "missing files", data: `{"version":2}`},
-		{name: "invalid path", data: fmt.Sprintf(`{"version":2,"files":[{"path":"../outside","sha256":%q}]}`, digest)},
-		{name: "manifest self record", data: fmt.Sprintf(`{"version":2,"files":[{"path":%q,"sha256":%q}]}`, generatedfiles.ManifestPath, digest)},
-		{name: "invalid digest", data: `{"version":2,"files":[{"path":"generated/file","sha256":"sha256:ABC"}]}`},
-		{name: "duplicate", data: fmt.Sprintf(`{"version":2,"files":[{"path":"generated/file","sha256":%q},{"path":"generated/file","sha256":%q}]}`, digest, digest)},
-		{name: "trailing JSON", data: `{"version":2,"files":[]} {}`},
+		{name: "unknown field", data: `{"version":3,"files":[],"extra":true}`},
+		{name: "unsupported version", data: `{"version":2,"files":[]}`},
+		{name: "missing files", data: `{"version":3}`},
+		{name: "invalid path", data: fmt.Sprintf(`{"version":3,"files":[{"path":"../outside","sha256":%q}]}`, digest)},
+		{name: "manifest self record", data: fmt.Sprintf(`{"version":3,"files":[{"path":%q,"sha256":%q}]}`, generatedfiles.ManifestPath, digest)},
+		{name: "invalid digest", data: `{"version":3,"files":[{"path":"generated/file","sha256":"sha256:ABC"}]}`},
+		{name: "duplicate", data: fmt.Sprintf(`{"version":3,"files":[{"path":"generated/file","sha256":%q},{"path":"generated/file","sha256":%q}]}`, digest, digest)},
+		{name: "trailing JSON", data: `{"version":3,"files":[]} {}`},
 	}
 	for _, test := range tests {
 		test := test
@@ -215,6 +349,59 @@ func TestCheckRejectsInvalidOwnershipManifest(t *testing.T) {
 			writeFile(t, root, generatedfiles.ManifestPath, test.data)
 			if _, err := generatedfiles.Check(root, managedOutput(t)); !errors.Is(err, generatedfiles.ErrCheck) || !errors.Is(err, generatedfiles.ErrManifest) {
 				t.Fatalf("Check error = %v", err)
+			}
+		})
+	}
+}
+
+func TestCheckRejectsInvalidArtifactProvenanceAndNoncanonicalManifest(t *testing.T) {
+	t.Parallel()
+
+	base := managedOutput(t,
+		"generated/a.txt", "a\n",
+		"generated/b.txt", "b\n",
+	).ManifestJSON()
+	tests := []struct {
+		name         string
+		want         string
+		mutate       func(map[string]any)
+		noncanonical bool
+	}{
+		{name: "missing generator", want: "generator identity", mutate: func(document map[string]any) { delete(manifestFixtureRecord(document, 0), "generator") }},
+		{name: "invalid output kind", want: "output kind", mutate: func(document map[string]any) { manifestFixtureRecord(document, 0)["output_kind"] = "archive" }},
+		{name: "missing inputs", want: "input record IDs", mutate: func(document map[string]any) { delete(manifestFixtureRecord(document, 0), "input_record_ids") }},
+		{name: "duplicate inputs", want: "input record IDs", mutate: func(document map[string]any) {
+			manifestFixtureRecord(document, 0)["input_record_ids"] = []any{"input", "input"}
+		}},
+		{name: "unordered inputs", want: "input record IDs", mutate: func(document map[string]any) {
+			manifestFixtureRecord(document, 0)["input_record_ids"] = []any{"z", "a"}
+		}},
+		{name: "missing sources", want: "sources", mutate: func(document map[string]any) { delete(manifestFixtureRecord(document, 0), "sources") }},
+		{name: "invalid cleanup ownership", want: "cleanup ownership", mutate: func(document map[string]any) { manifestFixtureRecord(document, 0)["cleanup_ownership"] = "user-owned" }},
+		{name: "unordered records", want: "uniquely ordered", mutate: func(document map[string]any) {
+			files := document["files"].([]any)
+			files[0], files[1] = files[1], files[0]
+		}},
+		{name: "duplicate records", want: "uniquely ordered", mutate: func(document map[string]any) {
+			files := document["files"].([]any)
+			document["files"] = append(files, files[1])
+		}},
+		{name: "noncanonical JSON", want: "not canonical", noncanonical: true},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			var data []byte
+			if test.noncanonical {
+				data = append(append([]byte(nil), base...), ' ')
+			} else {
+				data = mutateOwnershipManifest(t, base, test.mutate)
+			}
+			writeFileBytes(t, root, generatedfiles.ManifestPath, data)
+			if _, err := generatedfiles.Check(root, managedOutput(t)); !errors.Is(err, generatedfiles.ErrCheck) || !errors.Is(err, generatedfiles.ErrManifest) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Check error = %v, want %q", err, test.want)
 			}
 		})
 	}
@@ -655,7 +842,7 @@ func TestReadApplicationManifestRecoveryRejectsMalformedOrUnsafeState(t *testing
 	t.Run("malformed", func(t *testing.T) {
 		t.Parallel()
 		root := t.TempDir()
-		writeFile(t, root, generatedfiles.ManifestPath, "{\"version\":2")
+		writeFile(t, root, generatedfiles.ManifestPath, "{\"version\":3")
 		if _, _, err := generatedfiles.ReadApplicationManifestRecovery(root); !errors.Is(err, generatedfiles.ErrManifest) {
 			t.Fatalf("ReadApplicationManifestRecovery error = %v", err)
 		}
@@ -738,13 +925,109 @@ func TestReadOwnedFileRejectsSymbolicManagedParent(t *testing.T) {
 	}
 }
 
+func TestReadArtifactExplainsOwnedMissingModifiedAndManifestPaths(t *testing.T) {
+	t.Parallel()
+
+	const ownedPath = "generated/go/owned.go"
+	root := t.TempDir()
+	output := managedOutput(t, ownedPath, "package generated\n")
+	writeOutput(t, root, output)
+	manifestData := output.ManifestJSON()
+
+	want, exists, err := generatedfiles.ReadArtifact(root, ownedPath)
+	if err != nil || !exists || !want.Valid() || want.Path() != ownedPath ||
+		want.Generator() != "plystra.test-generator/v1" ||
+		want.Kind() != generatedfiles.ArtifactKindGoSource ||
+		want.CleanupOwnership() != generatedfiles.CleanupOwnershipCLI {
+		t.Fatalf("ReadArtifact(owned) = %#v, %t, %v", want, exists, err)
+	}
+
+	if err := os.Remove(filepath.Join(root, filepath.FromSlash(ownedPath))); err != nil {
+		t.Fatalf("Remove(owned): %v", err)
+	}
+	missing, exists, err := generatedfiles.ReadArtifact(root, ownedPath)
+	if err != nil || !exists || missing.SHA256() != want.SHA256() {
+		t.Fatalf("ReadArtifact(missing owned) = %#v, %t, %v", missing, exists, err)
+	}
+
+	writeFile(t, root, ownedPath, "manual edit\n")
+	modified, exists, err := generatedfiles.ReadArtifact(root, ownedPath)
+	if err != nil || !exists || modified.SHA256() != want.SHA256() {
+		t.Fatalf("ReadArtifact(modified owned) = %#v, %t, %v", modified, exists, err)
+	}
+	writeFile(t, root, "generated/go/unowned.go", "package generated\n")
+	if artifact, exists, err := generatedfiles.ReadArtifact(root, "generated/go/unowned.go"); err != nil || exists || artifact.Valid() {
+		t.Fatalf("ReadArtifact(unowned) = %#v, %t, %v", artifact, exists, err)
+	}
+
+	manifest, exists, err := generatedfiles.ReadArtifact(root, generatedfiles.ManifestPath)
+	if err != nil || !exists || !manifest.Valid() ||
+		manifest.Path() != generatedfiles.ManifestPath ||
+		manifest.SHA256() != testDigest(manifestData) ||
+		manifest.Generator() != "plystra.generated-ownership/v3" ||
+		manifest.Kind() != generatedfiles.ArtifactKindOwnershipManifest ||
+		manifest.CleanupOwnership() != generatedfiles.CleanupOwnershipCLI ||
+		len(manifest.InputRecordIDs()) != 2 ||
+		!strings.HasPrefix(manifest.InputRecordIDs()[0], "artifact-set:sha256:") ||
+		!slices.Equal(manifest.Sources(), []string{"generated output model"}) {
+		t.Fatalf("ReadArtifact(ownership manifest) = %#v, %t, %v", manifest, exists, err)
+	}
+	inputs := manifest.InputRecordIDs()
+	sources := manifest.Sources()
+	inputs[0] = "mutated"
+	sources[0] = "mutated"
+	repeated, exists, err := generatedfiles.ReadArtifact(root, generatedfiles.ManifestPath)
+	if err != nil || !exists || repeated.InputRecordIDs()[0] == "mutated" || repeated.Sources()[0] == "mutated" {
+		t.Fatalf("ReadArtifact(ownership manifest defensive access) = %#v, %t, %v", repeated, exists, err)
+	}
+
+	if _, _, err := generatedfiles.ReadArtifact(root, "../outside"); !errors.Is(err, generatedfiles.ErrManifest) {
+		t.Fatalf("ReadArtifact(unsafe path) error = %v", err)
+	}
+	withoutManifest := t.TempDir()
+	if artifact, exists, err := generatedfiles.ReadArtifact(withoutManifest, ownedPath); err != nil || exists || artifact.Valid() {
+		t.Fatalf("ReadArtifact(without manifest) = %#v, %t, %v", artifact, exists, err)
+	}
+}
+
 func managedFile(t testing.TB, filePath string, data []byte) generatedfiles.File {
 	t.Helper()
-	file, err := generatedfiles.NewFile(filePath, data)
+	file, err := generatedfiles.NewFile(filePath, data, testArtifactInput(filePath))
 	if err != nil {
 		t.Fatalf("NewFile(%s): %v", filePath, err)
 	}
 	return file
+}
+
+func testArtifactInput(filePath string) generatedfiles.ArtifactInput {
+	kind := generatedfiles.ArtifactKindGoSource
+	if filePath == generatedfiles.ApplicationManifestPath {
+		kind = generatedfiles.ArtifactKindApplicationManifest
+	}
+	return generatedfiles.ArtifactInput{
+		Generator:      "plystra.test-generator/v1",
+		Kind:           kind,
+		InputRecordIDs: []string{"test:" + filePath},
+		Sources:        []string{"test fixture"},
+	}
+}
+
+func mutateOwnershipManifest(t testing.TB, data []byte, mutate func(map[string]any)) []byte {
+	t.Helper()
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("decode ownership manifest fixture: %v", err)
+	}
+	mutate(document)
+	result, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		t.Fatalf("encode ownership manifest fixture: %v", err)
+	}
+	return append(result, '\n')
+}
+
+func manifestFixtureRecord(document map[string]any, index int) map[string]any {
+	return document["files"].([]any)[index].(map[string]any)
 }
 
 func compactJSON(t testing.TB, data []byte) []byte {

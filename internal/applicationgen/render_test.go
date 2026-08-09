@@ -66,6 +66,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 	assertBootstrapMatchesManifestProvenance(t, output, options)
+	assertCompleteArtifactProvenance(t, output)
 	wantPaths := []string{
 		"generated/compatibility/interface-documentation.json",
 		"generated/compatibility/interface-javascript.json",
@@ -808,6 +809,42 @@ func assertBootstrapMatchesManifestProvenance(t testing.TB, output generatedfile
 	} {
 		if !bytes.Contains(bootstrap, []byte(required)) {
 			t.Fatalf("generated bootstrap disagrees with manifest provenance %q:\n%s", required, bootstrap)
+		}
+	}
+}
+
+func assertCompleteArtifactProvenance(t testing.TB, output generatedfiles.Output) {
+	t.Helper()
+	files := output.Files()
+	artifacts := output.Artifacts()
+	if len(artifacts) != len(files)+1 {
+		t.Fatalf("artifact count = %d, want %d", len(artifacts), len(files)+1)
+	}
+	byPath := make(map[string]generatedfiles.Artifact, len(artifacts))
+	for _, artifact := range artifacts {
+		if !artifact.Valid() || artifact.Generator() == "" || len(artifact.InputRecordIDs()) == 0 || len(artifact.Sources()) == 0 || artifact.CleanupOwnership() != generatedfiles.CleanupOwnershipCLI {
+			t.Fatalf("invalid generated artifact provenance for %s: %#v", artifact.Path(), artifact)
+		}
+		if _, duplicate := byPath[artifact.Path()]; duplicate {
+			t.Fatalf("duplicate artifact provenance for %s", artifact.Path())
+		}
+		byPath[artifact.Path()] = artifact
+		for _, value := range append(artifact.InputRecordIDs(), artifact.Sources()...) {
+			for _, forbidden := range []string{"PRIVATE_APPLICATION_TOKEN", "resolved-secret-value"} {
+				if strings.Contains(value, forbidden) {
+					t.Fatalf("artifact %s leaked %q in provenance", artifact.Path(), forbidden)
+				}
+			}
+		}
+	}
+	manifest, exists := byPath[generatedfiles.ManifestPath]
+	if !exists || manifest.Kind() != generatedfiles.ArtifactKindOwnershipManifest {
+		t.Fatalf("ownership-manifest artifact provenance = %#v, %t", manifest, exists)
+	}
+	for _, file := range files {
+		artifact, exists := byPath[file.Path()]
+		if !exists || artifact.SHA256() != file.Artifact().SHA256() || artifact.Generator() != file.Artifact().Generator() || artifact.Kind() != file.Artifact().Kind() {
+			t.Fatalf("file %s artifact provenance = %#v, %t; file record %#v", file.Path(), artifact, exists, file.Artifact())
 		}
 	}
 }

@@ -182,10 +182,25 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: lower contributions: %w", ErrRender, err)
 	}
+	artifactEvidence, err := newArtifactEvidenceIndex(options.ManifestProvenance)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: artifact provenance: %w", ErrRender, err)
+	}
 
 	files := make([]generatedfiles.File, 0)
 	add := func(filePath string, data []byte) error {
-		file, err := generatedfiles.NewFile(filePath, data)
+		input, err := artifactEvidence.input(filePath)
+		if err != nil {
+			return err
+		}
+		extra := artifactCompatibilityEvidence(filePath, options)
+		merged := mergeArtifactEvidence(
+			artifactEvidenceFromInput(input),
+			extra,
+		)
+		input.InputRecordIDs = merged.inputs
+		input.Sources = merged.sources
+		file, err := generatedfiles.NewFile(filePath, data, input)
 		if err != nil {
 			return err
 		}
@@ -607,6 +622,13 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		return generatedfiles.Output{}, fmt.Errorf("%w: finalize managed output: %w", ErrRender, err)
 	}
 	return output, nil
+}
+
+func artifactEvidenceFromInput(input generatedfiles.ArtifactInput) artifactEvidence {
+	return artifactEvidence{
+		inputs:  append([]string(nil), input.InputRecordIDs...),
+		sources: append([]string(nil), input.Sources...),
+	}
 }
 
 func selectedTransportProvenance(options Options, context generation.Context, modelDigest string) (transportprovenance.Provenance, error) {

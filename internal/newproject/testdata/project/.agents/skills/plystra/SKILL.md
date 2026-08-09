@@ -147,7 +147,7 @@ A typical Plystra Project evolves into this layout:
             capability.yaml
       migrations/                 # optional Plugin-owned database assets
     generated/
-      .plystra-manifest.json
+      .plystra-manifest.json        # per-file generator/input/source provenance
       manifest.json
       proto/
         descriptor-set.pb
@@ -1200,12 +1200,10 @@ plystra generate --check is read-only. It recomputes the complete resolution and
 generation fixed point and fails on stale, missing, unexpected, or manually modified
 managed paths. If it reports drift:
 
-1. Identify the authored plugin.yaml, capability.yaml, plystra.yaml, go.mod, or
-   generation-extension input that should produce the desired output.
-2. Move any handwritten file out of generated.
-3. Run plystra generate.
-4. Rerun checks and inspect the generated contract, manifest, docs, and SDK
-   surfaces affected by the change.
+1. Read that path's generated/.plystra-manifest.json entry for its exact
+   generator, normalized input IDs, source references, output kind, and cleanup owner.
+2. Change the named authored input; move handwritten files out of generated.
+3. Run plystra generate, then plystra generate --check with the same selector.
 
 Keep go.work optional. Standard Go Module dependency resolution remains the
 build and distribution boundary for every Plystra module.

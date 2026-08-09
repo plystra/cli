@@ -23,7 +23,16 @@ func FuzzManagedOutputPathsAndBytes(f *testing.F) {
 		if len(filePath) > 4096 || len(data) > 1<<20 {
 			return
 		}
-		file, err := NewFile(filePath, data)
+		kind := ArtifactKindGoSource
+		if filePath == ApplicationManifestPath {
+			kind = ArtifactKindApplicationManifest
+		}
+		file, err := NewFile(filePath, data, ArtifactInput{
+			Generator:      "plystra.fuzz-generator/v1",
+			Kind:           kind,
+			InputRecordIDs: []string{"fuzz:" + filePath},
+			Sources:        []string{"fuzz input"},
+		})
 		if err != nil {
 			return
 		}
@@ -34,7 +43,9 @@ func FuzzManagedOutputPathsAndBytes(f *testing.F) {
 			}
 			t.Fatalf("NewOutput accepted NewFile then failed: %v", err)
 		}
-		if len(output.Files()) != 1 || output.Files()[0].Path() != filePath || len(output.ManifestJSON()) == 0 {
+		artifacts := output.Artifacts()
+		if len(output.Files()) != 1 || output.Files()[0].Path() != filePath || len(output.ManifestJSON()) == 0 ||
+			len(artifacts) != 2 || !artifacts[0].Valid() || !artifacts[1].Valid() {
 			t.Fatalf("prepared output lost accepted file %q", filePath)
 		}
 		repeated, err := NewOutput(output.Files())
@@ -45,11 +56,19 @@ func FuzzManagedOutputPathsAndBytes(f *testing.F) {
 }
 
 func FuzzOwnershipManifestDecoder(f *testing.F) {
+	empty, err := NewOutput(nil)
+	if err != nil {
+		f.Fatalf("NewOutput(empty): %v", err)
+	}
+	one, err := NewOutput([]File{mustFuzzFile(f, "generated/a", []byte("a\n"))})
+	if err != nil {
+		f.Fatalf("NewOutput(one): %v", err)
+	}
 	for _, seed := range [][]byte{
+		empty.ManifestJSON(),
+		one.ManifestJSON(),
 		[]byte(`{"version":2,"files":[]}`),
-		[]byte(`{"version":2,"files":[{"path":"generated/a","sha256":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}`),
-		[]byte(`{"version":1,"files":[]}`),
-		[]byte(`{"version":2,"files":null}`),
+		[]byte(`{"version":3,"files":null}`),
 		[]byte(`not-json`),
 	} {
 		f.Add(seed)
@@ -71,4 +90,18 @@ func FuzzOwnershipManifestDecoder(f *testing.F) {
 			}
 		}
 	})
+}
+
+func mustFuzzFile(f *testing.F, filePath string, data []byte) File {
+	f.Helper()
+	file, err := NewFile(filePath, data, ArtifactInput{
+		Generator:      "plystra.fuzz-generator/v1",
+		Kind:           ArtifactKindGoSource,
+		InputRecordIDs: []string{"fuzz:" + filePath},
+		Sources:        []string{"fuzz input"},
+	})
+	if err != nil {
+		f.Fatalf("NewFile(%s): %v", filePath, err)
+	}
+	return file
 }

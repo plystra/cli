@@ -940,6 +940,24 @@ or the selected configuration, run `plystra generate` with that same selector,
 then require a clean `plystra generate --check`; malformed, incomplete,
 reordered, or digest-tampered provenance is rejected.
 
+The ownership manifest uses schema 3 and records one immutable entry for every
+managed artifact. Inspect one entry directly when diagnosing generated drift:
+
+```powershell
+$ownership = Get-Content generated/.plystra-manifest.json -Raw |
+  ConvertFrom-Json
+$ownership.files |
+  Where-Object path -eq 'generated/go/assembly/interfaces_gen.go' |
+  Select-Object path, sha256, generator, output_kind,
+    input_record_ids, sources, cleanup_ownership
+```
+
+Each entry names the exact generator version, normalized non-secret inputs,
+stable authored or selected-configuration sources, output kind, and
+`cli-owned` cleanup authority. The record remains usable when the target file
+is missing or manually modified. The ownership manifest's own provenance is
+implicit because it cannot contain its own stable digest.
+
 ## Create and configure a Plugin
 
 From a module root:
@@ -1731,7 +1749,10 @@ Check mode is read-only. Drift reports one or more categories:
   file kind or digest.
 
 Fix the authored input, move handwritten files out of `generated/`, and run
-normal generation. Never delete or overwrite an unexpected file blindly.
+normal generation. For an owned path, inspect its schema-3
+`generated/.plystra-manifest.json` entry to identify the generator and source
+inputs before changing authored code. Never delete or overwrite an unexpected
+file blindly.
 
 The CLI protects an enclosing Go workspace boundary. If a valid parent
 `go.work` does not list the nearest module, nested Go subprocesses run with

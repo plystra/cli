@@ -11,6 +11,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/interfaceprovenance"
 )
 
@@ -201,6 +202,41 @@ config:
 		t.Fatalf("unexposed kernel.info/v1 mappings = %#v", intrinsics[1].Mappings())
 	}
 
+	proxyArtifact := readGeneratedArtifact(t, root, orderBinding.Mappings().ProxyPath())
+	assertGeneratedArtifactEvidence(t, proxyArtifact, "plystra.interface-proxy/v1", []string{
+		"application-model:" + manifest.ApplicationModelDigest(),
+		"constructor:" + orderConstructor,
+		"interface-contract:order.create/v1:" + interfaces[1].ContractDigest(),
+		"interface-provenance:" + provenance.Digest(),
+		"interface:order.create/v1",
+	}, []string{
+		interfaces[1].DirectiveSource(),
+		interfaces[1].MetadataSource(),
+		constructors[1].Source(),
+	})
+	adapterArtifact := readGeneratedArtifact(t, root, orderBinding.Mappings().AdapterPath())
+	assertGeneratedArtifactEvidence(t, adapterArtifact, "plystra.implementation-adapter/v1", []string{
+		"application-model:" + manifest.ApplicationModelDigest(),
+		"constructor:" + orderConstructor,
+		"interface-contract:order.create/v1:" + interfaces[1].ContractDigest(),
+		"interface:order.create/v1",
+	}, []string{
+		interfaces[1].DirectiveSource(),
+		constructors[1].Source(),
+	})
+	assemblyArtifact := readGeneratedArtifact(t, root, orderBinding.Mappings().AssemblyPath())
+	assertGeneratedArtifactEvidence(t, assemblyArtifact, "plystra.implementation-assembly/v1", []string{
+		"constructor:" + configConstructor,
+		"constructor:" + orderConstructor,
+		"interface:configuration.owner/v1",
+		"interface:order.create/v1",
+	}, []string{
+		interfaces[0].DirectiveSource(),
+		interfaces[1].DirectiveSource(),
+		constructors[0].Source(),
+		constructors[1].Source(),
+	})
+
 	rootSources := orderBinding.RootSources()
 	rootSources[0] = "mutated"
 	dependencies[0] = interfaceprovenance.Dependency{}
@@ -212,6 +248,7 @@ config:
 		t.Fatal("Interface provenance accessors exposed mutable storage")
 	}
 
+	ownershipData := readFile(t, root, "generated/.plystra-manifest.json")
 	for _, forbidden := range []string{
 		"https://private.example",
 		"private-runtime-label",
@@ -219,7 +256,11 @@ config:
 		"resolved-provenance-secret",
 	} {
 		if bytes.Contains(provenance.RecordJSON(), []byte(forbidden)) ||
-			bytes.Contains(manifestData, []byte(forbidden)) {
+			bytes.Contains(manifestData, []byte(forbidden)) ||
+			bytes.Contains(ownershipData, []byte(forbidden)) ||
+			artifactContains(proxyArtifact, forbidden) ||
+			artifactContains(adapterArtifact, forbidden) ||
+			artifactContains(assemblyArtifact, forbidden) {
 			t.Fatalf("generated provenance leaked configuration or Secret material %q", forbidden)
 		}
 	}
@@ -227,7 +268,7 @@ config:
 	var ownership struct {
 		ApplicationManifest json.RawMessage `json:"application_manifest"`
 	}
-	if err := json.Unmarshal(readFile(t, root, "generated/.plystra-manifest.json"), &ownership); err != nil {
+	if err := json.Unmarshal(ownershipData, &ownership); err != nil {
 		t.Fatalf("decode ownership manifest: %v", err)
 	}
 	recovered, err := applicationgen.DecodeManifestProvenance(ownership.ApplicationManifest)
@@ -247,6 +288,41 @@ config:
 		!bytes.Equal(checkedManifest.InterfaceProvenance().RecordJSON(), provenance.RecordJSON()) {
 		t.Fatalf("deterministic Interface provenance = %#v, %v", checkedManifest.InterfaceProvenance(), err)
 	}
+}
+
+func readGeneratedArtifact(t testing.TB, root, filePath string) generatedfiles.Artifact {
+	t.Helper()
+	artifact, exists, err := generatedfiles.ReadArtifact(root, filePath)
+	if err != nil || !exists || !artifact.Valid() {
+		t.Fatalf("ReadArtifact(%s) = %#v, %t, %v", filePath, artifact, exists, err)
+	}
+	return artifact
+}
+
+func assertGeneratedArtifactEvidence(t testing.TB, artifact generatedfiles.Artifact, generator string, inputs, sources []string) {
+	t.Helper()
+	if artifact.Generator() != generator || artifact.Kind() != generatedfiles.ArtifactKindGoSource || artifact.CleanupOwnership() != generatedfiles.CleanupOwnershipCLI {
+		t.Fatalf("artifact identity for %s = generator %q kind %q cleanup %q", artifact.Path(), artifact.Generator(), artifact.Kind(), artifact.CleanupOwnership())
+	}
+	for _, input := range inputs {
+		if !slices.Contains(artifact.InputRecordIDs(), input) {
+			t.Fatalf("artifact %s inputs %v omit %q", artifact.Path(), artifact.InputRecordIDs(), input)
+		}
+	}
+	for _, source := range sources {
+		if source != "" && !slices.Contains(artifact.Sources(), source) {
+			t.Fatalf("artifact %s sources %v omit %q", artifact.Path(), artifact.Sources(), source)
+		}
+	}
+}
+
+func artifactContains(artifact generatedfiles.Artifact, value string) bool {
+	for _, candidate := range append(artifact.InputRecordIDs(), artifact.Sources()...) {
+		if strings.Contains(candidate, value) {
+			return true
+		}
+	}
+	return false
 }
 
 func assertUnexposedOrdinaryMapping(t testing.TB, mapping interfaceprovenance.Mapping, relative string) {

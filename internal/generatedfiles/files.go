@@ -394,20 +394,48 @@ func decodePreviousManifest(actual map[string]actualFile) (map[string]string, er
 }
 
 func manifestFiles(document manifestDocument) (map[string]string, error) {
+	artifacts, err := manifestArtifacts(document)
+	if err != nil {
+		return nil, err
+	}
 	previous := make(map[string]string, len(document.Files))
-	for index, record := range document.Files {
-		if !validManagedPath(record.Path) {
-			return nil, fmt.Errorf("%w: files[%d] has invalid path %q", ErrManifest, index, record.Path)
-		}
-		if !validDigest(record.SHA256) {
-			return nil, fmt.Errorf("%w: files[%d] has invalid sha256 for %s", ErrManifest, index, record.Path)
-		}
-		if _, duplicate := previous[record.Path]; duplicate {
-			return nil, fmt.Errorf("%w: files[%d] duplicates %s", ErrManifest, index, record.Path)
-		}
-		previous[record.Path] = record.SHA256
+	for filePath, artifact := range artifacts {
+		previous[filePath] = artifact.sha256
 	}
 	return previous, nil
+}
+
+func manifestArtifacts(document manifestDocument) (map[string]Artifact, error) {
+	artifacts := make(map[string]Artifact, len(document.Files))
+	for index, record := range document.Files {
+		if record.Path == ManifestPath {
+			return nil, fmt.Errorf("%w: files[%d] cannot record the ownership manifest itself", ErrManifest, index)
+		}
+		artifact, err := restoreArtifact(record)
+		if err != nil {
+			return nil, fmt.Errorf("%w: files[%d] for %q: %v", ErrManifest, index, record.Path, err)
+		}
+		if index > 0 && document.Files[index-1].Path >= record.Path {
+			return nil, fmt.Errorf("%w: files must be uniquely ordered by path", ErrManifest)
+		}
+		artifacts[record.Path] = artifact
+	}
+	applicationArtifact, hasApplicationArtifact := artifacts[ApplicationManifestPath]
+	hasApplicationSnapshot := len(document.ApplicationManifest) != 0
+	if hasApplicationArtifact != hasApplicationSnapshot {
+		return nil, fmt.Errorf("%w: %s ownership and application_manifest snapshot must appear together", ErrManifest, ApplicationManifestPath)
+	}
+	if hasApplicationSnapshot {
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, document.ApplicationManifest); err != nil {
+			return nil, fmt.Errorf("%w: compact application_manifest snapshot: %v", ErrManifest, err)
+		}
+		compact.WriteByte('\n')
+		if digest(compact.Bytes()) != applicationArtifact.sha256 {
+			return nil, fmt.Errorf("%w: application_manifest snapshot digest does not match %s", ErrManifest, ApplicationManifestPath)
+		}
+	}
+	return artifacts, nil
 }
 
 func decodeManifestDocument(data []byte) (manifestDocument, error) {
@@ -426,7 +454,84 @@ func decodeManifestDocument(data []byte) (manifestDocument, error) {
 	if len(document.ApplicationManifest) != 0 && !json.Valid(document.ApplicationManifest) {
 		return manifestDocument{}, fmt.Errorf("%w: %s application_manifest is invalid JSON", ErrManifest, ManifestPath)
 	}
+	if _, err := manifestArtifacts(document); err != nil {
+		return manifestDocument{}, err
+	}
+	canonical, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return manifestDocument{}, fmt.Errorf("%w: encode canonical %s: %v", ErrManifest, ManifestPath, err)
+	}
+	canonical = append(canonical, '\n')
+	if !bytes.Equal(data, canonical) {
+		return manifestDocument{}, fmt.Errorf("%w: %s is not canonical generated JSON", ErrManifest, ManifestPath)
+	}
 	return document, nil
+}
+
+// ReadArtifact returns one immutable stable explanation record from the
+// ownership manifest. The target itself may be missing or manually modified;
+// callers can still explain the last CLI-owned artifact without trusting its
+// current bytes. A path absent from valid ownership history returns false.
+func ReadArtifact(rootPath, filePath string) (result Artifact, exists bool, readErr error) {
+	if filePath != ManifestPath && !validManagedPath(filePath) {
+		return Artifact{}, false, fmt.Errorf("%w: invalid artifact request for %q", ErrManifest, filePath)
+	}
+	absoluteRoot, err := filepath.Abs(rootPath)
+	if err != nil {
+		return Artifact{}, false, fmt.Errorf("%w: resolve application root: %w", ErrManifest, err)
+	}
+	root, err := os.OpenRoot(absoluteRoot)
+	if err != nil {
+		return Artifact{}, false, fmt.Errorf("%w: open application root: %w", ErrManifest, err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			readErr = errors.Join(readErr, fmt.Errorf("%w: close application root: %w", ErrManifest, err))
+		}
+	}()
+	generated, err := root.Lstat("generated")
+	if errors.Is(err, fs.ErrNotExist) {
+		return Artifact{}, false, nil
+	}
+	if err != nil {
+		return Artifact{}, false, fmt.Errorf("%w: inspect generated directory: %v", ErrManifest, err)
+	}
+	if !generated.IsDir() || generated.Mode()&fs.ModeSymlink != 0 {
+		return Artifact{}, false, fmt.Errorf("%w: generated directory is not regular and non-symbolic", ErrManifest)
+	}
+	manifestPath := filepath.FromSlash(ManifestPath)
+	manifestInfo, err := root.Lstat(manifestPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return Artifact{}, false, nil
+	}
+	if err != nil {
+		return Artifact{}, false, fmt.Errorf("%w: inspect %s: %v", ErrManifest, ManifestPath, err)
+	}
+	manifestData, err := readStableRootFile(root, ManifestPath, manifestInfo, maximumManifestBytes)
+	if err != nil {
+		return Artifact{}, false, err
+	}
+	document, err := decodeManifestDocument(manifestData)
+	if err != nil {
+		return Artifact{}, false, err
+	}
+	artifacts, err := manifestArtifacts(document)
+	if err != nil {
+		return Artifact{}, false, err
+	}
+	if filePath == ManifestPath {
+		values := make([]Artifact, 0, len(artifacts))
+		for _, artifact := range artifacts {
+			values = append(values, artifact)
+		}
+		sort.Slice(values, func(left, right int) bool { return values[left].path < values[right].path })
+		return ownershipManifestArtifact(manifestData, values), true, nil
+	}
+	artifact, found := artifacts[filePath]
+	if !found {
+		return Artifact{}, false, nil
+	}
+	return cloneArtifact(artifact), true, nil
 }
 
 // ReadOwnedFile returns one bounded managed file only when the ownership

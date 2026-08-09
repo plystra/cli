@@ -95,6 +95,8 @@ Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do no
 
 The required top-level ` + "`interface_provenance`" + ` record in ` + "`generated/manifest.json`" + ` uses schema ` + "`plystra.interface-provenance/v1`" + `. It joins every visible authored Interface to reachable bindings, explicit or unique-compatible constructor selections, the complete dependency-first constructor graph, configuration ownership, root and exposure sources, effective Interface-policy inputs, and exact generated proxy, adapter, assembly, Protobuf, wire-map, Connect, HTTP-route, and JavaScript mappings and digests. Required intrinsic ` + "`kernel.*`" + ` Interfaces are recorded separately without an ordinary constructor or Implementation adapter. The exact same canonical record is embedded in ` + "`generated/.plystra-manifest.json`" + `. It contains no configuration values, Secret-reference targets, resolved Secrets, process environment, or machine-specific absolute paths. Never edit either manifest; change authored inputs, regenerate, and require a clean ` + "`plystra generate --check`" + `.
 
+Ownership-manifest schema 3 records one immutable entry for every managed artifact: Project-relative path and SHA-256, exact generator/version, closed output kind, normalized non-secret input-record IDs, stable source references, and ` + "`cli-owned`" + ` cleanup authority. The manifest's own provenance is implicit because it cannot contain its own stable digest. An entry remains useful when its target is missing or manually modified. Never edit this evidence; use it to find the authored input, then regenerate.
+
 The required top-level ` + "`transport_toolchain`" + ` record in ` + "`generated/manifest.json`" + ` identifies the exact embedded ` + "`go/format`" + ` runtime; built-in Protobuf-model, descriptor, wire-map, Connect, JavaScript, and API-documentation generator versions; pinned generated Go and npm dependency versions; and its canonical digest. ` + "`plystra generate --check`" + ` reports drift when that identity changes. Plystra generation does not invoke an implicit global ` + "`protoc`" + ` or generator executable and does not use a hosted generation service.
 
 For each Interface exposed through Connect, the generated JavaScript SDK publishes one nested client method, one tree-shakable factory, its declared semantic-error-code union, and deterministic request, response, and reachable nested-message types from the authored Go contract. For ` + "`records.echo/v1`" + `, call ` + "`client.records.echo.v1(request)`" + ` or ` + "`createRecordsEchoV1(options)(request)`" + `. Both forms use the same exact Connect procedure and safe runtime boundary. Effective JSON names and required markers remain exact. ` + "`int32`" + ` and ` + "`uint32`" + ` become JavaScript ` + "`number`" + `; ` + "`int64`" + ` and ` + "`uint64`" + ` become ` + "`bigint`" + `; floating-point fields become ` + "`number`" + `; bytes become ` + "`Uint8Array`" + `; timestamps and durations use their canonical transport strings; repeated values are readonly arrays; and maps are readonly string-keyed records. The unsafe JavaScript object key ` + "`__proto__`" + ` is rejected before dispatch rather than silently changed or dropped.
@@ -324,7 +326,7 @@ A typical Plystra Project evolves into this layout:
             capability.yaml
       migrations/                 # optional Plugin-owned database assets
     generated/
-      .plystra-manifest.json
+      .plystra-manifest.json        # per-file generator/input/source provenance
       manifest.json
       proto/
         descriptor-set.pb
@@ -1377,12 +1379,10 @@ plystra generate --check is read-only. It recomputes the complete resolution and
 generation fixed point and fails on stale, missing, unexpected, or manually modified
 managed paths. If it reports drift:
 
-1. Identify the authored plugin.yaml, capability.yaml, plystra.yaml, go.mod, or
-   generation-extension input that should produce the desired output.
-2. Move any handwritten file out of generated.
-3. Run plystra generate.
-4. Rerun checks and inspect the generated contract, manifest, docs, and SDK
-   surfaces affected by the change.
+1. Read that path's generated/.plystra-manifest.json entry for its exact
+   generator, normalized input IDs, source references, output kind, and cleanup owner.
+2. Change the named authored input; move handwritten files out of generated.
+3. Run plystra generate, then plystra generate --check with the same selector.
 
 Keep go.work optional. Standard Go Module dependency resolution remains the
 build and distribution boundary for every Plystra module.

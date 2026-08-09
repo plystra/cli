@@ -45,7 +45,11 @@ func TestLoadGeneratedDependencyBaselineFallsBackToPrimaryWithoutRecovery(t *tes
 	root := t.TempDir()
 	manifest, want := renderDependencyBaseline(t, "kernel.health/v1")
 	writeBaselineFile(t, root, generatedfiles.ApplicationManifestPath, manifest)
-	writeBaselineFile(t, root, generatedfiles.ManifestPath, []byte("{\"version\":2,\"files\":[]}\n"))
+	empty, err := generatedfiles.NewOutput(nil)
+	if err != nil {
+		t.Fatalf("NewOutput(empty): %v", err)
+	}
+	writeBaselineFile(t, root, generatedfiles.ManifestPath, empty.ManifestJSON())
 
 	baseline, _, err := loadGeneratedDependencyBaseline(root, defaultConfigurationSelector())
 	if err != nil || !baseline.Valid() || baseline.Digest() != want.Digest() {
@@ -57,12 +61,13 @@ func TestLoadGeneratedDependencyBaselineRejectsMalformedRecovery(t *testing.T) {
 	t.Parallel()
 
 	validPrimary, _ := renderDependencyBaseline(t, "kernel.health/v1")
+	invalidApplicationOwnership := recoveryOutput(t, []byte("{\"invalid\":true}\n")).ManifestJSON()
 	for _, test := range []struct {
 		name string
 		data []byte
 	}{
-		{name: "ownership JSON", data: []byte("{\"version\":2")},
-		{name: "embedded application manifest", data: []byte("{\"version\":2,\"files\":[],\"application_manifest\":{\"invalid\":true}}\n")},
+		{name: "ownership JSON", data: []byte("{\"version\":3")},
+		{name: "embedded application manifest", data: invalidApplicationOwnership},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
@@ -159,7 +164,21 @@ func defaultConfigurationSelector() configurationSelector {
 
 func writeRecoveryOutput(t testing.TB, root string, applicationManifest []byte) {
 	t.Helper()
-	file, err := generatedfiles.NewFile(generatedfiles.ApplicationManifestPath, applicationManifest)
+	output := recoveryOutput(t, applicationManifest)
+	for _, desired := range output.Files() {
+		writeBaselineFile(t, root, desired.Path(), desired.Data())
+	}
+	writeBaselineFile(t, root, generatedfiles.ManifestPath, output.ManifestJSON())
+}
+
+func recoveryOutput(t testing.TB, applicationManifest []byte) generatedfiles.Output {
+	t.Helper()
+	file, err := generatedfiles.NewFile(generatedfiles.ApplicationManifestPath, applicationManifest, generatedfiles.ArtifactInput{
+		Generator:      "plystra.test-recovery/v1",
+		Kind:           generatedfiles.ArtifactKindApplicationManifest,
+		InputRecordIDs: []string{"test:application-manifest"},
+		Sources:        []string{"plystra.yaml"},
+	})
 	if err != nil {
 		t.Fatalf("NewFile: %v", err)
 	}
@@ -167,10 +186,7 @@ func writeRecoveryOutput(t testing.TB, root string, applicationManifest []byte) 
 	if err != nil {
 		t.Fatalf("NewOutput: %v", err)
 	}
-	for _, desired := range output.Files() {
-		writeBaselineFile(t, root, desired.Path(), desired.Data())
-	}
-	writeBaselineFile(t, root, generatedfiles.ManifestPath, output.ManifestJSON())
+	return output
 }
 
 func writeBaselineFile(t testing.TB, root, name string, data []byte) {
