@@ -81,6 +81,8 @@ When several compatible Implementations satisfy one required Interface, select o
 
 Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + ` block followed by one stable ` + "`Diagnostic: PLYSTRA_<AREA>_<CONDITION>`" + ` code. Follow that one command or file edit with the same default, ` + "`--env`" + `, or ` + "`--config`" + ` selection, and use the code rather than human wording as the automation or support identity. Recovery output preserves safe explicit and ambient selectors, but uses ` + "`<environment>`" + ` or ` + "`<yaml-path>`" + ` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice or a code.
 
+Authored Interface failures distinguish invalid directives, canonical Go contracts, optional interface.yaml metadata, duplicate visible IDs, and packages ordinary Go tooling cannot load. Apply the emitted recovery to the reported module-relative source in its owning Project; never edit a dependency's Module Cache copy.
+
 Authored Implementation failures distinguish invalid directives, Config schemas, required or optional Interface parameters, constructor results, and structural conformance. Apply the emitted recovery to the reported Project-relative Go source. Fix dependency-owned source in its owning Project or select a corrected module version; never edit the Module Cache copy.
 
 Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
@@ -1409,6 +1411,14 @@ recovery action or code.
   constraints, semantic errors, typed semantics, and extension metadata.
   Implement the visible contract or create a new version instead of weakening
   validation.
+- Interface authoring codes:
+  PLYSTRA_INTERFACE_DECLARATION_INVALID,
+  PLYSTRA_INTERFACE_CONTRACT_INVALID,
+  PLYSTRA_INTERFACE_METADATA_INVALID,
+  PLYSTRA_INTERFACE_ID_DUPLICATE, and PLYSTRA_AUTHORING_PACKAGE_INVALID.
+  They identify the directive, Go contract, optional interface.yaml, visible ID,
+  and loadable-package boundaries. Apply Recovery in the owning Project, never
+  to a dependency's Module Cache copy.
 - Implementation authoring codes, in validation order:
   PLYSTRA_IMPLEMENTATION_DECLARATION_INVALID,
   PLYSTRA_IMPLEMENTATION_CONFIG_INVALID,

@@ -84,6 +84,11 @@ const (
 	ImplementationOptionalInvalid      = Prefix + "IMPLEMENTATION_OPTIONAL_INTERFACE_INVALID"
 	ImplementationResultInvalid        = Prefix + "IMPLEMENTATION_RESULT_INVALID"
 	ImplementationConformanceInvalid   = Prefix + "IMPLEMENTATION_CONFORMANCE_INVALID"
+	InterfaceDeclarationInvalid        = Prefix + "INTERFACE_DECLARATION_INVALID"
+	InterfaceContractInvalid           = Prefix + "INTERFACE_CONTRACT_INVALID"
+	InterfaceMetadataInvalid           = Prefix + "INTERFACE_METADATA_INVALID"
+	InterfaceIDDuplicate               = Prefix + "INTERFACE_ID_DUPLICATE"
+	AuthoredPackageInvalid             = Prefix + "AUTHORING_PACKAGE_INVALID"
 )
 
 const (

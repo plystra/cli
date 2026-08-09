@@ -224,6 +224,86 @@ func TestPublicResolvingCommandsClassifyInvalidImplementationAuthoringWithoutMut
 	}
 }
 
+func TestPublicResolvingCommandsClassifyInvalidInterfaceAuthoringWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		source          string
+		metadata        string
+		duplicateSource string
+		problems        []string
+		recovery        string
+		code            string
+	}{
+		{
+			name:     "declaration",
+			source:   invalidInterfaceDeclarationSource,
+			problems: []string{"interfaces/email/send/v1/interface.go:3:1", "expected //plystra:interface <interface-id>"},
+			recovery: "Correct the reported //plystra:interface directive so it immediately documents the exported defined type Interface and names one canonical Interface ID, then rerun the command.",
+			code:     diagnosticcode.InterfaceDeclarationInvalid,
+		},
+		{
+			name:     "contract",
+			source:   invalidInterfaceContractSource,
+			problems: []string{"interfaces/email/send/v1/interface.go:3:1", "exactly one operation method"},
+			recovery: "Correct the reported Interface Go package to the canonical single-operation method, request, response, field, and error shape, then rerun the command.",
+			code:     diagnosticcode.InterfaceContractInvalid,
+		},
+		{
+			name:     "metadata",
+			source:   validAuthoredInterfaceSource,
+			metadata: "unknown: true\n",
+			problems: []string{"interfaces/email/send/v1/interface.yaml:1:1", "unknown top-level field"},
+			recovery: "Correct the reported module-relative interface.yaml field to match the closed Interface metadata schema, then rerun the command.",
+			code:     diagnosticcode.InterfaceMetadataInvalid,
+		},
+		{
+			name:            "duplicate ID",
+			source:          validAuthoredInterfaceSource,
+			duplicateSource: duplicateAuthoredInterfaceSource,
+			problems: []string{
+				`duplicate visible Interface ID "email.send/v1"`,
+				"example.com/command-invalid-interface/interfaces/email/send/v1",
+				"example.com/command-invalid-interface/interfaces/duplicate/email/v1",
+			},
+			recovery: "Make the reported visible Go packages declare distinct canonical Interface IDs, then rerun the command.",
+			code:     diagnosticcode.InterfaceIDDuplicate,
+		},
+		{
+			name:     "package",
+			source:   invalidAuthoredPackageSource,
+			problems: []string{"invalid Interface package", "missingSymbol"},
+			recovery: "Correct the reported authored Go package in its owning Project so ordinary Go tooling can load it, then rerun the command.",
+			code:     diagnosticcode.AuthoredPackageInvalid,
+		},
+	}
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			for _, arguments := range commands {
+				arguments := arguments
+				t.Run(strings.Join(arguments, " "), func(t *testing.T) {
+					root := writeCommandInvalidInterfaceProject(t, test.source, test.metadata, test.duplicateSource)
+					before := commandTree(t, root)
+					exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
+					want := append([]string(nil), test.problems...)
+					want = append(want, "Recovery:\n"+test.recovery+"\n", "Diagnostic: "+test.code)
+					if exitCode != 1 || stdout != "" || !commandContainsAll(stderr, want...) {
+						t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+					}
+					if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+						t.Fatalf("%v mutated invalid Interface Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+					}
+					assertNoCommandTransactions(t, root)
+				})
+			}
+		})
+	}
+}
+
 func writeCommandIntrinsicFailureProject(t testing.TB, shadow bool) string {
 	t.Helper()
 	root := t.TempDir()
@@ -248,6 +328,78 @@ func writeCommandInvalidImplementationProject(t testing.TB, source string) strin
 	writeCommandFile(t, filepath.Join(root, "service", "service.go"), source)
 	return root
 }
+
+func writeCommandInvalidInterfaceProject(t testing.TB, source, metadata, duplicateSource string) string {
+	t.Helper()
+	root := t.TempDir()
+	writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/command-invalid-interface\n\ngo 1.26\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(root, "generated", "sentinel.txt"), "must remain unchanged\n")
+	writeCommandFile(t, filepath.Join(root, "interfaces", "email", "send", "v1", "interface.go"), source)
+	if metadata != "" {
+		writeCommandFile(t, filepath.Join(root, "interfaces", "email", "send", "v1", "interface.yaml"), metadata)
+	}
+	if duplicateSource != "" {
+		writeCommandFile(t, filepath.Join(root, "interfaces", "duplicate", "email", "v1", "interface.go"), duplicateSource)
+	}
+	return root
+}
+
+const invalidInterfaceDeclarationSource = `package sendv1
+
+//plystra:interface
+type Interface interface{}
+`
+
+const invalidInterfaceContractSource = `package sendv1
+
+//plystra:interface email.send/v1
+type Interface interface{}
+
+type Request struct{}
+type Response struct{}
+`
+
+const validAuthoredInterfaceSource = `package sendv1
+
+import "context"
+
+//plystra:interface email.send/v1
+type Interface interface {
+	Send(context.Context, Request) (Response, error)
+}
+
+type Request struct{}
+type Response struct{}
+`
+
+const duplicateAuthoredInterfaceSource = `package duplicatev1
+
+import "context"
+
+//plystra:interface email.send/v1
+type Interface interface {
+	Send(context.Context, Request) (Response, error)
+}
+
+type Request struct{}
+type Response struct{}
+`
+
+const invalidAuthoredPackageSource = `package sendv1
+
+import "context"
+
+//plystra:interface email.send/v1
+type Interface interface {
+	Send(context.Context, Request) (Response, error)
+}
+
+type Request struct{}
+type Response struct{}
+
+var _ = missingSymbol
+`
 
 const invalidImplementationDeclarationSource = `package service
 

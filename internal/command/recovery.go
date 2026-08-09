@@ -27,6 +27,10 @@ import (
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/implementationdecl"
 	"github.com/plystra/cli/internal/implementationinventory"
+	"github.com/plystra/cli/internal/interfacecontract"
+	"github.com/plystra/cli/internal/interfacedecl"
+	"github.com/plystra/cli/internal/interfaceinventory"
+	"github.com/plystra/cli/internal/interfacemeta"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
@@ -130,6 +134,11 @@ const (
 	diagnosticImplementationOptionalInvalid      = diagnosticcode.ImplementationOptionalInvalid
 	diagnosticImplementationResultInvalid        = diagnosticcode.ImplementationResultInvalid
 	diagnosticImplementationConformanceInvalid   = diagnosticcode.ImplementationConformanceInvalid
+	diagnosticInterfaceDeclarationInvalid        = diagnosticcode.InterfaceDeclarationInvalid
+	diagnosticInterfaceContractInvalid           = diagnosticcode.InterfaceContractInvalid
+	diagnosticInterfaceMetadataInvalid           = diagnosticcode.InterfaceMetadataInvalid
+	diagnosticInterfaceIDDuplicate               = diagnosticcode.InterfaceIDDuplicate
+	diagnosticAuthoredPackageInvalid             = diagnosticcode.AuthoredPackageInvalid
 )
 
 const (
@@ -292,6 +301,16 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticImplementationResultInvalid, "Change the reported constructor to return exactly one concrete value plus error, then rerun the command.")
 	case errors.Is(err, implementationinventory.ErrInvalidConformance):
 		return recoveryDiagnostic(diagnosticImplementationConformanceInvalid, "Implement every reported canonical Interface method on the constructor's concrete result type, then rerun the command.")
+	case errors.Is(err, interfacedecl.ErrInvalid):
+		return recoveryDiagnostic(diagnosticInterfaceDeclarationInvalid, "Correct the reported //plystra:interface directive so it immediately documents the exported defined type Interface and names one canonical Interface ID, then rerun the command.")
+	case errors.Is(err, interfacecontract.ErrInvalid):
+		return recoveryDiagnostic(diagnosticInterfaceContractInvalid, "Correct the reported Interface Go package to the canonical single-operation method, request, response, field, and error shape, then rerun the command.")
+	case errors.Is(err, interfacemeta.ErrInvalid):
+		return recoveryDiagnostic(diagnosticInterfaceMetadataInvalid, "Correct the reported module-relative interface.yaml field to match the closed Interface metadata schema, then rerun the command.")
+	case errors.Is(err, interfaceinventory.ErrDuplicateID):
+		return recoveryDiagnostic(diagnosticInterfaceIDDuplicate, "Make the reported visible Go packages declare distinct canonical Interface IDs, then rerun the command.")
+	case errors.Is(err, interfaceinventory.ErrPackage):
+		return recoveryDiagnostic(diagnosticAuthoredPackageInvalid, "Correct the reported authored Go package in its owning Project so ordinary Go tooling can load it, then rerun the command.")
 	case errors.Is(err, applicationresolve.ErrManifest) && !errors.Is(err, applicationresolve.ErrConfigurationSelection):
 		return recoveryDiagnostic(diagnosticProjectManifestInvalid, "Correct the reported root or dependency Project plystra.yaml, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrInheritedConflict):

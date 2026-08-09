@@ -1228,6 +1228,14 @@ recovery action or code.
   constraints, semantic errors, typed semantics, and extension metadata.
   Implement the visible contract or create a new version instead of weakening
   validation.
+- Interface authoring codes:
+  PLYSTRA_INTERFACE_DECLARATION_INVALID,
+  PLYSTRA_INTERFACE_CONTRACT_INVALID,
+  PLYSTRA_INTERFACE_METADATA_INVALID,
+  PLYSTRA_INTERFACE_ID_DUPLICATE, and PLYSTRA_AUTHORING_PACKAGE_INVALID.
+  They identify the directive, Go contract, optional interface.yaml, visible ID,
+  and loadable-package boundaries. Apply Recovery in the owning Project, never
+  to a dependency's Module Cache copy.
 - Implementation authoring codes, in validation order:
   PLYSTRA_IMPLEMENTATION_DECLARATION_INVALID,
   PLYSTRA_IMPLEMENTATION_CONFIG_INVALID,

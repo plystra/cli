@@ -1793,6 +1793,24 @@ not broadly scanned. If several compatible Implementations remain, run
 `--config` selection used to generate the application. Do not add a priority or
 fallback.
 
+### Invalid authored Interface
+
+Interface discovery classifies each actionable authoring boundary separately:
+
+- `PLYSTRA_INTERFACE_DECLARATION_INVALID` identifies an invalid or unattached
+  `//plystra:interface` directive;
+- `PLYSTRA_INTERFACE_CONTRACT_INVALID` identifies a Go contract outside the
+  canonical single-operation request/response shape;
+- `PLYSTRA_INTERFACE_METADATA_INVALID` identifies an invalid optional
+  `interface.yaml` document;
+- `PLYSTRA_INTERFACE_ID_DUPLICATE` identifies every visible package declaring
+  the same canonical Interface ID;
+- `PLYSTRA_AUTHORING_PACKAGE_INVALID` identifies an eligible authored package
+  that ordinary Go tooling cannot load.
+
+Apply the emitted recovery to the reported module-relative source in its owning
+Project. Never patch a dependency's Module Cache copy.
+
 ### Invalid authored Implementation
 
 Constructor discovery classifies each actionable authoring boundary separately:

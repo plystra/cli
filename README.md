@@ -689,6 +689,11 @@ human wording. A recovery command preserves the selected default, `--env`, or
 advice. Unknown internal failures retain their original diagnostic without an
 invented recovery action or code.
 
+Authored Interface failures distinguish an invalid `//plystra:interface`
+declaration, canonical Go contract, optional `interface.yaml`, duplicate visible
+ID, and an authored package that ordinary Go tooling cannot load. Correct the
+reported module-relative source in its owning Project.
+
 Authored Implementation failures distinguish an invalid
 `//plystra:implements` declaration, unsupported `Config` shape, invalid required
 or `plystra.Optional[T]` parameter, invalid constructor result, and structural

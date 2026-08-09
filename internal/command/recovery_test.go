@@ -24,6 +24,10 @@ import (
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/implementationdecl"
 	"github.com/plystra/cli/internal/implementationinventory"
+	"github.com/plystra/cli/internal/interfacecontract"
+	"github.com/plystra/cli/internal/interfacedecl"
+	"github.com/plystra/cli/internal/interfaceinventory"
+	"github.com/plystra/cli/internal/interfacemeta"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
@@ -278,6 +282,11 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "invalid optional Interface parameter", err: implementationinventory.ErrInvalidOptionalInterface, code: diagnosticcode.ImplementationOptionalInvalid},
 		{name: "invalid Implementation result", err: implementationinventory.ErrInvalidResult, code: diagnosticcode.ImplementationResultInvalid},
 		{name: "invalid Implementation conformance", err: implementationinventory.ErrInvalidConformance, code: diagnosticcode.ImplementationConformanceInvalid},
+		{name: "invalid Interface declaration", err: interfacedecl.ErrInvalid, code: diagnosticcode.InterfaceDeclarationInvalid},
+		{name: "invalid Interface contract", err: interfacecontract.ErrInvalid, code: diagnosticcode.InterfaceContractInvalid},
+		{name: "invalid Interface metadata", err: interfacemeta.ErrInvalid, code: diagnosticcode.InterfaceMetadataInvalid},
+		{name: "duplicate Interface ID", err: interfaceinventory.ErrDuplicateID, code: diagnosticcode.InterfaceIDDuplicate},
+		{name: "invalid authored package", err: interfaceinventory.ErrPackage, code: diagnosticcode.AuthoredPackageInvalid},
 	}
 	for _, test := range tests {
 		test := test
