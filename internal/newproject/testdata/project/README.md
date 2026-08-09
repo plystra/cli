@@ -49,7 +49,7 @@ Cross-origin browser access is opt-in. Add `http.cors.allowed_origins` to the se
 
 When several compatible Implementations satisfy one required Interface, select one with `plystra use <interface-id> <constructor-symbol>`. Add `--env <environment>` to write only that sparse overlay or `--config <yaml-path>` to write only one complete replacement configuration; the command regenerates and validates with the same selection.
 
-Common actionable Plystra CLI failures end with exactly one `Recovery:` block followed by one stable `Diagnostic: PLYSTRA-*` code. Follow that one command or file edit with the same default, `--env`, or `--config` selection, and use the code rather than human wording as the automation or support identity. Recovery output preserves safe explicit and ambient selectors, but uses `<environment>` or `<yaml-path>` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice or a code.
+Common actionable Plystra CLI failures end with exactly one `Recovery:` block followed by one stable `Diagnostic: PLYSTRA_<AREA>_<CONDITION>` code. Follow that one command or file edit with the same default, `--env`, or `--config` selection, and use the code rather than human wording as the automation or support identity. Recovery output preserves safe explicit and ambient selectors, but uses `<environment>` or `<yaml-path>` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice or a code.
 
 Generated source under `generated/` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 

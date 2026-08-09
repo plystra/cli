@@ -28,7 +28,7 @@ func TestInspectV1BuildsExactFilesystemResult(t *testing.T) {
 	input := InspectInput{
 		Evidence: evidence,
 		Diagnostics: []diagnosticjson.Diagnostic{{
-			Code:     "PLYSTRA-INSPECT-READY",
+			Code:     "PLYSTRA_INSPECT_READY",
 			Severity: diagnosticjson.SeverityInfo,
 			Message:  "The selected application model is ready.",
 		}},
@@ -130,9 +130,9 @@ func TestInspectV1CanonicalizesPermutationsAndReadiness(t *testing.T) {
 
 	evidence := resolvedInspectEvidence(t)
 	diagnostics := []diagnosticjson.Diagnostic{
-		{Code: "PLYSTRA-ZETA", Severity: diagnosticjson.SeverityError, Message: "Resolve the selected Provider conflict."},
-		{Code: "PLYSTRA-ALPHA", Severity: diagnosticjson.SeverityWarning, Message: "Review the selected configuration."},
-		{Code: "PLYSTRA-INFO", Severity: diagnosticjson.SeverityInfo, Message: "Resolution evidence is available."},
+		{Code: "PLYSTRA_ZETA", Severity: diagnosticjson.SeverityError, Message: "Resolve the selected Provider conflict."},
+		{Code: "PLYSTRA_ALPHA", Severity: diagnosticjson.SeverityWarning, Message: "Review the selected configuration."},
+		{Code: "PLYSTRA_INFO", Severity: diagnosticjson.SeverityInfo, Message: "Resolution evidence is available."},
 	}
 	sources := []diagnosticjson.Source{
 		{Module: "example.com/inspect", Path: "plystra.production.yaml", Kind: "inspect-selection", Line: 1, Column: 1},
@@ -155,7 +155,7 @@ func TestInspectV1CanonicalizesPermutationsAndReadiness(t *testing.T) {
 	warning, err := NewInspect(InspectInput{
 		Evidence: evidence,
 		Diagnostics: []diagnosticjson.Diagnostic{{
-			Code:     "PLYSTRA-REVIEW",
+			Code:     "PLYSTRA_REVIEW",
 			Severity: diagnosticjson.SeverityWarning,
 			Message:  "Review the selected configuration.",
 		}},
@@ -167,7 +167,7 @@ func TestInspectV1CanonicalizesPermutationsAndReadiness(t *testing.T) {
 	info, err := NewInspect(InspectInput{
 		Evidence: evidence,
 		Diagnostics: []diagnosticjson.Diagnostic{{
-			Code:     "PLYSTRA-INFORMATION",
+			Code:     "PLYSTRA_INFORMATION",
 			Severity: diagnosticjson.SeverityInfo,
 			Message:  "Resolution evidence is available.",
 		}},
@@ -196,7 +196,7 @@ func TestInspectV1RejectsIncompleteAndUnsafeInput(t *testing.T) {
 		{name: "multiline next action", input: InspectInput{Evidence: valid, NextAction: "Run plystra check.\nThen retry."}, want: "one line"},
 		{name: "windows absolute path", input: InspectInput{Evidence: valid, NextAction: `Open C:\Users\person\secret.yaml.`}, want: "absolute path"},
 		{name: "unix absolute path", input: InspectInput{Evidence: valid, NextAction: "Open /home/person/secret.yaml."}, want: "absolute path"},
-		{name: "unsafe diagnostic path", input: InspectInput{Evidence: valid, Diagnostics: []diagnosticjson.Diagnostic{{Code: "PLYSTRA-UNSAFE", Severity: diagnosticjson.SeverityError, Message: "Open /home/person/secret.yaml."}}, NextAction: "Run plystra check."}, want: "absolute path"},
+		{name: "unsafe diagnostic path", input: InspectInput{Evidence: valid, Diagnostics: []diagnosticjson.Diagnostic{{Code: "PLYSTRA_UNSAFE", Severity: diagnosticjson.SeverityError, Message: "Open /home/person/secret.yaml."}}, NextAction: "Run plystra check."}, want: "absolute path"},
 		{name: "invalid diagnostic", input: InspectInput{Evidence: valid, Diagnostics: []diagnosticjson.Diagnostic{{Code: "invalid", Severity: diagnosticjson.SeverityError, Message: "Resolve the error."}}, NextAction: "Run plystra check."}, want: "shared envelope"},
 		{name: "invalid source", input: InspectInput{Evidence: valid, Sources: []diagnosticjson.Source{{Module: "example.com/inspect", Path: "../secret", Kind: "inspect-selection"}}, NextAction: "Run plystra check."}, want: "shared envelope"},
 	}
@@ -214,7 +214,7 @@ func TestInspectV1StorageIsDefensive(t *testing.T) {
 	t.Parallel()
 
 	evidence := resolvedInspectEvidence(t)
-	diagnostics := []diagnosticjson.Diagnostic{{Code: "PLYSTRA-READY", Severity: diagnosticjson.SeverityInfo, Message: "The application is ready."}}
+	diagnostics := []diagnosticjson.Diagnostic{{Code: "PLYSTRA_READY", Severity: diagnosticjson.SeverityInfo, Message: "The application is ready."}}
 	sources := []diagnosticjson.Source{{Module: "example.com/inspect", Path: "plystra.production.yaml", Kind: "inspect-selection", Line: 1, Column: 1}}
 	result, err := NewInspect(InspectInput{Evidence: evidence, Diagnostics: diagnostics, Sources: sources, NextAction: "Run `plystra dev --env production` to start the application."})
 	if err != nil {

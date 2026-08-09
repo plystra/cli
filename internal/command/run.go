@@ -51,7 +51,7 @@ const (
   plystra generate [--check] [--env <environment>|--config <yaml-path>]
 
 Common actionable failures end with one Recovery block containing the primary
-command or file edit and one stable PLYSTRA-* Diagnostic code.
+command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
 `
 	addUsage = `Usage:
   plystra add <go-module-query>

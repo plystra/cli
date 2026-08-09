@@ -2200,6 +2200,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"npm run typecheck",
 		"plystra inspect --format json",
 		"plystra generate --check",
+		"Diagnostic: PLYSTRA_<AREA>_<CONDITION>",
 	} {
 		if !strings.Contains(string(data), required) {
 			t.Fatalf("Plystra skill omits %q:\n%s", required, data)

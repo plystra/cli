@@ -73,6 +73,14 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.ProjectConcurrentChange,
 		diagnosticcode.ConfigurationCompositionDrift,
 		diagnosticcode.GeneratedDrift,
+		diagnosticcode.ResolveUnknownInterface,
+		diagnosticcode.ResolveUnknownImplementation,
+		diagnosticcode.ResolveIncompatibleImplementation,
+		diagnosticcode.ResolveMultipleImplementations,
+		diagnosticcode.ResolveMissingImplementation,
+		diagnosticcode.ResolveConstructorCycle,
+		diagnosticcode.ResolveReservedInterface,
+		diagnosticcode.ResolveIntrinsicInterfaceSelection,
 	}
 	seen := make(map[string]struct{}, len(codes))
 	for _, code := range codes {
@@ -87,7 +95,7 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 }
 
 func TestValidRejectsNoncanonicalCodes(t *testing.T) {
-	for _, value := range []string{"", "PLYSTRA-", "plystra-provider-missing", "PLYSTRA--MISSING", "PLYSTRA-MISSING-", "PLYSTRA-MISSING_VALUE"} {
+	for _, value := range []string{"", "PLYSTRA_", "plystra_provider_missing", "PLYSTRA__MISSING", "PLYSTRA_MISSING_", "PLYSTRA-MISSING-VALUE", "PLYSTRA_MISSING-VALUE"} {
 		if diagnosticcode.Valid(value) {
 			t.Fatalf("Valid(%q) = true", value)
 		}

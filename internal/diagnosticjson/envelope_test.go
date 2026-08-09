@@ -17,8 +17,8 @@ func TestEnvelopeDefinesRequiredCanonicalShape(t *testing.T) {
 	input := validInput()
 	input.ConfigurationMode = generation.ConfigurationModeEnvironment
 	input.Diagnostics = []diagnosticjson.Diagnostic{
-		{Code: "PLYSTRA-ZETA", Severity: diagnosticjson.SeverityWarning, Message: "Later finding."},
-		{Code: "PLYSTRA-ALPHA", Severity: diagnosticjson.SeverityInfo, Message: "First finding."},
+		{Code: "PLYSTRA_ZETA", Severity: diagnosticjson.SeverityWarning, Message: "Later finding."},
+		{Code: "PLYSTRA_ALPHA", Severity: diagnosticjson.SeverityInfo, Message: "First finding."},
 	}
 	input.Sources = []diagnosticjson.Source{
 		{Module: "example.com/platform", Path: "mailer/plugin.yaml", Kind: "plugin-declaration"},
@@ -35,7 +35,7 @@ func TestEnvelopeDefinesRequiredCanonicalShape(t *testing.T) {
 	if err != nil || !first.Valid() {
 		t.Fatalf("New = %#v, %v", first, err)
 	}
-	want := `{"schema":"plystra.inspect","schema_version":1,"configuration_mode":"environment","application_model_digest":"` + testDigest("a") + `","diagnostics":[{"code":"PLYSTRA-ALPHA","severity":"info","message":"First finding."},{"code":"PLYSTRA-ZETA","severity":"warning","message":"Later finding."}],"sources":[{"module":"example.com/app","path":"plystra.production.yaml","kind":"provider-selection","line":7,"column":5},{"module":"example.com/platform","path":"mailer/plugin.yaml","kind":"plugin-declaration"}],"result":{"a":1,"array":[3,2],"nested":{"a":0,"z":true},"z":1}}`
+	want := `{"schema":"plystra.inspect","schema_version":1,"configuration_mode":"environment","application_model_digest":"` + testDigest("a") + `","diagnostics":[{"code":"PLYSTRA_ALPHA","severity":"info","message":"First finding."},{"code":"PLYSTRA_ZETA","severity":"warning","message":"Later finding."}],"sources":[{"module":"example.com/app","path":"plystra.production.yaml","kind":"provider-selection","line":7,"column":5},{"module":"example.com/platform","path":"mailer/plugin.yaml","kind":"plugin-declaration"}],"result":{"a":1,"array":[3,2],"nested":{"a":0,"z":true},"z":1}}`
 	if got := string(first.CanonicalJSON()); got != want || !json.Valid([]byte(got)) {
 		t.Fatalf("CanonicalJSON = %s\nwant          = %s", got, want)
 	}
@@ -117,7 +117,7 @@ func TestEnvelopeRejectsInvalidIdentity(t *testing.T) {
 func TestEnvelopeRejectsInvalidDiagnostics(t *testing.T) {
 	t.Parallel()
 
-	valid := diagnosticjson.Diagnostic{Code: "PLYSTRA-RESOLUTION-001", Severity: diagnosticjson.SeverityError, Message: "Select one Provider."}
+	valid := diagnosticjson.Diagnostic{Code: "PLYSTRA_RESOLUTION_001", Severity: diagnosticjson.SeverityError, Message: "Select one Provider."}
 	tests := []struct {
 		name        string
 		diagnostics []diagnosticjson.Diagnostic
@@ -125,8 +125,8 @@ func TestEnvelopeRejectsInvalidDiagnostics(t *testing.T) {
 	}{
 		{name: "missing code", diagnostics: []diagnosticjson.Diagnostic{{Severity: valid.Severity, Message: valid.Message}}, want: "code"},
 		{name: "lowercase code", diagnostics: []diagnosticjson.Diagnostic{{Code: "plystra-resolution", Severity: valid.Severity, Message: valid.Message}}, want: "code"},
-		{name: "empty code segment", diagnostics: []diagnosticjson.Diagnostic{{Code: "PLYSTRA--RESOLUTION", Severity: valid.Severity, Message: valid.Message}}, want: "code"},
-		{name: "trailing separator", diagnostics: []diagnosticjson.Diagnostic{{Code: "PLYSTRA-RESOLUTION-", Severity: valid.Severity, Message: valid.Message}}, want: "code"},
+		{name: "empty code segment", diagnostics: []diagnosticjson.Diagnostic{{Code: "PLYSTRA__RESOLUTION", Severity: valid.Severity, Message: valid.Message}}, want: "code"},
+		{name: "trailing separator", diagnostics: []diagnosticjson.Diagnostic{{Code: "PLYSTRA_RESOLUTION_", Severity: valid.Severity, Message: valid.Message}}, want: "code"},
 		{name: "unsupported severity", diagnostics: []diagnosticjson.Diagnostic{{Code: valid.Code, Severity: "fatal", Message: valid.Message}}, want: "severity"},
 		{name: "empty message", diagnostics: []diagnosticjson.Diagnostic{{Code: valid.Code, Severity: valid.Severity}}, want: "message"},
 		{name: "long message", diagnostics: []diagnosticjson.Diagnostic{{Code: valid.Code, Severity: valid.Severity, Message: strings.Repeat("x", 4097)}}, want: "message"},
@@ -224,7 +224,7 @@ func TestEnvelopeStrictlyCanonicalizesAndBoundsResult(t *testing.T) {
 func TestEnvelopeOwnsAllMutableInputAndOutputStorage(t *testing.T) {
 	t.Parallel()
 
-	diagnostic := diagnosticjson.Diagnostic{Code: "PLYSTRA-CHECK", Severity: diagnosticjson.SeverityInfo, Message: "Project is valid."}
+	diagnostic := diagnosticjson.Diagnostic{Code: "PLYSTRA_CHECK", Severity: diagnosticjson.SeverityInfo, Message: "Project is valid."}
 	source := diagnosticjson.Source{Module: "example.com/app", Path: "plystra.yaml", Kind: "project-marker", Line: 1, Column: 1}
 	input := validInput()
 	input.Diagnostics = []diagnosticjson.Diagnostic{diagnostic}

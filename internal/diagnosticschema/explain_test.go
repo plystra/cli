@@ -31,7 +31,7 @@ func TestExplainV1BuildsExactCausalResult(t *testing.T) {
 			Field:  `capabilities.require["kernel.health/v1"]`,
 		},
 		Diagnostics: []diagnosticjson.Diagnostic{{
-			Code:     "PLYSTRA-EXPLAIN-AVAILABLE",
+			Code:     "PLYSTRA_EXPLAIN_AVAILABLE",
 			Severity: diagnosticjson.SeverityInfo,
 			Message:  "The Capability is available from the Kernel intrinsic catalog.",
 		}},
@@ -141,8 +141,8 @@ func TestExplainV1CanonicalizesSourceAndDiagnosticPermutations(t *testing.T) {
 	intrinsic := intrinsicExplainSource(t, evidence, "kernel.health/v1")
 	selection := diagnosticjson.Source{Module: "example.com/inspect", Path: "plystra.production.yaml", Kind: "configuration-selection"}
 	diagnostics := []diagnosticjson.Diagnostic{
-		{Code: "PLYSTRA-ZETA", Severity: diagnosticjson.SeverityWarning, Message: "Review the current decision."},
-		{Code: "PLYSTRA-ALPHA", Severity: diagnosticjson.SeverityInfo, Message: "The direct source is available."},
+		{Code: "PLYSTRA_ZETA", Severity: diagnosticjson.SeverityWarning, Message: "Review the current decision."},
+		{Code: "PLYSTRA_ALPHA", Severity: diagnosticjson.SeverityInfo, Message: "The direct source is available."},
 	}
 	primary := []diagnosticjson.Source{selection, intrinsic, selection}
 	additional := []diagnosticjson.Source{selection, selection}
@@ -240,7 +240,7 @@ func TestExplainV1RejectsIncompleteAndUnsafeInput(t *testing.T) {
 			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "invalid", Severity: diagnosticjson.SeverityError, Message: "Resolve the error."}}
 		}, want: "shared envelope"},
 		{name: "unsafe diagnostic", mutate: func(input *ExplainInput) {
-			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "PLYSTRA-UNSAFE", Severity: diagnosticjson.SeverityError, Message: "Open /home/person/secret.yaml."}}
+			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "PLYSTRA_UNSAFE", Severity: diagnosticjson.SeverityError, Message: "Open /home/person/secret.yaml."}}
 		}, want: "absolute path"},
 	}
 	for _, test := range tests {
@@ -261,7 +261,7 @@ func TestExplainV1StorageIsDefensiveAndSchemaIndependent(t *testing.T) {
 
 	evidence := resolvedInspectEvidence(t)
 	primary := []diagnosticjson.Source{intrinsicExplainSource(t, evidence, "kernel.health/v1")}
-	diagnostics := []diagnosticjson.Diagnostic{{Code: "PLYSTRA-EXPLAIN", Severity: diagnosticjson.SeverityInfo, Message: "The decision is available."}}
+	diagnostics := []diagnosticjson.Diagnostic{{Code: "PLYSTRA_EXPLAIN", Severity: diagnosticjson.SeverityInfo, Message: "The decision is available."}}
 	result, err := NewExplain(ExplainInput{
 		Evidence:       evidence,
 		SubjectKind:    ExplainSubjectCapability,

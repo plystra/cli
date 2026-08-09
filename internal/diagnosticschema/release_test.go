@@ -147,7 +147,7 @@ func TestReleaseV1SupportsKindsStatusesPoliciesAndConfigurationModes(t *testing.
 		t.Run(test.name, func(t *testing.T) {
 			input := completeReleaseInput(resolvedInspectEvidence(t))
 			test.mutate(&input)
-			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "PLYSTRA-RELEASE-INCOMPLETE", Severity: diagnosticjson.SeverityError, Message: "Release evidence is incomplete."}}
+			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "PLYSTRA_RELEASE_INCOMPLETE", Severity: diagnosticjson.SeverityError, Message: "Release evidence is incomplete."}}
 			input.Artifacts = nil
 			result, err := NewRelease(input)
 			if err != nil || !result.Valid() || result.Status() != ReleaseStatusIncomplete || result.UnsatisfiedPolicyCount() != test.wantPolicyCount || result.IncompleteEvidenceCount() != test.wantEvidenceCount {
@@ -166,7 +166,7 @@ func TestReleaseV1CanonicalizesInputPermutations(t *testing.T) {
 	input.PolicyEvaluations[0].Sources = []diagnosticjson.Source{source, source}
 	input.EvidenceFiles[0].Sources = []diagnosticjson.Source{source, source}
 	input.Artifacts = append(input.Artifacts, ReleaseArtifact{Kind: "go-module", Path: "dist/module.zip", Digest: inspectDigest("b"), Sources: []diagnosticjson.Source{source, source}})
-	input.Diagnostics = append(input.Diagnostics, diagnosticjson.Diagnostic{Code: "PLYSTRA-RELEASE-WARNING", Severity: diagnosticjson.SeverityWarning, Message: "Release evidence includes a warning."})
+	input.Diagnostics = append(input.Diagnostics, diagnosticjson.Diagnostic{Code: "PLYSTRA_RELEASE_WARNING", Severity: diagnosticjson.SeverityWarning, Message: "Release evidence includes a warning."})
 	input.Sources = []diagnosticjson.Source{source, source}
 	first, err := NewRelease(input)
 	if err != nil {
@@ -245,14 +245,14 @@ func TestReleaseV1RejectsIncompleteAndUnsafeInput(t *testing.T) {
 		}, want: "sources"},
 		{name: "complete without artifact", mutate: func(input *ReleaseInput) { input.Artifacts = nil }, want: "at least one"},
 		{name: "complete with error", mutate: func(input *ReleaseInput) {
-			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "PLYSTRA-RELEASE-ERROR", Severity: diagnosticjson.SeverityError, Message: "Release failed."}}
+			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "PLYSTRA_RELEASE_ERROR", Severity: diagnosticjson.SeverityError, Message: "Release failed."}}
 		}, want: "complete release contains"},
 		{name: "incomplete without error", mutate: func(input *ReleaseInput) { input.EvidenceFiles[0].Status = ReleaseEvidenceIncomplete }, want: "requires an error"},
 		{name: "invalid diagnostic", mutate: func(input *ReleaseInput) {
 			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "invalid", Severity: diagnosticjson.SeverityInfo, Message: "Release evidence is complete."}}
 		}, want: "shared envelope"},
 		{name: "unsafe diagnostic", mutate: func(input *ReleaseInput) {
-			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "PLYSTRA-UNSAFE", Severity: diagnosticjson.SeverityInfo, Message: "Open /home/person/release.json."}}
+			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "PLYSTRA_UNSAFE", Severity: diagnosticjson.SeverityInfo, Message: "Open /home/person/release.json."}}
 		}, want: "absolute path"},
 		{name: "additional source", mutate: func(input *ReleaseInput) {
 			input.Sources = []diagnosticjson.Source{{Module: "example.com/inspect", Path: "../source", Kind: "release"}}
@@ -338,7 +338,7 @@ func completeReleaseInput(evidence resolutionevidence.Evidence) ReleaseInput {
 			{Kind: ReleaseEvidenceProvenance, Status: ReleaseEvidenceComplete, Digest: inspectDigest("6")},
 		},
 		Artifacts:   []ReleaseArtifact{{Kind: "binary", Path: "dist/example-app.exe", Digest: inspectDigest("a")}},
-		Diagnostics: []diagnosticjson.Diagnostic{{Code: "PLYSTRA-RELEASE-COMPLETE", Severity: diagnosticjson.SeverityInfo, Message: "Release evidence is complete."}},
+		Diagnostics: []diagnosticjson.Diagnostic{{Code: "PLYSTRA_RELEASE_COMPLETE", Severity: diagnosticjson.SeverityInfo, Message: "Release evidence is complete."}},
 	}
 }
 

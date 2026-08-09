@@ -50,7 +50,7 @@ type selector struct {
 func Resolve(input Input) (Result, error) {
 	catalog, err := buildCatalog(input.Interfaces, input.Implementations, intrinsicinterface.Definitions())
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w: %v", ErrResolve, ErrInvalidInput, err)
+		return Result{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrInvalidInput, err)
 	}
 	requirements, intrinsicRequirements, err := normalizeRequirements(input.Requirements, catalog.interfaces, catalog.intrinsics)
 	if err != nil {

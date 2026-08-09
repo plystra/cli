@@ -679,7 +679,8 @@ digests in concise output.
 
 Common actionable CLI failures append exactly one `Recovery:` block after the
 concise problem. Follow that one command or file edit before rerunning the
-operation. The block is followed by one stable `Diagnostic: PLYSTRA-*` code;
+operation. The block is followed by one stable
+`Diagnostic: PLYSTRA_<AREA>_<CONDITION>` code;
 use that code as the machine-stable failure identity instead of matching the
 human wording. A recovery command preserves the selected default, `--env`, or
 `--config` mode, including a safe selector supplied through `PLYSTRA_ENV` or

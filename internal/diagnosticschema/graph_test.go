@@ -34,7 +34,7 @@ func TestGraphV1BuildsExactTypedResult(t *testing.T) {
 			Sources: []diagnosticjson.Source{moduleSource},
 		}},
 		Diagnostics: []diagnosticjson.Diagnostic{{
-			Code:     "PLYSTRA-GRAPH-READY",
+			Code:     "PLYSTRA_GRAPH_READY",
 			Severity: diagnosticjson.SeverityInfo,
 			Message:  "The Capability graph is available.",
 		}},
@@ -124,8 +124,8 @@ func TestGraphV1CanonicalizesPermutations(t *testing.T) {
 		{ID: "declared-requirement:kernel.health/v1", Kind: "declared-requirement", From: "module:example.com/inspect", To: "capability:kernel.health/v1", Reason: "project-declaration", Sources: []diagnosticjson.Source{moduleSource}},
 	}
 	diagnostics := []diagnosticjson.Diagnostic{
-		{Code: "PLYSTRA-ZETA", Severity: diagnosticjson.SeverityWarning, Message: "Review the graph."},
-		{Code: "PLYSTRA-ALPHA", Severity: diagnosticjson.SeverityInfo, Message: "The graph is deterministic."},
+		{Code: "PLYSTRA_ZETA", Severity: diagnosticjson.SeverityWarning, Message: "Review the graph."},
+		{Code: "PLYSTRA_ALPHA", Severity: diagnosticjson.SeverityInfo, Message: "The graph is deterministic."},
 	}
 	build := func() GraphResult {
 		result, err := NewGraph(GraphInput{Evidence: evidence, Type: GraphTypeCapabilities, Nodes: nodes, Edges: edges, Diagnostics: diagnostics})
@@ -208,7 +208,7 @@ func TestGraphV1RejectsIncompleteAndUnsafeInput(t *testing.T) {
 			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "invalid", Severity: diagnosticjson.SeverityError, Message: "Resolve the error."}}
 		}, want: "shared envelope"},
 		{name: "unsafe diagnostic", mutate: func(input *GraphInput) {
-			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "PLYSTRA-UNSAFE", Severity: diagnosticjson.SeverityError, Message: "Open /home/person/secret.yaml."}}
+			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "PLYSTRA_UNSAFE", Severity: diagnosticjson.SeverityError, Message: "Open /home/person/secret.yaml."}}
 		}, want: "absolute path"},
 	}
 	for _, test := range tests {

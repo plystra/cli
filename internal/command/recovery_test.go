@@ -15,12 +15,14 @@ import (
 	"github.com/plystra/cli/internal/capabilitycreate"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/configurationresolve"
+	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationactivation"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/newproject"
@@ -260,6 +262,14 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "atomic concurrent change", err: atomicfs.ErrConcurrentChange, code: diagnosticcode.ProjectConcurrentChange},
 		{name: "resolution concurrent change", err: applicationresolve.ErrConcurrentChange, code: diagnosticcode.ProjectConcurrentChange},
 		{name: "generation concurrent change", err: applicationgenerate.ErrConcurrentChange, code: diagnosticcode.ProjectConcurrentChange},
+		{name: "unknown Interface", err: interfaceresolution.ErrUnknownInterface, code: diagnosticcode.ResolveUnknownInterface},
+		{name: "unknown Implementation", err: interfaceresolution.ErrUnknownConstructor, code: diagnosticcode.ResolveUnknownImplementation},
+		{name: "incompatible Implementation", err: interfaceresolution.ErrIncompatibleChoice, code: diagnosticcode.ResolveIncompatibleImplementation},
+		{name: "multiple Implementations", err: interfaceresolution.ErrAmbiguousImplementation, code: diagnosticcode.ResolveMultipleImplementations},
+		{name: "missing Implementation", err: constructorgraph.ErrMissingBinding, code: diagnosticcode.ResolveMissingImplementation},
+		{name: "constructor cycle", err: constructorgraph.ErrCycle, code: diagnosticcode.ResolveConstructorCycle},
+		{name: "reserved Interface", err: interfaceresolution.ErrReservedInterface, code: diagnosticcode.ResolveReservedInterface},
+		{name: "intrinsic Interface selection", err: interfaceresolution.ErrIntrinsicChoice, code: diagnosticcode.ResolveIntrinsicInterfaceSelection},
 	}
 	for _, test := range tests {
 		test := test

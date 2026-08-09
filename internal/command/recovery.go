@@ -18,12 +18,14 @@ import (
 	"github.com/plystra/cli/internal/capabilitycreate"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/configurationresolve"
+	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationactivation"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/newproject"
@@ -112,6 +114,14 @@ const (
 	diagnosticProjectConcurrentChange            = diagnosticcode.ProjectConcurrentChange
 	diagnosticConfigurationCompositionDrift      = diagnosticcode.ConfigurationCompositionDrift
 	diagnosticGeneratedDrift                     = diagnosticcode.GeneratedDrift
+	diagnosticResolveUnknownInterface            = diagnosticcode.ResolveUnknownInterface
+	diagnosticResolveUnknownImplementation       = diagnosticcode.ResolveUnknownImplementation
+	diagnosticResolveIncompatibleImplementation  = diagnosticcode.ResolveIncompatibleImplementation
+	diagnosticResolveMultipleImplementations     = diagnosticcode.ResolveMultipleImplementations
+	diagnosticResolveMissingImplementation       = diagnosticcode.ResolveMissingImplementation
+	diagnosticResolveConstructorCycle            = diagnosticcode.ResolveConstructorCycle
+	diagnosticResolveReservedInterface           = diagnosticcode.ResolveReservedInterface
+	diagnosticResolveIntrinsicInterfaceSelection = diagnosticcode.ResolveIntrinsicInterfaceSelection
 )
 
 const (
@@ -234,8 +244,34 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		command := "plystra use " + ambiguousProvider.Capability().String() + " <plugin-id>" + context.selectorSuffix()
 		return recoveryDiagnostic(diagnosticProviderAmbiguous, "Select one compatible Provider explicitly by running `"+command+"`.")
 	}
+	var ambiguousImplementation *interfaceresolution.AmbiguousImplementationError
+	if errors.As(err, &ambiguousImplementation) && ambiguousImplementation != nil {
+		command := "plystra use " + ambiguousImplementation.InterfaceID().String() + " <constructor-symbol>" + context.selectorSuffix()
+		return recoveryDiagnostic(diagnosticResolveMultipleImplementations, "Select one compatible Implementation by running `"+command+"`.")
+	}
+	var missingImplementation *constructorgraph.MissingBindingError
+	if errors.As(err, &missingImplementation) && missingImplementation != nil {
+		command := "plystra implement " + missingImplementation.InterfaceID().String() + " --package <project-relative-package>"
+		return recoveryDiagnostic(diagnosticResolveMissingImplementation, "Create one compatible local Implementation by running `"+command+"`.")
+	}
 
 	switch {
+	case errors.Is(err, interfaceresolution.ErrUnknownInterface):
+		return recoveryDiagnostic(diagnosticResolveUnknownInterface, "Correct the reported Interface ID in "+context.configurationTarget()+" to one canonical Interface visible in the selected Go Module graph, then rerun the command.")
+	case errors.Is(err, interfaceresolution.ErrUnknownConstructor):
+		return recoveryDiagnostic(diagnosticResolveUnknownImplementation, implementationSelectionRecovery(context))
+	case errors.Is(err, interfaceresolution.ErrIncompatibleChoice):
+		return recoveryDiagnostic(diagnosticResolveIncompatibleImplementation, implementationSelectionRecovery(context))
+	case errors.Is(err, interfaceresolution.ErrAmbiguousImplementation):
+		return recoveryDiagnostic(diagnosticResolveMultipleImplementations, "Select one compatible Implementation by running `plystra use <interface-id> <constructor-symbol>"+context.selectorSuffix()+"`.")
+	case errors.Is(err, constructorgraph.ErrMissingBinding):
+		return recoveryDiagnostic(diagnosticResolveMissingImplementation, "Create one compatible local Implementation by running `plystra implement <interface-id> --package <project-relative-package>`.")
+	case errors.Is(err, constructorgraph.ErrCycle):
+		return recoveryDiagnostic(diagnosticResolveConstructorCycle, "Remove one required Interface parameter from the reported constructor cycle, then rerun the command.")
+	case errors.Is(err, interfaceresolution.ErrReservedInterface):
+		return recoveryDiagnostic(diagnosticResolveReservedInterface, "Remove the reported local kernel.* Interface declaration and import the canonical Kernel Interface package instead.")
+	case errors.Is(err, interfaceresolution.ErrIntrinsicChoice):
+		return recoveryDiagnostic(diagnosticResolveIntrinsicInterfaceSelection, "Remove the reported interfaces.use entry from "+context.configurationTarget()+"; Kernel supplies that Interface intrinsically.")
 	case errors.Is(err, applicationresolve.ErrManifest) && !errors.Is(err, applicationresolve.ErrConfigurationSelection):
 		return recoveryDiagnostic(diagnosticProjectManifestInvalid, "Correct the reported root or dependency Project plystra.yaml, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrInheritedConflict):
@@ -365,6 +401,10 @@ func goToolingRecovery() string {
 
 func pluginTargetRecovery() string {
 	return "Rerun with `--plugin <plugin-directory-or-id>` to select one exact local Plugin."
+}
+
+func implementationSelectionRecovery(context recoveryContext) string {
+	return "Replace the reported choice with one visible compatible constructor by running `plystra use <interface-id> <constructor-symbol>" + context.selectorSuffix() + "`."
 }
 
 func generationGraphRecovery() string {

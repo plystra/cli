@@ -30,7 +30,7 @@ func TestTestV1BuildsExactPluginSliceResult(t *testing.T) {
 			{Order: 1, ID: "slice-startup", Kind: "lifecycle", Subject: "example.orders", Status: TestStatusPassed, Summary: "The selected Plugin slice started and stopped cleanly.", Sources: []diagnosticjson.Source{moduleSource}},
 			{Order: 3, ID: "transport-tests", Kind: "transport", Subject: "connect", Status: TestStatusSkipped, Summary: "No exposed transport belongs to the selected Plugin slice."},
 		},
-		Diagnostics: []diagnosticjson.Diagnostic{{Code: "PLYSTRA-TEST-FAILED", Severity: diagnosticjson.SeverityError, Message: "Inspect the structured failure and rerun the selected Plugin test."}},
+		Diagnostics: []diagnosticjson.Diagnostic{{Code: "PLYSTRA_TEST_FAILED", Severity: diagnosticjson.SeverityError, Message: "Inspect the structured failure and rerun the selected Plugin test."}},
 	}
 	result, err := NewTest(input)
 	if err != nil {
@@ -135,7 +135,7 @@ func TestTestV1CanonicalizesInputPermutations(t *testing.T) {
 		{Order: 2, ID: "packages", Kind: "go-package", Subject: "example.com/app/orders", Status: TestStatusFailed, Summary: "A package failed.", Failures: []TestFailure{{Kind: "zeta", Subject: "TestZeta", Summary: "The zeta assertion failed."}, {Kind: "alpha", Subject: "TestAlpha", Summary: "The alpha assertion failed."}}},
 		{Order: 1, ID: "startup", Kind: "lifecycle", Subject: "example.orders", Status: TestStatusPassed, Summary: "Startup passed."},
 	}
-	diagnostics := []diagnosticjson.Diagnostic{{Code: "PLYSTRA-ZETA", Severity: diagnosticjson.SeverityError, Message: "Resolve the test failure."}, {Code: "PLYSTRA-ALPHA", Severity: diagnosticjson.SeverityInfo, Message: "The slice resolved."}}
+	diagnostics := []diagnosticjson.Diagnostic{{Code: "PLYSTRA_ZETA", Severity: diagnosticjson.SeverityError, Message: "Resolve the test failure."}, {Code: "PLYSTRA_ALPHA", Severity: diagnosticjson.SeverityInfo, Message: "The slice resolved."}}
 	build := func() TestResult {
 		result, err := NewTest(TestInput{Evidence: evidence, Slice: sliceInput, Outcomes: outcomes, Diagnostics: diagnostics})
 		if err != nil {
@@ -276,7 +276,7 @@ func TestTestV1RejectsIncompleteAndUnsafeInput(t *testing.T) {
 			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "invalid", Severity: diagnosticjson.SeverityError, Message: "Resolve the error."}}
 		}, want: "shared envelope"},
 		{name: "unsafe diagnostic", mutate: func(input *TestInput) {
-			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "PLYSTRA-UNSAFE", Severity: diagnosticjson.SeverityError, Message: "Open /home/person/private."}}
+			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "PLYSTRA_UNSAFE", Severity: diagnosticjson.SeverityError, Message: "Open /home/person/private."}}
 		}, want: "absolute path"},
 	}
 	for _, test := range tests {

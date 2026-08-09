@@ -38,7 +38,7 @@ func TestCheckV1BuildsExactOrderedResult(t *testing.T) {
 			},
 		},
 		Diagnostics: []diagnosticjson.Diagnostic{{
-			Code:     "PLYSTRA-GENERATED-DRIFT",
+			Code:     "PLYSTRA_GENERATED_DRIFT",
 			Severity: diagnosticjson.SeverityError,
 			Message:  "Run `plystra generate --env production` to refresh generated output.",
 		}},
@@ -134,8 +134,8 @@ func TestCheckV1CanonicalizesPermutations(t *testing.T) {
 		{Order: 1, ID: "configuration-composition", Status: CheckStatusPassed, Summary: "Configuration is current.", Sources: []diagnosticjson.Source{firstSource, firstSource}},
 	}
 	diagnostics := []diagnosticjson.Diagnostic{
-		{Code: "PLYSTRA-ZETA", Severity: diagnosticjson.SeverityError, Message: "Regenerate the Project."},
-		{Code: "PLYSTRA-ALPHA", Severity: diagnosticjson.SeverityInfo, Message: "Configuration is current."},
+		{Code: "PLYSTRA_ZETA", Severity: diagnosticjson.SeverityError, Message: "Regenerate the Project."},
+		{Code: "PLYSTRA_ALPHA", Severity: diagnosticjson.SeverityInfo, Message: "Configuration is current."},
 	}
 	build := func() CheckResult {
 		result, err := NewCheck(CheckInput{Evidence: evidence, Checks: checks, Diagnostics: diagnostics})
@@ -214,7 +214,7 @@ func TestCheckV1RejectsIncompleteAndUnsafeInput(t *testing.T) {
 			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "invalid", Severity: diagnosticjson.SeverityError, Message: "Resolve the error."}}
 		}, want: "shared envelope"},
 		{name: "unsafe diagnostic", mutate: func(input *CheckInput) {
-			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "PLYSTRA-UNSAFE", Severity: diagnosticjson.SeverityError, Message: "Open /home/person/secret.yaml."}}
+			input.Diagnostics = []diagnosticjson.Diagnostic{{Code: "PLYSTRA_UNSAFE", Severity: diagnosticjson.SeverityError, Message: "Open /home/person/secret.yaml."}}
 		}, want: "absolute path"},
 	}
 	for _, test := range tests {

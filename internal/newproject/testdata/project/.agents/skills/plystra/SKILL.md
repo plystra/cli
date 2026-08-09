@@ -1211,7 +1211,7 @@ build and distribution boundary for every Plystra module.
 ## Diagnose common failures
 
 Common actionable CLI failures end with exactly one Recovery: block followed by
-one stable Diagnostic: PLYSTRA-* code. Follow that one command or file edit with
+one stable Diagnostic: PLYSTRA_<AREA>_<CONDITION> code. Follow that one command or file edit with
 the same default, --env, or --config selection, and use the code as the stable
 automation or support identity. Recovery output preserves safe explicit and
 ambient selectors, but substitutes <environment> or <yaml-path> for unsafe or
