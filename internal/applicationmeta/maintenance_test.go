@@ -59,7 +59,7 @@ config:
     host: local.example # explicit local value
 `)
 
-	maintained, err := applicationmeta.MaintainDependencyConfiguration(current, applicationmeta.DependencyBaseline{}, dependencies, lookup)
+	maintained, err := applicationmeta.MaintainDependencyConfiguration(current, applicationmeta.DependencyBaseline{}, nil, dependencies, lookup)
 	if err != nil {
 		t.Fatalf("MaintainDependencyConfiguration: %v", err)
 	}
@@ -116,12 +116,52 @@ config:
 	if err != nil {
 		t.Fatalf("Compose maintained configuration: %v", err)
 	}
-	repeated, err := applicationmeta.MaintainDependencyConfiguration(data, composition.DependencyBaseline(), dependencies, lookup)
+	repeated, err := applicationmeta.MaintainDependencyConfiguration(data, composition.DependencyBaseline(), maintained.LocalPaths(), dependencies, lookup)
 	if err != nil || repeated.Changed() || !bytes.Equal(repeated.Data(), data) {
 		t.Fatalf("repeated maintenance = changed %t, err %v\nfirst: %s\nagain: %s", repeated.Changed(), err, data, repeated.Data())
 	}
 	if !slices.Equal(maintained.LocalPaths(), repeated.LocalPaths()) {
 		t.Fatalf("repeated local paths = %v, want %v", repeated.LocalPaths(), maintained.LocalPaths())
+	}
+}
+
+func TestMaintainDependencyConfigurationPersistsIdenticalLocalSelectionOwnership(t *testing.T) {
+	t.Parallel()
+
+	lookup := composeSchemaLookup(nil)
+	current := []byte("interfaces: {use: {email.send/v1: example.com/acme/smtp.New}}\n")
+	dependencies := []applicationmeta.Dependency{{
+		ModulePath:    "example.com/platform",
+		ModuleVersion: "v1.0.0",
+		Manifest:      composeManifest(t, "interfaces: {use: {email.send/v1: example.com/acme/smtp.New}}\n"),
+	}}
+	initial, err := applicationmeta.MaintainDependencyConfiguration(current, applicationmeta.DependencyBaseline{}, nil, dependencies, lookup)
+	if err != nil {
+		t.Fatalf("initial maintenance: %v", err)
+	}
+	const selectionPath = `interfaces.use["email.send/v1"]`
+	if !slices.Contains(initial.LocalPaths(), selectionPath) {
+		t.Fatalf("initial local paths %v omit identical explicit selection", initial.LocalPaths())
+	}
+	composition, err := applicationmeta.Compose(dependencies, composeManifest(t, string(initial.Data())), lookup)
+	if err != nil {
+		t.Fatalf("Compose initial selection: %v", err)
+	}
+	repeated, err := applicationmeta.MaintainDependencyConfiguration(initial.Data(), composition.DependencyBaseline(), initial.LocalPaths(), dependencies, lookup)
+	if err != nil || repeated.Changed() || !slices.Equal(repeated.LocalPaths(), initial.LocalPaths()) {
+		t.Fatalf("repeated ownership = changed %t paths %v, error %v", repeated.Changed(), repeated.LocalPaths(), err)
+	}
+	changedDependencies := []applicationmeta.Dependency{{
+		ModulePath:    "example.com/platform",
+		ModuleVersion: "v2.0.0",
+		Manifest:      composeManifest(t, "interfaces: {use: {email.send/v1: example.com/acme/other.New}}\n"),
+	}}
+	maintained, err := applicationmeta.MaintainDependencyConfiguration(repeated.Data(), composition.DependencyBaseline(), repeated.LocalPaths(), changedDependencies, lookup)
+	if err != nil {
+		t.Fatalf("maintain changed inherited selection: %v", err)
+	}
+	if !bytes.Contains(maintained.Data(), []byte("example.com/acme/smtp.New")) || bytes.Contains(maintained.Data(), []byte("example.com/acme/other.New")) || !slices.Contains(maintained.LocalPaths(), selectionPath) {
+		t.Fatalf("explicit identical selection was not preserved with local ownership %v:\n%s", maintained.LocalPaths(), maintained.Data())
 	}
 }
 
@@ -148,7 +188,7 @@ config:
     token: {env: PRIVATE_OLD_TOKEN}
 `),
 	}}
-	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("http: {address: ':8080'}\n"), applicationmeta.DependencyBaseline{}, oldDependencies, lookup)
+	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("http: {address: ':8080'}\n"), applicationmeta.DependencyBaseline{}, nil, oldDependencies, lookup)
 	if err != nil {
 		t.Fatalf("materialize old baseline: %v", err)
 	}
@@ -178,7 +218,7 @@ config:
 `),
 	}}
 
-	maintained, err := applicationmeta.MaintainDependencyConfiguration(current, oldComposition.DependencyBaseline(), newDependencies, lookup)
+	maintained, err := applicationmeta.MaintainDependencyConfiguration(current, oldComposition.DependencyBaseline(), initial.LocalPaths(), newDependencies, lookup)
 	if err != nil {
 		t.Fatalf("maintain changed baseline: %v", err)
 	}
@@ -221,7 +261,7 @@ func TestMaintainDependencyConfigurationRequiresExplicitRemovalAndConflictResolu
 		ModuleVersion: "v1.0.0",
 		Manifest:      composeManifest(t, "capabilities: {use: {email.send/v1: acme.smtp}}\nconfig: {example.com/acme/smtp.New: {host: old.example}}\n"),
 	}}
-	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("{}\n"), applicationmeta.DependencyBaseline{}, oldDependencies, lookup)
+	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("{}\n"), applicationmeta.DependencyBaseline{}, nil, oldDependencies, lookup)
 	if err != nil {
 		t.Fatalf("materialize old baseline: %v", err)
 	}
@@ -233,7 +273,7 @@ func TestMaintainDependencyConfigurationRequiresExplicitRemovalAndConflictResolu
 	if bytes.Equal(withoutHost, initial.Data()) {
 		t.Fatalf("test did not remove inherited host:\n%s", initial.Data())
 	}
-	_, err = applicationmeta.MaintainDependencyConfiguration(withoutHost, oldComposition.DependencyBaseline(), oldDependencies, lookup)
+	_, err = applicationmeta.MaintainDependencyConfiguration(withoutHost, oldComposition.DependencyBaseline(), initial.LocalPaths(), oldDependencies, lookup)
 	if !errors.Is(err, applicationmeta.ErrAmbiguousConfigurationOwnership) || !strings.Contains(err.Error(), `config["example.com/acme/smtp.New"]["host"]`) {
 		t.Fatalf("implicit deletion error = %v", err)
 	}
@@ -241,12 +281,12 @@ func TestMaintainDependencyConfigurationRequiresExplicitRemovalAndConflictResolu
 		{ModulePath: "example.com/a", ModuleVersion: "v2.0.0", Manifest: composeManifest(t, "capabilities: {use: {email.send/v1: acme.smtp}}\nconfig: {example.com/acme/smtp.New: {host: new.example}}\n")},
 		{ModulePath: "example.com/b", ModuleVersion: "v2.0.0", Manifest: composeManifest(t, "capabilities: {use: {email.send/v1: acme.other}}\n")},
 	}
-	_, err = applicationmeta.MaintainDependencyConfiguration(initial.Data(), oldComposition.DependencyBaseline(), conflicting, lookup)
+	_, err = applicationmeta.MaintainDependencyConfiguration(initial.Data(), oldComposition.DependencyBaseline(), initial.LocalPaths(), conflicting, lookup)
 	if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), `capabilities.use["email.send/v1"]`) || strings.Contains(err.Error(), "new.example") {
 		t.Fatalf("new inherited conflict = %v", err)
 	}
 	explicit := bytes.Replace(initial.Data(), []byte("email.send/v1: acme.smtp"), []byte("email.send/v1: acme.other"), 1)
-	maintained, err := applicationmeta.MaintainDependencyConfiguration(explicit, oldComposition.DependencyBaseline(), conflicting, lookup)
+	maintained, err := applicationmeta.MaintainDependencyConfiguration(explicit, oldComposition.DependencyBaseline(), initial.LocalPaths(), conflicting, lookup)
 	if err != nil || !bytes.Contains(maintained.Data(), []byte("acme.other")) {
 		t.Fatalf("explicit conflict resolution = %v\n%s", err, maintained.Data())
 	}
@@ -263,7 +303,7 @@ func TestMaintainDependencyConfigurationUsesOverlayOnlyAsConflictResolution(t *t
 	overlay := parseOverlayManifest(t, "plystra.production.yaml", "capabilities: {use: {email.send/v1: acme.production}}\n")
 	root := []byte("# shared root\n{}\n")
 
-	maintained, err := applicationmeta.MaintainDependencyConfigurationWithOverlay(root, overlay, applicationmeta.DependencyBaseline{}, dependencies, lookup)
+	maintained, err := applicationmeta.MaintainDependencyConfigurationWithOverlay(root, overlay, applicationmeta.DependencyBaseline{}, nil, dependencies, lookup)
 	if err != nil {
 		t.Fatalf("MaintainDependencyConfigurationWithOverlay: %v", err)
 	}
@@ -274,11 +314,11 @@ func TestMaintainDependencyConfigurationUsesOverlayOnlyAsConflictResolution(t *t
 	if err != nil {
 		t.Fatalf("Compose resolved overlay: %v", err)
 	}
-	repeated, err := applicationmeta.MaintainDependencyConfigurationWithOverlay(root, overlay, composition.DependencyBaseline(), dependencies, lookup)
+	repeated, err := applicationmeta.MaintainDependencyConfigurationWithOverlay(root, overlay, composition.DependencyBaseline(), maintained.LocalPaths(), dependencies, lookup)
 	if err != nil || repeated.Changed() || !bytes.Equal(repeated.Data(), root) {
 		t.Fatalf("repeat overlay maintenance = changed %t, error %v\n%s", repeated.Changed(), err, repeated.Data())
 	}
-	_, err = applicationmeta.MaintainDependencyConfiguration(root, composition.DependencyBaseline(), dependencies, lookup)
+	_, err = applicationmeta.MaintainDependencyConfiguration(root, composition.DependencyBaseline(), maintained.LocalPaths(), dependencies, lookup)
 	if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), `capabilities.use["email.send/v1"]`) {
 		t.Fatalf("unselected overlay conflict error = %v", err)
 	}

@@ -66,7 +66,7 @@ func TestGenerateComparesAuthoredInterfaceShapeAgainstOwnedBaseline(t *testing.T
 	driftBefore := snapshotTree(t, root)
 	drift, err := applicationgenerate.Generate(t.Context(), options)
 	if err != nil ||
-		!slicesContains(drift.Report().Changed(), interfacecompatibility.Path) ||
+		!slicesContains(drift.Report().Stale(), interfacecompatibility.Path) ||
 		drift.InterfaceShapeComparison().Clean() ||
 		!drift.InterfaceShapeComparison().Valid() {
 		t.Fatalf("Generate --check(changed) = changes %#v comparison %#v, %v", drift.Report().Changes(), drift.InterfaceShapeComparison().Changes(), err)

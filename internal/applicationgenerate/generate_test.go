@@ -76,7 +76,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	applicationManifest := readFile(t, root, "generated/manifest.json")
 	for _, required := range []string{
 		`"capability_aliases":[]`,
-		`"configuration":{"version":4,"mode":"default"`,
+		`"configuration":{"version":5,"mode":"default"`,
 		`"root":{"path":"plystra.yaml","digest":"sha256:`,
 		`"dependency_baselines":[{"mode":"default","path":"plystra.yaml"`,
 		`"dependency_composition_digest":"sha256:`,
@@ -140,7 +140,7 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 		Check:       true,
 		Environment: environment,
 	})
-	if err != nil || !reflect.DeepEqual(drifted.Report().Changed(), []string{"generated/manifest.json"}) {
+	if err != nil || !reflect.DeepEqual(drifted.Report().ManuallyModified(), []string{"generated/manifest.json"}) {
 		t.Fatalf("drift check = %#v, %v", drifted.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, driftedBefore) {
@@ -269,7 +269,7 @@ func TestGenerateDetectsDescriptorEvidenceDriftWithoutMutation(t *testing.T) {
 	checkOptions.Check = true
 	checkOptions.Validate = nil
 	changed, err := applicationgenerate.Generate(t.Context(), checkOptions)
-	if err != nil || !reflect.DeepEqual(changed.Report().Changed(), []string{"generated/proto/descriptor-set.pb"}) {
+	if err != nil || !reflect.DeepEqual(changed.Report().ManuallyModified(), []string{"generated/proto/descriptor-set.pb"}) {
 		t.Fatalf("changed descriptor check = %#v, %v", changed.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, changedBefore) {
@@ -349,7 +349,7 @@ errors: []
 `))
 	beforeAdditionCheck := snapshotTree(t, root)
 	drift, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment})
-	if err != nil || drift.Report().Clean() || !slicesContains(drift.Report().Changed(), protobufwiremap.Path) || !reflect.DeepEqual(snapshotTree(t, root), beforeAdditionCheck) {
+	if err != nil || drift.Report().Clean() || !slicesContains(drift.Report().Stale(), protobufwiremap.Path) || !reflect.DeepEqual(snapshotTree(t, root), beforeAdditionCheck) {
 		t.Fatalf("added-field check = %#v, %v", drift.Report().Changes(), err)
 	}
 	if result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Environment: environment, Validate: validate}); err != nil || !result.Report().Clean() {
@@ -460,7 +460,7 @@ errors: []
 `))
 	beforeAdditionCheck := snapshotTree(t, root)
 	drift, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Check: true, Environment: environment})
-	if err != nil || drift.Report().Clean() || !slicesContains(drift.Report().Changed(), protobufwiremap.Path) || !reflect.DeepEqual(snapshotTree(t, root), beforeAdditionCheck) {
+	if err != nil || drift.Report().Clean() || !slicesContains(drift.Report().Stale(), protobufwiremap.Path) || !reflect.DeepEqual(snapshotTree(t, root), beforeAdditionCheck) {
 		t.Fatalf("added-enum-member check = %#v, %v", drift.Report().Changes(), err)
 	}
 	if result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Environment: environment, Validate: validate}); err != nil || !result.Report().Clean() {
@@ -1218,7 +1218,7 @@ func TestGenerateDetectsDependencyPluginConfigurationSchemaDrift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate check after dependency schema change: %v", err)
 	}
-	if checked.Report().Clean() || !strings.Contains(strings.Join(checked.Report().Changed(), "\n"), "generated/manifest.json") {
+	if checked.Report().Clean() || !strings.Contains(strings.Join(checked.Report().Stale(), "\n"), "generated/manifest.json") {
 		t.Fatalf("dependency schema change report = %#v", checked.Report().Changes())
 	}
 	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, applicationBeforeCheck) {
@@ -1325,7 +1325,7 @@ func TestGenerateSelectedHTTPTransportsCauseApplicationModelDrift(t *testing.T) 
 			if err != nil {
 				t.Fatalf("Generate check after transport change: %v", err)
 			}
-			if checked.Report().Clean() || !strings.Contains(strings.Join(checked.Report().Changed(), "\n"), "generated/manifest.json") {
+			if checked.Report().Clean() || !strings.Contains(strings.Join(checked.Report().Stale(), "\n"), "generated/manifest.json") {
 				t.Fatalf("transport change report = %#v", checked.Report().Changes())
 			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, beforeCheck) {
@@ -1446,8 +1446,8 @@ func TestGenerateSelectedHTTPCORSCausesApplicationModelDrift(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Generate check after CORS change: %v", err)
 			}
-			changedPaths := strings.Join(checked.Report().Changed(), "\n")
-			if checked.Report().Clean() || !strings.Contains(changedPaths, "generated/manifest.json") || !strings.Contains(changedPaths, connectHandlerPath) {
+			stalePaths := strings.Join(checked.Report().Stale(), "\n")
+			if checked.Report().Clean() || !strings.Contains(stalePaths, "generated/manifest.json") || !strings.Contains(stalePaths, connectHandlerPath) {
 				t.Fatalf("CORS change report = %#v", checked.Report().Changes())
 			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, beforeCheck) {
@@ -1551,13 +1551,13 @@ func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
 				t.Fatalf("Generate check after exposure change: %v", err)
 			}
 			if checked.Report().Clean() ||
-				!slicesContains(checked.Report().Changed(), generatedfiles.ManifestPath) ||
-				!slicesContains(checked.Report().Changed(), "generated/manifest.json") ||
-				!slicesContains(checked.Report().Changed(), "generated/proto/descriptor-set.pb") ||
+				!slicesContains(checked.Report().Stale(), generatedfiles.ManifestPath) ||
+				!slicesContains(checked.Report().Stale(), "generated/manifest.json") ||
+				!slicesContains(checked.Report().Stale(), "generated/proto/descriptor-set.pb") ||
 				!slicesContains(checked.Report().Missing(), "generated/proto/plystra/generated/kernel/health/v1/capability.proto") ||
-				!slicesContains(checked.Report().Obsolete(), "generated/proto/plystra/generated/kernel/info/v1/capability.proto") ||
+				!slicesContains(checked.Report().Stale(), "generated/proto/plystra/generated/kernel/info/v1/capability.proto") ||
 				!slicesContains(checked.Report().Missing(), "generated/sdk/javascript/src/interfaces/kernel/health/v1.ts") ||
-				!slicesContains(checked.Report().Obsolete(), "generated/sdk/javascript/src/interfaces/kernel/info/v1.ts") {
+				!slicesContains(checked.Report().Stale(), "generated/sdk/javascript/src/interfaces/kernel/info/v1.ts") {
 				t.Fatalf("exposure change report = %#v", checked.Report().Changes())
 			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, beforeCheck) {

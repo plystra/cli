@@ -292,8 +292,8 @@ provenance, and leaves no target when a relative replacement remains.
 
 The staged generated application must also be a fixed point. Creation installs
 the generated output and immediately runs the equivalent of
-`plystra generate --check`. Dependency-composition drift or any changed,
-missing, unexpected, or obsolete generated path rejects the template and
+`plystra generate --check`. Dependency-composition drift or any stale,
+missing, unexpected, or manually modified generated path rejects the template and
 restores the transaction. The template author must make generation
 deterministic, run `plystra generate` followed by `plystra generate --check` in
 a fresh Project directory, and prepare a corrected module version for owner
@@ -719,9 +719,12 @@ boundary. `plystra generate --check` reports `changed plystra.yaml (dependency
 composition)` without modifying the configuration or generated tree.
 
 Inspect `generated/manifest.json` for the non-secret dependency composition
-digest and path/digest/removal/source baseline. An explicit tombstone has
-`"removed": true`; the manifest records provenance, not raw Plugin
-configuration or Secret reference targets.
+digest, path/digest/removal/source baseline, and sorted
+`current_project_paths` for each maintained selection. Those paths preserve
+explicit current-Project ownership even when the selected value currently
+matches an inherited declaration, so a later dependency update cannot silently
+replace it. An explicit tombstone has `"removed": true`; the manifest records
+paths and provenance, not raw Plugin configuration or Secret reference targets.
 
 ## Select an environment or complete alternative configuration
 
@@ -877,13 +880,16 @@ with every resolved canonical Capability ID, its exact contract and constraint
 digests, and each constrained request or response field's path, type, and
 normalized constraint object. Unconstrained Capabilities retain empty field
 lists, while the aggregate projection digest changes for added, removed, or
-changed constraints. Configuration schema v4 records `default`,
+changed constraints. Configuration schema v5 records `default`,
 `environment`, or `explicit-config` mode; the environment name and overlay
 reference when applicable; project-relative paths; normalized document
-digests; dependency baseline history; the committed Protobuf wire-map digest;
-and the final build-affecting application-model digest. Environment mode reuses
-the root dependency baseline because overlays do not own dependency
-maintenance. The required top-level `transport_toolchain` record identifies
+digests; dependency baseline history; sorted per-selection
+`current_project_paths`; the committed Protobuf wire-map digest; and the final
+build-affecting application-model digest. The ownership paths contain no values
+or Secret-reference targets and keep explicit current-Project decisions stable
+across repeated maintenance. Environment mode reuses the root dependency
+baseline because overlays do not own dependency maintenance. The required
+top-level `transport_toolchain` record identifies
 the exact embedded `go/format` runtime; built-in Protobuf-model, descriptor,
 wire-map, Connect, JavaScript, and API-documentation generator versions;
 pinned generated Go and npm dependencies; and its canonical SHA-256 digest.
@@ -1716,11 +1722,13 @@ roadmap gates.
 
 Check mode is read-only. Drift reports one or more categories:
 
-- `changed`: a managed path differs from deterministic output.
+- `stale`: current bytes still match recorded CLI output, but the selected
+  inputs changed or the path is no longer part of desired output.
 - `missing`: a required managed path is absent.
 - `unexpected`: a path exists under managed space but is not owned; the CLI
   preserves it rather than overwriting it.
-- `obsolete`: the ownership manifest still records output that should disappear.
+- `manually-modified`: a previously owned path no longer matches its recorded
+  file kind or digest.
 
 Fix the authored input, move handwritten files out of `generated/`, and run
 normal generation. Never delete or overwrite an unexpected file blindly.

@@ -77,7 +77,7 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 	beforeCheck := snapshotTree(t, root)
 	drift, err := applicationgenerate.Generate(t.Context(), options)
 	if err != nil ||
-		!slicesContains(drift.Report().Changed(), interfacecompatibility.TransportPath) ||
+		!slicesContains(drift.Report().Stale(), interfacecompatibility.TransportPath) ||
 		!drift.InterfaceShapeComparison().Valid() ||
 		drift.InterfaceShapeComparison().Clean() ||
 		!drift.InterfaceTransportComparison().Valid() ||

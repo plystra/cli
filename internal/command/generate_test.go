@@ -118,7 +118,7 @@ replace github.com/plystra/kernel => %s
 	writeCommandFile(t, filepath.Join(root, "generated", "manifest.json"), "drift\n")
 	drifted := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, start, environment)
-	if exitCode != 1 || stdout != "" || stderr != "generated output is not current:\n  changed generated/manifest.json\n\nRecovery:\nRun `plystra generate` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.GeneratedDrift+"\n" {
+	if exitCode != 1 || stdout != "" || stderr != "generated output is not current:\n  manually-modified generated/manifest.json\n\nRecovery:\nRun `plystra generate` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.GeneratedDrift+"\n" {
 		t.Fatalf("drift check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, drifted) {
@@ -127,6 +127,24 @@ replace github.com/plystra/kernel => %s
 	exitCode, stdout, stderr = runCommand(t, []string{"generate"}, start, environment)
 	if exitCode != 0 || stderr != "" {
 		t.Fatalf("repair generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {address: \":9090\"}\n")
+	stale := commandTree(t, root)
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, start, environment)
+	if exitCode != 1 || stdout != "" ||
+		!strings.HasPrefix(stderr, "generated output is not current:\n") ||
+		!strings.Contains(stderr, "  stale generated/.plystra-manifest.json\n") ||
+		!strings.Contains(stderr, "  stale generated/manifest.json\n") ||
+		strings.Contains(stderr, "manually-modified") {
+		t.Fatalf("stale output = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, stale) {
+		t.Fatalf("stale check mutated application:\nbefore: %#v\nafter:  %#v", stale, after)
+	}
+	exitCode, stdout, stderr = runCommand(t, []string{"generate"}, start, environment)
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("repair stale output = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 
 	writeCommandFile(t, filepath.Join(root, "generated", "manual.txt"), "preserve\n")

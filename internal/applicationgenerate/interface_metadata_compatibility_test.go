@@ -113,7 +113,7 @@ func TestGenerateComparesInterfaceMetadataByDeclaredCompatibilityClass(t *testin
 			before := snapshotTree(t, root)
 			drift, err := applicationgenerate.Generate(t.Context(), options)
 			if err != nil ||
-				!slicesContains(drift.Report().Changed(), interfacecompatibility.MetadataPath) ||
+				!slicesContains(drift.Report().Stale(), interfacecompatibility.MetadataPath) ||
 				!drift.InterfaceShapeComparison().Clean() ||
 				drift.InterfaceMetadataComparison().Clean() ||
 				!drift.InterfaceMetadataComparison().Valid() {

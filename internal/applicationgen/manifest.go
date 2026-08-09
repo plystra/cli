@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	applicationManifestConfigurationVersion = 4
+	applicationManifestConfigurationVersion = 5
 	// ConfigurationModeDefault identifies the mandatory root plystra.yaml as
 	// the current-project document.
 	ConfigurationModeDefault = "default"
@@ -72,6 +72,7 @@ type applicationManifestSelectionBaseline struct {
 	Path                        string                          `json:"path"`
 	DependencyCompositionDigest string                          `json:"dependency_composition_digest"`
 	DependencyBaseline          []applicationManifestProvenance `json:"dependency_baseline"`
+	CurrentProjectPaths         []string                        `json:"current_project_paths"`
 }
 
 type applicationManifestDocument struct {
@@ -93,6 +94,7 @@ type ManifestProvenanceOptions struct {
 	RootDigest             string
 	SelectedPath           string
 	SelectedDigest         string
+	CurrentProjectPaths    []string
 	Composition            applicationmeta.Composition
 	ProtobufWireMapDigest  string
 	ApplicationModelDigest string
@@ -118,24 +120,30 @@ type ManifestProvenance struct {
 }
 
 type manifestSelectionBaseline struct {
-	mode     string
-	path     string
-	baseline applicationmeta.DependencyBaseline
+	mode                string
+	path                string
+	baseline            applicationmeta.DependencyBaseline
+	currentProjectPaths []string
 }
 
 // NewManifestProvenance constructs the only supported generated-manifest
 // provenance schema from already normalized typed configuration-layer
 // identities.
 func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenance, error) {
+	currentProjectPaths, err := normalizeCurrentProjectPaths(options.CurrentProjectPaths)
+	if err != nil {
+		return ManifestProvenance{}, err
+	}
 	baselines := make([]manifestSelectionBaseline, 0, len(options.Previous.baselines)+1)
 	if validateManifestProvenance(options.Previous) == nil {
 		baselines = cloneSelectionBaselines(options.Previous.baselines)
 	}
 	baselineMode, baselinePath := dependencyBaselineSelection(options.Mode, options.RootPath, options.SelectedPath)
 	current := manifestSelectionBaseline{
-		mode:     baselineMode,
-		path:     baselinePath,
-		baseline: options.Composition.DependencyBaseline(),
+		mode:                baselineMode,
+		path:                baselinePath,
+		baseline:            options.Composition.DependencyBaseline(),
+		currentProjectPaths: currentProjectPaths,
 	}
 	replaced := false
 	for index := range baselines {
@@ -211,6 +219,27 @@ func (p ManifestProvenance) BaselineForSelection(mode, selectedPath string) (app
 	return p.baselines[index].baseline, true
 }
 
+// CurrentProjectPaths returns the schema paths explicitly owned by the active
+// current-project configuration layer rather than its dependency baseline.
+func (p ManifestProvenance) CurrentProjectPaths() []string {
+	paths, _ := p.CurrentProjectPathsForSelection(p.mode, p.selectedPath)
+	return paths
+}
+
+// CurrentProjectPathsForSelection returns the persisted current-project
+// ownership paths for one exact dependency-baseline selection.
+func (p ManifestProvenance) CurrentProjectPathsForSelection(mode, selectedPath string) ([]string, bool) {
+	mode, selectedPath = dependencyBaselineSelection(mode, p.rootPath, selectedPath)
+	index := sort.Search(len(p.baselines), func(index int) bool {
+		return p.baselines[index].mode > mode ||
+			(p.baselines[index].mode == mode && p.baselines[index].path >= selectedPath)
+	})
+	if index >= len(p.baselines) || p.baselines[index].mode != mode || p.baselines[index].path != selectedPath {
+		return nil, false
+	}
+	return append([]string(nil), p.baselines[index].currentProjectPaths...), true
+}
+
 // ApplicationModelDigest returns the final build-affecting generation-context
 // digest.
 func (p ManifestProvenance) ApplicationModelDigest() string {
@@ -282,6 +311,7 @@ func RenderManifest(aliasJSON []byte, context generation.Context, provenance Man
 			Path:                        selection.path,
 			DependencyCompositionDigest: selection.baseline.Digest(),
 			DependencyBaseline:          serialized,
+			CurrentProjectPaths:         append([]string{}, selection.currentProjectPaths...),
 		}
 	}
 	document := applicationManifestDocument{
@@ -370,6 +400,9 @@ func DecodeManifestProvenance(data []byte) (ManifestProvenance, error) {
 		if selection.DependencyBaseline == nil {
 			return ManifestProvenance{}, fmt.Errorf("generated application manifest dependency_baselines[%d].dependency_baseline must be an array", baselineIndex)
 		}
+		if selection.CurrentProjectPaths == nil {
+			return ManifestProvenance{}, fmt.Errorf("generated application manifest dependency_baselines[%d].current_project_paths must be an array", baselineIndex)
+		}
 		records := make([]applicationmeta.BaselineRecord, len(selection.DependencyBaseline))
 		for index, record := range selection.DependencyBaseline {
 			records[index] = applicationmeta.BaselineRecord{
@@ -383,7 +416,12 @@ func DecodeManifestProvenance(data []byte) (ManifestProvenance, error) {
 		if err != nil {
 			return ManifestProvenance{}, fmt.Errorf("generated application manifest dependency_baselines[%d]: %w", baselineIndex, err)
 		}
-		baselines[baselineIndex] = manifestSelectionBaseline{mode: selection.Mode, path: selection.Path, baseline: baseline}
+		baselines[baselineIndex] = manifestSelectionBaseline{
+			mode:                selection.Mode,
+			path:                selection.Path,
+			baseline:            baseline,
+			currentProjectPaths: append([]string{}, selection.CurrentProjectPaths...),
+		}
 	}
 	selectedPath := configuration.Root.Path
 	selectedDigest := configuration.Root.Digest
@@ -932,6 +970,9 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 		if !safeManifestPath(selection.path) || !selection.baseline.Valid() {
 			return fmt.Errorf("dependency baseline %d has an invalid selection path or baseline", index)
 		}
+		if !validCurrentProjectPaths(selection.currentProjectPaths) {
+			return fmt.Errorf("dependency baseline %d has invalid current-project ownership paths", index)
+		}
 		if selection.mode == ConfigurationModeDefault && selection.path != rootConfigurationPath {
 			return fmt.Errorf("dependency baseline %d default selection must use %q", index, rootConfigurationPath)
 		}
@@ -976,9 +1017,40 @@ func validEnvironmentName(value string) bool {
 		path.Base(value) == value
 }
 
+func normalizeCurrentProjectPaths(values []string) ([]string, error) {
+	result := append([]string{}, values...)
+	sort.Strings(result)
+	if !validCurrentProjectPaths(result) {
+		return nil, errors.New("current-project ownership paths must be nonempty, bounded, unique, and canonical")
+	}
+	return result, nil
+}
+
+func validCurrentProjectPaths(values []string) bool {
+	if values == nil {
+		return false
+	}
+	for index, value := range values {
+		if value == "" || len(value) > 4096 || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+			return false
+		}
+		if index > 0 && values[index-1] >= value {
+			return false
+		}
+	}
+	return true
+}
+
 func cloneSelectionBaselines(values []manifestSelectionBaseline) []manifestSelectionBaseline {
 	result := make([]manifestSelectionBaseline, len(values))
-	copy(result, values)
+	for index, value := range values {
+		result[index] = manifestSelectionBaseline{
+			mode:                value.mode,
+			path:                value.path,
+			baseline:            value.baseline,
+			currentProjectPaths: append([]string{}, value.currentProjectPaths...),
+		}
+	}
 	return result
 }
 

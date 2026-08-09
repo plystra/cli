@@ -247,15 +247,16 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
+	previousLocalPaths, _ := previousProvenance.CurrentProjectPathsForSelection(selector.mode, selector.path)
 	maintenanceSnapshot := configurationSnapshot
 	if selector.mode == configurationModeEnvironment {
 		maintenanceSnapshot = rootSnapshot
 	}
 	var maintenance applicationmeta.ConfigurationMaintenance
 	if selector.mode == configurationModeEnvironment {
-		maintenance, err = applicationmeta.MaintainDependencyConfigurationWithOverlay(maintenanceSnapshot.data, selectedManifest, previousBaseline, dependencyManifests, schemaLookup)
+		maintenance, err = applicationmeta.MaintainDependencyConfigurationWithOverlay(maintenanceSnapshot.data, selectedManifest, previousBaseline, previousLocalPaths, dependencyManifests, schemaLookup)
 	} else {
-		maintenance, err = applicationmeta.MaintainDependencyConfiguration(maintenanceSnapshot.data, previousBaseline, dependencyManifests, schemaLookup)
+		maintenance, err = applicationmeta.MaintainDependencyConfiguration(maintenanceSnapshot.data, previousBaseline, previousLocalPaths, dependencyManifests, schemaLookup)
 	}
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)

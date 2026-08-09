@@ -82,20 +82,24 @@ func (m ConfigurationMaintenance) LocalPaths() []string {
 // generated baseline has been recorded yet; existing values are then treated
 // as current-project decisions and missing compatible dependency values are
 // introduced without overwriting them.
-func MaintainDependencyConfiguration(data []byte, previous DependencyBaseline, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
-	return maintainDependencyConfiguration(data, nil, previous, dependencies, schemas)
+func MaintainDependencyConfiguration(data []byte, previous DependencyBaseline, previousLocalPaths []string, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
+	return maintainDependencyConfiguration(data, nil, previous, previousLocalPaths, dependencies, schemas)
 }
 
 // MaintainDependencyConfigurationWithOverlay maintains only the shared root
 // document while allowing explicit sparse overlay decisions to resolve exact
 // inherited conflicts. Overlay values are never materialized into root data.
-func MaintainDependencyConfigurationWithOverlay(data []byte, overlay Manifest, previous DependencyBaseline, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
-	return maintainDependencyConfiguration(data, &overlay, previous, dependencies, schemas)
+func MaintainDependencyConfigurationWithOverlay(data []byte, overlay Manifest, previous DependencyBaseline, previousLocalPaths []string, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
+	return maintainDependencyConfiguration(data, &overlay, previous, previousLocalPaths, dependencies, schemas)
 }
 
-func maintainDependencyConfiguration(data []byte, overlay *Manifest, previous DependencyBaseline, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
+func maintainDependencyConfiguration(data []byte, overlay *Manifest, previous DependencyBaseline, previousLocalPaths []string, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
 	if schemas == nil {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: schema lookup is nil", ErrMaintainConfiguration)
+	}
+	previousLocal, err := validatePreviousLocalPaths(previous, previousLocalPaths)
+	if err != nil {
+		return ConfigurationMaintenance{}, fmt.Errorf("%w: %w", ErrMaintainConfiguration, err)
 	}
 	currentManifest, err := Parse(data)
 	if err != nil {
@@ -142,13 +146,17 @@ func maintainDependencyConfiguration(data []byte, overlay *Manifest, previous De
 	local := make(map[string]maintenanceDecision)
 	for path, decision := range currentByPath {
 		old := oldCandidates[path]
-		if len(old) != 1 || !baselineMatchesDecision(old, decision) {
+		_, previouslyLocal := previousLocal[path]
+		if previouslyLocal || len(old) != 1 || !baselineMatchesDecision(old, decision) {
 			local[path] = cloneMaintenanceDecision(decision)
 		}
 	}
 	propagateLocalConfigObjects(currentByPath, local)
 	for path, old := range oldCandidates {
 		if _, exists := currentByPath[path]; exists {
+			continue
+		}
+		if _, previouslyLocal := previousLocal[path]; previouslyLocal {
 			continue
 		}
 		if len(old) != 1 || maintenanceDecisionResolvesPath(local, path) || maintenanceDecisionResolvesPath(overlayByPath, path) {
@@ -220,6 +228,23 @@ func maintainDependencyConfiguration(data []byte, overlay *Manifest, previous De
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: updated Project configuration changed current-project process settings", ErrMaintainConfiguration)
 	}
 	return ConfigurationMaintenance{data: append([]byte(nil), updated...), localPaths: localPaths, changed: !bytes.Equal(data, updated)}, nil
+}
+
+func validatePreviousLocalPaths(previous DependencyBaseline, paths []string) (map[string]struct{}, error) {
+	if len(paths) != 0 && !previous.Valid() {
+		return nil, errors.New("current-project ownership paths require a valid prior dependency baseline")
+	}
+	result := make(map[string]struct{}, len(paths))
+	for index, path := range paths {
+		if !supportedMaintenancePath(path) {
+			return nil, fmt.Errorf("prior current-project ownership path %q has no typed composition rule", path)
+		}
+		if index > 0 && paths[index-1] >= path {
+			return nil, errors.New("prior current-project ownership paths must be unique and canonically ordered")
+		}
+		result[path] = struct{}{}
+	}
+	return result, nil
 }
 
 func sortedMaintenanceDecisionPaths(values map[string]maintenanceDecision) []string {

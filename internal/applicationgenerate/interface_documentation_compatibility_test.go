@@ -96,7 +96,7 @@ errors: [invalid_recipient]
 	beforeCheck := snapshotTree(t, root)
 	drift, err := applicationgenerate.Generate(t.Context(), options)
 	if err != nil ||
-		!slicesContains(drift.Report().Changed(), interfacecompatibility.DocumentationPath) ||
+		!slicesContains(drift.Report().Stale(), interfacecompatibility.DocumentationPath) ||
 		!drift.InterfaceDocumentationComparison().Valid() ||
 		drift.InterfaceDocumentationComparison().Clean() {
 		t.Fatalf(
@@ -170,7 +170,7 @@ errors: [invalid_recipient]
 	beforeRemovalCheck := snapshotTree(t, root)
 	removed, err := applicationgenerate.Generate(t.Context(), options)
 	if err != nil ||
-		!slicesContains(removed.Report().Changed(), interfacecompatibility.DocumentationPath) ||
+		!slicesContains(removed.Report().Stale(), interfacecompatibility.DocumentationPath) ||
 		len(removed.InterfaceDocumentationComparison().Changes()) != 2 {
 		t.Fatalf(
 			"Generate --check(removed) = changes %#v documentation %#v, %v",

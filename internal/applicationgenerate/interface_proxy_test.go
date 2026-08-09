@@ -123,7 +123,7 @@ replace example.com/platform/unused => %s
 	}
 	changedBefore := snapshotTree(t, root)
 	changed, err := applicationgenerate.Generate(t.Context(), check)
-	if err != nil || !reflect.DeepEqual(changed.Report().Changed(), []string{appProxy}) {
+	if err != nil || !reflect.DeepEqual(changed.Report().ManuallyModified(), []string{appProxy}) {
 		t.Fatalf("changed proxy check = %#v, %v", changed.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, changedBefore) {

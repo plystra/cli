@@ -47,7 +47,7 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:49431d9936cd9b5648d69dd37e5caa72cd0d0833bc13cecffccce505b2fabd70"
+      "sha256": "sha256:78b226810562e8c3094973455af128e8e6e6ac51e4e85c81092964ee604155de"
     },
     {
       "path": "generated/proto/descriptor-set.pb",
@@ -79,7 +79,7 @@
       ]
     },
     "configuration": {
-      "version": 4,
+      "version": 5,
       "mode": "default",
       "root": {
         "path": "plystra.yaml",
@@ -90,7 +90,8 @@
           "mode": "default",
           "path": "plystra.yaml",
           "dependency_composition_digest": "sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130",
-          "dependency_baseline": []
+          "dependency_baseline": [],
+          "current_project_paths": []
         }
       ],
       "protobuf_wire_map_digest": "sha256:291fb979cc47f081f48f964b9addaace1aa6dc1c7fb03bb29d16794509461183",

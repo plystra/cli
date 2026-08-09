@@ -559,6 +559,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		RootDigest:             resolved.RootConfigurationDigest(),
 		SelectedPath:           selection.Path(),
 		SelectedDigest:         selection.Digest(),
+		CurrentProjectPaths:    resolved.ConfigurationMaintenance().LocalPaths(),
 		Composition:            resolved.Composition(),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: modelDigest,

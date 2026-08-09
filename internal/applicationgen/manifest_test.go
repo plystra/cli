@@ -120,6 +120,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 		RootDigest:             "sha256:" + strings.Repeat("3", 64),
 		SelectedPath:           "plystra.yaml",
 		SelectedDigest:         "sha256:" + strings.Repeat("3", 64),
+		CurrentProjectPaths:    []string{`interfaces.require["audit.write/v1"]`},
 		Composition:            dependencyComposition(t),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,
@@ -136,6 +137,7 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 		RootDigest:             "sha256:" + strings.Repeat("3", 64),
 		SelectedPath:           "plystra.production.yaml",
 		SelectedDigest:         "sha256:" + strings.Repeat("4", 64),
+		CurrentProjectPaths:    []string{`interfaces.use["email.send/v1"]`},
 		Composition:            dependencyComposition(t),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,
@@ -164,12 +166,20 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 	if !environmentExists || !defaultEnvironmentExists || environmentBaseline.Digest() != defaultEnvironmentBaseline.Digest() {
 		t.Fatalf("shared environment baseline = environment %q/%t default %q/%t", environmentBaseline.Digest(), environmentExists, defaultEnvironmentBaseline.Digest(), defaultEnvironmentExists)
 	}
+	environmentPaths, environmentPathsExist := decodedEnvironment.CurrentProjectPathsForSelection(applicationgen.ConfigurationModeEnvironment, "plystra.production.yaml")
+	if !environmentPathsExist || !slices.Equal(environmentPaths, []string{`interfaces.use["email.send/v1"]`}) || !slices.Equal(decodedEnvironment.CurrentProjectPaths(), environmentPaths) {
+		t.Fatalf("shared environment current-project paths = %v/%t active %v", environmentPaths, environmentPathsExist, decodedEnvironment.CurrentProjectPaths())
+	}
 	explicitProvenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
-		Mode:                   applicationgen.ConfigurationModeExplicit,
-		RootPath:               "plystra.yaml",
-		RootDigest:             "sha256:" + strings.Repeat("3", 64),
-		SelectedPath:           "deploy/customer-a.yaml",
-		SelectedDigest:         "sha256:" + strings.Repeat("5", 64),
+		Mode:           applicationgen.ConfigurationModeExplicit,
+		RootPath:       "plystra.yaml",
+		RootDigest:     "sha256:" + strings.Repeat("3", 64),
+		SelectedPath:   "deploy/customer-a.yaml",
+		SelectedDigest: "sha256:" + strings.Repeat("5", 64),
+		CurrentProjectPaths: []string{
+			`interfaces.use["records.read/v1"]`,
+			`interfaces.require["records.read/v1"]`,
+		},
 		Composition:            testComposition(),
 		ProtobufWireMapDigest:  wireMap.Digest(),
 		ApplicationModelDigest: defaultModel,
@@ -193,6 +203,15 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 	if !defaultExists || !explicitExists || defaultBaseline.Digest() != defaultProvenance.DependencyBaseline().Digest() || explicitBaseline.Digest() != explicitProvenance.DependencyBaseline().Digest() {
 		t.Fatalf("retained baselines = default %q/%t explicit %q/%t", defaultBaseline.Digest(), defaultExists, explicitBaseline.Digest(), explicitExists)
 	}
+	defaultPaths, defaultPathsExist := decoded.CurrentProjectPathsForSelection(applicationgen.ConfigurationModeDefault, "plystra.yaml")
+	explicitPaths, explicitPathsExist := decoded.CurrentProjectPathsForSelection(applicationgen.ConfigurationModeExplicit, "deploy/customer-a.yaml")
+	if !defaultPathsExist || !explicitPathsExist || !slices.Equal(defaultPaths, []string{`interfaces.use["email.send/v1"]`}) || !slices.Equal(explicitPaths, []string{`interfaces.require["records.read/v1"]`, `interfaces.use["records.read/v1"]`}) {
+		t.Fatalf("retained current-project paths = default %v/%t explicit %v/%t", defaultPaths, defaultPathsExist, explicitPaths, explicitPathsExist)
+	}
+	explicitPaths[0] = "changed"
+	if decoded.CurrentProjectPaths()[0] == "changed" {
+		t.Fatal("CurrentProjectPaths exposed mutable provenance storage")
+	}
 	for _, forbidden := range []string{
 		"C:/private/root-config",
 		"ROOT_PRIVATE_TOKEN",
@@ -206,9 +225,16 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 			t.Fatalf("generated manifest leaked %q: %s", forbidden, data)
 		}
 	}
-	oldSchema := bytes.Replace(data, []byte(`"version":4`), []byte(`"version":3`), 1)
-	if _, err := applicationgen.DecodeManifestProvenance(oldSchema); err == nil || !strings.Contains(err.Error(), "must use version 4") {
+	oldSchema := bytes.Replace(data, []byte(`"version":5`), []byte(`"version":4`), 1)
+	if _, err := applicationgen.DecodeManifestProvenance(oldSchema); err == nil || !strings.Contains(err.Error(), "must use version 5") {
 		t.Fatalf("DecodeManifestProvenance(old schema) error = %v", err)
+	}
+	withoutOwnership := bytes.Replace(data, []byte(`,"current_project_paths":["interfaces.use[\"email.send/v1\"]"]`), nil, 1)
+	if bytes.Equal(withoutOwnership, data) {
+		t.Fatalf("manifest fixture omits expected current-project ownership record: %s", data)
+	}
+	if _, err := applicationgen.DecodeManifestProvenance(withoutOwnership); err == nil || !strings.Contains(err.Error(), "current_project_paths") {
+		t.Fatalf("DecodeManifestProvenance(missing current-project ownership) error = %v", err)
 	}
 	unknown := bytes.Replace(data, []byte(`"mode":"explicit-config"`), []byte(`"unknown":true,"mode":"explicit-config"`), 1)
 	if _, err := applicationgen.DecodeManifestProvenance(unknown); err == nil || !strings.Contains(err.Error(), "unknown field") {

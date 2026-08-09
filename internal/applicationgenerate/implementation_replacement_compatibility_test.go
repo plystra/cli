@@ -117,14 +117,14 @@ interfaces:
 	replacementCheck, err := applicationgenerate.Generate(t.Context(), options)
 	if err != nil ||
 		replacementCheck.Report().Clean() ||
-		!slicesContains(replacementCheck.Report().Changed(), assemblyPath) ||
-		!slicesContains(replacementCheck.Report().Changed(), adapterPath) ||
-		!slicesContains(replacementCheck.Report().Changed(), manifestPath) {
+		!slicesContains(replacementCheck.Report().Stale(), assemblyPath) ||
+		!slicesContains(replacementCheck.Report().Stale(), adapterPath) ||
+		!slicesContains(replacementCheck.Report().Stale(), manifestPath) {
 		t.Fatalf(
-			"Generate --check(replacement) = changed %#v missing %#v obsolete %#v, %v",
-			replacementCheck.Report().Changed(),
+			"Generate --check(replacement) = stale %#v missing %#v manually modified %#v, %v",
+			replacementCheck.Report().Stale(),
 			replacementCheck.Report().Missing(),
-			replacementCheck.Report().Obsolete(),
+			replacementCheck.Report().ManuallyModified(),
 			err,
 		)
 	}
@@ -310,13 +310,8 @@ func assertNoInterfaceProjectionReportDrift(
 	result applicationgenerate.Result,
 ) {
 	t.Helper()
-	for _, path := range append(
-		append(
-			append([]string(nil), result.Report().Changed()...),
-			result.Report().Missing()...,
-		),
-		result.Report().Obsolete()...,
-	) {
+	for _, change := range result.Report().Changes() {
+		path := change.Path()
 		for _, prefix := range []string{
 			"generated/compatibility/",
 			"generated/docs/",

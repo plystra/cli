@@ -103,49 +103,58 @@ func TestNewOutputRejectsUnsafeIgnoredAndDuplicatePaths(t *testing.T) {
 	}
 }
 
-func TestCheckReportsChangedMissingUnexpectedAndObsoleteFiles(t *testing.T) {
+func TestCheckReportsStaleMissingUnexpectedAndManuallyModifiedFiles(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	oldOutput := managedOutput(t,
 		"generated/docs/same.md", "same",
-		"generated/go/modified-obsolete.go", "generated before",
+		"generated/go/modified-retired.go", "generated before",
+		"generated/go/modified-retained.go", "retained before",
 		"generated/go/obsolete.go", "obsolete",
 		"generated/go/shared.go", "before",
 	)
 	writeOutput(t, root, oldOutput)
-	writeFile(t, root, "generated/go/modified-obsolete.go", "user edit")
+	writeFile(t, root, "generated/go/modified-retired.go", "user edit")
+	writeFile(t, root, "generated/go/modified-retained.go", "retained user edit")
+	writeFile(t, root, "generated/go/unowned-conflict.go", "unowned conflict")
 	writeFile(t, root, "generated/unowned.txt", "keep")
 	before := snapshotFiles(t, root)
 
 	newOutput := managedOutput(t,
 		"generated/docs/missing.md", "missing",
 		"generated/docs/same.md", "same",
+		"generated/go/modified-retained.go", "retained after",
 		"generated/go/shared.go", "after",
+		"generated/go/unowned-conflict.go", "desired",
 	)
 	report, err := generatedfiles.Check(root, newOutput)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	assertPaths(t, "changed", report.Changed(), []string{
+	assertPaths(t, "stale", report.Stale(), []string{
 		generatedfiles.ManifestPath,
-		"generated/go/modified-obsolete.go",
+		"generated/go/obsolete.go",
 		"generated/go/shared.go",
 	})
 	assertPaths(t, "missing", report.Missing(), []string{"generated/docs/missing.md"})
-	assertPaths(t, "unexpected", report.Unexpected(), []string{"generated/unowned.txt"})
-	assertPaths(t, "obsolete", report.Obsolete(), []string{
-		"generated/go/modified-obsolete.go",
-		"generated/go/obsolete.go",
+	assertPaths(t, "unexpected", report.Unexpected(), []string{
+		"generated/go/unowned-conflict.go",
+		"generated/unowned.txt",
+	})
+	assertPaths(t, "manually modified", report.ManuallyModified(), []string{
+		"generated/go/modified-retained.go",
+		"generated/go/modified-retired.go",
 	})
 	wantKinds := []generatedfiles.ChangeKind{
-		generatedfiles.ChangeChanged,
-		generatedfiles.ChangeChanged,
-		generatedfiles.ChangeChanged,
+		generatedfiles.ChangeStale,
+		generatedfiles.ChangeStale,
+		generatedfiles.ChangeStale,
 		generatedfiles.ChangeMissing,
 		generatedfiles.ChangeUnexpected,
-		generatedfiles.ChangeObsolete,
-		generatedfiles.ChangeObsolete,
+		generatedfiles.ChangeUnexpected,
+		generatedfiles.ChangeManuallyModified,
+		generatedfiles.ChangeManuallyModified,
 	}
 	changes := report.Changes()
 	gotKinds := make([]generatedfiles.ChangeKind, len(changes))
@@ -217,12 +226,12 @@ func TestInstallReplacesAndRemovesManagedFilesWhilePreservingUnownedFiles(t *tes
 	root := t.TempDir()
 	oldOutput := managedOutput(t,
 		"generated/docs/same.md", "same",
-		"generated/go/modified-obsolete.go", "generated before",
+		"generated/go/modified-retired.go", "generated before",
 		"generated/go/obsolete.go", "obsolete",
 		"generated/go/shared.go", "before",
 	)
 	writeOutput(t, root, oldOutput)
-	writeFile(t, root, "generated/go/modified-obsolete.go", "user edit")
+	writeFile(t, root, "generated/go/modified-retired.go", "user edit")
 	writeFile(t, root, "generated/unowned.txt", "keep")
 	newOutput := managedOutput(t,
 		"generated/docs/same.md", "same",
@@ -236,7 +245,7 @@ func TestInstallReplacesAndRemovesManagedFilesWhilePreservingUnownedFiles(t *tes
 		assertFile(t, updatedRoot, "generated/go/alias.go", "alias")
 		assertFile(t, updatedRoot, "generated/go/shared.go", "after")
 		assertMissing(t, updatedRoot, "generated/go/obsolete.go")
-		assertFile(t, updatedRoot, "generated/go/modified-obsolete.go", "user edit")
+		assertFile(t, updatedRoot, "generated/go/modified-retired.go", "user edit")
 		assertFile(t, updatedRoot, "generated/unowned.txt", "keep")
 		return nil
 	})
@@ -247,16 +256,16 @@ func TestInstallReplacesAndRemovesManagedFilesWhilePreservingUnownedFiles(t *tes
 		t.Fatal("validation callback did not run")
 	}
 	assertPaths(t, "unexpected", report.Unexpected(), []string{
-		"generated/go/modified-obsolete.go",
+		"generated/go/modified-retired.go",
 		"generated/unowned.txt",
 	})
-	if len(report.Changed()) != 0 || len(report.Missing()) != 0 || len(report.Obsolete()) != 0 {
+	if len(report.Stale()) != 0 || len(report.Missing()) != 0 || len(report.ManuallyModified()) != 0 {
 		t.Fatalf("post-install managed drift = %#v", report.Changes())
 	}
 	assertFile(t, root, "generated/go/alias.go", "alias")
 	assertFile(t, root, "generated/go/shared.go", "after")
 	assertMissing(t, root, "generated/go/obsolete.go")
-	assertFile(t, root, "generated/go/modified-obsolete.go", "user edit")
+	assertFile(t, root, "generated/go/modified-retired.go", "user edit")
 	assertFile(t, root, "generated/unowned.txt", "keep")
 	assertFileBytes(t, root, generatedfiles.ManifestPath, newOutput.ManifestJSON())
 	checked, err := generatedfiles.Check(root, newOutput)

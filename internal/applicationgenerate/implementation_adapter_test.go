@@ -143,7 +143,7 @@ replace example.com/platform/unused-adapter => %s
 	}
 	changedBefore := snapshotTree(t, root)
 	changed, err := applicationgenerate.Generate(t.Context(), check)
-	if err != nil || !reflect.DeepEqual(changed.Report().Changed(), []string{runAdapter}) {
+	if err != nil || !reflect.DeepEqual(changed.Report().ManuallyModified(), []string{runAdapter}) {
 		t.Fatalf("changed adapter check = %#v, %v", changed.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, changedBefore) {

@@ -134,7 +134,7 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 		protobufwiremap.Path,
 		"generated/manifest.json",
 	} {
-		if !slicesContains(drift.Report().Changed(), changed) {
+		if !slicesContains(drift.Report().Stale(), changed) {
 			t.Fatalf("Interface field-removal drift omits %s: %#v", changed, drift.Report().Changes())
 		}
 	}
@@ -270,7 +270,7 @@ func TestGenerateRejectsFieldNumberReuseFromUnexposedInterfaceHistory(t *testing
 				protobufwiremap.Path,
 				"generated/manifest.json",
 			} {
-				if !slicesContains(removedCheck.Report().Changed(), changed) {
+				if !slicesContains(removedCheck.Report().Stale(), changed) {
 					t.Fatalf("unexposed field removal drift omits %s: %#v", changed, removedCheck.Report().Changes())
 				}
 			}

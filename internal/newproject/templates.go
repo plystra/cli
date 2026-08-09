@@ -63,7 +63,7 @@ The template's complete effective graph must contain only public Go Modules. Cre
 
 Every dependency Plystra Project in the template graph must be portable without a relative Go Module ` + "`replace`" + `. Creation reports each remaining directive with stable ` + "`module@version/go.mod`" + ` provenance and leaves no target Project. Publish the referenced module versions and remove the relative replacements before publishing a corrected template.
 
-The staged generated application must be a fixed point. Creation installs generated output and then runs an immediate ` + "`plystra generate --check`" + ` equivalent. Dependency-composition drift or any changed, missing, unexpected, or obsolete generated path rejects the template and restores the transaction. The publisher must make generation deterministic, run ` + "`plystra generate`" + ` followed by ` + "`plystra generate --check`" + ` in a fresh Project directory, and publish a corrected module version.
+The staged generated application must be a fixed point. Creation installs generated output and then runs an immediate ` + "`plystra generate --check`" + ` equivalent. Dependency-composition drift or any stale, missing, unexpected, or manually modified generated path rejects the template and restores the transaction. The publisher must make generation deterministic, run ` + "`plystra generate`" + ` followed by ` + "`plystra generate --check`" + ` in a fresh Project directory, and publish a corrected module version.
 
 Template creation next runs the same read-only workflow as ` + "`plystra check`" + `: it rechecks the selected configuration and generated output, then runs ` + "`go test -mod=readonly ./...`" + ` from the staged Project root. Any failure restores the creation transaction and leaves no target Project. The publisher must make that public check pass in a fresh Project directory before publishing a corrected version.
 
@@ -491,7 +491,7 @@ relative replacement remains.
 
 The staged generated application must be a fixed point. Creation installs the
 generated output and then runs an immediate plystra generate --check equivalent.
-Dependency-composition drift or any changed, missing, unexpected, or obsolete
+Dependency-composition drift or any stale, missing, unexpected, or manually modified
 generated path rejects the template and restores the transaction. The
 publisher must make generation deterministic, run plystra generate followed by
 plystra generate --check in a fresh Project directory, and publish a corrected
@@ -598,16 +598,15 @@ Configure one exact non-intrinsic Interface policy:
 Only positive timeout is accepted. Values normalize and replace the exact key;
 null removes it. Changes cause drift. Enforcement is deferred.
 
-Plystra generate maintains the selected current-Project document with a typed
-three-way update from that selection's previous dependency baseline, the
-authored current file, and the newly resolved dependency baseline. Default mode
-selects root plystra.yaml. It preserves comments, explicit current-Project
-values, and exact tombstones; introduces new inherited declarations; and
-removes inherited declarations that disappeared. A hand-deleted inherited
-value is ambiguous, so express that decision with the field's sparse removal or
-null tombstone. Configuration and generated output share one rollback boundary.
-Plystra generate --check reports dependency-composition drift against the
-selected path without writing either surface.
+Plystra generate applies a typed three-way update from the selection's previous
+dependency baseline, authored file, and new dependency baseline. Default mode
+selects root plystra.yaml. It preserves comments, explicit values, and exact
+tombstones; adds new inherited declarations; and removes disappeared inherited
+values. Hand deletion is ambiguous; use the field's sparse removal or null.
+Configuration and generated output share one rollback boundary. The generated
+manifest retains non-secret current_project_paths so an identical local choice
+stays locally owned; edit YAML, never ownership data. Plystra generate --check
+reports dependency-composition drift without writing either surface.
 
 Remove only exact inherited declarations with sparse edits and null
 tombstones:
@@ -759,12 +758,13 @@ independent dependency baselines.
 Inspect generated/manifest.json for the versioned canonical constraint
 projection: every resolved canonical Capability has exact contract and
 constraint digests plus its ordered constrained request and response fields;
-an unconstrained Capability has an empty field list. The configuration schema v4
+an unconstrained Capability has an empty field list. The configuration schema v5
 records default, environment, or explicit-config mode; the environment and
 overlay reference when applicable; Project-relative paths; normalized document
-digests; dependency baseline history; the Protobuf wire-map digest; and final
-application-model digest. Environment mode retains the root dependency baseline
-because the overlay does not own dependency maintenance. The manifest never
+digests; dependency baseline history with non-secret current_project_paths; the
+Protobuf wire-map digest; and final application-model digest. Environment mode
+retains the root dependency baseline because overlays do not own maintenance.
+The manifest never
 records raw configuration, Secret reference targets, resolved Secrets, or
 machine-specific absolute paths. Its top-level transport_toolchain record identifies
 embedded go/format; Protobuf-model, descriptor, wire-map, Connect, JavaScript,
@@ -1374,7 +1374,7 @@ or --config selector used for generation. The command is read-only and never
 repairs YAML, generated output, or module metadata.
 
 plystra generate --check is read-only. It recomputes the complete resolution and
-generation fixed point and fails on changed, missing, unexpected, or obsolete
+generation fixed point and fails on stale, missing, unexpected, or manually modified
 managed paths. If it reports drift:
 
 1. Identify the authored plugin.yaml, capability.yaml, plystra.yaml, go.mod, or

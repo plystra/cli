@@ -84,7 +84,7 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 	beforeCheck := snapshotTree(t, root)
 	drift, err := applicationgenerate.Generate(t.Context(), options)
 	if err != nil ||
-		!slicesContains(drift.Report().Changed(), interfacecompatibility.JavaScriptPath) ||
+		!slicesContains(drift.Report().Stale(), interfacecompatibility.JavaScriptPath) ||
 		!drift.InterfaceJavaScriptComparison().Valid() ||
 		drift.InterfaceJavaScriptComparison().Clean() ||
 		drift.InterfaceJavaScriptComparison().PackageChanged() {

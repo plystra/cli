@@ -36,10 +36,10 @@ var (
 type ChangeKind string
 
 const (
-	ChangeChanged    ChangeKind = "changed"
-	ChangeMissing    ChangeKind = "missing"
-	ChangeUnexpected ChangeKind = "unexpected"
-	ChangeObsolete   ChangeKind = "obsolete"
+	ChangeStale            ChangeKind = "stale"
+	ChangeMissing          ChangeKind = "missing"
+	ChangeUnexpected       ChangeKind = "unexpected"
+	ChangeManuallyModified ChangeKind = "manually-modified"
 )
 
 // Change is one immutable deterministic drift diagnostic.
@@ -48,14 +48,14 @@ type Change struct {
 	path string
 }
 
-// Kind returns changed, missing, unexpected, or obsolete.
+// Kind returns stale, missing, unexpected, or manually-modified.
 func (c Change) Kind() ChangeKind { return c.kind }
 
 // Path returns the slash-separated application-relative path.
 func (c Change) Path() string { return c.path }
 
 // Report is a deterministic path-sorted set of drift diagnostics, grouped in
-// changed, missing, unexpected, then obsolete order.
+// stale, missing, unexpected, then manually-modified order.
 type Report struct {
 	changes []Change
 }
@@ -66,9 +66,9 @@ func (r Report) Clean() bool { return len(r.changes) == 0 }
 // Changes returns defensive ordered diagnostics.
 func (r Report) Changes() []Change { return append([]Change(nil), r.changes...) }
 
-// Changed returns paths whose bytes or file kind differ from desired or from
-// the prior ownership snapshot when the path is also obsolete.
-func (r Report) Changed() []string { return r.paths(ChangeChanged) }
+// Stale returns paths whose current bytes still match prior CLI ownership but
+// whose desired output or ownership has changed.
+func (r Report) Stale() []string { return r.paths(ChangeStale) }
 
 // Missing returns desired paths absent from the application.
 func (r Report) Missing() []string { return r.paths(ChangeMissing) }
@@ -77,8 +77,9 @@ func (r Report) Missing() []string { return r.paths(ChangeMissing) }
 // nor prior manifest. Installation preserves these paths.
 func (r Report) Unexpected() []string { return r.paths(ChangeUnexpected) }
 
-// Obsolete returns prior managed paths no longer present in desired output.
-func (r Report) Obsolete() []string { return r.paths(ChangeObsolete) }
+// ManuallyModified returns prior CLI-owned paths whose current file kind or
+// bytes no longer match the recorded ownership digest.
+func (r Report) ManuallyModified() []string { return r.paths(ChangeManuallyModified) }
 
 func (r Report) paths(kind ChangeKind) []string {
 	var paths []string
@@ -101,16 +102,17 @@ func Check(rootPath string, output Output) (Report, error) {
 }
 
 // Install atomically writes desired output and its ownership manifest, removes
-// unchanged obsolete managed files, validates the complete updated
-// application, and rolls back on error or panic. Unowned and modified-obsolete
-// files are preserved and remain visible as unexpected drift.
+// unchanged stale managed files that are no longer desired, validates the
+// complete updated application, and rolls back on error or panic. Unowned and
+// manually modified retired files are preserved and remain visible as
+// unexpected drift.
 func Install(rootPath string, output Output, validate func(root string) error) (Report, error) {
 	return install(rootPath, output, nil, validate, false)
 }
 
 // InstallStrict behaves like Install but rejects every unexpected unowned or
-// modified-obsolete path. The path is preserved while all managed writes and
-// removals are rolled back.
+// manually modified retired path. The path is preserved while all managed
+// writes and removals are rolled back.
 func InstallStrict(rootPath string, output Output, validate func(root string) error) (Report, error) {
 	return install(rootPath, output, nil, validate, true)
 }
@@ -659,11 +661,19 @@ func classify(output Output, state inspectedState) Report {
 	for _, file := range output.files {
 		desired[file.path] = file
 		actual, exists := state.actual[file.path]
+		previousDigest, formerlyManaged := state.previous[file.path]
 		switch {
 		case !exists:
 			add(ChangeMissing, file.path)
-		case !actual.mode.IsRegular() || actual.mode&fs.ModeSymlink != 0 || !bytes.Equal(actual.data, file.data):
-			add(ChangeChanged, file.path)
+		case actual.mode.IsRegular() && actual.mode&fs.ModeSymlink == 0 && bytes.Equal(actual.data, file.data):
+			// Desired output is already present, including identical output that
+			// can be adopted into ownership on the next installation.
+		case !formerlyManaged:
+			add(ChangeUnexpected, file.path)
+		case actual.mode.IsRegular() && actual.mode&fs.ModeSymlink == 0 && digest(actual.data) == previousDigest:
+			add(ChangeStale, file.path)
+		default:
+			add(ChangeManuallyModified, file.path)
 		}
 	}
 	manifest, exists := state.actual[ManifestPath]
@@ -671,16 +681,18 @@ func classify(output Output, state inspectedState) Report {
 	case !exists:
 		add(ChangeMissing, ManifestPath)
 	case !manifest.mode.IsRegular() || manifest.mode&fs.ModeSymlink != 0 || !bytes.Equal(manifest.data, output.manifestJSON):
-		add(ChangeChanged, ManifestPath)
+		add(ChangeStale, ManifestPath)
 	}
 	for filePath, previousDigest := range state.previous {
 		if _, retained := desired[filePath]; retained {
 			continue
 		}
-		add(ChangeObsolete, filePath)
-		if actual, exists := state.actual[filePath]; exists && (!actual.mode.IsRegular() || actual.mode&fs.ModeSymlink != 0 || digest(actual.data) != previousDigest) {
-			add(ChangeChanged, filePath)
+		actual, exists := state.actual[filePath]
+		if exists && (!actual.mode.IsRegular() || actual.mode&fs.ModeSymlink != 0 || digest(actual.data) != previousDigest) {
+			add(ChangeManuallyModified, filePath)
+			continue
 		}
+		add(ChangeStale, filePath)
 	}
 	for filePath, actual := range state.actual {
 		if filePath == ManifestPath || actual.mode.IsDir() {
@@ -695,7 +707,7 @@ func classify(output Output, state inspectedState) Report {
 		add(ChangeUnexpected, filePath)
 	}
 
-	order := [...]ChangeKind{ChangeChanged, ChangeMissing, ChangeUnexpected, ChangeObsolete}
+	order := [...]ChangeKind{ChangeStale, ChangeMissing, ChangeUnexpected, ChangeManuallyModified}
 	var result []Change
 	for _, kind := range order {
 		paths := make([]string, 0, len(changes[kind]))

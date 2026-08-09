@@ -56,7 +56,7 @@ func TestAliasGeneratedOutputAppearanceAndDisappearance(t *testing.T) {
 		aliasClientPath,
 		aliasJavaScriptPath,
 	})
-	assertContainsPaths(t, "appearance changed", appearance.Changed(), []string{
+	assertContainsPaths(t, "appearance stale", appearance.Stale(), []string{
 		generatedfiles.ManifestPath,
 		"generated/docs/api.md",
 		"generated/docs/openapi.json",
@@ -64,7 +64,7 @@ func TestAliasGeneratedOutputAppearanceAndDisappearance(t *testing.T) {
 		"generated/sdk/javascript/README.md",
 		"generated/sdk/javascript/src/index.ts",
 	})
-	if len(appearance.Unexpected()) != 0 || len(appearance.Obsolete()) != 0 {
+	if len(appearance.Unexpected()) != 0 || len(appearance.ManuallyModified()) != 0 {
 		t.Fatalf("appearance extra drift = %#v", appearance.Changes())
 	}
 	if report, err := generatedfiles.Install(root, withAlias, func(string) error { return nil }); err != nil || !report.Clean() {
@@ -81,12 +81,12 @@ func TestAliasGeneratedOutputAppearanceAndDisappearance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Check disappearance: %v", err)
 	}
-	assertPaths(t, "disappearance obsolete", disappearance.Obsolete(), []string{
+	assertContainsPaths(t, "disappearance stale", disappearance.Stale(), []string{
 		aliasHTTPPath,
 		aliasClientPath,
 		aliasJavaScriptPath,
 	})
-	assertContainsPaths(t, "disappearance changed", disappearance.Changed(), []string{
+	assertContainsPaths(t, "disappearance stale", disappearance.Stale(), []string{
 		generatedfiles.ManifestPath,
 		"generated/docs/api.md",
 		"generated/docs/openapi.json",
@@ -94,7 +94,7 @@ func TestAliasGeneratedOutputAppearanceAndDisappearance(t *testing.T) {
 		"generated/sdk/javascript/README.md",
 		"generated/sdk/javascript/src/index.ts",
 	})
-	if len(disappearance.Missing()) != 0 || len(disappearance.Unexpected()) != 0 {
+	if len(disappearance.Missing()) != 0 || len(disappearance.Unexpected()) != 0 || len(disappearance.ManuallyModified()) != 0 {
 		t.Fatalf("disappearance extra drift = %#v", disappearance.Changes())
 	}
 	if report, err := generatedfiles.Install(root, withoutAlias, func(string) error { return nil }); err != nil || !report.Clean() {
@@ -119,11 +119,11 @@ func TestAliasRetargetDeprecationExposureAndTargetContractDrift(t *testing.T) {
 	}}}
 	baseline := renderAliasOutput(t, baselineOptions)
 	tests := []struct {
-		name            string
-		options         aliasRenderOptions
-		changed         []string
-		obsolete        []string
-		forbiddenChange []string
+		name           string
+		options        aliasRenderOptions
+		stale          []string
+		retired        []string
+		forbiddenStale []string
 	}{
 		{
 			name: "retarget",
@@ -132,7 +132,7 @@ func TestAliasRetargetDeprecationExposureAndTargetContractDrift(t *testing.T) {
 				target:   "kernel.info/v1",
 				exposure: fullAliasExposure,
 			}}},
-			changed: []string{
+			stale: []string{
 				aliasClientPath,
 				aliasHTTPPath,
 				aliasJavaScriptPath,
@@ -148,7 +148,7 @@ func TestAliasRetargetDeprecationExposureAndTargetContractDrift(t *testing.T) {
 				exposure:   fullAliasExposure,
 				deprecated: "Use health.status/v1 instead.",
 			}}},
-			changed: []string{
+			stale: []string{
 				aliasClientPath,
 				aliasHTTPPath,
 				aliasJavaScriptPath,
@@ -163,9 +163,9 @@ func TestAliasRetargetDeprecationExposureAndTargetContractDrift(t *testing.T) {
 				target:   "kernel.health/v1",
 				exposure: generation.Exposure{HTTP: true},
 			}}},
-			changed:         []string{"generated/docs/api.md", "generated/sdk/javascript/src/index.ts"},
-			obsolete:        []string{aliasClientPath, aliasJavaScriptPath},
-			forbiddenChange: []string{aliasHTTPPath},
+			stale:          []string{"generated/docs/api.md", "generated/sdk/javascript/src/index.ts"},
+			retired:        []string{aliasClientPath, aliasJavaScriptPath},
+			forbiddenStale: []string{aliasHTTPPath},
 		},
 		{
 			name: "target contract digest",
@@ -173,12 +173,12 @@ func TestAliasRetargetDeprecationExposureAndTargetContractDrift(t *testing.T) {
 				healthSchema: `{"id":"kernel.health/v1","request":{},"response":{"healthy":{"type":"boolean","required":true},"status":{"type":"string","required":true}},"errors":[],"semantics":` + querySemanticsJSON + `}`,
 				aliases:      baselineOptions.aliases,
 			},
-			changed: []string{
+			stale: []string{
 				aliasJavaScriptPath,
 				"generated/docs/api.md",
 				"generated/docs/openapi.json",
 			},
-			forbiddenChange: []string{
+			forbiddenStale: []string{
 				aliasClientPath,
 				aliasHTTPPath,
 			},
@@ -195,19 +195,19 @@ func TestAliasRetargetDeprecationExposureAndTargetContractDrift(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Check: %v", err)
 			}
-			assertContainsPaths(t, "common changed", report.Changed(), []string{
+			assertContainsPaths(t, "common stale", report.Stale(), []string{
 				generatedfiles.ManifestPath,
 				"generated/manifest.json",
 				"generated/sdk/javascript/README.md",
 			})
-			assertContainsPaths(t, "surface changed", report.Changed(), test.changed)
-			for _, filePath := range test.forbiddenChange {
-				if slices.Contains(report.Changed(), filePath) {
-					t.Fatalf("%s unexpectedly changed unchanged forwarding surface %s: %v", test.name, filePath, report.Changed())
+			assertContainsPaths(t, "surface stale", report.Stale(), test.stale)
+			assertContainsPaths(t, "retired stale", report.Stale(), test.retired)
+			for _, filePath := range test.forbiddenStale {
+				if slices.Contains(report.Stale(), filePath) {
+					t.Fatalf("%s unexpectedly marked unchanged forwarding surface %s stale: %v", test.name, filePath, report.Stale())
 				}
 			}
-			assertPaths(t, "obsolete", report.Obsolete(), test.obsolete)
-			if len(report.Missing()) != 0 || len(report.Unexpected()) != 0 {
+			if len(report.Missing()) != 0 || len(report.Unexpected()) != 0 || len(report.ManuallyModified()) != 0 {
 				t.Fatalf("%s extra drift = %#v", test.name, report.Changes())
 			}
 			if report.Clean() {

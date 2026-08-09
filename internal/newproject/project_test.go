@@ -895,7 +895,7 @@ func TestCreateRejectsImmediateGeneratedDriftAndRollsBack(t *testing.T) {
 	for _, detail := range []string{
 		templateQuery,
 		"generated output is not stable immediately after installation",
-		"changed generated/go/assembly/compatibility_gen.go",
+		"manually-modified generated/go/assembly/compatibility_gen.go",
 		"template publisher must make generation deterministic",
 		"plystra generate --check",
 		"publish a corrected module version",
@@ -2182,7 +2182,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"versioned canonical constraint",
 		"exact contract and",
 		"constraint digests",
-		"configuration schema v4",
+		"configuration schema v5",
+		"current_project_paths",
 		"Protobuf wire-map digest",
 		"top-level transport_toolchain",
 		"embedded go/format",

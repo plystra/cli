@@ -361,7 +361,7 @@ interfaces:
     email.send/v1: github.com/acme/smtp.New
 `),
 	}}
-	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("# project configuration\n{}\n"), applicationmeta.DependencyBaseline{}, oldDependencies, composeSchemaLookup(nil))
+	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("# project configuration\n{}\n"), applicationmeta.DependencyBaseline{}, nil, oldDependencies, composeSchemaLookup(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +392,7 @@ interfaces:
     email.send/v1: github.com/acme/smtp.New
 `),
 	}}
-	maintained, err := applicationmeta.MaintainDependencyConfiguration(locallyEdited, oldComposition.DependencyBaseline(), newDependencies, composeSchemaLookup(nil))
+	maintained, err := applicationmeta.MaintainDependencyConfiguration(locallyEdited, oldComposition.DependencyBaseline(), initial.LocalPaths(), newDependencies, composeSchemaLookup(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +426,7 @@ interfaces:
 	}) {
 		t.Fatalf("maintained effective choices = %v", got)
 	}
-	repeated, err := applicationmeta.MaintainDependencyConfiguration(maintained.Data(), composition.DependencyBaseline(), newDependencies, composeSchemaLookup(nil))
+	repeated, err := applicationmeta.MaintainDependencyConfiguration(maintained.Data(), composition.DependencyBaseline(), maintained.LocalPaths(), newDependencies, composeSchemaLookup(nil))
 	if err != nil || repeated.Changed() || !bytes.Equal(repeated.Data(), maintained.Data()) {
 		t.Fatalf("repeated maintenance = changed %t error %v\n%s", repeated.Changed(), err, repeated.Data())
 	}
@@ -453,7 +453,7 @@ config:
     host: old.example
 `),
 	}}
-	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("# shared configuration\n{}\n"), applicationmeta.DependencyBaseline{}, oldDependencies, lookup)
+	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("# shared configuration\n{}\n"), applicationmeta.DependencyBaseline{}, nil, oldDependencies, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +490,7 @@ config:
     host: new.example
 `),
 	}}
-	maintained, err := applicationmeta.MaintainDependencyConfiguration(explicitRemovals, oldComposition.DependencyBaseline(), newDependencies, lookup)
+	maintained, err := applicationmeta.MaintainDependencyConfiguration(explicitRemovals, oldComposition.DependencyBaseline(), initial.LocalPaths(), newDependencies, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +537,7 @@ config:
 	if configured, exists := composition.Manifest().Configuration(mustConstructorSymbol(t, "example.com/platform/smtp.New")); exists && bytes.Contains(configured.YAML(), []byte("host")) {
 		t.Fatalf("effective constructor configuration retained removed host:\n%s", configured.YAML())
 	}
-	repeated, err := applicationmeta.MaintainDependencyConfiguration(maintained.Data(), composition.DependencyBaseline(), newDependencies, lookup)
+	repeated, err := applicationmeta.MaintainDependencyConfiguration(maintained.Data(), composition.DependencyBaseline(), maintained.LocalPaths(), newDependencies, lookup)
 	if err != nil || repeated.Changed() || !bytes.Equal(repeated.Data(), maintained.Data()) || !slices.Equal(repeated.LocalPaths(), maintained.LocalPaths()) {
 		t.Fatalf("repeated removal maintenance = changed %t error %v local %v want %v\n%s", repeated.Changed(), err, repeated.LocalPaths(), maintained.LocalPaths(), repeated.Data())
 	}
@@ -551,7 +551,7 @@ func TestMaintainDependencyConfigurationPreservesLocalInterfacePolicy(t *testing
 		ModuleVersion: "v1.0.0",
 		Manifest:      composeManifest(t, "interfaces: {policies: {email.send/v1: {timeout: 5s}}}\n"),
 	}}
-	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("# project configuration\n{}\n"), applicationmeta.DependencyBaseline{}, oldDependencies, composeSchemaLookup(nil))
+	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("# project configuration\n{}\n"), applicationmeta.DependencyBaseline{}, nil, oldDependencies, composeSchemaLookup(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +579,7 @@ interfaces:
     email.send/v1: {timeout: 10s}
 `),
 	}}
-	maintained, err := applicationmeta.MaintainDependencyConfiguration(locallyEdited, oldComposition.DependencyBaseline(), newDependencies, composeSchemaLookup(nil))
+	maintained, err := applicationmeta.MaintainDependencyConfiguration(locallyEdited, oldComposition.DependencyBaseline(), initial.LocalPaths(), newDependencies, composeSchemaLookup(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -605,7 +605,7 @@ interfaces:
 	}) {
 		t.Fatalf("maintained effective policies = %v", got)
 	}
-	repeated, err := applicationmeta.MaintainDependencyConfiguration(maintained.Data(), composition.DependencyBaseline(), newDependencies, composeSchemaLookup(nil))
+	repeated, err := applicationmeta.MaintainDependencyConfiguration(maintained.Data(), composition.DependencyBaseline(), maintained.LocalPaths(), newDependencies, composeSchemaLookup(nil))
 	if err != nil || repeated.Changed() || !bytes.Equal(repeated.Data(), maintained.Data()) {
 		t.Fatalf("repeated policy maintenance = changed %t error %v\n%s", repeated.Changed(), err, repeated.Data())
 	}

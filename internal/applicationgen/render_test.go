@@ -164,7 +164,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		`"id":"health.status/v1"`,
 		`"target":"kernel.health/v1"`,
 		`"kind":"application"`,
-		`"configuration":{"version":4,"mode":"default"`,
+		`"configuration":{"version":5,"mode":"default"`,
 		`"root":{"path":"plystra.yaml","digest":"sha256:`,
 		`"dependency_composition_digest":"sha256:`,
 		`"application_model_digest":"` + options.ManifestProvenance.ApplicationModelDigest() + `"`,
@@ -238,7 +238,7 @@ func TestRenderRemovesAliasSurfacesWhenFinalMapChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Check without Aliases: %v", err)
 	}
-	wantObsolete := []string{
+	wantRetired := []string{
 		"generated/go/adapters/connect/compat/send/v1/handler_gen.go",
 		"generated/go/adapters/connect/health/status/v1/handler_gen.go",
 		"generated/go/adapters/http/compat/send/v1/handler_gen.go",
@@ -250,13 +250,18 @@ func TestRenderRemovesAliasSurfacesWhenFinalMapChanges(t *testing.T) {
 		"generated/sdk/javascript/src/operations/compat/send/v1.ts",
 		"generated/sdk/javascript/src/operations/health/status/v1.ts",
 	}
-	if !slices.Equal(report.Obsolete(), wantObsolete) || len(report.Missing()) != 0 || len(report.Unexpected()) != 0 {
+	for _, filePath := range wantRetired {
+		if !slices.Contains(report.Stale(), filePath) {
+			t.Fatalf("Alias removal stale paths omit %s: %#v", filePath, report.Changes())
+		}
+	}
+	if len(report.Missing()) != 0 || len(report.Unexpected()) != 0 || len(report.ManuallyModified()) != 0 {
 		t.Fatalf("Alias removal drift = %#v", report.Changes())
 	}
 	if installed, err := generatedfiles.Install(root, withoutAliases, func(string) error { return nil }); err != nil || !installed.Clean() {
 		t.Fatalf("Install without Aliases = %#v, %v", installed.Changes(), err)
 	}
-	for _, filePath := range wantObsolete {
+	for _, filePath := range wantRetired {
 		if _, exists := outputFile(withoutAliases, filePath); exists {
 			t.Fatalf("Alias file %s remains in desired output", filePath)
 		}
@@ -470,7 +475,7 @@ timeout: {type: duration, default: 5s}
 		t.Fatalf("Install with configuration = %#v, %v", report.Changes(), err)
 	}
 	report, err := generatedfiles.Check(root, withoutConfiguration)
-	if err != nil || !slices.Contains(report.Obsolete(), configurationPath) {
+	if err != nil || !slices.Contains(report.Stale(), configurationPath) {
 		t.Fatalf("configuration cleanup = %#v, %v", report.Changes(), err)
 	}
 }

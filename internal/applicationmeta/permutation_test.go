@@ -253,16 +253,18 @@ func assertMaintenancePermutationDeterminism(t testing.TB, lookup applicationmet
 	}
 	data := []byte("# current-project comment\nhttp:\n  address: \":8080\" # retained\n  expose: [kernel.health/v1]\ncapabilities:\n  require: [kernel.info/v1]\n")
 	var maintained []byte
+	var maintainedLocalPaths []string
 	for index, ordered := range dependencyPermutations(oldDependencies) {
-		result, err := applicationmeta.MaintainDependencyConfiguration(data, applicationmeta.DependencyBaseline{}, ordered, lookup)
+		result, err := applicationmeta.MaintainDependencyConfiguration(data, applicationmeta.DependencyBaseline{}, nil, ordered, lookup)
 		if err != nil {
 			t.Fatalf("initial maintenance permutation %d: %v", index, err)
 		}
 		if index == 0 {
 			maintained = result.Data()
+			maintainedLocalPaths = result.LocalPaths()
 			continue
 		}
-		if !reflect.DeepEqual(result.Data(), maintained) {
+		if !reflect.DeepEqual(result.Data(), maintained) || !reflect.DeepEqual(result.LocalPaths(), maintainedLocalPaths) {
 			t.Fatalf("initial maintenance permutation %d changed YAML:\nwant:\n%s\ngot:\n%s", index, maintained, result.Data())
 		}
 	}
@@ -280,7 +282,7 @@ func assertMaintenancePermutationDeterminism(t testing.TB, lookup applicationmet
 	}
 	var recomposed []byte
 	for index, ordered := range dependencyPermutations(newDependencies) {
-		result, err := applicationmeta.MaintainDependencyConfiguration(maintained, previousComposition.DependencyBaseline(), ordered, lookup)
+		result, err := applicationmeta.MaintainDependencyConfiguration(maintained, previousComposition.DependencyBaseline(), maintainedLocalPaths, ordered, lookup)
 		if err != nil {
 			t.Fatalf("recomposition maintenance permutation %d: %v", index, err)
 		}
