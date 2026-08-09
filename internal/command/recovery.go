@@ -25,6 +25,8 @@ import (
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/implementationdecl"
+	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
@@ -122,6 +124,12 @@ const (
 	diagnosticResolveConstructorCycle            = diagnosticcode.ResolveConstructorCycle
 	diagnosticResolveReservedInterface           = diagnosticcode.ResolveReservedInterface
 	diagnosticResolveIntrinsicInterfaceSelection = diagnosticcode.ResolveIntrinsicInterfaceSelection
+	diagnosticImplementationDeclarationInvalid   = diagnosticcode.ImplementationDeclarationInvalid
+	diagnosticImplementationConfigInvalid        = diagnosticcode.ImplementationConfigInvalid
+	diagnosticImplementationRequiredInvalid      = diagnosticcode.ImplementationRequiredInvalid
+	diagnosticImplementationOptionalInvalid      = diagnosticcode.ImplementationOptionalInvalid
+	diagnosticImplementationResultInvalid        = diagnosticcode.ImplementationResultInvalid
+	diagnosticImplementationConformanceInvalid   = diagnosticcode.ImplementationConformanceInvalid
 )
 
 const (
@@ -272,6 +280,18 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticResolveReservedInterface, "Remove the reported local kernel.* Interface declaration and import the canonical Kernel Interface package instead.")
 	case errors.Is(err, interfaceresolution.ErrIntrinsicChoice):
 		return recoveryDiagnostic(diagnosticResolveIntrinsicInterfaceSelection, "Remove the reported interfaces.use entry from "+context.configurationTarget()+"; Kernel supplies that Interface intrinsically.")
+	case errors.Is(err, implementationdecl.ErrInvalid):
+		return recoveryDiagnostic(diagnosticImplementationDeclarationInvalid, "Correct the reported //plystra:implements directive so it immediately documents one exported package-level constructor and names canonical Interface IDs, then rerun the command.")
+	case errors.Is(err, implementationinventory.ErrInvalidConfiguration):
+		return recoveryDiagnostic(diagnosticImplementationConfigInvalid, "Correct the reported constructor's first Config parameter and exported Config fields to use the supported typed configuration schema, then rerun the command.")
+	case errors.Is(err, implementationinventory.ErrInvalidRequiredInterface):
+		return recoveryDiagnostic(diagnosticImplementationRequiredInvalid, "Replace the reported required constructor parameter with one visible canonical Interface type, then rerun the command.")
+	case errors.Is(err, implementationinventory.ErrInvalidOptionalInterface):
+		return recoveryDiagnostic(diagnosticImplementationOptionalInvalid, "Replace the reported optional constructor parameter with the exact plystra.Optional[T] value type around one visible canonical Interface, then rerun the command.")
+	case errors.Is(err, implementationinventory.ErrInvalidResult):
+		return recoveryDiagnostic(diagnosticImplementationResultInvalid, "Change the reported constructor to return exactly one concrete value plus error, then rerun the command.")
+	case errors.Is(err, implementationinventory.ErrInvalidConformance):
+		return recoveryDiagnostic(diagnosticImplementationConformanceInvalid, "Implement every reported canonical Interface method on the constructor's concrete result type, then rerun the command.")
 	case errors.Is(err, applicationresolve.ErrManifest) && !errors.Is(err, applicationresolve.ErrConfigurationSelection):
 		return recoveryDiagnostic(diagnosticProjectManifestInvalid, "Correct the reported root or dependency Project plystra.yaml, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrInheritedConflict):

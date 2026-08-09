@@ -81,6 +81,8 @@ When several compatible Implementations satisfy one required Interface, select o
 
 Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + ` block followed by one stable ` + "`Diagnostic: PLYSTRA_<AREA>_<CONDITION>`" + ` code. Follow that one command or file edit with the same default, ` + "`--env`" + `, or ` + "`--config`" + ` selection, and use the code rather than human wording as the automation or support identity. Recovery output preserves safe explicit and ambient selectors, but uses ` + "`<environment>`" + ` or ` + "`<yaml-path>`" + ` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice or a code.
 
+Authored Implementation failures distinguish invalid directives, Config schemas, required or optional Interface parameters, constructor results, and structural conformance. Apply the emitted recovery to the reported Project-relative Go source. Fix dependency-owned source in its owning Project or select a corrected module version; never edit the Module Cache copy.
+
 Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
 ` + "`generated/compatibility/interfaces.json`" + ` is the committed, CLI-owned shape baseline for every visible authored Interface, whether or not it is selected or exposed. It records package and method identity, request and response names, reachable messages, stable field numbers, Go and JSON names, requiredness, and canonical Go types while excluding metadata, projections, Implementations, configuration, Secrets, source paths, and module versions. During prerelease development, ` + "`plystra generate`" + ` refreshes it transactionally and ` + "`plystra generate --check`" + ` reports drift without mutation. Never edit it manually.
@@ -1407,13 +1409,20 @@ recovery action or code.
   constraints, semantic errors, typed semantics, and extension metadata.
   Implement the visible contract or create a new version instead of weakening
   validation.
-- Constructor signature mismatch after adding requires: regenerate, import the
-  Plugin's generated dependencies package, and use
-  New(Config, dependencies.Dependencies) *Plugin.
+- Implementation authoring codes, in validation order:
+  PLYSTRA_IMPLEMENTATION_DECLARATION_INVALID,
+  PLYSTRA_IMPLEMENTATION_CONFIG_INVALID,
+  PLYSTRA_IMPLEMENTATION_REQUIRED_INTERFACE_INVALID,
+  PLYSTRA_IMPLEMENTATION_OPTIONAL_INTERFACE_INVALID,
+  PLYSTRA_IMPLEMENTATION_RESULT_INVALID, and
+  PLYSTRA_IMPLEMENTATION_CONFORMANCE_INVALID. They identify the directive,
+  Config, required parameter, exact plystra.Optional[T] parameter, result, and
+  conformance boundary. Apply Recovery to the reported source; fix dependency
+  source in its owning Project or select a corrected version, never Module Cache.
 - Unavailable generated client: confirm assembly completed and avoid invoking
-  clients during Plugin construction.
-- Invalid configuration: compare the concrete selected Plugin ID and its
-  plugin.yaml config schema with the object in the selected current-Project
+  application clients while constructors are still running before publication.
+- Invalid runtime configuration: compare the selected constructor symbol and
+  its compiled Config schema with the object in the selected current-Project
   document. Keep Secret values behind valid env or file references.
 - Wrong configuration selection: run plystra inspect with the intended --env or
   --config, add --verbose or --format json when complete provenance is needed,
@@ -1421,44 +1430,8 @@ recovery action or code.
   automation, set exactly one of
   PLYSTRA_ENV or PLYSTRA_CONFIG. An environment is a sparse overlay above root;
   an explicit file is complete and root plystra.yaml is not merged beneath it.
-- Unexpected Capability Provider or requirement: run plystra explain capability
-  <capability-name>/vN with the same --env or --config selector. The concise
-  result identifies the selected Provider or available-but-unrequired state,
-  direct reason and source, and one exact command or configuration field that
-  changes the decision. Add --verbose for complete candidates, rejections,
-  requiring edges, generation rules, configuration provenance, and assembly
-  evidence, or --format json for deterministic automation output.
-- Unexpected Plugin selection: run plystra explain plugin <plugin-id> with the
-  same selector. A current-Project Plugin reports declaration membership; a
-  selected dependency Plugin reports every exact Capability Provider reason;
-  and a visible unselected Plugin reports the rejected Provider decision. Use
-  the returned selector-matched command or field, then regenerate and check with
-  that same selector. Add --verbose or --format json for complete redacted
-  evidence.
-- Unexpected configuration value, removal, or owner: run plystra explain config
-  config.<plugin-id>.<field> with the same selector. The result identifies the
-  typed effective owner, every winning source, an explicit removal or ancestor
-  suppression, and the exact selected current-Project document field to edit.
-  Values and Secret-reference targets remain redacted; use --verbose only when
-  the complete provenance graph is needed.
-- Unexpected Alias target, exposure, or origin: run plystra explain alias
-  <alias-name>/vN with the same selector. The result identifies the direct
-  canonical target, inherited or narrowed exposure, every compatible application
-  declaration and selected generation-extension contribution, and the selected
-  configuration field or activation-Provider decision that changes the result.
-  Add --verbose or --format json for the target contract digest and complete
-  redacted generation evidence.
-- Unexpected or missing HTTP or JavaScript exposure: run plystra explain
-  exposure <capability-or-alias-name>/vN with the same selector. A canonical
-  Capability reports every effective http.expose source or the selected field
-  that would expose it. An Alias reports its direct target and distinguishes an
-  Alias narrowing from an internal target, then identifies the selected Alias,
-  activation-Provider, or target-exposure decision that changes the surface.
-- Alias error: point directly to a resolved canonical target with the same
-  version and exposure no broader than the target.
-- Unclaimed extension namespace: add a compatible selected Plugin whose
-  generation declaration activates that namespace; do not make the Kernel or
-  application interpret extension metadata.
+- Alias error: point directly to one resolved canonical Interface target with
+  the same version and exposure no broader than that target.
 - Unexpected generated path: remove handwritten content from generated and
   regenerate. Do not overwrite the reported path manually.
 - Protobuf wire-history drift: recover the exact previously generated

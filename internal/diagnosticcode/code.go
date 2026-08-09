@@ -78,6 +78,12 @@ const (
 	ResolveConstructorCycle            = Prefix + "RESOLVE_CONSTRUCTOR_CYCLE"
 	ResolveReservedInterface           = Prefix + "RESOLVE_RESERVED_INTERFACE"
 	ResolveIntrinsicInterfaceSelection = Prefix + "RESOLVE_INTRINSIC_INTERFACE_SELECTION"
+	ImplementationDeclarationInvalid   = Prefix + "IMPLEMENTATION_DECLARATION_INVALID"
+	ImplementationConfigInvalid        = Prefix + "IMPLEMENTATION_CONFIG_INVALID"
+	ImplementationRequiredInvalid      = Prefix + "IMPLEMENTATION_REQUIRED_INTERFACE_INVALID"
+	ImplementationOptionalInvalid      = Prefix + "IMPLEMENTATION_OPTIONAL_INTERFACE_INVALID"
+	ImplementationResultInvalid        = Prefix + "IMPLEMENTATION_RESULT_INVALID"
+	ImplementationConformanceInvalid   = Prefix + "IMPLEMENTATION_CONFORMANCE_INVALID"
 )
 
 const (

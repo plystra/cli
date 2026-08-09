@@ -51,6 +51,8 @@ When several compatible Implementations satisfy one required Interface, select o
 
 Common actionable Plystra CLI failures end with exactly one `Recovery:` block followed by one stable `Diagnostic: PLYSTRA_<AREA>_<CONDITION>` code. Follow that one command or file edit with the same default, `--env`, or `--config` selection, and use the code rather than human wording as the automation or support identity. Recovery output preserves safe explicit and ambient selectors, but uses `<environment>` or `<yaml-path>` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice or a code.
 
+Authored Implementation failures distinguish invalid directives, Config schemas, required or optional Interface parameters, constructor results, and structural conformance. Apply the emitted recovery to the reported Project-relative Go source. Fix dependency-owned source in its owning Project or select a corrected module version; never edit the Module Cache copy.
+
 Generated source under `generated/` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
 `generated/compatibility/interfaces.json` is the committed, CLI-owned shape baseline for every visible authored Interface, whether or not it is selected or exposed. It records package and method identity, request and response names, reachable messages, stable field numbers, Go and JSON names, requiredness, and canonical Go types while excluding metadata, projections, Implementations, configuration, Secrets, source paths, and module versions. During prerelease development, `plystra generate` refreshes it transactionally and `plystra generate --check` reports drift without mutation. Never edit it manually.

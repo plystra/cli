@@ -1793,6 +1793,26 @@ not broadly scanned. If several compatible Implementations remain, run
 `--config` selection used to generate the application. Do not add a priority or
 fallback.
 
+### Invalid authored Implementation
+
+Constructor discovery classifies each actionable authoring boundary separately:
+
+- `PLYSTRA_IMPLEMENTATION_DECLARATION_INVALID` identifies an invalid or
+  unattached `//plystra:implements` directive;
+- `PLYSTRA_IMPLEMENTATION_CONFIG_INVALID` identifies an unsupported constructor
+  `Config` parameter or field schema;
+- `PLYSTRA_IMPLEMENTATION_REQUIRED_INTERFACE_INVALID` and
+  `PLYSTRA_IMPLEMENTATION_OPTIONAL_INTERFACE_INVALID` identify invalid required
+  or exact `plystra.Optional[T]` parameters;
+- `PLYSTRA_IMPLEMENTATION_RESULT_INVALID` identifies a constructor that does not
+  return exactly one concrete pointer and `error`;
+- `PLYSTRA_IMPLEMENTATION_CONFORMANCE_INVALID` identifies a returned concrete
+  type that does not implement every declared canonical Interface.
+
+Apply the emitted recovery to the reported Project-relative Go source. If the
+source belongs to a dependency Project, fix that owning Project or select a
+corrected dependency version; never edit the Module Cache copy.
+
 ### Inherited configuration conflict
 
 Read the exact `capabilities.use`, `capabilities.aliases`, or `config` field and

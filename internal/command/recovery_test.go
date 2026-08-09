@@ -22,6 +22,8 @@ import (
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/implementationdecl"
+	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
@@ -270,6 +272,12 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "constructor cycle", err: constructorgraph.ErrCycle, code: diagnosticcode.ResolveConstructorCycle},
 		{name: "reserved Interface", err: interfaceresolution.ErrReservedInterface, code: diagnosticcode.ResolveReservedInterface},
 		{name: "intrinsic Interface selection", err: interfaceresolution.ErrIntrinsicChoice, code: diagnosticcode.ResolveIntrinsicInterfaceSelection},
+		{name: "invalid Implementation declaration", err: implementationdecl.ErrInvalid, code: diagnosticcode.ImplementationDeclarationInvalid},
+		{name: "invalid Implementation Config", err: implementationinventory.ErrInvalidConfiguration, code: diagnosticcode.ImplementationConfigInvalid},
+		{name: "invalid required Interface parameter", err: implementationinventory.ErrInvalidRequiredInterface, code: diagnosticcode.ImplementationRequiredInvalid},
+		{name: "invalid optional Interface parameter", err: implementationinventory.ErrInvalidOptionalInterface, code: diagnosticcode.ImplementationOptionalInvalid},
+		{name: "invalid Implementation result", err: implementationinventory.ErrInvalidResult, code: diagnosticcode.ImplementationResultInvalid},
+		{name: "invalid Implementation conformance", err: implementationinventory.ErrInvalidConformance, code: diagnosticcode.ImplementationConformanceInvalid},
 	}
 	for _, test := range tests {
 		test := test

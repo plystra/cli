@@ -689,6 +689,12 @@ human wording. A recovery command preserves the selected default, `--env`, or
 advice. Unknown internal failures retain their original diagnostic without an
 invented recovery action or code.
 
+Authored Implementation failures distinguish an invalid
+`//plystra:implements` declaration, unsupported `Config` shape, invalid required
+or `plystra.Optional[T]` parameter, invalid constructor result, and structural
+conformance failure. Follow the code-specific recovery against the reported
+Project-relative Go source; never edit a dependency's Module Cache copy.
+
 The current `plystra check` implementation is read-only. It verifies the
 selected dependency composition and generated fixed point, then runs
 `go test -mod=readonly ./...` from the Project root. Later roadmap gates add

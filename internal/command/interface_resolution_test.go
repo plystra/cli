@@ -134,6 +134,96 @@ func TestPublicResolvingCommandsRejectInvalidIntrinsicInterfaceWithoutMutation(t
 	}
 }
 
+func TestPublicResolvingCommandsClassifyInvalidImplementationAuthoringWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		source   string
+		identity string
+		problem  string
+		recovery string
+		code     string
+	}{
+		{
+			name:     "declaration",
+			source:   invalidImplementationDeclarationSource,
+			identity: "service/service.go:5:1",
+			problem:  "expected //plystra:implements <interface-id>",
+			recovery: "Correct the reported //plystra:implements directive so it immediately documents one exported package-level constructor and names canonical Interface IDs, then rerun the command.",
+			code:     diagnosticcode.ImplementationDeclarationInvalid,
+		},
+		{
+			name:     "Config",
+			source:   invalidImplementationConfigSource,
+			identity: "example.com/command-invalid-implementation/service.New",
+			problem:  "Config field Unsupported",
+			recovery: "Correct the reported constructor's first Config parameter and exported Config fields to use the supported typed configuration schema, then rerun the command.",
+			code:     diagnosticcode.ImplementationConfigInvalid,
+		},
+		{
+			name:     "required Interface",
+			source:   invalidImplementationRequiredSource,
+			identity: "example.com/command-invalid-implementation/service.New",
+			problem:  "parameter 1 must be a canonical Interface type",
+			recovery: "Replace the reported required constructor parameter with one visible canonical Interface type, then rerun the command.",
+			code:     diagnosticcode.ImplementationRequiredInvalid,
+		},
+		{
+			name:     "optional Interface",
+			source:   invalidImplementationOptionalSource,
+			identity: "example.com/command-invalid-implementation/service.New",
+			problem:  "Optional must be github.com/plystra/kernel.Optional[T]",
+			recovery: "Replace the reported optional constructor parameter with the exact plystra.Optional[T] value type around one visible canonical Interface, then rerun the command.",
+			code:     diagnosticcode.ImplementationOptionalInvalid,
+		},
+		{
+			name:     "result",
+			source:   invalidImplementationResultSource,
+			identity: "example.com/command-invalid-implementation/service.New",
+			problem:  "constructor must return exactly one concrete pointer and error",
+			recovery: "Change the reported constructor to return exactly one concrete value plus error, then rerun the command.",
+			code:     diagnosticcode.ImplementationResultInvalid,
+		},
+		{
+			name:     "conformance",
+			source:   invalidImplementationConformanceSource,
+			identity: "example.com/command-invalid-implementation/service.New",
+			problem:  "missing method Send",
+			recovery: "Implement every reported canonical Interface method on the constructor's concrete result type, then rerun the command.",
+			code:     diagnosticcode.ImplementationConformanceInvalid,
+		},
+	}
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			for _, arguments := range commands {
+				arguments := arguments
+				t.Run(strings.Join(arguments, " "), func(t *testing.T) {
+					root := writeCommandInvalidImplementationProject(t, test.source)
+					before := commandTree(t, root)
+					exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
+					if exitCode != 1 || stdout != "" || !commandContainsAll(
+						stderr,
+						test.identity,
+						test.problem,
+						"Recovery:\n"+test.recovery+"\n",
+						"Diagnostic: "+test.code,
+					) {
+						t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+					}
+					if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+						t.Fatalf("%v mutated invalid Implementation Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+					}
+					assertNoCommandTransactions(t, root)
+				})
+			}
+		})
+	}
+}
+
 func writeCommandIntrinsicFailureProject(t testing.TB, shadow bool) string {
 	t.Helper()
 	root := t.TempDir()
@@ -147,6 +237,110 @@ func writeCommandIntrinsicFailureProject(t testing.TB, shadow bool) string {
 	writeCommandGraphInterface(t, root, "kernel/health/v1", "healthv1", "kernel.health/v1", "Health")
 	return root
 }
+
+func writeCommandInvalidImplementationProject(t testing.TB, source string) string {
+	t.Helper()
+	root := t.TempDir()
+	writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/command-invalid-implementation\n\ngo 1.26\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(root, "generated", "sentinel.txt"), "must remain unchanged\n")
+	writeCommandGraphInterface(t, root, "email/send/v1", "sendv1", "email.send/v1", "Send")
+	writeCommandFile(t, filepath.Join(root, "service", "service.go"), source)
+	return root
+}
+
+const invalidImplementationDeclarationSource = `package service
+
+type Service struct{}
+
+//plystra:implements
+func New() (*Service, error) { return &Service{}, nil }
+`
+
+const invalidImplementationConfigSource = `package service
+
+import (
+	"context"
+
+	sendv1 "example.com/command-invalid-implementation/interfaces/email/send/v1"
+)
+
+type Config struct {
+	Unsupported chan int
+}
+
+type Service struct{}
+
+//plystra:implements email.send/v1
+func New(config Config) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
+	return sendv1.Response{}, nil
+}
+`
+
+const invalidImplementationRequiredSource = `package service
+
+import (
+	"context"
+
+	sendv1 "example.com/command-invalid-implementation/interfaces/email/send/v1"
+)
+
+type Service struct{}
+
+//plystra:implements email.send/v1
+func New(value string) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
+	return sendv1.Response{}, nil
+}
+`
+
+const invalidImplementationOptionalSource = `package service
+
+import (
+	"context"
+
+	sendv1 "example.com/command-invalid-implementation/interfaces/email/send/v1"
+)
+
+type Optional[T any] struct{}
+type Service struct{}
+
+//plystra:implements email.send/v1
+func New(value Optional[sendv1.Interface]) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
+	return sendv1.Response{}, nil
+}
+`
+
+const invalidImplementationResultSource = `package service
+
+import (
+	"context"
+
+	sendv1 "example.com/command-invalid-implementation/interfaces/email/send/v1"
+)
+
+type Service struct{}
+
+//plystra:implements email.send/v1
+func New() *Service { return &Service{} }
+
+func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
+	return sendv1.Response{}, nil
+}
+`
+
+const invalidImplementationConformanceSource = `package service
+
+type Service struct{}
+
+//plystra:implements email.send/v1
+func New() (*Service, error) { return &Service{}, nil }
+`
 
 func writeCommandGraphFailureProject(t testing.TB) string {
 	t.Helper()

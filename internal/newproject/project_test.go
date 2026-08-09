@@ -2201,6 +2201,12 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra inspect --format json",
 		"plystra generate --check",
 		"Diagnostic: PLYSTRA_<AREA>_<CONDITION>",
+		"PLYSTRA_IMPLEMENTATION_DECLARATION_INVALID",
+		"PLYSTRA_IMPLEMENTATION_CONFIG_INVALID",
+		"PLYSTRA_IMPLEMENTATION_REQUIRED_INTERFACE_INVALID",
+		"PLYSTRA_IMPLEMENTATION_OPTIONAL_INTERFACE_INVALID",
+		"PLYSTRA_IMPLEMENTATION_RESULT_INVALID",
+		"PLYSTRA_IMPLEMENTATION_CONFORMANCE_INVALID",
 	} {
 		if !strings.Contains(string(data), required) {
 			t.Fatalf("Plystra skill omits %q:\n%s", required, data)
