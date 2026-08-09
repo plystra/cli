@@ -92,6 +92,15 @@ const (
 )
 
 const (
+	InterfaceCreateNameInvalid            = Prefix + "INTERFACE_CREATE_NAME_INVALID"
+	InterfaceCreateTargetExists           = Prefix + "INTERFACE_CREATE_TARGET_EXISTS"
+	ImplementationCreateInterfaceInvalid  = Prefix + "IMPLEMENTATION_CREATE_INTERFACE_INVALID"
+	ImplementationCreatePackageInvalid    = Prefix + "IMPLEMENTATION_CREATE_PACKAGE_INVALID"
+	ImplementationCreateInterfaceNotFound = Prefix + "IMPLEMENTATION_CREATE_INTERFACE_NOT_FOUND"
+	ImplementationCreateTargetExists      = Prefix + "IMPLEMENTATION_CREATE_TARGET_EXISTS"
+)
+
+const (
 	ConstructorConfigurationSchemaInvalid = Prefix + "CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID"
 	ConstructorConfigurationValuesInvalid = Prefix + "CONSTRUCTOR_CONFIGURATION_VALUES_INVALID"
 )

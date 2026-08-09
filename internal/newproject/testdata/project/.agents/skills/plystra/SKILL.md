@@ -1236,6 +1236,14 @@ recovery action or code.
   They identify the directive, Go contract, optional interface.yaml, visible ID,
   and loadable-package boundaries. Apply Recovery in the owning Project, never
   to a dependency's Module Cache copy.
+- Scaffold-command codes:
+  PLYSTRA_INTERFACE_CREATE_NAME_INVALID,
+  PLYSTRA_INTERFACE_CREATE_TARGET_EXISTS,
+  PLYSTRA_IMPLEMENTATION_CREATE_INTERFACE_INVALID,
+  PLYSTRA_IMPLEMENTATION_CREATE_INTERFACE_NOT_FOUND,
+  PLYSTRA_IMPLEMENTATION_CREATE_PACKAGE_INVALID, and
+  PLYSTRA_IMPLEMENTATION_CREATE_TARGET_EXISTS. They distinguish invalid or
+  missing identities, unsafe package paths, and existing targets before mutation.
 - Implementation authoring codes, in validation order:
   PLYSTRA_IMPLEMENTATION_DECLARATION_INVALID,
   PLYSTRA_IMPLEMENTATION_CONFIG_INVALID,

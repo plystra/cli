@@ -473,6 +473,16 @@ Commands below a module root use the nearest real enclosing `go.mod`; nested mod
 
 ## Authoring behavior
 
+Create the initial `/v1` package for one canonical unversioned Interface name:
+
+```powershell
+plystra interface create email.send
+```
+
+The name has at least two lower-case dot-separated segments. Creation fails
+without mutation when the name is invalid or its local package or visible ID
+already exists.
+
 Scaffold an ordinary Go package for one visible canonical Interface from the
 Project root or any nested authored package:
 
@@ -488,6 +498,11 @@ compile-time Interface assertion. It does not copy the Interface contract,
 write authored registration or configuration, or create generated output.
 Plystra rediscovers and type-checks the new constructor before committing the
 transaction; any failure removes the complete scaffold.
+
+Creation diagnostics distinguish invalid Interface names, invalid or invisible
+versioned Interface IDs, unsafe Implementation package paths, and existing
+Interface or Implementation targets. Each failure emits one recovery command or
+replacement choice and leaves the Project unchanged.
 
 Plugin-target inference resolves an explicit target, the enclosing plugin, the only local plugin, or an interactive choice when several local plugins remain and a terminal is available. Non-interactive ambiguity fails with every candidate and requires `--plugin <directory-or-plugin-id>`.
 

@@ -22,9 +22,11 @@ import (
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/implementationcreate"
 	"github.com/plystra/cli/internal/implementationdecl"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfacecontract"
+	"github.com/plystra/cli/internal/interfacecreate"
 	"github.com/plystra/cli/internal/interfacedecl"
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfacemeta"
@@ -287,6 +289,12 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "invalid Interface metadata", err: interfacemeta.ErrInvalid, code: diagnosticcode.InterfaceMetadataInvalid},
 		{name: "duplicate Interface ID", err: interfaceinventory.ErrDuplicateID, code: diagnosticcode.InterfaceIDDuplicate},
 		{name: "invalid authored package", err: interfaceinventory.ErrPackage, code: diagnosticcode.AuthoredPackageInvalid},
+		{name: "invalid Interface create name", err: interfacecreate.ErrInvalidName, code: diagnosticcode.InterfaceCreateNameInvalid},
+		{name: "existing Interface create target", err: interfacecreate.ErrTargetExists, code: diagnosticcode.InterfaceCreateTargetExists},
+		{name: "invalid Implementation create Interface", err: implementationcreate.ErrInvalidInterface, code: diagnosticcode.ImplementationCreateInterfaceInvalid},
+		{name: "invalid Implementation create package", err: implementationcreate.ErrInvalidPackage, code: diagnosticcode.ImplementationCreatePackageInvalid},
+		{name: "missing Implementation create Interface", err: implementationcreate.ErrInterfaceNotFound, code: diagnosticcode.ImplementationCreateInterfaceNotFound},
+		{name: "existing Implementation create target", err: implementationcreate.ErrTargetExists, code: diagnosticcode.ImplementationCreateTargetExists},
 	}
 	for _, test := range tests {
 		test := test

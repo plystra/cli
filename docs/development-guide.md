@@ -1831,6 +1831,25 @@ Apply the emitted recovery to the reported Project-relative Go source. If the
 source belongs to a dependency Project, fix that owning Project or select a
 corrected dependency version; never edit the Module Cache copy.
 
+### Interface and Implementation creation
+
+Public scaffold commands classify pre-mutation input and target failures:
+
+- `PLYSTRA_INTERFACE_CREATE_NAME_INVALID` and
+  `PLYSTRA_INTERFACE_CREATE_TARGET_EXISTS` identify an invalid unversioned name
+  or an existing `/v1` package or visible ID;
+- `PLYSTRA_IMPLEMENTATION_CREATE_INTERFACE_INVALID` and
+  `PLYSTRA_IMPLEMENTATION_CREATE_INTERFACE_NOT_FOUND` identify a malformed or
+  invisible canonical versioned Interface ID;
+- `PLYSTRA_IMPLEMENTATION_CREATE_PACKAGE_INVALID` and
+  `PLYSTRA_IMPLEMENTATION_CREATE_TARGET_EXISTS` identify an unsafe `--package`
+  value or an existing target directory.
+
+Run the emitted corrected `plystra interface create <domain.operation>` or
+`plystra implement <interface-name>/vN --package ./<package>` form. These failures
+occur before scaffold installation and leave authored and generated files
+unchanged.
+
 ### Inherited configuration conflict
 
 Read the exact `capabilities.use`, `capabilities.aliases`, or `config` field and

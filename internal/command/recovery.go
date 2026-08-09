@@ -25,9 +25,11 @@ import (
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/implementationcreate"
 	"github.com/plystra/cli/internal/implementationdecl"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfacecontract"
+	"github.com/plystra/cli/internal/interfacecreate"
 	"github.com/plystra/cli/internal/interfacedecl"
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfacemeta"
@@ -139,6 +141,15 @@ const (
 	diagnosticInterfaceMetadataInvalid           = diagnosticcode.InterfaceMetadataInvalid
 	diagnosticInterfaceIDDuplicate               = diagnosticcode.InterfaceIDDuplicate
 	diagnosticAuthoredPackageInvalid             = diagnosticcode.AuthoredPackageInvalid
+)
+
+const (
+	diagnosticInterfaceCreateNameInvalid            = diagnosticcode.InterfaceCreateNameInvalid
+	diagnosticInterfaceCreateTargetExists           = diagnosticcode.InterfaceCreateTargetExists
+	diagnosticImplementationCreateInterfaceInvalid  = diagnosticcode.ImplementationCreateInterfaceInvalid
+	diagnosticImplementationCreatePackageInvalid    = diagnosticcode.ImplementationCreatePackageInvalid
+	diagnosticImplementationCreateInterfaceNotFound = diagnosticcode.ImplementationCreateInterfaceNotFound
+	diagnosticImplementationCreateTargetExists      = diagnosticcode.ImplementationCreateTargetExists
 )
 
 const (
@@ -311,6 +322,18 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticInterfaceIDDuplicate, "Make the reported visible Go packages declare distinct canonical Interface IDs, then rerun the command.")
 	case errors.Is(err, interfaceinventory.ErrPackage):
 		return recoveryDiagnostic(diagnosticAuthoredPackageInvalid, "Correct the reported authored Go package in its owning Project so ordinary Go tooling can load it, then rerun the command.")
+	case errors.Is(err, interfacecreate.ErrInvalidName):
+		return recoveryDiagnostic(diagnosticInterfaceCreateNameInvalid, "Run `plystra interface create <domain.operation>` with one unversioned canonical lower-case name containing at least two dot-separated segments.")
+	case errors.Is(err, interfacecreate.ErrTargetExists):
+		return recoveryDiagnostic(diagnosticInterfaceCreateTargetExists, "Choose a different unversioned Interface name whose v1 package and visible ID do not already exist.")
+	case errors.Is(err, implementationcreate.ErrInvalidInterface):
+		return recoveryDiagnostic(diagnosticImplementationCreateInterfaceInvalid, "Rerun `plystra implement <interface-name>/vN --package <project-relative-package>` with one canonical versioned Interface ID.")
+	case errors.Is(err, implementationcreate.ErrInvalidPackage):
+		return recoveryDiagnostic(diagnosticImplementationCreatePackageInvalid, "Rerun with `--package ./<safe-project-relative-go-package>` naming one canonical child package.")
+	case errors.Is(err, implementationcreate.ErrInterfaceNotFound):
+		return recoveryDiagnostic(diagnosticImplementationCreateInterfaceNotFound, "Replace the reported Interface ID with one canonical Interface visible in the effective Plystra Project graph, then rerun the command.")
+	case errors.Is(err, implementationcreate.ErrTargetExists):
+		return recoveryDiagnostic(diagnosticImplementationCreateTargetExists, "Rerun with a different `--package ./<project-relative-go-package>` whose target directory does not exist.")
 	case errors.Is(err, applicationresolve.ErrManifest) && !errors.Is(err, applicationresolve.ErrConfigurationSelection):
 		return recoveryDiagnostic(diagnosticProjectManifestInvalid, "Correct the reported root or dependency Project plystra.yaml, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrInheritedConflict):

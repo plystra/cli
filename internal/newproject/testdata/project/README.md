@@ -55,6 +55,8 @@ Authored Interface failures distinguish invalid directives, canonical Go contrac
 
 Authored Implementation failures distinguish invalid directives, Config schemas, required or optional Interface parameters, constructor results, and structural conformance. Apply the emitted recovery to the reported Project-relative Go source. Fix dependency-owned source in its owning Project or select a corrected module version; never edit the Module Cache copy.
 
+Interface and Implementation scaffold failures distinguish invalid or missing identities, unsafe package paths, and existing targets before mutation. Follow the emitted corrected command or replacement choice.
+
 Generated source under `generated/` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
 `generated/compatibility/interfaces.json` is the committed, CLI-owned shape baseline for every visible authored Interface, whether or not it is selected or exposed. It records package and method identity, request and response names, reachable messages, stable field numbers, Go and JSON names, requiredness, and canonical Go types while excluding metadata, projections, Implementations, configuration, Secrets, source paths, and module versions. During prerelease development, `plystra generate` refreshes it transactionally and `plystra generate --check` reports drift without mutation. Never edit it manually.
