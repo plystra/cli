@@ -1831,6 +1831,15 @@ Apply the emitted recovery to the reported Project-relative Go source. If the
 source belongs to a dependency Project, fix that owning Project or select a
 corrected dependency version; never edit the Module Cache copy.
 
+### Invalid `plystra use` input
+
+`PLYSTRA_USE_INTERFACE_INVALID` identifies a malformed canonical versioned
+Interface ID. `PLYSTRA_USE_CONSTRUCTOR_INVALID` identifies a malformed fully
+qualified exported constructor symbol. Run the emitted corrected
+`plystra use <interface-id> <constructor-symbol>` command; it retains the active
+default, `--env`, or `--config` mode. These input failures occur before Project
+discovery or mutation.
+
 ### Interface and Implementation creation
 
 Public scaffold commands classify pre-mutation input and target failures:

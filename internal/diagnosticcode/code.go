@@ -101,6 +101,11 @@ const (
 )
 
 const (
+	UseInterfaceInvalid   = Prefix + "USE_INTERFACE_INVALID"
+	UseConstructorInvalid = Prefix + "USE_CONSTRUCTOR_INVALID"
+)
+
+const (
 	ConstructorConfigurationSchemaInvalid = Prefix + "CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID"
 	ConstructorConfigurationValuesInvalid = Prefix + "CONSTRUCTOR_CONFIGURATION_VALUES_INVALID"
 )

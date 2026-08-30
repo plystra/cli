@@ -28,6 +28,7 @@ import (
 	"github.com/plystra/cli/internal/implementationcreate"
 	"github.com/plystra/cli/internal/implementationdecl"
 	"github.com/plystra/cli/internal/implementationinventory"
+	"github.com/plystra/cli/internal/implementationselect"
 	"github.com/plystra/cli/internal/interfacecontract"
 	"github.com/plystra/cli/internal/interfacecreate"
 	"github.com/plystra/cli/internal/interfacedecl"
@@ -150,6 +151,11 @@ const (
 	diagnosticImplementationCreatePackageInvalid    = diagnosticcode.ImplementationCreatePackageInvalid
 	diagnosticImplementationCreateInterfaceNotFound = diagnosticcode.ImplementationCreateInterfaceNotFound
 	diagnosticImplementationCreateTargetExists      = diagnosticcode.ImplementationCreateTargetExists
+)
+
+const (
+	diagnosticUseInterfaceInvalid   = diagnosticcode.UseInterfaceInvalid
+	diagnosticUseConstructorInvalid = diagnosticcode.UseConstructorInvalid
 )
 
 const (
@@ -334,6 +340,10 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticImplementationCreateInterfaceNotFound, "Replace the reported Interface ID with one canonical Interface visible in the effective Plystra Project graph, then rerun the command.")
 	case errors.Is(err, implementationcreate.ErrTargetExists):
 		return recoveryDiagnostic(diagnosticImplementationCreateTargetExists, "Rerun with a different `--package ./<project-relative-go-package>` whose target directory does not exist.")
+	case errors.Is(err, implementationselect.ErrInvalidInterfaceID):
+		return recoveryDiagnostic(diagnosticUseInterfaceInvalid, "Rerun `plystra use <interface-id> <constructor-symbol>"+context.selectorSuffix()+"` with one canonical versioned Interface ID.")
+	case errors.Is(err, implementationselect.ErrInvalidConstructor):
+		return recoveryDiagnostic(diagnosticUseConstructorInvalid, "Rerun `plystra use <interface-id> <constructor-symbol>"+context.selectorSuffix()+"` with one visible fully qualified exported constructor symbol.")
 	case errors.Is(err, applicationresolve.ErrManifest) && !errors.Is(err, applicationresolve.ErrConfigurationSelection):
 		return recoveryDiagnostic(diagnosticProjectManifestInvalid, "Correct the reported root or dependency Project plystra.yaml, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrInheritedConflict):

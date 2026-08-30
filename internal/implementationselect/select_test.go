@@ -75,14 +75,29 @@ func TestSelectRejectsInvalidIdentityBeforeProjectMutation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
 	}
-	tests := []implementationselect.Options{
-		{Start: root, InterfaceID: "email.send", Constructor: "example.com/email/smtp.New"},
-		{Start: root, InterfaceID: "email.send/v1", Constructor: "example.com/email/smtp.new"},
+	tests := []struct {
+		name    string
+		options implementationselect.Options
+		want    error
+	}{
+		{
+			name:    "Interface ID",
+			options: implementationselect.Options{Start: root, InterfaceID: "email.send", Constructor: "example.com/email/smtp.New"},
+			want:    implementationselect.ErrInvalidInterfaceID,
+		},
+		{
+			name:    "constructor",
+			options: implementationselect.Options{Start: root, InterfaceID: "email.send/v1", Constructor: "example.com/email/smtp.new"},
+			want:    implementationselect.ErrInvalidConstructor,
+		},
 	}
-	for _, options := range tests {
-		if _, err := implementationselect.Select(t.Context(), options); !errors.Is(err, implementationselect.ErrSelect) {
-			t.Fatalf("Select(%#v) = %v", options, err)
-		}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := implementationselect.Select(t.Context(), test.options)
+			if !errors.Is(err, implementationselect.ErrSelect) || !errors.Is(err, test.want) {
+				t.Fatalf("Select(%#v) = %v, want ErrSelect and %v", test.options, err, test.want)
+			}
+		})
 	}
 	after, err := os.ReadDir(root)
 	if err != nil || len(after) != len(before) {

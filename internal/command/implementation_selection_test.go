@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/diagnosticcode"
 )
 
 func TestRunUseSelectsImplementationOnlyInRequestedConfigurationLayer(t *testing.T) {
@@ -153,6 +154,72 @@ func TestRunUseRejectsInvalidImplementationChoicesAndRestoresProject(t *testing.
 			)
 			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, test.want) {
 				t.Fatalf("rejected plystra use = exit %d, stdout %q, stderr %q; want %q", exitCode, stdout, stderr, test.want)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("rejected plystra use changed the Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
+func TestRunUseClassifiesMalformedInputsWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name        string
+		interfaceID string
+		constructor string
+		selectors   []string
+		environment map[string]string
+		problem     string
+		recovery    string
+		diagnostic  string
+		reject      string
+	}{
+		{
+			name:        "invalid Interface preserves explicit environment",
+			interfaceID: "email.send",
+			constructor: "example.com/acme/implementation-use/smtp.New",
+			selectors:   []string{"--env", "production"},
+			environment: map[string]string{
+				"PLYSTRA_CONFIG": "deploy/ignored.yaml",
+				"PLYSTRA_ENV":    "ignored",
+			},
+			problem:    "parse exact Interface ID",
+			recovery:   "Rerun `plystra use <interface-id> <constructor-symbol> --env \"production\"` with one canonical versioned Interface ID.",
+			diagnostic: diagnosticcode.UseInterfaceInvalid,
+			reject:     "ignored",
+		},
+		{
+			name:        "invalid constructor preserves ambient configuration",
+			interfaceID: "email.send/v1",
+			constructor: "example.com/acme/implementation-use/smtp.new",
+			environment: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"},
+			problem:     "parse fully qualified Implementation constructor",
+			recovery:    "Rerun `plystra use <interface-id> <constructor-symbol> --config \"deploy/customer.yaml\"` with one visible fully qualified exported constructor symbol.",
+			diagnostic:  diagnosticcode.UseConstructorInvalid,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeImplementationSelectionCommandProject(t)
+			before := commandTree(t, root)
+			arguments := append([]string{"use", test.interfaceID, test.constructor}, test.selectors...)
+			exitCode, stdout, stderr := runCommand(
+				t,
+				arguments,
+				filepath.Join(root, "smtp"),
+				implementationSelectionCommandEnvironment(test.environment),
+			)
+			if exitCode != 1 || stdout != "" || !commandContainsAll(
+				stderr,
+				test.problem,
+				"Recovery:\n"+test.recovery+"\n",
+				"Diagnostic: "+test.diagnostic,
+			) {
+				t.Fatalf("rejected plystra use = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			if strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 || test.reject != "" && strings.Contains(stderr, test.reject) {
+				t.Fatalf("rejected plystra use emitted unstable diagnostic framing: %q", stderr)
 			}
 			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("rejected plystra use changed the Project:\nbefore: %#v\nafter:  %#v", before, after)

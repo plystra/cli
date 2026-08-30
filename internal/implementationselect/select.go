@@ -23,6 +23,12 @@ var (
 	// ErrSelect reports a failed Implementation-selection and regeneration
 	// transaction.
 	ErrSelect = errors.New("select Interface Implementation")
+	// ErrInvalidInterfaceID reports a malformed Interface identity supplied to
+	// the public selection workflow.
+	ErrInvalidInterfaceID = errors.New("invalid Interface selection ID")
+	// ErrInvalidConstructor reports a malformed fully qualified constructor
+	// symbol supplied to the public selection workflow.
+	ErrInvalidConstructor = errors.New("invalid Implementation selection constructor")
 	// ErrConfigurationWrite reports that the selected current-Project document
 	// could not safely produce the planned Implementation-selection write.
 	ErrConfigurationWrite = errors.New("prepare Interface Implementation selection")
@@ -102,11 +108,11 @@ func Select(ctx context.Context, options Options) (Result, error) {
 	}
 	id, err := interfaceid.Parse(options.InterfaceID)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: parse exact Interface ID: %w", ErrSelect, err)
+		return Result{}, fmt.Errorf("%w: %w: parse exact Interface ID: %w", ErrSelect, ErrInvalidInterfaceID, err)
 	}
 	constructor, err := constructorsymbol.Parse(options.Constructor)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: parse fully qualified Implementation constructor: %w", ErrSelect, err)
+		return Result{}, fmt.Errorf("%w: %w: parse fully qualified Implementation constructor: %w", ErrSelect, ErrInvalidConstructor, err)
 	}
 	module, err := projectlocate.Find(options.Start)
 	if err != nil {

@@ -55,6 +55,8 @@ Authored Interface failures distinguish invalid directives, canonical Go contrac
 
 Authored Implementation failures distinguish invalid directives, Config schemas, required or optional Interface parameters, constructor results, and structural conformance. Apply the emitted recovery to the reported Project-relative Go source. Fix dependency-owned source in its owning Project or select a corrected module version; never edit the Module Cache copy.
 
+`plystra use` rejects malformed canonical Interface IDs with `PLYSTRA_USE_INTERFACE_INVALID` and malformed fully qualified constructor symbols with `PLYSTRA_USE_CONSTRUCTOR_INVALID` before Project mutation. Run the emitted corrected command with the same default, environment, or complete-replacement selection.
+
 Interface and Implementation scaffold failures distinguish invalid or missing identities, unsafe package paths, and existing targets before mutation. Follow the emitted corrected command or replacement choice.
 
 Generated source under `generated/` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.

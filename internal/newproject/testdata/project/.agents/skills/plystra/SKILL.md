@@ -1224,6 +1224,11 @@ recovery action or code.
 - Ambiguous Implementation: run plystra use <interface-id> <constructor-symbol>
   with the same --env or --config selector used for the application. Do not add
   priorities or rely on discovery order.
+- Invalid plystra use input: PLYSTRA_USE_INTERFACE_INVALID identifies a
+  malformed canonical versioned Interface ID, while
+  PLYSTRA_USE_CONSTRUCTOR_INVALID identifies a malformed fully qualified
+  exported constructor symbol. Run the corrected command emitted by Recovery;
+  it preserves the active selector and fails before Project mutation.
 - Incompatible contract: compare exact request, response, closed field
   constraints, semantic errors, typed semantics, and extension metadata.
   Implement the visible contract or create a new version instead of weakening

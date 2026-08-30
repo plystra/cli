@@ -98,6 +98,8 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.ImplementationCreatePackageInvalid,
 		diagnosticcode.ImplementationCreateInterfaceNotFound,
 		diagnosticcode.ImplementationCreateTargetExists,
+		diagnosticcode.UseInterfaceInvalid,
+		diagnosticcode.UseConstructorInvalid,
 	}
 	seen := make(map[string]struct{}, len(codes))
 	for _, code := range codes {

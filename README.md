@@ -715,6 +715,12 @@ or `plystra.Optional[T]` parameter, invalid constructor result, and structural
 conformance failure. Follow the code-specific recovery against the reported
 Project-relative Go source; never edit a dependency's Module Cache copy.
 
+`plystra use` rejects a malformed canonical Interface ID with
+`PLYSTRA_USE_INTERFACE_INVALID` and a malformed fully qualified constructor
+symbol with `PLYSTRA_USE_CONSTRUCTOR_INVALID`. Both failures occur before
+Project mutation, and their corrected command preserves the selected default,
+environment, or complete-replacement mode.
+
 The current `plystra check` implementation is read-only. It verifies the
 selected dependency composition and generated fixed point, then runs
 `go test -mod=readonly ./...` from the Project root. Later roadmap gates add

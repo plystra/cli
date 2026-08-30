@@ -25,6 +25,7 @@ import (
 	"github.com/plystra/cli/internal/implementationcreate"
 	"github.com/plystra/cli/internal/implementationdecl"
 	"github.com/plystra/cli/internal/implementationinventory"
+	"github.com/plystra/cli/internal/implementationselect"
 	"github.com/plystra/cli/internal/interfacecontract"
 	"github.com/plystra/cli/internal/interfacecreate"
 	"github.com/plystra/cli/internal/interfacedecl"
@@ -295,6 +296,8 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "invalid Implementation create package", err: implementationcreate.ErrInvalidPackage, code: diagnosticcode.ImplementationCreatePackageInvalid},
 		{name: "missing Implementation create Interface", err: implementationcreate.ErrInterfaceNotFound, code: diagnosticcode.ImplementationCreateInterfaceNotFound},
 		{name: "existing Implementation create target", err: implementationcreate.ErrTargetExists, code: diagnosticcode.ImplementationCreateTargetExists},
+		{name: "invalid use Interface", err: implementationselect.ErrInvalidInterfaceID, code: diagnosticcode.UseInterfaceInvalid},
+		{name: "invalid use constructor", err: implementationselect.ErrInvalidConstructor, code: diagnosticcode.UseConstructorInvalid},
 	}
 	for _, test := range tests {
 		test := test
@@ -305,6 +308,19 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 				t.Fatalf("primaryActionableDiagnostic(%v) = %#v, %t; want canonical code %q", test.err, diagnostic, ok, test.code)
 			}
 		})
+	}
+}
+
+func TestPrimaryActionableDiagnosticLeavesBroadUseFailuresUnclassified(t *testing.T) {
+	t.Parallel()
+
+	for _, err := range []error{
+		implementationselect.ErrSelect,
+		implementationselect.ErrConfigurationWrite,
+	} {
+		if diagnostic, ok := primaryActionableDiagnostic(err, recoveryContext{}); ok {
+			t.Fatalf("primaryActionableDiagnostic(%v) = %#v, true; want no guessed classification", err, diagnostic)
+		}
 	}
 }
 
