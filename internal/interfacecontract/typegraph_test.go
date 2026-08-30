@@ -152,6 +152,88 @@ type Node struct {
 	}
 }
 
+func TestValidateNormalizesZeroValueOmissionSemantics(t *testing.T) {
+	t.Parallel()
+
+	source := `package createv1
+
+import (
+	"context"
+	"time"
+)
+
+//plystra:interface order.create/v1
+type Interface interface {
+	Create(context.Context, Request) (Response, error)
+}
+
+type Request struct {
+	Boolean   bool              ` + "`plystra:\"1\"`" + `
+	String    string            ` + "`json:\"string,omitempty\" plystra:\"2\"`" + `
+	Int32     int32             ` + "`plystra:\"3\"`" + `
+	Int64     int64             ` + "`plystra:\"4\"`" + `
+	Uint32    uint32            ` + "`plystra:\"5\"`" + `
+	Uint64    uint64            ` + "`plystra:\"6\"`" + `
+	Float32   float32           ` + "`plystra:\"7\"`" + `
+	Float64   float64           ` + "`plystra:\"8\"`" + `
+	Message   Detail            ` + "`plystra:\"9\"`" + `
+	Timestamp time.Time         ` + "`plystra:\"10\"`" + `
+	Duration  time.Duration     ` + "`plystra:\"11\"`" + `
+	Bytes     []byte            ` + "`plystra:\"12\"`" + `
+	Repeated  []string          ` + "`plystra:\"13\"`" + `
+	Map       map[string]string ` + "`plystra:\"14\"`" + `
+	Required  string            ` + "`plystra:\"15,required\"`" + `
+}
+
+type Response struct {
+	Message Detail ` + "`plystra:\"1\"`" + `
+}
+
+type Detail struct {
+	Value    string ` + "`plystra:\"1\"`" + `
+	Required int64  ` + "`plystra:\"2,required\"`" + `
+}
+`
+	contract, err := validateSource(t, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{
+		"Boolean",
+		"String",
+		"Int32",
+		"Int64",
+		"Uint32",
+		"Uint64",
+		"Float32",
+		"Float64",
+		"Message",
+		"Timestamp",
+		"Duration",
+	} {
+		if field := requestField(t, contract, name); !field.OmissionEqualsZeroValue() {
+			t.Fatalf("field %s does not normalize omission to the ordinary Go zero value", name)
+		}
+	}
+	for _, name := range []string{"Bytes", "Repeated", "Map", "Required"} {
+		if field := requestField(t, contract, name); field.OmissionEqualsZeroValue() {
+			t.Fatalf("field %s claims unsupported zero-value omission semantics", name)
+		}
+	}
+	response := contract.ResponseFields()
+	if len(response) != 1 || !response[0].OmissionEqualsZeroValue() {
+		t.Fatalf("response fields = %#v", response)
+	}
+	detail, exists := contract.Message("Detail")
+	if !exists || len(detail.Fields()) != 2 || !detail.Fields()[0].OmissionEqualsZeroValue() || detail.Fields()[1].OmissionEqualsZeroValue() {
+		t.Fatalf("Detail = %#v, %t", detail, exists)
+	}
+	if (interfacecontract.Field{}).OmissionEqualsZeroValue() {
+		t.Fatal("zero Field claims zero-value omission semantics")
+	}
+}
+
 func TestValidateAcceptsAliasesOfSupportedExactTypes(t *testing.T) {
 	t.Parallel()
 

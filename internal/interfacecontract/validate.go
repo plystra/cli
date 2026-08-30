@@ -84,6 +84,33 @@ func (f Field) Number() uint64 { return f.number }
 // Required reports whether the canonical field is required.
 func (f Field) Required() bool { return f.required }
 
+// OmissionEqualsZeroValue reports whether omitting the field and supplying its
+// ordinary Go zero value are semantically identical after canonical
+// conversion. The initial contract applies this only to non-required scalar
+// and non-pointer value-message fields; byte sequences and collections retain
+// no implied nil-versus-empty semantics.
+func (f Field) OmissionEqualsZeroValue() bool {
+	if f.required {
+		return false
+	}
+	switch f.fieldType.Kind() {
+	case TypeBoolean,
+		TypeString,
+		TypeInt32,
+		TypeInt64,
+		TypeUint32,
+		TypeUint64,
+		TypeFloat32,
+		TypeFloat64,
+		TypeMessage,
+		TypeTimestamp,
+		TypeDuration:
+		return true
+	default:
+		return false
+	}
+}
+
 // JSONName returns the explicitly declared JSON name, or an empty string.
 func (f Field) JSONName() string { return f.jsonName }
 

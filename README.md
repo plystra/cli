@@ -132,8 +132,10 @@ partial response; canonical, Alias, and direct handler paths agree. ProtoJSON
 requests have their own 1 MiB, depth-64, and 65,536-token preflight before
 strict decoding with unknown or duplicate fields and invalid UTF-8 rejected,
 followed by the same generated message and canonical request validation. A required `null` fails requiredness,
-an optional non-nullable `null` becomes absence, explicit zero values retain
-presence, full-range integers remain exact, and non-finite canonical numbers
+and an optional non-nullable `null` becomes absence. For non-required
+non-pointer scalar and value-message Interface fields, omission and an explicit
+Go zero value normalize to the same ordinary Go value; wire presence is not
+business-observable, and full-range integers remain exact. Non-finite canonical numbers
 fail before root-context creation or Provider invocation. ProtoJSON responses
 are validated against the same exact generated message and canonical response,
 then limited independently to 1 MiB with no partial response. Canonical and

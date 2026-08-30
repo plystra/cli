@@ -555,8 +555,10 @@ direct handler paths. ProtoJSON requests independently accept at most 1 MiB,
 unknown or duplicate fields, malformed or trailing documents, invalid UTF-8,
 excessive work, the enum zero sentinel, and non-finite canonical numbers fail before root
 creation or Provider invocation. Required `null` fails requiredness, optional
-non-nullable `null` becomes absence, explicit zero values remain present, and
-full-range integers remain exact. ProtoJSON responses run the same exact
+non-nullable `null` becomes absence, and non-required non-pointer scalar and
+value-message Interface fields normalize omission and an explicit Go zero
+value to the same ordinary Go value. Wire presence is not business-observable,
+and full-range integers remain exact. ProtoJSON responses run the same exact
 message and canonical response validation, then enforce their own 1 MiB
 serialized limit without writing a partial response. Canonical and Alias
 binary and ProtoJSON calls therefore reach the same canonical request and
@@ -1387,7 +1389,8 @@ types, unknown nested fields, cyclic object input, output over 1 MiB, more than
 paths, and direct handler invocation. A rejection must return no partial
 response. For ProtoJSON, include malformed and trailing documents, invalid
 UTF-8, top-level and nested unknown fields, duplicate fields, required and optional `null`,
-explicit zero values, full-range integers, enum sentinels, non-finite values,
+omitted-versus-explicit-zero equivalence for non-required scalar and
+value-message fields, full-range integers, enum sentinels, non-finite values,
 more than 64 nested containers, more than 65,536 structural tokens, request and
 response payloads over 1 MiB, and canonical/Alias parity. A ProtoJSON rejection
 must likewise return no partial canonical response and must not enter the
