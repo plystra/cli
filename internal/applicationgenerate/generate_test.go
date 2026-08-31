@@ -236,6 +236,7 @@ func TestGenerateKeepsDormantConstructorConfigurationOutOfRuntimeBootstrap(t *te
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance(without dormant configuration): %v", err)
 	}
+	baselineJavaScript := snapshotSubtree(t, root, "generated/sdk/javascript")
 
 	writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf(`interfaces:
   use:
@@ -263,6 +264,9 @@ config:
 	}
 	if manifest.ApplicationModelDigest() != baselineProvenance.ApplicationModelDigest() {
 		t.Fatalf("dormant-only configuration changed application_model_digest: %q != %q", manifest.ApplicationModelDigest(), baselineProvenance.ApplicationModelDigest())
+	}
+	if javascript := snapshotSubtree(t, root, "generated/sdk/javascript"); !reflect.DeepEqual(javascript, baselineJavaScript) {
+		t.Fatalf("dormant-only configuration changed JavaScript SDK output:\nbefore: %#v\nafter: %#v", baselineJavaScript, javascript)
 	}
 	interfaceProvenance := manifest.InterfaceProvenance()
 	if len(interfaceProvenance.Bindings()) != 0 || len(interfaceProvenance.Constructors()) != 0 {
