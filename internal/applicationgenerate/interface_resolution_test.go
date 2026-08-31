@@ -14,7 +14,7 @@ import (
 	"github.com/plystra/cli/internal/projectcheck"
 )
 
-func TestGenerationAndCheckCollectLocalApplicationRootsBeforeRejectingInvalidGraph(t *testing.T) {
+func TestGenerationAndCheckRejectInvalidRequiredConstructorGraphBeforeMutation(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -53,7 +53,7 @@ func TestGenerationAndCheckCollectLocalApplicationRootsBeforeRejectingInvalidGra
 				"GOPROXY": "off",
 				"GOSUMDB": "off",
 			}))
-			if !errors.Is(err, constructorgraph.ErrMissingBinding) || !strings.Contains(err.Error(), "audit.write/v1") || !strings.Contains(err.Error(), "//plystra:implements app.run/v1") || !strings.Contains(err.Error(), "before generation") {
+			if !errors.Is(err, constructorgraph.ErrMissingBinding) || !strings.Contains(err.Error(), "audit.write/v1") || !strings.Contains(err.Error(), `plystra.yaml interfaces.require["app.run/v1"]`) || !strings.Contains(err.Error(), "example.com/generation-graph/app.New") || !strings.Contains(err.Error(), "before generation") {
 				t.Fatalf("operation error = %v", err)
 			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
@@ -252,7 +252,7 @@ func writeGenerationGraphFailureProject(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	writeModule(t, root, "example.com/generation-graph", "")
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [app.run/v1]}\n")
 	writeFile(t, filepath.Join(root, "generated", "sentinel.txt"), "must remain unchanged\n")
 	writeGenerationGraphInterface(t, root, "app/run/v1", "runv1", "app.run/v1", "Run")
 	writeGenerationGraphInterface(t, root, "audit/write/v1", "writev1", "audit.write/v1", "Write")

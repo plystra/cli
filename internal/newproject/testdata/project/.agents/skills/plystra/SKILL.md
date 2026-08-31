@@ -53,6 +53,7 @@ For a new local behavior, use this sequence:
 
     plystra interface create records.read
     plystra implement records.read/v1 --package ./records
+    # Add records.read/v1 to interfaces.require in the selected plystra.yaml.
     # Edit the authored Interface and Implementation.
     plystra generate
     go test ./...
@@ -65,6 +66,9 @@ compatible Implementations for one required Interface, select the exact
 constructor requested by the application:
 
     plystra use email.send/v1 example.com/acme/email/smtp.New
+
+Implementations are candidates, not roots. Required, current-Project-exposed,
+or transitively required Interfaces activate them; interfaces.use only selects.
 
 The detailed reference below contains complete file shapes and variants. Open
 only the section needed for the current command or authored file.

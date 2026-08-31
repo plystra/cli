@@ -658,6 +658,28 @@ Composition is typed and independent of dependency order:
 - Incompatible inherited Providers, Aliases, or Plugin fields fail with every
   contributing `module@version/plystra.yaml` source.
 
+Interface activation is explicit. Every discovered `//plystra:implements`
+constructor is only a compatible candidate, including constructors authored in
+the current Project. A candidate becomes reachable only when its Interface is
+collected from `interfaces.require`, selected current-Project `http.expose`, or
+another reachable constructor's required Interface parameter. Discovery and
+`interfaces.use` alone create no root, binding, constructor call, lifecycle
+entry, runtime configuration, or generated proxy or adapter.
+
+For an internal application root, add the exact Interface ID to the selected
+document:
+
+```yaml
+interfaces:
+  require:
+    - records.read/v1
+```
+
+To publish the Interface instead, add it to selected current-Project
+`http.expose`; that exposure also creates the root. Do not make an
+Implementation reachable by relying on its package location or discovery
+order.
+
 Resolve an inherited Provider conflict in the current Project at the exact
 canonical key:
 

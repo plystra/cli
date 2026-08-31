@@ -56,12 +56,8 @@ func TestResolveBuildsSelectedInterfaceConstructorGraphFromConfiguration(t *test
 	if len(dependencies) != 2 || dependencies[0].InterfaceID().String() != "audit.write/v1" || dependencies[0].Optional() || !dependencies[0].Available() || dependencies[0].Constructor().String() != "example.com/interface-app/auditone.New" || dependencies[1].InterfaceID().String() != "cache.read/v1" || !dependencies[1].Optional() || dependencies[1].Available() {
 		t.Fatalf("default app dependencies = %#v", dependencies)
 	}
-	if roots := graph.Roots(); len(roots) != 2 || roots[0].InterfaceID().String() != "app.run/v1" || !reflect.DeepEqual(roots[0].Sources(), []string{
-		"example.com/interface-app@local/app/service.go:14:1 //plystra:implements app.run/v1",
+	if roots := graph.Roots(); len(roots) != 1 || roots[0].InterfaceID().String() != "app.run/v1" || !reflect.DeepEqual(roots[0].Sources(), []string{
 		`plystra.yaml interfaces.require["app.run/v1"]`,
-	}) || roots[1].InterfaceID().String() != "audit.write/v1" || !reflect.DeepEqual(roots[1].Sources(), []string{
-		"example.com/interface-app@local/auditone/service.go:11:1 //plystra:implements audit.write/v1",
-		"example.com/interface-app@local/audittwo/service.go:11:1 //plystra:implements audit.write/v1",
 	}) {
 		t.Fatalf("default roots = %#v", roots)
 	}
@@ -275,7 +271,7 @@ func TestResolveKeepsGeneratedManifestFromOverridingCurrentInterfaceSelection(t 
 	}
 }
 
-func TestResolveCollectsLocalImplementationDeclarationsAsApplicationRoots(t *testing.T) {
+func TestResolveRetainsUnrequiredImplementationsAsCandidatesOnly(t *testing.T) {
 	t.Parallel()
 
 	parent := t.TempDir()
@@ -296,7 +292,26 @@ replace example.com/interface-dependency => ../dependency
 `)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	writeResolvedInterface(t, root, "app/run/v1", "runv1", "app.run/v1", "Run")
-	writeResolvedSimpleImplementationForModule(t, root, "example.com/local-application", "app", "app.run/v1", "app/run/v1", "Run")
+	writeResolvedInterface(t, root, "audit/write/v1", "writev1", "audit.write/v1", "Write")
+	writeFile(t, filepath.Join(root, "app", "service.go"), `package app
+
+import (
+	"context"
+
+	runv1 "example.com/local-application/interfaces/app/run/v1"
+	writev1 "example.com/local-application/interfaces/audit/write/v1"
+)
+
+type Service struct{}
+
+//plystra:implements app.run/v1
+func New(write writev1.Interface) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) {
+	return runv1.Response{}, nil
+}
+`)
+	writeResolvedSimpleImplementationForModule(t, root, "example.com/local-application", "alternate", "app.run/v1", "app/run/v1", "Run")
 	before := snapshotTree(t, parent)
 
 	resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
@@ -310,19 +325,30 @@ replace example.com/interface-dependency => ../dependency
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	roots := resolved.InterfaceResolution().Graph().Roots()
-	if len(roots) != 1 || roots[0].InterfaceID().String() != "app.run/v1" || !reflect.DeepEqual(roots[0].Sources(), []string{
-		"example.com/local-application@local/app/service.go:11:1 //plystra:implements app.run/v1",
-	}) {
-		t.Fatalf("local application roots = %#v", roots)
+	resolution := resolved.InterfaceResolution()
+	if roots := resolution.Graph().Roots(); len(roots) != 0 {
+		t.Fatalf("unrequired Implementation candidates created roots = %#v", roots)
 	}
-	if got := resolvedSelectionSummaries(resolved.InterfaceResolution()); !reflect.DeepEqual(got, []string{
-		"app.run/v1=example.com/local-application/app.New:unique-compatible",
-	}) {
-		t.Fatalf("local application selections = %v", got)
+	if selections := resolution.Selections(); len(selections) != 0 {
+		t.Fatalf("unrequired Implementation candidates created selections = %#v", selections)
+	}
+	if constructors := resolution.Graph().ConstructionOrder(); len(constructors) != 0 {
+		t.Fatalf("unrequired Implementation candidates entered the constructor graph = %#v", constructors)
+	}
+	candidates := make(map[string]bool)
+	for _, implementation := range resolved.Implementations().Implementations() {
+		candidates[implementation.Symbol().String()] = implementation.Local()
+	}
+	wantCandidates := map[string]bool{
+		"example.com/interface-dependency/unused.New": false,
+		"example.com/local-application/alternate.New": true,
+		"example.com/local-application/app.New":       true,
+	}
+	if !reflect.DeepEqual(candidates, wantCandidates) {
+		t.Fatalf("visible Implementation candidates = %#v, want %#v", candidates, wantCandidates)
 	}
 	if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
-		t.Fatalf("local application-root resolution mutated files:\nbefore: %#v\nafter: %#v", before, after)
+		t.Fatalf("candidate-only resolution mutated files:\nbefore: %#v\nafter: %#v", before, after)
 	}
 }
 
@@ -337,7 +363,7 @@ func TestResolveAppliesNoDiscoveryOrFilesystemOrderSelectionPriority(t *testing.
 	for index, order := range orders {
 		root := t.TempDir()
 		writeModule(t, root, "example.com/order-independent")
-		writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+		writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [app.run/v1]}\n")
 		writeResolvedInterface(t, root, "app/run/v1", "runv1", "app.run/v1", "Run")
 		for _, packageName := range order {
 			writeResolvedSimpleImplementationForModule(t, root, "example.com/order-independent", packageName, "app.run/v1", "app/run/v1", "Run")

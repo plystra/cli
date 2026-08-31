@@ -1105,6 +1105,15 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 	if !bytes.Contains(readme, []byte("JavaScript SDK generation requires Connect")) {
 		t.Fatalf("generated README omits the JavaScript Connect requirement:\n%s", readme)
 	}
+	for _, activationGuidance := range [][]byte{
+		[]byte("`plystra implement` creates a validated compatible candidate"),
+		[]byte("`interfaces.require` set for an internal application root"),
+		[]byte("Discovery and `interfaces.use` alone never create a root"),
+	} {
+		if !bytes.Contains(readme, activationGuidance) {
+			t.Fatalf("generated README omits candidate-only activation guidance %q:\n%s", activationGuidance, readme)
+		}
+	}
 	for _, toolchainGuidance := range [][]byte{
 		[]byte("top-level `transport_toolchain` record"),
 		[]byte("exact embedded `go/format` runtime"),
@@ -1928,6 +1937,9 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"### Change ordinary business behavior",
 		"adds two public concepts",
 		"the other concrete Implementation package",
+		"Implementations are candidates, not roots",
+		"transitively required Interfaces activate them",
+		"interfaces.use only selects",
 		"### Select one environment",
 		"Use --config only when the task",
 		"one complete replacement document; it is an advanced",

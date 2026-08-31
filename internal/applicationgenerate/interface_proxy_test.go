@@ -12,7 +12,7 @@ import (
 	"github.com/plystra/cli/internal/applicationgenerate"
 )
 
-func TestGenerateInstallsOnlyReachableTypedInterfaceProxiesAndChecksDrift(t *testing.T) {
+func TestGenerateInstallsOnlyReachableInterfaceRuntimeAndChecksProxyDrift(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -55,6 +55,31 @@ func (*Service) Write(context.Context, writev1.Request) (writev1.Response, error
 	return writev1.Response{}, nil
 }
 `)
+	writeGenerationGraphInterface(t, root, "unused/local/v1", "localv1", "unused.local/v1", "Run")
+	writeFile(t, filepath.Join(root, "localcandidate", "service.go"), `package localcandidate
+
+import (
+	"context"
+
+	localv1 "example.com/acme/interface-proxy-app/interfaces/unused/local/v1"
+)
+
+type Config struct {
+	Label string
+}
+
+type Service struct{}
+
+//plystra:implements unused.local/v1
+func New(Config) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Start(context.Context) error { return nil }
+func (*Service) Stop(context.Context) error  { return nil }
+
+func (*Service) Run(context.Context, localv1.Request) (localv1.Response, error) {
+	return localv1.Response{}, nil
+}
+`)
 	dependencyRoot := filepath.Join(t.TempDir(), "unused-dependency")
 	writeModule(t, dependencyRoot, "example.com/platform/unused", "")
 	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
@@ -90,11 +115,24 @@ replace example.com/platform/unused => %s
 	}
 	appProxy := "generated/go/proxies/app/run/v1/proxy_gen.go"
 	auditProxy := "generated/go/proxies/audit/write/v1/proxy_gen.go"
-	unusedProxy := "generated/go/proxies/unused/notify/v1/proxy_gen.go"
+	unusedDependencyProxy := "generated/go/proxies/unused/notify/v1/proxy_gen.go"
+	unusedLocalProxy := "generated/go/proxies/unused/local/v1/proxy_gen.go"
 	for _, path := range []string{appProxy, auditProxy} {
 		assertFileExists(t, root, path)
 	}
-	assertFileMissing(t, root, unusedProxy)
+	for _, path := range []string{
+		unusedDependencyProxy,
+		unusedLocalProxy,
+		"generated/go/adapters/implementations/unused/local/v1/adapter_gen.go",
+	} {
+		assertFileMissing(t, root, path)
+	}
+	const unusedLocalConstructor = "example.com/acme/interface-proxy-app/localcandidate.New"
+	for _, entry := range snapshotGenerated(t, root) {
+		if bytes.Contains(entry.data, []byte(unusedLocalConstructor)) {
+			t.Fatalf("unrequired local candidate entered generated proxy, adapter, assembly, bootstrap, configuration, lifecycle, or provenance at %s", entry.path)
+		}
+	}
 	appSource := readFile(t, root, appProxy)
 	for _, required := range [][]byte{
 		[]byte(`contract "example.com/acme/interface-proxy-app/interfaces/app/run/v1"`),

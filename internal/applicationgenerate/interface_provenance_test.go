@@ -127,8 +127,7 @@ config:
 		t.Fatalf("binding order = %#v", bindings)
 	}
 	configurationBinding := bindings[0]
-	if len(configurationBinding.RootSources()) != 1 ||
-		!strings.Contains(configurationBinding.RootSources()[0], "//plystra:implements configuration.owner/v1") ||
+	if len(configurationBinding.RootSources()) != 0 ||
 		!slices.Equal(configurationBinding.RequiringConstructors(), []string{orderConstructor}) ||
 		configurationBinding.Selection().Constructor() != configConstructor ||
 		configurationBinding.Selection().Reason() != interfaceprovenance.SelectionUniqueCompatible ||

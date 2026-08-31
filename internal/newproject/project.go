@@ -769,6 +769,8 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"### Change ordinary business behavior",
 		"adds two public concepts",
 		"the other concrete Implementation package",
+		"Implementations are candidates, not roots",
+		"interfaces.use only selects",
 		"### Select one environment",
 		"Use --config only when the task",
 		"one complete replacement document; it is an advanced",

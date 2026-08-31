@@ -10,7 +10,7 @@ import (
 	"github.com/plystra/cli/internal/diagnosticcode"
 )
 
-func TestPublicResolvingCommandsCollectLocalApplicationRootsAndRejectInvalidGraphWithoutMutation(t *testing.T) {
+func TestPublicResolvingCommandsRejectInvalidRequiredConstructorGraphWithoutMutation(t *testing.T) {
 	t.Parallel()
 
 	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
@@ -25,7 +25,7 @@ func TestPublicResolvingCommandsCollectLocalApplicationRootsAndRejectInvalidGrap
 				"app.run/v1",
 				"audit.write/v1",
 				"example.com/command-graph/app.New",
-				"//plystra:implements app.run/v1",
+				`plystra.yaml interfaces.require["app.run/v1"]`,
 				"Recovery:\nCreate one compatible local Implementation by running `plystra implement audit.write/v1 --package <project-relative-package>`.\n",
 				"Diagnostic: "+diagnosticcode.ResolveMissingImplementation,
 			) {
@@ -498,7 +498,7 @@ func writeCommandGraphFailureProject(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/command-graph\n\ngo 1.26\n")
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [app.run/v1]}\n")
 	writeCommandFile(t, filepath.Join(root, "generated", "sentinel.txt"), "must remain unchanged\n")
 	writeCommandGraphInterface(t, root, "app/run/v1", "runv1", "app.run/v1", "Run")
 	writeCommandGraphInterface(t, root, "audit/write/v1", "writev1", "audit.write/v1", "Write")
@@ -539,7 +539,7 @@ func writeCommandCycleFailureProject(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/command-cycle\n\ngo 1.26\n")
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [cycle.a/v1]}\n")
 	writeCommandFile(t, filepath.Join(root, "generated", "sentinel.txt"), "must remain unchanged\n")
 	writeCommandGraphInterface(t, root, "cycle/a/v1", "av1", "cycle.a/v1", "A")
 	writeCommandGraphInterface(t, root, "cycle/b/v1", "bv1", "cycle.b/v1", "B")
