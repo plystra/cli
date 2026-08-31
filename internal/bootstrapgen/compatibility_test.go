@@ -131,6 +131,32 @@ func TestApplicationModelCompatibilityChangesForEveryBuildAffectingDeclaration(t
 	}
 }
 
+func TestExecutableApplicationModelCompatibilityExcludesDormantChoices(t *testing.T) {
+	t.Parallel()
+
+	manifest := compatibilityManifest(t, `interfaces:
+  require: [records.read/v1]
+  use:
+    audit.write/v1: example.com/acme/audit.New
+    records.read/v1: example.com/acme/records.New
+`)
+	digest := bootstrapDigest("c")
+	compatibility, err := bootstrapgen.NewExecutableApplicationModelCompatibility(digest, manifest, []string{"records.read/v1"})
+	if err != nil || !compatibility.Valid() {
+		t.Fatalf("NewExecutableApplicationModelCompatibility = %#v, %v", compatibility, err)
+	}
+	canonical := string(compatibility.CanonicalJSON())
+	if !strings.Contains(canonical, `"constructor":"example.com/acme/records.New"`) || strings.Contains(canonical, "audit.New") || strings.Contains(canonical, "audit.write/v1") {
+		t.Fatalf("executable compatibility did not isolate active explicit choices: %s", canonical)
+	}
+	for _, executable := range [][]string{{""}, {"records.read/v1", "records.read/v1"}, {"records.read"}} {
+		invalid, err := bootstrapgen.NewExecutableApplicationModelCompatibility(digest, manifest, executable)
+		if invalid.Valid() || !errors.Is(err, bootstrapgen.ErrInvalidApplicationModelCompatibility) {
+			t.Fatalf("NewExecutableApplicationModelCompatibility(%v) = %#v, %v", executable, invalid, err)
+		}
+	}
+}
+
 func TestApplicationModelCompatibilityRejectsInvalidCompiledDigest(t *testing.T) {
 	t.Parallel()
 

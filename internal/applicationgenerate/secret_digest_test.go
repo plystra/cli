@@ -74,6 +74,7 @@ func (*Service) Create(context.Context, createv1.Request) (createv1.Response, er
 }
 `)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `capabilities: {require: [email.send/v1]}
+interfaces: {use: {order.create/v1: example.com/acme/secret-free-digests/configowner.New}}
 config:
   example.com/acme/secret-free-digests/configowner.New:
     password: {env: PLYSTRA_DIGEST_SECRET}

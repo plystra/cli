@@ -108,6 +108,7 @@ const (
 const (
 	ConstructorConfigurationSchemaInvalid = Prefix + "CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID"
 	ConstructorConfigurationValuesInvalid = Prefix + "CONSTRUCTOR_CONFIGURATION_VALUES_INVALID"
+	ConstructorConfigurationUnselected    = Prefix + "CONSTRUCTOR_CONFIGURATION_UNSELECTED"
 )
 
 // Valid reports whether value is one bounded canonical Plystra diagnostic

@@ -273,6 +273,10 @@ const (
 
 var runtimeConfigurationSchemas = map[string]map[string]runtimeConfigurationFieldKind{}
 
+var runtimeExecutableInterfaceChoices = map[string]struct{}{}
+
+var runtimeExecutableConstructors = map[string]struct{}{}
+
 const (
 	runtimeEnvironmentVariable   = "PLYSTRA_ENV"
 	runtimeConfigurationVariable = "PLYSTRA_CONFIG"
@@ -418,6 +422,9 @@ func runtimeApplicationModelInterfaces(node *yaml.Node) ([]string, []map[string]
 		constructor, valueErr := runtimeString(choices[interfaceID])
 		if valueErr != nil || !validRuntimeConstructorSymbol(constructor) {
 			return nil, nil, nil, runtimeConfigurationError("interfaces.use[%q] must be a fully qualified Implementation constructor symbol", interfaceID)
+		}
+		if _, executable := runtimeExecutableInterfaceChoices[interfaceID]; !executable {
+			continue
 		}
 		implementations = append(implementations, map[string]any{
 			"constructor": constructor,
@@ -1278,6 +1285,12 @@ func mergeRuntimeConfigurations(lowerNode, upperNode *yaml.Node) (*yaml.Node, bo
 	for pluginID := range pluginIDs {
 		schema, selected := runtimeConfigurationSchemas[pluginID]
 		if !selected {
+			if validRuntimeConstructorSymbol(pluginID) {
+				if _, executable := runtimeExecutableConstructors[pluginID]; !executable {
+					continue
+				}
+				return nil, false, runtimeConfigurationError("config targets active constructor %q without a generated runtime binding", pluginID)
+			}
 			return nil, false, runtimeConfigurationError("config targets unselected Plugin %q", pluginID)
 		}
 		if parsed, parseErr := kernelplugin.ParseID(pluginID); parseErr != nil || parsed.String() != pluginID {

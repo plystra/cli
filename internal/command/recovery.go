@@ -161,6 +161,7 @@ const (
 const (
 	diagnosticConstructorConfigurationSchemaInvalid = diagnosticcode.ConstructorConfigurationSchemaInvalid
 	diagnosticConstructorConfigurationValuesInvalid = diagnosticcode.ConstructorConfigurationValuesInvalid
+	diagnosticConstructorConfigurationUnselected    = diagnosticcode.ConstructorConfigurationUnselected
 )
 
 func commandRecoveryContext(configurationPath, environmentName string, environment []string) recoveryContext {
@@ -356,6 +357,8 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticConstructorConfigurationSchemaInvalid, "Use the fully qualified symbol of a discovered constructor with a compiled Go Config schema in "+context.configurationTarget()+", or remove that constructor configuration entry, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrConfigurationValues):
 		return recoveryDiagnostic(diagnosticConstructorConfigurationValuesInvalid, "Correct the reported constructor configuration field in "+context.configurationTarget()+" to match its compiled Go Config field type, then rerun the command.")
+	case errors.Is(err, applicationresolve.ErrUnownedConstructorConfiguration):
+		return recoveryDiagnostic(diagnosticConstructorConfigurationUnselected, "Name the reported constructor in an effective interfaces.use entry, make it reachable through an Interface requirement, or remove its configuration from "+context.configurationTarget()+", then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrApplyOverlay):
 		return recoveryDiagnostic(diagnosticEnvironmentOverlayInvalid, invalidConfigurationRecovery(context))
 	case errors.Is(err, applicationmeta.ErrInvalidManifest), errors.Is(err, configurationresolve.ErrInvalidConfiguration):

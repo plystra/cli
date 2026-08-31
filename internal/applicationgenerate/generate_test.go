@@ -212,6 +212,69 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 	}
 }
 
+func TestGenerateKeepsDormantConstructorConfigurationOutOfRuntimeBootstrap(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "example.com/acme/dormant-configuration"
+	root := t.TempDir()
+	writeApplicationModule(t, root, modulePath)
+	constructor := writeConstructorConfigurationOwner(t, root, modulePath, true)
+	const secretTarget = "PLYSTRA_DORMANT_CONFIGURATION_SECRET"
+	writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf(`interfaces:
+  use:
+    configuration.owner/v1: %s
+config:
+  %s:
+    endpoint: smtp.internal
+    password: {env: %s}
+`, constructor, constructor, secretTarget))
+	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+
+	result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: environment,
+		Validate:    func(_ context.Context, _ string) error { return nil },
+	})
+	if err != nil || !result.Report().Clean() {
+		t.Fatalf("Generate dormant constructor configuration without a resolved Secret = changes %#v, %v", result.Report().Changes(), err)
+	}
+	manifest, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance(dormant configuration): %v", err)
+	}
+	interfaceProvenance := manifest.InterfaceProvenance()
+	if len(interfaceProvenance.Bindings()) != 0 || len(interfaceProvenance.Constructors()) != 0 {
+		t.Fatalf("dormant constructor configuration entered executable Interface provenance: %#v", interfaceProvenance)
+	}
+	assembly := readFile(t, root, "generated/go/assembly/interfaces_gen.go")
+	bootstrap := readFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
+	for path, data := range map[string][]byte{
+		"generated/go/assembly/interfaces_gen.go": assembly,
+		"generated/go/bootstrap/bootstrap_gen.go": bootstrap,
+	} {
+		for _, forbidden := range []string{constructor, secretTarget, "smtp.internal"} {
+			if bytes.Contains(data, []byte(forbidden)) {
+				t.Fatalf("%s contains dormant runtime input %q:\n%s", path, forbidden, data)
+			}
+		}
+	}
+	if !bytes.Contains(assembly, []byte("type ConstructorConfiguration struct {\n}")) || !bytes.Contains(bootstrap, []byte("runtimeExecutableConstructors")) {
+		t.Fatalf("dormant configuration runtime boundary is incomplete:\nassembly:\n%s\nbootstrap:\n%s", assembly, bootstrap)
+	}
+	for _, entry := range snapshotTree(t, root) {
+		if strings.HasPrefix(entry.path, "generated/go/proxies/configuration/owner/v1/") || strings.HasPrefix(entry.path, "generated/go/adapters/implementations/configuration/owner/v1/") {
+			t.Fatalf("dormant constructor configuration emitted executable Interface artifact %s", entry.path)
+		}
+	}
+	smokeBefore := snapshotTree(t, root)
+	if err := projectsmoke.Run(t.Context(), projectsmoke.Options{Root: root, Environment: environment}); err != nil {
+		t.Fatalf("run dormant-configuration generated application lifecycle smoke: %v", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, smokeBefore) {
+		t.Fatalf("dormant-configuration lifecycle smoke mutated Project:\nbefore: %#v\nafter: %#v", smokeBefore, after)
+	}
+}
+
 func changedTransportToolchainManifest(t testing.TB, data []byte) []byte {
 	t.Helper()
 	provenance, err := applicationgen.DecodeManifestProvenance(data)
@@ -1781,7 +1844,7 @@ func TestGenerateApplicationModelDigestExcludesRuntimeValuesAndMachinePaths(t *t
 	writePlugin(t, root, "mailer", "id: acme.mailer\nprovides: [email.send/v1]\n")
 	writeCapability(t, root, "mailer", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 	configurationPath := filepath.Join(root, "plystra.yaml")
-	writeFile(t, configurationPath, fmt.Sprintf("http:\n  transports: {connect: true, rest: false}\ncapabilities: {require: [email.send/v1]}\nconfig:\n  %s:\n    endpoint: 'C:/private/machine-one'\n    password: {env: PRIVATE_TOKEN_ONE}\n", configurationOwner))
+	writeFile(t, configurationPath, fmt.Sprintf("http:\n  transports: {connect: true, rest: false}\ncapabilities: {require: [email.send/v1]}\ninterfaces: {use: {configuration.owner/v1: %s}}\nconfig:\n  %s:\n    endpoint: 'C:/private/machine-one'\n    password: {env: PRIVATE_TOKEN_ONE}\n", configurationOwner, configurationOwner))
 	options := applicationgenerate.Options{
 		Start:       root,
 		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "PRIVATE_TOKEN_ONE": "resolved-super-secret-one", "PRIVATE_TOKEN_TWO": "resolved-super-secret-two"}),
@@ -1796,7 +1859,7 @@ func TestGenerateApplicationModelDigestExcludesRuntimeValuesAndMachinePaths(t *t
 		t.Fatalf("DecodeManifestProvenance(initial): %v", err)
 	}
 
-	writeFile(t, configurationPath, fmt.Sprintf("http:\n  transports: {connect: true, rest: false}\ncapabilities: {require: [email.send/v1]}\nconfig:\n  %s:\n    endpoint: 'D:/private/machine-two'\n    password: {env: PRIVATE_TOKEN_TWO}\n", configurationOwner))
+	writeFile(t, configurationPath, fmt.Sprintf("http:\n  transports: {connect: true, rest: false}\ncapabilities: {require: [email.send/v1]}\ninterfaces: {use: {configuration.owner/v1: %s}}\nconfig:\n  %s:\n    endpoint: 'D:/private/machine-two'\n    password: {env: PRIVATE_TOKEN_TWO}\n", configurationOwner, configurationOwner))
 	updated, err := applicationgenerate.Generate(t.Context(), options)
 	if err != nil || !updated.Report().Clean() {
 		t.Fatalf("updated Generate = changes %#v, %v", updated.Report().Changes(), err)
@@ -2269,8 +2332,8 @@ func TestGenerateDetectsConcurrentPrivateConfigurationChange(t *testing.T) {
 	configurationOwner := writeConstructorConfigurationOwner(t, root, modulePath, false)
 	writePlugin(t, root, "business", "id: acme.business\nconfig: {label: {type: string}}\n")
 	manifestPath := filepath.Join(root, "plystra.yaml")
-	first := fmt.Sprintf("config:\n  %s:\n    label: private-one\n", configurationOwner)
-	second := fmt.Sprintf("config:\n  %s:\n    label: private-two\n", configurationOwner)
+	first := fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\nconfig:\n  %s:\n    label: private-one\n", configurationOwner, configurationOwner)
+	second := fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\nconfig:\n  %s:\n    label: private-two\n", configurationOwner, configurationOwner)
 	writeFile(t, manifestPath, first)
 	environment := goEnvironment(nil)
 	noValidation := func(_ context.Context, _ string) error { return nil }

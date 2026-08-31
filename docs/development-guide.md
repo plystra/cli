@@ -669,6 +669,17 @@ choice is still validated immediately; it remains dormant until the Interface
 enters the requirement closure, and an invalid dormant choice fails before
 generation.
 
+Constructor-keyed configuration follows the same ownership boundary. An
+effective `config.<constructor-symbol>` object is accepted only when that exact
+constructor is named by an effective explicit `interfaces.use` choice or is
+already selected into the reachable constructor graph. The CLI immediately
+checks the object against the constructor's exported same-package `Config`
+schema, including Secret-reference syntax, without reading the referenced
+environment variable or file. While the choice is dormant, the object remains
+authored configuration only and creates no runtime delivery, generated assembly
+or bootstrap membership, Secret lookup, or Kernel state. Configuration for any
+other constructor fails without exposing its values.
+
 For an internal application root, add the exact Interface ID to the selected
 document:
 
@@ -1289,10 +1300,13 @@ selection when no flag is present, while an explicit flag overrides both
 variables. The command may start inside a nested package and may record a valid
 choice before the Interface is required. Such a dormant choice is validated but
 does not create a root, binding, reachable constructor, lifecycle entry, or
-generated Interface runtime. The command preserves comments and unrelated
-values, regenerates and validates with the same selection, and restores the
-selected YAML, generated output, `go.mod`, and `go.sum` if any later step fails.
-It rejects intrinsic Interfaces, unknown Interfaces, unknown constructors, and
+generated Interface runtime. Its exact `config.<constructor-symbol>` object is
+also accepted and immediately type-validated, but no Secret reference is
+resolved and no constructor configuration enters runtime, bootstrap, or Kernel
+state until activation. The command preserves comments and unrelated values,
+regenerates and validates with the same selection, and restores the selected
+YAML, generated output, `go.mod`, and `go.sum` if any later step fails. It
+rejects intrinsic Interfaces, unknown Interfaces, unknown constructors, and
 constructors that do not implement the exact canonical Interface.
 
 There is no constructor priority, discovery-order winner, or runtime selection
@@ -1407,8 +1421,11 @@ digest. Startup derives the same projection from the normalized selected
 runtime document and rejects a mismatch with rebuild guidance before reading
 startup settings, creating a Secret resolver, or constructing a Provider.
 Runtime-only address, timeout, Plugin configuration, and Secret-reference
-changes do not enter the projection. Neither compiled record contains YAML
-values, Secret-reference targets, resolved Secrets, or machine paths.
+changes do not enter the projection. The explicit Implementation-choice member
+contains only Interfaces in the frozen executable closure; dormant choices and
+dormant constructor configuration create no bootstrap runtime membership.
+Neither compiled record contains YAML values, Secret-reference targets,
+resolved Secrets, or machine paths.
 
 Validate the generated Connect handler directly with `httptest` until server
 mounting lands in the later transport gate. Exercise both binary Protobuf and
@@ -1868,6 +1885,16 @@ Constructor discovery classifies each actionable authoring boundary separately:
 Apply the emitted recovery to the reported Project-relative Go source. If the
 source belongs to a dependency Project, fix that owning Project or select a
 corrected dependency version; never edit the Module Cache copy.
+
+### Unowned constructor configuration
+
+`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies an effective
+`config.<constructor-symbol>` object whose constructor is neither named by an
+effective explicit `interfaces.use` choice nor selected into the reachable
+constructor graph. Name the constructor in an effective choice, make it
+reachable through an Interface requirement, or remove its configuration from
+the selected document. The diagnostic reports the constructor and safe source
+location without printing configured values or Secret-reference targets.
 
 ### Invalid `plystra use` input
 

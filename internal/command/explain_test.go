@@ -1045,7 +1045,9 @@ require github.com/plystra/kernel v0.0.0
 
 replace github.com/plystra/kernel => %s
 `, filepath.ToSlash(kernelRoot)))
-	writeCommandFile(t, filepath.Join(platformRoot, "plystra.yaml"), `config:
+	writeCommandFile(t, filepath.Join(platformRoot, "plystra.yaml"), `interfaces:
+  use: {email.send/v1: example.com/platform/shared.New}
+config:
   example.com/platform/shared.New:
     host: dependency-private.example
     password: {env: EXPLAIN_PRIVATE_PASSWORD}

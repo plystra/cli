@@ -1114,6 +1114,10 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("A Project with zero non-intrinsic roots is valid"),
 		[]byte("application smoke path starts, invokes `kernel.health/v1`, and stops cleanly"),
 		[]byte("without ordinary constructor or configuration membership"),
+		[]byte("An exact `config.<constructor-symbol>` object is accepted only for an effective explicit choice"),
+		[]byte("without reading an environment variable or Secret file"),
+		[]byte("no runtime delivery, bootstrap membership, Secret lookup, or Kernel state"),
+		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration"),
 	} {
 		if !bytes.Contains(readme, activationGuidance) {
 			t.Fatalf("generated README omits candidate-only activation guidance %q:\n%s", activationGuidance, readme)
@@ -1945,6 +1949,10 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"Implementations are candidates, not roots",
 		"transitively required Interfaces activate them",
 		"interfaces.use only selects",
+		"validates dormant config.<constructor-symbol> immediately",
+		"including Secret-reference syntax, without resolving",
+		"Dormant configuration creates no runtime, bootstrap, Secret, or Kernel state",
+		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED",
 		"### Select one environment",
 		"Use --config only when the task",
 		"one complete replacement document; it is an advanced",

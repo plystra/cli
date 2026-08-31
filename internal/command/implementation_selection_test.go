@@ -387,6 +387,33 @@ var _ contract.Interface = (*Service)(nil)
 `, packageName, interfacePath, id, method))
 }
 
+func writeCommandConfigurableImplementation(t testing.TB, root, packageName, id, interfacePath, method string) {
+	t.Helper()
+	writeCommandFile(t, filepath.Join(root, packageName, "implementation.go"), fmt.Sprintf(`package %s
+
+import (
+	"context"
+
+	contract "example.com/acme/implementation-use/interfaces/%s"
+)
+
+type Config struct {
+	Endpoint string `+"`plystra:\"required\"`"+`
+}
+
+type Service struct{}
+
+//plystra:implements %s
+func New(Config) (*Service, error) { return &Service{}, nil }
+
+func (*Service) %s(context.Context, contract.Request) (contract.Response, error) {
+	return contract.Response{}, nil
+}
+
+var _ contract.Interface = (*Service)(nil)
+`, packageName, interfacePath, id, method))
+}
+
 func commandHasImplementationChoice(manifest applicationmeta.Manifest, interfaceID, constructor string) bool {
 	for _, choice := range manifest.ImplementationChoices() {
 		if choice.InterfaceID().String() == interfaceID && choice.Constructor().String() == constructor {

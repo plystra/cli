@@ -94,6 +94,35 @@ func TestPublicResolvingCommandsRejectInvalidDormantChoiceWithoutMutation(t *tes
 	}
 }
 
+func TestPublicResolvingCommandsRejectUnownedConstructorConfigurationWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	for _, arguments := range commands {
+		name := strings.Join(arguments, " ")
+		t.Run(name, func(t *testing.T) {
+			root := writeImplementationSelectionCommandProject(t)
+			constructor := "example.com/acme/implementation-use/reports.New"
+			writeCommandConfigurableImplementation(t, root, "reports", "reports.read/v1", "reports/read/v1", "Read")
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "config: {"+constructor+": {endpoint: private.internal}}\n")
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "reports"), implementationSelectionCommandEnvironment(nil))
+			if exitCode != 1 || stdout != "" || !commandContainsAll(
+				stderr,
+				constructor,
+				"Recovery:\nName the reported constructor in an effective interfaces.use entry, make it reachable through an Interface requirement, or remove its configuration from plystra.yaml, then rerun the command.\n",
+				"Diagnostic: "+diagnosticcode.ConstructorConfigurationUnselected,
+			) || strings.Contains(stderr, "private.internal") {
+				t.Fatalf("%v unowned constructor configuration = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%v mutated unowned constructor configuration Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func TestPublicResolvingCommandsEmitStableConstructorCycleWithoutMutation(t *testing.T) {
 	t.Parallel()
 

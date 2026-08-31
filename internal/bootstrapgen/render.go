@@ -31,6 +31,8 @@ type Options struct {
 	ModulePath                    string
 	DefaultStartupTimeout         time.Duration
 	ConfigurationSchemas          []ConfigurationSchema
+	ExecutableInterfaceChoices    []string
+	ExecutableConstructors        []string
 	ConfigurationProvenance       transportprovenance.Provenance
 	ApplicationModelCompatibility ApplicationModelCompatibility
 }
@@ -58,7 +60,15 @@ func Render(options Options) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w: %v", ErrRender, ErrInvalidOptions, err)
 	}
-	runtimeSupport, err := renderRuntimeConfigurationSupport(schemas)
+	executableInterfaces, err := planRuntimeExecutableInterfaceChoices(options.ExecutableInterfaceChoices)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w: %v", ErrRender, ErrInvalidOptions, err)
+	}
+	executableConstructors, err := planRuntimeExecutableConstructors(options.ExecutableConstructors)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w: %v", ErrRender, ErrInvalidOptions, err)
+	}
+	runtimeSupport, err := renderRuntimeConfigurationSupport(schemas, executableInterfaces, executableConstructors)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w: %v", ErrRender, ErrInvalidOptions, err)
 	}

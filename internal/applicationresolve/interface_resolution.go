@@ -75,6 +75,24 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 	})
 }
 
+func validateConstructorConfigurationOwners(manifest applicationmeta.Manifest, resolution interfaceresolution.Result) error {
+	owners := make(map[string]struct{})
+	for _, choice := range manifest.ImplementationChoices() {
+		owners[choice.Constructor().String()] = struct{}{}
+	}
+	for _, node := range resolution.Graph().ConstructionOrder() {
+		owners[node.Symbol().String()] = struct{}{}
+	}
+	for _, configured := range manifest.Configurations() {
+		constructor := configured.Constructor().String()
+		if _, owned := owners[constructor]; owned {
+			continue
+		}
+		return fmt.Errorf("%w: config[%q] at %s", ErrUnownedConstructorConfiguration, constructor, configured.Source())
+	}
+	return nil
+}
+
 func intrinsicInterfaceIDs() map[string]struct{} {
 	result := make(map[string]struct{})
 	for _, definition := range intrinsicinterface.Definitions() {

@@ -45,6 +45,10 @@ var (
 	// ErrConcurrentChange reports plystra.yaml changing while it was read or
 	// before the complete resolution finished.
 	ErrConcurrentChange = errors.New("application manifest changed during resolution")
+	// ErrUnownedConstructorConfiguration reports effective constructor
+	// configuration whose constructor is neither explicitly selected nor
+	// reachable in the frozen Interface constructor graph.
+	ErrUnownedConstructorConfiguration = errors.New("constructor configuration has no explicit selection or reachable constructor")
 )
 
 // Options contains the application location and bounded Go helper settings.
@@ -283,6 +287,9 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	interfaceResolution, err := resolveInterfaces(manifest, composition, interfaces, implementations, inventory, currentProjectPaths)
 	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	if err := validateConstructorConfigurationOwners(manifest, interfaceResolution); err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	rootLayerManifest := rootManifest

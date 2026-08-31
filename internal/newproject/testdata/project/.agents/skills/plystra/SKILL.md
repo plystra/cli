@@ -71,8 +71,11 @@ Implementations are candidates, not roots. Required, current-Project-exposed,
 or transitively required Interfaces activate them; interfaces.use only selects
 and is validated while dormant.
 
-The detailed reference below contains complete file shapes and variants. Open
-only the section needed for the current command or authored file.
+Plystra validates dormant config.<constructor-symbol> immediately against the
+exact same-package Config, including Secret-reference syntax, without resolving
+it. Dormant configuration creates no runtime, bootstrap, Secret, or Kernel state.
+Its constructor must be an effective interfaces.use choice or reachable;
+otherwise PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED fails without values.
 
 ### Select one environment
 
@@ -95,21 +98,16 @@ and start that document with one consistent selector:
     go run ./generated/go/application --config deploy/customer-a.yaml
 
 Generated startup accepts the same --env selector or PLYSTRA_ENV and the same
---config selector or PLYSTRA_CONFIG. An explicit selector overrides both
-ambient variables, and the two modes cannot be combined. An overlay or
-replacement must exist and pass typed validation before application
-construction; unselected documents are not read. Replacement mode keeps root
-plystra.yaml as the mandatory Project marker but does not merge it beneath the
-selected file. Generated bootstrap records the matching selection mode,
-selected environment when applicable, stable relative paths, normalized
-document and dependency-composition digests, and final application-model digest
-as non-secret provenance. It also embeds a bounded compatibility projection for
-the build-affecting declarations tied to that full model digest. Startup derives
-the same projection from the selected runtime document and rejects a mismatch
-with rebuild guidance before startup settings, Secret resolution, or application
-construction. Runtime-only address, timeouts.startup, ordinary configuration, and Secret-
-reference changes stay outside that comparison. Neither compiled record contains
-YAML values, Secret-reference targets, resolved Secrets, or machine paths.
+--config selector or PLYSTRA_CONFIG; explicit selection wins and modes cannot be
+combined. Selected documents must exist and pass typed validation; replacement
+keeps root plystra.yaml as the marker and does not merge it beneath. Bootstrap
+embeds non-secret selection provenance and a bounded compatibility projection
+tied to the final model digest. It lists only executable Implementation choices,
+so dormant choices and configuration have no runtime membership. A mismatch
+requires a rebuild with the same selector before settings, Secrets, or
+construction. Runtime-only address,
+timeouts.startup, configuration, and Secret references remain outside comparison,
+and no record contains values, Secret targets, resolved Secrets, or machine paths.
 
 ## Detailed task reference
 
@@ -410,15 +408,15 @@ Prefer the targeted public workflow for ordinary Implementation selection:
 The default form writes root plystra.yaml; --env writes that sparse overlay;
 --config writes that complete document. Ambient selectors choose the same
 targets unless a flag overrides them. A pre-requirement choice stays dormant.
-The command preserves unrelated content, regenerates with the same selection,
-rolls back every owned file after failure, and rejects invalid targets.
+Its configuration is validated but not delivered. The command preserves unrelated
+content, regenerates with the same selection, rolls back every owned file after
+failure, and rejects invalid targets.
 
 The current entry replaces the inherited choice; Interface and conformance
 validation still runs. Never reorder dependencies or invent priority.
 Regenerate and check after selection or dependency changes.
-Both generated manifests share non-secret composition plus strict
-plystra.interface-provenance/v1 for Interfaces, bindings, constructors,
-intrinsics, and generated mappings. Inspect; never edit.
+Both manifests record non-secret composition and strict
+plystra.interface-provenance/v1. Inspect; never edit.
 
 Configure one exact non-intrinsic Interface policy:
 
@@ -1242,6 +1240,10 @@ recovery action or code.
   PLYSTRA_USE_CONSTRUCTOR_INVALID identifies a malformed fully qualified
   exported constructor symbol. Run the corrected command emitted by Recovery;
   it preserves the active selector and fails before Project mutation.
+- Unowned constructor configuration:
+  PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED requires an effective
+  interfaces.use owner, a reachable constructor, or removal. Values and Secret
+  targets stay redacted.
 - Incompatible contract: compare exact request, response, closed field
   constraints, semantic errors, typed semantics, and extension metadata.
   Implement the visible contract or create a new version instead of weakening
@@ -1277,12 +1279,9 @@ recovery action or code.
 - Invalid runtime configuration: compare the selected constructor symbol and
   its compiled Config schema with the object in the selected current-Project
   document. Keep Secret values behind valid env or file references.
-- Wrong configuration selection: run plystra inspect with the intended --env or
-  --config, add --verbose or --format json when complete provenance is needed,
-  then run generate and generate --check with the same selector. For
-  automation, set exactly one of
-  PLYSTRA_ENV or PLYSTRA_CONFIG. An environment is a sparse overlay above root;
-  an explicit file is complete and root plystra.yaml is not merged beneath it.
+- Wrong configuration selection: inspect, generate, and generate --check with
+  the same --env or --config. Automation sets exactly one of PLYSTRA_ENV or
+  PLYSTRA_CONFIG; environments overlay root, while explicit files replace it.
 - Alias error: point directly to one resolved canonical Interface target with
   the same version and exposure no broader than that target.
 - Unexpected generated path: remove handwritten content from generated and

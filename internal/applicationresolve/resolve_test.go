@@ -257,7 +257,7 @@ func (*Service) Audit(context.Context, auditv1.Request) (auditv1.Response, error
 	writeModule(t, kernelRoot, "github.com/plystra/kernel")
 	writeFile(t, filepath.Join(kernelRoot, "optional.go"), "package plystra\n\ntype Optional[T any] struct{}\n")
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/implementations\n\ngo 1.26\n\nrequire (\n\texample.com/contracts v1.2.3\n\tgithub.com/plystra/kernel v0.0.0\n)\n\nreplace example.com/contracts => ../contracts\nreplace github.com/plystra/kernel => ../kernel\n")
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "config: {example.com/implementations/domains/orders/service.Build: {mode: current}}\n")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {use: {orders.create.execute/v1: example.com/implementations/domains/orders/service.Build}}\nconfig: {example.com/implementations/domains/orders/service.Build: {mode: current}}\n")
 	writeFile(t, filepath.Join(root, "interfaces", "orders", "create", "v1", "interface.go"), interfaceDeclarationSource("createv1", "orders.create.execute/v1", "Create"))
 	writeFile(t, filepath.Join(root, "domains", "orders", "service", "new.go"), `package service
 

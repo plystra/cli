@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/interfaceid"
 )
 
 const applicationModelCompatibilityVersion = 1
@@ -69,6 +70,29 @@ type applicationModelCompatibilityPolicy struct {
 // manifest without process settings, ordinary Plugin configuration, Secret
 // references, source paths, or resolved Secret values.
 func NewApplicationModelCompatibility(applicationModelDigest string, manifest applicationmeta.Manifest) (ApplicationModelCompatibility, error) {
+	return newApplicationModelCompatibility(applicationModelDigest, manifest, nil, false)
+}
+
+// NewExecutableApplicationModelCompatibility projects only explicit
+// Implementation choices whose Interfaces are members of the frozen
+// executable closure. Dormant authored choices remain configuration
+// provenance and are excluded from generated bootstrap compatibility.
+func NewExecutableApplicationModelCompatibility(applicationModelDigest string, manifest applicationmeta.Manifest, executableInterfaces []string) (ApplicationModelCompatibility, error) {
+	executable := make(map[string]struct{}, len(executableInterfaces))
+	for _, identifier := range executableInterfaces {
+		parsed, err := interfaceid.Parse(identifier)
+		if err != nil || parsed.String() != identifier {
+			return ApplicationModelCompatibility{}, fmt.Errorf("%w: executable Interface ID %q is invalid", ErrInvalidApplicationModelCompatibility, identifier)
+		}
+		if _, duplicate := executable[identifier]; duplicate {
+			return ApplicationModelCompatibility{}, fmt.Errorf("%w: executable Interface ID %q is repeated", ErrInvalidApplicationModelCompatibility, identifier)
+		}
+		executable[identifier] = struct{}{}
+	}
+	return newApplicationModelCompatibility(applicationModelDigest, manifest, executable, true)
+}
+
+func newApplicationModelCompatibility(applicationModelDigest string, manifest applicationmeta.Manifest, executable map[string]struct{}, filterChoices bool) (ApplicationModelCompatibility, error) {
 	if !validApplicationModelCompatibilityDigest(applicationModelDigest) {
 		return ApplicationModelCompatibility{}, fmt.Errorf("%w: application-model digest is not a canonical SHA-256 digest", ErrInvalidApplicationModelCompatibility)
 	}
@@ -100,6 +124,11 @@ func NewApplicationModelCompatibility(applicationModelDigest string, manifest ap
 		projection.InterfaceRequirements = append(projection.InterfaceRequirements, requirement.ID().String())
 	}
 	for _, choice := range manifest.ImplementationChoices() {
+		if filterChoices {
+			if _, active := executable[choice.InterfaceID().String()]; !active {
+				continue
+			}
+		}
 		projection.ImplementationChoices = append(projection.ImplementationChoices, applicationModelCompatibilityImplementation{
 			Interface:   choice.InterfaceID().String(),
 			Constructor: choice.Constructor().String(),

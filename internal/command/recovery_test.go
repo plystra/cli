@@ -114,6 +114,13 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			code:    diagnosticConstructorConfigurationValuesInvalid,
 		},
 		{
+			name:    "unselected constructor configuration",
+			err:     fmt.Errorf("resolve configuration owner: %w", applicationresolve.ErrUnownedConstructorConfiguration),
+			context: commandRecoveryContext("", "test", nil),
+			want:    "Name the reported constructor in an effective interfaces.use entry, make it reachable through an Interface requirement, or remove its configuration from plystra.test.yaml, then rerun the command.",
+			code:    diagnosticConstructorConfigurationUnselected,
+		},
+		{
 			name: "configuration selection",
 			err:  fmt.Errorf("resolve: %w", applicationresolve.ErrConfigurationSelection),
 			want: "Select exactly one existing Project configuration with `--env <environment>` or `--config <yaml-path>`, then rerun the command.",
@@ -212,6 +219,7 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "HTTP transport", err: applicationmeta.ErrHTTPTransportSelection, code: diagnosticcode.HTTPTransportSelectionInvalid},
 		{name: "constructor configuration schema", err: applicationmeta.ErrConfigurationSchema, code: diagnosticcode.ConstructorConfigurationSchemaInvalid},
 		{name: "constructor configuration values", err: applicationmeta.ErrConfigurationValues, code: diagnosticcode.ConstructorConfigurationValuesInvalid},
+		{name: "unselected constructor configuration", err: applicationresolve.ErrUnownedConstructorConfiguration, code: diagnosticcode.ConstructorConfigurationUnselected},
 		{name: "environment overlay", err: applicationmeta.ErrApplyOverlay, code: diagnosticcode.EnvironmentOverlayInvalid},
 		{name: "current configuration", err: applicationmeta.ErrInvalidManifest, code: diagnosticcode.ConfigurationInvalid},
 		{name: "resolved configuration", err: configurationresolve.ErrInvalidConfiguration, code: diagnosticcode.ConfigurationInvalid},

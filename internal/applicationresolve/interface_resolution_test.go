@@ -3,14 +3,17 @@ package applicationresolve_test
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationgen"
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/constructorgraph"
+	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/transporttoolchain"
@@ -413,6 +416,77 @@ func TestResolveValidatesDormantExplicitSelectionWithoutActivation(t *testing.T)
 				t.Fatalf("invalid dormant selection mutated files:\nbefore: %#v\nafter:  %#v", before, after)
 			}
 		})
+	}
+}
+
+func TestResolveOwnsAndValidatesDormantConstructorConfigurationWithoutRuntimeMembership(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	const modulePath = "example.com/dormant-configuration"
+	const selectedConstructor = modulePath + "/smtp.New"
+	cliRoot := repositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	writeFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf("module %s\n\ngo 1.26\n\nrequire (\n\tgithub.com/plystra/kernel v0.0.0\n\tgo.yaml.in/yaml/v3 v3.0.4 // indirect\n)\n\nreplace github.com/plystra/kernel => %s\n", modulePath, filepath.ToSlash(kernelRoot)))
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("read CLI go.sum: %v", err)
+	}
+	writeFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	writeResolvedInterface(t, root, "email/send/v1", "sendv1", "email.send/v1", "Send")
+	writeResolvedConfigurableImplementationForModule(t, root, modulePath, "smtp", "email.send/v1", "email/send/v1", "Send")
+	environment := goEnvironment(map[string]string{
+		"GOWORK":  "off",
+		"GOPROXY": "off",
+		"GOSUMDB": "off",
+	})
+	valid := "interfaces: {use: {email.send/v1: " + selectedConstructor + "}}\nconfig: {" + selectedConstructor + ": {endpoint: smtp.internal, password: {env: PLYSTRA_DORMANT_SECRET}}}\n"
+	writeFile(t, filepath.Join(root, "plystra.yaml"), valid)
+	before := snapshotTree(t, root)
+
+	resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: root, Environment: environment})
+	if err != nil {
+		t.Fatalf("Resolve dormant constructor configuration without a Secret value: %v", err)
+	}
+	configured, exists := resolved.Manifest().Configuration(mustResolvedConstructorSymbol(t, selectedConstructor))
+	if !exists || !strings.Contains(string(configured.YAML()), "endpoint: smtp.internal") || !strings.Contains(string(configured.YAML()), "PLYSTRA_DORMANT_SECRET") {
+		t.Fatalf("effective dormant constructor configuration = %s, %t", configured.YAML(), exists)
+	}
+	resolution := resolved.InterfaceResolution()
+	if len(resolution.Selections()) != 0 || len(resolution.Graph().Roots()) != 0 || len(resolution.Graph().Bindings()) != 0 || len(resolution.Graph().ConstructionOrder()) != 0 {
+		t.Fatalf("dormant constructor configuration entered executable resolution = %#v", resolution)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("dormant constructor configuration resolution mutated files:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "config: {"+selectedConstructor+": {endpoint: smtp.internal}}\n")
+	before = snapshotTree(t, root)
+	_, err = applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: root, Environment: environment})
+	if !errors.Is(err, applicationresolve.ErrUnownedConstructorConfiguration) || !strings.Contains(err.Error(), selectedConstructor) || strings.Contains(err.Error(), "smtp.internal") {
+		t.Fatalf("Resolve unowned constructor configuration error = %v", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("unowned constructor configuration resolution mutated files:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {use: {email.send/v1: "+selectedConstructor+"}}\nconfig: {"+selectedConstructor+": {endpoint: true}}\n")
+	before = snapshotTree(t, root)
+	_, err = applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: root, Environment: environment})
+	if !errors.Is(err, applicationmeta.ErrConfigurationValues) || !errors.Is(err, applicationmeta.ErrConfigurationInvalidValue) || strings.Contains(err.Error(), "true") {
+		t.Fatalf("Resolve invalid dormant constructor configuration error = %v", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("invalid dormant constructor configuration resolution mutated files:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [email.send/v1]}\nconfig: {"+selectedConstructor+": {endpoint: smtp.internal}}\n")
+	resolved, err = applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: root, Environment: environment})
+	if err != nil {
+		t.Fatalf("Resolve reachable uniquely selected constructor configuration: %v", err)
+	}
+	if got := resolvedGraphNodes(resolved.InterfaceResolution().Graph()); !reflect.DeepEqual(got, []string{selectedConstructor}) {
+		t.Fatalf("reachable configured constructor graph = %v", got)
 	}
 }
 
@@ -1372,6 +1446,42 @@ func (*Service) %s(context.Context, contract.Request) (contract.Response, error)
 	return contract.Response{}, nil
 }
 `, packageName, interfaceModulePath, interfacePath, identifier, method))
+}
+
+func writeResolvedConfigurableImplementationForModule(t testing.TB, root, modulePath, packageName, identifier, interfacePath, method string) {
+	t.Helper()
+	writeFile(t, filepath.Join(root, packageName, "service.go"), fmt.Sprintf(`package %s
+
+import (
+	"context"
+
+	contract "%s/interfaces/%s"
+	"github.com/plystra/kernel/configuration"
+)
+
+type Config struct {
+	Endpoint string `+"`plystra:\"required\"`"+`
+	Password configuration.Secret
+}
+
+type Service struct{}
+
+//plystra:implements %s
+func New(Config) (*Service, error) { return &Service{}, nil }
+
+func (*Service) %s(context.Context, contract.Request) (contract.Response, error) {
+	return contract.Response{}, nil
+}
+`, packageName, modulePath, interfacePath, identifier, method))
+}
+
+func mustResolvedConstructorSymbol(t testing.TB, value string) constructorsymbol.Symbol {
+	t.Helper()
+	symbol, err := constructorsymbol.Parse(value)
+	if err != nil {
+		t.Fatalf("parse constructor symbol %q: %v", value, err)
+	}
+	return symbol
 }
 
 func resolvedGraphNodes(graph constructorgraph.Graph) []string {

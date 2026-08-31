@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/plystra/cli/internal/constructorsymbol"
+	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/pluginid"
 	"github.com/plystra/kernel/plugin/manifest"
 )
@@ -67,7 +69,37 @@ func planRuntimeConfigurationSchemas(inputs []ConfigurationSchema) ([]runtimeCon
 	return result, nil
 }
 
-func renderRuntimeConfigurationSupport(schemas []runtimeConfigurationSchema) (string, error) {
+func planRuntimeExecutableInterfaceChoices(inputs []string) ([]string, error) {
+	result := append([]string(nil), inputs...)
+	sort.Strings(result)
+	for index, value := range result {
+		identifier, err := interfaceid.Parse(value)
+		if err != nil || identifier.String() != value {
+			return nil, fmt.Errorf("executable Interface identity %q is invalid", value)
+		}
+		if index != 0 && result[index-1] == value {
+			return nil, fmt.Errorf("executable Interface identity %q is repeated", value)
+		}
+	}
+	return result, nil
+}
+
+func planRuntimeExecutableConstructors(inputs []string) ([]string, error) {
+	result := append([]string(nil), inputs...)
+	sort.Strings(result)
+	for index, value := range result {
+		constructor, err := constructorsymbol.Parse(value)
+		if err != nil || constructor.String() != value {
+			return nil, fmt.Errorf("executable constructor identity %q is invalid", value)
+		}
+		if index != 0 && result[index-1] == value {
+			return nil, fmt.Errorf("executable constructor identity %q is repeated", value)
+		}
+	}
+	return result, nil
+}
+
+func renderRuntimeConfigurationSupport(schemas []runtimeConfigurationSchema, executableInterfaces, executableConstructors []string) (string, error) {
 	var source strings.Builder
 	source.WriteString("type runtimeConfigurationFieldKind uint8\n\n")
 	source.WriteString("const (\n")
@@ -105,6 +137,16 @@ func renderRuntimeConfigurationSupport(schemas []runtimeConfigurationSchema) (st
 			fmt.Fprintf(&source, "\t\t%s: %s,\n", strconv.Quote(field.name), kind)
 		}
 		source.WriteString("\t},\n")
+	}
+	source.WriteString("}\n\n")
+	source.WriteString("var runtimeExecutableInterfaceChoices = map[string]struct{}{\n")
+	for _, identifier := range executableInterfaces {
+		fmt.Fprintf(&source, "\t%s: {},\n", strconv.Quote(identifier))
+	}
+	source.WriteString("}\n\n")
+	source.WriteString("var runtimeExecutableConstructors = map[string]struct{}{\n")
+	for _, constructor := range executableConstructors {
+		fmt.Fprintf(&source, "\t%s: {},\n", strconv.Quote(constructor))
 	}
 	source.WriteString("}\n\n")
 	source.WriteString(runtimeConfigurationSupport)
@@ -256,6 +298,9 @@ func runtimeApplicationModelInterfaces(node *yaml.Node) ([]string, []map[string]
 		constructor, valueErr := runtimeString(choices[interfaceID])
 		if valueErr != nil || !validRuntimeConstructorSymbol(constructor) {
 			return nil, nil, nil, runtimeConfigurationError("interfaces.use[%q] must be a fully qualified Implementation constructor symbol", interfaceID)
+		}
+		if _, executable := runtimeExecutableInterfaceChoices[interfaceID]; !executable {
+			continue
 		}
 		implementations = append(implementations, map[string]any{
 			"constructor": constructor,
@@ -1116,6 +1161,12 @@ func mergeRuntimeConfigurations(lowerNode, upperNode *yaml.Node) (*yaml.Node, bo
 	for pluginID := range pluginIDs {
 		schema, selected := runtimeConfigurationSchemas[pluginID]
 		if !selected {
+			if validRuntimeConstructorSymbol(pluginID) {
+				if _, executable := runtimeExecutableConstructors[pluginID]; !executable {
+					continue
+				}
+				return nil, false, runtimeConfigurationError("config targets active constructor %q without a generated runtime binding", pluginID)
+			}
 			return nil, false, runtimeConfigurationError("config targets unselected Plugin %q", pluginID)
 		}
 		if parsed, parseErr := kernelplugin.ParseID(pluginID); parseErr != nil || parsed.String() != pluginID {

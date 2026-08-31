@@ -122,6 +122,14 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		options.KernelBuildIdentity,
 		context.BuildModelDigest(),
 	)
+	executableInterfaceChoices := make([]string, len(implementationAssemblyOptions.Bindings))
+	for index, binding := range implementationAssemblyOptions.Bindings {
+		executableInterfaceChoices[index] = binding.InterfaceID.String()
+	}
+	executableConstructors := make([]string, len(implementationAssemblyOptions.Constructors))
+	for index, constructor := range implementationAssemblyOptions.Constructors {
+		executableConstructors[index] = constructor.Symbol.String()
+	}
 	modelDigest, err := ApplicationModelDigest(ApplicationModelOptions{
 		ModulePath:             options.ModulePath,
 		JavaScriptPackage:      options.JavaScriptPackage,
@@ -149,7 +157,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: transport configuration provenance: %v", ErrRender, ErrResolution, err)
 	}
-	modelCompatibility, err := bootstrapgen.NewApplicationModelCompatibility(modelDigest, options.Composition.Manifest())
+	modelCompatibility, err := bootstrapgen.NewExecutableApplicationModelCompatibility(modelDigest, options.Composition.Manifest(), executableInterfaceChoices)
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: runtime application-model compatibility: %v", ErrRender, ErrResolution, err)
 	}
@@ -341,6 +349,8 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		ModulePath:                    options.ModulePath,
 		DefaultStartupTimeout:         applicationmeta.DefaultStartupTimeout,
 		ConfigurationSchemas:          runtimeConfigurationSchemas,
+		ExecutableInterfaceChoices:    executableInterfaceChoices,
+		ExecutableConstructors:        executableConstructors,
 		ConfigurationProvenance:       transportProvenance,
 		ApplicationModelCompatibility: modelCompatibility,
 	})

@@ -23,6 +23,7 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.HTTPTransportSelectionInvalid,
 		diagnosticcode.ConstructorConfigurationSchemaInvalid,
 		diagnosticcode.ConstructorConfigurationValuesInvalid,
+		diagnosticcode.ConstructorConfigurationUnselected,
 		diagnosticcode.EnvironmentOverlayInvalid,
 		diagnosticcode.ConfigurationInvalid,
 		diagnosticcode.PluginConfigurationUnselected,
