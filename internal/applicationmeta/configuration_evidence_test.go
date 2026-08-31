@@ -75,6 +75,16 @@ config:
 		`timeouts.startup`:             applicationmeta.ConfigurationSummaryDuration,
 	}
 	seen := make(map[string]struct{}, len(first))
+	nonComposable := map[string]struct{}{
+		"http.address":                 {},
+		"http.cors":                    {},
+		"http.cors.allow_credentials":  {},
+		"http.cors.allowed_origins":    {},
+		`http.expose["email.send/v1"]`: {},
+		"http.transports.connect":      {},
+		"http.transports.rest":         {},
+		"timeouts.startup":             {},
+	}
 	var bounded strings.Builder
 	previous := ""
 	for _, decision := range first {
@@ -89,6 +99,10 @@ config:
 		seen[decision.Path()] = struct{}{}
 		if decision.Summary() != want || decision.Removed() || decision.Source() != "deploy/customer config.yaml" || !strings.HasPrefix(decision.Digest(), "sha256:") {
 			t.Fatalf("decision %s = summary %q removed %t source %q digest %q", decision.Path(), decision.Summary(), decision.Removed(), decision.Source(), decision.Digest())
+		}
+		_, currentProjectOwned := nonComposable[decision.Path()]
+		if decision.DependencyComposable() == currentProjectOwned {
+			t.Fatalf("decision %s dependency-composable = %t, current-Project-owned = %t", decision.Path(), decision.DependencyComposable(), currentProjectOwned)
 		}
 		bounded.WriteString(decision.Path())
 		bounded.WriteString(string(decision.Summary()))

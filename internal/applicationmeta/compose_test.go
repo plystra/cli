@@ -96,7 +96,7 @@ config:
 	if address, exists := manifest.HTTPAddress(); !exists || address != ":8080" || manifest.StartupTimeout().String() != "3s" {
 		t.Fatalf("current process settings = address %q, %t, timeout %s", address, exists, manifest.StartupTimeout())
 	}
-	if got := exposureIDs(manifest); !slices.Equal(got, []string{"email.send/v1", "kernel.health/v1", "order.create/v1"}) {
+	if got := exposureIDs(manifest); !slices.Equal(got, []string{"kernel.health/v1"}) {
 		t.Fatalf("HTTP exposures = %v", got)
 	}
 	if got := requirementIDs(manifest); !slices.Equal(got, []string{"audit.write/v1", "kernel.info/v1"}) {
@@ -131,6 +131,11 @@ config:
 	for _, local := range []string{`http.expose["kernel.health/v1"]`, `capabilities.require["kernel.info/v1"]`} {
 		if records := findProvenance(t, first.ResolutionSources(), local); len(records) != 0 {
 			t.Fatalf("current-project declaration entered dependency resolution provenance: %#v", provenanceStrings(records))
+		}
+	}
+	for _, ignored := range []string{`http.expose["email.send/v1"]`, `http.expose["order.create/v1"]`} {
+		if records := findProvenance(t, first.Provenance(), ignored); len(records) != 0 {
+			t.Fatalf("dependency-owned exposure entered composition provenance: %#v", provenanceStrings(records))
 		}
 	}
 	ratio := findProvenance(t, first.Provenance(), `config["example.com/acme/smtp.New"]["ratio"]`)
@@ -253,17 +258,13 @@ func TestComposeRequiresSelectedHTTPTransportForEffectiveExposure(t *testing.T) 
 			},
 		},
 		{
-			name: "dependency exposure without transport",
+			name: "dependency exposure is ignored without transport",
 			dependencies: []applicationmeta.Dependency{{
 				ModulePath:    "example.com/platform",
 				ModuleVersion: "v1.2.0",
 				Manifest:      composeManifest(t, "http: {expose: [kernel.info/v1]}\n"),
 			}},
 			current: "http: {transports: {connect: false, rest: false}}\n",
-			want: []string{
-				applicationmeta.ErrHTTPTransportSelection.Error(),
-				`kernel.info/v1 at example.com/platform@v1.2.0/plystra.yaml http.expose["kernel.info/v1"]`,
-			},
 		},
 	} {
 		test := test
@@ -447,7 +448,6 @@ capabilities:
 		t.Fatalf("removed declarations remain: exposures %#v requirements %#v choices %#v aliases %#v", manifest.HTTPExposures(), manifest.Requirements(), manifest.ProviderChoices(), manifest.Aliases())
 	}
 	for _, path := range []string{
-		`http.expose["email.send/v1"]`,
 		`capabilities.require["audit.write/v1"]`,
 		`capabilities.use["email.send/v1"]`,
 		`capabilities.aliases["mail.send/v1"]`,
@@ -455,6 +455,9 @@ capabilities:
 		if records := findProvenance(t, composed.Provenance(), path); len(records) != 1 || len(records[0].Sources()) != 1 || !strings.Contains(records[0].Sources()[0], "example.com/platform@v1.4.0/plystra.yaml") {
 			t.Fatalf("provenance for %s = %#v", path, provenanceStrings(records))
 		}
+	}
+	if records := findProvenance(t, composed.Provenance(), `http.expose["email.send/v1"]`); len(records) != 0 {
+		t.Fatalf("dependency-owned exposure entered provenance: %#v", provenanceStrings(records))
 	}
 }
 
@@ -469,18 +472,6 @@ func TestComposeRequiresCurrentDecisionForInheritedAddRemoveConflicts(t *testing
 		resolve string
 		assert  func(testing.TB, applicationmeta.Manifest)
 	}{
-		{
-			name:    "HTTP exposure",
-			added:   "http: {expose: [email.send/v1]}\n",
-			removed: "http: {expose: {remove: [email.send/v1]}}\n",
-			path:    `http.expose["email.send/v1"]`,
-			resolve: "http: {expose: {remove: [email.send/v1]}}\n",
-			assert: func(t testing.TB, manifest applicationmeta.Manifest) {
-				if len(manifest.HTTPExposures()) != 0 {
-					t.Fatalf("HTTP removal did not win: %#v", manifest.HTTPExposures())
-				}
-			},
-		},
 		{
 			name:    "requirement",
 			added:   "capabilities: {require: [audit.write/v1]}\n",
@@ -542,6 +533,30 @@ func TestComposeRequiresCurrentDecisionForInheritedAddRemoveConflicts(t *testing
 	}
 }
 
+func TestComposeIgnoresDependencyHTTPExposureConflicts(t *testing.T) {
+	t.Parallel()
+
+	dependencies := []applicationmeta.Dependency{
+		{ModulePath: "example.com/add", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "http: {expose: [email.send/v1]}\n")},
+		{ModulePath: "example.com/remove", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "http: {expose: {remove: [email.send/v1]}}\n")},
+	}
+	current := composeManifest(t, "http: {transports: {connect: false, rest: true}, expose: [app.health/v1]}\n")
+	composed, err := applicationmeta.Compose(dependencies, current, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+	if got := exposureIDs(composed.Manifest()); !slices.Equal(got, []string{"app.health/v1"}) {
+		t.Fatalf("effective current-Project exposures = %v", got)
+	}
+	if records := findProvenance(t, composed.Provenance(), `http.expose["email.send/v1"]`); len(records) != 0 {
+		t.Fatalf("ignored dependency conflict entered provenance: %#v", provenanceStrings(records))
+	}
+	reordered, err := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[1], dependencies[0]}, current, composeSchemaLookup(nil))
+	if err != nil || reordered.DependencyDigest() != composed.DependencyDigest() || !reflect.DeepEqual(provenanceStrings(reordered.Provenance()), provenanceStrings(composed.Provenance())) {
+		t.Fatalf("ignored dependency exposure changed deterministic composition: %#v, %v", reordered, err)
+	}
+}
+
 func TestComposeDeduplicatesCompatibleInheritedRemovals(t *testing.T) {
 	t.Parallel()
 
@@ -569,7 +584,6 @@ capabilities:
 		t.Fatalf("deduplicated removals produced declarations: %#v", manifest)
 	}
 	for _, path := range []string{
-		`http.expose["email.send/v1"]`,
 		`capabilities.require["audit.write/v1"]`,
 		`capabilities.use["email.send/v1"]`,
 		`capabilities.aliases["mail.send/v1"]`,
@@ -578,6 +592,9 @@ capabilities:
 		if len(records) != 1 || !records[0].Removed() || len(records[0].Sources()) != 2 {
 			t.Fatalf("deduplicated provenance for %s = %#v", path, provenanceStrings(records))
 		}
+	}
+	if records := findProvenance(t, first.Provenance(), `http.expose["email.send/v1"]`); len(records) != 0 {
+		t.Fatalf("dependency-owned exposure removal entered provenance: %#v", provenanceStrings(records))
 	}
 }
 

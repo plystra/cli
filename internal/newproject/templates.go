@@ -55,7 +55,7 @@ go build ./...
 go vet ./...
 ` + "```" + `
 
-Mutating Plystra commands regenerate automatically. Add an ordinary Go Module dependency with ` + "`plystra add github.com/acme/platform@v1.0.0`" + `, update it with ` + "`plystra update github.com/acme/platform@v1.1.0`" + `, and remove it with ` + "`plystra remove github.com/acme/platform`" + `. A Project created with ` + "`plystra new app --template github.com/acme/platform@v1.0.0`" + ` retains the selected template as the same kind of ordinary direct dependency: its root declarations, typed local operational values, and Secret-reference placeholders compose into this Project, but its source is not copied and it receives no resolution priority. Creation validates those values without reading referenced ` + "`env`" + ` or ` + "`file`" + ` Secrets; generated source and manifest provenance contain neither reference targets nor resolved values. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate. Use ` + "`plystra inspect`" + ` for a concise read-only summary of the same selected model, ` + "`--verbose`" + ` for complete resolution evidence, or ` + "`--format json`" + ` for deterministic automation output. Use ` + "`plystra explain capability <capability-name>/vN`" + ` with the same selector to see a Capability's selected Provider, direct reason and source, and the exact command or configuration field that changes that decision. Use ` + "`plystra explain plugin <plugin-id>`" + ` to see whether a Plugin is selected from the current Project, selected as an exact Capability Provider, or visible but unselected, together with the direct source and selector-matched change. Use ` + "`plystra explain config config.<plugin-id>.<field>`" + ` to see the typed configuration owner, winning source, explicit removal or ancestor suppression, and exact selected document field to edit without exposing configuration values or Secret-reference targets. Use ` + "`plystra explain alias <alias-name>/vN`" + ` to see its direct canonical target, inherited or narrowed exposure, every compatible application or generation-extension source, and the selector-matched field or activation decision that changes the result. Use ` + "`plystra explain exposure <capability-or-alias-name>/vN`" + ` to see why that identity is public or internal and the selected exposure, Alias, or activation decision that changes the surface.
+Mutating Plystra commands regenerate automatically. Add an ordinary Go Module dependency with ` + "`plystra add github.com/acme/platform@v1.0.0`" + `, update it with ` + "`plystra update github.com/acme/platform@v1.1.0`" + `, and remove it with ` + "`plystra remove github.com/acme/platform`" + `. A Project created with ` + "`plystra new app --template github.com/acme/platform@v1.0.0`" + ` retains the selected template as the same kind of ordinary direct dependency: its dependency-composable root declarations, typed values, and Secret-reference placeholders compose into this Project, but its source is not copied and it receives no resolution priority. Dependency public exposure and process settings do not compose; declare them in the selected current-Project document. Creation validates composable values without reading referenced ` + "`env`" + ` or ` + "`file`" + ` Secrets; generated source and manifest provenance contain neither reference targets nor resolved values. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate. Use ` + "`plystra inspect`" + ` for a concise read-only summary of the same selected model, ` + "`--verbose`" + ` for complete resolution evidence, or ` + "`--format json`" + ` for deterministic automation output. Use ` + "`plystra explain capability <capability-name>/vN`" + ` with the same selector to see a Capability's selected Provider, direct reason and source, and the exact command or configuration field that changes that decision. Use ` + "`plystra explain plugin <plugin-id>`" + ` to see whether a Plugin is selected from the current Project, selected as an exact Capability Provider, or visible but unselected, together with the direct source and selector-matched change. Use ` + "`plystra explain config config.<plugin-id>.<field>`" + ` to see the typed configuration owner, winning source, explicit removal or ancestor suppression, and exact selected document field to edit without exposing configuration values or Secret-reference targets. Use ` + "`plystra explain alias <alias-name>/vN`" + ` to see its direct canonical target, inherited or narrowed exposure, every compatible application or generation-extension source, and the selector-matched field or activation decision that changes the result. Use ` + "`plystra explain exposure <capability-or-alias-name>/vN`" + ` to see why that identity is public or internal and the selected exposure, Alias, or activation decision that changes the surface.
 
 A template's default Provider model must be unambiguous. If several compatible Plugins provide one required Capability, the template publisher must record one ` + "`capabilities.use`" + ` choice in the template's root ` + "`plystra.yaml`" + ` and publish a corrected version. Creation otherwise reports every candidate and leaves no target Project to repair.
 
@@ -563,15 +563,17 @@ Composition uses field-specific rules:
 
 - interfaces.require is a set; interfaces.use and interfaces.policies replace
   or remove exact keys.
-- http.expose and capabilities.require form deterministic canonical-ID unions.
-  Use their sparse add/remove mapping for exact inherited set edits.
+- capabilities.require and interfaces.require form deterministic canonical-ID
+  unions. Use their sparse add/remove mapping for exact inherited set edits.
 - Identical additions, removals, Provider selections, and Alias declarations
   deduplicate.
 - Plugin configuration merges only by fields declared in plugin.yaml.
   Declared objects merge recursively; scalar and array fields replace as one
   value. Null removes one inherited field or a complete Plugin config entry.
-- Dependency http.address, http.transports, http.cors, and timeouts.startup
-  never replace this Project's process settings.
+- Dependency http.expose, http.address, http.transports, http.cors, and
+  timeouts.startup never enter this Project's public or process settings. Add
+  http.expose in the selected current-Project document to publish an imported
+  Interface.
 - Incompatible Provider, Alias, or Plugin-field values fail with every
   contributing module@version/plystra.yaml source.
 
@@ -620,12 +622,9 @@ manifest retains non-secret current_project_paths so an identical local choice
 stays locally owned; edit YAML, never ownership data. Plystra generate --check
 reports dependency-composition drift without writing either surface.
 
-Remove only exact inherited declarations with sparse edits and null
+Remove only exact inherited composable declarations with sparse edits and null
 tombstones:
 
-    http:
-      expose:
-        remove: [diagnostics.internal/v1]
     capabilities:
       require:
         remove: [audit.legacy/v1]
@@ -639,6 +638,10 @@ tombstones:
     config:
       acme.email.smtp:
         legacy_host: null
+
+Dependency exposure is ignored rather than inherited. An environment overlay
+may use http.expose.remove only to remove exposure from this same current
+Project's root configuration.
 
 The same Capability cannot appear in both add and remove. A null entry removes
 only that keyed Provider, Alias, Plugin object, or declared Plugin field.

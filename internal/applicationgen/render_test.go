@@ -170,7 +170,6 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		`"dependency_composition_digest":"sha256:`,
 		`"application_model_digest":"` + options.ManifestProvenance.ApplicationModelDigest() + `"`,
 		`"protobuf_wire_map_digest":"` + options.ManifestProvenance.ProtobufWireMapDigest() + `"`,
-		`"path":"http.expose[\"diagnostics.internal/v1\"]"`,
 		`"removed":true`,
 		`"path":"config[\"example.com/acme/business.New\"][\"password\"]"`,
 		`"path":"config[\"example.com/acme/business.New\"][\"legacy\"]"`,
@@ -180,7 +179,11 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 			t.Fatalf("Alias manifest omits %q:\n%s", required, manifest)
 		}
 	}
-	for _, forbidden := range []string{"PRIVATE_APPLICATION_TOKEN", "private-runtime-value"} {
+	for _, forbidden := range []string{
+		`"path":"http.expose[\"diagnostics.internal/v1\"]"`,
+		"PRIVATE_APPLICATION_TOKEN",
+		"private-runtime-value",
+	} {
 		if strings.Contains(manifest, forbidden) {
 			t.Fatalf("Alias manifest contains forbidden value %q:\n%s", forbidden, manifest)
 		}

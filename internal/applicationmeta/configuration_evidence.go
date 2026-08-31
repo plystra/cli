@@ -60,7 +60,8 @@ func (d ConfigurationDecision) Removed() bool { return d.removed }
 func (d ConfigurationDecision) Source() string { return d.source }
 
 // DependencyComposable reports whether this field participates in dependency
-// composition. Process-local settings deliberately return false.
+// composition. Current-Project-owned process and public-surface settings
+// deliberately return false.
 func (d ConfigurationDecision) DependencyComposable() bool { return d.dependencyComposable }
 
 // ConfigurationDecisions returns deterministic typed decisions for one parsed
@@ -105,7 +106,7 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 			summary:              summary,
 			removed:              decision.removed,
 			source:               source,
-			dependencyComposable: true,
+			dependencyComposable: decision.field != maintenanceHTTPExposure,
 		})
 	}
 	result = append(result, processConfigurationDecisions(manifest)...)

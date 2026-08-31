@@ -718,7 +718,7 @@ func configurationContributionKey(value ConfigurationContribution) string {
 }
 
 func configurationPathDependencyComposable(value string) bool {
-	return strings.HasPrefix(value, "http.expose[") || strings.HasPrefix(value, "capabilities.require[") || strings.HasPrefix(value, "capabilities.use[") || strings.HasPrefix(value, "capabilities.aliases[") || strings.HasPrefix(value, "interfaces.require[") || strings.HasPrefix(value, "interfaces.use[") || strings.HasPrefix(value, "interfaces.policies[") || strings.HasPrefix(value, "config[")
+	return strings.HasPrefix(value, "capabilities.require[") || strings.HasPrefix(value, "capabilities.use[") || strings.HasPrefix(value, "capabilities.aliases[") || strings.HasPrefix(value, "interfaces.require[") || strings.HasPrefix(value, "interfaces.use[") || strings.HasPrefix(value, "interfaces.policies[") || strings.HasPrefix(value, "config[")
 }
 
 func configurationPathKeys(value, prefix string) ([]string, bool) {

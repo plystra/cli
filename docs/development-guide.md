@@ -641,8 +641,9 @@ dependency even when it contains a file named `plugin.yaml` below its root.
 
 Composition is typed and independent of dependency order:
 
-- `http.expose` and `capabilities.require` form canonical-ID unions. Use their
-  sparse `{add: [...], remove: [...]}` form for an exact inherited set edit.
+- `capabilities.require` and `interfaces.require` form canonical-ID unions. Use
+  their sparse `{add: [...], remove: [...]}` form for an exact inherited set
+  edit.
 - Identical additions, removals, Provider selections, and Alias declarations
   deduplicate.
 - Plugin configuration merges by fields declared in that Plugin's
@@ -650,9 +651,10 @@ Composition is typed and independent of dependency order:
   replace as complete values. A keyed `null` removes one inherited field, and
   `config.<plugin-id>: null` removes that Plugin's inherited object. Unknown
   fields and invalid or changing types fail.
-- Dependency `http.address`, `http.transports`, `http.cors`,
-  `timeouts.startup`, and other process settings do not enter the current
-  Project.
+- Dependency `http.expose`, `http.address`, `http.transports`, `http.cors`,
+  `timeouts.startup`, and other public/process settings do not enter the
+  current Project. Add `http.expose` in the selected current-Project document
+  when an imported Interface should become public.
 - Incompatible inherited Providers, Aliases, or Plugin fields fail with every
   contributing `module@version/plystra.yaml` source.
 
@@ -675,11 +677,6 @@ Record an exact inherited removal without copying the rest of the dependency
 configuration:
 
 ```yaml
-http:
-  expose:
-    remove:
-      - diagnostics.internal/v1
-
 capabilities:
   require:
     remove:
@@ -702,6 +699,11 @@ than an appendable list. When dependencies disagree between an addition and
 removal, the current Project must make that same exact decision. Removing a
 required Plugin field still fails final configuration validation unless a
 valid default supplies it.
+
+`http.expose` is not an inherited set. A dependency Project's exposure is
+ignored by consumers and needs no removal tombstone. An environment overlay
+may still use sparse `http.expose.remove` to remove an exposure declared by the
+same current Project's root configuration.
 
 After manually changing a replacement or dependency version, run:
 

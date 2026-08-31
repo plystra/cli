@@ -376,15 +376,17 @@ Composition uses field-specific rules:
 
 - interfaces.require is a set; interfaces.use and interfaces.policies replace
   or remove exact keys.
-- http.expose and capabilities.require form deterministic canonical-ID unions.
-  Use their sparse add/remove mapping for exact inherited set edits.
+- capabilities.require and interfaces.require form deterministic canonical-ID
+  unions. Use their sparse add/remove mapping for exact inherited set edits.
 - Identical additions, removals, Provider selections, and Alias declarations
   deduplicate.
 - Plugin configuration merges only by fields declared in plugin.yaml.
   Declared objects merge recursively; scalar and array fields replace as one
   value. Null removes one inherited field or a complete Plugin config entry.
-- Dependency http.address, http.transports, http.cors, and timeouts.startup
-  never replace this Project's process settings.
+- Dependency http.expose, http.address, http.transports, http.cors, and
+  timeouts.startup never enter this Project's public or process settings. Add
+  http.expose in the selected current-Project document to publish an imported
+  Interface.
 - Incompatible Provider, Alias, or Plugin-field values fail with every
   contributing module@version/plystra.yaml source.
 
@@ -433,12 +435,9 @@ manifest retains non-secret current_project_paths so an identical local choice
 stays locally owned; edit YAML, never ownership data. Plystra generate --check
 reports dependency-composition drift without writing either surface.
 
-Remove only exact inherited declarations with sparse edits and null
+Remove only exact inherited composable declarations with sparse edits and null
 tombstones:
 
-    http:
-      expose:
-        remove: [diagnostics.internal/v1]
     capabilities:
       require:
         remove: [audit.legacy/v1]
@@ -452,6 +451,10 @@ tombstones:
     config:
       acme.email.smtp:
         legacy_host: null
+
+Dependency exposure is ignored rather than inherited. An environment overlay
+may use http.expose.remove only to remove exposure from this same current
+Project's root configuration.
 
 The same Capability cannot appear in both add and remove. A null entry removes
 only that keyed Provider, Alias, Plugin object, or declared Plugin field.

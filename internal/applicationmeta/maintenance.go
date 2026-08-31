@@ -434,6 +434,9 @@ func dependencyMaintenanceCandidates(dependencies []Dependency, schemas SchemaLo
 			return nil, fmt.Errorf("dependency %s: %w", dependencyIdentity(dependency), err)
 		}
 		for _, decision := range decisions {
+			if decision.field == maintenanceHTTPExposure {
+				continue
+			}
 			source := dependencySource(dependency, decision.source)
 			byDecision := result[decision.path]
 			if byDecision == nil {

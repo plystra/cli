@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -475,8 +474,8 @@ var _ sendv1.Interface = (*Service)(nil)
 		t.Fatalf("Parse(plystra.yaml): %v", err)
 	}
 	exposures := model.HTTPExposures()
-	if len(exposures) != 1 || exposures[0].ID().String() != "kernel.health/v1" {
-		t.Fatalf("composed HTTP exposures = %#v, want kernel.health/v1", exposures)
+	if len(exposures) != 0 {
+		t.Fatalf("dependency HTTP exposure entered created Project = %#v", exposures)
 	}
 	if transports := model.HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
 		t.Fatalf("composed HTTP transports = %#v, want Connect enabled and REST disabled", transports)
@@ -518,7 +517,7 @@ var _ sendv1.Interface = (*Service)(nil)
 	}
 }
 
-func TestCreateQualifiesGeneratedJavaScriptSDKAndRemovesValidationOutput(t *testing.T) {
+func TestCreateIgnoresTemplateExposureWithoutGeneratingJavaScriptSDK(t *testing.T) {
 	proxy := createKernelProxy(t)
 	const templatePath = "example.com/acme/javascript-platform"
 	const templateVersion = "v1.0.0"
@@ -546,60 +545,20 @@ func TestCreateQualifiesGeneratedJavaScriptSDKAndRemovesValidationOutput(t *test
 	if result.Path() != filepath.Join(parent, "my-app") {
 		t.Fatalf("result path = %q", result.Path())
 	}
-	assertDirectRequirement(t, result.Path(), "connectrpc.com/connect", "v1.20.0")
-	assertDirectRequirement(t, result.Path(), "google.golang.org/protobuf", "v1.36.11")
+	assertDirectRequirement(t, result.Path(), templatePath, templateVersion)
 	if _, err := os.Lstat(filepath.Join(result.Path(), "go.work")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("generated Project contains go.work: %v", err)
 	}
-	packageData, err := os.ReadFile(filepath.Join(result.Path(), "generated", "sdk", "javascript", "package.json"))
+	configuration, err := os.ReadFile(filepath.Join(result.Path(), "plystra.yaml"))
 	if err != nil {
-		t.Fatalf("read generated JavaScript package metadata: %v", err)
+		t.Fatalf("read created Project configuration: %v", err)
 	}
-	var packageManifest struct {
-		Scripts struct {
-			Typecheck string `json:"typecheck"`
-			Build     string `json:"build"`
-		} `json:"scripts"`
-		Dependencies    map[string]string `json:"dependencies"`
-		DevDependencies map[string]string `json:"devDependencies"`
+	manifest, err := applicationmeta.Parse(configuration)
+	if err != nil || len(manifest.HTTPExposures()) != 0 {
+		t.Fatalf("created Project exposure = %#v, %v", manifest.HTTPExposures(), err)
 	}
-	if err := json.Unmarshal(packageData, &packageManifest); err != nil {
-		t.Fatalf("decode generated JavaScript package metadata: %v", err)
-	}
-	if packageManifest.Scripts.Typecheck == "" || packageManifest.Scripts.Build == "" || packageManifest.DevDependencies["typescript"] == "" {
-		t.Fatalf("generated JavaScript package metadata omits required package-manager inputs: %s", packageData)
-	}
-	for dependency, version := range map[string]string{
-		"@bufbuild/protobuf":      "2.12.1",
-		"@connectrpc/connect":     "2.1.2",
-		"@connectrpc/connect-web": "2.1.2",
-	} {
-		if packageManifest.Dependencies[dependency] != version {
-			t.Fatalf("generated JavaScript package dependency %s = %q, want %q: %s", dependency, packageManifest.Dependencies[dependency], version, packageData)
-		}
-	}
-	descriptorSource, err := os.ReadFile(filepath.Join(result.Path(), "generated", "sdk", "javascript", "src", "descriptors.ts"))
-	if err != nil {
-		t.Fatalf("read generated JavaScript Connect descriptors: %v", err)
-	}
-	runtimeSource, err := os.ReadFile(filepath.Join(result.Path(), "generated", "sdk", "javascript", "src", "runtime.ts"))
-	if err != nil {
-		t.Fatalf("read generated JavaScript Connect runtime: %v", err)
-	}
-	for _, required := range [][]byte{[]byte("createFileRegistry"), []byte("FileDescriptorSetSchema"), []byte("resolveUnaryMethod")} {
-		if !bytes.Contains(descriptorSource, required) {
-			t.Fatalf("generated JavaScript descriptors omit %q", required)
-		}
-	}
-	for _, required := range [][]byte{[]byte("createConnectTransport"), []byte("runtime.transport.unary"), []byte("ConnectError")} {
-		if !bytes.Contains(runtimeSource, required) {
-			t.Fatalf("generated JavaScript runtime omits %q", required)
-		}
-	}
-	for _, obsolete := range [][]byte{[]byte("api/v1/capabilities/"), []byte(`Accept: "application/json"`)} {
-		if bytes.Contains(runtimeSource, obsolete) {
-			t.Fatalf("generated JavaScript runtime retains obsolete JSON/fetch transport %q", obsolete)
-		}
+	if _, err := os.Lstat(filepath.Join(result.Path(), "generated", "sdk", "javascript")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ignored dependency exposure generated a JavaScript SDK: %v", err)
 	}
 	if err := gocommand.Run(t.Context(), gocommand.Options{
 		Directory:   result.Path(),
@@ -607,49 +566,9 @@ func TestCreateQualifiesGeneratedJavaScriptSDKAndRemovesValidationOutput(t *test
 	}, "list", "-mod=readonly", "./..."); err != nil {
 		t.Fatalf("created Project does not resolve with GOWORK=off: %v", err)
 	}
-	logData, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read npm log: %v", err)
+	if _, err := os.Lstat(logPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ignored dependency exposure invoked npm validation: %v", err)
 	}
-	wantLog := "install --ignore-scripts --no-audit --no-fund --package-lock=false\nrun typecheck\nrun build\npack --dry-run --json\n"
-	if string(logData) != wantLog {
-		t.Fatalf("npm validation calls = %q, want %q", logData, wantLog)
-	}
-	for _, relative := range []string{"generated/sdk/javascript/node_modules", "generated/sdk/javascript/dist", "generated/sdk/javascript/package-lock.json", "generated/sdk/javascript/npm-shrinkwrap.json"} {
-		if _, err := os.Lstat(filepath.Join(result.Path(), filepath.FromSlash(relative))); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("validation output %s remains in committed Project: %v", relative, err)
-		}
-	}
-}
-
-func TestCreateRollsBackWhenGeneratedJavaScriptSDKValidationFails(t *testing.T) {
-	proxy := createKernelProxy(t)
-	const templatePath = "example.com/acme/javascript-failing-platform"
-	const templateVersion = "v1.0.0"
-	templateQuery := templatePath + "@" + templateVersion
-	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
-		"template.go":  []byte("package platform\n"),
-		"plystra.yaml": []byte("http:\n  expose: [kernel.health/v1]\n"),
-	})
-	environment := isolatedGoEnvironment(t, proxy)
-	environment = setEnvironmentValue(environment, "PLYSTRA_NPM_HELPER", "1")
-	environment = setEnvironmentValue(environment, "PLYSTRA_NPM_FAIL_ON", "run typecheck")
-	parent := t.TempDir()
-	_, err := newproject.Create(t.Context(), newproject.Options{
-		Parent:      parent,
-		ProjectName: "my-app",
-		ModulePath:  "example.com/acme/my-app",
-		Template:    templateQuery,
-		NPMCommand:  os.Args[0],
-		Environment: environment,
-	})
-	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrInvalidTemplate) || !strings.Contains(err.Error(), "npm run typecheck") || !strings.Contains(err.Error(), "injected npm failure") {
-		t.Fatalf("Create error = %v", err)
-	}
-	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("target exists after JavaScript qualification failure: %v", err)
-	}
-	assertNoTransactionFiles(t, parent)
 }
 
 func TestCreateRejectsTemplateWithoutRootProjectMarkerAndRollsBack(t *testing.T) {
@@ -2043,12 +1962,12 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra use email.send/v1 example.com/acme/email/production.New --env production",
 		"plystra use email.send/v1 example.com/acme/email/customer.New --config deploy/customer-a.yaml",
 		"rolls back every owned file after",
-		"Remove only exact inherited declarations with sparse edits and null",
-		"remove: [diagnostics.internal/v1]",
+		"Remove only exact inherited composable declarations with sparse edits and null",
+		"Dependency exposure is ignored rather than inherited",
 		"email.send/v1: null",
 		"legacy_host: null",
 		"Declared objects merge recursively",
-		"Dependency http.address, http.transports, http.cors, and timeouts.startup",
+		"Dependency http.expose, http.address, http.transports, http.cors, and",
 		"interfaces.use and interfaces.policies replace",
 		"Only positive timeout is accepted",
 		"Values normalize and replace",

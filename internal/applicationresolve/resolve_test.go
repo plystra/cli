@@ -889,13 +889,13 @@ replace example.com/platform-b => ../platform-b
 		t.Fatalf("effective requirements = %v", got)
 	}
 	selectedProviders := result.ResolutionEvidence().SelectedProviders()
-	if len(selectedProviders) != 2 || selectedProviders[0].Capability() != "kernel.health/v1" || selectedProviders[0].SelectionReason() != resolutionevidence.ProviderSelectionIntrinsic || !selectedProviders[0].Intrinsic() || selectedProviders[0].ProviderSource().Module() != "github.com/plystra/kernel" || selectedProviders[0].ProviderSource().Path() != "capability/catalog/definitions/kernel.health/v1/capability.yaml" || selectedProviders[1].Capability() != "kernel.info/v1" || selectedProviders[1].SelectionReason() != resolutionevidence.ProviderSelectionIntrinsic || !selectedProviders[1].Intrinsic() {
+	if len(selectedProviders) != 1 || selectedProviders[0].Capability() != "kernel.health/v1" || selectedProviders[0].SelectionReason() != resolutionevidence.ProviderSelectionIntrinsic || !selectedProviders[0].Intrinsic() || selectedProviders[0].ProviderSource().Module() != "github.com/plystra/kernel" || selectedProviders[0].ProviderSource().Path() != "capability/catalog/definitions/kernel.health/v1/capability.yaml" {
 		t.Fatalf("intrinsic Provider evidence = %#v", selectedProviders)
 	}
-	if !result.ConfigurationMaintenance().Changed() || result.ConfigurationMaintenancePath() != "plystra.yaml" || !bytes.Equal(result.ConfigurationMaintenanceSource(), []byte(rootConfiguration)) {
+	if result.ConfigurationMaintenance().Changed() || result.ConfigurationMaintenancePath() != "plystra.yaml" || !bytes.Equal(result.ConfigurationMaintenanceSource(), []byte(rootConfiguration)) {
 		t.Fatalf("root maintenance = changed %t path %q source %q", result.ConfigurationMaintenance().Changed(), result.ConfigurationMaintenancePath(), result.ConfigurationMaintenanceSource())
 	}
-	if !bytes.Contains(result.RootConfigurationData(), []byte("expose:")) || !bytes.Equal(result.ConfigurationSource(), []byte(overlayConfiguration)) {
+	if bytes.Contains(result.RootConfigurationData(), []byte("expose:")) || !bytes.Equal(result.ConfigurationSource(), []byte(overlayConfiguration)) {
 		t.Fatal("root or overlay provenance was not preserved independently")
 	}
 	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, before) {
@@ -1161,7 +1161,7 @@ replace example.com/providers => ../providers
 	if !first.Composition().Valid() || first.Composition().DependencyDigest() == "" || len(first.Composition().Provenance()) == 0 {
 		t.Fatalf("Composition = %#v", first.Composition())
 	}
-	if address, exists := first.Manifest().HTTPAddress(); !exists || address != ":8080" || first.Manifest().StartupTimeout() != applicationmeta.DefaultStartupTimeout || len(first.CurrentManifest().HTTPExposures()) != 1 || len(first.Manifest().HTTPExposures()) != 1 || !first.ConfigurationMaintenance().Changed() {
+	if address, exists := first.Manifest().HTTPAddress(); !exists || address != ":8080" || first.Manifest().StartupTimeout() != applicationmeta.DefaultStartupTimeout || len(first.CurrentManifest().HTTPExposures()) != 0 || len(first.Manifest().HTTPExposures()) != 0 || !first.ConfigurationMaintenance().Changed() {
 		t.Fatalf("composed/current manifests = effective %#v, current %#v", first.Manifest(), first.CurrentManifest())
 	}
 	if got := pluginSummaries(plugins); !reflect.DeepEqual(got, []string{
@@ -1180,7 +1180,7 @@ replace example.com/providers => ../providers
 		t.Fatalf("Requirements = %v", requirements)
 	}
 	target, exists := resolved.Context().Capability(capability)
-	if !exists || target.Exposure() != (generation.Exposure{Go: true, HTTP: true, JavaScript: true}) {
+	if !exists || target.Exposure() != (generation.Exposure{Go: true}) {
 		t.Fatalf("target exposure = %#v, %t", target.Exposure(), exists)
 	}
 	aliases := resolved.AliasResolution().Aliases()
@@ -1196,29 +1196,18 @@ replace example.com/providers => ../providers
 		t.Fatalf("resolution evidence requirements = %#v", evidenceRequirements)
 	}
 	evidenceSources := evidenceRequirements[0].Sources()
-	if len(evidenceSources) != 3 || evidenceSources[0].Kind() != providerresolution.RequirementAliasTarget || evidenceSources[1].Kind() != providerresolution.RequirementExposure || evidenceSources[2].Kind() != providerresolution.RequirementPlugin {
+	if len(evidenceSources) != 2 || evidenceSources[0].Kind() != providerresolution.RequirementAliasTarget || evidenceSources[1].Kind() != providerresolution.RequirementPlugin {
 		t.Fatalf("resolution evidence requirement sources = %#v", evidenceSources)
 	}
 	if source := evidenceSources[0]; source.ProjectModule() != "example.com/providers" || source.Source().Module() != "example.com/providers" || source.Source().Path() != "plystra.yaml" || source.Alias() != "mail.send/v1" {
 		t.Fatalf("dependency Alias-target source = %#v", source)
 	}
-	if source := evidenceSources[1]; source.ProjectModule() != "example.com/providers" || source.Source().Module() != "example.com/providers" || source.Source().Path() != "plystra.yaml" {
-		t.Fatalf("dependency exposure source = %#v", source)
-	}
-	if source := evidenceSources[2]; source.ProjectModule() != "example.com/app" || source.Source().Module() != "example.com/app" || source.Source().Path() != "local/plugin.yaml" || source.PluginID() != "example.local" {
+	if source := evidenceSources[1]; source.ProjectModule() != "example.com/app" || source.Source().Module() != "example.com/app" || source.Source().Path() != "local/plugin.yaml" || source.PluginID() != "example.local" {
 		t.Fatalf("local Plugin requirement source = %#v", source)
 	}
 	publicExposures := first.ResolutionEvidence().PublicExposures()
-	if first.ResolutionEvidence().PublicExposureCount() != 2 || len(publicExposures) != 2 || publicExposures[0].Capability() != "email.send/v1" || publicExposures[0].Kind() != resolutionevidence.PublicExposureCanonical || publicExposures[0].CanonicalTarget() != "email.send/v1" || publicExposures[0].ContractDigest() != target.ContractDigest() || publicExposures[0].Exposure() != target.Exposure() || publicExposures[1].Capability() != "mail.send/v1" || publicExposures[1].Kind() != resolutionevidence.PublicExposureAlias || publicExposures[1].CanonicalTarget() != "email.send/v1" || publicExposures[1].ContractDigest() != target.ContractDigest() || publicExposures[1].Exposure() != target.Exposure() {
-		t.Fatalf("dependency-composed public exposures = %#v", publicExposures)
-	}
-	canonicalExposureSources := publicExposures[0].Sources()
-	if len(canonicalExposureSources) != 1 || canonicalExposureSources[0].Kind() != resolutionevidence.PublicExposureSourceHTTPExpose || canonicalExposureSources[0].ProjectModule() != "example.com/providers" || canonicalExposureSources[0].Source().Module() != "example.com/providers" || canonicalExposureSources[0].Source().Path() != "plystra.yaml" || canonicalExposureSources[0].Source().Kind() != "exposure" {
-		t.Fatalf("dependency canonical public exposure sources = %#v", canonicalExposureSources)
-	}
-	aliasExposureSources := publicExposures[1].Sources()
-	if len(aliasExposureSources) != 1 || aliasExposureSources[0].Kind() != resolutionevidence.PublicExposureSourceAliasApplication || aliasExposureSources[0].ProjectModule() != "example.com/providers" || aliasExposureSources[0].Source().Module() != "example.com/providers" || aliasExposureSources[0].Source().Path() != "plystra.yaml" || aliasExposureSources[0].Source().Kind() != "alias-target" {
-		t.Fatalf("dependency Alias public exposure sources = %#v", aliasExposureSources)
+	if first.ResolutionEvidence().PublicExposureCount() != 0 || len(publicExposures) != 0 {
+		t.Fatalf("dependency-owned exposure created public consumer surfaces = %#v", publicExposures)
 	}
 	for _, forbidden := range []string{"private.smtp.example.com", "PLYSTRA_APPLICATION_RESOLVE_PRIVATE_SECRET", "resolved-private-secret", appRoot, providerRoot} {
 		if bytes.Contains(resolved.Context().CanonicalJSON(), []byte(forbidden)) || bytes.Contains(first.ResolutionEvidence().CanonicalJSON(), []byte(forbidden)) {
@@ -1283,7 +1272,7 @@ replace example.com/direct => ../direct
 replace example.com/transitive => ../transitive
 replace example.com/ordinary => ../ordinary
 `)
-	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "http: {expose: [email.send/v1]}\n")
 	writePlugin(t, appRoot, "app", "id: example.app\n")
 
 	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
@@ -1324,12 +1313,12 @@ replace example.com/ordinary => ../ordinary
 		t.Fatalf("transitive requirement sources = %#v", auditSources)
 	}
 	emailSources := evidenceRequirements[1].Sources()
-	if len(emailSources) != 1 || emailSources[0].Kind() != providerresolution.RequirementExposure || emailSources[0].ProjectModule() != "example.com/direct" || emailSources[0].Source().Module() != "example.com/direct" || emailSources[0].Source().Path() != "plystra.yaml" {
-		t.Fatalf("direct exposure requirement sources = %#v", emailSources)
+	if len(emailSources) != 1 || emailSources[0].Kind() != providerresolution.RequirementExposure || emailSources[0].ProjectModule() != "example.com/app" || emailSources[0].Source().Module() != "example.com/app" || emailSources[0].Source().Path() != "plystra.yaml" {
+		t.Fatalf("current-Project exposure requirement sources = %#v", emailSources)
 	}
 	auditConfiguration := resolvedConfigurationField(t, result, `capabilities.require["audit.write/v1"]`)
 	emailConfiguration := resolvedConfigurationField(t, result, `http.expose["email.send/v1"]`)
-	if auditConfiguration.Owner() != resolutionevidence.ConfigurationOwnerDependency || emailConfiguration.Owner() != resolutionevidence.ConfigurationOwnerDependency || len(auditConfiguration.Contributors()) != 1 || len(emailConfiguration.Contributors()) != 1 || auditConfiguration.Contributors()[0].Sources()[0].Module() != "example.com/transitive" || emailConfiguration.Contributors()[0].Sources()[0].Module() != "example.com/direct" {
+	if auditConfiguration.Owner() != resolutionevidence.ConfigurationOwnerDependency || emailConfiguration.Owner() != resolutionevidence.ConfigurationOwnerRoot || len(auditConfiguration.Contributors()) != 1 || len(emailConfiguration.Contributors()) != 1 || auditConfiguration.Contributors()[0].Sources()[0].Module() != "example.com/transitive" || emailConfiguration.Contributors()[0].Sources()[0].Module() != "example.com/app" {
 		t.Fatalf("direct/transitive configuration evidence = audit %#v email %#v", auditConfiguration, emailConfiguration)
 	}
 	if provider, exists := result.Resolution().Context().SelectedProvider(parseGenerationCapability(t, "email.send/v1")); !exists || provider.String() != "example.smtp" {
@@ -1391,7 +1380,6 @@ replace example.com/ordinary => ../ordinary
 	}
 	provenance := result.Composition().Provenance()
 	for path, source := range map[string]string{
-		`http.expose["email.send/v1"]`:           "example.com/direct@v1.2.0/plystra.yaml",
 		`capabilities.require["audit.write/v1"]`: "example.com/transitive@v1.4.0/plystra.yaml",
 		`capabilities.use["email.send/v1"]`:      "example.com/direct@v1.2.0/plystra.yaml",
 	} {
@@ -1399,6 +1387,9 @@ replace example.com/ordinary => ../ordinary
 		if len(records) != 1 || len(records[0].Sources()) != 1 || !strings.HasPrefix(records[0].Sources()[0], source) {
 			t.Fatalf("provenance for %s = %#v", path, records)
 		}
+	}
+	if records := compositionProvenance(provenance, `http.expose["email.send/v1"]`); len(records) != 0 {
+		t.Fatalf("dependency-owned exposure entered composition provenance: %#v", records)
 	}
 }
 

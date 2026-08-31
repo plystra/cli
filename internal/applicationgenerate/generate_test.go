@@ -1033,6 +1033,63 @@ func TestGenerateChecksAndRepairsDependencyCompositionDriftTransactionally(t *te
 	assertNoTransactions(t, appRoot)
 }
 
+func TestGenerateIgnoresDependencyExposureChanges(t *testing.T) {
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	dependencyRoot := filepath.Join(root, "platform")
+	writeModule(t, dependencyRoot, "example.com/platform", "")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "http: {expose: [kernel.info/v1]}\n")
+	writeApplicationModule(t, appRoot, "example.com/acme/dependency-exposure")
+	goModPath := filepath.Join(appRoot, "go.mod")
+	goMod := string(readAbsoluteFile(t, goModPath)) + fmt.Sprintf("\nrequire example.com/platform v1.0.0\n\nreplace example.com/platform => %s\n", filepath.ToSlash(dependencyRoot))
+	writeFile(t, goModPath, goMod)
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
+	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+	validate := func(_ context.Context, _ string) error { return nil }
+
+	initial, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       appRoot,
+		Environment: environment,
+		Validate:    validate,
+	})
+	if err != nil || initial.ConfigurationChanged() || !initial.Report().Clean() {
+		t.Fatalf("initial Generate = changed %t, report %#v, %v", initial.ConfigurationChanged(), initial.Report().Changes(), err)
+	}
+	before := snapshotTree(t, appRoot)
+	manifest := readFile(t, appRoot, "generated/manifest.json")
+	if bytes.Contains(manifest, []byte(`http.expose[\"kernel.info/v1\"]`)) {
+		t.Fatalf("dependency exposure entered generated provenance: %s", manifest)
+	}
+	assertFileMissing(t, appRoot, "generated/proto/plystra/generated/kernel/info/v1/capability.proto")
+	assertFileMissing(t, appRoot, "generated/sdk/javascript/src/interfaces/kernel/info/v1.ts")
+
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "http: {expose: [kernel.health/v1]}\n")
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       appRoot,
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil || !checked.Checked() || checked.ConfigurationChanged() || !checked.Report().Clean() {
+		t.Fatalf("exposure-only dependency check = checked %t, changed %t, report %#v, %v", checked.Checked(), checked.ConfigurationChanged(), checked.Report().Changes(), err)
+	}
+	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, before) {
+		t.Fatalf("dependency exposure change altered consumer output:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+
+	regenerated, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       appRoot,
+		Environment: environment,
+		Validate:    validate,
+	})
+	if err != nil || regenerated.ConfigurationChanged() || !regenerated.Report().Clean() {
+		t.Fatalf("exposure-only dependency regeneration = changed %t, report %#v, %v", regenerated.ConfigurationChanged(), regenerated.Report().Changes(), err)
+	}
+	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, before) {
+		t.Fatalf("dependency exposure regeneration altered consumer output:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoTransactions(t, appRoot)
+}
+
 func TestGenerateMaintainsFullReplacementSelectionsIndependently(t *testing.T) {
 	root := t.TempDir()
 	appRoot := filepath.Join(root, "app")

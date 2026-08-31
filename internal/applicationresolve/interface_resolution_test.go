@@ -613,7 +613,7 @@ func TestResolveRejectsUnknownOrShadowedIntrinsicKernelInterfaceWithoutMutation(
 	}
 }
 
-func TestResolveCollectsDependencyExposureWithComposedProvenance(t *testing.T) {
+func TestResolveIgnoresDependencyExposureWithoutConsumerResolutionState(t *testing.T) {
 	t.Parallel()
 
 	parent := t.TempDir()
@@ -662,18 +662,22 @@ replace example.com/interface-platform => ../platform
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	roots := resolved.InterfaceResolution().Graph().Roots()
-	wantSource := `example.com/interface-platform@v1.2.3/plystra.yaml http.expose["app.run/v1"]`
-	if len(roots) != 1 || roots[0].InterfaceID().String() != "app.run/v1" || !reflect.DeepEqual(roots[0].Sources(), []string{wantSource}) {
-		t.Fatalf("dependency exposure roots = %#v", roots)
+	if roots := resolved.InterfaceResolution().Graph().Roots(); len(roots) != 0 {
+		t.Fatalf("dependency exposure created consumer roots = %#v", roots)
 	}
-	if got := resolvedSelectionSummaries(resolved.InterfaceResolution()); !reflect.DeepEqual(got, []string{
-		"app.run/v1=example.com/interface-platform/app.New:unique-compatible",
-	}) {
-		t.Fatalf("dependency exposure selections = %v", got)
+	if got := resolvedSelectionSummaries(resolved.InterfaceResolution()); len(got) != 0 {
+		t.Fatalf("dependency exposure created consumer selections = %v", got)
 	}
-	if !resolved.ConfigurationMaintenance().Changed() {
-		t.Fatal("dependency exposure was not represented in planned root maintenance")
+	if exposures := resolved.Manifest().HTTPExposures(); len(exposures) != 0 {
+		t.Fatalf("dependency exposure entered the effective consumer manifest = %#v", exposures)
+	}
+	if resolved.ConfigurationMaintenance().Changed() {
+		t.Fatal("dependency exposure entered planned consumer maintenance")
+	}
+	for _, record := range resolved.Composition().Provenance() {
+		if record.Path() == `http.expose["app.run/v1"]` {
+			t.Fatalf("dependency exposure entered consumer composition provenance: %#v", record)
+		}
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("dependency exposure resolution mutated current Project:\nbefore: %#v\nafter: %#v", before, after)
@@ -789,6 +793,7 @@ replace example.com/ordinary => ../ordinary
 	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `http:
   address: ":9090"
   transports: {connect: true}
+  expose: [app.run/v1]
 timeouts:
   startup: 7s
 `)
@@ -828,6 +833,10 @@ timeouts:
 	}) {
 		t.Fatalf("dependency selections = %v", got)
 	}
+	roots := first.InterfaceResolution().Graph().Roots()
+	if len(roots) != 2 || roots[0].InterfaceID().String() != "app.run/v1" || !reflect.DeepEqual(roots[0].Sources(), []string{`plystra.yaml http.expose["app.run/v1"]`}) || roots[1].InterfaceID().String() != "audit.write/v1" {
+		t.Fatalf("current and inherited Interface roots = %#v", roots)
+	}
 	policies := first.Manifest().InterfacePolicies()
 	if len(policies) != 1 || policies[0].InterfaceID().String() != "app.run/v1" || policies[0].Timeout().String() != "5s" {
 		t.Fatalf("dependency policies = %#v", policies)
@@ -848,7 +857,6 @@ timeouts:
 		}
 	}
 	for path, module := range map[string]string{
-		`http.expose["app.run/v1"]`:                              "example.com/direct@v1.2.0",
 		`interfaces.require["audit.write/v1"]`:                   "example.com/transitive@v1.4.0",
 		`interfaces.use["app.run/v1"]`:                           "example.com/direct@v1.2.0",
 		`interfaces.use["audit.write/v1"]`:                       "example.com/transitive@v1.4.0",
@@ -860,6 +868,9 @@ timeouts:
 		if len(records) != 1 || len(records[0].Sources()) != 1 || !strings.Contains(records[0].Sources()[0], module+"/plystra.yaml") {
 			t.Fatalf("dependency provenance for %s = %#v", path, records)
 		}
+	}
+	if records := compositionProvenance(first.Composition().Provenance(), `http.expose["app.run/v1"]`); len(records) != 0 {
+		t.Fatalf("dependency-owned exposure entered composition provenance: %#v", records)
 	}
 	if first.Composition().DependencyDigest() == "" || first.Composition().DependencyDigest() != second.Composition().DependencyDigest() || !reflect.DeepEqual(first.Composition().Provenance(), second.Composition().Provenance()) {
 		t.Fatalf("dependency composition is not deterministic: first %#v second %#v", first.Composition().Provenance(), second.Composition().Provenance())

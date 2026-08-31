@@ -13,7 +13,6 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationinventory"
-	"github.com/plystra/cli/internal/interfaceid"
 )
 
 var (
@@ -121,9 +120,10 @@ func (c Composition) Provenance() []Provenance {
 }
 
 // ResolutionSources returns dependency provenance whose normalized value
-// matches one effective Interface or legacy requirement, exposure, selection,
-// or remaining Alias. Superseded and removed dependency declarations remain
-// in Provenance but do not introduce final application requirements.
+// matches one effective Interface or legacy requirement, selection, or
+// remaining Alias. Public exposure is current-Project-owned and therefore has
+// no dependency provenance. Superseded and removed dependency declarations
+// remain in Provenance but do not introduce final application requirements.
 func (c Composition) ResolutionSources() []Provenance {
 	if !c.Valid() {
 		return nil
@@ -142,10 +142,10 @@ func (c Composition) DependencyDigest() string {
 }
 
 // Compose applies the typed dependency rules beneath one current-project
-// Manifest. Process settings remain current-project-owned; canonical sets
-// union; keyed Implementation selections and remaining keyed declarations
-// require compatible inherited values unless the current Project replaces that
-// exact key.
+// Manifest. Process settings and public exposure remain current-project-owned;
+// composable canonical sets union; keyed Implementation selections and
+// remaining keyed declarations require compatible inherited values unless the
+// current Project replaces that exact key.
 func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) (Composition, error) {
 	if schemas == nil {
 		return Composition{}, fmt.Errorf("%w: schema lookup is nil", ErrCompose)
@@ -169,10 +169,7 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 	}
 
 	records := make(map[string]*provenanceRecord)
-	exposures, err := composeExposureSet(ordered, current.HTTPExposures(), current.removedHTTPExposures, records)
-	if err != nil {
-		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
-	}
+	exposures := current.HTTPExposures()
 	requirements, err := composeRequirementSet(ordered, current.Requirements(), current.removedRequirements, records)
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
@@ -334,53 +331,6 @@ func addProvenance(records map[string]*provenanceRecord, path, digest, source st
 type setCandidate struct {
 	valueSources   map[string]struct{}
 	removalSources map[string]struct{}
-}
-
-func composeExposureSet(dependencies []Dependency, current []HTTPExposure, currentRemovals []interfaceRemoval, records map[string]*provenanceRecord) ([]HTTPExposure, error) {
-	inherited := make(map[interfaceid.Identifier]*interfaceSetCandidate)
-	for _, dependency := range dependencies {
-		for _, exposure := range dependency.Manifest.HTTPExposures() {
-			path := fmt.Sprintf("http.expose[%q]", exposure.id.String())
-			source := dependencySource(dependency, exposure.source)
-			addProvenance(records, path, interfaceDeclarationDigest("http.expose", exposure.id, false), source, false)
-			candidate := ensureInterfaceSetCandidate(inherited, exposure.id)
-			candidate.valueSources[source] = struct{}{}
-		}
-		for _, removal := range dependency.Manifest.removedHTTPExposures {
-			path := fmt.Sprintf("http.expose[%q]", removal.id.String())
-			source := dependencySource(dependency, removal.source)
-			addProvenance(records, path, interfaceDeclarationDigest("http.expose", removal.id, true), source, true)
-			candidate := ensureInterfaceSetCandidate(inherited, removal.id)
-			candidate.removalSources[source] = struct{}{}
-		}
-	}
-	values := make(map[interfaceid.Identifier]HTTPExposure)
-	for _, exposure := range current {
-		values[exposure.id] = exposure
-	}
-	removed := interfaceRemovalSet(currentRemovals)
-	ids := sortedInterfaceCandidateIDs(inherited)
-	for _, id := range ids {
-		if _, replaced := values[id]; replaced {
-			continue
-		}
-		if _, explicitlyRemoved := removed[id]; explicitlyRemoved {
-			continue
-		}
-		candidate := inherited[id]
-		if len(candidate.valueSources) > 0 && len(candidate.removalSources) > 0 {
-			return nil, inheritedInterfaceSetConflict("http.expose", id, candidate)
-		}
-		if len(candidate.valueSources) > 0 {
-			values[id] = HTTPExposure{id: id, source: sortedSet(candidate.valueSources)[0]}
-		}
-	}
-	result := make([]HTTPExposure, 0, len(values))
-	for _, exposure := range values {
-		result = append(result, exposure)
-	}
-	sort.Slice(result, func(left, right int) bool { return result[left].id.String() < result[right].id.String() })
-	return result, nil
 }
 
 func composeRequirementSet(dependencies []Dependency, current []CapabilityRequirement, currentRemovals []capabilityRemoval, records map[string]*provenanceRecord) ([]CapabilityRequirement, error) {

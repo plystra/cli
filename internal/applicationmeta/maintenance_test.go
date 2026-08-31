@@ -72,7 +72,7 @@ config:
 			t.Fatalf("local paths %v omit %s", localPaths, expected)
 		}
 	}
-	for _, inherited := range []string{`http.expose["records.read/v1"]`, `capabilities.require["email.send/v1"]`, `capabilities.aliases["mail.send/v1"]`} {
+	for _, inherited := range []string{`capabilities.require["email.send/v1"]`, `capabilities.aliases["mail.send/v1"]`} {
 		if slices.Contains(localPaths, inherited) {
 			t.Fatalf("local paths %v contain inherited %s", localPaths, inherited)
 		}
@@ -92,7 +92,6 @@ config:
 		[]byte("# explicit local exposure"),
 		[]byte("# explicit local Provider"),
 		[]byte("# explicit local value"),
-		[]byte("- records.read/v1"),
 		[]byte("email.send/v1"),
 		[]byte("mail.send/v1: email.send/v1"),
 		[]byte("region: dependency"),
@@ -103,6 +102,9 @@ config:
 		if !bytes.Contains(data, expected) {
 			t.Fatalf("maintained YAML omits %q:\n%s", expected, data)
 		}
+	}
+	if bytes.Contains(data, []byte("records.read/v1")) {
+		t.Fatalf("dependency-owned exposure was materialized into current configuration:\n%s", data)
 	}
 	manifest := composeManifest(t, string(data))
 	if transports := manifest.HTTPTransports(); transports != (applicationmeta.HTTPTransports{REST: true}) {
@@ -224,8 +226,6 @@ config:
 	}
 	data := maintained.Data()
 	for _, expected := range [][]byte{
-		[]byte("records.new/v1"),
-		[]byte("records.stable/v1"),
 		[]byte("audit.write/v1"),
 		[]byte("host: new.example"),
 		[]byte("inherited: new"),
@@ -239,6 +239,8 @@ config:
 	}
 	for _, absent := range [][]byte{
 		[]byte("records.old/v1"),
+		[]byte("records.new/v1"),
+		[]byte("records.stable/v1"),
 		[]byte("old.example"),
 		[]byte("PRIVATE_OLD_TOKEN"),
 		[]byte("PRIVATE_NEW_TOKEN"),

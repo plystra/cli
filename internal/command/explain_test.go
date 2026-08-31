@@ -701,7 +701,7 @@ require (
 replace example.com/a => ../a
 replace example.com/b => ../b
 `)
-	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), "capabilities: {require: [email.send/v1]}\n")
+	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), "capabilities: {require: [email.send/v1]}\nhttp: {expose: [email.send/v1]}\n")
 	nested := filepath.Join(appRoot, "nested")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatalf("MkdirAll(%s): %v", nested, err)
@@ -733,11 +733,11 @@ replace example.com/b => ../b
 
 	exitCode, stdout, stderr = runCommand(t, []string{"explain", "exposure", "email.send/v1", "--format", "json"}, nested, inspectCommandEnvironment(nil))
 	document = decodeExplainCommandEnvelope(t, stdout)
-	if exitCode != 0 || stderr != inspectProgress || document.Result.Subject.Kind != "exposure" || document.Result.Decision.Outcome != "public" || document.Result.Reason.Code != "http-expose" || len(document.Result.Reason.Sources) != 2 {
-		t.Fatalf("inherited exposure explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
+	if exitCode != 0 || stderr != inspectProgress || document.Result.Subject.Kind != "exposure" || document.Result.Decision.Outcome != "public" || document.Result.Reason.Code != "http-expose" || len(document.Result.Reason.Sources) != 1 {
+		t.Fatalf("current-Project exposure explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
 	}
-	if document.Result.Reason.Sources[0].Module != "example.com/a" || document.Result.Reason.Sources[1].Module != "example.com/b" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `http.expose["email.send/v1"]` {
-		t.Fatalf("inherited exposure explanation sources or change = sources %#v, change %#v", document.Result.Reason.Sources, document.Result.Change)
+	if document.Result.Reason.Sources[0].Module != "example.com/app" || document.Result.Reason.Sources[0].Path != "plystra.yaml" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `http.expose["email.send/v1"]` {
+		t.Fatalf("current-Project exposure explanation sources or change = sources %#v, change %#v", document.Result.Reason.Sources, document.Result.Change)
 	}
 
 	exitCode, stdout, stderr = runCommand(t, []string{"explain", "exposure", "mail.send/v1", "--format", "json"}, nested, inspectCommandEnvironment(nil))
