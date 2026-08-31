@@ -57,13 +57,20 @@ type Envelope struct {
 	Detail     Detail            `+"`json:\"detail\" plystra:\"12,required\"`"+`
 	Items      []Detail          `+"`json:\"items\" plystra:\"13\"`"+`
 	Lookup     map[string]Detail `+"`json:\"lookup\" plystra:\"14\"`"+`
-	At         time.Time         `+"`json:\"at\" plystra:\"15,required\"`"+`
-	Delay      time.Duration     `+"`json:\"delay\" plystra:\"16,required\"`"+`
+	At         time.Time         `+"`json:\"at\" plystra:\"15\"`"+`
+	Delay      time.Duration     `+"`json:\"delay\" plystra:\"16\"`"+`
 	DefaultName string           `+"`plystra:\"17\"`"+`
+	Enabled     bool             `+"`json:\"enabled\" plystra:\"18\"`"+`
+	Optional    OptionalDetail   `+"`json:\"optional\" plystra:\"19\"`"+`
 }
 
 type Detail struct {
 	Code   string `+"`json:\"code\" plystra:\"1,required\"`"+`
+	Amount int64  `+"`json:\"amount\" plystra:\"2\"`"+`
+}
+
+type OptionalDetail struct {
+	Note   string `+"`json:\"note\" plystra:\"1\"`"+`
 	Amount int64  `+"`json:\"amount\" plystra:\"2\"`"+`
 }
 `)
@@ -75,6 +82,7 @@ type Detail struct {
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 
 	echov1 "example.com/interface-connect/interfaces/records/echo/v1"
@@ -85,7 +93,18 @@ type Service struct{}
 
 var calls atomic.Int64
 
+var (
+	lastRequestMu sync.RWMutex
+	lastRequest   echov1.Request
+)
+
 func Calls() int64 { return calls.Load() }
+
+func LastRequest() echov1.Request {
+	lastRequestMu.RLock()
+	defer lastRequestMu.RUnlock()
+	return lastRequest
+}
 
 type semanticFailure string
 
@@ -103,6 +122,9 @@ func (*Service) Echo(ctx context.Context, request echov1.Request) (echov1.Respon
 		return echov1.Response{}, errors.New("Interface call bypassed Kernel governance")
 	}
 	calls.Add(1)
+	lastRequestMu.Lock()
+	lastRequest = request
+	lastRequestMu.Unlock()
 	switch request.Value.Detail.Code {
 	case "semantic":
 		return echov1.Response{}, semanticFailure("record_rejected")
@@ -225,9 +247,11 @@ http:
 		`readonly "detail": RecordsEchoV1Detail;`,
 		`readonly "items"?: ReadonlyArray<RecordsEchoV1Detail>;`,
 		`readonly "lookup"?: Readonly<Record<string, RecordsEchoV1Detail>>;`,
-		`readonly "at": string;`,
-		`readonly "delay": string;`,
+		`readonly "at"?: string;`,
+		`readonly "delay"?: string;`,
 		`readonly "DefaultName"?: string;`,
+		`readonly "enabled"?: boolean;`,
+		`readonly "optional"?: RecordsEchoV1OptionalDetail;`,
 		`export type ErrorCode = "record_rejected";`,
 		`export type Operation = (`,
 		`export function createOperation(options: ClientOptions): Operation`,
@@ -453,7 +477,55 @@ const requestJSON = ` + "`" + `{
 		"lookup": {"nested": {"code": "map", "amount": "9"}},
 		"at": "2026-07-25T01:02:03.456Z",
 		"delay": "1.500s",
-		"DefaultName": ""
+		"DefaultName": "present",
+		"enabled": true,
+		"optional": {"note": "present", "amount": "11"}
+	}
+}` + "`" + `
+
+const omittedZeroRequestJSON = ` + "`" + `{
+	"value": {
+		"active": true,
+		"name": "zero",
+		"payload": "AA==",
+		"detail": {"code": "zero"}
+	}
+}` + "`" + `
+
+const explicitScalarZeroRequestJSON = ` + "`" + `{
+	"value": {
+		"active": true,
+		"count_32": 0,
+		"count_64": "0",
+		"unsigned_32": 0,
+		"unsigned_64": "0",
+		"ratio_32": 0,
+		"ratio_64": 0,
+		"name": "zero",
+		"payload": "AA==",
+		"detail": {"code": "zero"},
+		"DefaultName": "",
+		"enabled": false
+	}
+}` + "`" + `
+
+const explicitZeroRequestJSON = ` + "`" + `{
+	"value": {
+		"active": true,
+		"count_32": 0,
+		"count_64": "0",
+		"unsigned_32": 0,
+		"unsigned_64": "0",
+		"ratio_32": 0,
+		"ratio_64": 0,
+		"name": "zero",
+		"payload": "AA==",
+		"detail": {"code": "zero"},
+		"at": "0001-01-01T00:00:00Z",
+		"delay": "0s",
+		"DefaultName": "",
+		"enabled": false,
+		"optional": {}
 	}
 }` + "`" + `
 
@@ -495,8 +567,11 @@ func TestConnectAndInternalCallsUseTheSameGovernedInterface(t *testing.T) {
 		Detail: echov1.Detail{Code: "root", Amount: 7},
 		Items: []echov1.Detail{{Code: "item", Amount: 8}},
 		Lookup: map[string]echov1.Detail{"nested": {Code: "map", Amount: 9}},
-		At: time.Date(2026, 7, 25, 1, 2, 3, 456000000, time.UTC),
-		Delay: 1500 * time.Millisecond,
+		At:      time.Date(2026, 7, 25, 1, 2, 3, 456000000, time.UTC),
+		Delay:   1500 * time.Millisecond,
+		DefaultName: "present",
+		Enabled: true,
+		Optional: echov1.OptionalDetail{Note: "present", Amount: 11},
 	}}
 	internal, err := application.Interfaces().RecordsEchoV1().Echo(context.Background(), input)
 	if err != nil || !reflect.DeepEqual(internal, echov1.Response{Value: input.Value}) {
@@ -513,12 +588,63 @@ func TestConnectAndInternalCallsUseTheSameGovernedInterface(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
+	method, err := connectschema.Method("plystra.generated.records.echo.v1.RecordsEchoV1Service.Invoke")
+	if err != nil {
+		t.Fatalf("Connect method: %v", err)
+	}
+	envelope := method.Input().Fields().ByName("value").Message()
+	for _, name := range []string{"count_32", "count_64", "unsigned_32", "unsigned_64", "ratio_32", "ratio_64", "DefaultName", "enabled"} {
+		if field := envelope.Fields().ByJSONName(name); field == nil || field.HasPresence() {
+			t.Fatalf("non-required scalar descriptor %s = %#v", name, field)
+		}
+	}
+	for _, name := range []string{"active", "name", "payload"} {
+		if field := envelope.Fields().ByJSONName(name); field == nil || !field.HasPresence() {
+			t.Fatalf("required scalar descriptor %s = %#v", name, field)
+		}
+	}
+	omittedWire, err := (proto.MarshalOptions{Deterministic: true}).Marshal(dynamicRequestJSON(t, omittedZeroRequestJSON))
+	if err != nil {
+		t.Fatalf("marshal omitted scalar request: %v", err)
+	}
+	explicitWire, err := (proto.MarshalOptions{Deterministic: true}).Marshal(dynamicRequestJSON(t, explicitScalarZeroRequestJSON))
+	if err != nil {
+		t.Fatalf("marshal explicit scalar-zero request: %v", err)
+	}
+	if !bytes.Equal(omittedWire, explicitWire) {
+		t.Fatalf("omitted and explicit scalar-zero Protobuf differ:\nomitted: %x\nexplicit: %x", omittedWire, explicitWire)
+	}
+
 	status, encoded := callConnect(t, server.Client(), context.Background(), server.URL+connectadapter.Procedure, "root")
 	if status != http.StatusOK || !equalJSON(encoded, []byte(requestJSON)) {
 		t.Fatalf("Connect response = status %d, body %s; want %s", status, encoded, requestJSON)
 	}
 	if calls := records.Calls(); calls != callsBefore+2 {
 		t.Fatalf("selected Implementation calls = %d, want %d", calls, callsBefore+2)
+	}
+
+	wantZero := echov1.Request{Value: echov1.Envelope{
+		Active: true,
+		Name: "zero",
+		Payload: []byte{0},
+		Detail: echov1.Detail{Code: "zero"},
+	}}
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "omitted", body: omittedZeroRequestJSON},
+		{name: "explicit", body: explicitZeroRequestJSON},
+	} {
+		t.Run("non-required zero/"+test.name, func(t *testing.T) {
+			status, body := callConnectJSON(t, server.Client(), t.Context(), server.URL+connectadapter.Procedure, test.body)
+			if status != http.StatusOK {
+				t.Fatalf("Connect response = status %d, body %s", status, body)
+			}
+			if got := records.LastRequest(); !reflect.DeepEqual(got, wantZero) {
+				t.Fatalf("Implementation request = %#v, want ordinary Go zero values %#v", got, wantZero)
+			}
+		})
 	}
 
 	errorCases := []struct {
@@ -630,7 +756,12 @@ func TestConnectAndInternalCallsUseTheSameGovernedInterface(t *testing.T) {
 
 func callConnect(t *testing.T, client *http.Client, ctx context.Context, target, behavior string) (int, []byte) {
 	t.Helper()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader(requestJSONFor(behavior)))
+	return callConnectJSON(t, client, ctx, target, requestJSONFor(behavior))
+}
+
+func callConnectJSON(t *testing.T, client *http.Client, ctx context.Context, target, requestBody string) (int, []byte) {
+	t.Helper()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader(requestBody))
 	if err != nil {
 		t.Fatalf("http.NewRequestWithContext: %v", err)
 	}
@@ -654,15 +785,20 @@ func requestJSONFor(behavior string) string {
 
 func directRequest(t *testing.T, behavior string) *connect.Request[dynamicpb.Message] {
 	t.Helper()
+	return connect.NewRequest(dynamicRequestJSON(t, requestJSONFor(behavior)))
+}
+
+func dynamicRequestJSON(t *testing.T, body string) *dynamicpb.Message {
+	t.Helper()
 	method, err := connectschema.Method("plystra.generated.records.echo.v1.RecordsEchoV1Service.Invoke")
 	if err != nil {
 		t.Fatalf("Connect method: %v", err)
 	}
 	message := dynamicpb.NewMessage(method.Input())
-	if err := (protojson.UnmarshalOptions{DiscardUnknown: false}).Unmarshal([]byte(requestJSONFor(behavior)), message); err != nil {
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: false}).Unmarshal([]byte(body), message); err != nil {
 		t.Fatalf("decode direct request: %v", err)
 	}
-	return connect.NewRequest(message)
+	return message
 }
 
 func assertSafeConnectError(t *testing.T, err error, code connect.Code, semanticErrorCode, kernelErrorClass string) {

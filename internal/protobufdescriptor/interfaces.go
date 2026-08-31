@@ -380,7 +380,7 @@ func interfaceFieldDescriptor(
 		if err != nil {
 			return nil, nil, false, false, fmt.Errorf("field %s: %v", field.GoName(), err)
 		}
-		if descriptor.GetType() != descriptorpb.FieldDescriptorProto_TYPE_MESSAGE {
+		if field.Required() && descriptor.GetType() != descriptorpb.FieldDescriptorProto_TYPE_MESSAGE {
 			descriptor.Proto3Optional = proto.Bool(true)
 		}
 		return descriptor, nil, usesTimestamp, usesDuration, nil

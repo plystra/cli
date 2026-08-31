@@ -99,7 +99,7 @@ type Record struct {
 		"message RecordsListV1Request {",
 		`map<string, sint64> labels = 2 [json_name = "labels"];`,
 		`repeated uint64 ids = 3 [json_name = "ids"];`,
-		`optional bytes payload = 4 [json_name = "payload"];`,
+		`bytes payload = 4 [json_name = "payload"];`,
 		`.google.protobuf.Timestamp created_at = 5 [json_name = "created_at"];`,
 		`.google.protobuf.Duration maximum_age = 6 [json_name = "maximum_age"];`,
 		`optional sint32 page_size = 7 [json_name = "page_size"];`,
@@ -160,7 +160,7 @@ type Record struct {
 		t.Fatal("request descriptor is absent")
 	}
 	assertInterfaceDescriptorField(t, request, "page_size", 7, protoreflect.Sint32Kind, true, "page_size")
-	assertInterfaceDescriptorField(t, request, "payload", 4, protoreflect.BytesKind, true, "payload")
+	assertInterfaceDescriptorField(t, request, "payload", 4, protoreflect.BytesKind, false, "payload")
 	assertInterfaceDescriptorField(t, request, "created_at", 5, protoreflect.MessageKind, true, "created_at")
 	labels := request.Fields().ByName("labels")
 	if labels == nil || !labels.IsMap() || labels.MapKey().Kind() != protoreflect.StringKind || labels.MapValue().Kind() != protoreflect.Sint64Kind {
@@ -241,7 +241,7 @@ type Response struct{}
 	for _, fragment := range []string{
 		"reserved 7;",
 		`reserved "removed";`,
-		`optional string keep = 1 [json_name = "keep"];`,
+		`string keep = 1 [json_name = "keep"];`,
 	} {
 		if !strings.Contains(source, fragment) {
 			t.Fatalf("generated Interface schema omits %q:\n%s", fragment, source)
