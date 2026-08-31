@@ -419,6 +419,96 @@ func TestResolveValidatesDormantExplicitSelectionWithoutActivation(t *testing.T)
 	}
 }
 
+func TestResolvePreservesInheritedReplacementAndRemovalForDormantSelections(t *testing.T) {
+	t.Parallel()
+
+	const (
+		interfaceID          = "email.send/v1"
+		inheritedConstructor = "example.com/dormant-platform/smtp.New"
+		localConstructor     = "example.com/dormant-consumer/local.New"
+	)
+	tests := []struct {
+		name            string
+		configuration   string
+		wantConstructor string
+	}{
+		{
+			name:            "replacement",
+			configuration:   "interfaces: {use: {email.send/v1: " + localConstructor + "}}\n",
+			wantConstructor: localConstructor,
+		},
+		{
+			name:          "removal",
+			configuration: "interfaces: {use: {email.send/v1: null}}\n",
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			parent := t.TempDir()
+			dependencyRoot := filepath.Join(parent, "platform")
+			writeModule(t, dependencyRoot, "example.com/dormant-platform")
+			writeResolvedInterface(t, dependencyRoot, "email/send/v1", "sendv1", interfaceID, "Send")
+			writeResolvedSimpleImplementationForModule(t, dependencyRoot, "example.com/dormant-platform", "smtp", interfaceID, "email/send/v1", "Send")
+			writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "interfaces: {use: {email.send/v1: "+inheritedConstructor+"}}\n")
+
+			applicationRoot := filepath.Join(parent, "application")
+			writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/dormant-consumer
+
+go 1.26
+
+require example.com/dormant-platform v1.2.3
+
+replace example.com/dormant-platform => ../platform
+`)
+			writeResolvedSimpleImplementationForInterfaceModule(t, applicationRoot, "example.com/dormant-platform", "local", interfaceID, "email/send/v1", "Send")
+			writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), test.configuration)
+			before := snapshotTree(t, parent)
+
+			resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+				Start: applicationRoot,
+				Environment: goEnvironment(map[string]string{
+					"GOWORK":  "off",
+					"GOPROXY": "off",
+					"GOSUMDB": "off",
+					"GOFLAGS": "-mod=readonly",
+				}),
+			})
+			if err != nil {
+				t.Fatalf("Resolve dormant inherited %s: %v", test.name, err)
+			}
+			choices := resolved.Manifest().ImplementationChoices()
+			if test.wantConstructor == "" {
+				if len(choices) != 0 {
+					t.Fatalf("removed dormant choice remains effective: %#v", choices)
+				}
+			} else if len(choices) != 1 || choices[0].InterfaceID().String() != interfaceID || choices[0].Constructor().String() != test.wantConstructor || choices[0].Source() != `plystra.yaml interfaces.use["email.send/v1"]` {
+				t.Fatalf("replacement dormant choice = %#v", choices)
+			}
+			resolution := resolved.InterfaceResolution()
+			if len(resolution.Selections()) != 0 || len(resolution.Graph().Roots()) != 0 || len(resolution.Graph().Bindings()) != 0 || len(resolution.Graph().ConstructionOrder()) != 0 {
+				t.Fatalf("dormant inherited %s entered executable resolution = %#v", test.name, resolution)
+			}
+			const selectionPath = `interfaces.use["email.send/v1"]`
+			baseline := compositionProvenance(resolved.Composition().Provenance(), selectionPath)
+			if len(baseline) != 1 || baseline[0].Removed() || len(baseline[0].Sources()) != 1 || !strings.Contains(baseline[0].Sources()[0], "example.com/dormant-platform@v1.2.3/plystra.yaml") {
+				t.Fatalf("inherited dormant baseline = %#v", baseline)
+			}
+			if effective := compositionProvenance(resolved.Composition().ResolutionSources(), selectionPath); len(effective) != 0 {
+				t.Fatalf("superseded dormant selection retained dependency resolution authority: %#v", effective)
+			}
+			if test.wantConstructor == "" && !strings.Contains(string(resolved.ConfigurationMaintenance().Data()), "email.send/v1: null") {
+				t.Fatalf("dormant removal tombstone was not preserved:\n%s", resolved.ConfigurationMaintenance().Data())
+			}
+			if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
+				t.Fatalf("dormant inherited %s resolution mutated files:\nbefore: %#v\nafter: %#v", test.name, before, after)
+			}
+		})
+	}
+}
+
 func TestResolveOwnsAndValidatesDormantConstructorConfigurationWithoutRuntimeMembership(t *testing.T) {
 	t.Parallel()
 
