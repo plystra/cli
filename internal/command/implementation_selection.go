@@ -18,6 +18,11 @@ Options:
   --env <environment>    Write the Implementation choice to plystra.<environment>.yaml.
   --config <yaml-path>   Write the Implementation choice to one complete replacement configuration.
 
+An exact compatible choice may be recorded before its Interface is required. It
+remains dormant without creating a root, binding, constructor, or generated
+Interface runtime until that Interface becomes reachable; invalid choices are
+rejected immediately.
+
 PLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit
 selector is present; setting both is an error. Explicit --env or --config
 overrides both variables, and the two flags cannot be combined. Relative

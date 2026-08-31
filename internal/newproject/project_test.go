@@ -1108,7 +1108,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 	for _, activationGuidance := range [][]byte{
 		[]byte("`plystra implement` creates a validated compatible candidate"),
 		[]byte("`interfaces.require` set for an internal application root"),
-		[]byte("Discovery and `interfaces.use` alone never create a root"),
+		[]byte("Discovery alone never creates a root"),
+		[]byte("An exact compatible `interfaces.use` choice is validated immediately but remains dormant"),
+		[]byte("without a root, binding, reachable constructor, lifecycle entry, or generated Interface runtime"),
 		[]byte("A Project with zero non-intrinsic roots is valid"),
 		[]byte("application smoke path starts, invokes `kernel.health/v1`, and stops cleanly"),
 		[]byte("without ordinary constructor or configuration membership"),

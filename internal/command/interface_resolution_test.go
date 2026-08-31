@@ -68,6 +68,32 @@ func TestPublicResolvingCommandsEmitStableImplementationAmbiguityWithoutMutation
 	}
 }
 
+func TestPublicResolvingCommandsRejectInvalidDormantChoiceWithoutMutation(t *testing.T) {
+	root := writeImplementationSelectionCommandProject(t)
+	const constructor = "example.com/acme/implementation-use/reports.New"
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {use: {email.send/v1: "+constructor+"}}\n")
+	before := commandTree(t, root)
+
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	for _, arguments := range commands {
+		exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "reports"), commandGoEnvironment())
+		if exitCode != 1 || stdout != "" || !commandContainsAll(
+			stderr,
+			"email.send/v1",
+			constructor,
+			"does not implement Interface",
+			"Recovery:\nReplace the reported choice with one visible compatible constructor by running `plystra use <interface-id> <constructor-symbol>`.\n",
+			"Diagnostic: "+diagnosticcode.ResolveIncompatibleImplementation,
+		) {
+			t.Fatalf("%v invalid dormant choice = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+		}
+		if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+			t.Fatalf("%v mutated invalid dormant Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+		}
+		assertNoCommandTransactions(t, root)
+	}
+}
+
 func TestPublicResolvingCommandsEmitStableConstructorCycleWithoutMutation(t *testing.T) {
 	t.Parallel()
 

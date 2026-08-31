@@ -664,7 +664,10 @@ the current Project. A candidate becomes reachable only when its Interface is
 collected from `interfaces.require`, selected current-Project `http.expose`, or
 another reachable constructor's required Interface parameter. Discovery and
 `interfaces.use` alone create no root, binding, constructor call, lifecycle
-entry, runtime configuration, or generated proxy or adapter.
+entry, runtime configuration, or generated proxy or adapter. An exact compatible
+choice is still validated immediately; it remains dormant until the Interface
+enters the requirement closure, and an invalid dormant choice fails before
+generation.
 
 For an internal application root, add the exact Interface ID to the selected
 document:
@@ -1283,12 +1286,14 @@ The default form writes root `plystra.yaml`; `--env` writes only the selected
 sparse project-root overlay; and `--config` writes only the selected complete
 replacement document. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` provide the same
 selection when no flag is present, while an explicit flag overrides both
-variables. The command may start inside a nested package, preserves comments and
-unrelated values, regenerates and validates with the same selection, and
-restores the selected YAML, generated output, `go.mod`, and `go.sum` if any
-later step fails. It rejects intrinsic Interfaces, unknown Interfaces, unknown
-constructors, and constructors that do not implement the exact canonical
-Interface.
+variables. The command may start inside a nested package and may record a valid
+choice before the Interface is required. Such a dormant choice is validated but
+does not create a root, binding, reachable constructor, lifecycle entry, or
+generated Interface runtime. The command preserves comments and unrelated
+values, regenerates and validates with the same selection, and restores the
+selected YAML, generated output, `go.mod`, and `go.sum` if any later step fails.
+It rejects intrinsic Interfaces, unknown Interfaces, unknown constructors, and
+constructors that do not implement the exact canonical Interface.
 
 There is no constructor priority, discovery-order winner, or runtime selection
 fallback.

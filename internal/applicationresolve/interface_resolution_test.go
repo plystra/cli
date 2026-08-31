@@ -352,6 +352,70 @@ func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) {
 	}
 }
 
+func TestResolveValidatesDormantExplicitSelectionWithoutActivation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	const modulePath = "example.com/dormant-selection"
+	const selectedConstructor = modulePath + "/smtp.New"
+	writeModule(t, root, modulePath)
+	writeResolvedInterface(t, root, "email/send/v1", "sendv1", "email.send/v1", "Send")
+	writeResolvedInterface(t, root, "reports/read/v1", "readv1", "reports.read/v1", "Read")
+	writeResolvedSimpleImplementationForModule(t, root, modulePath, "smtp", "email.send/v1", "email/send/v1", "Send")
+	writeResolvedSimpleImplementationForModule(t, root, modulePath, "reports", "reports.read/v1", "reports/read/v1", "Read")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {use: {email.send/v1: "+selectedConstructor+"}}\n")
+	environment := goEnvironment(map[string]string{
+		"GOWORK":  "off",
+		"GOPROXY": "off",
+		"GOSUMDB": "off",
+	})
+	before := snapshotTree(t, root)
+
+	resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       root,
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Resolve dormant selection: %v", err)
+	}
+	choices := resolved.Manifest().ImplementationChoices()
+	if len(choices) != 1 || choices[0].InterfaceID().String() != "email.send/v1" || choices[0].Constructor().String() != selectedConstructor {
+		t.Fatalf("effective dormant choices = %#v", choices)
+	}
+	resolution := resolved.InterfaceResolution()
+	if len(resolution.Selections()) != 0 || len(resolution.Graph().Roots()) != 0 || len(resolution.Graph().Bindings()) != 0 || len(resolution.Graph().ConstructionOrder()) != 0 {
+		t.Fatalf("dormant selection entered executable resolution = %#v", resolution)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("dormant selection resolution mutated files:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+
+	invalid := []struct {
+		name        string
+		constructor string
+		wantError   error
+	}{
+		{name: "invisible constructor", constructor: modulePath + "/missing.New", wantError: interfaceresolution.ErrUnknownConstructor},
+		{name: "incompatible constructor", constructor: modulePath + "/reports.New", wantError: interfaceresolution.ErrIncompatibleChoice},
+	}
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {use: {email.send/v1: "+test.constructor+"}}\n")
+			before := snapshotTree(t, root)
+			_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+				Start:       root,
+				Environment: environment,
+			})
+			if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, test.wantError) || !containsResolutionFragments(err.Error(), "email.send/v1", test.constructor) {
+				t.Fatalf("Resolve invalid dormant selection = %v", err)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("invalid dormant selection mutated files:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
 func TestResolveAppliesNoDiscoveryOrFilesystemOrderSelectionPriority(t *testing.T) {
 	t.Parallel()
 

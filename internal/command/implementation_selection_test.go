@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/diagnosticcode"
 )
@@ -126,6 +127,69 @@ func TestRunUseSelectsImplementationOnlyInRequestedConfigurationLayer(t *testing
 			assertNoCommandTransactions(t, root)
 		})
 	}
+}
+
+func TestRunUseRecordsDormantSelectionWithoutActivation(t *testing.T) {
+	root := writeImplementationSelectionCommandProject(t)
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	const selected = "example.com/acme/implementation-use/local.New"
+
+	exitCode, stdout, stderr := runCommand(
+		t,
+		[]string{"use", "email.send/v1", selected},
+		filepath.Join(root, "smtp"),
+		implementationSelectionCommandEnvironment(nil),
+	)
+	wantOutput := "selected Implementation " + selected + " for email.send/v1 in " + filepath.Join(root, "plystra.yaml") + "\n"
+	if exitCode != 0 || stdout != wantOutput || stderr != "" {
+		t.Fatalf("dormant plystra use = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	manifest, err := applicationmeta.Parse(readCommandFile(t, root, "plystra.yaml"))
+	if err != nil || len(manifest.InterfaceRequirements()) != 0 || !commandHasImplementationChoice(manifest, "email.send/v1", selected) {
+		t.Fatalf("dormant selected configuration = %#v, %v", manifest, err)
+	}
+	provenance, err := applicationgen.DecodeManifestProvenance(readCommandFile(t, root, "generated/manifest.json"))
+	if err != nil {
+		t.Fatalf("decode dormant generated manifest: %v", err)
+	}
+	interfaceProvenance := provenance.InterfaceProvenance()
+	if len(interfaceProvenance.Bindings()) != 0 || len(interfaceProvenance.Constructors()) != 0 {
+		t.Fatalf("dormant selection entered binding or constructor provenance: %#v", interfaceProvenance)
+	}
+	tree := commandTree(t, root)
+	for name := range tree {
+		if strings.HasPrefix(name, "generated/go/proxies/email/send/v1/") || strings.HasPrefix(name, "generated/go/adapters/implementations/email/send/v1/") {
+			t.Fatalf("dormant selection emitted reachable Interface artifact %s", name)
+		}
+	}
+	assembly := string(tree["generated/go/assembly/interfaces_gen.go"])
+	if assembly == "" || strings.Contains(assembly, selected) {
+		t.Fatalf("dormant selection entered generated assembly:\n%s", assembly)
+	}
+
+	for _, check := range []struct {
+		arguments []string
+		stdout    string
+	}{
+		{
+			arguments: []string{"generate", "--check"},
+			stdout:    "generated output is current for example.com/acme/implementation-use in " + root + "\n",
+		},
+		{
+			arguments: []string{"check"},
+			stdout:    "Project checks passed for example.com/acme/implementation-use in " + root + "\n",
+		},
+	} {
+		before := commandTree(t, root)
+		exitCode, stdout, stderr = runCommand(t, check.arguments, filepath.Join(root, "local"), implementationSelectionCommandEnvironment(nil))
+		if exitCode != 0 || stdout != check.stdout || stderr != "" {
+			t.Fatalf("%v after dormant use = exit %d, stdout %q, stderr %q", check.arguments, exitCode, stdout, stderr)
+		}
+		if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+			t.Fatalf("%v mutated dormant Project:\nbefore: %#v\nafter:  %#v", check.arguments, before, after)
+		}
+	}
+	assertNoCommandTransactions(t, root)
 }
 
 func TestRunUseRejectsInvalidImplementationChoicesAndRestoresProject(t *testing.T) {

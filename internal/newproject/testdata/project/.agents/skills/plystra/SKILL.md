@@ -68,7 +68,8 @@ constructor requested by the application:
     plystra use email.send/v1 example.com/acme/email/smtp.New
 
 Implementations are candidates, not roots. Required, current-Project-exposed,
-or transitively required Interfaces activate them; interfaces.use only selects.
+or transitively required Interfaces activate them; interfaces.use only selects
+and is validated while dormant.
 
 The detailed reference below contains complete file shapes and variants. Open
 only the section needed for the current command or authored file.
@@ -406,11 +407,11 @@ Prefer the targeted public workflow for ordinary Implementation selection:
     plystra use email.send/v1 example.com/acme/email/production.New --env production
     plystra use email.send/v1 example.com/acme/email/customer.New --config deploy/customer-a.yaml
 
-The default form writes root plystra.yaml; --env writes only that sparse
-overlay; --config writes only that complete document. Ambient selectors choose
-the same targets unless a flag overrides them. The command preserves unrelated
-content, regenerates with the same selection, rolls back every owned file after
-failure, and rejects an invalid or incompatible target.
+The default form writes root plystra.yaml; --env writes that sparse overlay;
+--config writes that complete document. Ambient selectors choose the same
+targets unless a flag overrides them. A pre-requirement choice stays dormant.
+The command preserves unrelated content, regenerates with the same selection,
+rolls back every owned file after failure, and rejects invalid targets.
 
 The current entry replaces the inherited choice; Interface and conformance
 validation still runs. Never reorder dependencies or invent priority.
