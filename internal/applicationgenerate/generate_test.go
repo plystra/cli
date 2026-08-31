@@ -29,13 +29,14 @@ import (
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/pluginmeta"
+	"github.com/plystra/cli/internal/projectsmoke"
 	"github.com/plystra/cli/internal/protobufidentity"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/transporttoolchain"
 )
 
-func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *testing.T) {
+func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -93,6 +94,17 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	if err != nil || !manifestProvenance.TransportToolchain().Valid() {
 		t.Fatalf("generated transport toolchain = %#v, %v", manifestProvenance.TransportToolchain(), err)
 	}
+	interfaceProvenance := manifestProvenance.InterfaceProvenance()
+	intrinsics := interfaceProvenance.Intrinsics()
+	if !interfaceProvenance.Valid() ||
+		len(interfaceProvenance.Interfaces()) != 0 ||
+		len(interfaceProvenance.Bindings()) != 0 ||
+		len(interfaceProvenance.Constructors()) != 0 ||
+		len(intrinsics) != 2 ||
+		intrinsics[0].Interface().ID() != "kernel.health/v1" ||
+		intrinsics[1].Interface().ID() != "kernel.info/v1" {
+		t.Fatalf("zero-root Interface provenance = %#v", interfaceProvenance)
+	}
 	ownershipManifest := readFile(t, root, generatedfiles.ManifestPath)
 	if !bytes.Contains(ownershipManifest, []byte(`"transport_toolchain"`)) ||
 		!bytes.Contains(ownershipManifest, []byte(manifestProvenance.TransportToolchain().Digest())) {
@@ -131,7 +143,47 @@ func TestGenerateChecksAndInstallsEmptyApplicationWithoutJavaScriptIdentity(t *t
 	if !bytes.Contains(entrypoint, []byte("applicationbootstrap.New(ctx, applicationbootstrap.RuntimeOptions{")) || !bytes.Contains(entrypoint, []byte("os.Environ()")) || bytes.Contains(entrypoint, []byte("plystra.yaml")) {
 		t.Fatalf("generated entrypoint does not delegate default configuration selection to bootstrap:\n%s", entrypoint)
 	}
+	for _, lifecycleStep := range [][]byte{
+		[]byte("application.Start(ctx)"),
+		[]byte("application.Invocations().IntrinsicHealth(ctx)"),
+		[]byte("application.Stop(stopContext)"),
+	} {
+		if !bytes.Contains(entrypoint, lifecycleStep) {
+			t.Fatalf("zero-root generated entrypoint omits lifecycle smoke step %q:\n%s", lifecycleStep, entrypoint)
+		}
+	}
+	interfaceAssembly := readFile(t, root, "generated/go/assembly/interfaces_gen.go")
+	for _, intrinsicOnlyStep := range [][]byte{
+		[]byte("lifecycleBindings := make([]kernellifecycle.Binding, 0, 0)"),
+		[]byte("kernelintrinsic.NewBindings"),
+		[]byte("kernelinvocation.NewCatalog(bindings)"),
+	} {
+		if !bytes.Contains(interfaceAssembly, intrinsicOnlyStep) {
+			t.Fatalf("zero-root static Interface assembly omits %q:\n%s", intrinsicOnlyStep, interfaceAssembly)
+		}
+	}
+	for _, entry := range snapshotTree(t, root) {
+		if strings.HasPrefix(entry.path, "generated/go/proxies/") || strings.HasPrefix(entry.path, "generated/go/adapters/implementations/") {
+			t.Fatalf("zero-root Project generated ordinary Interface artifact %s", entry.path)
+		}
+	}
 	assertFileMissing(t, root, "generated/sdk/javascript/package.json")
+
+	smokeBefore := snapshotTree(t, root)
+	if err := projectsmoke.Run(t.Context(), projectsmoke.Options{Root: root, Environment: environment}); err != nil {
+		t.Fatalf("run zero-root generated application lifecycle smoke: %v", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, smokeBefore) {
+		t.Fatalf("zero-root generated application lifecycle smoke mutated Project:\nbefore: %#v\nafter: %#v", smokeBefore, after)
+	}
+	stable, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil || !stable.Report().Clean() || stable.ConfigurationChanged() {
+		t.Fatalf("zero-root deterministic generation check = changes %#v, configuration changed %t, %v", stable.Report().Changes(), stable.ConfigurationChanged(), err)
+	}
 
 	writeFile(t, filepath.Join(root, "generated", "manifest.json"), string(changedTransportToolchainManifest(t, applicationManifest)))
 	driftedBefore := snapshotTree(t, root)

@@ -680,6 +680,12 @@ To publish the Interface instead, add it to selected current-Project
 Implementation reachable by relying on its package location or discovery
 order.
 
+A Project with zero non-intrinsic roots remains valid. Generation emits
+intrinsic-only static assembly and bootstrap with an empty ordinary constructor
+and lifecycle plan. The generated application can start, invoke
+`kernel.health/v1` through its smoke path, and stop cleanly without ordinary
+bindings, runtime configuration, or public transports.
+
 Resolve an inherited Provider conflict in the current Project at the exact
 canonical key:
 

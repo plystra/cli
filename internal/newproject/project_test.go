@@ -1109,6 +1109,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`plystra implement` creates a validated compatible candidate"),
 		[]byte("`interfaces.require` set for an internal application root"),
 		[]byte("Discovery and `interfaces.use` alone never create a root"),
+		[]byte("A Project with zero non-intrinsic roots is valid"),
+		[]byte("application smoke path starts, invokes `kernel.health/v1`, and stops cleanly"),
+		[]byte("without ordinary constructor or configuration membership"),
 	} {
 		if !bytes.Contains(readme, activationGuidance) {
 			t.Fatalf("generated README omits candidate-only activation guidance %q:\n%s", activationGuidance, readme)
