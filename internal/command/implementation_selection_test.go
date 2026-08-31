@@ -12,6 +12,7 @@ import (
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/diagnosticcode"
+	"github.com/plystra/cli/internal/interfaceprovenance"
 )
 
 func TestRunUseSelectsImplementationOnlyInRequestedConfigurationLayer(t *testing.T) {
@@ -190,6 +191,63 @@ func TestRunUseRecordsDormantSelectionWithoutActivation(t *testing.T) {
 		}
 	}
 	assertNoCommandTransactions(t, root)
+}
+
+func TestRunUseConvergesBeforeAndAfterInterfaceRequirement(t *testing.T) {
+	const selected = "example.com/acme/implementation-use/local.New"
+	environment := implementationSelectionCommandEnvironment(nil)
+
+	useFirst := writeImplementationSelectionCommandProject(t)
+	writeCommandFile(t, filepath.Join(useFirst, "plystra.yaml"), "{}\n")
+	exitCode, stdout, stderr := runCommand(t, []string{"use", "email.send/v1", selected}, filepath.Join(useFirst, "smtp"), environment)
+	if exitCode != 0 || stderr != "" || stdout != "selected Implementation "+selected+" for email.send/v1 in "+filepath.Join(useFirst, "plystra.yaml")+"\n" {
+		t.Fatalf("use before require = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	dormantManifest, err := applicationmeta.Parse(readCommandFile(t, useFirst, "plystra.yaml"))
+	if err != nil || len(dormantManifest.InterfaceRequirements()) != 0 || !commandHasImplementationChoice(dormantManifest, "email.send/v1", selected) {
+		t.Fatalf("recorded dormant selection = %#v, %v", dormantManifest, err)
+	}
+	writeCommandFile(t, filepath.Join(useFirst, "plystra.yaml"), "interfaces: {require: [email.send/v1], use: {email.send/v1: "+selected+"}}\n")
+	exitCode, stdout, stderr = runCommand(t, []string{"generate"}, filepath.Join(useFirst, "local"), environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/implementation-use in "+useFirst+"\n" {
+		t.Fatalf("generate after dormant selection activation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	useFirstProvenance, err := applicationgen.DecodeManifestProvenance(readCommandFile(t, useFirst, "generated/manifest.json"))
+	if err != nil {
+		t.Fatalf("decode use-before-require manifest: %v", err)
+	}
+
+	requireFirst := writeImplementationSelectionCommandProject(t)
+	exitCode, stdout, stderr = runCommand(t, []string{"use", "email.send/v1", selected}, filepath.Join(requireFirst, "smtp"), environment)
+	if exitCode != 0 || stderr != "" || stdout != "selected Implementation "+selected+" for email.send/v1 in "+filepath.Join(requireFirst, "plystra.yaml")+"\n" {
+		t.Fatalf("use after require = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	requireFirstProvenance, err := applicationgen.DecodeManifestProvenance(readCommandFile(t, requireFirst, "generated/manifest.json"))
+	if err != nil {
+		t.Fatalf("decode require-before-use manifest: %v", err)
+	}
+
+	if useFirstProvenance.SelectedDigest() != requireFirstProvenance.SelectedDigest() {
+		t.Fatalf("authoring order changed normalized selected configuration: %q != %q", useFirstProvenance.SelectedDigest(), requireFirstProvenance.SelectedDigest())
+	}
+	if useFirstProvenance.ApplicationModelDigest() != requireFirstProvenance.ApplicationModelDigest() {
+		t.Fatalf("authoring order changed application_model_digest: %q != %q", useFirstProvenance.ApplicationModelDigest(), requireFirstProvenance.ApplicationModelDigest())
+	}
+	for sequence, provenance := range map[string]applicationgen.ManifestProvenance{
+		"use before require": useFirstProvenance,
+		"require before use": requireFirstProvenance,
+	} {
+		bindings := provenance.InterfaceProvenance().Bindings()
+		constructors := provenance.InterfaceProvenance().Constructors()
+		if len(bindings) != 1 || bindings[0].InterfaceID() != "email.send/v1" || bindings[0].Selection().Constructor() != selected || bindings[0].Selection().Reason() != interfaceprovenance.SelectionExplicit || len(constructors) != 1 || constructors[0].Symbol() != selected {
+			t.Fatalf("%s executable Interface model = bindings %#v, constructors %#v", sequence, bindings, constructors)
+		}
+	}
+	if useFirstAssembly, requireFirstAssembly := readCommandFile(t, useFirst, "generated/go/assembly/interfaces_gen.go"), readCommandFile(t, requireFirst, "generated/go/assembly/interfaces_gen.go"); !reflect.DeepEqual(useFirstAssembly, requireFirstAssembly) {
+		t.Fatalf("authoring order changed static Interface assembly:\nuse before require:\n%s\nrequire before use:\n%s", useFirstAssembly, requireFirstAssembly)
+	}
+	assertNoCommandTransactions(t, useFirst)
+	assertNoCommandTransactions(t, requireFirst)
 }
 
 func TestRunUseRejectsInvalidImplementationChoicesAndRestoresProject(t *testing.T) {
