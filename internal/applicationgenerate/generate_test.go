@@ -27,6 +27,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/generatedfiles"
+	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/pluginmeta"
 	"github.com/plystra/cli/internal/projectsmoke"
@@ -293,6 +294,108 @@ config:
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, smokeBefore) {
 		t.Fatalf("dormant-configuration lifecycle smoke mutated Project:\nbefore: %#v\nafter: %#v", smokeBefore, after)
+	}
+}
+
+func TestGeneratePromotesDormantSelectionDeterministicallyOnActivation(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "example.com/acme/dormant-activation"
+	root := t.TempDir()
+	writeApplicationModule(t, root, modulePath)
+	constructor := writeConstructorConfigurationOwner(t, root, modulePath, true)
+	const secretTarget = "PLYSTRA_DORMANT_ACTIVATION_SECRET"
+	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+	writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf(`interfaces:
+  use:
+    configuration.owner/v1: %s
+config:
+  %s:
+    endpoint: smtp.internal
+    password: {env: %s}
+`, constructor, constructor, secretTarget))
+
+	dormant, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: environment,
+		Validate:    func(_ context.Context, _ string) error { return nil },
+	})
+	if err != nil || !dormant.Report().Clean() {
+		t.Fatalf("Generate dormant selection = changes %#v, %v", dormant.Report().Changes(), err)
+	}
+	dormantProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance(dormant): %v", err)
+	}
+	if bindings, constructors := dormantProvenance.InterfaceProvenance().Bindings(), dormantProvenance.InterfaceProvenance().Constructors(); len(bindings) != 0 || len(constructors) != 0 {
+		t.Fatalf("dormant selection entered executable provenance: bindings %#v, constructors %#v", bindings, constructors)
+	}
+
+	writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf(`interfaces:
+  require: [configuration.owner/v1]
+  use:
+    configuration.owner/v1: %s
+config:
+  %s:
+    endpoint: smtp.internal
+    password: {env: %s}
+`, constructor, constructor, secretTarget))
+	activationBefore := snapshotTree(t, root)
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil || !checked.Checked() || checked.Report().Clean() {
+		t.Fatalf("Check dormant selection activation = checked %t, changes %#v, %v", checked.Checked(), checked.Report().Changes(), err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, activationBefore) {
+		t.Fatalf("activation check mutated Project:\nbefore: %#v\nafter: %#v", activationBefore, after)
+	}
+
+	activated, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: environment,
+		Validate:    func(_ context.Context, _ string) error { return nil },
+	})
+	if err != nil || !activated.Report().Clean() {
+		t.Fatalf("Generate activated dormant selection = changes %#v, %v", activated.Report().Changes(), err)
+	}
+	activatedProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance(activated): %v", err)
+	}
+	if activatedProvenance.ApplicationModelDigest() == dormantProvenance.ApplicationModelDigest() {
+		t.Fatal("activation preserved the dormant executable application-model digest")
+	}
+	interfaceProvenance := activatedProvenance.InterfaceProvenance()
+	bindings := interfaceProvenance.Bindings()
+	constructors := interfaceProvenance.Constructors()
+	if len(bindings) != 1 || bindings[0].InterfaceID() != "configuration.owner/v1" || bindings[0].Selection().Constructor() != constructor || bindings[0].Selection().Reason() != interfaceprovenance.SelectionExplicit || bindings[0].ConfigurationOwner() != `config["`+constructor+`"]` || len(constructors) != 1 || constructors[0].Symbol() != constructor || constructors[0].ConfigurationOwner() != bindings[0].ConfigurationOwner() {
+		t.Fatalf("activated exact selection provenance = bindings %#v, constructors %#v", bindings, constructors)
+	}
+	mappings := bindings[0].Mappings()
+	if mappings.ProxyPath() == "" || mappings.AdapterPath() == "" || mappings.AssemblyPath() != "generated/go/assembly/interfaces_gen.go" {
+		t.Fatalf("activated artifact provenance = %#v", mappings)
+	}
+	assertFileExists(t, root, mappings.ProxyPath())
+	assertFileExists(t, root, mappings.AdapterPath())
+	assembly := readFile(t, root, mappings.AssemblyPath())
+	if !bytes.Contains(assembly, []byte(constructor)) || bytes.Contains(assembly, []byte(secretTarget)) || bytes.Contains(assembly, []byte("smtp.internal")) {
+		t.Fatalf("activated static assembly does not retain the exact safe constructor boundary:\n%s", assembly)
+	}
+
+	stableBefore := snapshotTree(t, root)
+	stable, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil || !stable.Checked() || !stable.Report().Clean() || stable.ConfigurationChanged() {
+		t.Fatalf("activated deterministic generation check = changes %#v, configuration changed %t, %v", stable.Report().Changes(), stable.ConfigurationChanged(), err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, stableBefore) {
+		t.Fatalf("activated deterministic check mutated Project:\nbefore: %#v\nafter: %#v", stableBefore, after)
 	}
 }
 
