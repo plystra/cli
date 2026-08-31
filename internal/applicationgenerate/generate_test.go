@@ -220,6 +220,22 @@ func TestGenerateKeepsDormantConstructorConfigurationOutOfRuntimeBootstrap(t *te
 	writeApplicationModule(t, root, modulePath)
 	constructor := writeConstructorConfigurationOwner(t, root, modulePath, true)
 	const secretTarget = "PLYSTRA_DORMANT_CONFIGURATION_SECRET"
+	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	baseline, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: environment,
+		Validate:    func(_ context.Context, _ string) error { return nil },
+	})
+	if err != nil || !baseline.Report().Clean() {
+		t.Fatalf("Generate without dormant constructor configuration = changes %#v, %v", baseline.Report().Changes(), err)
+	}
+	baselineManifest := readFile(t, root, "generated/manifest.json")
+	baselineProvenance, err := applicationgen.DecodeManifestProvenance(baselineManifest)
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance(without dormant configuration): %v", err)
+	}
+
 	writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf(`interfaces:
   use:
     configuration.owner/v1: %s
@@ -228,7 +244,6 @@ config:
     endpoint: smtp.internal
     password: {env: %s}
 `, constructor, constructor, secretTarget))
-	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
 
 	result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       root,
@@ -241,6 +256,12 @@ config:
 	manifest, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance(dormant configuration): %v", err)
+	}
+	if manifest.SelectedDigest() == baselineProvenance.SelectedDigest() || bytes.Equal(readFile(t, root, "generated/manifest.json"), baselineManifest) {
+		t.Fatal("dormant-only configuration change did not alter selected-configuration provenance")
+	}
+	if manifest.ApplicationModelDigest() != baselineProvenance.ApplicationModelDigest() {
+		t.Fatalf("dormant-only configuration changed application_model_digest: %q != %q", manifest.ApplicationModelDigest(), baselineProvenance.ApplicationModelDigest())
 	}
 	interfaceProvenance := manifest.InterfaceProvenance()
 	if len(interfaceProvenance.Bindings()) != 0 || len(interfaceProvenance.Constructors()) != 0 {
