@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	applicationManifestConfigurationVersion = 5
+	applicationManifestConfigurationVersion = 6
 	// ConfigurationModeDefault identifies the mandatory root plystra.yaml as
 	// the current-project document.
 	ConfigurationModeDefault = "default"
@@ -56,15 +56,17 @@ type applicationManifestDocumentReference struct {
 }
 
 type applicationManifestConfiguration struct {
-	Version                int                                    `json:"version"`
-	Mode                   string                                 `json:"mode"`
-	Environment            string                                 `json:"environment,omitempty"`
-	Root                   applicationManifestDocumentReference   `json:"root"`
-	Overlay                *applicationManifestDocumentReference  `json:"overlay,omitempty"`
-	Selected               *applicationManifestDocumentReference  `json:"selected,omitempty"`
-	DependencyBaselines    []applicationManifestSelectionBaseline `json:"dependency_baselines"`
-	ProtobufWireMapDigest  string                                 `json:"protobuf_wire_map_digest"`
-	ApplicationModelDigest string                                 `json:"application_model_digest"`
+	Version                               int                                                 `json:"version"`
+	Mode                                  string                                              `json:"mode"`
+	Environment                           string                                              `json:"environment,omitempty"`
+	Root                                  applicationManifestDocumentReference                `json:"root"`
+	Overlay                               *applicationManifestDocumentReference               `json:"overlay,omitempty"`
+	Selected                              *applicationManifestDocumentReference               `json:"selected,omitempty"`
+	DependencyBaselines                   []applicationManifestSelectionBaseline              `json:"dependency_baselines"`
+	DormantImplementationSelections       []applicationManifestDormantImplementationSelection `json:"dormant_implementation_selections"`
+	DormantImplementationSelectionsDigest string                                              `json:"dormant_implementation_selections_digest"`
+	ProtobufWireMapDigest                 string                                              `json:"protobuf_wire_map_digest"`
+	ApplicationModelDigest                string                                              `json:"application_model_digest"`
 }
 
 type applicationManifestSelectionBaseline struct {
@@ -88,35 +90,38 @@ type applicationManifestDocument struct {
 // configuration-layer model; raw YAML values and Secret reference targets are
 // never retained.
 type ManifestProvenanceOptions struct {
-	Mode                   string
-	Environment            string
-	RootPath               string
-	RootDigest             string
-	SelectedPath           string
-	SelectedDigest         string
-	CurrentProjectPaths    []string
-	Composition            applicationmeta.Composition
-	ProtobufWireMapDigest  string
-	ApplicationModelDigest string
-	InterfaceProvenance    interfaceprovenance.Provenance
-	TransportToolchain     transporttoolchain.Identity
-	Previous               ManifestProvenance
+	Mode                            string
+	Environment                     string
+	RootPath                        string
+	RootDigest                      string
+	SelectedPath                    string
+	SelectedDigest                  string
+	CurrentProjectPaths             []string
+	DormantImplementationSelections []DormantImplementationSelection
+	Composition                     applicationmeta.Composition
+	ProtobufWireMapDigest           string
+	ApplicationModelDigest          string
+	InterfaceProvenance             interfaceprovenance.Provenance
+	TransportToolchain              transporttoolchain.Identity
+	Previous                        ManifestProvenance
 }
 
 // ManifestProvenance is one immutable validated generated-manifest
 // configuration record.
 type ManifestProvenance struct {
-	mode                   string
-	environment            string
-	rootPath               string
-	rootDigest             string
-	selectedPath           string
-	selectedDigest         string
-	baselines              []manifestSelectionBaseline
-	protobufWireMapDigest  string
-	applicationModelDigest string
-	interfaceProvenance    interfaceprovenance.Provenance
-	transportToolchain     transporttoolchain.Identity
+	mode                                  string
+	environment                           string
+	rootPath                              string
+	rootDigest                            string
+	selectedPath                          string
+	selectedDigest                        string
+	baselines                             []manifestSelectionBaseline
+	dormantImplementationSelections       []DormantImplementationSelection
+	dormantImplementationSelectionsDigest string
+	protobufWireMapDigest                 string
+	applicationModelDigest                string
+	interfaceProvenance                   interfaceprovenance.Provenance
+	transportToolchain                    transporttoolchain.Identity
 }
 
 type manifestSelectionBaseline struct {
@@ -133,6 +138,14 @@ func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenanc
 	currentProjectPaths, err := normalizeCurrentProjectPaths(options.CurrentProjectPaths)
 	if err != nil {
 		return ManifestProvenance{}, err
+	}
+	dormantSelections, err := normalizeDormantImplementationSelections(options.DormantImplementationSelections)
+	if err != nil {
+		return ManifestProvenance{}, err
+	}
+	dormantSelectionsDigest, err := dormantImplementationSelectionsDigest(dormantSelections)
+	if err != nil {
+		return ManifestProvenance{}, fmt.Errorf("digest dormant implementation selections: %w", err)
 	}
 	baselines := make([]manifestSelectionBaseline, 0, len(options.Previous.baselines)+1)
 	if validateManifestProvenance(options.Previous) == nil {
@@ -163,17 +176,19 @@ func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenanc
 		return baselines[left].path < baselines[right].path
 	})
 	provenance := ManifestProvenance{
-		mode:                   options.Mode,
-		environment:            options.Environment,
-		rootPath:               options.RootPath,
-		rootDigest:             options.RootDigest,
-		selectedPath:           options.SelectedPath,
-		selectedDigest:         options.SelectedDigest,
-		baselines:              baselines,
-		protobufWireMapDigest:  options.ProtobufWireMapDigest,
-		applicationModelDigest: options.ApplicationModelDigest,
-		interfaceProvenance:    options.InterfaceProvenance,
-		transportToolchain:     options.TransportToolchain,
+		mode:                                  options.Mode,
+		environment:                           options.Environment,
+		rootPath:                              options.RootPath,
+		rootDigest:                            options.RootDigest,
+		selectedPath:                          options.SelectedPath,
+		selectedDigest:                        options.SelectedDigest,
+		baselines:                             baselines,
+		dormantImplementationSelections:       dormantSelections,
+		dormantImplementationSelectionsDigest: dormantSelectionsDigest,
+		protobufWireMapDigest:                 options.ProtobufWireMapDigest,
+		applicationModelDigest:                options.ApplicationModelDigest,
+		interfaceProvenance:                   options.InterfaceProvenance,
+		transportToolchain:                    options.TransportToolchain,
 	}
 	if err := validateManifestProvenance(provenance); err != nil {
 		return ManifestProvenance{}, err
@@ -238,6 +253,18 @@ func (p ManifestProvenance) CurrentProjectPathsForSelection(mode, selectedPath s
 		return nil, false
 	}
 	return append([]string(nil), p.baselines[index].currentProjectPaths...), true
+}
+
+// DormantImplementationSelections returns exact authored choices that remain
+// outside executable binding and artifact provenance.
+func (p ManifestProvenance) DormantImplementationSelections() []DormantImplementationSelection {
+	return cloneDormantImplementationSelections(p.dormantImplementationSelections)
+}
+
+// DormantImplementationSelectionsDigest returns the canonical identity of the
+// complete dormant selection record.
+func (p ManifestProvenance) DormantImplementationSelectionsDigest() string {
+	return p.dormantImplementationSelectionsDigest
 }
 
 // ApplicationModelDigest returns the final build-affecting generation-context
@@ -327,9 +354,11 @@ func RenderManifest(aliasJSON []byte, context generation.Context, provenance Man
 				Path:   provenance.rootPath,
 				Digest: provenance.rootDigest,
 			},
-			DependencyBaselines:    baselines,
-			ProtobufWireMapDigest:  provenance.protobufWireMapDigest,
-			ApplicationModelDigest: provenance.applicationModelDigest,
+			DependencyBaselines:                   baselines,
+			DormantImplementationSelections:       dormantImplementationSelectionWires(provenance.dormantImplementationSelections),
+			DormantImplementationSelectionsDigest: provenance.dormantImplementationSelectionsDigest,
+			ProtobufWireMapDigest:                 provenance.protobufWireMapDigest,
+			ApplicationModelDigest:                provenance.applicationModelDigest,
 		},
 	}
 	selectedReference := &applicationManifestDocumentReference{Path: provenance.selectedPath, Digest: provenance.selectedDigest}
@@ -438,17 +467,19 @@ func DecodeManifestProvenance(data []byte) (ManifestProvenance, error) {
 		}
 	}
 	provenance := ManifestProvenance{
-		mode:                   configuration.Mode,
-		environment:            configuration.Environment,
-		rootPath:               configuration.Root.Path,
-		rootDigest:             configuration.Root.Digest,
-		selectedPath:           selectedPath,
-		selectedDigest:         selectedDigest,
-		baselines:              baselines,
-		protobufWireMapDigest:  configuration.ProtobufWireMapDigest,
-		applicationModelDigest: configuration.ApplicationModelDigest,
-		interfaceProvenance:    interfaceRecord,
-		transportToolchain:     toolchain,
+		mode:                                  configuration.Mode,
+		environment:                           configuration.Environment,
+		rootPath:                              configuration.Root.Path,
+		rootDigest:                            configuration.Root.Digest,
+		selectedPath:                          selectedPath,
+		selectedDigest:                        selectedDigest,
+		baselines:                             baselines,
+		dormantImplementationSelections:       restoreDormantImplementationSelections(configuration.DormantImplementationSelections),
+		dormantImplementationSelectionsDigest: configuration.DormantImplementationSelectionsDigest,
+		protobufWireMapDigest:                 configuration.ProtobufWireMapDigest,
+		applicationModelDigest:                configuration.ApplicationModelDigest,
+		interfaceProvenance:                   interfaceRecord,
+		transportToolchain:                    toolchain,
 	}
 	if err := validateManifestProvenance(provenance); err != nil {
 		return ManifestProvenance{}, fmt.Errorf("generated application manifest configuration provenance: %w", err)
@@ -963,6 +994,7 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 	}
 	activeMode, activePath := dependencyBaselineSelection(provenance.mode, provenance.rootPath, provenance.selectedPath)
 	active := 0
+	var activeCurrentProjectPaths []string
 	for index, selection := range provenance.baselines {
 		if selection.mode != ConfigurationModeDefault && selection.mode != ConfigurationModeExplicit {
 			return fmt.Errorf("dependency baseline %d has an invalid selection mode", index)
@@ -984,10 +1016,24 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 		}
 		if selection.mode == activeMode && selection.path == activePath {
 			active++
+			activeCurrentProjectPaths = selection.currentProjectPaths
 		}
 	}
 	if active != 1 {
 		return errors.New("dependency baseline history must contain the active selection exactly once")
+	}
+	if err := validateDormantImplementationSelections(
+		provenance.dormantImplementationSelections,
+		provenance.mode,
+		provenance.rootPath,
+		provenance.selectedPath,
+		activeCurrentProjectPaths,
+	); err != nil {
+		return err
+	}
+	dormantDigest, err := dormantImplementationSelectionsDigest(provenance.dormantImplementationSelections)
+	if err != nil || dormantDigest != provenance.dormantImplementationSelectionsDigest {
+		return errors.New("dormant implementation selections digest is inconsistent")
 	}
 	if !validSHA256(provenance.protobufWireMapDigest) {
 		return errors.New("generated Protobuf wire-map digest must be a lower-case SHA-256 digest")
@@ -1000,6 +1046,22 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 	}
 	if !provenance.interfaceProvenance.Valid() {
 		return errors.New("interface and constructor provenance is absent or invalid")
+	}
+	visibleInterfaces := make(map[string]struct{})
+	for _, declared := range provenance.interfaceProvenance.Interfaces() {
+		visibleInterfaces[declared.ID()] = struct{}{}
+	}
+	activeBindings := make(map[string]struct{})
+	for _, binding := range provenance.interfaceProvenance.Bindings() {
+		activeBindings[binding.InterfaceID()] = struct{}{}
+	}
+	for _, selection := range provenance.dormantImplementationSelections {
+		if _, visible := visibleInterfaces[selection.interfaceID]; !visible {
+			return fmt.Errorf("dormant implementation selection %s is absent from visible Interface provenance", selection.interfaceID)
+		}
+		if _, active := activeBindings[selection.interfaceID]; active {
+			return fmt.Errorf("dormant implementation selection %s duplicates an executable binding", selection.interfaceID)
+		}
 	}
 	return nil
 }

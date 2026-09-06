@@ -926,15 +926,27 @@ with every resolved canonical Capability ID, its exact contract and constraint
 digests, and each constrained request or response field's path, type, and
 normalized constraint object. Unconstrained Capabilities retain empty field
 lists, while the aggregate projection digest changes for added, removed, or
-changed constraints. Configuration schema v5 records `default`,
+changed constraints. Configuration schema v6 records `default`,
 `environment`, or `explicit-config` mode; the environment name and overlay
 reference when applicable; project-relative paths; normalized document
 digests; dependency baseline history; sorted per-selection
 `current_project_paths`; the committed Protobuf wire-map digest; and the final
-build-affecting application-model digest. The ownership paths contain no values
-or Secret-reference targets and keep explicit current-Project decisions stable
-across repeated maintenance. Environment mode reuses the root dependency
-baseline because overlays do not own dependency maintenance. The required
+build-affecting application-model digest. It also requires the canonically
+ordered `dormant_implementation_selections` array and its aggregate digest.
+Each entry records the exact dormant Interface and constructor, the
+constructor's module/version and stable source, the canonical
+`interfaces.use` path and normalized decision digest, the effective owner, and
+ordered replacement/removal contributions with module-relative configuration
+sources. The array is explicitly empty when there is no dormant choice. These
+records contain no constructor configuration value or Secret-reference target,
+never appear as executable bindings, and move out of this configuration class
+when activation records the same exact choice in `interface_provenance`.
+
+The ownership paths contain no values or Secret-reference targets and keep
+explicit current-Project decisions stable across repeated maintenance.
+Environment mode reuses the root dependency baseline because overlays do not
+own dependency maintenance; overlay-owned dormant selection evidence retains
+its environment owner and overlay source separately. The required
 top-level `transport_toolchain` record identifies
 the exact embedded `go/format` runtime; built-in Protobuf-model, descriptor,
 wire-map, Connect, JavaScript, and API-documentation generator versions;

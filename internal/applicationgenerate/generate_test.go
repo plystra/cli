@@ -35,6 +35,7 @@ import (
 	"github.com/plystra/cli/internal/protobufidentity"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
+	"github.com/plystra/cli/internal/resolutionevidence"
 	"github.com/plystra/cli/internal/transporttoolchain"
 )
 
@@ -79,11 +80,13 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 	applicationManifest := readFile(t, root, "generated/manifest.json")
 	for _, required := range []string{
 		`"capability_aliases":[]`,
-		`"configuration":{"version":5,"mode":"default"`,
+		`"configuration":{"version":6,"mode":"default"`,
 		`"root":{"path":"plystra.yaml","digest":"sha256:`,
 		`"dependency_baselines":[{"mode":"default","path":"plystra.yaml"`,
 		`"dependency_composition_digest":"sha256:`,
 		`"dependency_baseline":[]`,
+		`"dormant_implementation_selections":[]`,
+		`"dormant_implementation_selections_digest":"sha256:`,
 		`"protobuf_wire_map_digest":"sha256:`,
 		`"application_model_digest":"sha256:`,
 		`"transport_toolchain":{"schema":"plystra.transport-toolchain/v2"`,
@@ -236,6 +239,12 @@ func TestGenerateRecordsDormantSelectionOnlyInConfigurationProvenance(t *testing
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance(without dormant selection): %v", err)
 	}
+	if selections := baselineProvenance.DormantImplementationSelections(); selections == nil || len(selections) != 0 {
+		t.Fatalf("baseline dormant selections = %#v, want an empty array", selections)
+	}
+	if digest := baselineProvenance.DormantImplementationSelectionsDigest(); !strings.HasPrefix(digest, "sha256:") || len(digest) != 71 {
+		t.Fatalf("baseline dormant-selection digest = %q", digest)
+	}
 	baselineArtifactEvidence := snapshotExecutablePublicArtifactEvidence(t, root)
 
 	selectedSource := []byte(fmt.Sprintf(`interfaces:
@@ -255,6 +264,11 @@ func TestGenerateRecordsDormantSelectionOnlyInConfigurationProvenance(t *testing
 	if len(choices) != 1 || choices[0].InterfaceID().String() != "configuration.owner/v1" || choices[0].Constructor().String() != constructor || choices[0].Source() != "plystra.yaml "+selectionPath {
 		t.Fatalf("resolved dormant selection intent = %#v", choices)
 	}
+	implementation, exists := resolved.Implementations().BySymbol(choices[0].Constructor())
+	if !exists {
+		t.Fatalf("resolved dormant constructor %s is absent from the validated inventory", constructor)
+	}
+	configurationField := resolvedConfigurationField(t, resolved, selectionPath)
 	result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       root,
 		Environment: environment,
@@ -274,6 +288,50 @@ func TestGenerateRecordsDormantSelectionOnlyInConfigurationProvenance(t *testing
 	if paths := manifest.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{selectionPath}) {
 		t.Fatalf("dormant current-project provenance paths = %v, want only %s", paths, selectionPath)
 	}
+	selections := manifest.DormantImplementationSelections()
+	if len(selections) != 1 {
+		t.Fatalf("dormant implementation selections = %#v", selections)
+	}
+	selection := selections[0]
+	if selection.InterfaceID() != "configuration.owner/v1" ||
+		selection.Constructor() != constructor ||
+		selection.ConstructorModulePath() != modulePath ||
+		selection.ConstructorModuleVersion() != "local" ||
+		selection.ConstructorSource() != implementation.Source() ||
+		selection.SelectionPath() != selectionPath ||
+		selection.SelectionDigest() != configurationField.Digest() ||
+		selection.SelectionOwner() != string(resolutionevidence.ConfigurationOwnerRoot) {
+		t.Fatalf("exact dormant selection provenance = %#v", selection)
+	}
+	contributions := selection.Contributions()
+	if len(contributions) != 1 ||
+		contributions[0].Owner() != string(resolutionevidence.ConfigurationOwnerRoot) ||
+		contributions[0].Precedence() != 2 ||
+		contributions[0].Digest() != selection.SelectionDigest() ||
+		contributions[0].Summary() != "implementation" ||
+		contributions[0].Removed() ||
+		!contributions[0].Effective() {
+		t.Fatalf("dormant selection contributions = %#v", contributions)
+	}
+	sources := contributions[0].Sources()
+	if len(sources) != 1 ||
+		sources[0].Module() != modulePath ||
+		sources[0].Path() != "plystra.yaml" ||
+		sources[0].Kind() != "configuration-value" ||
+		sources[0].Line() != 1 ||
+		sources[0].Column() != 1 {
+		t.Fatalf("dormant selection sources = %#v", sources)
+	}
+	if manifest.DormantImplementationSelectionsDigest() == baselineProvenance.DormantImplementationSelectionsDigest() {
+		t.Fatal("exact dormant selection did not change its configuration-provenance digest")
+	}
+	selections[0] = applicationgen.DormantImplementationSelection{}
+	contributions[0] = applicationgen.DormantSelectionContribution{}
+	sources[0] = applicationgen.DormantSelectionSource{}
+	retained := manifest.DormantImplementationSelections()
+	if len(retained) != 1 || retained[0].Constructor() != constructor || len(retained[0].Contributions()) != 1 || len(retained[0].Contributions()[0].Sources()) != 1 {
+		t.Fatal("dormant selection accessors exposed mutable provenance storage")
+	}
 	if !bytes.Contains(manifestData, []byte(strconv.Quote(selectionPath))) || bytes.Equal(manifestData, baselineManifest) {
 		t.Fatalf("dormant selection intent did not enter generated configuration provenance:\n%s", manifestData)
 	}
@@ -289,6 +347,211 @@ func TestGenerateRecordsDormantSelectionOnlyInConfigurationProvenance(t *testing
 	if artifactEvidence := snapshotExecutablePublicArtifactEvidence(t, root); !reflect.DeepEqual(artifactEvidence, baselineArtifactEvidence) {
 		t.Fatalf("dormant selection changed executable/public artifact provenance:\nbefore: %#v\nafter: %#v", baselineArtifactEvidence, artifactEvidence)
 	}
+}
+
+func TestGeneratedManifestRejectsMalformedDormantSelectionProvenance(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "example.com/acme/dormant-selection-validation"
+	root := t.TempDir()
+	writeApplicationModule(t, root, modulePath)
+	constructor := writeConstructorConfigurationOwner(t, root, modulePath, false)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\n", constructor))
+	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+	if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start: root, Environment: environment, Validate: func(_ context.Context, _ string) error { return nil },
+	}); err != nil {
+		t.Fatalf("Generate dormant selection: %v", err)
+	}
+	manifestData := readFile(t, root, "generated/manifest.json")
+
+	edit := func(t *testing.T, update func(map[string]json.RawMessage)) []byte {
+		t.Helper()
+		var document map[string]json.RawMessage
+		if err := json.Unmarshal(manifestData, &document); err != nil {
+			t.Fatalf("decode generated manifest: %v", err)
+		}
+		var configuration map[string]json.RawMessage
+		if err := json.Unmarshal(document["configuration"], &configuration); err != nil {
+			t.Fatalf("decode generated configuration provenance: %v", err)
+		}
+		update(configuration)
+		encoded, err := json.Marshal(configuration)
+		if err != nil {
+			t.Fatalf("encode edited configuration provenance: %v", err)
+		}
+		document["configuration"] = encoded
+		encoded, err = json.Marshal(document)
+		if err != nil {
+			t.Fatalf("encode edited generated manifest: %v", err)
+		}
+		return append(encoded, '\n')
+	}
+	editSelections := func(t *testing.T, configuration map[string]json.RawMessage, update func([]map[string]json.RawMessage) []map[string]json.RawMessage) {
+		t.Helper()
+		var selections []map[string]json.RawMessage
+		if err := json.Unmarshal(configuration["dormant_implementation_selections"], &selections); err != nil || len(selections) != 1 {
+			t.Fatalf("decode dormant selection fixture = %#v, %v", selections, err)
+		}
+		encoded, err := json.Marshal(update(selections))
+		if err != nil {
+			t.Fatalf("encode dormant selection fixture: %v", err)
+		}
+		configuration["dormant_implementation_selections"] = encoded
+	}
+	assertRejected := func(t *testing.T, data []byte, want ...string) {
+		t.Helper()
+		_, err := applicationgen.DecodeManifestProvenance(data)
+		if err == nil {
+			t.Fatal("DecodeManifestProvenance accepted malformed dormant selection provenance")
+		}
+		for _, fragment := range want {
+			if !strings.Contains(err.Error(), fragment) {
+				t.Fatalf("DecodeManifestProvenance error %q does not contain %q", err, fragment)
+			}
+		}
+	}
+
+	t.Run("missing selections", func(t *testing.T) {
+		assertRejected(t, edit(t, func(configuration map[string]json.RawMessage) {
+			delete(configuration, "dormant_implementation_selections")
+		}), "dormant implementation selections", "array")
+	})
+	t.Run("missing digest", func(t *testing.T) {
+		assertRejected(t, edit(t, func(configuration map[string]json.RawMessage) {
+			delete(configuration, "dormant_implementation_selections_digest")
+		}), "dormant implementation selections digest is inconsistent")
+	})
+	t.Run("digest tamper", func(t *testing.T) {
+		assertRejected(t, edit(t, func(configuration map[string]json.RawMessage) {
+			configuration["dormant_implementation_selections_digest"] = json.RawMessage(`"sha256:0000000000000000000000000000000000000000000000000000000000000000"`)
+		}), "dormant implementation selections digest is inconsistent")
+	})
+	t.Run("constructor tamper", func(t *testing.T) {
+		assertRejected(t, edit(t, func(configuration map[string]json.RawMessage) {
+			editSelections(t, configuration, func(selections []map[string]json.RawMessage) []map[string]json.RawMessage {
+				selections[0]["constructor"] = json.RawMessage(strconv.Quote(modulePath + "/configowner.Other"))
+				return selections
+			})
+		}), "selection digest does not match")
+	})
+	t.Run("constructor source tamper", func(t *testing.T) {
+		assertRejected(t, edit(t, func(configuration map[string]json.RawMessage) {
+			editSelections(t, configuration, func(selections []map[string]json.RawMessage) []map[string]json.RawMessage {
+				selections[0]["constructor_source"] = json.RawMessage(strconv.Quote(modulePath + "@local/configowner/../configowner/implementation.go:1:1"))
+				return selections
+			})
+		}), "constructor source")
+	})
+	t.Run("duplicate record", func(t *testing.T) {
+		assertRejected(t, edit(t, func(configuration map[string]json.RawMessage) {
+			editSelections(t, configuration, func(selections []map[string]json.RawMessage) []map[string]json.RawMessage {
+				return append(selections, selections[0])
+			})
+		}), "unique and canonically ordered")
+	})
+	t.Run("unknown record field", func(t *testing.T) {
+		assertRejected(t, edit(t, func(configuration map[string]json.RawMessage) {
+			editSelections(t, configuration, func(selections []map[string]json.RawMessage) []map[string]json.RawMessage {
+				selections[0]["unknown"] = json.RawMessage(`true`)
+				return selections
+			})
+		}), "unknown field")
+	})
+}
+
+func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *testing.T) {
+	t.Parallel()
+
+	const selectionPath = `interfaces.use["configuration.owner/v1"]`
+	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+	validate := func(_ context.Context, _ string) error { return nil }
+
+	t.Run("environment overlay", func(t *testing.T) {
+		const modulePath = "example.com/acme/dormant-environment"
+		root := t.TempDir()
+		writeApplicationModule(t, root, modulePath)
+		rootConstructor := writeConstructorConfigurationOwner(t, root, modulePath, false)
+		overlayConstructor := writeAlternativeConstructorConfigurationOwner(t, root, modulePath)
+		writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\n", rootConstructor))
+		writeFile(t, filepath.Join(root, "plystra.production.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\n", overlayConstructor))
+
+		if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+			Start: root, EnvironmentName: "production", Environment: environment, Validate: validate,
+		}); err != nil {
+			t.Fatalf("Generate environment dormant selection: %v", err)
+		}
+		provenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+		if err != nil {
+			t.Fatalf("DecodeManifestProvenance(environment): %v", err)
+		}
+		assertDormantSelectionRecord(t, provenance, "configuration.owner/v1", overlayConstructor, modulePath, "local", string(resolutionevidence.ConfigurationOwnerEnvironment),
+			[]string{string(resolutionevidence.ConfigurationOwnerRoot), string(resolutionevidence.ConfigurationOwnerEnvironment)},
+			[]string{modulePath, modulePath},
+			[]string{"plystra.yaml", "plystra.production.yaml"})
+		if paths := provenance.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{selectionPath}) {
+			t.Fatalf("environment root-maintenance paths = %v, want %s", paths, selectionPath)
+		}
+	})
+
+	t.Run("explicit replacement", func(t *testing.T) {
+		const modulePath = "example.com/acme/dormant-explicit"
+		root := t.TempDir()
+		writeApplicationModule(t, root, modulePath)
+		constructor := writeConstructorConfigurationOwner(t, root, modulePath, false)
+		writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+		writeFile(t, filepath.Join(root, "deploy", "customer.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\n", constructor))
+
+		if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+			Start: root, ConfigurationPath: "deploy/customer.yaml", Environment: environment, Validate: validate,
+		}); err != nil {
+			t.Fatalf("Generate explicit dormant selection: %v", err)
+		}
+		provenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+		if err != nil {
+			t.Fatalf("DecodeManifestProvenance(explicit): %v", err)
+		}
+		assertDormantSelectionRecord(t, provenance, "configuration.owner/v1", constructor, modulePath, "local", string(resolutionevidence.ConfigurationOwnerExplicit),
+			[]string{string(resolutionevidence.ConfigurationOwnerExplicit)},
+			[]string{modulePath},
+			[]string{"deploy/customer.yaml"})
+		if paths := provenance.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{selectionPath}) {
+			t.Fatalf("explicit current-project paths = %v, want %s", paths, selectionPath)
+		}
+	})
+
+	t.Run("dependency composition", func(t *testing.T) {
+		const dependencyModule = "example.com/platform/dormant-selection"
+		root := t.TempDir()
+		dependencyRoot := filepath.Join(root, "platform")
+		applicationRoot := filepath.Join(root, "application")
+		writeApplicationModule(t, dependencyRoot, dependencyModule)
+		constructor := writeConstructorConfigurationOwner(t, dependencyRoot, dependencyModule, false)
+		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\n", constructor))
+		writeApplicationModule(t, applicationRoot, "example.com/acme/dormant-dependency")
+		goModPath := filepath.Join(applicationRoot, "go.mod")
+		goMod := string(readAbsoluteFile(t, goModPath)) + fmt.Sprintf("\nrequire %s v1.0.0\n\nreplace %s => %s\n", dependencyModule, dependencyModule, filepath.ToSlash(dependencyRoot))
+		writeFile(t, goModPath, goMod)
+		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+
+		result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+			Start: applicationRoot, Environment: environment, Validate: validate,
+		})
+		if err != nil || !result.ConfigurationChanged() {
+			t.Fatalf("Generate dependency-composed dormant selection = changed %t, %v", result.ConfigurationChanged(), err)
+		}
+		provenance, err := applicationgen.DecodeManifestProvenance(readFile(t, applicationRoot, "generated/manifest.json"))
+		if err != nil {
+			t.Fatalf("DecodeManifestProvenance(dependency): %v", err)
+		}
+		assertDormantSelectionRecord(t, provenance, "configuration.owner/v1", constructor, dependencyModule, "v1.0.0", string(resolutionevidence.ConfigurationOwnerDependency),
+			[]string{string(resolutionevidence.ConfigurationOwnerDependency)},
+			[]string{dependencyModule},
+			[]string{"plystra.yaml"})
+		if paths := provenance.CurrentProjectPaths(); len(paths) != 0 {
+			t.Fatalf("dependency-owned dormant selection entered current-project paths: %v", paths)
+		}
+	})
 }
 
 func TestGenerateKeepsDormantConstructorConfigurationOutOfRuntimeBootstrap(t *testing.T) {
@@ -513,6 +776,11 @@ config:
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance(dormant): %v", err)
 	}
+	dormantSelections := dormantProvenance.DormantImplementationSelections()
+	if len(dormantSelections) != 1 || dormantSelections[0].InterfaceID() != "configuration.owner/v1" || dormantSelections[0].Constructor() != constructor {
+		t.Fatalf("dormant exact selection provenance = %#v", dormantSelections)
+	}
+	dormantSelectionsDigest := dormantProvenance.DormantImplementationSelectionsDigest()
 	if bindings, constructors := dormantProvenance.InterfaceProvenance().Bindings(), dormantProvenance.InterfaceProvenance().Constructors(); len(bindings) != 0 || len(constructors) != 0 {
 		t.Fatalf("dormant selection entered executable provenance: bindings %#v, constructors %#v", bindings, constructors)
 	}
@@ -554,6 +822,12 @@ config:
 	}
 	if activatedProvenance.ApplicationModelDigest() == dormantProvenance.ApplicationModelDigest() {
 		t.Fatal("activation preserved the dormant executable application-model digest")
+	}
+	if selections := activatedProvenance.DormantImplementationSelections(); selections == nil || len(selections) != 0 {
+		t.Fatalf("activated binding retained dormant selection provenance: %#v", selections)
+	}
+	if activatedProvenance.DormantImplementationSelectionsDigest() == dormantSelectionsDigest {
+		t.Fatal("activation retained the nonempty dormant-selection digest")
 	}
 	interfaceProvenance := activatedProvenance.InterfaceProvenance()
 	bindings := interfaceProvenance.Bindings()
@@ -620,6 +894,9 @@ config:
 	}
 	if deactivatedProvenance.ApplicationModelDigest() != dormantProvenance.ApplicationModelDigest() {
 		t.Fatalf("deactivation application-model digest = %q, want dormant %q", deactivatedProvenance.ApplicationModelDigest(), dormantProvenance.ApplicationModelDigest())
+	}
+	if selections := deactivatedProvenance.DormantImplementationSelections(); !reflect.DeepEqual(selections, dormantSelections) || deactivatedProvenance.DormantImplementationSelectionsDigest() != dormantSelectionsDigest {
+		t.Fatalf("deactivation dormant selection provenance = %#v/%q, want %#v/%q", selections, deactivatedProvenance.DormantImplementationSelectionsDigest(), dormantSelections, dormantSelectionsDigest)
 	}
 	if bindings, constructors := deactivatedProvenance.InterfaceProvenance().Bindings(), deactivatedProvenance.InterfaceProvenance().Constructors(); len(bindings) != 0 || len(constructors) != 0 {
 		t.Fatalf("deactivated selection retained executable provenance: bindings %#v, constructors %#v", bindings, constructors)
@@ -2893,6 +3170,105 @@ func (*Service) Load(context.Context, ownerv1.Request) (ownerv1.Response, error)
 }
 `)
 	return modulePath + "/configowner.New"
+}
+
+func writeAlternativeConstructorConfigurationOwner(t testing.TB, root, modulePath string) string {
+	t.Helper()
+	writeFile(t, filepath.Join(root, "configowneralt", "implementation.go"), `package configowneralt
+
+import (
+	"context"
+
+	ownerv1 "`+modulePath+`/interfaces/configuration/owner/v1"
+)
+
+type Service struct{}
+
+//plystra:implements configuration.owner/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) Load(context.Context, ownerv1.Request) (ownerv1.Response, error) {
+	return ownerv1.Response{}, nil
+}
+`)
+	return modulePath + "/configowneralt.New"
+}
+
+func assertDormantSelectionRecord(
+	t testing.TB,
+	provenance applicationgen.ManifestProvenance,
+	interfaceID, constructor, modulePath, moduleVersion, owner string,
+	contributionOwners, sourceModules, sourcePaths []string,
+) {
+	t.Helper()
+	selections := provenance.DormantImplementationSelections()
+	if len(selections) != 1 {
+		t.Fatalf("dormant implementation selections = %#v", selections)
+	}
+	selection := selections[0]
+	if selection.InterfaceID() != interfaceID ||
+		selection.Constructor() != constructor ||
+		selection.ConstructorModulePath() != modulePath ||
+		selection.ConstructorModuleVersion() != moduleVersion ||
+		!strings.HasPrefix(selection.ConstructorSource(), modulePath+"@"+moduleVersion+"/") ||
+		selection.SelectionPath() != fmt.Sprintf("interfaces.use[%q]", interfaceID) ||
+		selection.SelectionOwner() != owner ||
+		!strings.HasPrefix(selection.SelectionDigest(), "sha256:") || len(selection.SelectionDigest()) != 71 {
+		t.Fatalf("dormant selection record = %#v", selection)
+	}
+	if digest := provenance.DormantImplementationSelectionsDigest(); !strings.HasPrefix(digest, "sha256:") || len(digest) != 71 {
+		t.Fatalf("dormant implementation selection digest = %q", digest)
+	}
+	contributions := selection.Contributions()
+	if len(contributions) != len(contributionOwners) || len(sourceModules) != len(contributionOwners) || len(sourcePaths) != len(contributionOwners) {
+		t.Fatalf("dormant selection contributions = %#v, expectations = %v/%v/%v", contributions, contributionOwners, sourceModules, sourcePaths)
+	}
+	precedence := map[string]int{
+		string(resolutionevidence.ConfigurationOwnerDependency):  1,
+		string(resolutionevidence.ConfigurationOwnerRoot):        2,
+		string(resolutionevidence.ConfigurationOwnerExplicit):    2,
+		string(resolutionevidence.ConfigurationOwnerEnvironment): 3,
+	}
+	for index, contribution := range contributions {
+		wantOwner := contributionOwners[index]
+		wantSummary := "implementation"
+		if wantOwner == string(resolutionevidence.ConfigurationOwnerDependency) {
+			wantSummary = "redacted"
+		}
+		if contribution.Owner() != wantOwner ||
+			contribution.Precedence() != precedence[wantOwner] ||
+			contribution.Summary() != wantSummary ||
+			contribution.Removed() ||
+			contribution.Effective() != (wantOwner == owner) ||
+			!strings.HasPrefix(contribution.Digest(), "sha256:") || len(contribution.Digest()) != 71 {
+			t.Fatalf("dormant selection contribution %d = %#v", index, contribution)
+		}
+		if contribution.Effective() && contribution.Digest() != selection.SelectionDigest() {
+			t.Fatalf("effective dormant contribution digest = %q, want %q", contribution.Digest(), selection.SelectionDigest())
+		}
+		sources := contribution.Sources()
+		if len(sources) != 1 ||
+			sources[0].Module() != sourceModules[index] ||
+			sources[0].Path() != sourcePaths[index] ||
+			sources[0].Kind() != "configuration-value" ||
+			sources[0].Line() != 1 || sources[0].Column() != 1 {
+			t.Fatalf("dormant selection contribution %d sources = %#v", index, sources)
+		}
+	}
+	if bindings := provenance.InterfaceProvenance().Bindings(); len(bindings) != 0 {
+		t.Fatalf("dormant selection entered executable bindings: %#v", bindings)
+	}
+}
+
+func resolvedConfigurationField(t testing.TB, result applicationresolve.Result, path string) resolutionevidence.ConfigurationField {
+	t.Helper()
+	for _, field := range result.ResolutionEvidence().ConfigurationFields() {
+		if field.Path() == path {
+			return field
+		}
+	}
+	t.Fatalf("resolved configuration field %s is absent", path)
+	return resolutionevidence.ConfigurationField{}
 }
 
 func writeApplicationModuleDefinition(t testing.TB, root, modulePath string) {

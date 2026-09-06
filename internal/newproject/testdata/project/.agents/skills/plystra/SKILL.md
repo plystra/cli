@@ -97,18 +97,17 @@ and start that document with one consistent selector:
     plystra generate --check --config deploy/customer-a.yaml
     go run ./generated/go/application --config deploy/customer-a.yaml
 
-Generated startup accepts the same --env selector or PLYSTRA_ENV and the same
---config selector or PLYSTRA_CONFIG; explicit selection wins and modes cannot be
-combined. Selected documents must exist and pass typed validation; replacement
-keeps root plystra.yaml as the marker and does not merge it beneath.
+Generated startup accepts the same --env selector or PLYSTRA_ENV; the same
+--config selector or PLYSTRA_CONFIG works for replacement configuration.
+Explicit selection wins and modes cannot combine.
+Replacement keeps root plystra.yaml as the marker but does not merge it beneath.
 Manifest provenance records the selected document and dependency composition.
-Bootstrap embeds only the bounded executable compatibility projection tied to
-the final model digest. It lists only executable Implementation choices. Dormant
-choices and configuration have no runtime membership or artifact-provenance
-effect. A mismatch requires a rebuild with the same selector before settings,
-Secrets, or construction. Runtime-only address,
-timeouts.startup, configuration, and Secret references remain outside comparison,
-and no record contains values, Secret targets, resolved Secrets, or machine paths.
+Bootstrap contains the bounded executable compatibility projection and only
+executable Implementation choices, so dormant choices have no runtime or
+artifact-provenance effect. A mismatch requires a rebuild with the same selector
+before settings, Secrets, or construction. Runtime-only address, timeouts.startup,
+configuration, and Secret references remain outside comparison; records contain
+no values, Secret targets, resolved Secrets, or machine paths.
 
 ## Detailed task reference
 
@@ -588,21 +587,21 @@ maintains only the selected file, and independent maintained selections retain
 independent dependency baselines.
 
 Inspect generated/manifest.json for the versioned canonical constraint
-projection: every resolved canonical Capability has exact contract and
-constraint digests plus its ordered constrained request and response fields;
-an unconstrained Capability has an empty field list. The configuration schema v5
-records default, environment, or explicit-config mode; the environment and
-overlay reference when applicable; Project-relative paths; normalized document
-digests; dependency baseline history with non-secret current_project_paths; the
-Protobuf wire-map digest; and final application-model digest. Environment mode
-retains the root dependency baseline because overlays do not own maintenance.
-The manifest never
-records raw configuration, Secret reference targets, resolved Secrets, or
-machine-specific absolute paths. Its top-level transport_toolchain record identifies
-embedded go/format; Protobuf-model, descriptor, wire-map, Connect, JavaScript,
-and API-documentation generator versions; pinned generated Go/npm dependencies;
-and its digest. Generation invokes neither global protoc nor a hosted generator.
-A changed build-affecting selection or toolchain identity creates drift.
+projection. Each Capability has exact contract and constraint digests; an
+unconstrained one has an empty field list. The configuration schema v6 records
+default, environment, or explicit-config mode, selected document digests,
+dependency history with non-secret current_project_paths, Protobuf wire-map digest,
+and the final model digest. Its sorted dormant_implementation_selections
+and aggregate digest retain each exact Interface, constructor/module source,
+interfaces.use decision, owner, and replacement/removal sources, never values or
+Secret targets. Empty Projects use an empty array. Activation removes the entry
+and records the choice in executable interface_provenance. Environment entries
+retain overlay provenance while the root dependency baseline stays root-owned.
+The manifest contains no raw configuration, resolved Secrets, or machine paths.
+Its top-level transport_toolchain identifies embedded go/format, Protobuf and
+API-documentation generator versions, generated Go/npm dependencies, and its
+digest. Generation uses neither
+global protoc nor a hosted generator; build-affecting identity changes drift.
 
 ## Naming and identity rules
 

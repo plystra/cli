@@ -309,7 +309,7 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:e072847b49da77ceaff5d76f9efa4b6803bb302e062e2bba966ffe65977e8eb5",
+      "sha256": "sha256:ce3cc0a329a620ce8f003edd024b6779b840526dbd86c6ae62d1e64761350b11",
       "generator": "plystra.application-manifest/v1",
       "output_kind": "application-manifest",
       "input_record_ids": [
@@ -410,7 +410,7 @@
       ]
     },
     "configuration": {
-      "version": 5,
+      "version": 6,
       "mode": "default",
       "root": {
         "path": "plystra.yaml",
@@ -425,6 +425,8 @@
           "current_project_paths": []
         }
       ],
+      "dormant_implementation_selections": [],
+      "dormant_implementation_selections_digest": "sha256:f781509b1c7204b29c108dddeaeba732605c9ea41e0412205c03777d995e6681",
       "protobuf_wire_map_digest": "sha256:291fb979cc47f081f48f964b9addaace1aa6dc1c7fb03bb29d16794509461183",
       "application_model_digest": "sha256:b3b799ecdc0c41742ce0783292ae14e33b4b896e56ec17e6d23ea659ef8420ee"
     },
