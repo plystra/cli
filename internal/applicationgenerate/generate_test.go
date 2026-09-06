@@ -453,8 +453,17 @@ config:
 			}
 		}
 	}
-	if !bytes.Contains(assembly, []byte("type ConstructorConfiguration struct {\n}")) || !bytes.Contains(bootstrap, []byte("runtimeExecutableConstructors")) {
-		t.Fatalf("dormant configuration runtime boundary is incomplete:\nassembly:\n%s\nbootstrap:\n%s", assembly, bootstrap)
+	if !bytes.Contains(assembly, []byte("type ConstructorConfiguration struct {\n}")) {
+		t.Fatalf("dormant constructor configuration entered generated runtime delivery:\n%s", assembly)
+	}
+	for _, expected := range []string{
+		"applicationassembly.NewInterfaceRuntime(applicationassembly.ConstructorConfiguration{}, startupTimeout)",
+		"var runtimeConfigurationSchemas = map[string]map[string]runtimeConfigurationFieldKind{}",
+		"var runtimeExecutableConstructors = map[string]struct{}{}",
+	} {
+		if !bytes.Contains(bootstrap, []byte(expected)) {
+			t.Fatalf("dormant configuration runtime boundary omits %q:\n%s", expected, bootstrap)
+		}
 	}
 	for _, entry := range snapshotTree(t, root) {
 		if strings.HasPrefix(entry.path, "generated/go/proxies/configuration/owner/v1/") || strings.HasPrefix(entry.path, "generated/go/adapters/implementations/configuration/owner/v1/") {
