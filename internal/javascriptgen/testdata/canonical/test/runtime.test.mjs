@@ -225,7 +225,9 @@ test("canonical Interface method preserves every authored field over Connect", a
   const paths = [];
   const requests = [];
   const expectedRequest = recordsEnvelopeJSON();
+  expectedRequest.detail.children[0].amount = "0";
   const expectedResponse = recordsEnvelope();
+  expectedResponse.detail.children[0].amount = 0n;
   const options = {
     baseUrl: "https://api.example.test/root",
     credentialPolicy: anonymousCredentialPolicy,
@@ -316,10 +318,12 @@ test("canonical Interface method safely preserves dynamic object-property keys",
   );
   assert.deepEqual(response.value.lookup.constructor, {
     code: "constructor",
+    amount: 0n,
     children: [],
   });
   assert.deepEqual(response.value.lookup.prototype, {
     code: "prototype",
+    amount: 0n,
     children: [],
   });
   assert.equal(Object.getPrototypeOf(response.value.lookup), Object.prototype);
