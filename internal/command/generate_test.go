@@ -15,13 +15,11 @@ import (
 	"strings"
 	"testing"
 
-	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/diagnosticcode"
-	"github.com/plystra/cli/internal/transportprovenance"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 )
@@ -108,7 +106,7 @@ replace github.com/plystra/kernel => %s
 	} {
 		assertCommandFile(t, root, name)
 	}
-	assertCommandBootstrapProvenanceMatchesManifest(t, root)
+	assertCommandBootstrapExcludesSelectorOnlyProvenance(t, root)
 
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, start, environment)
 	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/app in "+root+"\n" {
@@ -719,7 +717,7 @@ replace github.com/plystra/kernel => %s
 	if err != nil || provenance.Mode() != applicationgen.ConfigurationModeEnvironment || provenance.Environment() != "production" || provenance.SelectedPath() != "plystra.production.yaml" {
 		t.Fatalf("environment provenance = mode %q environment %q path %q, %v", provenance.Mode(), provenance.Environment(), provenance.SelectedPath(), err)
 	}
-	assertCommandBootstrapProvenanceMatchesManifest(t, root)
+	assertCommandBootstrapExcludesSelectorOnlyProvenance(t, root)
 
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, start, commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "production"}))
 	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/environment in "+root+"\n" {
@@ -928,7 +926,7 @@ interfaces:
 	if provenance.Mode() != applicationgen.ConfigurationModeExplicit || provenance.RootPath() != "plystra.yaml" || provenance.SelectedPath() != "deploy/customer.yaml" {
 		t.Fatalf("selected manifest provenance = mode %q root %q selected %q", provenance.Mode(), provenance.RootPath(), provenance.SelectedPath())
 	}
-	assertCommandBootstrapProvenanceMatchesManifest(t, applicationRoot)
+	assertCommandBootstrapExcludesSelectorOnlyProvenance(t, applicationRoot)
 	for _, name := range []string{
 		"generated/go/adapters/http/kernel/info/v1/handler_gen.go",
 		"generated/go/clients/kernel/info/v1/client_gen.go",
@@ -1526,36 +1524,32 @@ func readCommandFile(t testing.TB, root, name string) []byte {
 	return data
 }
 
-func assertCommandBootstrapProvenanceMatchesManifest(t testing.TB, root string) {
+func assertCommandBootstrapExcludesSelectorOnlyProvenance(t testing.TB, root string) {
 	t.Helper()
 	manifest, err := applicationgen.DecodeManifestProvenance(readCommandFile(t, root, "generated/manifest.json"))
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance: %v", err)
 	}
-	provenance, err := transportprovenance.New(transportprovenance.Input{
-		Mode:                        generation.ConfigurationMode(manifest.Mode()),
-		Environment:                 manifest.Environment(),
-		RootPath:                    manifest.RootPath(),
-		RootDigest:                  manifest.RootDigest(),
-		SelectedPath:                manifest.SelectedPath(),
-		SelectedDigest:              manifest.SelectedDigest(),
-		DependencyCompositionDigest: manifest.DependencyBaseline().Digest(),
-		ApplicationModelDigest:      manifest.ApplicationModelDigest(),
-	})
-	if err != nil {
-		t.Fatalf("transportprovenance.New from generated manifest: %v", err)
-	}
 	bootstrap := readCommandFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
+	for _, forbidden := range []string{
+		manifest.RootDigest(),
+		manifest.SelectedDigest(),
+		manifest.DependencyBaseline().Digest(),
+		"compiledConfigurationSelectionProvenanceJSON",
+		"compiledConfigurationSelectionProvenanceDigest",
+	} {
+		if bytes.Contains(bootstrap, []byte(forbidden)) {
+			t.Fatalf("generated bootstrap contains selector-only provenance %q", forbidden)
+		}
+	}
 	for _, required := range []string{
-		strconv.Quote(string(provenance.CanonicalJSON())),
-		strconv.Quote(provenance.Digest()),
 		"compiledApplicationModelCompatibilityJSON",
 		"compiledApplicationModelCompatibilityDigest",
 		"compiledApplicationModelDigest",
 		strconv.Quote(manifest.ApplicationModelDigest()),
 	} {
 		if !bytes.Contains(bootstrap, []byte(required)) {
-			t.Fatalf("generated bootstrap provenance disagrees with generated manifest %q", required)
+			t.Fatalf("generated bootstrap executable provenance disagrees with generated manifest %q", required)
 		}
 	}
 }

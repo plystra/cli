@@ -236,6 +236,7 @@ func TestGenerateKeepsDormantConstructorConfigurationOutOfRuntimeBootstrap(t *te
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance(without dormant configuration): %v", err)
 	}
+	baselineArtifactEvidence := snapshotExecutablePublicArtifactEvidence(t, root)
 	baselineJavaScript := snapshotSubtree(t, root, "generated/sdk/javascript")
 	baselineDocumentation := snapshotSubtree(t, root, "generated/docs")
 
@@ -247,6 +248,23 @@ config:
     endpoint: smtp.internal
     password: {env: %s}
 `, constructor, constructor, secretTarget))
+	driftBefore := snapshotTree(t, root)
+	drift, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Check:       true,
+		Environment: environment,
+	})
+	wantStale := []string{generatedfiles.ManifestPath, generatedfiles.ApplicationManifestPath}
+	if err != nil || !drift.Checked() || drift.ConfigurationChanged() ||
+		!reflect.DeepEqual(drift.Report().Stale(), wantStale) ||
+		len(drift.Report().Missing()) != 0 ||
+		len(drift.Report().Unexpected()) != 0 ||
+		len(drift.Report().ManuallyModified()) != 0 {
+		t.Fatalf("Check dormant-only configuration drift = checked %t configuration changed %t changes %#v, %v", drift.Checked(), drift.ConfigurationChanged(), drift.Report().Changes(), err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, driftBefore) {
+		t.Fatalf("dormant-only check mutated application:\nbefore: %#v\nafter: %#v", driftBefore, after)
+	}
 
 	result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       root,
@@ -256,7 +274,8 @@ config:
 	if err != nil || !result.Report().Clean() {
 		t.Fatalf("Generate dormant constructor configuration without a resolved Secret = changes %#v, %v", result.Report().Changes(), err)
 	}
-	manifest, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+	manifestJSON := readFile(t, root, "generated/manifest.json")
+	manifest, err := applicationgen.DecodeManifestProvenance(manifestJSON)
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance(dormant configuration): %v", err)
 	}
@@ -265,6 +284,19 @@ config:
 	}
 	if manifest.ApplicationModelDigest() != baselineProvenance.ApplicationModelDigest() {
 		t.Fatalf("dormant-only configuration changed application_model_digest: %q != %q", manifest.ApplicationModelDigest(), baselineProvenance.ApplicationModelDigest())
+	}
+	for _, expected := range []string{
+		`interfaces.use["configuration.owner/v1"]`,
+		`config["` + constructor + `"]`,
+		`config["` + constructor + `"]["endpoint"]`,
+		`config["` + constructor + `"]["password"]`,
+	} {
+		if !slicesContains(manifest.CurrentProjectPaths(), expected) {
+			t.Fatalf("dormant configuration provenance paths %v omit %s", manifest.CurrentProjectPaths(), expected)
+		}
+	}
+	if artifactEvidence := snapshotExecutablePublicArtifactEvidence(t, root); !reflect.DeepEqual(artifactEvidence, baselineArtifactEvidence) {
+		t.Fatalf("dormant-only configuration changed executable/public artifact provenance:\nbefore: %#v\nafter: %#v", baselineArtifactEvidence, artifactEvidence)
 	}
 	if javascript := snapshotSubtree(t, root, "generated/sdk/javascript"); !reflect.DeepEqual(javascript, baselineJavaScript) {
 		t.Fatalf("dormant-only configuration changed JavaScript SDK output:\nbefore: %#v\nafter: %#v", baselineJavaScript, javascript)
@@ -278,6 +310,16 @@ config:
 	}
 	assembly := readFile(t, root, "generated/go/assembly/interfaces_gen.go")
 	bootstrap := readFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
+	for path, data := range map[string][]byte{
+		generatedfiles.ManifestPath:            readFile(t, root, generatedfiles.ManifestPath),
+		generatedfiles.ApplicationManifestPath: manifestJSON,
+	} {
+		for _, forbidden := range []string{secretTarget, "smtp.internal"} {
+			if bytes.Contains(data, []byte(forbidden)) {
+				t.Fatalf("%s contains dormant private input %q:\n%s", path, forbidden, data)
+			}
+		}
+	}
 	for path, data := range map[string][]byte{
 		"generated/go/assembly/interfaces_gen.go": assembly,
 		"generated/go/bootstrap/bootstrap_gen.go": bootstrap,
@@ -1990,6 +2032,7 @@ func TestGenerateApplicationModelDigestExcludesRuntimeValuesAndMachinePaths(t *t
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance(initial): %v", err)
 	}
+	initialBootstrapData := readFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
 
 	writeFile(t, configurationPath, fmt.Sprintf("http:\n  transports: {connect: true, rest: false}\ncapabilities: {require: [email.send/v1]}\ninterfaces: {use: {configuration.owner/v1: %s}}\nconfig:\n  %s:\n    endpoint: 'D:/private/machine-two'\n    password: {env: PRIVATE_TOKEN_TWO}\n", configurationOwner, configurationOwner))
 	updated, err := applicationgenerate.Generate(t.Context(), options)
@@ -2005,20 +2048,23 @@ func TestGenerateApplicationModelDigestExcludesRuntimeValuesAndMachinePaths(t *t
 	if updatedProvenance.ApplicationModelDigest() != initialProvenance.ApplicationModelDigest() {
 		t.Fatalf("runtime-only values changed application_model_digest: %q != %q", updatedProvenance.ApplicationModelDigest(), initialProvenance.ApplicationModelDigest())
 	}
+	if !bytes.Equal(bootstrapData, initialBootstrapData) {
+		t.Fatalf("runtime-only values changed generated bootstrap:\nbefore:\n%s\nafter:\n%s", initialBootstrapData, bootstrapData)
+	}
 	for _, required := range []string{
-		"compiledConfigurationSelectionProvenanceJSON",
-		"compiledConfigurationSelectionProvenanceDigest",
 		"compiledApplicationModelCompatibilityJSON",
 		"compiledApplicationModelCompatibilityDigest",
+		"compiledApplicationModelDigest",
 		"validateRuntimeApplicationModel(document)",
-		updatedProvenance.RootDigest(),
 		updatedProvenance.ApplicationModelDigest(),
 	} {
 		if !bytes.Contains(bootstrapData, []byte(required)) {
-			t.Fatalf("generated bootstrap omits non-secret configuration provenance %q", required)
+			t.Fatalf("generated bootstrap omits executable application-model compatibility %q", required)
 		}
 	}
 	for _, forbidden := range []string{
+		"compiledConfigurationSelectionProvenanceJSON",
+		"compiledConfigurationSelectionProvenanceDigest",
 		root,
 		"C:/private/machine-one",
 		"D:/private/machine-two",
@@ -2813,6 +2859,41 @@ type treeEntry struct {
 	path string
 	mode fs.FileMode
 	data []byte
+}
+
+type artifactEvidenceSnapshot struct {
+	path             string
+	sha256           string
+	generator        string
+	kind             generatedfiles.ArtifactKind
+	inputRecordIDs   []string
+	sources          []string
+	cleanupOwnership generatedfiles.CleanupOwnership
+}
+
+func snapshotExecutablePublicArtifactEvidence(t testing.TB, root string) []artifactEvidenceSnapshot {
+	t.Helper()
+	var result []artifactEvidenceSnapshot
+	for _, entry := range snapshotGenerated(t, root) {
+		if !entry.mode.IsRegular() || entry.path == generatedfiles.ManifestPath || entry.path == generatedfiles.ApplicationManifestPath {
+			continue
+		}
+		artifact, exists, err := generatedfiles.ReadArtifact(root, entry.path)
+		if err != nil || !exists || !artifact.Valid() {
+			t.Fatalf("ReadArtifact(%s) = %#v, %t, %v", entry.path, artifact, exists, err)
+		}
+		result = append(result, artifactEvidenceSnapshot{
+			path:             artifact.Path(),
+			sha256:           artifact.SHA256(),
+			generator:        artifact.Generator(),
+			kind:             artifact.Kind(),
+			inputRecordIDs:   artifact.InputRecordIDs(),
+			sources:          artifact.Sources(),
+			cleanupOwnership: artifact.CleanupOwnership(),
+		})
+	}
+	sort.Slice(result, func(left, right int) bool { return result[left].path < result[right].path })
+	return result
 }
 
 func snapshotTree(t testing.TB, root string) []treeEntry {

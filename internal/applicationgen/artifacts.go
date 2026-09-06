@@ -62,9 +62,10 @@ type artifactEvidence struct {
 }
 
 type artifactEvidenceIndex struct {
-	base   artifactEvidence
-	all    artifactEvidence
-	byPath map[string]artifactEvidence
+	base          artifactEvidence
+	configuration artifactEvidence
+	all           artifactEvidence
+	byPath        map[string]artifactEvidence
 }
 
 func newArtifactEvidenceIndex(provenance ManifestProvenance) (artifactEvidenceIndex, error) {
@@ -74,10 +75,8 @@ func newArtifactEvidenceIndex(provenance ManifestProvenance) (artifactEvidenceIn
 	base := artifactEvidence{
 		inputs: []string{
 			applicationModelInputPrefix + provenance.ApplicationModelDigest(),
-			dependencyCompositionInputPrefix + provenance.DependencyBaseline().Digest(),
 			interfaceProvenanceInputPrefix + provenance.InterfaceProvenance().Digest(),
 			transportToolchainInputPrefix + provenance.TransportToolchain().Digest(),
-			configurationSelectionInputPrefix + provenance.Mode() + ":" + provenance.SelectedPath() + ":" + provenance.SelectedDigest(),
 		},
 		sources: []string{provenance.SelectedPath()},
 	}
@@ -88,7 +87,16 @@ func newArtifactEvidenceIndex(provenance ManifestProvenance) (artifactEvidenceIn
 		base.sources = append(base.sources, record.Sources...)
 	}
 	base = canonicalArtifactEvidence(base)
-	index := artifactEvidenceIndex{base: base, all: base, byPath: make(map[string]artifactEvidence)}
+	configuration := artifactEvidence{inputs: []string{
+		dependencyCompositionInputPrefix + provenance.DependencyBaseline().Digest(),
+		configurationSelectionInputPrefix + provenance.Mode() + ":" + provenance.SelectedPath() + ":" + provenance.SelectedDigest(),
+	}}
+	index := artifactEvidenceIndex{
+		base:          base,
+		configuration: canonicalArtifactEvidence(configuration),
+		all:           base,
+		byPath:        make(map[string]artifactEvidence),
+	}
 
 	interfaces := make(map[string]interfaceprovenance.Interface)
 	for _, current := range provenance.InterfaceProvenance().Interfaces() {
@@ -155,6 +163,9 @@ func (i artifactEvidenceIndex) input(filePath string) (generatedfiles.ArtifactIn
 		if artifactUsesGlobalEvidence(filePath) {
 			evidence = i.all
 		}
+	}
+	if filePath == aliasManifestPath {
+		evidence = mergeArtifactEvidence(evidence, i.configuration)
 	}
 	evidence = mergeArtifactEvidence(i.base, evidence)
 	return generatedfiles.ArtifactInput{

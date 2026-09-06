@@ -100,12 +100,13 @@ and start that document with one consistent selector:
 Generated startup accepts the same --env selector or PLYSTRA_ENV and the same
 --config selector or PLYSTRA_CONFIG; explicit selection wins and modes cannot be
 combined. Selected documents must exist and pass typed validation; replacement
-keeps root plystra.yaml as the marker and does not merge it beneath. Bootstrap
-embeds non-secret selection provenance and a bounded compatibility projection
-tied to the final model digest. It lists only executable Implementation choices,
-so dormant choices and configuration have no runtime membership. A mismatch
-requires a rebuild with the same selector before settings, Secrets, or
-construction. Runtime-only address,
+keeps root plystra.yaml as the marker and does not merge it beneath.
+Manifest provenance records the selected document and dependency composition.
+Bootstrap embeds only the bounded executable compatibility projection tied to
+the final model digest. It lists only executable Implementation choices. Dormant
+choices and configuration have no runtime membership or artifact-provenance
+effect. A mismatch requires a rebuild with the same selector before settings,
+Secrets, or construction. Runtime-only address,
 timeouts.startup, configuration, and Secret references remain outside comparison,
 and no record contains values, Secret targets, resolved Secrets, or machine paths.
 

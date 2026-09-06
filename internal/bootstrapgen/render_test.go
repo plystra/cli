@@ -50,9 +50,6 @@ token: {type: secret}
 	for _, required := range []string{
 		`applicationassembly "example.com/acme/application/generated/go/assembly"`,
 		`defaultRuntimeDocument = "plystra.yaml"`,
-		"compiledConfigurationSelectionProvenanceJSON",
-		strconv.Quote(string(options.ConfigurationProvenance.CanonicalJSON())),
-		`compiledConfigurationSelectionProvenanceDigest = "` + options.ConfigurationProvenance.Digest() + `"`,
 		"compiledApplicationModelCompatibilityJSON",
 		strconv.Quote(string(options.ApplicationModelCompatibility.CanonicalJSON())),
 		`compiledApplicationModelCompatibilityDigest = "` + options.ApplicationModelCompatibility.Digest() + `"`,
@@ -106,6 +103,10 @@ token: {type: secret}
 		}
 	}
 	for _, forbidden := range []string{
+		"compiledConfigurationSelectionProvenanceJSON",
+		"compiledConfigurationSelectionProvenanceDigest",
+		strconv.Quote(string(options.ConfigurationProvenance.CanonicalJSON())),
+		strconv.Quote(options.ConfigurationProvenance.Digest()),
 		"documentPath string",
 		"private-runtime-value",
 		"PRIVATE_SECRET_TARGET",
@@ -125,7 +126,7 @@ token: {type: secret}
 	}
 }
 
-func TestRenderRecordsEveryConfigurationSelectionProvenance(t *testing.T) {
+func TestRenderKeepsEqualExecutableModelStableAcrossConfigurationSelections(t *testing.T) {
 	t.Parallel()
 
 	generatedByMode := make(map[generation.ConfigurationMode][]byte)
@@ -145,8 +146,8 @@ func TestRenderRecordsEveryConfigurationSelectionProvenance(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Render(%s): %v", mode, err)
 		}
-		if !bytes.Contains(generated, []byte(strconv.Quote(string(provenance.CanonicalJSON())))) || !bytes.Contains(generated, []byte(strconv.Quote(provenance.Digest()))) {
-			t.Fatalf("generated %s bootstrap omits exact canonical provenance:\n%s", mode, generated)
+		if bytes.Contains(generated, []byte(strconv.Quote(string(provenance.CanonicalJSON())))) || bytes.Contains(generated, []byte(strconv.Quote(provenance.Digest()))) {
+			t.Fatalf("generated %s bootstrap serialized selector-only provenance:\n%s", mode, generated)
 		}
 		for _, forbidden := range []string{
 			`C:\\Users\\private\\project`,
@@ -165,10 +166,9 @@ func TestRenderRecordsEveryConfigurationSelectionProvenance(t *testing.T) {
 		}
 		generatedByMode[mode] = generated
 	}
-	if bytes.Equal(generatedByMode[generation.ConfigurationModeDefault], generatedByMode[generation.ConfigurationModeEnvironment]) ||
-		bytes.Equal(generatedByMode[generation.ConfigurationModeDefault], generatedByMode[generation.ConfigurationModeExplicit]) ||
-		bytes.Equal(generatedByMode[generation.ConfigurationModeEnvironment], generatedByMode[generation.ConfigurationModeExplicit]) {
-		t.Fatal("distinct configuration selections produced identical bootstrap provenance")
+	if !bytes.Equal(generatedByMode[generation.ConfigurationModeDefault], generatedByMode[generation.ConfigurationModeEnvironment]) ||
+		!bytes.Equal(generatedByMode[generation.ConfigurationModeDefault], generatedByMode[generation.ConfigurationModeExplicit]) {
+		t.Fatal("selector-only provenance changed bootstrap for an equal executable model")
 	}
 }
 

@@ -1654,14 +1654,16 @@ internal transport-provenance value. It must agree with the selected
 configuration record in `generated/manifest.json`, the typed dependency
 composition digest, and the final build-affecting application-model digest
 before bootstrap, Connect, REST/JSON, JavaScript, or API-document rendering can
-start. Bootstrap embeds the exact canonical non-secret provenance JSON plus its
-digest in `compiledConfigurationSelectionProvenanceJSON` and
-`compiledConfigurationSelectionProvenanceDigest`; do not edit those generated
-constants. Transport renderers receive no YAML values or Secret targets and do
-not embed selector-only paths or document digests in their source. Changing
-from the default file to an environment overlay or full replacement therefore
-changes manifest and bootstrap provenance, while equal effective build models
-retain byte-identical transport output.
+start. Those renderers receive no YAML values or Secret targets and do not
+embed selector-only paths or document digests in executable or public output.
+Bootstrap embeds only the executable compatibility projection and its complete
+application-model digest. Changing from the default file to an environment
+overlay or full replacement therefore changes generated manifest provenance
+and may change stable source ownership in artifact evidence without changing
+the owned artifact bytes. A dormant-only edit within the same selected document
+leaves bootstrap, transport, SDK, and public documentation output plus their
+artifact provenance byte-identical when the effective executable model remains
+equal.
 
 Output is limited to exact generated requirements, structured diagnostics,
 typed contributions at `http.ingress`, `invocation.prepare`,

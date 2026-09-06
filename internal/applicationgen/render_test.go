@@ -65,7 +65,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	assertBootstrapMatchesManifestProvenance(t, output, options)
+	assertBootstrapExcludesSelectorOnlyProvenance(t, output, options)
 	assertCompleteArtifactProvenance(t, output)
 	wantPaths := []string{
 		"generated/compatibility/interface-documentation.json",
@@ -549,7 +549,7 @@ func TestRenderRequiresMatchingTransportConfigurationProvenance(t *testing.T) {
 	}
 }
 
-func TestRenderSelectionDriftsManifestButKeepsEqualModelTransportSourceStable(t *testing.T) {
+func TestRenderSelectionDriftsManifestButKeepsEqualExecutablePublicOutputStable(t *testing.T) {
 	t.Parallel()
 
 	composition := testComposition()
@@ -575,9 +575,9 @@ func TestRenderSelectionDriftsManifestButKeepsEqualModelTransportSourceStable(t 
 	if err != nil {
 		t.Fatalf("Render(explicit): %v", err)
 	}
-	assertBootstrapMatchesManifestProvenance(t, defaultOutput, defaultOptions)
-	assertBootstrapMatchesManifestProvenance(t, environmentOutput, environmentOptions)
-	assertBootstrapMatchesManifestProvenance(t, explicitOutput, explicitOptions)
+	assertBootstrapExcludesSelectorOnlyProvenance(t, defaultOutput, defaultOptions)
+	assertBootstrapExcludesSelectorOnlyProvenance(t, environmentOutput, environmentOptions)
+	assertBootstrapExcludesSelectorOnlyProvenance(t, explicitOutput, explicitOptions)
 
 	defaultManifest := outputData(t, defaultOutput, aliasManifestPathForTest)
 	environmentManifest := outputData(t, environmentOutput, aliasManifestPathForTest)
@@ -588,8 +588,8 @@ func TestRenderSelectionDriftsManifestButKeepsEqualModelTransportSourceStable(t 
 	defaultBootstrap := outputData(t, defaultOutput, "generated/go/bootstrap/bootstrap_gen.go")
 	environmentBootstrap := outputData(t, environmentOutput, "generated/go/bootstrap/bootstrap_gen.go")
 	explicitBootstrap := outputData(t, explicitOutput, "generated/go/bootstrap/bootstrap_gen.go")
-	if bytes.Equal(defaultBootstrap, environmentBootstrap) || bytes.Equal(defaultBootstrap, explicitBootstrap) || bytes.Equal(environmentBootstrap, explicitBootstrap) {
-		t.Fatal("configuration selection did not produce generated-bootstrap provenance drift")
+	if !bytes.Equal(defaultBootstrap, environmentBootstrap) || !bytes.Equal(defaultBootstrap, explicitBootstrap) {
+		t.Fatal("selector-only provenance changed generated bootstrap for an equal executable model")
 	}
 	for name, output := range map[string]generatedfiles.Output{"environment": environmentOutput, "explicit": explicitOutput} {
 		if !sameTransportOutput(defaultOutput, output) {
@@ -789,7 +789,7 @@ func testConfigurationLayerDigest(t testing.TB, data []byte, overlay bool) strin
 	return digest
 }
 
-func assertBootstrapMatchesManifestProvenance(t testing.TB, output generatedfiles.Output, options applicationgen.Options) {
+func assertBootstrapExcludesSelectorOnlyProvenance(t testing.TB, output generatedfiles.Output, options applicationgen.Options) {
 	t.Helper()
 	manifest := options.ManifestProvenance
 	provenance, err := transportprovenance.New(transportprovenance.Input{
@@ -806,13 +806,16 @@ func assertBootstrapMatchesManifestProvenance(t testing.TB, output generatedfile
 		t.Fatalf("transportprovenance.New from manifest: %v", err)
 	}
 	bootstrap := outputData(t, output, "generated/go/bootstrap/bootstrap_gen.go")
-	for _, required := range []string{
+	for _, forbidden := range []string{
 		strconv.Quote(string(provenance.CanonicalJSON())),
 		strconv.Quote(provenance.Digest()),
 	} {
-		if !bytes.Contains(bootstrap, []byte(required)) {
-			t.Fatalf("generated bootstrap disagrees with manifest provenance %q:\n%s", required, bootstrap)
+		if bytes.Contains(bootstrap, []byte(forbidden)) {
+			t.Fatalf("generated bootstrap serialized selector-only provenance %q:\n%s", forbidden, bootstrap)
 		}
+	}
+	if !bytes.Contains(bootstrap, []byte(strconv.Quote(manifest.ApplicationModelDigest()))) {
+		t.Fatalf("generated bootstrap omits executable application-model digest %q:\n%s", manifest.ApplicationModelDigest(), bootstrap)
 	}
 }
 
