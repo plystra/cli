@@ -323,6 +323,7 @@ func TestGenerateKeepsDormantConstructorConfigurationOutOfRuntimeBootstrap(t *te
 		t.Fatalf("dormant selection-only provenance paths = %v, want only %s", paths, selectionPath)
 	}
 	baselineArtifactEvidence := snapshotExecutablePublicArtifactEvidence(t, root)
+	baselineProxies := snapshotSubtree(t, root, "generated/go/proxies")
 	baselineJavaScript := snapshotSubtree(t, root, "generated/sdk/javascript")
 	baselineDocumentation := snapshotSubtree(t, root, "generated/docs")
 
@@ -404,6 +405,9 @@ config:
 	}
 	if artifactEvidence := snapshotExecutablePublicArtifactEvidence(t, root); !reflect.DeepEqual(artifactEvidence, baselineArtifactEvidence) {
 		t.Fatalf("dormant-only configuration changed executable/public artifact provenance:\nbefore: %#v\nafter: %#v", baselineArtifactEvidence, artifactEvidence)
+	}
+	if proxies := snapshotSubtree(t, root, "generated/go/proxies"); !reflect.DeepEqual(proxies, baselineProxies) {
+		t.Fatalf("dormant-only configuration changed generated proxy output:\nbefore: %#v\nafter: %#v", baselineProxies, proxies)
 	}
 	if javascript := snapshotSubtree(t, root, "generated/sdk/javascript"); !reflect.DeepEqual(javascript, baselineJavaScript) {
 		t.Fatalf("dormant-only configuration changed JavaScript SDK output:\nbefore: %#v\nafter: %#v", baselineJavaScript, javascript)
