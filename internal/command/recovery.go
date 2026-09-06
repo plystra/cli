@@ -172,6 +172,15 @@ func commandRecoveryContext(configurationPath, environmentName string, environme
 	}
 }
 
+func rejectConflictingConfigurationSelectors(writer io.Writer, configurationPath, environmentName string) bool {
+	if configurationPath == "" || environmentName == "" {
+		return false
+	}
+	err := fmt.Errorf("%w: --config and --env cannot be used together", applicationresolve.ErrConfigurationSelection)
+	writeCommandFailure(writer, "", err, commandRecoveryContext(configurationPath, environmentName, nil))
+	return true
+}
+
 func writeCommandFailure(writer io.Writer, prefix string, err error, context recoveryContext) {
 	if err == nil {
 		return

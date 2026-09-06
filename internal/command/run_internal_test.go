@@ -148,7 +148,7 @@ func TestParseGenerateArguments(t *testing.T) {
 		{arguments: []string{"generate", "--env"}},
 		{arguments: []string{"generate", "--env", ""}},
 		{arguments: []string{"generate", "--env", "test", "--env", "production"}},
-		{arguments: []string{"generate", "--env", "test", "--config", "deploy.yaml"}},
+		{arguments: []string{"generate", "--env", "test", "--config", "deploy.yaml"}, configurationPath: "deploy.yaml", environmentName: "test", ok: true},
 	}
 	for _, test := range tests {
 		result, ok := parseGenerateArguments(test.arguments)
@@ -179,7 +179,7 @@ func TestParseCheckArguments(t *testing.T) {
 		{arguments: []string{"check", "--env"}},
 		{arguments: []string{"check", "--env", ""}},
 		{arguments: []string{"check", "--env", "test", "--env", "production"}},
-		{arguments: []string{"check", "--env", "test", "--config", "deploy.yaml"}},
+		{arguments: []string{"check", "--env", "test", "--config", "deploy.yaml"}, configurationPath: "deploy.yaml", environmentName: "test", ok: true},
 	}
 	for _, test := range tests {
 		result, ok := parseCheckArguments(test.arguments)
@@ -219,7 +219,7 @@ func TestParseInspectArguments(t *testing.T) {
 		{arguments: []string{"inspect", "--env"}},
 		{arguments: []string{"inspect", "--env", ""}},
 		{arguments: []string{"inspect", "--env", "test", "--env", "production"}},
-		{arguments: []string{"inspect", "--env", "test", "--config", "deploy.yaml"}},
+		{arguments: []string{"inspect", "--env", "test", "--config", "deploy.yaml"}, format: commandFormatHuman, configurationPath: "deploy.yaml", environmentName: "test", ok: true},
 	}
 	for _, test := range tests {
 		result, ok := parseInspectArguments(test.arguments)
@@ -264,7 +264,7 @@ func TestParseExplainArguments(t *testing.T) {
 		{arguments: []string{"explain", "capability", "email.send/v1", "--config", "a.yaml", "--config", "b.yaml"}},
 		{arguments: []string{"explain", "capability", "email.send/v1", "--env"}},
 		{arguments: []string{"explain", "capability", "email.send/v1", "--env", "test", "--env", "production"}},
-		{arguments: []string{"explain", "capability", "email.send/v1", "--env", "test", "--config", "deploy.yaml"}},
+		{arguments: []string{"explain", "capability", "email.send/v1", "--env", "test", "--config", "deploy.yaml"}, subjectKind: diagnosticschema.ExplainSubjectCapability, subject: "email.send/v1", format: commandFormatHuman, configurationPath: "deploy.yaml", environmentName: "test", ok: true},
 	}
 	for _, test := range tests {
 		result, ok := parseExplainArguments(test.arguments)

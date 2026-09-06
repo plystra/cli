@@ -1936,6 +1936,13 @@ Plugin IDs cannot resolve the conflict.
 
 ### Wrong configuration selection
 
+`PLYSTRA_CONFIGURATION_SELECTION_INVALID` identifies a conflicting explicit or
+ambient selector, a duplicated selector environment variable, an unsafe
+selector, or a selected document that cannot be loaded. An explicit `--env`
+plus `--config` pair fails before Project discovery or mutation. Follow the
+emitted recovery with exactly one intended selector; the recovery does not echo
+the rejected selector value.
+
 If drift or a Provider choice does not match the intended deployment, inspect
 the active model with `plystra inspect` and the intended `--env` or `--config`.
 Use `--verbose` or `--format json` when complete resolution provenance is

@@ -28,6 +28,11 @@ func TestParseUseArguments(t *testing.T) {
 			arguments: []string{"use", "email.send/v1", "example.com/email/smtp.New", "--config", "deploy/customer.yaml"},
 			want:      useArguments{interfaceID: "email.send/v1", constructor: "example.com/email/smtp.New", config: "deploy/customer.yaml"},
 		},
+		{
+			name:      "conflicting selectors reach the semantic boundary",
+			arguments: []string{"use", "email.send/v1", "example.com/email/smtp.New", "--env", "test", "--config", "deploy.yaml"},
+			want:      useArguments{interfaceID: "email.send/v1", constructor: "example.com/email/smtp.New", config: "deploy.yaml", environment: "test"},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -53,7 +58,6 @@ func TestParseUseArgumentsRejectsInvalidForms(t *testing.T) {
 		{"use", "email.send/v1", "example.com/email/smtp.New", "--config"},
 		{"use", "email.send/v1", "example.com/email/smtp.New", "--env", "test", "--env", "production"},
 		{"use", "email.send/v1", "example.com/email/smtp.New", "--config", "a.yaml", "--config", "b.yaml"},
-		{"use", "email.send/v1", "example.com/email/smtp.New", "--env", "test", "--config", "deploy.yaml"},
 	} {
 		if got, ok := parseUseArguments(arguments); ok {
 			t.Fatalf("parseUseArguments(%q) = %#v, true; want false", arguments, got)

@@ -710,6 +710,13 @@ human wording. A recovery command preserves the selected default, `--env`, or
 advice. Unknown internal failures retain their original diagnostic without an
 invented recovery action or code.
 
+Configuration-selection failures use
+`PLYSTRA_CONFIGURATION_SELECTION_INVALID`. An explicit `--env` plus `--config`
+pair is rejected before Project discovery or mutation; conflicting or duplicate
+ambient selector variables, unsafe values, and missing selected documents use
+the same code at the shared selection boundary. The recovery action names no
+selector value and directs the command to exactly one intended selection.
+
 Authored Interface failures distinguish an invalid `//plystra:interface`
 declaration, canonical Go contract, optional `interface.yaml`, duplicate visible
 ID, and an authored package that ordinary Go tooling cannot load. Correct the

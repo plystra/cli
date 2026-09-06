@@ -38,6 +38,9 @@ func runExplain(arguments []string, stdout, stderr io.Writer, workingDirectory s
 		_, _ = io.WriteString(stderr, explainUsage)
 		return 2
 	}
+	if rejectConflictingConfigurationSelectors(stderr, parsed.configurationPath, parsed.environmentName) {
+		return 1
+	}
 	output, err := newCommandOutput(parsed.format, stdout, stderr)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "configure explain output: %v\n", err)
@@ -131,14 +134,14 @@ func parseExplainArguments(arguments []string) (explainArguments, bool) {
 				return explainArguments{}, false
 			}
 		case "--config":
-			if configurationSet || environmentSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+			if configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
 				return explainArguments{}, false
 			}
 			configurationSet = true
 			index++
 			result.configurationPath = arguments[index]
 		case "--env":
-			if environmentSet || configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+			if environmentSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
 				return explainArguments{}, false
 			}
 			environmentSet = true

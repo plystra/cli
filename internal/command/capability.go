@@ -39,6 +39,8 @@ PLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit
 selector is present; setting both is an error. Explicit --env or --config
 overrides both variables, and the two flags cannot be combined. Relative
 configuration paths are resolved from the detected Plystra Project root.
+Invalid or conflicting selections emit the stable
+PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
 `
 	capabilityCreateHelp = `Usage:
   ` + capabilityCreateSynopsis + `
@@ -72,6 +74,9 @@ func runCapability(arguments []string, stdout, stderr io.Writer, workingDirector
 	if !ok {
 		_, _ = io.WriteString(stderr, capabilityArgumentUsage(arguments))
 		return 2
+	}
+	if rejectConflictingConfigurationSelectors(stderr, parsed.config, parsed.environment) {
+		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
 	defer cancel()
@@ -155,14 +160,14 @@ func parseCapabilityArguments(arguments []string) (capabilityArguments, bool) {
 		for index := 3; index < len(arguments); index++ {
 			switch arguments[index] {
 			case "--config":
-				if configurationSet || environmentSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+				if configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
 					return capabilityArguments{}, false
 				}
 				configurationSet = true
 				index++
 				result.config = arguments[index]
 			case "--env":
-				if environmentSet || configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+				if environmentSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
 					return capabilityArguments{}, false
 				}
 				environmentSet = true

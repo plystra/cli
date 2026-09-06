@@ -1280,9 +1280,10 @@ recovery action or code.
 - Invalid runtime configuration: compare the selected constructor symbol and
   its compiled Config schema with the object in the selected current-Project
   document. Keep Secret values behind valid env or file references.
-- Wrong configuration selection: inspect, generate, and generate --check with
-  the same --env or --config. Automation sets exactly one of PLYSTRA_ENV or
-  PLYSTRA_CONFIG; environments overlay root, while explicit files replace it.
+- PLYSTRA_CONFIGURATION_SELECTION_INVALID: select exactly one safe existing
+  configuration with --env or --config. Automation sets exactly one of
+  PLYSTRA_ENV or PLYSTRA_CONFIG; environments overlay root, while explicit
+  files replace it.
 - Alias error: point directly to one resolved canonical Interface target with
   the same version and exposure no broader than that target.
 - Unexpected generated path: remove handwritten content from generated and

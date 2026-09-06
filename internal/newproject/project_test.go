@@ -2147,6 +2147,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra inspect --format json",
 		"plystra generate --check",
 		"Diagnostic: PLYSTRA_<AREA>_<CONDITION>",
+		"PLYSTRA_CONFIGURATION_SELECTION_INVALID",
 		"PLYSTRA_IMPLEMENTATION_DECLARATION_INVALID",
 		"PLYSTRA_IMPLEMENTATION_CONFIG_INVALID",
 		"PLYSTRA_IMPLEMENTATION_REQUIRED_INTERFACE_INVALID",

@@ -104,7 +104,9 @@ PLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit
 selector is present; setting both is an error. Explicit --env or --config
 overrides both variables, and the two flags cannot be combined. Relative
 configuration paths are resolved from the detected Plystra Project root. Root
-plystra.yaml remains mandatory and is not merged beneath --config.
+plystra.yaml remains mandatory and is not merged beneath --config. Invalid or
+conflicting selections emit the stable PLYSTRA_CONFIGURATION_SELECTION_INVALID
+diagnostic.
 `
 	checkUsage = `Usage:
   plystra check [--env <environment>|--config <yaml-path>]
@@ -119,7 +121,8 @@ PLYSTRA_CONFIG supply equivalent selectors when no explicit selector is present;
 setting both is an error. Explicit --env or --config overrides both variables,
 and the two flags cannot be combined. Relative configuration paths are resolved
 from the detected Plystra Project root. Root plystra.yaml remains mandatory and
-is not merged beneath --config.
+is not merged beneath --config. Invalid or conflicting selections emit the
+stable PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
 `
 	inspectUsage = `Usage:
   plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
@@ -137,7 +140,8 @@ equivalent selectors when no explicit selector is present; setting both is an
 error. Explicit --env or --config overrides both variables, and the two flags
 cannot be combined. Relative configuration paths are resolved from the detected
 Plystra Project root. Root plystra.yaml remains mandatory and is not merged
-beneath --config.
+beneath --config. Invalid or conflicting selections emit the stable
+PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
 `
 	explainUsage = `Usage:
   plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
@@ -162,7 +166,8 @@ explicit selector is present; setting both is an error. Explicit --env or
 --config overrides both variables,
 and the two flags cannot be combined. Relative configuration paths are resolved
 from the detected Plystra Project root. Root plystra.yaml remains mandatory and
-is not merged beneath --config.
+is not merged beneath --config. Invalid or conflicting selections emit the
+stable PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
 `
 )
 
@@ -378,6 +383,9 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			_, _ = io.WriteString(stderr, checkUsage)
 			return 2
 		}
+		if rejectConflictingConfigurationSelectors(stderr, check.configurationPath, check.environmentName) {
+			return 1
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
 		defer cancel()
 		result, err := projectcheck.Check(ctx, projectcheck.Options{
@@ -409,6 +417,9 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		if !ok {
 			_, _ = io.WriteString(stderr, generateUsage)
 			return 2
+		}
+		if rejectConflictingConfigurationSelectors(stderr, generate.configurationPath, generate.environmentName) {
+			return 1
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
 		defer cancel()
@@ -509,14 +520,14 @@ func parseCheckArguments(arguments []string) (checkArguments, bool) {
 	for index := 1; index < len(arguments); index++ {
 		switch arguments[index] {
 		case "--config":
-			if configurationSet || environmentSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+			if configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
 				return checkArguments{}, false
 			}
 			configurationSet = true
 			index++
 			result.configurationPath = arguments[index]
 		case "--env":
-			if environmentSet || configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+			if environmentSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
 				return checkArguments{}, false
 			}
 			environmentSet = true
@@ -544,14 +555,14 @@ func parseGenerateArguments(arguments []string) (generateArguments, bool) {
 			}
 			result.check = true
 		case "--config":
-			if configurationSet || environmentSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+			if configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
 				return generateArguments{}, false
 			}
 			configurationSet = true
 			index++
 			result.configurationPath = arguments[index]
 		case "--env":
-			if environmentSet || configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+			if environmentSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
 				return generateArguments{}, false
 			}
 			environmentSet = true

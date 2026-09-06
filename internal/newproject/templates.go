@@ -85,6 +85,8 @@ When several compatible Implementations satisfy one required Interface, select o
 
 Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + ` block followed by one stable ` + "`Diagnostic: PLYSTRA_<AREA>_<CONDITION>`" + ` code. Follow that one command or file edit with the same default, ` + "`--env`" + `, or ` + "`--config`" + ` selection, and use the code rather than human wording as the automation or support identity. Recovery output preserves safe explicit and ambient selectors, but uses ` + "`<environment>`" + ` or ` + "`<yaml-path>`" + ` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice or a code.
 
+` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
+
 Authored Interface failures distinguish invalid directives, canonical Go contracts, optional interface.yaml metadata, duplicate visible IDs, and packages ordinary Go tooling cannot load. Apply the emitted recovery to the reported module-relative source in its owning Project; never edit a dependency's Module Cache copy.
 
 Authored Implementation failures distinguish invalid directives, Config schemas, required or optional Interface parameters, constructor results, and structural conformance. Apply the emitted recovery to the reported Project-relative Go source. Fix dependency-owned source in its owning Project or select a corrected module version; never edit the Module Cache copy.
@@ -1473,9 +1475,10 @@ recovery action or code.
 - Invalid runtime configuration: compare the selected constructor symbol and
   its compiled Config schema with the object in the selected current-Project
   document. Keep Secret values behind valid env or file references.
-- Wrong configuration selection: inspect, generate, and generate --check with
-  the same --env or --config. Automation sets exactly one of PLYSTRA_ENV or
-  PLYSTRA_CONFIG; environments overlay root, while explicit files replace it.
+- PLYSTRA_CONFIGURATION_SELECTION_INVALID: select exactly one safe existing
+  configuration with --env or --config. Automation sets exactly one of
+  PLYSTRA_ENV or PLYSTRA_CONFIG; environments overlay root, while explicit
+  files replace it.
 - Alias error: point directly to one resolved canonical Interface target with
   the same version and exposure no broader than that target.
 - Unexpected generated path: remove handwritten content from generated and
