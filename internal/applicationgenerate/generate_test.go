@@ -300,19 +300,26 @@ func TestGenerateKeepsDormantConstructorConfigurationOutOfRuntimeBootstrap(t *te
 	constructor := writeConstructorConfigurationOwner(t, root, modulePath, true)
 	const secretTarget = "PLYSTRA_DORMANT_CONFIGURATION_SECRET"
 	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	selectionPath := `interfaces.use["configuration.owner/v1"]`
+	writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf(`interfaces:
+  use:
+    configuration.owner/v1: %s
+`, constructor))
 	baseline, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       root,
 		Environment: environment,
 		Validate:    func(_ context.Context, _ string) error { return nil },
 	})
 	if err != nil || !baseline.Report().Clean() {
-		t.Fatalf("Generate without dormant constructor configuration = changes %#v, %v", baseline.Report().Changes(), err)
+		t.Fatalf("Generate with dormant selection only = changes %#v, %v", baseline.Report().Changes(), err)
 	}
 	baselineManifest := readFile(t, root, "generated/manifest.json")
 	baselineProvenance, err := applicationgen.DecodeManifestProvenance(baselineManifest)
 	if err != nil {
-		t.Fatalf("DecodeManifestProvenance(without dormant configuration): %v", err)
+		t.Fatalf("DecodeManifestProvenance(dormant selection only): %v", err)
+	}
+	if paths := baselineProvenance.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{selectionPath}) {
+		t.Fatalf("dormant selection-only provenance paths = %v, want only %s", paths, selectionPath)
 	}
 	baselineArtifactEvidence := snapshotExecutablePublicArtifactEvidence(t, root)
 	baselineJavaScript := snapshotSubtree(t, root, "generated/sdk/javascript")
@@ -326,6 +333,13 @@ config:
     endpoint: smtp.internal
     password: {env: %s}
 `, constructor, constructor, secretTarget))
+	resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       root,
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Resolve dormant constructor configuration provenance: %v", err)
+	}
 	driftBefore := snapshotTree(t, root)
 	drift, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       root,
@@ -357,21 +371,32 @@ config:
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance(dormant configuration): %v", err)
 	}
-	if manifest.SelectedDigest() == baselineProvenance.SelectedDigest() || bytes.Equal(readFile(t, root, "generated/manifest.json"), baselineManifest) {
-		t.Fatal("dormant-only configuration change did not alter selected-configuration provenance")
+	if manifest.RootDigest() != resolved.ConfigurationSelection().Digest() ||
+		manifest.SelectedDigest() != resolved.ConfigurationSelection().Digest() ||
+		manifest.SelectedDigest() == baselineProvenance.SelectedDigest() ||
+		bytes.Equal(manifestJSON, baselineManifest) {
+		t.Fatalf("dormant constructor configuration provenance = root %q selected %q, want resolved %q distinct from baseline %q", manifest.RootDigest(), manifest.SelectedDigest(), resolved.ConfigurationSelection().Digest(), baselineProvenance.SelectedDigest())
+	}
+	if manifest.Mode() != baselineProvenance.Mode() || manifest.SelectedPath() != baselineProvenance.SelectedPath() {
+		t.Fatalf("dormant constructor configuration changed selection identity: %s/%s != %s/%s", manifest.Mode(), manifest.SelectedPath(), baselineProvenance.Mode(), baselineProvenance.SelectedPath())
+	}
+	wantPaths := []string{
+		`config["` + constructor + `"]`,
+		`config["` + constructor + `"]["endpoint"]`,
+		`config["` + constructor + `"]["password"]`,
+		selectionPath,
+	}
+	if paths := manifest.CurrentProjectPaths(); !reflect.DeepEqual(paths, wantPaths) {
+		t.Fatalf("dormant constructor configuration provenance paths = %v, want %v", paths, wantPaths)
+	}
+	if manifest.DependencyBaseline().Digest() != baselineProvenance.DependencyBaseline().Digest() {
+		t.Fatalf("dormant constructor configuration changed dependency-composition provenance: %q != %q", manifest.DependencyBaseline().Digest(), baselineProvenance.DependencyBaseline().Digest())
 	}
 	if manifest.ApplicationModelDigest() != baselineProvenance.ApplicationModelDigest() {
 		t.Fatalf("dormant-only configuration changed application_model_digest: %q != %q", manifest.ApplicationModelDigest(), baselineProvenance.ApplicationModelDigest())
 	}
-	for _, expected := range []string{
-		`interfaces.use["configuration.owner/v1"]`,
-		`config["` + constructor + `"]`,
-		`config["` + constructor + `"]["endpoint"]`,
-		`config["` + constructor + `"]["password"]`,
-	} {
-		if !slicesContains(manifest.CurrentProjectPaths(), expected) {
-			t.Fatalf("dormant configuration provenance paths %v omit %s", manifest.CurrentProjectPaths(), expected)
-		}
+	if manifest.InterfaceProvenance().Digest() != baselineProvenance.InterfaceProvenance().Digest() {
+		t.Fatalf("dormant constructor configuration changed executable Interface provenance: %q != %q", manifest.InterfaceProvenance().Digest(), baselineProvenance.InterfaceProvenance().Digest())
 	}
 	if artifactEvidence := snapshotExecutablePublicArtifactEvidence(t, root); !reflect.DeepEqual(artifactEvidence, baselineArtifactEvidence) {
 		t.Fatalf("dormant-only configuration changed executable/public artifact provenance:\nbefore: %#v\nafter: %#v", baselineArtifactEvidence, artifactEvidence)
