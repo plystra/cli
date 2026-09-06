@@ -325,6 +325,7 @@ func TestGenerateKeepsDormantConstructorConfigurationOutOfRuntimeBootstrap(t *te
 	baselineArtifactEvidence := snapshotExecutablePublicArtifactEvidence(t, root)
 	baselineProxies := snapshotSubtree(t, root, "generated/go/proxies")
 	baselineImplementationAdapters := snapshotSubtree(t, root, "generated/go/adapters/implementations")
+	baselineAssembly := readFile(t, root, "generated/go/assembly/interfaces_gen.go")
 	baselineJavaScript := snapshotSubtree(t, root, "generated/sdk/javascript")
 	baselineDocumentation := snapshotSubtree(t, root, "generated/docs")
 
@@ -425,6 +426,9 @@ config:
 	}
 	assembly := readFile(t, root, "generated/go/assembly/interfaces_gen.go")
 	bootstrap := readFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
+	if !bytes.Equal(assembly, baselineAssembly) {
+		t.Fatalf("dormant-only configuration changed static assembly:\nbefore:\n%s\nafter:\n%s", baselineAssembly, assembly)
+	}
 	for path, data := range map[string][]byte{
 		generatedfiles.ManifestPath:            readFile(t, root, generatedfiles.ManifestPath),
 		generatedfiles.ApplicationManifestPath: manifestJSON,
