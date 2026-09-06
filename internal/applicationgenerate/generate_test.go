@@ -24,6 +24,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/generatedfiles"
@@ -210,6 +211,83 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 	})
 	if err != nil || !clean.Report().Clean() {
 		t.Fatalf("clean check = %#v, %v", clean.Report().Changes(), err)
+	}
+}
+
+func TestGenerateRecordsDormantSelectionOnlyInConfigurationProvenance(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "example.com/acme/dormant-selection-provenance"
+	root := t.TempDir()
+	writeApplicationModule(t, root, modulePath)
+	constructor := writeConstructorConfigurationOwner(t, root, modulePath, false)
+	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	baseline, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: environment,
+		Validate:    func(_ context.Context, _ string) error { return nil },
+	})
+	if err != nil || !baseline.Report().Clean() {
+		t.Fatalf("Generate without dormant selection = changes %#v, %v", baseline.Report().Changes(), err)
+	}
+	baselineManifest := readFile(t, root, "generated/manifest.json")
+	baselineProvenance, err := applicationgen.DecodeManifestProvenance(baselineManifest)
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance(without dormant selection): %v", err)
+	}
+	baselineArtifactEvidence := snapshotExecutablePublicArtifactEvidence(t, root)
+
+	selectedSource := []byte(fmt.Sprintf(`interfaces:
+  use:
+    configuration.owner/v1: %s
+`, constructor))
+	selectionPath := `interfaces.use["configuration.owner/v1"]`
+	writeFile(t, filepath.Join(root, "plystra.yaml"), string(selectedSource))
+	resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start:       root,
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Resolve dormant selection provenance: %v", err)
+	}
+	choices := resolved.Manifest().ImplementationChoices()
+	if len(choices) != 1 || choices[0].InterfaceID().String() != "configuration.owner/v1" || choices[0].Constructor().String() != constructor || choices[0].Source() != "plystra.yaml "+selectionPath {
+		t.Fatalf("resolved dormant selection intent = %#v", choices)
+	}
+	result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: environment,
+		Validate:    func(_ context.Context, _ string) error { return nil },
+	})
+	if err != nil || !result.Report().Clean() {
+		t.Fatalf("Generate dormant selection = changes %#v, %v", result.Report().Changes(), err)
+	}
+	manifestData := readFile(t, root, "generated/manifest.json")
+	manifest, err := applicationgen.DecodeManifestProvenance(manifestData)
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance(dormant selection): %v", err)
+	}
+	if manifest.SelectedDigest() != resolved.ConfigurationSelection().Digest() || manifest.SelectedDigest() == baselineProvenance.SelectedDigest() {
+		t.Fatalf("dormant selected-document digest = %q, want %q distinct from %q", manifest.SelectedDigest(), resolved.ConfigurationSelection().Digest(), baselineProvenance.SelectedDigest())
+	}
+	if paths := manifest.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{selectionPath}) {
+		t.Fatalf("dormant current-project provenance paths = %v, want only %s", paths, selectionPath)
+	}
+	if !bytes.Contains(manifestData, []byte(strconv.Quote(selectionPath))) || bytes.Equal(manifestData, baselineManifest) {
+		t.Fatalf("dormant selection intent did not enter generated configuration provenance:\n%s", manifestData)
+	}
+	if manifest.DependencyBaseline().Digest() != baselineProvenance.DependencyBaseline().Digest() {
+		t.Fatalf("dormant current-project selection changed dependency-composition provenance: %q != %q", manifest.DependencyBaseline().Digest(), baselineProvenance.DependencyBaseline().Digest())
+	}
+	if manifest.ApplicationModelDigest() != baselineProvenance.ApplicationModelDigest() {
+		t.Fatalf("dormant selection changed executable application-model digest: %q != %q", manifest.ApplicationModelDigest(), baselineProvenance.ApplicationModelDigest())
+	}
+	if bindings, constructors := manifest.InterfaceProvenance().Bindings(), manifest.InterfaceProvenance().Constructors(); len(bindings) != 0 || len(constructors) != 0 {
+		t.Fatalf("dormant selection entered executable provenance: bindings %#v, constructors %#v", bindings, constructors)
+	}
+	if artifactEvidence := snapshotExecutablePublicArtifactEvidence(t, root); !reflect.DeepEqual(artifactEvidence, baselineArtifactEvidence) {
+		t.Fatalf("dormant selection changed executable/public artifact provenance:\nbefore: %#v\nafter: %#v", baselineArtifactEvidence, artifactEvidence)
 	}
 }
 
