@@ -347,7 +347,7 @@ config:
 	}
 }
 
-func TestGeneratePromotesDormantSelectionDeterministicallyOnActivation(t *testing.T) {
+func TestGenerateMovesDormantSelectionDeterministicallyAcrossActivation(t *testing.T) {
 	t.Parallel()
 
 	const modulePath = "example.com/acme/dormant-activation"
@@ -380,6 +380,7 @@ config:
 	if bindings, constructors := dormantProvenance.InterfaceProvenance().Bindings(), dormantProvenance.InterfaceProvenance().Constructors(); len(bindings) != 0 || len(constructors) != 0 {
 		t.Fatalf("dormant selection entered executable provenance: bindings %#v, constructors %#v", bindings, constructors)
 	}
+	dormantFiles := snapshotRegularTree(t, root)
 
 	writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf(`interfaces:
   require: [configuration.owner/v1]
@@ -446,6 +447,64 @@ config:
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, stableBefore) {
 		t.Fatalf("activated deterministic check mutated Project:\nbefore: %#v\nafter: %#v", stableBefore, after)
+	}
+
+	writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf(`interfaces:
+  use:
+    configuration.owner/v1: %s
+config:
+  %s:
+    endpoint: smtp.internal
+    password: {env: %s}
+`, constructor, constructor, secretTarget))
+	deactivationBefore := snapshotTree(t, root)
+	checked, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil || !checked.Checked() || checked.Report().Clean() {
+		t.Fatalf("Check active selection deactivation = checked %t, changes %#v, %v", checked.Checked(), checked.Report().Changes(), err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, deactivationBefore) {
+		t.Fatalf("deactivation check mutated Project:\nbefore: %#v\nafter: %#v", deactivationBefore, after)
+	}
+
+	deactivated, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: environment,
+		Validate:    func(_ context.Context, _ string) error { return nil },
+	})
+	if err != nil || !deactivated.Report().Clean() {
+		t.Fatalf("Generate deactivated selection = changes %#v, %v", deactivated.Report().Changes(), err)
+	}
+	deactivatedProvenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance(deactivated): %v", err)
+	}
+	if deactivatedProvenance.ApplicationModelDigest() != dormantProvenance.ApplicationModelDigest() {
+		t.Fatalf("deactivation application-model digest = %q, want dormant %q", deactivatedProvenance.ApplicationModelDigest(), dormantProvenance.ApplicationModelDigest())
+	}
+	if bindings, constructors := deactivatedProvenance.InterfaceProvenance().Bindings(), deactivatedProvenance.InterfaceProvenance().Constructors(); len(bindings) != 0 || len(constructors) != 0 {
+		t.Fatalf("deactivated selection retained executable provenance: bindings %#v, constructors %#v", bindings, constructors)
+	}
+	assertFileMissing(t, root, mappings.ProxyPath())
+	assertFileMissing(t, root, mappings.AdapterPath())
+	if after := snapshotRegularTree(t, root); !reflect.DeepEqual(after, dormantFiles) {
+		t.Fatalf("deactivation did not restore exact dormant Project files:\nbefore: %#v\nafter: %#v", dormantFiles, after)
+	}
+
+	deactivatedStableBefore := snapshotTree(t, root)
+	deactivatedStable, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Check:       true,
+		Environment: environment,
+	})
+	if err != nil || !deactivatedStable.Checked() || !deactivatedStable.Report().Clean() || deactivatedStable.ConfigurationChanged() {
+		t.Fatalf("deactivated deterministic generation check = changes %#v, configuration changed %t, %v", deactivatedStable.Report().Changes(), deactivatedStable.ConfigurationChanged(), err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, deactivatedStableBefore) {
+		t.Fatalf("deactivated deterministic check mutated Project:\nbefore: %#v\nafter: %#v", deactivatedStableBefore, after)
 	}
 }
 
@@ -2899,6 +2958,17 @@ func snapshotExecutablePublicArtifactEvidence(t testing.TB, root string) []artif
 func snapshotTree(t testing.TB, root string) []treeEntry {
 	t.Helper()
 	return snapshotSubtree(t, root, ".")
+}
+
+func snapshotRegularTree(t testing.TB, root string) []treeEntry {
+	t.Helper()
+	var result []treeEntry
+	for _, entry := range snapshotTree(t, root) {
+		if entry.mode.IsRegular() {
+			result = append(result, entry)
+		}
+	}
+	return result
 }
 
 func snapshotGenerated(t testing.TB, root string) []treeEntry {
