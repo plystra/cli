@@ -327,6 +327,7 @@ func TestGenerateKeepsDormantConstructorConfigurationOutOfRuntimeBootstrap(t *te
 	baselineImplementationAdapters := snapshotSubtree(t, root, "generated/go/adapters/implementations")
 	baselineAssembly := readFile(t, root, "generated/go/assembly/interfaces_gen.go")
 	baselineBootstrap := readFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
+	baselineTransport := snapshotTransportSurface(t, root)
 	baselineJavaScript := snapshotSubtree(t, root, "generated/sdk/javascript")
 	baselineDocumentation := snapshotSubtree(t, root, "generated/docs")
 
@@ -414,6 +415,9 @@ config:
 	}
 	if adapters := snapshotSubtree(t, root, "generated/go/adapters/implementations"); !reflect.DeepEqual(adapters, baselineImplementationAdapters) {
 		t.Fatalf("dormant-only configuration changed generated Implementation adapter output:\nbefore: %#v\nafter: %#v", baselineImplementationAdapters, adapters)
+	}
+	if transport := snapshotTransportSurface(t, root); !reflect.DeepEqual(transport, baselineTransport) {
+		t.Fatalf("dormant-only configuration changed generated transport output:\nbefore: %#v\nafter: %#v", baselineTransport, transport)
 	}
 	if javascript := snapshotSubtree(t, root, "generated/sdk/javascript"); !reflect.DeepEqual(javascript, baselineJavaScript) {
 		t.Fatalf("dormant-only configuration changed JavaScript SDK output:\nbefore: %#v\nafter: %#v", baselineJavaScript, javascript)
@@ -3106,6 +3110,22 @@ func snapshotRegularTree(t testing.TB, root string) []treeEntry {
 func snapshotGenerated(t testing.TB, root string) []treeEntry {
 	t.Helper()
 	return snapshotSubtree(t, root, "generated")
+}
+
+func snapshotTransportSurface(t testing.TB, root string) []treeEntry {
+	t.Helper()
+	var result []treeEntry
+	for _, subtree := range []string{
+		"generated/compatibility/interface-transport.json",
+		"generated/go/adapters/connect",
+		"generated/go/adapters/http",
+		"generated/go/internal/connectschema",
+		"generated/go/internal/invocationcontext",
+		"generated/proto",
+	} {
+		result = append(result, snapshotSubtree(t, root, subtree)...)
+	}
+	return result
 }
 
 func snapshotSubtree(t testing.TB, root, subtree string) []treeEntry {
