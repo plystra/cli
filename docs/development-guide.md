@@ -1907,6 +1907,22 @@ qualified exported constructor symbol. Run the emitted corrected
 default, `--env`, or `--config` mode. These input failures occur before Project
 discovery or mutation.
 
+### Plugin creation
+
+`plystra plugin create` classifies each actionable pre-installation boundary:
+
+- `PLYSTRA_PLUGIN_CREATE_NAME_INVALID` identifies an invalid or reserved
+  lower-case ASCII kebab-case root-level name;
+- `PLYSTRA_PLUGIN_CREATE_ID_INVALID` identifies a Project module namespace and
+  Plugin name that cannot derive one canonical Plugin ID;
+- `PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS` identifies an existing root-level
+  Plugin directory.
+
+Run the emitted corrected `plystra plugin create <plugin-name>` command or
+correct the current Project module path in `go.mod`. Invalid names fail before
+Project discovery; all three failures occur before scaffold installation and
+leave authored, generated, and module files unchanged.
+
 ### Interface and Implementation creation
 
 Public scaffold commands classify pre-mutation input and target failures:

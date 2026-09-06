@@ -92,6 +92,9 @@ const (
 )
 
 const (
+	PluginCreateNameInvalid               = Prefix + "PLUGIN_CREATE_NAME_INVALID"
+	PluginCreateIDInvalid                 = Prefix + "PLUGIN_CREATE_ID_INVALID"
+	PluginCreateTargetExists              = Prefix + "PLUGIN_CREATE_TARGET_EXISTS"
 	InterfaceCreateNameInvalid            = Prefix + "INTERFACE_CREATE_NAME_INVALID"
 	InterfaceCreateTargetExists           = Prefix + "INTERFACE_CREATE_TARGET_EXISTS"
 	ImplementationCreateInterfaceInvalid  = Prefix + "IMPLEMENTATION_CREATE_INTERFACE_INVALID"

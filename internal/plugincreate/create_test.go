@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/gocommand"
@@ -372,11 +373,13 @@ func TestCreatePreservesExistingDirectoriesAndGeneratedTargets(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		setup func(t *testing.T, root string)
+		name    string
+		setup   func(t *testing.T, root string)
+		wantErr error
 	}{
 		{
-			name: "plugin directory",
+			name:    "plugin directory",
+			wantErr: plugincreate.ErrTargetExists,
 			setup: func(t *testing.T, root string) {
 				t.Helper()
 				if err := os.Mkdir(filepath.Join(root, "account"), 0o755); err != nil {
@@ -386,7 +389,8 @@ func TestCreatePreservesExistingDirectoriesAndGeneratedTargets(t *testing.T) {
 			},
 		},
 		{
-			name: "generated target",
+			name:    "generated target",
+			wantErr: atomicfs.ErrTargetExists,
 			setup: func(t *testing.T, root string) {
 				t.Helper()
 				path := filepath.Join(root, "generated", "go", "configuration", "account_gen.go")
@@ -405,8 +409,8 @@ func TestCreatePreservesExistingDirectoriesAndGeneratedTargets(t *testing.T) {
 			test.setup(t, root)
 			before := snapshotTree(t, root)
 			_, err := plugincreate.Create(context.Background(), plugincreate.Options{Start: root, Name: "account"})
-			if !errors.Is(err, plugincreate.ErrCreate) {
-				t.Fatalf("Create error = %v, want ErrCreate", err)
+			if !errors.Is(err, plugincreate.ErrCreate) || !errors.Is(err, test.wantErr) {
+				t.Fatalf("Create error = %v, want ErrCreate and %v", err, test.wantErr)
 			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("existing tree changed:\nbefore: %#v\nafter:  %#v", before, after)

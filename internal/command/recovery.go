@@ -38,6 +38,7 @@ import (
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/newproject"
+	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/pluginindex"
 	"github.com/plystra/cli/internal/pluginmeta"
 	"github.com/plystra/cli/internal/plugintarget"
@@ -145,6 +146,9 @@ const (
 )
 
 const (
+	diagnosticPluginCreateNameInvalid               = diagnosticcode.PluginCreateNameInvalid
+	diagnosticPluginCreateIDInvalid                 = diagnosticcode.PluginCreateIDInvalid
+	diagnosticPluginCreateTargetExists              = diagnosticcode.PluginCreateTargetExists
 	diagnosticInterfaceCreateNameInvalid            = diagnosticcode.InterfaceCreateNameInvalid
 	diagnosticInterfaceCreateTargetExists           = diagnosticcode.InterfaceCreateTargetExists
 	diagnosticImplementationCreateInterfaceInvalid  = diagnosticcode.ImplementationCreateInterfaceInvalid
@@ -338,6 +342,12 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticInterfaceIDDuplicate, "Make the reported visible Go packages declare distinct canonical Interface IDs, then rerun the command.")
 	case errors.Is(err, interfaceinventory.ErrPackage):
 		return recoveryDiagnostic(diagnosticAuthoredPackageInvalid, "Correct the reported authored Go package in its owning Project so ordinary Go tooling can load it, then rerun the command.")
+	case errors.Is(err, plugincreate.ErrInvalidName):
+		return recoveryDiagnostic(diagnosticPluginCreateNameInvalid, "Run `plystra plugin create <plugin-name>` with one lower-case ASCII kebab-case name that is not reserved at the Project root.")
+	case errors.Is(err, plugincreate.ErrDeriveID):
+		return recoveryDiagnostic(diagnosticPluginCreateIDInvalid, "Correct the current Project module path in go.mod or choose a shorter canonical Plugin name so their derived identity is valid, then rerun `plystra plugin create <plugin-name>`.")
+	case errors.Is(err, plugincreate.ErrTargetExists):
+		return recoveryDiagnostic(diagnosticPluginCreateTargetExists, "Rerun `plystra plugin create <plugin-name>` with a different canonical name whose root-level directory does not exist.")
 	case errors.Is(err, interfacecreate.ErrInvalidName):
 		return recoveryDiagnostic(diagnosticInterfaceCreateNameInvalid, "Run `plystra interface create <domain.operation>` with one unversioned canonical lower-case name containing at least two dot-separated segments.")
 	case errors.Is(err, interfacecreate.ErrTargetExists):

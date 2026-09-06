@@ -92,6 +92,20 @@ JavaScript SDK dependency installation plus typecheck/build/package validation,
 Project checks, the read-only Go package build, and an isolated lifecycle health
 smoke all succeed. Validation-only npm output is removed before installation.
 `
+	pluginUsage = `Usage:
+  plystra plugin create <name>
+`
+	pluginCreateUsage = `Usage:
+  plystra plugin create <name>
+
+Creates one root-level Plugin scaffold and derives its exact Plugin ID from the
+current Project module namespace plus the lower-case ASCII kebab-case name. The
+name must not be reserved, and the target directory must not already exist.
+
+Invalid names, unformable derived IDs, and existing targets emit
+PLYSTRA_PLUGIN_CREATE_NAME_INVALID, PLYSTRA_PLUGIN_CREATE_ID_INVALID, and
+PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS respectively.
+`
 	generateUsage = `Usage:
   plystra generate [--check] [--env <environment>|--config <yaml-path>]
 
@@ -338,8 +352,20 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 	case "use":
 		return runUse(arguments, stdout, stderr, workingDirectory, environment)
 	case "plugin":
-		if len(arguments) != 3 || arguments[1] != "create" {
-			_, _ = io.WriteString(stderr, "usage: plystra plugin create <name>\n")
+		if len(arguments) == 2 && isHelp(arguments[1]) {
+			_, _ = io.WriteString(stdout, pluginUsage)
+			return 0
+		}
+		if len(arguments) == 3 && arguments[1] == "create" && isHelp(arguments[2]) {
+			_, _ = io.WriteString(stdout, pluginCreateUsage)
+			return 0
+		}
+		if len(arguments) < 2 || arguments[1] != "create" {
+			_, _ = io.WriteString(stderr, pluginUsage)
+			return 2
+		}
+		if len(arguments) != 3 || strings.TrimSpace(arguments[2]) == "" {
+			_, _ = io.WriteString(stderr, pluginCreateUsage)
 			return 2
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

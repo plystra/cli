@@ -717,6 +717,13 @@ ambient selector variables, unsafe values, and missing selected documents use
 the same code at the shared selection boundary. The recovery action names no
 selector value and directs the command to exactly one intended selection.
 
+`plystra plugin create` distinguishes an invalid or reserved root-level name,
+a Project module namespace that cannot form a canonical Plugin ID, and an
+existing Plugin directory with `PLYSTRA_PLUGIN_CREATE_NAME_INVALID`,
+`PLYSTRA_PLUGIN_CREATE_ID_INVALID`, and
+`PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS`. Each recovery uses placeholders rather
+than echoing rejected input, and each failure leaves the Project unchanged.
+
 Authored Interface failures distinguish an invalid `//plystra:interface`
 declaration, canonical Go contract, optional `interface.yaml`, duplicate visible
 ID, and an authored package that ordinary Go tooling cannot load. Correct the

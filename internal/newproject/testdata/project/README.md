@@ -57,6 +57,8 @@ Common actionable Plystra CLI failures end with exactly one `Recovery:` block fo
 
 `PLYSTRA_CONFIGURATION_SELECTION_INVALID` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
+`plystra plugin create` uses `PLYSTRA_PLUGIN_CREATE_NAME_INVALID` for an invalid or reserved root-level name, `PLYSTRA_PLUGIN_CREATE_ID_INVALID` when the Project module namespace and name cannot form a canonical Plugin ID, and `PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.
+
 Authored Interface failures distinguish invalid directives, canonical Go contracts, optional interface.yaml metadata, duplicate visible IDs, and packages ordinary Go tooling cannot load. Apply the emitted recovery to the reported module-relative source in its owning Project; never edit a dependency's Module Cache copy.
 
 Authored Implementation failures distinguish invalid directives, Config schemas, required or optional Interface parameters, constructor results, and structural conformance. Apply the emitted recovery to the reported Project-relative Go source. Fix dependency-owned source in its owning Project or select a corrected module version; never edit the Module Cache copy.

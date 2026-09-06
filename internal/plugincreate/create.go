@@ -26,6 +26,8 @@ var (
 	ErrInvalidName = errors.New("invalid plugin name")
 	// ErrDeriveID reports a module path that cannot form a canonical Plugin ID.
 	ErrDeriveID = errors.New("derive plugin ID")
+	// ErrTargetExists reports a root-level Plugin target that already exists.
+	ErrTargetExists = errors.New("plugin target already exists")
 	// ErrModuleTidy preserves the plugin-creation error identity for callers
 	// while module normalization is shared with other compound CLI commands.
 	ErrModuleTidy = modulemutation.ErrTidy
@@ -78,7 +80,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	}
 	pluginPath := filepath.Join(located.Path(), options.Name)
 	if _, err := os.Lstat(pluginPath); err == nil {
-		return Result{}, fmt.Errorf("%w: plugin directory %q already exists", ErrCreate, options.Name)
+		return Result{}, fmt.Errorf("%w: %w: plugin directory %q already exists", ErrCreate, ErrTargetExists, options.Name)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Result{}, fmt.Errorf("%w: inspect plugin directory %q: %w", ErrCreate, options.Name, err)
 	}
