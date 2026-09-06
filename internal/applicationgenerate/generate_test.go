@@ -313,6 +313,7 @@ func TestGenerateKeepsDormantConstructorConfigurationOutOfRuntimeBootstrap(t *te
 	if err != nil || !baseline.Report().Clean() {
 		t.Fatalf("Generate with dormant selection only = changes %#v, %v", baseline.Report().Changes(), err)
 	}
+	baselineOwnershipManifest := readFile(t, root, generatedfiles.ManifestPath)
 	baselineManifest := readFile(t, root, "generated/manifest.json")
 	baselineProvenance, err := applicationgen.DecodeManifestProvenance(baselineManifest)
 	if err != nil {
@@ -373,12 +374,15 @@ config:
 	}
 	if manifest.RootDigest() != resolved.ConfigurationSelection().Digest() ||
 		manifest.SelectedDigest() != resolved.ConfigurationSelection().Digest() ||
-		manifest.SelectedDigest() == baselineProvenance.SelectedDigest() ||
-		bytes.Equal(manifestJSON, baselineManifest) {
+		manifest.SelectedDigest() == baselineProvenance.SelectedDigest() {
 		t.Fatalf("dormant constructor configuration provenance = root %q selected %q, want resolved %q distinct from baseline %q", manifest.RootDigest(), manifest.SelectedDigest(), resolved.ConfigurationSelection().Digest(), baselineProvenance.SelectedDigest())
 	}
 	if manifest.Mode() != baselineProvenance.Mode() || manifest.SelectedPath() != baselineProvenance.SelectedPath() {
 		t.Fatalf("dormant constructor configuration changed selection identity: %s/%s != %s/%s", manifest.Mode(), manifest.SelectedPath(), baselineProvenance.Mode(), baselineProvenance.SelectedPath())
+	}
+	ownershipManifest := readFile(t, root, generatedfiles.ManifestPath)
+	if bytes.Equal(manifestJSON, baselineManifest) || bytes.Equal(ownershipManifest, baselineOwnershipManifest) {
+		t.Fatalf("dormant constructor configuration manifest bytes changed = application %t, ownership %t; want both true", !bytes.Equal(manifestJSON, baselineManifest), !bytes.Equal(ownershipManifest, baselineOwnershipManifest))
 	}
 	wantPaths := []string{
 		`config["` + constructor + `"]`,
