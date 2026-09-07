@@ -117,6 +117,9 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.DependencyRemoveNotSelected,
 		diagnosticcode.DependencyUpdateQueryInvalid,
 		diagnosticcode.DependencyUpdateNotSelected,
+		diagnosticcode.CapabilityCreateReferenceInvalid,
+		diagnosticcode.CapabilityImplementReferenceInvalid,
+		diagnosticcode.CapabilityExposeReferenceInvalid,
 	}
 	seen := make(map[string]struct{}, len(codes))
 	for _, code := range codes {

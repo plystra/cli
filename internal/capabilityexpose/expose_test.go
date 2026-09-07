@@ -143,7 +143,7 @@ func TestExposeRequiresExactCapabilityAndPlystraProject(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	if _, err := capabilityexpose.Expose(t.Context(), capabilityexpose.Options{Start: root, Reference: "records.read"}); !errors.Is(err, capabilityexpose.ErrExpose) || !strings.Contains(err.Error(), "exact Capability ID") {
+	if _, err := capabilityexpose.Expose(t.Context(), capabilityexpose.Options{Start: root, Reference: "records.read"}); !errors.Is(err, capabilityexpose.ErrExpose) || !errors.Is(err, capabilityexpose.ErrInvalidReference) || !errors.Is(err, capabilityid.ErrInvalid) || err.Error() != "expose capability: parse exact Capability ID: invalid capability reference: expected <capability-name>/v<major>" {
 		t.Fatalf("unversioned Expose error = %v", err)
 	}
 	writeExposureFile(t, filepath.Join(root, "go.mod"), []byte("module example.com/acme/app\n\ngo 1.26\n"))

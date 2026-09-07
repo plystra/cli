@@ -13,6 +13,8 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/capabilitycreate"
+	"github.com/plystra/cli/internal/capabilityexpose"
+	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/constructorgraph"
@@ -325,6 +327,9 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "unselected dependency removal", err: fmt.Errorf("%w: %w", dependencyremove.ErrRemove, dependencyremove.ErrNotSelected), code: diagnosticcode.DependencyRemoveNotSelected},
 		{name: "invalid dependency update query", err: fmt.Errorf("%w: %w", dependencyupdate.ErrUpdate, moduleargument.ErrInvalidQuery), code: diagnosticcode.DependencyUpdateQueryInvalid},
 		{name: "unselected dependency update", err: fmt.Errorf("%w: %w", dependencyupdate.ErrUpdate, dependencyupdate.ErrNotSelected), code: diagnosticcode.DependencyUpdateNotSelected},
+		{name: "invalid Capability create reference", err: fmt.Errorf("%w: %w", capabilitycreate.ErrCreate, capabilitycreate.ErrInvalidReference), code: diagnosticcode.CapabilityCreateReferenceInvalid},
+		{name: "invalid Capability implement reference", err: fmt.Errorf("%w: %w", capabilitycreate.ErrImplement, capabilitycreate.ErrInvalidReference), code: diagnosticcode.CapabilityImplementReferenceInvalid},
+		{name: "invalid Capability expose reference", err: fmt.Errorf("%w: %w", capabilityexpose.ErrExpose, capabilityexpose.ErrInvalidReference), code: diagnosticcode.CapabilityExposeReferenceInvalid},
 		{name: "invalid use Interface", err: implementationselect.ErrInvalidInterfaceID, code: diagnosticcode.UseInterfaceInvalid},
 		{name: "invalid use constructor", err: implementationselect.ErrInvalidConstructor, code: diagnosticcode.UseConstructorInvalid},
 	}
@@ -350,6 +355,26 @@ func TestPrimaryActionableDiagnosticRequiresMatchingDependencyOperationAndCondit
 		dependencyupdate.ErrNotSelected,
 		fmt.Errorf("%w: %w", dependencyremove.ErrRemove, dependencyupdate.ErrNotSelected),
 		fmt.Errorf("%w: %w", dependencyupdate.ErrUpdate, dependencyremove.ErrNotSelected),
+	} {
+		if diagnostic, ok := primaryActionableDiagnostic(err, recoveryContext{}); ok {
+			t.Fatalf("primaryActionableDiagnostic(%v) = %#v, true; want no cross-family classification", err, diagnostic)
+		}
+	}
+}
+
+func TestPrimaryActionableDiagnosticRequiresMatchingCapabilityOperationAndReferenceCondition(t *testing.T) {
+	t.Parallel()
+
+	for _, err := range []error{
+		capabilitycreate.ErrCreate,
+		capabilitycreate.ErrImplement,
+		capabilitycreate.ErrInvalidReference,
+		capabilityexpose.ErrExpose,
+		capabilityexpose.ErrInvalidReference,
+		capabilityid.ErrInvalid,
+		fmt.Errorf("%w: %w", capabilitycreate.ErrCreate, capabilityexpose.ErrInvalidReference),
+		fmt.Errorf("%w: %w", capabilitycreate.ErrImplement, capabilityexpose.ErrInvalidReference),
+		fmt.Errorf("%w: %w", capabilityexpose.ErrExpose, capabilitycreate.ErrInvalidReference),
 	} {
 		if diagnostic, ok := primaryActionableDiagnostic(err, recoveryContext{}); ok {
 			t.Fatalf("primaryActionableDiagnostic(%v) = %#v, true; want no cross-family classification", err, diagnostic)

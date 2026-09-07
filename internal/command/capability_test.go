@@ -78,6 +78,64 @@ func TestRunCapabilityCreateAndImplementUsePublicTransactionalSurface(t *testing
 	assertNoCommandTransactions(t, root)
 }
 
+func TestRunCapabilityRejectsInvalidReferencesBeforeProjectDiscoveryOrMutation(t *testing.T) {
+	root := t.TempDir()
+	writeCommandFile(t, filepath.Join(root, "preserve.txt"), "preserve\n")
+	environment := commandGoEnvironment()
+	tests := []struct {
+		name      string
+		arguments []string
+		code      string
+		recovery  string
+		rejected  string
+	}{
+		{
+			name:      "create",
+			arguments: []string{"capability", "create", "Records.create", "--query"},
+			code:      diagnosticcode.CapabilityCreateReferenceInvalid,
+			recovery:  "Rerun `plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]` with one canonical lower-case Capability name containing at least two dot-separated segments and an optional positive `/vN` major.",
+			rejected:  "Records.create",
+		},
+		{
+			name:      "implement",
+			arguments: []string{"capability", "implement", "records.create/v01"},
+			code:      diagnosticcode.CapabilityImplementReferenceInvalid,
+			recovery:  "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>]` with one canonical lower-case Capability ID containing at least two dot-separated segments and a positive major.",
+			rejected:  "records.create/v01",
+		},
+		{
+			name:      "expose",
+			arguments: []string{"capability", "expose", "records/v1", "--env", "production"},
+			code:      diagnosticcode.CapabilityExposeReferenceInvalid,
+			recovery:  "Rerun `plystra capability expose <capability-name>/vN --env \"production\"` with one canonical lower-case Capability ID containing at least two dot-separated segments and a positive major.",
+			rejected:  "records/v1",
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, test.arguments, root, environment)
+			if exitCode != 1 || stdout != "" || !commandContainsAll(
+				stderr,
+				"invalid capability",
+				"Recovery:\n"+test.recovery+"\n",
+				"Diagnostic: "+test.code,
+			) {
+				t.Fatalf("invalid Capability %s reference = exit %d, stdout %q, stderr %q", test.name, exitCode, stdout, stderr)
+			}
+			recoveryIndex := strings.Index(stderr, "Recovery:")
+			if recoveryIndex < 0 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 || strings.Contains(strings.ToLower(stderr), "usage:") || strings.Contains(stderr[recoveryIndex:], test.rejected) {
+				t.Fatalf("invalid Capability %s reference emitted unstable diagnostic framing: %q", test.name, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("invalid Capability %s reference changed the filesystem:\nbefore: %#v\nafter:  %#v", test.name, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func TestRunCapabilityCreateAndExposeRegenerateRunnableApplication(t *testing.T) {
 	root := writeCapabilityCommandModule(t)
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")

@@ -63,6 +63,8 @@ Mutating Plystra commands regenerate automatically. Add an ordinary Go Module de
 
 Malformed ` + "`add`" + ` and ` + "`update`" + ` queries emit ` + "`PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID`" + ` and ` + "`PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID`" + `; a malformed exact ` + "`remove`" + ` path emits ` + "`PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID`" + `. Each failure occurs before Project discovery or mutation and supplies one placeholder-based corrected command. A valid ` + "`remove`" + ` path or ` + "`update`" + ` query absent from ` + "`go.mod`" + ` emits ` + "`PLYSTRA_DEPENDENCY_REMOVE_NOT_SELECTED`" + ` or ` + "`PLYSTRA_DEPENDENCY_UPDATE_NOT_SELECTED`" + ` before mutation, with placeholder-only recovery.
 
+Malformed ` + "`capability create`" + `, ` + "`capability implement`" + `, and ` + "`capability expose`" + ` references emit ` + "`PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID`" + `, ` + "`PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID`" + `, and ` + "`PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID`" + ` before Project discovery or mutation. Recovery uses canonical placeholders and retains only a safe exposure selector.
+
 A template's default Provider model must be unambiguous. If several compatible Plugins provide one required Capability, the template publisher must record one ` + "`capabilities.use`" + ` choice in the template's root ` + "`plystra.yaml`" + ` and publish a corrected version. Creation otherwise reports every candidate and leaves no target Project to repair.
 
 The template's complete effective graph must contain only public Go Modules. Creation rejects every direct or transitive module matched by the effective ` + "`GOPRIVATE`" + ` setting, reports its selected ` + "`path@version`" + `, and leaves no target Project. Publish or replace a genuinely private dependency before publishing the template, or correct an overbroad Go privacy setting before retrying.
@@ -1421,13 +1423,9 @@ build and distribution boundary for every Plystra module.
 
 ## Diagnose common failures
 
-Common actionable CLI failures end with exactly one Recovery: block followed by
-one stable Diagnostic: PLYSTRA_<AREA>_<CONDITION> code. Follow that one command or file edit with
-the same default, --env, or --config selection, and use the code as the stable
-automation or support identity. Recovery output preserves safe explicit and
-ambient selectors, but substitutes <environment> or <yaml-path> for unsafe or
-absolute selector input. An unclassified internal error receives no guessed
-recovery action or code.
+Actionable CLI failures end with one Recovery: block and one stable
+Diagnostic: PLYSTRA_<AREA>_<CONDITION> code. Follow that action with the same
+selector; unsafe values become placeholders. Unclassified errors get neither.
 
 - Missing Implementation: require or expose the Interface and make a compatible
   constructor visible in the effective Plystra Project graph. Markerless
@@ -1435,6 +1433,10 @@ recovery action or code.
 - Ambiguous Implementation: run plystra use <interface-id> <constructor-symbol>
   with the same --env or --config selector used for the application. Do not add
   priorities or rely on discovery order.
+- Invalid Capability reference: PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
+  PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID, or
+  PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID; fix the matching command input
+  before Project discovery or mutation.
 - Invalid plystra use input: PLYSTRA_USE_INTERFACE_INVALID identifies a
   malformed canonical versioned Interface ID, while
   PLYSTRA_USE_CONSTRUCTOR_INVALID identifies a malformed fully qualified

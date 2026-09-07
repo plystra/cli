@@ -1958,6 +1958,20 @@ reachable through an Interface requirement, or remove its configuration from
 the selected document. The diagnostic reports the constructor and safe source
 location without printing configured values or Secret-reference targets.
 
+### Invalid Capability command input
+
+Malformed references are classified before Project discovery or mutation:
+
+- `PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID` identifies an invalid canonical
+  Capability name or optional exact `/vN` ID passed to `capability create`;
+- `PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID` identifies an invalid exact
+  Capability ID passed to `capability implement`; and
+- `PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID` identifies an invalid exact
+  Capability ID passed to `capability expose`.
+
+Run the emitted corrected command with canonical placeholders. Exposure recovery
+retains the active default, `--env`, or `--config` selector only when it is safe.
+
 ### Invalid `plystra use` input
 
 `PLYSTRA_USE_INTERFACE_INVALID` identifies a malformed canonical versioned

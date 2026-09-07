@@ -18,9 +18,26 @@ import (
 	"github.com/plystra/cli/internal/projectlocate"
 )
 
-// ErrPlan reports that a coherent Capability authoring plan could not be
-// produced.
-var ErrPlan = errors.New("plan capability authoring")
+var (
+	// ErrPlan reports that a coherent Capability authoring plan could not be
+	// produced.
+	ErrPlan = errors.New("plan capability authoring")
+	// ErrInvalidReference reports a malformed Capability name or exact ID
+	// supplied to an authoring command.
+	ErrInvalidReference = errors.New("invalid capability authoring reference")
+)
+
+// invalidReferenceError preserves the established parser wording while
+// exposing a stable condition to public command recovery.
+type invalidReferenceError struct {
+	cause error
+}
+
+func (e *invalidReferenceError) Error() string { return "parse reference: " + e.cause.Error() }
+func (e *invalidReferenceError) Unwrap() error { return e.cause }
+func (e *invalidReferenceError) Is(target error) bool {
+	return target == ErrInvalidReference
+}
 
 // IntentProfile identifies one explicit business-intent authoring profile.
 // Profiles expand into the authoritative Capability contract and never become
@@ -129,7 +146,7 @@ func Prepare(options Options) (Plan, error) {
 	}
 	reference, err := capabilityid.ParseReference(options.Reference)
 	if err != nil {
-		return Plan{}, fmt.Errorf("%w: parse reference: %w", ErrPlan, err)
+		return Plan{}, fmt.Errorf("%w: %w", ErrPlan, &invalidReferenceError{cause: err})
 	}
 	module, err := projectlocate.Find(options.Start)
 	if err != nil {
@@ -182,7 +199,7 @@ func PrepareVisible(ctx context.Context, options Options) (Plan, error) {
 	}
 	reference, err := capabilityid.ParseReference(options.Reference)
 	if err != nil {
-		return Plan{}, fmt.Errorf("%w: parse reference: %w", ErrPlan, err)
+		return Plan{}, fmt.Errorf("%w: %w", ErrPlan, &invalidReferenceError{cause: err})
 	}
 	module, err := projectlocate.Find(options.Start)
 	if err != nil {

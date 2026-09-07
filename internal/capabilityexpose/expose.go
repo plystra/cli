@@ -21,10 +21,27 @@ import (
 var (
 	// ErrExpose reports a failed HTTP-exposure and regeneration transaction.
 	ErrExpose = errors.New("expose capability")
+	// ErrInvalidReference reports a malformed exact Capability ID supplied to
+	// the exposure command.
+	ErrInvalidReference = errors.New("invalid capability exposure reference")
 	// ErrManifestWrite reports that plystra.yaml could not safely produce the
 	// planned HTTP-exposure write.
 	ErrManifestWrite = errors.New("prepare capability HTTP exposure")
 )
+
+// invalidReferenceError preserves the established parser wording while
+// exposing a stable condition to public command recovery.
+type invalidReferenceError struct {
+	cause error
+}
+
+func (e *invalidReferenceError) Error() string {
+	return "parse exact Capability ID: " + e.cause.Error()
+}
+func (e *invalidReferenceError) Unwrap() error { return e.cause }
+func (e *invalidReferenceError) Is(target error) bool {
+	return target == ErrInvalidReference
+}
 
 // Options contains the application location and bounded generation settings
 // for one complete exposure transaction. Validate overrides generated-module
@@ -112,7 +129,7 @@ func Expose(ctx context.Context, options Options) (Result, error) {
 	}
 	id, err := capabilityid.Parse(options.Reference)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: parse exact Capability ID: %w", ErrExpose, err)
+		return Result{}, fmt.Errorf("%w: %w", ErrExpose, &invalidReferenceError{cause: err})
 	}
 	module, err := projectlocate.Find(options.Start)
 	if err != nil {

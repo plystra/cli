@@ -16,6 +16,7 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/capabilitycreate"
+	"github.com/plystra/cli/internal/capabilityexpose"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/constructorgraph"
@@ -180,6 +181,12 @@ const (
 	diagnosticDependencyRemoveNotSelected  = diagnosticcode.DependencyRemoveNotSelected
 	diagnosticDependencyUpdateQueryInvalid = diagnosticcode.DependencyUpdateQueryInvalid
 	diagnosticDependencyUpdateNotSelected  = diagnosticcode.DependencyUpdateNotSelected
+)
+
+const (
+	diagnosticCapabilityCreateReferenceInvalid    = diagnosticcode.CapabilityCreateReferenceInvalid
+	diagnosticCapabilityImplementReferenceInvalid = diagnosticcode.CapabilityImplementReferenceInvalid
+	diagnosticCapabilityExposeReferenceInvalid    = diagnosticcode.CapabilityExposeReferenceInvalid
 )
 
 const (
@@ -414,6 +421,12 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticDependencyUpdateQueryInvalid, "Rerun `plystra update <go-module-query>` with one valid non-removal Go Module query.")
 	case errors.Is(err, dependencyupdate.ErrUpdate) && errors.Is(err, dependencyupdate.ErrNotSelected):
 		return recoveryDiagnostic(diagnosticDependencyUpdateNotSelected, "Rerun `plystra update <go-module-query>` with one query whose module path is already selected in go.mod.")
+	case errors.Is(err, capabilitycreate.ErrCreate) && errors.Is(err, capabilitycreate.ErrInvalidReference):
+		return recoveryDiagnostic(diagnosticCapabilityCreateReferenceInvalid, "Rerun `plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]` with one canonical lower-case Capability name containing at least two dot-separated segments and an optional positive `/vN` major.")
+	case errors.Is(err, capabilitycreate.ErrImplement) && errors.Is(err, capabilitycreate.ErrInvalidReference):
+		return recoveryDiagnostic(diagnosticCapabilityImplementReferenceInvalid, "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>]` with one canonical lower-case Capability ID containing at least two dot-separated segments and a positive major.")
+	case errors.Is(err, capabilityexpose.ErrExpose) && errors.Is(err, capabilityexpose.ErrInvalidReference):
+		return recoveryDiagnostic(diagnosticCapabilityExposeReferenceInvalid, "Rerun `plystra capability expose <capability-name>/vN"+context.selectorSuffix()+"` with one canonical lower-case Capability ID containing at least two dot-separated segments and a positive major.")
 	case errors.Is(err, implementationselect.ErrInvalidInterfaceID):
 		return recoveryDiagnostic(diagnosticUseInterfaceInvalid, "Rerun `plystra use <interface-id> <constructor-symbol>"+context.selectorSuffix()+"` with one canonical versioned Interface ID.")
 	case errors.Is(err, implementationselect.ErrInvalidConstructor):

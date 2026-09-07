@@ -41,6 +41,9 @@ overrides both variables, and the two flags cannot be combined. Relative
 configuration paths are resolved from the detected Plystra Project root.
 Invalid or conflicting selections emit the stable
 PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
+Malformed exact Capability IDs emit the stable
+PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID diagnostic before Project discovery
+or mutation.
 `
 	capabilityCreateHelp = `Usage:
   ` + capabilityCreateSynopsis + `
@@ -51,6 +54,17 @@ Intent profiles:
 A new Capability identity requires one explicit intent profile. A later version
 copies the complete semantics of its highest visible source contract; omit the
 profile flag in that case. Names never imply semantics.
+
+Malformed Capability names or optional exact IDs emit the stable
+PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID diagnostic before Project discovery
+or mutation.
+`
+	capabilityImplementHelp = `Usage:
+  ` + capabilityImplementSynopsis + `
+
+Malformed exact Capability IDs emit the stable
+PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID diagnostic before Project
+discovery or mutation.
 `
 )
 
@@ -220,7 +234,7 @@ func capabilityHelp(arguments []string) (string, bool) {
 	case len(arguments) == 3 && arguments[0] == "capability" && arguments[1] == "create" && isHelp(arguments[2]):
 		return capabilityCreateHelp, true
 	case len(arguments) == 3 && arguments[0] == "capability" && arguments[1] == "implement" && isHelp(arguments[2]):
-		return "Usage:\n  " + capabilityImplementSynopsis + "\n", true
+		return capabilityImplementHelp, true
 	case len(arguments) == 3 && arguments[0] == "capability" && arguments[1] == "expose" && isHelp(arguments[2]):
 		return capabilityExposeHelp, true
 	default:

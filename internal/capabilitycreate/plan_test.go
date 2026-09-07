@@ -166,8 +166,11 @@ func TestPrepareRejectsInvalidReferenceBeforeFilesystemAccess(t *testing.T) {
 	t.Parallel()
 
 	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: "missing", Reference: "Account.Register"})
-	if !errors.Is(err, capabilitycreate.ErrPlan) || !errors.Is(err, capabilityid.ErrInvalid) {
-		t.Fatalf("Prepare error = %v, want ErrPlan and ErrInvalid", err)
+	if !errors.Is(err, capabilitycreate.ErrPlan) || !errors.Is(err, capabilitycreate.ErrInvalidReference) || !errors.Is(err, capabilityid.ErrInvalid) {
+		t.Fatalf("Prepare error = %v, want ErrPlan, ErrInvalidReference, and capabilityid.ErrInvalid", err)
+	}
+	if got, want := err.Error(), "plan capability authoring: parse reference: invalid capability reference: expected <capability-name> with optional /v<major>"; got != want {
+		t.Fatalf("Prepare error = %q, want %q", got, want)
 	}
 	if plan.Target().ID() != "" || plan.Version().Target().String() != "" || len(plan.SourceProviders()) != 0 {
 		t.Fatalf("invalid Prepare returned %#v", plan)

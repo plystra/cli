@@ -573,6 +573,14 @@ plystra capability create records.update --query --plugin records --expose
 
 `capability expose` requires an exact `<capability-name>/vN`. With no selector it updates root `plystra.yaml`; `--env production` updates only the sparse `plystra.production.yaml` overlay; and `--config deploy/customer-a.yaml` updates only that complete replacement document. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` provide the same two selector modes when neither flag is present, while either explicit flag overrides both ambient variables. The command preserves comments, unrelated values, and exact add/remove tombstones, then regenerates every affected Go, HTTP, JavaScript, documentation, assembly, and manifest surface with the same selected configuration. Invocation from a nested Plugin still resolves relative configuration paths from the Project root. Repeating the command is byte-idempotent when generated output is current, and no unselected configuration file is synchronized.
 
+Malformed `capability create`, `capability implement`, and `capability expose`
+references emit `PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID`,
+`PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID`, and
+`PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID` respectively. Each is rejected
+before Project discovery or mutation. Recovery uses canonical placeholders
+instead of copying the rejected reference, and exposure recovery retains only a
+safe default, environment, or complete-replacement selector.
+
 When several compatible Implementations satisfy one required Interface, select the intended constructor through the targeted public workflow:
 
 ```powershell
@@ -768,6 +776,14 @@ Authored Implementation failures distinguish an invalid
 or `plystra.Optional[T]` parameter, invalid constructor result, and structural
 conformance failure. Follow the code-specific recovery against the reported
 Project-relative Go source; never edit a dependency's Module Cache copy.
+
+Malformed `plystra capability create`, `plystra capability implement`, and
+`plystra capability expose` references use
+`PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID`,
+`PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID`, and
+`PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID`. They fail before Project
+discovery or mutation; recovery uses canonical placeholders and preserves a
+safe exposure selector.
 
 `plystra use` rejects a malformed canonical Interface ID with
 `PLYSTRA_USE_INTERFACE_INVALID` and a malformed fully qualified constructor

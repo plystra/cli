@@ -125,6 +125,12 @@ const (
 )
 
 const (
+	CapabilityCreateReferenceInvalid    = Prefix + "CAPABILITY_CREATE_REFERENCE_INVALID"
+	CapabilityImplementReferenceInvalid = Prefix + "CAPABILITY_IMPLEMENT_REFERENCE_INVALID"
+	CapabilityExposeReferenceInvalid    = Prefix + "CAPABILITY_EXPOSE_REFERENCE_INVALID"
+)
+
+const (
 	ConstructorConfigurationSchemaInvalid = Prefix + "CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID"
 	ConstructorConfigurationValuesInvalid = Prefix + "CONSTRUCTOR_CONFIGURATION_VALUES_INVALID"
 	ConstructorConfigurationUnselected    = Prefix + "CONSTRUCTOR_CONFIGURATION_UNSELECTED"
