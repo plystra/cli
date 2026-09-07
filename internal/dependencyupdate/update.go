@@ -15,8 +15,24 @@ import (
 	"github.com/plystra/cli/internal/projectlocate"
 )
 
-// ErrUpdate reports failure to update and validate one Go Module dependency.
-var ErrUpdate = errors.New("update Plystra Project dependency")
+var (
+	// ErrUpdate reports failure to update and validate one Go Module dependency.
+	ErrUpdate = errors.New("update Plystra Project dependency")
+	// ErrNotSelected reports a valid update query whose module path is absent
+	// from the Project's selected Go Module requirements.
+	ErrNotSelected = errors.New("dependency is not selected")
+)
+
+type notSelectedError struct {
+	modulePath string
+}
+
+func (e *notSelectedError) Error() string {
+	return fmt.Sprintf("Go Module %q is not selected in go.mod; use plystra add", e.modulePath)
+}
+func (e *notSelectedError) Is(target error) bool {
+	return target == ErrNotSelected
+}
 
 // Options controls one targeted dependency-update transaction.
 type Options struct {
@@ -62,7 +78,7 @@ func Update(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: inspect selected dependency: %w", ErrUpdate, err)
 	}
 	if !selected {
-		return Result{}, fmt.Errorf("%w: Go Module %q is not selected in go.mod; use plystra add", ErrUpdate, modulePath)
+		return Result{}, fmt.Errorf("%w: %w", ErrUpdate, &notSelectedError{modulePath: modulePath})
 	}
 	directRequirements := []string(nil)
 	if !before.Indirect() {

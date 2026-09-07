@@ -661,6 +661,17 @@ Malformed dependency input is classified before Project discovery or mutation:
 Follow the emitted placeholder-based corrected command. It never copies the
 rejected input into the recovery action.
 
+Valid but unselected dependency targets are classified after read-only Project
+and `go.mod` inspection and before mutation:
+
+- `PLYSTRA_DEPENDENCY_REMOVE_NOT_SELECTED` identifies an exact remove path
+  absent from the selected `go.mod` requirements; and
+- `PLYSTRA_DEPENDENCY_UPDATE_NOT_SELECTED` identifies an update query whose
+  module path is absent from those requirements.
+
+The recovery action uses a placeholder and directs the command to an already
+selected path or query.
+
 Every direct or transitive module in the effective Go Module graph whose root
 contains regular `plystra.yaml` is a dependency Plystra Project. The CLI scans
 its root-level Plugins and composes only that root configuration. It ignores a

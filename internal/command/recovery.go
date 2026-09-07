@@ -177,7 +177,9 @@ const (
 const (
 	diagnosticDependencyAddQueryInvalid    = diagnosticcode.DependencyAddQueryInvalid
 	diagnosticDependencyRemovePathInvalid  = diagnosticcode.DependencyRemovePathInvalid
+	diagnosticDependencyRemoveNotSelected  = diagnosticcode.DependencyRemoveNotSelected
 	diagnosticDependencyUpdateQueryInvalid = diagnosticcode.DependencyUpdateQueryInvalid
+	diagnosticDependencyUpdateNotSelected  = diagnosticcode.DependencyUpdateNotSelected
 )
 
 const (
@@ -406,8 +408,12 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticDependencyAddQueryInvalid, "Rerun `plystra add <go-module-query>` with one valid non-removal Go Module query.")
 	case errors.Is(err, dependencyremove.ErrRemove) && errors.Is(err, moduleargument.ErrInvalidPath):
 		return recoveryDiagnostic(diagnosticDependencyRemovePathInvalid, "Rerun `plystra remove <go-module-path>` with one valid Go Module path without a version query.")
+	case errors.Is(err, dependencyremove.ErrRemove) && errors.Is(err, dependencyremove.ErrNotSelected):
+		return recoveryDiagnostic(diagnosticDependencyRemoveNotSelected, "Rerun `plystra remove <go-module-path>` with one exact Go Module path already selected in go.mod.")
 	case errors.Is(err, dependencyupdate.ErrUpdate) && errors.Is(err, moduleargument.ErrInvalidQuery):
 		return recoveryDiagnostic(diagnosticDependencyUpdateQueryInvalid, "Rerun `plystra update <go-module-query>` with one valid non-removal Go Module query.")
+	case errors.Is(err, dependencyupdate.ErrUpdate) && errors.Is(err, dependencyupdate.ErrNotSelected):
+		return recoveryDiagnostic(diagnosticDependencyUpdateNotSelected, "Rerun `plystra update <go-module-query>` with one query whose module path is already selected in go.mod.")
 	case errors.Is(err, implementationselect.ErrInvalidInterfaceID):
 		return recoveryDiagnostic(diagnosticUseInterfaceInvalid, "Rerun `plystra use <interface-id> <constructor-symbol>"+context.selectorSuffix()+"` with one canonical versioned Interface ID.")
 	case errors.Is(err, implementationselect.ErrInvalidConstructor):

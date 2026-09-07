@@ -614,6 +614,10 @@ Malformed `add` and `update` queries emit
 `PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID`; a malformed exact `remove` path emits
 `PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID`. Each failure occurs before Project
 discovery or mutation and supplies one placeholder-based corrected command.
+A valid `remove` path or `update` query whose module path is absent from
+`go.mod` emits `PLYSTRA_DEPENDENCY_REMOVE_NOT_SELECTED` or
+`PLYSTRA_DEPENDENCY_UPDATE_NOT_SELECTED` before mutation. Recovery identifies
+the required selected path or query without copying the supplied value.
 
 ## Public command surface
 

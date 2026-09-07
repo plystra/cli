@@ -61,7 +61,7 @@ A Project with zero non-intrinsic roots is valid. Generation still emits intrins
 
 Mutating Plystra commands regenerate automatically. Add an ordinary Go Module dependency with ` + "`plystra add github.com/acme/platform@v1.0.0`" + `, update it with ` + "`plystra update github.com/acme/platform@v1.1.0`" + `, and remove it with ` + "`plystra remove github.com/acme/platform`" + `. A Project created with ` + "`plystra new app --template github.com/acme/platform@v1.0.0 --no-git --no-github-ci --skills`" + ` retains the selected template as the same kind of ordinary direct dependency: its dependency-composable root declarations, typed values, and Secret-reference placeholders compose into this Project, but its source is not copied and it receives no resolution priority. Dependency public exposure and process settings do not compose; declare them in the selected current-Project document. Creation validates composable values without reading referenced ` + "`env`" + ` or ` + "`file`" + ` Secrets; generated source and manifest provenance contain neither reference targets nor resolved values. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate. Use ` + "`plystra inspect`" + ` for a concise read-only summary of the same selected model, ` + "`--verbose`" + ` for complete resolution evidence, or ` + "`--format json`" + ` for deterministic automation output. Use ` + "`plystra explain capability <capability-name>/vN`" + ` with the same selector to see a Capability's selected Provider, direct reason and source, and the exact command or configuration field that changes that decision. Use ` + "`plystra explain plugin <plugin-id>`" + ` to see whether a Plugin is selected from the current Project, selected as an exact Capability Provider, or visible but unselected, together with the direct source and selector-matched change. Use ` + "`plystra explain config config.<plugin-id>.<field>`" + ` to see the typed configuration owner, winning source, explicit removal or ancestor suppression, and exact selected document field to edit without exposing configuration values or Secret-reference targets. Use ` + "`plystra explain alias <alias-name>/vN`" + ` to see its direct canonical target, inherited or narrowed exposure, every compatible application or generation-extension source, and the selector-matched field or activation decision that changes the result. Use ` + "`plystra explain exposure <capability-or-alias-name>/vN`" + ` to see why that identity is public or internal and the selected exposure, Alias, or activation decision that changes the surface.
 
-Malformed ` + "`add`" + ` and ` + "`update`" + ` queries emit ` + "`PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID`" + ` and ` + "`PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID`" + `; a malformed exact ` + "`remove`" + ` path emits ` + "`PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID`" + `. Each failure occurs before Project discovery or mutation and supplies one placeholder-based corrected command.
+Malformed ` + "`add`" + ` and ` + "`update`" + ` queries emit ` + "`PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID`" + ` and ` + "`PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID`" + `; a malformed exact ` + "`remove`" + ` path emits ` + "`PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID`" + `. Each failure occurs before Project discovery or mutation and supplies one placeholder-based corrected command. A valid ` + "`remove`" + ` path or ` + "`update`" + ` query absent from ` + "`go.mod`" + ` emits ` + "`PLYSTRA_DEPENDENCY_REMOVE_NOT_SELECTED`" + ` or ` + "`PLYSTRA_DEPENDENCY_UPDATE_NOT_SELECTED`" + ` before mutation, with placeholder-only recovery.
 
 A template's default Provider model must be unambiguous. If several compatible Plugins provide one required Capability, the template publisher must record one ` + "`capabilities.use`" + ` choice in the template's root ` + "`plystra.yaml`" + ` and publish a corrected version. Creation otherwise reports every candidate and leaves no target Project to repair.
 
@@ -553,11 +553,10 @@ Update exactly one selected dependency through a standard module query:
 
     plystra update github.com/acme/email@v1.5.0
 
-All three commands run from the Project root or a Plugin. Add uses Go tooling
-and retains the selected module as a direct go.mod requirement. Remove requires
-a selected module and verifies regeneration plus tidy did not reselect it.
-Update preserves an existing direct requirement. It targets only that module query;
-Go may adjust required transitive versions. An omitted version query uses
+Run all three from the Project root or a Plugin. Add retains the selected module as a direct
+go.mod requirement. Remove requires a selected module and verifies tidy did not
+reselect it. Update preserves an existing direct requirement and targets
+only that module query. Omitting the version uses
 Go's normal selection, not a whole-graph upgrade. Each command
 recomposes root plystra.yaml, regenerates, tidies, and validates the complete
 Project. The current dependency surfaces use the default root configuration and
@@ -566,9 +565,11 @@ failed Go command, resolution, composition, generation, tidy, removal
 postcondition, or validation step restores every transaction-owned module,
 root-configuration, and generated file.
 
-Malformed add/update queries and remove paths fail before mutation as
+Malformed add/update queries and remove paths use
 PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID, PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID,
 or PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID; follow Recovery.
+Unselected remove/update targets use PLYSTRA_DEPENDENCY_REMOVE_NOT_SELECTED or
+PLYSTRA_DEPENDENCY_UPDATE_NOT_SELECTED; follow Recovery.
 
 The CLI asks Go for the effective module graph. Every direct or transitive
 module with regular root plystra.yaml is a dependency Plystra Project; its

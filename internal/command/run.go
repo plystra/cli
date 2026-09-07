@@ -70,6 +70,8 @@ regenerates, tidies, and validates the complete Project in one rollback boundary
 
 Malformed paths emit PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID before Project
 discovery or mutation.
+Valid paths absent from go.mod emit PLYSTRA_DEPENDENCY_REMOVE_NOT_SELECTED
+before mutation.
 `
 	updateUsage = `Usage:
   plystra update <go-module-query>
@@ -79,6 +81,8 @@ regenerates, tidies, and validates the complete Project in one rollback boundary
 
 Malformed queries emit PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID before Project
 discovery or mutation.
+Valid queries whose module path is absent from go.mod emit
+PLYSTRA_DEPENDENCY_UPDATE_NOT_SELECTED before mutation.
 `
 	newUsage = `Usage:
   plystra new <project-name> [--module <go-module-path>] [--template <go-module-query>] [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]

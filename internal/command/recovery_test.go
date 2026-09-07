@@ -322,7 +322,9 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "existing Implementation create target", err: implementationcreate.ErrTargetExists, code: diagnosticcode.ImplementationCreateTargetExists},
 		{name: "invalid dependency add query", err: fmt.Errorf("%w: %w", dependencyadd.ErrAdd, moduleargument.ErrInvalidQuery), code: diagnosticcode.DependencyAddQueryInvalid},
 		{name: "invalid dependency remove path", err: fmt.Errorf("%w: %w", dependencyremove.ErrRemove, moduleargument.ErrInvalidPath), code: diagnosticcode.DependencyRemovePathInvalid},
+		{name: "unselected dependency removal", err: fmt.Errorf("%w: %w", dependencyremove.ErrRemove, dependencyremove.ErrNotSelected), code: diagnosticcode.DependencyRemoveNotSelected},
 		{name: "invalid dependency update query", err: fmt.Errorf("%w: %w", dependencyupdate.ErrUpdate, moduleargument.ErrInvalidQuery), code: diagnosticcode.DependencyUpdateQueryInvalid},
+		{name: "unselected dependency update", err: fmt.Errorf("%w: %w", dependencyupdate.ErrUpdate, dependencyupdate.ErrNotSelected), code: diagnosticcode.DependencyUpdateNotSelected},
 		{name: "invalid use Interface", err: implementationselect.ErrInvalidInterfaceID, code: diagnosticcode.UseInterfaceInvalid},
 		{name: "invalid use constructor", err: implementationselect.ErrInvalidConstructor, code: diagnosticcode.UseConstructorInvalid},
 	}
@@ -335,6 +337,23 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 				t.Fatalf("primaryActionableDiagnostic(%v) = %#v, %t; want canonical code %q", test.err, diagnostic, ok, test.code)
 			}
 		})
+	}
+}
+
+func TestPrimaryActionableDiagnosticRequiresMatchingDependencyOperationAndCondition(t *testing.T) {
+	t.Parallel()
+
+	for _, err := range []error{
+		dependencyremove.ErrRemove,
+		dependencyremove.ErrNotSelected,
+		dependencyupdate.ErrUpdate,
+		dependencyupdate.ErrNotSelected,
+		fmt.Errorf("%w: %w", dependencyremove.ErrRemove, dependencyupdate.ErrNotSelected),
+		fmt.Errorf("%w: %w", dependencyupdate.ErrUpdate, dependencyremove.ErrNotSelected),
+	} {
+		if diagnostic, ok := primaryActionableDiagnostic(err, recoveryContext{}); ok {
+			t.Fatalf("primaryActionableDiagnostic(%v) = %#v, true; want no cross-family classification", err, diagnostic)
+		}
 	}
 }
 

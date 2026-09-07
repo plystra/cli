@@ -119,7 +119,9 @@ const (
 const (
 	DependencyAddQueryInvalid    = Prefix + "DEPENDENCY_ADD_QUERY_INVALID"
 	DependencyRemovePathInvalid  = Prefix + "DEPENDENCY_REMOVE_PATH_INVALID"
+	DependencyRemoveNotSelected  = Prefix + "DEPENDENCY_REMOVE_NOT_SELECTED"
 	DependencyUpdateQueryInvalid = Prefix + "DEPENDENCY_UPDATE_QUERY_INVALID"
+	DependencyUpdateNotSelected  = Prefix + "DEPENDENCY_UPDATE_NOT_SELECTED"
 )
 
 const (

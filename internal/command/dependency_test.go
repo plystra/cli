@@ -274,9 +274,20 @@ func TestRunRemoveRejectsInvalidModulePathBeforeMutation(t *testing.T) {
 func TestRunRemoveRejectsUnselectedModuleBeforeMutation(t *testing.T) {
 	root := writeCapabilityCommandModule(t)
 	before := commandTree(t, root)
-	exitCode, stdout, stderr := runCommand(t, []string{"remove", "example.com/acme/platform"}, filepath.Join(root, "records"), commandGoEnvironment())
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "is not selected in go.mod") {
+	modulePath := "example.com/acme/platform"
+	exitCode, stdout, stderr := runCommand(t, []string{"remove", modulePath}, filepath.Join(root, "records"), commandGoEnvironment())
+	wantRecovery := "Rerun `plystra remove <go-module-path>` with one exact Go Module path already selected in go.mod."
+	if exitCode != 1 || stdout != "" || !commandContainsAll(
+		stderr,
+		"is not selected in go.mod",
+		"Recovery:\n"+wantRecovery+"\n",
+		"Diagnostic: "+diagnosticcode.DependencyRemoveNotSelected,
+	) {
 		t.Fatalf("unselected plystra remove = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	recoveryIndex := strings.Index(stderr, "Recovery:")
+	if recoveryIndex < 0 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 || strings.Contains(strings.ToLower(stderr), "usage:") || strings.Contains(stderr[recoveryIndex:], modulePath) {
+		t.Fatalf("unselected plystra remove emitted unstable diagnostic framing: %q", stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("unselected removal changed Project:\nbefore: %#v\nafter:  %#v", before, after)
@@ -421,9 +432,20 @@ func TestRunUpdateRejectsInvalidModuleQueryBeforeMutation(t *testing.T) {
 func TestRunUpdateRejectsUnselectedQueryBeforeMutation(t *testing.T) {
 	root := writeCapabilityCommandModule(t)
 	before := commandTree(t, root)
-	exitCode, stdout, stderr := runCommand(t, []string{"update", "example.com/acme/platform@v1.1.0"}, filepath.Join(root, "records"), commandGoEnvironment())
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "use plystra add") {
+	query := "example.com/acme/platform@v1.1.0"
+	exitCode, stdout, stderr := runCommand(t, []string{"update", query}, filepath.Join(root, "records"), commandGoEnvironment())
+	wantRecovery := "Rerun `plystra update <go-module-query>` with one query whose module path is already selected in go.mod."
+	if exitCode != 1 || stdout != "" || !commandContainsAll(
+		stderr,
+		"use plystra add",
+		"Recovery:\n"+wantRecovery+"\n",
+		"Diagnostic: "+diagnosticcode.DependencyUpdateNotSelected,
+	) {
 		t.Fatalf("unselected plystra update = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	recoveryIndex := strings.Index(stderr, "Recovery:")
+	if recoveryIndex < 0 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 || strings.Contains(strings.ToLower(stderr), "usage:") || strings.Contains(stderr[recoveryIndex:], query) {
+		t.Fatalf("unselected plystra update emitted unstable diagnostic framing: %q", stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("unselected update changed Project:\nbefore: %#v\nafter:  %#v", before, after)

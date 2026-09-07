@@ -15,8 +15,24 @@ import (
 	"github.com/plystra/cli/internal/projectlocate"
 )
 
-// ErrRemove reports failure to remove and validate one Go Module dependency.
-var ErrRemove = errors.New("remove Plystra Project dependency")
+var (
+	// ErrRemove reports failure to remove and validate one Go Module dependency.
+	ErrRemove = errors.New("remove Plystra Project dependency")
+	// ErrNotSelected reports a valid removal path absent from the Project's
+	// selected Go Module requirements.
+	ErrNotSelected = errors.New("dependency is not selected")
+)
+
+type notSelectedError struct {
+	modulePath string
+}
+
+func (e *notSelectedError) Error() string {
+	return fmt.Sprintf("Go Module %q is not selected in go.mod", e.modulePath)
+}
+func (e *notSelectedError) Is(target error) bool {
+	return target == ErrNotSelected
+}
 
 // Options controls one dependency-removal transaction.
 type Options struct {
@@ -63,7 +79,7 @@ func Remove(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: inspect selected dependency: %w", ErrRemove, err)
 	}
 	if !selected {
-		return Result{}, fmt.Errorf("%w: Go Module %q is not selected in go.mod", ErrRemove, modulePath)
+		return Result{}, fmt.Errorf("%w: %w", ErrRemove, &notSelectedError{modulePath: modulePath})
 	}
 
 	err = modulemutation.Change(ctx, project.Path(), modulemutation.ChangeOptions{
