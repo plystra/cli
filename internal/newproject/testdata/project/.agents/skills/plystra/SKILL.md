@@ -1236,9 +1236,8 @@ values use placeholders. Unclassified errors get neither.
     PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID;
   - wrong action: PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE or
     PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE;
-  - new identity without profile:
-    PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED;
-  - profile on copied version:
+  - confirmation: PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED;
+  - intent profile: PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED or
     PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
   Follow Recovery; all precede mutation.
 - Invalid plystra use input: PLYSTRA_USE_INTERFACE_INVALID means malformed

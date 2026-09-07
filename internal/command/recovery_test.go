@@ -183,10 +183,10 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			code: diagnosticProtobufWireHistoryInvalid,
 		},
 		{
-			name: "Capability confirmation",
-			err:  fmt.Errorf("create Capability: %w", capabilitycreate.ErrConfirmationRequired),
-			want: "Review the visible Capability versions, then rerun the create command with `--confirm`.",
-			code: diagnosticCapabilityConfirmationRequired,
+			name: "Capability create confirmation",
+			err:  errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrConfirmationRequired),
+			want: "Review the visible Capability versions, then rerun the same `plystra capability create` command with `--confirm`.",
+			code: diagnosticCapabilityCreateConfirmationRequired,
 		},
 		{
 			name: "Capability create exact version",
@@ -305,7 +305,6 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "generated ownership", err: generatedfiles.ErrConflict, code: diagnosticcode.GeneratedOwnershipConflict},
 		{name: "unexpected generated output", err: generatedfiles.ErrUnexpected, code: diagnosticcode.GeneratedUnexpectedOutput},
 		{name: "generated manifest", err: generatedfiles.ErrManifest, code: diagnosticcode.GeneratedManifestInvalid},
-		{name: "Capability confirmation", err: capabilitycreate.ErrConfirmationRequired, code: diagnosticcode.CapabilityConfirmationRequired},
 		{name: "Capability manifest", err: capabilitymeta.ErrInvalidManifest, code: diagnosticcode.CapabilityManifestInvalid},
 		{name: "atomic concurrent change", err: atomicfs.ErrConcurrentChange, code: diagnosticcode.ProjectConcurrentChange},
 		{name: "resolution concurrent change", err: applicationresolve.ErrConcurrentChange, code: diagnosticcode.ProjectConcurrentChange},
@@ -353,6 +352,7 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "unselected dependency update", err: fmt.Errorf("%w: %w", dependencyupdate.ErrUpdate, dependencyupdate.ErrNotSelected), code: diagnosticcode.DependencyUpdateNotSelected},
 		{name: "invalid Capability create reference", err: fmt.Errorf("%w: %w", capabilitycreate.ErrCreate, capabilitycreate.ErrInvalidReference), code: diagnosticcode.CapabilityCreateReferenceInvalid},
 		{name: "existing Capability create target", err: errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrCreateAlreadyVisible), code: diagnosticcode.CapabilityCreateAlreadyVisible},
+		{name: "Capability create confirmation", err: errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrConfirmationRequired), code: diagnosticcode.CapabilityCreateConfirmationRequired},
 		{name: "missing Capability create intent profile", err: errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfile, capabilitycreate.ErrIntentProfileRequired), code: diagnosticcode.CapabilityCreateIntentProfileRequired},
 		{name: "inapplicable Capability create intent profile", err: errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfile, capabilitycreate.ErrIntentProfileNotAllowed), code: diagnosticcode.CapabilityCreateIntentProfileNotAllowed},
 		{name: "invalid Capability implement reference", err: fmt.Errorf("%w: %w", capabilitycreate.ErrImplement, capabilitycreate.ErrInvalidReference), code: diagnosticcode.CapabilityImplementReferenceInvalid},
@@ -446,6 +446,21 @@ func TestPrimaryActionableDiagnosticRequiresMatchingCapabilityIntentAndCondition
 	} {
 		if diagnostic, ok := primaryActionableDiagnostic(err, recoveryContext{}); ok {
 			t.Fatalf("primaryActionableDiagnostic(%v) = %#v, true; want no cross-condition classification", err, diagnostic)
+		}
+	}
+}
+
+func TestPrimaryActionableDiagnosticRequiresCapabilityCreateConfirmationBoundary(t *testing.T) {
+	t.Parallel()
+
+	for _, err := range []error{
+		capabilitycreate.ErrCreate,
+		capabilitycreate.ErrConfirmationRequired,
+		errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrConfirmationRequired),
+		errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrImplement, capabilitycreate.ErrConfirmationRequired),
+	} {
+		if diagnostic, ok := primaryActionableDiagnostic(err, recoveryContext{}); ok {
+			t.Fatalf("primaryActionableDiagnostic(%v) = %#v, true; want no cross-operation classification", err, diagnostic)
 		}
 	}
 }

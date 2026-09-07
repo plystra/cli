@@ -65,7 +65,6 @@ const (
 	GeneratedOwnershipConflict         = Prefix + "GENERATED_OWNERSHIP_CONFLICT"
 	GeneratedUnexpectedOutput          = Prefix + "GENERATED_UNEXPECTED_OUTPUT"
 	GeneratedManifestInvalid           = Prefix + "GENERATED_MANIFEST_INVALID"
-	CapabilityConfirmationRequired     = Prefix + "CAPABILITY_CONFIRMATION_REQUIRED"
 	CapabilityManifestInvalid          = Prefix + "CAPABILITY_MANIFEST_INVALID"
 	ProjectConcurrentChange            = Prefix + "PROJECT_CONCURRENT_CHANGE"
 	ConfigurationCompositionDrift      = Prefix + "CONFIGURATION_COMPOSITION_DRIFT"
@@ -127,6 +126,7 @@ const (
 const (
 	CapabilityCreateReferenceInvalid        = Prefix + "CAPABILITY_CREATE_REFERENCE_INVALID"
 	CapabilityCreateAlreadyVisible          = Prefix + "CAPABILITY_CREATE_ALREADY_VISIBLE"
+	CapabilityCreateConfirmationRequired    = Prefix + "CAPABILITY_CREATE_CONFIRMATION_REQUIRED"
 	CapabilityCreateIntentProfileRequired   = Prefix + "CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED"
 	CapabilityCreateIntentProfileNotAllowed = Prefix + "CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED"
 	CapabilityImplementReferenceInvalid     = Prefix + "CAPABILITY_IMPLEMENT_REFERENCE_INVALID"

@@ -552,7 +552,7 @@ plystra capability create records.read --query --plugin records --expose
 
 `--query` expands into complete explicit read-only, inherently idempotent, safely retryable, best-effort-cancellable, completed-before-return semantics with public request and response data. Names never imply semantics. A new Capability identity requires one supported profile before any mutation.
 
-An omitted version selects `v1` when none is visible. When the identity is already visible, it selects one above the highest visible version and copies that exact contract, including its semantics, as an editing base; omit profile flags for that later-version workflow. An explicit older or skipped new version is rejected without mutation until it is deliberately repeated with `--confirm`. An existing exact version is never recreated; implement it instead:
+An omitted version selects `v1` when none is visible. When the identity is already visible, it selects one above the highest visible version and copies that exact contract, including its semantics, as an editing base; omit profile flags for that later-version workflow. An explicit older or skipped new version is rejected without mutation under `PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED` until the same create command is deliberately repeated with `--confirm`. An existing exact version is never recreated; implement it instead:
 
 ```powershell
 plystra capability implement email.send/v1 --plugin mailer
@@ -588,6 +588,11 @@ existing exact contract to `capability implement`, while
 exact contract to `capability create`. Both failures leave the Project
 unchanged and preserve the original problem wording above one placeholder-based
 recovery command.
+
+An explicit older or skipped new version emits
+`PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED`. Review the visible version
+history and repeat the same `capability create` command with `--confirm`; the
+unconfirmed request leaves every Project byte unchanged.
 
 Intent-profile mistakes are distinct. A new identity without a profile emits
 `PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED` and recovers by adding
@@ -803,6 +808,11 @@ Valid exact Capability IDs use `PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE` when
 `capability create` must become `capability implement`, and
 `PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE` when `capability implement` must
 become `capability create`. Neither action mismatch mutates the Project.
+
+`PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED` identifies an explicit older
+or skipped new version that must be reviewed and repeated with `--confirm`.
+Classification requires the owning create-operation boundary and occurs before
+mutation.
 
 `PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED` identifies a new identity
 without `--query`; `PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED`

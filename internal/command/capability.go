@@ -61,6 +61,9 @@ or mutation.
 An already-visible exact version emits
 PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE and directs the developer to the
 implementation command without changing the Project.
+An explicit older or skipped new version emits
+PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED and requires the same create
+command to be repeated with --confirm before mutation.
 A missing new-identity profile emits
 PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED; a profile supplied while
 copying a later version emits PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.

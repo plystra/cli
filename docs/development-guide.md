@@ -1194,6 +1194,10 @@ supplying it while copying a later version emits
 `PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED`. Follow the emitted
 command to add or omit `--query` before retrying.
 
+An explicit older or skipped new version is rejected before mutation with
+`PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED`. Review the visible version
+history and repeat the same `capability create` command with `--confirm`.
+
 Field constraints use one closed type-specific vocabulary: strings accept
 `min_length`, `max_length`, and bounded Go regular-expression `pattern`;
 integers and numbers accept `minimum` and `maximum`; arrays accept `min_items`
@@ -1985,6 +1989,12 @@ the transaction boundary:
 
 Both failures preserve the existing action-mismatch message, emit one
 placeholder-based counterpart command, and leave every Project byte unchanged.
+
+Explicit older or skipped new versions retain the broad confirmation-required
+error but are classified only beneath the owning create-operation boundary as
+`PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED`. Review the visible version
+history and repeat the same create command with `--confirm`; the first request
+does not mutate the Project.
 
 Intent-profile failures have separate recovery:
 

@@ -140,7 +140,7 @@ func TestAuthoringEnforcesActionAndExplicitVersionConfirmation(t *testing.T) {
 	before := snapshotAuthoringTree(t, root)
 	base.Reference = "records.create/v3"
 	_, err := capabilitycreate.Create(t.Context(), capabilitycreate.AuthorOptions{Options: base})
-	if !errors.Is(err, capabilitycreate.ErrCreate) || !errors.Is(err, capabilitycreate.ErrConfirmationRequired) {
+	if !errors.Is(err, capabilitycreate.ErrCreate) || !errors.Is(err, capabilitycreate.ErrConfirmationRequired) || errors.Is(err, capabilitycreate.ErrImplement) {
 		t.Fatalf("unconfirmed skipped version = %v", err)
 	}
 	if after := snapshotAuthoringTree(t, root); !reflect.DeepEqual(after, before) {

@@ -124,7 +124,6 @@ const (
 	diagnosticGeneratedOwnershipConflict         = diagnosticcode.GeneratedOwnershipConflict
 	diagnosticGeneratedUnexpectedOutput          = diagnosticcode.GeneratedUnexpectedOutput
 	diagnosticGeneratedManifestInvalid           = diagnosticcode.GeneratedManifestInvalid
-	diagnosticCapabilityConfirmationRequired     = diagnosticcode.CapabilityConfirmationRequired
 	diagnosticCapabilityManifestInvalid          = diagnosticcode.CapabilityManifestInvalid
 	diagnosticProjectConcurrentChange            = diagnosticcode.ProjectConcurrentChange
 	diagnosticConfigurationCompositionDrift      = diagnosticcode.ConfigurationCompositionDrift
@@ -186,6 +185,7 @@ const (
 const (
 	diagnosticCapabilityCreateReferenceInvalid        = diagnosticcode.CapabilityCreateReferenceInvalid
 	diagnosticCapabilityCreateAlreadyVisible          = diagnosticcode.CapabilityCreateAlreadyVisible
+	diagnosticCapabilityCreateConfirmationRequired    = diagnosticcode.CapabilityCreateConfirmationRequired
 	diagnosticCapabilityCreateIntentProfileRequired   = diagnosticcode.CapabilityCreateIntentProfileRequired
 	diagnosticCapabilityCreateIntentProfileNotAllowed = diagnosticcode.CapabilityCreateIntentProfileNotAllowed
 	diagnosticCapabilityImplementReferenceInvalid     = diagnosticcode.CapabilityImplementReferenceInvalid
@@ -429,6 +429,8 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticCapabilityCreateReferenceInvalid, "Rerun `plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]` with one canonical lower-case Capability name containing at least two dot-separated segments and an optional positive `/vN` major.")
 	case errors.Is(err, capabilitycreate.ErrCreate) && errors.Is(err, capabilitycreate.ErrActionMismatch) && errors.Is(err, capabilitycreate.ErrCreateAlreadyVisible) && !errors.Is(err, capabilitycreate.ErrImplementNotVisible):
 		return recoveryDiagnostic(diagnosticCapabilityCreateAlreadyVisible, "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>]` for the existing exact contract.")
+	case errors.Is(err, capabilitycreate.ErrCreate) && !errors.Is(err, capabilitycreate.ErrImplement) && errors.Is(err, capabilitycreate.ErrConfirmationRequired):
+		return recoveryDiagnostic(diagnosticCapabilityCreateConfirmationRequired, "Review the visible Capability versions, then rerun the same `plystra capability create` command with `--confirm`.")
 	case errors.Is(err, capabilitycreate.ErrCreate) && errors.Is(err, capabilitycreate.ErrIntentProfile) && errors.Is(err, capabilitycreate.ErrIntentProfileRequired) && !errors.Is(err, capabilitycreate.ErrIntentProfileNotAllowed):
 		return recoveryDiagnostic(diagnosticCapabilityCreateIntentProfileRequired, "Rerun `plystra capability create <capability-name> --query [--plugin <plugin>] [--confirm] [--expose]` with the explicit query intent profile required for a new Capability identity.")
 	case errors.Is(err, capabilitycreate.ErrCreate) && errors.Is(err, capabilitycreate.ErrIntentProfile) && errors.Is(err, capabilitycreate.ErrIntentProfileNotAllowed) && !errors.Is(err, capabilitycreate.ErrIntentProfileRequired):
@@ -549,8 +551,6 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticGeneratedUnexpectedOutput, generatedOwnershipRecovery(context))
 	case errors.Is(err, generatedfiles.ErrManifest):
 		return recoveryDiagnostic(diagnosticGeneratedManifestInvalid, "Restore generated/.plystra-manifest.json from a known-good generated state, then run `plystra generate"+context.selectorSuffix()+"`.")
-	case errors.Is(err, capabilitycreate.ErrConfirmationRequired):
-		return recoveryDiagnostic(diagnosticCapabilityConfirmationRequired, "Review the visible Capability versions, then rerun the create command with `--confirm`.")
 	case errors.Is(err, capabilitymeta.ErrInvalidManifest):
 		return recoveryDiagnostic(diagnosticCapabilityManifestInvalid, "Correct the reported authored capability.yaml, then rerun the command.")
 	case errors.Is(err, atomicfs.ErrConcurrentChange), errors.Is(err, applicationresolve.ErrConcurrentChange), errors.Is(err, applicationgenerate.ErrConcurrentChange):
