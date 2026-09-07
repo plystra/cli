@@ -27,6 +27,9 @@ Follow the emitted counterpart command; neither failure changes the Project.
 An explicit older or skipped new version uses
 `PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED` and requires the
 same create command to be repeated with `--confirm` after review.
+An omitted version above the maximum visible major uses
+`PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED` and requires a new
+canonical Capability identity.
 Creating a new identity without a profile uses
 `PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED`; supplying
 `--query` for a copied later version uses

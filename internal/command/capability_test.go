@@ -153,6 +153,43 @@ func TestRunCapabilityRejectsInvalidReferencesBeforeProjectDiscoveryOrMutation(t
 	}
 }
 
+func TestRunCapabilityCreateRejectsExhaustedVersionBeforeMutation(t *testing.T) {
+	root := writeCapabilityCommandModule(t)
+	const maximum = "18446744073709551615"
+	writeCommandFile(t, filepath.Join(root, "records", "plugin.yaml"), "id: acme.library.records\nprovides: [records.archive/v"+maximum+"]\n")
+	writeCommandFile(t, filepath.Join(root, "records", "capabilities", "records.archive", "v"+maximum, "capability.yaml"), `id: records.archive/v18446744073709551615
+
+request: {}
+response: {}
+errors: []
+
+semantics:
+  kind: query
+  effects: none
+  idempotency: {mode: inherent}
+  retry: {safety: safe}
+  cancellation: {mode: best-effort}
+  completion: {mode: completed-before-return}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`)
+	before := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"capability", "create", "records.archive", "--plugin", "records"}, root, commandGoEnvironment())
+	wantError := "create capability: plan capability authoring: infer capability version: capability major version overflow for records.archive\n\n" +
+		"Recovery:\nRerun `plystra capability create <new-capability-name> --query [--plugin <plugin>] [--expose]` with a new canonical Capability identity; the existing identity has no higher major version.\n\n" +
+		"Diagnostic: " + diagnosticcode.CapabilityCreateVersionExhausted + "\n"
+	if exitCode != 1 || stdout != "" || stderr != wantError {
+		t.Fatalf("exhausted capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("exhausted capability create changed Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	if strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 || strings.Contains(strings.ToLower(stderr), "usage:") {
+		t.Fatalf("exhausted capability create emitted unstable diagnostic framing: %q", stderr)
+	}
+	assertNoCommandTransactions(t, root)
+}
+
 func TestRunCapabilityCreateAndExposeRegenerateRunnableApplication(t *testing.T) {
 	root := writeCapabilityCommandModule(t)
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")

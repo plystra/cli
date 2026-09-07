@@ -127,6 +127,7 @@ const (
 	CapabilityCreateReferenceInvalid        = Prefix + "CAPABILITY_CREATE_REFERENCE_INVALID"
 	CapabilityCreateAlreadyVisible          = Prefix + "CAPABILITY_CREATE_ALREADY_VISIBLE"
 	CapabilityCreateConfirmationRequired    = Prefix + "CAPABILITY_CREATE_CONFIRMATION_REQUIRED"
+	CapabilityCreateVersionExhausted        = Prefix + "CAPABILITY_CREATE_VERSION_EXHAUSTED"
 	CapabilityCreateIntentProfileRequired   = Prefix + "CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED"
 	CapabilityCreateIntentProfileNotAllowed = Prefix + "CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED"
 	CapabilityImplementReferenceInvalid     = Prefix + "CAPABILITY_IMPLEMENT_REFERENCE_INVALID"

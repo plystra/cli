@@ -25,6 +25,9 @@ var (
 	// ErrInvalidReference reports a malformed Capability name or exact ID
 	// supplied to an authoring command.
 	ErrInvalidReference = errors.New("invalid capability authoring reference")
+	// ErrVersionExhausted reports an unversioned create request whose visible
+	// Capability identity already uses the largest supported major version.
+	ErrVersionExhausted = errors.New("capability major version is exhausted")
 )
 
 // invalidReferenceError preserves the established parser wording while
@@ -37,6 +40,18 @@ func (e *invalidReferenceError) Error() string { return "parse reference: " + e.
 func (e *invalidReferenceError) Unwrap() error { return e.cause }
 func (e *invalidReferenceError) Is(target error) bool {
 	return target == ErrInvalidReference
+}
+
+// versionExhaustedError preserves the established inference wording and
+// low-level cause while exposing the public authoring condition.
+type versionExhaustedError struct {
+	cause error
+}
+
+func (e *versionExhaustedError) Error() string { return e.cause.Error() }
+func (e *versionExhaustedError) Unwrap() error { return e.cause }
+func (e *versionExhaustedError) Is(target error) bool {
+	return target == ErrVersionExhausted
 }
 
 // IntentProfile identifies one explicit business-intent authoring profile.
@@ -172,6 +187,9 @@ func Prepare(options Options) (Plan, error) {
 	}
 	version, err := capabilityversion.Infer(reference, visible)
 	if err != nil {
+		if errors.Is(err, capabilityversion.ErrOverflow) {
+			err = &versionExhaustedError{cause: err}
+		}
 		return Plan{}, fmt.Errorf("%w: %w", ErrPlan, err)
 	}
 
@@ -236,6 +254,9 @@ func PrepareVisible(ctx context.Context, options Options) (Plan, error) {
 	}
 	version, err := capabilityversion.Infer(reference, visible)
 	if err != nil {
+		if errors.Is(err, capabilityversion.ErrOverflow) {
+			err = &versionExhaustedError{cause: err}
+		}
 		return Plan{}, fmt.Errorf("%w: %w", ErrPlan, err)
 	}
 	return Plan{

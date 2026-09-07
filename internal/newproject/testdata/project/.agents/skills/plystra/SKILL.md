@@ -1230,16 +1230,13 @@ values use placeholders. Unclassified errors get neither.
   constructor visible. Markerless dependencies are not scanned.
 - Ambiguous Implementation: run plystra use <interface-id> <constructor-symbol>
   with the same selector; no discovery priority exists.
-- Capability diagnostics:
-  - malformed reference: PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
-    PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID, or
-    PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID;
-  - wrong action: PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE or
-    PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE;
+- Capability diagnostics all precede mutation:
+  - malformed reference: PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID, PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID, or PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID;
+  - wrong action: PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE or PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE;
   - confirmation: PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED;
-  - intent profile: PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED or
-    PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
-  Follow Recovery; all precede mutation.
+  - version exhaustion: PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED;
+  - intent profile: PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED or PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
+  Follow Recovery.
 - Invalid plystra use input: PLYSTRA_USE_INTERFACE_INVALID means malformed
   Interface ID; PLYSTRA_USE_CONSTRUCTOR_INVALID means malformed fully qualified
   constructor symbol. Recovery retains the selector; both precede mutation.

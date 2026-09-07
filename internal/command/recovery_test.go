@@ -16,6 +16,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityexpose"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilitymeta"
+	"github.com/plystra/cli/internal/capabilityversion"
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/dependencyadd"
@@ -189,6 +190,12 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			code: diagnosticCapabilityCreateConfirmationRequired,
 		},
 		{
+			name: "Capability create version exhaustion",
+			err:  errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrVersionExhausted, capabilityversion.ErrOverflow),
+			want: "Rerun `plystra capability create <new-capability-name> --query [--plugin <plugin>] [--expose]` with a new canonical Capability identity; the existing identity has no higher major version.",
+			code: diagnosticCapabilityCreateVersionExhausted,
+		},
+		{
 			name: "Capability create exact version",
 			err:  errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrCreateAlreadyVisible),
 			want: "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>]` for the existing exact contract.",
@@ -353,6 +360,7 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "invalid Capability create reference", err: fmt.Errorf("%w: %w", capabilitycreate.ErrCreate, capabilitycreate.ErrInvalidReference), code: diagnosticcode.CapabilityCreateReferenceInvalid},
 		{name: "existing Capability create target", err: errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrCreateAlreadyVisible), code: diagnosticcode.CapabilityCreateAlreadyVisible},
 		{name: "Capability create confirmation", err: errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrConfirmationRequired), code: diagnosticcode.CapabilityCreateConfirmationRequired},
+		{name: "Capability create version exhaustion", err: errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrVersionExhausted, capabilityversion.ErrOverflow), code: diagnosticcode.CapabilityCreateVersionExhausted},
 		{name: "missing Capability create intent profile", err: errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfile, capabilitycreate.ErrIntentProfileRequired), code: diagnosticcode.CapabilityCreateIntentProfileRequired},
 		{name: "inapplicable Capability create intent profile", err: errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfile, capabilitycreate.ErrIntentProfileNotAllowed), code: diagnosticcode.CapabilityCreateIntentProfileNotAllowed},
 		{name: "invalid Capability implement reference", err: fmt.Errorf("%w: %w", capabilitycreate.ErrImplement, capabilitycreate.ErrInvalidReference), code: diagnosticcode.CapabilityImplementReferenceInvalid},
@@ -458,6 +466,24 @@ func TestPrimaryActionableDiagnosticRequiresCapabilityCreateConfirmationBoundary
 		capabilitycreate.ErrConfirmationRequired,
 		errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrConfirmationRequired),
 		errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrImplement, capabilitycreate.ErrConfirmationRequired),
+	} {
+		if diagnostic, ok := primaryActionableDiagnostic(err, recoveryContext{}); ok {
+			t.Fatalf("primaryActionableDiagnostic(%v) = %#v, true; want no cross-operation classification", err, diagnostic)
+		}
+	}
+}
+
+func TestPrimaryActionableDiagnosticRequiresCapabilityCreateVersionExhaustionBoundary(t *testing.T) {
+	t.Parallel()
+
+	for _, err := range []error{
+		capabilitycreate.ErrCreate,
+		capabilitycreate.ErrVersionExhausted,
+		capabilityversion.ErrOverflow,
+		errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrVersionExhausted),
+		errors.Join(capabilitycreate.ErrCreate, capabilityversion.ErrOverflow),
+		errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrVersionExhausted, capabilityversion.ErrOverflow),
+		errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrImplement, capabilitycreate.ErrVersionExhausted, capabilityversion.ErrOverflow),
 	} {
 		if diagnostic, ok := primaryActionableDiagnostic(err, recoveryContext{}); ok {
 			t.Fatalf("primaryActionableDiagnostic(%v) = %#v, true; want no cross-operation classification", err, diagnostic)

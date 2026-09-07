@@ -177,6 +177,23 @@ func TestPrepareRejectsInvalidReferenceBeforeFilesystemAccess(t *testing.T) {
 	}
 }
 
+func TestPrepareClassifiesExhaustedCapabilityVersion(t *testing.T) {
+	t.Parallel()
+
+	root := createModule(t)
+	writePlugin(t, root, "account", "id: acme.app.account\nprovides: [account.register/v18446744073709551615]\n")
+	plan, err := capabilitycreate.Prepare(capabilitycreate.Options{Start: root, Reference: "account.register"})
+	if !errors.Is(err, capabilitycreate.ErrPlan) || !errors.Is(err, capabilitycreate.ErrVersionExhausted) || !errors.Is(err, capabilityversion.ErrInfer) || !errors.Is(err, capabilityversion.ErrOverflow) {
+		t.Fatalf("Prepare error = %v, want ErrPlan, ErrVersionExhausted, ErrInfer, and ErrOverflow", err)
+	}
+	if got, want := err.Error(), "plan capability authoring: infer capability version: capability major version overflow for account.register"; got != want {
+		t.Fatalf("Prepare error = %q, want %q", got, want)
+	}
+	if plan.Target().ID() != "" || plan.Version().Target().String() != "" || len(plan.SourceProviders()) != 0 {
+		t.Fatalf("exhausted Prepare returned %#v", plan)
+	}
+}
+
 func TestPrepareReportsMissingPlugin(t *testing.T) {
 	t.Parallel()
 

@@ -63,7 +63,7 @@ Mutating Plystra commands regenerate automatically. Add an ordinary Go Module de
 
 Malformed ` + "`add`" + ` and ` + "`update`" + ` queries emit ` + "`PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID`" + ` and ` + "`PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID`" + `; a malformed exact ` + "`remove`" + ` path emits ` + "`PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID`" + `. Each failure occurs before Project discovery or mutation and supplies one placeholder-based corrected command. A valid ` + "`remove`" + ` path or ` + "`update`" + ` query absent from ` + "`go.mod`" + ` emits ` + "`PLYSTRA_DEPENDENCY_REMOVE_NOT_SELECTED`" + ` or ` + "`PLYSTRA_DEPENDENCY_UPDATE_NOT_SELECTED`" + ` before mutation, with placeholder-only recovery.
 
-Malformed ` + "`capability create`" + `, ` + "`capability implement`" + `, and ` + "`capability expose`" + ` references emit ` + "`PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID`" + `, ` + "`PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID`" + `, and ` + "`PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID`" + ` before Project discovery or mutation. Recovery uses canonical placeholders and retains only a safe exposure selector. A valid exact action mismatch emits ` + "`PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE`" + ` or ` + "`PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE`" + ` and switches to the counterpart authoring command without mutation. An explicit older or skipped new version uses ` + "`PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED`" + ` and requires the same create command with ` + "`--confirm`" + `. Missing new-identity profiles use ` + "`PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED`" + `; profiles on copied later versions use ` + "`PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED`" + `.
+Malformed ` + "`capability create`" + `, ` + "`capability implement`" + `, and ` + "`capability expose`" + ` references emit ` + "`PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID`" + `, ` + "`PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID`" + `, and ` + "`PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID`" + ` before Project discovery or mutation. Recovery uses canonical placeholders and retains only a safe exposure selector. A valid exact action mismatch emits ` + "`PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE`" + ` or ` + "`PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE`" + ` and switches to the counterpart authoring command without mutation. An explicit older or skipped new version uses ` + "`PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED`" + ` and requires the same create command with ` + "`--confirm`" + `. An omitted version above the maximum visible major uses ` + "`PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED`" + ` and requires a new canonical Capability identity. Missing new-identity profiles use ` + "`PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED`" + `; profiles on copied later versions use ` + "`PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED`" + `.
 
 A template's default Provider model must be unambiguous. If several compatible Plugins provide one required Capability, the template publisher must record one ` + "`capabilities.use`" + ` choice in the template's root ` + "`plystra.yaml`" + ` and publish a corrected version. Creation otherwise reports every candidate and leaves no target Project to repair.
 
@@ -1431,16 +1431,13 @@ values use placeholders. Unclassified errors get neither.
   constructor visible. Markerless dependencies are not scanned.
 - Ambiguous Implementation: run plystra use <interface-id> <constructor-symbol>
   with the same selector; no discovery priority exists.
-- Capability diagnostics:
-  - malformed reference: PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
-    PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID, or
-    PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID;
-  - wrong action: PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE or
-    PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE;
+- Capability diagnostics all precede mutation:
+  - malformed reference: PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID, PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID, or PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID;
+  - wrong action: PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE or PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE;
   - confirmation: PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED;
-  - intent profile: PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED or
-    PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
-  Follow Recovery; all precede mutation.
+  - version exhaustion: PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED;
+  - intent profile: PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED or PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
+  Follow Recovery.
 - Invalid plystra use input: PLYSTRA_USE_INTERFACE_INVALID means malformed
   Interface ID; PLYSTRA_USE_CONSTRUCTOR_INVALID means malformed fully qualified
   constructor symbol. Recovery retains the selector; both precede mutation.

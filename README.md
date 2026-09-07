@@ -552,7 +552,7 @@ plystra capability create records.read --query --plugin records --expose
 
 `--query` expands into complete explicit read-only, inherently idempotent, safely retryable, best-effort-cancellable, completed-before-return semantics with public request and response data. Names never imply semantics. A new Capability identity requires one supported profile before any mutation.
 
-An omitted version selects `v1` when none is visible. When the identity is already visible, it selects one above the highest visible version and copies that exact contract, including its semantics, as an editing base; omit profile flags for that later-version workflow. An explicit older or skipped new version is rejected without mutation under `PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED` until the same create command is deliberately repeated with `--confirm`. An existing exact version is never recreated; implement it instead:
+An omitted version selects `v1` when none is visible. When the identity is already visible, it selects one above the highest visible version and copies that exact contract, including its semantics, as an editing base; omit profile flags for that later-version workflow. An explicit older or skipped new version is rejected without mutation under `PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED` until the same create command is deliberately repeated with `--confirm`. If the highest visible major is already `18446744073709551615`, omitted-version creation emits `PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED` before mutation; use a new canonical Capability identity because no higher major exists. An existing exact version is never recreated; implement it instead:
 
 ```powershell
 plystra capability implement email.send/v1 --plugin mailer
@@ -593,6 +593,12 @@ An explicit older or skipped new version emits
 `PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED`. Review the visible version
 history and repeat the same `capability create` command with `--confirm`; the
 unconfirmed request leaves every Project byte unchanged.
+
+An omitted version cannot advance an identity whose highest visible major is
+already `18446744073709551615`. That failure emits
+`PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED`, retains the existing inference
+problem, and directs creation to a new canonical Capability identity without
+changing the Project.
 
 Intent-profile mistakes are distinct. A new identity without a profile emits
 `PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED` and recovers by adding
@@ -813,6 +819,12 @@ become `capability create`. Neither action mismatch mutates the Project.
 or skipped new version that must be reviewed and repeated with `--confirm`.
 Classification requires the owning create-operation boundary and occurs before
 mutation.
+
+`PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED` identifies an omitted-version
+create request whose visible identity already uses the maximum unsigned 64-bit
+major. Classification requires the create, authoring-exhaustion, and low-level
+overflow conditions together; recovery creates a new canonical Capability
+identity, and the failed request does not mutate the Project.
 
 `PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED` identifies a new identity
 without `--query`; `PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED`

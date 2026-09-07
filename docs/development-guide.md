@@ -1198,6 +1198,11 @@ An explicit older or skipped new version is rejected before mutation with
 `PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED`. Review the visible version
 history and repeat the same `capability create` command with `--confirm`.
 
+If omitted-version inference sees `18446744073709551615` as the highest visible
+major, no later version can be represented. The command emits
+`PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED` before mutation and directs the
+developer to create a new canonical Capability identity.
+
 Field constraints use one closed type-specific vocabulary: strings accept
 `min_length`, `max_length`, and bounded Go regular-expression `pattern`;
 integers and numbers accept `minimum` and `maximum`; arrays accept `min_items`
@@ -1995,6 +2000,13 @@ error but are classified only beneath the owning create-operation boundary as
 `PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED`. Review the visible version
 history and repeat the same create command with `--confirm`; the first request
 does not mutate the Project.
+
+An unversioned create request cannot advance a Capability identity whose
+highest visible major is `18446744073709551615`. The authoring layer preserves
+the low-level overflow cause under `ErrVersionExhausted`; the public create
+boundary emits `PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED` with one
+placeholder-based command for a new canonical Capability identity. The failed
+request leaves the complete Project unchanged.
 
 Intent-profile failures have separate recovery:
 

@@ -18,6 +18,7 @@ import (
 	"github.com/plystra/cli/internal/capabilitycreate"
 	"github.com/plystra/cli/internal/capabilityexpose"
 	"github.com/plystra/cli/internal/capabilitymeta"
+	"github.com/plystra/cli/internal/capabilityversion"
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/dependencyadd"
@@ -186,6 +187,7 @@ const (
 	diagnosticCapabilityCreateReferenceInvalid        = diagnosticcode.CapabilityCreateReferenceInvalid
 	diagnosticCapabilityCreateAlreadyVisible          = diagnosticcode.CapabilityCreateAlreadyVisible
 	diagnosticCapabilityCreateConfirmationRequired    = diagnosticcode.CapabilityCreateConfirmationRequired
+	diagnosticCapabilityCreateVersionExhausted        = diagnosticcode.CapabilityCreateVersionExhausted
 	diagnosticCapabilityCreateIntentProfileRequired   = diagnosticcode.CapabilityCreateIntentProfileRequired
 	diagnosticCapabilityCreateIntentProfileNotAllowed = diagnosticcode.CapabilityCreateIntentProfileNotAllowed
 	diagnosticCapabilityImplementReferenceInvalid     = diagnosticcode.CapabilityImplementReferenceInvalid
@@ -431,6 +433,8 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticCapabilityCreateAlreadyVisible, "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>]` for the existing exact contract.")
 	case errors.Is(err, capabilitycreate.ErrCreate) && !errors.Is(err, capabilitycreate.ErrImplement) && errors.Is(err, capabilitycreate.ErrConfirmationRequired):
 		return recoveryDiagnostic(diagnosticCapabilityCreateConfirmationRequired, "Review the visible Capability versions, then rerun the same `plystra capability create` command with `--confirm`.")
+	case errors.Is(err, capabilitycreate.ErrCreate) && !errors.Is(err, capabilitycreate.ErrImplement) && errors.Is(err, capabilitycreate.ErrVersionExhausted) && errors.Is(err, capabilityversion.ErrOverflow):
+		return recoveryDiagnostic(diagnosticCapabilityCreateVersionExhausted, "Rerun `plystra capability create <new-capability-name> --query [--plugin <plugin>] [--expose]` with a new canonical Capability identity; the existing identity has no higher major version.")
 	case errors.Is(err, capabilitycreate.ErrCreate) && errors.Is(err, capabilitycreate.ErrIntentProfile) && errors.Is(err, capabilitycreate.ErrIntentProfileRequired) && !errors.Is(err, capabilitycreate.ErrIntentProfileNotAllowed):
 		return recoveryDiagnostic(diagnosticCapabilityCreateIntentProfileRequired, "Rerun `plystra capability create <capability-name> --query [--plugin <plugin>] [--confirm] [--expose]` with the explicit query intent profile required for a new Capability identity.")
 	case errors.Is(err, capabilitycreate.ErrCreate) && errors.Is(err, capabilitycreate.ErrIntentProfile) && errors.Is(err, capabilitycreate.ErrIntentProfileNotAllowed) && !errors.Is(err, capabilitycreate.ErrIntentProfileRequired):

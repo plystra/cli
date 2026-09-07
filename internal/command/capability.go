@@ -64,6 +64,9 @@ implementation command without changing the Project.
 An explicit older or skipped new version emits
 PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED and requires the same create
 command to be repeated with --confirm before mutation.
+An omitted version whose highest visible major is already the maximum emits
+PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED and requires a new Capability
+identity before mutation.
 A missing new-identity profile emits
 PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED; a profile supplied while
 copying a later version emits PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
