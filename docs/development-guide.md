@@ -253,7 +253,10 @@ initial `go.mod` directive is `module orders`. Use `--module` when directory
 identity and a standard publishable Go Module path differ. Project names must
 be one safe lower-case ASCII kebab-case child component; absolute paths,
 traversal, separators, `.`, `..`, unsafe names, and existing targets fail
-before mutation. The old positional full-module-path syntax is not supported.
+before mutation. Invalid names and module identities emit
+`PLYSTRA_PROJECT_CREATE_NAME_INVALID` and
+`PLYSTRA_PROJECT_CREATE_MODULE_INVALID`. The old positional full-module-path
+syntax is not supported.
 
 `--template` accepts one standard Go Module query. Go resolves the query, the
 selected module must contain regular root `plystra.yaml`, and the new Project

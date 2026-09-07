@@ -353,7 +353,10 @@ The first command creates `./my-app/` with `module my-app`; `--module` changes
 the `go.mod` identity and generated imports without changing that directory.
 Unsafe names, paths, traversal, separators, and an existing target fail before
 filesystem mutation. An explicit module path must satisfy standard Go Module
-rules. The removed positional full-module-path form is not accepted.
+rules. Invalid Project names and module identities emit
+`PLYSTRA_PROJECT_CREATE_NAME_INVALID` and
+`PLYSTRA_PROJECT_CREATE_MODULE_INVALID`. The removed positional
+full-module-path form is not accepted.
 
 `--template` resolves one standard Go Module query, requires that selected
 module to contain regular root `plystra.yaml`, and retains it as an ordinary

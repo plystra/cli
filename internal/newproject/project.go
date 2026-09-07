@@ -55,6 +55,12 @@ const maximumGoEnvironmentValueBytes = 64 << 10
 var (
 	// ErrCreate reports a project creation failure.
 	ErrCreate = errors.New("create Plystra project")
+	// ErrInvalidProjectName reports a Project directory name that is not one
+	// safe canonical child component.
+	ErrInvalidProjectName = errors.New("invalid Plystra project name")
+	// ErrInvalidModulePath reports a Go Module identity that cannot be used by
+	// the created Project.
+	ErrInvalidModulePath = errors.New("invalid Plystra project module path")
 	// ErrGitInitialization reports a failed requested Git repository setup.
 	ErrGitInitialization = errors.New("initialize Git repository")
 	// ErrInvalidTemplate reports a resolved module that cannot serve as a
@@ -93,16 +99,16 @@ func (r Result) Path() string { return r.path }
 // Create stages, validates, and atomically commits a new Plystra Go Module.
 func Create(ctx context.Context, options Options) (Result, error) {
 	if !validProjectName(options.ProjectName) {
-		return Result{}, fmt.Errorf("%w: project name %q must be one lower-case ASCII kebab-case child directory", ErrCreate, options.ProjectName)
+		return Result{}, fmt.Errorf("%w: %w: project name %q must be one lower-case ASCII kebab-case child directory", ErrCreate, ErrInvalidProjectName, options.ProjectName)
 	}
 	modulePath := options.ModulePath
 	if modulePath == "" {
 		modulePath = options.ProjectName
 		if err := modulepath.CheckProject(modulePath); err != nil {
-			return Result{}, fmt.Errorf("%w: project name %q cannot be used as the initial Go Module path: %v", ErrCreate, options.ProjectName, err)
+			return Result{}, fmt.Errorf("%w: %w: project name %q cannot be used as the initial Go Module path: %v", ErrCreate, ErrInvalidModulePath, options.ProjectName, err)
 		}
 	} else if err := module.CheckPath(modulePath); err != nil {
-		return Result{}, fmt.Errorf("%w: invalid explicit Go Module path %q: %v", ErrCreate, modulePath, err)
+		return Result{}, fmt.Errorf("%w: %w: invalid explicit Go Module path %q: %v", ErrCreate, ErrInvalidModulePath, modulePath, err)
 	}
 	templateQuery := ""
 	templateModulePath := ""

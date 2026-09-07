@@ -87,6 +87,9 @@ Interactive creation asks for each unspecified choice. Non-interactive creation
 must specify one flag from every choice pair. Omitting a pair emits
 PLYSTRA_PROJECT_CREATE_CHOICE_REQUIRED before target creation.
 
+Invalid Project names and explicit Go Module paths emit
+PLYSTRA_PROJECT_CREATE_NAME_INVALID and PLYSTRA_PROJECT_CREATE_MODULE_INVALID.
+
 Template dependencies must be public, portable, and generation-stable. Creation
 rejects the staged Project unless immediate generation checking, applicable
 JavaScript SDK dependency installation plus typecheck/build/package validation,

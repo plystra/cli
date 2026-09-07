@@ -627,18 +627,21 @@ global protoc nor a hosted generator; build-affecting identity changes drift.
 
 ## Create a Project and a Plugin
 
-From the desired parent directory, create `./app/` with the project name as
-its initial Go Module path:
+Create `./app/` with local module `app`:
 
     plystra new app
 
-Choose an independent standard Go Module path without changing the directory:
+Use an independent module path:
 
     plystra new app --module github.com/acme/app
 
-Start from an existing Plystra Project distributed as a Go Module dependency:
+Create from a template dependency:
 
     plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3
+
+Invalid Project names and module paths emit
+`PLYSTRA_PROJECT_CREATE_NAME_INVALID` or
+`PLYSTRA_PROJECT_CREATE_MODULE_INVALID` before staging.
 
 Inside an existing Project, create a root-level Plugin:
 

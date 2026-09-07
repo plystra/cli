@@ -93,6 +93,8 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.InterfaceMetadataInvalid,
 		diagnosticcode.InterfaceIDDuplicate,
 		diagnosticcode.AuthoredPackageInvalid,
+		diagnosticcode.ProjectCreateNameInvalid,
+		diagnosticcode.ProjectCreateModuleInvalid,
 		diagnosticcode.ProjectCreateChoiceRequired,
 		diagnosticcode.PluginCreateNameInvalid,
 		diagnosticcode.PluginCreateIDInvalid,

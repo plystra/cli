@@ -1311,7 +1311,10 @@ func TestPublicCommandRejectsOldPositionalModulePathWithoutMutation(t *testing.T
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := command.RunIn([]string{"new", "example.com/acme/my-app", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
-	if exitCode != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "project name") {
+	wantStderr := "create project: create Plystra project: invalid Plystra project name: project name \"example.com/acme/my-app\" must be one lower-case ASCII kebab-case child directory\n\n" +
+		"Recovery:\nRerun `plystra new <project-name> [options]` with one lower-case ASCII kebab-case child directory name; put any independent Go Module identity in `--module <go-module-path>`.\n\n" +
+		"Diagnostic: " + diagnosticcode.ProjectCreateNameInvalid + "\n"
+	if exitCode != 1 || stdout.Len() != 0 || stderr.String() != wantStderr {
 		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
 	}
 	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
@@ -1326,7 +1329,9 @@ func TestPublicCommandRejectsInvalidModuleOverrideWithoutMutation(t *testing.T) 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := command.RunIn([]string{"new", "my-app", "--module", "local-module", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
-	if exitCode != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "invalid explicit Go Module path") {
+	if exitCode != 1 || stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "create project: create Plystra project: invalid Plystra project module path: invalid explicit Go Module path \"local-module\":") ||
+		!strings.Contains(stderr.String(), "\n\nRecovery:\nRerun `plystra new <project-name> --module <go-module-path> [options]` with one valid Go Module path and every required choice flag.\n\nDiagnostic: "+diagnosticcode.ProjectCreateModuleInvalid+"\n") ||
+		strings.Count(stderr.String(), "Recovery:") != 1 || strings.Count(stderr.String(), "Diagnostic:") != 1 {
 		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
 	}
 	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
@@ -1498,8 +1503,8 @@ func TestCreateRejectsUnsafeProjectNamesBeforeMutation(t *testing.T) {
 			t.Parallel()
 			parent := t.TempDir()
 			_, err := newproject.Create(context.Background(), newproject.Options{Parent: parent, ProjectName: test.projectName})
-			if !errors.Is(err, newproject.ErrCreate) {
-				t.Fatalf("Create error = %v, want ErrCreate", err)
+			if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrInvalidProjectName) {
+				t.Fatalf("Create error = %v, want ErrCreate and ErrInvalidProjectName", err)
 			}
 			entries, readErr := os.ReadDir(parent)
 			if readErr != nil || len(entries) != 0 {
@@ -1518,7 +1523,7 @@ func TestCreateRejectsInvalidExplicitModulePathsBeforeMutation(t *testing.T) {
 			t.Parallel()
 			parent := t.TempDir()
 			_, err := newproject.Create(context.Background(), newproject.Options{Parent: parent, ProjectName: "my-app", ModulePath: modulePath})
-			if !errors.Is(err, newproject.ErrCreate) || !strings.Contains(err.Error(), "invalid explicit Go Module path") {
+			if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrInvalidModulePath) || !strings.Contains(err.Error(), "invalid explicit Go Module path") {
 				t.Fatalf("Create error = %v", err)
 			}
 			entries, readErr := os.ReadDir(parent)

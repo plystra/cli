@@ -146,6 +146,8 @@ const (
 )
 
 const (
+	diagnosticProjectCreateNameInvalid              = diagnosticcode.ProjectCreateNameInvalid
+	diagnosticProjectCreateModuleInvalid            = diagnosticcode.ProjectCreateModuleInvalid
 	diagnosticProjectCreateChoiceRequired           = diagnosticcode.ProjectCreateChoiceRequired
 	diagnosticPluginCreateNameInvalid               = diagnosticcode.PluginCreateNameInvalid
 	diagnosticPluginCreateIDInvalid                 = diagnosticcode.PluginCreateIDInvalid
@@ -255,6 +257,12 @@ func primaryFailureMessage(err error) string {
 func primaryActionableDiagnostic(err error, context recoveryContext) (actionableDiagnostic, bool) {
 	if errors.Is(err, errNewChoiceRequired) {
 		return recoveryDiagnostic(diagnosticProjectCreateChoiceRequired, "Rerun `plystra new <project-name> [options]` with exactly one of `--git` or `--no-git`, one of `--github-ci` or `--no-github-ci`, and one of `--skills` or `--no-skills`.")
+	}
+	if errors.Is(err, newproject.ErrInvalidProjectName) {
+		return recoveryDiagnostic(diagnosticProjectCreateNameInvalid, "Rerun `plystra new <project-name> [options]` with one lower-case ASCII kebab-case child directory name; put any independent Go Module identity in `--module <go-module-path>`.")
+	}
+	if errors.Is(err, newproject.ErrInvalidModulePath) {
+		return recoveryDiagnostic(diagnosticProjectCreateModuleInvalid, "Rerun `plystra new <project-name> --module <go-module-path> [options]` with one valid Go Module path and every required choice flag.")
 	}
 	if errors.Is(err, newproject.ErrInvalidTemplate) {
 		if _, action, found := splitEmbeddedRecovery(err.Error()); found {
