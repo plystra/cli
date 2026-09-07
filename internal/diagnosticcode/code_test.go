@@ -95,6 +95,7 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.AuthoredPackageInvalid,
 		diagnosticcode.ProjectCreateNameInvalid,
 		diagnosticcode.ProjectCreateModuleInvalid,
+		diagnosticcode.ProjectCreateTemplateInvalid,
 		diagnosticcode.ProjectCreateChoiceRequired,
 		diagnosticcode.PluginCreateNameInvalid,
 		diagnosticcode.PluginCreateIDInvalid,

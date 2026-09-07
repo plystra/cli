@@ -148,6 +148,7 @@ const (
 const (
 	diagnosticProjectCreateNameInvalid              = diagnosticcode.ProjectCreateNameInvalid
 	diagnosticProjectCreateModuleInvalid            = diagnosticcode.ProjectCreateModuleInvalid
+	diagnosticProjectCreateTemplateInvalid          = diagnosticcode.ProjectCreateTemplateInvalid
 	diagnosticProjectCreateChoiceRequired           = diagnosticcode.ProjectCreateChoiceRequired
 	diagnosticPluginCreateNameInvalid               = diagnosticcode.PluginCreateNameInvalid
 	diagnosticPluginCreateIDInvalid                 = diagnosticcode.PluginCreateIDInvalid
@@ -263,6 +264,9 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	}
 	if errors.Is(err, newproject.ErrInvalidModulePath) {
 		return recoveryDiagnostic(diagnosticProjectCreateModuleInvalid, "Rerun `plystra new <project-name> --module <go-module-path> [options]` with one valid Go Module path and every required choice flag.")
+	}
+	if errors.Is(err, newproject.ErrInvalidTemplateQuery) {
+		return recoveryDiagnostic(diagnosticProjectCreateTemplateInvalid, "Rerun `plystra new <project-name> --template <go-module-query> [options]` with one valid non-removal Go Module query and every required choice flag.")
 	}
 	if errors.Is(err, newproject.ErrInvalidTemplate) {
 		if _, action, found := splitEmbeddedRecovery(err.Error()); found {

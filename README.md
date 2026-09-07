@@ -358,9 +358,11 @@ rules. Invalid Project names and module identities emit
 `PLYSTRA_PROJECT_CREATE_MODULE_INVALID`. The removed positional
 full-module-path form is not accepted.
 
-`--template` resolves one standard Go Module query, requires that selected
-module to contain regular root `plystra.yaml`, and retains it as an ordinary
-direct dependency. The CLI composes the dependency Project's root declarations
+`--template` rejects a malformed query before staging with
+`PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID`. It resolves one standard Go Module
+query, requires that selected module to contain regular root `plystra.yaml`,
+and retains it as an ordinary direct dependency. The CLI composes the
+dependency Project's root declarations
 into the new Project and regenerates the application; it does not clone or copy
 the dependency source, inspect dependency environment overlays, modify the Go
 Module Cache, create `go.work`, or grant the template any Provider or

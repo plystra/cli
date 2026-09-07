@@ -1066,12 +1066,13 @@ func TestCreateRejectsInvalidTemplateQueryBeforeMutation(t *testing.T) {
 		Template:    "../platform@v1.0.0",
 		GoCommand:   filepath.Join(parent, "must-not-run"),
 	})
-	if !errors.Is(err, newproject.ErrCreate) || !strings.Contains(err.Error(), "template query") {
+	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrInvalidTemplateQuery) || !strings.Contains(err.Error(), "invalid Go Module path") {
 		t.Fatalf("Create error = %v", err)
 	}
 	if entries, readErr := os.ReadDir(parent); readErr != nil || len(entries) != 0 {
 		t.Fatalf("invalid template query mutated parent: %v, %v", entries, readErr)
 	}
+	assertNoTransactionFiles(t, parent)
 }
 
 func assertCIUsesCurrentActions(t *testing.T, workflow []byte) {
@@ -1337,6 +1338,29 @@ func TestPublicCommandRejectsInvalidModuleOverrideWithoutMutation(t *testing.T) 
 	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
 		t.Fatalf("invalid module override mutated parent: %v, %v", entries, err)
 	}
+}
+
+func TestPublicCommandRejectsInvalidTemplateQueryWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := command.RunIn([]string{"new", "my-app", "--template", "../platform@v1.0.0", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
+	wantRecovery := "\n\nRecovery:\nRerun `plystra new <project-name> --template <go-module-query> [options]` with one valid non-removal Go Module query and every required choice flag.\n\nDiagnostic: " + diagnosticcode.ProjectCreateTemplateInvalid + "\n"
+	if exitCode != 1 || stdout.Len() != 0 ||
+		!strings.HasPrefix(stderr.String(), "create project: create Plystra project: invalid Plystra project template query: invalid Go Module path ") ||
+		!strings.Contains(stderr.String(), wantRecovery) || strings.Contains(stderr.String(), "Usage:") ||
+		strings.Count(stderr.String(), "Recovery:") != 1 || strings.Count(stderr.String(), "Diagnostic:") != 1 {
+		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
+	}
+	if recoveryIndex := strings.Index(stderr.String(), "Recovery:"); recoveryIndex < 0 || strings.Contains(stderr.String()[recoveryIndex:], "../platform") {
+		t.Fatalf("recovery echoed rejected template query: %q", stderr.String())
+	}
+	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
+		t.Fatalf("invalid template query mutated parent: %v, %v", entries, err)
+	}
+	assertNoTransactionFiles(t, parent)
 }
 
 func TestCreateHonorsOptionalProjectChoices(t *testing.T) {

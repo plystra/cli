@@ -258,9 +258,11 @@ before mutation. Invalid names and module identities emit
 `PLYSTRA_PROJECT_CREATE_MODULE_INVALID`. The old positional full-module-path
 syntax is not supported.
 
-`--template` accepts one standard Go Module query. Go resolves the query, the
-selected module must contain regular root `plystra.yaml`, and the new Project
-retains it as a direct `go.mod` requirement. The CLI composes that dependency
+`--template` rejects a malformed query before staging with
+`PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID`. It accepts one standard Go Module
+query. Go resolves the query, the selected module must contain regular root
+`plystra.yaml`, and the new Project retains it as a direct `go.mod`
+requirement. The CLI composes that dependency
 Project's root declarations, regenerates the complete application, and validates
 the staged Project before installing the target directory. It does not clone a
 source repository, copy Plugin directories, inspect dependency environment

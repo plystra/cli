@@ -627,21 +627,15 @@ global protoc nor a hosted generator; build-affecting identity changes drift.
 
 ## Create a Project and a Plugin
 
-Create `./app/` with local module `app`:
+Create a Project with optional module or template input:
 
     plystra new app
-
-Use an independent module path:
-
     plystra new app --module github.com/acme/app
-
-Create from a template dependency:
-
     plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3
 
-Invalid Project names and module paths emit
-`PLYSTRA_PROJECT_CREATE_NAME_INVALID` or
-`PLYSTRA_PROJECT_CREATE_MODULE_INVALID` before staging.
+Pre-staging input codes are `PLYSTRA_PROJECT_CREATE_NAME_INVALID`,
+`PLYSTRA_PROJECT_CREATE_MODULE_INVALID`, and
+`PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID`.
 
 Inside an existing Project, create a root-level Plugin:
 

@@ -61,6 +61,9 @@ var (
 	// ErrInvalidModulePath reports a Go Module identity that cannot be used by
 	// the created Project.
 	ErrInvalidModulePath = errors.New("invalid Plystra project module path")
+	// ErrInvalidTemplateQuery reports a malformed Go Module query supplied to
+	// the Project creation command.
+	ErrInvalidTemplateQuery = errors.New("invalid Plystra project template query")
 	// ErrGitInitialization reports a failed requested Git repository setup.
 	ErrGitInitialization = errors.New("initialize Git repository")
 	// ErrInvalidTemplate reports a resolved module that cannot serve as a
@@ -116,7 +119,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		var err error
 		templateQuery, templateModulePath, err = moduleargument.ParseQuery(options.Template)
 		if err != nil {
-			return Result{}, fmt.Errorf("%w: template query: %w", ErrCreate, err)
+			return Result{}, fmt.Errorf("%w: %w: %v", ErrCreate, ErrInvalidTemplateQuery, err)
 		}
 	}
 	if options.Plugin != "" {
