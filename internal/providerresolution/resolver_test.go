@@ -200,6 +200,18 @@ func TestResolveReferenceOnlyRequirementReportsMissingAndConflictingProviders(t 
 		if !errors.Is(err, providerresolution.ErrMissingProvider) || !strings.Contains(err.Error(), "generation rule require-audit") {
 			t.Fatalf("Resolve error = %v, want actionable ErrMissingProvider", err)
 		}
+		var missing *providerresolution.MissingProviderError
+		if !errors.As(err, &missing) || !slices.Equal(missing.Sources(), []string{"generation rule require-audit"}) {
+			t.Fatalf("MissingProviderError = %#v", missing)
+		}
+		sources := missing.RequirementSources()
+		if len(sources) != 1 || sources[0].Kind != providerresolution.RequirementDeclaration || sources[0].ModulePath != "example.com/project" || sources[0].Path != "plystra.yaml" || sources[0].Line != 1 || sources[0].Column != 1 {
+			t.Fatalf("typed missing-provider sources = %#v", sources)
+		}
+		sources[0] = providerresolution.RequirementSource{}
+		if missing.RequirementSources()[0].ModulePath != "example.com/project" {
+			t.Fatal("MissingProviderError exposed mutable typed source storage")
+		}
 	})
 
 	t.Run("conflicting contracts", func(t *testing.T) {

@@ -443,7 +443,7 @@ func resolveNormalized(
 		case 0:
 			issues = append(issues, &MissingProviderError{
 				capability: group.id,
-				sources:    requirementSourceStrings(group.sources),
+				sources:    append([]RequirementSource(nil), group.sources...),
 			})
 		case 1:
 			selected := providers[0]
@@ -1320,7 +1320,7 @@ func (*ProviderContractError) Unwrap() error { return ErrProviderContract }
 // MissingProviderError reports one unresolved ordinary requirement.
 type MissingProviderError struct {
 	capability capabilityid.Identifier
-	sources    []string
+	sources    []RequirementSource
 }
 
 // Capability returns the missing exact ID.
@@ -1336,7 +1336,16 @@ func (e *MissingProviderError) Sources() []string {
 	if e == nil {
 		return nil
 	}
-	return append([]string(nil), e.sources...)
+	return requirementSourceStrings(e.sources)
+}
+
+// RequirementSources returns sorted typed module-relative requirement
+// provenance without requiring consumers to parse diagnostic text.
+func (e *MissingProviderError) RequirementSources() []RequirementSource {
+	if e == nil {
+		return nil
+	}
+	return append([]RequirementSource(nil), e.sources...)
 }
 
 func (e *MissingProviderError) Error() string {
@@ -1347,7 +1356,7 @@ func (e *MissingProviderError) Error() string {
 		"%s: %s required by [%s] has no visible provider; correction: add an intended module containing a plugin that provides the exact contract, or remove the requirement",
 		ErrMissingProvider,
 		e.capability,
-		strings.Join(e.sources, ", "),
+		strings.Join(requirementSourceStrings(e.sources), ", "),
 	)
 }
 

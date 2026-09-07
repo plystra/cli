@@ -39,6 +39,33 @@ func TestPublicResolvingCommandsRejectInvalidRequiredConstructorGraphWithoutMuta
 	}
 }
 
+func TestPublicResolvingCommandsReportMissingProviderRequirementSourceWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	for _, arguments := range commands {
+		arguments := arguments
+		t.Run(strings.Join(arguments, " "), func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/command-missing-provider\n\ngo 1.26\n")
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "capabilities: {require: [audit.write/v1]}\n")
+			writeCommandFile(t, filepath.Join(root, "generated", "sentinel.txt"), "must remain unchanged\n")
+			before := commandTree(t, root)
+
+			exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
+			wantSuffix := "\n\nSource: example.com/command-missing-provider:plystra.yaml:1:1 (declaration)\n\nRecovery:\nAdd an intended dependency with `plystra add <go-module-query>` whose Plugin provides audit.write/v1.\n\nDiagnostic: " + diagnosticcode.ProviderMissing + "\n"
+			if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, root) {
+				t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%v mutated missing-Provider Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func TestPublicResolvingCommandsEmitStableImplementationAmbiguityWithoutMutation(t *testing.T) {
 	t.Parallel()
 

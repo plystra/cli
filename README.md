@@ -783,8 +783,8 @@ human wording. A recovery command preserves the selected default, `--env`, or
 advice. Unknown internal failures retain their original diagnostic without an
 invented recovery action or code.
 
-Classified authored Interface and Implementation failures insert one or more
-canonical source lines between the problem and recovery:
+Classified failures with typed provenance insert one or more canonical source
+lines between the problem and recovery:
 
 ```text
 Source: <module>:<module-relative-path>[:<line>:<column>] (<kind>)
@@ -792,8 +792,10 @@ Source: <module>:<module-relative-path>[:<line>:<column>] (<kind>)
 
 Multiple sources use the shared diagnostic-envelope order. The CLI prints the
 owning Project module, never an absolute path or Module Cache path, and omits
-rather than fabricates a line or column when Go's structured package error does
-not provide one.
+rather than fabricates a line or column when structured provenance does not
+provide one. Authored Interface and Implementation failures report their
+declaration or package source. `PLYSTRA_PROVIDER_MISSING` reports every typed
+requirement source that made the exact Capability necessary.
 
 Configuration-selection failures use
 `PLYSTRA_CONFIGURATION_SELECTION_INVALID`. An explicit `--env` plus `--config`

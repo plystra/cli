@@ -89,7 +89,7 @@ Cross-origin browser access is opt-in. Add ` + "`http.cors.allowed_origins`" + `
 
 When several compatible Implementations satisfy one required Interface, select one with ` + "`plystra use <interface-id> <constructor-symbol>`" + `. The same command may record a validated dormant choice before the Interface becomes required without activating its constructor. Constructor configuration for that dormant choice is type-checked immediately, but its Secret references remain unresolved and it enters no runtime, bootstrap, or Kernel state. Add ` + "`--env <environment>`" + ` to write only that sparse overlay or ` + "`--config <yaml-path>`" + ` to write only one complete replacement configuration; the command regenerates and validates with the same selection.
 
-Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + ` block followed by one stable ` + "`Diagnostic: PLYSTRA_<AREA>_<CONDITION>`" + ` code. Authored Interface and Implementation failures insert sorted ` + "`Source: <module>:<module-relative-path>[:<line>:<column>] (<kind>)`" + ` lines before recovery; they never expose absolute or Module Cache paths. Follow that one command or file edit with the same default, ` + "`--env`" + `, or ` + "`--config`" + ` selection, and use the code rather than human wording as the automation or support identity. Recovery output preserves safe explicit and ambient selectors, but uses ` + "`<environment>`" + ` or ` + "`<yaml-path>`" + ` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice or a code.
+Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + ` block followed by one stable ` + "`Diagnostic: PLYSTRA_<AREA>_<CONDITION>`" + ` code. Authored Interface and Implementation failures, plus ` + "`PLYSTRA_PROVIDER_MISSING`" + `, insert sorted ` + "`Source: <module>:<module-relative-path>[:<line>:<column>] (<kind>)`" + ` lines before recovery; they never expose absolute or Module Cache paths. Follow that one command or file edit with the same default, ` + "`--env`" + `, or ` + "`--config`" + ` selection, and use the code rather than human wording as the automation or support identity. Recovery output preserves safe explicit and ambient selectors, but uses ` + "`<environment>`" + ` or ` + "`<yaml-path>`" + ` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice or a code.
 
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
@@ -1423,7 +1423,8 @@ build and distribution boundary for every Plystra module.
 ## Diagnose common failures
 
 Actionable failures end with Recovery and a stable
-Diagnostic: PLYSTRA_<AREA>_<CONDITION> code. Authored failures put sorted
+Diagnostic: PLYSTRA_<AREA>_<CONDITION> code. Authored failures and
+PLYSTRA_PROVIDER_MISSING put sorted
 Source: <module>:<module-relative-path>[:line:column] (<kind>) lines first; they
 expose no Module Cache or absolute path. Unsafe selectors use placeholders.
 Unclassified errors get neither.

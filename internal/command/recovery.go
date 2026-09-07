@@ -248,6 +248,20 @@ func writeCommandFailure(writer io.Writer, prefix string, err error, context rec
 func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source {
 	var sources []diagnosticjson.Source
 	switch code {
+	case diagnosticProviderMissing:
+		var missing *providerresolution.MissingProviderError
+		if !errors.As(err, &missing) || missing == nil {
+			return nil
+		}
+		for _, source := range missing.RequirementSources() {
+			sources = append(sources, diagnosticjson.Source{
+				Module: source.ModulePath,
+				Path:   source.Path,
+				Kind:   string(source.Kind),
+				Line:   source.Line,
+				Column: source.Column,
+			})
+		}
 	case diagnosticImplementationDeclarationInvalid,
 		diagnosticInterfaceDeclarationInvalid,
 		diagnosticInterfaceContractInvalid,

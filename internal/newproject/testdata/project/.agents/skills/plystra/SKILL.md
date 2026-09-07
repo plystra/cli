@@ -1220,7 +1220,8 @@ build and distribution boundary for every Plystra module.
 ## Diagnose common failures
 
 Actionable failures end with Recovery and a stable
-Diagnostic: PLYSTRA_<AREA>_<CONDITION> code. Authored failures put sorted
+Diagnostic: PLYSTRA_<AREA>_<CONDITION> code. Authored failures and
+PLYSTRA_PROVIDER_MISSING put sorted
 Source: <module>:<module-relative-path>[:line:column] (<kind>) lines first; they
 expose no Module Cache or absolute path. Unsafe selectors use placeholders.
 Unclassified errors get neither.
