@@ -13,6 +13,7 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/capabilityexpose"
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/projectlocate"
 )
 
@@ -153,6 +154,37 @@ func TestExposeRequiresExactCapabilityAndPlystraProject(t *testing.T) {
 	var nilContext context.Context
 	if _, err := capabilityexpose.Expose(nilContext, capabilityexpose.Options{}); !errors.Is(err, capabilityexpose.ErrExpose) {
 		t.Fatalf("nil-context Expose error = %v", err)
+	}
+}
+
+func TestExposeRejectsMissingVisibleCapabilityBeforeMutation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	goMod := []byte("module example.com/acme/app\n\ngo 1.26\n")
+	manifest := []byte("{}\n")
+	writeExposureFile(t, filepath.Join(root, "go.mod"), goMod)
+	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), manifest)
+
+	_, err := capabilityexpose.Expose(t.Context(), capabilityexpose.Options{
+		Start:             root,
+		Reference:         "records.missing/v1",
+		ConfigurationPath: "plystra.yaml",
+		Environment:       os.Environ(),
+	})
+	want := "expose capability: capability exposure target is not visible: records.missing/v1 is absent from the visible canonical catalog"
+	if !errors.Is(err, capabilityexpose.ErrExpose) || !errors.Is(err, capabilityexpose.ErrNotVisible) || !errors.Is(err, interfaceresolution.ErrUnknownInterface) || errors.Is(err, capabilityexpose.ErrInvalidReference) || err.Error() != want {
+		t.Fatalf("missing visible Capability error = %v", err)
+	}
+	if got := readExposureFile(t, filepath.Join(root, "go.mod")); !bytes.Equal(got, goMod) {
+		t.Fatalf("missing visible Capability changed go.mod: %q", got)
+	}
+	if got := readExposureFile(t, filepath.Join(root, "plystra.yaml")); !bytes.Equal(got, manifest) {
+		t.Fatalf("missing visible Capability changed plystra.yaml: %q", got)
+	}
+	entries, readErr := os.ReadDir(root)
+	if readErr != nil || len(entries) != 2 || entries[0].Name() != "go.mod" || entries[1].Name() != "plystra.yaml" {
+		t.Fatalf("missing visible Capability changed Project entries = %#v, %v", entries, readErr)
 	}
 }
 

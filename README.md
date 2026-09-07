@@ -581,6 +581,12 @@ before Project discovery or mutation. Recovery uses canonical placeholders
 instead of copying the rejected reference, and exposure recovery retains only a
 safe default, environment, or complete-replacement selector.
 
+A well-formed exact `capability expose` target must already be present in the
+selected visible canonical catalog. An absent target emits
+`PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE` before write planning or mutation;
+recovery keeps a safe selector, substitutes the Capability placeholder, and
+leaves every Project byte unchanged.
+
 A well-formed exact version sent to the wrong authoring action is also
 classified. `PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE` switches creation of an
 existing exact contract to `capability implement`, while
@@ -809,6 +815,12 @@ Malformed `plystra capability create`, `plystra capability implement`, and
 `PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID`. They fail before Project
 discovery or mutation; recovery uses canonical placeholders and preserves a
 safe exposure selector.
+
+`PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE` identifies a well-formed exact exposure
+target absent from the selected visible canonical catalog. Classification
+requires the owning exposure boundary and the preserved unknown-Interface
+condition; recovery reruns `capability expose` with a visible placeholder and
+the safe selected configuration, while the failed request changes no files.
 
 Valid exact Capability IDs use `PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE` when
 `capability create` must become `capability implement`, and

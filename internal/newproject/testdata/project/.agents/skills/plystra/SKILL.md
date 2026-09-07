@@ -1007,20 +1007,17 @@ Expose an existing exact canonical Capability with:
     plystra capability expose records.read/v1
     plystra capability expose records.read/v1 --env production
 
-The default form updates root plystra.yaml. The environment form updates only
+Default updates root plystra.yaml; --env updates only
 the sparse project-root plystra.production.yaml overlay while preserving
 comments, unrelated values, and explicit add/remove tombstones. For an
-advanced complete replacement, use:
+advanced replacement, use:
 
     plystra capability expose records.read/v1 --config deploy/customer-a.yaml
 
-PLYSTRA_ENV and PLYSTRA_CONFIG select the same targets when neither explicit
-flag is present. An explicit --env or --config overrides both variables, and
-the selector modes cannot be combined. Relative replacement paths resolve from
-the Project root even when the command starts inside a Plugin. The command
-regenerates with the same selection, reports the selected document path, never
-synchronizes an unselected YAML file, and restores the selected document on
-failure.
+PLYSTRA_ENV and PLYSTRA_CONFIG provide the same selectors. Explicit flags
+override them; never combine selector modes. Relative paths resolve from the
+Project root. The command regenerates with the same selection, leaves
+unselected YAML untouched, and restores the selected document on failure.
 
 Or expose during creation with --expose. That shortcut uses the default root
 configuration. Exposure is application-owned and updates the selected
@@ -1230,13 +1227,17 @@ values use placeholders. Unclassified errors get neither.
   constructor visible. Markerless dependencies are not scanned.
 - Ambiguous Implementation: run plystra use <interface-id> <constructor-symbol>
   with the same selector; no discovery priority exists.
-- Capability diagnostics all precede mutation:
-  - malformed reference: PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID, PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID, or PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID;
-  - wrong action: PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE or PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE;
-  - confirmation: PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED;
-  - version exhaustion: PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED;
-  - intent profile: PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED or PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
-  Follow Recovery.
+- Capability diagnostics precede mutation. Malformed references use
+  PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
+  PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID, or
+  PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID; missing exposure uses
+  PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE; wrong actions use
+  PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE or
+  PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE. Create confirmation, exhaustion,
+  and profile failures use PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED,
+  PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED,
+  PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED, or
+  PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED. Follow Recovery.
 - Invalid plystra use input: PLYSTRA_USE_INTERFACE_INVALID means malformed
   Interface ID; PLYSTRA_USE_CONSTRUCTOR_INVALID means malformed fully qualified
   constructor symbol. Recovery retains the selector; both precede mutation.

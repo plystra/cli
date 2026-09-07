@@ -605,24 +605,36 @@ func TestRunCapabilityExposeRejectsEventAndStreamAndRollsBack(t *testing.T) {
 	}
 }
 
+func TestRunCapabilityExposeRejectsMissingVisibleTargetBeforeMutation(t *testing.T) {
+	root := writeCapabilityCommandModule(t)
+	environment := commandGoEnvironment()
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "# Production.\n{}\n")
+	before := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"capability", "expose", "missing.operation/v1", "--env", "production"}, filepath.Join(root, "records"), environment)
+	wantError := "expose capability: capability exposure target is not visible: missing.operation/v1 is absent from the visible canonical catalog\n\n" +
+		"Recovery:\nRerun `plystra capability expose <capability-name>/vN --env \"production\"` with one exact Capability visible in the selected Go Module graph.\n\n" +
+		"Diagnostic: " + diagnosticcode.CapabilityExposeNotVisible + "\n"
+	if exitCode != 1 || stdout != "" || stderr != wantError {
+		t.Fatalf("missing capability expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 || strings.Contains(strings.ToLower(stderr), "usage:") || strings.Contains(stderr[strings.Index(stderr, "Recovery:"):], "missing.operation/v1") {
+		t.Fatalf("missing capability expose emitted unstable diagnostic framing: %q", stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("missing expose changed module:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoCommandTransactions(t, root)
+}
+
 func TestRunCapabilityRejectsUnexpectedGeneratedOutput(t *testing.T) {
 	root := writeCapabilityCommandModule(t)
 	environment := commandGoEnvironment()
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
-	missingBefore := commandTree(t, root)
-	exitCode, stdout, stderr := runCommand(t, []string{"capability", "expose", "missing.operation/v1"}, root, environment)
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "missing.operation/v1") || !strings.Contains(stderr, "unknown Interface") || !strings.Contains(stderr, "not defined by a visible canonical package") {
-		t.Fatalf("missing capability expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
-	}
-	if after := commandTree(t, root); !reflect.DeepEqual(after, missingBefore) {
-		t.Fatalf("missing expose changed module:\nbefore: %#v\nafter:  %#v", missingBefore, after)
-	}
-	assertNoCommandTransactions(t, root)
 
 	writeCommandFile(t, filepath.Join(root, "generated", "manual.txt"), "user-owned\n")
 	before := commandTree(t, root)
 
-	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.create", "--query", "--expose", "--plugin", "records"}, root, environment)
+	exitCode, stdout, stderr := runCommand(t, []string{"capability", "create", "records.create", "--query", "--expose", "--plugin", "records"}, root, environment)
 	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "unexpected generated output") || !strings.Contains(stderr, "generated/manual.txt") {
 		t.Fatalf("unexpected-output capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}

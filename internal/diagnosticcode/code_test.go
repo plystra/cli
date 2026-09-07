@@ -125,6 +125,7 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.CapabilityImplementReferenceInvalid,
 		diagnosticcode.CapabilityImplementNotVisible,
 		diagnosticcode.CapabilityExposeReferenceInvalid,
+		diagnosticcode.CapabilityExposeNotVisible,
 	}
 	seen := make(map[string]struct{}, len(codes))
 	for _, code := range codes {

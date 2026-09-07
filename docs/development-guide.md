@@ -1442,6 +1442,13 @@ file, and is byte-idempotent when generated output is current. A selection,
 generation, module, or validation failure restores the selected document and
 all other files in the transaction.
 
+The exact target must already exist in the selected visible canonical catalog.
+A well-formed target that is absent emits
+`PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE` after read-only application resolution
+but before write planning or mutation. Recovery retains a safe default,
+`--env`, or `--config` selector and substitutes a canonical Capability
+placeholder instead of copying the missing target.
+
 The generated strict handler is under:
 
 ```text
@@ -1983,6 +1990,13 @@ Malformed references are classified before Project discovery or mutation:
 
 Run the emitted corrected command with canonical placeholders. Exposure recovery
 retains the active default, `--env`, or `--config` selector only when it is safe.
+
+`PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE` identifies a well-formed exact
+`capability expose` target absent from the selected visible canonical catalog.
+The exposure layer preserves the unknown-Interface cause beneath its owning
+public boundary, emits one selector-preserving placeholder command, and returns
+before write planning or any Project mutation. A generic unknown Interface
+outside that boundary keeps its existing resolution diagnostic.
 
 Well-formed exact IDs that select the wrong authoring action are classified at
 the transaction boundary:

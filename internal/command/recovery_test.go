@@ -208,6 +208,13 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			code: diagnosticCapabilityImplementNotVisible,
 		},
 		{
+			name:    "Capability expose missing target",
+			err:     errors.Join(capabilityexpose.ErrExpose, capabilityexpose.ErrNotVisible, interfaceresolution.ErrUnknownInterface),
+			context: commandRecoveryContext("", "production", nil),
+			want:    "Rerun `plystra capability expose <capability-name>/vN --env \"production\"` with one exact Capability visible in the selected Go Module graph.",
+			code:    diagnosticCapabilityExposeNotVisible,
+		},
+		{
 			name: "Capability create missing intent profile",
 			err:  errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfile, capabilitycreate.ErrIntentProfileRequired),
 			want: "Rerun `plystra capability create <capability-name> --query [--plugin <plugin>] [--confirm] [--expose]` with the explicit query intent profile required for a new Capability identity.",
@@ -366,6 +373,7 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "invalid Capability implement reference", err: fmt.Errorf("%w: %w", capabilitycreate.ErrImplement, capabilitycreate.ErrInvalidReference), code: diagnosticcode.CapabilityImplementReferenceInvalid},
 		{name: "missing Capability implement target", err: errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrImplementNotVisible), code: diagnosticcode.CapabilityImplementNotVisible},
 		{name: "invalid Capability expose reference", err: fmt.Errorf("%w: %w", capabilityexpose.ErrExpose, capabilityexpose.ErrInvalidReference), code: diagnosticcode.CapabilityExposeReferenceInvalid},
+		{name: "missing Capability expose target", err: errors.Join(capabilityexpose.ErrExpose, capabilityexpose.ErrNotVisible, interfaceresolution.ErrUnknownInterface), code: diagnosticcode.CapabilityExposeNotVisible},
 		{name: "invalid use Interface", err: implementationselect.ErrInvalidInterfaceID, code: diagnosticcode.UseInterfaceInvalid},
 		{name: "invalid use constructor", err: implementationselect.ErrInvalidConstructor, code: diagnosticcode.UseConstructorInvalid},
 	}
@@ -434,6 +442,26 @@ func TestPrimaryActionableDiagnosticRequiresMatchingCapabilityActionAndCondition
 	} {
 		if diagnostic, ok := primaryActionableDiagnostic(err, recoveryContext{}); ok {
 			t.Fatalf("primaryActionableDiagnostic(%v) = %#v, true; want no cross-condition classification", err, diagnostic)
+		}
+	}
+}
+
+func TestPrimaryActionableDiagnosticRequiresCapabilityExposeNotVisibleBoundary(t *testing.T) {
+	t.Parallel()
+
+	for _, err := range []error{
+		capabilityexpose.ErrExpose,
+		capabilityexpose.ErrNotVisible,
+		interfaceresolution.ErrUnknownInterface,
+		errors.Join(capabilityexpose.ErrExpose, capabilityexpose.ErrNotVisible),
+		errors.Join(capabilityexpose.ErrExpose, interfaceresolution.ErrUnknownInterface),
+		errors.Join(capabilitycreate.ErrCreate, capabilityexpose.ErrExpose, capabilityexpose.ErrNotVisible, interfaceresolution.ErrUnknownInterface),
+		errors.Join(capabilitycreate.ErrImplement, capabilityexpose.ErrExpose, capabilityexpose.ErrNotVisible, interfaceresolution.ErrUnknownInterface),
+		errors.Join(capabilityexpose.ErrExpose, capabilityexpose.ErrInvalidReference, capabilityexpose.ErrNotVisible, interfaceresolution.ErrUnknownInterface),
+	} {
+		diagnostic, ok := primaryActionableDiagnostic(err, recoveryContext{})
+		if ok && diagnostic.code == diagnosticCapabilityExposeNotVisible {
+			t.Fatalf("primaryActionableDiagnostic(%v) = %#v, true; want no cross-condition exposure classification", err, diagnostic)
 		}
 	}
 }

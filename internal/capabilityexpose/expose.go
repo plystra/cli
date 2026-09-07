@@ -14,6 +14,8 @@ import (
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/interfaceresolution"
+	"github.com/plystra/cli/internal/intrinsiccatalog"
 	"github.com/plystra/cli/internal/modulemutation"
 	"github.com/plystra/cli/internal/projectlocate"
 )
@@ -24,6 +26,9 @@ var (
 	// ErrInvalidReference reports a malformed exact Capability ID supplied to
 	// the exposure command.
 	ErrInvalidReference = errors.New("invalid capability exposure reference")
+	// ErrNotVisible reports a well-formed exact Capability ID that is absent
+	// from the selected application's canonical catalog.
+	ErrNotVisible = errors.New("capability exposure target is not visible")
 	// ErrManifestWrite reports that plystra.yaml could not safely produce the
 	// planned HTTP-exposure write.
 	ErrManifestWrite = errors.New("prepare capability HTTP exposure")
@@ -41,6 +46,20 @@ func (e *invalidReferenceError) Error() string {
 func (e *invalidReferenceError) Unwrap() error { return e.cause }
 func (e *invalidReferenceError) Is(target error) bool {
 	return target == ErrInvalidReference
+}
+
+// notVisibleError preserves the generic Interface-resolution condition while
+// exposing the exact public command state that owns recovery.
+type notVisibleError struct {
+	id capabilityid.Identifier
+}
+
+func (e *notVisibleError) Error() string {
+	return fmt.Sprintf("%s: %s is absent from the visible canonical catalog", ErrNotVisible, e.id)
+}
+func (*notVisibleError) Unwrap() error { return interfaceresolution.ErrUnknownInterface }
+func (*notVisibleError) Is(target error) bool {
+	return target == ErrNotVisible
 }
 
 // Options contains the application location and bounded generation settings
@@ -135,6 +154,20 @@ func Expose(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrExpose, err)
 	}
+	resolved, err := applicationresolve.Resolve(ctx, applicationresolve.Options{
+		Start:                 options.Start,
+		ConfigurationPath:     options.ConfigurationPath,
+		EnvironmentName:       options.EnvironmentName,
+		GoCommand:             options.GoCommand,
+		Environment:           options.Environment,
+		DependencyOutputLimit: options.DependencyOutputLimit,
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: resolve selected application before exposure: %w", ErrExpose, err)
+	}
+	if !capabilityVisible(resolved, id) {
+		return Result{}, fmt.Errorf("%w: %w", ErrExpose, &notVisibleError{id: id})
+	}
 	write, changed, selection, err := SelectedManifestWrite(module.Path(), id, options.ConfigurationPath, options.EnvironmentName, options.Environment)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrExpose, err)
@@ -167,4 +200,23 @@ func Expose(ctx context.Context, options Options) (Result, error) {
 		manifestPath: filepath.Join(module.Path(), filepath.FromSlash(selection.Path())),
 		changed:      changed,
 	}, nil
+}
+
+func capabilityVisible(resolved applicationresolve.Result, id capabilityid.Identifier) bool {
+	if _, found := intrinsiccatalog.Lookup(id); found {
+		return true
+	}
+	for _, definition := range resolved.Interfaces().Interfaces() {
+		if definition.ID() == id.String() {
+			return true
+		}
+	}
+	for _, plugin := range resolved.Inventory().Plugins() {
+		for _, provided := range plugin.Provides() {
+			if provided == id {
+				return true
+			}
+		}
+	}
+	return false
 }

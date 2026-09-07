@@ -133,6 +133,7 @@ const (
 	CapabilityImplementReferenceInvalid     = Prefix + "CAPABILITY_IMPLEMENT_REFERENCE_INVALID"
 	CapabilityImplementNotVisible           = Prefix + "CAPABILITY_IMPLEMENT_NOT_VISIBLE"
 	CapabilityExposeReferenceInvalid        = Prefix + "CAPABILITY_EXPOSE_REFERENCE_INVALID"
+	CapabilityExposeNotVisible              = Prefix + "CAPABILITY_EXPOSE_NOT_VISIBLE"
 )
 
 const (

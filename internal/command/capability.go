@@ -44,6 +44,8 @@ PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
 Malformed exact Capability IDs emit the stable
 PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID diagnostic before Project discovery
 or mutation.
+A well-formed exact Capability absent from the selected visible catalog emits
+PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE before write planning or mutation.
 `
 	capabilityCreateHelp = `Usage:
   ` + capabilityCreateSynopsis + `

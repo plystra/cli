@@ -2402,6 +2402,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID",
 		"PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE",
 		"PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID",
+		"PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE",
 	} {
 		if !strings.Contains(string(data), required) {
 			t.Fatalf("Plystra skill omits %q:\n%s", required, data)

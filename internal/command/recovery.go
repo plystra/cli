@@ -193,6 +193,7 @@ const (
 	diagnosticCapabilityImplementReferenceInvalid     = diagnosticcode.CapabilityImplementReferenceInvalid
 	diagnosticCapabilityImplementNotVisible           = diagnosticcode.CapabilityImplementNotVisible
 	diagnosticCapabilityExposeReferenceInvalid        = diagnosticcode.CapabilityExposeReferenceInvalid
+	diagnosticCapabilityExposeNotVisible              = diagnosticcode.CapabilityExposeNotVisible
 )
 
 const (
@@ -361,6 +362,8 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	}
 
 	switch {
+	case errors.Is(err, capabilityexpose.ErrExpose) && !errors.Is(err, capabilitycreate.ErrCreate) && !errors.Is(err, capabilitycreate.ErrImplement) && !errors.Is(err, capabilityexpose.ErrInvalidReference) && errors.Is(err, capabilityexpose.ErrNotVisible) && errors.Is(err, interfaceresolution.ErrUnknownInterface):
+		return recoveryDiagnostic(diagnosticCapabilityExposeNotVisible, "Rerun `plystra capability expose <capability-name>/vN"+context.selectorSuffix()+"` with one exact Capability visible in the selected Go Module graph.")
 	case errors.Is(err, interfaceresolution.ErrUnknownInterface):
 		return recoveryDiagnostic(diagnosticResolveUnknownInterface, "Correct the reported Interface ID in "+context.configurationTarget()+" to one canonical Interface visible in the selected Go Module graph, then rerun the command.")
 	case errors.Is(err, interfaceresolution.ErrUnknownConstructor):
