@@ -200,6 +200,18 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			want: "Rerun `plystra capability create <capability-name>/vN [--query] [--plugin <plugin>] [--confirm] [--expose]` to author the missing exact contract.",
 			code: diagnosticCapabilityImplementNotVisible,
 		},
+		{
+			name: "Capability create missing intent profile",
+			err:  errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfile, capabilitycreate.ErrIntentProfileRequired),
+			want: "Rerun `plystra capability create <capability-name> --query [--plugin <plugin>] [--confirm] [--expose]` with the explicit query intent profile required for a new Capability identity.",
+			code: diagnosticCapabilityCreateIntentProfileRequired,
+		},
+		{
+			name: "Capability create inapplicable intent profile",
+			err:  errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfile, capabilitycreate.ErrIntentProfileNotAllowed),
+			want: "Rerun `plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]` without `--query`; a later version copies the highest visible contract's semantics.",
+			code: diagnosticCapabilityCreateIntentProfileNotAllowed,
+		},
 	}
 	for _, test := range tests {
 		test := test
@@ -341,6 +353,8 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "unselected dependency update", err: fmt.Errorf("%w: %w", dependencyupdate.ErrUpdate, dependencyupdate.ErrNotSelected), code: diagnosticcode.DependencyUpdateNotSelected},
 		{name: "invalid Capability create reference", err: fmt.Errorf("%w: %w", capabilitycreate.ErrCreate, capabilitycreate.ErrInvalidReference), code: diagnosticcode.CapabilityCreateReferenceInvalid},
 		{name: "existing Capability create target", err: errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrCreateAlreadyVisible), code: diagnosticcode.CapabilityCreateAlreadyVisible},
+		{name: "missing Capability create intent profile", err: errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfile, capabilitycreate.ErrIntentProfileRequired), code: diagnosticcode.CapabilityCreateIntentProfileRequired},
+		{name: "inapplicable Capability create intent profile", err: errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfile, capabilitycreate.ErrIntentProfileNotAllowed), code: diagnosticcode.CapabilityCreateIntentProfileNotAllowed},
 		{name: "invalid Capability implement reference", err: fmt.Errorf("%w: %w", capabilitycreate.ErrImplement, capabilitycreate.ErrInvalidReference), code: diagnosticcode.CapabilityImplementReferenceInvalid},
 		{name: "missing Capability implement target", err: errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrImplementNotVisible), code: diagnosticcode.CapabilityImplementNotVisible},
 		{name: "invalid Capability expose reference", err: fmt.Errorf("%w: %w", capabilityexpose.ErrExpose, capabilityexpose.ErrInvalidReference), code: diagnosticcode.CapabilityExposeReferenceInvalid},
@@ -407,6 +421,28 @@ func TestPrimaryActionableDiagnosticRequiresMatchingCapabilityActionAndCondition
 		errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrImplementNotVisible),
 		errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrImplementNotVisible),
 		errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrCreateAlreadyVisible),
+		errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrCreateAlreadyVisible, capabilitycreate.ErrImplementNotVisible),
+		errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrCreateAlreadyVisible, capabilitycreate.ErrImplementNotVisible),
+	} {
+		if diagnostic, ok := primaryActionableDiagnostic(err, recoveryContext{}); ok {
+			t.Fatalf("primaryActionableDiagnostic(%v) = %#v, true; want no cross-condition classification", err, diagnostic)
+		}
+	}
+}
+
+func TestPrimaryActionableDiagnosticRequiresMatchingCapabilityIntentAndCondition(t *testing.T) {
+	t.Parallel()
+
+	for _, err := range []error{
+		capabilitycreate.ErrIntentProfile,
+		capabilitycreate.ErrIntentProfileRequired,
+		capabilitycreate.ErrIntentProfileNotAllowed,
+		errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfile),
+		errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfileRequired),
+		errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfileNotAllowed),
+		errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrIntentProfile, capabilitycreate.ErrIntentProfileRequired),
+		errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrIntentProfile, capabilitycreate.ErrIntentProfileNotAllowed),
+		errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfile, capabilitycreate.ErrIntentProfileRequired, capabilitycreate.ErrIntentProfileNotAllowed),
 	} {
 		if diagnostic, ok := primaryActionableDiagnostic(err, recoveryContext{}); ok {
 			t.Fatalf("primaryActionableDiagnostic(%v) = %#v, true; want no cross-condition classification", err, diagnostic)

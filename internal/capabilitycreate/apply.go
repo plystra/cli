@@ -36,6 +36,12 @@ var (
 	// ErrIntentProfile reports a missing or inapplicable explicit business
 	// intent profile for Capability creation.
 	ErrIntentProfile = errors.New("capability creation intent profile is invalid")
+	// ErrIntentProfileRequired reports a new Capability identity without an
+	// explicit authoring profile.
+	ErrIntentProfileRequired = errors.New("capability creation intent profile is required")
+	// ErrIntentProfileNotAllowed reports an explicit authoring profile on a
+	// later Capability version that copies its source contract.
+	ErrIntentProfileNotAllowed = errors.New("capability creation intent profile is not allowed")
 )
 
 type actionMismatchError struct {
@@ -48,6 +54,18 @@ func (e *actionMismatchError) Error() string {
 }
 func (e *actionMismatchError) Is(target error) bool {
 	return target == ErrActionMismatch || target == e.condition
+}
+
+type intentProfileError struct {
+	condition error
+	detail    string
+}
+
+func (e *intentProfileError) Error() string {
+	return ErrIntentProfile.Error() + ": " + e.detail
+}
+func (e *intentProfileError) Is(target error) bool {
+	return target == ErrIntentProfile || target == e.condition
 }
 
 // AuthorOptions contains planning inputs and the bounded hooks used by one
@@ -171,9 +189,15 @@ func author(ctx context.Context, options AuthorOptions, expected capabilityversi
 		_, hasSource := version.Source()
 		switch {
 		case !hasSource && plan.Intent() == "":
-			return Result{}, fmt.Errorf("%w: %s is a new Capability identity; select one explicit profile such as --query", ErrIntentProfile, version.Target())
+			return Result{}, &intentProfileError{
+				condition: ErrIntentProfileRequired,
+				detail:    fmt.Sprintf("%s is a new Capability identity; select one explicit profile such as --query", version.Target()),
+			}
 		case hasSource && plan.Intent() != "":
-			return Result{}, fmt.Errorf("%w: %s copies semantics from %s; omit --%s", ErrIntentProfile, version.Target(), mustSource(version), plan.Intent())
+			return Result{}, &intentProfileError{
+				condition: ErrIntentProfileNotAllowed,
+				detail:    fmt.Sprintf("%s copies semantics from %s; omit --%s", version.Target(), mustSource(version), plan.Intent()),
+			}
 		}
 	}
 

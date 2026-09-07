@@ -158,9 +158,16 @@ func TestRunCapabilityCreateAndExposeRegenerateRunnableApplication(t *testing.T)
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	environment := commandGoEnvironment()
 
+	profileBefore := commandTree(t, root)
 	exitCode, stdout, stderr := runCommand(t, []string{"capability", "create", "records.list", "--plugin", "records"}, root, environment)
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "select one explicit profile such as --query") {
+	wantError := "create capability: capability creation intent profile is invalid: records.list/v1 is a new Capability identity; select one explicit profile such as --query\n\n" +
+		"Recovery:\nRerun `plystra capability create <capability-name> --query [--plugin <plugin>] [--confirm] [--expose]` with the explicit query intent profile required for a new Capability identity.\n\n" +
+		"Diagnostic: " + diagnosticcode.CapabilityCreateIntentProfileRequired + "\n"
+	if exitCode != 1 || stdout != "" || stderr != wantError {
 		t.Fatalf("name-inferred capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, profileBefore) {
+		t.Fatalf("missing-profile create changed Project:\nbefore: %#v\nafter:  %#v", profileBefore, after)
 	}
 	if _, err := os.Stat(filepath.Join(root, "records", "capabilities", "records.list")); !os.IsNotExist(err) {
 		t.Fatalf("missing-profile create mutated Capability tree: %v", err)
@@ -172,6 +179,18 @@ func TestRunCapabilityCreateAndExposeRegenerateRunnableApplication(t *testing.T)
 	if exitCode != 0 || stdout != wantOutput || stderr != "" {
 		t.Fatalf("runnable capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
+	profileBefore = commandTree(t, root)
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.list", "--query", "--plugin", "records"}, root, environment)
+	wantError = "create capability: capability creation intent profile is invalid: records.list/v2 copies semantics from records.list/v1; omit --query\n\n" +
+		"Recovery:\nRerun `plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]` without `--query`; a later version copies the highest visible contract's semantics.\n\n" +
+		"Diagnostic: " + diagnosticcode.CapabilityCreateIntentProfileNotAllowed + "\n"
+	if exitCode != 1 || stdout != "" || stderr != wantError {
+		t.Fatalf("later-version profile create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, profileBefore) {
+		t.Fatalf("later-version profile create changed Project:\nbefore: %#v\nafter:  %#v", profileBefore, after)
+	}
+	assertNoCommandTransactions(t, root)
 	for _, filePath := range []string{
 		"generated/go/application/main_gen.go",
 		"generated/go/assembly/providers_gen.go",

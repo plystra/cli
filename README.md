@@ -589,6 +589,12 @@ exact contract to `capability create`. Both failures leave the Project
 unchanged and preserve the original problem wording above one placeholder-based
 recovery command.
 
+Intent-profile mistakes are distinct. A new identity without a profile emits
+`PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED` and recovers by adding
+`--query`; a later version supplied with a profile emits
+`PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED` and recovers by omitting
+`--query`. Both fail before mutation.
+
 When several compatible Implementations satisfy one required Interface, select the intended constructor through the targeted public workflow:
 
 ```powershell
@@ -797,6 +803,11 @@ Valid exact Capability IDs use `PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE` when
 `capability create` must become `capability implement`, and
 `PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE` when `capability implement` must
 become `capability create`. Neither action mismatch mutates the Project.
+
+`PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED` identifies a new identity
+without `--query`; `PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED`
+identifies a copied later version that must omit `--query`. Both failures are
+classified before mutation.
 
 `plystra use` rejects a malformed canonical Interface ID with
 `PLYSTRA_USE_INTERFACE_INVALID` and a malformed fully qualified constructor

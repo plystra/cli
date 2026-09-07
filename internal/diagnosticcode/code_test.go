@@ -119,6 +119,8 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.DependencyUpdateNotSelected,
 		diagnosticcode.CapabilityCreateReferenceInvalid,
 		diagnosticcode.CapabilityCreateAlreadyVisible,
+		diagnosticcode.CapabilityCreateIntentProfileRequired,
+		diagnosticcode.CapabilityCreateIntentProfileNotAllowed,
 		diagnosticcode.CapabilityImplementReferenceInvalid,
 		diagnosticcode.CapabilityImplementNotVisible,
 		diagnosticcode.CapabilityExposeReferenceInvalid,

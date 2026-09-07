@@ -1189,7 +1189,10 @@ semantics:
 `--query` writes that complete semantic profile into the authoritative
 `capability.yaml`; the Capability name never implies behavior. A genuinely new
 identity requires one supported intent profile before the command mutates the
-Project.
+Project. Omitting it emits `PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED`;
+supplying it while copying a later version emits
+`PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED`. Follow the emitted
+command to add or omit `--query` before retrying.
 
 Field constraints use one closed type-specific vocabulary: strings accept
 `min_length`, `max_length`, and bounded Go regular-expression `pattern`;
@@ -1982,6 +1985,16 @@ the transaction boundary:
 
 Both failures preserve the existing action-mismatch message, emit one
 placeholder-based counterpart command, and leave every Project byte unchanged.
+
+Intent-profile failures have separate recovery:
+
+- `PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED` adds `--query` for a new
+  Capability identity; and
+- `PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED` omits `--query` when a
+  later version copies the highest visible contract's semantics.
+
+Both conditions retain the broad intent-profile error, require the matching
+create boundary for classification, and fail before any Project mutation.
 
 ### Invalid `plystra use` input
 

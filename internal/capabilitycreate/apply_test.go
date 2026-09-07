@@ -149,6 +149,25 @@ func TestAuthoringEnforcesActionAndExplicitVersionConfirmation(t *testing.T) {
 	if _, err := capabilitycreate.Create(t.Context(), capabilitycreate.AuthorOptions{Options: base, Confirm: true}); err != nil {
 		t.Fatalf("confirmed skipped version: %v", err)
 	}
+	profileBefore := snapshotAuthoringTree(t, root)
+	missingProfile := base
+	missingProfile.Reference = "records.missing"
+	missingProfile.Intent = ""
+	_, err = capabilitycreate.Create(t.Context(), capabilitycreate.AuthorOptions{Options: missingProfile})
+	if !errors.Is(err, capabilitycreate.ErrCreate) || !errors.Is(err, capabilitycreate.ErrIntentProfile) ||
+		!errors.Is(err, capabilitycreate.ErrIntentProfileRequired) || errors.Is(err, capabilitycreate.ErrIntentProfileNotAllowed) {
+		t.Fatalf("create new identity without profile = %v", err)
+	}
+	laterProfile := base
+	laterProfile.Reference = "records.create"
+	_, err = capabilitycreate.Create(t.Context(), capabilitycreate.AuthorOptions{Options: laterProfile})
+	if !errors.Is(err, capabilitycreate.ErrCreate) || !errors.Is(err, capabilitycreate.ErrIntentProfile) ||
+		!errors.Is(err, capabilitycreate.ErrIntentProfileNotAllowed) || errors.Is(err, capabilitycreate.ErrIntentProfileRequired) {
+		t.Fatalf("create later version with profile = %v", err)
+	}
+	if after := snapshotAuthoringTree(t, root); !reflect.DeepEqual(after, profileBefore) {
+		t.Fatalf("intent-profile failures mutated module:\nbefore: %#v\nafter:  %#v", profileBefore, after)
+	}
 
 	_, err = capabilitycreate.Create(t.Context(), capabilitycreate.AuthorOptions{Options: base, Confirm: true})
 	if !errors.Is(err, capabilitycreate.ErrCreate) || !errors.Is(err, capabilitycreate.ErrActionMismatch) ||

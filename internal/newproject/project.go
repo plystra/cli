@@ -823,6 +823,8 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"plystra plugin create records",
 		"plystra capability create records.read --query --plugin records --expose",
 		"PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE",
+		"PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED",
+		"PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED",
 		"PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE",
 		"plystra implement email.send/v1 --package ./mailer",
 		"creates no copied contract",

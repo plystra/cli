@@ -24,3 +24,7 @@ An already-visible exact create target uses
 `PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE`; a non-visible exact
 implement target uses `PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE`.
 Follow the emitted counterpart command; neither failure changes the Project.
+Creating a new identity without a profile uses
+`PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED`; supplying
+`--query` for a copied later version uses
+`PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED`.

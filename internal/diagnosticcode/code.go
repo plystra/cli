@@ -125,11 +125,13 @@ const (
 )
 
 const (
-	CapabilityCreateReferenceInvalid    = Prefix + "CAPABILITY_CREATE_REFERENCE_INVALID"
-	CapabilityCreateAlreadyVisible      = Prefix + "CAPABILITY_CREATE_ALREADY_VISIBLE"
-	CapabilityImplementReferenceInvalid = Prefix + "CAPABILITY_IMPLEMENT_REFERENCE_INVALID"
-	CapabilityImplementNotVisible       = Prefix + "CAPABILITY_IMPLEMENT_NOT_VISIBLE"
-	CapabilityExposeReferenceInvalid    = Prefix + "CAPABILITY_EXPOSE_REFERENCE_INVALID"
+	CapabilityCreateReferenceInvalid        = Prefix + "CAPABILITY_CREATE_REFERENCE_INVALID"
+	CapabilityCreateAlreadyVisible          = Prefix + "CAPABILITY_CREATE_ALREADY_VISIBLE"
+	CapabilityCreateIntentProfileRequired   = Prefix + "CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED"
+	CapabilityCreateIntentProfileNotAllowed = Prefix + "CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED"
+	CapabilityImplementReferenceInvalid     = Prefix + "CAPABILITY_IMPLEMENT_REFERENCE_INVALID"
+	CapabilityImplementNotVisible           = Prefix + "CAPABILITY_IMPLEMENT_NOT_VISIBLE"
+	CapabilityExposeReferenceInvalid        = Prefix + "CAPABILITY_EXPOSE_REFERENCE_INVALID"
 )
 
 const (
