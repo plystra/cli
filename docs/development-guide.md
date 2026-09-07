@@ -256,7 +256,9 @@ traversal, separators, `.`, `..`, unsafe names, and existing targets fail
 before mutation. Invalid names and module identities emit
 `PLYSTRA_PROJECT_CREATE_NAME_INVALID` and
 `PLYSTRA_PROJECT_CREATE_MODULE_INVALID`. The old positional full-module-path
-syntax is not supported.
+syntax is not supported. An existing Project file, directory, or symbolic
+target emits `PLYSTRA_PROJECT_CREATE_TARGET_EXISTS`; the CLI preserves it and
+directs recovery to a different Project name or parent directory.
 
 An initial `--plugin` value is validated before target staging. Invalid or
 reserved names emit `PLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID`; inputs that

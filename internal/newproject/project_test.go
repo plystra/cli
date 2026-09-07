@@ -22,6 +22,7 @@ import (
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/connectgen"
@@ -1426,6 +1427,50 @@ func TestPublicCommandClassifiesInvalidInitialPluginWithoutMutation(t *testing.T
 	}
 }
 
+func TestPublicCommandClassifiesExistingProjectTargetWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	for _, targetKind := range []string{"directory", "file"} {
+		targetKind := targetKind
+		t.Run(targetKind, func(t *testing.T) {
+			t.Parallel()
+			parent := t.TempDir()
+			target := filepath.Join(parent, "my-app")
+			marker := target
+			if targetKind == "directory" {
+				if err := os.Mkdir(target, 0o755); err != nil {
+					t.Fatalf("Mkdir: %v", err)
+				}
+				marker = filepath.Join(target, "keep.txt")
+			}
+			if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			exitCode := command.RunIn([]string{"new", "my-app", "--module", "example.com/acme/my-app", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
+			wantRecovery := "Rerun `plystra new <project-name> [options]` with a different canonical Project name whose target does not exist, or run it from a different parent directory."
+			wantBlock := "\n\nRecovery:\n" + wantRecovery + "\n\nDiagnostic: " + diagnosticcode.ProjectCreateTargetExists + "\n"
+			stderrText := stderr.String()
+			if exitCode != 1 || stdout.Len() != 0 || !strings.HasPrefix(stderrText, "create project: create Plystra project: plystra project target already exists: transaction target already exists: ") ||
+				!strings.Contains(stderrText, wantBlock) || strings.Contains(stderrText, "Usage:") ||
+				strings.Count(stderrText, "Recovery:") != 1 || strings.Count(stderrText, "Diagnostic:") != 1 {
+				t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderrText)
+			}
+			recoveryIndex := strings.Index(stderrText, "Recovery:")
+			if recoveryIndex < 0 || strings.Contains(stderrText[recoveryIndex:], "my-app") || strings.Contains(stderrText[recoveryIndex:], parent) {
+				t.Fatalf("recovery echoed the occupied target: %q", stderrText)
+			}
+			content, err := os.ReadFile(marker)
+			if err != nil || string(content) != "keep" {
+				t.Fatalf("existing target content = %q, %v", content, err)
+			}
+			assertNoTransactionFiles(t, parent)
+		})
+	}
+}
+
 func TestCreateHonorsOptionalProjectChoices(t *testing.T) {
 	proxy := createKernelProxy(t)
 	environment := isolatedGoEnvironment(t, proxy)
@@ -1684,8 +1729,8 @@ func TestCreatePreservesExistingProject(t *testing.T) {
 		ModulePath:  "example.com/acme/my-app",
 		GoCommand:   filepath.Join(parent, "must-not-run"),
 	})
-	if !errors.Is(err, newproject.ErrCreate) {
-		t.Fatalf("Create error = %v, want ErrCreate", err)
+	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrTargetExists) || !errors.Is(err, atomicfs.ErrTargetExists) {
+		t.Fatalf("Create error = %v, want ErrCreate, ErrTargetExists, and atomicfs.ErrTargetExists", err)
 	}
 	content, readErr := os.ReadFile(keep)
 	if readErr != nil || string(content) != "keep" {

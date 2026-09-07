@@ -69,6 +69,8 @@ var (
 	// ErrInvalidPluginID reports inputs that cannot derive a canonical initial
 	// Plugin identity.
 	ErrInvalidPluginID = errors.New("invalid initial Plystra plugin ID")
+	// ErrTargetExists reports a Project target that cannot be replaced.
+	ErrTargetExists = errors.New("plystra project target already exists")
 	// ErrGitInitialization reports a failed requested Git repository setup.
 	ErrGitInitialization = errors.New("initialize Git repository")
 	// ErrInvalidTemplate reports a resolved module that cannot serve as a
@@ -203,6 +205,9 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		return verifyChoices(stagingRoot, modulePath, options.Git, options.GitHubCI, options.Skills)
 	})
 	if err != nil {
+		if errors.Is(err, atomicfs.ErrTargetExists) {
+			return Result{}, fmt.Errorf("%w: %w: %w", ErrCreate, ErrTargetExists, err)
+		}
 		return Result{}, fmt.Errorf("%w: %w", ErrCreate, err)
 	}
 	return Result{modulePath: modulePath, path: target}, nil
@@ -808,6 +813,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID",
 		"PLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID",
 		"PLYSTRA_PROJECT_CREATE_PLUGIN_ID_INVALID",
+		"PLYSTRA_PROJECT_CREATE_TARGET_EXISTS",
 		"Template-declared operational values and Secret-reference placeholders",
 		"does not read PLATFORM_SMTP_PASSWORD",
 		"invent values for required fields omitted by the template",

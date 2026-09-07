@@ -97,6 +97,7 @@ const (
 	ProjectCreateTemplateInvalid          = Prefix + "PROJECT_CREATE_TEMPLATE_INVALID"
 	ProjectCreatePluginNameInvalid        = Prefix + "PROJECT_CREATE_PLUGIN_NAME_INVALID"
 	ProjectCreatePluginIDInvalid          = Prefix + "PROJECT_CREATE_PLUGIN_ID_INVALID"
+	ProjectCreateTargetExists             = Prefix + "PROJECT_CREATE_TARGET_EXISTS"
 	ProjectCreateChoiceRequired           = Prefix + "PROJECT_CREATE_CHOICE_REQUIRED"
 	PluginCreateNameInvalid               = Prefix + "PLUGIN_CREATE_NAME_INVALID"
 	PluginCreateIDInvalid                 = Prefix + "PLUGIN_CREATE_ID_INVALID"

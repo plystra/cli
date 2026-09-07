@@ -832,8 +832,9 @@ Create a Project with optional module, template, or initial Plugin input:
 
 Pre-staging input codes are ` + "`PLYSTRA_PROJECT_CREATE_NAME_INVALID`" + `,
 ` + "`PLYSTRA_PROJECT_CREATE_MODULE_INVALID`" + `, ` + "`PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID`" + `,
-` + "`PLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID`" + `, and
-` + "`PLYSTRA_PROJECT_CREATE_PLUGIN_ID_INVALID`" + `.
+` + "`PLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID`" + `,
+` + "`PLYSTRA_PROJECT_CREATE_PLUGIN_ID_INVALID`" + `, and
+` + "`PLYSTRA_PROJECT_CREATE_TARGET_EXISTS`" + `.
 
 Inside an existing Project, create a root-level Plugin:
 

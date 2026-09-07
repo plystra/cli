@@ -95,6 +95,9 @@ Invalid initial Plugin names and derived IDs emit
 PLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID and
 PLYSTRA_PROJECT_CREATE_PLUGIN_ID_INVALID.
 
+An existing Project target emits PLYSTRA_PROJECT_CREATE_TARGET_EXISTS and is
+never replaced or modified.
+
 Template dependencies must be public, portable, and generation-stable. Creation
 rejects the staged Project unless immediate generation checking, applicable
 JavaScript SDK dependency installation plus typecheck/build/package validation,

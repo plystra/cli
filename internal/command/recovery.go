@@ -151,6 +151,7 @@ const (
 	diagnosticProjectCreateTemplateInvalid          = diagnosticcode.ProjectCreateTemplateInvalid
 	diagnosticProjectCreatePluginNameInvalid        = diagnosticcode.ProjectCreatePluginNameInvalid
 	diagnosticProjectCreatePluginIDInvalid          = diagnosticcode.ProjectCreatePluginIDInvalid
+	diagnosticProjectCreateTargetExists             = diagnosticcode.ProjectCreateTargetExists
 	diagnosticProjectCreateChoiceRequired           = diagnosticcode.ProjectCreateChoiceRequired
 	diagnosticPluginCreateNameInvalid               = diagnosticcode.PluginCreateNameInvalid
 	diagnosticPluginCreateIDInvalid                 = diagnosticcode.PluginCreateIDInvalid
@@ -275,6 +276,9 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	}
 	if errors.Is(err, newproject.ErrInvalidPluginID) {
 		return recoveryDiagnostic(diagnosticProjectCreatePluginIDInvalid, "Rerun `plystra new <project-name> --module <go-module-path> --plugin <plugin-name> [options]` with values that derive one canonical Plugin ID and every required choice flag.")
+	}
+	if errors.Is(err, newproject.ErrTargetExists) {
+		return recoveryDiagnostic(diagnosticProjectCreateTargetExists, "Rerun `plystra new <project-name> [options]` with a different canonical Project name whose target does not exist, or run it from a different parent directory.")
 	}
 	if errors.Is(err, newproject.ErrInvalidTemplate) {
 		if _, action, found := splitEmbeddedRecovery(err.Error()); found {

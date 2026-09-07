@@ -356,7 +356,9 @@ filesystem mutation. An explicit module path must satisfy standard Go Module
 rules. Invalid Project names and module identities emit
 `PLYSTRA_PROJECT_CREATE_NAME_INVALID` and
 `PLYSTRA_PROJECT_CREATE_MODULE_INVALID`. The removed positional
-full-module-path form is not accepted.
+full-module-path form is not accepted. An existing Project file, directory, or
+symbolic target emits `PLYSTRA_PROJECT_CREATE_TARGET_EXISTS`; the CLI preserves
+it and directs recovery to a different Project name or parent directory.
 
 An initial `--plugin` value is validated before target staging. Invalid or
 reserved names emit `PLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID`; inputs that
