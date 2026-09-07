@@ -24,6 +24,12 @@ var (
 	// ErrActionMismatch reports a create request for an existing exact contract
 	// or an implement request for a contract that is not visible.
 	ErrActionMismatch = errors.New("capability authoring action does not match visible contracts")
+	// ErrCreateAlreadyVisible reports that capability create received an exact
+	// Capability version that is already visible.
+	ErrCreateAlreadyVisible = errors.New("capability create target is already visible")
+	// ErrImplementNotVisible reports that capability implement received an
+	// exact Capability version that is not visible.
+	ErrImplementNotVisible = errors.New("capability implement target is not visible")
 	// ErrConfirmationRequired reports an explicit older, skipped, or otherwise
 	// unusual new version that was not confirmed by the caller.
 	ErrConfirmationRequired = errors.New("capability version requires confirmation")
@@ -31,6 +37,18 @@ var (
 	// intent profile for Capability creation.
 	ErrIntentProfile = errors.New("capability creation intent profile is invalid")
 )
+
+type actionMismatchError struct {
+	condition error
+	detail    string
+}
+
+func (e *actionMismatchError) Error() string {
+	return ErrActionMismatch.Error() + ": " + e.detail
+}
+func (e *actionMismatchError) Is(target error) bool {
+	return target == ErrActionMismatch || target == e.condition
+}
 
 // AuthorOptions contains planning inputs and the bounded hooks used by one
 // complete Capability authoring transaction. Confirm accepts an unusual new
@@ -129,9 +147,15 @@ func author(ctx context.Context, options AuthorOptions, expected capabilityversi
 	if version.Action() != expected {
 		switch expected {
 		case capabilityversion.ActionCreate:
-			return Result{}, fmt.Errorf("%w: %s is already visible; implement the existing exact contract instead", ErrActionMismatch, version.Target())
+			return Result{}, &actionMismatchError{
+				condition: ErrCreateAlreadyVisible,
+				detail:    fmt.Sprintf("%s is already visible; implement the existing exact contract instead", version.Target()),
+			}
 		case capabilityversion.ActionImplement:
-			return Result{}, fmt.Errorf("%w: %s is not visible; create a new contract instead", ErrActionMismatch, version.Target())
+			return Result{}, &actionMismatchError{
+				condition: ErrImplementNotVisible,
+				detail:    fmt.Sprintf("%s is not visible; create a new contract instead", version.Target()),
+			}
 		default:
 			return Result{}, fmt.Errorf("%w: unsupported requested action %q", ErrActionMismatch, expected)
 		}
@@ -169,7 +193,10 @@ func author(ctx context.Context, options AuthorOptions, expected capabilityversi
 		}
 		writes = append(writes, schemaWrite, manifestWrite)
 	} else if expected == capabilityversion.ActionCreate {
-		return Result{}, fmt.Errorf("%w: target plugin %s already declares %s", ErrActionMismatch, plan.Target().ID(), version.Target())
+		return Result{}, &actionMismatchError{
+			condition: ErrCreateAlreadyVisible,
+			detail:    fmt.Sprintf("target plugin %s already declares %s", plan.Target().ID(), version.Target()),
+		}
 	}
 	implementationWrite, implementationCreated, err := RenderImplementationWrite(plan)
 	if err != nil {

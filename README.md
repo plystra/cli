@@ -581,6 +581,14 @@ before Project discovery or mutation. Recovery uses canonical placeholders
 instead of copying the rejected reference, and exposure recovery retains only a
 safe default, environment, or complete-replacement selector.
 
+A well-formed exact version sent to the wrong authoring action is also
+classified. `PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE` switches creation of an
+existing exact contract to `capability implement`, while
+`PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE` switches implementation of a missing
+exact contract to `capability create`. Both failures leave the Project
+unchanged and preserve the original problem wording above one placeholder-based
+recovery command.
+
 When several compatible Implementations satisfy one required Interface, select the intended constructor through the targeted public workflow:
 
 ```powershell
@@ -784,6 +792,11 @@ Malformed `plystra capability create`, `plystra capability implement`, and
 `PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID`. They fail before Project
 discovery or mutation; recovery uses canonical placeholders and preserves a
 safe exposure selector.
+
+Valid exact Capability IDs use `PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE` when
+`capability create` must become `capability implement`, and
+`PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE` when `capability implement` must
+become `capability create`. Neither action mismatch mutates the Project.
 
 `plystra use` rejects a malformed canonical Interface ID with
 `PLYSTRA_USE_INTERFACE_INVALID` and a malformed fully qualified constructor

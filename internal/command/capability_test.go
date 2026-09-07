@@ -39,10 +39,27 @@ func TestRunCapabilityCreateAndImplementUsePublicTransactionalSurface(t *testing
 		t.Fatalf("capability implement = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 
+	actionBefore := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.create/v1", "--plugin", "records"}, root, environment)
-	wantError := "create capability: capability authoring action does not match visible contracts: records.create/v1 is already visible; implement the existing exact contract instead\n"
+	wantError := "create capability: capability authoring action does not match visible contracts: records.create/v1 is already visible; implement the existing exact contract instead\n\n" +
+		"Recovery:\nRerun `plystra capability implement <capability-name>/vN [--plugin <plugin>]` for the existing exact contract.\n\n" +
+		"Diagnostic: " + diagnosticcode.CapabilityCreateAlreadyVisible + "\n"
 	if exitCode != 1 || stdout != "" || stderr != wantError {
 		t.Fatalf("duplicate capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, actionBefore) {
+		t.Fatalf("duplicate capability create changed module:\nbefore: %#v\nafter:  %#v", actionBefore, after)
+	}
+
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "implement", "records.missing/v1", "--plugin", "records"}, root, environment)
+	wantError = "implement capability: capability authoring action does not match visible contracts: records.missing/v1 is not visible; create a new contract instead\n\n" +
+		"Recovery:\nRerun `plystra capability create <capability-name>/vN [--query] [--plugin <plugin>] [--confirm] [--expose]` to author the missing exact contract.\n\n" +
+		"Diagnostic: " + diagnosticcode.CapabilityImplementNotVisible + "\n"
+	if exitCode != 1 || stdout != "" || stderr != wantError {
+		t.Fatalf("missing capability implement = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, actionBefore) {
+		t.Fatalf("missing capability implement changed module:\nbefore: %#v\nafter:  %#v", actionBefore, after)
 	}
 
 	beforeConfirmation := commandTree(t, root)

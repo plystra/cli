@@ -185,7 +185,9 @@ const (
 
 const (
 	diagnosticCapabilityCreateReferenceInvalid    = diagnosticcode.CapabilityCreateReferenceInvalid
+	diagnosticCapabilityCreateAlreadyVisible      = diagnosticcode.CapabilityCreateAlreadyVisible
 	diagnosticCapabilityImplementReferenceInvalid = diagnosticcode.CapabilityImplementReferenceInvalid
+	diagnosticCapabilityImplementNotVisible       = diagnosticcode.CapabilityImplementNotVisible
 	diagnosticCapabilityExposeReferenceInvalid    = diagnosticcode.CapabilityExposeReferenceInvalid
 )
 
@@ -423,8 +425,12 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticDependencyUpdateNotSelected, "Rerun `plystra update <go-module-query>` with one query whose module path is already selected in go.mod.")
 	case errors.Is(err, capabilitycreate.ErrCreate) && errors.Is(err, capabilitycreate.ErrInvalidReference):
 		return recoveryDiagnostic(diagnosticCapabilityCreateReferenceInvalid, "Rerun `plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]` with one canonical lower-case Capability name containing at least two dot-separated segments and an optional positive `/vN` major.")
+	case errors.Is(err, capabilitycreate.ErrCreate) && errors.Is(err, capabilitycreate.ErrActionMismatch) && errors.Is(err, capabilitycreate.ErrCreateAlreadyVisible):
+		return recoveryDiagnostic(diagnosticCapabilityCreateAlreadyVisible, "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>]` for the existing exact contract.")
 	case errors.Is(err, capabilitycreate.ErrImplement) && errors.Is(err, capabilitycreate.ErrInvalidReference):
 		return recoveryDiagnostic(diagnosticCapabilityImplementReferenceInvalid, "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>]` with one canonical lower-case Capability ID containing at least two dot-separated segments and a positive major.")
+	case errors.Is(err, capabilitycreate.ErrImplement) && errors.Is(err, capabilitycreate.ErrActionMismatch) && errors.Is(err, capabilitycreate.ErrImplementNotVisible):
+		return recoveryDiagnostic(diagnosticCapabilityImplementNotVisible, "Rerun `plystra capability create <capability-name>/vN [--query] [--plugin <plugin>] [--confirm] [--expose]` to author the missing exact contract.")
 	case errors.Is(err, capabilityexpose.ErrExpose) && errors.Is(err, capabilityexpose.ErrInvalidReference):
 		return recoveryDiagnostic(diagnosticCapabilityExposeReferenceInvalid, "Rerun `plystra capability expose <capability-name>/vN"+context.selectorSuffix()+"` with one canonical lower-case Capability ID containing at least two dot-separated segments and a positive major.")
 	case errors.Is(err, implementationselect.ErrInvalidInterfaceID):

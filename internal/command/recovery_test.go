@@ -188,6 +188,18 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			want: "Review the visible Capability versions, then rerun the create command with `--confirm`.",
 			code: diagnosticCapabilityConfirmationRequired,
 		},
+		{
+			name: "Capability create exact version",
+			err:  errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrCreateAlreadyVisible),
+			want: "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>]` for the existing exact contract.",
+			code: diagnosticCapabilityCreateAlreadyVisible,
+		},
+		{
+			name: "Capability implement missing version",
+			err:  errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrImplementNotVisible),
+			want: "Rerun `plystra capability create <capability-name>/vN [--query] [--plugin <plugin>] [--confirm] [--expose]` to author the missing exact contract.",
+			code: diagnosticCapabilityImplementNotVisible,
+		},
 	}
 	for _, test := range tests {
 		test := test
@@ -328,7 +340,9 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "invalid dependency update query", err: fmt.Errorf("%w: %w", dependencyupdate.ErrUpdate, moduleargument.ErrInvalidQuery), code: diagnosticcode.DependencyUpdateQueryInvalid},
 		{name: "unselected dependency update", err: fmt.Errorf("%w: %w", dependencyupdate.ErrUpdate, dependencyupdate.ErrNotSelected), code: diagnosticcode.DependencyUpdateNotSelected},
 		{name: "invalid Capability create reference", err: fmt.Errorf("%w: %w", capabilitycreate.ErrCreate, capabilitycreate.ErrInvalidReference), code: diagnosticcode.CapabilityCreateReferenceInvalid},
+		{name: "existing Capability create target", err: errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrCreateAlreadyVisible), code: diagnosticcode.CapabilityCreateAlreadyVisible},
 		{name: "invalid Capability implement reference", err: fmt.Errorf("%w: %w", capabilitycreate.ErrImplement, capabilitycreate.ErrInvalidReference), code: diagnosticcode.CapabilityImplementReferenceInvalid},
+		{name: "missing Capability implement target", err: errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrImplementNotVisible), code: diagnosticcode.CapabilityImplementNotVisible},
 		{name: "invalid Capability expose reference", err: fmt.Errorf("%w: %w", capabilityexpose.ErrExpose, capabilityexpose.ErrInvalidReference), code: diagnosticcode.CapabilityExposeReferenceInvalid},
 		{name: "invalid use Interface", err: implementationselect.ErrInvalidInterfaceID, code: diagnosticcode.UseInterfaceInvalid},
 		{name: "invalid use constructor", err: implementationselect.ErrInvalidConstructor, code: diagnosticcode.UseConstructorInvalid},
@@ -378,6 +392,24 @@ func TestPrimaryActionableDiagnosticRequiresMatchingCapabilityOperationAndRefere
 	} {
 		if diagnostic, ok := primaryActionableDiagnostic(err, recoveryContext{}); ok {
 			t.Fatalf("primaryActionableDiagnostic(%v) = %#v, true; want no cross-family classification", err, diagnostic)
+		}
+	}
+}
+
+func TestPrimaryActionableDiagnosticRequiresMatchingCapabilityActionAndCondition(t *testing.T) {
+	t.Parallel()
+
+	for _, err := range []error{
+		capabilitycreate.ErrActionMismatch,
+		capabilitycreate.ErrCreateAlreadyVisible,
+		capabilitycreate.ErrImplementNotVisible,
+		errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrCreateAlreadyVisible),
+		errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrImplementNotVisible),
+		errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrImplementNotVisible),
+		errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrCreateAlreadyVisible),
+	} {
+		if diagnostic, ok := primaryActionableDiagnostic(err, recoveryContext{}); ok {
+			t.Fatalf("primaryActionableDiagnostic(%v) = %#v, true; want no cross-condition classification", err, diagnostic)
 		}
 	}
 }

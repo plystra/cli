@@ -58,6 +58,9 @@ profile flag in that case. Names never imply semantics.
 Malformed Capability names or optional exact IDs emit the stable
 PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID diagnostic before Project discovery
 or mutation.
+An already-visible exact version emits
+PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE and directs the developer to the
+implementation command without changing the Project.
 `
 	capabilityImplementHelp = `Usage:
   ` + capabilityImplementSynopsis + `
@@ -65,6 +68,9 @@ or mutation.
 Malformed exact Capability IDs emit the stable
 PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID diagnostic before Project
 discovery or mutation.
+A valid exact version that is not visible emits
+PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE and directs the developer to the
+creation command without changing the Project.
 `
 )
 

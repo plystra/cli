@@ -19,3 +19,8 @@ Implement an existing canonical capability with:
 ```text
 plystra capability implement <capability-name>/vN --plugin account-profile
 ```
+
+An already-visible exact create target uses
+`PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE`; a non-visible exact
+implement target uses `PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE`.
+Follow the emitted counterpart command; neither failure changes the Project.

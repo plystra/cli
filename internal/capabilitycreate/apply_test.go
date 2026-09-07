@@ -151,12 +151,14 @@ func TestAuthoringEnforcesActionAndExplicitVersionConfirmation(t *testing.T) {
 	}
 
 	_, err = capabilitycreate.Create(t.Context(), capabilitycreate.AuthorOptions{Options: base, Confirm: true})
-	if !errors.Is(err, capabilitycreate.ErrCreate) || !errors.Is(err, capabilitycreate.ErrActionMismatch) {
+	if !errors.Is(err, capabilitycreate.ErrCreate) || !errors.Is(err, capabilitycreate.ErrActionMismatch) ||
+		!errors.Is(err, capabilitycreate.ErrCreateAlreadyVisible) || errors.Is(err, capabilitycreate.ErrImplementNotVisible) {
 		t.Fatalf("create existing exact Capability = %v", err)
 	}
 	base.Reference = "records.missing/v1"
 	_, err = capabilitycreate.Implement(t.Context(), capabilitycreate.AuthorOptions{Options: base})
-	if !errors.Is(err, capabilitycreate.ErrImplement) || !errors.Is(err, capabilitycreate.ErrActionMismatch) {
+	if !errors.Is(err, capabilitycreate.ErrImplement) || !errors.Is(err, capabilitycreate.ErrActionMismatch) ||
+		!errors.Is(err, capabilitycreate.ErrImplementNotVisible) || errors.Is(err, capabilitycreate.ErrCreateAlreadyVisible) {
 		t.Fatalf("implement missing exact Capability = %v", err)
 	}
 }

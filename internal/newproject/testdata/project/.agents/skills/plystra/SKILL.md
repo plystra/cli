@@ -1226,16 +1226,17 @@ Actionable CLI failures end with one Recovery: block and one stable
 Diagnostic: PLYSTRA_<AREA>_<CONDITION> code. Follow that action with the same
 selector; unsafe values become placeholders. Unclassified errors get neither.
 
-- Missing Implementation: require or expose the Interface and make a compatible
-  constructor visible in the effective Plystra Project graph. Markerless
-  dependencies are not broadly scanned for Plystra declarations.
+- Missing Implementation: make a compatible constructor visible and require or
+  expose its Interface. Markerless dependencies are not broadly scanned.
 - Ambiguous Implementation: run plystra use <interface-id> <constructor-symbol>
   with the same --env or --config selector used for the application. Do not add
   priorities or rely on discovery order.
-- Invalid Capability reference: PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
+- Capability commands: malformed references use
+  PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID, or
-  PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID; fix the matching command input
-  before Project discovery or mutation.
+  PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID. Wrong actions use
+  PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE or
+  PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE. Follow Recovery; no mutation occurs.
 - Invalid plystra use input: PLYSTRA_USE_INTERFACE_INVALID identifies a
   malformed canonical versioned Interface ID, while
   PLYSTRA_USE_CONSTRUCTOR_INVALID identifies a malformed fully qualified

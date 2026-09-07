@@ -1972,6 +1972,17 @@ Malformed references are classified before Project discovery or mutation:
 Run the emitted corrected command with canonical placeholders. Exposure recovery
 retains the active default, `--env`, or `--config` selector only when it is safe.
 
+Well-formed exact IDs that select the wrong authoring action are classified at
+the transaction boundary:
+
+- `PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE` identifies an exact contract that
+  is already visible and must be passed to `capability implement`; and
+- `PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE` identifies an exact contract that
+  is not visible and must first be authored with `capability create`.
+
+Both failures preserve the existing action-mismatch message, emit one
+placeholder-based counterpart command, and leave every Project byte unchanged.
+
 ### Invalid `plystra use` input
 
 `PLYSTRA_USE_INTERFACE_INVALID` identifies a malformed canonical versioned
