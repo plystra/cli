@@ -25,6 +25,7 @@ import (
 	"github.com/plystra/cli/internal/dependencyremove"
 	"github.com/plystra/cli/internal/dependencyupdate"
 	"github.com/plystra/cli/internal/diagnosticcode"
+	"github.com/plystra/cli/internal/diagnosticjson"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationactivation"
 	"github.com/plystra/cli/internal/generationexec"
@@ -234,8 +235,81 @@ func writeCommandFailure(writer io.Writer, prefix string, err error, context rec
 		_, _ = fmt.Fprintf(writer, "%s: %s\n", prefix, message)
 	}
 	if actionable {
+		for index, source := range actionableDiagnosticSources(err, diagnostic.code) {
+			if index == 0 {
+				_, _ = fmt.Fprintln(writer)
+			}
+			_, _ = fmt.Fprintf(writer, "Source: %s\n", explainSourceSummary(source))
+		}
 		_, _ = fmt.Fprintf(writer, "\nRecovery:\n%s\n\nDiagnostic: %s\n", diagnostic.recovery, diagnostic.code)
 	}
+}
+
+func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source {
+	var sources []diagnosticjson.Source
+	switch code {
+	case diagnosticImplementationDeclarationInvalid,
+		diagnosticInterfaceDeclarationInvalid,
+		diagnosticInterfaceContractInvalid,
+		diagnosticInterfaceMetadataInvalid,
+		diagnosticAuthoredPackageInvalid:
+		expectedKind := map[string]string{
+			diagnosticImplementationDeclarationInvalid: "implementation-declaration",
+			diagnosticInterfaceDeclarationInvalid:      "interface-declaration",
+			diagnosticInterfaceContractInvalid:         "interface-contract",
+			diagnosticInterfaceMetadataInvalid:         "interface-metadata",
+			diagnosticAuthoredPackageInvalid:           "authored-package",
+		}[code]
+		var located *interfaceinventory.SourceError
+		if !errors.As(err, &located) || located == nil || located.SourceKind() != expectedKind {
+			return nil
+		}
+		sources = append(sources, diagnosticjson.Source{
+			Module: located.ModulePath(),
+			Path:   located.SourcePath(),
+			Kind:   located.SourceKind(),
+			Line:   located.Line(),
+			Column: located.Column(),
+		})
+	case diagnosticImplementationConfigInvalid,
+		diagnosticImplementationRequiredInvalid,
+		diagnosticImplementationOptionalInvalid,
+		diagnosticImplementationResultInvalid,
+		diagnosticImplementationConformanceInvalid:
+		var invalid *implementationinventory.ValidationError
+		if !errors.As(err, &invalid) || invalid == nil {
+			return nil
+		}
+		sources = append(sources, diagnosticjson.Source{
+			Module: invalid.ModulePath(),
+			Path:   invalid.SourcePath(),
+			Kind:   "implementation-constructor",
+			Line:   invalid.Line(),
+			Column: invalid.Column(),
+		})
+	case diagnosticInterfaceIDDuplicate:
+		var duplicate *interfaceinventory.DuplicateIDError
+		if !errors.As(err, &duplicate) || duplicate == nil {
+			return nil
+		}
+		for _, definition := range duplicate.Definitions() {
+			position := definition.Declaration().Position()
+			sources = append(sources, diagnosticjson.Source{
+				Module: definition.ModulePath(),
+				Path:   definition.SourcePath(),
+				Kind:   "interface-declaration",
+				Line:   position.Line,
+				Column: position.Column,
+			})
+		}
+	default:
+		return nil
+	}
+	canonical, canonicalErr := diagnosticjson.CanonicalizeSources(sources)
+	if canonicalErr != nil {
+		return nil
+	}
+	return canonical
 }
 
 func primaryFailureMessage(err error) string {

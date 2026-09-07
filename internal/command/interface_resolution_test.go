@@ -197,6 +197,7 @@ func TestPublicResolvingCommandsClassifyInvalidImplementationAuthoringWithoutMut
 		source   string
 		identity string
 		problem  string
+		sources  []string
 		recovery string
 		code     string
 	}{
@@ -205,6 +206,7 @@ func TestPublicResolvingCommandsClassifyInvalidImplementationAuthoringWithoutMut
 			source:   invalidImplementationDeclarationSource,
 			identity: "service/service.go:5:1",
 			problem:  "expected //plystra:implements <interface-id>",
+			sources:  []string{"example.com/command-invalid-implementation:service/service.go:5:1 (implementation-declaration)"},
 			recovery: "Correct the reported //plystra:implements directive so it immediately documents one exported package-level constructor and names canonical Interface IDs, then rerun the command.",
 			code:     diagnosticcode.ImplementationDeclarationInvalid,
 		},
@@ -213,6 +215,7 @@ func TestPublicResolvingCommandsClassifyInvalidImplementationAuthoringWithoutMut
 			source:   invalidImplementationConfigSource,
 			identity: "example.com/command-invalid-implementation/service.New",
 			problem:  "Config field Unsupported",
+			sources:  []string{"example.com/command-invalid-implementation:service/service.go:16:6 (implementation-constructor)"},
 			recovery: "Correct the reported constructor's first Config parameter and exported Config fields to use the supported typed configuration schema, then rerun the command.",
 			code:     diagnosticcode.ImplementationConfigInvalid,
 		},
@@ -221,6 +224,7 @@ func TestPublicResolvingCommandsClassifyInvalidImplementationAuthoringWithoutMut
 			source:   invalidImplementationRequiredSource,
 			identity: "example.com/command-invalid-implementation/service.New",
 			problem:  "parameter 1 must be a canonical Interface type",
+			sources:  []string{"example.com/command-invalid-implementation:service/service.go:12:6 (implementation-constructor)"},
 			recovery: "Replace the reported required constructor parameter with one visible canonical Interface type, then rerun the command.",
 			code:     diagnosticcode.ImplementationRequiredInvalid,
 		},
@@ -229,6 +233,7 @@ func TestPublicResolvingCommandsClassifyInvalidImplementationAuthoringWithoutMut
 			source:   invalidImplementationOptionalSource,
 			identity: "example.com/command-invalid-implementation/service.New",
 			problem:  "Optional must be github.com/plystra/kernel.Optional[T]",
+			sources:  []string{"example.com/command-invalid-implementation:service/service.go:13:6 (implementation-constructor)"},
 			recovery: "Replace the reported optional constructor parameter with the exact plystra.Optional[T] value type around one visible canonical Interface, then rerun the command.",
 			code:     diagnosticcode.ImplementationOptionalInvalid,
 		},
@@ -237,6 +242,7 @@ func TestPublicResolvingCommandsClassifyInvalidImplementationAuthoringWithoutMut
 			source:   invalidImplementationResultSource,
 			identity: "example.com/command-invalid-implementation/service.New",
 			problem:  "constructor must return exactly one concrete pointer and error",
+			sources:  []string{"example.com/command-invalid-implementation:service/service.go:12:6 (implementation-constructor)"},
 			recovery: "Change the reported constructor to return exactly one concrete value plus error, then rerun the command.",
 			code:     diagnosticcode.ImplementationResultInvalid,
 		},
@@ -245,6 +251,7 @@ func TestPublicResolvingCommandsClassifyInvalidImplementationAuthoringWithoutMut
 			source:   invalidImplementationConformanceSource,
 			identity: "example.com/command-invalid-implementation/service.New",
 			problem:  "missing method Send",
+			sources:  []string{"example.com/command-invalid-implementation:service/service.go:6:6 (implementation-constructor)"},
 			recovery: "Implement every reported canonical Interface method on the constructor's concrete result type, then rerun the command.",
 			code:     diagnosticcode.ImplementationConformanceInvalid,
 		},
@@ -260,13 +267,18 @@ func TestPublicResolvingCommandsClassifyInvalidImplementationAuthoringWithoutMut
 					root := writeCommandInvalidImplementationProject(t, test.source)
 					before := commandTree(t, root)
 					exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
+					suffix := "\n\n"
+					for _, source := range test.sources {
+						suffix += "Source: " + source + "\n"
+					}
+					suffix += "\nRecovery:\n" + test.recovery + "\n\nDiagnostic: " + test.code + "\n"
 					if exitCode != 1 || stdout != "" || !commandContainsAll(
 						stderr,
 						test.identity,
 						test.problem,
 						"Recovery:\n"+test.recovery+"\n",
 						"Diagnostic: "+test.code,
-					) {
+					) || !strings.HasSuffix(stderr, suffix) || strings.Count(stderr, "Source: ") != len(test.sources) || strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, root) {
 						t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
 					}
 					if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
@@ -288,6 +300,7 @@ func TestPublicResolvingCommandsClassifyInvalidInterfaceAuthoringWithoutMutation
 		metadata        string
 		duplicateSource string
 		problems        []string
+		sources         []string
 		recovery        string
 		code            string
 	}{
@@ -295,6 +308,7 @@ func TestPublicResolvingCommandsClassifyInvalidInterfaceAuthoringWithoutMutation
 			name:     "declaration",
 			source:   invalidInterfaceDeclarationSource,
 			problems: []string{"interfaces/email/send/v1/interface.go:3:1", "expected //plystra:interface <interface-id>"},
+			sources:  []string{"example.com/command-invalid-interface:interfaces/email/send/v1/interface.go:3:1 (interface-declaration)"},
 			recovery: "Correct the reported //plystra:interface directive so it immediately documents the exported defined type Interface and names one canonical Interface ID, then rerun the command.",
 			code:     diagnosticcode.InterfaceDeclarationInvalid,
 		},
@@ -302,6 +316,7 @@ func TestPublicResolvingCommandsClassifyInvalidInterfaceAuthoringWithoutMutation
 			name:     "contract",
 			source:   invalidInterfaceContractSource,
 			problems: []string{"interfaces/email/send/v1/interface.go:3:1", "exactly one operation method"},
+			sources:  []string{"example.com/command-invalid-interface:interfaces/email/send/v1/interface.go:3:1 (interface-contract)"},
 			recovery: "Correct the reported Interface Go package to the canonical single-operation method, request, response, field, and error shape, then rerun the command.",
 			code:     diagnosticcode.InterfaceContractInvalid,
 		},
@@ -310,6 +325,7 @@ func TestPublicResolvingCommandsClassifyInvalidInterfaceAuthoringWithoutMutation
 			source:   validAuthoredInterfaceSource,
 			metadata: "unknown: true\n",
 			problems: []string{"interfaces/email/send/v1/interface.yaml:1:1", "unknown top-level field"},
+			sources:  []string{"example.com/command-invalid-interface:interfaces/email/send/v1/interface.yaml:1:1 (interface-metadata)"},
 			recovery: "Correct the reported module-relative interface.yaml field to match the closed Interface metadata schema, then rerun the command.",
 			code:     diagnosticcode.InterfaceMetadataInvalid,
 		},
@@ -322,6 +338,10 @@ func TestPublicResolvingCommandsClassifyInvalidInterfaceAuthoringWithoutMutation
 				"example.com/command-invalid-interface/interfaces/email/send/v1",
 				"example.com/command-invalid-interface/interfaces/duplicate/email/v1",
 			},
+			sources: []string{
+				"example.com/command-invalid-interface:interfaces/duplicate/email/v1/interface.go:5:1 (interface-declaration)",
+				"example.com/command-invalid-interface:interfaces/email/send/v1/interface.go:5:1 (interface-declaration)",
+			},
 			recovery: "Make the reported visible Go packages declare distinct canonical Interface IDs, then rerun the command.",
 			code:     diagnosticcode.InterfaceIDDuplicate,
 		},
@@ -329,6 +349,7 @@ func TestPublicResolvingCommandsClassifyInvalidInterfaceAuthoringWithoutMutation
 			name:     "package",
 			source:   invalidAuthoredPackageSource,
 			problems: []string{"invalid Interface package", "missingSymbol"},
+			sources:  []string{"example.com/command-invalid-interface:interfaces/email/send/v1/interface.go (authored-package)"},
 			recovery: "Correct the reported authored Go package in its owning Project so ordinary Go tooling can load it, then rerun the command.",
 			code:     diagnosticcode.AuthoredPackageInvalid,
 		},
@@ -346,7 +367,12 @@ func TestPublicResolvingCommandsClassifyInvalidInterfaceAuthoringWithoutMutation
 					exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
 					want := append([]string(nil), test.problems...)
 					want = append(want, "Recovery:\n"+test.recovery+"\n", "Diagnostic: "+test.code)
-					if exitCode != 1 || stdout != "" || !commandContainsAll(stderr, want...) {
+					suffix := "\n\n"
+					for _, source := range test.sources {
+						suffix += "Source: " + source + "\n"
+					}
+					suffix += "\nRecovery:\n" + test.recovery + "\n\nDiagnostic: " + test.code + "\n"
+					if exitCode != 1 || stdout != "" || !commandContainsAll(stderr, want...) || !strings.HasSuffix(stderr, suffix) || strings.Count(stderr, "Source: ") != len(test.sources) || strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, root) {
 						t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
 					}
 					if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
@@ -355,6 +381,54 @@ func TestPublicResolvingCommandsClassifyInvalidInterfaceAuthoringWithoutMutation
 					assertNoCommandTransactions(t, root)
 				})
 			}
+		})
+	}
+}
+
+func TestPublicResolvingCommandsReportDependencyOwnedSourceWithoutPrivatePaths(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	applicationRoot := filepath.Join(parent, "application")
+	dependencyRoot := filepath.Join(parent, "dependency")
+	writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/command-invalid-dependency-consumer
+
+go 1.26
+
+require example.com/command-invalid-dependency v1.2.3
+
+replace example.com/command-invalid-dependency => ../dependency
+`)
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(applicationRoot, "generated", "sentinel.txt"), "must remain unchanged\n")
+	writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), "module example.com/command-invalid-dependency\n\ngo 1.26\n")
+	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
+	writeCommandGraphInterface(t, dependencyRoot, "email/send/v1", "sendv1", "email.send/v1", "Send")
+	writeCommandFile(t, filepath.Join(dependencyRoot, "interfaces", "email", "send", "v1", "interface.yaml"), "unknown: true\n")
+	applicationBefore := commandTree(t, applicationRoot)
+	dependencyBefore := commandTree(t, dependencyRoot)
+
+	for _, arguments := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}} {
+		arguments := arguments
+		t.Run(strings.Join(arguments, " "), func(t *testing.T) {
+			exitCode, stdout, stderr := runCommand(t, arguments, applicationRoot, commandGoEnvironment())
+			wantSuffix := "\n\nSource: example.com/command-invalid-dependency:interfaces/email/send/v1/interface.yaml:1:1 (interface-metadata)\n\nRecovery:\nCorrect the reported module-relative interface.yaml field to match the closed Interface metadata schema, then rerun the command.\n\nDiagnostic: " + diagnosticcode.InterfaceMetadataInvalid + "\n"
+			if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 {
+				t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+			}
+			for _, privatePath := range []string{parent, filepath.ToSlash(parent), applicationRoot, filepath.ToSlash(applicationRoot), dependencyRoot, filepath.ToSlash(dependencyRoot)} {
+				if strings.Contains(stderr, privatePath) {
+					t.Fatalf("%v exposed private path %q: %q", arguments, privatePath, stderr)
+				}
+			}
+			if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, applicationBefore) {
+				t.Fatalf("%v mutated consumer Project:\nbefore: %#v\nafter:  %#v", arguments, applicationBefore, after)
+			}
+			if after := commandTree(t, dependencyRoot); !reflect.DeepEqual(after, dependencyBefore) {
+				t.Fatalf("%v mutated dependency Project:\nbefore: %#v\nafter:  %#v", arguments, dependencyBefore, after)
+			}
+			assertNoCommandTransactions(t, applicationRoot)
+			assertNoCommandTransactions(t, dependencyRoot)
 		})
 	}
 }

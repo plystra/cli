@@ -186,6 +186,29 @@ func TestEnvelopeRejectsUnsafeOrDuplicateSources(t *testing.T) {
 	}
 }
 
+func TestCanonicalizeSourcesUsesEnvelopeOrderingAndValidation(t *testing.T) {
+	t.Parallel()
+
+	input := []diagnosticjson.Source{
+		{Module: "example.com/zeta", Path: "service/service.go", Kind: "implementation-constructor", Line: 7, Column: 6},
+		{Module: "example.com/alpha", Path: "interfaces/run/interface.go", Kind: "interface-declaration", Line: 3, Column: 1},
+	}
+	canonical, err := diagnosticjson.CanonicalizeSources(input)
+	if err != nil || len(canonical) != 2 || canonical[0] != input[1] || canonical[1] != input[0] {
+		t.Fatalf("CanonicalizeSources = %#v, %v", canonical, err)
+	}
+	input[1].Path = "changed.go"
+	if canonical[0].Path != "interfaces/run/interface.go" {
+		t.Fatalf("canonical sources share input storage: %#v", canonical)
+	}
+	if duplicate, duplicateErr := diagnosticjson.CanonicalizeSources([]diagnosticjson.Source{canonical[0], canonical[0]}); !errors.Is(duplicateErr, diagnosticjson.ErrInvalid) || duplicate != nil || !strings.Contains(duplicateErr.Error(), "duplicates") {
+		t.Fatalf("duplicate CanonicalizeSources = %#v, %v", duplicate, duplicateErr)
+	}
+	if unsafe, unsafeErr := diagnosticjson.CanonicalizeSources([]diagnosticjson.Source{{Module: "example.com/app", Path: `C:\private\source.go`, Kind: "interface-declaration"}}); !errors.Is(unsafeErr, diagnosticjson.ErrInvalid) || unsafe != nil || !strings.Contains(unsafeErr.Error(), "module-relative") {
+		t.Fatalf("unsafe CanonicalizeSources = %#v, %v", unsafe, unsafeErr)
+	}
+}
+
 func TestEnvelopeStrictlyCanonicalizesAndBoundsResult(t *testing.T) {
 	t.Parallel()
 

@@ -1219,9 +1219,11 @@ build and distribution boundary for every Plystra module.
 
 ## Diagnose common failures
 
-Actionable failures end with one Recovery block and one stable
-Diagnostic: PLYSTRA_<AREA>_<CONDITION> code. Safe selectors remain; unsafe
-values use placeholders. Unclassified errors get neither.
+Actionable failures end with Recovery and a stable
+Diagnostic: PLYSTRA_<AREA>_<CONDITION> code. Authored failures put sorted
+Source: <module>:<module-relative-path>[:line:column] (<kind>) lines first; they
+expose no Module Cache or absolute path. Unsafe selectors use placeholders.
+Unclassified errors get neither.
 
 - Missing Implementation: require or expose its Interface and make one
   constructor visible. Markerless dependencies are not scanned.
@@ -1254,7 +1256,7 @@ values use placeholders. Unclassified errors get neither.
   PLYSTRA_INTERFACE_METADATA_INVALID,
   PLYSTRA_INTERFACE_ID_DUPLICATE, and PLYSTRA_AUTHORING_PACKAGE_INVALID.
   They identify directive, Go contract, metadata, visible-ID, and package-load
-  failures. Apply Recovery in the owning Project, never its Module Cache.
+  failures. Apply Recovery to Source in the owning Project, never Module Cache.
 - Scaffold-command codes:
   PLYSTRA_PLUGIN_CREATE_NAME_INVALID, PLYSTRA_PLUGIN_CREATE_ID_INVALID,
   PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS,
@@ -1273,7 +1275,7 @@ values use placeholders. Unclassified errors get neither.
   PLYSTRA_IMPLEMENTATION_RESULT_INVALID, and
   PLYSTRA_IMPLEMENTATION_CONFORMANCE_INVALID. They identify the directive,
   Config, required parameter, exact plystra.Optional[T] parameter, result, and
-  conformance boundary. Apply Recovery to the reported source; fix dependency
+  conformance boundary. Apply Recovery to Source; fix dependency
   source in its owning Project or select a corrected version, never Module Cache.
 - Unavailable generated client: confirm assembly completed and avoid invoking
   application clients while constructors are still running before publication.

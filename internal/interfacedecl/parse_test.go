@@ -166,6 +166,16 @@ func TestParseFileRejectsInvalidGoSyntax(t *testing.T) {
 	}
 }
 
+func TestInvalidErrorPreservesDirectivePosition(t *testing.T) {
+	t.Parallel()
+
+	_, err := interfacedecl.ParseFile("interfaces/order/interface.go", []byte("package order\n//plystra:interface\ntype Interface interface{}\n"))
+	var invalid *interfacedecl.InvalidError
+	if !errors.As(err, &invalid) || invalid.Position() != (interfacedecl.Position{Path: "interfaces/order/interface.go", Line: 2, Column: 1}) || !errors.Is(invalid, interfacedecl.ErrInvalid) {
+		t.Fatalf("InvalidError = %#v, %v", invalid, err)
+	}
+}
+
 func FuzzParseFile(f *testing.F) {
 	for _, seed := range []string{
 		"package test\n//plystra:interface order.create/v1\ntype Interface interface{}\n",

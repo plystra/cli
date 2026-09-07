@@ -16,6 +16,31 @@ import (
 // ErrInvalid reports a Go declaration that cannot be a canonical Interface contract.
 var ErrInvalid = errors.New("invalid Interface contract")
 
+// InvalidError preserves the authoritative Interface declaration position for
+// one invalid compiled contract while supporting errors.Is with ErrInvalid.
+type InvalidError struct {
+	position interfacedecl.Position
+	message  string
+}
+
+// Position returns the module-relative authoritative declaration position.
+func (e *InvalidError) Position() interfacedecl.Position {
+	if e == nil {
+		return interfacedecl.Position{}
+	}
+	return e.position
+}
+
+func (e *InvalidError) Error() string {
+	if e == nil {
+		return ErrInvalid.Error()
+	}
+	return fmt.Sprintf("%s: %s:%d:%d: %s", ErrInvalid, e.position.Path, e.position.Line, e.position.Column, e.message)
+}
+
+// Unwrap supports errors.Is with ErrInvalid.
+func (*InvalidError) Unwrap() error { return ErrInvalid }
+
 // Contract is the normalized identity of one type-checked Interface operation.
 type Contract struct {
 	id             interfaceid.Identifier
@@ -348,6 +373,5 @@ func validJSONName(name string) bool {
 }
 
 func invalid(declaration interfacedecl.Declaration, message string) error {
-	position := declaration.Position()
-	return fmt.Errorf("%w: %s:%d:%d: %s", ErrInvalid, position.Path, position.Line, position.Column, message)
+	return &InvalidError{position: declaration.Position(), message: message}
 }

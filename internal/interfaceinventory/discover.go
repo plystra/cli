@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/plystra/cli/internal/gocommand"
@@ -36,8 +37,13 @@ import (
 )
 
 const (
-	defaultOutputLimit = 64 << 20
-	maximumSourceSize  = 16 << 20
+	defaultOutputLimit                  = 64 << 20
+	maximumSourceSize                   = 16 << 20
+	sourceKindAuthoredPackage           = "authored-package"
+	sourceKindImplementationDeclaration = "implementation-declaration"
+	sourceKindInterfaceContract         = "interface-contract"
+	sourceKindInterfaceDeclaration      = "interface-declaration"
+	sourceKindInterfaceMetadata         = "interface-metadata"
 )
 
 var (
@@ -355,7 +361,7 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 			if version == "" {
 				version = "local"
 			}
-			return Discovery{}, fmt.Errorf("%w: inspect %s@%s: package %s: %w", ErrDiscover, interfaces[index].modulePath, version, interfaces[index].packagePath, err)
+			return Discovery{}, fmt.Errorf("%w: inspect %s@%s: package %s: %w", ErrDiscover, interfaces[index].modulePath, version, interfaces[index].packagePath, locateMetadataError(interfaces[index].modulePath, interfaces[index].metadata.Path(), err))
 		}
 		interfaces[index].deprecation = deprecation
 		interfaces[index].hasDeprecation = present
@@ -452,11 +458,15 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 			continue
 		}
 		if err := validateLoadedPackage(candidate, loaded); err != nil {
+			if errors.Is(err, ErrPackage) {
+				err = locateAuthoredPackageError(candidate, loaded, err)
+			}
 			return loadedInventory{}, err
 		}
 		checkedPackage, err := checkedImporter.Import(candidate.importPath)
 		if err != nil {
-			return loadedInventory{}, fmt.Errorf("%w: import compiled package %s: %s", ErrPackage, candidate.importPath, sanitizePackageError(err.Error(), candidate))
+			packageErr := fmt.Errorf("%w: import compiled package %s: %s", ErrPackage, candidate.importPath, sanitizePackageError(err.Error(), candidate))
+			return loadedInventory{}, locateAuthoredPackageError(candidate, loaded, packageErr)
 		}
 		if checkedPackage.Path() != candidate.importPath || checkedPackage.Name() != loaded.Name {
 			return loadedInventory{}, fmt.Errorf("%w: compiled package identity for %q is %s %q", ErrInvalidOutput, candidate.importPath, checkedPackage.Path(), checkedPackage.Name())
@@ -480,10 +490,10 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 		}
 		metadata, hasMetadata, err := loadOptionalMetadata(candidate)
 		if err != nil {
-			return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
+			return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, locateMetadataError(candidate.source.path, candidateMetadataPath(candidate), err))
 		}
 		if err := validateConformancePackage(candidate, metadata); err != nil {
-			return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
+			return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, locateMetadataError(candidate.source.path, metadata.Path(), err))
 		}
 		for _, declaration := range declarations.interfaces {
 			if declaration.PackageName() != loaded.Name {
@@ -491,15 +501,16 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 			}
 			contract, err := interfacecontract.Validate(declaration, checkedPackage)
 			if err != nil {
-				return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
+				position := declaration.Position()
+				return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, sourceError(candidate.source.path, position.Path, sourceKindInterfaceContract, position.Line, position.Column, err))
 			}
 			constraints, err := interfacemeta.ResolveConstraintTargets(metadata, contract)
 			if err != nil {
-				return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
+				return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, locateMetadataError(candidate.source.path, metadata.Path(), err))
 			}
 			examples, err := interfacemeta.ResolveExamples(metadata, contract)
 			if err != nil {
-				return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
+				return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, locateMetadataError(candidate.source.path, metadata.Path(), err))
 			}
 			contractDigest, err := interfacedigest.CalculateContract(contract, metadata, constraints)
 			if err != nil {
@@ -567,6 +578,34 @@ func loadOptionalMetadata(candidate packageCandidate) (interfacemeta.Document, b
 		return interfacemeta.Document{}, false, err
 	}
 	return document, true, nil
+}
+
+func candidateMetadataPath(candidate packageCandidate) string {
+	relativeDirectory, err := filepath.Rel(candidate.source.root, candidate.directory)
+	if err != nil || filepath.IsAbs(relativeDirectory) || relativeDirectory == ".." || strings.HasPrefix(relativeDirectory, ".."+string(filepath.Separator)) {
+		return interfacemeta.Name
+	}
+	if relativeDirectory == "." {
+		return interfacemeta.Name
+	}
+	return path.Join(filepath.ToSlash(relativeDirectory), interfacemeta.Name)
+}
+
+func locateMetadataError(modulePath, fallbackPath string, err error) error {
+	sourcePath := fallbackPath
+	line, column := 0, 0
+	var invalid *interfacemeta.InvalidError
+	if errors.As(err, &invalid) {
+		if invalid.Path() != "" {
+			sourcePath = invalid.Path()
+		}
+		line = invalid.Line()
+		column = invalid.Column()
+	}
+	if sourcePath == "" {
+		sourcePath = interfacemeta.Name
+	}
+	return sourceError(modulePath, sourcePath, sourceKindInterfaceMetadata, line, column, err)
 }
 
 func validateConformancePackage(candidate packageCandidate, metadata interfacemeta.Document) error {
@@ -974,14 +1013,24 @@ func parseDeclarations(candidate packageCandidate, loaded listedPackage) (packag
 		if hasInterface {
 			parsed, err := interfacedecl.ParseFile(sourcePath, data)
 			if err != nil {
-				return packageDeclarations{}, err
+				position := interfacedecl.Position{Path: sourcePath}
+				var invalid *interfacedecl.InvalidError
+				if errors.As(err, &invalid) {
+					position = invalid.Position()
+				}
+				return packageDeclarations{}, sourceError(candidate.source.path, position.Path, sourceKindInterfaceDeclaration, position.Line, position.Column, err)
 			}
 			declarations.interfaces = append(declarations.interfaces, parsed...)
 		}
 		if hasImplementation {
 			parsed, err := implementationdecl.ParseFile(sourcePath, data)
 			if err != nil {
-				return packageDeclarations{}, err
+				position := implementationdecl.Position{Path: sourcePath}
+				var invalid *implementationdecl.InvalidError
+				if errors.As(err, &invalid) {
+					position = invalid.Position()
+				}
+				return packageDeclarations{}, sourceError(candidate.source.path, position.Path, sourceKindImplementationDeclaration, position.Line, position.Column, err)
 			}
 			declarations.implementations = append(declarations.implementations, parsed...)
 		}
@@ -1043,6 +1092,107 @@ func validateLoadedPackage(candidate packageCandidate, loaded listedPackage) err
 
 func packageError(candidate packageCandidate, loaded listedPackage, message string) error {
 	return fmt.Errorf("%w: package %s: %s", ErrPackage, candidate.importPath, sanitizePackageError(message, candidate, loaded.Dir))
+}
+
+func locateAuthoredPackageError(candidate packageCandidate, loaded listedPackage, err error) error {
+	sourcePath, line, column := authoredPackageSource(candidate, loaded)
+	return sourceError(candidate.source.path, sourcePath, sourceKindAuthoredPackage, line, column, err)
+}
+
+func authoredPackageSource(candidate packageCandidate, loaded listedPackage) (string, int, int) {
+	packageErrors := make([]*listedPackageError, 0, 1+len(loaded.DepsErrors))
+	packageErrors = append(packageErrors, loaded.Error)
+	packageErrors = append(packageErrors, loaded.DepsErrors...)
+	for _, packageErr := range packageErrors {
+		if packageErr == nil {
+			continue
+		}
+		if sourcePath, line, column, ok := listedPackageSource(candidate, packageErr.Pos); ok {
+			return sourcePath, line, column
+		}
+	}
+
+	fileNames := append(append([]string(nil), loaded.GoFiles...), loaded.CgoFiles...)
+	sort.Strings(fileNames)
+	for _, fileName := range fileNames {
+		if fileName == "" || filepath.Base(fileName) != fileName {
+			continue
+		}
+		if sourcePath, ok := moduleRelativeSourcePath(candidate.source.root, filepath.Join(candidate.directory, fileName)); ok {
+			return sourcePath, 0, 0
+		}
+	}
+	if sourcePath, ok := moduleRelativeSourcePath(candidate.source.root, candidate.directory); ok {
+		return sourcePath, 0, 0
+	}
+	return "go.mod", 0, 0
+}
+
+func listedPackageSource(candidate packageCandidate, value string) (string, int, int, bool) {
+	fileName, line, column, ok := splitListedPosition(value)
+	if !ok {
+		return "", 0, 0, false
+	}
+	fileName = filepath.Clean(fileName)
+	absoluteCandidates := make([]string, 0, 2)
+	if filepath.IsAbs(fileName) || filepath.VolumeName(fileName) != "" {
+		absoluteCandidates = append(absoluteCandidates, fileName)
+	} else if filepath.Base(fileName) == fileName {
+		absoluteCandidates = append(absoluteCandidates, filepath.Join(candidate.directory, fileName))
+	} else {
+		absoluteCandidates = append(absoluteCandidates, filepath.Join(candidate.source.root, fileName), filepath.Join(candidate.directory, fileName))
+	}
+	fallback := ""
+	for _, absolutePath := range absoluteCandidates {
+		sourcePath, safe := moduleRelativeSourcePath(candidate.source.root, absolutePath)
+		if !safe {
+			continue
+		}
+		if _, statErr := os.Lstat(absolutePath); statErr == nil {
+			return sourcePath, line, column, true
+		}
+		if fallback == "" {
+			fallback = sourcePath
+		}
+	}
+	if fallback != "" {
+		return fallback, line, column, true
+	}
+	return "", 0, 0, false
+}
+
+func splitListedPosition(value string) (string, int, int, bool) {
+	value = strings.TrimSpace(value)
+	lastColon := strings.LastIndexByte(value, ':')
+	if lastColon <= 0 || lastColon == len(value)-1 {
+		return "", 0, 0, false
+	}
+	lastNumber, err := strconv.Atoi(value[lastColon+1:])
+	if err != nil || lastNumber <= 0 {
+		return "", 0, 0, false
+	}
+	prefix := value[:lastColon]
+	secondColon := strings.LastIndexByte(prefix, ':')
+	if secondColon <= 0 || secondColon == len(prefix)-1 {
+		return prefix, lastNumber, 0, true
+	}
+	line, err := strconv.Atoi(prefix[secondColon+1:])
+	if err != nil || line <= 0 {
+		return prefix, lastNumber, 0, true
+	}
+	return prefix[:secondColon], line, lastNumber, true
+}
+
+func moduleRelativeSourcePath(root, target string) (string, bool) {
+	relativePath, err := filepath.Rel(root, target)
+	if err != nil || relativePath == "." || filepath.IsAbs(relativePath) || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	relativePath = filepath.ToSlash(relativePath)
+	if !fs.ValidPath(relativePath) || relativePath == "." {
+		return "", false
+	}
+	return relativePath, true
 }
 
 func sanitizePackageError(message string, candidate packageCandidate, extraPaths ...string) string {

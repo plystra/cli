@@ -37,6 +37,64 @@ var (
 	ErrInvalidConformance = errors.New("invalid structural Implementation conformance")
 )
 
+// ValidationError preserves the owning module and constructor declaration
+// position for one invalid authored Implementation shape.
+type ValidationError struct {
+	condition  error
+	modulePath string
+	sourcePath string
+	line       int
+	column     int
+	detail     string
+}
+
+// ModulePath returns the Go Module identity that owns the constructor.
+func (e *ValidationError) ModulePath() string {
+	if e == nil {
+		return ""
+	}
+	return e.modulePath
+}
+
+// SourcePath returns the stable module-relative constructor source path.
+func (e *ValidationError) SourcePath() string {
+	if e == nil {
+		return ""
+	}
+	return e.sourcePath
+}
+
+// Line returns the one-based constructor declaration line.
+func (e *ValidationError) Line() int {
+	if e == nil {
+		return 0
+	}
+	return e.line
+}
+
+// Column returns the one-based constructor declaration column.
+func (e *ValidationError) Column() int {
+	if e == nil {
+		return 0
+	}
+	return e.column
+}
+
+func (e *ValidationError) Error() string {
+	if e == nil || e.condition == nil {
+		return ErrInvalidInput.Error()
+	}
+	return fmt.Sprintf("%s: %s", e.condition, e.detail)
+}
+
+// Unwrap supports errors.Is with the exact constructor validation condition.
+func (e *ValidationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.condition
+}
+
 // Input is one parsed constructor declaration and its compiled Go package
 // provenance. Importer retains that loader's package-identity cache for exact
 // cross-package conformance checks. Callers obtain these values from the shared
@@ -192,22 +250,22 @@ func Build(inputs []Input, interfaces []InterfaceInput) (Index, error) {
 		}
 		configuration, hasConfig, configurationErr := CompileConfiguration(input.Types, function)
 		if configurationErr != nil {
-			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidConfiguration, symbol, inputSource(input), configurationErr)
+			return Index{}, validationError(ErrInvalidConfiguration, input, symbol.String(), configurationErr)
 		}
 		optional, optionalPositions, optionalErr := validateOptionalInterfaces(function, hasConfig, interfacePackages)
 		if optionalErr != nil {
-			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidOptionalInterface, symbol, inputSource(input), optionalErr)
+			return Index{}, validationError(ErrInvalidOptionalInterface, input, symbol.String(), optionalErr)
 		}
 		required, requiredErr := validateRequiredInterfaces(function, hasConfig, optionalPositions, interfacePackages)
 		if requiredErr != nil {
-			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidRequiredInterface, symbol, inputSource(input), requiredErr)
+			return Index{}, validationError(ErrInvalidRequiredInterface, input, symbol.String(), requiredErr)
 		}
 		concrete, resultErr := validateConstructorResult(function)
 		if resultErr != nil {
-			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidResult, symbol, inputSource(input), resultErr)
+			return Index{}, validationError(ErrInvalidResult, input, symbol.String(), resultErr)
 		}
 		if conformanceErr := validateStructuralConformance(input, concrete, interfacePackages); conformanceErr != nil {
-			return Index{}, fmt.Errorf("%w: %s at %s: %v", ErrInvalidConformance, symbol, inputSource(input), conformanceErr)
+			return Index{}, validationError(ErrInvalidConformance, input, symbol.String(), conformanceErr)
 		}
 		implementations[index] = Implementation{
 			modulePath:    input.ModulePath,
@@ -261,4 +319,16 @@ func inputSource(input Input) string {
 	}
 	position := input.Declaration.Position()
 	return fmt.Sprintf("%s@%s/%s:%d:%d", input.ModulePath, version, position.Path, position.Line, position.Column)
+}
+
+func validationError(condition error, input Input, symbol string, cause error) error {
+	position := input.Declaration.Position()
+	return &ValidationError{
+		condition:  condition,
+		modulePath: input.ModulePath,
+		sourcePath: position.Path,
+		line:       position.Line,
+		column:     position.Column,
+		detail:     fmt.Sprintf("%s at %s: %v", symbol, inputSource(input), cause),
+	}
 }

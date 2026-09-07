@@ -258,6 +258,10 @@ func TestValidateRequiresCheckedPackage(t *testing.T) {
 	if !errors.Is(err, interfacecontract.ErrInvalid) || contract.ID().String() != "" || !strings.Contains(err.Error(), "type-checked Go package is required") {
 		t.Fatalf("Validate = %#v, %v", contract, err)
 	}
+	var invalid *interfacecontract.InvalidError
+	if !errors.As(err, &invalid) || invalid.Position() != (interfacedecl.Position{Path: "interface.go", Line: 2, Column: 1}) {
+		t.Fatalf("InvalidError = %#v, %v", invalid, err)
+	}
 }
 
 func validateSource(t *testing.T, source string) (interfacecontract.Contract, error) {

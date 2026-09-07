@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/scanner"
 	"go/token"
 	"sort"
 	"strings"
@@ -25,6 +26,31 @@ type Position struct {
 	Line   int
 	Column int
 }
+
+// InvalidError preserves the source position for one invalid authored
+// Implementation declaration while supporting errors.Is with ErrInvalid.
+type InvalidError struct {
+	position Position
+	detail   string
+}
+
+// Position returns the best available module-relative source position.
+func (e *InvalidError) Position() Position {
+	if e == nil {
+		return Position{}
+	}
+	return e.position
+}
+
+func (e *InvalidError) Error() string {
+	if e == nil {
+		return ErrInvalid.Error()
+	}
+	return fmt.Sprintf("%s: %s", ErrInvalid, e.detail)
+}
+
+// Unwrap supports errors.Is with ErrInvalid.
+func (*InvalidError) Unwrap() error { return ErrInvalid }
 
 // ImplementedInterface records one exact Interface directive on a constructor.
 type ImplementedInterface struct {
@@ -70,7 +96,7 @@ func ParseFile(path string, source []byte) ([]Declaration, error) {
 	files := token.NewFileSet()
 	file, err := parser.ParseFile(files, path, source, parser.AllErrors|parser.ParseComments)
 	if err != nil {
-		return nil, fmt.Errorf("%w: parse %s: %v", ErrInvalid, path, err)
+		return nil, parseError(path, err)
 	}
 
 	directives, err := collectDirectives(files, file)
@@ -198,5 +224,23 @@ func positionLess(left, right Position) bool {
 }
 
 func declarationError(position Position, message string) error {
-	return fmt.Errorf("%w: %s:%d:%d: %s", ErrInvalid, position.Path, position.Line, position.Column, message)
+	return &InvalidError{
+		position: position,
+		detail:   fmt.Sprintf("%s:%d:%d: %s", position.Path, position.Line, position.Column, message),
+	}
+}
+
+func parseError(path string, err error) error {
+	position := Position{Path: path}
+	var list scanner.ErrorList
+	if errors.As(err, &list) && len(list) > 0 {
+		position = sourcePosition(list[0].Pos)
+		if position.Path == "" {
+			position.Path = path
+		}
+	}
+	return &InvalidError{
+		position: position,
+		detail:   fmt.Sprintf("parse %s: %v", path, err),
+	}
 }

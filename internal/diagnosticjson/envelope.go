@@ -123,9 +123,9 @@ func New(input Input) (Envelope, error) {
 	if err != nil {
 		return Envelope{}, fmt.Errorf("%w: diagnostics: %v", ErrInvalid, err)
 	}
-	sources, err := normalizeSources(input.Sources)
+	sources, err := CanonicalizeSources(input.Sources)
 	if err != nil {
-		return Envelope{}, fmt.Errorf("%w: sources: %v", ErrInvalid, err)
+		return Envelope{}, err
 	}
 	result, err := normalizeResult(input.Result)
 	if err != nil {
@@ -171,7 +171,7 @@ func (e Envelope) Valid() bool {
 	if err != nil || !equalDiagnostics(e.diagnostics, diagnostics) {
 		return false
 	}
-	sources, err := normalizeSources(input.Sources)
+	sources, err := CanonicalizeSources(input.Sources)
 	if err != nil || !equalSources(e.sources, sources) {
 		return false
 	}
@@ -261,6 +261,16 @@ func normalizeDiagnostics(input []Diagnostic) ([]Diagnostic, error) {
 		}
 	}
 	return diagnostics, nil
+}
+
+// CanonicalizeSources validates, copies, and orders stable module-relative
+// source references using the same contract as every diagnostic envelope.
+func CanonicalizeSources(input []Source) ([]Source, error) {
+	sources, err := normalizeSources(input)
+	if err != nil {
+		return nil, fmt.Errorf("%w: sources: %v", ErrInvalid, err)
+	}
+	return sources, nil
 }
 
 func normalizeSources(input []Source) ([]Source, error) {

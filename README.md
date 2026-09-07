@@ -783,6 +783,18 @@ human wording. A recovery command preserves the selected default, `--env`, or
 advice. Unknown internal failures retain their original diagnostic without an
 invented recovery action or code.
 
+Classified authored Interface and Implementation failures insert one or more
+canonical source lines between the problem and recovery:
+
+```text
+Source: <module>:<module-relative-path>[:<line>:<column>] (<kind>)
+```
+
+Multiple sources use the shared diagnostic-envelope order. The CLI prints the
+owning Project module, never an absolute path or Module Cache path, and omits
+rather than fabricates a line or column when Go's structured package error does
+not provide one.
+
 Configuration-selection failures use
 `PLYSTRA_CONFIGURATION_SELECTION_INVALID`. An explicit `--env` plus `--config`
 pair is rejected before Project discovery or mutation; conflicting or duplicate
@@ -800,13 +812,13 @@ than echoing rejected input, and each failure leaves the Project unchanged.
 Authored Interface failures distinguish an invalid `//plystra:interface`
 declaration, canonical Go contract, optional `interface.yaml`, duplicate visible
 ID, and an authored package that ordinary Go tooling cannot load. Correct the
-reported module-relative source in its owning Project.
+reported `Source:` in its owning Project.
 
 Authored Implementation failures distinguish an invalid
 `//plystra:implements` declaration, unsupported `Config` shape, invalid required
 or `plystra.Optional[T]` parameter, invalid constructor result, and structural
 conformance failure. Follow the code-specific recovery against the reported
-Project-relative Go source; never edit a dependency's Module Cache copy.
+`Source:`; never edit a dependency's Module Cache copy.
 
 Malformed `plystra capability create`, `plystra capability implement`, and
 `plystra capability expose` references use

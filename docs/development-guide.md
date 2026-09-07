@@ -1909,6 +1909,26 @@ Recovery:
 Diagnostic: PLYSTRA_<AREA>_<CONDITION>
 ```
 
+An authored Interface or Implementation failure inserts canonical provenance
+before recovery:
+
+```text
+<problem>
+
+Source: <module>:<module-relative-path>[:<line>:<column>] (<kind>)
+
+Recovery:
+<one command or file edit>
+
+Diagnostic: PLYSTRA_<AREA>_<CONDITION>
+```
+
+Duplicate Interface identities emit every defining source in the shared
+diagnostic-envelope order. Sources always name the owning Project module and a
+slash-separated module-relative path. They never expose an absolute path or a
+Module Cache path. A package-level source omits the optional span when Go's
+structured package error provides no exact line or column.
+
 Run that action with the same selected application model. Recovery commands
 retain default, environment, or complete-replacement mode, including selectors
 supplied through `PLYSTRA_ENV` or `PLYSTRA_CONFIG`. Unsafe or absolute selector
@@ -1944,8 +1964,8 @@ Interface discovery classifies each actionable authoring boundary separately:
 - `PLYSTRA_AUTHORING_PACKAGE_INVALID` identifies an eligible authored package
   that ordinary Go tooling cannot load.
 
-Apply the emitted recovery to the reported module-relative source in its owning
-Project. Never patch a dependency's Module Cache copy.
+Apply the emitted recovery to the reported `Source:` in its owning Project.
+Never patch a dependency's Module Cache copy.
 
 ### Invalid authored Implementation
 
@@ -1963,7 +1983,7 @@ Constructor discovery classifies each actionable authoring boundary separately:
 - `PLYSTRA_IMPLEMENTATION_CONFORMANCE_INVALID` identifies a returned concrete
   type that does not implement every declared canonical Interface.
 
-Apply the emitted recovery to the reported Project-relative Go source. If the
+Apply the emitted recovery to the reported `Source:`. If the
 source belongs to a dependency Project, fix that owning Project or select a
 corrected dependency version; never edit the Module Cache copy.
 

@@ -281,6 +281,10 @@ func TestParseFileRejectsUnknownTopLevelField(t *testing.T) {
 	if !errors.Is(err, interfacemeta.ErrInvalid) || !errors.Is(err, interfacemeta.ErrUnknownField) || errors.Is(err, interfacemeta.ErrAuthoritativeField) || document.Path() != "" || !strings.Contains(err.Error(), "unknown top-level field \"custom\"") {
 		t.Fatalf("ParseFile = %#v, %v", document, err)
 	}
+	var invalid *interfacemeta.InvalidError
+	if !errors.As(err, &invalid) || invalid.Path() != "interfaces/order/interface.yaml" || invalid.Line() != 1 || invalid.Column() != 1 || !errors.Is(invalid, interfacemeta.ErrInvalid) || !errors.Is(invalid, interfacemeta.ErrUnknownField) {
+		t.Fatalf("InvalidError = %#v, %v", invalid, err)
+	}
 }
 
 func TestParseFileRejectsUnsafeOrMalformedDocuments(t *testing.T) {

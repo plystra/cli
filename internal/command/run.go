@@ -52,6 +52,7 @@ const (
 
 Common actionable failures end with one Recovery block containing the primary
 command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
+Authored-source failures add canonical module-relative Source lines first.
 `
 	addUsage = `Usage:
   plystra add <go-module-query>

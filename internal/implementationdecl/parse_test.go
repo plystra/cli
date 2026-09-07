@@ -194,6 +194,16 @@ func TestParseFileRejectsInvalidGoSyntax(t *testing.T) {
 	}
 }
 
+func TestInvalidErrorPreservesDirectivePosition(t *testing.T) {
+	t.Parallel()
+
+	_, err := implementationdecl.ParseFile("service/implementation.go", []byte("package service\n//plystra:implements\nfunc New() (*Service, error) { return nil, nil }\n"))
+	var invalid *implementationdecl.InvalidError
+	if !errors.As(err, &invalid) || invalid.Position() != (implementationdecl.Position{Path: "service/implementation.go", Line: 2, Column: 1}) || !errors.Is(invalid, implementationdecl.ErrInvalid) {
+		t.Fatalf("InvalidError = %#v, %v", invalid, err)
+	}
+}
+
 func FuzzParseFile(f *testing.F) {
 	for _, seed := range []string{
 		"package test\n//plystra:implements order.create/v1\nfunc New() (*Service, error) { return nil, nil }\n",

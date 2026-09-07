@@ -1462,6 +1462,9 @@ func TestDiscoverRejectsMalformedActiveDeclarationsAndPackages(t *testing.T) {
 		source   string
 		want     error
 		wantText string
+		kind     string
+		line     int
+		column   int
 	}{
 		{
 			name: "malformed directive",
@@ -1471,6 +1474,9 @@ type Interface interface{}
 `,
 			want:     interfacedecl.ErrInvalid,
 			wantText: "interfaces/broken/interface.go:2:1",
+			kind:     "interface-declaration",
+			line:     2,
+			column:   1,
 		},
 		{
 			name: "invalid contract",
@@ -1485,6 +1491,9 @@ type Response struct { Value string ` + "`plystra:\"1\"`" + ` }
 `,
 			want:     interfacecontract.ErrInvalid,
 			wantText: "missing plystra field-number tag",
+			kind:     "interface-contract",
+			line:     5,
+			column:   1,
 		},
 		{
 			name: "Go type error",
@@ -1498,6 +1507,7 @@ type Response struct { Value string ` + "`plystra:\"1\"`" + ` }
 `,
 			want:     interfaceinventory.ErrPackage,
 			wantText: "Missing",
+			kind:     "authored-package",
 		},
 		{
 			name: "program package",
@@ -1513,6 +1523,7 @@ func main() {}
 `,
 			want:     interfaceinventory.ErrPackage,
 			wantText: "cannot define an importable Interface",
+			kind:     "authored-package",
 		},
 	}
 	for _, test := range tests {
@@ -1529,7 +1540,42 @@ func main() {}
 			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
 				t.Fatalf("error exposed private Project root: %v", err)
 			}
+			var located *interfaceinventory.SourceError
+			if !errors.As(err, &located) || located.ModulePath() != "example.com/broken" || located.SourcePath() != "interfaces/broken/interface.go" || located.SourceKind() != test.kind || located.Line() != test.line || located.Column() != test.column || !errors.Is(located, test.want) {
+				t.Fatalf("SourceError = %#v, %v", located, err)
+			}
 		})
+	}
+}
+
+func TestDiscoverDependencyAuthoringErrorUsesOwningModuleSource(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	applicationRoot := filepath.Join(root, "application")
+	dependencyRoot := filepath.Join(root, "dependency")
+	writeProject(t, dependencyRoot, "example.com/dependency")
+	writeFile(t, filepath.Join(dependencyRoot, "api", "interface.go"), interfaceSource("api", "dependency.records.list/v1", "List"))
+	writeFile(t, filepath.Join(dependencyRoot, "api", interfacemeta.Name), "unknown: true\n")
+	writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/application
+
+go 1.26
+
+require example.com/dependency v1.2.3
+
+replace example.com/dependency => ../dependency
+`)
+	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+
+	_, err := discoverResult(t, applicationRoot, goEnvironment(map[string]string{"GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off"}))
+	var located *interfaceinventory.SourceError
+	if !errors.Is(err, interfacemeta.ErrInvalid) || !errors.As(err, &located) || located.ModulePath() != "example.com/dependency" || located.SourcePath() != "api/interface.yaml" || located.SourceKind() != "interface-metadata" || located.Line() != 1 || located.Column() != 1 {
+		t.Fatalf("dependency SourceError = %#v, %v", located, err)
+	}
+	for _, privateRoot := range []string{root, filepath.ToSlash(root), dependencyRoot, filepath.ToSlash(dependencyRoot)} {
+		if strings.Contains(err.Error(), privateRoot) {
+			t.Fatalf("dependency error exposed private path %q: %v", privateRoot, err)
+		}
 	}
 }
 

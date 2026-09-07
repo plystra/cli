@@ -146,6 +146,10 @@ func TestBuildRejectsSecretConfigurationContainers(t *testing.T) {
 			if !errors.Is(err, implementationinventory.ErrInvalidConfiguration) || !strings.Contains(err.Error(), "Secret configuration must be a direct named field") {
 				t.Fatalf("Build error = %v", err)
 			}
+			var invalid *implementationinventory.ValidationError
+			if !errors.As(err, &invalid) || invalid.ModulePath() != "example.com/app" || invalid.SourcePath() != "service/implementation.go" || invalid.Line() != 4 || invalid.Column() != 6 {
+				t.Fatalf("ValidationError = %#v, %v", invalid, err)
+			}
 		})
 	}
 }

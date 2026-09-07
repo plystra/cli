@@ -31,6 +31,69 @@ var (
 	ErrUnknownField = errors.New("unknown Interface metadata field")
 )
 
+// InvalidError preserves one module-relative metadata position and every
+// applicable typed metadata condition.
+type InvalidError struct {
+	path    string
+	line    int
+	column  int
+	kind    error
+	message string
+}
+
+// Path returns the stable module-relative metadata path.
+func (e *InvalidError) Path() string {
+	if e == nil {
+		return ""
+	}
+	return e.path
+}
+
+// Line returns the one-based source line, or zero when unavailable.
+func (e *InvalidError) Line() int {
+	if e == nil {
+		return 0
+	}
+	return e.line
+}
+
+// Column returns the one-based source column, or zero when unavailable.
+func (e *InvalidError) Column() int {
+	if e == nil {
+		return 0
+	}
+	return e.column
+}
+
+func (e *InvalidError) Error() string {
+	if e == nil {
+		return ErrInvalid.Error()
+	}
+	location := e.path
+	if location == "" {
+		location = Name
+	}
+	if e.line > 0 {
+		location = fmt.Sprintf("%s:%d:%d", location, e.line, e.column)
+	}
+	if e.kind != nil {
+		return fmt.Sprintf("%s: %s: %s: %s", ErrInvalid, e.kind, location, e.message)
+	}
+	return fmt.Sprintf("%s: %s: %s", ErrInvalid, location, e.message)
+}
+
+// Unwrap supports errors.Is with ErrInvalid and the specific metadata
+// condition when one is available.
+func (e *InvalidError) Unwrap() []error {
+	if e == nil {
+		return nil
+	}
+	if e.kind == nil {
+		return []error{ErrInvalid}
+	}
+	return []error{ErrInvalid, e.kind}
+}
+
 var allowedTopLevelFields = map[string]struct{}{
 	"description": {},
 	"semantics":   {},
@@ -323,16 +386,11 @@ func invalid(sourcePath string, line, column int, format string, arguments ...an
 }
 
 func invalidWith(sourcePath string, line, column int, kind error, format string, arguments ...any) error {
-	location := sourcePath
-	if location == "" {
-		location = Name
+	return &InvalidError{
+		path:    sourcePath,
+		line:    line,
+		column:  column,
+		kind:    kind,
+		message: fmt.Sprintf(format, arguments...),
 	}
-	if line > 0 {
-		location = fmt.Sprintf("%s:%d:%d", location, line, column)
-	}
-	message := fmt.Sprintf(format, arguments...)
-	if kind != nil {
-		return fmt.Errorf("%w: %w: %s: %s", ErrInvalid, kind, location, message)
-	}
-	return fmt.Errorf("%w: %s: %s", ErrInvalid, location, message)
 }
