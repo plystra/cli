@@ -376,7 +376,8 @@ selected by the user. It pins the exact Kernel version supported by that CLI
 build.
 
 If a non-interactive caller omits any choice, the command fails before creating
-the target. Repeated or contradictory choice flags also fail without mutation.
+the target with `PLYSTRA_PROJECT_CREATE_CHOICE_REQUIRED` and one command
+recovery. Repeated or contradictory choice flags also fail without mutation.
 
 ## Understand authored and CLI-owned files
 

@@ -84,7 +84,8 @@ Options:
   --skills, --no-skills     Include or omit Plystra agent skills.
 
 Interactive creation asks for each unspecified choice. Non-interactive creation
-must specify one flag from every choice pair.
+must specify one flag from every choice pair. Omitting a pair emits
+PLYSTRA_PROJECT_CREATE_CHOICE_REQUIRED before target creation.
 
 Template dependencies must be public, portable, and generation-stable. Creation
 rejects the staged Project unless immediate generation checking, applicable
@@ -248,8 +249,8 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		choices, err := resolveNewChoices(options, promptNew)
 		if err != nil {
 			if errors.Is(err, errNewChoiceRequired) {
-				_, _ = fmt.Fprintf(stderr, "%v\n\n%s", err, newUsage)
-				return 2
+				writeCommandFailure(stderr, "", err, recoveryContext{})
+				return 1
 			}
 			_, _ = fmt.Fprintf(stderr, "choose new project options: %v\n", err)
 			return 1

@@ -25,6 +25,7 @@ import (
 	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/connectgen"
+	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/newproject"
 	"github.com/plystra/cli/internal/plugincreate"
@@ -1394,7 +1395,10 @@ func TestPublicCommandRequiresExplicitNonInteractiveChoices(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := command.RunIn([]string{"new", "my-app"}, &stdout, &stderr, parent, nil)
-	if exitCode != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "--git or --no-git") || !strings.Contains(stderr.String(), "--github-ci or --no-github-ci") || !strings.Contains(stderr.String(), "--skills or --no-skills") {
+	wantStderr := "new project choice is required in non-interactive mode; specify --git or --no-git, --github-ci or --no-github-ci, --skills or --no-skills\n\n" +
+		"Recovery:\nRerun `plystra new <project-name> [options]` with exactly one of `--git` or `--no-git`, one of `--github-ci` or `--no-github-ci`, and one of `--skills` or `--no-skills`.\n\n" +
+		"Diagnostic: " + diagnosticcode.ProjectCreateChoiceRequired + "\n"
+	if exitCode != 1 || stdout.Len() != 0 || stderr.String() != wantStderr {
 		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
 	}
 	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {

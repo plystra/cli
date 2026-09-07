@@ -446,6 +446,9 @@ validation, and troubleshooting workflows. It contains no Git, branch, commit,
 or push instructions. `plystra new --help` documents the complete creation
 contract.
 
+Omitting any choice pair in a non-interactive invocation fails before target
+creation with `PLYSTRA_PROJECT_CREATE_CHOICE_REQUIRED` and one command recovery.
+
 Successful template creation reports the selected query:
 
 ```text

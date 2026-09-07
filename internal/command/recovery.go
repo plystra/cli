@@ -146,6 +146,7 @@ const (
 )
 
 const (
+	diagnosticProjectCreateChoiceRequired           = diagnosticcode.ProjectCreateChoiceRequired
 	diagnosticPluginCreateNameInvalid               = diagnosticcode.PluginCreateNameInvalid
 	diagnosticPluginCreateIDInvalid                 = diagnosticcode.PluginCreateIDInvalid
 	diagnosticPluginCreateTargetExists              = diagnosticcode.PluginCreateTargetExists
@@ -252,6 +253,9 @@ func primaryFailureMessage(err error) string {
 }
 
 func primaryActionableDiagnostic(err error, context recoveryContext) (actionableDiagnostic, bool) {
+	if errors.Is(err, errNewChoiceRequired) {
+		return recoveryDiagnostic(diagnosticProjectCreateChoiceRequired, "Rerun `plystra new <project-name> [options]` with exactly one of `--git` or `--no-git`, one of `--github-ci` or `--no-github-ci`, and one of `--skills` or `--no-skills`.")
+	}
 	if errors.Is(err, newproject.ErrInvalidTemplate) {
 		if _, action, found := splitEmbeddedRecovery(err.Error()); found {
 			return recoveryDiagnostic(diagnosticTemplateInvalid, action)

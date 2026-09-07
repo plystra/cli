@@ -14,10 +14,12 @@ only when the task or a diagnostic requires them.
 
 ### Operate a Project created from a template
 
-Create from a published template Go Module query in the desired parent
-directory:
+Create from a template Go Module query in its parent directory:
 
     plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3
+
+For non-interactive creation, follow `plystra new --help`; omitted
+choices emit `PLYSTRA_PROJECT_CREATE_CHOICE_REQUIRED`.
 
 On success the command reports:
 

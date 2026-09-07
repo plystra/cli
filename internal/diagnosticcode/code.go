@@ -92,6 +92,7 @@ const (
 )
 
 const (
+	ProjectCreateChoiceRequired           = Prefix + "PROJECT_CREATE_CHOICE_REQUIRED"
 	PluginCreateNameInvalid               = Prefix + "PLUGIN_CREATE_NAME_INVALID"
 	PluginCreateIDInvalid                 = Prefix + "PLUGIN_CREATE_ID_INVALID"
 	PluginCreateTargetExists              = Prefix + "PLUGIN_CREATE_TARGET_EXISTS"

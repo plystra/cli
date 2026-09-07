@@ -299,6 +299,7 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "invalid Interface metadata", err: interfacemeta.ErrInvalid, code: diagnosticcode.InterfaceMetadataInvalid},
 		{name: "duplicate Interface ID", err: interfaceinventory.ErrDuplicateID, code: diagnosticcode.InterfaceIDDuplicate},
 		{name: "invalid authored package", err: interfaceinventory.ErrPackage, code: diagnosticcode.AuthoredPackageInvalid},
+		{name: "missing Project create choice", err: errNewChoiceRequired, code: diagnosticcode.ProjectCreateChoiceRequired},
 		{name: "invalid Plugin create name", err: plugincreate.ErrInvalidName, code: diagnosticcode.PluginCreateNameInvalid},
 		{name: "invalid derived Plugin ID", err: plugincreate.ErrDeriveID, code: diagnosticcode.PluginCreateIDInvalid},
 		{name: "existing Plugin create target", err: plugincreate.ErrTargetExists, code: diagnosticcode.PluginCreateTargetExists},
