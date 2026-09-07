@@ -75,7 +75,7 @@ Template creation then builds every staged Go package with ` + "`go build -mod=r
 
 Root ` + "`plystra.yaml`" + ` is the mandatory Project marker and shared default configuration. A sparse project-root ` + "`plystra.production.yaml`" + ` can be selected with ` + "`plystra generate --env production`" + ` and checked with the same selector; it is never created or loaded implicitly. To use one complete alternative current-Project document, run ` + "`plystra generate --config deploy/customer-a.yaml`" + `. Root configuration is not merged beneath an explicitly selected file. ` + "`PLYSTRA_ENV`" + ` and ` + "`PLYSTRA_CONFIG`" + ` supply the corresponding selector for automation; select exactly one mode.
 
-Start the generated application with the same selector used for generation: ` + "`go run ./generated/go/application --env production`" + ` selects one sparse overlay, while ` + "`go run ./generated/go/application --config deploy/customer-a.yaml`" + ` selects one complete replacement. Generated startup uses root ` + "`plystra.yaml`" + ` when no selector is present and accepts ` + "`PLYSTRA_ENV`" + ` or ` + "`PLYSTRA_CONFIG`" + ` when the corresponding flag is omitted. An explicit selector overrides both ambient variables, and the two modes cannot be combined. Replacement mode still requires a regular root Project marker but does not parse or merge its configuration. The selected replacement must be an existing nonsymbolic regular file inside the runtime Project directory. Unsafe or missing selections and invalid typed changes fail before Implementation construction, and unselected files are ignored. Generated manifest configuration provenance records the matching selected document and dependency composition plus each exact dormant Interface choice, constructor module/source, effective owner, and replacement/removal history without configuration values or Secret targets. Activation removes that dormant record and places the same choice in reachable binding provenance. Bootstrap records only the bounded build-affecting projection of transports, CORS, public exposure, requirements, executable Implementation choices, and Interface timeout policies tied to the complete compiled application-model digest. Dormant choices and dormant constructor configuration create no bootstrap runtime membership or artifact-provenance change. Startup rejects a different build-affecting projection with rebuild guidance before reading startup settings, resolving Secrets, or constructing Implementations. Runtime-only address, ` + "`timeouts.startup`" + `, ordinary configuration, and Secret-reference changes remain valid when their typed values are valid. Generated source never embeds YAML values, Secret-reference targets, resolved Secrets, or machine paths.
+Start the generated application with the same selector used for generation: ` + "`go run ./generated/go/application --env production`" + ` selects one sparse overlay, while ` + "`go run ./generated/go/application --config deploy/customer-a.yaml`" + ` selects one complete replacement. Generated startup uses root ` + "`plystra.yaml`" + ` when no selector is present and accepts ` + "`PLYSTRA_ENV`" + ` or ` + "`PLYSTRA_CONFIG`" + ` when the corresponding flag is omitted. An explicit selector overrides both ambient variables, and the two modes cannot be combined. Replacement mode still requires a regular root Project marker but does not parse or merge its configuration. The selected replacement must be an existing nonsymbolic regular file inside the runtime Project directory. Unsafe or missing selections and invalid typed changes fail before Implementation construction, and unselected files are ignored. Generated manifest configuration provenance records the matching selected document and dependency composition, each exact dormant Interface choice, and one constructor-keyed dormant configuration record with normalized field digests, redacted summaries, owners, suppressed descendants, and replacement/removal history. It contains no raw configuration values or Secret targets. Activation removes the affected dormant records and places the same choice and configuration ownership in reachable binding provenance. Bootstrap records only the bounded build-affecting projection of transports, CORS, public exposure, requirements, executable Implementation choices, and Interface timeout policies tied to the complete compiled application-model digest. Dormant choices and dormant constructor configuration create no bootstrap runtime membership or artifact-provenance change. Startup rejects a different build-affecting projection with rebuild guidance before reading startup settings, resolving Secrets, or constructing Implementations. Runtime-only address, ` + "`timeouts.startup`" + `, ordinary configuration, and Secret-reference changes remain valid when their typed values are valid. Generated source never embeds YAML values, Secret-reference targets, resolved Secrets, or machine paths.
 
 New Projects record ` + "`http.transports.connect: true`" + ` and ` + "`http.transports.rest: false`" + ` explicitly in root configuration. Keep those current-Project transport choices explicit when changing them. A nonempty public exposure requires at least one enabled transport, and JavaScript SDK generation requires Connect. If a selected default, environment, or full-replacement model has JavaScript Capability or Alias surfaces with Connect disabled, generation fails and identifies every affected surface; enable Connect in that selected current-Project configuration or remove those surfaces.
 
@@ -783,18 +783,20 @@ plystra.yaml and preserves the sparse overlay. Full-replacement generation
 maintains only the selected file, and independent maintained selections retain
 independent dependency baselines.
 
-Inspect generated/manifest.json for the versioned canonical constraint
-projection. Each Capability has exact contract and constraint digests; an
-unconstrained one has an empty field list. The configuration schema v6 records
-default, environment, or explicit-config mode, selected document digests,
-dependency history with non-secret current_project_paths, Protobuf wire-map digest,
-and the final model digest. Its sorted dormant_implementation_selections
-and aggregate digest retain each exact Interface, constructor/module source,
-interfaces.use decision, owner, and replacement/removal sources, never values or
-Secret targets. Empty Projects use an empty array. Activation removes the entry
-and records the choice in executable interface_provenance. Environment entries
-retain overlay provenance while the root dependency baseline stays root-owned.
-The manifest contains no raw configuration, resolved Secrets, or machine paths.
+Inspect generated/manifest.json for the versioned canonical constraint projection:
+exact contract and constraint digests; unconstrained fields are empty.
+Configuration schema v7 records default, environment, or explicit-config mode;
+document/model digests, dependency history,
+non-secret current_project_paths, and Protobuf wire-map digest.
+dormant_implementation_selections and dormant_constructor_configurations arrays have
+digests. Selections retain Interface, constructor/module source, interfaces.use
+decision, owner, and contributions; configurations retain
+normalized field digests and redacted summaries, state, owners, and suppressed descendants. Shared constructors
+use one entry; a constructor active through any binding has none.
+Activation removes the affected entries and records choice
+and configuration ownership in interface_provenance.
+Environment preserves the root dependency baseline. Raw values, Secret targets, and machine
+paths are absent.
 Its top-level transport_toolchain identifies embedded go/format, Protobuf and
 API-documentation generator versions, generated Go/npm dependencies, and its
 digest. Generation uses neither

@@ -253,18 +253,13 @@ func validateDormantImplementationSelection(value DormantImplementationSelection
 	if err != nil || identifier.String() != value.interfaceID || strings.HasPrefix(identifier.Name(), "kernel.") {
 		return fmt.Errorf("interface ID %q is not an ordinary canonical Interface", value.interfaceID)
 	}
-	symbol, err := constructorsymbol.Parse(value.constructor)
-	if err != nil || symbol.String() != value.constructor {
-		return fmt.Errorf("constructor %q is not canonical", value.constructor)
-	}
-	if err := module.CheckPath(value.constructorModulePath); err != nil || symbol.PackagePath() != value.constructorModulePath && !strings.HasPrefix(symbol.PackagePath(), value.constructorModulePath+"/") {
-		return errors.New("constructor package is outside its owning module")
-	}
-	if !validDormantModuleVersion(value.constructorModulePath, value.constructorModuleVersion) {
-		return errors.New("constructor module version is invalid")
-	}
-	if !validDormantConstructorSource(value.constructorSource, value.constructorModulePath, value.constructorModuleVersion, symbol.PackagePath()) {
-		return errors.New("constructor source is not stable module-qualified provenance")
+	if err := validateDormantConstructorIdentity(
+		value.constructor,
+		value.constructorModulePath,
+		value.constructorModuleVersion,
+		value.constructorSource,
+	); err != nil {
+		return err
 	}
 	expectedPath := "interfaces.use[" + strconv.Quote(value.interfaceID) + "]"
 	if value.selectionPath != expectedPath {
@@ -471,6 +466,24 @@ func dormantSourcePath(owner, rootPath, selectedPath string) string {
 	default:
 		return ""
 	}
+}
+
+func validateDormantConstructorIdentity(constructor, modulePath, moduleVersion, source string) error {
+	symbol, err := constructorsymbol.Parse(constructor)
+	if err != nil || symbol.String() != constructor {
+		return fmt.Errorf("constructor %q is not canonical", constructor)
+	}
+	if err := module.CheckPath(modulePath); err != nil ||
+		symbol.PackagePath() != modulePath && !strings.HasPrefix(symbol.PackagePath(), modulePath+"/") {
+		return errors.New("constructor package is outside its owning module")
+	}
+	if !validDormantModuleVersion(modulePath, moduleVersion) {
+		return errors.New("constructor module version is invalid")
+	}
+	if !validDormantConstructorSource(source, modulePath, moduleVersion, symbol.PackagePath()) {
+		return errors.New("constructor source is not stable module-qualified provenance")
+	}
+	return nil
 }
 
 func validDormantModuleVersion(modulePath, version string) bool {

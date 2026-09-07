@@ -586,18 +586,20 @@ plystra.yaml and preserves the sparse overlay. Full-replacement generation
 maintains only the selected file, and independent maintained selections retain
 independent dependency baselines.
 
-Inspect generated/manifest.json for the versioned canonical constraint
-projection. Each Capability has exact contract and constraint digests; an
-unconstrained one has an empty field list. The configuration schema v6 records
-default, environment, or explicit-config mode, selected document digests,
-dependency history with non-secret current_project_paths, Protobuf wire-map digest,
-and the final model digest. Its sorted dormant_implementation_selections
-and aggregate digest retain each exact Interface, constructor/module source,
-interfaces.use decision, owner, and replacement/removal sources, never values or
-Secret targets. Empty Projects use an empty array. Activation removes the entry
-and records the choice in executable interface_provenance. Environment entries
-retain overlay provenance while the root dependency baseline stays root-owned.
-The manifest contains no raw configuration, resolved Secrets, or machine paths.
+Inspect generated/manifest.json for the versioned canonical constraint projection:
+exact contract and constraint digests; unconstrained fields are empty.
+Configuration schema v7 records default, environment, or explicit-config mode;
+document/model digests, dependency history,
+non-secret current_project_paths, and Protobuf wire-map digest.
+dormant_implementation_selections and dormant_constructor_configurations arrays have
+digests. Selections retain Interface, constructor/module source, interfaces.use
+decision, owner, and contributions; configurations retain
+normalized field digests and redacted summaries, state, owners, and suppressed descendants. Shared constructors
+use one entry; a constructor active through any binding has none.
+Activation removes the affected entries and records choice
+and configuration ownership in interface_provenance.
+Environment preserves the root dependency baseline. Raw values, Secret targets, and machine
+paths are absent.
 Its top-level transport_toolchain identifies embedded go/format, Protobuf and
 API-documentation generator versions, generated Go/npm dependencies, and its
 digest. Generation uses neither

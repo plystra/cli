@@ -556,21 +556,26 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
+	dormantConfigurations, err := dormantConstructorConfigurations(resolved, dormantSelections)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
 	provenance, err := applicationgen.NewManifestProvenance(applicationgen.ManifestProvenanceOptions{
-		Mode:                            selection.Mode(),
-		Environment:                     selection.Environment(),
-		RootPath:                        "plystra.yaml",
-		RootDigest:                      resolved.RootConfigurationDigest(),
-		SelectedPath:                    selection.Path(),
-		SelectedDigest:                  selection.Digest(),
-		CurrentProjectPaths:             resolved.ConfigurationMaintenance().LocalPaths(),
-		DormantImplementationSelections: dormantSelections,
-		Composition:                     resolved.Composition(),
-		ProtobufWireMapDigest:           wireMap.Digest(),
-		ApplicationModelDigest:          modelDigest,
-		InterfaceProvenance:             interfaceProvenance,
-		TransportToolchain:              toolchain,
-		Previous:                        resolved.PreviousManifestProvenance(),
+		Mode:                             selection.Mode(),
+		Environment:                      selection.Environment(),
+		RootPath:                         "plystra.yaml",
+		RootDigest:                       resolved.RootConfigurationDigest(),
+		SelectedPath:                     selection.Path(),
+		SelectedDigest:                   selection.Digest(),
+		CurrentProjectPaths:              resolved.ConfigurationMaintenance().LocalPaths(),
+		DormantImplementationSelections:  dormantSelections,
+		DormantConstructorConfigurations: dormantConfigurations,
+		Composition:                      resolved.Composition(),
+		ProtobufWireMapDigest:            wireMap.Digest(),
+		ApplicationModelDigest:           modelDigest,
+		InterfaceProvenance:              interfaceProvenance,
+		TransportToolchain:               toolchain,
+		Previous:                         resolved.PreviousManifestProvenance(),
 	})
 	if err != nil {
 		return preparedGeneration{}, fmt.Errorf("construct application manifest provenance: %w", err)

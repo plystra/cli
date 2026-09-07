@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -80,13 +81,15 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 	applicationManifest := readFile(t, root, "generated/manifest.json")
 	for _, required := range []string{
 		`"capability_aliases":[]`,
-		`"configuration":{"version":6,"mode":"default"`,
+		`"configuration":{"version":7,"mode":"default"`,
 		`"root":{"path":"plystra.yaml","digest":"sha256:`,
 		`"dependency_baselines":[{"mode":"default","path":"plystra.yaml"`,
 		`"dependency_composition_digest":"sha256:`,
 		`"dependency_baseline":[]`,
 		`"dormant_implementation_selections":[]`,
 		`"dormant_implementation_selections_digest":"sha256:`,
+		`"dormant_constructor_configurations":[]`,
+		`"dormant_constructor_configurations_digest":"sha256:`,
 		`"protobuf_wire_map_digest":"sha256:`,
 		`"application_model_digest":"sha256:`,
 		`"transport_toolchain":{"schema":"plystra.transport-toolchain/v2"`,
@@ -356,7 +359,7 @@ func TestGeneratedManifestRejectsMalformedDormantSelectionProvenance(t *testing.
 	root := t.TempDir()
 	writeApplicationModule(t, root, modulePath)
 	constructor := writeConstructorConfigurationOwner(t, root, modulePath, false)
-	writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\n", constructor))
+	writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\nconfig: {%s: {endpoint: dormant.internal}}\n", constructor, constructor))
 	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
 	if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start: root, Environment: environment, Validate: func(_ context.Context, _ string) error { return nil },
@@ -398,6 +401,18 @@ func TestGeneratedManifestRejectsMalformedDormantSelectionProvenance(t *testing.
 			t.Fatalf("encode dormant selection fixture: %v", err)
 		}
 		configuration["dormant_implementation_selections"] = encoded
+	}
+	editConfigurations := func(t *testing.T, configuration map[string]json.RawMessage, update func([]map[string]json.RawMessage) []map[string]json.RawMessage) {
+		t.Helper()
+		var configurations []map[string]json.RawMessage
+		if err := json.Unmarshal(configuration["dormant_constructor_configurations"], &configurations); err != nil || len(configurations) != 1 {
+			t.Fatalf("decode dormant constructor configuration fixture = %#v, %v", configurations, err)
+		}
+		encoded, err := json.Marshal(update(configurations))
+		if err != nil {
+			t.Fatalf("encode dormant constructor configuration fixture: %v", err)
+		}
+		configuration["dormant_constructor_configurations"] = encoded
 	}
 	assertRejected := func(t *testing.T, data []byte, want ...string) {
 		t.Helper()
@@ -458,6 +473,70 @@ func TestGeneratedManifestRejectsMalformedDormantSelectionProvenance(t *testing.
 			})
 		}), "unknown field")
 	})
+	t.Run("missing constructor configurations", func(t *testing.T) {
+		assertRejected(t, edit(t, func(configuration map[string]json.RawMessage) {
+			delete(configuration, "dormant_constructor_configurations")
+		}), "dormant constructor configurations", "array")
+	})
+	t.Run("missing constructor configurations digest", func(t *testing.T) {
+		assertRejected(t, edit(t, func(configuration map[string]json.RawMessage) {
+			delete(configuration, "dormant_constructor_configurations_digest")
+		}), "dormant constructor configurations digest is inconsistent")
+	})
+	t.Run("constructor configurations digest tamper", func(t *testing.T) {
+		assertRejected(t, edit(t, func(configuration map[string]json.RawMessage) {
+			configuration["dormant_constructor_configurations_digest"] = json.RawMessage(`"sha256:0000000000000000000000000000000000000000000000000000000000000000"`)
+		}), "dormant constructor configurations digest is inconsistent")
+	})
+	t.Run("constructor configuration duplicate", func(t *testing.T) {
+		assertRejected(t, edit(t, func(configuration map[string]json.RawMessage) {
+			editConfigurations(t, configuration, func(configurations []map[string]json.RawMessage) []map[string]json.RawMessage {
+				return append(configurations, configurations[0])
+			})
+		}), "unique and canonically ordered")
+	})
+	t.Run("constructor configuration reordered fields", func(t *testing.T) {
+		assertRejected(t, edit(t, func(configuration map[string]json.RawMessage) {
+			editConfigurations(t, configuration, func(configurations []map[string]json.RawMessage) []map[string]json.RawMessage {
+				var fields []json.RawMessage
+				if err := json.Unmarshal(configurations[0]["fields"], &fields); err != nil || len(fields) < 2 {
+					t.Fatalf("decode dormant configuration field fixture = %#v, %v", fields, err)
+				}
+				slices.Reverse(fields)
+				encoded, err := json.Marshal(fields)
+				if err != nil {
+					t.Fatalf("encode reordered dormant configuration fields: %v", err)
+				}
+				configurations[0]["fields"] = encoded
+				return configurations
+			})
+		}), "configuration fields", "canonically ordered")
+	})
+	t.Run("constructor configuration field tamper", func(t *testing.T) {
+		assertRejected(t, edit(t, func(configuration map[string]json.RawMessage) {
+			editConfigurations(t, configuration, func(configurations []map[string]json.RawMessage) []map[string]json.RawMessage {
+				var fields []map[string]json.RawMessage
+				if err := json.Unmarshal(configurations[0]["fields"], &fields); err != nil || len(fields) == 0 {
+					t.Fatalf("decode dormant configuration field fixture = %#v, %v", fields, err)
+				}
+				fields[0]["digest"] = json.RawMessage(`"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"`)
+				encoded, err := json.Marshal(fields)
+				if err != nil {
+					t.Fatalf("encode tampered dormant configuration fields: %v", err)
+				}
+				configurations[0]["fields"] = encoded
+				return configurations
+			})
+		}), "effective field contribution disagrees")
+	})
+	t.Run("unknown constructor configuration field", func(t *testing.T) {
+		assertRejected(t, edit(t, func(configuration map[string]json.RawMessage) {
+			editConfigurations(t, configuration, func(configurations []map[string]json.RawMessage) []map[string]json.RawMessage {
+				configurations[0]["unknown"] = json.RawMessage(`true`)
+				return configurations
+			})
+		}), "unknown field")
+	})
 }
 
 func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *testing.T) {
@@ -473,8 +552,8 @@ func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *tes
 		writeApplicationModule(t, root, modulePath)
 		rootConstructor := writeConstructorConfigurationOwner(t, root, modulePath, false)
 		overlayConstructor := writeAlternativeConstructorConfigurationOwner(t, root, modulePath)
-		writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\n", rootConstructor))
-		writeFile(t, filepath.Join(root, "plystra.production.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\n", overlayConstructor))
+		writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\nconfig: {%s: {endpoint: root.internal, label: inherited}}\n", rootConstructor, overlayConstructor))
+		writeFile(t, filepath.Join(root, "plystra.production.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\nconfig: {%s: {endpoint: production.internal}}\n", overlayConstructor, overlayConstructor))
 
 		if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 			Start: root, EnvironmentName: "production", Environment: environment, Validate: validate,
@@ -489,8 +568,25 @@ func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *tes
 			[]string{string(resolutionevidence.ConfigurationOwnerRoot), string(resolutionevidence.ConfigurationOwnerEnvironment)},
 			[]string{modulePath, modulePath},
 			[]string{"plystra.yaml", "plystra.production.yaml"})
-		if paths := provenance.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{selectionPath}) {
-			t.Fatalf("environment root-maintenance paths = %v, want %s", paths, selectionPath)
+		configurationRoot := fmt.Sprintf("config[%q]", overlayConstructor)
+		if paths := provenance.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{configurationRoot, configurationRoot + `["endpoint"]`, configurationRoot + `["label"]`, selectionPath}) {
+			t.Fatalf("environment root-maintenance paths = %v", paths)
+		}
+		configuration := onlyDormantConstructorConfiguration(t, provenance, overlayConstructor)
+		endpoint := dormantConfigurationField(t, configuration, configurationRoot+`["endpoint"]`)
+		assertDormantConfigurationContributionOwners(t, endpoint, string(resolutionevidence.ConfigurationOwnerEnvironment), []string{
+			string(resolutionevidence.ConfigurationOwnerRoot),
+			string(resolutionevidence.ConfigurationOwnerEnvironment),
+		})
+		label := dormantConfigurationField(t, configuration, configurationRoot+`["label"]`)
+		assertDormantConfigurationContributionOwners(t, label, string(resolutionevidence.ConfigurationOwnerRoot), []string{
+			string(resolutionevidence.ConfigurationOwnerRoot),
+		})
+		manifestData := readFile(t, root, "generated/manifest.json")
+		for _, forbidden := range []string{"root.internal", "production.internal", "inherited"} {
+			if bytes.Contains(manifestData, []byte(forbidden)) {
+				t.Fatalf("environment dormant configuration leaked %q", forbidden)
+			}
 		}
 	})
 
@@ -500,7 +596,7 @@ func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *tes
 		writeApplicationModule(t, root, modulePath)
 		constructor := writeConstructorConfigurationOwner(t, root, modulePath, false)
 		writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
-		writeFile(t, filepath.Join(root, "deploy", "customer.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\n", constructor))
+		writeFile(t, filepath.Join(root, "deploy", "customer.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\nconfig: {%s: {endpoint: customer.internal}}\n", constructor, constructor))
 
 		if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 			Start: root, ConfigurationPath: "deploy/customer.yaml", Environment: environment, Validate: validate,
@@ -515,9 +611,13 @@ func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *tes
 			[]string{string(resolutionevidence.ConfigurationOwnerExplicit)},
 			[]string{modulePath},
 			[]string{"deploy/customer.yaml"})
-		if paths := provenance.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{selectionPath}) {
-			t.Fatalf("explicit current-project paths = %v, want %s", paths, selectionPath)
+		configurationRoot := fmt.Sprintf("config[%q]", constructor)
+		if paths := provenance.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{configurationRoot, configurationRoot + `["endpoint"]`, selectionPath}) {
+			t.Fatalf("explicit current-project paths = %v", paths)
 		}
+		assertDormantConstructorConfigurationRecord(t, provenance, constructor, modulePath, "local", string(resolutionevidence.ConfigurationOwnerExplicit),
+			[]string{"", "endpoint"}, []string{"object", "string"},
+			[]string{modulePath, modulePath}, []string{"deploy/customer.yaml", "deploy/customer.yaml"})
 	})
 
 	t.Run("dependency composition", func(t *testing.T) {
@@ -527,12 +627,12 @@ func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *tes
 		applicationRoot := filepath.Join(root, "application")
 		writeApplicationModule(t, dependencyRoot, dependencyModule)
 		constructor := writeConstructorConfigurationOwner(t, dependencyRoot, dependencyModule, false)
-		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\n", constructor))
+		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\nconfig: {%s: {endpoint: dependency.internal}}\n", constructor, constructor))
 		writeApplicationModule(t, applicationRoot, "example.com/acme/dormant-dependency")
 		goModPath := filepath.Join(applicationRoot, "go.mod")
 		goMod := string(readAbsoluteFile(t, goModPath)) + fmt.Sprintf("\nrequire %s v1.0.0\n\nreplace %s => %s\n", dependencyModule, dependencyModule, filepath.ToSlash(dependencyRoot))
 		writeFile(t, goModPath, goMod)
-		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), fmt.Sprintf("config: {%s: {endpoint: application.internal}}\n", constructor))
 
 		result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 			Start: applicationRoot, Environment: environment, Validate: validate,
@@ -548,8 +648,60 @@ func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *tes
 			[]string{string(resolutionevidence.ConfigurationOwnerDependency)},
 			[]string{dependencyModule},
 			[]string{"plystra.yaml"})
-		if paths := provenance.CurrentProjectPaths(); len(paths) != 0 {
-			t.Fatalf("dependency-owned dormant selection entered current-project paths: %v", paths)
+		configurationRoot := fmt.Sprintf("config[%q]", constructor)
+		if paths := provenance.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{configurationRoot, configurationRoot + `["endpoint"]`}) {
+			t.Fatalf("dependency-selected dormant configuration current-project paths = %v", paths)
+		}
+		configuration := onlyDormantConstructorConfiguration(t, provenance, constructor)
+		endpoint := dormantConfigurationField(t, configuration, configurationRoot+`["endpoint"]`)
+		assertDormantConfigurationContributionOwners(t, endpoint, string(resolutionevidence.ConfigurationOwnerRoot), []string{
+			string(resolutionevidence.ConfigurationOwnerDependency),
+			string(resolutionevidence.ConfigurationOwnerRoot),
+		})
+	})
+
+	t.Run("environment removal", func(t *testing.T) {
+		const modulePath = "example.com/acme/dormant-removal"
+		root := t.TempDir()
+		writeApplicationModule(t, root, modulePath)
+		constructor := writeConstructorConfigurationOwner(t, root, modulePath, false)
+		writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\nconfig: {%s: {endpoint: root.internal, label: inherited}}\n", constructor, constructor))
+		writeFile(t, filepath.Join(root, "plystra.production.yaml"), fmt.Sprintf("config: {%s: null}\n", constructor))
+
+		if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+			Start: root, EnvironmentName: "production", Environment: environment, Validate: validate,
+		}); err != nil {
+			t.Fatalf("Generate environment dormant configuration removal: %v", err)
+		}
+		manifestData := readFile(t, root, "generated/manifest.json")
+		provenance, err := applicationgen.DecodeManifestProvenance(manifestData)
+		if err != nil {
+			t.Fatalf("DecodeManifestProvenance(environment removal): %v", err)
+		}
+		configurationRoot := fmt.Sprintf("config[%q]", constructor)
+		configuration := onlyDormantConstructorConfiguration(t, provenance, constructor)
+		removedRoot := dormantConfigurationField(t, configuration, configurationRoot)
+		if !removedRoot.Removed() || removedRoot.Summary() != "removal" {
+			t.Fatalf("removed dormant constructor root = %#v", removedRoot)
+		}
+		assertDormantConfigurationContributionOwners(t, removedRoot, string(resolutionevidence.ConfigurationOwnerEnvironment), []string{
+			string(resolutionevidence.ConfigurationOwnerRoot),
+			string(resolutionevidence.ConfigurationOwnerEnvironment),
+		})
+		for _, name := range []string{"endpoint", "label"} {
+			field := dormantConfigurationField(t, configuration, configurationRoot+fmt.Sprintf("[%q]", name))
+			if field.Effective() || field.Digest() != "" || field.Summary() != "" || field.Owner() != "" || field.Removed() {
+				t.Fatalf("suppressed dormant configuration field %s = %#v", name, field)
+			}
+			contributions := field.Contributions()
+			if len(contributions) != 1 || contributions[0].Owner() != string(resolutionevidence.ConfigurationOwnerRoot) || contributions[0].Effective() {
+				t.Fatalf("suppressed dormant configuration field %s contributions = %#v", name, contributions)
+			}
+		}
+		for _, forbidden := range []string{"root.internal", "inherited"} {
+			if bytes.Contains(manifestData, []byte(forbidden)) {
+				t.Fatalf("removed dormant configuration leaked %q", forbidden)
+			}
 		}
 	})
 }
@@ -648,6 +800,18 @@ config:
 	if manifest.Mode() != baselineProvenance.Mode() || manifest.SelectedPath() != baselineProvenance.SelectedPath() {
 		t.Fatalf("dormant constructor configuration changed selection identity: %s/%s != %s/%s", manifest.Mode(), manifest.SelectedPath(), baselineProvenance.Mode(), baselineProvenance.SelectedPath())
 	}
+	assertDormantConstructorConfigurationRecord(
+		t,
+		manifest,
+		constructor,
+		modulePath,
+		"local",
+		string(resolutionevidence.ConfigurationOwnerRoot),
+		[]string{"", "endpoint", "password"},
+		[]string{"object", "string", "secret-reference"},
+		[]string{modulePath, modulePath, modulePath},
+		[]string{"plystra.yaml", "plystra.yaml", "plystra.yaml"},
+	)
 	ownershipManifest := readFile(t, root, generatedfiles.ManifestPath)
 	if bytes.Equal(manifestJSON, baselineManifest) || bytes.Equal(ownershipManifest, baselineOwnershipManifest) {
 		t.Fatalf("dormant constructor configuration manifest bytes changed = application %t, ownership %t; want both true", !bytes.Equal(manifestJSON, baselineManifest), !bytes.Equal(ownershipManifest, baselineOwnershipManifest))
@@ -781,6 +945,11 @@ config:
 		t.Fatalf("dormant exact selection provenance = %#v", dormantSelections)
 	}
 	dormantSelectionsDigest := dormantProvenance.DormantImplementationSelectionsDigest()
+	dormantConfigurations := dormantProvenance.DormantConstructorConfigurations()
+	dormantConfigurationsDigest := dormantProvenance.DormantConstructorConfigurationsDigest()
+	if len(dormantConfigurations) != 1 || dormantConfigurations[0].Constructor() != constructor {
+		t.Fatalf("dormant constructor configuration provenance = %#v", dormantConfigurations)
+	}
 	if bindings, constructors := dormantProvenance.InterfaceProvenance().Bindings(), dormantProvenance.InterfaceProvenance().Constructors(); len(bindings) != 0 || len(constructors) != 0 {
 		t.Fatalf("dormant selection entered executable provenance: bindings %#v, constructors %#v", bindings, constructors)
 	}
@@ -828,6 +997,12 @@ config:
 	}
 	if activatedProvenance.DormantImplementationSelectionsDigest() == dormantSelectionsDigest {
 		t.Fatal("activation retained the nonempty dormant-selection digest")
+	}
+	if configurations := activatedProvenance.DormantConstructorConfigurations(); configurations == nil || len(configurations) != 0 {
+		t.Fatalf("activated constructor retained dormant configuration provenance: %#v", configurations)
+	}
+	if activatedProvenance.DormantConstructorConfigurationsDigest() == dormantConfigurationsDigest {
+		t.Fatal("activation retained the nonempty dormant-configuration digest")
 	}
 	interfaceProvenance := activatedProvenance.InterfaceProvenance()
 	bindings := interfaceProvenance.Bindings()
@@ -898,6 +1073,9 @@ config:
 	if selections := deactivatedProvenance.DormantImplementationSelections(); !reflect.DeepEqual(selections, dormantSelections) || deactivatedProvenance.DormantImplementationSelectionsDigest() != dormantSelectionsDigest {
 		t.Fatalf("deactivation dormant selection provenance = %#v/%q, want %#v/%q", selections, deactivatedProvenance.DormantImplementationSelectionsDigest(), dormantSelections, dormantSelectionsDigest)
 	}
+	if configurations := deactivatedProvenance.DormantConstructorConfigurations(); !reflect.DeepEqual(configurations, dormantConfigurations) || deactivatedProvenance.DormantConstructorConfigurationsDigest() != dormantConfigurationsDigest {
+		t.Fatalf("deactivation dormant constructor configuration provenance = %#v/%q, want %#v/%q", configurations, deactivatedProvenance.DormantConstructorConfigurationsDigest(), dormantConfigurations, dormantConfigurationsDigest)
+	}
 	if bindings, constructors := deactivatedProvenance.InterfaceProvenance().Bindings(), deactivatedProvenance.InterfaceProvenance().Constructors(); len(bindings) != 0 || len(constructors) != 0 {
 		t.Fatalf("deactivated selection retained executable provenance: bindings %#v, constructors %#v", bindings, constructors)
 	}
@@ -918,6 +1096,92 @@ config:
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, deactivatedStableBefore) {
 		t.Fatalf("deactivated deterministic check mutated Project:\nbefore: %#v\nafter: %#v", deactivatedStableBefore, after)
+	}
+}
+
+func TestGenerateExcludesConfigurationForConstructorActiveThroughAnotherInterface(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "example.com/acme/shared-active-constructor"
+	root := t.TempDir()
+	writeApplicationModule(t, root, modulePath)
+	constructor := writeSharedConstructorConfigurationOwner(t, root, modulePath)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf(`interfaces:
+  require: [configuration.owner/v1]
+  use:
+    configuration.owner/v1: %s
+    configuration.reader/v1: %s
+config:
+  %s: {endpoint: active.internal}
+`, constructor, constructor, constructor))
+
+	result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+		Validate:    func(_ context.Context, _ string) error { return nil },
+	})
+	if err != nil || !result.Report().Clean() {
+		t.Fatalf("Generate shared active constructor = changes %#v, %v", result.Report().Changes(), err)
+	}
+	manifestData := readFile(t, root, "generated/manifest.json")
+	provenance, err := applicationgen.DecodeManifestProvenance(manifestData)
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance(shared active constructor): %v", err)
+	}
+	selections := provenance.DormantImplementationSelections()
+	if len(selections) != 1 || selections[0].InterfaceID() != "configuration.reader/v1" || selections[0].Constructor() != constructor {
+		t.Fatalf("shared constructor dormant selection provenance = %#v", selections)
+	}
+	if configurations := provenance.DormantConstructorConfigurations(); configurations == nil || len(configurations) != 0 {
+		t.Fatalf("active shared constructor entered dormant configuration provenance: %#v", configurations)
+	}
+	constructors := provenance.InterfaceProvenance().Constructors()
+	if len(constructors) != 1 || constructors[0].Symbol() != constructor || constructors[0].ConfigurationOwner() != fmt.Sprintf("config[%q]", constructor) {
+		t.Fatalf("active shared constructor provenance = %#v", constructors)
+	}
+	if bytes.Contains(manifestData, []byte("active.internal")) {
+		t.Fatalf("active constructor manifest provenance leaked the raw configuration value: %s", manifestData)
+	}
+}
+
+func TestGenerateDeduplicatesDormantConfigurationForSharedConstructor(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "example.com/acme/shared-dormant-constructor"
+	root := t.TempDir()
+	writeApplicationModule(t, root, modulePath)
+	constructor := writeSharedConstructorConfigurationOwner(t, root, modulePath)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf(`interfaces:
+  use:
+    configuration.owner/v1: %s
+    configuration.reader/v1: %s
+config:
+  %s: {endpoint: dormant.internal}
+`, constructor, constructor, constructor))
+
+	result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+		Validate:    func(_ context.Context, _ string) error { return nil },
+	})
+	if err != nil || !result.Report().Clean() {
+		t.Fatalf("Generate shared dormant constructor = changes %#v, %v", result.Report().Changes(), err)
+	}
+	manifestData := readFile(t, root, "generated/manifest.json")
+	provenance, err := applicationgen.DecodeManifestProvenance(manifestData)
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance(shared dormant constructor): %v", err)
+	}
+	selections := provenance.DormantImplementationSelections()
+	if len(selections) != 2 || selections[0].Constructor() != constructor || selections[1].Constructor() != constructor {
+		t.Fatalf("shared constructor dormant selections = %#v", selections)
+	}
+	configuration := onlyDormantConstructorConfiguration(t, provenance, constructor)
+	if len(configuration.Fields()) != 2 {
+		t.Fatalf("shared dormant constructor configuration fields = %#v", configuration.Fields())
+	}
+	if bytes.Count(manifestData, []byte(`"configuration_path":"config[`)) != 1 {
+		t.Fatalf("shared dormant constructor configuration was not serialized exactly once: %s", manifestData)
 	}
 }
 
@@ -3184,14 +3448,75 @@ import (
 
 type Service struct{}
 
+type Config struct {
+	Endpoint string
+	Label string
+}
+
 //plystra:implements configuration.owner/v1
-func New() (*Service, error) { return &Service{}, nil }
+func New(Config) (*Service, error) { return &Service{}, nil }
 
 func (*Service) Load(context.Context, ownerv1.Request) (ownerv1.Response, error) {
 	return ownerv1.Response{}, nil
 }
 `)
 	return modulePath + "/configowneralt.New"
+}
+
+func writeSharedConstructorConfigurationOwner(t testing.TB, root, modulePath string) string {
+	t.Helper()
+	writeFile(t, filepath.Join(root, "interfaces", "configuration", "owner", "v1", "interface.go"), `package ownerv1
+
+import "context"
+
+//plystra:interface configuration.owner/v1
+type Interface interface {
+	Load(context.Context, Request) (Response, error)
+}
+
+type Request struct{}
+type Response struct{}
+`)
+	writeFile(t, filepath.Join(root, "interfaces", "configuration", "reader", "v1", "interface.go"), `package readerv1
+
+import "context"
+
+//plystra:interface configuration.reader/v1
+type Interface interface {
+	Read(context.Context, Request) (Response, error)
+}
+
+type Request struct{}
+type Response struct{}
+`)
+	writeFile(t, filepath.Join(root, "configshared", "implementation.go"), `package configshared
+
+import (
+	"context"
+
+	ownerv1 "`+modulePath+`/interfaces/configuration/owner/v1"
+	readerv1 "`+modulePath+`/interfaces/configuration/reader/v1"
+)
+
+type Config struct {
+	Endpoint string
+}
+
+type Service struct{}
+
+//plystra:implements configuration.owner/v1
+//plystra:implements configuration.reader/v1
+func New(Config) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Load(context.Context, ownerv1.Request) (ownerv1.Response, error) {
+	return ownerv1.Response{}, nil
+}
+
+func (*Service) Read(context.Context, readerv1.Request) (readerv1.Response, error) {
+	return readerv1.Response{}, nil
+}
+`)
+	return modulePath + "/configshared.New"
 }
 
 func assertDormantSelectionRecord(
@@ -3257,6 +3582,110 @@ func assertDormantSelectionRecord(
 	}
 	if bindings := provenance.InterfaceProvenance().Bindings(); len(bindings) != 0 {
 		t.Fatalf("dormant selection entered executable bindings: %#v", bindings)
+	}
+}
+
+func assertDormantConstructorConfigurationRecord(
+	t testing.TB,
+	provenance applicationgen.ManifestProvenance,
+	constructor, modulePath, moduleVersion, owner string,
+	fieldNames, summaries, sourceModules, sourcePaths []string,
+) {
+	t.Helper()
+	configurations := provenance.DormantConstructorConfigurations()
+	if len(configurations) != 1 {
+		t.Fatalf("dormant constructor configurations = %#v", configurations)
+	}
+	configuration := configurations[0]
+	root := fmt.Sprintf("config[%q]", constructor)
+	if configuration.Constructor() != constructor ||
+		configuration.ConstructorModulePath() != modulePath ||
+		configuration.ConstructorModuleVersion() != moduleVersion ||
+		!strings.HasPrefix(configuration.ConstructorSource(), modulePath+"@"+moduleVersion+"/") ||
+		configuration.ConfigurationPath() != root {
+		t.Fatalf("dormant constructor configuration = %#v", configuration)
+	}
+	if digest := provenance.DormantConstructorConfigurationsDigest(); !strings.HasPrefix(digest, "sha256:") || len(digest) != 71 {
+		t.Fatalf("dormant constructor configurations digest = %q", digest)
+	}
+	fields := configuration.Fields()
+	if len(fields) != len(fieldNames) || len(summaries) != len(fields) || len(sourceModules) != len(fields) || len(sourcePaths) != len(fields) {
+		t.Fatalf("dormant configuration fields = %#v, expectations = %v/%v/%v/%v", fields, fieldNames, summaries, sourceModules, sourcePaths)
+	}
+	for index, field := range fields {
+		path := root
+		if fieldNames[index] != "" {
+			path += fmt.Sprintf("[%q]", fieldNames[index])
+		}
+		if field.Path() != path || field.Summary() != summaries[index] || field.Owner() != owner ||
+			field.Removed() || !field.Effective() || !strings.HasPrefix(field.Digest(), "sha256:") || len(field.Digest()) != 71 {
+			t.Fatalf("dormant configuration field %d = %#v", index, field)
+		}
+		contributions := field.Contributions()
+		if len(contributions) != 1 || contributions[0].Owner() != owner || !contributions[0].Effective() ||
+			contributions[0].Digest() != field.Digest() || contributions[0].Summary() != field.Summary() || contributions[0].Removed() {
+			t.Fatalf("dormant configuration field %d contributions = %#v", index, contributions)
+		}
+		sources := contributions[0].Sources()
+		if len(sources) != 1 || sources[0].Module() != sourceModules[index] || sources[0].Path() != sourcePaths[index] ||
+			sources[0].Kind() != "configuration-value" || sources[0].Line() != 1 || sources[0].Column() != 1 {
+			t.Fatalf("dormant configuration field %d sources = %#v", index, sources)
+		}
+	}
+}
+
+func onlyDormantConstructorConfiguration(
+	t testing.TB,
+	provenance applicationgen.ManifestProvenance,
+	constructor string,
+) applicationgen.DormantConstructorConfiguration {
+	t.Helper()
+	configurations := provenance.DormantConstructorConfigurations()
+	if len(configurations) != 1 || configurations[0].Constructor() != constructor {
+		t.Fatalf("dormant constructor configurations = %#v, want only %s", configurations, constructor)
+	}
+	return configurations[0]
+}
+
+func dormantConfigurationField(
+	t testing.TB,
+	configuration applicationgen.DormantConstructorConfiguration,
+	path string,
+) applicationgen.DormantConfigurationField {
+	t.Helper()
+	for _, field := range configuration.Fields() {
+		if field.Path() == path {
+			return field
+		}
+	}
+	t.Fatalf("dormant constructor configuration %s omits field %s", configuration.Constructor(), path)
+	return applicationgen.DormantConfigurationField{}
+}
+
+func assertDormantConfigurationContributionOwners(
+	t testing.TB,
+	field applicationgen.DormantConfigurationField,
+	effectiveOwner string,
+	wantOwners []string,
+) {
+	t.Helper()
+	if !field.Effective() || field.Owner() != effectiveOwner {
+		t.Fatalf("dormant configuration field %s effective owner = %q/%t, want %q", field.Path(), field.Owner(), field.Effective(), effectiveOwner)
+	}
+	contributions := field.Contributions()
+	owners := make([]string, len(contributions))
+	effective := 0
+	for index, contribution := range contributions {
+		owners[index] = contribution.Owner()
+		if contribution.Effective() {
+			effective++
+			if contribution.Owner() != effectiveOwner || contribution.Digest() != field.Digest() || contribution.Summary() != field.Summary() || contribution.Removed() != field.Removed() {
+				t.Fatalf("effective dormant configuration contribution %d disagrees with field %#v", index, field)
+			}
+		}
+	}
+	if !slices.Equal(owners, wantOwners) || effective != 1 {
+		t.Fatalf("dormant configuration field %s contribution owners/effective = %v/%d, want %v/1", field.Path(), owners, effective, wantOwners)
 	}
 }
 

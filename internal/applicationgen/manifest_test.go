@@ -225,8 +225,8 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 			t.Fatalf("generated manifest leaked %q: %s", forbidden, data)
 		}
 	}
-	oldSchema := bytes.Replace(data, []byte(`"version":6`), []byte(`"version":5`), 1)
-	if _, err := applicationgen.DecodeManifestProvenance(oldSchema); err == nil || !strings.Contains(err.Error(), "must use version 6") {
+	oldSchema := bytes.Replace(data, []byte(`"version":7`), []byte(`"version":6`), 1)
+	if _, err := applicationgen.DecodeManifestProvenance(oldSchema); err == nil || !strings.Contains(err.Error(), "must use version 7") {
 		t.Fatalf("DecodeManifestProvenance(old schema) error = %v", err)
 	}
 	withoutOwnership := bytes.Replace(data, []byte(`,"current_project_paths":["interfaces.use[\"email.send/v1\"]"]`), nil, 1)

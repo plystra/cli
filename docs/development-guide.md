@@ -926,21 +926,28 @@ with every resolved canonical Capability ID, its exact contract and constraint
 digests, and each constrained request or response field's path, type, and
 normalized constraint object. Unconstrained Capabilities retain empty field
 lists, while the aggregate projection digest changes for added, removed, or
-changed constraints. Configuration schema v6 records `default`,
+changed constraints. Configuration schema v7 records `default`,
 `environment`, or `explicit-config` mode; the environment name and overlay
 reference when applicable; project-relative paths; normalized document
 digests; dependency baseline history; sorted per-selection
 `current_project_paths`; the committed Protobuf wire-map digest; and the final
-build-affecting application-model digest. It also requires the canonically
-ordered `dormant_implementation_selections` array and its aggregate digest.
-Each entry records the exact dormant Interface and constructor, the
+build-affecting application-model digest. It also requires canonically ordered
+`dormant_implementation_selections` and constructor-keyed
+`dormant_constructor_configurations` arrays, each with an aggregate digest.
+Selection entries record the exact dormant Interface and constructor, the
 constructor's module/version and stable source, the canonical
 `interfaces.use` path and normalized decision digest, the effective owner, and
 ordered replacement/removal contributions with module-relative configuration
-sources. The array is explicitly empty when there is no dormant choice. These
-records contain no constructor configuration value or Secret-reference target,
-never appear as executable bindings, and move out of this configuration class
-when activation records the same exact choice in `interface_provenance`.
+sources. A dormant constructor configuration is recorded once even when
+several dormant Interface selections name the same constructor. It retains the
+exact constructor identity, canonical `config["<constructor>"]` path, normalized
+field digests and redacted summaries, effective/removal state, owners,
+suppressed descendants, and ordered contribution sources. A constructor active
+through any reachable binding is excluded. Both arrays are explicitly empty
+when absent. They contain no raw configuration value, Secret-reference target,
+resolved Secret, or machine path, never appear as executable bindings, and
+move out of this configuration class when activation records the same exact
+choice and configuration ownership in `interface_provenance`.
 
 The ownership paths contain no values or Secret-reference targets and keep
 explicit current-Project decisions stable across repeated maintenance.
@@ -1435,7 +1442,8 @@ startup settings, creating a Secret resolver, or constructing a Provider.
 Runtime-only address, timeout, Plugin configuration, and Secret-reference
 changes do not enter the projection. The explicit Implementation-choice member
 contains only Interfaces in the frozen executable closure; dormant choices and
-dormant constructor configuration create no bootstrap runtime membership.
+dormant constructor-configuration provenance create no bootstrap runtime
+membership.
 Neither compiled record contains YAML values, Secret-reference targets,
 resolved Secrets, or machine paths.
 
