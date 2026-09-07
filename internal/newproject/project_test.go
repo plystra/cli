@@ -1363,6 +1363,69 @@ func TestPublicCommandRejectsInvalidTemplateQueryWithoutMutation(t *testing.T) {
 	assertNoTransactionFiles(t, parent)
 }
 
+func TestPublicCommandClassifiesInvalidInitialPluginWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		modulePath   string
+		pluginName   string
+		wantPrefix   string
+		wantRecovery string
+		wantCode     string
+		rejected     []string
+	}{
+		{
+			name:         "invalid name",
+			modulePath:   "example.com/acme/my-app",
+			pluginName:   "Account",
+			wantPrefix:   "create project: create Plystra project: invalid initial Plystra plugin name: invalid plugin name ",
+			wantRecovery: "Rerun `plystra new <project-name> --plugin <plugin-name> [options]` with one lower-case ASCII kebab-case initial Plugin name that is not reserved and every required choice flag.",
+			wantCode:     diagnosticcode.ProjectCreatePluginNameInvalid,
+			rejected:     []string{"Account"},
+		},
+		{
+			name:         "invalid derived ID",
+			modulePath:   "example.com",
+			pluginName:   "account",
+			wantPrefix:   "create project: create Plystra project: invalid initial Plystra plugin ID: derive plugin ID: module path ",
+			wantRecovery: "Rerun `plystra new <project-name> --module <go-module-path> --plugin <plugin-name> [options]` with values that derive one canonical Plugin ID and every required choice flag.",
+			wantCode:     diagnosticcode.ProjectCreatePluginIDInvalid,
+			rejected:     []string{"example.com", "account"},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			parent := t.TempDir()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			exitCode := command.RunIn([]string{"new", "my-app", "--module", test.modulePath, "--plugin", test.pluginName, "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
+			wantBlock := "\n\nRecovery:\n" + test.wantRecovery + "\n\nDiagnostic: " + test.wantCode + "\n"
+			stderrText := stderr.String()
+			if exitCode != 1 || stdout.Len() != 0 || !strings.HasPrefix(stderrText, test.wantPrefix) ||
+				!strings.Contains(stderrText, wantBlock) || strings.Contains(stderrText, "Usage:") ||
+				strings.Count(stderrText, "Recovery:") != 1 || strings.Count(stderrText, "Diagnostic:") != 1 {
+				t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderrText)
+			}
+			recoveryIndex := strings.Index(stderrText, "Recovery:")
+			if recoveryIndex < 0 {
+				t.Fatalf("stderr omits recovery: %q", stderrText)
+			}
+			for _, rejected := range test.rejected {
+				if strings.Contains(stderrText[recoveryIndex:], rejected) {
+					t.Fatalf("recovery echoed rejected input %q: %q", rejected, stderrText)
+				}
+			}
+			if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
+				t.Fatalf("invalid initial Plugin mutated parent: %v, %v", entries, err)
+			}
+			assertNoTransactionFiles(t, parent)
+		})
+	}
+}
+
 func TestCreateHonorsOptionalProjectChoices(t *testing.T) {
 	proxy := createKernelProxy(t)
 	environment := isolatedGoEnvironment(t, proxy)
@@ -1572,15 +1635,35 @@ func TestCreateRejectsInvalidInitialPluginBeforeMutation(t *testing.T) {
 				ModulePath:  "example.com/acme/my-app",
 				Plugin:      pluginName,
 			})
-			if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, plugincreate.ErrInvalidName) {
-				t.Fatalf("Create error = %v, want ErrCreate and ErrInvalidName", err)
+			if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrInvalidPluginName) || !errors.Is(err, plugincreate.ErrInvalidName) {
+				t.Fatalf("Create error = %v, want ErrCreate, ErrInvalidPluginName, and plugincreate.ErrInvalidName", err)
 			}
 			entries, readErr := os.ReadDir(parent)
 			if readErr != nil || len(entries) != 0 {
 				t.Fatalf("parent entries = %v, %v", entries, readErr)
 			}
+			assertNoTransactionFiles(t, parent)
 		})
 	}
+}
+
+func TestCreateRejectsInvalidInitialPluginIDBeforeMutation(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	_, err := newproject.Create(context.Background(), newproject.Options{
+		Parent:      parent,
+		ProjectName: "my-app",
+		ModulePath:  "example.com",
+		Plugin:      "account",
+	})
+	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrInvalidPluginID) || !errors.Is(err, plugincreate.ErrDeriveID) {
+		t.Fatalf("Create error = %v, want ErrCreate, ErrInvalidPluginID, and plugincreate.ErrDeriveID", err)
+	}
+	if entries, readErr := os.ReadDir(parent); readErr != nil || len(entries) != 0 {
+		t.Fatalf("parent entries = %v, %v", entries, readErr)
+	}
+	assertNoTransactionFiles(t, parent)
 }
 
 func TestCreatePreservesExistingProject(t *testing.T) {
@@ -2186,6 +2269,11 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra generate --check",
 		"Diagnostic: PLYSTRA_<AREA>_<CONDITION>",
 		"PLYSTRA_CONFIGURATION_SELECTION_INVALID",
+		"PLYSTRA_PROJECT_CREATE_NAME_INVALID",
+		"PLYSTRA_PROJECT_CREATE_MODULE_INVALID",
+		"PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID",
+		"PLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID",
+		"PLYSTRA_PROJECT_CREATE_PLUGIN_ID_INVALID",
 		"PLYSTRA_PLUGIN_CREATE_NAME_INVALID",
 		"PLYSTRA_PLUGIN_CREATE_ID_INVALID",
 		"PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS",

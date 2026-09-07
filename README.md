@@ -358,6 +358,13 @@ rules. Invalid Project names and module identities emit
 `PLYSTRA_PROJECT_CREATE_MODULE_INVALID`. The removed positional
 full-module-path form is not accepted.
 
+An initial `--plugin` value is validated before target staging. Invalid or
+reserved names emit `PLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID`; inputs that
+cannot derive one canonical Plugin ID emit
+`PLYSTRA_PROJECT_CREATE_PLUGIN_ID_INVALID`. Both recoveries rerun
+`plystra new` with placeholders rather than switching to the post-creation
+Plugin command or echoing rejected input.
+
 `--template` rejects a malformed query before staging with
 `PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID`. It resolves one standard Go Module
 query, requires that selected module to contain regular root `plystra.yaml`,

@@ -149,6 +149,8 @@ const (
 	diagnosticProjectCreateNameInvalid              = diagnosticcode.ProjectCreateNameInvalid
 	diagnosticProjectCreateModuleInvalid            = diagnosticcode.ProjectCreateModuleInvalid
 	diagnosticProjectCreateTemplateInvalid          = diagnosticcode.ProjectCreateTemplateInvalid
+	diagnosticProjectCreatePluginNameInvalid        = diagnosticcode.ProjectCreatePluginNameInvalid
+	diagnosticProjectCreatePluginIDInvalid          = diagnosticcode.ProjectCreatePluginIDInvalid
 	diagnosticProjectCreateChoiceRequired           = diagnosticcode.ProjectCreateChoiceRequired
 	diagnosticPluginCreateNameInvalid               = diagnosticcode.PluginCreateNameInvalid
 	diagnosticPluginCreateIDInvalid                 = diagnosticcode.PluginCreateIDInvalid
@@ -267,6 +269,12 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	}
 	if errors.Is(err, newproject.ErrInvalidTemplateQuery) {
 		return recoveryDiagnostic(diagnosticProjectCreateTemplateInvalid, "Rerun `plystra new <project-name> --template <go-module-query> [options]` with one valid non-removal Go Module query and every required choice flag.")
+	}
+	if errors.Is(err, newproject.ErrInvalidPluginName) {
+		return recoveryDiagnostic(diagnosticProjectCreatePluginNameInvalid, "Rerun `plystra new <project-name> --plugin <plugin-name> [options]` with one lower-case ASCII kebab-case initial Plugin name that is not reserved and every required choice flag.")
+	}
+	if errors.Is(err, newproject.ErrInvalidPluginID) {
+		return recoveryDiagnostic(diagnosticProjectCreatePluginIDInvalid, "Rerun `plystra new <project-name> --module <go-module-path> --plugin <plugin-name> [options]` with values that derive one canonical Plugin ID and every required choice flag.")
 	}
 	if errors.Is(err, newproject.ErrInvalidTemplate) {
 		if _, action, found := splitEmbeddedRecovery(err.Error()); found {

@@ -64,6 +64,11 @@ var (
 	// ErrInvalidTemplateQuery reports a malformed Go Module query supplied to
 	// the Project creation command.
 	ErrInvalidTemplateQuery = errors.New("invalid Plystra project template query")
+	// ErrInvalidPluginName reports a malformed or reserved initial Plugin name.
+	ErrInvalidPluginName = errors.New("invalid initial Plystra plugin name")
+	// ErrInvalidPluginID reports inputs that cannot derive a canonical initial
+	// Plugin identity.
+	ErrInvalidPluginID = errors.New("invalid initial Plystra plugin ID")
 	// ErrGitInitialization reports a failed requested Git repository setup.
 	ErrGitInitialization = errors.New("initialize Git repository")
 	// ErrInvalidTemplate reports a resolved module that cannot serve as a
@@ -124,7 +129,14 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	}
 	if options.Plugin != "" {
 		if _, err := plugincreate.DeriveID(modulePath, options.Plugin); err != nil {
-			return Result{}, fmt.Errorf("%w: initial plugin: %w", ErrCreate, err)
+			switch {
+			case errors.Is(err, plugincreate.ErrInvalidName):
+				return Result{}, fmt.Errorf("%w: %w: %w", ErrCreate, ErrInvalidPluginName, err)
+			case errors.Is(err, plugincreate.ErrDeriveID):
+				return Result{}, fmt.Errorf("%w: %w: %w", ErrCreate, ErrInvalidPluginID, err)
+			default:
+				return Result{}, fmt.Errorf("%w: initial plugin: %w", ErrCreate, err)
+			}
 		}
 	}
 	parent := options.Parent
@@ -791,6 +803,11 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"plystra new app",
 		"plystra new app --module github.com/acme/app",
 		"plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3",
+		"PLYSTRA_PROJECT_CREATE_NAME_INVALID",
+		"PLYSTRA_PROJECT_CREATE_MODULE_INVALID",
+		"PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID",
+		"PLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID",
+		"PLYSTRA_PROJECT_CREATE_PLUGIN_ID_INVALID",
 		"Template-declared operational values and Secret-reference placeholders",
 		"does not read PLATFORM_SMTP_PASSWORD",
 		"invent values for required fields omitted by the template",

@@ -258,6 +258,12 @@ before mutation. Invalid names and module identities emit
 `PLYSTRA_PROJECT_CREATE_MODULE_INVALID`. The old positional full-module-path
 syntax is not supported.
 
+An initial `--plugin` value is validated before target staging. Invalid or
+reserved names emit `PLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID`; inputs that
+cannot derive one canonical Plugin ID emit
+`PLYSTRA_PROJECT_CREATE_PLUGIN_ID_INVALID`. Both recoveries rerun
+`plystra new` with placeholders instead of the post-creation Plugin command.
+
 `--template` rejects a malformed query before staging with
 `PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID`. It accepts one standard Go Module
 query. Go resolves the query, the selected module must contain regular root

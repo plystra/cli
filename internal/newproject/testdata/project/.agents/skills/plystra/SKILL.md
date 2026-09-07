@@ -627,28 +627,26 @@ global protoc nor a hosted generator; build-affecting identity changes drift.
 
 ## Create a Project and a Plugin
 
-Create a Project with optional module or template input:
+Create a Project with optional module, template, or initial Plugin input:
 
     plystra new app
     plystra new app --module github.com/acme/app
     plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3
 
 Pre-staging input codes are `PLYSTRA_PROJECT_CREATE_NAME_INVALID`,
-`PLYSTRA_PROJECT_CREATE_MODULE_INVALID`, and
-`PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID`.
+`PLYSTRA_PROJECT_CREATE_MODULE_INVALID`, `PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID`,
+`PLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID`, and
+`PLYSTRA_PROJECT_CREATE_PLUGIN_ID_INVALID`.
 
 Inside an existing Project, create a root-level Plugin:
 
     plystra plugin create records
 
-Expected effects:
+Effects:
 
-- records/plugin.yaml receives the generated exact Plugin ID.
-- records/plugin.go receives Config, Plugin, and New(Config) declarations.
-- records/plugin_test.go and records/README.md are created.
-- generated/go/configuration/records_gen.go is created.
-- Complete application assembly is regenerated for the Project.
-- The command formats, tidies, tests, and rolls back its own changes on failure.
+- create records/{plugin.yaml,plugin.go,plugin_test.go,README.md} and generated/go/configuration/records_gen.go;
+- derive the exact Plugin ID and declare Config, Plugin, and New(Config); and
+- regenerate, format, tidy, test, and roll back on failure.
 
 Do not expose a Plugin. Applications expose exact Capabilities. All local
 root-level Plugins in a Plystra Project participate in application resolution;

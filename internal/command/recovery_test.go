@@ -302,6 +302,8 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "invalid Project create name", err: newproject.ErrInvalidProjectName, code: diagnosticcode.ProjectCreateNameInvalid},
 		{name: "invalid Project create module", err: newproject.ErrInvalidModulePath, code: diagnosticcode.ProjectCreateModuleInvalid},
 		{name: "invalid Project create template query", err: newproject.ErrInvalidTemplateQuery, code: diagnosticcode.ProjectCreateTemplateInvalid},
+		{name: "invalid Project create Plugin name", err: newproject.ErrInvalidPluginName, code: diagnosticcode.ProjectCreatePluginNameInvalid},
+		{name: "invalid Project create Plugin ID", err: newproject.ErrInvalidPluginID, code: diagnosticcode.ProjectCreatePluginIDInvalid},
 		{name: "missing Project create choice", err: errNewChoiceRequired, code: diagnosticcode.ProjectCreateChoiceRequired},
 		{name: "invalid Plugin create name", err: plugincreate.ErrInvalidName, code: diagnosticcode.PluginCreateNameInvalid},
 		{name: "invalid derived Plugin ID", err: plugincreate.ErrDeriveID, code: diagnosticcode.PluginCreateIDInvalid},
