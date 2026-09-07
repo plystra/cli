@@ -609,6 +609,12 @@ Omit the version query to request Go's normal upgrade selection for that module.
 
 `plystra add` validates one module query, resolves it through ordinary Go tooling, and records the selected module as a direct requirement. `plystra remove` requires a module already selected in `go.mod`, uses ordinary Go tooling to remove it, and fails if regeneration or tidy would select it again. `plystra update` also requires an existing selection, preserves a direct requirement as direct, and verifies that the module remains selected. All three commands recompose the dependency-derived root `plystra.yaml` baseline, regenerate, tidy, and validate the complete Project. These initial dependency workflows use the default root configuration and never scan for or rewrite environment overlays or alternative YAML files. A failed Go command, resolution, composition, generation, tidy, dependency postcondition, or validation step restores `go.mod`, `go.sum`, root configuration, generated artifacts, and every other transaction-owned file without overwriting a concurrent user edit. The Go Module proxy and cache remain ordinary Go-tool boundaries; the CLI never copies or modifies dependency source.
 
+Malformed `add` and `update` queries emit
+`PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID` and
+`PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID`; a malformed exact `remove` path emits
+`PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID`. Each failure occurs before Project
+discovery or mutation and supplies one placeholder-based corrected command.
+
 ## Public command surface
 
 The intended command set includes:

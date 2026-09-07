@@ -19,6 +19,9 @@ import (
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/constructorgraph"
+	"github.com/plystra/cli/internal/dependencyadd"
+	"github.com/plystra/cli/internal/dependencyremove"
+	"github.com/plystra/cli/internal/dependencyupdate"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationactivation"
@@ -35,6 +38,7 @@ import (
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfacemeta"
 	"github.com/plystra/cli/internal/interfaceresolution"
+	"github.com/plystra/cli/internal/moduleargument"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/newproject"
@@ -168,6 +172,12 @@ const (
 const (
 	diagnosticUseInterfaceInvalid   = diagnosticcode.UseInterfaceInvalid
 	diagnosticUseConstructorInvalid = diagnosticcode.UseConstructorInvalid
+)
+
+const (
+	diagnosticDependencyAddQueryInvalid    = diagnosticcode.DependencyAddQueryInvalid
+	diagnosticDependencyRemovePathInvalid  = diagnosticcode.DependencyRemovePathInvalid
+	diagnosticDependencyUpdateQueryInvalid = diagnosticcode.DependencyUpdateQueryInvalid
 )
 
 const (
@@ -392,6 +402,12 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticImplementationCreateInterfaceNotFound, "Replace the reported Interface ID with one canonical Interface visible in the effective Plystra Project graph, then rerun the command.")
 	case errors.Is(err, implementationcreate.ErrTargetExists):
 		return recoveryDiagnostic(diagnosticImplementationCreateTargetExists, "Rerun with a different `--package ./<project-relative-go-package>` whose target directory does not exist.")
+	case errors.Is(err, dependencyadd.ErrAdd) && errors.Is(err, moduleargument.ErrInvalidQuery):
+		return recoveryDiagnostic(diagnosticDependencyAddQueryInvalid, "Rerun `plystra add <go-module-query>` with one valid non-removal Go Module query.")
+	case errors.Is(err, dependencyremove.ErrRemove) && errors.Is(err, moduleargument.ErrInvalidPath):
+		return recoveryDiagnostic(diagnosticDependencyRemovePathInvalid, "Rerun `plystra remove <go-module-path>` with one valid Go Module path without a version query.")
+	case errors.Is(err, dependencyupdate.ErrUpdate) && errors.Is(err, moduleargument.ErrInvalidQuery):
+		return recoveryDiagnostic(diagnosticDependencyUpdateQueryInvalid, "Rerun `plystra update <go-module-query>` with one valid non-removal Go Module query.")
 	case errors.Is(err, implementationselect.ErrInvalidInterfaceID):
 		return recoveryDiagnostic(diagnosticUseInterfaceInvalid, "Rerun `plystra use <interface-id> <constructor-symbol>"+context.selectorSuffix()+"` with one canonical versioned Interface ID.")
 	case errors.Is(err, implementationselect.ErrInvalidConstructor):

@@ -117,6 +117,12 @@ const (
 )
 
 const (
+	DependencyAddQueryInvalid    = Prefix + "DEPENDENCY_ADD_QUERY_INVALID"
+	DependencyRemovePathInvalid  = Prefix + "DEPENDENCY_REMOVE_PATH_INVALID"
+	DependencyUpdateQueryInvalid = Prefix + "DEPENDENCY_UPDATE_QUERY_INVALID"
+)
+
+const (
 	ConstructorConfigurationSchemaInvalid = Prefix + "CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID"
 	ConstructorConfigurationValuesInvalid = Prefix + "CONSTRUCTOR_CONFIGURATION_VALUES_INVALID"
 	ConstructorConfigurationUnselected    = Prefix + "CONSTRUCTOR_CONFIGURATION_UNSELECTED"

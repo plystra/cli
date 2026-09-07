@@ -2388,6 +2388,9 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_IMPLEMENTATION_CREATE_TARGET_EXISTS",
 		"PLYSTRA_USE_INTERFACE_INVALID",
 		"PLYSTRA_USE_CONSTRUCTOR_INVALID",
+		"PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID",
+		"PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID",
+		"PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID",
 	} {
 		if !strings.Contains(string(data), required) {
 			t.Fatalf("Plystra skill omits %q:\n%s", required, data)

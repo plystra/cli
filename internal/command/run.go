@@ -58,18 +58,27 @@ command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
 
 Adds one ordinary Go Module dependency, recomposes root plystra.yaml, regenerates,
 tidies, and validates the complete Project in one rollback boundary.
+
+Malformed queries emit PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID before Project
+discovery or mutation.
 `
 	removeUsage = `Usage:
   plystra remove <go-module-path>
 
 Removes one ordinary Go Module dependency, recomposes root plystra.yaml,
 regenerates, tidies, and validates the complete Project in one rollback boundary.
+
+Malformed paths emit PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID before Project
+discovery or mutation.
 `
 	updateUsage = `Usage:
   plystra update <go-module-query>
 
 Updates one selected ordinary Go Module dependency, recomposes root plystra.yaml,
 regenerates, tidies, and validates the complete Project in one rollback boundary.
+
+Malformed queries emit PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID before Project
+discovery or mutation.
 `
 	newUsage = `Usage:
   plystra new <project-name> [--module <go-module-path>] [--template <go-module-query>] [--plugin <name>] [--git|--no-git] [--github-ci|--no-github-ci] [--skills|--no-skills]

@@ -649,6 +649,18 @@ mutations remains incomplete. The commands never rewrite an unselected overlay o
 alternative YAML file. Any later failure restores `go.mod`, `go.sum`, root
 configuration, generated output, and every other transaction-owned file.
 
+Malformed dependency input is classified before Project discovery or mutation:
+
+- `PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID` identifies an invalid non-removal
+  `plystra add` Go Module query;
+- `PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID` identifies an invalid exact
+  `plystra remove` Go Module path, including a path with a version query; and
+- `PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID` identifies an invalid non-removal
+  `plystra update` Go Module query.
+
+Follow the emitted placeholder-based corrected command. It never copies the
+rejected input into the recovery action.
+
 Every direct or transitive module in the effective Go Module graph whose root
 contains regular `plystra.yaml` is a dependency Plystra Project. The CLI scans
 its root-level Plugins and composes only that root configuration. It ignores a

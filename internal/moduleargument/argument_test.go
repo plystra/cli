@@ -1,6 +1,9 @@
 package moduleargument
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestParseQuery(t *testing.T) {
 	t.Parallel()
@@ -31,6 +34,9 @@ func TestParseQuery(t *testing.T) {
 			if (err == nil) != test.ok || got != test.want || path != test.path {
 				t.Fatalf("ParseQuery(%q) = %q, %q, %v; want %q, %q, ok %t", test.value, got, path, err, test.want, test.path, test.ok)
 			}
+			if !test.ok && !errors.Is(err, ErrInvalidQuery) {
+				t.Fatalf("ParseQuery(%q) error = %v, want ErrInvalidQuery", test.value, err)
+			}
 		})
 	}
 }
@@ -60,6 +66,9 @@ func TestParsePath(t *testing.T) {
 			got, err := ParsePath(test.value)
 			if (err == nil) != test.ok || got != test.want {
 				t.Fatalf("ParsePath(%q) = %q, %v; want %q, ok %t", test.value, got, err, test.want, test.ok)
+			}
+			if !test.ok && !errors.Is(err, ErrInvalidPath) {
+				t.Fatalf("ParsePath(%q) error = %v, want ErrInvalidPath", test.value, err)
 			}
 		})
 	}

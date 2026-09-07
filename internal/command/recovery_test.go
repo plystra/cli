@@ -16,6 +16,9 @@ import (
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/constructorgraph"
+	"github.com/plystra/cli/internal/dependencyadd"
+	"github.com/plystra/cli/internal/dependencyremove"
+	"github.com/plystra/cli/internal/dependencyupdate"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationactivation"
@@ -32,6 +35,7 @@ import (
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfacemeta"
 	"github.com/plystra/cli/internal/interfaceresolution"
+	"github.com/plystra/cli/internal/moduleargument"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/newproject"
@@ -316,6 +320,9 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "invalid Implementation create package", err: implementationcreate.ErrInvalidPackage, code: diagnosticcode.ImplementationCreatePackageInvalid},
 		{name: "missing Implementation create Interface", err: implementationcreate.ErrInterfaceNotFound, code: diagnosticcode.ImplementationCreateInterfaceNotFound},
 		{name: "existing Implementation create target", err: implementationcreate.ErrTargetExists, code: diagnosticcode.ImplementationCreateTargetExists},
+		{name: "invalid dependency add query", err: fmt.Errorf("%w: %w", dependencyadd.ErrAdd, moduleargument.ErrInvalidQuery), code: diagnosticcode.DependencyAddQueryInvalid},
+		{name: "invalid dependency remove path", err: fmt.Errorf("%w: %w", dependencyremove.ErrRemove, moduleargument.ErrInvalidPath), code: diagnosticcode.DependencyRemovePathInvalid},
+		{name: "invalid dependency update query", err: fmt.Errorf("%w: %w", dependencyupdate.ErrUpdate, moduleargument.ErrInvalidQuery), code: diagnosticcode.DependencyUpdateQueryInvalid},
 		{name: "invalid use Interface", err: implementationselect.ErrInvalidInterfaceID, code: diagnosticcode.UseInterfaceInvalid},
 		{name: "invalid use constructor", err: implementationselect.ErrInvalidConstructor, code: diagnosticcode.UseConstructorInvalid},
 	}

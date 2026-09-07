@@ -354,22 +354,22 @@ Update exactly one selected dependency through a standard module query:
 
     plystra update github.com/acme/email@v1.5.0
 
-All three commands may start at the Project root or inside a Plugin. Add
-resolves the query through ordinary Go tooling and
-retains the selected module as a direct go.mod requirement. Remove requires the
-module to be selected in go.mod and
-verifies that regeneration plus tidy did not select it again. Update requires
-an existing selection and preserves an existing direct requirement. It targets
-only that module query; Go may adjust transitive versions required by the selected
-graph. An omitted
-version query uses Go's normal upgrade selection rather than requesting an
-upgrade of every selected module. Each command
+All three commands run from the Project root or a Plugin. Add uses Go tooling
+and retains the selected module as a direct go.mod requirement. Remove requires
+a selected module and verifies regeneration plus tidy did not reselect it.
+Update preserves an existing direct requirement. It targets only that module query;
+Go may adjust required transitive versions. An omitted version query uses
+Go's normal selection, not a whole-graph upgrade. Each command
 recomposes root plystra.yaml, regenerates, tidies, and validates the complete
 Project. The current dependency surfaces use the default root configuration and
 never rewrite unselected environment overlays or alternative YAML files. A
 failed Go command, resolution, composition, generation, tidy, removal
 postcondition, or validation step restores every transaction-owned module,
 root-configuration, and generated file.
+
+Malformed add/update queries and remove paths fail before mutation as
+PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID, PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID,
+or PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID; follow Recovery.
 
 The CLI asks Go for the effective module graph. Every direct or transitive
 module with regular root plystra.yaml is a dependency Plystra Project; its
