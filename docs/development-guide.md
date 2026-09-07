@@ -391,6 +391,9 @@ build.
 If a non-interactive caller omits any choice, the command fails before creating
 the target with `PLYSTRA_PROJECT_CREATE_CHOICE_REQUIRED` and one command
 recovery. Repeated or contradictory choice flags also fail without mutation.
+If requested Git initialization fails, the staged tree is removed, no target is
+installed, and `PLYSTRA_PROJECT_CREATE_GIT_INITIALIZATION_FAILED` directs the
+caller to correct Git and retry with `--git` or deliberately choose `--no-git`.
 
 ## Understand authored and CLI-owned files
 

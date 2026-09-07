@@ -98,6 +98,9 @@ PLYSTRA_PROJECT_CREATE_PLUGIN_ID_INVALID.
 An existing Project target emits PLYSTRA_PROJECT_CREATE_TARGET_EXISTS and is
 never replaced or modified.
 
+Requested Git initialization failures emit
+PLYSTRA_PROJECT_CREATE_GIT_INITIALIZATION_FAILED and leave no target Project.
+
 Template dependencies must be public, portable, and generation-stable. Creation
 rejects the staged Project unless immediate generation checking, applicable
 JavaScript SDK dependency installation plus typecheck/build/package validation,

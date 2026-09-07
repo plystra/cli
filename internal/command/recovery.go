@@ -152,6 +152,7 @@ const (
 	diagnosticProjectCreatePluginNameInvalid        = diagnosticcode.ProjectCreatePluginNameInvalid
 	diagnosticProjectCreatePluginIDInvalid          = diagnosticcode.ProjectCreatePluginIDInvalid
 	diagnosticProjectCreateTargetExists             = diagnosticcode.ProjectCreateTargetExists
+	diagnosticProjectCreateGitInitializationFailed  = diagnosticcode.ProjectCreateGitInitializationFailed
 	diagnosticProjectCreateChoiceRequired           = diagnosticcode.ProjectCreateChoiceRequired
 	diagnosticPluginCreateNameInvalid               = diagnosticcode.PluginCreateNameInvalid
 	diagnosticPluginCreateIDInvalid                 = diagnosticcode.PluginCreateIDInvalid
@@ -279,6 +280,9 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	}
 	if errors.Is(err, newproject.ErrTargetExists) {
 		return recoveryDiagnostic(diagnosticProjectCreateTargetExists, "Rerun `plystra new <project-name> [options]` with a different canonical Project name whose target does not exist, or run it from a different parent directory.")
+	}
+	if errors.Is(err, newproject.ErrGitInitialization) {
+		return recoveryDiagnostic(diagnosticProjectCreateGitInitializationFailed, "Correct the reported Git installation or initialization failure, then rerun `plystra new <project-name> [options]` with `--git`; use `--no-git` only when the Project intentionally needs no repository.")
 	}
 	if errors.Is(err, newproject.ErrInvalidTemplate) {
 		if _, action, found := splitEmbeddedRecovery(err.Error()); found {

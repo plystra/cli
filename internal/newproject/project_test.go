@@ -1543,6 +1543,53 @@ func TestPublicCommandRequiresExplicitNonInteractiveChoices(t *testing.T) {
 	}
 }
 
+func TestPublicCommandClassifiesGitInitializationFailureAndRollsBack(t *testing.T) {
+	realGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("LookPath(go): %v", err)
+	}
+	goRootOutput, err := exec.Command(realGo, "env", "GOROOT").Output()
+	if err != nil || strings.TrimSpace(string(goRootOutput)) == "" {
+		t.Fatalf("go env GOROOT = %q, %v", goRootOutput, err)
+	}
+	goInfo, err := os.Stat(realGo)
+	if err != nil {
+		t.Fatalf("Stat(go): %v", err)
+	}
+	goData, err := os.ReadFile(realGo)
+	if err != nil {
+		t.Fatalf("ReadFile(go): %v", err)
+	}
+	commandDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(commandDirectory, filepath.Base(realGo)), goData, goInfo.Mode().Perm()); err != nil {
+		t.Fatalf("WriteFile(go copy): %v", err)
+	}
+	t.Setenv("PATH", commandDirectory)
+	t.Setenv("GOROOT", strings.TrimSpace(string(goRootOutput)))
+
+	proxy := createKernelProxy(t)
+	environment := isolatedGoEnvironment(t, proxy)
+	parent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := command.RunIn([]string{"new", "my-app", "--module", "example.com/acme/my-app", "--git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, environment)
+	wantRecovery := "Correct the reported Git installation or initialization failure, then rerun `plystra new <project-name> [options]` with `--git`; use `--no-git` only when the Project intentionally needs no repository."
+	wantStderr := "create project: create Plystra project: create directory transaction: populate staging directory: initialize Git repository: git init failed\n\n" +
+		"Recovery:\n" + wantRecovery + "\n\n" +
+		"Diagnostic: " + diagnosticcode.ProjectCreateGitInitializationFailed + "\n"
+	if exitCode != 1 || stdout.Len() != 0 || stderr.String() != wantStderr {
+		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
+	}
+	recoveryIndex := strings.Index(stderr.String(), "Recovery:")
+	if recoveryIndex < 0 || strings.Contains(stderr.String()[recoveryIndex:], "my-app") || strings.Contains(stderr.String()[recoveryIndex:], parent) {
+		t.Fatalf("recovery echoed rejected Project input: %q", stderr.String())
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Git initialization failure created target: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
+}
+
 func TestCreateRollsBackGitInitializationFailure(t *testing.T) {
 	proxy := createKernelProxy(t)
 	environment := isolatedGoEnvironment(t, proxy)

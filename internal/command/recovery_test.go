@@ -305,6 +305,7 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "invalid Project create Plugin name", err: newproject.ErrInvalidPluginName, code: diagnosticcode.ProjectCreatePluginNameInvalid},
 		{name: "invalid Project create Plugin ID", err: newproject.ErrInvalidPluginID, code: diagnosticcode.ProjectCreatePluginIDInvalid},
 		{name: "existing Project create target", err: newproject.ErrTargetExists, code: diagnosticcode.ProjectCreateTargetExists},
+		{name: "failed Project Git initialization", err: newproject.ErrGitInitialization, code: diagnosticcode.ProjectCreateGitInitializationFailed},
 		{name: "missing Project create choice", err: errNewChoiceRequired, code: diagnosticcode.ProjectCreateChoiceRequired},
 		{name: "invalid Plugin create name", err: plugincreate.ErrInvalidName, code: diagnosticcode.PluginCreateNameInvalid},
 		{name: "invalid derived Plugin ID", err: plugincreate.ErrDeriveID, code: diagnosticcode.PluginCreateIDInvalid},
