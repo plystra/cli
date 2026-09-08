@@ -236,15 +236,19 @@ func normalizeChoices(inputs []Choice, catalog catalog) (map[string]normalizedCh
 		if identifier == "" || constructorID == "" {
 			return nil, fmt.Errorf("%w: choices[%d] has an empty Interface or constructor", ErrInvalidInput, index)
 		}
-		if strings.HasPrefix(input.InterfaceID.Name(), "kernel.") {
-			return nil, fmt.Errorf("%w: interfaces.use[%q] names %s", ErrIntrinsicChoice, identifier, input.Constructor)
-		}
-		if _, visible := catalog.interfaces[identifier]; !visible {
-			return nil, fmt.Errorf("%w: interfaces.use[%q] is not defined by a visible canonical package", ErrUnknownInterface, identifier)
-		}
 		sources, err := normalizeChoiceSources(input.Sources)
 		if err != nil {
 			return nil, fmt.Errorf("%w: choices[%d] sources: %v", ErrInvalidInput, index, err)
+		}
+		if strings.HasPrefix(input.InterfaceID.Name(), "kernel.") {
+			return nil, &IntrinsicChoiceError{
+				interfaceID: input.InterfaceID,
+				constructor: input.Constructor,
+				sources:     sources,
+			}
+		}
+		if _, visible := catalog.interfaces[identifier]; !visible {
+			return nil, fmt.Errorf("%w: interfaces.use[%q] is not defined by a visible canonical package", ErrUnknownInterface, identifier)
 		}
 		constructor, visible := catalog.constructors[constructorID]
 		if !visible {

@@ -205,9 +205,6 @@ func parseImplementationChoices(node *yaml.Node) ([]ImplementationChoice, []inte
 		if err != nil {
 			return nil, nil, invalid("interfaces.use key %q is not a canonical Interface ID", value)
 		}
-		if strings.HasPrefix(identifier.Name(), "kernel.") {
-			return nil, nil, invalid("interfaces.use key %q selects an intrinsic kernel.* Interface", value)
-		}
 		source := fmt.Sprintf("plystra.yaml interfaces.use[%q]", identifier.String())
 		if isNull(values[value]) {
 			removals = append(removals, interfaceRemoval{id: identifier, source: source})

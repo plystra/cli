@@ -1217,35 +1217,38 @@ boundary.
 
 ## Diagnose common failures
 
-Failures end: Recovery, then Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
+Failures end with Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
+Typed provenance:
 Source: <module>:<module-relative-path>[:line:column] (<kind>).
-configuration-declaration: PLYSTRA_CONFIGURATION_INHERITED_CONFLICT,
-PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS. Sources omit absolute/Module Cache
-paths; unsafe selectors use placeholders; unknown errors get neither.
+PLYSTRA_CONFIGURATION_INHERITED_CONFLICT and
+PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS use configuration-declaration.
+Sources omit absolute/Module Cache paths; unsafe selectors use placeholders;
+unknown errors get no code.
 
 - PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION: root and requiring-constructor sources;
-  add a visible compatible constructor.
-- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS: candidate-constructor sources;
-  select via plystra use <interface-id> <constructor-symbol>.
+  add a compatible constructor.
+- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS: candidate-constructor sources; use
+  plystra use <interface-id> <constructor-symbol>.
 - PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: cycle-constructor sources; remove one
   required parameter.
-- PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION /
-  PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION: effective interfaces.use sources
-  are implementation-selection; choose a visible compatible constructor.
-- Capability failures precede mutation. Malformed create/implement/expose:
+- PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION,
+  PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION, and
+  PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: effective interfaces.use sources
+  are implementation-selection. Fix the constructor; intrinsic recovery sets
+  the selected document entry to null.
+- Capability failures precede mutation. References:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,
-  PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID. Missing exposure:
-  PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE. Wrong action:
+  PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID. Other classes:
+  PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE,
   PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE,
-  PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE. Confirmation/exhaustion/profile:
+  PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE,
   PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED,
   PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED,
   PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED,
   PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED. Follow Recovery.
-- Invalid plystra use input: PLYSTRA_USE_INTERFACE_INVALID means malformed
-  Interface ID; PLYSTRA_USE_CONSTRUCTOR_INVALID means malformed fully qualified
-  constructor symbol. Recovery retains the selector; both precede mutation.
+- PLYSTRA_USE_INTERFACE_INVALID / PLYSTRA_USE_CONSTRUCTOR_INVALID: malformed
+  Interface ID / constructor. Both precede mutation; Recovery retains selector.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: select its constructor through
   interfaces.use, make it reachable, or remove its config. Values and Secret
   targets stay redacted.

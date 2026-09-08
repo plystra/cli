@@ -137,15 +137,24 @@ func TestResolveCollectsIntrinsicKernelRequirementsOutsideImplementationSelectio
 		t.Fatalf("unknown intrinsic error = %v", err)
 	}
 
+	healthConstructor := mustResolutionSymbol(t, "example.com/application/health.New")
+	wantChoiceSource := resolutionChoiceSource(`plystra.yaml interfaces.use["kernel.health/v1"]`, "example.com/application", "plystra.yaml")
 	_, err = interfaceresolution.Resolve(interfaceresolution.Input{Choices: []interfaceresolution.Choice{{
 		InterfaceID: healthID,
-		Constructor: mustResolutionSymbol(t, "example.com/application/health.New"),
-		Sources: []interfaceresolution.ChoiceSource{
-			resolutionChoiceSource(`plystra.yaml interfaces.use["kernel.health/v1"]`, "example.com/application", "plystra.yaml"),
-		},
+		Constructor: healthConstructor,
+		Sources:     []interfaceresolution.ChoiceSource{wantChoiceSource},
 	}}})
 	if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, interfaceresolution.ErrIntrinsicChoice) || !containsAll(err.Error(), healthID.String(), "health.New") {
 		t.Fatalf("intrinsic choice error = %v", err)
+	}
+	var intrinsic *interfaceresolution.IntrinsicChoiceError
+	if !errors.As(err, &intrinsic) || intrinsic.InterfaceID() != healthID || intrinsic.Constructor() != healthConstructor || !reflect.DeepEqual(intrinsic.ChoiceSources(), []interfaceresolution.ChoiceSource{wantChoiceSource}) {
+		t.Fatalf("IntrinsicChoiceError = %#v", intrinsic)
+	}
+	choiceSources := intrinsic.ChoiceSources()
+	choiceSources[0] = interfaceresolution.ChoiceSource{}
+	if !reflect.DeepEqual(intrinsic.ChoiceSources(), []interfaceresolution.ChoiceSource{wantChoiceSource}) {
+		t.Fatal("IntrinsicChoiceError exposed mutable source storage")
 	}
 }
 

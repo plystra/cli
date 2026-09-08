@@ -83,6 +83,41 @@ interfaces:
 	}
 }
 
+func TestParsePreservesIntrinsicImplementationChoiceForResolutionValidation(t *testing.T) {
+	t.Parallel()
+
+	manifest, err := applicationmeta.ParseSource("deploy/customer.yaml", []byte(`interfaces:
+  use:
+    kernel.health/v1: example.com/acme/health.New
+    kernel.info/v1: null
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := implementationChoiceStrings(manifest.ImplementationChoices()); !reflect.DeepEqual(got, []string{
+		`kernel.health/v1->example.com/acme/health.New@deploy/customer.yaml interfaces.use["kernel.health/v1"]`,
+	}) {
+		t.Fatalf("ImplementationChoices = %v", got)
+	}
+	decisions, err := applicationmeta.ConfigurationDecisions(manifest, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		`interfaces.use["kernel.health/v1"]`: false,
+		`interfaces.use["kernel.info/v1"]`:   true,
+	}
+	if len(decisions) != len(want) {
+		t.Fatalf("ConfigurationDecisions = %#v", decisions)
+	}
+	for _, decision := range decisions {
+		removed, exists := want[decision.Path()]
+		if !exists || decision.Removed() != removed || decision.Source() != "deploy/customer.yaml" {
+			t.Fatalf("ConfigurationDecision = %#v", decision)
+		}
+	}
+}
+
 func TestParseRejectsInvalidInterfaceConfiguration(t *testing.T) {
 	t.Parallel()
 
@@ -100,7 +135,6 @@ func TestParseRejectsInvalidInterfaceConfiguration(t *testing.T) {
 		{name: "invalid choice key", data: "interfaces: {use: {email/v1: github.com/acme/smtp.New}}\n", want: "not a canonical Interface ID"},
 		{name: "invalid constructor", data: "interfaces: {use: {email.send/v1: acme.smtp}}\n", want: "not a fully qualified constructor symbol"},
 		{name: "nonstring constructor", data: "interfaces: {use: {email.send/v1: true}}\n", want: "must be a fully qualified constructor symbol or null"},
-		{name: "intrinsic selection", data: "interfaces: {use: {kernel.health/v1: github.com/acme/health.New}}\n", want: "intrinsic kernel.* Interface"},
 		{name: "policies nonmapping", data: "interfaces: {policies: []}\n", want: "interfaces.policies must be a mapping"},
 		{name: "invalid policy key", data: "interfaces: {policies: {email/v1: {timeout: 1s}}}\n", want: "not a canonical Interface ID"},
 		{name: "intrinsic policy", data: "interfaces: {policies: {kernel.health/v1: {timeout: 1s}}}\n", want: "intrinsic kernel.* Interface"},

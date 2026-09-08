@@ -23,6 +23,11 @@ remains dormant without creating a root, binding, constructor, or generated
 Interface runtime until that Interface becomes reachable; invalid choices are
 rejected immediately.
 
+An effective choice for an intrinsic kernel.* Interface emits
+PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION with every contributing
+implementation-selection Source. Set that interfaces.use entry to null in the
+selected current-Project document to remove either a local or inherited choice.
+
 PLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit
 selector is present; setting both is an error. Explicit --env or --config
 overrides both variables, and the two flags cannot be combined. Relative

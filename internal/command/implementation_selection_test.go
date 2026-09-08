@@ -258,7 +258,6 @@ func TestRunUseRejectsInvalidImplementationChoicesAndRestoresProject(t *testing.
 		want        string
 	}{
 		{name: "invalid Interface", interfaceID: "email.send", constructor: "example.com/acme/implementation-use/smtp.New", want: "parse exact Interface ID"},
-		{name: "intrinsic Interface", interfaceID: "kernel.health/v1", constructor: "example.com/acme/implementation-use/smtp.New", want: "intrinsic kernel.* Interface"},
 		{name: "absent Interface", interfaceID: "missing.operation/v1", constructor: "example.com/acme/implementation-use/smtp.New", want: "unknown Interface"},
 		{name: "invalid constructor", interfaceID: "email.send/v1", constructor: "example.com/acme/implementation-use/smtp.new", want: "parse fully qualified Implementation constructor"},
 		{name: "unknown constructor", interfaceID: "email.send/v1", constructor: "example.com/acme/implementation-use/missing.New", want: "unknown Implementation constructor"},
@@ -279,6 +278,58 @@ func TestRunUseRejectsInvalidImplementationChoicesAndRestoresProject(t *testing.
 			}
 			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("rejected plystra use changed the Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
+func TestRunUseReportsIntrinsicImplementationSelectionSourceAndRestoresProject(t *testing.T) {
+	tests := []struct {
+		name         string
+		selectedPath string
+		selectors    []string
+	}{
+		{name: "default", selectedPath: "plystra.yaml"},
+		{name: "environment", selectedPath: "plystra.production.yaml", selectors: []string{"--env", "production"}},
+		{name: "complete replacement", selectedPath: "deploy/customer.yaml", selectors: []string{"--config", "deploy/customer.yaml"}},
+	}
+	const constructor = "example.com/acme/implementation-use/smtp.New"
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			root := writeImplementationSelectionCommandProject(t)
+			if test.selectedPath != "plystra.yaml" {
+				writeCommandFile(t, filepath.Join(root, filepath.FromSlash(test.selectedPath)), "{}\n")
+			}
+			before := commandTree(t, root)
+			arguments := append([]string{"use", "kernel.health/v1", constructor}, test.selectors...)
+			exitCode, stdout, stderr := runCommand(
+				t,
+				arguments,
+				filepath.Join(root, "smtp"),
+				implementationSelectionCommandEnvironment(nil),
+			)
+			wantSource := "Source: example.com/acme/implementation-use:" + test.selectedPath + ":1:1 (implementation-selection)"
+			wantRecovery := "Recovery:\nSet the reported interfaces.use entry to null in " + test.selectedPath + " to remove the effective selection; Kernel supplies that Interface intrinsically.\n"
+			if exitCode != 1 || stdout != "" || !commandContainsAll(
+				stderr,
+				"kernel.health/v1",
+				constructor,
+				"intrinsic Kernel Interface cannot select an Implementation",
+				wantSource,
+				wantRecovery,
+				"Diagnostic: "+diagnosticcode.ResolveIntrinsicInterfaceSelection,
+			) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+				t.Fatalf("%v intrinsic use = exit %d, stdout %q, stderr %q", arguments, exitCode, stdout, stderr)
+			}
+			for _, privatePath := range []string{root, filepath.ToSlash(root)} {
+				if strings.Contains(stderr, privatePath) {
+					t.Fatalf("%v exposed private path %q: %q", arguments, privatePath, stderr)
+				}
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%v intrinsic use changed the Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
 			}
 			assertNoCommandTransactions(t, root)
 		})

@@ -588,6 +588,123 @@ replace example.com/zeta => ../zeta
 	}
 }
 
+func TestPublicResolvingCommandsReportIntrinsicImplementationChoiceSources(t *testing.T) {
+	tests := []struct {
+		name         string
+		selectedPath string
+		selectors    []string
+	}{
+		{name: "default", selectedPath: "plystra.yaml"},
+		{name: "environment", selectedPath: "plystra.production.yaml", selectors: []string{"--env", "production"}},
+		{name: "complete replacement", selectedPath: "deploy/customer.yaml", selectors: []string{"--config", "deploy/customer.yaml"}},
+	}
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	const constructor = "example.com/application/health.New"
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/intrinsic-choice-command\n\ngo 1.26\n")
+			writeCommandFile(t, filepath.Join(root, "generated", "sentinel.txt"), "must remain unchanged\n")
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+			writeCommandFile(t, filepath.Join(root, filepath.FromSlash(test.selectedPath)), "interfaces: {use: {kernel.health/v1: "+constructor+"}}\n")
+			before := commandTree(t, root)
+			for _, command := range commands {
+				arguments := append(append([]string(nil), command...), test.selectors...)
+				exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
+				wantSource := "Source: example.com/intrinsic-choice-command:" + test.selectedPath + ":1:1 (implementation-selection)"
+				wantRecovery := "Recovery:\nSet the reported interfaces.use entry to null in " + test.selectedPath + " to remove the effective selection; Kernel supplies that Interface intrinsically.\n"
+				if exitCode != 1 || stdout != "" || !commandContainsAll(
+					stderr,
+					"kernel.health/v1",
+					constructor,
+					"intrinsic Kernel Interface cannot select an Implementation",
+					wantSource,
+					wantRecovery,
+					"Diagnostic: "+diagnosticcode.ResolveIntrinsicInterfaceSelection,
+				) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+					t.Fatalf("%v intrinsic choice = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+				}
+				for _, privatePath := range []string{root, filepath.ToSlash(root)} {
+					if strings.Contains(stderr, privatePath) {
+						t.Fatalf("%v exposed private path %q: %q", arguments, privatePath, stderr)
+					}
+				}
+				if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+					t.Fatalf("%v mutated intrinsic-choice Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+				}
+				assertNoCommandTransactions(t, root)
+			}
+		})
+	}
+}
+
+func TestPublicResolvingCommandsReportEveryInheritedIntrinsicImplementationChoiceSource(t *testing.T) {
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	for _, command := range commands {
+		command := command
+		t.Run(strings.Join(command, " "), func(t *testing.T) {
+			t.Parallel()
+
+			parent := t.TempDir()
+			alphaRoot := filepath.Join(parent, "alpha")
+			zetaRoot := filepath.Join(parent, "zeta")
+			applicationRoot := filepath.Join(parent, "application")
+			const constructor = "example.com/application/health.New"
+			for _, dependency := range []struct {
+				root       string
+				modulePath string
+			}{
+				{root: zetaRoot, modulePath: "example.com/zeta"},
+				{root: alphaRoot, modulePath: "example.com/alpha"},
+			} {
+				writeCommandFile(t, filepath.Join(dependency.root, "go.mod"), "module "+dependency.modulePath+"\n\ngo 1.26\n")
+				writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {use: {kernel.health/v1: "+constructor+"}}\n")
+			}
+			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/intrinsic-consumer
+
+go 1.26
+
+require (
+	example.com/alpha v1.0.0
+	example.com/zeta v1.0.0
+)
+
+replace example.com/alpha => ../alpha
+replace example.com/zeta => ../zeta
+`)
+			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+			writeCommandFile(t, filepath.Join(applicationRoot, "generated", "sentinel.txt"), "must remain unchanged\n")
+			before := commandTree(t, parent)
+
+			exitCode, stdout, stderr := runCommand(t, command, applicationRoot, commandGoEnvironment())
+			wantSuffix := strings.Join([]string{
+				"",
+				"Source: example.com/alpha:plystra.yaml:1:1 (implementation-selection)",
+				"Source: example.com/zeta:plystra.yaml:1:1 (implementation-selection)",
+				"",
+				"Recovery:",
+				"Set the reported interfaces.use entry to null in plystra.yaml to remove the effective selection; Kernel supplies that Interface intrinsically.",
+				"",
+				"Diagnostic: " + diagnosticcode.ResolveIntrinsicInterfaceSelection,
+				"",
+			}, "\n")
+			if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 2 {
+				t.Fatalf("%v inherited intrinsic choice = exit %d stdout %q stderr %q", command, exitCode, stdout, stderr)
+			}
+			for _, privatePath := range []string{parent, filepath.ToSlash(parent), alphaRoot, filepath.ToSlash(alphaRoot), zetaRoot, filepath.ToSlash(zetaRoot)} {
+				if strings.Contains(stderr, privatePath) {
+					t.Fatalf("%v exposed private path %q: %q", command, privatePath, stderr)
+				}
+			}
+			if after := commandTree(t, parent); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%v mutated inherited intrinsic-choice Projects:\nbefore: %#v\nafter:  %#v", command, before, after)
+			}
+			assertNoCommandTransactions(t, applicationRoot)
+		})
+	}
+}
+
 func TestPublicResolvingCommandsRejectUnownedConstructorConfigurationWithoutMutation(t *testing.T) {
 	t.Parallel()
 

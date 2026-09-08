@@ -36,6 +36,7 @@ import (
 	"github.com/plystra/cli/internal/interfacecontract"
 	"github.com/plystra/cli/internal/interfacecreate"
 	"github.com/plystra/cli/internal/interfacedecl"
+	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfacemeta"
 	"github.com/plystra/cli/internal/interfaceresolution"
@@ -419,6 +420,42 @@ func TestWriteCommandFailureReportsProviderContractConflictSources(t *testing.T)
 		"Diagnostic: " + diagnosticProviderContractConflict + "\n"
 	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 3 {
 		t.Fatalf("Provider contract conflict output = %q, want suffix %q", got, wantSuffix)
+	}
+}
+
+func TestWriteCommandFailureReportsIntrinsicImplementationSelectionSources(t *testing.T) {
+	t.Parallel()
+
+	id, err := interfaceid.Parse("kernel.health/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	constructor, err := constructorsymbol.Parse("example.com/application/health.New")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, resolutionErr := interfaceresolution.Resolve(interfaceresolution.Input{Choices: []interfaceresolution.Choice{{
+		InterfaceID: id,
+		Constructor: constructor,
+		Sources: []interfaceresolution.ChoiceSource{
+			{Reference: `example.com/z@v1.0.0/plystra.yaml interfaces.use["kernel.health/v1"]`, ModulePath: "example.com/z", Path: "plystra.yaml", Line: 1, Column: 1},
+			{Reference: `example.com/a@v1.0.0/plystra.yaml interfaces.use["kernel.health/v1"]`, ModulePath: "example.com/a", Path: "plystra.yaml", Line: 1, Column: 1},
+		},
+	}}})
+	if !errors.Is(resolutionErr, interfaceresolution.ErrIntrinsicChoice) {
+		t.Fatalf("Resolve error = %v", resolutionErr)
+	}
+
+	var output strings.Builder
+	writeCommandFailure(&output, "generate", resolutionErr, commandRecoveryContext("deploy/customer.yaml", "", nil))
+	got := output.String()
+	wantSuffix := "\n\n" +
+		"Source: example.com/a:plystra.yaml:1:1 (implementation-selection)\n" +
+		"Source: example.com/z:plystra.yaml:1:1 (implementation-selection)\n\n" +
+		"Recovery:\nSet the reported interfaces.use entry to null in deploy/customer.yaml to remove the effective selection; Kernel supplies that Interface intrinsically.\n\n" +
+		"Diagnostic: " + diagnosticResolveIntrinsicInterfaceSelection + "\n"
+	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 2 {
+		t.Fatalf("intrinsic Implementation selection output = %q, want suffix %q", got, wantSuffix)
 	}
 }
 

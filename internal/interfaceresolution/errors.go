@@ -134,6 +134,56 @@ func (e *IncompatibleChoiceError) Error() string {
 // Unwrap supports errors.Is with ErrIncompatibleChoice.
 func (*IncompatibleChoiceError) Unwrap() error { return ErrIncompatibleChoice }
 
+// IntrinsicChoiceError identifies an effective ordinary Implementation choice
+// for an Interface supplied intrinsically by Kernel and retains every
+// declaration that contributed the forbidden selection.
+type IntrinsicChoiceError struct {
+	interfaceID interfaceid.Identifier
+	constructor constructorsymbol.Symbol
+	sources     []ChoiceSource
+}
+
+// InterfaceID returns the exact intrinsic Interface ID.
+func (e *IntrinsicChoiceError) InterfaceID() interfaceid.Identifier {
+	if e == nil {
+		return interfaceid.Identifier{}
+	}
+	return e.interfaceID
+}
+
+// Constructor returns the ordinary constructor selected for the intrinsic
+// Interface.
+func (e *IntrinsicChoiceError) Constructor() constructorsymbol.Symbol {
+	if e == nil {
+		return constructorsymbol.Symbol{}
+	}
+	return e.constructor
+}
+
+// ChoiceSources returns every sorted typed module-relative declaration that
+// contributed the forbidden effective selection.
+func (e *IntrinsicChoiceError) ChoiceSources() []ChoiceSource {
+	if e == nil {
+		return nil
+	}
+	return append([]ChoiceSource(nil), e.sources...)
+}
+
+func (e *IntrinsicChoiceError) Error() string {
+	if e == nil {
+		return ErrIntrinsicChoice.Error()
+	}
+	return fmt.Sprintf(
+		"%s: interfaces.use[%q] names %s",
+		ErrIntrinsicChoice,
+		e.interfaceID,
+		e.constructor,
+	)
+}
+
+// Unwrap supports errors.Is with ErrIntrinsicChoice.
+func (*IntrinsicChoiceError) Unwrap() error { return ErrIntrinsicChoice }
+
 // Candidate is one compatible visible Implementation retained by an
 // ambiguity diagnostic.
 type Candidate struct {

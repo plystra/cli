@@ -89,7 +89,7 @@ Cross-origin browser access is opt-in. Add ` + "`http.cors.allowed_origins`" + `
 
 When several compatible Implementations satisfy one required Interface, select one with ` + "`plystra use <interface-id> <constructor-symbol>`" + `. The same command may record a validated dormant choice before the Interface becomes required without activating its constructor. Constructor configuration for that dormant choice is type-checked immediately, but its Secret references remain unresolved and it enters no runtime, bootstrap, or Kernel state. Add ` + "`--env <environment>`" + ` to write only that sparse overlay or ` + "`--config <yaml-path>`" + ` to write only one complete replacement configuration; the command regenerates and validates with the same selection.
 
-Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + ` block followed by one stable ` + "`Diagnostic: PLYSTRA_<AREA>_<CONDITION>`" + ` code. Authored Interface and Implementation failures, plus ` + "`PLYSTRA_CAPABILITY_REQUIREMENT_CONFLICT`" + `, ` + "`PLYSTRA_CAPABILITY_CONTRACT_CONFLICT`" + `, ` + "`PLYSTRA_CAPABILITY_SCHEMA_CONFLICT`" + `, ` + "`PLYSTRA_PROVIDER_MISSING`" + `, ` + "`PLYSTRA_PROVIDER_AMBIGUOUS`" + `, ` + "`PLYSTRA_PROVIDER_SELECTION_INVALID`" + `, ` + "`PLYSTRA_PROVIDER_CONTRACT_CONFLICT`" + `, ` + "`PLYSTRA_PROVIDER_CONTRACT_MISMATCH`" + `, ` + "`PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS`" + `, ` + "`PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION`" + `, ` + "`PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE`" + `, ` + "`PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION`" + `, and ` + "`PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION`" + `, insert sorted ` + "`Source: <module>:<module-relative-path>[:<line>:<column>] (<kind>)`" + ` lines before recovery; Capability requirement conflict includes every source for each incompatible exact contract, visible Capability contract conflict includes every conflicting Provider declaration, Capability schema conflict includes both declarations that block authoring, Provider ambiguity includes every compatible Provider declaration, invalid selection includes every effective choice declaration, Provider contract conflict includes every reference-only requirement plus each conflicting Provider declaration, contract mismatch includes every exact-contract requirement plus each incompatible Provider declaration, Interface Implementation ambiguity includes every compatible constructor declaration, missing Implementation includes every root declaration or exposure plus every requiring constructor in each complete dependency path, a constructor cycle includes every requiring constructor declaration in the complete cycle, and an unknown or incompatible explicit Interface Implementation choice includes every effective ` + "`interfaces.use`" + ` declaration as ` + "`implementation-selection`" + `. They never expose absolute or Module Cache paths. Follow that one command or file edit with the same default, ` + "`--env`" + `, or ` + "`--config`" + ` selection, and use the code rather than human wording as the automation or support identity. Recovery output preserves safe explicit and ambient selectors, but uses ` + "`<environment>`" + ` or ` + "`<yaml-path>`" + ` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice or a code.
+Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + ` block followed by one stable ` + "`Diagnostic: PLYSTRA_<AREA>_<CONDITION>`" + ` code. Authored Interface and Implementation failures, plus ` + "`PLYSTRA_CAPABILITY_REQUIREMENT_CONFLICT`" + `, ` + "`PLYSTRA_CAPABILITY_CONTRACT_CONFLICT`" + `, ` + "`PLYSTRA_CAPABILITY_SCHEMA_CONFLICT`" + `, ` + "`PLYSTRA_PROVIDER_MISSING`" + `, ` + "`PLYSTRA_PROVIDER_AMBIGUOUS`" + `, ` + "`PLYSTRA_PROVIDER_SELECTION_INVALID`" + `, ` + "`PLYSTRA_PROVIDER_CONTRACT_CONFLICT`" + `, ` + "`PLYSTRA_PROVIDER_CONTRACT_MISMATCH`" + `, ` + "`PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS`" + `, ` + "`PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION`" + `, ` + "`PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE`" + `, ` + "`PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION`" + `, ` + "`PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION`" + `, and ` + "`PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION`" + `, insert sorted ` + "`Source: <module>:<module-relative-path>[:<line>:<column>] (<kind>)`" + ` lines before recovery; Capability requirement conflict includes every source for each incompatible exact contract, visible Capability contract conflict includes every conflicting Provider declaration, Capability schema conflict includes both declarations that block authoring, Provider ambiguity includes every compatible Provider declaration, invalid selection includes every effective choice declaration, Provider contract conflict includes every reference-only requirement plus each conflicting Provider declaration, contract mismatch includes every exact-contract requirement plus each incompatible Provider declaration, Interface Implementation ambiguity includes every compatible constructor declaration, missing Implementation includes every root declaration or exposure plus every requiring constructor in each complete dependency path, a constructor cycle includes every requiring constructor declaration in the complete cycle, and an unknown, incompatible, or intrinsic explicit Interface Implementation choice includes every effective ` + "`interfaces.use`" + ` declaration as ` + "`implementation-selection`" + `. For an intrinsic choice, set the selected current-Project entry to ` + "`null`" + ` to remove either a local or inherited effective selection because Kernel supplies that Interface intrinsically. They never expose absolute or Module Cache paths. Follow that one command or file edit with the same default, ` + "`--env`" + `, or ` + "`--config`" + ` selection, and use the code rather than human wording as the automation or support identity. Recovery output preserves safe explicit and ambient selectors, but uses ` + "`<environment>`" + ` or ` + "`<yaml-path>`" + ` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice or a code.
 
 ` + "`PLYSTRA_CONFIGURATION_INHERITED_CONFLICT`" + ` reports every contributing Project configuration document as a sorted ` + "`configuration-declaration`" + ` source, including all modules behind compatible declaration deduplication. The problem identifies the exact field while configuration values and Secret-reference targets stay redacted. Apply the recovery to the selected root, environment, or complete-replacement document.
 
@@ -1424,35 +1424,38 @@ boundary.
 
 ## Diagnose common failures
 
-Failures end: Recovery, then Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
+Failures end with Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
+Typed provenance:
 Source: <module>:<module-relative-path>[:line:column] (<kind>).
-configuration-declaration: PLYSTRA_CONFIGURATION_INHERITED_CONFLICT,
-PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS. Sources omit absolute/Module Cache
-paths; unsafe selectors use placeholders; unknown errors get neither.
+PLYSTRA_CONFIGURATION_INHERITED_CONFLICT and
+PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS use configuration-declaration.
+Sources omit absolute/Module Cache paths; unsafe selectors use placeholders;
+unknown errors get no code.
 
 - PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION: root and requiring-constructor sources;
-  add a visible compatible constructor.
-- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS: candidate-constructor sources;
-  select via plystra use <interface-id> <constructor-symbol>.
+  add a compatible constructor.
+- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS: candidate-constructor sources; use
+  plystra use <interface-id> <constructor-symbol>.
 - PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: cycle-constructor sources; remove one
   required parameter.
-- PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION /
-  PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION: effective interfaces.use sources
-  are implementation-selection; choose a visible compatible constructor.
-- Capability failures precede mutation. Malformed create/implement/expose:
+- PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION,
+  PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION, and
+  PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: effective interfaces.use sources
+  are implementation-selection. Fix the constructor; intrinsic recovery sets
+  the selected document entry to null.
+- Capability failures precede mutation. References:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,
-  PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID. Missing exposure:
-  PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE. Wrong action:
+  PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID. Other classes:
+  PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE,
   PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE,
-  PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE. Confirmation/exhaustion/profile:
+  PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE,
   PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED,
   PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED,
   PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED,
   PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED. Follow Recovery.
-- Invalid plystra use input: PLYSTRA_USE_INTERFACE_INVALID means malformed
-  Interface ID; PLYSTRA_USE_CONSTRUCTOR_INVALID means malformed fully qualified
-  constructor symbol. Recovery retains the selector; both precede mutation.
+- PLYSTRA_USE_INTERFACE_INVALID / PLYSTRA_USE_CONSTRUCTOR_INVALID: malformed
+  Interface ID / constructor. Both precede mutation; Recovery retains selector.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: select its constructor through
   interfaces.use, make it reachable, or remove its config. Values and Secret
   targets stay redacted.

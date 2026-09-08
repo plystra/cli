@@ -86,6 +86,25 @@ interfaces:
 	}
 }
 
+func TestSetImplementationChoicePreservesIntrinsicIntentForResolutionValidation(t *testing.T) {
+	t.Parallel()
+
+	id := mustImplementationChoiceInterfaceID(t, "kernel.health/v1")
+	constructor := mustImplementationChoiceConstructor(t, "example.com/acme/health.New")
+	updated, changed, err := applicationmeta.SetImplementationChoice([]byte("{}\n"), id, constructor)
+	if err != nil || !changed {
+		t.Fatalf("SetImplementationChoice = changed %t, %v", changed, err)
+	}
+	manifest, err := applicationmeta.Parse(updated)
+	if err != nil || !containsImplementationChoice(manifest, id, constructor) {
+		t.Fatalf("Parse(updated) choices = %#v, %v", manifest.ImplementationChoices(), err)
+	}
+	idempotent, idempotentChanged, err := applicationmeta.SetImplementationChoice(updated, id, constructor)
+	if err != nil || idempotentChanged || !bytes.Equal(idempotent, updated) {
+		t.Fatalf("idempotent SetImplementationChoice = changed %t, data %q, %v", idempotentChanged, idempotent, err)
+	}
+}
+
 func TestSetImplementationChoiceRejectsInvalidInputWithoutSecretDisclosure(t *testing.T) {
 	t.Parallel()
 
@@ -99,7 +118,6 @@ func TestSetImplementationChoiceRejectsInvalidInputWithoutSecretDisclosure(t *te
 		constructor constructorsymbol.Symbol
 	}{
 		{name: "empty Interface", data: []byte("{}\n"), constructor: validConstructor},
-		{name: "intrinsic Interface", data: []byte("{}\n"), id: mustImplementationChoiceInterfaceID(t, "kernel.health/v1"), constructor: validConstructor},
 		{name: "empty constructor", data: []byte("{}\n"), id: validID},
 		{name: "invalid document", data: []byte("config:\n  example.com/email/smtp.New:\n    password: {env: " + secret + "}\nunknown: true\n"), id: validID, constructor: validConstructor},
 	}

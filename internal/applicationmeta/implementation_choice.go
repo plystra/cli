@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"sort"
-	"strings"
 
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceid"
@@ -36,9 +35,6 @@ func SetImplementationChoiceOverlay(data []byte, id interfaceid.Identifier, cons
 func setImplementationChoice(data []byte, id interfaceid.Identifier, constructor constructorsymbol.Symbol, parse func([]byte) (Manifest, error)) ([]byte, bool, error) {
 	if id.String() == "" {
 		return nil, false, fmt.Errorf("%w: Interface is empty", ErrSetImplementationChoice)
-	}
-	if strings.HasPrefix(id.Name(), "kernel.") {
-		return nil, false, fmt.Errorf("%w: intrinsic kernel.* Interface %s does not select an application Implementation", ErrSetImplementationChoice, id)
 	}
 	if constructor.String() == "" {
 		return nil, false, fmt.Errorf("%w: Implementation constructor is empty", ErrSetImplementationChoice)

@@ -915,6 +915,133 @@ interfaces:
 	}
 }
 
+func TestResolveRejectsIntrinsicImplementationSelectionsWithTypedProvenance(t *testing.T) {
+	t.Parallel()
+
+	const constructor = "example.com/application/health.New"
+	environment := goEnvironment(map[string]string{
+		"GOWORK":  "off",
+		"GOPROXY": "off",
+		"GOSUMDB": "off",
+	})
+
+	t.Run("current Project", func(t *testing.T) {
+		root := t.TempDir()
+		const modulePath = "example.com/intrinsic-application"
+		writeModule(t, root, modulePath)
+		writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {use: {kernel.health/v1: "+constructor+"}}\n")
+		before := snapshotTree(t, root)
+
+		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+			Start:       root,
+			Environment: environment,
+		})
+		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, interfaceresolution.ErrIntrinsicChoice) || !containsResolutionFragments(err.Error(), "kernel.health/v1", constructor) {
+			t.Fatalf("Resolve intrinsic choice = %v", err)
+		}
+		var invalid *interfaceresolution.IntrinsicChoiceError
+		if !errors.As(err, &invalid) || invalid.InterfaceID().String() != "kernel.health/v1" || invalid.Constructor().String() != constructor {
+			t.Fatalf("IntrinsicChoiceError = %#v", invalid)
+		}
+		sources := invalid.ChoiceSources()
+		if len(sources) != 1 || sources[0].ModulePath != modulePath || sources[0].Path != "plystra.yaml" || sources[0].Line != 1 || sources[0].Column != 1 {
+			t.Fatalf("intrinsic choice sources = %#v", sources)
+		}
+		sources[0] = interfaceresolution.ChoiceSource{}
+		if repeated := invalid.ChoiceSources(); len(repeated) != 1 || repeated[0].ModulePath != modulePath {
+			t.Fatal("IntrinsicChoiceError exposed mutable source storage")
+		}
+		if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+			t.Fatalf("intrinsic choice resolution mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
+		}
+	})
+
+	t.Run("inherited dependencies", func(t *testing.T) {
+		parent := t.TempDir()
+		alphaRoot := filepath.Join(parent, "alpha")
+		zetaRoot := filepath.Join(parent, "zeta")
+		applicationRoot := filepath.Join(parent, "application")
+		for _, dependency := range []struct {
+			root       string
+			modulePath string
+		}{
+			{root: zetaRoot, modulePath: "example.com/zeta"},
+			{root: alphaRoot, modulePath: "example.com/alpha"},
+		} {
+			writeModule(t, dependency.root, dependency.modulePath)
+			writeFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {use: {kernel.health/v1: "+constructor+"}}\n")
+		}
+		writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/intrinsic-consumer
+
+go 1.26
+
+require (
+	example.com/alpha v1.0.0
+	example.com/zeta v1.0.0
+)
+
+replace example.com/alpha => ../alpha
+replace example.com/zeta => ../zeta
+`)
+		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+		before := snapshotTree(t, parent)
+
+		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+			Start:       applicationRoot,
+			Environment: environment,
+		})
+		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, interfaceresolution.ErrIntrinsicChoice) {
+			t.Fatalf("Resolve inherited intrinsic choice = %v", err)
+		}
+		var invalid *interfaceresolution.IntrinsicChoiceError
+		if !errors.As(err, &invalid) {
+			t.Fatalf("inherited intrinsic choice omitted typed provenance: %v", err)
+		}
+		sources := invalid.ChoiceSources()
+		if len(sources) != 2 || sources[0].ModulePath != "example.com/alpha" || sources[0].Path != "plystra.yaml" || sources[1].ModulePath != "example.com/zeta" || sources[1].Path != "plystra.yaml" {
+			t.Fatalf("inherited intrinsic choice sources = %#v", sources)
+		}
+		if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
+			t.Fatalf("inherited intrinsic choice resolution mutated Projects:\nbefore: %#v\nafter:  %#v", before, after)
+		}
+	})
+
+	t.Run("inherited selection removed by current Project tombstone", func(t *testing.T) {
+		parent := t.TempDir()
+		dependencyRoot := filepath.Join(parent, "platform")
+		applicationRoot := filepath.Join(parent, "application")
+		writeModule(t, dependencyRoot, "example.com/platform")
+		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "interfaces: {use: {kernel.health/v1: "+constructor+"}}\n")
+		writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/intrinsic-removal
+
+go 1.26
+
+require example.com/platform v1.0.0
+
+replace example.com/platform => ../platform
+`)
+		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "interfaces: {use: {kernel.health/v1: null}}\n")
+		before := snapshotTree(t, parent)
+
+		resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+			Start:       applicationRoot,
+			Environment: environment,
+		})
+		if err != nil {
+			t.Fatalf("Resolve removed inherited intrinsic choice: %v", err)
+		}
+		if choices := resolved.Manifest().ImplementationChoices(); len(choices) != 0 {
+			t.Fatalf("removed inherited intrinsic choice remains effective: %#v", choices)
+		}
+		if !strings.Contains(string(resolved.ConfigurationMaintenance().Data()), "kernel.health/v1: null") {
+			t.Fatalf("intrinsic removal tombstone was not preserved:\n%s", resolved.ConfigurationMaintenance().Data())
+		}
+		if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
+			t.Fatalf("removed inherited intrinsic choice resolution mutated Projects:\nbefore: %#v\nafter:  %#v", before, after)
+		}
+	})
+}
+
 func TestResolveRejectsUnknownOrShadowedIntrinsicKernelInterfaceWithoutMutation(t *testing.T) {
 	t.Parallel()
 
