@@ -153,6 +153,8 @@ func TestBuildReportsCompleteDeterministicCycle(t *testing.T) {
 			testDependency("beta.run/v1", "example.com/contracts/beta", "beta", 1, false),
 		),
 	}
+	constructors[0].sourcePath, constructors[0].line, constructors[0].column = "b.go", 8, 6
+	constructors[1].sourcePath, constructors[1].line, constructors[1].column = "a.go", 8, 6
 	selections := []Selection{
 		testSelection("beta.run/v1", "example.com/app/b.New", SelectionUnique, "b.go:6:1"),
 		testSelection("alpha.run/v1", "example.com/app/a.New", SelectionExplicit, "plystra.yaml:4:5"),
@@ -170,7 +172,7 @@ func TestBuildReportsCompleteDeterministicCycle(t *testing.T) {
 		t.Fatalf("cycle error type = %T", firstErr)
 	}
 	steps := cycle.Steps()
-	if len(steps) != 2 || steps[0].RequiringConstructor().String() != "example.com/app/a.New" || steps[0].InterfaceID().String() != "beta.run/v1" || steps[0].SelectedConstructor().String() != "example.com/app/b.New" || steps[0].SelectionReason() != SelectionUnique || steps[1].RequiringConstructor().String() != "example.com/app/b.New" || steps[1].InterfaceID().String() != "alpha.run/v1" || steps[1].SelectedConstructor().String() != "example.com/app/a.New" || steps[1].SelectionReason() != SelectionExplicit {
+	if len(steps) != 2 || steps[0].RequiringConstructor().String() != "example.com/app/a.New" || steps[0].RequiringModulePath() != "example.com/app" || steps[0].RequiringSourcePath() != "a.go" || steps[0].RequiringLine() != 8 || steps[0].RequiringColumn() != 6 || steps[0].InterfaceID().String() != "beta.run/v1" || steps[0].SelectedConstructor().String() != "example.com/app/b.New" || steps[0].SelectionReason() != SelectionUnique || steps[1].RequiringConstructor().String() != "example.com/app/b.New" || steps[1].RequiringModulePath() != "example.com/app" || steps[1].RequiringSourcePath() != "b.go" || steps[1].RequiringLine() != 8 || steps[1].RequiringColumn() != 6 || steps[1].InterfaceID().String() != "alpha.run/v1" || steps[1].SelectedConstructor().String() != "example.com/app/a.New" || steps[1].SelectionReason() != SelectionExplicit {
 		t.Fatalf("cycle steps = %#v", steps)
 	}
 	for _, fragment := range []string{"example.com/app/a.New", "app@local/a.go:8:6", "beta.run/v1", "example.com/app/b.New", "app@local/b.go:8:6", "alpha.run/v1", "unique-compatible", "explicit", "acyclic compatible Implementation"} {

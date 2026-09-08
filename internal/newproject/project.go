@@ -832,6 +832,8 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION",
 		"root declaration or exposure",
 		"complete implementation-constructor path",
+		"PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE",
+		"complete constructor cycle",
 		"plystra implement email.send/v1 --package ./mailer",
 		"creates no copied contract",
 		"Before a contract appears in any published tag",

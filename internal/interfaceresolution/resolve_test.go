@@ -257,7 +257,7 @@ func TestResolveReportsCompleteMissingPathAndConstructorCycle(t *testing.T) {
 			t.Fatalf("cycle error = %v", err)
 		}
 		steps := cycle.Steps()
-		if len(steps) != 2 || steps[0].RequiringConstructor() != cycleA || steps[0].InterfaceID() != cycleBID || steps[0].SelectedConstructor() != cycleB || steps[0].SelectionReason() != constructorgraph.SelectionUnique || steps[1].RequiringConstructor() != cycleB || steps[1].InterfaceID() != cycleAID || steps[1].SelectedConstructor() != cycleA || steps[1].SelectionReason() != constructorgraph.SelectionUnique || !containsAll(err.Error(), cycleA.String(), cycleB.String(), "cycle.a/v1", "cycle.b/v1", "unique-compatible") {
+		if len(steps) != 2 || steps[0].RequiringConstructor() != cycleA || steps[0].RequiringModulePath() != "example.com/application" || steps[0].RequiringSourcePath() != "cyclea/service.go" || steps[0].RequiringLine() != 13 || steps[0].RequiringColumn() != 6 || steps[0].InterfaceID() != cycleBID || steps[0].SelectedConstructor() != cycleB || steps[0].SelectionReason() != constructorgraph.SelectionUnique || steps[1].RequiringConstructor() != cycleB || steps[1].RequiringModulePath() != "example.com/application" || steps[1].RequiringSourcePath() != "cycleb/service.go" || steps[1].RequiringLine() != 13 || steps[1].RequiringColumn() != 6 || steps[1].InterfaceID() != cycleAID || steps[1].SelectedConstructor() != cycleA || steps[1].SelectionReason() != constructorgraph.SelectionUnique || !containsAll(err.Error(), cycleA.String(), cycleB.String(), "cycle.a/v1", "cycle.b/v1", "unique-compatible") {
 			t.Fatalf("cycle path/error = %#v / %v", steps, err)
 		}
 	})

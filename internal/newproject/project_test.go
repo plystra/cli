@@ -1124,6 +1124,8 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION`"),
 		[]byte("every root declaration or exposure"),
 		[]byte("every requiring constructor in each complete dependency path"),
+		[]byte("`PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE`"),
+		[]byte("every requiring constructor declaration in the complete cycle"),
 	} {
 		if !bytes.Contains(readme, activationGuidance) {
 			t.Fatalf("generated README omits candidate-only activation guidance %q:\n%s", activationGuidance, readme)
@@ -2188,6 +2190,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION",
 		"root declaration or exposure",
 		"complete implementation-constructor path",
+		"PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE",
+		"complete constructor cycle",
 		"plystra implement email.send/v1 --package ./mailer",
 		"creates no copied contract",
 		"capabilities/records.read/v1/capability.yaml",

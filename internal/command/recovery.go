@@ -457,6 +457,20 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: step.RequiringColumn(),
 			})
 		}
+	case diagnosticResolveConstructorCycle:
+		var cycle *constructorgraph.CycleError
+		if !errors.As(err, &cycle) || cycle == nil {
+			return nil
+		}
+		for _, step := range cycle.Steps() {
+			sources = append(sources, diagnosticjson.Source{
+				Module: step.RequiringModulePath(),
+				Path:   step.RequiringSourcePath(),
+				Kind:   "implementation-constructor",
+				Line:   step.RequiringLine(),
+				Column: step.RequiringColumn(),
+			})
+		}
 	case diagnosticResolveMultipleImplementations:
 		var ambiguous *interfaceresolution.AmbiguousImplementationError
 		if !errors.As(err, &ambiguous) || ambiguous == nil {

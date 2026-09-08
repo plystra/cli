@@ -1295,6 +1295,7 @@ func New(a av1.Interface) (*Service, error) { return &Service{}, nil }
 
 func (*Service) B(context.Context, bv1.Request) (bv1.Response, error) { return bv1.Response{}, nil }
 `)
+	before := snapshotTree(t, root)
 	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
 		Start: root,
 		Environment: goEnvironment(map[string]string{
@@ -1307,8 +1308,15 @@ func (*Service) B(context.Context, bv1.Request) (bv1.Response, error) { return b
 		t.Fatalf("Resolve error = %v", err)
 	}
 	var cycle *constructorgraph.CycleError
-	if !errors.As(err, &cycle) || len(cycle.Steps()) != 2 || !containsResolutionFragments(err.Error(), "cycle.a/v1", "cycle.b/v1", "cyclea.New", "cycleb.New", "unique-compatible", "correction") {
+	if !errors.As(err, &cycle) || !containsResolutionFragments(err.Error(), "cycle.a/v1", "cycle.b/v1", "cyclea.New", "cycleb.New", "unique-compatible", "correction") {
 		t.Fatalf("cycle/error = %#v / %v", cycle, err)
+	}
+	steps := cycle.Steps()
+	if len(steps) != 2 || steps[0].RequiringModulePath() != "example.com/cyclic-interface" || steps[0].RequiringSourcePath() != "cyclea/service.go" || steps[0].RequiringLine() != 13 || steps[0].RequiringColumn() != 6 || steps[1].RequiringModulePath() != "example.com/cyclic-interface" || steps[1].RequiringSourcePath() != "cycleb/service.go" || steps[1].RequiringLine() != 13 || steps[1].RequiringColumn() != 6 {
+		t.Fatalf("cycle steps = %#v", steps)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("failed cycle resolution mutated files:\nbefore: %#v\nafter: %#v", before, after)
 	}
 }
 

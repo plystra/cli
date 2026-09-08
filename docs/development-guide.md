@@ -1954,6 +1954,10 @@ dependency-owned roots and constructors retain their owning Project modules.
 An ambiguous Interface Implementation emits every compatible constructor
 declaration as `implementation-constructor`, including dependency-owned
 candidates, before the selector-preserving recovery action.
+A constructor cycle emits every requiring constructor declaration in the
+complete cycle as `implementation-constructor`; the problem retains the ordered
+Interface edges and selection reasons. Dependency-owned declarations keep their
+owning Project modules rather than exposing Module Cache paths.
 An inherited configuration conflict emits every contributing Project document
 as `configuration-declaration`, including all modules behind compatible
 declaration deduplication. Its document-level span is `1:1`; the exact schema

@@ -825,6 +825,9 @@ the complete path to the missing binding. Constructor declarations use the
 `PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS` reports every compatible
 Implementation constructor declaration as an `implementation-constructor`
 source before selection recovery.
+`PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE` reports every requiring constructor
+declaration in the complete cycle as an `implementation-constructor` source.
+The problem retains the ordered Interface edges and selection reasons.
 `PLYSTRA_CONFIGURATION_INHERITED_CONFLICT` reports every Project configuration
 document that contributed a competing declaration, including every module
 behind compatible declaration deduplication, as `configuration-declaration`.

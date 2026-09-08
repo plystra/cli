@@ -1225,12 +1225,14 @@ PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS.
 Sources omit absolute/Module Cache paths; unsafe selectors use placeholders;
 unknown errors get neither.
 
-- PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION reports each
-  root declaration or exposure and complete implementation-constructor path.
-  Expose a compatible constructor; markerless modules stay invisible.
-- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS reports every candidate
-  implementation-constructor. Run plystra use <interface-id> <constructor-symbol>
-  with the selector; no candidate has discovery priority.
+- PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION: root declaration or exposure and
+  complete implementation-constructor path. Add a compatible constructor;
+  markerless modules remain invisible.
+- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS: every candidate
+  implementation-constructor. Use plystra use <interface-id> <constructor-symbol>;
+  discovery gives no priority.
+- PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: every implementation-constructor in the
+  complete constructor cycle. Remove one required Interface parameter.
 - Capability failures precede mutation. Malformed create/implement/expose:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,

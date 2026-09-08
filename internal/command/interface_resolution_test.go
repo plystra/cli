@@ -102,7 +102,7 @@ replace example.com/roots/zeta => ../zeta-root
 	writeCommandGraphInterface(t, contractsRoot, "audit/write/v1", "writev1", "audit.write/v1", "Write")
 	writeCommandGraphInterface(t, contractsRoot, "storage/read/v1", "readv1", "storage.read/v1", "Read")
 
-	writeCommandMissingPathImplementation(t, appConstructorRoot, "example.com/constructors/app", `package service
+	writeCommandGraphImplementationModule(t, appConstructorRoot, "example.com/constructors/app", `package service
 
 import (
 	"context"
@@ -119,7 +119,7 @@ func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) {
 	return runv1.Response{}, nil
 }
 `)
-	writeCommandMissingPathImplementation(t, auditConstructorRoot, "example.com/constructors/audit", `package service
+	writeCommandGraphImplementationModule(t, auditConstructorRoot, "example.com/constructors/audit", `package service
 
 import (
 	"context"
@@ -489,15 +489,24 @@ func TestPublicResolvingCommandsEmitStableConstructorCycleWithoutMutation(t *tes
 			root := writeCommandCycleFailureProject(t)
 			before := commandTree(t, root)
 			exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
+			wantSuffix := strings.Join([]string{
+				"",
+				"Source: example.com/command-cycle:cyclea/service.go:13:6 (implementation-constructor)",
+				"Source: example.com/command-cycle:cycleb/service.go:13:6 (implementation-constructor)",
+				"",
+				"Recovery:",
+				"Remove one required Interface parameter from the reported constructor cycle, then rerun the command.",
+				"",
+				"Diagnostic: " + diagnosticcode.ResolveConstructorCycle,
+				"",
+			}, "\n")
 			if exitCode != 1 || stdout != "" || !commandContainsAll(
 				stderr,
 				"cycle.a/v1",
 				"cycle.b/v1",
 				"example.com/command-cycle/cyclea.New",
 				"example.com/command-cycle/cycleb.New",
-				"Recovery:\nRemove one required Interface parameter from the reported constructor cycle, then rerun the command.\n",
-				"Diagnostic: "+diagnosticcode.ResolveConstructorCycle,
-			) {
+			) || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 2 || strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, root) {
 				t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
 			}
 			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
@@ -505,6 +514,107 @@ func TestPublicResolvingCommandsEmitStableConstructorCycleWithoutMutation(t *tes
 			}
 			assertNoCommandTransactions(t, root)
 		})
+	}
+}
+
+func TestPublicResolvingCommandsReportDependencyConstructorCycleSourcesWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	applicationRoot := filepath.Join(parent, "application")
+	contractsRoot := filepath.Join(parent, "contracts")
+	alphaRoot := filepath.Join(parent, "alpha")
+	zetaRoot := filepath.Join(parent, "zeta")
+
+	writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/cycle-consumer
+
+go 1.26
+
+require (
+	example.com/cycles/zeta v1.2.0
+	example.com/contracts v1.0.0
+	example.com/cycles/alpha v1.1.0
+)
+
+replace example.com/contracts => ../contracts
+replace example.com/cycles/alpha => ../alpha
+replace example.com/cycles/zeta => ../zeta
+`)
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "interfaces: {require: [cycle.a/v1]}\n")
+	writeCommandFile(t, filepath.Join(applicationRoot, "generated", "sentinel.txt"), "must remain unchanged\n")
+	writeCommandFile(t, filepath.Join(contractsRoot, "go.mod"), "module example.com/contracts\n\ngo 1.26\n")
+	writeCommandFile(t, filepath.Join(contractsRoot, "plystra.yaml"), "{}\n")
+	writeCommandGraphInterface(t, contractsRoot, "cycle/a/v1", "av1", "cycle.a/v1", "A")
+	writeCommandGraphInterface(t, contractsRoot, "cycle/b/v1", "bv1", "cycle.b/v1", "B")
+	writeCommandGraphImplementationModule(t, alphaRoot, "example.com/cycles/alpha", `package service
+
+import (
+	"context"
+
+	av1 "example.com/contracts/interfaces/cycle/a/v1"
+	bv1 "example.com/contracts/interfaces/cycle/b/v1"
+)
+
+type Service struct{}
+
+//plystra:implements cycle.a/v1
+func New(next bv1.Interface) (*Service, error) { return &Service{}, nil }
+
+func (*Service) A(context.Context, av1.Request) (av1.Response, error) {
+	return av1.Response{}, nil
+}
+`)
+	writeCommandGraphImplementationModule(t, zetaRoot, "example.com/cycles/zeta", `package service
+
+import (
+	"context"
+
+	av1 "example.com/contracts/interfaces/cycle/a/v1"
+	bv1 "example.com/contracts/interfaces/cycle/b/v1"
+)
+
+type Service struct{}
+
+//plystra:implements cycle.b/v1
+func New(previous av1.Interface) (*Service, error) { return &Service{}, nil }
+
+func (*Service) B(context.Context, bv1.Request) (bv1.Response, error) {
+	return bv1.Response{}, nil
+}
+`)
+
+	roots := []string{applicationRoot, contractsRoot, alphaRoot, zetaRoot}
+	trees := make(map[string]map[string][]byte, len(roots))
+	for _, root := range roots {
+		trees[root] = commandTree(t, root)
+	}
+	for _, arguments := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}} {
+		exitCode, stdout, stderr := runCommand(t, arguments, applicationRoot, commandGoEnvironment())
+		wantSuffix := strings.Join([]string{
+			"",
+			"Source: example.com/cycles/alpha:service/implementation.go:13:6 (implementation-constructor)",
+			"Source: example.com/cycles/zeta:service/implementation.go:13:6 (implementation-constructor)",
+			"",
+			"Recovery:",
+			"Remove one required Interface parameter from the reported constructor cycle, then rerun the command.",
+			"",
+			"Diagnostic: " + diagnosticcode.ResolveConstructorCycle,
+			"",
+		}, "\n")
+		if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 2 || !commandContainsAll(stderr, "cycle.a/v1", "cycle.b/v1", "example.com/cycles/alpha/service.New", "example.com/cycles/zeta/service.New", "unique-compatible") {
+			t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+		}
+		for _, privatePath := range append([]string{parent, filepath.ToSlash(parent)}, roots...) {
+			if strings.Contains(stderr, privatePath) || strings.Contains(stderr, filepath.ToSlash(privatePath)) {
+				t.Fatalf("%v exposed private path %q: %q", arguments, privatePath, stderr)
+			}
+		}
+		for _, root := range roots {
+			if after := commandTree(t, root); !reflect.DeepEqual(after, trees[root]) {
+				t.Fatalf("%v mutated %s:\nbefore: %#v\nafter:  %#v", arguments, root, trees[root], after)
+			}
+			assertNoCommandTransactions(t, root)
+		}
 	}
 }
 
@@ -1124,7 +1234,7 @@ func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
 `)
 }
 
-func writeCommandMissingPathImplementation(t testing.TB, root, modulePath, source string) {
+func writeCommandGraphImplementationModule(t testing.TB, root, modulePath, source string) {
 	t.Helper()
 	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf("module %s\n\ngo 1.26\n\nrequire example.com/contracts v1.0.0\n\nreplace example.com/contracts => ../contracts\n", modulePath))
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
