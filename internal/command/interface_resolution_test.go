@@ -14,28 +14,173 @@ func TestPublicResolvingCommandsRejectInvalidRequiredConstructorGraphWithoutMuta
 	t.Parallel()
 
 	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
-	for _, arguments := range commands {
-		name := strings.Join(arguments, " ")
-		t.Run(name, func(t *testing.T) {
-			root := writeCommandGraphFailureProject(t)
-			before := commandTree(t, root)
-			exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "app"), commandGoEnvironment())
-			if exitCode != 1 || stdout != "" || !commandContainsAll(
-				stderr,
-				"app.run/v1",
-				"audit.write/v1",
-				"example.com/command-graph/app.New",
-				`plystra.yaml interfaces.require["app.run/v1"]`,
-				"Recovery:\nCreate one compatible local Implementation by running `plystra implement audit.write/v1 --package <project-relative-package>`.\n",
-				"Diagnostic: "+diagnosticcode.ResolveMissingImplementation,
-			) {
-				t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+	rootKinds := []struct {
+		name          string
+		configuration string
+		sourceKind    string
+	}{
+		{name: "requirement", configuration: "interfaces: {require: [app.run/v1]}\n", sourceKind: "declaration"},
+		{name: "exposure", configuration: "http: {expose: [app.run/v1]}\n", sourceKind: "exposure"},
+	}
+	for _, rootKind := range rootKinds {
+		rootKind := rootKind
+		t.Run(rootKind.name, func(t *testing.T) {
+			t.Parallel()
+			for _, arguments := range commands {
+				arguments := arguments
+				t.Run(strings.Join(arguments, " "), func(t *testing.T) {
+					root := writeCommandGraphFailureProject(t, rootKind.configuration)
+					before := commandTree(t, root)
+					exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "app"), commandGoEnvironment())
+					wantSuffix := strings.Join([]string{
+						"",
+						"Source: example.com/command-graph:app/service.go:13:6 (implementation-constructor)",
+						"Source: example.com/command-graph:audit/service.go:13:6 (implementation-constructor)",
+						"Source: example.com/command-graph:plystra.yaml:1:1 (" + rootKind.sourceKind + ")",
+						"",
+						"Recovery:",
+						"Create one compatible local Implementation by running `plystra implement storage.read/v1 --package <project-relative-package>`.",
+						"",
+						"Diagnostic: " + diagnosticcode.ResolveMissingImplementation,
+						"",
+					}, "\n")
+					if exitCode != 1 || stdout != "" || !commandContainsAll(
+						stderr,
+						"app.run/v1",
+						"audit.write/v1",
+						"storage.read/v1",
+						"example.com/command-graph/app.New",
+						"example.com/command-graph/audit.New",
+					) || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 3 || strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, root) {
+						t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+					}
+					if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+						t.Fatalf("%v mutated Project before rejecting graph:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+					}
+					assertNoCommandTransactions(t, root)
+				})
 			}
-			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
-				t.Fatalf("%v mutated Project before rejecting graph:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+		})
+	}
+}
+
+func TestPublicResolvingCommandsReportDependencyMissingImplementationPathSourcesWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	applicationRoot := filepath.Join(parent, "application")
+	contractsRoot := filepath.Join(parent, "contracts")
+	appConstructorRoot := filepath.Join(parent, "app-constructor")
+	auditConstructorRoot := filepath.Join(parent, "audit-constructor")
+	alphaRoot := filepath.Join(parent, "alpha-root")
+	zetaRoot := filepath.Join(parent, "zeta-root")
+
+	writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/missing-path-consumer
+
+go 1.26
+
+require (
+	example.com/roots/zeta v1.4.0
+	example.com/constructors/audit v1.2.0
+	example.com/contracts v1.0.0
+	example.com/roots/alpha v1.3.0
+	example.com/constructors/app v1.1.0
+)
+
+replace example.com/contracts => ../contracts
+replace example.com/constructors/app => ../app-constructor
+replace example.com/constructors/audit => ../audit-constructor
+replace example.com/roots/alpha => ../alpha-root
+replace example.com/roots/zeta => ../zeta-root
+`)
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(applicationRoot, "generated", "sentinel.txt"), "must remain unchanged\n")
+
+	writeCommandFile(t, filepath.Join(contractsRoot, "go.mod"), "module example.com/contracts\n\ngo 1.26\n")
+	writeCommandFile(t, filepath.Join(contractsRoot, "plystra.yaml"), "{}\n")
+	writeCommandGraphInterface(t, contractsRoot, "app/run/v1", "runv1", "app.run/v1", "Run")
+	writeCommandGraphInterface(t, contractsRoot, "audit/write/v1", "writev1", "audit.write/v1", "Write")
+	writeCommandGraphInterface(t, contractsRoot, "storage/read/v1", "readv1", "storage.read/v1", "Read")
+
+	writeCommandMissingPathImplementation(t, appConstructorRoot, "example.com/constructors/app", `package service
+
+import (
+	"context"
+	runv1 "example.com/contracts/interfaces/app/run/v1"
+	writev1 "example.com/contracts/interfaces/audit/write/v1"
+)
+
+type Service struct{}
+
+//plystra:implements app.run/v1
+func New(audit writev1.Interface) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) {
+	return runv1.Response{}, nil
+}
+`)
+	writeCommandMissingPathImplementation(t, auditConstructorRoot, "example.com/constructors/audit", `package service
+
+import (
+	"context"
+	writev1 "example.com/contracts/interfaces/audit/write/v1"
+	readv1 "example.com/contracts/interfaces/storage/read/v1"
+)
+
+type Service struct{}
+
+//plystra:implements audit.write/v1
+func New(storage readv1.Interface) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Write(context.Context, writev1.Request) (writev1.Response, error) {
+	return writev1.Response{}, nil
+}
+`)
+	for _, root := range []struct {
+		path       string
+		modulePath string
+	}{
+		{path: alphaRoot, modulePath: "example.com/roots/alpha"},
+		{path: zetaRoot, modulePath: "example.com/roots/zeta"},
+	} {
+		writeCommandFile(t, filepath.Join(root.path, "go.mod"), "module "+root.modulePath+"\n\ngo 1.26\n")
+		writeCommandFile(t, filepath.Join(root.path, "plystra.yaml"), "interfaces: {require: [app.run/v1]}\n")
+	}
+
+	roots := []string{applicationRoot, contractsRoot, appConstructorRoot, auditConstructorRoot, alphaRoot, zetaRoot}
+	trees := make(map[string]map[string][]byte, len(roots))
+	for _, root := range roots {
+		trees[root] = commandTree(t, root)
+	}
+	for _, arguments := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}} {
+		exitCode, stdout, stderr := runCommand(t, arguments, applicationRoot, commandGoEnvironment())
+		wantSuffix := strings.Join([]string{
+			"",
+			"Source: example.com/constructors/app:service/implementation.go:12:6 (implementation-constructor)",
+			"Source: example.com/constructors/audit:service/implementation.go:12:6 (implementation-constructor)",
+			"Source: example.com/roots/alpha:plystra.yaml:1:1 (declaration)",
+			"Source: example.com/roots/zeta:plystra.yaml:1:1 (declaration)",
+			"",
+			"Recovery:",
+			"Create one compatible local Implementation by running `plystra implement storage.read/v1 --package <project-relative-package>`.",
+			"",
+			"Diagnostic: " + diagnosticcode.ResolveMissingImplementation,
+			"",
+		}, "\n")
+		if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 4 || !commandContainsAll(stderr, "app.run/v1", "audit.write/v1", "storage.read/v1", "example.com/constructors/app/service.New", "example.com/constructors/audit/service.New") {
+			t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+		}
+		for _, privatePath := range append([]string{parent, filepath.ToSlash(parent)}, roots...) {
+			if strings.Contains(stderr, privatePath) || strings.Contains(stderr, filepath.ToSlash(privatePath)) {
+				t.Fatalf("%v exposed private path %q: %q", arguments, privatePath, stderr)
+			}
+		}
+		for _, root := range roots {
+			if after := commandTree(t, root); !reflect.DeepEqual(after, trees[root]) {
+				t.Fatalf("%v mutated %s:\nbefore: %#v\nafter:  %#v", arguments, root, trees[root], after)
 			}
 			assertNoCommandTransactions(t, root)
-		})
+		}
 	}
 }
 
@@ -833,14 +978,15 @@ type Service struct{}
 func New() (*Service, error) { return &Service{}, nil }
 `
 
-func writeCommandGraphFailureProject(t testing.TB) string {
+func writeCommandGraphFailureProject(t testing.TB, configuration string) string {
 	t.Helper()
 	root := t.TempDir()
 	writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/command-graph\n\ngo 1.26\n")
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [app.run/v1]}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), configuration)
 	writeCommandFile(t, filepath.Join(root, "generated", "sentinel.txt"), "must remain unchanged\n")
 	writeCommandGraphInterface(t, root, "app/run/v1", "runv1", "app.run/v1", "Run")
 	writeCommandGraphInterface(t, root, "audit/write/v1", "writev1", "audit.write/v1", "Write")
+	writeCommandGraphInterface(t, root, "storage/read/v1", "readv1", "storage.read/v1", "Read")
 	writeCommandFile(t, filepath.Join(root, "app", "service.go"), `package app
 
 import (
@@ -857,6 +1003,24 @@ func New(audit writev1.Interface) (*Service, error) { return &Service{}, nil }
 
 func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) {
 	return runv1.Response{}, nil
+}
+`)
+	writeCommandFile(t, filepath.Join(root, "audit", "service.go"), `package audit
+
+import (
+	"context"
+
+	writev1 "example.com/command-graph/interfaces/audit/write/v1"
+	readv1 "example.com/command-graph/interfaces/storage/read/v1"
+)
+
+type Service struct{}
+
+//plystra:implements audit.write/v1
+func New(storage readv1.Interface) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Write(context.Context, writev1.Request) (writev1.Response, error) {
+	return writev1.Response{}, nil
 }
 `)
 	return root
@@ -958,6 +1122,13 @@ func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
 	return sendv1.Response{}, nil
 }
 `)
+}
+
+func writeCommandMissingPathImplementation(t testing.TB, root, modulePath, source string) {
+	t.Helper()
+	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf("module %s\n\ngo 1.26\n\nrequire example.com/contracts v1.0.0\n\nreplace example.com/contracts => ../contracts\n", modulePath))
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(root, "service", "implementation.go"), source)
 }
 
 func commandContainsAll(value string, fragments ...string) bool {

@@ -21,9 +21,9 @@ func TestBuildKeepsMissingOptionalDependencyUnavailable(t *testing.T) {
 		testConstructor("example.com/app/storage.New", "example.com/app@local/storage/new.go:5:6", []string{"storage.read/v1"}),
 	}
 	requirements := []Requirement{
-		{InterfaceID: testID("orders.run/v1"), Source: "plystra.yaml:interfaces.require[orders.run/v1]"},
-		{InterfaceID: testID("orders.run/v1"), Source: "http.expose[orders.run/v1]"},
-		{InterfaceID: testID("orders.run/v1"), Source: "http.expose[orders.run/v1]"},
+		testRequirement("orders.run/v1", "plystra.yaml:interfaces.require[orders.run/v1]", RequirementDeclaration),
+		testRequirement("orders.run/v1", "http.expose[orders.run/v1]", RequirementExposure),
+		testRequirement("orders.run/v1", "http.expose[orders.run/v1]", RequirementExposure),
 	}
 	selections := []Selection{
 		testSelection("storage.read/v1", "example.com/app/storage.New", SelectionUnique, "example.com/app@local/storage/new.go:5:6"),
@@ -64,7 +64,7 @@ func TestBuildKeepsMissingOptionalDependencyUnavailable(t *testing.T) {
 		}
 	}
 
-	roots[0].sources[0] = "changed"
+	roots[0].sources[0].Reference = "changed"
 	bindings := graph.Bindings()
 	bindings[0].sources[0] = "changed"
 	nodes[1].dependencies[0] = Dependency{}
@@ -82,7 +82,7 @@ func TestBuildIncludesAvailableOptionalDependency(t *testing.T) {
 		),
 		testConstructor("example.com/app/audit.New", "app@local/audit.go:4:6", []string{"audit.write/v1"}),
 	}
-	graph, err := build(constructors, []Requirement{{InterfaceID: testID("orders.run/v1"), Source: "root"}}, []Selection{
+	graph, err := build(constructors, []Requirement{testRequirement("orders.run/v1", "root", RequirementDeclaration)}, []Selection{
 		testSelection("orders.run/v1", "example.com/app/orders.New", SelectionUnique, "orders"),
 		testSelection("audit.write/v1", "example.com/app/audit.New", SelectionUnique, "audit"),
 	})
@@ -106,7 +106,10 @@ func TestBuildReportsCompleteMissingRequiredPath(t *testing.T) {
 			testDependency("storage.read/v1", "example.com/contracts/storage", "storage", 1, false),
 		),
 	}
-	_, err := build(constructors, []Requirement{{InterfaceID: testID("orders.run/v1"), Source: "plystra.yaml:3:5"}}, []Selection{
+	constructors[0].sourcePath = "orders.go"
+	constructors[0].line = 4
+	constructors[0].column = 6
+	_, err := build(constructors, []Requirement{testRequirementAt("orders.run/v1", "plystra.yaml:3:5", RequirementDeclaration, "plystra.yaml", 3, 5)}, []Selection{
 		testSelection("orders.run/v1", "example.com/app/orders.New", SelectionUnique, "orders.go:3:1"),
 	})
 	if !errors.Is(err, ErrBuild) || !errors.Is(err, ErrMissingBinding) {
@@ -116,8 +119,12 @@ func TestBuildReportsCompleteMissingRequiredPath(t *testing.T) {
 	if !errors.As(err, &missing) || missing.InterfaceID().String() != "storage.read/v1" || missing.Root().InterfaceID().String() != "orders.run/v1" || !slices.Equal(missing.Root().Sources(), []string{"plystra.yaml:3:5"}) {
 		t.Fatalf("MissingBindingError = %#v", missing)
 	}
+	rootSources := missing.RequirementSources()
+	if len(rootSources) != 1 || rootSources[0].Kind != RequirementDeclaration || rootSources[0].ModulePath != "example.com/app" || rootSources[0].Path != "plystra.yaml" || rootSources[0].Line != 3 || rootSources[0].Column != 5 {
+		t.Fatalf("missing requirement sources = %#v", rootSources)
+	}
 	steps := missing.Steps()
-	if len(steps) != 1 || steps[0].RequiringConstructor().String() != "example.com/app/orders.New" || steps[0].RequiringSource() != "app@local/orders.go:4:6" || steps[0].InterfaceID().String() != "storage.read/v1" || steps[0].ParameterPosition() != 1 || steps[0].ParameterName() != "storage" || steps[0].Optional() || steps[0].SelectedConstructor().String() != "" {
+	if len(steps) != 1 || steps[0].RequiringConstructor().String() != "example.com/app/orders.New" || steps[0].RequiringSource() != "app@local/orders.go:4:6" || steps[0].RequiringModulePath() != "example.com/app" || steps[0].RequiringSourcePath() != "orders.go" || steps[0].RequiringLine() != 4 || steps[0].RequiringColumn() != 6 || steps[0].InterfaceID().String() != "storage.read/v1" || steps[0].ParameterPosition() != 1 || steps[0].ParameterName() != "storage" || steps[0].Optional() || steps[0].SelectedConstructor().String() != "" {
 		t.Fatalf("missing path = %#v", steps)
 	}
 	for _, fragment := range []string{"orders.run/v1", "plystra.yaml:3:5", "example.com/app/orders.New", "storage.read/v1", "parameter 1", "select one compatible visible Implementation"} {
@@ -126,8 +133,12 @@ func TestBuildReportsCompleteMissingRequiredPath(t *testing.T) {
 		}
 	}
 	steps[0].selectionSources = []string{"changed"}
+	rootSources[0].Path = "changed"
 	if len(missing.Steps()[0].SelectionSources()) != 0 {
 		t.Fatal("MissingBindingError exposed mutable path")
+	}
+	if missing.RequirementSources()[0].Path != "plystra.yaml" {
+		t.Fatal("MissingBindingError exposed mutable requirement sources")
 	}
 }
 
@@ -146,7 +157,7 @@ func TestBuildReportsCompleteDeterministicCycle(t *testing.T) {
 		testSelection("beta.run/v1", "example.com/app/b.New", SelectionUnique, "b.go:6:1"),
 		testSelection("alpha.run/v1", "example.com/app/a.New", SelectionExplicit, "plystra.yaml:4:5"),
 	}
-	requirements := []Requirement{{InterfaceID: testID("alpha.run/v1"), Source: "root"}}
+	requirements := []Requirement{testRequirement("alpha.run/v1", "root", RequirementDeclaration)}
 	_, firstErr := build(constructors, requirements, selections)
 	slices.Reverse(constructors)
 	slices.Reverse(selections)
@@ -178,8 +189,8 @@ func TestBuildSharesOneConstructorAcrossSeveralBindings(t *testing.T) {
 
 	constructor := testConstructor("example.com/app/service.New", "app@local/service.go:5:6", []string{"alpha.run/v1", "beta.run/v1"})
 	graph, err := build([]normalizedConstructor{constructor}, []Requirement{
-		{InterfaceID: testID("beta.run/v1"), Source: "beta root"},
-		{InterfaceID: testID("alpha.run/v1"), Source: "alpha root"},
+		testRequirement("beta.run/v1", "beta root", RequirementDeclaration),
+		testRequirement("alpha.run/v1", "alpha root", RequirementDeclaration),
 	}, []Selection{
 		testSelection("beta.run/v1", "example.com/app/service.New", SelectionUnique, "service.go"),
 		testSelection("alpha.run/v1", "example.com/app/service.New", SelectionUnique, "service.go"),
@@ -221,6 +232,43 @@ func TestBuildRejectsInvalidSelectionInput(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsInvalidRequirementSourceInput(t *testing.T) {
+	t.Parallel()
+
+	valid := testRequirement("alpha.run/v1", "plystra.yaml interfaces.require[alpha.run/v1]", RequirementDeclaration)
+	tests := []struct {
+		name   string
+		mutate func(*RequirementSource)
+		want   string
+	}{
+		{name: "kind", mutate: func(source *RequirementSource) { source.Kind = "priority" }, want: "kind"},
+		{name: "reference", mutate: func(source *RequirementSource) { source.Reference = "bad\nsource" }, want: "reference"},
+		{name: "module", mutate: func(source *RequirementSource) { source.ModulePath = "not a module" }, want: "module"},
+		{name: "path", mutate: func(source *RequirementSource) { source.Path = "../plystra.yaml" }, want: "module-relative"},
+		{name: "line", mutate: func(source *RequirementSource) { source.Line = 0 }, want: "line"},
+		{name: "column", mutate: func(source *RequirementSource) { source.Column = 0 }, want: "column"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			requirement := valid
+			test.mutate(&requirement.Source)
+			_, err := build(nil, []Requirement{requirement}, nil)
+			if !errors.Is(err, ErrBuild) || !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("build error = %v", err)
+			}
+		})
+	}
+
+	conflict := valid
+	conflict.Source.Path = "other.yaml"
+	_, err := build(nil, []Requirement{valid, conflict}, nil)
+	if !errors.Is(err, ErrBuild) || !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), "conflicting typed provenance") {
+		t.Fatalf("conflicting requirement source error = %v", err)
+	}
+}
+
 func testConstructor(symbol, source string, interfaces []string, dependencies ...normalizedDependency) normalizedConstructor {
 	implemented := make(map[string]struct{}, len(interfaces))
 	for _, identifier := range interfaces {
@@ -229,8 +277,30 @@ func testConstructor(symbol, source string, interfaces []string, dependencies ..
 	return normalizedConstructor{
 		symbol:       testSymbol(symbol),
 		source:       source,
+		modulePath:   "example.com/app",
+		sourcePath:   "implementation.go",
+		line:         1,
+		column:       1,
 		implements:   implemented,
 		dependencies: append([]normalizedDependency(nil), dependencies...),
+	}
+}
+
+func testRequirement(identifier, reference string, kind RequirementSourceKind) Requirement {
+	return testRequirementAt(identifier, reference, kind, "plystra.yaml", 1, 1)
+}
+
+func testRequirementAt(identifier, reference string, kind RequirementSourceKind, sourcePath string, line, column int) Requirement {
+	return Requirement{
+		InterfaceID: testID(identifier),
+		Source: RequirementSource{
+			Kind:       kind,
+			Reference:  reference,
+			ModulePath: "example.com/app",
+			Path:       sourcePath,
+			Line:       line,
+			Column:     column,
+		},
 	}
 }
 

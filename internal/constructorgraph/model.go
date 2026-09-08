@@ -26,11 +26,42 @@ func (r SelectionReason) Valid() bool {
 	return r == SelectionExplicit || r == SelectionUnique
 }
 
+// RequirementSourceKind identifies the application configuration edge that
+// introduced one root Interface requirement.
+type RequirementSourceKind string
+
+const (
+	// RequirementDeclaration identifies an explicit interfaces.require entry.
+	RequirementDeclaration RequirementSourceKind = "declaration"
+	// RequirementExposure identifies an explicit public HTTP exposure.
+	RequirementExposure RequirementSourceKind = "exposure"
+)
+
+// Valid reports whether the kind belongs to the closed root-source vocabulary.
+func (k RequirementSourceKind) Valid() bool {
+	return k == RequirementDeclaration || k == RequirementExposure
+}
+
+// RequirementSource is one typed stable Project-document location that made a
+// root Interface necessary. Reference retains the existing bounded provenance
+// used by generated evidence and human error paths.
+type RequirementSource struct {
+	Kind       RequirementSourceKind
+	Reference  string
+	ModulePath string
+	Path       string
+	Line       int
+	Column     int
+}
+
+// String returns the bounded stable requirement reference.
+func (s RequirementSource) String() string { return s.Reference }
+
 // Requirement is one root Interface requirement and its stable provenance.
 // Several requirements for the same Interface are normalized into one root.
 type Requirement struct {
 	InterfaceID interfaceid.Identifier
-	Source      string
+	Source      RequirementSource
 }
 
 // Selection binds one exact Interface to one already selected constructor.
@@ -71,14 +102,25 @@ func (g Graph) ConstructionOrder() []Node { return cloneNodes(g.construction) }
 // sources that contributed it.
 type Root struct {
 	interfaceID interfaceid.Identifier
-	sources     []string
+	sources     []RequirementSource
 }
 
 // InterfaceID returns the exact required Interface ID.
 func (r Root) InterfaceID() interfaceid.Identifier { return r.interfaceID }
 
 // Sources returns every sorted unique requirement source.
-func (r Root) Sources() []string { return append([]string(nil), r.sources...) }
+func (r Root) Sources() []string {
+	result := make([]string, len(r.sources))
+	for index, source := range r.sources {
+		result[index] = source.Reference
+	}
+	return result
+}
+
+// RequirementSources returns every sorted unique typed root source.
+func (r Root) RequirementSources() []RequirementSource {
+	return append([]RequirementSource(nil), r.sources...)
+}
 
 // Binding is one reachable exact Interface-to-constructor selection.
 type Binding struct {

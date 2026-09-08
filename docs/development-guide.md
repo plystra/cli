@@ -1947,6 +1947,10 @@ source and each incompatible Provider's `capability.yaml` declaration. Sources
 always name the owning Project module and a slash-separated module-relative
 path. They never expose an absolute path or a Module Cache path. A source omits
 the optional span when structured provenance provides no exact line or column.
+A missing Interface Implementation emits every root declaration or exposure
+source plus every requiring constructor declaration on the complete path to the
+missing binding. Requiring declarations use `implementation-constructor`, and
+dependency-owned roots and constructors retain their owning Project modules.
 An ambiguous Interface Implementation emits every compatible constructor
 declaration as `implementation-constructor`, including dependency-owned
 candidates, before the selector-preserving recovery action.

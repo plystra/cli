@@ -1218,29 +1218,29 @@ boundary.
 ## Diagnose common failures
 
 Failures end with Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
-Sources are sorted and use:
+Sorted sources use:
 Source: <module>:<module-relative-path>[:line:column] (<kind>).
-implementation-constructor: PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS.
 configuration-declaration: PLYSTRA_CONFIGURATION_INHERITED_CONFLICT,
 PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS.
-Sources omit absolute/Module Cache paths. Unsafe selectors use placeholders;
-unclassified errors get neither.
+Sources omit absolute/Module Cache paths; unsafe selectors use placeholders;
+unknown errors get neither.
 
-- Missing Implementation: require or expose its Interface and make one
-  constructor visible. Markerless dependencies are not scanned.
-- Ambiguous Implementation: use plystra use <interface-id> <constructor-symbol>
-  with the same selector. Every candidate source is reported; discovery has no
-  priority.
-- Capability diagnostics precede mutation. Malformed references use
+- PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION reports each
+  root declaration or exposure and complete implementation-constructor path.
+  Expose a compatible constructor; markerless modules stay invisible.
+- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS reports every candidate
+  implementation-constructor. Run plystra use <interface-id> <constructor-symbol>
+  with the selector; no candidate has discovery priority.
+- Capability failures precede mutation. Malformed create/implement/expose:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
-  PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID, or
-  PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID; missing exposure uses
-  PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE; wrong actions use
-  PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE or
-  PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE. Create confirmation, exhaustion,
-  and profile failures use PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED,
+  PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,
+  PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID. Missing exposure:
+  PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE. Wrong action:
+  PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE,
+  PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE. Confirmation/exhaustion/profile:
+  PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED,
   PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED,
-  PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED, or
+  PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED,
   PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED. Follow Recovery.
 - Invalid plystra use input: PLYSTRA_USE_INTERFACE_INVALID means malformed
   Interface ID; PLYSTRA_USE_CONSTRUCTOR_INVALID means malformed fully qualified

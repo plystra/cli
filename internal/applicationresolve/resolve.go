@@ -297,7 +297,8 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if selector.mode == configurationModeEnvironment {
 		currentProjectPaths = append(currentProjectPaths, resolutionDeclarationPaths(selectedManifest)...)
 	}
-	interfaceResolution, err := resolveInterfaces(manifest, composition, interfaces, implementations, inventory, currentProjectPaths)
+	sourceContext := applicationInputSourceContext(module, dependencies, composition, currentProjectPaths)
+	interfaceResolution, err := resolveInterfaces(manifest, composition, interfaces, implementations, inventory, sourceContext)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -333,7 +334,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		SelectedDigest:              selectedDigest,
 		DependencyCompositionDigest: composition.DependencyDigest(),
 	}
-	input, err := applicationinput.Build(manifest, inventory, applicationInputSourceContext(module, dependencies, composition, currentProjectPaths), configurationProvenance, generationexec.BuildOptions{
+	input, err := applicationinput.Build(manifest, inventory, sourceContext, configurationProvenance, generationexec.BuildOptions{
 		GoCommand:        options.GoCommand,
 		BuildEnvironment: append([]string(nil), options.Environment...),
 		CompileTimeout:   options.CompileTimeout,

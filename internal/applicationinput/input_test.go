@@ -211,6 +211,53 @@ capabilities:
 	}
 }
 
+func TestConfigurationSourcesPreserveTypedCurrentAndDependencyLocations(t *testing.T) {
+	t.Parallel()
+
+	const field = `interfaces.require["app.run/v1"]`
+	context := applicationinput.SourceContext{
+		CurrentModulePath: "example.com/app",
+		Dependencies: []applicationinput.DependencySource{
+			{ModulePath: "example.com/a", Version: "v1.0.0"},
+			{ModulePath: "example.com/b", Version: ""},
+		},
+		DependencyProvenance: []applicationinput.DependencyProvenance{{
+			Path: field,
+			Sources: []string{
+				`example.com/a@v1.0.0/plystra.yaml interfaces.require["app.run/v1"]`,
+				`example.com/b@workspace/plystra.yaml interfaces.require["app.run/v1"]`,
+			},
+		}},
+		CurrentProjectPaths: []string{field},
+	}
+	sources, err := applicationinput.ConfigurationSources(context, `plystra.production.yaml interfaces.require.add["app.run/v1"]`, field)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []applicationinput.ConfigurationSource{
+		{Reference: `plystra.production.yaml interfaces.require.add["app.run/v1"]`, ModulePath: "example.com/app", Path: "plystra.production.yaml", Line: 1, Column: 1},
+		{Reference: `example.com/a@v1.0.0/plystra.yaml interfaces.require["app.run/v1"]`, ModulePath: "example.com/a", Path: "plystra.yaml", Line: 1, Column: 1},
+		{Reference: `example.com/b@workspace/plystra.yaml interfaces.require["app.run/v1"]`, ModulePath: "example.com/b", Path: "plystra.yaml", Line: 1, Column: 1},
+	}
+	if !reflect.DeepEqual(sources, want) {
+		t.Fatalf("ConfigurationSources = %#v, want %#v", sources, want)
+	}
+	sources[0].Path = "changed"
+	repeated, err := applicationinput.ConfigurationSources(context, `plystra.production.yaml interfaces.require.add["app.run/v1"]`, field)
+	if err != nil || !reflect.DeepEqual(repeated, want) {
+		t.Fatalf("repeated ConfigurationSources = %#v, %v", repeated, err)
+	}
+
+	invalid := context
+	invalid.DependencyProvenance = []applicationinput.DependencyProvenance{{
+		Path:    field,
+		Sources: []string{`example.com/unlisted@v1.0.0/plystra.yaml interfaces.require["app.run/v1"]`},
+	}}
+	if values, err := applicationinput.ConfigurationSources(invalid, `plystra.production.yaml interfaces.require.add["app.run/v1"]`, field); err == nil || values != nil || !strings.Contains(err.Error(), "does not identify a discovered dependency Project") {
+		t.Fatalf("ConfigurationSources(unlisted dependency) = %#v, %v", values, err)
+	}
+}
+
 func TestBuildPreservesEveryCompatibleInheritedProviderChoiceSource(t *testing.T) {
 	t.Parallel()
 

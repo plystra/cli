@@ -1121,6 +1121,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("without reading an environment variable or Secret file"),
 		[]byte("no runtime delivery, bootstrap membership, Secret lookup, or Kernel state"),
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration"),
+		[]byte("`PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION`"),
+		[]byte("every root declaration or exposure"),
+		[]byte("every requiring constructor in each complete dependency path"),
 	} {
 		if !bytes.Contains(readme, activationGuidance) {
 			t.Fatalf("generated README omits candidate-only activation guidance %q:\n%s", activationGuidance, readme)
@@ -2182,6 +2185,9 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra plugin create records",
 		"plystra capability create records.read --query --plugin records --expose",
 		"PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED",
+		"PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION",
+		"root declaration or exposure",
+		"complete implementation-constructor path",
 		"plystra implement email.send/v1 --package ./mailer",
 		"creates no copied contract",
 		"capabilities/records.read/v1/capability.yaml",

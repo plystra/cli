@@ -16,7 +16,7 @@ type dependencyPath struct {
 
 func (p dependencyPath) clone() dependencyPath {
 	result := p
-	result.root.sources = append([]string(nil), p.root.sources...)
+	result.root.sources = append([]RequirementSource(nil), p.root.sources...)
 	result.steps = clonePathSteps(p.steps)
 	return result
 }
@@ -27,6 +27,10 @@ func (p dependencyPath) clone() dependencyPath {
 type PathStep struct {
 	requiringConstructor constructorsymbol.Symbol
 	requiringSource      string
+	requiringModulePath  string
+	requiringSourcePath  string
+	requiringLine        int
+	requiringColumn      int
 	interfaceID          interfaceid.Identifier
 	parameterName        string
 	parameterPosition    int
@@ -43,6 +47,20 @@ func (s PathStep) RequiringConstructor() constructorsymbol.Symbol {
 
 // RequiringSource returns stable module-qualified constructor provenance.
 func (s PathStep) RequiringSource() string { return s.requiringSource }
+
+// RequiringModulePath returns the Go Module identity that owns the requiring
+// constructor declaration.
+func (s PathStep) RequiringModulePath() string { return s.requiringModulePath }
+
+// RequiringSourcePath returns the slash-separated module-relative source path
+// of the requiring constructor declaration.
+func (s PathStep) RequiringSourcePath() string { return s.requiringSourcePath }
+
+// RequiringLine returns the one-based requiring constructor declaration line.
+func (s PathStep) RequiringLine() int { return s.requiringLine }
+
+// RequiringColumn returns the one-based requiring constructor declaration column.
+func (s PathStep) RequiringColumn() int { return s.requiringColumn }
 
 // InterfaceID returns the required or available optional Interface edge.
 func (s PathStep) InterfaceID() interfaceid.Identifier { return s.interfaceID }
@@ -102,8 +120,17 @@ func (e *MissingBindingError) Root() Root {
 		return Root{}
 	}
 	root := e.path.root
-	root.sources = append([]string(nil), root.sources...)
+	root.sources = append([]RequirementSource(nil), root.sources...)
 	return root
+}
+
+// RequirementSources returns the complete typed provenance for the root that
+// reaches the missing Interface.
+func (e *MissingBindingError) RequirementSources() []RequirementSource {
+	if e == nil {
+		return nil
+	}
+	return append([]RequirementSource(nil), e.path.root.sources...)
 }
 
 // Steps returns the complete dependency path. The final step identifies the
@@ -120,7 +147,7 @@ func (e *MissingBindingError) Error() string {
 		return ErrMissingBinding.Error()
 	}
 	var message strings.Builder
-	fmt.Fprintf(&message, "%s: %s required from [%s]", ErrMissingBinding, e.path.root.interfaceID, strings.Join(e.path.root.sources, ", "))
+	fmt.Fprintf(&message, "%s: %s required from [%s]", ErrMissingBinding, e.path.root.interfaceID, strings.Join(e.path.root.Sources(), ", "))
 	for _, step := range e.path.steps {
 		kind := "requires"
 		if step.optional {

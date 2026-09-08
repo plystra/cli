@@ -3,13 +3,17 @@ package constructorgraph
 import (
 	"errors"
 	"fmt"
+	"math"
+	"path"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/modulepath"
 )
 
 var (
@@ -29,6 +33,10 @@ type normalizedConstructor struct {
 	implementation implementationinventory.Implementation
 	symbol         constructorsymbol.Symbol
 	source         string
+	modulePath     string
+	sourcePath     string
+	line           int
+	column         int
 	implements     map[string]struct{}
 	dependencies   []normalizedDependency
 }
@@ -108,6 +116,10 @@ func normalizeConstructors(index implementationinventory.Index) ([]normalizedCon
 		if symbol.String() == "" || implementation.Source() == "" {
 			return nil, errors.New("discovered Implementation has empty identity or source")
 		}
+		position := implementation.Declaration().Position()
+		if err := checkSourceLocation(implementation.ModulePath(), implementation.SourcePath(), position.Line, position.Column); err != nil {
+			return nil, fmt.Errorf("Implementation %s source %v", symbol, err)
+		}
 		implemented := implementation.Declaration().ImplementedInterfaces()
 		if len(implemented) == 0 {
 			return nil, fmt.Errorf("Implementation %s declares no Interface", symbol)
@@ -159,6 +171,10 @@ func normalizeConstructors(index implementationinventory.Index) ([]normalizedCon
 			implementation: implementation,
 			symbol:         symbol,
 			source:         implementation.Source(),
+			modulePath:     implementation.ModulePath(),
+			sourcePath:     implementation.SourcePath(),
+			line:           position.Line,
+			column:         position.Column,
 			implements:     identities,
 			dependencies:   dependencies,
 		}
@@ -175,6 +191,9 @@ func indexConstructors(constructors []normalizedConstructor) (map[string]normali
 		}
 		if _, duplicate := result[value]; duplicate {
 			return nil, fmt.Errorf("constructor %s appears more than once", constructor.symbol)
+		}
+		if err := checkSourceLocation(constructor.modulePath, constructor.sourcePath, constructor.line, constructor.column); err != nil {
+			return nil, fmt.Errorf("constructor %s source %v", constructor.symbol, err)
 		}
 		positions := make(map[int]struct{}, len(constructor.dependencies))
 		for _, dependency := range constructor.dependencies {
@@ -198,18 +217,21 @@ func normalizeRequirements(inputs []Requirement) ([]Root, error) {
 		if identifier == "" {
 			return nil, fmt.Errorf("requirements[%d] has an empty Interface ID", index)
 		}
-		source, err := normalizeSource(input.Source)
-		if err != nil {
+		if err := CheckRequirementSource(input.Source); err != nil {
 			return nil, fmt.Errorf("requirements[%d] source %v", index, err)
 		}
 		root := byID[identifier]
 		root.interfaceID = input.InterfaceID
-		root.sources = append(root.sources, source)
+		root.sources = append(root.sources, input.Source)
 		byID[identifier] = root
 	}
 	result := make([]Root, 0, len(byID))
 	for _, root := range byID {
-		root.sources = uniqueSorted(root.sources)
+		var err error
+		root.sources, err = normalizeRequirementSources(root.sources)
+		if err != nil {
+			return nil, err
+		}
 		result = append(result, root)
 	}
 	sort.Slice(result, func(left, right int) bool {
@@ -256,7 +278,7 @@ func normalizeSelections(inputs []Selection, constructors map[string]normalizedC
 		}
 		if previous, duplicate := result[identifier]; duplicate {
 			if previous.constructor != normalized.constructor || previous.reason != normalized.reason {
-				return nil, fmt.Errorf("Interface %s has conflicting selected constructors or reasons", identifier)
+				return nil, fmt.Errorf("interface %s has conflicting selected constructors or reasons", identifier)
 			}
 			previous.sources = uniqueSorted(append(previous.sources, normalized.sources...))
 			result[identifier] = previous
@@ -274,6 +296,65 @@ func normalizeSource(value string) (string, error) {
 	return value, nil
 }
 
+// CheckRequirementSource validates one typed root source without changing it.
+func CheckRequirementSource(source RequirementSource) error {
+	if !source.Kind.Valid() {
+		return fmt.Errorf("has invalid kind %q", source.Kind)
+	}
+	if _, err := normalizeSource(source.Reference); err != nil {
+		return fmt.Errorf("reference %v", err)
+	}
+	if err := checkSourceLocation(source.ModulePath, source.Path, source.Line, source.Column); err != nil {
+		return err
+	}
+	return nil
+}
+
+func checkSourceLocation(modulePath, sourcePath string, line, column int) error {
+	if err := modulepath.CheckProject(modulePath); err != nil {
+		return fmt.Errorf("module %q is invalid: %v", modulePath, err)
+	}
+	if !validSourcePath(sourcePath) {
+		return fmt.Errorf("path %q is not a stable module-relative slash path", sourcePath)
+	}
+	if line < 1 || line > math.MaxInt32 {
+		return errors.New("line is outside the supported one-based range")
+	}
+	if column < 1 || column > math.MaxInt32 {
+		return errors.New("column is outside the supported one-based range")
+	}
+	return nil
+}
+
+func validSourcePath(value string) bool {
+	if value == "" || len(value) > 1024 || !utf8.ValidString(value) || path.IsAbs(value) || path.Clean(value) != value || value == "." || value == ".." || strings.HasPrefix(value, "../") || strings.Contains(value, "\\") || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return false
+	}
+	if len(value) >= 2 && value[1] == ':' && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) {
+		return false
+	}
+	return true
+}
+
+func normalizeRequirementSources(values []RequirementSource) ([]RequirementSource, error) {
+	result := append([]RequirementSource(nil), values...)
+	sort.Slice(result, func(left, right int) bool {
+		return result[left].Reference < result[right].Reference
+	})
+	write := 0
+	for _, source := range result {
+		if write != 0 && result[write-1].Reference == source.Reference {
+			if result[write-1] != source {
+				return nil, fmt.Errorf("requirement source %q has conflicting typed provenance", source.Reference)
+			}
+			continue
+		}
+		result[write] = source
+		write++
+	}
+	return append([]RequirementSource(nil), result[:write]...), nil
+}
+
 func uniqueSorted(values []string) []string {
 	sort.Strings(values)
 	result := values[:0]
@@ -288,7 +369,7 @@ func uniqueSorted(values []string) []string {
 func cloneRoots(values []Root) []Root {
 	result := append([]Root(nil), values...)
 	for index := range result {
-		result[index].sources = append([]string(nil), result[index].sources...)
+		result[index].sources = append([]RequirementSource(nil), result[index].sources...)
 	}
 	return result
 }
@@ -363,6 +444,10 @@ func (b *graphBuilder) visitInterface(identifier interfaceid.Identifier, path de
 		step := PathStep{
 			requiringConstructor: constructor.symbol,
 			requiringSource:      constructor.source,
+			requiringModulePath:  constructor.modulePath,
+			requiringSourcePath:  constructor.sourcePath,
+			requiringLine:        constructor.line,
+			requiringColumn:      constructor.column,
 			interfaceID:          declared.interfaceID,
 			parameterName:        declared.parameterName,
 			parameterPosition:    declared.parameterPosition,

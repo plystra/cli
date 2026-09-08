@@ -191,12 +191,11 @@ func normalizeRequirements(inputs []Requirement, interfaces map[string]interface
 		if identifier == "" {
 			return nil, nil, fmt.Errorf("%w: requirements[%d] has an empty Interface ID", ErrInvalidInput, index)
 		}
-		source, err := normalizeSource(input.Source)
-		if err != nil {
+		if err := constructorgraph.CheckRequirementSource(input.Source); err != nil {
 			return nil, nil, fmt.Errorf("%w: requirements[%d] source %v", ErrInvalidInput, index, err)
 		}
 		if _, intrinsic := intrinsics[identifier]; intrinsic {
-			intrinsicSources[identifier] = append(intrinsicSources[identifier], source)
+			intrinsicSources[identifier] = append(intrinsicSources[identifier], input.Source.Reference)
 			continue
 		}
 		if strings.HasPrefix(input.InterfaceID.Name(), "kernel.") {
@@ -205,13 +204,13 @@ func normalizeRequirements(inputs []Requirement, interfaces map[string]interface
 		if _, visible := interfaces[identifier]; !visible {
 			return nil, nil, fmt.Errorf("%w: required Interface %s is not defined by a visible canonical package", ErrUnknownInterface, input.InterfaceID)
 		}
-		result = append(result, Requirement{InterfaceID: input.InterfaceID, Source: source})
+		result = append(result, Requirement{InterfaceID: input.InterfaceID, Source: input.Source})
 	}
 	sort.Slice(result, func(left, right int) bool {
 		if result[left].InterfaceID != result[right].InterfaceID {
 			return result[left].InterfaceID.String() < result[right].InterfaceID.String()
 		}
-		return result[left].Source < result[right].Source
+		return result[left].Source.Reference < result[right].Source.Reference
 	})
 	intrinsicRequirements := make([]IntrinsicRequirement, 0, len(intrinsics))
 	for identifier, definition := range intrinsics {

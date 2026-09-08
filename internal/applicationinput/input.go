@@ -63,6 +63,29 @@ type DependencyProvenance struct {
 	Sources []string
 }
 
+// ConfigurationSource is one typed stable Project-document location derived
+// from normalized configuration provenance. Reference retains the bounded
+// human explanation while the remaining fields avoid downstream parsing.
+type ConfigurationSource struct {
+	Reference  string
+	ModulePath string
+	Path       string
+	Line       int
+	Column     int
+}
+
+// String returns the bounded stable configuration reference.
+func (s ConfigurationSource) String() string { return s.Reference }
+
+// ConfigurationSources resolves every effective current- or dependency-
+// Project document that contributes one normalized configuration field.
+func ConfigurationSources(input SourceContext, reference, field string) ([]ConfigurationSource, error) {
+	if err := validateSourceContext(input); err != nil {
+		return nil, fmt.Errorf("source context: %v", err)
+	}
+	return configurationSources(input, reference, field)
+}
+
 // Build loads every indexed provider contract, merges the exact visible
 // canonical catalog with Kernel intrinsics, carries normalized selected-
 // configuration provenance, and constructs the fixed-point resolver input. It
@@ -327,6 +350,25 @@ func validateSourceContext(input SourceContext) error {
 }
 
 func configurationRequirementSources(input SourceContext, reference, field string, kind providerresolution.RequirementSourceKind) ([]providerresolution.RequirementSource, error) {
+	configurationSources, err := configurationSources(input, reference, field)
+	if err != nil {
+		return nil, err
+	}
+	values := make([]providerresolution.RequirementSource, len(configurationSources))
+	for index, source := range configurationSources {
+		values[index] = providerresolution.RequirementSource{
+			Kind:       kind,
+			Reference:  source.Reference,
+			ModulePath: source.ModulePath,
+			Path:       source.Path,
+			Line:       source.Line,
+			Column:     source.Column,
+		}
+	}
+	return values, nil
+}
+
+func configurationSources(input SourceContext, reference, field string) ([]ConfigurationSource, error) {
 	references := make([]string, 0, 2)
 	for _, currentPath := range input.CurrentProjectPaths {
 		if currentPath == field {
@@ -345,10 +387,10 @@ func configurationRequirementSources(input SourceContext, reference, field strin
 		references = append(references, reference)
 		currentSourceCount = 1
 	}
-	values := make([]providerresolution.RequirementSource, 0, len(references))
+	values := make([]ConfigurationSource, 0, len(references))
 	for index, value := range references {
 		dependencySource := index >= currentSourceCount
-		source, err := configurationRequirementSource(input, value, field, kind, dependencySource)
+		source, err := configurationSource(input, value, field, dependencySource)
 		if err != nil {
 			return nil, err
 		}
@@ -411,43 +453,24 @@ func configurationProviderChoiceSources(input SourceContext, reference, field st
 }
 
 func configurationProviderChoiceSource(input SourceContext, reference, field string, kind providerresolution.ChoiceSourceKind) (providerresolution.ChoiceSource, error) {
-	document, err := configurationDocument(reference, field)
+	source, err := configurationSource(input, reference, field, kind == providerresolution.ChoiceSourceDependencyProject)
 	if err != nil {
 		return providerresolution.ChoiceSource{}, err
 	}
-	modulePath := input.CurrentModulePath
-	relativePath := document
-	if kind == providerresolution.ChoiceSourceDependencyProject {
-		for _, dependency := range input.Dependencies {
-			version := dependency.Version
-			if version == "" {
-				version = "workspace"
-			}
-			prefix := dependency.ModulePath + "@" + version + "/"
-			if strings.HasPrefix(document, prefix) {
-				modulePath = dependency.ModulePath
-				relativePath = strings.TrimPrefix(document, prefix)
-				break
-			}
-		}
-	}
-	if relativePath == "" || path.IsAbs(relativePath) || path.Clean(relativePath) != relativePath || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, "../") || strings.Contains(relativePath, "/../") || strings.Contains(relativePath, "\\") || strings.ContainsAny(relativePath, "\x00\r\n") {
-		return providerresolution.ChoiceSource{}, fmt.Errorf("source %q has an unsafe Project-relative document", reference)
-	}
 	return providerresolution.ChoiceSource{
 		Kind:       kind,
-		Reference:  reference,
-		ModulePath: modulePath,
-		Path:       relativePath,
-		Line:       1,
-		Column:     1,
+		Reference:  source.Reference,
+		ModulePath: source.ModulePath,
+		Path:       source.Path,
+		Line:       source.Line,
+		Column:     source.Column,
 	}, nil
 }
 
-func configurationRequirementSource(input SourceContext, reference, field string, kind providerresolution.RequirementSourceKind, dependencySource bool) (providerresolution.RequirementSource, error) {
+func configurationSource(input SourceContext, reference, field string, dependencySource bool) (ConfigurationSource, error) {
 	document, err := configurationDocument(reference, field)
 	if err != nil {
-		return providerresolution.RequirementSource{}, err
+		return ConfigurationSource{}, err
 	}
 	modulePath := input.CurrentModulePath
 	relativePath := document
@@ -466,10 +489,9 @@ func configurationRequirementSource(input SourceContext, reference, field string
 		}
 	}
 	if relativePath == "" || path.IsAbs(relativePath) || path.Clean(relativePath) != relativePath || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, "../") || strings.Contains(relativePath, "/../") || strings.Contains(relativePath, "\\") || strings.ContainsAny(relativePath, "\x00\r\n") {
-		return providerresolution.RequirementSource{}, fmt.Errorf("source %q has an unsafe Project-relative document", reference)
+		return ConfigurationSource{}, fmt.Errorf("source %q has an unsafe Project-relative document", reference)
 	}
-	return providerresolution.RequirementSource{
-		Kind:       kind,
+	return ConfigurationSource{
 		Reference:  reference,
 		ModulePath: modulePath,
 		Path:       relativePath,

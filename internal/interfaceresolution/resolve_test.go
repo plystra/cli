@@ -34,8 +34,8 @@ func TestResolveSelectsDeterministicReachableConstructorClosure(t *testing.T) {
 		Interfaces:      fixture.Interfaces(),
 		Implementations: fixture.Implementations(),
 		Requirements: []interfaceresolution.Requirement{
-			{InterfaceID: runID, Source: "example.com/application@local/plystra.yaml interfaces.require[app.run/v1]"},
-			{InterfaceID: runID, Source: "example.com/application@local/plystra.yaml http.expose[app.run/v1]"},
+			resolutionRequirement(runID, "example.com/application@local/plystra.yaml interfaces.require[app.run/v1]", interfaceresolution.RequirementDeclaration),
+			resolutionRequirement(runID, "example.com/application@local/plystra.yaml http.expose[app.run/v1]", interfaceresolution.RequirementExposure),
 		},
 	}
 	result, err := interfaceresolution.Resolve(input)
@@ -71,10 +71,11 @@ func TestResolveSelectsDeterministicReachableConstructorClosure(t *testing.T) {
 	}
 
 	withCache := input
-	withCache.Requirements = append(append([]interfaceresolution.Requirement(nil), input.Requirements...), interfaceresolution.Requirement{
-		InterfaceID: cacheID,
-		Source:      "example.com/application@local/plystra.yaml interfaces.require[cache.read/v1]",
-	})
+	withCache.Requirements = append(append([]interfaceresolution.Requirement(nil), input.Requirements...), resolutionRequirement(
+		cacheID,
+		"example.com/application@local/plystra.yaml interfaces.require[cache.read/v1]",
+		interfaceresolution.RequirementDeclaration,
+	))
 	cacheResult, err := interfaceresolution.Resolve(withCache)
 	if err != nil {
 		t.Fatal(err)
@@ -104,8 +105,8 @@ func TestResolveCollectsIntrinsicKernelRequirementsOutsideImplementationSelectio
 	healthID := mustResolutionID(t, "kernel.health/v1")
 	result, err := interfaceresolution.Resolve(interfaceresolution.Input{
 		Requirements: []interfaceresolution.Requirement{
-			{InterfaceID: healthID, Source: `plystra.yaml http.expose["kernel.health/v1"]`},
-			{InterfaceID: healthID, Source: `plystra.yaml interfaces.require["kernel.health/v1"]`},
+			resolutionRequirement(healthID, `plystra.yaml http.expose["kernel.health/v1"]`, interfaceresolution.RequirementExposure),
+			resolutionRequirement(healthID, `plystra.yaml interfaces.require["kernel.health/v1"]`, interfaceresolution.RequirementDeclaration),
 		},
 	})
 	if err != nil {
@@ -129,10 +130,9 @@ func TestResolveCollectsIntrinsicKernelRequirementsOutsideImplementationSelectio
 	}
 
 	unknownID := mustResolutionID(t, "kernel.missing/v1")
-	_, err = interfaceresolution.Resolve(interfaceresolution.Input{Requirements: []interfaceresolution.Requirement{{
-		InterfaceID: unknownID,
-		Source:      `plystra.yaml interfaces.require["kernel.missing/v1"]`,
-	}}})
+	_, err = interfaceresolution.Resolve(interfaceresolution.Input{Requirements: []interfaceresolution.Requirement{
+		resolutionRequirement(unknownID, `plystra.yaml interfaces.require["kernel.missing/v1"]`, interfaceresolution.RequirementDeclaration),
+	}})
 	if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, interfaceresolution.ErrUnknownInterface) || !containsAll(err.Error(), unknownID.String(), "selected Kernel API") {
 		t.Fatalf("unknown intrinsic error = %v", err)
 	}
@@ -157,10 +157,9 @@ func TestResolveAppliesExplicitChoiceBeforeAmbiguity(t *testing.T) {
 	base := interfaceresolution.Input{
 		Interfaces:      fixture.Interfaces(),
 		Implementations: fixture.Implementations(),
-		Requirements: []interfaceresolution.Requirement{{
-			InterfaceID: emailID,
-			Source:      "example.com/application@local/plystra.yaml interfaces.require[email.send/v1]",
-		}},
+		Requirements: []interfaceresolution.Requirement{
+			resolutionRequirement(emailID, "example.com/application@local/plystra.yaml interfaces.require[email.send/v1]", interfaceresolution.RequirementDeclaration),
+		},
 	}
 
 	_, err := interfaceresolution.Resolve(base)
@@ -217,10 +216,9 @@ func TestResolveReportsCompleteMissingPathAndConstructorCycle(t *testing.T) {
 		_, err := interfaceresolution.Resolve(interfaceresolution.Input{
 			Interfaces:      fixture.Interfaces(),
 			Implementations: fixture.Implementations(),
-			Requirements: []interfaceresolution.Requirement{{
-				InterfaceID: jobID,
-				Source:      "example.com/application@local/plystra.yaml interfaces.require[job.run/v1]",
-			}},
+			Requirements: []interfaceresolution.Requirement{
+				resolutionRequirement(jobID, "example.com/application@local/plystra.yaml interfaces.require[job.run/v1]", interfaceresolution.RequirementDeclaration),
+			},
 		})
 		if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, constructorgraph.ErrBuild) || !errors.Is(err, constructorgraph.ErrMissingBinding) {
 			t.Fatalf("missing Resolve error = %v", err)
@@ -229,8 +227,12 @@ func TestResolveReportsCompleteMissingPathAndConstructorCycle(t *testing.T) {
 		if !errors.As(err, &missing) || missing.InterfaceID() != missingID || missing.Root().InterfaceID() != jobID {
 			t.Fatalf("missing binding = %#v", missing)
 		}
+		rootSources := missing.RequirementSources()
+		if len(rootSources) != 1 || rootSources[0].Kind != interfaceresolution.RequirementDeclaration || rootSources[0].ModulePath != "example.com/application" || rootSources[0].Path != "plystra.yaml" || rootSources[0].Line != 1 || rootSources[0].Column != 1 {
+			t.Fatalf("missing requirement sources = %#v", rootSources)
+		}
 		steps := missing.Steps()
-		if len(steps) != 1 || steps[0].RequiringConstructor() != jobConstructor || steps[0].InterfaceID() != missingID || steps[0].ParameterPosition() != 1 || steps[0].ParameterName() != "dependency" || steps[0].SelectedConstructor().String() != "" || !containsAll(err.Error(), jobConstructor.String(), "missing.need/v1", "parameter 1", "before generation") {
+		if len(steps) != 1 || steps[0].RequiringConstructor() != jobConstructor || steps[0].RequiringModulePath() != "example.com/application" || steps[0].RequiringSourcePath() != "job/service.go" || steps[0].RequiringLine() != 13 || steps[0].RequiringColumn() != 6 || steps[0].InterfaceID() != missingID || steps[0].ParameterPosition() != 1 || steps[0].ParameterName() != "dependency" || steps[0].SelectedConstructor().String() != "" || !containsAll(err.Error(), jobConstructor.String(), "missing.need/v1", "parameter 1", "before generation") {
 			t.Fatalf("missing path/error = %#v / %v", steps, err)
 		}
 	})
@@ -243,10 +245,9 @@ func TestResolveReportsCompleteMissingPathAndConstructorCycle(t *testing.T) {
 		_, err := interfaceresolution.Resolve(interfaceresolution.Input{
 			Interfaces:      fixture.Interfaces(),
 			Implementations: fixture.Implementations(),
-			Requirements: []interfaceresolution.Requirement{{
-				InterfaceID: cycleAID,
-				Source:      "example.com/application@local/plystra.yaml interfaces.require[cycle.a/v1]",
-			}},
+			Requirements: []interfaceresolution.Requirement{
+				resolutionRequirement(cycleAID, "example.com/application@local/plystra.yaml interfaces.require[cycle.a/v1]", interfaceresolution.RequirementDeclaration),
+			},
 		})
 		if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, constructorgraph.ErrCycle) {
 			t.Fatalf("cycle Resolve error = %v", err)
@@ -477,6 +478,20 @@ func mustResolutionSymbol(t testing.TB, value string) constructorsymbol.Symbol {
 		t.Fatal(err)
 	}
 	return symbol
+}
+
+func resolutionRequirement(identifier interfaceid.Identifier, reference string, kind interfaceresolution.RequirementSourceKind) interfaceresolution.Requirement {
+	return interfaceresolution.Requirement{
+		InterfaceID: identifier,
+		Source: interfaceresolution.RequirementSource{
+			Kind:       kind,
+			Reference:  reference,
+			ModulePath: "example.com/application",
+			Path:       "plystra.yaml",
+			Line:       1,
+			Column:     1,
+		},
+	}
 }
 
 func writeResolutionFile(t testing.TB, name, content string) {

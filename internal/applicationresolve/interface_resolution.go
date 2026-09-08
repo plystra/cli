@@ -3,6 +3,7 @@ package applicationresolve
 import (
 	"fmt"
 
+	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceinventory"
@@ -12,25 +13,31 @@ import (
 	"github.com/plystra/cli/internal/plugininventory"
 )
 
-func resolveInterfaces(manifest applicationmeta.Manifest, composition applicationmeta.Composition, interfaces interfaceinventory.Index, implementations implementationinventory.Index, legacyPlugins plugininventory.Index, currentProjectPaths []string) (interfaceresolution.Result, error) {
-	provenance := make(map[string][]string)
+func resolveInterfaces(manifest applicationmeta.Manifest, composition applicationmeta.Composition, interfaces interfaceinventory.Index, implementations implementationinventory.Index, legacyPlugins plugininventory.Index, sourceContext applicationinput.SourceContext) (interfaceresolution.Result, error) {
+	choiceProvenance := make(map[string][]string)
 	for _, record := range composition.ResolutionSources() {
-		provenance[record.Path()] = append(provenance[record.Path()], record.Sources()...)
-	}
-	current := make(map[string]struct{}, len(currentProjectPaths))
-	for _, path := range currentProjectPaths {
-		current[path] = struct{}{}
+		choiceProvenance[record.Path()] = append(choiceProvenance[record.Path()], record.Sources()...)
 	}
 	requirements := manifest.InterfaceRequirements()
 	exposures := manifest.HTTPExposures()
 	rootRequirements := make([]interfaceresolution.Requirement, 0, len(requirements)+len(exposures))
 	for _, requirement := range requirements {
 		path := fmt.Sprintf("interfaces.require[%q]", requirement.ID().String())
-		sources := interfaceRequirementSources(requirement.Source(), path, provenance, current)
+		sources, err := applicationinput.ConfigurationSources(sourceContext, requirement.Source(), path)
+		if err != nil {
+			return interfaceresolution.Result{}, fmt.Errorf("interface requirement %s provenance: %w", requirement.ID(), err)
+		}
 		for _, source := range sources {
 			rootRequirements = append(rootRequirements, interfaceresolution.Requirement{
 				InterfaceID: requirement.ID(),
-				Source:      source,
+				Source: interfaceresolution.RequirementSource{
+					Kind:       interfaceresolution.RequirementDeclaration,
+					Reference:  source.Reference,
+					ModulePath: source.ModulePath,
+					Path:       source.Path,
+					Line:       source.Line,
+					Column:     source.Column,
+				},
 			})
 		}
 	}
@@ -49,11 +56,21 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 			}
 		}
 		path := fmt.Sprintf("http.expose[%q]", identifier)
-		sources := interfaceRequirementSources(exposure.Source(), path, provenance, current)
+		sources, err := applicationinput.ConfigurationSources(sourceContext, exposure.Source(), path)
+		if err != nil {
+			return interfaceresolution.Result{}, fmt.Errorf("HTTP exposure %s provenance: %w", exposure.ID(), err)
+		}
 		for _, source := range sources {
 			rootRequirements = append(rootRequirements, interfaceresolution.Requirement{
 				InterfaceID: exposure.ID(),
-				Source:      source,
+				Source: interfaceresolution.RequirementSource{
+					Kind:       interfaceresolution.RequirementExposure,
+					Reference:  source.Reference,
+					ModulePath: source.ModulePath,
+					Path:       source.Path,
+					Line:       source.Line,
+					Column:     source.Column,
+				},
 			})
 		}
 	}
@@ -64,7 +81,7 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 		explicitChoices[index] = interfaceresolution.Choice{
 			InterfaceID: choice.InterfaceID(),
 			Constructor: choice.Constructor(),
-			Sources:     uniqueSortedStrings(append([]string{choice.Source()}, provenance[path]...)),
+			Sources:     uniqueSortedStrings(append([]string{choice.Source()}, choiceProvenance[path]...)),
 		}
 	}
 	return interfaceresolution.Resolve(interfaceresolution.Input{
@@ -99,14 +116,6 @@ func intrinsicInterfaceIDs() map[string]struct{} {
 		result[definition.ID().String()] = struct{}{}
 	}
 	return result
-}
-
-func interfaceRequirementSources(source, path string, provenance map[string][]string, current map[string]struct{}) []string {
-	values := append([]string(nil), provenance[path]...)
-	if _, explicit := current[path]; explicit || len(values) == 0 {
-		values = append(values, source)
-	}
-	return uniqueSortedStrings(values)
 }
 
 // legacyCapabilityIDs isolates the pre-Gate-14 exposure path. An exposure

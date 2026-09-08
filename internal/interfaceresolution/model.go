@@ -11,11 +11,24 @@ import (
 	"github.com/plystra/cli/internal/interfaceinventory"
 )
 
-// Requirement is one root Interface requirement with stable non-secret
+// RequirementSource is one typed stable source for a root Interface edge.
+type RequirementSource = constructorgraph.RequirementSource
+
+// RequirementSourceKind identifies declaration and exposure root edges.
+type RequirementSourceKind = constructorgraph.RequirementSourceKind
+
+const (
+	// RequirementDeclaration identifies an explicit interfaces.require entry.
+	RequirementDeclaration = constructorgraph.RequirementDeclaration
+	// RequirementExposure identifies an explicit public HTTP exposure.
+	RequirementExposure = constructorgraph.RequirementExposure
+)
+
+// Requirement is one root Interface requirement with stable non-secret typed
 // provenance. Repeated identical requirements are deduplicated by resolution.
 type Requirement struct {
 	InterfaceID interfaceid.Identifier
-	Source      string
+	Source      RequirementSource
 }
 
 // Choice is one effective interfaces.use decision. Choices influence only an

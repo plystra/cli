@@ -818,6 +818,10 @@ declaration.
 `PLYSTRA_PROVIDER_CONTRACT_MISMATCH` reports every exact-contract requirement
 source together with each incompatible Provider's `capability.yaml`
 declaration.
+`PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION` reports every declaration or exposure
+source that introduced the root Interface plus every requiring constructor on
+the complete path to the missing binding. Constructor declarations use the
+`implementation-constructor` kind.
 `PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS` reports every compatible
 Implementation constructor declaration as an `implementation-constructor`
 source before selection recovery.

@@ -434,6 +434,29 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: source.Column,
 			})
 		}
+	case diagnosticResolveMissingImplementation:
+		var missing *constructorgraph.MissingBindingError
+		if !errors.As(err, &missing) || missing == nil {
+			return nil
+		}
+		for _, source := range missing.RequirementSources() {
+			sources = append(sources, diagnosticjson.Source{
+				Module: source.ModulePath,
+				Path:   source.Path,
+				Kind:   string(source.Kind),
+				Line:   source.Line,
+				Column: source.Column,
+			})
+		}
+		for _, step := range missing.Steps() {
+			sources = append(sources, diagnosticjson.Source{
+				Module: step.RequiringModulePath(),
+				Path:   step.RequiringSourcePath(),
+				Kind:   "implementation-constructor",
+				Line:   step.RequiringLine(),
+				Column: step.RequiringColumn(),
+			})
+		}
 	case diagnosticResolveMultipleImplementations:
 		var ambiguous *interfaceresolution.AmbiguousImplementationError
 		if !errors.As(err, &ambiguous) || ambiguous == nil {

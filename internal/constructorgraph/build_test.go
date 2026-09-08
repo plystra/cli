@@ -70,7 +70,14 @@ func (*Service) Run(context.Context, ordersv1.Request) (ordersv1.Response, error
 		Implementations: discovery.Implementations(),
 		Requirements: []constructorgraph.Requirement{{
 			InterfaceID: identifier,
-			Source:      "example.com/app@local/plystra.yaml:1:1 interfaces.require[orders.run/v1]",
+			Source: constructorgraph.RequirementSource{
+				Kind:       constructorgraph.RequirementDeclaration,
+				Reference:  "example.com/app@local/plystra.yaml:1:1 interfaces.require[orders.run/v1]",
+				ModulePath: "example.com/app",
+				Path:       "plystra.yaml",
+				Line:       1,
+				Column:     1,
+			},
 		}},
 		Selections: []constructorgraph.Selection{{
 			InterfaceID: identifier,

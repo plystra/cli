@@ -780,7 +780,7 @@ func verifyChoices(root, modulePath string, git, githubCI, skills bool) error {
 
 func validateGeneratedSkill(data []byte, modulePath string) error {
 	if len(data) == 0 || len(data) > 64<<10 {
-		return errors.New("generated Plystra skill has an invalid size")
+		return fmt.Errorf("generated Plystra skill has an invalid size: %d bytes", len(data))
 	}
 	text := string(data)
 	if !strings.HasPrefix(text, "---\nname: plystra\n") || strings.Contains(text, "TODO") {
@@ -829,6 +829,9 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED",
 		"PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE",
 		"PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE",
+		"PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION",
+		"root declaration or exposure",
+		"complete implementation-constructor path",
 		"plystra implement email.send/v1 --package ./mailer",
 		"creates no copied contract",
 		"Before a contract appears in any published tag",

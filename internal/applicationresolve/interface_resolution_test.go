@@ -1239,8 +1239,16 @@ func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) {
 		t.Fatalf("Resolve error = %v", err)
 	}
 	var missing *constructorgraph.MissingBindingError
-	if !errors.As(err, &missing) || missing.InterfaceID().String() != "audit.write/v1" || missing.Root().InterfaceID().String() != "app.run/v1" || len(missing.Steps()) != 1 || missing.Steps()[0].RequiringConstructor().String() != "example.com/missing-interface/app.New" || missing.Steps()[0].RequiringSource() == "" || missing.Steps()[0].ParameterName() != "audit" || !containsResolutionFragments(err.Error(), "plystra.yaml", "example.com/missing-interface/app.New", "audit.write/v1", "before generation") {
+	if !errors.As(err, &missing) || missing.InterfaceID().String() != "audit.write/v1" || missing.Root().InterfaceID().String() != "app.run/v1" || !containsResolutionFragments(err.Error(), "plystra.yaml", "example.com/missing-interface/app.New", "audit.write/v1", "before generation") {
 		t.Fatalf("missing path/error = %#v / %v", missing, err)
+	}
+	rootSources := missing.RequirementSources()
+	if len(rootSources) != 1 || rootSources[0].Kind != constructorgraph.RequirementDeclaration || rootSources[0].ModulePath != "example.com/missing-interface" || rootSources[0].Path != "plystra.yaml" || rootSources[0].Line != 1 || rootSources[0].Column != 1 {
+		t.Fatalf("missing root sources = %#v", rootSources)
+	}
+	steps := missing.Steps()
+	if len(steps) != 1 || steps[0].RequiringConstructor().String() != "example.com/missing-interface/app.New" || steps[0].RequiringSource() == "" || steps[0].RequiringModulePath() != "example.com/missing-interface" || steps[0].RequiringSourcePath() != "app/service.go" || steps[0].RequiringLine() != 13 || steps[0].RequiringColumn() != 6 || steps[0].ParameterName() != "audit" {
+		t.Fatalf("missing path steps = %#v", steps)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("failed resolution mutated files:\nbefore: %#v\nafter: %#v", before, after)
