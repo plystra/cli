@@ -3,6 +3,7 @@ package interfaceresolution
 import (
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -13,6 +14,7 @@ import (
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/intrinsicinterface"
+	"github.com/plystra/cli/internal/modulepath"
 )
 
 type constructorRecord struct {
@@ -36,7 +38,7 @@ type catalog struct {
 type normalizedChoice struct {
 	interfaceID interfaceid.Identifier
 	constructor constructorsymbol.Symbol
-	sources     []string
+	sources     []ChoiceSource
 }
 
 type selector struct {
@@ -240,25 +242,25 @@ func normalizeChoices(inputs []Choice, catalog catalog) (map[string]normalizedCh
 		if _, visible := catalog.interfaces[identifier]; !visible {
 			return nil, fmt.Errorf("%w: interfaces.use[%q] is not defined by a visible canonical package", ErrUnknownInterface, identifier)
 		}
+		sources, err := normalizeChoiceSources(input.Sources)
+		if err != nil {
+			return nil, fmt.Errorf("%w: choices[%d] sources: %v", ErrInvalidInput, index, err)
+		}
 		constructor, visible := catalog.constructors[constructorID]
 		if !visible {
-			return nil, fmt.Errorf("%w: interfaces.use[%q] names invisible constructor %s", ErrUnknownConstructor, identifier, input.Constructor)
+			return nil, &UnknownConstructorError{
+				interfaceID: input.InterfaceID,
+				constructor: input.Constructor,
+				sources:     sources,
+			}
 		}
 		if _, compatible := constructor.implements[identifier]; !compatible {
-			return nil, fmt.Errorf("%w: constructor %s does not implement Interface %s", ErrIncompatibleChoice, input.Constructor, input.InterfaceID)
-		}
-		if len(input.Sources) == 0 {
-			return nil, fmt.Errorf("%w: choices[%d] has no source", ErrInvalidInput, index)
-		}
-		sources := make([]string, len(input.Sources))
-		for sourceIndex, value := range input.Sources {
-			source, err := normalizeSource(value)
-			if err != nil {
-				return nil, fmt.Errorf("%w: choices[%d].sources[%d] %v", ErrInvalidInput, index, sourceIndex, err)
+			return nil, &IncompatibleChoiceError{
+				interfaceID: input.InterfaceID,
+				constructor: input.Constructor,
+				sources:     sources,
 			}
-			sources[sourceIndex] = source
 		}
-		sources = uniqueSorted(sources)
 		normalized := normalizedChoice{
 			interfaceID: input.InterfaceID,
 			constructor: input.Constructor,
@@ -268,7 +270,7 @@ func normalizeChoices(inputs []Choice, catalog catalog) (map[string]normalizedCh
 			if previous.constructor != normalized.constructor {
 				return nil, fmt.Errorf("%w: interfaces.use[%q] selects both %s and %s", ErrInvalidInput, identifier, previous.constructor, normalized.constructor)
 			}
-			previous.sources = uniqueSorted(append(previous.sources, normalized.sources...))
+			previous.sources = uniqueSortedChoiceSources(append(previous.sources, normalized.sources...))
 			result[identifier] = previous
 			continue
 		}
@@ -297,7 +299,7 @@ func (s *selector) selectInterface(identifier interfaceid.Identifier) (bool, err
 	if choice, explicit := s.choices[key]; explicit {
 		selected = s.catalog.constructors[choice.constructor.String()]
 		reason = constructorgraph.SelectionExplicit
-		sources = append([]string(nil), choice.sources...)
+		sources = choiceSourceReferences(choice.sources)
 	} else {
 		candidates := s.catalog.candidates[key]
 		switch len(candidates) {
@@ -356,6 +358,67 @@ func normalizeSource(value string) (string, error) {
 		return "", errors.New("must be non-empty single-line UTF-8 at most 4096 bytes")
 	}
 	return value, nil
+}
+
+func normalizeChoiceSources(inputs []ChoiceSource) ([]ChoiceSource, error) {
+	if len(inputs) == 0 {
+		return nil, errors.New("at least one typed source is required")
+	}
+	values := make([]ChoiceSource, len(inputs))
+	for index, input := range inputs {
+		reference, err := normalizeSource(input.Reference)
+		if err != nil {
+			return nil, fmt.Errorf("sources[%d].reference %v", index, err)
+		}
+		if err := modulepath.CheckProject(input.ModulePath); err != nil {
+			return nil, fmt.Errorf("sources[%d].module_path %q is invalid: %v", index, input.ModulePath, err)
+		}
+		if input.Path == "" || path.IsAbs(input.Path) || path.Clean(input.Path) != input.Path || input.Path == "." || input.Path == ".." || strings.HasPrefix(input.Path, "../") || strings.Contains(input.Path, "/../") || strings.Contains(input.Path, "\\") || strings.ContainsAny(input.Path, "\x00\r\n") || !utf8.ValidString(input.Path) {
+			return nil, fmt.Errorf("sources[%d].path %q must be one safe module-relative slash path", index, input.Path)
+		}
+		if input.Line < 1 || input.Column < 1 {
+			return nil, fmt.Errorf("sources[%d].line and column must be positive", index)
+		}
+		input.Reference = reference
+		values[index] = input
+	}
+	return uniqueSortedChoiceSources(values), nil
+}
+
+func uniqueSortedChoiceSources(values []ChoiceSource) []ChoiceSource {
+	sort.Slice(values, func(left, right int) bool {
+		leftKey := choiceSourceKey(values[left])
+		rightKey := choiceSourceKey(values[right])
+		if leftKey != rightKey {
+			return leftKey < rightKey
+		}
+		return values[left].Reference < values[right].Reference
+	})
+	result := values[:0]
+	for _, value := range values {
+		if len(result) != 0 && choiceSourceKey(result[len(result)-1]) == choiceSourceKey(value) {
+			continue
+		}
+		result = append(result, value)
+	}
+	return append([]ChoiceSource(nil), result...)
+}
+
+func choiceSourceKey(value ChoiceSource) string {
+	return strings.Join([]string{
+		value.ModulePath,
+		value.Path,
+		fmt.Sprintf("%010d", value.Line),
+		fmt.Sprintf("%010d", value.Column),
+	}, "\x00")
+}
+
+func choiceSourceReferences(values []ChoiceSource) []string {
+	result := make([]string, len(values))
+	for index, value := range values {
+		result[index] = value.Reference
+	}
+	return uniqueSorted(result)
 }
 
 func uniqueSorted(values []string) []string {

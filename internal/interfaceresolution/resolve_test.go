@@ -140,7 +140,9 @@ func TestResolveCollectsIntrinsicKernelRequirementsOutsideImplementationSelectio
 	_, err = interfaceresolution.Resolve(interfaceresolution.Input{Choices: []interfaceresolution.Choice{{
 		InterfaceID: healthID,
 		Constructor: mustResolutionSymbol(t, "example.com/application/health.New"),
-		Sources:     []string{`plystra.yaml interfaces.use["kernel.health/v1"]`},
+		Sources: []interfaceresolution.ChoiceSource{
+			resolutionChoiceSource(`plystra.yaml interfaces.use["kernel.health/v1"]`, "example.com/application", "plystra.yaml"),
+		},
 	}}})
 	if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, interfaceresolution.ErrIntrinsicChoice) || !containsAll(err.Error(), healthID.String(), "health.New") {
 		t.Fatalf("intrinsic choice error = %v", err)
@@ -187,8 +189,21 @@ func TestResolveAppliesExplicitChoiceBeforeAmbiguity(t *testing.T) {
 	}
 
 	base.Choices = []interfaceresolution.Choice{
-		{InterfaceID: emailID, Constructor: two, Sources: []string{"z-source", "a-source"}},
-		{InterfaceID: emailID, Constructor: two, Sources: []string{"a-source"}},
+		{
+			InterfaceID: emailID,
+			Constructor: two,
+			Sources: []interfaceresolution.ChoiceSource{
+				resolutionChoiceSource("z-source", "example.com/z", "z.yaml"),
+				resolutionChoiceSource("a-source", "example.com/a", "a.yaml"),
+			},
+		},
+		{
+			InterfaceID: emailID,
+			Constructor: two,
+			Sources: []interfaceresolution.ChoiceSource{
+				resolutionChoiceSource("a-source", "example.com/a", "a.yaml"),
+			},
+		},
 	}
 	result, err := interfaceresolution.Resolve(base)
 	if err != nil {
@@ -277,7 +292,9 @@ func TestResolveValidatesEveryExplicitChoiceWithoutMakingItARoot(t *testing.T) {
 		Choices: []interfaceresolution.Choice{{
 			InterfaceID: auditID,
 			Constructor: auditConstructor,
-			Sources:     []string{"plystra.yaml interfaces.use[audit.write/v1]"},
+			Sources: []interfaceresolution.ChoiceSource{
+				resolutionChoiceSource("plystra.yaml interfaces.use[audit.write/v1]", "example.com/application", "plystra.yaml"),
+			},
 		}},
 	})
 	if err != nil {
@@ -293,11 +310,126 @@ func TestResolveValidatesEveryExplicitChoiceWithoutMakingItARoot(t *testing.T) {
 		Choices: []interfaceresolution.Choice{{
 			InterfaceID: auditID,
 			Constructor: runConstructor,
-			Sources:     []string{"plystra.yaml interfaces.use[audit.write/v1]"},
+			Sources: []interfaceresolution.ChoiceSource{
+				resolutionChoiceSource("plystra.yaml interfaces.use[audit.write/v1]", "example.com/application", "plystra.yaml"),
+			},
 		}},
 	})
 	if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, interfaceresolution.ErrIncompatibleChoice) || !containsAll(err.Error(), auditID.String(), runConstructor.String()) {
 		t.Fatalf("incompatible choice error = %v", err)
+	}
+}
+
+func TestResolvePreservesTypedInvalidChoiceSources(t *testing.T) {
+	t.Parallel()
+
+	fixture := discoverResolutionFixture(t)
+	auditID := mustResolutionID(t, "audit.write/v1")
+	unknownConstructor := mustResolutionSymbol(t, "example.com/application/missing.New")
+	incompatibleConstructor := mustResolutionSymbol(t, "example.com/application/app.New")
+	sources := []interfaceresolution.ChoiceSource{
+		resolutionChoiceSource(`example.com/z@v1.0.0/plystra.yaml interfaces.use["audit.write/v1"]`, "example.com/z", "plystra.yaml"),
+		resolutionChoiceSource(`example.com/a@v1.0.0/config/selection.yaml interfaces.use["audit.write/v1"]`, "example.com/a", "config/selection.yaml"),
+		resolutionChoiceSource(`example.com/z@v1.0.0/plystra.yaml interfaces.use["audit.write/v1"]`, "example.com/z", "plystra.yaml"),
+	}
+	wantSources := []interfaceresolution.ChoiceSource{sources[1], sources[0]}
+
+	tests := []struct {
+		name        string
+		constructor constructorsymbol.Symbol
+		want        error
+	}{
+		{name: "unknown", constructor: unknownConstructor, want: interfaceresolution.ErrUnknownConstructor},
+		{name: "incompatible", constructor: incompatibleConstructor, want: interfaceresolution.ErrIncompatibleChoice},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := interfaceresolution.Resolve(interfaceresolution.Input{
+				Interfaces:      fixture.Interfaces(),
+				Implementations: fixture.Implementations(),
+				Choices: []interfaceresolution.Choice{{
+					InterfaceID: auditID,
+					Constructor: test.constructor,
+					Sources:     sources,
+				}},
+			})
+			if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, test.want) || !containsAll(err.Error(), auditID.String(), test.constructor.String()) {
+				t.Fatalf("Resolve error = %v", err)
+			}
+
+			var gotSources []interfaceresolution.ChoiceSource
+			switch test.want {
+			case interfaceresolution.ErrUnknownConstructor:
+				var invalid *interfaceresolution.UnknownConstructorError
+				if !errors.As(err, &invalid) || invalid.InterfaceID() != auditID || invalid.Constructor() != test.constructor {
+					t.Fatalf("UnknownConstructorError = %#v", invalid)
+				}
+				gotSources = invalid.ChoiceSources()
+			case interfaceresolution.ErrIncompatibleChoice:
+				var invalid *interfaceresolution.IncompatibleChoiceError
+				if !errors.As(err, &invalid) || invalid.InterfaceID() != auditID || invalid.Constructor() != test.constructor {
+					t.Fatalf("IncompatibleChoiceError = %#v", invalid)
+				}
+				gotSources = invalid.ChoiceSources()
+			default:
+				t.Fatalf("unsupported expected error %v", test.want)
+			}
+			if !reflect.DeepEqual(gotSources, wantSources) {
+				t.Fatalf("ChoiceSources = %#v, want %#v", gotSources, wantSources)
+			}
+			gotSources[0] = interfaceresolution.ChoiceSource{}
+			var repeated []interfaceresolution.ChoiceSource
+			if test.want == interfaceresolution.ErrUnknownConstructor {
+				var invalid *interfaceresolution.UnknownConstructorError
+				_ = errors.As(err, &invalid)
+				repeated = invalid.ChoiceSources()
+			} else {
+				var invalid *interfaceresolution.IncompatibleChoiceError
+				_ = errors.As(err, &invalid)
+				repeated = invalid.ChoiceSources()
+			}
+			if !reflect.DeepEqual(repeated, wantSources) {
+				t.Fatal("typed invalid choice error exposed mutable source storage")
+			}
+		})
+	}
+}
+
+func TestResolveRejectsInvalidTypedChoiceSources(t *testing.T) {
+	t.Parallel()
+
+	fixture := discoverResolutionFixture(t)
+	auditID := mustResolutionID(t, "audit.write/v1")
+	auditConstructor := mustResolutionSymbol(t, "example.com/application/audit.New")
+	valid := resolutionChoiceSource(`plystra.yaml interfaces.use["audit.write/v1"]`, "example.com/application", "plystra.yaml")
+	tests := map[string][]interfaceresolution.ChoiceSource{
+		"missing":         nil,
+		"empty reference": {{ModulePath: valid.ModulePath, Path: valid.Path, Line: 1, Column: 1}},
+		"invalid module":  {{Reference: valid.Reference, ModulePath: "example.com//application", Path: valid.Path, Line: 1, Column: 1}},
+		"absolute path":   {{Reference: valid.Reference, ModulePath: valid.ModulePath, Path: "/private/plystra.yaml", Line: 1, Column: 1}},
+		"invalid span":    {{Reference: valid.Reference, ModulePath: valid.ModulePath, Path: valid.Path}},
+	}
+	for name, sources := range tests {
+		sources := sources
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := interfaceresolution.Resolve(interfaceresolution.Input{
+				Interfaces:      fixture.Interfaces(),
+				Implementations: fixture.Implementations(),
+				Choices: []interfaceresolution.Choice{{
+					InterfaceID: auditID,
+					Constructor: auditConstructor,
+					Sources:     sources,
+				}},
+			})
+			if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, interfaceresolution.ErrInvalidInput) {
+				t.Fatalf("Resolve error = %v", err)
+			}
+		})
 	}
 }
 
@@ -491,6 +623,16 @@ func resolutionRequirement(identifier interfaceid.Identifier, reference string, 
 			Line:       1,
 			Column:     1,
 		},
+	}
+}
+
+func resolutionChoiceSource(reference, modulePath, sourcePath string) interfaceresolution.ChoiceSource {
+	return interfaceresolution.ChoiceSource{
+		Reference:  reference,
+		ModulePath: modulePath,
+		Path:       sourcePath,
+		Line:       1,
+		Column:     1,
 	}
 }
 

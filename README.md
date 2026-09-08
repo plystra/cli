@@ -828,6 +828,12 @@ source before selection recovery.
 `PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE` reports every requiring constructor
 declaration in the complete cycle as an `implementation-constructor` source.
 The problem retains the ordered Interface edges and selection reasons.
+`PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION` and
+`PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION` report every effective
+`interfaces.use` declaration as an `implementation-selection` source. A
+current-Project choice identifies only the selected root, environment, or
+complete-replacement document; an inherited choice identifies every
+same-valued contributing dependency Project in deterministic module order.
 `PLYSTRA_CONFIGURATION_INHERITED_CONFLICT` reports every Project configuration
 document that contributed a competing declaration, including every module
 behind compatible declaration deduplication, as `configuration-declaration`.

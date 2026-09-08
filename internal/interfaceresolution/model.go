@@ -36,8 +36,22 @@ type Requirement struct {
 type Choice struct {
 	InterfaceID interfaceid.Identifier
 	Constructor constructorsymbol.Symbol
-	Sources     []string
+	Sources     []ChoiceSource
 }
+
+// ChoiceSource is one typed stable Project-document location for an effective
+// interfaces.use declaration. Reference retains the bounded human explanation
+// while the remaining fields avoid downstream parsing.
+type ChoiceSource struct {
+	Reference  string
+	ModulePath string
+	Path       string
+	Line       int
+	Column     int
+}
+
+// String returns the bounded stable configuration reference.
+func (s ChoiceSource) String() string { return s.Reference }
 
 // Input contains the complete validated visible inventories plus selected
 // current-application requirements and explicit Implementation choices.

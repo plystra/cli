@@ -1126,6 +1126,10 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("every requiring constructor in each complete dependency path"),
 		[]byte("`PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE`"),
 		[]byte("every requiring constructor declaration in the complete cycle"),
+		[]byte("`PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION`"),
+		[]byte("`PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION`"),
+		[]byte("every effective `interfaces.use` declaration"),
+		[]byte("`implementation-selection`"),
 	} {
 		if !bytes.Contains(readme, activationGuidance) {
 			t.Fatalf("generated README omits candidate-only activation guidance %q:\n%s", activationGuidance, readme)
@@ -2188,10 +2192,13 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra capability create records.read --query --plugin records --expose",
 		"PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED",
 		"PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION",
-		"root declaration or exposure",
-		"complete implementation-constructor path",
+		"root and requiring-constructor sources",
 		"PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE",
-		"complete constructor cycle",
+		"cycle-constructor sources",
+		"PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION",
+		"PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION",
+		"effective interfaces.use sources",
+		"implementation-selection",
 		"plystra implement email.send/v1 --package ./mailer",
 		"creates no copied contract",
 		"capabilities/records.read/v1/capability.yaml",

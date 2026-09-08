@@ -412,8 +412,106 @@ func TestResolveValidatesDormantExplicitSelectionWithoutActivation(t *testing.T)
 			if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, test.wantError) || !containsResolutionFragments(err.Error(), "email.send/v1", test.constructor) {
 				t.Fatalf("Resolve invalid dormant selection = %v", err)
 			}
+			var located interface {
+				ChoiceSources() []interfaceresolution.ChoiceSource
+			}
+			if !errors.As(err, &located) {
+				t.Fatalf("invalid dormant selection omitted typed choice provenance: %v", err)
+			}
+			sources := located.ChoiceSources()
+			if len(sources) != 1 || sources[0].ModulePath != modulePath || sources[0].Path != "plystra.yaml" || sources[0].Line != 1 || sources[0].Column != 1 {
+				t.Fatalf("invalid dormant selection sources = %#v", sources)
+			}
+			sources[0] = interfaceresolution.ChoiceSource{}
+			if repeated := located.ChoiceSources(); len(repeated) != 1 || repeated[0].ModulePath != modulePath {
+				t.Fatal("invalid dormant selection exposed mutable source storage")
+			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("invalid dormant selection mutated files:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
+func TestResolvePreservesEveryInheritedInvalidImplementationChoiceSource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		constructor string
+		wantError   error
+	}{
+		{name: "unknown", constructor: "example.com/interface-app/missing.New", wantError: interfaceresolution.ErrUnknownConstructor},
+		{name: "incompatible", constructor: "example.com/interface-app/reports.New", wantError: interfaceresolution.ErrIncompatibleChoice},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			parent := t.TempDir()
+			contractsRoot := filepath.Join(parent, "contracts")
+			alphaRoot := filepath.Join(parent, "alpha")
+			zetaRoot := filepath.Join(parent, "zeta")
+			applicationRoot := filepath.Join(parent, "application")
+
+			writeModule(t, contractsRoot, "example.com/contracts")
+			writeFile(t, filepath.Join(contractsRoot, "plystra.yaml"), "{}\n")
+			writeResolvedInterface(t, contractsRoot, "email/send/v1", "sendv1", "email.send/v1", "Send")
+			writeResolvedInterface(t, contractsRoot, "reports/read/v1", "readv1", "reports.read/v1", "Read")
+
+			for _, dependency := range []struct {
+				root       string
+				modulePath string
+			}{
+				{root: zetaRoot, modulePath: "example.com/zeta"},
+				{root: alphaRoot, modulePath: "example.com/alpha"},
+			} {
+				writeModule(t, dependency.root, dependency.modulePath)
+				writeFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {use: {email.send/v1: "+test.constructor+"}}\n")
+			}
+
+			writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/interface-app
+
+go 1.26
+
+require (
+	example.com/alpha v1.0.0
+	example.com/contracts v1.0.0
+	example.com/zeta v1.0.0
+)
+
+replace example.com/alpha => ../alpha
+replace example.com/contracts => ../contracts
+replace example.com/zeta => ../zeta
+`)
+			writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+			writeResolvedSimpleImplementationForInterfaceModule(t, applicationRoot, "example.com/contracts", "reports", "reports.read/v1", "reports/read/v1", "Read")
+
+			before := snapshotTree(t, parent)
+			_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+				Start: applicationRoot,
+				Environment: goEnvironment(map[string]string{
+					"GOWORK":  "off",
+					"GOPROXY": "off",
+					"GOSUMDB": "off",
+				}),
+			})
+			if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, test.wantError) || !containsResolutionFragments(err.Error(), "email.send/v1", test.constructor) {
+				t.Fatalf("Resolve inherited invalid selection = %v", err)
+			}
+			var located interface {
+				ChoiceSources() []interfaceresolution.ChoiceSource
+			}
+			if !errors.As(err, &located) {
+				t.Fatalf("inherited invalid selection omitted typed choice provenance: %v", err)
+			}
+			sources := located.ChoiceSources()
+			if len(sources) != 2 || sources[0].ModulePath != "example.com/alpha" || sources[0].Path != "plystra.yaml" || sources[1].ModulePath != "example.com/zeta" || sources[1].Path != "plystra.yaml" {
+				t.Fatalf("inherited invalid selection sources = %#v", sources)
+			}
+			if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
+				t.Fatalf("Resolve inherited invalid selection mutated files:\nbefore: %#v\nafter:  %#v", before, after)
 			}
 		})
 	}

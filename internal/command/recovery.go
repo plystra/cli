@@ -471,6 +471,34 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: step.RequiringColumn(),
 			})
 		}
+	case diagnosticResolveUnknownImplementation:
+		var invalid *interfaceresolution.UnknownConstructorError
+		if !errors.As(err, &invalid) || invalid == nil {
+			return nil
+		}
+		for _, source := range invalid.ChoiceSources() {
+			sources = append(sources, diagnosticjson.Source{
+				Module: source.ModulePath,
+				Path:   source.Path,
+				Kind:   "implementation-selection",
+				Line:   source.Line,
+				Column: source.Column,
+			})
+		}
+	case diagnosticResolveIncompatibleImplementation:
+		var invalid *interfaceresolution.IncompatibleChoiceError
+		if !errors.As(err, &invalid) || invalid == nil {
+			return nil
+		}
+		for _, source := range invalid.ChoiceSources() {
+			sources = append(sources, diagnosticjson.Source{
+				Module: source.ModulePath,
+				Path:   source.Path,
+				Kind:   "implementation-selection",
+				Line:   source.Line,
+				Column: source.Column,
+			})
+		}
 	case diagnosticResolveMultipleImplementations:
 		var ambiguous *interfaceresolution.AmbiguousImplementationError
 		if !errors.As(err, &ambiguous) || ambiguous == nil {

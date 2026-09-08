@@ -1958,6 +1958,12 @@ A constructor cycle emits every requiring constructor declaration in the
 complete cycle as `implementation-constructor`; the problem retains the ordered
 Interface edges and selection reasons. Dependency-owned declarations keep their
 owning Project modules rather than exposing Module Cache paths.
+An unknown or incompatible explicit Interface Implementation choice emits every
+effective `interfaces.use` declaration as `implementation-selection`. Default,
+environment, and complete-replacement selections retain the selected
+current-Project document, while an inherited same-valued choice retains every
+contributing dependency Project in deterministic module order. Neither form
+exposes an absolute path or Module Cache location.
 An inherited configuration conflict emits every contributing Project document
 as `configuration-declaration`, including all modules behind compatible
 declaration deduplication. Its document-level span is `1:1`; the exact schema

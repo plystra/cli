@@ -424,28 +424,167 @@ replace example.com/providers/zeta => ../zeta
 }
 
 func TestPublicResolvingCommandsRejectInvalidDormantChoiceWithoutMutation(t *testing.T) {
-	root := writeImplementationSelectionCommandProject(t)
-	const constructor = "example.com/acme/implementation-use/reports.New"
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {use: {email.send/v1: "+constructor+"}}\n")
-	before := commandTree(t, root)
-
+	tests := []struct {
+		name           string
+		constructor    string
+		configuration  string
+		selectedPath   string
+		selectors      []string
+		problem        string
+		recoverySuffix string
+		diagnostic     string
+	}{
+		{
+			name:           "default incompatible",
+			constructor:    "example.com/acme/implementation-use/reports.New",
+			configuration:  "interfaces: {use: {email.send/v1: example.com/acme/implementation-use/reports.New}}\n",
+			selectedPath:   "plystra.yaml",
+			problem:        "does not implement Interface",
+			recoverySuffix: "",
+			diagnostic:     diagnosticcode.ResolveIncompatibleImplementation,
+		},
+		{
+			name:           "environment unknown",
+			constructor:    "example.com/acme/implementation-use/missing.New",
+			configuration:  "interfaces: {use: {email.send/v1: example.com/acme/implementation-use/missing.New}}\n",
+			selectedPath:   "plystra.production.yaml",
+			selectors:      []string{"--env", "production"},
+			problem:        "names invisible constructor",
+			recoverySuffix: " --env \"production\"",
+			diagnostic:     diagnosticcode.ResolveUnknownImplementation,
+		},
+		{
+			name:           "explicit incompatible",
+			constructor:    "example.com/acme/implementation-use/reports.New",
+			configuration:  "interfaces: {use: {email.send/v1: example.com/acme/implementation-use/reports.New}}\n",
+			selectedPath:   "deploy/customer.yaml",
+			selectors:      []string{"--config", "deploy/customer.yaml"},
+			problem:        "does not implement Interface",
+			recoverySuffix: " --config \"deploy/customer.yaml\"",
+			diagnostic:     diagnosticcode.ResolveIncompatibleImplementation,
+		},
+	}
 	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
-	for _, arguments := range commands {
-		exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "reports"), commandGoEnvironment())
-		if exitCode != 1 || stdout != "" || !commandContainsAll(
-			stderr,
-			"email.send/v1",
-			constructor,
-			"does not implement Interface",
-			"Recovery:\nReplace the reported choice with one visible compatible constructor by running `plystra use <interface-id> <constructor-symbol>`.\n",
-			"Diagnostic: "+diagnosticcode.ResolveIncompatibleImplementation,
-		) {
-			t.Fatalf("%v invalid dormant choice = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
-		}
-		if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
-			t.Fatalf("%v mutated invalid dormant Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
-		}
-		assertNoCommandTransactions(t, root)
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			root := writeImplementationSelectionCommandProject(t)
+			if test.selectedPath != "plystra.yaml" {
+				writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+			}
+			writeCommandFile(t, filepath.Join(root, filepath.FromSlash(test.selectedPath)), test.configuration)
+			before := commandTree(t, root)
+			for _, command := range commands {
+				arguments := append(append([]string(nil), command...), test.selectors...)
+				exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "reports"), commandGoEnvironment())
+				wantSource := "Source: example.com/acme/implementation-use:" + test.selectedPath + ":1:1 (implementation-selection)"
+				wantRecovery := "Recovery:\nReplace the reported choice with one visible compatible constructor by running `plystra use <interface-id> <constructor-symbol>" + test.recoverySuffix + "`.\n"
+				if exitCode != 1 || stdout != "" || !commandContainsAll(
+					stderr,
+					"email.send/v1",
+					test.constructor,
+					test.problem,
+					wantSource,
+					wantRecovery,
+					"Diagnostic: "+test.diagnostic,
+				) || strings.Count(stderr, "Source: ") != 1 {
+					t.Fatalf("%v invalid dormant choice = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+				}
+				for _, privatePath := range []string{root, filepath.ToSlash(root)} {
+					if strings.Contains(stderr, privatePath) {
+						t.Fatalf("%v exposed private path %q: %q", arguments, privatePath, stderr)
+					}
+				}
+				if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+					t.Fatalf("%v mutated invalid dormant Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+				}
+				assertNoCommandTransactions(t, root)
+			}
+		})
+	}
+}
+
+func TestPublicResolvingCommandsReportEveryInheritedInvalidImplementationChoiceSource(t *testing.T) {
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	for _, command := range commands {
+		command := command
+		t.Run(strings.Join(command, " "), func(t *testing.T) {
+			t.Parallel()
+
+			parent := t.TempDir()
+			contractsRoot := filepath.Join(parent, "contracts")
+			alphaRoot := filepath.Join(parent, "alpha")
+			zetaRoot := filepath.Join(parent, "zeta")
+			applicationRoot := filepath.Join(parent, "application")
+			const constructor = "example.com/missing/private.New"
+
+			writeCommandFile(t, filepath.Join(contractsRoot, "go.mod"), "module example.com/contracts\n\ngo 1.26\n")
+			writeCommandFile(t, filepath.Join(contractsRoot, "plystra.yaml"), "{}\n")
+			writeCommandGraphInterface(t, contractsRoot, "email/send/v1", "sendv1", "email.send/v1", "Send")
+			for _, dependency := range []struct {
+				root       string
+				modulePath string
+			}{
+				{root: zetaRoot, modulePath: "example.com/zeta"},
+				{root: alphaRoot, modulePath: "example.com/alpha"},
+			} {
+				writeCommandFile(t, filepath.Join(dependency.root, "go.mod"), "module "+dependency.modulePath+"\n\ngo 1.26\n")
+				writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {use: {email.send/v1: "+constructor+"}}\n")
+			}
+			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/consumer
+
+go 1.26
+
+require (
+	example.com/alpha v1.0.0
+	example.com/contracts v1.0.0
+	example.com/zeta v1.0.0
+)
+
+replace example.com/alpha => ../alpha
+replace example.com/contracts => ../contracts
+replace example.com/zeta => ../zeta
+`)
+			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+
+			before := map[string]map[string][]byte{
+				"application": commandTree(t, applicationRoot),
+				"contracts":   commandTree(t, contractsRoot),
+				"alpha":       commandTree(t, alphaRoot),
+				"zeta":        commandTree(t, zetaRoot),
+			}
+			exitCode, stdout, stderr := runCommand(t, command, applicationRoot, commandGoEnvironment())
+			wantSuffix := strings.Join([]string{
+				"",
+				"Source: example.com/alpha:plystra.yaml:1:1 (implementation-selection)",
+				"Source: example.com/zeta:plystra.yaml:1:1 (implementation-selection)",
+				"",
+				"Recovery:",
+				"Replace the reported choice with one visible compatible constructor by running `plystra use <interface-id> <constructor-symbol>`.",
+				"",
+				"Diagnostic: " + diagnosticcode.ResolveUnknownImplementation,
+				"",
+			}, "\n")
+			if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 2 {
+				t.Fatalf("%v inherited invalid choice = exit %d stdout %q stderr %q", command, exitCode, stdout, stderr)
+			}
+			for _, privatePath := range []string{parent, filepath.ToSlash(parent), applicationRoot, filepath.ToSlash(applicationRoot), alphaRoot, filepath.ToSlash(alphaRoot), zetaRoot, filepath.ToSlash(zetaRoot)} {
+				if strings.Contains(stderr, privatePath) {
+					t.Fatalf("%v exposed private path %q: %q", command, privatePath, stderr)
+				}
+			}
+			for name, root := range map[string]string{
+				"application": applicationRoot,
+				"contracts":   contractsRoot,
+				"alpha":       alphaRoot,
+				"zeta":        zetaRoot,
+			} {
+				if after := commandTree(t, root); !reflect.DeepEqual(after, before[name]) {
+					t.Fatalf("%v mutated %s Project:\nbefore: %#v\nafter:  %#v", command, name, before[name], after)
+				}
+				assertNoCommandTransactions(t, root)
+			}
+		})
 	}
 }
 

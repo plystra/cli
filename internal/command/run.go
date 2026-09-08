@@ -52,8 +52,9 @@ const (
 
 Common actionable failures end with one Recovery block containing the primary
 command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
-Typed source-bearing failures, including missing, ambiguous, and cyclic
-Interface Implementation resolution, add canonical module-relative Source lines first.
+Typed source-bearing failures, including invalid explicit choices and missing,
+ambiguous, or cyclic Interface Implementation resolution, add canonical
+module-relative Source lines first.
 `
 	addUsage = `Usage:
   plystra add <go-module-query>

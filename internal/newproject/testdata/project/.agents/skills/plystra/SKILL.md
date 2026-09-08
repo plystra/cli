@@ -1217,22 +1217,21 @@ boundary.
 
 ## Diagnose common failures
 
-Failures end with Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
-Sorted sources use:
+Failures end: Recovery, then Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
 Source: <module>:<module-relative-path>[:line:column] (<kind>).
 configuration-declaration: PLYSTRA_CONFIGURATION_INHERITED_CONFLICT,
-PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS.
-Sources omit absolute/Module Cache paths; unsafe selectors use placeholders;
-unknown errors get neither.
+PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS. Sources omit absolute/Module Cache
+paths; unsafe selectors use placeholders; unknown errors get neither.
 
-- PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION: root declaration or exposure and
-  complete implementation-constructor path. Add a compatible constructor;
-  markerless modules remain invisible.
-- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS: every candidate
-  implementation-constructor. Use plystra use <interface-id> <constructor-symbol>;
-  discovery gives no priority.
-- PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: every implementation-constructor in the
-  complete constructor cycle. Remove one required Interface parameter.
+- PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION: root and requiring-constructor sources;
+  add a visible compatible constructor.
+- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS: candidate-constructor sources;
+  select via plystra use <interface-id> <constructor-symbol>.
+- PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: cycle-constructor sources; remove one
+  required parameter.
+- PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION /
+  PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION: effective interfaces.use sources
+  are implementation-selection; choose a visible compatible constructor.
 - Capability failures precede mutation. Malformed create/implement/expose:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,

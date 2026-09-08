@@ -36,6 +36,104 @@ var (
 	ErrIntrinsicChoice = errors.New("intrinsic Kernel Interface cannot select an Implementation")
 )
 
+// UnknownConstructorError identifies an explicit choice whose constructor is
+// outside the effective visible Project graph and retains every declaration
+// that contributed the rejected selection.
+type UnknownConstructorError struct {
+	interfaceID interfaceid.Identifier
+	constructor constructorsymbol.Symbol
+	sources     []ChoiceSource
+}
+
+// InterfaceID returns the exact selected Interface ID.
+func (e *UnknownConstructorError) InterfaceID() interfaceid.Identifier {
+	if e == nil {
+		return interfaceid.Identifier{}
+	}
+	return e.interfaceID
+}
+
+// Constructor returns the invisible constructor symbol.
+func (e *UnknownConstructorError) Constructor() constructorsymbol.Symbol {
+	if e == nil {
+		return constructorsymbol.Symbol{}
+	}
+	return e.constructor
+}
+
+// ChoiceSources returns every sorted typed module-relative declaration that
+// contributed the invalid effective selection.
+func (e *UnknownConstructorError) ChoiceSources() []ChoiceSource {
+	if e == nil {
+		return nil
+	}
+	return append([]ChoiceSource(nil), e.sources...)
+}
+
+func (e *UnknownConstructorError) Error() string {
+	if e == nil {
+		return ErrUnknownConstructor.Error()
+	}
+	return fmt.Sprintf(
+		"%s: interfaces.use[%q] names invisible constructor %s",
+		ErrUnknownConstructor,
+		e.interfaceID,
+		e.constructor,
+	)
+}
+
+// Unwrap supports errors.Is with ErrUnknownConstructor.
+func (*UnknownConstructorError) Unwrap() error { return ErrUnknownConstructor }
+
+// IncompatibleChoiceError identifies an explicit constructor that does not
+// implement the selected canonical Interface and retains every declaration
+// that contributed the rejected selection.
+type IncompatibleChoiceError struct {
+	interfaceID interfaceid.Identifier
+	constructor constructorsymbol.Symbol
+	sources     []ChoiceSource
+}
+
+// InterfaceID returns the exact selected Interface ID.
+func (e *IncompatibleChoiceError) InterfaceID() interfaceid.Identifier {
+	if e == nil {
+		return interfaceid.Identifier{}
+	}
+	return e.interfaceID
+}
+
+// Constructor returns the incompatible constructor symbol.
+func (e *IncompatibleChoiceError) Constructor() constructorsymbol.Symbol {
+	if e == nil {
+		return constructorsymbol.Symbol{}
+	}
+	return e.constructor
+}
+
+// ChoiceSources returns every sorted typed module-relative declaration that
+// contributed the invalid effective selection.
+func (e *IncompatibleChoiceError) ChoiceSources() []ChoiceSource {
+	if e == nil {
+		return nil
+	}
+	return append([]ChoiceSource(nil), e.sources...)
+}
+
+func (e *IncompatibleChoiceError) Error() string {
+	if e == nil {
+		return ErrIncompatibleChoice.Error()
+	}
+	return fmt.Sprintf(
+		"%s: constructor %s does not implement Interface %s",
+		ErrIncompatibleChoice,
+		e.constructor,
+		e.interfaceID,
+	)
+}
+
+// Unwrap supports errors.Is with ErrIncompatibleChoice.
+func (*IncompatibleChoiceError) Unwrap() error { return ErrIncompatibleChoice }
+
 // Candidate is one compatible visible Implementation retained by an
 // ambiguity diagnostic.
 type Candidate struct {

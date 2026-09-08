@@ -14,10 +14,6 @@ import (
 )
 
 func resolveInterfaces(manifest applicationmeta.Manifest, composition applicationmeta.Composition, interfaces interfaceinventory.Index, implementations implementationinventory.Index, legacyPlugins plugininventory.Index, sourceContext applicationinput.SourceContext) (interfaceresolution.Result, error) {
-	choiceProvenance := make(map[string][]string)
-	for _, record := range composition.ResolutionSources() {
-		choiceProvenance[record.Path()] = append(choiceProvenance[record.Path()], record.Sources()...)
-	}
 	requirements := manifest.InterfaceRequirements()
 	exposures := manifest.HTTPExposures()
 	rootRequirements := make([]interfaceresolution.Requirement, 0, len(requirements)+len(exposures))
@@ -78,10 +74,24 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 	explicitChoices := make([]interfaceresolution.Choice, len(choices))
 	for index, choice := range choices {
 		path := fmt.Sprintf("interfaces.use[%q]", choice.InterfaceID().String())
+		sources, err := applicationinput.ConfigurationSources(sourceContext, choice.Source(), path)
+		if err != nil {
+			return interfaceresolution.Result{}, fmt.Errorf("implementation choice %s provenance: %w", choice.InterfaceID(), err)
+		}
+		choiceSources := make([]interfaceresolution.ChoiceSource, len(sources))
+		for sourceIndex, source := range sources {
+			choiceSources[sourceIndex] = interfaceresolution.ChoiceSource{
+				Reference:  source.Reference,
+				ModulePath: source.ModulePath,
+				Path:       source.Path,
+				Line:       source.Line,
+				Column:     source.Column,
+			}
+		}
 		explicitChoices[index] = interfaceresolution.Choice{
 			InterfaceID: choice.InterfaceID(),
 			Constructor: choice.Constructor(),
-			Sources:     uniqueSortedStrings(append([]string{choice.Source()}, choiceProvenance[path]...)),
+			Sources:     choiceSources,
 		}
 	}
 	return interfaceresolution.Resolve(interfaceresolution.Input{
