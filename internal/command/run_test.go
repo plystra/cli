@@ -31,7 +31,7 @@ const (
 )
 
 const (
-	wantUnknownInterfaceSourceUsage = "PLYSTRA_RESOLVE_UNKNOWN_INTERFACE reports every module-relative requirement,\nexposure, or Implementation-selection source before selector-aware recovery.\n"
+	wantUnknownInterfaceSourceUsage = "PLYSTRA_RESOLVE_UNKNOWN_INTERFACE reports every module-relative requirement,\nexposure, or Implementation-selection source before selector-aware recovery.\nPLYSTRA_RESOLVE_RESERVED_INTERFACE reports the module-relative declaration that\nuses the reserved kernel.* namespace before recovery.\n"
 	wantGenerateUsageWithSources    = wantGenerateUsage + wantUnknownInterfaceSourceUsage
 	wantCheckUsageWithSources       = wantCheckUsage + wantUnknownInterfaceSourceUsage
 )

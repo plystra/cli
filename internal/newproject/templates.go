@@ -93,6 +93,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_RESOLVE_UNKNOWN_INTERFACE`" + ` reports every effective ` + "`interfaces.require`" + ` or ` + "`http.expose`" + ` declaration as a ` + "`declaration`" + ` or ` + "`exposure`" + ` source, or every effective ` + "`interfaces.use`" + ` declaration as ` + "`implementation-selection`" + `. Current selected documents and every same-valued inherited dependency contributor retain their owning Project module and module-relative path.
 
+` + "`PLYSTRA_RESOLVE_RESERVED_INTERFACE`" + ` reports an application-authored ` + "`kernel.*`" + ` Interface as one ` + "`interface-declaration`" + ` source in its owning current or dependency Project. Remove that declaration there and import the canonical Kernel Interface package; never edit a Module Cache copy.
+
 ` + "`PLYSTRA_CONFIGURATION_INHERITED_CONFLICT`" + ` reports every contributing Project configuration document as a sorted ` + "`configuration-declaration`" + ` source, including all modules behind compatible declaration deduplication. The problem identifies the exact field while configuration values and Secret-reference targets stay redacted. Apply the recovery to the selected root, environment, or complete-replacement document.
 
 ` + "`PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS`" + ` reports every Project document that contributed a prior inherited field when its current-Project representation disappears without an explicit typed removal. Restore the exact field or write its typed removal in the selected document. The prior contributor references remain visible, while the inherited value, Secret-reference target, and machine-specific paths stay redacted.
@@ -1428,24 +1430,18 @@ boundary.
 
 Failures end with Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
 Source: <module>:<module-relative-path>[:line:column] (<kind>).
-PLYSTRA_CONFIGURATION_INHERITED_CONFLICT and
-PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS use configuration-declaration.
-No absolute/Module Cache source paths; unsafe selectors use placeholders;
-unknown errors stay uncoded.
+PLYSTRA_CONFIGURATION_INHERITED_CONFLICT / PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS:
+configuration-declaration. No absolute/Module Cache paths; unsafe selectors use
+placeholders; unknown errors stay uncoded.
 
-- PLYSTRA_RESOLVE_UNKNOWN_INTERFACE: declaration, exposure, or
-  implementation-selection sources; correct selected YAML.
-- PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION: root and requiring-constructor sources;
-  add a compatible constructor.
-- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS: constructor sources; use
-  plystra use <interface-id> <constructor-symbol>.
-- PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: cycle-constructor sources; remove one
-  required parameter.
-- PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION,
-  PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION, and
-  PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: effective interfaces.use sources
-  are implementation-selection. Fix the constructor; intrinsic recovery sets
-  the selected document entry to null.
+- PLYSTRA_RESOLVE_UNKNOWN_INTERFACE: declaration, exposure, or implementation-selection; correct selected YAML.
+- PLYSTRA_RESOLVE_RESERVED_INTERFACE: interface-declaration; remove kernel.*.
+- PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION: root and requiring-constructor sources; add constructor.
+- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS: constructor sources; run plystra use <interface-id> <constructor-symbol>.
+- PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: cycle-constructor sources; break cycle.
+- PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION / PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION /
+  PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: effective interfaces.use sources are
+  implementation-selection; fix constructor, or set the selected document entry to null.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,

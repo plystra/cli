@@ -835,6 +835,12 @@ The problem retains the ordered Interface edges and selection reasons.
 only the root, environment, or complete-replacement document; an inherited
 reference names every same-valued dependency Project in deterministic module
 order.
+`PLYSTRA_RESOLVE_RESERVED_INTERFACE` reports the application-authored
+`kernel.*` Interface declaration as an `interface-declaration` source. The
+source retains the owning current or dependency Project module and
+module-relative Go path; remove that declaration in its owning Project and
+import the canonical Kernel Interface package instead of editing a Module Cache
+copy.
 `PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION`,
 `PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION`, and
 `PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION` report every effective

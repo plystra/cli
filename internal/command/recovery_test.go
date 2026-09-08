@@ -3,6 +3,7 @@ package command
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -504,6 +505,64 @@ func TestWriteCommandFailureReportsUnknownInterfaceSources(t *testing.T) {
 		"Diagnostic: " + diagnosticResolveUnknownInterface + "\n"
 	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 2 {
 		t.Fatalf("unknown Interface output = %q, want suffix %q", got, wantSuffix)
+	}
+}
+
+func TestWriteCommandFailureReportsReservedInterfaceSource(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	const (
+		modulePath = "example.com/recovery-reserved"
+		sourcePath = "interfaces/kernel/health/v1/interface.go"
+	)
+	for path, data := range map[string]string{
+		"go.mod":       "module " + modulePath + "\n\ngo 1.26\n",
+		"plystra.yaml": "{}\n",
+		sourcePath: `package healthv1
+
+import "context"
+
+//plystra:interface kernel.health/v1
+type Interface interface {
+	Health(context.Context, Request) (Response, error)
+}
+
+type Request struct{}
+type Response struct{}
+`,
+	} {
+		absolute := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(absolute, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	environment := make([]string, 0, len(os.Environ())+3)
+	for _, entry := range os.Environ() {
+		upper := strings.ToUpper(entry)
+		if strings.HasPrefix(upper, "GOWORK=") || strings.HasPrefix(upper, "GOPROXY=") || strings.HasPrefix(upper, "GOSUMDB=") {
+			continue
+		}
+		environment = append(environment, entry)
+	}
+	environment = append(environment, "GOWORK=off", "GOPROXY=off", "GOSUMDB=off")
+	_, resolutionErr := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: root, Environment: environment})
+	if !errors.Is(resolutionErr, interfaceresolution.ErrReservedInterface) {
+		t.Fatalf("Resolve error = %v", resolutionErr)
+	}
+
+	var output strings.Builder
+	writeCommandFailure(&output, "generate", resolutionErr, recoveryContext{})
+	got := output.String()
+	wantSuffix := "\n\n" +
+		"Source: " + modulePath + ":" + sourcePath + ":5:1 (interface-declaration)\n\n" +
+		"Recovery:\nRemove the reported local kernel.* Interface declaration and import the canonical Kernel Interface package instead.\n\n" +
+		"Diagnostic: " + diagnosticResolveReservedInterface + "\n"
+	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 1 || strings.Contains(got, root) || strings.Contains(got, filepath.ToSlash(root)) {
+		t.Fatalf("reserved Interface output = %q, want suffix %q", got, wantSuffix)
 	}
 }
 

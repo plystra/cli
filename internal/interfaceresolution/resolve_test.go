@@ -234,6 +234,54 @@ func TestResolveReportsEveryUnknownInterfaceSourceDeterministically(t *testing.T
 	}
 }
 
+func TestResolveReportsReservedInterfaceDeclarationSource(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	const (
+		modulePath = "example.com/reserved-interface"
+		sourcePath = "interfaces/kernel/health/v1/interface.go"
+	)
+	writeResolutionFile(t, filepath.Join(root, "go.mod"), "module "+modulePath+"\n\ngo 1.26\n")
+	writeResolutionFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeResolutionFile(t, filepath.Join(root, filepath.FromSlash(sourcePath)), resolutionInterfaceSource("healthv1", "kernel.health/v1", "Health"))
+
+	project, err := projectlocate.Find(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	environment := append(os.Environ(), "GOWORK=off", "GOPROXY=off", "GOSUMDB=off")
+	dependencies, err := moduledependency.Discover(t.Context(), project, moduledependency.Options{Environment: environment})
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovery, err := interfaceinventory.DiscoverApplication(t.Context(), project, dependencies, interfaceinventory.Options{Environment: environment})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = interfaceresolution.Resolve(interfaceresolution.Input{Interfaces: discovery.Interfaces()})
+	if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, interfaceresolution.ErrInvalidInput) || !errors.Is(err, interfaceresolution.ErrReservedInterface) {
+		t.Fatalf("Resolve reserved Interface error = %v", err)
+	}
+	var reserved *interfaceresolution.ReservedInterfaceError
+	if !errors.As(err, &reserved) || reserved == nil {
+		t.Fatalf("ReservedInterfaceError = %#v", reserved)
+	}
+	wantSource := modulePath + "@local/" + sourcePath + ":5:1"
+	wantMessage := "reserved intrinsic Kernel Interface kernel.health/v1: application package \"" + modulePath + "/interfaces/kernel/health/v1\" at " + wantSource + " uses the reserved kernel.* namespace; correction: remove the declaration and import the canonical Kernel Interface package"
+	if reserved.InterfaceID().String() != "kernel.health/v1" ||
+		reserved.PackagePath() != modulePath+"/interfaces/kernel/health/v1" ||
+		reserved.Source() != wantSource ||
+		reserved.ModulePath() != modulePath ||
+		reserved.SourcePath() != sourcePath ||
+		reserved.Line() != 5 ||
+		reserved.Column() != 1 ||
+		reserved.Error() != wantMessage {
+		t.Fatalf("ReservedInterfaceError = %#v / %q, want source %q and message %q", reserved, reserved.Error(), wantSource, wantMessage)
+	}
+}
+
 func TestResolveAppliesExplicitChoiceBeforeAmbiguity(t *testing.T) {
 	t.Parallel()
 

@@ -124,11 +124,20 @@ func buildCatalog(interfaces interfaceinventory.Index, implementations implement
 	}
 	for _, definition := range interfaces.Interfaces() {
 		identifier, err := interfaceid.Parse(definition.ID())
-		if err != nil || definition.PackagePath() == "" || definition.Source() == "" {
+		position := definition.Declaration().Position()
+		if err != nil || definition.PackagePath() == "" || definition.Source() == "" || definition.ModulePath() == "" || definition.SourcePath() == "" || position.Line < 1 || position.Column < 1 {
 			return catalog{}, fmt.Errorf("visible Interface has invalid identity or provenance: %q", definition.ID())
 		}
 		if strings.HasPrefix(identifier.Name(), "kernel.") {
-			return catalog{}, fmt.Errorf("%w %s: application package %q at %s uses the reserved kernel.* namespace; correction: remove the declaration and import the canonical Kernel Interface package", ErrReservedInterface, identifier, definition.PackagePath(), definition.Source())
+			return catalog{}, &ReservedInterfaceError{
+				interfaceID: identifier,
+				packagePath: definition.PackagePath(),
+				source:      definition.Source(),
+				modulePath:  definition.ModulePath(),
+				sourcePath:  definition.SourcePath(),
+				line:        position.Line,
+				column:      position.Column,
+			}
 		}
 		result.interfaces[identifier.String()] = definition
 	}

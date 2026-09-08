@@ -100,6 +100,92 @@ func (e *UnknownInterfaceError) Error() string {
 // Unwrap supports errors.Is with ErrUnknownInterface.
 func (*UnknownInterfaceError) Unwrap() error { return ErrUnknownInterface }
 
+// ReservedInterfaceError identifies one application-authored Interface in the
+// intrinsic kernel.* namespace and retains its exact declaration provenance.
+type ReservedInterfaceError struct {
+	interfaceID interfaceid.Identifier
+	packagePath string
+	source      string
+	modulePath  string
+	sourcePath  string
+	line        int
+	column      int
+}
+
+// InterfaceID returns the exact reserved Interface ID.
+func (e *ReservedInterfaceError) InterfaceID() interfaceid.Identifier {
+	if e == nil {
+		return interfaceid.Identifier{}
+	}
+	return e.interfaceID
+}
+
+// PackagePath returns the application-authored Go package that declared the
+// reserved Interface.
+func (e *ReservedInterfaceError) PackagePath() string {
+	if e == nil {
+		return ""
+	}
+	return e.packagePath
+}
+
+// Source returns the stable module-qualified declaration provenance retained
+// by the original human diagnostic.
+func (e *ReservedInterfaceError) Source() string {
+	if e == nil {
+		return ""
+	}
+	return e.source
+}
+
+// ModulePath returns the Go Module that owns the invalid declaration.
+func (e *ReservedInterfaceError) ModulePath() string {
+	if e == nil {
+		return ""
+	}
+	return e.modulePath
+}
+
+// SourcePath returns the slash-separated module-relative declaration path.
+func (e *ReservedInterfaceError) SourcePath() string {
+	if e == nil {
+		return ""
+	}
+	return e.sourcePath
+}
+
+// Line returns the one-based Interface directive line.
+func (e *ReservedInterfaceError) Line() int {
+	if e == nil {
+		return 0
+	}
+	return e.line
+}
+
+// Column returns the one-based Interface directive column.
+func (e *ReservedInterfaceError) Column() int {
+	if e == nil {
+		return 0
+	}
+	return e.column
+}
+
+func (e *ReservedInterfaceError) Error() string {
+	if e == nil {
+		return ErrReservedInterface.Error()
+	}
+	return fmt.Sprintf(
+		"%s %s: application package %q at %s uses the reserved kernel.* namespace; correction: remove the declaration and import the canonical Kernel Interface package",
+		ErrReservedInterface,
+		e.interfaceID,
+		e.packagePath,
+		e.source,
+	)
+}
+
+// Unwrap supports errors.Is with ErrReservedInterface.
+func (*ReservedInterfaceError) Unwrap() error { return ErrReservedInterface }
+
 // UnknownConstructorError identifies an explicit choice whose constructor is
 // outside the effective visible Project graph and retains every declaration
 // that contributed the rejected selection.

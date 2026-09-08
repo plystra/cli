@@ -897,15 +897,14 @@ func TestPublicResolvingCommandsRejectInvalidIntrinsicInterfaceWithoutMutation(t
 					before := commandTree(t, root)
 					exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
 					want = append(want, "Recovery:\n", "Diagnostic: "+code)
-					wantSources := 0
+					wantSource := "Source: example.com/command-intrinsic:interfaces/kernel/health/v1/interface.go:5:1 (interface-declaration)"
+					wantRecovery := "Remove the reported local kernel.* Interface declaration and import the canonical Kernel Interface package instead."
 					if !shadow {
-						wantSources = 1
-						wantSuffix := "\n\nSource: example.com/command-intrinsic:plystra.yaml:1:1 (declaration)\n\nRecovery:\nCorrect the reported Interface ID in plystra.yaml to one canonical Interface visible in the selected Go Module graph, then rerun the command.\n\nDiagnostic: " + code + "\n"
-						if !strings.HasSuffix(stderr, wantSuffix) {
-							t.Fatalf("%v omitted or reordered unknown Interface source: %q", arguments, stderr)
-						}
+						wantSource = "Source: example.com/command-intrinsic:plystra.yaml:1:1 (declaration)"
+						wantRecovery = "Correct the reported Interface ID in plystra.yaml to one canonical Interface visible in the selected Go Module graph, then rerun the command."
 					}
-					if exitCode != 1 || stdout != "" || !commandContainsAll(stderr, want...) || strings.Count(stderr, "Source: ") != wantSources {
+					wantSuffix := "\n\n" + wantSource + "\n\nRecovery:\n" + wantRecovery + "\n\nDiagnostic: " + code + "\n"
+					if exitCode != 1 || stdout != "" || !commandContainsAll(stderr, want...) || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 {
 						t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
 					}
 					if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
@@ -918,6 +917,61 @@ func TestPublicResolvingCommandsRejectInvalidIntrinsicInterfaceWithoutMutation(t
 				})
 			}
 		})
+	}
+}
+
+func TestPublicResolvingCommandsReportDependencyReservedInterfaceSourceWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	applicationRoot := filepath.Join(parent, "application")
+	dependencyRoot := filepath.Join(parent, "platform")
+	const dependencyModule = "example.com/reserved-platform"
+	writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), "module "+dependencyModule+"\n\ngo 1.26\n")
+	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
+	writeCommandGraphInterface(t, dependencyRoot, "kernel/info/v1", "infov1", "kernel.info/v1", "Info")
+	writeCommandFile(t, filepath.Join(dependencyRoot, "sentinel.txt"), "dependency remains unchanged\n")
+	writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/reserved-consumer
+
+go 1.26
+
+require example.com/reserved-platform v1.4.0
+
+replace example.com/reserved-platform => ../platform
+`)
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(applicationRoot, "generated", "sentinel.txt"), "application remains unchanged\n")
+	applicationBefore := commandTree(t, applicationRoot)
+	dependencyBefore := commandTree(t, dependencyRoot)
+
+	wantSuffix := strings.Join([]string{
+		"",
+		"Source: " + dependencyModule + ":interfaces/kernel/info/v1/interface.go:5:1 (interface-declaration)",
+		"",
+		"Recovery:",
+		"Remove the reported local kernel.* Interface declaration and import the canonical Kernel Interface package instead.",
+		"",
+		"Diagnostic: " + diagnosticcode.ResolveReservedInterface,
+		"",
+	}, "\n")
+	for _, arguments := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}} {
+		exitCode, stdout, stderr := runCommand(t, arguments, applicationRoot, commandGoEnvironment())
+		if exitCode != 1 || stdout != "" || !commandContainsAll(stderr, "kernel.info/v1", "reserved kernel.* namespace", "canonical Kernel Interface package") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 {
+			t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+		}
+		for _, privatePath := range []string{parent, applicationRoot, dependencyRoot} {
+			if strings.Contains(stderr, privatePath) || strings.Contains(stderr, filepath.ToSlash(privatePath)) {
+				t.Fatalf("%v exposed private path %q: %q", arguments, privatePath, stderr)
+			}
+		}
+		if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, applicationBefore) {
+			t.Fatalf("%v mutated application Project:\nbefore: %#v\nafter:  %#v", arguments, applicationBefore, after)
+		}
+		if after := commandTree(t, dependencyRoot); !reflect.DeepEqual(after, dependencyBefore) {
+			t.Fatalf("%v mutated dependency Project:\nbefore: %#v\nafter:  %#v", arguments, dependencyBefore, after)
+		}
+		assertNoCommandTransactions(t, applicationRoot)
+		assertNoCommandTransactions(t, dependencyRoot)
 	}
 }
 

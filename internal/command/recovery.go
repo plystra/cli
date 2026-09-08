@@ -457,6 +457,18 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: source.Column,
 			})
 		}
+	case diagnosticResolveReservedInterface:
+		var reserved *interfaceresolution.ReservedInterfaceError
+		if !errors.As(err, &reserved) || reserved == nil {
+			return nil
+		}
+		sources = append(sources, diagnosticjson.Source{
+			Module: reserved.ModulePath(),
+			Path:   reserved.SourcePath(),
+			Kind:   "interface-declaration",
+			Line:   reserved.Line(),
+			Column: reserved.Column(),
+		})
 	case diagnosticResolveMissingImplementation:
 		var missing *constructorgraph.MissingBindingError
 		if !errors.As(err, &missing) || missing == nil {

@@ -1094,11 +1094,72 @@ func TestResolveRejectsUnknownOrShadowedIntrinsicKernelInterfaceWithoutMutation(
 				if len(sources) != 1 || sources[0].Kind != interfaceresolution.RequirementDeclaration || sources[0].ModulePath != "example.com/intrinsic-application" || sources[0].Path != "plystra.yaml" || sources[0].Line != 1 || sources[0].Column != 1 {
 					t.Fatalf("unknown reserved Interface sources = %#v", sources)
 				}
+			} else {
+				var reserved *interfaceresolution.ReservedInterfaceError
+				if !errors.As(err, &reserved) ||
+					reserved.InterfaceID().String() != "kernel.health/v1" ||
+					reserved.PackagePath() != "example.com/intrinsic-application/interfaces/kernel/health/v1" ||
+					reserved.Source() != "example.com/intrinsic-application@local/interfaces/kernel/health/v1/interface.go:5:1" ||
+					reserved.ModulePath() != "example.com/intrinsic-application" ||
+					reserved.SourcePath() != "interfaces/kernel/health/v1/interface.go" ||
+					reserved.Line() != 5 || reserved.Column() != 1 {
+					t.Fatalf("ReservedInterfaceError = %#v", reserved)
+				}
 			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("failed intrinsic resolution mutated Project:\nbefore: %#v\nafter: %#v", before, after)
 			}
 		})
+	}
+}
+
+func TestResolveReportsDependencyOwnedReservedInterfaceSourceWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	dependencyRoot := filepath.Join(parent, "platform")
+	applicationRoot := filepath.Join(parent, "application")
+	const (
+		dependencyModule = "example.com/reserved-platform"
+		sourcePath       = "interfaces/kernel/info/v1/interface.go"
+	)
+	writeModule(t, dependencyRoot, dependencyModule)
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
+	writeResolvedInterface(t, dependencyRoot, "kernel/info/v1", "infov1", "kernel.info/v1", "Info")
+	writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/reserved-consumer
+
+go 1.26
+
+require example.com/reserved-platform v1.4.0
+
+replace example.com/reserved-platform => ../platform
+`)
+	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+	before := snapshotTree(t, parent)
+
+	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start: applicationRoot,
+		Environment: goEnvironment(map[string]string{
+			"GOWORK":  "off",
+			"GOPROXY": "off",
+			"GOSUMDB": "off",
+		}),
+	})
+	if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, interfaceresolution.ErrReservedInterface) || !containsResolutionFragments(err.Error(), "kernel.info/v1", "reserved kernel.* namespace", "canonical Kernel Interface package") {
+		t.Fatalf("Resolve dependency reserved Interface = %v", err)
+	}
+	var reserved *interfaceresolution.ReservedInterfaceError
+	if !errors.As(err, &reserved) ||
+		reserved.InterfaceID().String() != "kernel.info/v1" ||
+		reserved.PackagePath() != dependencyModule+"/interfaces/kernel/info/v1" ||
+		reserved.Source() != dependencyModule+"@v1.4.0/"+sourcePath+":5:1" ||
+		reserved.ModulePath() != dependencyModule ||
+		reserved.SourcePath() != sourcePath ||
+		reserved.Line() != 5 || reserved.Column() != 1 {
+		t.Fatalf("ReservedInterfaceError = %#v", reserved)
+	}
+	if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
+		t.Fatalf("dependency reserved Interface resolution mutated Projects:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 }
 

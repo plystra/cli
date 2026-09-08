@@ -154,6 +154,8 @@ conflicting selections emit the stable PLYSTRA_CONFIGURATION_SELECTION_INVALID
 diagnostic.
 PLYSTRA_RESOLVE_UNKNOWN_INTERFACE reports every module-relative requirement,
 exposure, or Implementation-selection source before selector-aware recovery.
+PLYSTRA_RESOLVE_RESERVED_INTERFACE reports the module-relative declaration that
+uses the reserved kernel.* namespace before recovery.
 `
 	checkUsage = `Usage:
   plystra check [--env <environment>|--config <yaml-path>]
@@ -175,6 +177,8 @@ contributing module-relative configuration-declaration source before
 selector-aware recovery.
 PLYSTRA_RESOLVE_UNKNOWN_INTERFACE reports every module-relative requirement,
 exposure, or Implementation-selection source before selector-aware recovery.
+PLYSTRA_RESOLVE_RESERVED_INTERFACE reports the module-relative declaration that
+uses the reserved kernel.* namespace before recovery.
 `
 	inspectUsage = `Usage:
   plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]

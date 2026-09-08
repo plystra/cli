@@ -832,6 +832,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"PLYSTRA_RESOLVE_UNKNOWN_INTERFACE",
 		"declaration, exposure, or",
 		"correct selected YAML",
+		"PLYSTRA_RESOLVE_RESERVED_INTERFACE",
 		"PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION",
 		"root and requiring-constructor sources",
 		"PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE",

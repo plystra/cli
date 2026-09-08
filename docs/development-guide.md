@@ -1964,6 +1964,12 @@ An unknown Interface emits every effective `interfaces.require` or
 current-Project reference retains the root, environment, or complete-replacement
 document, while an inherited same-valued reference retains every contributing
 dependency Project in deterministic module order.
+An application-authored `kernel.*` Interface uses
+`PLYSTRA_RESOLVE_RESERVED_INTERFACE` and emits its Go declaration as
+`interface-declaration`. The source retains the owning current or dependency
+Project module and module-relative path. Remove that declaration in its owning
+Project and import the canonical Kernel Interface package; never edit a Module
+Cache copy.
 An unknown, incompatible, or intrinsic explicit Interface Implementation choice
 emits every effective `interfaces.use` declaration as
 `implementation-selection`. Default, environment, and complete-replacement
