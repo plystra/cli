@@ -709,7 +709,7 @@ func groupRequirements(inputs []normalizedRequirement, candidates map[capability
 				}
 				issues = append(issues, &ProviderContractConflictError{
 					capability: inputs[first].id,
-					sources:    requirementSourceStrings(sources),
+					sources:    append([]RequirementSource(nil), sources...),
 					providers:  details,
 				})
 			} else {
@@ -1258,7 +1258,7 @@ func (p ProviderDetail) ContractDigest() string { return p.digest }
 // requirement contributes only an exact Capability ID and no baseline contract.
 type ProviderContractConflictError struct {
 	capability capabilityid.Identifier
-	sources    []string
+	sources    []RequirementSource
 	providers  []ProviderDetail
 }
 
@@ -1275,7 +1275,16 @@ func (e *ProviderContractConflictError) Sources() []string {
 	if e == nil {
 		return nil
 	}
-	return append([]string(nil), e.sources...)
+	return requirementSourceStrings(e.sources)
+}
+
+// RequirementSources returns sorted typed module-relative requirement
+// provenance without requiring consumers to parse diagnostic text.
+func (e *ProviderContractConflictError) RequirementSources() []RequirementSource {
+	if e == nil {
+		return nil
+	}
+	return append([]RequirementSource(nil), e.sources...)
 }
 
 // Providers returns every conflicting candidate in Plugin ID order.
@@ -1296,7 +1305,7 @@ func (e *ProviderContractConflictError) Error() string {
 		"%s: %s referenced by [%s] has providers carrying different exact contracts",
 		ErrProviderContract,
 		e.capability,
-		strings.Join(e.sources, ", "),
+		strings.Join(requirementSourceStrings(e.sources), ", "),
 	)
 	for _, provider := range e.providers {
 		fmt.Fprintf(&message, "; plugin %q at %q carries %s", provider.pluginID, provider.source, provider.digest)

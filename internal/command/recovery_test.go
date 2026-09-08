@@ -56,7 +56,7 @@ import (
 func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *testing.T) {
 	t.Parallel()
 
-	missing, ambiguous, invalidChoice, contractConflict := recoveryProviderFailures(t)
+	missing, ambiguous, invalidChoice, mismatch, contractConflict := recoveryProviderFailures(t)
 	tests := []struct {
 		name    string
 		err     error
@@ -95,10 +95,16 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			code:    diagnosticProviderSelectionInvalid,
 		},
 		{
+			name: "Provider contract mismatch",
+			err:  mismatch,
+			want: "Make every Provider of email.send/v1 carry one identical provider-independent capability.yaml.",
+			code: diagnosticProviderContractMismatch,
+		},
+		{
 			name: "Provider contract conflict",
 			err:  contractConflict,
 			want: "Make every Provider of email.send/v1 carry one identical provider-independent capability.yaml.",
-			code: diagnosticProviderContractMismatch,
+			code: diagnosticProviderContractConflict,
 		},
 		{
 			name:    "inherited configuration conflict",
@@ -253,7 +259,7 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 func TestWriteCommandFailureReportsProviderContractMismatchSources(t *testing.T) {
 	t.Parallel()
 
-	_, _, _, mismatch := recoveryProviderFailures(t)
+	_, _, _, mismatch, _ := recoveryProviderFailures(t)
 	var output strings.Builder
 	writeCommandFailure(&output, "generate", fmt.Errorf("resolve application: %w", mismatch), recoveryContext{})
 	got := output.String()
@@ -264,6 +270,24 @@ func TestWriteCommandFailureReportsProviderContractMismatchSources(t *testing.T)
 		"Diagnostic: " + diagnosticProviderContractMismatch + "\n"
 	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 2 {
 		t.Fatalf("Provider contract mismatch output = %q, want suffix %q", got, wantSuffix)
+	}
+}
+
+func TestWriteCommandFailureReportsProviderContractConflictSources(t *testing.T) {
+	t.Parallel()
+
+	_, _, _, _, conflict := recoveryProviderFailures(t)
+	var output strings.Builder
+	writeCommandFailure(&output, "generate", fmt.Errorf("resolve application: %w", conflict), recoveryContext{})
+	got := output.String()
+	wantSuffix := "\n\n" +
+		"Source: example.com/project:plystra.yaml:1:1 (declaration)\n" +
+		"Source: example.com/provider-local:local/capabilities/email.send/v1/capability.yaml:1:1 (provider-declaration)\n" +
+		"Source: example.com/provider-smtp:smtp/capabilities/email.send/v1/capability.yaml:1:1 (provider-declaration)\n\n" +
+		"Recovery:\nMake every Provider of email.send/v1 carry one identical provider-independent capability.yaml.\n\n" +
+		"Diagnostic: " + diagnosticProviderContractConflict + "\n"
+	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 3 {
+		t.Fatalf("Provider contract conflict output = %q, want suffix %q", got, wantSuffix)
 	}
 }
 
@@ -609,7 +633,7 @@ func FuzzRecoverySelectorDoesNotInjectDiagnosticLines(f *testing.F) {
 func TestWriteCommandFailureChoosesOneJoinedProblemAndLeavesUnknownErrorsUnchanged(t *testing.T) {
 	t.Parallel()
 
-	_, ambiguous, invalidChoice, _ := recoveryProviderFailures(t)
+	_, ambiguous, invalidChoice, _, _ := recoveryProviderFailures(t)
 	joined := errors.Join(ambiguous, invalidChoice)
 	var output strings.Builder
 	writeCommandFailure(&output, "", joined, recoveryContext{})
@@ -634,7 +658,7 @@ func TestWriteCommandFailureChoosesOneJoinedProblemAndLeavesUnknownErrorsUnchang
 	}
 }
 
-func recoveryProviderFailures(t *testing.T) (missing, ambiguous, invalidChoice, contractConflict error) {
+func recoveryProviderFailures(t *testing.T) (missing, ambiguous, invalidChoice, mismatch, contractConflict error) {
 	t.Helper()
 	contract := recoveryContract("string")
 	requirement := providerresolution.Requirement{
@@ -670,7 +694,7 @@ func recoveryProviderFailures(t *testing.T) (missing, ambiguous, invalidChoice, 
 			}},
 		}},
 	})
-	_, contractConflict = providerresolution.Resolve(providerresolution.Input{
+	_, mismatch = providerresolution.Resolve(providerresolution.Input{
 		Requirements: []providerresolution.Requirement{requirement},
 		Candidates: []providerresolution.Candidate{{
 			PluginID: "acme.email.local",
@@ -684,14 +708,44 @@ func recoveryProviderFailures(t *testing.T) (missing, ambiguous, invalidChoice, 
 			},
 		}},
 	})
+	_, contractConflict = providerresolution.Resolve(providerresolution.Input{
+		Requirements: []providerresolution.Requirement{{
+			Capability: "email.send/v1",
+			Source:     requirement.Source,
+		}},
+		Candidates: []providerresolution.Candidate{
+			{
+				PluginID: "acme.email.local",
+				Contract: contract,
+				Source:   "local/capability.yaml",
+				DeclarationSource: providerresolution.ProviderSource{
+					ModulePath: "example.com/provider-local",
+					Path:       "local/capabilities/email.send/v1/capability.yaml",
+					Line:       1,
+					Column:     1,
+				},
+			},
+			{
+				PluginID: "acme.email.smtp",
+				Contract: recoveryContract("boolean"),
+				Source:   "smtp/capability.yaml",
+				DeclarationSource: providerresolution.ProviderSource{
+					ModulePath: "example.com/provider-smtp",
+					Path:       "smtp/capabilities/email.send/v1/capability.yaml",
+					Line:       1,
+					Column:     1,
+				},
+			},
+		},
+	})
 	for name, err := range map[string]error{
-		"missing": missing, "ambiguous": ambiguous, "invalid choice": invalidChoice, "contract conflict": contractConflict,
+		"missing": missing, "ambiguous": ambiguous, "invalid choice": invalidChoice, "contract mismatch": mismatch, "contract conflict": contractConflict,
 	} {
 		if err == nil {
 			t.Fatalf("%s provider input unexpectedly resolved", name)
 		}
 	}
-	return missing, ambiguous, invalidChoice, contractConflict
+	return missing, ambiguous, invalidChoice, mismatch, contractConflict
 }
 
 func recoveryContract(fieldType string) []byte {

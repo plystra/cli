@@ -216,26 +216,60 @@ func TestResolveReferenceOnlyRequirementReportsMissingAndConflictingProviders(t 
 
 	t.Run("conflicting contracts", func(t *testing.T) {
 		t.Parallel()
+		declarationSource := requirementSource("plystra.yaml capabilities.require[audit.write/v1]")
+		generationSource := providerresolution.RequirementSource{
+			Kind:             providerresolution.RequirementGenerationRule,
+			Reference:        "generation rule require-audit",
+			ModulePath:       "example.com/security",
+			Path:             "authn/plugin.yaml",
+			Line:             1,
+			Column:           1,
+			PluginID:         "example.security",
+			Namespace:        "authn",
+			SourceCapability: "session.verify/v1",
+			RuleID:           "require-audit",
+		}
 		input := providerresolution.Input{
-			Requirements: []providerresolution.Requirement{{Capability: "audit.write/v1", Source: requirementSource("generation rule require-audit")}},
+			Requirements: []providerresolution.Requirement{
+				{Capability: "audit.write/v1", Source: generationSource},
+				{Capability: "audit.write/v1", Source: declarationSource},
+			},
 			Candidates: []providerresolution.Candidate{
-				{PluginID: "zeta.audit", Contract: contract("audit.write/v1", "extensions: {retention: {days: 30}}\n"), Source: "zeta/audit.write"},
-				{PluginID: "acme.audit", Contract: contract("audit.write/v1", "extensions: {retention: {days: 7}}\n"), Source: "acme/audit.write"},
+				{PluginID: "zeta.audit", Contract: contract("audit.write/v1", "extensions: {retention: {days: 30}}\n"), Source: "zeta/audit.write", DeclarationSource: providerSource("example.com/zeta", "audit/capabilities/audit.write/v1/capability.yaml")},
+				{PluginID: "acme.audit", Contract: contract("audit.write/v1", "extensions: {retention: {days: 7}}\n"), Source: "acme/audit.write", DeclarationSource: providerSource("example.com/acme", "audit/capabilities/audit.write/v1/capability.yaml")},
 			},
 		}
 		_, firstErr := providerresolution.Resolve(input)
+		slices.Reverse(input.Requirements)
 		slices.Reverse(input.Candidates)
 		_, secondErr := providerresolution.Resolve(input)
 		if !errors.Is(firstErr, providerresolution.ErrProviderContract) || firstErr.Error() != secondErr.Error() {
 			t.Fatalf("contract conflict diagnostics:\nfirst:  %v\nsecond: %v", firstErr, secondErr)
 		}
 		var conflict *providerresolution.ProviderContractConflictError
-		if !errors.As(firstErr, &conflict) || conflict.Capability().String() != "audit.write/v1" || !slices.Equal(conflict.Sources(), []string{"generation rule require-audit"}) {
+		if !errors.As(firstErr, &conflict) || conflict.Capability().String() != "audit.write/v1" || !slices.Equal(conflict.Sources(), []string{"generation rule require-audit", "plystra.yaml capabilities.require[audit.write/v1]"}) {
 			t.Fatalf("ProviderContractConflictError = %#v", conflict)
+		}
+		requirementSources := conflict.RequirementSources()
+		if !reflect.DeepEqual(requirementSources, []providerresolution.RequirementSource{declarationSource, generationSource}) {
+			t.Fatalf("contract conflict requirement sources = %#v", requirementSources)
+		}
+		requirementSources[0] = providerresolution.RequirementSource{}
+		if conflict.RequirementSources()[0].ModulePath != declarationSource.ModulePath {
+			t.Fatal("ProviderContractConflictError exposed mutable typed requirement sources")
 		}
 		providers := conflict.Providers()
 		if len(providers) != 2 || providers[0].PluginID() != "acme.audit" || providers[1].PluginID() != "zeta.audit" || providers[0].ContractDigest() == providers[1].ContractDigest() {
 			t.Fatalf("conflicting Providers = %#v", providers)
+		}
+		for index, want := range []providerresolution.ProviderSource{
+			providerSource("example.com/acme", "audit/capabilities/audit.write/v1/capability.yaml"),
+			providerSource("example.com/zeta", "audit/capabilities/audit.write/v1/capability.yaml"),
+		} {
+			got, available := providers[index].DeclarationSource()
+			if !available || got != want {
+				t.Fatalf("conflicting Provider %d declaration source = %#v, %t; want %#v", index, got, available, want)
+			}
 		}
 		providers[0] = providerresolution.ProviderDetail{}
 		if conflict.Providers()[0].PluginID() != "acme.audit" {
