@@ -577,7 +577,10 @@ func TestResolveRejectsInvalidExplicitChoices(t *testing.T) {
 			problem: providerresolution.ChoiceUnrequiredCapability,
 		},
 		"unknown plugin": {
-			choice:  providerresolution.Choice{Capability: "email.send/v1", PluginID: "missing.email", Sources: choiceSources("choice/unknown-plugin")},
+			choice: providerresolution.Choice{Capability: "email.send/v1", PluginID: "missing.email", Sources: []providerresolution.ChoiceSource{
+				{Kind: providerresolution.ChoiceSourceDependencyProject, Reference: "a choice/unknown-plugin", ModulePath: "example.com/a", Path: "plystra.yaml", Line: 1, Column: 1},
+				{Kind: providerresolution.ChoiceSourceDependencyProject, Reference: "b choice/unknown-plugin", ModulePath: "example.com/b", Path: "plystra.yaml", Line: 2, Column: 3},
+			}},
 			problem: providerresolution.ChoiceUnknownPlugin,
 		},
 		"non provider": {
@@ -597,6 +600,14 @@ func TestResolveRejectsInvalidExplicitChoices(t *testing.T) {
 			var choice *providerresolution.ChoiceError
 			if !errors.As(err, &choice) || choice.Problem() != test.problem || choice.Source() != test.choice.Sources[0].Reference || choice.PluginID() != test.choice.PluginID {
 				t.Fatalf("ChoiceError = %#v", choice)
+			}
+			sources := choice.ChoiceSources()
+			if !slices.Equal(sources, test.choice.Sources) {
+				t.Fatalf("ChoiceError.ChoiceSources = %#v, want %#v", sources, test.choice.Sources)
+			}
+			sources[0] = providerresolution.ChoiceSource{}
+			if choice.ChoiceSources()[0] != test.choice.Sources[0] {
+				t.Fatal("ChoiceError exposed mutable typed source storage")
 			}
 		})
 	}

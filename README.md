@@ -798,6 +798,8 @@ declaration or package source. `PLYSTRA_PROVIDER_MISSING` reports every typed
 requirement source that made the exact Capability necessary.
 `PLYSTRA_PROVIDER_AMBIGUOUS` reports those requirement sources together with
 every compatible Provider's `capability.yaml` declaration.
+`PLYSTRA_PROVIDER_SELECTION_INVALID` reports every effective
+`capabilities.use` declaration that created the rejected choice.
 
 Configuration-selection failures use
 `PLYSTRA_CONFIGURATION_SELECTION_INVALID`. An explicit `--env` plus `--config`

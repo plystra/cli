@@ -839,6 +839,7 @@ func newChoiceError(choice normalizedChoice, problem ChoiceProblem, detail strin
 		capability: choice.capability,
 		pluginID:   choice.pluginID,
 		source:     choice.sources[0].Reference,
+		sources:    append([]ChoiceSource(nil), choice.sources...),
 		problem:    problem,
 		detail:     detail,
 	}
@@ -1479,6 +1480,7 @@ type ChoiceError struct {
 	capability capabilityid.Identifier
 	pluginID   string
 	source     string
+	sources    []ChoiceSource
 	problem    ChoiceProblem
 	detail     string
 }
@@ -1505,6 +1507,15 @@ func (e *ChoiceError) Source() string {
 		return ""
 	}
 	return e.source
+}
+
+// ChoiceSources returns every sorted typed module-relative declaration that
+// contributed the invalid effective selection.
+func (e *ChoiceError) ChoiceSources() []ChoiceSource {
+	if e == nil {
+		return nil
+	}
+	return append([]ChoiceSource(nil), e.sources...)
 }
 
 // Problem returns a stable machine-readable problem label.
