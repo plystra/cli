@@ -273,6 +273,49 @@ func TestWriteCommandFailureReportsProviderContractMismatchSources(t *testing.T)
 	}
 }
 
+func TestWriteCommandFailureReportsCapabilityRequirementConflictSources(t *testing.T) {
+	t.Parallel()
+
+	declarationSource := providerresolution.RequirementSource{
+		Kind:       providerresolution.RequirementDeclaration,
+		Reference:  "plystra.yaml capabilities.require[email.send/v1]",
+		ModulePath: "example.com/project",
+		Path:       "plystra.yaml",
+		Line:       1,
+		Column:     1,
+	}
+	generationSource := providerresolution.RequirementSource{
+		Kind:             providerresolution.RequirementGenerationRule,
+		Reference:        "generation rule require-email",
+		ModulePath:       "example.com/security",
+		Path:             "authn/plugin.yaml",
+		Line:             2,
+		Column:           3,
+		PluginID:         "example.security",
+		Namespace:        "authn",
+		SourceCapability: "session.verify/v1",
+		RuleID:           "require-email",
+	}
+	_, conflict := providerresolution.Resolve(providerresolution.Input{Requirements: []providerresolution.Requirement{
+		{Contract: recoveryContract("boolean"), Source: generationSource},
+		{Contract: recoveryContract("string"), Source: declarationSource},
+	}})
+	if !errors.Is(conflict, providerresolution.ErrRequirementConflict) {
+		t.Fatalf("Resolve error = %v, want ErrRequirementConflict", conflict)
+	}
+	var output strings.Builder
+	writeCommandFailure(&output, "generate", fmt.Errorf("resolve application: %w", conflict), recoveryContext{})
+	got := output.String()
+	wantSuffix := "\n\n" +
+		"Source: example.com/project:plystra.yaml:1:1 (declaration)\n" +
+		"Source: example.com/security:authn/plugin.yaml:2:3 (generation-rule)\n\n" +
+		"Recovery:\nMake every Provider of email.send/v1 carry one identical provider-independent capability.yaml.\n\n" +
+		"Diagnostic: " + diagnosticCapabilityRequirementConflict + "\n"
+	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 2 {
+		t.Fatalf("Capability requirement conflict output = %q, want suffix %q", got, wantSuffix)
+	}
+}
+
 func TestWriteCommandFailureReportsProviderContractConflictSources(t *testing.T) {
 	t.Parallel()
 

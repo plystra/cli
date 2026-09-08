@@ -674,23 +674,23 @@ func groupRequirements(inputs []normalizedRequirement, candidates map[capability
 		for last < len(inputs) && inputs[last].id == inputs[first].id {
 			last++
 		}
-		contracts := make([]normalizedContract, 0, last-first)
+		contractRequirements := make([]normalizedRequirement, 0, last-first)
 		sources := make([]RequirementSource, 0, last-first)
 		for _, input := range inputs[first:last] {
 			sources = append(sources, input.source)
 			if input.hasContract {
-				contracts = append(contracts, input.contract)
+				contractRequirements = append(contractRequirements, input)
 			}
 		}
 		sources = uniqueRequirementSources(sources)
-		variants := contractVariants(contracts)
+		variants := contractVariants(contractRequirements)
 		if len(variants) > 1 {
 			issues = append(issues, &RequirementConflictError{capability: inputs[first].id, variants: variants})
 		} else if len(variants) == 1 {
 			groups = append(groups, requirementGroup{
 				id:           inputs[first].id,
-				contractJSON: append([]byte(nil), contracts[0].json...),
-				digest:       contracts[0].digest,
+				contractJSON: append([]byte(nil), contractRequirements[0].contract.json...),
+				digest:       contractRequirements[0].contract.digest,
 				sources:      sources,
 			})
 		} else if isIntrinsic(inputs[first].id) {
@@ -845,18 +845,18 @@ func newChoiceError(choice normalizedChoice, problem ChoiceProblem, detail strin
 	}
 }
 
-func contractVariants(inputs []normalizedContract) []ContractVariant {
+func contractVariants(inputs []normalizedRequirement) []ContractVariant {
 	variants := make([]ContractVariant, 0)
 	for first := 0; first < len(inputs); {
 		last := first + 1
-		for last < len(inputs) && inputs[last].digest == inputs[first].digest && bytes.Equal(inputs[last].json, inputs[first].json) {
+		for last < len(inputs) && inputs[last].contract.digest == inputs[first].contract.digest && bytes.Equal(inputs[last].contract.json, inputs[first].contract.json) {
 			last++
 		}
-		sources := make([]string, 0, last-first)
+		sources := make([]RequirementSource, 0, last-first)
 		for _, input := range inputs[first:last] {
 			sources = append(sources, input.source)
 		}
-		variants = append(variants, ContractVariant{digest: inputs[first].digest, sources: uniqueStrings(sources)})
+		variants = append(variants, ContractVariant{digest: inputs[first].contract.digest, sources: uniqueRequirementSources(sources)})
 		first = last
 	}
 	return variants
@@ -1183,14 +1183,20 @@ func (e *ResolutionError) Unwrap() []error {
 // ContractVariant identifies one exact contract required under a shared ID.
 type ContractVariant struct {
 	digest  string
-	sources []string
+	sources []RequirementSource
 }
 
 // Digest returns the exact canonical contract digest.
 func (v ContractVariant) Digest() string { return v.digest }
 
-// Sources returns every sorted provenance location requiring this variant.
-func (v ContractVariant) Sources() []string { return append([]string(nil), v.sources...) }
+// Sources returns every sorted diagnostic reference requiring this variant.
+func (v ContractVariant) Sources() []string { return requirementSourceStrings(v.sources) }
+
+// RequirementSources returns sorted typed module-relative requirement
+// provenance without requiring consumers to parse diagnostic text.
+func (v ContractVariant) RequirementSources() []RequirementSource {
+	return append([]RequirementSource(nil), v.sources...)
+}
 
 // RequirementConflictError reports multiple exact contracts under one ID.
 type RequirementConflictError struct {
@@ -1221,7 +1227,7 @@ func (e *RequirementConflictError) Error() string {
 	var message strings.Builder
 	fmt.Fprintf(&message, "%s: %s is required with different exact contracts", ErrRequirementConflict, e.capability)
 	for _, variant := range e.variants {
-		fmt.Fprintf(&message, "; %s from [%s]", variant.digest, strings.Join(variant.sources, ", "))
+		fmt.Fprintf(&message, "; %s from [%s]", variant.digest, strings.Join(variant.Sources(), ", "))
 	}
 	fmt.Fprintf(&message, "; correction: every source must require one provider-independent contract, or a semantic change must use a new /vN")
 	return message.String()

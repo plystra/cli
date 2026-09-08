@@ -794,8 +794,10 @@ Multiple sources use the shared diagnostic-envelope order. The CLI prints the
 owning Project module, never an absolute path or Module Cache path, and omits
 rather than fabricates a line or column when structured provenance does not
 provide one. Authored Interface and Implementation failures report their
-declaration or package source. `PLYSTRA_PROVIDER_MISSING` reports every typed
-requirement source that made the exact Capability necessary.
+declaration or package source. `PLYSTRA_CAPABILITY_REQUIREMENT_CONFLICT`
+reports every source that requires one of the incompatible exact contracts.
+`PLYSTRA_PROVIDER_MISSING` reports every typed requirement source that made the
+exact Capability necessary.
 `PLYSTRA_PROVIDER_AMBIGUOUS` reports those requirement sources together with
 every compatible Provider's `capability.yaml` declaration.
 `PLYSTRA_PROVIDER_SELECTION_INVALID` reports every effective

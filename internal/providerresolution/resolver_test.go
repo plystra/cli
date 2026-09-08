@@ -588,24 +588,75 @@ func TestResolveRejectsProviderLocalConstraintOverride(t *testing.T) {
 func TestResolveRejectsConflictingRequirementContracts(t *testing.T) {
 	t.Parallel()
 
+	declarationSource := requirementSource("protected-client")
+	generationSource := providerresolution.RequirementSource{
+		Kind:             providerresolution.RequirementGenerationRule,
+		Reference:        "generation rule protected-client",
+		ModulePath:       "example.com/security",
+		Path:             "authn/plugin.yaml",
+		Line:             1,
+		Column:           1,
+		PluginID:         "example.security",
+		Namespace:        "authn",
+		SourceCapability: "session.verify/v1",
+		RuleID:           "protect-order-cancel",
+	}
+	exposureSource := providerresolution.RequirementSource{
+		Kind:       providerresolution.RequirementExposure,
+		Reference:  "public-client",
+		ModulePath: "example.com/project",
+		Path:       "routes/plystra.yaml",
+		Line:       4,
+		Column:     5,
+	}
+	protected := contract("order.cancel/v1", "extensions: {authn: {authenticated: true}}\n")
 	input := providerresolution.Input{Requirements: []providerresolution.Requirement{
-		{Contract: contract("order.cancel/v1", "extensions: {authn: {authenticated: true}}\n"), Source: requirementSource("protected-client")},
-		{Contract: contract("order.cancel/v1", ""), Source: requirementSource("public-client")},
+		{Contract: protected, Source: generationSource},
+		{Contract: contract("order.cancel/v1", ""), Source: exposureSource},
+		{Contract: protected, Source: declarationSource},
 	}}
 	_, err := providerresolution.Resolve(input)
+	slices.Reverse(input.Requirements)
+	_, reorderedErr := providerresolution.Resolve(input)
 	if !errors.Is(err, providerresolution.ErrRequirementConflict) {
 		t.Fatalf("Resolve error = %v, want ErrRequirementConflict", err)
+	}
+	if reorderedErr == nil || err.Error() != reorderedErr.Error() {
+		t.Fatalf("requirement conflict diagnostic changed with input order:\nfirst:  %v\nsecond: %v", err, reorderedErr)
 	}
 	var conflict *providerresolution.RequirementConflictError
 	if !errors.As(err, &conflict) || conflict.Capability().String() != "order.cancel/v1" || len(conflict.Variants()) != 2 {
 		t.Fatalf("RequirementConflictError = %#v", conflict)
 	}
 	variants := conflict.Variants()
+	wantSources := map[string][]providerresolution.RequirementSource{
+		"generation rule protected-client|protected-client": {declarationSource, generationSource},
+		"public-client": {exposureSource},
+	}
+	for index, variant := range variants {
+		references := strings.Join(variant.Sources(), "|")
+		want, exists := wantSources[references]
+		if !exists {
+			t.Fatalf("contract variant %d references = %q", index, references)
+		}
+		typed := variant.RequirementSources()
+		if !reflect.DeepEqual(typed, want) {
+			t.Fatalf("contract variant %d typed sources = %#v; want %#v", index, typed, want)
+		}
+		typed[0] = providerresolution.RequirementSource{}
+		if reflect.DeepEqual(variant.RequirementSources()[0], providerresolution.RequirementSource{}) {
+			t.Fatalf("ContractVariant %d exposed mutable typed requirement sources", index)
+		}
+		delete(wantSources, references)
+	}
+	if len(wantSources) != 0 {
+		t.Fatalf("missing contract variants for sources %#v", wantSources)
+	}
 	variants[0] = providerresolution.ContractVariant{}
 	if len(conflict.Variants()[0].Sources()) == 0 {
 		t.Fatal("RequirementConflictError exposed mutable variants")
 	}
-	for _, detail := range []string{"protected-client", "public-client", "provider-independent", "new /vN"} {
+	for _, detail := range []string{"generation rule protected-client", "protected-client", "public-client", "provider-independent", "new /vN"} {
 		if !strings.Contains(err.Error(), detail) {
 			t.Fatalf("requirement conflict omits %q: %v", detail, err)
 		}
