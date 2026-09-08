@@ -36,6 +36,70 @@ var (
 	ErrIntrinsicChoice = errors.New("intrinsic Kernel Interface cannot select an Implementation")
 )
 
+// UnknownInterfaceError identifies one required or explicitly selected
+// Interface that is absent from the visible canonical catalog and retains
+// every declaration that introduced that exact reference.
+type UnknownInterfaceError struct {
+	interfaceID        interfaceid.Identifier
+	kernelAPI          bool
+	requirementSources []RequirementSource
+	choiceSources      []ChoiceSource
+}
+
+// InterfaceID returns the exact missing Interface ID.
+func (e *UnknownInterfaceError) InterfaceID() interfaceid.Identifier {
+	if e == nil {
+		return interfaceid.Identifier{}
+	}
+	return e.interfaceID
+}
+
+// RequirementSources returns every sorted typed requirement or exposure that
+// introduced the missing Interface.
+func (e *UnknownInterfaceError) RequirementSources() []RequirementSource {
+	if e == nil {
+		return nil
+	}
+	return append([]RequirementSource(nil), e.requirementSources...)
+}
+
+// ChoiceSources returns every sorted typed interfaces.use declaration that
+// selected the missing Interface.
+func (e *UnknownInterfaceError) ChoiceSources() []ChoiceSource {
+	if e == nil {
+		return nil
+	}
+	return append([]ChoiceSource(nil), e.choiceSources...)
+}
+
+func (e *UnknownInterfaceError) Error() string {
+	if e == nil {
+		return ErrUnknownInterface.Error()
+	}
+	if len(e.choiceSources) != 0 {
+		return fmt.Sprintf(
+			"%s: interfaces.use[%q] is not defined by a visible canonical package",
+			ErrUnknownInterface,
+			e.interfaceID,
+		)
+	}
+	if e.kernelAPI {
+		return fmt.Sprintf(
+			"%s: required reserved Interface %s is not published by the selected Kernel API",
+			ErrUnknownInterface,
+			e.interfaceID,
+		)
+	}
+	return fmt.Sprintf(
+		"%s: required Interface %s is not defined by a visible canonical package",
+		ErrUnknownInterface,
+		e.interfaceID,
+	)
+}
+
+// Unwrap supports errors.Is with ErrUnknownInterface.
+func (*UnknownInterfaceError) Unwrap() error { return ErrUnknownInterface }
+
 // UnknownConstructorError identifies an explicit choice whose constructor is
 // outside the effective visible Project graph and retains every declaration
 // that contributed the rejected selection.

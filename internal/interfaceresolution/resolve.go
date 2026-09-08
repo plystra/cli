@@ -185,6 +185,7 @@ func buildCatalog(interfaces interfaceinventory.Index, implementations implement
 func normalizeRequirements(inputs []Requirement, interfaces map[string]interfaceinventory.Interface, intrinsics map[string]intrinsicinterface.Definition) ([]Requirement, []IntrinsicRequirement, error) {
 	result := make([]Requirement, 0, len(inputs))
 	intrinsicSources := make(map[string][]string, len(intrinsics))
+	unknown := make(map[string]*UnknownInterfaceError)
 	for identifier, definition := range intrinsics {
 		intrinsicSources[identifier] = []string{definition.Source()}
 	}
@@ -201,12 +202,34 @@ func normalizeRequirements(inputs []Requirement, interfaces map[string]interface
 			continue
 		}
 		if strings.HasPrefix(input.InterfaceID.Name(), "kernel.") {
-			return nil, nil, fmt.Errorf("%w: required reserved Interface %s is not published by the selected Kernel API", ErrUnknownInterface, input.InterfaceID)
+			missing := unknown[identifier]
+			if missing == nil {
+				missing = &UnknownInterfaceError{interfaceID: input.InterfaceID, kernelAPI: true}
+				unknown[identifier] = missing
+			}
+			missing.requirementSources = append(missing.requirementSources, input.Source)
+			continue
 		}
 		if _, visible := interfaces[identifier]; !visible {
-			return nil, nil, fmt.Errorf("%w: required Interface %s is not defined by a visible canonical package", ErrUnknownInterface, input.InterfaceID)
+			missing := unknown[identifier]
+			if missing == nil {
+				missing = &UnknownInterfaceError{interfaceID: input.InterfaceID}
+				unknown[identifier] = missing
+			}
+			missing.requirementSources = append(missing.requirementSources, input.Source)
+			continue
 		}
 		result = append(result, Requirement{InterfaceID: input.InterfaceID, Source: input.Source})
+	}
+	if len(unknown) != 0 {
+		identifiers := make([]string, 0, len(unknown))
+		for identifier := range unknown {
+			identifiers = append(identifiers, identifier)
+		}
+		sort.Strings(identifiers)
+		missing := unknown[identifiers[0]]
+		missing.requirementSources = uniqueSortedRequirementSources(missing.requirementSources)
+		return nil, nil, missing
 	}
 	sort.Slice(result, func(left, right int) bool {
 		if result[left].InterfaceID != result[right].InterfaceID {
@@ -248,7 +271,10 @@ func normalizeChoices(inputs []Choice, catalog catalog) (map[string]normalizedCh
 			}
 		}
 		if _, visible := catalog.interfaces[identifier]; !visible {
-			return nil, fmt.Errorf("%w: interfaces.use[%q] is not defined by a visible canonical package", ErrUnknownInterface, identifier)
+			return nil, &UnknownInterfaceError{
+				interfaceID:   input.InterfaceID,
+				choiceSources: sources,
+			}
 		}
 		constructor, visible := catalog.constructors[constructorID]
 		if !visible {
@@ -406,6 +432,37 @@ func uniqueSortedChoiceSources(values []ChoiceSource) []ChoiceSource {
 		result = append(result, value)
 	}
 	return append([]ChoiceSource(nil), result...)
+}
+
+func uniqueSortedRequirementSources(values []RequirementSource) []RequirementSource {
+	result := append([]RequirementSource(nil), values...)
+	sort.Slice(result, func(left, right int) bool {
+		leftKey := requirementSourceKey(result[left])
+		rightKey := requirementSourceKey(result[right])
+		if leftKey != rightKey {
+			return leftKey < rightKey
+		}
+		return result[left].Reference < result[right].Reference
+	})
+	write := 0
+	for _, value := range result {
+		if write != 0 && result[write-1] == value {
+			continue
+		}
+		result[write] = value
+		write++
+	}
+	return append([]RequirementSource(nil), result[:write]...)
+}
+
+func requirementSourceKey(value RequirementSource) string {
+	return strings.Join([]string{
+		value.ModulePath,
+		value.Path,
+		fmt.Sprintf("%010d", value.Line),
+		fmt.Sprintf("%010d", value.Column),
+		string(value.Kind),
+	}, "\x00")
 }
 
 func choiceSourceKey(value ChoiceSource) string {

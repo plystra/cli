@@ -30,6 +30,12 @@ const (
 	wantImplementUsage           = "Usage:\n  plystra implement <interface-id> --package <project-relative-package>\n\nCreates a new ordinary Go package that implements one visible canonical\nInterface. The package path must begin with ./ and its target directory must not\nalready exist. The scaffold imports the canonical Interface package and creates\nno copied contract, generated substitute, configuration, or registration code.\n"
 )
 
+const (
+	wantUnknownInterfaceSourceUsage = "PLYSTRA_RESOLVE_UNKNOWN_INTERFACE reports every module-relative requirement,\nexposure, or Implementation-selection source before selector-aware recovery.\n"
+	wantGenerateUsageWithSources    = wantGenerateUsage + wantUnknownInterfaceSourceUsage
+	wantCheckUsageWithSources       = wantCheckUsage + wantUnknownInterfaceSourceUsage
+)
+
 func TestRunHelp(t *testing.T) {
 	t.Parallel()
 
@@ -58,7 +64,7 @@ func TestRunGenerateHelp(t *testing.T) {
 	for _, argument := range []string{"help", "-h", "--help"} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
-		if exitCode := command.Run([]string{"generate", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantGenerateUsage || stderr.Len() != 0 {
+		if exitCode := command.Run([]string{"generate", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantGenerateUsageWithSources || stderr.Len() != 0 {
 			t.Fatalf("Run(generate %s) = exit %d, stdout %q, stderr %q", argument, exitCode, stdout.String(), stderr.String())
 		}
 	}
@@ -70,7 +76,7 @@ func TestRunCheckHelp(t *testing.T) {
 	for _, argument := range []string{"help", "-h", "--help"} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
-		if exitCode := command.Run([]string{"check", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantCheckUsage || stderr.Len() != 0 {
+		if exitCode := command.Run([]string{"check", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantCheckUsageWithSources || stderr.Len() != 0 {
 			t.Fatalf("Run(check %s) = exit %d, stdout %q, stderr %q", argument, exitCode, stdout.String(), stderr.String())
 		}
 	}
@@ -361,12 +367,12 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "explain duplicate configuration", arguments: []string{"explain", "capability", "email.send/v1", "--config", "a.yaml", "--config", "b.yaml"}, wantError: wantExplainCapabilityUsage},
 		{name: "explain missing environment", arguments: []string{"explain", "capability", "email.send/v1", "--env"}, wantError: wantExplainCapabilityUsage},
 		{name: "explain duplicate environment", arguments: []string{"explain", "capability", "email.send/v1", "--env", "test", "--env", "production"}, wantError: wantExplainCapabilityUsage},
-		{name: "generate unknown option", arguments: []string{"generate", "--write"}, wantError: wantGenerateUsage},
-		{name: "generate duplicate check", arguments: []string{"generate", "--check", "--check"}, wantError: wantGenerateUsage},
-		{name: "generate missing configuration path", arguments: []string{"generate", "--config"}, wantError: wantGenerateUsage},
-		{name: "generate duplicate configuration", arguments: []string{"generate", "--config", "a.yaml", "--config", "b.yaml"}, wantError: wantGenerateUsage},
-		{name: "generate missing environment", arguments: []string{"generate", "--env"}, wantError: wantGenerateUsage},
-		{name: "generate duplicate environment", arguments: []string{"generate", "--env", "test", "--env", "production"}, wantError: wantGenerateUsage},
+		{name: "generate unknown option", arguments: []string{"generate", "--write"}, wantError: wantGenerateUsageWithSources},
+		{name: "generate duplicate check", arguments: []string{"generate", "--check", "--check"}, wantError: wantGenerateUsageWithSources},
+		{name: "generate missing configuration path", arguments: []string{"generate", "--config"}, wantError: wantGenerateUsageWithSources},
+		{name: "generate duplicate configuration", arguments: []string{"generate", "--config", "a.yaml", "--config", "b.yaml"}, wantError: wantGenerateUsageWithSources},
+		{name: "generate missing environment", arguments: []string{"generate", "--env"}, wantError: wantGenerateUsageWithSources},
+		{name: "generate duplicate environment", arguments: []string{"generate", "--env", "test", "--env", "production"}, wantError: wantGenerateUsageWithSources},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

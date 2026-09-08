@@ -136,6 +136,18 @@ func TestResolveCollectsIntrinsicKernelRequirementsOutsideImplementationSelectio
 	if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, interfaceresolution.ErrUnknownInterface) || !containsAll(err.Error(), unknownID.String(), "selected Kernel API") {
 		t.Fatalf("unknown intrinsic error = %v", err)
 	}
+	var unknown *interfaceresolution.UnknownInterfaceError
+	if !errors.As(err, &unknown) || unknown.InterfaceID() != unknownID || len(unknown.ChoiceSources()) != 0 {
+		t.Fatalf("UnknownInterfaceError = %#v", unknown)
+	}
+	requirementSources := unknown.RequirementSources()
+	if len(requirementSources) != 1 || requirementSources[0].Kind != interfaceresolution.RequirementDeclaration || requirementSources[0].ModulePath != "example.com/application" || requirementSources[0].Path != "plystra.yaml" {
+		t.Fatalf("unknown intrinsic requirement sources = %#v", requirementSources)
+	}
+	requirementSources[0] = interfaceresolution.RequirementSource{}
+	if repeated := unknown.RequirementSources(); len(repeated) != 1 || repeated[0].ModulePath != "example.com/application" {
+		t.Fatal("UnknownInterfaceError exposed mutable requirement source storage")
+	}
 
 	healthConstructor := mustResolutionSymbol(t, "example.com/application/health.New")
 	wantChoiceSource := resolutionChoiceSource(`plystra.yaml interfaces.use["kernel.health/v1"]`, "example.com/application", "plystra.yaml")
@@ -155,6 +167,70 @@ func TestResolveCollectsIntrinsicKernelRequirementsOutsideImplementationSelectio
 	choiceSources[0] = interfaceresolution.ChoiceSource{}
 	if !reflect.DeepEqual(intrinsic.ChoiceSources(), []interfaceresolution.ChoiceSource{wantChoiceSource}) {
 		t.Fatal("IntrinsicChoiceError exposed mutable source storage")
+	}
+}
+
+func TestResolveReportsEveryUnknownInterfaceSourceDeterministically(t *testing.T) {
+	t.Parallel()
+
+	missingID := mustResolutionID(t, "records.missing/v1")
+	alpha := resolutionRequirement(
+		missingID,
+		`example.com/alpha@v1.0.0/plystra.yaml interfaces.require["records.missing/v1"]`,
+		interfaceresolution.RequirementDeclaration,
+	)
+	alpha.Source.ModulePath = "example.com/alpha"
+	zeta := resolutionRequirement(
+		missingID,
+		`example.com/zeta@v1.0.0/plystra.yaml http.expose["records.missing/v1"]`,
+		interfaceresolution.RequirementExposure,
+	)
+	zeta.Source.ModulePath = "example.com/zeta"
+	zeta.Source.Path = "deploy/customer.yaml"
+
+	wantSources := []interfaceresolution.RequirementSource{alpha.Source, zeta.Source}
+	var firstError string
+	for _, requirements := range [][]interfaceresolution.Requirement{{zeta, alpha}, {alpha, zeta}} {
+		_, err := interfaceresolution.Resolve(interfaceresolution.Input{Requirements: requirements})
+		if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, interfaceresolution.ErrUnknownInterface) || !containsAll(err.Error(), missingID.String(), "visible canonical package") {
+			t.Fatalf("unknown requirement error = %v", err)
+		}
+		var unknown *interfaceresolution.UnknownInterfaceError
+		if !errors.As(err, &unknown) || unknown.InterfaceID() != missingID || len(unknown.ChoiceSources()) != 0 || !reflect.DeepEqual(unknown.RequirementSources(), wantSources) {
+			t.Fatalf("UnknownInterfaceError = %#v", unknown)
+		}
+		if firstError == "" {
+			firstError = err.Error()
+		} else if err.Error() != firstError {
+			t.Fatalf("unknown Interface error depends on requirement order:\nfirst: %s\nnext:  %s", firstError, err)
+		}
+	}
+
+	constructor := mustResolutionSymbol(t, "example.com/application/records.New")
+	choiceSources := []interfaceresolution.ChoiceSource{
+		resolutionChoiceSource(`example.com/zeta@v1.0.0/plystra.yaml interfaces.use["records.missing/v1"]`, "example.com/zeta", "plystra.yaml"),
+		resolutionChoiceSource(`example.com/alpha@v1.0.0/plystra.yaml interfaces.use["records.missing/v1"]`, "example.com/alpha", "plystra.yaml"),
+	}
+	_, err := interfaceresolution.Resolve(interfaceresolution.Input{Choices: []interfaceresolution.Choice{{
+		InterfaceID: missingID,
+		Constructor: constructor,
+		Sources:     choiceSources,
+	}}})
+	if !errors.Is(err, interfaceresolution.ErrResolve) || !errors.Is(err, interfaceresolution.ErrUnknownInterface) || !containsAll(err.Error(), `interfaces.use["records.missing/v1"]`, "visible canonical package") {
+		t.Fatalf("unknown choice error = %v", err)
+	}
+	var unknown *interfaceresolution.UnknownInterfaceError
+	if !errors.As(err, &unknown) || unknown.InterfaceID() != missingID || len(unknown.RequirementSources()) != 0 {
+		t.Fatalf("unknown choice error = %#v", unknown)
+	}
+	wantChoiceSources := []interfaceresolution.ChoiceSource{choiceSources[1], choiceSources[0]}
+	if got := unknown.ChoiceSources(); !reflect.DeepEqual(got, wantChoiceSources) {
+		t.Fatalf("unknown choice sources = %#v, want %#v", got, wantChoiceSources)
+	}
+	choiceView := unknown.ChoiceSources()
+	choiceView[0] = interfaceresolution.ChoiceSource{}
+	if repeated := unknown.ChoiceSources(); !reflect.DeepEqual(repeated, wantChoiceSources) {
+		t.Fatal("UnknownInterfaceError exposed mutable choice source storage")
 	}
 }
 

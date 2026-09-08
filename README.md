@@ -828,6 +828,13 @@ source before selection recovery.
 `PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE` reports every requiring constructor
 declaration in the complete cycle as an `implementation-constructor` source.
 The problem retains the ordered Interface edges and selection reasons.
+`PLYSTRA_RESOLVE_UNKNOWN_INTERFACE` reports every effective
+`interfaces.require` or `http.expose` declaration as a `declaration` or
+`exposure` source, or every effective `interfaces.use` declaration as an
+`implementation-selection` source. A selected current-Project reference names
+only the root, environment, or complete-replacement document; an inherited
+reference names every same-valued dependency Project in deterministic module
+order.
 `PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION`,
 `PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION`, and
 `PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION` report every effective

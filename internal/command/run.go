@@ -152,6 +152,8 @@ configuration paths are resolved from the detected Plystra Project root. Root
 plystra.yaml remains mandatory and is not merged beneath --config. Invalid or
 conflicting selections emit the stable PLYSTRA_CONFIGURATION_SELECTION_INVALID
 diagnostic.
+PLYSTRA_RESOLVE_UNKNOWN_INTERFACE reports every module-relative requirement,
+exposure, or Implementation-selection source before selector-aware recovery.
 `
 	checkUsage = `Usage:
   plystra check [--env <environment>|--config <yaml-path>]
@@ -171,6 +173,8 @@ stable PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
 Inherited configuration conflicts and ambiguous ownership failures emit every
 contributing module-relative configuration-declaration source before
 selector-aware recovery.
+PLYSTRA_RESOLVE_UNKNOWN_INTERFACE reports every module-relative requirement,
+exposure, or Implementation-selection source before selector-aware recovery.
 `
 	inspectUsage = `Usage:
   plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]

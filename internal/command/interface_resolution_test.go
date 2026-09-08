@@ -897,13 +897,152 @@ func TestPublicResolvingCommandsRejectInvalidIntrinsicInterfaceWithoutMutation(t
 					before := commandTree(t, root)
 					exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
 					want = append(want, "Recovery:\n", "Diagnostic: "+code)
-					if exitCode != 1 || stdout != "" || !commandContainsAll(stderr, want...) {
+					wantSources := 0
+					if !shadow {
+						wantSources = 1
+						wantSuffix := "\n\nSource: example.com/command-intrinsic:plystra.yaml:1:1 (declaration)\n\nRecovery:\nCorrect the reported Interface ID in plystra.yaml to one canonical Interface visible in the selected Go Module graph, then rerun the command.\n\nDiagnostic: " + code + "\n"
+						if !strings.HasSuffix(stderr, wantSuffix) {
+							t.Fatalf("%v omitted or reordered unknown Interface source: %q", arguments, stderr)
+						}
+					}
+					if exitCode != 1 || stdout != "" || !commandContainsAll(stderr, want...) || strings.Count(stderr, "Source: ") != wantSources {
 						t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+					}
+					if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+						t.Fatalf("%v exposed private path: %q", arguments, stderr)
 					}
 					if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 						t.Fatalf("%v mutated Project before rejecting intrinsic Interface:\nbefore: %#v\nafter: %#v", arguments, before, after)
 					}
 					assertNoCommandTransactions(t, root)
+				})
+			}
+		})
+	}
+}
+
+func TestPublicResolvingCommandsReportUnknownInterfaceConfigurationSources(t *testing.T) {
+	t.Parallel()
+
+	type fixture struct {
+		root          string
+		roots         []string
+		selectors     []string
+		configuration string
+		sources       []string
+	}
+	tests := []struct {
+		name  string
+		setup func(testing.TB) fixture
+	}{
+		{
+			name: "environment exposure",
+			setup: func(t testing.TB) fixture {
+				root := t.TempDir()
+				writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/unknown-exposure\n\ngo 1.26\n")
+				writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+				writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {expose: [records.missing/v1]}\n")
+				return fixture{
+					root:          root,
+					roots:         []string{root},
+					selectors:     []string{"--env", "production"},
+					configuration: "plystra.production.yaml",
+					sources: []string{
+						"Source: example.com/unknown-exposure:plystra.production.yaml:1:1 (exposure)",
+					},
+				}
+			},
+		},
+		{
+			name: "replacement selection",
+			setup: func(t testing.TB) fixture {
+				root := t.TempDir()
+				writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/unknown-selection\n\ngo 1.26\n")
+				writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+				writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), "interfaces: {use: {records.missing/v1: example.com/unknown-selection/records.New}}\n")
+				return fixture{
+					root:          root,
+					roots:         []string{root},
+					selectors:     []string{"--config", "deploy/customer.yaml"},
+					configuration: "deploy/customer.yaml",
+					sources: []string{
+						"Source: example.com/unknown-selection:deploy/customer.yaml:1:1 (implementation-selection)",
+					},
+				}
+			},
+		},
+		{
+			name: "inherited requirements",
+			setup: func(t testing.TB) fixture {
+				parent := t.TempDir()
+				alphaRoot := filepath.Join(parent, "alpha")
+				zetaRoot := filepath.Join(parent, "zeta")
+				applicationRoot := filepath.Join(parent, "application")
+				for _, dependency := range []struct {
+					root       string
+					modulePath string
+				}{
+					{root: zetaRoot, modulePath: "example.com/zeta"},
+					{root: alphaRoot, modulePath: "example.com/alpha"},
+				} {
+					writeCommandFile(t, filepath.Join(dependency.root, "go.mod"), "module "+dependency.modulePath+"\n\ngo 1.26\n")
+					writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {require: [records.missing/v1]}\n")
+				}
+				writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/unknown-consumer
+
+go 1.26
+
+require (
+	example.com/alpha v1.0.0
+	example.com/zeta v1.0.0
+)
+
+replace example.com/alpha => ../alpha
+replace example.com/zeta => ../zeta
+`)
+				writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+				return fixture{
+					root:          applicationRoot,
+					roots:         []string{applicationRoot, alphaRoot, zetaRoot},
+					configuration: "plystra.yaml",
+					sources: []string{
+						"Source: example.com/alpha:plystra.yaml:1:1 (declaration)",
+						"Source: example.com/zeta:plystra.yaml:1:1 (declaration)",
+					},
+				}
+			},
+		},
+	}
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			for _, baseArguments := range commands {
+				baseArguments := baseArguments
+				t.Run(strings.Join(baseArguments, " "), func(t *testing.T) {
+					t.Parallel()
+					fixture := test.setup(t)
+					before := make(map[string]map[string][]byte, len(fixture.roots))
+					for _, root := range fixture.roots {
+						before[root] = commandTree(t, root)
+					}
+					arguments := append(append([]string(nil), baseArguments...), fixture.selectors...)
+					exitCode, stdout, stderr := runCommand(t, arguments, fixture.root, commandGoEnvironment())
+					sourceBlock := strings.Join(fixture.sources, "\n")
+					wantSuffix := "\n\n" + sourceBlock + "\n\nRecovery:\nCorrect the reported Interface ID in " + fixture.configuration + " to one canonical Interface visible in the selected Go Module graph, then rerun the command.\n\nDiagnostic: " + diagnosticcode.ResolveUnknownInterface + "\n"
+					if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != len(fixture.sources) || !commandContainsAll(stderr, "records.missing/v1", "visible canonical package") {
+						t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+					}
+					for _, root := range fixture.roots {
+						if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+							t.Fatalf("%v exposed private path %q: %q", arguments, root, stderr)
+						}
+						if after := commandTree(t, root); !reflect.DeepEqual(after, before[root]) {
+							t.Fatalf("%v mutated %s:\nbefore: %#v\nafter:  %#v", arguments, root, before[root], after)
+						}
+						assertNoCommandTransactions(t, root)
+					}
 				})
 			}
 		})

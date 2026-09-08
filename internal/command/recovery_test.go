@@ -459,6 +459,54 @@ func TestWriteCommandFailureReportsIntrinsicImplementationSelectionSources(t *te
 	}
 }
 
+func TestWriteCommandFailureReportsUnknownInterfaceSources(t *testing.T) {
+	t.Parallel()
+
+	id, err := interfaceid.Parse("records.missing/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, resolutionErr := interfaceresolution.Resolve(interfaceresolution.Input{Requirements: []interfaceresolution.Requirement{
+		{
+			InterfaceID: id,
+			Source: interfaceresolution.RequirementSource{
+				Kind:       interfaceresolution.RequirementExposure,
+				Reference:  `example.com/z@v1.0.0/plystra.yaml http.expose["records.missing/v1"]`,
+				ModulePath: "example.com/z",
+				Path:       "plystra.yaml",
+				Line:       1,
+				Column:     1,
+			},
+		},
+		{
+			InterfaceID: id,
+			Source: interfaceresolution.RequirementSource{
+				Kind:       interfaceresolution.RequirementDeclaration,
+				Reference:  `example.com/a@v1.0.0/plystra.yaml interfaces.require["records.missing/v1"]`,
+				ModulePath: "example.com/a",
+				Path:       "plystra.yaml",
+				Line:       1,
+				Column:     1,
+			},
+		},
+	}})
+	if !errors.Is(resolutionErr, interfaceresolution.ErrUnknownInterface) {
+		t.Fatalf("Resolve error = %v", resolutionErr)
+	}
+
+	var output strings.Builder
+	writeCommandFailure(&output, "generate", resolutionErr, commandRecoveryContext("", "production", nil))
+	got := output.String()
+	wantSuffix := "\n\n" +
+		"Source: example.com/a:plystra.yaml:1:1 (declaration)\n" +
+		"Source: example.com/z:plystra.yaml:1:1 (exposure)\n\n" +
+		"Recovery:\nCorrect the reported Interface ID in plystra.production.yaml to one canonical Interface visible in the selected Go Module graph, then rerun the command.\n\n" +
+		"Diagnostic: " + diagnosticResolveUnknownInterface + "\n"
+	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 2 {
+		t.Fatalf("unknown Interface output = %q, want suffix %q", got, wantSuffix)
+	}
+}
+
 func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 	t.Parallel()
 

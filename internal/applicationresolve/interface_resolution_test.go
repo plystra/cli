@@ -1085,10 +1085,80 @@ func TestResolveRejectsUnknownOrShadowedIntrinsicKernelInterfaceWithoutMutation(
 			if !errors.Is(err, applicationresolve.ErrResolve) || !containsResolutionFragments(err.Error(), test.want...) {
 				t.Fatalf("Resolve error = %v", err)
 			}
+			if test.name == "unknown reserved Interface" {
+				var unknown *interfaceresolution.UnknownInterfaceError
+				if !errors.As(err, &unknown) || unknown.InterfaceID().String() != "kernel.missing/v1" || len(unknown.ChoiceSources()) != 0 {
+					t.Fatalf("UnknownInterfaceError = %#v", unknown)
+				}
+				sources := unknown.RequirementSources()
+				if len(sources) != 1 || sources[0].Kind != interfaceresolution.RequirementDeclaration || sources[0].ModulePath != "example.com/intrinsic-application" || sources[0].Path != "plystra.yaml" || sources[0].Line != 1 || sources[0].Column != 1 {
+					t.Fatalf("unknown reserved Interface sources = %#v", sources)
+				}
+			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("failed intrinsic resolution mutated Project:\nbefore: %#v\nafter: %#v", before, after)
 			}
 		})
+	}
+}
+
+func TestResolvePreservesEveryInheritedUnknownInterfaceSource(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	alphaRoot := filepath.Join(parent, "alpha")
+	zetaRoot := filepath.Join(parent, "zeta")
+	applicationRoot := filepath.Join(parent, "application")
+	for _, dependency := range []struct {
+		root       string
+		modulePath string
+	}{
+		{root: zetaRoot, modulePath: "example.com/zeta"},
+		{root: alphaRoot, modulePath: "example.com/alpha"},
+	} {
+		writeModule(t, dependency.root, dependency.modulePath)
+		writeFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {require: [records.missing/v1]}\n")
+	}
+	writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/unknown-interface-consumer
+
+go 1.26
+
+require (
+	example.com/alpha v1.0.0
+	example.com/zeta v1.0.0
+)
+
+replace example.com/alpha => ../alpha
+replace example.com/zeta => ../zeta
+`)
+	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+	before := snapshotTree(t, parent)
+
+	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start: applicationRoot,
+		Environment: goEnvironment(map[string]string{
+			"GOWORK":  "off",
+			"GOPROXY": "off",
+			"GOSUMDB": "off",
+		}),
+	})
+	if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, interfaceresolution.ErrUnknownInterface) || !containsResolutionFragments(err.Error(), "records.missing/v1", "visible canonical package") {
+		t.Fatalf("Resolve inherited unknown Interface = %v", err)
+	}
+	var unknown *interfaceresolution.UnknownInterfaceError
+	if !errors.As(err, &unknown) || unknown.InterfaceID().String() != "records.missing/v1" || len(unknown.ChoiceSources()) != 0 {
+		t.Fatalf("UnknownInterfaceError = %#v", unknown)
+	}
+	sources := unknown.RequirementSources()
+	if len(sources) != 2 || sources[0].Kind != interfaceresolution.RequirementDeclaration || sources[0].ModulePath != "example.com/alpha" || sources[0].Path != "plystra.yaml" || sources[1].Kind != interfaceresolution.RequirementDeclaration || sources[1].ModulePath != "example.com/zeta" || sources[1].Path != "plystra.yaml" {
+		t.Fatalf("inherited unknown Interface sources = %#v", sources)
+	}
+	sources[0] = interfaceresolution.RequirementSource{}
+	if repeated := unknown.RequirementSources(); len(repeated) != 2 || repeated[0].ModulePath != "example.com/alpha" {
+		t.Fatal("UnknownInterfaceError exposed mutable inherited source storage")
+	}
+	if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
+		t.Fatalf("unknown Interface resolution mutated Projects:\nbefore: %#v\nafter: %#v", before, after)
 	}
 }
 

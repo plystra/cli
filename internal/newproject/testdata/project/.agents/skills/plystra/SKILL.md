@@ -1218,16 +1218,17 @@ boundary.
 ## Diagnose common failures
 
 Failures end with Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
-Typed provenance:
 Source: <module>:<module-relative-path>[:line:column] (<kind>).
 PLYSTRA_CONFIGURATION_INHERITED_CONFLICT and
 PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS use configuration-declaration.
-Sources omit absolute/Module Cache paths; unsafe selectors use placeholders;
-unknown errors get no code.
+No absolute/Module Cache source paths; unsafe selectors use placeholders;
+unknown errors stay uncoded.
 
+- PLYSTRA_RESOLVE_UNKNOWN_INTERFACE: declaration, exposure, or
+  implementation-selection sources; correct selected YAML.
 - PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION: root and requiring-constructor sources;
   add a compatible constructor.
-- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS: candidate-constructor sources; use
+- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS: constructor sources; use
   plystra use <interface-id> <constructor-symbol>.
 - PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: cycle-constructor sources; remove one
   required parameter.
@@ -1236,26 +1237,25 @@ unknown errors get no code.
   PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: effective interfaces.use sources
   are implementation-selection. Fix the constructor; intrinsic recovery sets
   the selected document entry to null.
-- Capability failures precede mutation. References:
+- Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,
-  PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID. Other classes:
+  PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE,
   PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE,
   PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE,
   PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED,
   PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED,
   PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED,
-  PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED. Follow Recovery.
+  PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
 - PLYSTRA_USE_INTERFACE_INVALID / PLYSTRA_USE_CONSTRUCTOR_INVALID: malformed
   Interface ID / constructor. Both precede mutation; Recovery retains selector.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: select its constructor through
   interfaces.use, make it reachable, or remove its config. Values and Secret
   targets stay redacted.
-- Incompatible contract: compare exact request, response, closed field
-  constraints, semantic errors, typed semantics, and extension metadata.
-  Implement the visible contract or create a new version instead of weakening
-  validation.
+- Incompatible contract: compare request, response, closed fields, semantic
+  errors, typed semantics, and extension metadata. Implement the visible
+  contract or create a new version; never weaken validation.
 - Interface authoring codes:
   PLYSTRA_INTERFACE_DECLARATION_INVALID,
   PLYSTRA_INTERFACE_CONTRACT_INVALID,

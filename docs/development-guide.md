@@ -1958,6 +1958,12 @@ A constructor cycle emits every requiring constructor declaration in the
 complete cycle as `implementation-constructor`; the problem retains the ordered
 Interface edges and selection reasons. Dependency-owned declarations keep their
 owning Project modules rather than exposing Module Cache paths.
+An unknown Interface emits every effective `interfaces.require` or
+`http.expose` declaration as `declaration` or `exposure`, or every effective
+`interfaces.use` declaration as `implementation-selection`. A selected
+current-Project reference retains the root, environment, or complete-replacement
+document, while an inherited same-valued reference retains every contributing
+dependency Project in deterministic module order.
 An unknown, incompatible, or intrinsic explicit Interface Implementation choice
 emits every effective `interfaces.use` declaration as
 `implementation-selection`. Default, environment, and complete-replacement
