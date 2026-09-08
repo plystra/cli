@@ -1192,13 +1192,12 @@ Run the narrowest relevant test first, then the complete module checks:
     go build ./...
     go mod verify
 
-Plystra inspect resolves the same selected model without modifying the Project.
-Its default output gives the Project and configuration, Plugin and Capability
-counts, AuthN/AuthZ activation, transports, readiness, and the matching plystra
-check action. Add --verbose for complete deterministic resolution evidence or
---format json for one plystra.inspect v1 document on stdout; JSON progress and
-diagnostics stay on stderr. Use the same --env or --config selector across
-inspect, generate, check, and generated application startup.
+Plystra inspect reads the selected model without mutation. Default output
+summarizes configuration, Plugin/Capability counts, AuthN/AuthZ, transports,
+readiness, and the matching check action. Use --verbose for complete evidence
+or --format json for one plystra.inspect v1 document; JSON diagnostics stay on
+stderr. Keep one --env or --config selector across inspect, generate, check,
+and generated application startup.
 
 Plystra check verifies the selected configuration and generated fixed point,
 then runs go test -mod=readonly ./... from the Project root. Use the same --env
@@ -1219,11 +1218,12 @@ build and distribution boundary for every Plystra module.
 
 ## Diagnose common failures
 
-Failures end with Recovery and Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
-Source facts are sorted:
+Failures end with Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
+Sorted sources use:
 Source: <module>:<module-relative-path>[:line:column] (<kind>).
-PLYSTRA_CONFIGURATION_INHERITED_CONFLICT uses configuration-declaration.
-They omit absolute and Module Cache paths. Unsafe selectors use placeholders;
+configuration-declaration: PLYSTRA_CONFIGURATION_INHERITED_CONFLICT,
+PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS.
+Sources omit absolute/Module Cache paths. Unsafe selectors use placeholders;
 unclassified errors get neither.
 
 - Missing Implementation: require or expose its Interface and make one

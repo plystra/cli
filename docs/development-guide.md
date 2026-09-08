@@ -1952,6 +1952,11 @@ as `configuration-declaration`, including all modules behind compatible
 declaration deduplication. Its document-level span is `1:1`; the exact schema
 field remains in the problem text, and configured values plus Secret-reference
 targets remain redacted.
+An ambiguous configuration-ownership failure uses the same source kind and
+ordering for every Project document that contributed the prior inherited
+decision. It identifies the disappeared field and its prior module/version
+references without exposing the inherited value, a Secret-reference target, an
+absolute path, or a Module Cache path.
 
 Run that action with the same selected application model. Recovery commands
 retain default, environment, or complete-replacement mode, including selectors
@@ -2140,6 +2145,18 @@ selector. Source facts identify documents at `1:1`; the problem text identifies
 the exact field, while configuration values and Secret-reference targets stay
 redacted. Changing dependency order, making a module direct, or sorting IDs
 cannot resolve the conflict.
+
+### Ambiguous configuration ownership
+
+`PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS` means a field recorded in the prior
+dependency baseline is absent from the selected current-Project document, but
+no typed removal or replacement establishes current-Project intent. Read every
+sorted `configuration-declaration` source to identify all dependency Projects
+that supplied the prior compatible declaration. Restore the exact field or
+write its schema-defined removal in the selected root, environment, or
+complete-replacement document, then regenerate with the same selector. The
+diagnostic reports document spans at `1:1` and prior module/version references;
+it never prints the inherited value or Secret-reference target.
 
 ### Wrong configuration selection
 

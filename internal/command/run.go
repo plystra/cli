@@ -166,8 +166,9 @@ and the two flags cannot be combined. Relative configuration paths are resolved
 from the detected Plystra Project root. Root plystra.yaml remains mandatory and
 is not merged beneath --config. Invalid or conflicting selections emit the
 stable PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
-Inherited configuration conflicts emit every contributing module-relative
-configuration-declaration source before selector-aware recovery.
+Inherited configuration conflicts and ambiguous ownership failures emit every
+contributing module-relative configuration-declaration source before
+selector-aware recovery.
 `
 	inspectUsage = `Usage:
   plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]

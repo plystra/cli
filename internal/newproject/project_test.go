@@ -2363,6 +2363,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"Diagnostic: PLYSTRA_<AREA>_<CONDITION>",
 		"Source: <module>:<module-relative-path>[:line:column] (<kind>)",
 		"PLYSTRA_CONFIGURATION_INHERITED_CONFLICT",
+		"PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS",
 		"configuration-declaration",
 		"PLYSTRA_CONFIGURATION_SELECTION_INVALID",
 		"PLYSTRA_PROJECT_CREATE_NAME_INVALID",

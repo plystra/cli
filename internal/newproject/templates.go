@@ -93,6 +93,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_CONFIGURATION_INHERITED_CONFLICT`" + ` reports every contributing Project configuration document as a sorted ` + "`configuration-declaration`" + ` source, including all modules behind compatible declaration deduplication. The problem identifies the exact field while configuration values and Secret-reference targets stay redacted. Apply the recovery to the selected root, environment, or complete-replacement document.
 
+` + "`PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS`" + ` reports every Project document that contributed a prior inherited field when its current-Project representation disappears without an explicit typed removal. Restore the exact field or write its typed removal in the selected document. The prior contributor references remain visible, while the inherited value, Secret-reference target, and machine-specific paths stay redacted.
+
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 ` + "`plystra plugin create`" + ` uses ` + "`PLYSTRA_PLUGIN_CREATE_NAME_INVALID`" + ` for an invalid or reserved root-level name, ` + "`PLYSTRA_PLUGIN_CREATE_ID_INVALID`" + ` when the Project module namespace and name cannot form a canonical Plugin ID, and ` + "`PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS`" + ` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.
@@ -1397,13 +1399,12 @@ Run the narrowest relevant test first, then the complete module checks:
     go build ./...
     go mod verify
 
-Plystra inspect resolves the same selected model without modifying the Project.
-Its default output gives the Project and configuration, Plugin and Capability
-counts, AuthN/AuthZ activation, transports, readiness, and the matching plystra
-check action. Add --verbose for complete deterministic resolution evidence or
---format json for one plystra.inspect v1 document on stdout; JSON progress and
-diagnostics stay on stderr. Use the same --env or --config selector across
-inspect, generate, check, and generated application startup.
+Plystra inspect reads the selected model without mutation. Default output
+summarizes configuration, Plugin/Capability counts, AuthN/AuthZ, transports,
+readiness, and the matching check action. Use --verbose for complete evidence
+or --format json for one plystra.inspect v1 document; JSON diagnostics stay on
+stderr. Keep one --env or --config selector across inspect, generate, check,
+and generated application startup.
 
 Plystra check verifies the selected configuration and generated fixed point,
 then runs go test -mod=readonly ./... from the Project root. Use the same --env
@@ -1424,11 +1425,12 @@ build and distribution boundary for every Plystra module.
 
 ## Diagnose common failures
 
-Failures end with Recovery and Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
-Source facts are sorted:
+Failures end with Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
+Sorted sources use:
 Source: <module>:<module-relative-path>[:line:column] (<kind>).
-PLYSTRA_CONFIGURATION_INHERITED_CONFLICT uses configuration-declaration.
-They omit absolute and Module Cache paths. Unsafe selectors use placeholders;
+configuration-declaration: PLYSTRA_CONFIGURATION_INHERITED_CONFLICT,
+PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS.
+Sources omit absolute/Module Cache paths. Unsafe selectors use placeholders;
 unclassified errors get neither.
 
 - Missing Implementation: require or expose its Interface and make one

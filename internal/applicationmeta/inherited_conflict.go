@@ -7,8 +7,9 @@ import (
 )
 
 // ConfigurationDeclarationSource identifies one Project configuration
-// document that contributes to an inherited conflict. The conflicting field is
-// exposed separately by InheritedConflictError.Field.
+// document that contributes to an inherited conflict or a prior declaration
+// whose current-Project ownership became ambiguous. The exact field is exposed
+// separately by the corresponding typed error.
 type ConfigurationDeclarationSource struct {
 	modulePath string
 	path       string

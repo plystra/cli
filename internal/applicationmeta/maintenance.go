@@ -165,11 +165,13 @@ func maintainDependencyConfiguration(data []byte, overlay *Manifest, previous De
 		}
 		sources := baselineSources(old)
 		return ConfigurationMaintenance{}, fmt.Errorf(
-			"%w: %w: inherited %s from %s is absent; restore it or add an explicit typed removal",
+			"%w: %w",
 			ErrMaintainConfiguration,
-			ErrAmbiguousConfigurationOwnership,
-			path,
-			strings.Join(sources, ", "),
+			newAmbiguousConfigurationOwnershipError(
+				path,
+				fmt.Sprintf("inherited %s from %s is absent; restore it or add an explicit typed removal", path, strings.Join(sources, ", ")),
+				sources,
+			),
 		)
 	}
 

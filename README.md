@@ -823,6 +823,11 @@ document that contributed a competing declaration, including every module
 behind compatible declaration deduplication, as `configuration-declaration`.
 The exact conflicting field remains in the problem text; configuration values
 and Secret-reference targets never enter the source facts.
+`PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS` reports the same complete sorted
+document provenance when a previously inherited field disappears from the
+current-Project document without an explicit typed removal. The diagnostic
+retains the exact field and prior contributor references while omitting the
+inherited value, Secret-reference target, and machine-specific path.
 
 Configuration-selection failures use
 `PLYSTRA_CONFIGURATION_SELECTION_INVALID`. An explicit `--env` plus `--config`

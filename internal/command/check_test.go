@@ -203,6 +203,154 @@ func TestRunCheckReportsEveryInheritedConfigurationConflictSource(t *testing.T) 
 	}
 }
 
+func TestRunCheckReportsEveryAmbiguousConfigurationOwnershipSource(t *testing.T) {
+	parent := t.TempDir()
+	platformRoot := filepath.Join(parent, "platform")
+	applicationRoot := filepath.Join(parent, "application")
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+
+	writeCommandFile(t, filepath.Join(platformRoot, "go.mod"), "module example.com/platform\n\ngo 1.26\n")
+	writeCommandGraphInterface(t, platformRoot, "email/send/v1", "sendv1", "email.send/v1", "Send")
+	writeCommandFile(t, filepath.Join(platformRoot, "smtp", "service.go"), `package smtp
+
+import (
+	"context"
+
+	sendv1 "example.com/platform/interfaces/email/send/v1"
+)
+
+type Service struct{}
+
+//plystra:implements email.send/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
+	return sendv1.Response{}, nil
+}
+`)
+	writeCommandFile(t, filepath.Join(platformRoot, "plystra.yaml"), "{}\n")
+
+	dependencies := []struct {
+		module    string
+		version   string
+		directory string
+	}{
+		{module: "example.com/a", version: "v1.0.0", directory: "a"},
+		{module: "example.com/b", version: "v1.1.0", directory: "b"},
+		{module: "example.com/c", version: "v1.2.0", directory: "c"},
+	}
+	dependencyTrees := make(map[string]map[string][]byte, len(dependencies)+1)
+	dependencyTrees[platformRoot] = commandTree(t, platformRoot)
+	for _, dependency := range dependencies {
+		root := filepath.Join(parent, dependency.directory)
+		writeCommandFile(t, filepath.Join(root, "go.mod"), "module "+dependency.module+"\n\ngo 1.26\n")
+		writeCommandFile(t, filepath.Join(root, "package.go"), "package placeholder\n")
+		writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `interfaces:
+  require: [email.send/v1]
+  use: {email.send/v1: example.com/platform/smtp.New}
+`)
+		dependencyTrees[root] = commandTree(t, root)
+	}
+
+	var moduleFile strings.Builder
+	moduleFile.WriteString(`module example.com/application
+
+go 1.26
+
+require (
+	example.com/c v1.2.0
+	example.com/b v1.1.0
+	example.com/a v1.0.0
+	example.com/platform v1.0.0
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+`)
+	for _, dependency := range []struct {
+		module    string
+		directory string
+	}{
+		{module: "example.com/c", directory: "c"},
+		{module: "example.com/b", directory: "b"},
+		{module: "example.com/a", directory: "a"},
+		{module: "example.com/platform", directory: "platform"},
+	} {
+		fmt.Fprintf(&moduleFile, "replace %s => ../%s\n", dependency.module, dependency.directory)
+	}
+	fmt.Fprintf(&moduleFile, "\nreplace github.com/plystra/kernel => %s\n", filepath.ToSlash(kernelRoot))
+	writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), moduleFile.String())
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("ReadFile(go.sum): %v", err)
+	}
+	writeCommandFile(t, filepath.Join(applicationRoot, "go.sum"), string(goSum))
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+	environment := commandGoEnvironment()
+
+	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, applicationRoot, environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/application in "+applicationRoot+"\n" {
+		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	materialized := string(readCommandFile(t, applicationRoot, "plystra.yaml"))
+	if !strings.Contains(materialized, "example.com/platform/smtp.New") {
+		t.Fatalf("generated baseline omitted inherited selection:\n%s", materialized)
+	}
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "interfaces:\n  require: [email.send/v1]\n")
+	before := commandTree(t, applicationRoot)
+
+	exitCode, stdout, stderr = runCommand(t, []string{"check"}, applicationRoot, environment)
+	if exitCode != 1 || stdout != "" {
+		t.Fatalf("check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	sourceBlock := strings.Join([]string{
+		"Source: example.com/a:plystra.yaml:1:1 (configuration-declaration)",
+		"Source: example.com/b:plystra.yaml:1:1 (configuration-declaration)",
+		"Source: example.com/c:plystra.yaml:1:1 (configuration-declaration)",
+	}, "\n") + "\n"
+	for _, fragment := range []string{
+		`interfaces.use["email.send/v1"]`,
+		`example.com/a@v1.0.0/plystra.yaml interfaces.use["email.send/v1"]`,
+		`example.com/b@v1.1.0/plystra.yaml interfaces.use["email.send/v1"]`,
+		`example.com/c@v1.2.0/plystra.yaml interfaces.use["email.send/v1"]`,
+		"Make the inherited field intent explicit in plystra.yaml by restoring it or writing its typed removal.",
+		"Diagnostic: " + diagnosticcode.ConfigurationOwnershipAmbiguous,
+	} {
+		if !strings.Contains(stderr, fragment) {
+			t.Fatalf("check omits %q: %s", fragment, stderr)
+		}
+	}
+	if !strings.Contains(stderr, "\n\n"+sourceBlock+"\nRecovery:\n") {
+		t.Fatalf("check source block is absent or out of order: %s", stderr)
+	}
+	if strings.Count(stderr, "Source: ") != 3 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+		t.Fatalf("check has an unstable diagnostic envelope: %s", stderr)
+	}
+	for _, forbidden := range []string{"example.com/platform/smtp.New", parent, filepath.ToSlash(parent)} {
+		if strings.Contains(stderr, forbidden) {
+			t.Fatalf("check exposes redacted or machine-specific value %q: %s", forbidden, stderr)
+		}
+	}
+	if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, before) {
+		t.Fatal("ambiguous ownership check mutated the application Project")
+	}
+
+	secondExitCode, secondStdout, secondStderr := runCommand(t, []string{"check"}, applicationRoot, environment)
+	if secondExitCode != exitCode || secondStdout != stdout || secondStderr != stderr {
+		t.Fatalf("repeated check changed its diagnostic: exit %d/%d, stdout %q/%q, stderr %q/%q", exitCode, secondExitCode, stdout, secondStdout, stderr, secondStderr)
+	}
+	if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, before) {
+		t.Fatal("repeated ambiguous ownership check mutated the application Project")
+	}
+	for root, tree := range dependencyTrees {
+		if after := commandTree(t, root); !reflect.DeepEqual(after, tree) {
+			t.Fatalf("ambiguous ownership check mutated dependency Project %s", root)
+		}
+	}
+}
+
 func TestRunCheckReportsGoTestFailureWithoutMutation(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)

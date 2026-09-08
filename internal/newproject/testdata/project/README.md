@@ -63,6 +63,8 @@ Common actionable Plystra CLI failures end with exactly one `Recovery:` block fo
 
 `PLYSTRA_CONFIGURATION_INHERITED_CONFLICT` reports every contributing Project configuration document as a sorted `configuration-declaration` source, including all modules behind compatible declaration deduplication. The problem identifies the exact field while configuration values and Secret-reference targets stay redacted. Apply the recovery to the selected root, environment, or complete-replacement document.
 
+`PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS` reports every Project document that contributed a prior inherited field when its current-Project representation disappears without an explicit typed removal. Restore the exact field or write its typed removal in the selected document. The prior contributor references remain visible, while the inherited value, Secret-reference target, and machine-specific paths stay redacted.
+
 `PLYSTRA_CONFIGURATION_SELECTION_INVALID` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 `plystra plugin create` uses `PLYSTRA_PLUGIN_CREATE_NAME_INVALID` for an invalid or reserved root-level name, `PLYSTRA_PLUGIN_CREATE_ID_INVALID` when the Project module namespace and name cannot form a canonical Plugin ID, and `PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.

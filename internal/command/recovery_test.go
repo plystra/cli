@@ -311,6 +311,56 @@ func TestWriteCommandFailureReportsInheritedConfigurationConflictSources(t *test
 	}
 }
 
+func TestWriteCommandFailureReportsAmbiguousConfigurationOwnershipSources(t *testing.T) {
+	t.Parallel()
+
+	parseManifest := func(source string) applicationmeta.Manifest {
+		t.Helper()
+		manifest, err := applicationmeta.Parse([]byte(source))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		return manifest
+	}
+	dependencies := []applicationmeta.Dependency{
+		{ModulePath: "example.com/c", ModuleVersion: "v1.2.0", Manifest: parseManifest("interfaces: {use: {email.send/v1: example.com/primary.New}}\n")},
+		{ModulePath: "example.com/b", ModuleVersion: "v1.1.0", Manifest: parseManifest("interfaces: {use: {email.send/v1: example.com/primary.New}}\n")},
+		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: parseManifest("interfaces: {use: {email.send/v1: example.com/primary.New}}\n")},
+	}
+	lookup := func(constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		return implementationinventory.Configuration{}, false
+	}
+	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("{}\n"), applicationmeta.DependencyBaseline{}, nil, dependencies, lookup)
+	if err != nil {
+		t.Fatalf("MaintainDependencyConfiguration initial: %v", err)
+	}
+	composition, err := applicationmeta.Compose(dependencies, parseManifest("{}\n"), lookup)
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+	withoutChoice := strings.Replace(string(initial.Data()), "email.send/v1: example.com/primary.New", "", 1)
+	if withoutChoice == string(initial.Data()) {
+		t.Fatalf("test did not remove inherited choice: %s", initial.Data())
+	}
+	_, conflict := applicationmeta.MaintainDependencyConfiguration([]byte(withoutChoice), composition.DependencyBaseline(), initial.LocalPaths(), dependencies, lookup)
+	if !errors.Is(conflict, applicationmeta.ErrAmbiguousConfigurationOwnership) {
+		t.Fatalf("MaintainDependencyConfiguration error = %v, want ErrAmbiguousConfigurationOwnership", conflict)
+	}
+
+	var output strings.Builder
+	writeCommandFailure(&output, "check Plystra Project", fmt.Errorf("resolve application: %w", conflict), recoveryContext{})
+	got := output.String()
+	wantSuffix := "\n\n" +
+		"Source: example.com/a:plystra.yaml:1:1 (configuration-declaration)\n" +
+		"Source: example.com/b:plystra.yaml:1:1 (configuration-declaration)\n" +
+		"Source: example.com/c:plystra.yaml:1:1 (configuration-declaration)\n\n" +
+		"Recovery:\nMake the inherited field intent explicit in plystra.yaml by restoring it or writing its typed removal.\n\n" +
+		"Diagnostic: " + diagnosticConfigurationOwnershipAmbiguous + "\n"
+	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 3 {
+		t.Fatalf("ambiguous configuration ownership output = %q, want suffix %q", got, wantSuffix)
+	}
+}
+
 func TestWriteCommandFailureReportsCapabilityRequirementConflictSources(t *testing.T) {
 	t.Parallel()
 
