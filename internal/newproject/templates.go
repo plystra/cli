@@ -89,7 +89,7 @@ Cross-origin browser access is opt-in. Add ` + "`http.cors.allowed_origins`" + `
 
 When several compatible Implementations satisfy one required Interface, select one with ` + "`plystra use <interface-id> <constructor-symbol>`" + `. The same command may record a validated dormant choice before the Interface becomes required without activating its constructor. Constructor configuration for that dormant choice is type-checked immediately, but its Secret references remain unresolved and it enters no runtime, bootstrap, or Kernel state. Add ` + "`--env <environment>`" + ` to write only that sparse overlay or ` + "`--config <yaml-path>`" + ` to write only one complete replacement configuration; the command regenerates and validates with the same selection.
 
-Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + ` block followed by one stable ` + "`Diagnostic: PLYSTRA_<AREA>_<CONDITION>`" + ` code. Authored Interface and Implementation failures, plus ` + "`PLYSTRA_CAPABILITY_REQUIREMENT_CONFLICT`" + `, ` + "`PLYSTRA_CAPABILITY_CONTRACT_CONFLICT`" + `, ` + "`PLYSTRA_CAPABILITY_SCHEMA_CONFLICT`" + `, ` + "`PLYSTRA_PROVIDER_MISSING`" + `, ` + "`PLYSTRA_PROVIDER_AMBIGUOUS`" + `, ` + "`PLYSTRA_PROVIDER_SELECTION_INVALID`" + `, ` + "`PLYSTRA_PROVIDER_CONTRACT_CONFLICT`" + `, and ` + "`PLYSTRA_PROVIDER_CONTRACT_MISMATCH`" + `, insert sorted ` + "`Source: <module>:<module-relative-path>[:<line>:<column>] (<kind>)`" + ` lines before recovery; Capability requirement conflict includes every source for each incompatible exact contract, visible Capability contract conflict includes every conflicting Provider declaration, Capability schema conflict includes both declarations that block authoring, ambiguity includes every compatible Provider declaration, invalid selection includes every effective choice declaration, Provider contract conflict includes every reference-only requirement plus each conflicting Provider declaration, and contract mismatch includes every exact-contract requirement plus each incompatible Provider declaration. They never expose absolute or Module Cache paths. Follow that one command or file edit with the same default, ` + "`--env`" + `, or ` + "`--config`" + ` selection, and use the code rather than human wording as the automation or support identity. Recovery output preserves safe explicit and ambient selectors, but uses ` + "`<environment>`" + ` or ` + "`<yaml-path>`" + ` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice or a code.
+Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + ` block followed by one stable ` + "`Diagnostic: PLYSTRA_<AREA>_<CONDITION>`" + ` code. Authored Interface and Implementation failures, plus ` + "`PLYSTRA_CAPABILITY_REQUIREMENT_CONFLICT`" + `, ` + "`PLYSTRA_CAPABILITY_CONTRACT_CONFLICT`" + `, ` + "`PLYSTRA_CAPABILITY_SCHEMA_CONFLICT`" + `, ` + "`PLYSTRA_PROVIDER_MISSING`" + `, ` + "`PLYSTRA_PROVIDER_AMBIGUOUS`" + `, ` + "`PLYSTRA_PROVIDER_SELECTION_INVALID`" + `, ` + "`PLYSTRA_PROVIDER_CONTRACT_CONFLICT`" + `, ` + "`PLYSTRA_PROVIDER_CONTRACT_MISMATCH`" + `, and ` + "`PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS`" + `, insert sorted ` + "`Source: <module>:<module-relative-path>[:<line>:<column>] (<kind>)`" + ` lines before recovery; Capability requirement conflict includes every source for each incompatible exact contract, visible Capability contract conflict includes every conflicting Provider declaration, Capability schema conflict includes both declarations that block authoring, Provider ambiguity includes every compatible Provider declaration, invalid selection includes every effective choice declaration, Provider contract conflict includes every reference-only requirement plus each conflicting Provider declaration, contract mismatch includes every exact-contract requirement plus each incompatible Provider declaration, and Interface Implementation ambiguity includes every compatible constructor declaration. They never expose absolute or Module Cache paths. Follow that one command or file edit with the same default, ` + "`--env`" + `, or ` + "`--config`" + ` selection, and use the code rather than human wording as the automation or support identity. Recovery output preserves safe explicit and ambient selectors, but uses ` + "`<environment>`" + ` or ` + "`<yaml-path>`" + ` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice or a code.
 
 ` + "`PLYSTRA_CONFIGURATION_INHERITED_CONFLICT`" + ` reports every contributing Project configuration document as a sorted ` + "`configuration-declaration`" + ` source, including all modules behind compatible declaration deduplication. The problem identifies the exact field while configuration values and Secret-reference targets stay redacted. Apply the recovery to the selected root, environment, or complete-replacement document.
 
@@ -1411,23 +1411,23 @@ then runs go test -mod=readonly ./... from the Project root. Use the same --env
 or --config selector used for generation. The command is read-only and never
 repairs YAML, generated output, or module metadata.
 
-plystra generate --check is read-only. It recomputes the complete resolution and
-generation fixed point and fails on stale, missing, unexpected, or manually modified
-managed paths. If it reports drift:
+plystra generate --check is read-only and fails on stale, missing, unexpected,
+or manually modified managed paths. If it reports drift:
 
-1. Read that path's generated/.plystra-manifest.json entry for its exact
-   generator, normalized input IDs, source references, output kind, and cleanup owner.
+1. Read that path's generated/.plystra-manifest.json entry for its generator,
+   input IDs, sources, output kind, and cleanup owner.
 2. Change the named authored input; move handwritten files out of generated.
-3. Run plystra generate, then plystra generate --check with the same selector.
+3. Run plystra generate and plystra generate --check with the same selector.
 
-Keep go.work optional. Standard Go Module dependency resolution remains the
-build and distribution boundary for every Plystra module.
+Keep go.work optional; Go Module resolution remains the build and distribution
+boundary.
 
 ## Diagnose common failures
 
 Failures end with Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
-Sorted sources use:
+Sources are sorted and use:
 Source: <module>:<module-relative-path>[:line:column] (<kind>).
+implementation-constructor: PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS.
 configuration-declaration: PLYSTRA_CONFIGURATION_INHERITED_CONFLICT,
 PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS.
 Sources omit absolute/Module Cache paths. Unsafe selectors use placeholders;
@@ -1435,8 +1435,9 @@ unclassified errors get neither.
 
 - Missing Implementation: require or expose its Interface and make one
   constructor visible. Markerless dependencies are not scanned.
-- Ambiguous Implementation: run plystra use <interface-id> <constructor-symbol>
-  with the same selector; no discovery priority exists.
+- Ambiguous Implementation: use plystra use <interface-id> <constructor-symbol>
+  with the same selector. Every candidate source is reported; discovery has no
+  priority.
 - Capability diagnostics precede mutation. Malformed references use
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID, or

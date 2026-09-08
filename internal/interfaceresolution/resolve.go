@@ -18,6 +18,10 @@ import (
 type constructorRecord struct {
 	symbol     constructorsymbol.Symbol
 	source     string
+	modulePath string
+	sourcePath string
+	line       int
+	column     int
 	implements map[string]struct{}
 	required   []interfaceid.Identifier
 }
@@ -131,12 +135,17 @@ func buildCatalog(interfaces interfaceinventory.Index, implementations implement
 		if symbol.String() == "" || implementation.Source() == "" {
 			return catalog{}, errors.New("visible Implementation has empty identity or provenance")
 		}
+		position := implementation.Declaration().Position()
 		if _, duplicate := result.constructors[symbol.String()]; duplicate {
 			return catalog{}, fmt.Errorf("constructor %s appears more than once", symbol)
 		}
 		record := constructorRecord{
 			symbol:     symbol,
 			source:     implementation.Source(),
+			modulePath: implementation.ModulePath(),
+			sourcePath: implementation.SourcePath(),
+			line:       position.Line,
+			column:     position.Column,
 			implements: make(map[string]struct{}),
 		}
 		for _, declaration := range implementation.Declaration().ImplementedInterfaces() {
@@ -301,7 +310,14 @@ func (s *selector) selectInterface(identifier interfaceid.Identifier) (bool, err
 		default:
 			values := make([]Candidate, len(candidates))
 			for index, candidate := range candidates {
-				values[index] = Candidate{constructor: candidate.symbol, source: candidate.source}
+				values[index] = Candidate{
+					constructor: candidate.symbol,
+					source:      candidate.source,
+					modulePath:  candidate.modulePath,
+					sourcePath:  candidate.sourcePath,
+					line:        candidate.line,
+					column:      candidate.column,
+				}
 			}
 			return false, &AmbiguousImplementationError{interfaceID: identifier, candidates: values}
 		}

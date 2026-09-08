@@ -818,6 +818,9 @@ declaration.
 `PLYSTRA_PROVIDER_CONTRACT_MISMATCH` reports every exact-contract requirement
 source together with each incompatible Provider's `capability.yaml`
 declaration.
+`PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS` reports every compatible
+Implementation constructor declaration as an `implementation-constructor`
+source before selection recovery.
 `PLYSTRA_CONFIGURATION_INHERITED_CONFLICT` reports every Project configuration
 document that contributed a competing declaration, including every module
 behind compatible declaration deduplication, as `configuration-declaration`.

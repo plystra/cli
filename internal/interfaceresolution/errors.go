@@ -41,6 +41,10 @@ var (
 type Candidate struct {
 	constructor constructorsymbol.Symbol
 	source      string
+	modulePath  string
+	sourcePath  string
+	line        int
+	column      int
 }
 
 // Constructor returns the candidate's fully qualified constructor symbol.
@@ -48,6 +52,18 @@ func (c Candidate) Constructor() constructorsymbol.Symbol { return c.constructor
 
 // Source returns stable module-qualified constructor provenance.
 func (c Candidate) Source() string { return c.source }
+
+// ModulePath returns the Go Module identity that owns the candidate.
+func (c Candidate) ModulePath() string { return c.modulePath }
+
+// SourcePath returns the slash-separated module-relative constructor source.
+func (c Candidate) SourcePath() string { return c.sourcePath }
+
+// Line returns the one-based constructor declaration line.
+func (c Candidate) Line() int { return c.line }
+
+// Column returns the one-based constructor declaration column.
+func (c Candidate) Column() int { return c.column }
 
 // AmbiguousImplementationError identifies every compatible candidate for one
 // required Interface in deterministic constructor-symbol order.

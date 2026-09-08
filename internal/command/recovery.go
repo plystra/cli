@@ -434,6 +434,20 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: source.Column,
 			})
 		}
+	case diagnosticResolveMultipleImplementations:
+		var ambiguous *interfaceresolution.AmbiguousImplementationError
+		if !errors.As(err, &ambiguous) || ambiguous == nil {
+			return nil
+		}
+		for _, candidate := range ambiguous.Candidates() {
+			sources = append(sources, diagnosticjson.Source{
+				Module: candidate.ModulePath(),
+				Path:   candidate.SourcePath(),
+				Kind:   "implementation-constructor",
+				Line:   candidate.Line(),
+				Column: candidate.Column(),
+			})
+		}
 	case diagnosticImplementationDeclarationInvalid,
 		diagnosticInterfaceDeclarationInvalid,
 		diagnosticInterfaceContractInvalid,

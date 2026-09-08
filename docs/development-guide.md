@@ -1947,6 +1947,9 @@ source and each incompatible Provider's `capability.yaml` declaration. Sources
 always name the owning Project module and a slash-separated module-relative
 path. They never expose an absolute path or a Module Cache path. A source omits
 the optional span when structured provenance provides no exact line or column.
+An ambiguous Interface Implementation emits every compatible constructor
+declaration as `implementation-constructor`, including dependency-owned
+candidates, before the selector-preserving recovery action.
 An inherited configuration conflict emits every contributing Project document
 as `configuration-declaration`, including all modules behind compatible
 declaration deduplication. Its document-level span is `1:1`; the exact schema

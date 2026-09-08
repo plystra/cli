@@ -172,20 +172,108 @@ func TestPublicResolvingCommandsEmitStableImplementationAmbiguityWithoutMutation
 			root := writeCommandAmbiguousImplementationProject(t)
 			before := commandTree(t, root)
 			exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
-			if exitCode != 1 || stdout != "" || !commandContainsAll(
-				stderr,
-				"email.send/v1",
-				"example.com/acme/implementation-use/local.New",
-				"example.com/acme/implementation-use/smtp.New",
-				"Recovery:\nSelect one compatible Implementation by running `plystra use email.send/v1 <constructor-symbol>`.\n",
-				"Diagnostic: "+diagnosticcode.ResolveMultipleImplementations,
-			) {
+			wantSuffix := strings.Join([]string{
+				"",
+				"Source: example.com/acme/implementation-use:local/implementation.go:12:6 (implementation-constructor)",
+				"Source: example.com/acme/implementation-use:smtp/implementation.go:12:6 (implementation-constructor)",
+				"",
+				"Recovery:",
+				"Select one compatible Implementation by running `plystra use email.send/v1 <constructor-symbol>`.",
+				"",
+				"Diagnostic: " + diagnosticcode.ResolveMultipleImplementations,
+				"",
+			}, "\n")
+			if exitCode != 1 || stdout != "" ||
+				!commandContainsAll(stderr, "email.send/v1", "example.com/acme/implementation-use/local.New", "example.com/acme/implementation-use/smtp.New") ||
+				!strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 2 ||
+				strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, root) {
 				t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
 			}
 			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("%v mutated ambiguous Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
 			}
 			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
+func TestPublicResolvingCommandsReportDependencyImplementationAmbiguitySourcesWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	for _, arguments := range commands {
+		arguments := arguments
+		t.Run(strings.Join(arguments, " "), func(t *testing.T) {
+			parent := t.TempDir()
+			applicationRoot := filepath.Join(parent, "application")
+			contractRoot := filepath.Join(parent, "contracts")
+			alphaRoot := filepath.Join(parent, "alpha")
+			zetaRoot := filepath.Join(parent, "zeta")
+
+			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/implementation-source-consumer
+
+go 1.26
+
+require (
+	example.com/providers/zeta v1.3.0
+	example.com/contracts v1.0.0
+	example.com/providers/alpha v1.2.0
+)
+
+replace example.com/contracts => ../contracts
+replace example.com/providers/alpha => ../alpha
+replace example.com/providers/zeta => ../zeta
+`)
+			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "interfaces: {require: [email.send/v1]}\n")
+			writeCommandFile(t, filepath.Join(applicationRoot, "generated", "sentinel.txt"), "must remain unchanged\n")
+
+			writeCommandFile(t, filepath.Join(contractRoot, "go.mod"), "module example.com/contracts\n\ngo 1.26\n")
+			writeCommandFile(t, filepath.Join(contractRoot, "plystra.yaml"), "{}\n")
+			writeCommandGraphInterface(t, contractRoot, "email/send/v1", "sendv1", "email.send/v1", "Send")
+
+			writeCommandDependencyImplementation(t, alphaRoot, "example.com/providers/alpha")
+			writeCommandDependencyImplementation(t, zetaRoot, "example.com/providers/zeta")
+
+			applicationBefore := commandTree(t, applicationRoot)
+			contractBefore := commandTree(t, contractRoot)
+			alphaBefore := commandTree(t, alphaRoot)
+			zetaBefore := commandTree(t, zetaRoot)
+
+			exitCode, stdout, stderr := runCommand(t, arguments, applicationRoot, commandGoEnvironment())
+			wantSuffix := strings.Join([]string{
+				"",
+				"Source: example.com/providers/alpha:service/implementation.go:12:6 (implementation-constructor)",
+				"Source: example.com/providers/zeta:service/implementation.go:12:6 (implementation-constructor)",
+				"",
+				"Recovery:",
+				"Select one compatible Implementation by running `plystra use email.send/v1 <constructor-symbol>`.",
+				"",
+				"Diagnostic: " + diagnosticcode.ResolveMultipleImplementations,
+				"",
+			}, "\n")
+			if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 2 {
+				t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+			}
+			for _, privatePath := range []string{parent, filepath.ToSlash(parent), applicationRoot, filepath.ToSlash(applicationRoot), contractRoot, filepath.ToSlash(contractRoot), alphaRoot, filepath.ToSlash(alphaRoot), zetaRoot, filepath.ToSlash(zetaRoot)} {
+				if strings.Contains(stderr, privatePath) {
+					t.Fatalf("%v exposed private path %q: %q", arguments, privatePath, stderr)
+				}
+			}
+			if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, applicationBefore) {
+				t.Fatalf("%v mutated consumer Project:\nbefore: %#v\nafter:  %#v", arguments, applicationBefore, after)
+			}
+			if after := commandTree(t, contractRoot); !reflect.DeepEqual(after, contractBefore) {
+				t.Fatalf("%v mutated contract Project:\nbefore: %#v\nafter:  %#v", arguments, contractBefore, after)
+			}
+			if after := commandTree(t, alphaRoot); !reflect.DeepEqual(after, alphaBefore) {
+				t.Fatalf("%v mutated alpha Project:\nbefore: %#v\nafter:  %#v", arguments, alphaBefore, after)
+			}
+			if after := commandTree(t, zetaRoot); !reflect.DeepEqual(after, zetaBefore) {
+				t.Fatalf("%v mutated zeta Project:\nbefore: %#v\nafter:  %#v", arguments, zetaBefore, after)
+			}
+			for _, root := range []string{applicationRoot, contractRoot, alphaRoot, zetaRoot} {
+				assertNoCommandTransactions(t, root)
+			}
 		})
 	}
 }
@@ -847,6 +935,29 @@ type Interface interface {
 type Request struct{}
 type Response struct{}
 `, packageName, identifier, method))
+}
+
+func writeCommandDependencyImplementation(t testing.TB, root, modulePath string) {
+	t.Helper()
+	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf("module %s\n\ngo 1.26\n\nrequire example.com/contracts v1.0.0\n\nreplace example.com/contracts => ../contracts\n", modulePath))
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(root, "service", "implementation.go"), `package service
+
+import (
+	"context"
+
+	sendv1 "example.com/contracts/interfaces/email/send/v1"
+)
+
+type Service struct{}
+
+//plystra:implements email.send/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
+	return sendv1.Response{}, nil
+}
+`)
 }
 
 func commandContainsAll(value string, fragments ...string) bool {

@@ -172,7 +172,14 @@ func TestResolveAppliesExplicitChoiceBeforeAmbiguity(t *testing.T) {
 		t.Fatalf("ambiguous error = %#v", ambiguous)
 	}
 	candidates := ambiguous.Candidates()
-	if len(candidates) != 2 || candidates[0].Constructor() != one || candidates[1].Constructor() != two || candidates[0].Source() == "" || candidates[1].Source() == "" || !containsAll(err.Error(), one.String(), two.String(), "interfaces.use") {
+	if len(candidates) != 2 ||
+		candidates[0].Constructor() != one || candidates[1].Constructor() != two ||
+		candidates[0].Source() == "" || candidates[1].Source() == "" ||
+		candidates[0].ModulePath() != "example.com/application" || candidates[1].ModulePath() != "example.com/application" ||
+		candidates[0].SourcePath() != "emailone/service.go" || candidates[1].SourcePath() != "emailtwo/service.go" ||
+		candidates[0].Line() != 12 || candidates[1].Line() != 12 ||
+		candidates[0].Column() != 6 || candidates[1].Column() != 6 ||
+		!containsAll(err.Error(), one.String(), two.String(), "interfaces.use") {
 		t.Fatalf("ambiguous candidates/error = %#v / %v", candidates, err)
 	}
 	candidates[0] = interfaceresolution.Candidate{}

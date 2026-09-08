@@ -1204,23 +1204,23 @@ then runs go test -mod=readonly ./... from the Project root. Use the same --env
 or --config selector used for generation. The command is read-only and never
 repairs YAML, generated output, or module metadata.
 
-plystra generate --check is read-only. It recomputes the complete resolution and
-generation fixed point and fails on stale, missing, unexpected, or manually modified
-managed paths. If it reports drift:
+plystra generate --check is read-only and fails on stale, missing, unexpected,
+or manually modified managed paths. If it reports drift:
 
-1. Read that path's generated/.plystra-manifest.json entry for its exact
-   generator, normalized input IDs, source references, output kind, and cleanup owner.
+1. Read that path's generated/.plystra-manifest.json entry for its generator,
+   input IDs, sources, output kind, and cleanup owner.
 2. Change the named authored input; move handwritten files out of generated.
-3. Run plystra generate, then plystra generate --check with the same selector.
+3. Run plystra generate and plystra generate --check with the same selector.
 
-Keep go.work optional. Standard Go Module dependency resolution remains the
-build and distribution boundary for every Plystra module.
+Keep go.work optional; Go Module resolution remains the build and distribution
+boundary.
 
 ## Diagnose common failures
 
 Failures end with Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
-Sorted sources use:
+Sources are sorted and use:
 Source: <module>:<module-relative-path>[:line:column] (<kind>).
+implementation-constructor: PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS.
 configuration-declaration: PLYSTRA_CONFIGURATION_INHERITED_CONFLICT,
 PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS.
 Sources omit absolute/Module Cache paths. Unsafe selectors use placeholders;
@@ -1228,8 +1228,9 @@ unclassified errors get neither.
 
 - Missing Implementation: require or expose its Interface and make one
   constructor visible. Markerless dependencies are not scanned.
-- Ambiguous Implementation: run plystra use <interface-id> <constructor-symbol>
-  with the same selector; no discovery priority exists.
+- Ambiguous Implementation: use plystra use <interface-id> <constructor-symbol>
+  with the same selector. Every candidate source is reported; discovery has no
+  priority.
 - Capability diagnostics precede mutation. Malformed references use
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID, or
