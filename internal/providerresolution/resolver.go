@@ -81,6 +81,16 @@ type RequirementSource struct {
 // String returns the bounded stable diagnostic reference.
 func (s RequirementSource) String() string { return s.Reference }
 
+// ProviderSource is one typed, stable, module-relative Capability declaration
+// location. A zero value is permitted for synthetic resolver callers that have
+// only the retained bounded diagnostic reference.
+type ProviderSource struct {
+	ModulePath string
+	Path       string
+	Line       int
+	Column     int
+}
+
 // Requirement carries deterministic typed provenance describing why the
 // application requires one exact canonical Capability. Contract may use the
 // accepted capability.yaml syntax. Capability may instead carry an exact
@@ -95,9 +105,10 @@ type Requirement struct {
 
 // Candidate carries one plugin's provider copy of an exact canonical contract.
 type Candidate struct {
-	PluginID string
-	Contract []byte
-	Source   string
+	PluginID          string
+	Contract          []byte
+	Source            string
+	DeclarationSource ProviderSource
 }
 
 // ChoiceSourceKind identifies whether one effective capabilities.use source
@@ -323,8 +334,10 @@ type normalizedRequirement struct {
 }
 
 type normalizedCandidate struct {
-	pluginID string
-	contract normalizedContract
+	pluginID             string
+	contract             normalizedContract
+	declarationSource    ProviderSource
+	hasDeclarationSource bool
 }
 
 type normalizedChoice struct {
@@ -459,7 +472,7 @@ func resolveNormalized(
 				}
 				issues = append(issues, &AmbiguousProviderError{
 					capability: group.id,
-					sources:    requirementSourceStrings(group.sources),
+					sources:    append([]RequirementSource(nil), group.sources...),
 					providers:  details,
 				})
 				continue
@@ -571,6 +584,11 @@ func normalizeCandidates(inputs []Candidate) ([]normalizedCandidate, []error) {
 			issues = append(issues, fmt.Errorf("%w: candidate source for plugin %q: %v", ErrInvalidInput, input.PluginID, err))
 			continue
 		}
+		declarationSource, hasDeclarationSource, err := normalizeProviderSource(input.DeclarationSource)
+		if err != nil {
+			issues = append(issues, fmt.Errorf("%w: candidate declaration source for plugin %q: %v", ErrInvalidInput, input.PluginID, err))
+			continue
+		}
 		if err := pluginid.Validate(input.PluginID); err != nil {
 			issues = append(issues, fmt.Errorf("%w: candidate at %q has non-canonical Plugin ID %q", ErrInvalidInput, source, input.PluginID))
 			continue
@@ -584,7 +602,12 @@ func normalizeCandidates(inputs []Candidate) ([]normalizedCandidate, []error) {
 			issues = append(issues, fmt.Errorf("%w: %w: plugin %q at %q cannot provide intrinsic Capability %s", ErrInvalidInput, ErrInvalidProvider, input.PluginID, source, contract.id))
 			continue
 		}
-		values = append(values, normalizedCandidate{pluginID: input.PluginID, contract: contract})
+		values = append(values, normalizedCandidate{
+			pluginID:             input.PluginID,
+			contract:             contract,
+			declarationSource:    declarationSource,
+			hasDeclarationSource: hasDeclarationSource,
+		})
 	}
 	return values, issues
 }
@@ -840,9 +863,11 @@ func contractVariants(inputs []normalizedContract) []ContractVariant {
 
 func providerDetail(candidate normalizedCandidate) ProviderDetail {
 	return ProviderDetail{
-		pluginID: candidate.pluginID,
-		source:   candidate.contract.source,
-		digest:   candidate.contract.digest,
+		pluginID:             candidate.pluginID,
+		source:               candidate.contract.source,
+		digest:               candidate.contract.digest,
+		declarationSource:    candidate.declarationSource,
+		hasDeclarationSource: candidate.hasDeclarationSource,
 	}
 }
 
@@ -864,6 +889,22 @@ func normalizeSource(value string) (string, error) {
 		return "", errors.New("must be non-empty valid single-line UTF-8, at most 1024 bytes")
 	}
 	return value, nil
+}
+
+func normalizeProviderSource(input ProviderSource) (ProviderSource, bool, error) {
+	if input == (ProviderSource{}) {
+		return ProviderSource{}, false, nil
+	}
+	if err := modulepath.CheckProject(input.ModulePath); err != nil {
+		return ProviderSource{}, false, fmt.Errorf("module path %q is invalid: %v", input.ModulePath, err)
+	}
+	if input.Path == "" || path.IsAbs(input.Path) || path.Clean(input.Path) != input.Path || input.Path == "." || input.Path == ".." || strings.HasPrefix(input.Path, "../") || strings.Contains(input.Path, "/../") || strings.Contains(input.Path, "\\") || strings.ContainsAny(input.Path, "\x00\r\n") || !utf8.ValidString(input.Path) {
+		return ProviderSource{}, false, fmt.Errorf("path %q must be one safe module-relative slash path", input.Path)
+	}
+	if input.Line < 1 || input.Column < 1 {
+		return ProviderSource{}, false, errors.New("line and column must be positive")
+	}
+	return input, true, nil
 }
 
 func normalizeChoiceSources(inputs []ChoiceSource) ([]ChoiceSource, error) {
@@ -1190,9 +1231,11 @@ func (*RequirementConflictError) Unwrap() error { return ErrRequirementConflict 
 
 // ProviderDetail records one complete candidate used in a diagnostic.
 type ProviderDetail struct {
-	pluginID string
-	source   string
-	digest   string
+	pluginID             string
+	source               string
+	digest               string
+	declarationSource    ProviderSource
+	hasDeclarationSource bool
 }
 
 // PluginID returns the candidate Plugin ID.
@@ -1200,6 +1243,12 @@ func (p ProviderDetail) PluginID() string { return p.pluginID }
 
 // Source returns provider declaration provenance.
 func (p ProviderDetail) Source() string { return p.source }
+
+// DeclarationSource returns typed Provider declaration provenance when the
+// resolver caller supplied it.
+func (p ProviderDetail) DeclarationSource() (ProviderSource, bool) {
+	return p.declarationSource, p.hasDeclarationSource
+}
 
 // ContractDigest returns the candidate's exact contract digest.
 func (p ProviderDetail) ContractDigest() string { return p.digest }
@@ -1366,7 +1415,7 @@ func (*MissingProviderError) Unwrap() error { return ErrMissingProvider }
 // AmbiguousProviderError reports every compatible provider requiring an explicit choice.
 type AmbiguousProviderError struct {
 	capability capabilityid.Identifier
-	sources    []string
+	sources    []RequirementSource
 	providers  []ProviderDetail
 }
 
@@ -1383,7 +1432,16 @@ func (e *AmbiguousProviderError) Sources() []string {
 	if e == nil {
 		return nil
 	}
-	return append([]string(nil), e.sources...)
+	return requirementSourceStrings(e.sources)
+}
+
+// RequirementSources returns sorted typed module-relative requirement
+// provenance without requiring consumers to parse diagnostic text.
+func (e *AmbiguousProviderError) RequirementSources() []RequirementSource {
+	if e == nil {
+		return nil
+	}
+	return append([]RequirementSource(nil), e.sources...)
 }
 
 // Providers returns every compatible candidate in Plugin ID order.
@@ -1406,7 +1464,7 @@ func (e *AmbiguousProviderError) Error() string {
 		"%s: %s required by [%s] has compatible providers [%s]; correction: run `plystra use %s <plugin-id>` to set capabilities.use[%s] to one Plugin ID; no priority, status, discovery-order, filesystem-order, or alphabetical fallback is applied",
 		ErrAmbiguousProvider,
 		e.capability,
-		strings.Join(e.sources, ", "),
+		strings.Join(requirementSourceStrings(e.sources), ", "),
 		strings.Join(providers, ", "),
 		e.capability,
 		e.capability,

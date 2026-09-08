@@ -248,6 +248,33 @@ func writeCommandFailure(writer io.Writer, prefix string, err error, context rec
 func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source {
 	var sources []diagnosticjson.Source
 	switch code {
+	case diagnosticProviderAmbiguous:
+		var ambiguous *providerresolution.AmbiguousProviderError
+		if !errors.As(err, &ambiguous) || ambiguous == nil {
+			return nil
+		}
+		for _, source := range ambiguous.RequirementSources() {
+			sources = append(sources, diagnosticjson.Source{
+				Module: source.ModulePath,
+				Path:   source.Path,
+				Kind:   string(source.Kind),
+				Line:   source.Line,
+				Column: source.Column,
+			})
+		}
+		for _, provider := range ambiguous.Providers() {
+			source, available := provider.DeclarationSource()
+			if !available {
+				continue
+			}
+			sources = append(sources, diagnosticjson.Source{
+				Module: source.ModulePath,
+				Path:   source.Path,
+				Kind:   "provider-declaration",
+				Line:   source.Line,
+				Column: source.Column,
+			})
+		}
 	case diagnosticProviderMissing:
 		var missing *providerresolution.MissingProviderError
 		if !errors.As(err, &missing) || missing == nil {

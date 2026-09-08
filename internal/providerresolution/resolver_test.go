@@ -253,13 +253,26 @@ func TestResolveRequiresExplicitChoiceForSeveralProviders(t *testing.T) {
 	t.Parallel()
 
 	requirement := providerresolution.Requirement{Contract: contract("email.send/v1", "request: {to: {type: string, required: true}}\n"), Source: requirementSource("plystra.yaml http.expose")}
-	candidates := []providerresolution.Candidate{
-		{PluginID: "zeta.email", Contract: requirement.Contract, Source: "zeta/capability.yaml"},
-		{PluginID: "acme.email", Contract: requirement.Contract, Source: "acme/capability.yaml"},
+	generatedRequirement := providerresolution.Requirement{
+		Contract: requirement.Contract,
+		Source: providerresolution.RequirementSource{
+			Kind:       providerresolution.RequirementGeneratedClient,
+			Reference:  "generated client",
+			ModulePath: "example.com/client",
+			Path:       "client/use.go",
+			Line:       7,
+			Column:     2,
+			PluginID:   "acme.client",
+		},
 	}
-	_, firstErr := providerresolution.Resolve(providerresolution.Input{Requirements: []providerresolution.Requirement{requirement}, Candidates: candidates})
+	requirements := []providerresolution.Requirement{requirement, generatedRequirement}
+	candidates := []providerresolution.Candidate{
+		{PluginID: "zeta.email", Contract: requirement.Contract, Source: "zeta/capability.yaml", DeclarationSource: providerSource("example.com/zeta", "zeta/capabilities/email.send/v1/capability.yaml")},
+		{PluginID: "acme.email", Contract: requirement.Contract, Source: "acme/capability.yaml", DeclarationSource: providerSource("example.com/acme", "acme/capabilities/email.send/v1/capability.yaml")},
+	}
+	_, firstErr := providerresolution.Resolve(providerresolution.Input{Requirements: requirements, Candidates: candidates})
 	slices.Reverse(candidates)
-	_, secondErr := providerresolution.Resolve(providerresolution.Input{Requirements: []providerresolution.Requirement{requirement}, Candidates: candidates})
+	_, secondErr := providerresolution.Resolve(providerresolution.Input{Requirements: requirements, Candidates: candidates})
 	if !errors.Is(firstErr, providerresolution.ErrResolve) || !errors.Is(firstErr, providerresolution.ErrAmbiguousProvider) || firstErr.Error() != secondErr.Error() {
 		t.Fatalf("order-dependent ambiguity:\nfirst:  %v\nsecond: %v", firstErr, secondErr)
 	}
@@ -267,9 +280,26 @@ func TestResolveRequiresExplicitChoiceForSeveralProviders(t *testing.T) {
 	if !errors.As(firstErr, &ambiguous) || ambiguous.Capability().String() != "email.send/v1" {
 		t.Fatalf("ambiguity = %T %#v", firstErr, ambiguous)
 	}
+	if !slices.Equal(ambiguous.Sources(), []string{"generated client", "plystra.yaml http.expose"}) {
+		t.Fatalf("ambiguity Sources = %v", ambiguous.Sources())
+	}
+	requirementSources := ambiguous.RequirementSources()
+	if len(requirementSources) != 2 || requirementSources[0] != requirement.Source || requirementSources[1] != generatedRequirement.Source {
+		t.Fatalf("ambiguity RequirementSources = %#v", requirementSources)
+	}
+	requirementSources[0] = providerresolution.RequirementSource{}
+	if ambiguous.RequirementSources()[0].ModulePath != "example.com/project" {
+		t.Fatal("AmbiguousProviderError exposed mutable typed requirement sources")
+	}
 	providers := ambiguous.Providers()
 	if len(providers) != 2 || providers[0].PluginID() != "acme.email" || providers[1].PluginID() != "zeta.email" {
 		t.Fatalf("ambiguity Providers = %#v", providers)
+	}
+	if source, available := providers[0].DeclarationSource(); !available || source != providerSource("example.com/acme", "acme/capabilities/email.send/v1/capability.yaml") {
+		t.Fatalf("acme declaration source = %#v, %t", source, available)
+	}
+	if source, available := providers[1].DeclarationSource(); !available || source != providerSource("example.com/zeta", "zeta/capabilities/email.send/v1/capability.yaml") {
+		t.Fatalf("zeta declaration source = %#v, %t", source, available)
 	}
 	providers[0] = providerresolution.ProviderDetail{}
 	if ambiguous.Providers()[0].PluginID() != "acme.email" {
@@ -282,7 +312,7 @@ func TestResolveRequiresExplicitChoiceForSeveralProviders(t *testing.T) {
 	}
 
 	result, err := providerresolution.Resolve(providerresolution.Input{
-		Requirements: []providerresolution.Requirement{requirement},
+		Requirements: requirements,
 		Candidates:   candidates,
 		Choices: []providerresolution.Choice{{
 			Capability: "email.send/v1",
@@ -611,6 +641,14 @@ func TestResolveRejectsInvalidProviderAndInputEnvelopes(t *testing.T) {
 		"invalid provider plugin": {
 			input: providerresolution.Input{Candidates: []providerresolution.Candidate{{PluginID: "Acme.Email", Contract: ordinary, Source: "bad/plugin"}}},
 		},
+		"invalid provider declaration source": {
+			input: providerresolution.Input{Candidates: []providerresolution.Candidate{{
+				PluginID:          "acme.email",
+				Contract:          ordinary,
+				Source:            "bad/provider-source",
+				DeclarationSource: providerresolution.ProviderSource{ModulePath: "example.com/project", Path: "../capability.yaml", Line: 1, Column: 1},
+			}}},
+		},
 		"invalid choice capability": {
 			input: providerresolution.Input{Choices: []providerresolution.Choice{{Capability: "email.send", PluginID: "acme.email", Sources: choiceSources("bad/choice")}}},
 		},
@@ -751,6 +789,15 @@ func requirementSource(reference string) providerresolution.RequirementSource {
 		Reference:  reference,
 		ModulePath: "example.com/project",
 		Path:       "plystra.yaml",
+		Line:       1,
+		Column:     1,
+	}
+}
+
+func providerSource(modulePath, sourcePath string) providerresolution.ProviderSource {
+	return providerresolution.ProviderSource{
+		ModulePath: modulePath,
+		Path:       sourcePath,
 		Line:       1,
 		Column:     1,
 	}

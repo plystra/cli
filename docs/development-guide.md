@@ -1925,10 +1925,12 @@ Diagnostic: PLYSTRA_<AREA>_<CONDITION>
 
 Duplicate Interface identities emit every defining source in the shared
 diagnostic-envelope order. A missing Capability Provider emits every
-requirement source that made the exact Capability necessary. Sources always
-name the owning Project module and a slash-separated module-relative path. They
-never expose an absolute path or a Module Cache path. A source omits the
-optional span when structured provenance provides no exact line or column.
+requirement source that made the exact Capability necessary. An ambiguous
+Capability Provider emits those requirement sources and every compatible
+Provider's `capability.yaml` declaration. Sources always name the owning
+Project module and a slash-separated module-relative path. They never expose an
+absolute path or a Module Cache path. A source omits the optional span when
+structured provenance provides no exact line or column.
 
 Run that action with the same selected application model. Recovery commands
 retain default, environment, or complete-replacement mode, including selectors

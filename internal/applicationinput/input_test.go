@@ -89,6 +89,15 @@ capabilities:
 	}) {
 		t.Fatalf("Candidates = %v", got)
 	}
+	wantCandidateSources := []providerresolution.ProviderSource{
+		{ModulePath: "example.com/providers", Path: "audit/capabilities/audit.write/v1/capability.yaml", Line: 1, Column: 1},
+		{ModulePath: "example.com/providers", Path: "business/capabilities/order.create/v1/capability.yaml", Line: 1, Column: 1},
+	}
+	for index, candidate := range input.Candidates {
+		if candidate.DeclarationSource != wantCandidateSources[index] {
+			t.Fatalf("Candidates[%d].DeclarationSource = %#v, want %#v", index, candidate.DeclarationSource, wantCandidateSources[index])
+		}
+	}
 	if len(input.Requirements) != 1 || input.Requirements[0].Capability != "kernel.info/v1" || len(input.Requirements[0].Contract) == 0 || input.Requirements[0].Source.String() != `plystra.yaml capabilities.require["kernel.info/v1"]` || input.Requirements[0].Source.Kind != providerresolution.RequirementDeclaration || input.Requirements[0].Source.ModulePath != "example.com/app" || input.Requirements[0].Source.Path != "plystra.yaml" {
 		t.Fatalf("Requirements = %#v", input.Requirements)
 	}

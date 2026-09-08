@@ -132,6 +132,12 @@ func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, s
 				PluginID: plugin.ID(),
 				Contract: append([]byte(nil), canonical...),
 				Source:   provenance,
+				DeclarationSource: providerresolution.ProviderSource{
+					ModulePath: plugin.ModulePath(),
+					Path:       path.Join(plugin.Path(), source.RelativePath()),
+					Line:       1,
+					Column:     1,
+				},
 			})
 		}
 	}

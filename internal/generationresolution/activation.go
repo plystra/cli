@@ -269,9 +269,10 @@ func cloneCandidates(inputs []providerresolution.Candidate) []providerresolution
 	result := make([]providerresolution.Candidate, len(inputs))
 	for index, input := range inputs {
 		result[index] = providerresolution.Candidate{
-			PluginID: input.PluginID,
-			Contract: append([]byte(nil), input.Contract...),
-			Source:   input.Source,
+			PluginID:          input.PluginID,
+			Contract:          append([]byte(nil), input.Contract...),
+			Source:            input.Source,
+			DeclarationSource: input.DeclarationSource,
 		}
 	}
 	return result
