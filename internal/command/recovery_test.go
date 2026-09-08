@@ -19,6 +19,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityversion"
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/constructorgraph"
+	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/dependencyadd"
 	"github.com/plystra/cli/internal/dependencyremove"
 	"github.com/plystra/cli/internal/dependencyupdate"
@@ -270,6 +271,43 @@ func TestWriteCommandFailureReportsProviderContractMismatchSources(t *testing.T)
 		"Diagnostic: " + diagnosticProviderContractMismatch + "\n"
 	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 2 {
 		t.Fatalf("Provider contract mismatch output = %q, want suffix %q", got, wantSuffix)
+	}
+}
+
+func TestWriteCommandFailureReportsInheritedConfigurationConflictSources(t *testing.T) {
+	t.Parallel()
+
+	parseManifest := func(source string) applicationmeta.Manifest {
+		t.Helper()
+		manifest, err := applicationmeta.Parse([]byte(source))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		return manifest
+	}
+	dependencies := []applicationmeta.Dependency{
+		{ModulePath: "example.com/c", ModuleVersion: "v1.2.0", Manifest: parseManifest("interfaces: {use: {email.send/v1: example.com/secondary.New}}\n")},
+		{ModulePath: "example.com/b", ModuleVersion: "v1.1.0", Manifest: parseManifest("interfaces: {use: {email.send/v1: example.com/primary.New}}\n")},
+		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: parseManifest("interfaces: {use: {email.send/v1: example.com/primary.New}}\n")},
+	}
+	_, conflict := applicationmeta.Compose(dependencies, parseManifest("{}\n"), func(constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		return implementationinventory.Configuration{}, false
+	})
+	if !errors.Is(conflict, applicationmeta.ErrInheritedConflict) {
+		t.Fatalf("Compose error = %v, want ErrInheritedConflict", conflict)
+	}
+
+	var output strings.Builder
+	writeCommandFailure(&output, "check Plystra Project", fmt.Errorf("resolve application: %w", conflict), recoveryContext{})
+	got := output.String()
+	wantSuffix := "\n\n" +
+		"Source: example.com/a:plystra.yaml:1:1 (configuration-declaration)\n" +
+		"Source: example.com/b:plystra.yaml:1:1 (configuration-declaration)\n" +
+		"Source: example.com/c:plystra.yaml:1:1 (configuration-declaration)\n\n" +
+		"Recovery:\nSet or remove the conflicting field explicitly in plystra.yaml, then rerun the command.\n\n" +
+		"Diagnostic: " + diagnosticConfigurationInheritedConflict + "\n"
+	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 3 {
+		t.Fatalf("inherited configuration conflict output = %q, want suffix %q", got, wantSuffix)
 	}
 }
 

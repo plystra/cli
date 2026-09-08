@@ -1219,11 +1219,12 @@ build and distribution boundary for every Plystra module.
 
 ## Diagnose common failures
 
-Actionable failures end with Recovery and a stable
-Diagnostic: PLYSTRA_<AREA>_<CONDITION> code. Source-bearing authored and Provider failures put sorted
-Source: <module>:<module-relative-path>[:line:column] (<kind>) lines first; they
-expose no Module Cache or absolute path. Unsafe selectors use placeholders.
-Unclassified errors get neither.
+Failures end with Recovery and Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
+Source facts are sorted:
+Source: <module>:<module-relative-path>[:line:column] (<kind>).
+PLYSTRA_CONFIGURATION_INHERITED_CONFLICT uses configuration-declaration.
+They omit absolute and Module Cache paths. Unsafe selectors use placeholders;
+unclassified errors get neither.
 
 - Missing Implementation: require or expose its Interface and make one
   constructor visible. Markerless dependencies are not scanned.

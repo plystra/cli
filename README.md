@@ -818,6 +818,11 @@ declaration.
 `PLYSTRA_PROVIDER_CONTRACT_MISMATCH` reports every exact-contract requirement
 source together with each incompatible Provider's `capability.yaml`
 declaration.
+`PLYSTRA_CONFIGURATION_INHERITED_CONFLICT` reports every Project configuration
+document that contributed a competing declaration, including every module
+behind compatible declaration deduplication, as `configuration-declaration`.
+The exact conflicting field remains in the problem text; configuration values
+and Secret-reference targets never enter the source facts.
 
 Configuration-selection failures use
 `PLYSTRA_CONFIGURATION_SELECTION_INVALID`. An explicit `--env` plus `--config`

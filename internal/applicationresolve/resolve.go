@@ -195,6 +195,10 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
+	rootManifest, err = applicationmeta.WithProjectModule(rootManifest, module.ModulePath())
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: associate root configuration with Project module: %w", ErrResolve, err)
+	}
 	selector, err := resolveConfigurationSelector(module.Path(), options.ConfigurationPath, options.EnvironmentName, options.Environment)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrConfigurationSelection, err)
@@ -209,6 +213,10 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		}
 		if err != nil {
 			return Result{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrConfigurationSelection, err)
+		}
+		selectedManifest, err = applicationmeta.WithProjectModule(selectedManifest, module.ModulePath())
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: associate selected configuration with Project module: %w", ErrResolve, err)
 		}
 	}
 	dependencies, err := moduledependency.Discover(ctx, module, moduledependency.Options{
@@ -268,6 +276,10 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	maintainedManifest, err := applicationmeta.ParseSource(maintenanceSnapshot.path, maintenance.Data())
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: maintained application manifest: %w", ErrResolve, err)
+	}
+	maintainedManifest, err = applicationmeta.WithProjectModule(maintainedManifest, module.ModulePath())
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: associate maintained configuration with Project module: %w", ErrResolve, err)
 	}
 	currentManifest := maintainedManifest
 	if selector.mode == configurationModeEnvironment {

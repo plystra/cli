@@ -139,6 +139,11 @@ func TestRunCheckReportsEveryInheritedConfigurationConflictSource(t *testing.T) 
 
 	orders := [][]int{{0, 1, 2}, {2, 1, 0}}
 	outputs := make([]string, len(orders))
+	sourceBlock := strings.Join([]string{
+		"Source: example.com/a:plystra.yaml:1:1 (configuration-declaration)",
+		"Source: example.com/b:plystra.yaml:1:1 (configuration-declaration)",
+		"Source: example.com/c:plystra.yaml:1:1 (configuration-declaration)",
+	}, "\n") + "\n"
 	for orderIndex, order := range orders {
 		root := filepath.Join(parent, fmt.Sprintf("application-%d", orderIndex))
 		var moduleFile strings.Builder
@@ -174,8 +179,14 @@ func TestRunCheckReportsEveryInheritedConfigurationConflictSource(t *testing.T) 
 				t.Fatalf("check order %d omits %q: %s", orderIndex, fragment, stderr)
 			}
 		}
-		if strings.Count(stderr, "example.com/implementation/primary.New") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+		if !strings.Contains(stderr, "\n\n"+sourceBlock+"\nRecovery:\n") {
+			t.Fatalf("check order %d source block is absent or out of order: %s", orderIndex, stderr)
+		}
+		if strings.Count(stderr, "Source: ") != 3 || strings.Count(stderr, "example.com/implementation/primary.New") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
 			t.Fatalf("check order %d has unstable deduplication or recovery: %s", orderIndex, stderr)
+		}
+		if strings.Contains(stderr, parent) || strings.Contains(stderr, filepath.ToSlash(parent)) {
+			t.Fatalf("check order %d exposes an absolute Project path: %s", orderIndex, stderr)
 		}
 		if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 			t.Fatalf("conflicting check order %d mutated the Project", orderIndex)

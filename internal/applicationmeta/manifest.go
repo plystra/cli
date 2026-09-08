@@ -21,6 +21,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/pluginid"
 	"go.yaml.in/yaml/v3"
 )
@@ -184,12 +185,14 @@ func (c ProviderChoice) Source() string { return c.source }
 type ConstructorConfiguration struct {
 	constructor constructorsymbol.Symbol
 	source      string
+	sourcePath  string
 	yaml        []byte
 }
 
 type constructorConfigurationRemoval struct {
 	constructor constructorsymbol.Symbol
 	source      string
+	sourcePath  string
 }
 
 // Constructor returns the exact fully qualified Implementation constructor.
@@ -222,6 +225,7 @@ func (ConstructorConfiguration) LogValue() slog.Value {
 // Manifest is the immutable normalized application metadata used by typed
 // Interface selection, dependency composition, exposure, and runtime input.
 type Manifest struct {
+	modulePath                   string
 	source                       string
 	httpAddress                  string
 	hasHTTPAddress               bool
@@ -247,6 +251,16 @@ type Manifest struct {
 	startupTimeout               time.Duration
 	hasStartupTimeout            bool
 	removeStartupTimeout         bool
+}
+
+// WithProjectModule returns a copy associated with the owning Project module
+// for module-relative diagnostic provenance.
+func WithProjectModule(manifest Manifest, projectModule string) (Manifest, error) {
+	if err := modulepath.CheckProject(projectModule); err != nil {
+		return Manifest{}, fmt.Errorf("%w: Project module %q is invalid: %v", ErrInvalidManifest, projectModule, err)
+	}
+	manifest.modulePath = projectModule
+	return manifest, nil
 }
 
 // String returns only a redaction marker because the manifest can contain
@@ -532,9 +546,11 @@ func rewriteManifestSource(manifest *Manifest, source string) {
 	}
 	for index := range manifest.configurations {
 		manifest.configurations[index].source = rewrite(manifest.configurations[index].source)
+		manifest.configurations[index].sourcePath = source
 	}
 	for index := range manifest.removedConfigurations {
 		manifest.removedConfigurations[index].source = rewrite(manifest.removedConfigurations[index].source)
+		manifest.removedConfigurations[index].sourcePath = source
 	}
 }
 
@@ -555,7 +571,7 @@ func parseConfigurations(node *yaml.Node) ([]ConstructorConfiguration, []constru
 		}
 		source := fmt.Sprintf("plystra.yaml config[%q]", value)
 		if isNull(values[value]) {
-			removals = append(removals, constructorConfigurationRemoval{constructor: constructor, source: source})
+			removals = append(removals, constructorConfigurationRemoval{constructor: constructor, source: source, sourcePath: "plystra.yaml"})
 			continue
 		}
 		if values[value].Kind != yaml.MappingNode {
@@ -568,6 +584,7 @@ func parseConfigurations(node *yaml.Node) ([]ConstructorConfiguration, []constru
 		configurations = append(configurations, ConstructorConfiguration{
 			constructor: constructor,
 			source:      source,
+			sourcePath:  "plystra.yaml",
 			yaml:        append([]byte(nil), data...),
 		})
 	}

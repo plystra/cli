@@ -19,6 +19,12 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (Manifest, error
 	if schemas == nil {
 		return Manifest{}, fmt.Errorf("%w: schema lookup is nil", ErrApplyOverlay)
 	}
+	projectModule := base.modulePath
+	if projectModule == "" {
+		projectModule = overlay.modulePath
+	} else if overlay.modulePath != "" && overlay.modulePath != projectModule {
+		return Manifest{}, fmt.Errorf("%w: base and overlay belong to different Project modules", ErrApplyOverlay)
+	}
 
 	httpAddress, hasHTTPAddress, removeHTTPAddress := base.httpAddress, base.hasHTTPAddress, base.removeHTTPAddress
 	if overlay.removeHTTPAddress {
@@ -57,6 +63,8 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (Manifest, error
 	}
 
 	return Manifest{
+		modulePath:                   projectModule,
+		source:                       base.source,
 		httpAddress:                  httpAddress,
 		hasHTTPAddress:               hasHTTPAddress,
 		removeHTTPAddress:            removeHTTPAddress,
@@ -366,12 +374,23 @@ func overlayConstructorConfigurations(base, overlay Manifest, schemas SchemaLook
 			for length := 0; length < len(prototype.segments); length++ {
 				ancestorPath := constructorConfigPath(prototype.constructor, prototype.segments[:length])
 				if ancestor, exists := selected[ancestorPath]; exists && ancestor.kind != constructorConfigObject {
-					return nil, nil, fmt.Errorf("%w: %s has incompatible lower %s and overlay %s types from %s and %s", ErrInheritedConflict, path, constructorConfigDecisionDescription(ancestor), constructorConfigDecisionDescription(prototype), ancestor.source, prototype.source)
+					declarations := make(configurationDeclarationSources)
+					addConfigurationDeclarationSource(declarations, ancestor.declarationSource)
+					addConfigurationDeclarationSource(declarations, prototype.declarationSource)
+					return nil, nil, newInheritedConflictError(
+						path,
+						fmt.Sprintf("%s has incompatible lower %s and overlay %s types from %s and %s", path, constructorConfigDecisionDescription(ancestor), constructorConfigDecisionDescription(prototype), ancestor.source, prototype.source),
+						declarations,
+					)
 				}
 			}
 			candidates := map[string]*constructorConfigCandidate{}
 			if lowerDecision, exists := lowerByPath[path]; exists {
-				candidates[constructorConfigCandidateKey(lowerDecision)] = &constructorConfigCandidate{decision: lowerDecision, sources: map[string]struct{}{lowerDecision.source: {}}}
+				candidates[constructorConfigCandidateKey(lowerDecision)] = &constructorConfigCandidate{
+					decision:     lowerDecision,
+					sources:      map[string]struct{}{lowerDecision.source: {}},
+					declarations: configurationDeclarationSources{lowerDecision.declarationSource: {}},
+				}
 			}
 			if err := validateCurrentConstructorConfigDecision(path, upperDecision, candidates); err != nil {
 				return nil, nil, err

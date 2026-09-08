@@ -297,6 +297,20 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: source.Column,
 			})
 		}
+	case diagnosticConfigurationInheritedConflict:
+		var conflict *applicationmeta.InheritedConflictError
+		if !errors.As(err, &conflict) || conflict == nil {
+			return nil
+		}
+		for _, source := range conflict.Sources() {
+			sources = append(sources, diagnosticjson.Source{
+				Module: source.ModulePath(),
+				Path:   source.Path(),
+				Kind:   "configuration-declaration",
+				Line:   source.Line(),
+				Column: source.Column(),
+			})
+		}
 	case diagnosticProviderSelectionInvalid:
 		var invalid *providerresolution.ChoiceError
 		if !errors.As(err, &invalid) || invalid == nil {

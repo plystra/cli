@@ -33,18 +33,20 @@ const (
 )
 
 type constructorConfigDecision struct {
-	constructor constructorsymbol.Symbol
-	segments    []string
-	kind        constructorConfigDecisionKind
-	valueType   string
-	yaml        []byte
-	digest      string
-	source      string
+	constructor       constructorsymbol.Symbol
+	segments          []string
+	kind              constructorConfigDecisionKind
+	valueType         string
+	yaml              []byte
+	digest            string
+	source            string
+	declarationSource ConfigurationDeclarationSource
 }
 
 type constructorConfigCandidate struct {
-	decision constructorConfigDecision
-	sources  map[string]struct{}
+	decision     constructorConfigDecision
+	sources      map[string]struct{}
+	declarations configurationDeclarationSources
 }
 
 func composeConstructorConfigurations(dependencies []Dependency, current Manifest, schemas SchemaLookup, records map[string]*provenanceRecord) ([]ConstructorConfiguration, error) {
@@ -56,6 +58,7 @@ func composeConstructorConfigurations(dependencies []Dependency, current Manifes
 		}
 		for _, decision := range decisions {
 			decision.source = dependencySource(dependency, decision.source)
+			decision.declarationSource = dependencyConfigurationDeclarationSource(dependency)
 			path := constructorConfigPath(decision.constructor, decision.segments)
 			addProvenance(records, path, decision.digest, decision.source, decision.kind == constructorConfigRemoval)
 			byDecision := inherited[path]
@@ -66,10 +69,15 @@ func composeConstructorConfigurations(dependencies []Dependency, current Manifes
 			key := constructorConfigCandidateKey(decision)
 			candidate := byDecision[key]
 			if candidate == nil {
-				candidate = &constructorConfigCandidate{decision: cloneConstructorConfigDecision(decision), sources: make(map[string]struct{})}
+				candidate = &constructorConfigCandidate{
+					decision:     cloneConstructorConfigDecision(decision),
+					sources:      make(map[string]struct{}),
+					declarations: make(configurationDeclarationSources),
+				}
 				byDecision[key] = candidate
 			}
 			candidate.sources[decision.source] = struct{}{}
+			addConfigurationDeclarationSource(candidate.declarations, decision.declarationSource)
 			if decision.source < candidate.decision.source || decision.source == candidate.decision.source && bytes.Compare(decision.yaml, candidate.decision.yaml) < 0 {
 				candidate.decision = cloneConstructorConfigDecision(decision)
 			}
@@ -134,13 +142,19 @@ func manifestConfigDecisions(manifest Manifest, schemas SchemaLookup) ([]constru
 		if err != nil {
 			return nil, err
 		}
+		declarationSource := manifestConfigurationDeclarationSource(manifest, configured.sourcePath)
+		for index := range decisions {
+			decisions[index].declarationSource = declarationSource
+		}
 		result = append(result, decisions...)
 	}
 	for _, removal := range manifest.removedConfigurations {
 		if _, exists := schemas(removal.constructor); !exists {
 			return nil, fmt.Errorf("%w for constructor %q at %s", ErrConfigurationSchema, removal.constructor, removal.source)
 		}
-		result = append(result, newConstructorConfigDecision(removal.constructor, nil, constructorConfigRemoval, "", nil, removal.source))
+		decision := newConstructorConfigDecision(removal.constructor, nil, constructorConfigRemoval, "", nil, removal.source)
+		decision.declarationSource = manifestConfigurationDeclarationSource(manifest, removal.sourcePath)
+		result = append(result, decision)
 	}
 	sort.Slice(result, func(left, right int) bool {
 		return constructorConfigPath(result[left].constructor, result[left].segments) < constructorConfigPath(result[right].constructor, result[right].segments)
@@ -587,7 +601,14 @@ func validateCurrentConstructorConfigDecision(path string, current constructorCo
 			continue
 		}
 		if lower.kind != current.kind || lower.kind == constructorConfigValue && lower.valueType != current.valueType {
-			return fmt.Errorf("%w: %s has incompatible lower %s and current %s types from %s and %s", ErrInheritedConflict, path, constructorConfigDecisionDescription(lower), constructorConfigDecisionDescription(current), strings.Join(sortedSet(candidate.sources), ", "), current.source)
+			declarations := make(configurationDeclarationSources)
+			mergeConfigurationDeclarationSources(declarations, candidate.declarations)
+			addConfigurationDeclarationSource(declarations, current.declarationSource)
+			return newInheritedConflictError(
+				path,
+				fmt.Sprintf("%s has incompatible lower %s and current %s types from %s and %s", path, constructorConfigDecisionDescription(lower), constructorConfigDecisionDescription(current), strings.Join(sortedSet(candidate.sources), ", "), current.source),
+				declarations,
+			)
 		}
 	}
 	return nil
@@ -600,11 +621,17 @@ func inheritedConstructorConfigConflict(path string, candidates map[string]*cons
 	}
 	sort.Strings(keys)
 	parts := make([]string, 0, len(keys))
+	declarations := make(configurationDeclarationSources)
 	for _, key := range keys {
 		candidate := candidates[key]
 		parts = append(parts, fmt.Sprintf("%s from %s", constructorConfigDecisionDescription(candidate.decision), strings.Join(sortedSet(candidate.sources), ", ")))
+		mergeConfigurationDeclarationSources(declarations, candidate.declarations)
 	}
-	return fmt.Errorf("%w: %s has incompatible declarations: %s; set or remove that exact field in the current Project configuration", ErrInheritedConflict, path, strings.Join(parts, "; "))
+	return newInheritedConflictError(
+		path,
+		fmt.Sprintf("%s has incompatible declarations: %s; set or remove that exact field in the current Project configuration", path, strings.Join(parts, "; ")),
+		declarations,
+	)
 }
 
 func constructorConfigDecisionDescription(decision constructorConfigDecision) string {
@@ -645,7 +672,7 @@ func renderConstructorConfigurations(selected map[string]constructorConfigDecisi
 		if err != nil {
 			return nil, fmt.Errorf("config[%q]: %v", constructor, err)
 		}
-		result = append(result, ConstructorConfiguration{constructor: root.decision.constructor, source: root.decision.source, yaml: data})
+		result = append(result, ConstructorConfiguration{constructor: root.decision.constructor, source: root.decision.source, sourcePath: root.decision.declarationSource.path, yaml: data})
 	}
 	return result, nil
 }
@@ -661,7 +688,7 @@ func renderConstructorConfigurationLayer(selected map[string]constructorConfigDe
 			return nil, nil, errors.New("overlaid constructor configuration has no root decision")
 		}
 		if root.decision.kind == constructorConfigRemoval {
-			removals = append(removals, constructorConfigurationRemoval{constructor: root.decision.constructor, source: root.decision.source})
+			removals = append(removals, constructorConfigurationRemoval{constructor: root.decision.constructor, source: root.decision.source, sourcePath: root.decision.declarationSource.path})
 			continue
 		}
 		node, present, err := renderConstructorConfigNode(root, true)
@@ -675,7 +702,7 @@ func renderConstructorConfigurationLayer(selected map[string]constructorConfigDe
 		if err != nil {
 			return nil, nil, fmt.Errorf("config[%q]: %v", constructor, err)
 		}
-		configurations = append(configurations, ConstructorConfiguration{constructor: root.decision.constructor, source: root.decision.source, yaml: data})
+		configurations = append(configurations, ConstructorConfiguration{constructor: root.decision.constructor, source: root.decision.source, sourcePath: root.decision.declarationSource.path, yaml: data})
 	}
 	return configurations, removals, nil
 }

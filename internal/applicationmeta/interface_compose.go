@@ -11,6 +11,7 @@ import (
 type interfaceSetCandidate struct {
 	valueSources   map[string]struct{}
 	removalSources map[string]struct{}
+	declarations   configurationDeclarationSources
 }
 
 func composeInterfaceRequirementSet(dependencies []Dependency, current []InterfaceRequirement, currentRemovals []interfaceRemoval, records map[string]*provenanceRecord) ([]InterfaceRequirement, error) {
@@ -22,6 +23,7 @@ func composeInterfaceRequirementSet(dependencies []Dependency, current []Interfa
 			addProvenance(records, path, interfaceDeclarationDigest("interfaces.require", requirement.id, false), source, false)
 			candidate := ensureInterfaceSetCandidate(inherited, requirement.id)
 			candidate.valueSources[source] = struct{}{}
+			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
 		}
 		for _, removal := range dependency.Manifest.removedInterfaceReqs {
 			path := fmt.Sprintf("interfaces.require[%q]", removal.id.String())
@@ -29,6 +31,7 @@ func composeInterfaceRequirementSet(dependencies []Dependency, current []Interfa
 			addProvenance(records, path, interfaceDeclarationDigest("interfaces.require", removal.id, true), source, true)
 			candidate := ensureInterfaceSetCandidate(inherited, removal.id)
 			candidate.removalSources[source] = struct{}{}
+			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
 		}
 	}
 	values := make(map[interfaceid.Identifier]InterfaceRequirement)
@@ -63,7 +66,11 @@ func composeInterfaceRequirementSet(dependencies []Dependency, current []Interfa
 func ensureInterfaceSetCandidate(values map[interfaceid.Identifier]*interfaceSetCandidate, id interfaceid.Identifier) *interfaceSetCandidate {
 	candidate := values[id]
 	if candidate == nil {
-		candidate = &interfaceSetCandidate{valueSources: make(map[string]struct{}), removalSources: make(map[string]struct{})}
+		candidate = &interfaceSetCandidate{
+			valueSources:   make(map[string]struct{}),
+			removalSources: make(map[string]struct{}),
+			declarations:   make(configurationDeclarationSources),
+		}
 		values[id] = candidate
 	}
 	return candidate
@@ -87,20 +94,24 @@ func interfaceRemovalSet(values []interfaceRemoval) map[interfaceid.Identifier]s
 }
 
 func inheritedInterfaceSetConflict(path string, id interfaceid.Identifier, candidate *interfaceSetCandidate) error {
-	return fmt.Errorf(
-		"%w: %s[%q] is added by %s and removed by %s; explicitly add or remove that exact Interface in the current Project configuration",
-		ErrInheritedConflict,
-		path,
-		id.String(),
-		strings.Join(sortedSet(candidate.valueSources), ", "),
-		strings.Join(sortedSet(candidate.removalSources), ", "),
+	field := fmt.Sprintf("%s[%q]", path, id.String())
+	return newInheritedConflictError(
+		field,
+		fmt.Sprintf(
+			"%s is added by %s and removed by %s; explicitly add or remove that exact Interface in the current Project configuration",
+			field,
+			strings.Join(sortedSet(candidate.valueSources), ", "),
+			strings.Join(sortedSet(candidate.removalSources), ", "),
+		),
+		candidate.declarations,
 	)
 }
 
 type implementationCandidate struct {
-	choice  ImplementationChoice
-	removed bool
-	sources map[string]struct{}
+	choice       ImplementationChoice
+	removed      bool
+	sources      map[string]struct{}
+	declarations configurationDeclarationSources
 }
 
 func composeImplementationChoices(dependencies []Dependency, current []ImplementationChoice, currentRemovals []interfaceRemoval, records map[string]*provenanceRecord) ([]ImplementationChoice, error) {
@@ -119,10 +130,11 @@ func composeImplementationChoices(dependencies []Dependency, current []Implement
 			candidate := byDigest[digest]
 			if candidate == nil {
 				choice.source = source
-				candidate = &implementationCandidate{choice: choice, sources: make(map[string]struct{})}
+				candidate = &implementationCandidate{choice: choice, sources: make(map[string]struct{}), declarations: make(configurationDeclarationSources)}
 				byDigest[digest] = candidate
 			}
 			candidate.sources[source] = struct{}{}
+			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
 			if source < candidate.choice.source {
 				candidate.choice.source = source
 			}
@@ -139,10 +151,11 @@ func composeImplementationChoices(dependencies []Dependency, current []Implement
 			}
 			candidate := byDigest[digest]
 			if candidate == nil {
-				candidate = &implementationCandidate{removed: true, sources: make(map[string]struct{})}
+				candidate = &implementationCandidate{removed: true, sources: make(map[string]struct{}), declarations: make(configurationDeclarationSources)}
 				byDigest[digest] = candidate
 			}
 			candidate.sources[source] = struct{}{}
+			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
 		}
 	}
 	selected := make(map[interfaceid.Identifier]ImplementationChoice)
@@ -189,6 +202,7 @@ func inheritedImplementationConflict(id interfaceid.Identifier, candidates map[s
 	}
 	sort.Strings(digests)
 	parts := make([]string, 0, len(digests))
+	declarations := make(configurationDeclarationSources)
 	for _, digest := range digests {
 		candidate := candidates[digest]
 		declaration := candidate.choice.constructor.String()
@@ -196,14 +210,21 @@ func inheritedImplementationConflict(id interfaceid.Identifier, candidates map[s
 			declaration = "<removed>"
 		}
 		parts = append(parts, fmt.Sprintf("%s from %s", declaration, strings.Join(sortedSet(candidate.sources), ", ")))
+		mergeConfigurationDeclarationSources(declarations, candidate.declarations)
 	}
-	return fmt.Errorf("%w: interfaces.use[%q] has incompatible Implementation declarations: %s; set or remove that exact key in the current Project configuration", ErrInheritedConflict, id.String(), strings.Join(parts, "; "))
+	field := fmt.Sprintf("interfaces.use[%q]", id.String())
+	return newInheritedConflictError(
+		field,
+		fmt.Sprintf("%s has incompatible Implementation declarations: %s; set or remove that exact key in the current Project configuration", field, strings.Join(parts, "; ")),
+		declarations,
+	)
 }
 
 type interfacePolicyCandidate struct {
-	policy  InterfacePolicy
-	removed bool
-	sources map[string]struct{}
+	policy       InterfacePolicy
+	removed      bool
+	sources      map[string]struct{}
+	declarations configurationDeclarationSources
 }
 
 func composeInterfacePolicies(dependencies []Dependency, current []InterfacePolicy, currentRemovals []interfaceRemoval, records map[string]*provenanceRecord) ([]InterfacePolicy, error) {
@@ -222,10 +243,11 @@ func composeInterfacePolicies(dependencies []Dependency, current []InterfacePoli
 			candidate := byDigest[digest]
 			if candidate == nil {
 				policy.source = source
-				candidate = &interfacePolicyCandidate{policy: policy, sources: make(map[string]struct{})}
+				candidate = &interfacePolicyCandidate{policy: policy, sources: make(map[string]struct{}), declarations: make(configurationDeclarationSources)}
 				byDigest[digest] = candidate
 			}
 			candidate.sources[source] = struct{}{}
+			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
 			if source < candidate.policy.source {
 				candidate.policy.source = source
 			}
@@ -242,10 +264,11 @@ func composeInterfacePolicies(dependencies []Dependency, current []InterfacePoli
 			}
 			candidate := byDigest[digest]
 			if candidate == nil {
-				candidate = &interfacePolicyCandidate{removed: true, sources: make(map[string]struct{})}
+				candidate = &interfacePolicyCandidate{removed: true, sources: make(map[string]struct{}), declarations: make(configurationDeclarationSources)}
 				byDigest[digest] = candidate
 			}
 			candidate.sources[source] = struct{}{}
+			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
 		}
 	}
 
@@ -293,6 +316,7 @@ func inheritedInterfacePolicyConflict(id interfaceid.Identifier, candidates map[
 	}
 	sort.Strings(digests)
 	parts := make([]string, 0, len(digests))
+	declarations := make(configurationDeclarationSources)
 	for _, digest := range digests {
 		candidate := candidates[digest]
 		declaration := candidate.policy.timeout.String()
@@ -300,8 +324,14 @@ func inheritedInterfacePolicyConflict(id interfaceid.Identifier, candidates map[
 			declaration = "<removed>"
 		}
 		parts = append(parts, fmt.Sprintf("%s from %s", declaration, strings.Join(sortedSet(candidate.sources), ", ")))
+		mergeConfigurationDeclarationSources(declarations, candidate.declarations)
 	}
-	return fmt.Errorf("%w: %s has incompatible timeout declarations: %s; set or remove that exact Interface policy in the current Project configuration", ErrInheritedConflict, interfacePolicyPath(id), strings.Join(parts, "; "))
+	field := interfacePolicyPath(id)
+	return newInheritedConflictError(
+		field,
+		fmt.Sprintf("%s has incompatible timeout declarations: %s; set or remove that exact Interface policy in the current Project configuration", field, strings.Join(parts, "; ")),
+		declarations,
+	)
 }
 
 func interfacePolicyPath(id interfaceid.Identifier) string {

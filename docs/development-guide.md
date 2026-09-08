@@ -1947,6 +1947,11 @@ source and each incompatible Provider's `capability.yaml` declaration. Sources
 always name the owning Project module and a slash-separated module-relative
 path. They never expose an absolute path or a Module Cache path. A source omits
 the optional span when structured provenance provides no exact line or column.
+An inherited configuration conflict emits every contributing Project document
+as `configuration-declaration`, including all modules behind compatible
+declaration deduplication. Its document-level span is `1:1`; the exact schema
+field remains in the problem text, and configured values plus Secret-reference
+targets remain redacted.
 
 Run that action with the same selected application model. Recovery commands
 retain default, environment, or complete-replacement mode, including selectors
@@ -2124,11 +2129,17 @@ unchanged.
 
 ### Inherited configuration conflict
 
-Read the exact `capabilities.use`, `capabilities.aliases`, or `config` field and
-every contributing module named by the diagnostic. Add one explicit decision
-for that exact key or declared Plugin field in root `plystra.yaml`, then
-regenerate. Changing dependency order, making a module direct, or sorting
-Plugin IDs cannot resolve the conflict.
+`PLYSTRA_CONFIGURATION_INHERITED_CONFLICT` identifies the exact conflicting
+typed set, `capabilities.use`, `capabilities.aliases`, `interfaces.use`,
+`interfaces.policies`, or constructor `config` field. Read every sorted
+`configuration-declaration` source: compatible declarations retain every
+contributing module rather than collapsing to one representative. Add one
+explicit decision or removal for that exact field in the selected root,
+environment, or complete-replacement document, then regenerate with the same
+selector. Source facts identify documents at `1:1`; the problem text identifies
+the exact field, while configuration values and Secret-reference targets stay
+redacted. Changing dependency order, making a module direct, or sorting IDs
+cannot resolve the conflict.
 
 ### Wrong configuration selection
 

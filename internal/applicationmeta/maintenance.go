@@ -51,8 +51,9 @@ type maintenanceDecision struct {
 }
 
 type maintenanceCandidate struct {
-	decision maintenanceDecision
-	sources  map[string]struct{}
+	decision     maintenanceDecision
+	sources      map[string]struct{}
+	declarations configurationDeclarationSources
 }
 
 // ConfigurationMaintenance is one immutable, comment-preserving planned
@@ -446,10 +447,15 @@ func dependencyMaintenanceCandidates(dependencies []Dependency, schemas SchemaLo
 			key := maintenanceDecisionKey(decision)
 			candidate := byDecision[key]
 			if candidate == nil {
-				candidate = &maintenanceCandidate{decision: cloneMaintenanceDecision(decision), sources: make(map[string]struct{})}
+				candidate = &maintenanceCandidate{
+					decision:     cloneMaintenanceDecision(decision),
+					sources:      make(map[string]struct{}),
+					declarations: make(configurationDeclarationSources),
+				}
 				byDecision[key] = candidate
 			}
 			candidate.sources[source] = struct{}{}
+			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
 			if candidate.decision.source == "" || source < candidate.decision.source {
 				candidate.decision.source = source
 			}
@@ -563,11 +569,17 @@ func dependencyMaintenanceConflict(path string, candidates map[string]*maintenan
 	}
 	sort.Strings(keys)
 	parts := make([]string, 0, len(keys))
+	declarations := make(configurationDeclarationSources)
 	for _, key := range keys {
 		candidate := candidates[key]
 		parts = append(parts, fmt.Sprintf("%s from %s", maintenanceDecisionDescription(candidate.decision), strings.Join(sortedSet(candidate.sources), ", ")))
+		mergeConfigurationDeclarationSources(declarations, candidate.declarations)
 	}
-	return fmt.Errorf("%w: %s has incompatible dependency declarations: %s; set or remove that exact field in the current Project configuration", ErrInheritedConflict, path, strings.Join(parts, "; "))
+	return newInheritedConflictError(
+		path,
+		fmt.Sprintf("%s has incompatible dependency declarations: %s; set or remove that exact field in the current Project configuration", path, strings.Join(parts, "; ")),
+		declarations,
+	)
 }
 
 func maintenanceDecisionDescription(decision maintenanceDecision) string {

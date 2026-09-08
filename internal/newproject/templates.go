@@ -91,6 +91,8 @@ When several compatible Implementations satisfy one required Interface, select o
 
 Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + ` block followed by one stable ` + "`Diagnostic: PLYSTRA_<AREA>_<CONDITION>`" + ` code. Authored Interface and Implementation failures, plus ` + "`PLYSTRA_CAPABILITY_REQUIREMENT_CONFLICT`" + `, ` + "`PLYSTRA_CAPABILITY_CONTRACT_CONFLICT`" + `, ` + "`PLYSTRA_CAPABILITY_SCHEMA_CONFLICT`" + `, ` + "`PLYSTRA_PROVIDER_MISSING`" + `, ` + "`PLYSTRA_PROVIDER_AMBIGUOUS`" + `, ` + "`PLYSTRA_PROVIDER_SELECTION_INVALID`" + `, ` + "`PLYSTRA_PROVIDER_CONTRACT_CONFLICT`" + `, and ` + "`PLYSTRA_PROVIDER_CONTRACT_MISMATCH`" + `, insert sorted ` + "`Source: <module>:<module-relative-path>[:<line>:<column>] (<kind>)`" + ` lines before recovery; Capability requirement conflict includes every source for each incompatible exact contract, visible Capability contract conflict includes every conflicting Provider declaration, Capability schema conflict includes both declarations that block authoring, ambiguity includes every compatible Provider declaration, invalid selection includes every effective choice declaration, Provider contract conflict includes every reference-only requirement plus each conflicting Provider declaration, and contract mismatch includes every exact-contract requirement plus each incompatible Provider declaration. They never expose absolute or Module Cache paths. Follow that one command or file edit with the same default, ` + "`--env`" + `, or ` + "`--config`" + ` selection, and use the code rather than human wording as the automation or support identity. Recovery output preserves safe explicit and ambient selectors, but uses ` + "`<environment>`" + ` or ` + "`<yaml-path>`" + ` instead of echoing an unsafe or absolute selector. An unclassified internal error remains unchanged and does not receive guessed advice or a code.
 
+` + "`PLYSTRA_CONFIGURATION_INHERITED_CONFLICT`" + ` reports every contributing Project configuration document as a sorted ` + "`configuration-declaration`" + ` source, including all modules behind compatible declaration deduplication. The problem identifies the exact field while configuration values and Secret-reference targets stay redacted. Apply the recovery to the selected root, environment, or complete-replacement document.
+
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 ` + "`plystra plugin create`" + ` uses ` + "`PLYSTRA_PLUGIN_CREATE_NAME_INVALID`" + ` for an invalid or reserved root-level name, ` + "`PLYSTRA_PLUGIN_CREATE_ID_INVALID`" + ` when the Project module namespace and name cannot form a canonical Plugin ID, and ` + "`PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS`" + ` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.
@@ -1422,11 +1424,12 @@ build and distribution boundary for every Plystra module.
 
 ## Diagnose common failures
 
-Actionable failures end with Recovery and a stable
-Diagnostic: PLYSTRA_<AREA>_<CONDITION> code. Source-bearing authored and Provider failures put sorted
-Source: <module>:<module-relative-path>[:line:column] (<kind>) lines first; they
-expose no Module Cache or absolute path. Unsafe selectors use placeholders.
-Unclassified errors get neither.
+Failures end with Recovery and Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
+Source facts are sorted:
+Source: <module>:<module-relative-path>[:line:column] (<kind>).
+PLYSTRA_CONFIGURATION_INHERITED_CONFLICT uses configuration-declaration.
+They omit absolute and Module Cache paths. Unsafe selectors use placeholders;
+unclassified errors get neither.
 
 - Missing Implementation: require or expose its Interface and make one
   constructor visible. Markerless dependencies are not scanned.
