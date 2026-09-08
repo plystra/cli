@@ -1929,10 +1929,11 @@ requirement source that made the exact Capability necessary. An ambiguous
 Capability Provider emits those requirement sources and every compatible
 Provider's `capability.yaml` declaration. An invalid Provider selection emits
 every effective `capabilities.use` declaration that created the rejected
-choice. Sources always name the owning Project module and a slash-separated
-module-relative path. They never expose an absolute path or a Module Cache
-path. A source omits the optional span when structured provenance provides no
-exact line or column.
+choice. A Provider contract mismatch emits every exact-contract requirement
+source and each incompatible Provider's `capability.yaml` declaration. Sources
+always name the owning Project module and a slash-separated module-relative
+path. They never expose an absolute path or a Module Cache path. A source omits
+the optional span when structured provenance provides no exact line or column.
 
 Run that action with the same selected application model. Recovery commands
 retain default, environment, or complete-replacement mode, including selectors

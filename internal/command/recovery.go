@@ -262,6 +262,33 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: source.Column,
 			})
 		}
+	case diagnosticProviderContractMismatch:
+		var mismatch *providerresolution.ProviderContractError
+		if !errors.As(err, &mismatch) || mismatch == nil {
+			return nil
+		}
+		for _, source := range mismatch.RequirementSources() {
+			sources = append(sources, diagnosticjson.Source{
+				Module: source.ModulePath,
+				Path:   source.Path,
+				Kind:   string(source.Kind),
+				Line:   source.Line,
+				Column: source.Column,
+			})
+		}
+		for _, provider := range mismatch.Providers() {
+			source, available := provider.DeclarationSource()
+			if !available {
+				continue
+			}
+			sources = append(sources, diagnosticjson.Source{
+				Module: source.ModulePath,
+				Path:   source.Path,
+				Kind:   "provider-declaration",
+				Line:   source.Line,
+				Column: source.Column,
+			})
+		}
 	case diagnosticProviderAmbiguous:
 		var ambiguous *providerresolution.AmbiguousProviderError
 		if !errors.As(err, &ambiguous) || ambiguous == nil {

@@ -432,23 +432,57 @@ func TestResolveRejectsContractDifferencesIncludingExtensionMetadata(t *testing.
 	t.Parallel()
 
 	required := contract("order.cancel/v1", "extensions:\n  authn: {authenticated: true}\n  authz: {permission: order.cancel}\n")
+	declarationSource := requirementSource("official/order.cancel/v1")
+	generationSource := providerresolution.RequirementSource{
+		Kind:             providerresolution.RequirementGenerationRule,
+		Reference:        "generation plugin require-order-contract",
+		ModulePath:       "example.com/security",
+		Path:             "authn/plugin.yaml",
+		Line:             1,
+		Column:           1,
+		PluginID:         "example.security",
+		Namespace:        "authn",
+		SourceCapability: "session.verify/v1",
+		RuleID:           "require-order-contract",
+	}
 	input := providerresolution.Input{
-		Requirements: []providerresolution.Requirement{{Contract: required, Source: requirementSource("official/order.cancel/v1")}},
+		Requirements: []providerresolution.Requirement{
+			{Contract: required, Source: generationSource},
+			{Contract: required, Source: declarationSource},
+		},
 		Candidates: []providerresolution.Candidate{
-			{PluginID: "acme.orders", Contract: append([]byte("extensions: {authz: {permission: order.cancel}, authn: {authenticated: true}}\nid: order.cancel/v1\n"), providerQuerySemanticsYAML...), Source: "acme/orders/capability.yaml"},
-			{PluginID: "legacy.orders", Contract: contract("order.cancel/v1", "extensions: {authz: {permission: order.cancel}}\n"), Source: "legacy/orders/capability.yaml"},
+			{PluginID: "acme.orders", Contract: append([]byte("extensions: {authz: {permission: order.cancel}, authn: {authenticated: true}}\nid: order.cancel/v1\n"), providerQuerySemanticsYAML...), Source: "acme/orders/capability.yaml", DeclarationSource: providerSource("example.com/acme", "orders/capabilities/order.cancel/v1/capability.yaml")},
+			{PluginID: "legacy.orders", Contract: contract("order.cancel/v1", "extensions: {authz: {permission: order.cancel}}\n"), Source: "legacy/orders/capability.yaml", DeclarationSource: providerSource("example.com/legacy", "orders/capabilities/order.cancel/v1/capability.yaml")},
 		},
 	}
 	_, err := providerresolution.Resolve(input)
+	slices.Reverse(input.Requirements)
+	slices.Reverse(input.Candidates)
+	_, reorderedErr := providerresolution.Resolve(input)
 	if !errors.Is(err, providerresolution.ErrProviderContract) {
 		t.Fatalf("Resolve error = %v, want ErrProviderContract", err)
+	}
+	if reorderedErr == nil || err.Error() != reorderedErr.Error() {
+		t.Fatalf("contract mismatch diagnostic changed with input order:\nfirst:  %v\nsecond: %v", err, reorderedErr)
 	}
 	var mismatch *providerresolution.ProviderContractError
 	if !errors.As(err, &mismatch) || mismatch.Capability().String() != "order.cancel/v1" || len(mismatch.Providers()) != 1 || mismatch.Providers()[0].PluginID() != "legacy.orders" {
 		t.Fatalf("ProviderContractError = %#v", mismatch)
 	}
-	if mismatch.ExpectedDigest() == mismatch.Providers()[0].ContractDigest() || !slices.Equal(mismatch.ExpectedSources(), []string{"official/order.cancel/v1"}) {
+	if mismatch.ExpectedDigest() == mismatch.Providers()[0].ContractDigest() || !slices.Equal(mismatch.ExpectedSources(), []string{"generation plugin require-order-contract", "official/order.cancel/v1"}) {
 		t.Fatalf("contract mismatch details = %q, %#v", mismatch.ExpectedDigest(), mismatch.Providers())
+	}
+	requirementSources := mismatch.RequirementSources()
+	if !reflect.DeepEqual(requirementSources, []providerresolution.RequirementSource{declarationSource, generationSource}) {
+		t.Fatalf("contract mismatch requirement sources = %#v", requirementSources)
+	}
+	requirementSources[0] = providerresolution.RequirementSource{}
+	if mismatch.RequirementSources()[0].ModulePath != declarationSource.ModulePath {
+		t.Fatal("ProviderContractError exposed mutable typed requirement sources")
+	}
+	provider, available := mismatch.Providers()[0].DeclarationSource()
+	if !available || provider != providerSource("example.com/legacy", "orders/capabilities/order.cancel/v1/capability.yaml") {
+		t.Fatalf("incompatible Provider declaration source = %#v, %t", provider, available)
 	}
 	for _, detail := range []string{"legacy.orders", "normalized extension metadata", "new /vN"} {
 		if !strings.Contains(err.Error(), detail) {

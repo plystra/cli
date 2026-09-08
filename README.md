@@ -800,6 +800,9 @@ requirement source that made the exact Capability necessary.
 every compatible Provider's `capability.yaml` declaration.
 `PLYSTRA_PROVIDER_SELECTION_INVALID` reports every effective
 `capabilities.use` declaration that created the rejected choice.
+`PLYSTRA_PROVIDER_CONTRACT_MISMATCH` reports every exact-contract requirement
+source together with each incompatible Provider's `capability.yaml`
+declaration.
 
 Configuration-selection failures use
 `PLYSTRA_CONFIGURATION_SELECTION_INVALID`. An explicit `--env` plus `--config`

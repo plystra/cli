@@ -443,10 +443,10 @@ func resolveNormalized(
 		}
 		if len(incompatible) != 0 {
 			issues = append(issues, &ProviderContractError{
-				capability:      group.id,
-				expectedDigest:  group.digest,
-				expectedSources: requirementSourceStrings(group.sources),
-				providers:       incompatible,
+				capability:     group.id,
+				expectedDigest: group.digest,
+				sources:        append([]RequirementSource(nil), group.sources...),
+				providers:      incompatible,
 			})
 			continue
 		}
@@ -1313,10 +1313,10 @@ func (*ProviderContractConflictError) Unwrap() error { return ErrProviderContrac
 
 // ProviderContractError reports candidates that do not carry the required exact contract.
 type ProviderContractError struct {
-	capability      capabilityid.Identifier
-	expectedDigest  string
-	expectedSources []string
-	providers       []ProviderDetail
+	capability     capabilityid.Identifier
+	expectedDigest string
+	sources        []RequirementSource
+	providers      []ProviderDetail
 }
 
 // Capability returns the incompatible exact ID.
@@ -1340,7 +1340,16 @@ func (e *ProviderContractError) ExpectedSources() []string {
 	if e == nil {
 		return nil
 	}
-	return append([]string(nil), e.expectedSources...)
+	return requirementSourceStrings(e.sources)
+}
+
+// RequirementSources returns sorted typed module-relative requirement
+// provenance without requiring consumers to parse diagnostic text.
+func (e *ProviderContractError) RequirementSources() []RequirementSource {
+	if e == nil {
+		return nil
+	}
+	return append([]RequirementSource(nil), e.sources...)
 }
 
 // Providers returns every incompatible candidate in Plugin ID order.
@@ -1356,7 +1365,7 @@ func (e *ProviderContractError) Error() string {
 		return ErrProviderContract.Error()
 	}
 	var message strings.Builder
-	fmt.Fprintf(&message, "%s: %s requires %s from [%s]", ErrProviderContract, e.capability, e.expectedDigest, strings.Join(e.expectedSources, ", "))
+	fmt.Fprintf(&message, "%s: %s requires %s from [%s]", ErrProviderContract, e.capability, e.expectedDigest, strings.Join(requirementSourceStrings(e.sources), ", "))
 	for _, provider := range e.providers {
 		fmt.Fprintf(&message, "; plugin %q at %q carries %s", provider.pluginID, provider.source, provider.digest)
 	}

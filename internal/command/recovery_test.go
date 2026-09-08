@@ -250,6 +250,23 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 	}
 }
 
+func TestWriteCommandFailureReportsProviderContractMismatchSources(t *testing.T) {
+	t.Parallel()
+
+	_, _, _, mismatch := recoveryProviderFailures(t)
+	var output strings.Builder
+	writeCommandFailure(&output, "generate", fmt.Errorf("resolve application: %w", mismatch), recoveryContext{})
+	got := output.String()
+	wantSuffix := "\n\n" +
+		"Source: example.com/project:plystra.yaml:1:1 (declaration)\n" +
+		"Source: example.com/provider:local/capabilities/email.send/v1/capability.yaml:1:1 (provider-declaration)\n\n" +
+		"Recovery:\nMake every Provider of email.send/v1 carry one identical provider-independent capability.yaml.\n\n" +
+		"Diagnostic: " + diagnosticProviderContractMismatch + "\n"
+	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 2 {
+		t.Fatalf("Provider contract mismatch output = %q, want suffix %q", got, wantSuffix)
+	}
+}
+
 func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 	t.Parallel()
 
@@ -659,6 +676,12 @@ func recoveryProviderFailures(t *testing.T) (missing, ambiguous, invalidChoice, 
 			PluginID: "acme.email.local",
 			Contract: recoveryContract("boolean"),
 			Source:   "local/capability.yaml",
+			DeclarationSource: providerresolution.ProviderSource{
+				ModulePath: "example.com/provider",
+				Path:       "local/capabilities/email.send/v1/capability.yaml",
+				Line:       1,
+				Column:     1,
+			},
 		}},
 	})
 	for name, err := range map[string]error{
