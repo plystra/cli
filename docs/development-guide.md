@@ -1925,7 +1925,9 @@ Diagnostic: PLYSTRA_<AREA>_<CONDITION>
 
 Duplicate Interface identities emit every defining source in the shared
 diagnostic-envelope order. A Capability requirement conflict emits every
-source that requires one of the incompatible exact contracts. A missing
+source that requires one of the incompatible exact contracts. A visible
+Capability contract conflict emits every Provider's `capability.yaml`
+declaration carrying one of the conflicting exact contracts. A missing
 Capability Provider emits every requirement source that made the exact
 Capability necessary. An ambiguous Capability Provider emits those requirement
 sources and every compatible Provider's `capability.yaml` declaration. An

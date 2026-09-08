@@ -796,6 +796,8 @@ rather than fabricates a line or column when structured provenance does not
 provide one. Authored Interface and Implementation failures report their
 declaration or package source. `PLYSTRA_CAPABILITY_REQUIREMENT_CONFLICT`
 reports every source that requires one of the incompatible exact contracts.
+`PLYSTRA_CAPABILITY_CONTRACT_CONFLICT` reports every visible Provider's
+`capability.yaml` declaration carrying one of the conflicting exact contracts.
 `PLYSTRA_PROVIDER_MISSING` reports every typed requirement source that made the
 exact Capability necessary.
 `PLYSTRA_PROVIDER_AMBIGUOUS` reports those requirement sources together with

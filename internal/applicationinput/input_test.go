@@ -314,8 +314,10 @@ func TestBuildRejectsConflictingVisibleProviderContracts(t *testing.T) {
 	writeModule(t, root, "example.com/app")
 	writePlugin(t, root, "smtp", "id: example.smtp\nprovides: [email.send/v1]\n")
 	writePlugin(t, root, "mock", "id: example.mock\nprovides: [email.send/v1]\n")
+	writePlugin(t, root, "backup", "id: example.backup\nprovides: [email.send/v1]\n")
 	writeCapability(t, root, "smtp", "email.send/v1", "id: email.send/v1\nrequest: {to: {type: string}}\nresponse: {}\nerrors: []\n")
 	writeCapability(t, root, "mock", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	writeCapability(t, root, "backup", "email.send/v1", "errors: []\nresponse: {}\nrequest: {}\nid: email.send/v1\n")
 	inventory := configureInventory(t, root)
 	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, applicationInputSourceContext(), nil, generationexec.BuildOptions{})
 	if !errors.Is(err, applicationinput.ErrBuild) || !errors.Is(err, applicationinput.ErrContractConflict) || len(input.Capabilities) != 0 {
@@ -326,25 +328,44 @@ func TestBuildRejectsConflictingVisibleProviderContracts(t *testing.T) {
 		t.Fatalf("Build error = %v, want typed email.send/v1 conflict", err)
 	}
 	var sources []string
+	var providerSources []providerresolution.ProviderSource
 	for _, variant := range conflict.Variants() {
-		if len(variant.Digest()) != len("sha256:")+64 || len(variant.Sources()) != 1 {
-			t.Fatalf("variant = digest %q, sources %v", variant.Digest(), variant.Sources())
+		if len(variant.Digest()) != len("sha256:")+64 || len(variant.Sources()) == 0 || len(variant.ProviderSources()) != len(variant.Sources()) {
+			t.Fatalf("variant = digest %q, sources %v, provider sources %v", variant.Digest(), variant.Sources(), variant.ProviderSources())
 		}
-		sources = append(sources, variant.Sources()[0])
+		sources = append(sources, variant.Sources()...)
+		providerSources = append(providerSources, variant.ProviderSources()...)
 	}
 	sort.Strings(sources)
 	wantSources := []string{
+		"example.com/app@local/backup/capabilities/email.send/v1/capability.yaml",
 		"example.com/app@local/mock/capabilities/email.send/v1/capability.yaml",
 		"example.com/app@local/smtp/capabilities/email.send/v1/capability.yaml",
 	}
 	if !reflect.DeepEqual(sources, wantSources) {
 		t.Fatalf("conflict sources = %v, want %v", sources, wantSources)
 	}
+	sort.Slice(providerSources, func(left, right int) bool {
+		return providerSources[left].Path < providerSources[right].Path
+	})
+	wantProviderSources := []providerresolution.ProviderSource{
+		{ModulePath: "example.com/app", Path: "backup/capabilities/email.send/v1/capability.yaml", Line: 1, Column: 1},
+		{ModulePath: "example.com/app", Path: "mock/capabilities/email.send/v1/capability.yaml", Line: 1, Column: 1},
+		{ModulePath: "example.com/app", Path: "smtp/capabilities/email.send/v1/capability.yaml", Line: 1, Column: 1},
+	}
+	if !reflect.DeepEqual(providerSources, wantProviderSources) {
+		t.Fatalf("conflict provider sources = %#v, want %#v", providerSources, wantProviderSources)
+	}
 	variants := conflict.Variants()
 	returned := variants[0].Sources()
 	returned[0] = "changed"
 	if reflect.DeepEqual(returned, conflict.Variants()[0].Sources()) {
 		t.Fatal("ContractConflictError exposed mutable source storage")
+	}
+	returnedProviderSources := variants[0].ProviderSources()
+	returnedProviderSources[0].Path = "changed"
+	if reflect.DeepEqual(returnedProviderSources, conflict.Variants()[0].ProviderSources()) {
+		t.Fatal("ContractConflictError exposed mutable typed provider source storage")
 	}
 }
 

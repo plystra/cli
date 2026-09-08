@@ -264,6 +264,22 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				})
 			}
 		}
+	case diagnosticCapabilityContractConflict:
+		var conflict *applicationinput.ContractConflictError
+		if !errors.As(err, &conflict) || conflict == nil {
+			return nil
+		}
+		for _, variant := range conflict.Variants() {
+			for _, source := range variant.ProviderSources() {
+				sources = append(sources, diagnosticjson.Source{
+					Module: source.ModulePath,
+					Path:   source.Path,
+					Kind:   "provider-declaration",
+					Line:   source.Line,
+					Column: source.Column,
+				})
+			}
+		}
 	case diagnosticProviderSelectionInvalid:
 		var invalid *providerresolution.ChoiceError
 		if !errors.As(err, &invalid) || invalid == nil {

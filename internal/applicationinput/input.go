@@ -122,22 +122,23 @@ func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, s
 				return generationresolution.ExtensionInput{}, fmt.Errorf("%w: plugin %q Capability %s: normalize contract: %w", ErrBuild, plugin.ID(), provided, err)
 			}
 			provenance := capabilityProvenance(plugin, source.RelativePath())
+			declarationSource := providerresolution.ProviderSource{
+				ModulePath: plugin.ModulePath(),
+				Path:       path.Join(plugin.Path(), source.RelativePath()),
+				Line:       1,
+				Column:     1,
+			}
 			group, exists := groups[provided]
 			if !exists {
 				group = &contractGroup{}
 				groups[provided] = group
 			}
-			group.add(canonical, provenance)
+			group.add(canonical, provenance, declarationSource)
 			candidates = append(candidates, providerresolution.Candidate{
-				PluginID: plugin.ID(),
-				Contract: append([]byte(nil), canonical...),
-				Source:   provenance,
-				DeclarationSource: providerresolution.ProviderSource{
-					ModulePath: plugin.ModulePath(),
-					Path:       path.Join(plugin.Path(), source.RelativePath()),
-					Line:       1,
-					Column:     1,
-				},
+				PluginID:          plugin.ID(),
+				Contract:          append([]byte(nil), canonical...),
+				Source:            provenance,
+				DeclarationSource: declarationSource,
 			})
 		}
 	}
@@ -157,7 +158,11 @@ func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, s
 		if len(group.variants) != 1 {
 			variants := make([]ContractVariant, len(group.variants))
 			for index, variant := range group.variants {
-				variants[index] = ContractVariant{digest: variant.digest, sources: append([]string(nil), variant.sources...)}
+				variants[index] = ContractVariant{
+					digest:          variant.digest,
+					sources:         append([]string(nil), variant.sources...),
+					providerSources: append([]providerresolution.ProviderSource(nil), variant.providerSources...),
+				}
 			}
 			conflicts = append(conflicts, &ContractConflictError{id: identifier, variants: variants})
 			continue
@@ -493,28 +498,45 @@ type contractGroup struct {
 }
 
 type contractVariant struct {
-	contract []byte
-	digest   string
-	sources  []string
+	contract        []byte
+	digest          string
+	sources         []string
+	providerSources []providerresolution.ProviderSource
 }
 
-func (g *contractGroup) add(contract []byte, source string) {
+func (g *contractGroup) add(contract []byte, source string, providerSource providerresolution.ProviderSource) {
 	for index := range g.variants {
 		if bytes.Equal(g.variants[index].contract, contract) {
 			g.variants[index].sources = append(g.variants[index].sources, source)
+			g.variants[index].providerSources = append(g.variants[index].providerSources, providerSource)
 			return
 		}
 	}
 	g.variants = append(g.variants, contractVariant{
-		contract: append([]byte(nil), contract...),
-		digest:   contractDigest(contract),
-		sources:  []string{source},
+		contract:        append([]byte(nil), contract...),
+		digest:          contractDigest(contract),
+		sources:         []string{source},
+		providerSources: []providerresolution.ProviderSource{providerSource},
 	})
 }
 
 func (g *contractGroup) normalize() {
 	for index := range g.variants {
 		sort.Strings(g.variants[index].sources)
+		sort.Slice(g.variants[index].providerSources, func(left, right int) bool {
+			leftSource := g.variants[index].providerSources[left]
+			rightSource := g.variants[index].providerSources[right]
+			if leftSource.ModulePath != rightSource.ModulePath {
+				return leftSource.ModulePath < rightSource.ModulePath
+			}
+			if leftSource.Path != rightSource.Path {
+				return leftSource.Path < rightSource.Path
+			}
+			if leftSource.Line != rightSource.Line {
+				return leftSource.Line < rightSource.Line
+			}
+			return leftSource.Column < rightSource.Column
+		})
 	}
 	sort.Slice(g.variants, func(left, right int) bool {
 		if g.variants[left].digest != g.variants[right].digest {
@@ -561,8 +583,9 @@ func contractDigest(contract []byte) string {
 // ContractVariant records one exact conflicting digest and every provider
 // source carrying it.
 type ContractVariant struct {
-	digest  string
-	sources []string
+	digest          string
+	sources         []string
+	providerSources []providerresolution.ProviderSource
 }
 
 // Digest returns the canonical contract SHA-256 digest.
@@ -571,6 +594,12 @@ func (v ContractVariant) Digest() string { return v.digest }
 // Sources returns deterministic provider provenance for this exact variant.
 func (v ContractVariant) Sources() []string {
 	return append([]string(nil), v.sources...)
+}
+
+// ProviderSources returns deterministic typed module-relative declaration
+// provenance without requiring consumers to parse diagnostic text.
+func (v ContractVariant) ProviderSources() []providerresolution.ProviderSource {
+	return append([]providerresolution.ProviderSource(nil), v.providerSources...)
 }
 
 // ContractConflictError reports every exact variant visible under one
@@ -595,7 +624,11 @@ func (e *ContractConflictError) Variants() []ContractVariant {
 	}
 	result := make([]ContractVariant, len(e.variants))
 	for index, variant := range e.variants {
-		result[index] = ContractVariant{digest: variant.digest, sources: append([]string(nil), variant.sources...)}
+		result[index] = ContractVariant{
+			digest:          variant.digest,
+			sources:         append([]string(nil), variant.sources...),
+			providerSources: append([]providerresolution.ProviderSource(nil), variant.providerSources...),
+		}
 	}
 	return result
 }

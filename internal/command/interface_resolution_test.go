@@ -101,6 +101,41 @@ func TestPublicResolvingCommandsReportAmbiguousProviderSourcesWithoutMutation(t 
 	}
 }
 
+func TestPublicResolvingCommandsReportVisibleCapabilityContractConflictSourcesWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	for _, arguments := range commands {
+		arguments := arguments
+		t.Run(strings.Join(arguments, " "), func(t *testing.T) {
+			t.Parallel()
+			root := writeProviderCommandProject(t)
+			writeCommandFile(t, filepath.Join(root, "smtp", "capabilities", "email.send", "v1", "capability.yaml"), "id: email.send/v1\nrequest: {to: {type: string}}\nresponse: {}\nerrors: []\n")
+			before := commandTree(t, root)
+
+			exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
+			wantSuffix := strings.Join([]string{
+				"",
+				"Source: example.com/acme/provider-use:local/capabilities/email.send/v1/capability.yaml:1:1 (provider-declaration)",
+				"Source: example.com/acme/provider-use:smtp/capabilities/email.send/v1/capability.yaml:1:1 (provider-declaration)",
+				"",
+				"Recovery:",
+				"Make every Provider of email.send/v1 carry one identical provider-independent capability.yaml.",
+				"",
+				"Diagnostic: " + diagnosticcode.CapabilityContractConflict,
+				"",
+			}, "\n")
+			if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 2 || strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, root) {
+				t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%v mutated conflicting-contract Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func TestPublicResolvingCommandsReportInvalidProviderSelectionSourceWithoutMutation(t *testing.T) {
 	t.Parallel()
 
