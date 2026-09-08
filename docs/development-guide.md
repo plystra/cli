@@ -1203,6 +1203,12 @@ major, no later version can be represented. The command emits
 `PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED` before mutation and directs the
 developer to create a new canonical Capability identity.
 
+If visible Providers disagree on the source exact contract, `capability create`
+and `capability implement` emit `PLYSTRA_CAPABILITY_SCHEMA_CONFLICT` before
+mutation. The diagnostic reports both owning modules and slash-separated
+module-relative `capability.yaml` declarations; it never prints a checkout or
+Module Cache path.
+
 Field constraints use one closed type-specific vocabulary: strings accept
 `min_length`, `max_length`, and bounded Go regular-expression `pattern`;
 integers and numbers accept `minimum` and `maximum`; arrays accept `min_items`
@@ -1927,19 +1933,20 @@ Duplicate Interface identities emit every defining source in the shared
 diagnostic-envelope order. A Capability requirement conflict emits every
 source that requires one of the incompatible exact contracts. A visible
 Capability contract conflict emits every Provider's `capability.yaml`
-declaration carrying one of the conflicting exact contracts. A missing
-Capability Provider emits every requirement source that made the exact
-Capability necessary. An ambiguous Capability Provider emits those requirement
-sources and every compatible Provider's `capability.yaml` declaration. An
-invalid Provider selection emits every effective `capabilities.use` declaration
-that created the rejected choice. A Provider contract conflict emits every
-reference-only requirement source and each conflicting Provider's
-`capability.yaml` declaration. A Provider contract mismatch emits every
-exact-contract requirement source and each incompatible Provider's
-`capability.yaml` declaration. Sources always name the owning Project module
-and a slash-separated module-relative path. They never expose an absolute path
-or a Module Cache path. A source omits the optional span when structured
-provenance provides no exact line or column.
+declaration carrying one of the conflicting exact contracts. A Capability
+authoring schema conflict emits both Provider declarations whose source
+contract blocks creation or implementation. A missing Capability Provider
+emits every requirement source that made the exact Capability necessary. An
+ambiguous Capability Provider emits those requirement sources and every
+compatible Provider's `capability.yaml` declaration. An invalid Provider
+selection emits every effective `capabilities.use` declaration that created the
+rejected choice. A Provider contract conflict emits every reference-only
+requirement source and each conflicting Provider's `capability.yaml`
+declaration. A Provider contract mismatch emits every exact-contract requirement
+source and each incompatible Provider's `capability.yaml` declaration. Sources
+always name the owning Project module and a slash-separated module-relative
+path. They never expose an absolute path or a Module Cache path. A source omits
+the optional span when structured provenance provides no exact line or column.
 
 Run that action with the same selected application model. Recovery commands
 retain default, environment, or complete-replacement mode, including selectors
@@ -2040,6 +2047,13 @@ the transaction boundary:
 
 Both failures preserve the existing action-mismatch message, emit one
 placeholder-based counterpart command, and leave every Project byte unchanged.
+
+`PLYSTRA_CAPABILITY_SCHEMA_CONFLICT` identifies two visible Providers carrying
+different exact source contracts during Capability creation or implementation.
+The typed failure retains both absolute paths for internal filesystem work but
+public error text and canonical `Source:` facts use only the owning module and
+module-relative `capability.yaml` path. Both commands fail before mutation and
+leave no transaction artifact.
 
 Explicit older or skipped new versions retain the broad confirmation-required
 error but are classified only beneath the owning create-operation boundary as

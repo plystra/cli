@@ -95,6 +95,41 @@ func TestRunCapabilityCreateAndImplementUsePublicTransactionalSurface(t *testing
 	assertNoCommandTransactions(t, root)
 }
 
+func TestRunCapabilityAuthoringReportsSchemaConflictSourcesWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := [][]string{
+		{"capability", "create", "account.register", "--plugin", "records"},
+		{"capability", "implement", "account.register/v1", "--plugin", "records"},
+	}
+	for _, arguments := range commands {
+		arguments := arguments
+		t.Run(strings.Join(arguments[:2], " "), func(t *testing.T) {
+			t.Parallel()
+			root := writeCapabilityCommandModule(t)
+			writeCommandFile(t, filepath.Join(root, "account", "plugin.yaml"), "id: acme.library.account\nprovides: [account.register/v1]\n")
+			writeCommandFile(t, filepath.Join(root, "profile", "plugin.yaml"), "id: acme.library.profile\nprovides: [account.register/v1]\n")
+			writeCommandFile(t, filepath.Join(root, "account", "capabilities", "account.register", "v1", "capability.yaml"), "id: account.register/v1\nrequest: {email: {type: string}}\nresponse: {}\nerrors: []\n")
+			writeCommandFile(t, filepath.Join(root, "profile", "capabilities", "account.register", "v1", "capability.yaml"), "id: account.register/v1\nrequest: {email: {type: integer}}\nresponse: {}\nerrors: []\n")
+			before := commandTree(t, root)
+
+			exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
+			wantSuffix := "\n\n" +
+				"Source: example.com/acme/library:account/capabilities/account.register/v1/capability.yaml:1:1 (provider-declaration)\n" +
+				"Source: example.com/acme/library:profile/capabilities/account.register/v1/capability.yaml:1:1 (provider-declaration)\n\n" +
+				"Recovery:\nMake every Provider of account.register/v1 carry one identical provider-independent capability.yaml.\n\n" +
+				"Diagnostic: " + diagnosticcode.CapabilitySchemaConflict + "\n"
+			if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 2 || strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+				t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%v mutated conflicting-schema Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func TestRunCapabilityRejectsInvalidReferencesBeforeProjectDiscoveryOrMutation(t *testing.T) {
 	root := t.TempDir()
 	writeCommandFile(t, filepath.Join(root, "preserve.txt"), "preserve\n")

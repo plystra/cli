@@ -14,6 +14,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/capabilitysource"
+	"github.com/plystra/cli/internal/providerresolution"
 )
 
 const querySemanticsYAML = `semantics:
@@ -77,6 +78,14 @@ func TestResolveSourcesRejectsExtensionMetadataConflict(t *testing.T) {
 	if !errors.As(err, &conflict) {
 		t.Fatalf("ResolveSources error type = %T", err)
 	}
+	baselineSource := conflict.BaselineDeclarationSource()
+	conflictingSource := conflict.ConflictingDeclarationSource()
+	if baselineSource != (providerresolution.ProviderSource{ModulePath: "example.com/acme/app", Path: "account/capabilities/account.register/v1/capability.yaml", Line: 1, Column: 1}) || conflictingSource != (providerresolution.ProviderSource{ModulePath: "example.com/acme/app", Path: "profile/capabilities/account.register/v1/capability.yaml", Line: 1, Column: 1}) {
+		t.Fatalf("typed conflict sources = %#v and %#v", baselineSource, conflictingSource)
+	}
+	if !filepath.IsAbs(conflict.BaselineSourcePath()) || !filepath.IsAbs(conflict.ConflictingSourcePath()) {
+		t.Fatalf("absolute conflict paths = %q and %q", conflict.BaselineSourcePath(), conflict.ConflictingSourcePath())
+	}
 	differences := conflict.Differences()
 	if len(differences) != 2 || differences[0].Path() != "extensions.authn" || differences[0].Baseline() != `{"authenticated":true}` || differences[0].Conflicting() != "<missing>" || differences[1].Path() != "extensions.authz.permission" || differences[1].Baseline() != `"account.register"` || differences[1].Conflicting() != `"account.update"` {
 		t.Fatalf("extension differences = %#v", differences)
@@ -111,6 +120,8 @@ func TestResolveSourcesReportsTypedSemanticsConflict(t *testing.T) {
 	if !errors.As(err, &conflict) {
 		t.Fatalf("ResolveSources error type = %T", err)
 	}
+	baselineSource := conflict.BaselineDeclarationSource()
+	conflictingSource := conflict.ConflictingDeclarationSource()
 	differences := conflict.Differences()
 	if len(differences) != 1 ||
 		differences[0].Path() != "semantics.data.response" ||
@@ -121,14 +132,17 @@ func TestResolveSourcesReportsTypedSemanticsConflict(t *testing.T) {
 	for _, required := range []string{
 		"acme.app.account",
 		"acme.app.profile",
-		conflict.BaselineSourcePath(),
-		conflict.ConflictingSourcePath(),
+		schemaSourceReference(baselineSource),
+		schemaSourceReference(conflictingSource),
 		`semantics.data.response: "public" != "restricted"`,
 		"new capability version",
 	} {
 		if !strings.Contains(err.Error(), required) {
 			t.Fatalf("conflict error %q does not contain %q", err, required)
 		}
+	}
+	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+		t.Fatalf("conflict error exposes absolute source path: %v", err)
 	}
 }
 
@@ -164,8 +178,8 @@ func TestResolveSourcesReportsConstraintConflict(t *testing.T) {
 	for _, required := range []string{
 		"acme.app.account",
 		"acme.app.profile",
-		conflict.BaselineSourcePath(),
-		conflict.ConflictingSourcePath(),
+		schemaSourceReference(conflict.BaselineDeclarationSource()),
+		schemaSourceReference(conflict.ConflictingDeclarationSource()),
 		"request.email.constraints.max_length: 254 != 320",
 		"new capability version",
 	} {
@@ -224,8 +238,8 @@ func TestResolveSourcesRejectsSemanticSchemaConflict(t *testing.T) {
 		"account.register/v1",
 		"acme.app.account",
 		"acme.app.profile",
-		conflict.BaselineSourcePath(),
-		conflict.ConflictingSourcePath(),
+		schemaSourceReference(conflict.BaselineDeclarationSource()),
+		schemaSourceReference(conflict.ConflictingDeclarationSource()),
 		"request.email.type: \"string\" != \"integer\"",
 		"correction: make every provider",
 		"new capability version",
@@ -316,4 +330,8 @@ func mustCapabilityID(t *testing.T, value string) capabilityid.Identifier {
 		t.Fatalf("Parse(%q): %v", value, err)
 	}
 	return id
+}
+
+func schemaSourceReference(source providerresolution.ProviderSource) string {
+	return source.ModulePath + ":" + source.Path
 }

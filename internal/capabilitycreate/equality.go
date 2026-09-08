@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"reflect"
 	"sort"
 	"strings"
 
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/providerresolution"
 )
 
 // ErrSchemaConflict reports semantically different declarations for one exact
@@ -43,8 +45,10 @@ type SchemaConflictError struct {
 	capability          capabilityid.Identifier
 	baselineProvider    Provider
 	baselineSourcePath  string
+	baselineSource      providerresolution.ProviderSource
 	conflictingProvider Provider
 	conflictingPath     string
+	conflictingSource   providerresolution.ProviderSource
 	differences         []SchemaDifference
 }
 
@@ -57,11 +61,23 @@ func (e *SchemaConflictError) BaselineProvider() Provider { return e.baselinePro
 // BaselineSourcePath returns the first provider's absolute capability.yaml path.
 func (e *SchemaConflictError) BaselineSourcePath() string { return e.baselineSourcePath }
 
+// BaselineDeclarationSource returns the first provider's stable module-relative
+// capability.yaml declaration location.
+func (e *SchemaConflictError) BaselineDeclarationSource() providerresolution.ProviderSource {
+	return e.baselineSource
+}
+
 // ConflictingProvider returns the provider carrying the different schema.
 func (e *SchemaConflictError) ConflictingProvider() Provider { return e.conflictingProvider }
 
 // ConflictingSourcePath returns the conflicting provider's absolute capability.yaml path.
 func (e *SchemaConflictError) ConflictingSourcePath() string { return e.conflictingPath }
+
+// ConflictingDeclarationSource returns the conflicting provider's stable
+// module-relative capability.yaml declaration location.
+func (e *SchemaConflictError) ConflictingDeclarationSource() providerresolution.ProviderSource {
+	return e.conflictingSource
+}
 
 // Differences returns a defensive copy in deterministic contract-path order.
 func (e *SchemaConflictError) Differences() []SchemaDifference {
@@ -79,9 +95,9 @@ func (e *SchemaConflictError) Error() string {
 		ErrSchemaConflict,
 		e.capability,
 		e.baselineProvider.PluginID(),
-		e.baselineSourcePath,
+		providerSourceReference(e.baselineSource),
 		e.conflictingProvider.PluginID(),
-		e.conflictingPath,
+		providerSourceReference(e.conflictingSource),
 	)
 	const maximumReportedDifferences = 8
 	reported := min(len(e.differences), maximumReportedDifferences)
@@ -111,10 +127,25 @@ func newSchemaConflict(baseline ResolvedSource, baselineSchema []byte, conflicti
 		capability:          baseline.Source().ID(),
 		baselineProvider:    baseline.Provider(),
 		baselineSourcePath:  baseline.Source().Path(),
+		baselineSource:      declarationSource(baseline),
 		conflictingProvider: conflicting.Provider(),
 		conflictingPath:     conflicting.Source().Path(),
+		conflictingSource:   declarationSource(conflicting),
 		differences:         differences,
 	}, nil
+}
+
+func declarationSource(source ResolvedSource) providerresolution.ProviderSource {
+	return providerresolution.ProviderSource{
+		ModulePath: source.Provider().ModulePath(),
+		Path:       path.Join(source.Provider().Directory(), source.Source().RelativePath()),
+		Line:       1,
+		Column:     1,
+	}
+}
+
+func providerSourceReference(source providerresolution.ProviderSource) string {
+	return source.ModulePath + ":" + source.Path
 }
 
 func schemaDifferences(baseline, conflicting []byte) ([]SchemaDifference, error) {

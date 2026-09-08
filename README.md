@@ -562,6 +562,12 @@ For a genuinely new name, creation reports conservative typo-like visible exact 
 
 Implementation searches local and effective-graph dependency Project contracts, requires exact provider-independent equality including closed field constraints, typed semantics, and normalized extension metadata, copies the canonical schema when the target plugin does not yet provide it, adds a compile-safe user-owned method only when absent, regenerates all affected module surfaces, tidies module metadata, and validates with `go test -mod=readonly ./...`. Repeating the command preserves an existing method byte-for-byte.
 
+If visible Providers disagree on the source exact contract, both creation of a
+later version and implementation of that exact version stop before mutation
+with `PLYSTRA_CAPABILITY_SCHEMA_CONFLICT`. The diagnostic reports every
+conflicting `capability.yaml` as an owning-module, module-relative source and
+never exposes the local checkout or Module Cache path.
+
 In a Plystra Project, expose an existing exact canonical Capability or create and expose a new one in the same transaction:
 
 ```powershell
@@ -798,6 +804,8 @@ declaration or package source. `PLYSTRA_CAPABILITY_REQUIREMENT_CONFLICT`
 reports every source that requires one of the incompatible exact contracts.
 `PLYSTRA_CAPABILITY_CONTRACT_CONFLICT` reports every visible Provider's
 `capability.yaml` declaration carrying one of the conflicting exact contracts.
+`PLYSTRA_CAPABILITY_SCHEMA_CONFLICT` reports both Provider declarations whose
+source contract blocks Capability creation or implementation.
 `PLYSTRA_PROVIDER_MISSING` reports every typed requirement source that made the
 exact Capability necessary.
 `PLYSTRA_PROVIDER_AMBIGUOUS` reports those requirement sources together with
@@ -854,6 +862,11 @@ Valid exact Capability IDs use `PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE` when
 `capability create` must become `capability implement`, and
 `PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE` when `capability implement` must
 become `capability create`. Neither action mismatch mutates the Project.
+
+`PLYSTRA_CAPABILITY_SCHEMA_CONFLICT` identifies visible Providers that carry
+different exact source contracts during Capability creation or implementation.
+It reports both owning-module `capability.yaml` declarations before recovery,
+leaks no absolute or Module Cache path, and leaves the Project unchanged.
 
 `PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED` identifies an explicit older
 or skipped new version that must be reviewed and repeated with `--confirm`.
