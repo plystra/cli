@@ -932,6 +932,86 @@ var _ echov1.Interface = (*Service)(nil)
 	}
 }
 
+func TestPublicResolvingCommandsReportHTTPTransportSelectionSourcesWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	modes := []struct {
+		name           string
+		root           string
+		selectedPath   string
+		selected       string
+		selector       []string
+		recoveryTarget string
+		sources        []string
+	}{
+		{
+			name:           "default",
+			root:           "http: {transports: {connect: false, rest: false}, expose: [kernel.info/v1, kernel.health/v1]}\n",
+			recoveryTarget: "plystra.yaml",
+			sources:        []string{"plystra.yaml"},
+		},
+		{
+			name:           "environment",
+			root:           "http: {transports: {connect: true, rest: false}, expose: [kernel.health/v1]}\n",
+			selectedPath:   "plystra.production.yaml",
+			selected:       "http: {transports: {connect: false, rest: false}, expose: {add: [kernel.info/v1]}}\n",
+			selector:       []string{"--env", "production"},
+			recoveryTarget: "plystra.production.yaml",
+			sources:        []string{"plystra.production.yaml", "plystra.yaml"},
+		},
+		{
+			name:           "replacement",
+			root:           "{}\n",
+			selectedPath:   "deploy/customer.yaml",
+			selected:       "http: {transports: {connect: false, rest: false}, expose: [kernel.health/v1]}\n",
+			selector:       []string{"--config", "deploy/customer.yaml"},
+			recoveryTarget: "deploy/customer.yaml",
+			sources:        []string{"deploy/customer.yaml"},
+		},
+	}
+	for _, mode := range modes {
+		mode := mode
+		t.Run(mode.name, func(t *testing.T) {
+			for _, command := range commands {
+				arguments := append(append([]string(nil), command...), mode.selector...)
+				t.Run(strings.Join(arguments, " "), func(t *testing.T) {
+					root := writeCapabilityCommandModule(t)
+					writeCommandFile(t, filepath.Join(root, "plystra.yaml"), mode.root)
+					if mode.selectedPath != "" {
+						writeCommandFile(t, filepath.Join(root, filepath.FromSlash(mode.selectedPath)), mode.selected)
+					}
+					before := commandTree(t, root)
+					exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "records"), commandGoEnvironment())
+					if exitCode != 1 || stdout != "" || !commandContainsAll(
+						stderr,
+						"invalid HTTP transport selection",
+						"http.expose is nonempty",
+						"http.transports.connect and http.transports.rest are both false",
+						"Recovery:\nEnable a supported transport in "+mode.recoveryTarget+" or remove the public exposure, then regenerate.\n",
+						"Diagnostic: "+diagnosticcode.HTTPTransportSelectionInvalid,
+					) || strings.Count(stderr, "Source: ") != len(mode.sources) || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+						t.Fatalf("%v invalid HTTP transport selection = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+					}
+					for _, source := range mode.sources {
+						want := "Source: example.com/acme/library:" + source + ":1:1 (exposure)"
+						if !strings.Contains(stderr, want) {
+							t.Fatalf("%v stderr %q does not contain %q", arguments, stderr, want)
+						}
+					}
+					if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+						t.Fatalf("%v exposed private Project path: %q", arguments, stderr)
+					}
+					if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+						t.Fatalf("%v mutated invalid HTTP transport Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+					}
+					assertNoCommandTransactions(t, root)
+				})
+			}
+		})
+	}
+}
+
 func TestPublicResolvingCommandsRejectUnownedConstructorConfigurationWithoutMutation(t *testing.T) {
 	t.Parallel()
 

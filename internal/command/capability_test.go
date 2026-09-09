@@ -487,6 +487,8 @@ func TestRunCapabilityExposeRejectsMissingHTTPTransportAndRollsBack(t *testing.T
 				"http.transports.connect and http.transports.rest are both false",
 				"enable at least one transport in the selected current-project configuration",
 				test.capability + ` at plystra.yaml http.expose["` + test.capability + `"]`,
+				"Source: example.com/acme/library:plystra.yaml:1:1 (exposure)",
+				"Diagnostic: " + diagnosticcode.HTTPTransportSelectionInvalid,
 			} {
 				if !strings.Contains(stderr, want) {
 					t.Fatalf("stderr %q does not contain %q", stderr, want)

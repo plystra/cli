@@ -82,8 +82,9 @@ func (a Alias) Source() string { return a.source }
 // HTTPExposure is one explicit canonical Interface selected for generated
 // HTTP and browser-facing application surfaces.
 type HTTPExposure struct {
-	id     interfaceid.Identifier
-	source string
+	id                interfaceid.Identifier
+	source            string
+	declarationSource ConfigurationDeclarationSource
 }
 
 // ID returns the exact canonical Interface ID declared under http.expose.
@@ -91,6 +92,12 @@ func (e HTTPExposure) ID() interfaceid.Identifier { return e.id }
 
 // Source returns stable configuration-path provenance for diagnostics.
 func (e HTTPExposure) Source() string { return e.source }
+
+// DeclarationSource returns the owning Project document retained with the
+// effective exposure.
+func (e HTTPExposure) DeclarationSource() ConfigurationDeclarationSource {
+	return e.declarationSource
+}
 
 // HTTPTransports is the closed selected-current-project external transport
 // choice. The zero value is not the schema default; callers obtain resolved
@@ -267,6 +274,10 @@ func WithProjectModule(manifest Manifest, projectModule string) (Manifest, error
 		return Manifest{}, fmt.Errorf("%w: Project module %q is invalid: %v", ErrInvalidManifest, projectModule, err)
 	}
 	manifest.modulePath = projectModule
+	manifest.httpExposures = append([]HTTPExposure(nil), manifest.httpExposures...)
+	for index := range manifest.httpExposures {
+		manifest.httpExposures[index].declarationSource.modulePath = projectModule
+	}
 	manifest.configurations = append([]ConstructorConfiguration(nil), manifest.configurations...)
 	for index := range manifest.configurations {
 		manifest.configurations[index].declarationSource.modulePath = projectModule
@@ -519,6 +530,7 @@ func rewriteManifestSource(manifest *Manifest, source string) {
 	}
 	for index := range manifest.httpExposures {
 		manifest.httpExposures[index].source = rewrite(manifest.httpExposures[index].source)
+		manifest.httpExposures[index].declarationSource.path = source
 	}
 	for index := range manifest.removedHTTPExposures {
 		manifest.removedHTTPExposures[index].source = rewrite(manifest.removedHTTPExposures[index].source)
@@ -649,7 +661,11 @@ func parseHTTP(node *yaml.Node, sparseOverlay bool) (string, bool, bool, httpTra
 		return address, hasAddress, removeAddress, transports, cors, nil, nil, nil
 	}
 	exposures, removals, err := parseInterfaceSet(exposeNode, "http.expose", func(id interfaceid.Identifier, source string) HTTPExposure {
-		return HTTPExposure{id: id, source: source}
+		return HTTPExposure{
+			id:                id,
+			source:            source,
+			declarationSource: ConfigurationDeclarationSource{path: "plystra.yaml", line: 1, column: 1},
+		}
 	})
 	if err != nil {
 		return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, err

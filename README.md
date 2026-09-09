@@ -866,6 +866,11 @@ document provenance when a previously inherited field disappears from the
 current-Project document without an explicit typed removal. The diagnostic
 retains the exact field and prior contributor references while omitting the
 inherited value, Secret-reference target, and machine-specific path.
+`PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID` retains every effective
+`http.expose` Interface and field in the problem, then emits each distinct
+owning current-Project document as an `exposure` source at `1:1`. Root,
+environment-overlay, and complete-replacement declarations keep their selected
+module-relative paths; dependency exposure remains ignored.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses
@@ -963,6 +968,13 @@ field path in the owning current or dependency Project document. The diagnostic
 emits exactly one `configuration-declaration` source at `1:1` and never prints
 configured values, unknown authored keys, Secret-reference targets, absolute
 paths, or Module Cache paths.
+
+A nonempty effective `http.expose` set with both supported transports disabled
+fails with `PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID`. Enable Connect or REST
+in the selected root, environment, or complete-replacement document, or remove
+the public exposure. The problem retains every exposed Interface and field;
+the diagnostic emits every distinct owning current-Project document at `1:1`
+as an `exposure` source without exposing an absolute path.
 
 Constructor-keyed configuration whose constructor is neither named by an
 effective `interfaces.use` choice nor reachable from an active Interface fails

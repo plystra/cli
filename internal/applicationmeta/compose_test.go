@@ -289,6 +289,51 @@ func TestComposeRequiresSelectedHTTPTransportForEffectiveExposure(t *testing.T) 
 	}
 }
 
+func TestComposeReportsHTTPTransportExposureSources(t *testing.T) {
+	t.Parallel()
+
+	base, err := applicationmeta.ParseSource("plystra.yaml", []byte("http: {transports: {connect: true, rest: false}, expose: [kernel.health/v1]}\n"))
+	if err != nil {
+		t.Fatalf("ParseSource(base): %v", err)
+	}
+	base, err = applicationmeta.WithProjectModule(base, "example.com/application")
+	if err != nil {
+		t.Fatalf("WithProjectModule(base): %v", err)
+	}
+	overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte("http: {transports: {connect: false, rest: false}, expose: {add: [kernel.info/v1]}}\n"))
+	if err != nil {
+		t.Fatalf("ParseOverlaySource: %v", err)
+	}
+	overlay, err = applicationmeta.WithProjectModule(overlay, "example.com/application")
+	if err != nil {
+		t.Fatalf("WithProjectModule(overlay): %v", err)
+	}
+	selected, err := applicationmeta.ApplyOverlay(base, overlay, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatalf("ApplyOverlay: %v", err)
+	}
+
+	composition, err := applicationmeta.Compose(nil, selected, composeSchemaLookup(nil))
+	var selection *applicationmeta.HTTPTransportSelectionError
+	if composition.Valid() || !errors.As(err, &selection) || selection == nil || !errors.Is(err, applicationmeta.ErrCompose) || !errors.Is(err, applicationmeta.ErrHTTPTransportSelection) {
+		t.Fatalf("Compose = %#v, %v", composition, err)
+	}
+	exposures := selection.Exposures()
+	if len(exposures) != 2 || exposures[0].ID().String() != "kernel.health/v1" || exposures[1].ID().String() != "kernel.info/v1" {
+		t.Fatalf("transport selection exposures = %#v", exposures)
+	}
+	for index, wantPath := range []string{"plystra.yaml", "plystra.production.yaml"} {
+		source := exposures[index].DeclarationSource()
+		if source.ModulePath() != "example.com/application" || source.Path() != wantPath || source.Line() != 1 || source.Column() != 1 {
+			t.Fatalf("transport selection source %d = %#v", index, source)
+		}
+	}
+	exposures[0] = applicationmeta.HTTPExposure{}
+	if selection.Exposures()[0].ID().String() != "kernel.health/v1" {
+		t.Fatal("HTTPTransportSelectionError exposed mutable storage")
+	}
+}
+
 func TestComposeKeepsDependencyHTTPCORSOutsideInheritance(t *testing.T) {
 	t.Parallel()
 

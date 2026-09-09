@@ -46,6 +46,9 @@ PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID diagnostic before Project discovery
 or mutation.
 A well-formed exact Capability absent from the selected visible catalog emits
 PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE before write planning or mutation.
+An exposure with no enabled HTTP transport emits
+PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID with effective exposure sources and
+rolls back the attempted write.
 `
 	capabilityCreateHelp = `Usage:
   ` + capabilityCreateSynopsis + `
@@ -76,6 +79,9 @@ Both failures occur before Project mutation.
 If visible Providers disagree on the source exact contract, the command emits
 PLYSTRA_CAPABILITY_SCHEMA_CONFLICT with every module-relative capability.yaml
 declaration before mutation.
+If --expose leaves no enabled HTTP transport, the command emits
+PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID with effective exposure sources and
+rolls back the attempted creation.
 `
 	capabilityImplementHelp = `Usage:
   ` + capabilityImplementSynopsis + `

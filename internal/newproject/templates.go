@@ -101,6 +101,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS`" + ` reports every Project document that contributed a prior inherited field when its current-Project representation disappears without an explicit typed removal. Restore the exact field or write its typed removal in the selected document. The prior contributor references remain visible, while the inherited value, Secret-reference target, and machine-specific paths stay redacted.
 
+` + "`PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID`" + ` retains every effective ` + "`http.expose`" + ` Interface and field in the problem, then reports each distinct owning current-Project document at ` + "`1:1`" + ` as an ` + "`exposure`" + ` source. Enable Connect or REST in the selected document, or remove the public exposure.
+
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 ` + "`plystra plugin create`" + ` uses ` + "`PLYSTRA_PLUGIN_CREATE_NAME_INVALID`" + ` for an invalid or reserved root-level name, ` + "`PLYSTRA_PLUGIN_CREATE_ID_INVALID`" + ` when the Project module namespace and name cannot form a canonical Plugin ID, and ` + "`PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS`" + ` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.
@@ -1465,6 +1467,7 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID / PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID:
   reported config lacks a schema or has an invalid typed value; choose a
   constructor with a schema, correct the safe field, or remove the entry.
+- PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID: correct transport or exposure at Source.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: reported sources own config;
   select or make its constructor reachable, or remove it. Values stay redacted.
 - Incompatible contract: compare the full typed contract and metadata. Implement

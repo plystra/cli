@@ -333,6 +333,27 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: source.Column(),
 			})
 		}
+	case diagnosticHTTPTransportSelectionInvalid:
+		var invalid *applicationmeta.HTTPTransportSelectionError
+		if !errors.As(err, &invalid) || invalid == nil {
+			return nil
+		}
+		seen := make(map[diagnosticjson.Source]struct{})
+		for _, exposure := range invalid.Exposures() {
+			source := exposure.DeclarationSource()
+			candidate := diagnosticjson.Source{
+				Module: source.ModulePath(),
+				Path:   source.Path(),
+				Kind:   "exposure",
+				Line:   source.Line(),
+				Column: source.Column(),
+			}
+			if _, exists := seen[candidate]; exists {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			sources = append(sources, candidate)
+		}
 	case diagnosticConstructorConfigurationUnselected:
 		var unowned *applicationresolve.UnownedConstructorConfigurationError
 		if !errors.As(err, &unowned) || unowned == nil {

@@ -1996,6 +1996,11 @@ ordering for every Project document that contributed the prior inherited
 decision. It identifies the disappeared field and its prior module/version
 references without exposing the inherited value, a Secret-reference target, an
 absolute path, or a Module Cache path.
+An invalid HTTP transport selection retains every effective `http.expose`
+Interface and field in the problem, then emits each distinct owning
+current-Project document at `1:1` as an `exposure` source. Root,
+environment-overlay, and complete-replacement declarations keep their
+module-relative paths; dependency exposure remains ignored.
 An unavailable constructor configuration schema uses
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
 current or dependency Project document as `configuration-declaration` at
@@ -2086,6 +2091,15 @@ exactly one `configuration-declaration` source at `1:1` for the selected root,
 environment, complete-replacement, or dependency document. It exposes neither
 configured values, unknown authored keys, nor Secret-reference targets,
 absolute paths, or Module Cache paths.
+
+### Public exposure without an HTTP transport
+
+`PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID` identifies a nonempty effective
+`http.expose` set when both Connect and REST are disabled. Enable one supported
+transport in the selected root, environment, or complete-replacement document,
+or remove the public exposure. The problem retains every exposed Interface and
+field, while the diagnostic emits every distinct owning current-Project
+document at `1:1` as an `exposure` source without exposing an absolute path.
 
 ### Unowned constructor configuration
 

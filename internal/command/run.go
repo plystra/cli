@@ -155,6 +155,8 @@ diagnostic.
 PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
 Project plystra.yaml as a project-marker source. Malformed readable documents
 use 1:1; unsafe or unreadable markers omit the unavailable span.
+PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID reports effective http.expose
+documents at 1:1 as exposure sources before selector-aware recovery.
 PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID reports the owning config
 document at 1:1 as a configuration-declaration source without values.
 PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID reports the owning config
@@ -188,6 +190,8 @@ configuration-declaration sources before selector-aware recovery.
 PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
 Project plystra.yaml as a project-marker source. Malformed readable documents
 use 1:1; unsafe or unreadable markers omit the unavailable span.
+PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID reports effective http.expose
+documents at 1:1 as exposure sources before selector-aware recovery.
 PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID reports the owning config
 document at 1:1 as a configuration-declaration source without values.
 PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID reports the owning config

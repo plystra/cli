@@ -314,15 +314,7 @@ func validateHTTPTransportSelection(manifest Manifest) error {
 		return nil
 	}
 
-	declared := make([]string, len(exposures))
-	for index, exposure := range exposures {
-		declared[index] = fmt.Sprintf("%s at %s", exposure.ID(), exposure.Source())
-	}
-	return fmt.Errorf(
-		"%w: http.expose is nonempty while http.transports.connect and http.transports.rest are both false; enable at least one transport in the selected current-project configuration; exposed Interfaces: %s",
-		ErrHTTPTransportSelection,
-		strings.Join(declared, ", "),
-	)
+	return newHTTPTransportSelectionError(exposures)
 }
 
 type provenanceRecord struct {
