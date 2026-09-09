@@ -2018,8 +2018,12 @@ maintenance change transactionally.
 `PLYSTRA_GENERATED_DRIFT` emits every stale, missing, or manually modified
 managed path as a sorted `generated-artifact` source in the current Project
 module. These path-only facts omit line and column rather than inventing a span.
-Regenerate with the same selection instead of editing owned output. Unexpected
-unowned output retains its separate diagnostic and move-aside recovery.
+Regenerate with the same selection instead of editing owned output.
+`PLYSTRA_GENERATED_UNEXPECTED_OUTPUT` emits every unexpected unowned path as a
+sorted `generated-artifact` source in the current Project module, also without
+a fabricated span. Move each reported path outside `generated/`, then rerun
+generation with the same selection; strict compound mutations remain rolled
+back until those paths are moved.
 `PLYSTRA_GO_MODULE_INVALID` emits the exact current-Project `go.mod` module or
 requirement position as a `module-dependency` source when dependency discovery
 rejects a changed module directive, self-requirement, duplicate requirement, or

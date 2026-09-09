@@ -220,6 +220,53 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 	}
 }
 
+func TestGenerateStrictUnexpectedOutputCarriesProjectRelativeSources(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "example.com/acme/unexpected-output-sources"
+	root := t.TempDir()
+	writeApplicationModule(t, root, modulePath)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	environment := goEnvironment(nil)
+	if result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: environment,
+		Validate:    func(_ context.Context, _ string) error { return nil },
+	}); err != nil || !result.Report().Clean() {
+		t.Fatalf("initial generation = %#v, %v", result.Report().Changes(), err)
+	}
+
+	writeFile(t, filepath.Join(root, "generated", "zeta.txt"), "zeta\n")
+	writeFile(t, filepath.Join(root, "generated", "alpha.txt"), "alpha\n")
+	before := snapshotTree(t, root)
+	_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:            root,
+		Environment:      environment,
+		RejectUnexpected: true,
+		Validate:         func(_ context.Context, _ string) error { return nil },
+	})
+	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, generatedfiles.ErrUnexpected) {
+		t.Fatalf("strict generation error = %v", err)
+	}
+	var source *applicationgenerate.UnexpectedOutputSourceError
+	wantPaths := []string{"generated/alpha.txt", "generated/zeta.txt"}
+	if !errors.As(err, &source) || source.ModulePath() != modulePath || source.SourceKind() != "generated-artifact" || !slices.Equal(source.Paths(), wantPaths) {
+		t.Fatalf("strict generation source = %#v, %v", source, err)
+	}
+	paths := source.Paths()
+	paths[0] = "generated/changed.txt"
+	if !slices.Equal(source.Paths(), wantPaths) {
+		t.Fatalf("strict generation source paths share caller storage: %v", source.Paths())
+	}
+	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+		t.Fatalf("strict generation exposed the Project path: %v", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("strict generation changed the Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoTransactions(t, root)
+}
+
 func TestGenerateRecordsDormantSelectionOnlyInConfigurationProvenance(t *testing.T) {
 	t.Parallel()
 

@@ -380,8 +380,8 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	if len(skill) > 64<<10 {
 		t.Fatalf("maximum-length Project skill = %d bytes, want at most %d", len(skill), 64<<10)
 	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATED_DRIFT")) || !bytes.Contains(skill, []byte("generated-artifact paths")) {
-		t.Fatal("maximum-length Project skill omits generated-drift guidance")
+	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATED_DRIFT")) || !bytes.Contains(skill, []byte("PLYSTRA_GENERATED_UNEXPECTED_OUTPUT")) || !bytes.Contains(skill, []byte("generated-artifact Sources")) {
+		t.Fatal("maximum-length Project skill omits generated-output source guidance")
 	}
 }
 
@@ -1156,6 +1156,7 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_ENVIRONMENT_OVERLAY_INVALID` reports the selected"),
 		[]byte("`PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT` reports the maintained"),
 		[]byte("`PLYSTRA_GENERATED_DRIFT` reports every stale, missing, or manually modified"),
+		[]byte("`PLYSTRA_GENERATED_UNEXPECTED_OUTPUT` reports every unexpected unowned path"),
 		[]byte("`generated-artifact` source"),
 		[]byte("Kernel is missing or only transitive"),
 		[]byte("`module-dependency` source"),
@@ -2216,7 +2217,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_ENVIRONMENT_OVERLAY_INVALID",
 		"PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT",
 		"PLYSTRA_GENERATED_DRIFT",
-		"generated-artifact paths",
+		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
+		"generated-artifact Sources",
 		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED",
 		"### Select one environment",
 		"Use --config only when the task",
@@ -2473,6 +2475,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_ENVIRONMENT_OVERLAY_INVALID",
 		"PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT",
 		"PLYSTRA_GENERATED_DRIFT",
+		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
 		"generated-artifact",
 		"PLYSTRA_GO_MODULE_INVALID",
 		"PLYSTRA_APPLICATION_DEPENDENCY_DRIFT",

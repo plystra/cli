@@ -282,6 +282,10 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		if errors.Is(err, atomicfs.ErrConcurrentChange) && !errors.Is(err, ErrConcurrentChange) {
 			err = errors.Join(ErrConcurrentChange, err)
 		}
+		var unexpected *generatedfiles.UnexpectedOutputError
+		if errors.As(err, &unexpected) && unexpected != nil {
+			err = unexpectedOutputSourceError(prepared.resolved.Module().ModulePath(), unexpected.Paths(), err)
+		}
 		return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
 	}
 	return Result{

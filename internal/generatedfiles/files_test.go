@@ -640,6 +640,15 @@ func TestInstallStrictRejectsUnexpectedOutputAndRollsBack(t *testing.T) {
 	if !errors.Is(err, generatedfiles.ErrInstall) || !errors.Is(err, generatedfiles.ErrUnexpected) || !strings.Contains(err.Error(), "generated/manual.txt") || !strings.Contains(err.Error(), "generated/notes.txt") {
 		t.Fatalf("InstallStrict error = %v", err)
 	}
+	var unexpected *generatedfiles.UnexpectedOutputError
+	if !errors.As(err, &unexpected) || !slices.Equal(unexpected.Paths(), []string{"generated/manual.txt", "generated/notes.txt"}) {
+		t.Fatalf("InstallStrict unexpected paths = %#v, %v", unexpected, err)
+	}
+	paths := unexpected.Paths()
+	paths[0] = "generated/changed.txt"
+	if !slices.Equal(unexpected.Paths(), []string{"generated/manual.txt", "generated/notes.txt"}) {
+		t.Fatalf("InstallStrict unexpected paths share caller storage: %v", unexpected.Paths())
+	}
 	if validated {
 		t.Fatal("strict installation validated beside unexpected output")
 	}

@@ -169,6 +169,8 @@ PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT reports the maintained current-Project
 configuration document at 1:1 as a configuration-declaration source.
 PLYSTRA_GENERATED_DRIFT reports each stale, missing, or manually modified
 managed path as a generated-artifact source without a fabricated span.
+PLYSTRA_GENERATED_UNEXPECTED_OUTPUT reports each unexpected unowned path as a
+generated-artifact source without a fabricated span.
 PLYSTRA_GO_MODULE_INVALID reports an exact current-Project go.mod module or
 requirement position as a module-dependency source once Project identity is valid.
 PLYSTRA_APPLICATION_DEPENDENCY_DRIFT reports current-Project go.mod at 1:1 as
@@ -217,6 +219,8 @@ PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT reports the maintained current-Project
 configuration document at 1:1 as a configuration-declaration source.
 PLYSTRA_GENERATED_DRIFT reports each stale, missing, or manually modified
 managed path as a generated-artifact source without a fabricated span.
+PLYSTRA_GENERATED_UNEXPECTED_OUTPUT reports each unexpected unowned path as a
+generated-artifact source without a fabricated span.
 PLYSTRA_GO_MODULE_INVALID reports an exact current-Project go.mod module or
 requirement position as a module-dependency source once Project identity is valid.
 PLYSTRA_APPLICATION_DEPENDENCY_DRIFT reports current-Project go.mod at 1:1 as
@@ -739,6 +743,14 @@ func writeGenerationReport(writer io.Writer, heading, modulePath string, configu
 			sourceInputs = append(sourceInputs, diagnosticjson.Source{
 				Module: modulePath,
 				Path:   change.Path(),
+				Kind:   "generated-artifact",
+			})
+		}
+	case diagnosticGeneratedUnexpectedOutput:
+		for _, unexpectedPath := range report.Unexpected() {
+			sourceInputs = append(sourceInputs, diagnosticjson.Source{
+				Module: modulePath,
+				Path:   unexpectedPath,
 				Kind:   "generated-artifact",
 			})
 		}

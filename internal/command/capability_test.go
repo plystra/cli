@@ -670,20 +670,24 @@ func TestRunCapabilityRejectsUnexpectedGeneratedOutput(t *testing.T) {
 
 	writeCommandFile(t, filepath.Join(root, "generated", "manual.txt"), "user-owned\n")
 	before := commandTree(t, root)
+	assertUnexpected := func(name string, exitCode int, stdout, stderr, recovery string) {
+		t.Helper()
+		wantSuffix := "\n\nSource: example.com/acme/library:generated/manual.txt (generated-artifact)\n\n" +
+			"Recovery:\n" + recovery + "\n\nDiagnostic: " + diagnosticcode.GeneratedUnexpectedOutput + "\n"
+		if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "unexpected generated output") || !strings.Contains(stderr, "generated/manual.txt") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+			t.Fatalf("%s = exit %d, stdout %q, stderr %q", name, exitCode, stdout, stderr)
+		}
+	}
 
 	exitCode, stdout, stderr := runCommand(t, []string{"capability", "create", "records.create", "--query", "--expose", "--plugin", "records"}, root, environment)
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "unexpected generated output") || !strings.Contains(stderr, "generated/manual.txt") {
-		t.Fatalf("unexpected-output capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
-	}
+	assertUnexpected("unexpected-output capability create", exitCode, stdout, stderr, "Move the reported unowned path outside generated/, then run `plystra generate`.")
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("failed command changed module:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 	assertNoCommandTransactions(t, root)
 
 	exitCode, stdout, stderr = runCommand(t, []string{"capability", "expose", "kernel.health/v1"}, root, environment)
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "unexpected generated output") || !strings.Contains(stderr, "generated/manual.txt") {
-		t.Fatalf("unexpected-output capability expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
-	}
+	assertUnexpected("unexpected-output capability expose", exitCode, stdout, stderr, "Move the reported unowned path outside generated/, then run `plystra generate`.")
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("failed expose changed module:\nbefore: %#v\nafter:  %#v", before, after)
 	}
@@ -693,14 +697,25 @@ func TestRunCapabilityRejectsUnexpectedGeneratedOutput(t *testing.T) {
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayData)
 	overlayBefore := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"capability", "expose", "kernel.health/v1", "--env", "production"}, filepath.Join(root, "records"), environment)
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "unexpected generated output") || !strings.Contains(stderr, "generated/manual.txt") {
-		t.Fatalf("unexpected-output environment expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
-	}
+	assertUnexpected("unexpected-output environment expose", exitCode, stdout, stderr, "Move the reported unowned path outside generated/, then run `plystra generate --env \"production\"`.")
 	if after := commandTree(t, root); !reflect.DeepEqual(after, overlayBefore) {
 		t.Fatalf("failed environment expose changed Project:\nbefore: %#v\nafter:  %#v", overlayBefore, after)
 	}
 	if got := string(readCommandFile(t, root, "plystra.production.yaml")); got != overlayData {
 		t.Fatalf("failed environment expose did not restore overlay: %q", got)
+	}
+	assertNoCommandTransactions(t, root)
+
+	replacementData := "# Complete replacement.\n{}\n"
+	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), replacementData)
+	replacementBefore := commandTree(t, root)
+	exitCode, stdout, stderr = runCommand(t, []string{"capability", "expose", "kernel.health/v1", "--config", "deploy/customer.yaml"}, filepath.Join(root, "records"), environment)
+	assertUnexpected("unexpected-output replacement expose", exitCode, stdout, stderr, "Move the reported unowned path outside generated/, then run `plystra generate --config \"deploy/customer.yaml\"`.")
+	if after := commandTree(t, root); !reflect.DeepEqual(after, replacementBefore) {
+		t.Fatalf("failed replacement expose changed Project:\nbefore: %#v\nafter:  %#v", replacementBefore, after)
+	}
+	if got := string(readCommandFile(t, root, "deploy/customer.yaml")); got != replacementData {
+		t.Fatalf("failed replacement expose did not restore selected document: %q", got)
 	}
 	assertNoCommandTransactions(t, root)
 }

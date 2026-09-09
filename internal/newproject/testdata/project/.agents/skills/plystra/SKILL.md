@@ -1249,7 +1249,8 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   fix schema or safe field at Source; values stay redacted.
 - PLYSTRA_CONFIGURATION_INVALID / PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
 - PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT: fix Source.
-- PLYSTRA_GENERATED_DRIFT: regenerate generated-artifact paths.
+- PLYSTRA_GENERATED_DRIFT / PLYSTRA_GENERATED_UNEXPECTED_OUTPUT: generated-artifact Sources;
+  regenerate managed paths, move unexpected paths.
 - PLYSTRA_GO_MODULE_INVALID: fix exact go.mod Source.
 - PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: go.mod module-dependency; generate repairs
   Kernel/runtime requirements; checks are read-only.
@@ -1289,8 +1290,6 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   files replace it.
 - Alias error: point directly to one resolved canonical Interface target with
   the same version and exposure no broader than that target.
-- Unexpected generated path: remove handwritten content from generated and
-  regenerate. Do not overwrite the reported path manually.
 - Protobuf wire-history drift: recover the exact previously generated
   generated/proto/wire-map.json. Never edit or delete it to force new field
   or enum-member numbers. Every visible authored Interface enters the ledger

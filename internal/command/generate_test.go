@@ -197,13 +197,37 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("repair stale output = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 
-	writeCommandFile(t, filepath.Join(root, "generated", "manual.txt"), "preserve\n")
+	writeCommandFile(t, filepath.Join(root, "generated", "zeta.txt"), "preserve zeta\n")
+	writeCommandFile(t, filepath.Join(root, "generated", "alpha.txt"), "preserve alpha\n")
+	unexpected := commandTree(t, root)
+	changes := "  unexpected generated/alpha.txt\n  unexpected generated/zeta.txt\n"
+	sources := "Source: example.com/acme/app:generated/alpha.txt (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/zeta.txt (generated-artifact)\n"
+	for _, arguments := range [][]string{{"generate", "--check"}, {"check"}} {
+		exitCode, stdout, stderr = runCommand(t, arguments, start, environment)
+		want := "generated output is not current:\n" + changes + "\n" + sources +
+			"\nRecovery:\nMove every unexpected unowned path outside generated/, then run `plystra generate`.\n\nDiagnostic: " + diagnosticcode.GeneratedUnexpectedOutput + "\n"
+		if exitCode != 1 || stdout != "" || stderr != want || strings.Count(stderr, "Source: ") != 2 {
+			t.Fatalf("%v unexpected output = exit %d, stdout %q, stderr %q", arguments, exitCode, stdout, stderr)
+		}
+		if after := commandTree(t, root); !reflect.DeepEqual(after, unexpected) {
+			t.Fatalf("%v unexpected-output check mutated application:\nbefore: %#v\nafter:  %#v", arguments, unexpected, after)
+		}
+	}
 	exitCode, stdout, stderr = runCommand(t, []string{"generate"}, start, environment)
-	if exitCode != 1 || stdout != "" || stderr != "generated output remains inconsistent after installation:\n  unexpected generated/manual.txt\n\nRecovery:\nMove every unexpected unowned path outside generated/, then run `plystra generate`.\n\nDiagnostic: "+diagnosticcode.GeneratedUnexpectedOutput+"\n" {
+	wantUnexpected := "generated output remains inconsistent after installation:\n" + changes + "\n" + sources +
+		"\nRecovery:\nMove every unexpected unowned path outside generated/, then run `plystra generate`.\n\nDiagnostic: " + diagnosticcode.GeneratedUnexpectedOutput + "\n"
+	if exitCode != 1 || stdout != "" || stderr != wantUnexpected || strings.Count(stderr, "Source: ") != 2 {
 		t.Fatalf("unexpected output = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
-	if got := string(readCommandFile(t, root, "generated/manual.txt")); got != "preserve\n" {
-		t.Fatalf("unexpected user file = %q", got)
+	if after := commandTree(t, root); !reflect.DeepEqual(after, unexpected) {
+		t.Fatalf("unexpected-output generation changed application:\nbefore: %#v\nafter:  %#v", unexpected, after)
+	}
+	if got := string(readCommandFile(t, root, "generated/alpha.txt")); got != "preserve alpha\n" {
+		t.Fatalf("unexpected alpha file = %q", got)
+	}
+	if got := string(readCommandFile(t, root, "generated/zeta.txt")); got != "preserve zeta\n" {
+		t.Fatalf("unexpected zeta file = %q", got)
 	}
 	assertNoCommandTransactions(t, root)
 }

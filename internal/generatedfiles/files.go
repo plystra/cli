@@ -60,6 +60,46 @@ type Report struct {
 	changes []Change
 }
 
+// UnexpectedOutputError reports the canonical unowned paths that a strict
+// installation refused to retain beside newly generated output.
+type UnexpectedOutputError struct {
+	paths []string
+}
+
+// Paths returns defensive, sorted application-relative paths.
+func (e *UnexpectedOutputError) Paths() []string {
+	if e == nil {
+		return nil
+	}
+	return append([]string(nil), e.paths...)
+}
+
+func (e *UnexpectedOutputError) Error() string {
+	if e == nil || len(e.paths) == 0 {
+		return ErrUnexpected.Error()
+	}
+	descriptions := make([]string, 0, len(e.paths))
+	for _, filePath := range e.paths {
+		descriptions = append(descriptions, "unexpected file "+filePath)
+	}
+	return fmt.Sprintf("%s: %s", ErrUnexpected, strings.Join(descriptions, ", "))
+}
+
+// Unwrap preserves the established unexpected-output sentinel.
+func (e *UnexpectedOutputError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return ErrUnexpected
+}
+
+func newUnexpectedOutputError(paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	return &UnexpectedOutputError{paths: append([]string(nil), paths...)}
+}
+
 // Clean reports whether desired and Git-visible generated files agree.
 func (r Report) Clean() bool { return len(r.changes) == 0 }
 
@@ -236,7 +276,7 @@ func invalidInstalledReport(report Report, rejectUnexpected bool) error {
 		description := fmt.Sprintf("%s file %s", change.kind, change.path)
 		if change.kind == ChangeUnexpected {
 			if rejectUnexpected {
-				unexpected = append(unexpected, description)
+				unexpected = append(unexpected, change.path)
 			}
 			continue
 		}
@@ -247,7 +287,7 @@ func invalidInstalledReport(report Report, rejectUnexpected bool) error {
 		result = errors.Join(result, fmt.Errorf("%w: %s", atomicfs.ErrConcurrentChange, strings.Join(concurrent, ", ")))
 	}
 	if len(unexpected) != 0 {
-		result = errors.Join(result, fmt.Errorf("%w: %s", ErrUnexpected, strings.Join(unexpected, ", ")))
+		result = errors.Join(result, newUnexpectedOutputError(unexpected))
 	}
 	return result
 }
