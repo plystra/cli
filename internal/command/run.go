@@ -55,10 +55,10 @@ const (
 Common actionable failures end with one Recovery block containing the primary
 command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
 Typed source-bearing failures, including invalid Project and Go Module
-declarations, current-Project configuration-composition drift, application
-module dependency drift, invalid explicit choices, and missing, ambiguous, or
-cyclic Interface Implementation resolution, add canonical module-relative
-Source lines first.
+declarations, current-Project configuration-composition and generated-artifact
+drift, application module dependency drift, invalid explicit choices, and
+missing, ambiguous, or cyclic Interface Implementation resolution, add
+canonical module-relative Source lines first.
 `
 	addUsage = `Usage:
   plystra add <go-module-query>
@@ -167,6 +167,8 @@ PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at
 1:1 as a configuration-declaration source before selector-aware recovery.
 PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT reports the maintained current-Project
 configuration document at 1:1 as a configuration-declaration source.
+PLYSTRA_GENERATED_DRIFT reports each stale, missing, or manually modified
+managed path as a generated-artifact source without a fabricated span.
 PLYSTRA_GO_MODULE_INVALID reports an exact current-Project go.mod module or
 requirement position as a module-dependency source once Project identity is valid.
 PLYSTRA_APPLICATION_DEPENDENCY_DRIFT reports current-Project go.mod at 1:1 as
@@ -213,6 +215,8 @@ PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at
 1:1 as a configuration-declaration source before selector-aware recovery.
 PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT reports the maintained current-Project
 configuration document at 1:1 as a configuration-declaration source.
+PLYSTRA_GENERATED_DRIFT reports each stale, missing, or manually modified
+managed path as a generated-artifact source without a fabricated span.
 PLYSTRA_GO_MODULE_INVALID reports an exact current-Project go.mod module or
 requirement position as a module-dependency source once Project identity is valid.
 PLYSTRA_APPLICATION_DEPENDENCY_DRIFT reports current-Project go.mod at 1:1 as
@@ -720,18 +724,32 @@ func writeGenerationReport(writer io.Writer, heading, modulePath string, configu
 		action = "Move every unexpected unowned path outside generated/, then run `plystra generate" + context.selectorSuffix() + "`."
 		code = diagnosticGeneratedUnexpectedOutput
 	}
-	if code == diagnosticConfigurationCompositionDrift {
-		sources, err := diagnosticjson.CanonicalizeSources([]diagnosticjson.Source{{
+	var sourceInputs []diagnosticjson.Source
+	switch code {
+	case diagnosticConfigurationCompositionDrift:
+		sourceInputs = []diagnosticjson.Source{{
 			Module: modulePath,
 			Path:   configurationPath,
 			Kind:   "configuration-declaration",
 			Line:   1,
 			Column: 1,
-		}})
-		if err == nil {
-			for _, source := range sources {
-				_, _ = fmt.Fprintf(writer, "\nSource: %s\n", explainSourceSummary(source))
+		}}
+	case diagnosticGeneratedDrift:
+		for _, change := range report.Changes() {
+			sourceInputs = append(sourceInputs, diagnosticjson.Source{
+				Module: modulePath,
+				Path:   change.Path(),
+				Kind:   "generated-artifact",
+			})
+		}
+	}
+	sources, err := diagnosticjson.CanonicalizeSources(sourceInputs)
+	if err == nil {
+		for index, source := range sources {
+			if index == 0 {
+				_, _ = fmt.Fprintln(writer)
 			}
+			_, _ = fmt.Fprintf(writer, "Source: %s\n", explainSourceSummary(source))
 		}
 	}
 	_, _ = fmt.Fprintf(writer, "\nRecovery:\n%s\n\nDiagnostic: %s\n", action, code)

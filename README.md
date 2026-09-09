@@ -885,6 +885,11 @@ dependency composition would change it. Default and environment-overlay checks
 identify root `plystra.yaml`; complete-replacement checks identify the selected
 document. Check modes remain read-only, and normal generation applies the
 maintenance change transactionally.
+`PLYSTRA_GENERATED_DRIFT` emits every stale, missing, or manually modified
+managed path as a sorted `generated-artifact` source in the current Project
+module. These path-only facts omit line and column rather than inventing a span.
+Regenerate with the same selection instead of editing owned output. Unexpected
+unowned output retains its separate diagnostic and move-aside recovery.
 `PLYSTRA_GO_MODULE_INVALID` emits the exact current-Project `go.mod` module or
 requirement position as a `module-dependency` source when dependency discovery
 rejects a changed module directive, self-requirement, duplicate requirement, or

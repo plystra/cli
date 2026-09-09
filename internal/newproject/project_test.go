@@ -356,6 +356,35 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	}
 }
 
+func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
+	proxy := createKernelProxy(t)
+	environment := isolatedGoEnvironment(t, proxy)
+	projectName := strings.Repeat("a", 64)
+
+	result, err := newproject.Create(context.Background(), newproject.Options{
+		Parent:      t.TempDir(),
+		ProjectName: projectName,
+		Skills:      true,
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Create maximum-length Project: %v", err)
+	}
+	if result.ModulePath() != projectName {
+		t.Fatalf("module path = %q, want %q", result.ModulePath(), projectName)
+	}
+	skill, err := os.ReadFile(filepath.Join(result.Path(), ".agents", "skills", "plystra", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(generated skill): %v", err)
+	}
+	if len(skill) > 64<<10 {
+		t.Fatalf("maximum-length Project skill = %d bytes, want at most %d", len(skill), 64<<10)
+	}
+	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATED_DRIFT")) || !bytes.Contains(skill, []byte("generated-artifact paths")) {
+		t.Fatal("maximum-length Project skill omits generated-drift guidance")
+	}
+}
+
 func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
 	proxy := createKernelProxy(t)
 	environment := isolatedGoEnvironment(t, proxy)
@@ -1126,6 +1155,8 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID` retains every effective"),
 		[]byte("`PLYSTRA_ENVIRONMENT_OVERLAY_INVALID` reports the selected"),
 		[]byte("`PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT` reports the maintained"),
+		[]byte("`PLYSTRA_GENERATED_DRIFT` reports every stale, missing, or manually modified"),
+		[]byte("`generated-artifact` source"),
 		[]byte("Kernel is missing or only transitive"),
 		[]byte("`module-dependency` source"),
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration"),
@@ -2165,6 +2196,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 	for _, required := range []string{
 		"name: plystra",
 		"The current Go Module path is " + modulePath,
+		"Replace MODULE_PATH below with it",
 		"## Choose the smallest workflow",
 		"### Operate a Project created from a template",
 		"The current CLI does not advertise any template as qualified",
@@ -2183,6 +2215,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID",
 		"PLYSTRA_ENVIRONMENT_OVERLAY_INVALID",
 		"PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT",
+		"PLYSTRA_GENERATED_DRIFT",
+		"generated-artifact paths",
 		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED",
 		"### Select one environment",
 		"Use --config only when the task",
@@ -2438,6 +2472,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID",
 		"PLYSTRA_ENVIRONMENT_OVERLAY_INVALID",
 		"PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT",
+		"PLYSTRA_GENERATED_DRIFT",
+		"generated-artifact",
 		"PLYSTRA_GO_MODULE_INVALID",
 		"PLYSTRA_APPLICATION_DEPENDENCY_DRIFT",
 		"module-dependency",

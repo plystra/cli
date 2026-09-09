@@ -54,9 +54,10 @@ replace github.com/plystra/kernel => %s
 	writeCommandFile(t, filepath.Join(root, "generated", "manifest.json"), "drift\n")
 	drifted := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"check"}, start, environment)
-	if exitCode != 1 || stdout != "" || stderr != "generated output is not current:\n  manually-modified generated/manifest.json\n\nRecovery:\nRun `plystra generate` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.GeneratedDrift+"\n" {
+	if exitCode != 1 || stdout != "" || stderr != "generated output is not current:\n  manually-modified generated/manifest.json\n\nSource: example.com/acme/check:generated/manifest.json (generated-artifact)\n\nRecovery:\nRun `plystra generate` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.GeneratedDrift+"\n" {
 		t.Fatalf("drifted check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
+	assertGeneratedDriftArtifactSources(t, stderr, "example.com/acme/check")
 	if after := commandTree(t, root); !reflect.DeepEqual(after, drifted) {
 		t.Fatal("drifted check mutated the Project")
 	}

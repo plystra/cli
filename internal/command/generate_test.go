@@ -25,6 +25,39 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+func assertGeneratedDriftArtifactSources(t *testing.T, stderr, modulePath string) {
+	t.Helper()
+	problemEnd := strings.Index(stderr, "\n\nSource: ")
+	if problemEnd < 0 {
+		t.Fatalf("generated drift omitted source block: %q", stderr)
+	}
+	sourceStart := problemEnd + 2
+	recoveryOffset := strings.Index(stderr[sourceStart:], "\n\nRecovery:\n")
+	if recoveryOffset < 0 {
+		t.Fatalf("generated drift source block omitted recovery: %q", stderr)
+	}
+
+	var paths []string
+	for _, line := range strings.Split(stderr[:problemEnd], "\n")[1:] {
+		parts := strings.SplitN(strings.TrimSpace(line), " ", 2)
+		if len(parts) != 2 || parts[1] == "" {
+			t.Fatalf("generated drift change line is not canonical: %q", line)
+		}
+		paths = append(paths, parts[1])
+	}
+	sort.Strings(paths)
+	wantSources := make([]string, 0, len(paths))
+	for _, path := range paths {
+		wantSources = append(wantSources, "Source: "+modulePath+":"+path+" (generated-artifact)")
+	}
+	if got := stderr[sourceStart : sourceStart+recoveryOffset]; got != strings.Join(wantSources, "\n") {
+		t.Fatalf("generated drift sources = %q, want %q", got, strings.Join(wantSources, "\n"))
+	}
+	if !strings.HasSuffix(stderr, "Diagnostic: "+diagnosticcode.GeneratedDrift+"\n") {
+		t.Fatalf("generated drift diagnostic = %q", stderr)
+	}
+}
+
 func TestRunGenerateAndCheckUsePublicApplicationSurface(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
@@ -75,11 +108,27 @@ replace github.com/plystra/kernel => %s
 		"  missing generated/manifest.json\n" +
 		"  missing generated/proto/descriptor-set.pb\n" +
 		"  missing generated/proto/wire-map.json\n\n" +
+		"Source: example.com/acme/app:generated/.plystra-manifest.json (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/compatibility/interface-documentation.json (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/compatibility/interface-javascript.json (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/compatibility/interface-metadata.json (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/compatibility/interface-transport.json (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/compatibility/interfaces.json (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/go/application/main_gen.go (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/go/assembly/compatibility_gen.go (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/go/assembly/interfaces_gen.go (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/go/assembly/invocations_gen.go (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/go/assembly/providers_gen.go (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/go/bootstrap/bootstrap_gen.go (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/manifest.json (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/proto/descriptor-set.pb (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/proto/wire-map.json (generated-artifact)\n\n" +
 		"Recovery:\nRun `plystra generate` to restore the selected generated output.\n\n" +
 		"Diagnostic: " + diagnosticcode.GeneratedDrift + "\n"
 	if stderr != wantMissing {
 		t.Fatalf("initial check stderr = %q, want %q", stderr, wantMissing)
 	}
+	assertGeneratedDriftArtifactSources(t, stderr, "example.com/acme/app")
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("generate --check mutated application:\nbefore: %#v\nafter:  %#v", before, after)
 	}
@@ -117,9 +166,10 @@ replace github.com/plystra/kernel => %s
 	writeCommandFile(t, filepath.Join(root, "generated", "manifest.json"), "drift\n")
 	drifted := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, start, environment)
-	if exitCode != 1 || stdout != "" || stderr != "generated output is not current:\n  manually-modified generated/manifest.json\n\nRecovery:\nRun `plystra generate` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.GeneratedDrift+"\n" {
+	if exitCode != 1 || stdout != "" || stderr != "generated output is not current:\n  manually-modified generated/manifest.json\n\nSource: example.com/acme/app:generated/manifest.json (generated-artifact)\n\nRecovery:\nRun `plystra generate` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.GeneratedDrift+"\n" {
 		t.Fatalf("drift check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
+	assertGeneratedDriftArtifactSources(t, stderr, "example.com/acme/app")
 	if after := commandTree(t, root); !reflect.DeepEqual(after, drifted) {
 		t.Fatalf("drift check mutated application:\nbefore: %#v\nafter:  %#v", drifted, after)
 	}
@@ -138,6 +188,7 @@ replace github.com/plystra/kernel => %s
 		strings.Contains(stderr, "manually-modified") {
 		t.Fatalf("stale output = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
+	assertGeneratedDriftArtifactSources(t, stderr, "example.com/acme/app")
 	if after := commandTree(t, root); !reflect.DeepEqual(after, stale) {
 		t.Fatalf("stale check mutated application:\nbefore: %#v\nafter:  %#v", stale, after)
 	}
@@ -830,6 +881,7 @@ replace github.com/plystra/kernel => %s
 	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate --env \"production\"` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.GeneratedDrift+"\n") || strings.Count(stderr, "Recovery:") != 1 {
 		t.Fatalf("environment drift recovery = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
+	assertGeneratedDriftArtifactSources(t, stderr, "example.com/acme/environment")
 	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeEnvironmentDrift) {
 		t.Fatal("environment drift check mutated the Project")
 	}
@@ -1110,6 +1162,7 @@ interfaces:
 	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "generated output is not current:\n") || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate --config \"deploy/ambient.yaml\"` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.GeneratedDrift+"\n") || strings.Count(stderr, "Recovery:") != 1 {
 		t.Fatalf("PLYSTRA_CONFIG check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
+	assertGeneratedDriftArtifactSources(t, stderr, "example.com/acme/config-select")
 	if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, beforeAmbientCheck) {
 		t.Fatal("PLYSTRA_CONFIG generate --check mutated the Project")
 	}
@@ -1289,6 +1342,7 @@ interfaces:
 	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "generated output is not current") {
 		t.Fatalf("environment policy drift check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
+	assertGeneratedDriftArtifactSources(t, stderr, "example.com/acme/policy")
 	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeEnvironmentCheck) {
 		t.Fatal("environment policy drift check mutated the Project")
 	}

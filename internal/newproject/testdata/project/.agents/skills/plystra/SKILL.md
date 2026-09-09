@@ -119,7 +119,7 @@ specific diagnostic or infrastructure task requires them.
 
 ## Start from the module boundary
 
-The current Go Module path is example.com/acme/my-app. Read its go.mod before writing imports.
+The current Go Module path is example.com/acme/my-app. Replace MODULE_PATH below with it; read go.mod before writing imports.
 
 Inspect these authored inputs first:
 
@@ -751,7 +751,7 @@ provider interface in the Plugin-owned scaffold:
         "context"
         "strings"
 
-        contract "example.com/acme/my-app/generated/go/contracts/records/read/v1"
+        contract "MODULE_PATH/generated/go/contracts/records/read/v1"
     )
 
     func (*Plugin) Read(_ context.Context, request contract.Request) (contract.Response, error) {
@@ -939,9 +939,9 @@ set and retain the generated client:
     import (
         "context"
 
-        lookupcontract "example.com/acme/my-app/generated/go/contracts/catalog/lookup/v1"
-        ordercontract "example.com/acme/my-app/generated/go/contracts/order/place/v1"
-        dependencies "example.com/acme/my-app/generated/go/dependencies/orders"
+        lookupcontract "MODULE_PATH/generated/go/contracts/catalog/lookup/v1"
+        ordercontract "MODULE_PATH/generated/go/contracts/order/place/v1"
+        dependencies "MODULE_PATH/generated/go/dependencies/orders"
     )
 
     type Plugin struct {
@@ -1244,13 +1244,14 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED,
   PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
 - PLYSTRA_USE_INTERFACE_INVALID / PLYSTRA_USE_CONSTRUCTOR_INVALID: malformed
-  Interface ID / constructor. Both precede mutation; Recovery retains selector.
+  Interface ID / constructor; both precede mutation and retain selector.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID / PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID:
-  fix the reported schema or safe field at Source; values stay redacted.
+  fix schema or safe field at Source; values stay redacted.
 - PLYSTRA_CONFIGURATION_INVALID / PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
 - PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT: fix Source.
+- PLYSTRA_GENERATED_DRIFT: regenerate generated-artifact paths.
 - PLYSTRA_GO_MODULE_INVALID: fix exact go.mod Source.
-- PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: go.mod 1:1 module-dependency; generate repairs
+- PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: go.mod module-dependency; generate repairs
   Kernel/runtime requirements; checks are read-only.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: reported sources own config;
   select or make its constructor reachable, or remove it. Values stay redacted.

@@ -789,6 +789,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 	required := []string{
 		"description: Develop Plystra Projects through ordinary Go Modules, versioned Interfaces, Implementations, and plystra.yaml",
 		"The current Go Module path is " + modulePath,
+		"Replace MODULE_PATH below with it",
 		"## Choose the smallest workflow",
 		"### Operate a Project created from a template",
 		"The current CLI does not advertise any template as qualified",
@@ -844,6 +845,8 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID",
 		"PLYSTRA_ENVIRONMENT_OVERLAY_INVALID",
 		"PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT",
+		"PLYSTRA_GENERATED_DRIFT",
+		"generated-artifact paths",
 		"PLYSTRA_GO_MODULE_INVALID",
 		"PLYSTRA_APPLICATION_DEPENDENCY_DRIFT",
 		"module-dependency",

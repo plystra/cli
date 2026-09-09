@@ -109,6 +109,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT`" + ` reports the maintained current-Project configuration document at ` + "`1:1`" + ` as a ` + "`configuration-declaration`" + ` source when dependency composition would change it. Default and environment-overlay checks identify root ` + "`plystra.yaml`" + `; complete-replacement checks identify the selected document. Check modes are read-only; normal generation applies the maintenance change transactionally.
 
+` + "`PLYSTRA_GENERATED_DRIFT`" + ` reports every stale, missing, or manually modified managed path as a sorted ` + "`generated-artifact`" + ` source in the current Project module. These path-only facts omit line and column rather than inventing a span. Regenerate with the same selection instead of editing owned output. Unexpected unowned output retains its separate diagnostic and move-aside recovery.
+
 ` + "`PLYSTRA_GO_MODULE_INVALID`" + ` reports the exact current-Project ` + "`go.mod`" + ` module or requirement position as a ` + "`module-dependency`" + ` source once Project identity is valid. Correct that declaration; a file that cannot establish a trustworthy module identity receives no invented source.
 
 ` + "`PLYSTRA_APPLICATION_DEPENDENCY_DRIFT`" + ` reports the current Project ` + "`go.mod`" + ` at ` + "`1:1`" + ` as a ` + "`module-dependency`" + ` source when the Kernel is missing or only transitive, or a generated runtime requirement has drifted. ` + "`plystra generate --check`" + ` and ` + "`plystra check`" + ` are read-only; normal generation transactionally restores the CLI-supported direct Kernel release and required runtime modules before validation.
@@ -348,7 +350,7 @@ specific diagnostic or infrastructure task requires them.
 
 ## Start from the module boundary
 
-The current Go Module path is %[1]s. Read its go.mod before writing imports.
+The current Go Module path is %[1]s. Replace MODULE_PATH below with it; read go.mod before writing imports.
 
 Inspect these authored inputs first:
 
@@ -980,7 +982,7 @@ provider interface in the Plugin-owned scaffold:
         "context"
         "strings"
 
-        contract "%[1]s/generated/go/contracts/records/read/v1"
+        contract "MODULE_PATH/generated/go/contracts/records/read/v1"
     )
 
     func (*Plugin) Read(_ context.Context, request contract.Request) (contract.Response, error) {
@@ -1168,9 +1170,9 @@ set and retain the generated client:
     import (
         "context"
 
-        lookupcontract "%[1]s/generated/go/contracts/catalog/lookup/v1"
-        ordercontract "%[1]s/generated/go/contracts/order/place/v1"
-        dependencies "%[1]s/generated/go/dependencies/orders"
+        lookupcontract "MODULE_PATH/generated/go/contracts/catalog/lookup/v1"
+        ordercontract "MODULE_PATH/generated/go/contracts/order/place/v1"
+        dependencies "MODULE_PATH/generated/go/dependencies/orders"
     )
 
     type Plugin struct {
@@ -1473,13 +1475,14 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED,
   PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
 - PLYSTRA_USE_INTERFACE_INVALID / PLYSTRA_USE_CONSTRUCTOR_INVALID: malformed
-  Interface ID / constructor. Both precede mutation; Recovery retains selector.
+  Interface ID / constructor; both precede mutation and retain selector.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID / PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID:
-  fix the reported schema or safe field at Source; values stay redacted.
+  fix schema or safe field at Source; values stay redacted.
 - PLYSTRA_CONFIGURATION_INVALID / PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
 - PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT: fix Source.
+- PLYSTRA_GENERATED_DRIFT: regenerate generated-artifact paths.
 - PLYSTRA_GO_MODULE_INVALID: fix exact go.mod Source.
-- PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: go.mod 1:1 module-dependency; generate repairs
+- PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: go.mod module-dependency; generate repairs
   Kernel/runtime requirements; checks are read-only.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: reported sources own config;
   select or make its constructor reachable, or remove it. Values stay redacted.
