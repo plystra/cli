@@ -313,6 +313,36 @@ config: {example.com/acme/smtp.New: {host: shared.example, settings: {mode: shar
 	}
 }
 
+func TestApplyOverlayReportsSelectedEnvironmentDocument(t *testing.T) {
+	t.Parallel()
+
+	base, err := applicationmeta.ParseSource("plystra.yaml", []byte("http: {cors: {allowed_origins: [https://shared.example], allow_credentials: true}}\n"))
+	if err != nil {
+		t.Fatalf("ParseSource(base): %v", err)
+	}
+	base, err = applicationmeta.WithProjectModule(base, "example.com/application")
+	if err != nil {
+		t.Fatalf("WithProjectModule(base): %v", err)
+	}
+	overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte("http: {cors: {allowed_origins: ['*']}}\n"))
+	if err != nil {
+		t.Fatalf("ParseOverlaySource: %v", err)
+	}
+	overlay, err = applicationmeta.WithProjectModule(overlay, "example.com/application")
+	if err != nil {
+		t.Fatalf("WithProjectModule(overlay): %v", err)
+	}
+
+	_, err = applicationmeta.ApplyOverlay(base, overlay, composeSchemaLookup(nil))
+	var invalid *applicationmeta.EnvironmentOverlayError
+	if !errors.Is(err, applicationmeta.ErrApplyOverlay) || !errors.As(err, &invalid) || invalid == nil || !strings.Contains(err.Error(), "http.cors cannot combine wildcard origin") {
+		t.Fatalf("ApplyOverlay = %v", err)
+	}
+	if invalid.ModulePath() != "example.com/application" || invalid.SourcePath() != "plystra.production.yaml" || invalid.SourceKind() != "configuration-declaration" || invalid.Line() != 1 || invalid.Column() != 1 {
+		t.Fatalf("environment overlay source = %#v", invalid)
+	}
+}
+
 func parseOverlayManifest(t *testing.T, source, data string) applicationmeta.Manifest {
 	t.Helper()
 	manifest, err := applicationmeta.ParseSource(source, []byte(data))

@@ -871,6 +871,10 @@ inherited value, Secret-reference target, and machine-specific path.
 owning current-Project document as an `exposure` source at `1:1`. Root,
 environment-overlay, and complete-replacement declarations keep their selected
 module-relative paths; dependency exposure remains ignored.
+`PLYSTRA_ENVIRONMENT_OVERLAY_INVALID` emits the selected current-Project
+environment document at `1:1` as a `configuration-declaration` source when its
+typed application over root configuration is invalid. The problem identifies
+the invalid field relationship without exposing values or an absolute path.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses
@@ -975,6 +979,12 @@ in the selected root, environment, or complete-replacement document, or remove
 the public exposure. The problem retains every exposed Interface and field;
 the diagnostic emits every distinct owning current-Project document at `1:1`
 as an `exposure` source without exposing an absolute path.
+
+A selected sparse environment overlay whose typed application over root
+configuration is invalid fails with `PLYSTRA_ENVIRONMENT_OVERLAY_INVALID`.
+Correct the reported relationship in the selected `plystra.<environment>.yaml`.
+The diagnostic emits that current-Project document at `1:1` as a
+`configuration-declaration` source without exposing values or an absolute path.
 
 Constructor-keyed configuration whose constructor is neither named by an
 effective `interfaces.use` choice nor reachable from an active Interface fails

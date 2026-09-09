@@ -1012,6 +1012,37 @@ func TestPublicResolvingCommandsReportHTTPTransportSelectionSourcesWithoutMutati
 	}
 }
 
+func TestPublicResolvingCommandsReportEnvironmentOverlaySourcesWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	for _, command := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}} {
+		arguments := append(append([]string(nil), command...), "--env", "production")
+		t.Run(strings.Join(arguments, " "), func(t *testing.T) {
+			root := writeCapabilityCommandModule(t)
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {cors: {allowed_origins: [https://shared.example], allow_credentials: true}}\n")
+			writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {cors: {allowed_origins: ['*']}}\n")
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "records"), commandGoEnvironment())
+			if exitCode != 1 || stdout != "" || !commandContainsAll(
+				stderr,
+				"http.cors cannot combine wildcard origin",
+				"Source: example.com/acme/library:plystra.production.yaml:1:1 (configuration-declaration)",
+				"Recovery:\nEdit plystra.production.yaml so every value matches a selected Plugin's closed typed schema, then rerun the command.\n",
+				"Diagnostic: "+diagnosticcode.EnvironmentOverlayInvalid,
+			) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+				t.Fatalf("%v invalid environment overlay = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+			}
+			if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+				t.Fatalf("%v exposed private Project path: %q", arguments, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%v mutated invalid environment Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func TestPublicResolvingCommandsRejectUnownedConstructorConfigurationWithoutMutation(t *testing.T) {
 	t.Parallel()
 

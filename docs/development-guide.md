@@ -2001,6 +2001,10 @@ Interface and field in the problem, then emits each distinct owning
 current-Project document at `1:1` as an `exposure` source. Root,
 environment-overlay, and complete-replacement declarations keep their
 module-relative paths; dependency exposure remains ignored.
+An invalid environment overlay emits the selected current-Project environment
+document at `1:1` as a `configuration-declaration` source. The problem
+identifies the invalid typed field relationship without exposing values, an
+absolute path, or a Module Cache path.
 An unavailable constructor configuration schema uses
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
 current or dependency Project document as `configuration-declaration` at
@@ -2100,6 +2104,15 @@ transport in the selected root, environment, or complete-replacement document,
 or remove the public exposure. The problem retains every exposed Interface and
 field, while the diagnostic emits every distinct owning current-Project
 document at `1:1` as an `exposure` source without exposing an absolute path.
+
+### Invalid environment overlay
+
+`PLYSTRA_ENVIRONMENT_OVERLAY_INVALID` identifies a selected sparse environment
+document whose typed application over root configuration is invalid. Correct
+the reported field relationship in the selected `plystra.<environment>.yaml`.
+The diagnostic emits that current-Project document at `1:1` as a
+`configuration-declaration` source without exposing values, an absolute path,
+or a Module Cache path.
 
 ### Unowned constructor configuration
 

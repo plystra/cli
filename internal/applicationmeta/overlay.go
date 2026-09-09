@@ -15,7 +15,13 @@ var ErrApplyOverlay = errors.New("apply current-project configuration overlay")
 // ApplyOverlay applies one sparse higher-precedence current-project Manifest
 // over a lower current-project Manifest. It preserves explicit removals so the
 // result can still suppress dependency-derived declarations during Compose.
-func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (Manifest, error) {
+func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, applyErr error) {
+	defer func() {
+		if errors.Is(applyErr, ErrApplyOverlay) {
+			applyErr = environmentOverlayError(overlay, applyErr)
+		}
+	}()
+
 	if schemas == nil {
 		return Manifest{}, fmt.Errorf("%w: schema lookup is nil", ErrApplyOverlay)
 	}

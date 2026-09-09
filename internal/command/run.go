@@ -157,6 +157,8 @@ Project plystra.yaml as a project-marker source. Malformed readable documents
 use 1:1; unsafe or unreadable markers omit the unavailable span.
 PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID reports effective http.expose
 documents at 1:1 as exposure sources before selector-aware recovery.
+PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at
+1:1 as a configuration-declaration source before selector-aware recovery.
 PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID reports the owning config
 document at 1:1 as a configuration-declaration source without values.
 PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID reports the owning config
@@ -192,6 +194,8 @@ Project plystra.yaml as a project-marker source. Malformed readable documents
 use 1:1; unsafe or unreadable markers omit the unavailable span.
 PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID reports effective http.expose
 documents at 1:1 as exposure sources before selector-aware recovery.
+PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at
+1:1 as a configuration-declaration source before selector-aware recovery.
 PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID reports the owning config
 document at 1:1 as a configuration-declaration source without values.
 PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID reports the owning config
