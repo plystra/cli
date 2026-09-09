@@ -347,7 +347,7 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: source.Column,
 			})
 		}
-	case diagnosticConstructorConfigurationSchemaInvalid:
+	case diagnosticConstructorConfigurationSchemaInvalid, diagnosticConstructorConfigurationValuesInvalid:
 		var located diagnosticSourceLocation
 		if !errors.As(err, &located) || located == nil || located.SourceKind() != "configuration-declaration" {
 			return nil
@@ -897,7 +897,7 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, applicationmeta.ErrConfigurationSchema):
 		return recoveryDiagnostic(diagnosticConstructorConfigurationSchemaInvalid, "Correct the reported owning Project document by using the fully qualified symbol of a discovered constructor with a compiled Go Config schema, or remove that constructor configuration entry, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrConfigurationValues):
-		return recoveryDiagnostic(diagnosticConstructorConfigurationValuesInvalid, "Correct the reported constructor configuration field in "+context.configurationTarget()+" to match its compiled Go Config field type, then rerun the command.")
+		return recoveryDiagnostic(diagnosticConstructorConfigurationValuesInvalid, "Correct the reported constructor configuration field in the owning Project document to match its compiled Go Config field type, then rerun the command.")
 	case errors.Is(err, applicationresolve.ErrUnownedConstructorConfiguration):
 		return recoveryDiagnostic(diagnosticConstructorConfigurationUnselected, "Name the reported constructor in an effective interfaces.use entry, make it reachable through an Interface requirement, or remove its configuration from "+context.configurationTarget()+", then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrApplyOverlay):

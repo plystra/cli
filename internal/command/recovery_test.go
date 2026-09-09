@@ -127,7 +127,7 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			name:    "constructor configuration value",
 			err:     fmt.Errorf("parse configuration: %w", applicationmeta.ErrConfigurationValues),
 			context: commandRecoveryContext("deploy/customer.yaml", "", nil),
-			want:    "Correct the reported constructor configuration field in deploy/customer.yaml to match its compiled Go Config field type, then rerun the command.",
+			want:    "Correct the reported constructor configuration field in the owning Project document to match its compiled Go Config field type, then rerun the command.",
 			code:    diagnosticConstructorConfigurationValuesInvalid,
 		},
 		{

@@ -800,6 +800,138 @@ func TestPublicResolvingCommandsReportDependencyConstructorConfigurationSchemaSo
 	}
 }
 
+func TestPublicResolvingCommandsReportConstructorConfigurationValueSourcesWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	modes := []struct {
+		name     string
+		path     string
+		selector []string
+	}{
+		{name: "default", path: "plystra.yaml"},
+		{name: "environment", path: "plystra.production.yaml", selector: []string{"--env", "production"}},
+		{name: "replacement", path: "deploy/customer.yaml", selector: []string{"--config", "deploy/customer.yaml"}},
+	}
+	const (
+		constructor  = "example.com/acme/implementation-use/smtp.New"
+		privateValue = "PRIVATE_INVALID_CONFIGURATION_VALUE"
+	)
+	for _, mode := range modes {
+		mode := mode
+		t.Run(mode.name, func(t *testing.T) {
+			for _, command := range commands {
+				arguments := append(append([]string(nil), command...), mode.selector...)
+				t.Run(strings.Join(arguments, " "), func(t *testing.T) {
+					root := writeImplementationSelectionCommandProject(t)
+					writeCommandConfigurableImplementation(t, root, "smtp", "email.send/v1", "email/send/v1", "Send")
+					if mode.path != "plystra.yaml" {
+						writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+					}
+					writeCommandFile(t, filepath.Join(root, filepath.FromSlash(mode.path)), "config: {"+constructor+": {endpoint: {token: "+privateValue+"}}}\n")
+					before := commandTree(t, root)
+					exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "smtp"), implementationSelectionCommandEnvironment(nil))
+					wantField := `config["` + constructor + `"]["endpoint"]`
+					wantSource := "Source: example.com/acme/implementation-use:" + mode.path + ":1:1 (configuration-declaration)"
+					if exitCode != 1 || stdout != "" || !commandContainsAll(
+						stderr,
+						"invalid constructor configuration values",
+						wantField,
+						wantSource,
+						"Recovery:\nCorrect the reported constructor configuration field in the owning Project document to match its compiled Go Config field type, then rerun the command.\n",
+						"Diagnostic: "+diagnosticcode.ConstructorConfigurationValuesInvalid,
+					) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 || strings.Contains(stderr, privateValue) || strings.Contains(stderr, "token") || strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+						t.Fatalf("%v invalid constructor configuration value = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+					}
+					if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+						t.Fatalf("%v mutated invalid constructor configuration Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+					}
+					assertNoCommandTransactions(t, root)
+				})
+			}
+		})
+	}
+}
+
+func TestPublicResolvingCommandsReportDependencyConstructorConfigurationValueSourceWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	for _, arguments := range commands {
+		commandArguments := append([]string(nil), arguments...)
+		t.Run(strings.Join(commandArguments, " "), func(t *testing.T) {
+			applicationRoot := writeImplementationSelectionCommandProject(t)
+			dependencyRoot := filepath.Join(t.TempDir(), "dependency")
+			const (
+				dependencyModule = "example.com/dependency"
+				constructor      = dependencyModule + "/service.New"
+				privateValue     = "PRIVATE_DEPENDENCY_INVALID_CONFIGURATION_VALUE"
+			)
+			writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), "module "+dependencyModule+"\n\ngo 1.26\n")
+			writeCommandFile(t, filepath.Join(dependencyRoot, "interfaces", "echo", "v1", "interface.go"), `package echov1
+
+import "context"
+
+//plystra:interface dependency.echo/v1
+type Interface interface {
+	Echo(context.Context, Request) (Response, error)
+}
+
+type Request struct{}
+type Response struct{}
+`)
+			writeCommandFile(t, filepath.Join(dependencyRoot, "service", "implementation.go"), `package service
+
+import (
+	"context"
+
+	echov1 "example.com/dependency/interfaces/echo/v1"
+)
+
+type Config struct {
+	Endpoint string
+}
+
+type Service struct{}
+
+//plystra:implements dependency.echo/v1
+func New(Config) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Echo(context.Context, echov1.Request) (echov1.Response, error) {
+	return echov1.Response{}, nil
+}
+
+var _ echov1.Interface = (*Service)(nil)
+`)
+			writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "config: {"+constructor+": {endpoint: {token: "+privateValue+"}}}\n")
+			goMod := string(readCommandFile(t, applicationRoot, "go.mod"))
+			goMod += "\nrequire " + dependencyModule + " v1.0.0\n\nreplace " + dependencyModule + " => " + filepath.ToSlash(dependencyRoot) + "\n"
+			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), goMod)
+
+			beforeApplication := commandTree(t, applicationRoot)
+			beforeDependency := commandTree(t, dependencyRoot)
+			exitCode, stdout, stderr := runCommand(t, commandArguments, filepath.Join(applicationRoot, "smtp"), commandGoEnvironment())
+			wantField := `config["` + constructor + `"]["endpoint"]`
+			wantSuffix := "\n\nSource: " + dependencyModule + ":plystra.yaml:1:1 (configuration-declaration)\n\nRecovery:\nCorrect the reported constructor configuration field in the owning Project document to match its compiled Go Config field type, then rerun the command.\n\nDiagnostic: " + diagnosticcode.ConstructorConfigurationValuesInvalid + "\n"
+			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, wantField) || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Contains(stderr, privateValue) || strings.Contains(stderr, "token") {
+				t.Fatalf("%v invalid dependency constructor configuration value = exit %d stdout %q stderr %q", commandArguments, exitCode, stdout, stderr)
+			}
+			for _, privatePath := range []string{applicationRoot, filepath.ToSlash(applicationRoot), dependencyRoot, filepath.ToSlash(dependencyRoot)} {
+				if strings.Contains(stderr, privatePath) {
+					t.Fatalf("%v exposed private path %q: %q", commandArguments, privatePath, stderr)
+				}
+			}
+			if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, beforeApplication) {
+				t.Fatalf("%v mutated application Project:\nbefore: %#v\nafter:  %#v", commandArguments, beforeApplication, after)
+			}
+			if after := commandTree(t, dependencyRoot); !reflect.DeepEqual(after, beforeDependency) {
+				t.Fatalf("%v mutated dependency Project:\nbefore: %#v\nafter:  %#v", commandArguments, beforeDependency, after)
+			}
+			assertNoCommandTransactions(t, applicationRoot)
+		})
+	}
+}
+
 func TestPublicResolvingCommandsRejectUnownedConstructorConfigurationWithoutMutation(t *testing.T) {
 	t.Parallel()
 

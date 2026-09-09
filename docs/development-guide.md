@@ -2001,6 +2001,11 @@ An unavailable constructor configuration schema uses
 current or dependency Project document as `configuration-declaration` at
 `1:1`. The problem identifies the constructor while configured values and
 Secret-reference targets remain redacted.
+An invalid constructor configuration value uses
+`PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID` and emits the same one
+owning-document source. The problem retains only the constructor and safe
+declared field path while values, unknown authored keys, and Secret-reference
+targets remain redacted.
 
 Run that action with the same selected application model. Recovery commands
 retain default, environment, or complete-replacement mode, including selectors
@@ -2069,6 +2074,17 @@ compiled schema or remove the entry in the reported owning Project document.
 The diagnostic emits exactly one `configuration-declaration` source at `1:1`
 for the selected root, environment, complete-replacement, or dependency
 document. It exposes neither configured values nor Secret-reference targets,
+absolute paths, or Module Cache paths.
+
+### Invalid constructor configuration value
+
+`PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID` identifies a safe declared
+`config.<constructor-symbol>.<field>` path whose value does not match the
+discovered compiled same-package `Config` schema. Correct that field in the
+reported owning current or dependency Project document. The diagnostic emits
+exactly one `configuration-declaration` source at `1:1` for the selected root,
+environment, complete-replacement, or dependency document. It exposes neither
+configured values, unknown authored keys, nor Secret-reference targets,
 absolute paths, or Module Cache paths.
 
 ### Unowned constructor configuration

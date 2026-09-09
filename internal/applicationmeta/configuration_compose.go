@@ -172,18 +172,18 @@ func normalizeConstructorConfigDecisions(configured ConstructorConfiguration, sc
 	}
 	root, err := decodeNormalizedConfigNode(configured.yaml)
 	if err != nil || root.Kind != yaml.MappingNode {
-		return nil, constructorConfigValueError(configured.constructor, configured.source, nil, ErrConfigurationInvalidValue)
+		return nil, constructorConfigValueError(configured.constructor, configured.source, configured.declarationSource, nil, ErrConfigurationInvalidValue)
 	}
 	provided, err := safeConstructorConfigMapping(root)
 	if err != nil {
-		return nil, constructorConfigValueError(configured.constructor, configured.source, nil, err)
+		return nil, constructorConfigValueError(configured.constructor, configured.source, configured.declarationSource, nil, err)
 	}
 	state := &constructorConfigNormalizeState{}
 	result := []constructorConfigDecision{newConstructorConfigDecision(configured.constructor, nil, constructorConfigObject, schema.String(), nil, configured.source)}
 	for _, name := range sortedNodeKeys(provided) {
 		field, declared := schema.Lookup(name)
 		if !declared {
-			return nil, constructorConfigValueError(configured.constructor, configured.source, nil, ErrConfigurationUnknownField)
+			return nil, constructorConfigValueError(configured.constructor, configured.source, configured.declarationSource, nil, ErrConfigurationUnknownField)
 		}
 		segments := []string{name}
 		source := constructorConfigDecisionSource(configured.source, segments)
@@ -191,7 +191,7 @@ func normalizeConstructorConfigDecisions(configured ConstructorConfiguration, sc
 			result = append(result, newConstructorConfigDecision(configured.constructor, segments, constructorConfigRemoval, "", nil, source))
 			continue
 		}
-		decisions, err := normalizeDeclaredConstructorConfigValue(configured.constructor, segments, field.Value(), provided[name], configured.source, state, 1)
+		decisions, err := normalizeDeclaredConstructorConfigValue(configured.constructor, segments, field.Value(), provided[name], configured.source, configured.declarationSource, state, 1)
 		if err != nil {
 			return nil, err
 		}
@@ -214,18 +214,18 @@ type constructorConfigNormalizeState struct {
 	nodes int
 }
 
-func normalizeDeclaredConstructorConfigValue(constructor constructorsymbol.Symbol, segments []string, schema implementationinventory.ConfigurationValue, node *yaml.Node, baseSource string, state *constructorConfigNormalizeState, depth int) ([]constructorConfigDecision, error) {
+func normalizeDeclaredConstructorConfigValue(constructor constructorsymbol.Symbol, segments []string, schema implementationinventory.ConfigurationValue, node *yaml.Node, baseSource string, declarationSource ConfigurationDeclarationSource, state *constructorConfigNormalizeState, depth int) ([]constructorConfigDecision, error) {
 	objectSchema, object := constructorConfigObjectSchema(schema)
 	if object {
-		return normalizeConstructorConfigObject(constructor, segments, schema.TypeIdentity(), objectSchema, node, baseSource, state, depth)
+		return normalizeConstructorConfigObject(constructor, segments, schema.TypeIdentity(), objectSchema, node, baseSource, declarationSource, state, depth)
 	}
 	normalized, err := normalizeConstructorConfigNode(schema, node, state, depth)
 	if err != nil {
-		return nil, constructorConfigValueError(constructor, baseSource, segments, err)
+		return nil, constructorConfigValueError(constructor, baseSource, declarationSource, segments, err)
 	}
 	data, err := marshalConstructorConfigNode(normalized)
 	if err != nil {
-		return nil, constructorConfigValueError(constructor, baseSource, segments, ErrConfigurationInvalidValue)
+		return nil, constructorConfigValueError(constructor, baseSource, declarationSource, segments, ErrConfigurationInvalidValue)
 	}
 	valueType := constructorConfigDeclaredType(schema)
 	return []constructorConfigDecision{{
@@ -239,26 +239,26 @@ func normalizeDeclaredConstructorConfigValue(constructor constructorsymbol.Symbo
 	}}, nil
 }
 
-func normalizeConstructorConfigObject(constructor constructorsymbol.Symbol, segments []string, declaredType string, schema implementationinventory.ConfigurationValue, node *yaml.Node, baseSource string, state *constructorConfigNormalizeState, depth int) ([]constructorConfigDecision, error) {
+func normalizeConstructorConfigObject(constructor constructorsymbol.Symbol, segments []string, declaredType string, schema implementationinventory.ConfigurationValue, node *yaml.Node, baseSource string, declarationSource ConfigurationDeclarationSource, state *constructorConfigNormalizeState, depth int) ([]constructorConfigDecision, error) {
 	if err := enterConstructorConfigNode(node, state, depth); err != nil || node.Kind != yaml.MappingNode {
-		return nil, constructorConfigValueError(constructor, baseSource, segments, ErrConfigurationInvalidValue)
+		return nil, constructorConfigValueError(constructor, baseSource, declarationSource, segments, ErrConfigurationInvalidValue)
 	}
 	provided, err := safeConstructorConfigMapping(node)
 	if err != nil {
-		return nil, constructorConfigValueError(constructor, baseSource, segments, err)
+		return nil, constructorConfigValueError(constructor, baseSource, declarationSource, segments, err)
 	}
 	result := []constructorConfigDecision{newConstructorConfigDecision(constructor, segments, constructorConfigObject, declaredType, nil, constructorConfigDecisionSource(baseSource, segments))}
 	for _, name := range sortedNodeKeys(provided) {
 		field, declared := lookupConstructorConfigField(schema.Fields(), name)
 		if !declared {
-			return nil, constructorConfigValueError(constructor, baseSource, segments, ErrConfigurationUnknownField)
+			return nil, constructorConfigValueError(constructor, baseSource, declarationSource, segments, ErrConfigurationUnknownField)
 		}
 		childSegments := append(append([]string(nil), segments...), name)
 		if isNull(provided[name]) {
 			result = append(result, newConstructorConfigDecision(constructor, childSegments, constructorConfigRemoval, "", nil, constructorConfigDecisionSource(baseSource, childSegments)))
 			continue
 		}
-		children, err := normalizeDeclaredConstructorConfigValue(constructor, childSegments, field.Value(), provided[name], baseSource, state, depth+1)
+		children, err := normalizeDeclaredConstructorConfigValue(constructor, childSegments, field.Value(), provided[name], baseSource, declarationSource, state, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -519,8 +519,8 @@ func safeConstructorConfigMapping(node *yaml.Node) (map[string]*yaml.Node, error
 	return result, nil
 }
 
-func constructorConfigValueError(constructor constructorsymbol.Symbol, source string, segments []string, reason error) error {
-	return fmt.Errorf("%s at %s: %w: %w", constructorConfigPath(constructor, segments), source, ErrConfigurationValues, reason)
+func constructorConfigValueError(constructor constructorsymbol.Symbol, reference string, source ConfigurationDeclarationSource, segments []string, reason error) error {
+	return newConstructorConfigurationValueError(constructor, segments, reference, source, reason)
 }
 
 func newConstructorConfigDecision(constructor constructorsymbol.Symbol, segments []string, kind constructorConfigDecisionKind, valueType string, data []byte, source string) constructorConfigDecision {

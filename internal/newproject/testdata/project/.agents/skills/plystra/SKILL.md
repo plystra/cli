@@ -1245,8 +1245,9 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
 - PLYSTRA_USE_INTERFACE_INVALID / PLYSTRA_USE_CONSTRUCTOR_INVALID: malformed
   Interface ID / constructor. Both precede mutation; Recovery retains selector.
-- PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID: reported config source
-  lacks a compiled Config schema; choose one with a schema or remove the entry.
+- PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID / PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID:
+  reported config lacks a schema or has an invalid typed value; choose a
+  constructor with a schema, correct the safe field, or remove the entry.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: reported sources own config;
   select or make its constructor reachable, or remove it. Values stay redacted.
 - Incompatible contract: compare the full typed contract and metadata. Implement

@@ -871,6 +871,11 @@ dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses
 `configuration-declaration` at `1:1`; the problem identifies the constructor,
 while configured values and Secret-reference targets remain redacted.
+`PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID` reports the one owning
+current or dependency Project document when a value does not match that schema.
+The source uses `configuration-declaration` at `1:1`; the problem retains only
+the constructor and safe declared field path while values, unknown authored
+keys, and Secret-reference targets remain redacted.
 
 Configuration-selection failures use
 `PLYSTRA_CONFIGURATION_SELECTION_INVALID`. An explicit `--env` plus `--config`
@@ -950,6 +955,14 @@ constructor with a compiled schema or remove the configuration entry in the
 reported owning Project document. The diagnostic emits exactly one
 `configuration-declaration` source at `1:1` and never prints configured values,
 Secret-reference targets, absolute paths, or Module Cache paths.
+
+Constructor-keyed configuration whose value does not match its discovered
+compiled same-package `Config` schema fails with
+`PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID`. Correct the reported safe
+field path in the owning current or dependency Project document. The diagnostic
+emits exactly one `configuration-declaration` source at `1:1` and never prints
+configured values, unknown authored keys, Secret-reference targets, absolute
+paths, or Module Cache paths.
 
 Constructor-keyed configuration whose constructor is neither named by an
 effective `interfaces.use` choice nor reachable from an active Interface fails

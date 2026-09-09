@@ -232,9 +232,18 @@ func TestComposeRejectsInvalidCompiledConstructorConfigurationValuesWithoutDiscl
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			manifest := composeManifest(t, fmt.Sprintf("config:\n  %s:\n    %s: %s\n", constructorConfigurationSymbol, test.field, test.value))
-			_, err := applicationmeta.Compose(nil, manifest, lookup)
-			if !errors.Is(err, applicationmeta.ErrConfigurationValues) || !errors.Is(err, test.reason) || !strings.Contains(err.Error(), `config["`+constructorConfigurationSymbol+`"]["`+test.field+`"]`) {
+			manifest, err := applicationmeta.ParseSource("deploy/customer.yaml", []byte(fmt.Sprintf("config:\n  %s:\n    %s: %s\n", constructorConfigurationSymbol, test.field, test.value)))
+			if err != nil {
+				t.Fatalf("ParseSource: %v", err)
+			}
+			manifest, err = applicationmeta.WithProjectModule(manifest, "example.com/application")
+			if err != nil {
+				t.Fatalf("WithProjectModule: %v", err)
+			}
+			_, err = applicationmeta.Compose(nil, manifest, lookup)
+			var valueError *applicationmeta.ConstructorConfigurationValueError
+			wantField := `config["` + constructorConfigurationSymbol + `"]["` + test.field + `"]`
+			if !errors.As(err, &valueError) || valueError == nil || !errors.Is(err, applicationmeta.ErrConfigurationValues) || !errors.Is(err, test.reason) || valueError.Constructor().String() != constructorConfigurationSymbol || valueError.Field() != wantField || valueError.ModulePath() != "example.com/application" || valueError.SourcePath() != "deploy/customer.yaml" || valueError.SourceKind() != "configuration-declaration" || valueError.Line() != 1 || valueError.Column() != 1 || !strings.Contains(err.Error(), wantField) {
 				t.Fatalf("Compose error = %v", err)
 			}
 			for _, forbidden := range test.forbidden {

@@ -280,6 +280,11 @@ config: {example.com/acme/smtp.New: {host: shared.example, settings: {mode: shar
 	typeMismatch := parseOverlayManifest(t, "plystra.test.yaml", "config: {example.com/acme/smtp.New: {settings: {mode: {name: private-value}}}}\n")
 	if _, err := applicationmeta.ApplyOverlay(base, typeMismatch, lookup); !errors.Is(err, applicationmeta.ErrApplyOverlay) || !errors.Is(err, applicationmeta.ErrConfigurationValues) || !errors.Is(err, applicationmeta.ErrConfigurationInvalidValue) || strings.Contains(err.Error(), "private-value") {
 		t.Fatalf("type mismatch error = %v", err)
+	} else {
+		var valueError *applicationmeta.ConstructorConfigurationValueError
+		if !errors.As(err, &valueError) || valueError == nil || valueError.SourcePath() != "plystra.test.yaml" || valueError.SourceKind() != "configuration-declaration" || valueError.Line() != 1 || valueError.Column() != 1 {
+			t.Fatalf("type mismatch source = %#v", valueError)
+		}
 	}
 	aliasChain := parseOverlayManifest(t, "plystra.test.yaml", "capabilities: {aliases: {email.send/v1: reports.read/v1}}\n")
 	baseAlias := parseOverlayManifest(t, "plystra.yaml", "capabilities: {aliases: {mail.send/v1: email.send/v1}}\n")
