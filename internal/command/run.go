@@ -52,9 +52,9 @@ const (
 
 Common actionable failures end with one Recovery block containing the primary
 command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
-Typed source-bearing failures, including invalid explicit choices and missing,
-ambiguous, or cyclic Interface Implementation resolution, add canonical
-module-relative Source lines first.
+Typed source-bearing failures, including invalid Project manifests, invalid
+explicit choices, and missing, ambiguous, or cyclic Interface Implementation
+resolution, add canonical module-relative Source lines first.
 `
 	addUsage = `Usage:
   plystra add <go-module-query>
@@ -152,6 +152,9 @@ configuration paths are resolved from the detected Plystra Project root. Root
 plystra.yaml remains mandatory and is not merged beneath --config. Invalid or
 conflicting selections emit the stable PLYSTRA_CONFIGURATION_SELECTION_INVALID
 diagnostic.
+PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
+Project plystra.yaml as a project-marker source. Malformed readable documents
+use 1:1; unsafe or unreadable markers omit the unavailable span.
 PLYSTRA_RESOLVE_UNKNOWN_INTERFACE reports every module-relative requirement,
 exposure, or Implementation-selection source before selector-aware recovery.
 PLYSTRA_RESOLVE_RESERVED_INTERFACE reports the module-relative declaration that
@@ -175,6 +178,9 @@ stable PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
 Inherited configuration conflicts and ambiguous ownership failures emit every
 contributing module-relative configuration-declaration source before
 selector-aware recovery.
+PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
+Project plystra.yaml as a project-marker source. Malformed readable documents
+use 1:1; unsafe or unreadable markers omit the unavailable span.
 PLYSTRA_RESOLVE_UNKNOWN_INTERFACE reports every module-relative requirement,
 exposure, or Implementation-selection source before selector-aware recovery.
 PLYSTRA_RESOLVE_RESERVED_INTERFACE reports the module-relative declaration that

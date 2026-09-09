@@ -67,6 +67,14 @@ type actionableDiagnostic struct {
 	recovery string
 }
 
+type diagnosticSourceLocation interface {
+	ModulePath() string
+	SourcePath() string
+	SourceKind() string
+	Line() int
+	Column() int
+}
+
 const (
 	diagnosticTemplateInvalid                    = diagnosticcode.TemplateInvalid
 	diagnosticCapabilityRequirementConflict      = diagnosticcode.CapabilityRequirementConflict
@@ -325,6 +333,18 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: source.Column(),
 			})
 		}
+	case diagnosticProjectManifestInvalid:
+		var located diagnosticSourceLocation
+		if !errors.As(err, &located) || located == nil || located.SourceKind() != "project-marker" {
+			return nil
+		}
+		sources = append(sources, diagnosticjson.Source{
+			Module: located.ModulePath(),
+			Path:   located.SourcePath(),
+			Kind:   located.SourceKind(),
+			Line:   located.Line(),
+			Column: located.Column(),
+		})
 	case diagnosticProviderSelectionInvalid:
 		var invalid *providerresolution.ChoiceError
 		if !errors.As(err, &invalid) || invalid == nil {

@@ -828,6 +828,11 @@ source before selection recovery.
 `PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE` reports every requiring constructor
 declaration in the complete cycle as an `implementation-constructor` source.
 The problem retains the ordered Interface edges and selection reasons.
+`PLYSTRA_PROJECT_MANIFEST_INVALID` reports exactly one current or dependency
+Project `plystra.yaml` as a `project-marker` source. A malformed readable
+document uses the conservative `1:1` span; an unsafe or unreadable marker omits
+the unavailable line and column. Correct the owning Project, or select a
+corrected dependency version, rather than editing a Module Cache copy.
 `PLYSTRA_RESOLVE_UNKNOWN_INTERFACE` reports every effective
 `interfaces.require` or `http.expose` declaration as a `declaration` or
 `exposure` source, or every effective `interfaces.use` declaration as an

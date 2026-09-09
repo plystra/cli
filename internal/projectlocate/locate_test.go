@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/modulelocate"
@@ -76,8 +77,16 @@ func TestFindRejectsUnsafeProjectMarkers(t *testing.T) {
 			root := t.TempDir()
 			writeFile(t, filepath.Join(root, "go.mod"), "module example.com/acme/app\n")
 			test.setup(t, root)
-			if _, err := projectlocate.Find(root); !errors.Is(err, projectlocate.ErrInvalidManifest) {
+			_, err := projectlocate.Find(root)
+			if !errors.Is(err, projectlocate.ErrInvalidManifest) {
 				t.Fatalf("Find error = %v", err)
+			}
+			var source *projectlocate.ManifestSourceError
+			if !errors.As(err, &source) || source.ModulePath() != "example.com/acme/app" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "project-marker" || source.Line() != 0 || source.Column() != 0 {
+				t.Fatalf("Find source = %#v, %v", source, err)
+			}
+			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("Find exposed Project root %q: %v", root, err)
 			}
 		})
 	}
@@ -95,17 +104,21 @@ func TestRecognizeDistinguishesOrdinaryAndPlystraModules(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	recognized, err := projectlocate.Recognize(root)
+	recognized, err := projectlocate.Recognize(root, "example.com/acme/app")
 	if err != nil || recognized {
 		t.Fatalf("Recognize ordinary module = %t, %v", recognized, err)
 	}
 	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
-	recognized, err = projectlocate.Recognize(root)
+	recognized, err = projectlocate.Recognize(root, "example.com/acme/app")
 	if err != nil || !recognized {
 		t.Fatalf("Recognize Project = %t, %v", recognized, err)
 	}
-	if recognized, err = projectlocate.Recognize(""); recognized || !errors.Is(err, projectlocate.ErrInvalidManifest) {
+	if recognized, err = projectlocate.Recognize("", "example.com/acme/app"); recognized || !errors.Is(err, projectlocate.ErrInvalidManifest) {
 		t.Fatalf("Recognize empty root = %t, %v", recognized, err)
+	}
+	var source *projectlocate.ManifestSourceError
+	if !errors.As(err, &source) || source.ModulePath() != "example.com/acme/app" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "project-marker" || source.Line() != 0 || source.Column() != 0 {
+		t.Fatalf("Recognize empty-root source = %#v, %v", source, err)
 	}
 }
 

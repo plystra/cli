@@ -1626,6 +1626,13 @@ func TestResolveRejectsMalformedAndUnsafeDependencyProjectManifest(t *testing.T)
 		if !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !strings.Contains(err.Error(), "example.com/dependency@v1.2.3") || !strings.Contains(err.Error(), `unknown key "unknown"`) {
 			t.Fatalf("Resolve malformed dependency error = %v", err)
 		}
+		var source *applicationresolve.ManifestSourceError
+		if !errors.As(err, &source) || source.ModulePath() != "example.com/dependency" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "project-marker" || source.Line() != 1 || source.Column() != 1 {
+			t.Fatalf("Resolve malformed dependency source = %#v, %v", source, err)
+		}
+		if strings.Contains(err.Error(), dependencyRoot) || strings.Contains(err.Error(), filepath.ToSlash(dependencyRoot)) {
+			t.Fatalf("Resolve malformed dependency exposed root %q: %v", dependencyRoot, err)
+		}
 	})
 
 	t.Run("symbolic", func(t *testing.T) {
@@ -1642,8 +1649,15 @@ func TestResolveRejectsMalformedAndUnsafeDependencyProjectManifest(t *testing.T)
 		writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
 
 		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: appRoot, Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})})
-		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, projectlocate.ErrInvalidManifest) || !strings.Contains(err.Error(), "example.com/dependency") {
+		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, projectlocate.ErrInvalidManifest) || !strings.Contains(err.Error(), "example.com/dependency") {
 			t.Fatalf("Resolve unsafe dependency error = %v", err)
+		}
+		var source *projectlocate.ManifestSourceError
+		if !errors.As(err, &source) || source.ModulePath() != "example.com/dependency" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "project-marker" || source.Line() != 0 || source.Column() != 0 {
+			t.Fatalf("Resolve unsafe dependency source = %#v, %v", source, err)
+		}
+		if strings.Contains(err.Error(), dependencyRoot) || strings.Contains(err.Error(), filepath.ToSlash(dependencyRoot)) {
+			t.Fatalf("Resolve unsafe dependency exposed root %q: %v", dependencyRoot, err)
 		}
 	})
 }
@@ -1818,6 +1832,25 @@ extensions:
 }
 
 func TestResolveRejectsMissingUnsafeAndChangingManifest(t *testing.T) {
+	t.Run("malformed", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeModule(t, root, "example.com/malformed")
+		writeFile(t, filepath.Join(root, "plystra.yaml"), "unknown: true\n")
+		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: root})
+		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !strings.Contains(err.Error(), `unknown key "unknown"`) {
+			t.Fatalf("Resolve error = %v", err)
+		}
+		var source *applicationresolve.ManifestSourceError
+		if !errors.As(err, &source) || source.ModulePath() != "example.com/malformed" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "project-marker" || source.Line() != 1 || source.Column() != 1 {
+			t.Fatalf("Resolve malformed root source = %#v, %v", source, err)
+		}
+		if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+			t.Fatalf("Resolve malformed root exposed Project root %q: %v", root, err)
+		}
+	})
+
 	t.Run("missing", func(t *testing.T) {
 		root := t.TempDir()
 		writeModule(t, root, "example.com/missing")
@@ -1837,6 +1870,13 @@ func TestResolveRejectsMissingUnsafeAndChangingManifest(t *testing.T) {
 		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, projectlocate.ErrInvalidManifest) {
 			t.Fatalf("Resolve error = %v", err)
 		}
+		var source *projectlocate.ManifestSourceError
+		if !errors.As(err, &source) || source.ModulePath() != "example.com/directory" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "project-marker" || source.Line() != 0 || source.Column() != 0 {
+			t.Fatalf("Resolve directory marker source = %#v, %v", source, err)
+		}
+		if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+			t.Fatalf("Resolve directory marker exposed Project root %q: %v", root, err)
+		}
 	})
 
 	t.Run("symbolic", func(t *testing.T) {
@@ -1851,6 +1891,13 @@ func TestResolveRejectsMissingUnsafeAndChangingManifest(t *testing.T) {
 		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, projectlocate.ErrInvalidManifest) {
 			t.Fatalf("Resolve error = %v", err)
 		}
+		var source *projectlocate.ManifestSourceError
+		if !errors.As(err, &source) || source.ModulePath() != "example.com/symbolic" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "project-marker" || source.Line() != 0 || source.Column() != 0 {
+			t.Fatalf("Resolve symbolic marker source = %#v, %v", source, err)
+		}
+		if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) || strings.Contains(err.Error(), target) || strings.Contains(err.Error(), filepath.ToSlash(target)) {
+			t.Fatalf("Resolve symbolic marker exposed private path: %v", err)
+		}
 	})
 
 	t.Run("oversized", func(t *testing.T) {
@@ -1860,6 +1907,13 @@ func TestResolveRejectsMissingUnsafeAndChangingManifest(t *testing.T) {
 		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: root})
 		if !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationresolve.ErrUnsafeManifest) || !strings.Contains(err.Error(), "exceeds") {
 			t.Fatalf("Resolve error = %v", err)
+		}
+		var source *applicationresolve.ManifestSourceError
+		if !errors.As(err, &source) || source.ModulePath() != "example.com/oversized" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "project-marker" || source.Line() != 0 || source.Column() != 0 {
+			t.Fatalf("Resolve oversized manifest source = %#v, %v", source, err)
+		}
+		if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+			t.Fatalf("Resolve oversized manifest exposed Project root %q: %v", root, err)
 		}
 	})
 

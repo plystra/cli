@@ -21,6 +21,7 @@ import (
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
+	"github.com/plystra/cli/internal/projectlocate"
 	"golang.org/x/mod/module"
 )
 
@@ -485,8 +486,15 @@ func TestDiscoverRejectsUnsafeDependencyProjectMarker(t *testing.T) {
 		"GOTOOLCHAIN": "local",
 		"GOWORK":      "off",
 	})})
-	if !errors.Is(err, moduledependency.ErrDiscover) || !strings.Contains(err.Error(), "regular non-symbolic") {
+	if !errors.Is(err, moduledependency.ErrDiscover) || !errors.Is(err, projectlocate.ErrInvalidManifest) || !strings.Contains(err.Error(), "regular non-symbolic") {
 		t.Fatalf("Discover unsafe marker error = %v", err)
+	}
+	var source *projectlocate.ManifestSourceError
+	if !errors.As(err, &source) || source.ModulePath() != "example.com/dependency" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "project-marker" || source.Line() != 0 || source.Column() != 0 {
+		t.Fatalf("Discover unsafe marker source = %#v, %v", source, err)
+	}
+	if strings.Contains(err.Error(), dependencyRoot) || strings.Contains(err.Error(), filepath.ToSlash(dependencyRoot)) {
+		t.Fatalf("Discover exposed dependency root %q: %v", dependencyRoot, err)
 	}
 }
 

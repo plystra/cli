@@ -1217,12 +1217,12 @@ boundary.
 
 ## Diagnose common failures
 
-Failures end with Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>.
-Source: <module>:<module-relative-path>[:line:column] (<kind>).
+Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>
+Source: <module>:<module-relative-path>[:line:column] (<kind>)
 PLYSTRA_CONFIGURATION_INHERITED_CONFLICT / PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS:
-configuration-declaration. No absolute/Module Cache paths; unsafe selectors use
-placeholders; unknown errors stay uncoded.
+configuration-declaration. Redact absolute/cache paths and unsafe selectors; unknowns uncoded
 
+- PLYSTRA_PROJECT_MANIFEST_INVALID: project-marker; malformed 1:1; else no span
 - PLYSTRA_RESOLVE_UNKNOWN_INTERFACE: declaration, exposure, or implementation-selection; correct selected YAML.
 - PLYSTRA_RESOLVE_RESERVED_INTERFACE: interface-declaration; remove kernel.*.
 - PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION: root and requiring-constructor sources; add constructor.

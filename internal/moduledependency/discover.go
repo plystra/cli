@@ -204,7 +204,7 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		return Index{}, fmt.Errorf("%w: %w", ErrDiscover, err)
 	}
 	for index := range modules {
-		project, err := projectlocate.Recognize(modules[index].root)
+		project, err := projectlocate.Recognize(modules[index].root, modules[index].path)
 		if err != nil {
 			return Index{}, fmt.Errorf("%w: inspect dependency Project marker for %q: %w", ErrDiscover, modules[index].path, err)
 		}

@@ -191,7 +191,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrResolve, err)
 	}
-	rootSnapshot, rootManifest, err := loadConfiguration(module.Path(), applicationManifestName)
+	rootSnapshot, rootManifest, err := loadProjectManifest(module.ModulePath(), module.Path())
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -225,6 +225,9 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		OutputLimit: options.DependencyOutputLimit,
 	})
 	if err != nil {
+		if errors.Is(err, projectlocate.ErrInvalidManifest) {
+			err = fmt.Errorf("%w: %w", ErrManifest, err)
+		}
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	declarations, err := interfaceinventory.DiscoverApplication(ctx, module, dependencies, interfaceinventory.Options{

@@ -1947,6 +1947,12 @@ source and each incompatible Provider's `capability.yaml` declaration. Sources
 always name the owning Project module and a slash-separated module-relative
 path. They never expose an absolute path or a Module Cache path. A source omits
 the optional span when structured provenance provides no exact line or column.
+A malformed current or dependency Project `plystra.yaml` uses
+`PLYSTRA_PROJECT_MANIFEST_INVALID` and emits exactly one `project-marker`
+source. A readable malformed document uses the conservative `1:1` span; an
+unsafe or unreadable marker omits the unavailable span. Correct the owning
+Project, or select a corrected dependency version, rather than editing a Module
+Cache copy.
 A missing Interface Implementation emits every root declaration or exposure
 source plus every requiring constructor declaration on the complete path to the
 missing binding. Requiring declarations use `implementation-constructor`, and

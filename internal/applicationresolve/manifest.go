@@ -16,10 +16,78 @@ import (
 
 const applicationManifestName = "plystra.yaml"
 
+const manifestSourceKind = "project-marker"
+
 const (
 	generatedApplicationManifestName = "generated/manifest.json"
 	maximumGeneratedManifestSize     = 16 << 20
 )
+
+// ManifestSourceError attaches stable owning-Project provenance to a root
+// manifest failure without changing its human message or typed error chain.
+type ManifestSourceError struct {
+	modulePath string
+	sourcePath string
+	line       int
+	column     int
+	cause      error
+}
+
+// ModulePath returns the Go Module identity that owns the invalid manifest.
+func (e *ManifestSourceError) ModulePath() string {
+	if e == nil {
+		return ""
+	}
+	return e.modulePath
+}
+
+// SourcePath returns the stable slash-separated module-relative manifest path.
+func (e *ManifestSourceError) SourcePath() string {
+	if e == nil {
+		return ""
+	}
+	return e.sourcePath
+}
+
+// SourceKind returns the canonical diagnostic source category.
+func (e *ManifestSourceError) SourceKind() string {
+	if e == nil {
+		return ""
+	}
+	return manifestSourceKind
+}
+
+// Line returns the one-based document line, or zero when no readable document
+// span exists.
+func (e *ManifestSourceError) Line() int {
+	if e == nil {
+		return 0
+	}
+	return e.line
+}
+
+// Column returns the one-based document column, or zero when unavailable.
+func (e *ManifestSourceError) Column() int {
+	if e == nil {
+		return 0
+	}
+	return e.column
+}
+
+func (e *ManifestSourceError) Error() string {
+	if e == nil || e.cause == nil {
+		return ErrManifest.Error()
+	}
+	return e.cause.Error()
+}
+
+// Unwrap preserves the original manifest error chain.
+func (e *ManifestSourceError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
 
 // ManifestSnapshot is one bounded, non-symbolic plystra.yaml read together
 // with the filesystem identity needed to detect replacement during a longer
@@ -41,6 +109,30 @@ func (s ManifestSnapshot) Data() []byte { return append([]byte(nil), s.data...) 
 
 func loadConfiguration(moduleRoot, relativePath string) (ManifestSnapshot, applicationmeta.Manifest, error) {
 	return loadConfigurationWithParser(moduleRoot, relativePath, applicationmeta.ParseSource)
+}
+
+func loadProjectManifest(modulePath, moduleRoot string) (ManifestSnapshot, applicationmeta.Manifest, error) {
+	snapshot, err := ReadManifestSnapshot(moduleRoot)
+	if err != nil {
+		return ManifestSnapshot{}, applicationmeta.Manifest{}, manifestSourceError(
+			modulePath,
+			applicationManifestName,
+			0,
+			0,
+			fmt.Errorf("%w: %w", ErrManifest, err),
+		)
+	}
+	manifest, err := applicationmeta.ParseSource(snapshot.path, snapshot.data)
+	if err != nil {
+		return ManifestSnapshot{}, applicationmeta.Manifest{}, manifestSourceError(
+			modulePath,
+			snapshot.path,
+			1,
+			1,
+			fmt.Errorf("%w: %w", ErrManifest, err),
+		)
+	}
+	return snapshot, manifest, nil
 }
 
 func loadEnvironmentOverlay(moduleRoot, relativePath string) (ManifestSnapshot, applicationmeta.Manifest, error) {
@@ -71,11 +163,23 @@ func loadDependencyManifests(dependencies []moduledependency.Module) ([]dependen
 	for _, dependency := range dependencies {
 		snapshot, err := ReadManifestSnapshot(dependency.Root())
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: dependency Project %s: %w", ErrManifest, dependencyIdentity(dependency), err)
+			return nil, nil, manifestSourceError(
+				dependency.Path(),
+				applicationManifestName,
+				0,
+				0,
+				fmt.Errorf("%w: dependency Project %s: %w", ErrManifest, dependencyIdentity(dependency), err),
+			)
 		}
 		manifest, err := applicationmeta.ParseSource(snapshot.path, snapshot.data)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: dependency Project %s: %w", ErrManifest, dependencyIdentity(dependency), err)
+			return nil, nil, manifestSourceError(
+				dependency.Path(),
+				snapshot.path,
+				1,
+				1,
+				fmt.Errorf("%w: dependency Project %s: %w", ErrManifest, dependencyIdentity(dependency), err),
+			)
 		}
 		snapshots = append(snapshots, dependencyManifestSnapshot{
 			identity: dependencyIdentity(dependency),
@@ -89,6 +193,19 @@ func loadDependencyManifests(dependencies []moduledependency.Module) ([]dependen
 		})
 	}
 	return snapshots, manifests, nil
+}
+
+func manifestSourceError(modulePath, sourcePath string, line, column int, cause error) error {
+	if cause == nil {
+		return nil
+	}
+	return &ManifestSourceError{
+		modulePath: modulePath,
+		sourcePath: filepath.ToSlash(sourcePath),
+		line:       line,
+		column:     column,
+		cause:      cause,
+	}
 }
 
 func recheckDependencyManifests(snapshots []dependencyManifestSnapshot) error {
