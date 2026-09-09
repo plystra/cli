@@ -77,6 +77,8 @@ Common actionable Plystra CLI failures end with exactly one `Recovery:` block fo
 
 `PLYSTRA_ENVIRONMENT_OVERLAY_INVALID` reports the selected `plystra.<environment>.yaml` at `1:1` as a `configuration-declaration` source when typed overlay application is invalid. Correct the reported field relationship there; values and machine paths remain excluded.
 
+`PLYSTRA_APPLICATION_DEPENDENCY_DRIFT` reports the current Project `go.mod` at `1:1` as a `module-dependency` source when the Kernel is missing or only transitive, or a generated runtime requirement has drifted. `plystra generate --check` and `plystra check` are read-only; normal generation transactionally restores the CLI-supported direct Kernel release and required runtime modules before validation.
+
 `PLYSTRA_CONFIGURATION_SELECTION_INVALID` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 `plystra plugin create` uses `PLYSTRA_PLUGIN_CREATE_NAME_INVALID` for an invalid or reserved root-level name, `PLYSTRA_PLUGIN_CREATE_ID_INVALID` when the Project module namespace and name cannot form a canonical Plugin ID, and `PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.

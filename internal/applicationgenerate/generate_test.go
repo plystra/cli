@@ -1262,6 +1262,10 @@ func TestGenerateCheckReportsMissingConnectRuntimeRequirementsWithoutMutation(t 
 	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, applicationgenerate.ErrRuntimeDependency) {
 		t.Fatalf("Generate check error = %v", err)
 	}
+	var source *applicationgenerate.DependencySourceError
+	if !errors.As(err, &source) || source.ModulePath() != "example.com/acme/missing-connect-runtime" || source.SourcePath() != "go.mod" || source.SourceKind() != "module-dependency" || source.Line() != 1 || source.Column() != 1 {
+		t.Fatalf("Generate check dependency source = %#v", source)
+	}
 	for _, want := range []string{"connectrpc.com/connect", "v1.20.0", "run plystra generate"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("Generate check error %q omits %q", err, want)
@@ -2943,6 +2947,47 @@ func TestGenerateRequiresDirectKernelDependency(t *testing.T) {
 	})
 	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, applicationgenerate.ErrKernelDependency) || !strings.Contains(err.Error(), "go.mod must directly require github.com/plystra/kernel") {
 		t.Fatalf("Generate without Kernel dependency = %v", err)
+	}
+	var source *applicationgenerate.DependencySourceError
+	if !errors.As(err, &source) || source.ModulePath() != "example.com/acme/missing-kernel" || source.SourcePath() != "go.mod" || source.SourceKind() != "module-dependency" || source.Line() != 1 || source.Column() != 1 {
+		t.Fatalf("Generate without Kernel dependency source = %#v", source)
+	}
+}
+
+func TestGenerateReportsTransitiveOnlyKernelDependencySource(t *testing.T) {
+	t.Parallel()
+
+	cliRoot := repositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	dependencyRoot := t.TempDir()
+	writeModule(t, dependencyRoot, "example.com/platform", "require github.com/plystra/kernel v0.0.0\n")
+
+	root := t.TempDir()
+	const modulePath = "example.com/acme/transitive-kernel"
+	writeModule(t, root, modulePath, fmt.Sprintf(`require example.com/platform v0.0.0
+
+replace example.com/platform => %s
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(dependencyRoot), filepath.ToSlash(kernelRoot)))
+	downloadModuleDependencies(t, root)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	before := snapshotTree(t, root)
+
+	_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Check:       true,
+		Environment: goEnvironment(nil),
+	})
+	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, applicationgenerate.ErrKernelDependency) || !strings.Contains(err.Error(), "go.mod must directly require github.com/plystra/kernel") {
+		t.Fatalf("Generate with transitive-only Kernel dependency = %v", err)
+	}
+	var source *applicationgenerate.DependencySourceError
+	if !errors.As(err, &source) || source.ModulePath() != modulePath || source.SourcePath() != "go.mod" || source.SourceKind() != "module-dependency" || source.Line() != 1 || source.Column() != 1 {
+		t.Fatalf("Generate with transitive-only Kernel dependency source = %#v", source)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("Generate check changed transitive-only Kernel Project:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 }
 

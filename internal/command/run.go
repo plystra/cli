@@ -23,6 +23,7 @@ import (
 	"github.com/plystra/cli/internal/projectcheck"
 	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/version"
+	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 )
 
 const (
@@ -52,9 +53,10 @@ const (
 
 Common actionable failures end with one Recovery block containing the primary
 command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
-Typed source-bearing failures, including invalid Project manifests, invalid
-explicit choices, and missing, ambiguous, or cyclic Interface Implementation
-resolution, add canonical module-relative Source lines first.
+Typed source-bearing failures, including invalid Project manifests, application
+module dependency drift, invalid explicit choices, and missing, ambiguous, or
+cyclic Interface Implementation resolution, add canonical module-relative
+Source lines first.
 `
 	addUsage = `Usage:
   plystra add <go-module-query>
@@ -161,6 +163,9 @@ PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID reports effective http.expose
 documents at 1:1 as exposure sources before selector-aware recovery.
 PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at
 1:1 as a configuration-declaration source before selector-aware recovery.
+PLYSTRA_APPLICATION_DEPENDENCY_DRIFT reports current-Project go.mod at 1:1 as
+a module-dependency source. Normal generation repairs the required direct
+Kernel and generated runtime dependencies; check modes remain read-only.
 PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID reports the owning config
 document at 1:1 as a configuration-declaration source without values.
 PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID reports the owning config
@@ -200,6 +205,9 @@ PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID reports effective http.expose
 documents at 1:1 as exposure sources before selector-aware recovery.
 PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at
 1:1 as a configuration-declaration source before selector-aware recovery.
+PLYSTRA_APPLICATION_DEPENDENCY_DRIFT reports current-Project go.mod at 1:1 as
+a module-dependency source. Normal generation repairs the required direct
+Kernel and generated runtime dependencies; check modes remain read-only.
 PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID reports the owning config
 document at 1:1 as a configuration-declaration source without values.
 PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID reports the owning config
@@ -539,12 +547,22 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			if locateErr != nil {
 				err = fmt.Errorf("locate Project: %w", locateErr)
 			} else {
-				err = modulemutation.Tidy(ctx, project.Path(), options.GoCommand, environment, func(mutate applicationgenerate.ModuleMutation) error {
+				generateWithMutation := func(mutate applicationgenerate.ModuleMutation) error {
 					options.MutateModule = mutate
 					var generateErr error
 					result, generateErr = applicationgenerate.Generate(ctx, options)
 					return generateErr
-				})
+				}
+				err = modulemutation.Tidy(ctx, project.Path(), options.GoCommand, environment, generateWithMutation)
+				var dependencySource *applicationgenerate.DependencySourceError
+				if errors.Is(err, applicationgenerate.ErrKernelDependency) && errors.As(err, &dependencySource) {
+					err = modulemutation.Change(ctx, project.Path(), modulemutation.ChangeOptions{
+						GoCommand:          options.GoCommand,
+						Environment:        environment,
+						Arguments:          []string{"get", kernelintrinsic.ModulePath + "@" + newproject.KernelVersion},
+						DirectRequirements: []string{kernelintrinsic.ModulePath},
+					}, generateWithMutation)
+				}
 			}
 		}
 		if err != nil {

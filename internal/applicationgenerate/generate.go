@@ -870,12 +870,12 @@ func validateRuntimeRequirements(resolved applicationresolve.Result, requirement
 	for _, requirement := range requirements {
 		dependency, exists := resolved.Dependencies().ByPath(requirement.Path())
 		if !exists || !dependency.Direct() || dependency.Indirect() || !semver.IsValid(dependency.RequiredVersion()) || semver.Compare(dependency.RequiredVersion(), requirement.MinimumVersion()) < 0 {
-			return fmt.Errorf(
+			return dependencySourceError(resolved.Module().ModulePath(), fmt.Errorf(
 				"%w: go.mod must directly require %s at %s or newer without // indirect; run plystra generate to repair module metadata transactionally",
 				ErrRuntimeDependency,
 				requirement.Path(),
 				requirement.MinimumVersion(),
-			)
+			))
 		}
 	}
 	return nil
@@ -884,7 +884,10 @@ func validateRuntimeRequirements(resolved applicationresolve.Result, requirement
 func kernelBuildProvenance(resolved applicationresolve.Result) (string, string, error) {
 	dependency, exists := resolved.Dependencies().ByPath(kernelintrinsic.ModulePath)
 	if !exists || !dependency.Direct() {
-		return "", "", fmt.Errorf("%w: go.mod must directly require %s", ErrKernelDependency, kernelintrinsic.ModulePath)
+		return "", "", dependencySourceError(
+			resolved.Module().ModulePath(),
+			fmt.Errorf("%w: go.mod must directly require %s", ErrKernelDependency, kernelintrinsic.ModulePath),
+		)
 	}
 	identity := ""
 	if dependency.SelectedVersion() == "" {

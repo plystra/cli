@@ -304,8 +304,8 @@ transitive dependency Project, reports stable `module@version/go.mod`
 provenance, and leaves no target when a relative replacement remains.
 
 The staged generated application must also be a fixed point. Creation installs
-the generated output and immediately runs the equivalent of
-`plystra generate --check`. Dependency-composition drift or any stale,
+the generated output and immediately runs the equivalent of `plystra generate --check`.
+Dependency-composition drift or any stale,
 missing, unexpected, or manually modified generated path rejects the template and
 restores the transaction. The template author must make generation
 deterministic, run `plystra generate` followed by `plystra generate --check` in
@@ -2009,6 +2009,15 @@ An invalid environment overlay emits the selected current-Project environment
 document at `1:1` as a `configuration-declaration` source. The problem
 identifies the invalid typed field relationship without exposing values, an
 absolute path, or a Module Cache path.
+Application dependency drift emits the current Project `go.mod` at `1:1` as a
+`module-dependency` source. `PLYSTRA_APPLICATION_DEPENDENCY_DRIFT` covers a
+missing or transitive-only Kernel requirement and generated runtime requirements
+that are missing, indirect, or older than the required minimum.
+`plystra generate --check` and `plystra check` report the source without changing
+module metadata.
+Normal `plystra generate` transactionally selects the direct Kernel release
+supported by the CLI, repairs generated runtime requirements, and validates the
+complete selected Project before committing either module or generated output.
 An unavailable constructor configuration schema uses
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
 current or dependency Project document as `configuration-declaration` at

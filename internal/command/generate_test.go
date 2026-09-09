@@ -20,6 +20,7 @@ import (
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/diagnosticcode"
+	"github.com/plystra/cli/internal/newproject"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 )
@@ -345,28 +346,31 @@ replace github.com/plystra/kernel => %s
 	environment := commandGoEnvironment()
 
 	beforeCheck := commandTree(t, root)
-	exitCode, stdout, stderr := runCommand(t, []string{"generate", "--check"}, root, environment)
-	if exitCode != 1 || stdout != "" {
-		t.Fatalf("initial Connect check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
-	}
-	for _, want := range []string{
-		"invalid generated application runtime dependency",
-		connectgen.ConnectModulePath,
-		connectgen.ConnectModuleVersion,
-		"\n\nRecovery:\nRun `plystra generate` to repair the required direct application runtime dependencies.\n\nDiagnostic: " + diagnosticcode.ApplicationDependencyDrift + "\n",
-	} {
-		if !strings.Contains(stderr, want) {
-			t.Fatalf("initial Connect check stderr %q omits %q", stderr, want)
+	for _, arguments := range [][]string{{"generate", "--check"}, {"check"}} {
+		exitCode, stdout, stderr := runCommand(t, arguments, root, environment)
+		if exitCode != 1 || stdout != "" {
+			t.Fatalf("initial Connect %v = exit %d, stdout %q, stderr %q", arguments, exitCode, stdout, stderr)
+		}
+		for _, want := range []string{
+			"invalid generated application runtime dependency",
+			connectgen.ConnectModulePath,
+			connectgen.ConnectModuleVersion,
+			"Source: example.com/acme/connect-runtime:go.mod:1:1 (module-dependency)",
+			"\n\nRecovery:\nRun `plystra generate` to repair the required direct application runtime dependencies.\n\nDiagnostic: " + diagnosticcode.ApplicationDependencyDrift + "\n",
+		} {
+			if !strings.Contains(stderr, want) {
+				t.Fatalf("initial Connect %v stderr %q omits %q", arguments, stderr, want)
+			}
+		}
+		if strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 {
+			t.Fatalf("initial Connect %v diagnostic counts in %q", arguments, stderr)
+		}
+		if after := commandTree(t, root); !reflect.DeepEqual(after, beforeCheck) {
+			t.Fatalf("%v changed the Project before runtime installation:\nbefore: %#v\nafter:  %#v", arguments, beforeCheck, after)
 		}
 	}
-	if count := strings.Count(stderr, "Recovery:"); count != 1 {
-		t.Fatalf("initial Connect check Recovery count = %d in %q", count, stderr)
-	}
-	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeCheck) {
-		t.Fatalf("generate --check changed the Project before runtime installation:\nbefore: %#v\nafter:  %#v", beforeCheck, after)
-	}
 
-	exitCode, stdout, stderr = runCommand(t, []string{"generate"}, root, environment)
+	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, root, environment)
 	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/connect-runtime in "+root+"\n" {
 		t.Fatalf("Connect generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
@@ -409,6 +413,91 @@ replace github.com/plystra/kernel => %s
 	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeCleanCheck) {
 		t.Fatalf("clean generate --check changed the Project:\nbefore: %#v\nafter:  %#v", beforeCleanCheck, after)
 	}
+}
+
+func TestRunGenerateRepairsKernelDependencyAndReadOnlyCommandsReportSource(t *testing.T) {
+	root := t.TempDir()
+	const modulePath = "example.com/acme/missing-kernel"
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf("module %s\n\ngo 1.26\n\nreplace github.com/plystra/kernel => %s\n", modulePath, filepath.ToSlash(kernelRoot)))
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("read CLI go.sum: %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "{}\n")
+	environment := commandGoEnvironment()
+	before := commandTree(t, root)
+
+	for _, arguments := range [][]string{{"generate", "--check", "--env", "production"}, {"check", "--env", "production"}} {
+		exitCode, stdout, stderr := runCommand(t, arguments, root, environment)
+		wantSuffix := "\n\nSource: " + modulePath + ":go.mod:1:1 (module-dependency)\n\nRecovery:\nRun `plystra generate --env \"production\"` to repair the required direct application runtime dependencies.\n\nDiagnostic: " + diagnosticcode.ApplicationDependencyDrift + "\n"
+		if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "go.mod must directly require github.com/plystra/kernel") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 {
+			t.Fatalf("%v = exit %d, stdout %q, stderr %q", arguments, exitCode, stdout, stderr)
+		}
+		if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+			t.Fatalf("%v exposed the Project path: %q", arguments, stderr)
+		}
+		if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+			t.Fatalf("%v changed the Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+		}
+		assertNoCommandTransactions(t, root)
+	}
+
+	exitCode, stdout, stderr := runCommand(t, []string{"generate", "--env", "production"}, root, environment)
+	if exitCode != 0 || stdout != "generated "+modulePath+" in "+root+"\n" || stderr != "" {
+		t.Fatalf("generate repair = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	parsed, err := modfile.Parse("go.mod", readCommandFile(t, root, "go.mod"), nil)
+	if err != nil {
+		t.Fatalf("parse repaired go.mod: %v", err)
+	}
+	var kernelRequirement *modfile.Require
+	for _, requirement := range parsed.Require {
+		if requirement.Mod.Path == "github.com/plystra/kernel" {
+			kernelRequirement = requirement
+			break
+		}
+	}
+	if kernelRequirement == nil || kernelRequirement.Indirect || kernelRequirement.Mod.Version != newproject.KernelVersion {
+		t.Fatalf("repaired Kernel requirement = %#v", kernelRequirement)
+	}
+	assertNoCommandTransactions(t, root)
+
+	afterRepair := commandTree(t, root)
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--env", "production"}, root, environment)
+	if exitCode != 0 || stdout != "generated output is current for "+modulePath+" in "+root+"\n" || stderr != "" {
+		t.Fatalf("clean repaired check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, afterRepair) {
+		t.Fatalf("clean repaired check changed the Project:\nbefore: %#v\nafter:  %#v", afterRepair, after)
+	}
+}
+
+func TestRunGenerateRollsBackKernelDependencyRepairAfterValidationFailure(t *testing.T) {
+	root := t.TempDir()
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf("module example.com/acme/kernel-repair-rollback\n\ngo 1.26\n\nreplace github.com/plystra/kernel => %s\n", filepath.ToSlash(kernelRoot)))
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("read CLI go.sum: %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(root, "validation_test.go"), "package kernelrepairrollback_test\n\nimport \"testing\"\n\nfunc TestRejectGeneratedState(t *testing.T) { t.Fatal(\"reject generated state\") }\n")
+	before := commandTree(t, root)
+
+	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, root, commandGoEnvironment())
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "validate generated application") || !strings.Contains(stderr, "reject generated state") {
+		t.Fatalf("generate rollback = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("failed Kernel repair changed the Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoCommandTransactions(t, root)
 }
 
 func TestRunGenerateRequiresConnectForJavaScriptSDKWithoutMutation(t *testing.T) {

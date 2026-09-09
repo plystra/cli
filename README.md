@@ -879,6 +879,13 @@ value or absolute path.
 environment document at `1:1` as a `configuration-declaration` source when its
 typed application over root configuration is invalid. The problem identifies
 the invalid field relationship without exposing values or an absolute path.
+`PLYSTRA_APPLICATION_DEPENDENCY_DRIFT` emits the current Project `go.mod` at
+`1:1` as a `module-dependency` source when its Kernel requirement is missing or
+only transitive, or when a generated runtime requirement is missing, indirect,
+or too old. `plystra generate --check` and `plystra check` leave module metadata
+unchanged. Normal `plystra generate` transactionally restores the direct Kernel
+release supported by the CLI and every required generated runtime dependency,
+then validates the complete selected Project before committing the repair.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses

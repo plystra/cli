@@ -1248,6 +1248,8 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID / PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID:
   fix the reported schema or safe field at Source; values stay redacted.
 - PLYSTRA_CONFIGURATION_INVALID / PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
+- PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: go.mod 1:1 module-dependency; normal
+  generation repairs direct Kernel/runtime requirements; checks stay read-only.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: reported sources own config;
   select or make its constructor reachable, or remove it. Values stay redacted.
 - Incompatible contract: compare the full typed contract and metadata. Implement
@@ -1266,8 +1268,7 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   PLYSTRA_IMPLEMENTATION_CREATE_INTERFACE_INVALID,
   PLYSTRA_IMPLEMENTATION_CREATE_INTERFACE_NOT_FOUND,
   PLYSTRA_IMPLEMENTATION_CREATE_PACKAGE_INVALID, and
-  PLYSTRA_IMPLEMENTATION_CREATE_TARGET_EXISTS. They reject invalid or missing
-  identities, unsafe paths, and existing targets before mutation.
+  PLYSTRA_IMPLEMENTATION_CREATE_TARGET_EXISTS.
 - Implementation authoring codes, in validation order:
   PLYSTRA_IMPLEMENTATION_DECLARATION_INVALID,
   PLYSTRA_IMPLEMENTATION_CONFIG_INVALID,
@@ -1276,11 +1277,9 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   PLYSTRA_IMPLEMENTATION_RESULT_INVALID, and
   PLYSTRA_IMPLEMENTATION_CONFORMANCE_INVALID. Apply Recovery to the owning
   Source or select a corrected dependency version; never edit Module Cache.
-- Unavailable generated client: confirm assembly completed and avoid invoking
-  application clients while constructors are still running before publication.
-- Invalid runtime configuration: compare the selected constructor symbol and
-  its compiled Config schema with the object in the selected current-Project
-  document. Keep Secret values behind valid env or file references.
+- Unavailable generated client: wait for constructor completion and publication.
+- Invalid runtime configuration: match the selected constructor's compiled
+  Config schema; keep Secrets behind valid env/file references.
 - PLYSTRA_CONFIGURATION_SELECTION_INVALID: select exactly one safe existing
   configuration with --env or --config. Automation sets exactly one of
   PLYSTRA_ENV or PLYSTRA_CONFIG; environments overlay root, while explicit
