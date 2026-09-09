@@ -77,6 +77,8 @@ Common actionable Plystra CLI failures end with exactly one `Recovery:` block fo
 
 `PLYSTRA_ENVIRONMENT_OVERLAY_INVALID` reports the selected `plystra.<environment>.yaml` at `1:1` as a `configuration-declaration` source when typed overlay application is invalid. Correct the reported field relationship there; values and machine paths remain excluded.
 
+`PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT` reports the maintained current-Project configuration document at `1:1` as a `configuration-declaration` source when dependency composition would change it. Default and environment-overlay checks identify root `plystra.yaml`; complete-replacement checks identify the selected document. Check modes are read-only; normal generation applies the maintenance change transactionally.
+
 `PLYSTRA_GO_MODULE_INVALID` reports the exact current-Project `go.mod` module or requirement position as a `module-dependency` source once Project identity is valid. Correct that declaration; a file that cannot establish a trustworthy module identity receives no invented source.
 
 `PLYSTRA_APPLICATION_DEPENDENCY_DRIFT` reports the current Project `go.mod` at `1:1` as a `module-dependency` source when the Kernel is missing or only transitive, or a generated runtime requirement has drifted. `plystra generate --check` and `plystra check` are read-only; normal generation transactionally restores the CLI-supported direct Kernel release and required runtime modules before validation.

@@ -15,6 +15,7 @@ import (
 	"github.com/plystra/cli/internal/dependencyadd"
 	"github.com/plystra/cli/internal/dependencyremove"
 	"github.com/plystra/cli/internal/dependencyupdate"
+	"github.com/plystra/cli/internal/diagnosticjson"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/modulemutation"
 	"github.com/plystra/cli/internal/newproject"
@@ -54,9 +55,10 @@ const (
 Common actionable failures end with one Recovery block containing the primary
 command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
 Typed source-bearing failures, including invalid Project and Go Module
-declarations, application module dependency drift, invalid explicit choices,
-and missing, ambiguous, or cyclic Interface Implementation resolution, add
-canonical module-relative Source lines first.
+declarations, current-Project configuration-composition drift, application
+module dependency drift, invalid explicit choices, and missing, ambiguous, or
+cyclic Interface Implementation resolution, add canonical module-relative
+Source lines first.
 `
 	addUsage = `Usage:
   plystra add <go-module-query>
@@ -163,6 +165,8 @@ PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID reports effective http.expose
 documents at 1:1 as exposure sources before selector-aware recovery.
 PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at
 1:1 as a configuration-declaration source before selector-aware recovery.
+PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT reports the maintained current-Project
+configuration document at 1:1 as a configuration-declaration source.
 PLYSTRA_GO_MODULE_INVALID reports an exact current-Project go.mod module or
 requirement position as a module-dependency source once Project identity is valid.
 PLYSTRA_APPLICATION_DEPENDENCY_DRIFT reports current-Project go.mod at 1:1 as
@@ -207,6 +211,8 @@ PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID reports effective http.expose
 documents at 1:1 as exposure sources before selector-aware recovery.
 PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at
 1:1 as a configuration-declaration source before selector-aware recovery.
+PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT reports the maintained current-Project
+configuration document at 1:1 as a configuration-declaration source.
 PLYSTRA_GO_MODULE_INVALID reports an exact current-Project go.mod module or
 requirement position as a module-dependency source once Project identity is valid.
 PLYSTRA_APPLICATION_DEPENDENCY_DRIFT reports current-Project go.mod at 1:1 as
@@ -515,7 +521,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			if result.ConfigurationChanged() {
 				heading = "Project configuration or generated output is not current"
 			}
-			writeGenerationReport(stderr, heading, result.ConfigurationChanged(), result.ConfigurationMaintenancePath(), result.Report(), commandRecoveryContext(check.configurationPath, check.environmentName, environment))
+			writeGenerationReport(stderr, heading, result.Module().ModulePath(), result.ConfigurationChanged(), result.ConfigurationMaintenancePath(), result.Report(), commandRecoveryContext(check.configurationPath, check.environmentName, environment))
 			return 1
 		}
 		_, _ = fmt.Fprintf(stdout, "Project checks passed for %s in %s\n", result.Module().ModulePath(), result.Module().Path())
@@ -582,7 +588,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 					heading = "Project configuration or generated output is not current"
 				}
 			}
-			writeGenerationReport(stderr, heading, configurationDrift, result.ConfigurationMaintenancePath(), result.Report(), commandRecoveryContext(generate.configurationPath, generate.environmentName, environment))
+			writeGenerationReport(stderr, heading, result.Module().ModulePath(), configurationDrift, result.ConfigurationMaintenancePath(), result.Report(), commandRecoveryContext(generate.configurationPath, generate.environmentName, environment))
 			return 1
 		}
 		if result.Checked() {
@@ -697,7 +703,7 @@ func parseGenerateArguments(arguments []string) (generateArguments, bool) {
 	return result, true
 }
 
-func writeGenerationReport(writer io.Writer, heading string, configurationDrift bool, configurationPath string, report generatedfiles.Report, context recoveryContext) {
+func writeGenerationReport(writer io.Writer, heading, modulePath string, configurationDrift bool, configurationPath string, report generatedfiles.Report, context recoveryContext) {
 	_, _ = fmt.Fprintf(writer, "%s:\n", heading)
 	if configurationDrift {
 		_, _ = fmt.Fprintf(writer, "  changed %s (dependency composition)\n", configurationPath)
@@ -713,6 +719,20 @@ func writeGenerationReport(writer io.Writer, heading string, configurationDrift 
 	if len(report.Unexpected()) > 0 {
 		action = "Move every unexpected unowned path outside generated/, then run `plystra generate" + context.selectorSuffix() + "`."
 		code = diagnosticGeneratedUnexpectedOutput
+	}
+	if code == diagnosticConfigurationCompositionDrift {
+		sources, err := diagnosticjson.CanonicalizeSources([]diagnosticjson.Source{{
+			Module: modulePath,
+			Path:   configurationPath,
+			Kind:   "configuration-declaration",
+			Line:   1,
+			Column: 1,
+		}})
+		if err == nil {
+			for _, source := range sources {
+				_, _ = fmt.Fprintf(writer, "\nSource: %s\n", explainSourceSummary(source))
+			}
+		}
 	}
 	_, _ = fmt.Fprintf(writer, "\nRecovery:\n%s\n\nDiagnostic: %s\n", action, code)
 }

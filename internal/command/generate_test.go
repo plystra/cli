@@ -585,14 +585,21 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities:\n  require: [kernel.info/v1]\n")
-	before := commandTree(t, applicationRoot)
-
-	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, applicationRoot, environment)
-	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed plystra.yaml (dependency composition)\n") || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.ConfigurationCompositionDrift+"\n") || strings.Count(stderr, "Recovery:") != 1 {
-		t.Fatalf("composition check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
-	}
-	if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, before) {
-		t.Fatalf("composition check mutated application:\nbefore: %#v\nafter:  %#v", before, after)
+	for _, arguments := range [][]string{{"generate", "--check"}, {"check"}} {
+		before := commandTree(t, applicationRoot)
+		exitCode, stdout, stderr = runCommand(t, arguments, applicationRoot, environment)
+		wantSuffix := "\n\nSource: example.com/acme/composed:plystra.yaml:1:1 (configuration-declaration)\n\n" +
+			"Recovery:\nRun `plystra generate` to restore the selected generated output.\n\n" +
+			"Diagnostic: " + diagnosticcode.ConfigurationCompositionDrift + "\n"
+		if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed plystra.yaml (dependency composition)\n") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+			t.Fatalf("%v composition check = exit %d, stdout %q, stderr %q", arguments, exitCode, stdout, stderr)
+		}
+		if strings.Contains(stderr, applicationRoot) || strings.Contains(stderr, filepath.ToSlash(applicationRoot)) {
+			t.Fatalf("%v composition check exposed the Project path: %q", arguments, stderr)
+		}
+		if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, before) {
+			t.Fatalf("%v composition check mutated application:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+		}
 	}
 }
 
@@ -1114,7 +1121,10 @@ interfaces:
 	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "interfaces: {require: [kernel.info/v1]}\n")
 	beforeCompositionCheck := commandTree(t, applicationRoot)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--config", "deploy/customer.yaml"}, nestedStart, environment)
-	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed deploy/customer.yaml (dependency composition)\n") || !strings.Contains(stderr, "\n\nRecovery:\nRun `plystra generate --config \"deploy/customer.yaml\"` to restore the selected generated output.\n\nDiagnostic: "+diagnosticcode.ConfigurationCompositionDrift+"\n") || strings.Count(stderr, "Recovery:") != 1 {
+	wantCompositionSuffix := "\n\nSource: example.com/acme/config-select:deploy/customer.yaml:1:1 (configuration-declaration)\n\n" +
+		"Recovery:\nRun `plystra generate --config \"deploy/customer.yaml\"` to restore the selected generated output.\n\n" +
+		"Diagnostic: " + diagnosticcode.ConfigurationCompositionDrift + "\n"
+	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed deploy/customer.yaml (dependency composition)\n") || !strings.HasSuffix(stderr, wantCompositionSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 || strings.Contains(stderr, applicationRoot) || strings.Contains(stderr, filepath.ToSlash(applicationRoot)) {
 		t.Fatalf("selected-path composition drift = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, beforeCompositionCheck) {

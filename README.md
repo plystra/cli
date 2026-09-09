@@ -879,6 +879,12 @@ value or absolute path.
 environment document at `1:1` as a `configuration-declaration` source when its
 typed application over root configuration is invalid. The problem identifies
 the invalid field relationship without exposing values or an absolute path.
+`PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT` emits the maintained current-Project
+configuration document at `1:1` as a `configuration-declaration` source when
+dependency composition would change it. Default and environment-overlay checks
+identify root `plystra.yaml`; complete-replacement checks identify the selected
+document. Check modes remain read-only, and normal generation applies the
+maintenance change transactionally.
 `PLYSTRA_GO_MODULE_INVALID` emits the exact current-Project `go.mod` module or
 requirement position as a `module-dependency` source when dependency discovery
 rejects a changed module directive, self-requirement, duplicate requirement, or

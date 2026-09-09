@@ -1248,9 +1248,10 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID / PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID:
   fix the reported schema or safe field at Source; values stay redacted.
 - PLYSTRA_CONFIGURATION_INVALID / PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
-- PLYSTRA_GO_MODULE_INVALID: fix the exact go.mod module-dependency Source.
-- PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: go.mod 1:1 module-dependency; normal
-  generation repairs direct Kernel/runtime requirements; checks stay read-only.
+- PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT: fix Source.
+- PLYSTRA_GO_MODULE_INVALID: fix exact go.mod Source.
+- PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: go.mod 1:1 module-dependency; generate repairs
+  Kernel/runtime requirements; checks are read-only.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: reported sources own config;
   select or make its constructor reachable, or remove it. Values stay redacted.
 - Incompatible contract: compare the full typed contract and metadata. Implement
