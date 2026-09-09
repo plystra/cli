@@ -2009,6 +2009,12 @@ An invalid environment overlay emits the selected current-Project environment
 document at `1:1` as a `configuration-declaration` source. The problem
 identifies the invalid typed field relationship without exposing values, an
 absolute path, or a Module Cache path.
+`PLYSTRA_GO_MODULE_INVALID` emits the exact current-Project `go.mod` module or
+requirement position as a `module-dependency` source when dependency discovery
+rejects a changed module directive, self-requirement, duplicate requirement, or
+another invalid requirement after Project identity is established. A malformed
+or unsafe file that prevents trustworthy module identification receives no
+invented source.
 Application dependency drift emits the current Project `go.mod` at `1:1` as a
 `module-dependency` source. `PLYSTRA_APPLICATION_DEPENDENCY_DRIFT` covers a
 missing or transitive-only Kernel requirement and generated runtime requirements

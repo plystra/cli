@@ -228,19 +228,43 @@ func parseRequirements(data []byte, applicationPath string) ([]requirement, erro
 		return nil, fmt.Errorf("%w: %v", ErrInvalidGoMod, err)
 	}
 	if parsed.Module == nil || parsed.Module.Mod.Path != applicationPath {
-		return nil, fmt.Errorf("%w: module directive changed from %q", ErrInvalidGoMod, applicationPath)
+		cause := fmt.Errorf("%w: module directive changed from %q", ErrInvalidGoMod, applicationPath)
+		if parsed.Module == nil {
+			return nil, cause
+		}
+		return nil, goModSourceError(
+			applicationPath,
+			parsed.Module.Syntax.Start.Line,
+			parsed.Module.Syntax.Start.LineRune,
+			cause,
+		)
 	}
 	seen := make(map[string]struct{}, len(parsed.Require))
 	requirements := make([]requirement, 0, len(parsed.Require))
 	for _, declared := range parsed.Require {
 		if err := module.Check(declared.Mod.Path, declared.Mod.Version); err != nil {
-			return nil, fmt.Errorf("%w: requirement %s@%s: %v", ErrInvalidGoMod, declared.Mod.Path, declared.Mod.Version, err)
+			return nil, goModSourceError(
+				applicationPath,
+				declared.Syntax.Start.Line,
+				declared.Syntax.Start.LineRune,
+				fmt.Errorf("%w: requirement %s@%s: %v", ErrInvalidGoMod, declared.Mod.Path, declared.Mod.Version, err),
+			)
 		}
 		if declared.Mod.Path == applicationPath {
-			return nil, fmt.Errorf("%w: application module cannot require itself", ErrInvalidGoMod)
+			return nil, goModSourceError(
+				applicationPath,
+				declared.Syntax.Start.Line,
+				declared.Syntax.Start.LineRune,
+				fmt.Errorf("%w: application module cannot require itself", ErrInvalidGoMod),
+			)
 		}
 		if _, duplicate := seen[declared.Mod.Path]; duplicate {
-			return nil, fmt.Errorf("%w: duplicate requirement %q", ErrInvalidGoMod, declared.Mod.Path)
+			return nil, goModSourceError(
+				applicationPath,
+				declared.Syntax.Start.Line,
+				declared.Syntax.Start.LineRune,
+				fmt.Errorf("%w: duplicate requirement %q", ErrInvalidGoMod, declared.Mod.Path),
+			)
 		}
 		seen[declared.Mod.Path] = struct{}{}
 		requirements = append(requirements, requirement{

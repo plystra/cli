@@ -53,10 +53,10 @@ const (
 
 Common actionable failures end with one Recovery block containing the primary
 command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
-Typed source-bearing failures, including invalid Project manifests, application
-module dependency drift, invalid explicit choices, and missing, ambiguous, or
-cyclic Interface Implementation resolution, add canonical module-relative
-Source lines first.
+Typed source-bearing failures, including invalid Project and Go Module
+declarations, application module dependency drift, invalid explicit choices,
+and missing, ambiguous, or cyclic Interface Implementation resolution, add
+canonical module-relative Source lines first.
 `
 	addUsage = `Usage:
   plystra add <go-module-query>
@@ -163,6 +163,8 @@ PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID reports effective http.expose
 documents at 1:1 as exposure sources before selector-aware recovery.
 PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at
 1:1 as a configuration-declaration source before selector-aware recovery.
+PLYSTRA_GO_MODULE_INVALID reports an exact current-Project go.mod module or
+requirement position as a module-dependency source once Project identity is valid.
 PLYSTRA_APPLICATION_DEPENDENCY_DRIFT reports current-Project go.mod at 1:1 as
 a module-dependency source. Normal generation repairs the required direct
 Kernel and generated runtime dependencies; check modes remain read-only.
@@ -205,6 +207,8 @@ PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID reports effective http.expose
 documents at 1:1 as exposure sources before selector-aware recovery.
 PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at
 1:1 as a configuration-declaration source before selector-aware recovery.
+PLYSTRA_GO_MODULE_INVALID reports an exact current-Project go.mod module or
+requirement position as a module-dependency source once Project identity is valid.
 PLYSTRA_APPLICATION_DEPENDENCY_DRIFT reports current-Project go.mod at 1:1 as
 a module-dependency source. Normal generation repairs the required direct
 Kernel and generated runtime dependencies; check modes remain read-only.

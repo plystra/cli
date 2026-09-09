@@ -879,6 +879,12 @@ value or absolute path.
 environment document at `1:1` as a `configuration-declaration` source when its
 typed application over root configuration is invalid. The problem identifies
 the invalid field relationship without exposing values or an absolute path.
+`PLYSTRA_GO_MODULE_INVALID` emits the exact current-Project `go.mod` module or
+requirement position as a `module-dependency` source when dependency discovery
+rejects a changed module directive, self-requirement, duplicate requirement, or
+another invalid requirement after Project identity is established. A malformed
+or unsafe file that prevents trustworthy module identification receives no
+invented source.
 `PLYSTRA_APPLICATION_DEPENDENCY_DRIFT` emits the current Project `go.mod` at
 `1:1` as a `module-dependency` source when its Kernel requirement is missing or
 only transitive, or when a generated runtime requirement is missing, indirect,

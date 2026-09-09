@@ -378,7 +378,7 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			Line:   located.Line(),
 			Column: located.Column(),
 		})
-	case diagnosticApplicationDependencyDrift:
+	case diagnosticApplicationDependencyDrift, diagnosticGoModuleInvalid:
 		var located diagnosticSourceLocation
 		if !errors.As(err, &located) || located == nil || located.SourceKind() != "module-dependency" {
 			return nil
