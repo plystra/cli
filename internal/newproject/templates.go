@@ -111,7 +111,7 @@ Authored Implementation failures distinguish invalid directives, Config schemas,
 
 ` + "`plystra use`" + ` rejects malformed canonical Interface IDs with ` + "`PLYSTRA_USE_INTERFACE_INVALID`" + ` and malformed fully qualified constructor symbols with ` + "`PLYSTRA_USE_CONSTRUCTOR_INVALID`" + ` before Project mutation. Run the emitted corrected command with the same default, environment, or complete-replacement selection.
 
-` + "`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED`" + ` identifies constructor-keyed configuration whose constructor is neither named by an effective ` + "`interfaces.use`" + ` choice nor reachable from an active Interface. Name it in an effective choice, make it reachable through an Interface requirement, or remove its configuration from the selected document. The diagnostic never prints configured values or Secret-reference targets.
+` + "`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED`" + ` identifies constructor-keyed configuration whose constructor is neither named by an effective ` + "`interfaces.use`" + ` choice nor reachable from an active Interface. Name it in an effective choice, make it reachable through an Interface requirement, or remove its configuration from the selected document. The diagnostic reports every effective contributing Project document at ` + "`1:1`" + ` as a sorted ` + "`configuration-declaration`" + ` source and never prints configured values or Secret-reference targets.
 
 Interface and Implementation scaffold failures distinguish invalid or missing identities, unsafe package paths, and existing targets before mutation. Follow the emitted corrected command or replacement choice.
 
@@ -1457,9 +1457,9 @@ configuration-declaration. Redact absolute/cache paths and unsafe selectors; unk
   PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
 - PLYSTRA_USE_INTERFACE_INVALID / PLYSTRA_USE_CONSTRUCTOR_INVALID: malformed
   Interface ID / constructor. Both precede mutation; Recovery retains selector.
-- PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: select its constructor through
-  interfaces.use, make it reachable, or remove its config. Values and Secret
-  targets stay redacted.
+- PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: Lists every
+  configuration-declaration source; select, make reachable, or remove config.
+  Values and Secret targets are redacted.
 - Incompatible contract: compare request, response, closed fields, semantic
   errors, typed semantics, and extension metadata. Implement the visible
   contract or create a new version; never weaken validation.

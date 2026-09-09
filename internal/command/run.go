@@ -155,6 +155,9 @@ diagnostic.
 PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
 Project plystra.yaml as a project-marker source. Malformed readable documents
 use 1:1; unsafe or unreadable markers omit the unavailable span.
+PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED reports every effective
+contributing config document at 1:1 as a configuration-declaration source
+without values.
 PLYSTRA_RESOLVE_UNKNOWN_INTERFACE reports every module-relative requirement,
 exposure, or Implementation-selection source before selector-aware recovery.
 PLYSTRA_RESOLVE_RESERVED_INTERFACE reports the module-relative declaration that
@@ -175,12 +178,15 @@ and the two flags cannot be combined. Relative configuration paths are resolved
 from the detected Plystra Project root. Root plystra.yaml remains mandatory and
 is not merged beneath --config. Invalid or conflicting selections emit the
 stable PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
-Inherited configuration conflicts and ambiguous ownership failures emit every
-contributing module-relative configuration-declaration source before
-selector-aware recovery.
+Inherited configuration conflicts, ambiguous ownership, and unselected
+constructor configuration failures emit module-relative
+configuration-declaration sources before selector-aware recovery.
 PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
 Project plystra.yaml as a project-marker source. Malformed readable documents
 use 1:1; unsafe or unreadable markers omit the unavailable span.
+PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED reports every effective
+contributing config document at 1:1 as a configuration-declaration source
+without values.
 PLYSTRA_RESOLVE_UNKNOWN_INTERFACE reports every module-relative requirement,
 exposure, or Implementation-selection source before selector-aware recovery.
 PLYSTRA_RESOLVE_RESERVED_INTERFACE reports the module-relative declaration that

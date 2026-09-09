@@ -709,27 +709,122 @@ func TestPublicResolvingCommandsRejectUnownedConstructorConfigurationWithoutMuta
 	t.Parallel()
 
 	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
-	for _, arguments := range commands {
-		name := strings.Join(arguments, " ")
-		t.Run(name, func(t *testing.T) {
-			root := writeImplementationSelectionCommandProject(t)
+	modes := []struct {
+		name           string
+		path           string
+		selector       []string
+		recoveryTarget string
+	}{
+		{name: "default", path: "plystra.yaml", recoveryTarget: "plystra.yaml"},
+		{name: "environment", path: "plystra.production.yaml", selector: []string{"--env", "production"}, recoveryTarget: "plystra.production.yaml"},
+		{name: "replacement", path: "deploy/customer.yaml", selector: []string{"--config", "deploy/customer.yaml"}, recoveryTarget: "deploy/customer.yaml"},
+	}
+	for _, mode := range modes {
+		mode := mode
+		t.Run(mode.name, func(t *testing.T) {
+			for _, command := range commands {
+				arguments := append(append([]string(nil), command...), mode.selector...)
+				t.Run(strings.Join(arguments, " "), func(t *testing.T) {
+					root := writeImplementationSelectionCommandProject(t)
+					constructor := "example.com/acme/implementation-use/reports.New"
+					writeCommandConfigurableImplementation(t, root, "reports", "reports.read/v1", "reports/read/v1", "Read")
+					if mode.path != "plystra.yaml" {
+						writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+					}
+					writeCommandFile(t, filepath.Join(root, filepath.FromSlash(mode.path)), "config: {"+constructor+": {endpoint: private.internal}}\n")
+					before := commandTree(t, root)
+					exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "reports"), implementationSelectionCommandEnvironment(nil))
+					wantSource := "Source: example.com/acme/implementation-use:" + mode.path + ":1:1 (configuration-declaration)"
+					if exitCode != 1 || stdout != "" || !commandContainsAll(
+						stderr,
+						constructor,
+						wantSource,
+						"Recovery:\nName the reported constructor in an effective interfaces.use entry, make it reachable through an Interface requirement, or remove its configuration from "+mode.recoveryTarget+", then rerun the command.\n",
+						"Diagnostic: "+diagnosticcode.ConstructorConfigurationUnselected,
+					) || strings.Count(stderr, "Source: ") != 1 || strings.Contains(stderr, "private.internal") || strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+						t.Fatalf("%v unowned constructor configuration = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+					}
+					if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+						t.Fatalf("%v mutated unowned constructor configuration Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+					}
+					assertNoCommandTransactions(t, root)
+				})
+			}
+		})
+	}
+}
+
+func TestPublicResolvingCommandsReportEveryUnownedConfigurationContributorWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
+	for _, baseArguments := range commands {
+		baseArguments := baseArguments
+		t.Run(strings.Join(baseArguments, " "), func(t *testing.T) {
+			parent := t.TempDir()
+			applicationRoot := filepath.Join(parent, "application")
+			alphaRoot := filepath.Join(parent, "alpha")
+			zetaRoot := filepath.Join(parent, "zeta")
 			constructor := "example.com/acme/implementation-use/reports.New"
-			writeCommandConfigurableImplementation(t, root, "reports", "reports.read/v1", "reports/read/v1", "Read")
-			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "config: {"+constructor+": {endpoint: private.internal}}\n")
-			before := commandTree(t, root)
-			exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "reports"), implementationSelectionCommandEnvironment(nil))
-			if exitCode != 1 || stdout != "" || !commandContainsAll(
-				stderr,
-				constructor,
-				"Recovery:\nName the reported constructor in an effective interfaces.use entry, make it reachable through an Interface requirement, or remove its configuration from plystra.yaml, then rerun the command.\n",
-				"Diagnostic: "+diagnosticcode.ConstructorConfigurationUnselected,
-			) || strings.Contains(stderr, "private.internal") {
-				t.Fatalf("%v unowned constructor configuration = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+			configuration := "config: {" + constructor + ": {endpoint: PRIVATE_SHARED_ENDPOINT}}\n"
+			for _, dependency := range []struct {
+				root       string
+				modulePath string
+			}{
+				{root: zetaRoot, modulePath: "example.com/zeta"},
+				{root: alphaRoot, modulePath: "example.com/alpha"},
+			} {
+				writeCommandFile(t, filepath.Join(dependency.root, "go.mod"), "module "+dependency.modulePath+"\n\ngo 1.26\n")
+				writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), configuration)
 			}
-			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
-				t.Fatalf("%v mutated unowned constructor configuration Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/acme/implementation-use
+
+go 1.26
+
+require (
+	example.com/zeta v1.0.0
+	example.com/alpha v1.0.0
+)
+
+replace example.com/zeta => %s
+replace example.com/alpha => %s
+`, filepath.ToSlash(zetaRoot), filepath.ToSlash(alphaRoot)))
+			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.production.yaml"), configuration)
+			writeCommandInterface(t, applicationRoot, "reports/read/v1", "readv1", "reports.read/v1", "Read")
+			writeCommandConfigurableImplementation(t, applicationRoot, "reports", "reports.read/v1", "reports/read/v1", "Read")
+
+			roots := []string{applicationRoot, alphaRoot, zetaRoot}
+			before := make(map[string]map[string][]byte, len(roots))
+			for _, root := range roots {
+				before[root] = commandTree(t, root)
 			}
-			assertNoCommandTransactions(t, root)
+			arguments := append(append([]string(nil), baseArguments...), "--env", "production")
+			exitCode, stdout, stderr := runCommand(t, arguments, applicationRoot, commandGoEnvironment())
+			wantSuffix := strings.Join([]string{
+				"",
+				"Source: example.com/acme/implementation-use:plystra.production.yaml:1:1 (configuration-declaration)",
+				"Source: example.com/alpha:plystra.yaml:1:1 (configuration-declaration)",
+				"Source: example.com/zeta:plystra.yaml:1:1 (configuration-declaration)",
+				"",
+				"Recovery:",
+				"Name the reported constructor in an effective interfaces.use entry, make it reachable through an Interface requirement, or remove its configuration from plystra.production.yaml, then rerun the command.",
+				"",
+				"Diagnostic: " + diagnosticcode.ConstructorConfigurationUnselected,
+				"",
+			}, "\n")
+			if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 3 || !strings.Contains(stderr, constructor) || strings.Contains(stderr, "PRIVATE_SHARED_ENDPOINT") {
+				t.Fatalf("%v unowned composed constructor configuration = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+			}
+			for _, root := range roots {
+				if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+					t.Fatalf("%v exposed private path %q: %q", arguments, root, stderr)
+				}
+				if after := commandTree(t, root); !reflect.DeepEqual(after, before[root]) {
+					t.Fatalf("%v mutated %s:\nbefore: %#v\nafter:  %#v", arguments, root, before[root], after)
+				}
+				assertNoCommandTransactions(t, root)
+			}
 		})
 	}
 }

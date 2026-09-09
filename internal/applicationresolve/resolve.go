@@ -51,6 +51,47 @@ var (
 	ErrUnownedConstructorConfiguration = errors.New("constructor configuration has no explicit selection or reachable constructor")
 )
 
+// UnownedConstructorConfigurationError reports one effective constructor
+// configuration together with every contributing Project document.
+// Configuration values and Secret-reference targets are never retained by
+// this error.
+type UnownedConstructorConfigurationError struct {
+	constructor constructorsymbol.Symbol
+	sources     []applicationinput.ConfigurationSource
+}
+
+// Constructor returns the exact unselected constructor symbol.
+func (e *UnownedConstructorConfigurationError) Constructor() constructorsymbol.Symbol {
+	if e == nil {
+		return constructorsymbol.Symbol{}
+	}
+	return e.constructor
+}
+
+// Sources returns a defensive copy in deterministic module/path/span order.
+func (e *UnownedConstructorConfigurationError) Sources() []applicationinput.ConfigurationSource {
+	if e == nil {
+		return nil
+	}
+	return append([]applicationinput.ConfigurationSource(nil), e.sources...)
+}
+
+func (e *UnownedConstructorConfigurationError) Error() string {
+	if e == nil {
+		return ErrUnownedConstructorConfiguration.Error()
+	}
+	reference := "selected Project configuration"
+	if len(e.sources) != 0 {
+		reference = e.sources[0].Reference
+	}
+	return fmt.Sprintf("%s: config[%q] at %s", ErrUnownedConstructorConfiguration, e.constructor, reference)
+}
+
+// Unwrap supports errors.Is with ErrUnownedConstructorConfiguration.
+func (*UnownedConstructorConfigurationError) Unwrap() error {
+	return ErrUnownedConstructorConfiguration
+}
+
 // Options contains the application location and bounded Go helper settings.
 // Environment is shared by read-only module and authored-declaration package
 // discovery plus selected legacy generation compilation so each observes the
@@ -305,7 +346,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	if err := validateConstructorConfigurationOwners(manifest, interfaceResolution); err != nil {
+	if err := validateConstructorConfigurationOwners(manifest, interfaceResolution, sourceContext); err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	rootLayerManifest := rootManifest
@@ -451,7 +492,7 @@ func applicationInputSourceContext(module modulelocate.Module, dependencies modu
 }
 
 func resolutionDeclarationPaths(manifest applicationmeta.Manifest) []string {
-	paths := make([]string, 0, len(manifest.HTTPExposures())+len(manifest.Requirements())+len(manifest.ProviderChoices())+len(manifest.Aliases())+len(manifest.InterfaceRequirements())+len(manifest.ImplementationChoices()))
+	paths := make([]string, 0, len(manifest.HTTPExposures())+len(manifest.Requirements())+len(manifest.ProviderChoices())+len(manifest.Aliases())+len(manifest.InterfaceRequirements())+len(manifest.ImplementationChoices())+len(manifest.Configurations()))
 	for _, exposure := range manifest.HTTPExposures() {
 		paths = append(paths, fmt.Sprintf("http.expose[%q]", exposure.ID().String()))
 	}
@@ -469,6 +510,9 @@ func resolutionDeclarationPaths(manifest applicationmeta.Manifest) []string {
 	}
 	for _, choice := range manifest.ImplementationChoices() {
 		paths = append(paths, fmt.Sprintf("interfaces.use[%q]", choice.InterfaceID().String()))
+	}
+	for _, configured := range manifest.Configurations() {
+		paths = append(paths, fmt.Sprintf("config[%q]", configured.Constructor().String()))
 	}
 	return paths
 }

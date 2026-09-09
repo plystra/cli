@@ -2,6 +2,7 @@ package applicationresolve
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
@@ -102,7 +103,7 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 	})
 }
 
-func validateConstructorConfigurationOwners(manifest applicationmeta.Manifest, resolution interfaceresolution.Result) error {
+func validateConstructorConfigurationOwners(manifest applicationmeta.Manifest, resolution interfaceresolution.Result, sourceContext applicationinput.SourceContext) error {
 	owners := make(map[string]struct{})
 	for _, choice := range manifest.ImplementationChoices() {
 		owners[choice.Constructor().String()] = struct{}{}
@@ -115,7 +116,30 @@ func validateConstructorConfigurationOwners(manifest applicationmeta.Manifest, r
 		if _, owned := owners[constructor]; owned {
 			continue
 		}
-		return fmt.Errorf("%w: config[%q] at %s", ErrUnownedConstructorConfiguration, constructor, configured.Source())
+		path := fmt.Sprintf("config[%q]", constructor)
+		sources, err := applicationinput.ConfigurationSources(sourceContext, configured.Source(), path)
+		if err != nil {
+			return fmt.Errorf("constructor configuration %s provenance: %w", constructor, err)
+		}
+		sort.Slice(sources, func(left, right int) bool {
+			if sources[left].ModulePath != sources[right].ModulePath {
+				return sources[left].ModulePath < sources[right].ModulePath
+			}
+			if sources[left].Path != sources[right].Path {
+				return sources[left].Path < sources[right].Path
+			}
+			if sources[left].Line != sources[right].Line {
+				return sources[left].Line < sources[right].Line
+			}
+			if sources[left].Column != sources[right].Column {
+				return sources[left].Column < sources[right].Column
+			}
+			return sources[left].Reference < sources[right].Reference
+		})
+		return &UnownedConstructorConfigurationError{
+			constructor: configured.Constructor(),
+			sources:     sources,
+		}
 	}
 	return nil
 }

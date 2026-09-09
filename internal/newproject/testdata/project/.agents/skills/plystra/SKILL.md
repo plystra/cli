@@ -1244,9 +1244,9 @@ configuration-declaration. Redact absolute/cache paths and unsafe selectors; unk
   PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
 - PLYSTRA_USE_INTERFACE_INVALID / PLYSTRA_USE_CONSTRUCTOR_INVALID: malformed
   Interface ID / constructor. Both precede mutation; Recovery retains selector.
-- PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: select its constructor through
-  interfaces.use, make it reachable, or remove its config. Values and Secret
-  targets stay redacted.
+- PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: Lists every
+  configuration-declaration source; select, make reachable, or remove config.
+  Values and Secret targets are redacted.
 - Incompatible contract: compare request, response, closed fields, semantic
   errors, typed semantics, and extension metadata. Implement the visible
   contract or create a new version; never weaken validation.

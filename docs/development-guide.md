@@ -2062,8 +2062,10 @@ corrected dependency version; never edit the Module Cache copy.
 effective explicit `interfaces.use` choice nor selected into the reachable
 constructor graph. Name the constructor in an effective choice, make it
 reachable through an Interface requirement, or remove its configuration from
-the selected document. The diagnostic reports the constructor and safe source
-location without printing configured values or Secret-reference targets.
+the selected document. The diagnostic reports the constructor and every
+effective contributing Project document at `1:1` as a sorted
+`configuration-declaration` source without printing configured values or
+Secret-reference targets.
 
 ### Invalid Capability command input
 

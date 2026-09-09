@@ -142,7 +142,13 @@ func manifestConfigDecisions(manifest Manifest, schemas SchemaLookup) ([]constru
 		if err != nil {
 			return nil, err
 		}
-		declarationSource := manifestConfigurationDeclarationSource(manifest, configured.sourcePath)
+		declarationSource := configured.DeclarationSource()
+		if declarationSource.modulePath == "" {
+			declarationSource.modulePath = manifest.modulePath
+		}
+		if declarationSource.path == "" {
+			declarationSource.path = manifest.source
+		}
 		for index := range decisions {
 			decisions[index].declarationSource = declarationSource
 		}
@@ -153,7 +159,13 @@ func manifestConfigDecisions(manifest Manifest, schemas SchemaLookup) ([]constru
 			return nil, fmt.Errorf("%w for constructor %q at %s", ErrConfigurationSchema, removal.constructor, removal.source)
 		}
 		decision := newConstructorConfigDecision(removal.constructor, nil, constructorConfigRemoval, "", nil, removal.source)
-		decision.declarationSource = manifestConfigurationDeclarationSource(manifest, removal.sourcePath)
+		decision.declarationSource = removal.declarationSource
+		if decision.declarationSource.modulePath == "" {
+			decision.declarationSource.modulePath = manifest.modulePath
+		}
+		if decision.declarationSource.path == "" {
+			decision.declarationSource.path = manifest.source
+		}
 		result = append(result, decision)
 	}
 	sort.Slice(result, func(left, right int) bool {
@@ -672,7 +684,7 @@ func renderConstructorConfigurations(selected map[string]constructorConfigDecisi
 		if err != nil {
 			return nil, fmt.Errorf("config[%q]: %v", constructor, err)
 		}
-		result = append(result, ConstructorConfiguration{constructor: root.decision.constructor, source: root.decision.source, sourcePath: root.decision.declarationSource.path, yaml: data})
+		result = append(result, ConstructorConfiguration{constructor: root.decision.constructor, source: root.decision.source, declarationSource: root.decision.declarationSource, yaml: data})
 	}
 	return result, nil
 }
@@ -688,7 +700,7 @@ func renderConstructorConfigurationLayer(selected map[string]constructorConfigDe
 			return nil, nil, errors.New("overlaid constructor configuration has no root decision")
 		}
 		if root.decision.kind == constructorConfigRemoval {
-			removals = append(removals, constructorConfigurationRemoval{constructor: root.decision.constructor, source: root.decision.source, sourcePath: root.decision.declarationSource.path})
+			removals = append(removals, constructorConfigurationRemoval{constructor: root.decision.constructor, source: root.decision.source, declarationSource: root.decision.declarationSource})
 			continue
 		}
 		node, present, err := renderConstructorConfigNode(root, true)
@@ -702,7 +714,7 @@ func renderConstructorConfigurationLayer(selected map[string]constructorConfigDe
 		if err != nil {
 			return nil, nil, fmt.Errorf("config[%q]: %v", constructor, err)
 		}
-		configurations = append(configurations, ConstructorConfiguration{constructor: root.decision.constructor, source: root.decision.source, sourcePath: root.decision.declarationSource.path, yaml: data})
+		configurations = append(configurations, ConstructorConfiguration{constructor: root.decision.constructor, source: root.decision.source, declarationSource: root.decision.declarationSource, yaml: data})
 	}
 	return configurations, removals, nil
 }

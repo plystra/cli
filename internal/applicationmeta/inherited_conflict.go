@@ -7,9 +7,9 @@ import (
 )
 
 // ConfigurationDeclarationSource identifies one Project configuration
-// document that contributes to an inherited conflict or a prior declaration
-// whose current-Project ownership became ambiguous. The exact field is exposed
-// separately by the corresponding typed error.
+// document behind an effective declaration, inherited conflict, or prior
+// declaration whose current-Project ownership became ambiguous. The exact
+// field or constructor is exposed separately by the corresponding typed value.
 type ConfigurationDeclarationSource struct {
 	modulePath string
 	path       string
@@ -77,15 +77,6 @@ func dependencyConfigurationDeclarationSource(dependency Dependency) Configurati
 	return ConfigurationDeclarationSource{
 		modulePath: dependency.ModulePath,
 		path:       dependency.Manifest.source,
-		line:       1,
-		column:     1,
-	}
-}
-
-func manifestConfigurationDeclarationSource(manifest Manifest, sourcePath string) ConfigurationDeclarationSource {
-	return ConfigurationDeclarationSource{
-		modulePath: manifest.modulePath,
-		path:       sourcePath,
 		line:       1,
 		column:     1,
 	}

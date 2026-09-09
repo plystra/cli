@@ -648,11 +648,16 @@ func TestResolveOwnsAndValidatesDormantConstructorConfigurationWithoutRuntimeMem
 		t.Fatalf("dormant constructor configuration resolution mutated files:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "config: {"+selectedConstructor+": {endpoint: smtp.internal}}\n")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "config: {"+selectedConstructor+": {endpoint: smtp.internal, password: {env: PRIVATE_UNOWNED_SECRET_TARGET}}}\n")
 	before = snapshotTree(t, root)
 	_, err = applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: root, Environment: environment})
-	if !errors.Is(err, applicationresolve.ErrUnownedConstructorConfiguration) || !strings.Contains(err.Error(), selectedConstructor) || strings.Contains(err.Error(), "smtp.internal") {
+	var unowned *applicationresolve.UnownedConstructorConfigurationError
+	if !errors.As(err, &unowned) || unowned == nil || !errors.Is(err, applicationresolve.ErrUnownedConstructorConfiguration) || unowned.Constructor().String() != selectedConstructor || !strings.Contains(err.Error(), selectedConstructor) || strings.Contains(err.Error(), "smtp.internal") || strings.Contains(err.Error(), "PRIVATE_UNOWNED_SECRET_TARGET") {
 		t.Fatalf("Resolve unowned constructor configuration error = %v", err)
+	}
+	sources := unowned.Sources()
+	if len(sources) != 1 || sources[0].ModulePath != modulePath || sources[0].Path != "plystra.yaml" || sources[0].Line != 1 || sources[0].Column != 1 {
+		t.Fatalf("unowned constructor configuration sources = %#v", sources)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("unowned constructor configuration resolution mutated files:\nbefore: %#v\nafter:  %#v", before, after)

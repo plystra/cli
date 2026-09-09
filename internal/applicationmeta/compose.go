@@ -120,10 +120,11 @@ func (c Composition) Provenance() []Provenance {
 }
 
 // ResolutionSources returns dependency provenance whose normalized value
-// matches one effective Interface or legacy requirement, selection, or
-// remaining Alias. Public exposure is current-Project-owned and therefore has
-// no dependency provenance. Superseded and removed dependency declarations
-// remain in Provenance but do not introduce final application requirements.
+// matches one effective Interface or legacy requirement, selection, remaining
+// Alias, or constructor-configuration root. Public exposure is
+// current-Project-owned and therefore has no dependency provenance. Superseded
+// and removed dependency declarations remain in Provenance but do not
+// introduce final application requirements or configuration ownership.
 func (c Composition) ResolutionSources() []Provenance {
 	if !c.Valid() {
 		return nil
@@ -257,6 +258,7 @@ func cloneProvenance(values []Provenance) []Provenance {
 
 func effectiveResolutionSources(manifest Manifest, provenance []Provenance) []Provenance {
 	effective := make(map[string]string)
+	effectiveConfigurationRoots := make(map[string]struct{}, len(manifest.configurations))
 	for _, exposure := range manifest.httpExposures {
 		path := fmt.Sprintf("http.expose[%q]", exposure.id.String())
 		effective[path] = interfaceDeclarationDigest("http.expose", exposure.id, false)
@@ -281,12 +283,23 @@ func effectiveResolutionSources(manifest Manifest, provenance []Provenance) []Pr
 		path := fmt.Sprintf("capabilities.aliases[%q]", alias.id.String())
 		effective[path] = aliasDigest(alias)
 	}
-	result := make([]Provenance, 0, len(effective))
+	for _, configured := range manifest.configurations {
+		effectiveConfigurationRoots[constructorConfigPath(configured.constructor, nil)] = struct{}{}
+	}
+	result := make([]Provenance, 0, len(effective)+len(effectiveConfigurationRoots))
 	for _, record := range provenance {
-		if record.removed || effective[record.path] != record.digest {
+		if record.removed {
 			continue
 		}
-		result = append(result, record)
+		if digest, exists := effective[record.path]; exists {
+			if digest == record.digest {
+				result = append(result, record)
+			}
+			continue
+		}
+		if _, exists := effectiveConfigurationRoots[record.path]; exists {
+			result = append(result, record)
+		}
 	}
 	return cloneProvenance(result)
 }

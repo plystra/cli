@@ -40,6 +40,23 @@ config: {example.com/acme/smtp.New: {host: production.example}}
 	if !exists || configured.Source() != `plystra.production.yaml config["example.com/acme/smtp.New"]` {
 		t.Fatalf("configuration source = %q, %t", configured.Source(), exists)
 	}
+	declarationSource := configured.DeclarationSource()
+	if declarationSource.ModulePath() != "" || declarationSource.Path() != "plystra.production.yaml" || declarationSource.Line() != 1 || declarationSource.Column() != 1 {
+		t.Fatalf("configuration declaration source = %#v", declarationSource)
+	}
+	associated, err := applicationmeta.WithProjectModule(manifest, "example.com/application")
+	if err != nil {
+		t.Fatalf("WithProjectModule: %v", err)
+	}
+	configured, exists = associated.Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
+	declarationSource = configured.DeclarationSource()
+	if !exists || declarationSource.ModulePath() != "example.com/application" || declarationSource.Path() != "plystra.production.yaml" || declarationSource.Line() != 1 || declarationSource.Column() != 1 {
+		t.Fatalf("associated configuration declaration source = %#v, %t", declarationSource, exists)
+	}
+	original, exists := manifest.Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
+	if !exists || original.DeclarationSource().ModulePath() != "" {
+		t.Fatalf("WithProjectModule mutated original manifest source = %#v, %t", original.DeclarationSource(), exists)
+	}
 	if _, err := applicationmeta.ParseSource("bad\nsource", []byte("{}\n")); !errors.Is(err, applicationmeta.ErrInvalidManifest) {
 		t.Fatalf("ParseSource(control) error = %v", err)
 	}
@@ -112,6 +129,14 @@ config:
       add: production
       remove: null
 `)
+	base, err := applicationmeta.WithProjectModule(base, "example.com/application")
+	if err != nil {
+		t.Fatalf("associate base Project module: %v", err)
+	}
+	overlay, err = applicationmeta.WithProjectModule(overlay, "example.com/application")
+	if err != nil {
+		t.Fatalf("associate overlay Project module: %v", err)
+	}
 
 	current, err := applicationmeta.ApplyOverlay(base, overlay, lookup)
 	if err != nil {
@@ -192,6 +217,10 @@ config:
 	configured, exists := effective.Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
 	if !exists {
 		t.Fatal("effective acme.smtp configuration is absent")
+	}
+	declarationSource := configured.DeclarationSource()
+	if declarationSource.ModulePath() != "example.com/application" || declarationSource.Path() != "plystra.production.yaml" || declarationSource.Line() != 1 || declarationSource.Column() != 1 {
+		t.Fatalf("effective configuration declaration source = %#v", declarationSource)
 	}
 	for _, expected := range [][]byte{
 		[]byte("host: production.example"),

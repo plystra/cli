@@ -183,16 +183,16 @@ func (c ProviderChoice) Source() string { return c.source }
 // configuration mapping. Values and Secret reference targets remain redacted
 // from formatting and are available only through the deliberate YAML accessor.
 type ConstructorConfiguration struct {
-	constructor constructorsymbol.Symbol
-	source      string
-	sourcePath  string
-	yaml        []byte
+	constructor       constructorsymbol.Symbol
+	source            string
+	declarationSource ConfigurationDeclarationSource
+	yaml              []byte
 }
 
 type constructorConfigurationRemoval struct {
-	constructor constructorsymbol.Symbol
-	source      string
-	sourcePath  string
+	constructor       constructorsymbol.Symbol
+	source            string
+	declarationSource ConfigurationDeclarationSource
 }
 
 // Constructor returns the exact fully qualified Implementation constructor.
@@ -200,6 +200,13 @@ func (c ConstructorConfiguration) Constructor() constructorsymbol.Symbol { retur
 
 // Source returns stable configuration-path provenance for diagnostics.
 func (c ConstructorConfiguration) Source() string { return c.source }
+
+// DeclarationSource returns the immutable deterministic representative Project
+// document retained with the effective configuration. Composition
+// ResolutionSources retains every contributing dependency document.
+func (c ConstructorConfiguration) DeclarationSource() ConfigurationDeclarationSource {
+	return c.declarationSource
+}
 
 // YAML returns defensive normalized bytes for CLI-owned validation and later
 // generated runtime binding. Callers must not copy them into diagnostics.
@@ -260,6 +267,14 @@ func WithProjectModule(manifest Manifest, projectModule string) (Manifest, error
 		return Manifest{}, fmt.Errorf("%w: Project module %q is invalid: %v", ErrInvalidManifest, projectModule, err)
 	}
 	manifest.modulePath = projectModule
+	manifest.configurations = append([]ConstructorConfiguration(nil), manifest.configurations...)
+	for index := range manifest.configurations {
+		manifest.configurations[index].declarationSource.modulePath = projectModule
+	}
+	manifest.removedConfigurations = append([]constructorConfigurationRemoval(nil), manifest.removedConfigurations...)
+	for index := range manifest.removedConfigurations {
+		manifest.removedConfigurations[index].declarationSource.modulePath = projectModule
+	}
 	return manifest, nil
 }
 
@@ -546,11 +561,11 @@ func rewriteManifestSource(manifest *Manifest, source string) {
 	}
 	for index := range manifest.configurations {
 		manifest.configurations[index].source = rewrite(manifest.configurations[index].source)
-		manifest.configurations[index].sourcePath = source
+		manifest.configurations[index].declarationSource.path = source
 	}
 	for index := range manifest.removedConfigurations {
 		manifest.removedConfigurations[index].source = rewrite(manifest.removedConfigurations[index].source)
-		manifest.removedConfigurations[index].sourcePath = source
+		manifest.removedConfigurations[index].declarationSource.path = source
 	}
 }
 
@@ -570,8 +585,9 @@ func parseConfigurations(node *yaml.Node) ([]ConstructorConfiguration, []constru
 			return nil, nil, invalid("config key %q is not a fully qualified constructor symbol", value)
 		}
 		source := fmt.Sprintf("plystra.yaml config[%q]", value)
+		declarationSource := ConfigurationDeclarationSource{path: "plystra.yaml", line: 1, column: 1}
 		if isNull(values[value]) {
-			removals = append(removals, constructorConfigurationRemoval{constructor: constructor, source: source, sourcePath: "plystra.yaml"})
+			removals = append(removals, constructorConfigurationRemoval{constructor: constructor, source: source, declarationSource: declarationSource})
 			continue
 		}
 		if values[value].Kind != yaml.MappingNode {
@@ -582,10 +598,10 @@ func parseConfigurations(node *yaml.Node) ([]ConstructorConfiguration, []constru
 			return nil, nil, invalid("config[%q] cannot be normalized", value)
 		}
 		configurations = append(configurations, ConstructorConfiguration{
-			constructor: constructor,
-			source:      source,
-			sourcePath:  "plystra.yaml",
-			yaml:        append([]byte(nil), data...),
+			constructor:       constructor,
+			source:            source,
+			declarationSource: declarationSource,
+			yaml:              append([]byte(nil), data...),
 		})
 	}
 	return configurations, removals, nil

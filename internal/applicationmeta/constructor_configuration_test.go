@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -12,6 +13,41 @@ import (
 )
 
 const constructorConfigurationSymbol = "example.com/acme/smtp.New"
+
+func TestComposeRetainsEveryDependencyConstructorConfigurationSource(t *testing.T) {
+	t.Parallel()
+
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
+		constructorConfigurationSymbol: composeSchema(t, "\tEndpoint string\n"),
+	})
+	dependencies := []applicationmeta.Dependency{
+		{ModulePath: "example.com/zeta", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {endpoint: shared.internal}}\n")},
+		{ModulePath: "example.com/alpha", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {endpoint: shared.internal}}\n")},
+	}
+	for _, ordered := range [][]applicationmeta.Dependency{dependencies, {dependencies[1], dependencies[0]}} {
+		composition, err := applicationmeta.Compose(ordered, composeManifest(t, "{}\n"), lookup)
+		if err != nil {
+			t.Fatalf("Compose: %v", err)
+		}
+		configured, exists := composition.Manifest().Configuration(mustConstructorSymbol(t, constructorConfigurationSymbol))
+		if !exists {
+			t.Fatal("composed dependency configuration is absent")
+		}
+		source := configured.DeclarationSource()
+		if source.ModulePath() != "example.com/alpha" || source.Path() != "plystra.yaml" || source.Line() != 1 || source.Column() != 1 {
+			t.Fatalf("representative dependency configuration source = %#v", source)
+		}
+		path := fmt.Sprintf("config[%q]", constructorConfigurationSymbol)
+		records := findProvenance(t, composition.ResolutionSources(), path)
+		wantSources := []string{
+			`example.com/alpha@v1.0.0/plystra.yaml config["example.com/acme/smtp.New"]`,
+			`example.com/zeta@v1.0.0/plystra.yaml config["example.com/acme/smtp.New"]`,
+		}
+		if len(records) != 1 || !reflect.DeepEqual(records[0].Sources(), wantSources) {
+			t.Fatalf("dependency configuration resolution sources = %#v, want %#v", provenanceStrings(records), wantSources)
+		}
+	}
+}
 
 func TestComposeNormalizesEveryCompiledConstructorConfigurationValue(t *testing.T) {
 	t.Parallel()

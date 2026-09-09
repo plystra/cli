@@ -942,8 +942,10 @@ Constructor-keyed configuration whose constructor is neither named by an
 effective `interfaces.use` choice nor reachable from an active Interface fails
 with `PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED`. Name that constructor in an
 effective choice, make it reachable through an Interface requirement, or remove
-the configuration object from the selected document; the diagnostic never
-prints configured values or Secret-reference targets.
+the configuration object from the selected document. The diagnostic reports
+every effective contributing Project document at `1:1` as a sorted
+`configuration-declaration` source; it never prints configured values or
+Secret-reference targets.
 
 The current `plystra check` implementation is read-only. It verifies the
 selected dependency composition and generated fixed point, then runs
