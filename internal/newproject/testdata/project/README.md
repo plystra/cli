@@ -81,6 +81,8 @@ Authored Implementation failures distinguish invalid directives, Config schemas,
 
 `plystra use` rejects malformed canonical Interface IDs with `PLYSTRA_USE_INTERFACE_INVALID` and malformed fully qualified constructor symbols with `PLYSTRA_USE_CONSTRUCTOR_INVALID` before Project mutation. Run the emitted corrected command with the same default, environment, or complete-replacement selection.
 
+`PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` identifies constructor-keyed configuration whose constructor has no discovered compiled same-package `Config` schema. Select a discovered constructor with one or remove the entry in the reported owning Project document. The diagnostic emits exactly one `configuration-declaration` source at `1:1` and never prints configured values, Secret-reference targets, absolute paths, or Module Cache paths.
+
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration whose constructor is neither named by an effective `interfaces.use` choice nor reachable from an active Interface. Name it in an effective choice, make it reachable through an Interface requirement, or remove its configuration from the selected document. The diagnostic reports every effective contributing Project document at `1:1` as a sorted `configuration-declaration` source and never prints configured values or Secret-reference targets.
 
 Interface and Implementation scaffold failures distinguish invalid or missing identities, unsafe package paths, and existing targets before mutation. Follow the emitted corrected command or replacement choice.

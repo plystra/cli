@@ -249,12 +249,67 @@ func TestComposeRejectsInvalidCompiledConstructorConfigurationValuesWithoutDiscl
 func TestComposeRejectsUnavailableConstructorConfigurationSchemaWithoutDisclosure(t *testing.T) {
 	t.Parallel()
 
-	const privateValue = "private-configuration-value"
-	manifest := composeManifest(t, "config: {example.com/acme/missing.New: {field: "+privateValue+"}}\n")
-	_, err := applicationmeta.Compose(nil, manifest, composeSchemaLookup(nil))
-	if !errors.Is(err, applicationmeta.ErrConfigurationSchema) || !strings.Contains(err.Error(), "example.com/acme/missing.New") || strings.Contains(err.Error(), privateValue) {
-		t.Fatalf("Compose missing schema error = %v", err)
+	const (
+		constructor  = "example.com/acme/missing.New"
+		privateValue = "private-configuration-value"
+	)
+	assertError := func(t *testing.T, err error, modulePath, sourcePath string) {
+		t.Helper()
+		var schemaError *applicationmeta.ConstructorConfigurationSchemaError
+		if !errors.As(err, &schemaError) || schemaError == nil || !errors.Is(err, applicationmeta.ErrConfigurationSchema) {
+			t.Fatalf("Compose missing schema error = %v", err)
+		}
+		if schemaError.Constructor().String() != constructor || schemaError.ModulePath() != modulePath || schemaError.SourcePath() != sourcePath || schemaError.SourceKind() != "configuration-declaration" || schemaError.Line() != 1 || schemaError.Column() != 1 {
+			t.Fatalf("constructor configuration schema error = %#v", schemaError)
+		}
+		if !strings.Contains(err.Error(), constructor) || strings.Contains(err.Error(), privateValue) {
+			t.Fatalf("Compose missing schema error disclosed a value or omitted its constructor: %v", err)
+		}
 	}
+
+	t.Run("current replacement value", func(t *testing.T) {
+		manifest, err := applicationmeta.ParseSource("deploy/customer.yaml", []byte("config: {"+constructor+": {field: "+privateValue+"}}\n"))
+		if err != nil {
+			t.Fatalf("ParseSource: %v", err)
+		}
+		manifest, err = applicationmeta.WithProjectModule(manifest, "example.com/application")
+		if err != nil {
+			t.Fatalf("WithProjectModule: %v", err)
+		}
+		_, err = applicationmeta.Compose(nil, manifest, composeSchemaLookup(nil))
+		assertError(t, err, "example.com/application", "deploy/customer.yaml")
+	})
+
+	t.Run("current environment removal", func(t *testing.T) {
+		manifest, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte("config: {"+constructor+": null}\n"))
+		if err != nil {
+			t.Fatalf("ParseOverlaySource: %v", err)
+		}
+		manifest, err = applicationmeta.WithProjectModule(manifest, "example.com/application")
+		if err != nil {
+			t.Fatalf("WithProjectModule: %v", err)
+		}
+		_, err = applicationmeta.Compose(nil, manifest, composeSchemaLookup(nil))
+		assertError(t, err, "example.com/application", "plystra.production.yaml")
+	})
+
+	t.Run("dependency value", func(t *testing.T) {
+		dependencyManifest := composeManifest(t, "config: {"+constructor+": {field: "+privateValue+"}}\n")
+		configured, exists := dependencyManifest.Configuration(mustConstructorSymbol(t, constructor))
+		if !exists || configured.DeclarationSource().ModulePath() != "" {
+			t.Fatalf("unexpected dependency fixture source = %#v, %t", configured.DeclarationSource(), exists)
+		}
+		_, err := applicationmeta.Compose([]applicationmeta.Dependency{{
+			ModulePath:    "example.com/dependency",
+			ModuleVersion: "v1.0.0",
+			Manifest:      dependencyManifest,
+		}}, composeManifest(t, "{}\n"), composeSchemaLookup(nil))
+		assertError(t, err, "example.com/dependency", "plystra.yaml")
+		configured, exists = dependencyManifest.Configuration(mustConstructorSymbol(t, constructor))
+		if !exists || configured.DeclarationSource().ModulePath() != "" {
+			t.Fatal("Compose mutated dependency manifest provenance")
+		}
+	})
 }
 
 func constructorConfigurationDecisionDigests(t testing.TB, manifest applicationmeta.Manifest, lookup applicationmeta.SchemaLookup) []string {

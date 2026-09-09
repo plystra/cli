@@ -120,7 +120,7 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			name:    "constructor configuration schema",
 			err:     fmt.Errorf("compose configuration: %w", applicationmeta.ErrConfigurationSchema),
 			context: commandRecoveryContext("", "test", nil),
-			want:    "Use the fully qualified symbol of a discovered constructor with a compiled Go Config schema in plystra.test.yaml, or remove that constructor configuration entry, then rerun the command.",
+			want:    "Correct the reported owning Project document by using the fully qualified symbol of a discovered constructor with a compiled Go Config schema, or remove that constructor configuration entry, then rerun the command.",
 			code:    diagnosticConstructorConfigurationSchemaInvalid,
 		},
 		{

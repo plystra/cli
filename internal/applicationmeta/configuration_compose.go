@@ -52,7 +52,9 @@ type constructorConfigCandidate struct {
 func composeConstructorConfigurations(dependencies []Dependency, current Manifest, schemas SchemaLookup, records map[string]*provenanceRecord) ([]ConstructorConfiguration, error) {
 	inherited := make(map[string]map[string]*constructorConfigCandidate)
 	for _, dependency := range dependencies {
-		decisions, err := manifestConfigDecisions(dependency.Manifest, schemas)
+		dependencyManifest := dependency.Manifest
+		dependencyManifest.modulePath = dependency.ModulePath
+		decisions, err := manifestConfigDecisions(dependencyManifest, schemas)
 		if err != nil {
 			return nil, fmt.Errorf("dependency %s: %w", dependencyIdentity(dependency), err)
 		}
@@ -138,34 +140,23 @@ func composeConstructorConfigurations(dependencies []Dependency, current Manifes
 func manifestConfigDecisions(manifest Manifest, schemas SchemaLookup) ([]constructorConfigDecision, error) {
 	var result []constructorConfigDecision
 	for _, configured := range manifest.Configurations() {
+		configured.declarationSource = completeConfigurationDeclarationSource(manifest, configured.declarationSource)
 		decisions, err := normalizeConstructorConfigDecisions(configured, schemas)
 		if err != nil {
 			return nil, err
 		}
-		declarationSource := configured.DeclarationSource()
-		if declarationSource.modulePath == "" {
-			declarationSource.modulePath = manifest.modulePath
-		}
-		if declarationSource.path == "" {
-			declarationSource.path = manifest.source
-		}
 		for index := range decisions {
-			decisions[index].declarationSource = declarationSource
+			decisions[index].declarationSource = configured.declarationSource
 		}
 		result = append(result, decisions...)
 	}
 	for _, removal := range manifest.removedConfigurations {
+		removal.declarationSource = completeConfigurationDeclarationSource(manifest, removal.declarationSource)
 		if _, exists := schemas(removal.constructor); !exists {
-			return nil, fmt.Errorf("%w for constructor %q at %s", ErrConfigurationSchema, removal.constructor, removal.source)
+			return nil, newConstructorConfigurationSchemaError(removal.constructor, removal.source, removal.declarationSource)
 		}
 		decision := newConstructorConfigDecision(removal.constructor, nil, constructorConfigRemoval, "", nil, removal.source)
 		decision.declarationSource = removal.declarationSource
-		if decision.declarationSource.modulePath == "" {
-			decision.declarationSource.modulePath = manifest.modulePath
-		}
-		if decision.declarationSource.path == "" {
-			decision.declarationSource.path = manifest.source
-		}
 		result = append(result, decision)
 	}
 	sort.Slice(result, func(left, right int) bool {
@@ -177,7 +168,7 @@ func manifestConfigDecisions(manifest Manifest, schemas SchemaLookup) ([]constru
 func normalizeConstructorConfigDecisions(configured ConstructorConfiguration, schemas SchemaLookup) ([]constructorConfigDecision, error) {
 	schema, exists := schemas(configured.constructor)
 	if !exists {
-		return nil, fmt.Errorf("%w for constructor %q at %s", ErrConfigurationSchema, configured.constructor, configured.source)
+		return nil, newConstructorConfigurationSchemaError(configured.constructor, configured.source, configured.declarationSource)
 	}
 	root, err := decodeNormalizedConfigNode(configured.yaml)
 	if err != nil || root.Kind != yaml.MappingNode {
@@ -207,6 +198,16 @@ func normalizeConstructorConfigDecisions(configured ConstructorConfiguration, sc
 		result = append(result, decisions...)
 	}
 	return result, nil
+}
+
+func completeConfigurationDeclarationSource(manifest Manifest, source ConfigurationDeclarationSource) ConfigurationDeclarationSource {
+	if source.modulePath == "" {
+		source.modulePath = manifest.modulePath
+	}
+	if source.path == "" {
+		source.path = manifest.source
+	}
+	return source
 }
 
 type constructorConfigNormalizeState struct {

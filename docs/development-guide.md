@@ -1996,6 +1996,11 @@ ordering for every Project document that contributed the prior inherited
 decision. It identifies the disappeared field and its prior module/version
 references without exposing the inherited value, a Secret-reference target, an
 absolute path, or a Module Cache path.
+An unavailable constructor configuration schema uses
+`PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
+current or dependency Project document as `configuration-declaration` at
+`1:1`. The problem identifies the constructor while configured values and
+Secret-reference targets remain redacted.
 
 Run that action with the same selected application model. Recovery commands
 retain default, environment, or complete-replacement mode, including selectors
@@ -2054,6 +2059,17 @@ Constructor discovery classifies each actionable authoring boundary separately:
 Apply the emitted recovery to the reported `Source:`. If the
 source belongs to a dependency Project, fix that owning Project or select a
 corrected dependency version; never edit the Module Cache copy.
+
+### Unavailable constructor configuration schema
+
+`PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` identifies a
+`config.<constructor-symbol>` entry whose constructor has no discovered
+compiled same-package `Config` schema. Select a discovered constructor with a
+compiled schema or remove the entry in the reported owning Project document.
+The diagnostic emits exactly one `configuration-declaration` source at `1:1`
+for the selected root, environment, complete-replacement, or dependency
+document. It exposes neither configured values nor Secret-reference targets,
+absolute paths, or Module Cache paths.
 
 ### Unowned constructor configuration
 

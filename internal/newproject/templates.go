@@ -111,6 +111,8 @@ Authored Implementation failures distinguish invalid directives, Config schemas,
 
 ` + "`plystra use`" + ` rejects malformed canonical Interface IDs with ` + "`PLYSTRA_USE_INTERFACE_INVALID`" + ` and malformed fully qualified constructor symbols with ` + "`PLYSTRA_USE_CONSTRUCTOR_INVALID`" + ` before Project mutation. Run the emitted corrected command with the same default, environment, or complete-replacement selection.
 
+` + "`PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID`" + ` identifies constructor-keyed configuration whose constructor has no discovered compiled same-package ` + "`Config`" + ` schema. Select a discovered constructor with one or remove the entry in the reported owning Project document. The diagnostic emits exactly one ` + "`configuration-declaration`" + ` source at ` + "`1:1`" + ` and never prints configured values, Secret-reference targets, absolute paths, or Module Cache paths.
+
 ` + "`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED`" + ` identifies constructor-keyed configuration whose constructor is neither named by an effective ` + "`interfaces.use`" + ` choice nor reachable from an active Interface. Name it in an effective choice, make it reachable through an Interface requirement, or remove its configuration from the selected document. The diagnostic reports every effective contributing Project document at ` + "`1:1`" + ` as a sorted ` + "`configuration-declaration`" + ` source and never prints configured values or Secret-reference targets.
 
 Interface and Implementation scaffold failures distinguish invalid or missing identities, unsafe package paths, and existing targets before mutation. Follow the emitted corrected command or replacement choice.
@@ -1432,8 +1434,9 @@ boundary.
 
 Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>
 Source: <module>:<module-relative-path>[:line:column] (<kind>)
-PLYSTRA_CONFIGURATION_INHERITED_CONFLICT / PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS:
-configuration-declaration. Redact absolute/cache paths and unsafe selectors; unknowns uncoded
+PLYSTRA_CONFIGURATION_INHERITED_CONFLICT and
+PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS use configuration-declaration.
+Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
 
 - PLYSTRA_PROJECT_MANIFEST_INVALID: project-marker; malformed 1:1; else no span
 - PLYSTRA_RESOLVE_UNKNOWN_INTERFACE: declaration, exposure, or implementation-selection; correct selected YAML.
@@ -1457,19 +1460,18 @@ configuration-declaration. Redact absolute/cache paths and unsafe selectors; unk
   PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
 - PLYSTRA_USE_INTERFACE_INVALID / PLYSTRA_USE_CONSTRUCTOR_INVALID: malformed
   Interface ID / constructor. Both precede mutation; Recovery retains selector.
-- PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: Lists every
-  configuration-declaration source; select, make reachable, or remove config.
-  Values and Secret targets are redacted.
-- Incompatible contract: compare request, response, closed fields, semantic
-  errors, typed semantics, and extension metadata. Implement the visible
-  contract or create a new version; never weaken validation.
+- PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID: reported config source
+  lacks a compiled Config schema; choose one with a schema or remove the entry.
+- PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: reported sources own config;
+  select or make its constructor reachable, or remove it. Values stay redacted.
+- Incompatible contract: compare the full typed contract and metadata. Implement
+  it or create a new version; never weaken validation.
 - Interface authoring codes:
   PLYSTRA_INTERFACE_DECLARATION_INVALID,
   PLYSTRA_INTERFACE_CONTRACT_INVALID,
   PLYSTRA_INTERFACE_METADATA_INVALID,
   PLYSTRA_INTERFACE_ID_DUPLICATE, and PLYSTRA_AUTHORING_PACKAGE_INVALID.
-  They identify directive, Go contract, metadata, visible-ID, and package-load
-  failures. Apply Recovery to Source in the owning Project, never Module Cache.
+  Apply Recovery to the owning Source, never Module Cache.
 - Scaffold-command codes:
   PLYSTRA_PLUGIN_CREATE_NAME_INVALID, PLYSTRA_PLUGIN_CREATE_ID_INVALID,
   PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS,
@@ -1478,7 +1480,7 @@ configuration-declaration. Redact absolute/cache paths and unsafe selectors; unk
   PLYSTRA_IMPLEMENTATION_CREATE_INTERFACE_INVALID,
   PLYSTRA_IMPLEMENTATION_CREATE_INTERFACE_NOT_FOUND,
   PLYSTRA_IMPLEMENTATION_CREATE_PACKAGE_INVALID, and
-  PLYSTRA_IMPLEMENTATION_CREATE_TARGET_EXISTS. They classify invalid or missing
+  PLYSTRA_IMPLEMENTATION_CREATE_TARGET_EXISTS. They reject invalid or missing
   identities, unsafe paths, and existing targets before mutation.
 - Implementation authoring codes, in validation order:
   PLYSTRA_IMPLEMENTATION_DECLARATION_INVALID,
@@ -1486,10 +1488,8 @@ configuration-declaration. Redact absolute/cache paths and unsafe selectors; unk
   PLYSTRA_IMPLEMENTATION_REQUIRED_INTERFACE_INVALID,
   PLYSTRA_IMPLEMENTATION_OPTIONAL_INTERFACE_INVALID,
   PLYSTRA_IMPLEMENTATION_RESULT_INVALID, and
-  PLYSTRA_IMPLEMENTATION_CONFORMANCE_INVALID. They identify the directive,
-  Config, required parameter, exact plystra.Optional[T] parameter, result, and
-  conformance boundary. Apply Recovery to Source; fix dependency
-  source in its owning Project or select a corrected version, never Module Cache.
+  PLYSTRA_IMPLEMENTATION_CONFORMANCE_INVALID. Apply Recovery to the owning
+  Source or select a corrected dependency version; never edit Module Cache.
 - Unavailable generated client: confirm assembly completed and avoid invoking
   application clients while constructors are still running before publication.
 - Invalid runtime configuration: compare the selected constructor symbol and

@@ -840,6 +840,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION",
 		"PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION",
 		"PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION",
+		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID",
 		"effective interfaces.use sources",
 		"implementation-selection",
 		"selected document entry to null",

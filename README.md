@@ -866,6 +866,11 @@ document provenance when a previously inherited field disappears from the
 current-Project document without an explicit typed removal. The diagnostic
 retains the exact field and prior contributor references while omitting the
 inherited value, Secret-reference target, and machine-specific path.
+`PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
+dependency Project document whose constructor-keyed configuration has no
+discovered compiled same-package `Config` schema. The source uses
+`configuration-declaration` at `1:1`; the problem identifies the constructor,
+while configured values and Secret-reference targets remain redacted.
 
 Configuration-selection failures use
 `PLYSTRA_CONFIGURATION_SELECTION_INVALID`. An explicit `--env` plus `--config`
@@ -937,6 +942,14 @@ classified before mutation.
 symbol with `PLYSTRA_USE_CONSTRUCTOR_INVALID`. Both failures occur before
 Project mutation, and their corrected command preserves the selected default,
 environment, or complete-replacement mode.
+
+Constructor-keyed configuration whose constructor has no discovered compiled
+same-package `Config` schema fails with
+`PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID`. Select a discovered
+constructor with a compiled schema or remove the configuration entry in the
+reported owning Project document. The diagnostic emits exactly one
+`configuration-declaration` source at `1:1` and never prints configured values,
+Secret-reference targets, absolute paths, or Module Cache paths.
 
 Constructor-keyed configuration whose constructor is neither named by an
 effective `interfaces.use` choice nor reachable from an active Interface fails

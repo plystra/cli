@@ -84,25 +84,42 @@ func (m ConfigurationMaintenance) LocalPaths() []string {
 // as current-project decisions and missing compatible dependency values are
 // introduced without overwriting them.
 func MaintainDependencyConfiguration(data []byte, previous DependencyBaseline, previousLocalPaths []string, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
-	return maintainDependencyConfiguration(data, nil, previous, previousLocalPaths, dependencies, schemas)
+	return maintainDependencyConfiguration(data, "", "", nil, previous, previousLocalPaths, dependencies, schemas)
+}
+
+// MaintainDependencyConfigurationSource performs dependency maintenance while
+// retaining the selected current-Project document's module-relative diagnostic
+// provenance.
+func MaintainDependencyConfigurationSource(data []byte, modulePath, sourcePath string, previous DependencyBaseline, previousLocalPaths []string, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
+	return maintainDependencyConfiguration(data, modulePath, sourcePath, nil, previous, previousLocalPaths, dependencies, schemas)
 }
 
 // MaintainDependencyConfigurationWithOverlay maintains only the shared root
 // document while allowing explicit sparse overlay decisions to resolve exact
 // inherited conflicts. Overlay values are never materialized into root data.
 func MaintainDependencyConfigurationWithOverlay(data []byte, overlay Manifest, previous DependencyBaseline, previousLocalPaths []string, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
-	return maintainDependencyConfiguration(data, &overlay, previous, previousLocalPaths, dependencies, schemas)
+	return maintainDependencyConfiguration(data, "", "", &overlay, previous, previousLocalPaths, dependencies, schemas)
 }
 
-func maintainDependencyConfiguration(data []byte, overlay *Manifest, previous DependencyBaseline, previousLocalPaths []string, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
+// MaintainDependencyConfigurationSourceWithOverlay performs root-document
+// dependency maintenance with module-relative diagnostic provenance while an
+// explicit sparse overlay resolves inherited conflicts.
+func MaintainDependencyConfigurationSourceWithOverlay(data []byte, modulePath, sourcePath string, overlay Manifest, previous DependencyBaseline, previousLocalPaths []string, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
+	return maintainDependencyConfiguration(data, modulePath, sourcePath, &overlay, previous, previousLocalPaths, dependencies, schemas)
+}
+
+func maintainDependencyConfiguration(data []byte, modulePath, sourcePath string, overlay *Manifest, previous DependencyBaseline, previousLocalPaths []string, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
 	if schemas == nil {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: schema lookup is nil", ErrMaintainConfiguration)
+	}
+	if (modulePath == "") != (sourcePath == "") {
+		return ConfigurationMaintenance{}, fmt.Errorf("%w: diagnostic module and source path must be provided together", ErrMaintainConfiguration)
 	}
 	previousLocal, err := validatePreviousLocalPaths(previous, previousLocalPaths)
 	if err != nil {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: %w", ErrMaintainConfiguration, err)
 	}
-	currentManifest, err := Parse(data)
+	currentManifest, err := parseMaintenanceManifest(data, modulePath, sourcePath)
 	if err != nil {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: current Project configuration: %w", ErrMaintainConfiguration, err)
 	}
@@ -212,7 +229,7 @@ func maintainDependencyConfiguration(data []byte, overlay *Manifest, previous De
 	if len(updated) > MaximumSize {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: updated Project configuration exceeds %d bytes", ErrMaintainConfiguration, MaximumSize)
 	}
-	afterManifest, err := Parse(updated)
+	afterManifest, err := parseMaintenanceManifest(updated, modulePath, sourcePath)
 	if err != nil {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: validate updated Project configuration: %w", ErrMaintainConfiguration, err)
 	}
@@ -231,6 +248,17 @@ func maintainDependencyConfiguration(data []byte, overlay *Manifest, previous De
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: updated Project configuration changed current-project process settings", ErrMaintainConfiguration)
 	}
 	return ConfigurationMaintenance{data: append([]byte(nil), updated...), localPaths: localPaths, changed: !bytes.Equal(data, updated)}, nil
+}
+
+func parseMaintenanceManifest(data []byte, modulePath, sourcePath string) (Manifest, error) {
+	if modulePath == "" {
+		return Parse(data)
+	}
+	manifest, err := ParseSource(sourcePath, data)
+	if err != nil {
+		return Manifest{}, err
+	}
+	return WithProjectModule(manifest, modulePath)
 }
 
 func validatePreviousLocalPaths(previous DependencyBaseline, paths []string) (map[string]struct{}, error) {
@@ -432,7 +460,9 @@ func dependencyMaintenanceCandidates(dependencies []Dependency, schemas SchemaLo
 	})
 	result := make(map[string]map[string]*maintenanceCandidate)
 	for _, dependency := range ordered {
-		decisions, err := maintenanceDecisions(dependency.Manifest, schemas)
+		dependencyManifest := dependency.Manifest
+		dependencyManifest.modulePath = dependency.ModulePath
+		decisions, err := maintenanceDecisions(dependencyManifest, schemas)
 		if err != nil {
 			return nil, fmt.Errorf("dependency %s: %w", dependencyIdentity(dependency), err)
 		}

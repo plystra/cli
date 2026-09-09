@@ -310,9 +310,9 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	var maintenance applicationmeta.ConfigurationMaintenance
 	if selector.mode == configurationModeEnvironment {
-		maintenance, err = applicationmeta.MaintainDependencyConfigurationWithOverlay(maintenanceSnapshot.data, selectedManifest, previousBaseline, previousLocalPaths, dependencyManifests, schemaLookup)
+		maintenance, err = applicationmeta.MaintainDependencyConfigurationSourceWithOverlay(maintenanceSnapshot.data, module.ModulePath(), maintenanceSnapshot.path, selectedManifest, previousBaseline, previousLocalPaths, dependencyManifests, schemaLookup)
 	} else {
-		maintenance, err = applicationmeta.MaintainDependencyConfiguration(maintenanceSnapshot.data, previousBaseline, previousLocalPaths, dependencyManifests, schemaLookup)
+		maintenance, err = applicationmeta.MaintainDependencyConfigurationSource(maintenanceSnapshot.data, module.ModulePath(), maintenanceSnapshot.path, previousBaseline, previousLocalPaths, dependencyManifests, schemaLookup)
 	}
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)

@@ -155,6 +155,8 @@ diagnostic.
 PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
 Project plystra.yaml as a project-marker source. Malformed readable documents
 use 1:1; unsafe or unreadable markers omit the unavailable span.
+PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID reports the owning config
+document at 1:1 as a configuration-declaration source without values.
 PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED reports every effective
 contributing config document at 1:1 as a configuration-declaration source
 without values.
@@ -178,12 +180,14 @@ and the two flags cannot be combined. Relative configuration paths are resolved
 from the detected Plystra Project root. Root plystra.yaml remains mandatory and
 is not merged beneath --config. Invalid or conflicting selections emit the
 stable PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
-Inherited configuration conflicts, ambiguous ownership, and unselected
-constructor configuration failures emit module-relative
+Inherited configuration conflicts, ambiguous ownership, and invalid or
+unselected constructor configuration failures emit module-relative
 configuration-declaration sources before selector-aware recovery.
 PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
 Project plystra.yaml as a project-marker source. Malformed readable documents
 use 1:1; unsafe or unreadable markers omit the unavailable span.
+PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID reports the owning config
+document at 1:1 as a configuration-declaration source without values.
 PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED reports every effective
 contributing config document at 1:1 as a configuration-declaration source
 without values.

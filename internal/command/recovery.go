@@ -347,6 +347,18 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: source.Column,
 			})
 		}
+	case diagnosticConstructorConfigurationSchemaInvalid:
+		var located diagnosticSourceLocation
+		if !errors.As(err, &located) || located == nil || located.SourceKind() != "configuration-declaration" {
+			return nil
+		}
+		sources = append(sources, diagnosticjson.Source{
+			Module: located.ModulePath(),
+			Path:   located.SourcePath(),
+			Kind:   located.SourceKind(),
+			Line:   located.Line(),
+			Column: located.Column(),
+		})
 	case diagnosticProjectManifestInvalid:
 		var located diagnosticSourceLocation
 		if !errors.As(err, &located) || located == nil || located.SourceKind() != "project-marker" {
@@ -883,7 +895,7 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, applicationmeta.ErrHTTPTransportSelection):
 		return recoveryDiagnostic(diagnosticHTTPTransportSelectionInvalid, "Enable a supported transport in "+context.configurationTarget()+" or remove the public exposure, then regenerate.")
 	case errors.Is(err, applicationmeta.ErrConfigurationSchema):
-		return recoveryDiagnostic(diagnosticConstructorConfigurationSchemaInvalid, "Use the fully qualified symbol of a discovered constructor with a compiled Go Config schema in "+context.configurationTarget()+", or remove that constructor configuration entry, then rerun the command.")
+		return recoveryDiagnostic(diagnosticConstructorConfigurationSchemaInvalid, "Correct the reported owning Project document by using the fully qualified symbol of a discovered constructor with a compiled Go Config schema, or remove that constructor configuration entry, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrConfigurationValues):
 		return recoveryDiagnostic(diagnosticConstructorConfigurationValuesInvalid, "Correct the reported constructor configuration field in "+context.configurationTarget()+" to match its compiled Go Config field type, then rerun the command.")
 	case errors.Is(err, applicationresolve.ErrUnownedConstructorConfiguration):
