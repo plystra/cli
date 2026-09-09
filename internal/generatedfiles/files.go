@@ -60,6 +60,40 @@ type Report struct {
 	changes []Change
 }
 
+// OwnershipConflictError reports the canonical desired path occupied by
+// unowned bytes or a non-regular filesystem entry.
+type OwnershipConflictError struct {
+	path        string
+	description string
+}
+
+// Path returns the slash-separated application-relative conflicting path.
+func (e *OwnershipConflictError) Path() string {
+	if e == nil {
+		return ""
+	}
+	return e.path
+}
+
+func (e *OwnershipConflictError) Error() string {
+	if e == nil || e.path == "" || e.description == "" {
+		return ErrConflict.Error()
+	}
+	return fmt.Sprintf("%s: desired path %s %s", ErrConflict, e.path, e.description)
+}
+
+// Unwrap preserves the established ownership-conflict sentinel.
+func (e *OwnershipConflictError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return ErrConflict
+}
+
+func newOwnershipConflictError(filePath, description string) error {
+	return &OwnershipConflictError{path: filePath, description: description}
+}
+
 // UnexpectedOutputError reports the canonical unowned paths that a strict
 // installation refused to retain beside newly generated output.
 type UnexpectedOutputError struct {
@@ -189,11 +223,11 @@ func install(rootPath string, output Output, additional []atomicfs.Write, valida
 		case !exists:
 			writes = append(writes, atomicfs.Write{Path: file.path, Data: file.data, MustNotExist: true})
 		case !actual.mode.IsRegular() || actual.mode&fs.ModeSymlink != 0:
-			return state.report, fmt.Errorf("%w: %w: desired path %s is not a regular file", ErrInstall, ErrConflict, file.path)
+			return state.report, fmt.Errorf("%w: %w", ErrInstall, newOwnershipConflictError(file.path, "is not a regular file"))
 		case bytes.Equal(actual.data, file.data):
 			// Identical legacy or unowned output can be adopted without mutation.
 		case state.previous[file.path] == "":
-			return state.report, fmt.Errorf("%w: %w: desired path %s already contains different unowned bytes", ErrInstall, ErrConflict, file.path)
+			return state.report, fmt.Errorf("%w: %w", ErrInstall, newOwnershipConflictError(file.path, "already contains different unowned bytes"))
 		default:
 			writes = append(writes, atomicfs.Write{Path: file.path, Data: file.data, ExpectedData: actual.data})
 		}

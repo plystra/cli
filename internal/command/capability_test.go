@@ -720,6 +720,57 @@ func TestRunCapabilityRejectsUnexpectedGeneratedOutput(t *testing.T) {
 	assertNoCommandTransactions(t, root)
 }
 
+func TestRunCapabilityRejectsGeneratedOwnershipConflict(t *testing.T) {
+	root := writeCapabilityCommandModule(t)
+	environment := commandGoEnvironment()
+	const conflictPath = "generated/go/application/main_gen.go"
+	writeCommandFile(t, filepath.Join(root, filepath.FromSlash(conflictPath)), "user-owned\n")
+
+	runAndAssert := func(name string, arguments []string, workingDirectory, recovery string) {
+		t.Helper()
+		before := commandTree(t, root)
+		exitCode, stdout, stderr := runCommand(t, arguments, workingDirectory, environment)
+		wantSuffix := "\n\nSource: example.com/acme/library:" + conflictPath + " (generated-artifact)\n\n" +
+			"Recovery:\n" + recovery + "\n\nDiagnostic: " + diagnosticcode.GeneratedOwnershipConflict + "\n"
+		if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "managed generated path conflicts with unowned file") || !strings.Contains(stderr, conflictPath) || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+			t.Fatalf("%s = exit %d, stdout %q, stderr %q", name, exitCode, stdout, stderr)
+		}
+		if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+			t.Fatalf("%s changed Project:\nbefore: %#v\nafter:  %#v", name, before, after)
+		}
+		assertNoCommandTransactions(t, root)
+	}
+
+	runAndAssert(
+		"ownership-conflict capability create",
+		[]string{"capability", "create", "records.create", "--query", "--expose", "--plugin", "records"},
+		root,
+		"Move the reported unowned path outside generated/, then run `plystra generate`.",
+	)
+	runAndAssert(
+		"ownership-conflict capability expose",
+		[]string{"capability", "expose", "kernel.health/v1"},
+		root,
+		"Move the reported unowned path outside generated/, then run `plystra generate`.",
+	)
+
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "# Production-only exposure.\n{}\n")
+	runAndAssert(
+		"ownership-conflict environment expose",
+		[]string{"capability", "expose", "kernel.health/v1", "--env", "production"},
+		filepath.Join(root, "records"),
+		"Move the reported unowned path outside generated/, then run `plystra generate --env \"production\"`.",
+	)
+
+	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), "# Complete replacement.\n{}\n")
+	runAndAssert(
+		"ownership-conflict replacement expose",
+		[]string{"capability", "expose", "kernel.health/v1", "--config", "deploy/customer.yaml"},
+		filepath.Join(root, "records"),
+		"Move the reported unowned path outside generated/, then run `plystra generate --config \"deploy/customer.yaml\"`.",
+	)
+}
+
 func writeCapabilityCommandModule(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()

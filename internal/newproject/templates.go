@@ -109,7 +109,7 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT`" + ` reports the maintained current-Project configuration document at ` + "`1:1`" + ` as a ` + "`configuration-declaration`" + ` source when dependency composition would change it. Default and environment-overlay checks identify root ` + "`plystra.yaml`" + `; complete-replacement checks identify the selected document. Check modes are read-only; normal generation applies the maintenance change transactionally.
 
-` + "`PLYSTRA_GENERATED_DRIFT`" + ` reports every stale, missing, or manually modified managed path as a sorted ` + "`generated-artifact`" + ` source in the current Project module. These path-only facts omit line and column rather than inventing a span. Regenerate with the same selection instead of editing owned output. ` + "`PLYSTRA_GENERATED_UNEXPECTED_OUTPUT`" + ` reports every unexpected unowned path as a sorted ` + "`generated-artifact`" + ` source, also without a fabricated span. Move each reported path outside ` + "`generated/`" + `, then rerun generation with the same selection; strict compound mutations remain rolled back until those paths are moved.
+` + "`PLYSTRA_GENERATED_DRIFT`" + ` reports every stale, missing, or manually modified managed path as a sorted ` + "`generated-artifact`" + ` source in the current Project module. These path-only facts omit line and column rather than inventing a span. Regenerate with the same selection instead of editing owned output. ` + "`PLYSTRA_GENERATED_OWNERSHIP_CONFLICT`" + ` reports the single desired managed path occupied by different unowned bytes or a non-regular entry as a ` + "`generated-artifact`" + ` source, without a fabricated span. Move the reported entry outside ` + "`generated/`" + `, then rerun generation with the same selection; it is never overwritten. ` + "`PLYSTRA_GENERATED_UNEXPECTED_OUTPUT`" + ` reports every unexpected unowned path as a sorted ` + "`generated-artifact`" + ` source. Move each reported path outside ` + "`generated/`" + `; strict compound mutations remain rolled back until those paths are moved.
 
 ` + "`PLYSTRA_GO_MODULE_INVALID`" + ` reports the exact current-Project ` + "`go.mod`" + ` module or requirement position as a ` + "`module-dependency`" + ` source once Project identity is valid. Correct that declaration; a file that cannot establish a trustworthy module identity receives no invented source.
 
@@ -1480,8 +1480,8 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   fix schema or safe field at Source; values stay redacted.
 - PLYSTRA_CONFIGURATION_INVALID / PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
 - PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT: fix Source.
-- PLYSTRA_GENERATED_DRIFT / PLYSTRA_GENERATED_UNEXPECTED_OUTPUT: generated-artifact Sources;
-  regenerate managed paths, move unexpected paths.
+- PLYSTRA_GENERATED_DRIFT / PLYSTRA_GENERATED_OWNERSHIP_CONFLICT /
+  PLYSTRA_GENERATED_UNEXPECTED_OUTPUT: regenerate or move generated-artifact Sources.
 - PLYSTRA_GO_MODULE_INVALID: fix exact go.mod Source.
 - PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: go.mod module-dependency; generate repairs
   Kernel/runtime requirements; checks are read-only.

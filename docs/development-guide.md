@@ -2019,6 +2019,11 @@ maintenance change transactionally.
 managed path as a sorted `generated-artifact` source in the current Project
 module. These path-only facts omit line and column rather than inventing a span.
 Regenerate with the same selection instead of editing owned output.
+`PLYSTRA_GENERATED_OWNERSHIP_CONFLICT` emits the single desired managed path
+occupied by different unowned bytes or a non-regular entry as a
+`generated-artifact` source in the current Project module, without a fabricated
+span. Move the reported entry outside `generated/`, then rerun generation with
+the same selection; the existing entry is never overwritten.
 `PLYSTRA_GENERATED_UNEXPECTED_OUTPUT` emits every unexpected unowned path as a
 sorted `generated-artifact` source in the current Project module, also without
 a fabricated span. Move each reported path outside `generated/`, then rerun

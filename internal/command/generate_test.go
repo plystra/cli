@@ -232,6 +232,25 @@ replace github.com/plystra/kernel => %s
 	assertNoCommandTransactions(t, root)
 }
 
+func TestRunGenerateReportsOwnershipConflictSourceWithoutMutation(t *testing.T) {
+	root := writeCapabilityCommandModule(t)
+	const conflictPath = "generated/go/application/main_gen.go"
+	writeCommandFile(t, filepath.Join(root, filepath.FromSlash(conflictPath)), "user-owned\n")
+	before := commandTree(t, root)
+
+	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, filepath.Join(root, "records"), commandGoEnvironment())
+	wantSuffix := "\n\nSource: example.com/acme/library:" + conflictPath + " (generated-artifact)\n\n" +
+		"Recovery:\nMove the reported unowned path outside generated/, then run `plystra generate`.\n\n" +
+		"Diagnostic: " + diagnosticcode.GeneratedOwnershipConflict + "\n"
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "managed generated path conflicts with unowned file") || !strings.Contains(stderr, "already contains different unowned bytes") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+		t.Fatalf("ownership-conflict generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("ownership-conflict generate changed Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoCommandTransactions(t, root)
+}
+
 func TestRunGenerateProjectsAuthoredInterfaceMessages(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)

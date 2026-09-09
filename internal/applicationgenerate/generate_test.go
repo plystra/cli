@@ -267,6 +267,69 @@ func TestGenerateStrictUnexpectedOutputCarriesProjectRelativeSources(t *testing.
 	assertNoTransactions(t, root)
 }
 
+func TestGenerateOwnershipConflictCarriesProjectRelativeSource(t *testing.T) {
+	t.Parallel()
+
+	const (
+		modulePath   = "example.com/acme/ownership-conflict-source"
+		conflictPath = "generated/go/application/main_gen.go"
+	)
+	tests := []struct {
+		name  string
+		setup func(testing.TB, string)
+	}{
+		{
+			name: "different unowned bytes",
+			setup: func(t testing.TB, root string) {
+				writeFile(t, filepath.Join(root, filepath.FromSlash(conflictPath)), "user-owned\n")
+			},
+		},
+		{
+			name: "non-regular entry",
+			setup: func(t testing.TB, root string) {
+				if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(conflictPath)), 0o755); err != nil {
+					t.Fatalf("MkdirAll(%s): %v", conflictPath, err)
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeApplicationModule(t, root, modulePath)
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+			test.setup(t, root)
+			before := snapshotTree(t, root)
+
+			_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+				Start:       root,
+				Environment: goEnvironment(nil),
+				Validate:    func(_ context.Context, _ string) error { return nil },
+			})
+			if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, generatedfiles.ErrInstall) || !errors.Is(err, generatedfiles.ErrConflict) {
+				t.Fatalf("generation ownership conflict = %v", err)
+			}
+			var conflict *generatedfiles.OwnershipConflictError
+			if !errors.As(err, &conflict) || conflict.Path() != conflictPath {
+				t.Fatalf("generated-file ownership conflict = %#v, %v", conflict, err)
+			}
+			var source *applicationgenerate.OwnershipConflictSourceError
+			if !errors.As(err, &source) || source.ModulePath() != modulePath || source.SourcePath() != conflictPath || source.SourceKind() != "generated-artifact" || source.Line() != 0 || source.Column() != 0 {
+				t.Fatalf("generation ownership-conflict source = %#v, %v", source, err)
+			}
+			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("generation ownership conflict exposed the Project path: %v", err)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("generation ownership conflict changed the Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			assertNoTransactions(t, root)
+		})
+	}
+}
+
 func TestGenerateRecordsDormantSelectionOnlyInConfigurationProvenance(t *testing.T) {
 	t.Parallel()
 

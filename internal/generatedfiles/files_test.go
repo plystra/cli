@@ -755,8 +755,9 @@ func TestInstallRejectsDifferentUnownedCollisionAndAdoptsIdenticalFile(t *testin
 	t.Run("different", func(t *testing.T) {
 		t.Parallel()
 		root := t.TempDir()
-		writeFile(t, root, "generated/go/alias.go", "user file")
-		output := managedOutput(t, "generated/go/alias.go", "generated")
+		const conflictPath = "generated/go/alias.go"
+		writeFile(t, root, conflictPath, "user file")
+		output := managedOutput(t, conflictPath, "generated")
 		validated := false
 		_, err := generatedfiles.Install(root, output, func(string) error {
 			validated = true
@@ -765,10 +766,43 @@ func TestInstallRejectsDifferentUnownedCollisionAndAdoptsIdenticalFile(t *testin
 		if !errors.Is(err, generatedfiles.ErrInstall) || !errors.Is(err, generatedfiles.ErrConflict) {
 			t.Fatalf("Install error = %v", err)
 		}
+		var conflict *generatedfiles.OwnershipConflictError
+		if !errors.As(err, &conflict) || conflict.Path() != conflictPath {
+			t.Fatalf("Install ownership conflict = %#v, %v", conflict, err)
+		}
 		if validated {
 			t.Fatal("validation ran for unowned collision")
 		}
-		assertFile(t, root, "generated/go/alias.go", "user file")
+		assertFile(t, root, conflictPath, "user file")
+		assertMissing(t, root, generatedfiles.ManifestPath)
+		assertNoTransaction(t, root)
+	})
+
+	t.Run("non-regular", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		const conflictPath = "generated/go/alias.go"
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(conflictPath)), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", conflictPath, err)
+		}
+		validated := false
+		_, err := generatedfiles.Install(root, managedOutput(t, conflictPath, "generated"), func(string) error {
+			validated = true
+			return nil
+		})
+		if !errors.Is(err, generatedfiles.ErrInstall) || !errors.Is(err, generatedfiles.ErrConflict) {
+			t.Fatalf("Install error = %v", err)
+		}
+		var conflict *generatedfiles.OwnershipConflictError
+		if !errors.As(err, &conflict) || conflict.Path() != conflictPath || !strings.Contains(err.Error(), "is not a regular file") {
+			t.Fatalf("Install ownership conflict = %#v, %v", conflict, err)
+		}
+		if validated {
+			t.Fatal("validation ran for non-regular collision")
+		}
+		if info, statErr := os.Lstat(filepath.Join(root, filepath.FromSlash(conflictPath))); statErr != nil || !info.IsDir() {
+			t.Fatalf("conflicting directory changed: %v, %v", info, statErr)
+		}
 		assertMissing(t, root, generatedfiles.ManifestPath)
 		assertNoTransaction(t, root)
 	})

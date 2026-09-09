@@ -540,7 +540,7 @@ Capability identities use `<capability-name>/v<number>`. Names contain at least 
 
 Capability creation and implementation update schemas, `plugin.yaml`, generated contracts, providers, clients, application invocation, adapters, assembly, SDKs, docs, and manifests in one transaction. Existing user implementations are never overwritten.
 
-Plugin and Capability mutations reject unexpected unowned or manually modified prior-owned files under `generated/`. They report the conflicting paths as module-relative `generated-artifact` sources, preserve those files, and roll back every CLI-owned declaration, source, module-metadata, and generated-output change instead of returning success beside immediate generation drift.
+Plugin and Capability mutations reject desired-path ownership conflicts, unexpected unowned files, and manually modified prior-owned files under `generated/`. They report the conflicting paths as module-relative `generated-artifact` sources, preserve those entries, and roll back every CLI-owned declaration, source, module-metadata, and generated-output change instead of returning success beside immediate generation drift.
 
 Create a genuinely new Capability identity from inside the target plugin, from a single-plugin module, or with an explicit target by choosing an intent profile:
 
@@ -889,6 +889,11 @@ maintenance change transactionally.
 managed path as a sorted `generated-artifact` source in the current Project
 module. These path-only facts omit line and column rather than inventing a span.
 Regenerate with the same selection instead of editing owned output.
+`PLYSTRA_GENERATED_OWNERSHIP_CONFLICT` emits the single desired managed path
+occupied by different unowned bytes or a non-regular entry as a
+`generated-artifact` source in the current Project module, without a fabricated
+span. Move the reported entry outside `generated/`, then rerun generation with
+the same selection; the existing entry is never overwritten.
 `PLYSTRA_GENERATED_UNEXPECTED_OUTPUT` emits every unexpected unowned path as a
 sorted `generated-artifact` source in the current Project module, also without
 a fabricated span. Move each reported path outside `generated/`, then rerun

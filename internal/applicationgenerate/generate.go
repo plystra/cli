@@ -282,6 +282,10 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		if errors.Is(err, atomicfs.ErrConcurrentChange) && !errors.Is(err, ErrConcurrentChange) {
 			err = errors.Join(ErrConcurrentChange, err)
 		}
+		var conflict *generatedfiles.OwnershipConflictError
+		if errors.As(err, &conflict) && conflict != nil {
+			err = ownershipConflictSourceError(prepared.resolved.Module().ModulePath(), conflict.Path(), err)
+		}
 		var unexpected *generatedfiles.UnexpectedOutputError
 		if errors.As(err, &unexpected) && unexpected != nil {
 			err = unexpectedOutputSourceError(prepared.resolved.Module().ModulePath(), unexpected.Paths(), err)

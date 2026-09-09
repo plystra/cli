@@ -1249,8 +1249,8 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   fix schema or safe field at Source; values stay redacted.
 - PLYSTRA_CONFIGURATION_INVALID / PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
 - PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT: fix Source.
-- PLYSTRA_GENERATED_DRIFT / PLYSTRA_GENERATED_UNEXPECTED_OUTPUT: generated-artifact Sources;
-  regenerate managed paths, move unexpected paths.
+- PLYSTRA_GENERATED_DRIFT / PLYSTRA_GENERATED_OWNERSHIP_CONFLICT /
+  PLYSTRA_GENERATED_UNEXPECTED_OUTPUT: regenerate or move generated-artifact Sources.
 - PLYSTRA_GO_MODULE_INVALID: fix exact go.mod Source.
 - PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: go.mod module-dependency; generate repairs
   Kernel/runtime requirements; checks are read-only.

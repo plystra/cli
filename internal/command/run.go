@@ -55,10 +55,10 @@ const (
 Common actionable failures end with one Recovery block containing the primary
 command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
 Typed source-bearing failures, including invalid Project and Go Module
-declarations, current-Project configuration-composition and generated-artifact
-drift, application module dependency drift, invalid explicit choices, and
-missing, ambiguous, or cyclic Interface Implementation resolution, add
-canonical module-relative Source lines first.
+declarations, current-Project configuration-composition, generated-output
+conflicts and drift, application module dependency drift, invalid explicit
+choices, and missing, ambiguous, or cyclic Interface Implementation resolution,
+add canonical module-relative Source lines first.
 `
 	addUsage = `Usage:
   plystra add <go-module-query>
@@ -167,6 +167,9 @@ PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at
 1:1 as a configuration-declaration source before selector-aware recovery.
 PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT reports the maintained current-Project
 configuration document at 1:1 as a configuration-declaration source.
+PLYSTRA_GENERATED_OWNERSHIP_CONFLICT reports the desired managed path occupied
+by different unowned bytes or a non-regular entry as a generated-artifact source
+without a fabricated span.
 PLYSTRA_GENERATED_DRIFT reports each stale, missing, or manually modified
 managed path as a generated-artifact source without a fabricated span.
 PLYSTRA_GENERATED_UNEXPECTED_OUTPUT reports each unexpected unowned path as a
@@ -217,6 +220,9 @@ PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at
 1:1 as a configuration-declaration source before selector-aware recovery.
 PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT reports the maintained current-Project
 configuration document at 1:1 as a configuration-declaration source.
+PLYSTRA_GENERATED_OWNERSHIP_CONFLICT reports the desired managed path occupied
+by different unowned bytes or a non-regular entry as a generated-artifact source
+without a fabricated span.
 PLYSTRA_GENERATED_DRIFT reports each stale, missing, or manually modified
 managed path as a generated-artifact source without a fabricated span.
 PLYSTRA_GENERATED_UNEXPECTED_OUTPUT reports each unexpected unowned path as a

@@ -380,7 +380,7 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	if len(skill) > 64<<10 {
 		t.Fatalf("maximum-length Project skill = %d bytes, want at most %d", len(skill), 64<<10)
 	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATED_DRIFT")) || !bytes.Contains(skill, []byte("PLYSTRA_GENERATED_UNEXPECTED_OUTPUT")) || !bytes.Contains(skill, []byte("generated-artifact Sources")) {
+	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATED_DRIFT")) || !bytes.Contains(skill, []byte("PLYSTRA_GENERATED_OWNERSHIP_CONFLICT")) || !bytes.Contains(skill, []byte("PLYSTRA_GENERATED_UNEXPECTED_OUTPUT")) || !bytes.Contains(skill, []byte("generated-artifact Sources")) {
 		t.Fatal("maximum-length Project skill omits generated-output source guidance")
 	}
 }
@@ -1156,6 +1156,7 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_ENVIRONMENT_OVERLAY_INVALID` reports the selected"),
 		[]byte("`PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT` reports the maintained"),
 		[]byte("`PLYSTRA_GENERATED_DRIFT` reports every stale, missing, or manually modified"),
+		[]byte("`PLYSTRA_GENERATED_OWNERSHIP_CONFLICT` reports the single desired managed path"),
 		[]byte("`PLYSTRA_GENERATED_UNEXPECTED_OUTPUT` reports every unexpected unowned path"),
 		[]byte("`generated-artifact` source"),
 		[]byte("Kernel is missing or only transitive"),
@@ -2217,6 +2218,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_ENVIRONMENT_OVERLAY_INVALID",
 		"PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT",
 		"PLYSTRA_GENERATED_DRIFT",
+		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
 		"generated-artifact Sources",
 		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED",
@@ -2475,6 +2477,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_ENVIRONMENT_OVERLAY_INVALID",
 		"PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT",
 		"PLYSTRA_GENERATED_DRIFT",
+		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
 		"generated-artifact",
 		"PLYSTRA_GO_MODULE_INVALID",

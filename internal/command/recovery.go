@@ -390,6 +390,16 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			Line:   located.Line(),
 			Column: located.Column(),
 		})
+	case diagnosticGeneratedOwnershipConflict:
+		var conflict *applicationgenerate.OwnershipConflictSourceError
+		if !errors.As(err, &conflict) || conflict == nil {
+			return nil
+		}
+		sources = append(sources, diagnosticjson.Source{
+			Module: conflict.ModulePath(),
+			Path:   conflict.SourcePath(),
+			Kind:   conflict.SourceKind(),
+		})
 	case diagnosticGeneratedUnexpectedOutput:
 		var unexpected *applicationgenerate.UnexpectedOutputSourceError
 		if !errors.As(err, &unexpected) || unexpected == nil {
