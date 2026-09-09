@@ -927,6 +927,60 @@ func TestResolveRequiresSelectedEnvironmentOverlay(t *testing.T) {
 	}
 }
 
+func TestResolveReportsMalformedSelectedConfigurationSource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		path      string
+		configure func(*applicationresolve.Options)
+	}{
+		{
+			name: "environment",
+			path: "plystra.production.yaml",
+			configure: func(options *applicationresolve.Options) {
+				options.EnvironmentName = "production"
+			},
+		},
+		{
+			name: "explicit",
+			path: "deploy/customer.yaml",
+			configure: func(options *applicationresolve.Options) {
+				options.ConfigurationPath = "deploy/customer.yaml"
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeModule(t, root, "example.com/application")
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+			writeFile(t, filepath.Join(root, filepath.FromSlash(test.path)), "unknown: true\n")
+			before := snapshotTree(t, root)
+			options := applicationresolve.Options{
+				Start:       root,
+				Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+			}
+			test.configure(&options)
+			_, err := applicationresolve.Resolve(t.Context(), options)
+			var source *applicationresolve.ManifestSourceError
+			if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrConfigurationSelection) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !errors.As(err, &source) || source == nil || !strings.Contains(err.Error(), `unknown key "unknown"`) {
+				t.Fatalf("Resolve malformed selected configuration = %v", err)
+			}
+			if source.ModulePath() != "example.com/application" || source.SourcePath() != test.path || source.SourceKind() != "configuration-declaration" || source.Line() != 1 || source.Column() != 1 {
+				t.Fatalf("selected configuration source = %#v", source)
+			}
+			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("selected configuration error exposed Project root %q: %v", root, err)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("malformed selected configuration mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
 func TestResolveDerivesExposureFromEverySelectedConfigurationMode(t *testing.T) {
 	t.Parallel()
 

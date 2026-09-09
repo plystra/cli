@@ -7,11 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/plystra/cli/internal/applicationmeta"
 )
 
 func TestSelectConfigurationTargetUsesResolutionSelectorAndParserRules(t *testing.T) {
 	t.Parallel()
 
+	const modulePath = "example.com/application"
 	root := t.TempDir()
 	files := map[string]string{
 		"plystra.yaml":            "http:\n  cors:\n    allowed_origins: [https://app.example.com]\n",
@@ -28,7 +31,7 @@ func TestSelectConfigurationTargetUsesResolutionSelectorAndParserRules(t *testin
 		}
 	}
 
-	defaultTarget, err := SelectConfigurationTarget(root, "", "", []string{"UNRELATED=value"})
+	defaultTarget, err := SelectConfigurationTarget(modulePath, root, "", "", []string{"UNRELATED=value"})
 	if err != nil || defaultTarget.Selection().Mode() != configurationModeDefault || defaultTarget.Selection().Path() != "plystra.yaml" || defaultTarget.Selection().Digest() == "" || defaultTarget.EnvironmentOverlay() {
 		t.Fatalf("default target = %#v, %v", defaultTarget.Selection(), err)
 	}
@@ -36,17 +39,58 @@ func TestSelectConfigurationTargetUsesResolutionSelectorAndParserRules(t *testin
 		t.Fatalf("default snapshot = %q", got)
 	}
 
-	environmentTarget, err := SelectConfigurationTarget(root, "", "", []string{"PLYSTRA_ENV=production"})
+	environmentTarget, err := SelectConfigurationTarget(modulePath, root, "", "", []string{"PLYSTRA_ENV=production"})
 	if err != nil || environmentTarget.Selection().Mode() != configurationModeEnvironment || environmentTarget.Selection().Environment() != "production" || environmentTarget.Selection().Path() != "plystra.production.yaml" || environmentTarget.Selection().Digest() == "" || !environmentTarget.EnvironmentOverlay() {
 		t.Fatalf("environment target = %#v, %v", environmentTarget.Selection(), err)
 	}
 
-	explicitTarget, err := SelectConfigurationTarget(root, "deploy/customer.yaml", "", []string{"PLYSTRA_ENV=ignored", "PLYSTRA_CONFIG=ignored.yaml", "PLYSTRA_CONFIG=duplicate.yaml"})
+	explicitTarget, err := SelectConfigurationTarget(modulePath, root, "deploy/customer.yaml", "", []string{"PLYSTRA_ENV=ignored", "PLYSTRA_CONFIG=ignored.yaml", "PLYSTRA_CONFIG=duplicate.yaml"})
 	if err != nil || explicitTarget.Selection().Mode() != configurationModeExplicit || explicitTarget.Selection().Path() != "deploy/customer.yaml" || explicitTarget.Selection().Digest() == "" || explicitTarget.EnvironmentOverlay() {
 		t.Fatalf("explicit target = %#v, %v", explicitTarget.Selection(), err)
 	}
-	if _, err := SelectConfigurationTarget(root, "", "missing", nil); !errors.Is(err, ErrConfigurationSelection) {
+	if _, err := SelectConfigurationTarget(modulePath, root, "", "missing", nil); !errors.Is(err, ErrConfigurationSelection) {
 		t.Fatalf("missing environment error = %v, want ErrConfigurationSelection", err)
+	}
+}
+
+func TestSelectConfigurationTargetReportsMalformedDocumentSource(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "example.com/application"
+	tests := []struct {
+		name        string
+		path        string
+		config      string
+		environment string
+	}{
+		{name: "default", path: "plystra.yaml"},
+		{name: "environment", path: "plystra.production.yaml", environment: "production"},
+		{name: "explicit", path: "deploy/customer.yaml", config: "deploy/customer.yaml"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			path := filepath.Join(root, filepath.FromSlash(test.path))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatalf("MkdirAll: %v", err)
+			}
+			if err := os.WriteFile(path, []byte("unknown: true\n"), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+
+			_, err := SelectConfigurationTarget(modulePath, root, test.config, test.environment, nil)
+			var source *ManifestSourceError
+			if !errors.Is(err, ErrConfigurationSelection) || !errors.Is(err, ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !errors.As(err, &source) || source == nil || !strings.Contains(err.Error(), `unknown key "unknown"`) {
+				t.Fatalf("SelectConfigurationTarget error = %v", err)
+			}
+			if source.ModulePath() != modulePath || source.SourcePath() != test.path || source.SourceKind() != configurationSourceKind || source.Line() != 1 || source.Column() != 1 {
+				t.Fatalf("selected configuration source = %#v", source)
+			}
+			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("selected configuration error exposed Project root %q: %v", root, err)
+			}
+		})
 	}
 }
 
@@ -134,14 +178,14 @@ func TestReadManifestSnapshotSupportsNestedConfigurationAndRejectsSymbolicCompon
 	if err := os.WriteFile(filepath.Join(root, "deploy", "customer.yaml"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	snapshot, manifest, err := loadConfiguration(root, "deploy/customer.yaml")
+	snapshot, manifest, err := loadConfiguration("example.com/application", root, "deploy/customer.yaml")
 	if err != nil || snapshot.Path() != "deploy/customer.yaml" || manifest.StartupTimeout() <= 0 {
 		t.Fatalf("loadConfiguration = path %q, manifest %#v, error %v", snapshot.Path(), manifest, err)
 	}
 	if err := os.Symlink(filepath.Join(root, "deploy"), filepath.Join(root, "linked")); err != nil {
 		t.Skipf("symbolic-link creation unavailable: %v", err)
 	}
-	if _, _, err := loadConfiguration(root, "linked/customer.yaml"); err == nil || !strings.Contains(err.Error(), "symbolic path component") {
+	if _, _, err := loadConfiguration("example.com/application", root, "linked/customer.yaml"); err == nil || !strings.Contains(err.Error(), "symbolic path component") {
 		t.Fatalf("loadConfiguration(symbolic component) error = %v", err)
 	}
 }
@@ -202,7 +246,7 @@ func TestManifestSnapshotComparisonDetectsIntermediateDirectoryReplacement(t *te
 	if err := os.WriteFile(configurationPath, []byte("{}\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	before, _, err := loadConfiguration(projectRoot, "deploy/customer.yaml")
+	before, _, err := loadConfiguration("example.com/application", projectRoot, "deploy/customer.yaml")
 	if err != nil {
 		t.Fatalf("loadConfiguration(before): %v", err)
 	}
@@ -217,7 +261,7 @@ func TestManifestSnapshotComparisonDetectsIntermediateDirectoryReplacement(t *te
 	if err := os.Rename(filepath.Join(displacedDirectory, "customer.yaml"), configurationPath); err != nil {
 		t.Fatalf("Move original configuration into replacement directory: %v", err)
 	}
-	after, _, err := loadConfiguration(projectRoot, "deploy/customer.yaml")
+	after, _, err := loadConfiguration("example.com/application", projectRoot, "deploy/customer.yaml")
 	if err != nil {
 		t.Fatalf("loadConfiguration(after): %v", err)
 	}

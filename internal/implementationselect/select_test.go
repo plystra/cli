@@ -21,6 +21,7 @@ import (
 func TestSelectedConfigurationWriteTargetsOnlyTheSelectedCurrentProjectLayer(t *testing.T) {
 	t.Parallel()
 
+	const modulePath = "example.com/application"
 	root := t.TempDir()
 	writeImplementationFile(t, filepath.Join(root, "plystra.yaml"), "# Root choices.\ninterfaces: {use: {email.send/v1: example.com/email/root.New}}\n")
 	writeImplementationFile(t, filepath.Join(root, "plystra.production.yaml"), "# Production choices.\n{}\n")
@@ -42,7 +43,7 @@ func TestSelectedConfigurationWriteTargetsOnlyTheSelectedCurrentProjectLayer(t *
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			write, changed, selection, err := implementationselect.SelectedConfigurationWrite(root, id, constructor, test.config, test.environment, test.ambient)
+			write, changed, selection, err := implementationselect.SelectedConfigurationWrite(modulePath, root, id, constructor, test.config, test.environment, test.ambient)
 			if err != nil || !changed || write.Path != test.wantPath || selection.Path() != test.wantPath || !strings.Contains(string(write.Data), test.wantComment) {
 				t.Fatalf("SelectedConfigurationWrite = path %q/%q, changed %t, data %q, %v", write.Path, selection.Path(), changed, write.Data, err)
 			}
@@ -59,10 +60,10 @@ func TestSelectedConfigurationWriteTargetsOnlyTheSelectedCurrentProjectLayer(t *
 		})
 	}
 
-	if _, _, _, err := implementationselect.SelectedConfigurationWrite(root, id, constructor, "deploy/customer.yaml", "production", nil); !errors.Is(err, implementationselect.ErrConfigurationWrite) || !strings.Contains(err.Error(), "cannot be used together") {
+	if _, _, _, err := implementationselect.SelectedConfigurationWrite(modulePath, root, id, constructor, "deploy/customer.yaml", "production", nil); !errors.Is(err, implementationselect.ErrConfigurationWrite) || !strings.Contains(err.Error(), "cannot be used together") {
 		t.Fatalf("selector conflict = %v", err)
 	}
-	if _, _, _, err := implementationselect.SelectedConfigurationWrite(root, id, constructor, "", "missing", nil); !errors.Is(err, implementationselect.ErrConfigurationWrite) || !strings.Contains(err.Error(), "plystra.missing.yaml") {
+	if _, _, _, err := implementationselect.SelectedConfigurationWrite(modulePath, root, id, constructor, "", "missing", nil); !errors.Is(err, implementationselect.ErrConfigurationWrite) || !strings.Contains(err.Error(), "plystra.missing.yaml") {
 		t.Fatalf("missing environment = %v", err)
 	}
 }

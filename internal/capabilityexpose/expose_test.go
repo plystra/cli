@@ -20,6 +20,7 @@ import (
 func TestSelectedManifestWriteUsesEnvironmentAndReplacementTargets(t *testing.T) {
 	t.Parallel()
 
+	const modulePath = "example.com/application"
 	root := t.TempDir()
 	rootData := []byte("http:\n  cors:\n    allowed_origins: [https://app.example.com]\n")
 	overlayData := []byte("# Production.\nhttp:\n  cors:\n    # Inherit root origins.\n    allow_credentials: true\n  expose:\n    remove: [records.read/v1, records.write/v1]\n")
@@ -29,7 +30,7 @@ func TestSelectedManifestWriteUsesEnvironmentAndReplacementTargets(t *testing.T)
 	writeExposureFile(t, filepath.Join(root, "deploy", "customer.yaml"), replacementData)
 	id := mustCapabilityID(t, "records.read/v1")
 
-	overlayWrite, changed, overlaySelection, err := capabilityexpose.SelectedManifestWrite(root, id, "", "production", []string{"PLYSTRA_CONFIG=ignored.yaml"})
+	overlayWrite, changed, overlaySelection, err := capabilityexpose.SelectedManifestWrite(modulePath, root, id, "", "production", []string{"PLYSTRA_CONFIG=ignored.yaml"})
 	if err != nil || !changed || overlayWrite.Path != "plystra.production.yaml" || overlaySelection.Mode() != applicationgen.ConfigurationModeEnvironment || overlaySelection.Environment() != "production" {
 		t.Fatalf("environment SelectedManifestWrite = changed %t, write %#v, selection %#v, %v", changed, overlayWrite, overlaySelection, err)
 	}
@@ -48,7 +49,7 @@ func TestSelectedManifestWriteUsesEnvironmentAndReplacementTargets(t *testing.T)
 		t.Fatalf("environment ExpectedData = %q", overlayWrite.ExpectedData)
 	}
 
-	replacementWrite, changed, replacementSelection, err := capabilityexpose.SelectedManifestWrite(root, id, "", "", []string{"PLYSTRA_CONFIG=deploy/customer.yaml"})
+	replacementWrite, changed, replacementSelection, err := capabilityexpose.SelectedManifestWrite(modulePath, root, id, "", "", []string{"PLYSTRA_CONFIG=deploy/customer.yaml"})
 	if err != nil || !changed || replacementWrite.Path != "deploy/customer.yaml" || replacementSelection.Mode() != applicationgen.ConfigurationModeExplicit || replacementSelection.Path() != "deploy/customer.yaml" {
 		t.Fatalf("replacement SelectedManifestWrite = changed %t, write %#v, selection %#v, %v", changed, replacementWrite, replacementSelection, err)
 	}
@@ -56,7 +57,7 @@ func TestSelectedManifestWriteUsesEnvironmentAndReplacementTargets(t *testing.T)
 		t.Fatalf("replacement write = %#v", replacementWrite)
 	}
 
-	if _, _, _, err := capabilityexpose.SelectedManifestWrite(root, id, "deploy/customer.yaml", "production", nil); !errors.Is(err, capabilityexpose.ErrManifestWrite) || !strings.Contains(err.Error(), "cannot be used together") {
+	if _, _, _, err := capabilityexpose.SelectedManifestWrite(modulePath, root, id, "deploy/customer.yaml", "production", nil); !errors.Is(err, capabilityexpose.ErrManifestWrite) || !strings.Contains(err.Error(), "cannot be used together") {
 		t.Fatalf("conflicting selector error = %v", err)
 	}
 	if got := readExposureFile(t, filepath.Join(root, "plystra.yaml")); !bytes.Equal(got, rootData) {
@@ -70,12 +71,13 @@ func TestSelectedManifestWriteUsesEnvironmentAndReplacementTargets(t *testing.T)
 func TestManifestWriteUsesExactSafeSnapshot(t *testing.T) {
 	t.Parallel()
 
+	const modulePath = "example.com/application"
 	root := t.TempDir()
 	original := []byte("# Application.\nhttp:\n  address: \":8080\"\n")
 	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), original)
 	id := mustCapabilityID(t, "records.read/v1")
 
-	write, changed, err := capabilityexpose.ManifestWrite(root, id)
+	write, changed, err := capabilityexpose.ManifestWrite(modulePath, root, id)
 	if err != nil || !changed {
 		t.Fatalf("ManifestWrite = changed %t, %#v, %v", changed, write, err)
 	}
@@ -90,7 +92,7 @@ func TestManifestWriteUsesExactSafeSnapshot(t *testing.T) {
 	}
 
 	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), []byte("http: {expose: [records.read/v1]}\n"))
-	repeated, repeatedChanged, err := capabilityexpose.ManifestWrite(root, id)
+	repeated, repeatedChanged, err := capabilityexpose.ManifestWrite(modulePath, root, id)
 	if err != nil || repeatedChanged || repeated.Path != "" || repeated.Data != nil || repeated.ExpectedData != nil {
 		t.Fatalf("idempotent ManifestWrite = changed %t, %#v, %v", repeatedChanged, repeated, err)
 	}
@@ -99,11 +101,12 @@ func TestManifestWriteUsesExactSafeSnapshot(t *testing.T) {
 func TestManifestWriteReplacesExactSparseRemoval(t *testing.T) {
 	t.Parallel()
 
+	const modulePath = "example.com/application"
 	root := t.TempDir()
 	original := []byte("# Selected environment.\nhttp:\n  expose:\n    remove:\n      - records.read/v1\n      - records.write/v1\n")
 	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), original)
 
-	write, changed, err := capabilityexpose.ManifestWrite(root, mustCapabilityID(t, "records.read/v1"))
+	write, changed, err := capabilityexpose.ManifestWrite(modulePath, root, mustCapabilityID(t, "records.read/v1"))
 	if err != nil || !changed {
 		t.Fatalf("ManifestWrite = changed %t, %#v, %v", changed, write, err)
 	}
@@ -124,18 +127,19 @@ func TestManifestWriteReplacesExactSparseRemoval(t *testing.T) {
 func TestManifestWriteRejectsUnsafeOrInvalidInputWithoutSecrets(t *testing.T) {
 	t.Parallel()
 
+	const modulePath = "example.com/application"
 	root := t.TempDir()
-	if _, _, err := capabilityexpose.ManifestWrite(root, mustCapabilityID(t, "records.read/v1")); !errors.Is(err, capabilityexpose.ErrManifestWrite) {
+	if _, _, err := capabilityexpose.ManifestWrite(modulePath, root, mustCapabilityID(t, "records.read/v1")); !errors.Is(err, capabilityexpose.ErrManifestWrite) {
 		t.Fatalf("missing ManifestWrite error = %v", err)
 	}
 
 	secret := "unique-private-value"
 	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), []byte("config:\n  acme.records:\n    password: "+secret+"\nhttp: {expose: {add: invalid}}\n"))
-	if _, _, err := capabilityexpose.ManifestWrite(root, mustCapabilityID(t, "records.read/v1")); !errors.Is(err, capabilityexpose.ErrManifestWrite) || strings.Contains(err.Error(), secret) {
+	if _, _, err := capabilityexpose.ManifestWrite(modulePath, root, mustCapabilityID(t, "records.read/v1")); !errors.Is(err, capabilityexpose.ErrManifestWrite) || strings.Contains(err.Error(), secret) {
 		t.Fatalf("invalid ManifestWrite error = %v", err)
 	}
 
-	if _, _, err := capabilityexpose.ManifestWrite(root, capabilityid.Identifier{}); !errors.Is(err, capabilityexpose.ErrManifestWrite) {
+	if _, _, err := capabilityexpose.ManifestWrite(modulePath, root, capabilityid.Identifier{}); !errors.Is(err, capabilityexpose.ErrManifestWrite) {
 		t.Fatalf("empty Capability error = %v", err)
 	}
 }

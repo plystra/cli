@@ -248,9 +248,9 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	selectedManifest := rootManifest
 	if selector.path != applicationManifestName {
 		if selector.mode == configurationModeEnvironment {
-			configurationSnapshot, selectedManifest, err = loadEnvironmentOverlay(module.Path(), selector.path)
+			configurationSnapshot, selectedManifest, err = loadEnvironmentOverlay(module.ModulePath(), module.Path(), selector.path)
 		} else {
-			configurationSnapshot, selectedManifest, err = loadConfiguration(module.Path(), selector.path)
+			configurationSnapshot, selectedManifest, err = loadConfiguration(module.ModulePath(), module.Path(), selector.path)
 		}
 		if err != nil {
 			return Result{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrConfigurationSelection, err)

@@ -103,6 +103,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID`" + ` retains every effective ` + "`http.expose`" + ` Interface and field in the problem, then reports each distinct owning current-Project document at ` + "`1:1`" + ` as an ` + "`exposure`" + ` source. Enable Connect or REST in the selected document, or remove the public exposure.
 
+` + "`PLYSTRA_CONFIGURATION_INVALID`" + ` reports a malformed selected environment or complete-replacement document at ` + "`1:1`" + ` as a ` + "`configuration-declaration`" + ` source. Correct that selected file; source facts contain no configured values or machine paths.
+
 ` + "`PLYSTRA_ENVIRONMENT_OVERLAY_INVALID`" + ` reports the selected ` + "`plystra.<environment>.yaml`" + ` at ` + "`1:1`" + ` as a ` + "`configuration-declaration`" + ` source when typed overlay application is invalid. Correct the reported field relationship there; values and machine paths remain excluded.
 
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
@@ -1468,7 +1470,7 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   Interface ID / constructor. Both precede mutation; Recovery retains selector.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID / PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID:
   fix the reported schema or safe field at Source; values stay redacted.
-- PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
+- PLYSTRA_CONFIGURATION_INVALID / PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: reported sources own config;
   select or make its constructor reachable, or remove it. Values stay redacted.
 - Incompatible contract: compare the full typed contract and metadata. Implement

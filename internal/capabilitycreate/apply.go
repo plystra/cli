@@ -230,7 +230,7 @@ func author(ctx context.Context, options AuthorOptions, expected capabilityversi
 		writes = append(writes, implementationWrite)
 	}
 	if options.Expose {
-		exposureWrite, changed, err := capabilityexpose.ManifestWrite(root, identifier)
+		exposureWrite, changed, err := capabilityexpose.ManifestWrite(plan.ModulePath(), root, identifier)
 		if err != nil {
 			return Result{}, err
 		}

@@ -155,6 +155,8 @@ diagnostic.
 PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
 Project plystra.yaml as a project-marker source. Malformed readable documents
 use 1:1; unsafe or unreadable markers omit the unavailable span.
+PLYSTRA_CONFIGURATION_INVALID reports a malformed selected environment or
+complete-replacement document at 1:1 as a configuration-declaration source.
 PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID reports effective http.expose
 documents at 1:1 as exposure sources before selector-aware recovery.
 PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at
@@ -192,6 +194,8 @@ configuration-declaration sources before selector-aware recovery.
 PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
 Project plystra.yaml as a project-marker source. Malformed readable documents
 use 1:1; unsafe or unreadable markers omit the unavailable span.
+PLYSTRA_CONFIGURATION_INVALID reports a malformed selected environment or
+complete-replacement document at 1:1 as a configuration-declaration source.
 PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID reports effective http.expose
 documents at 1:1 as exposure sources before selector-aware recovery.
 PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at

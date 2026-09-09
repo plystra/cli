@@ -102,8 +102,8 @@ func (r Result) Changed() bool { return r.changed }
 
 // ManifestWrite plans one concurrency-protected plystra.yaml replacement.
 // The zero write and false are returned when id is already exposed.
-func ManifestWrite(moduleRoot string, id capabilityid.Identifier) (atomicfs.Write, bool, error) {
-	write, changed, _, err := SelectedManifestWrite(moduleRoot, id, "", "", nil)
+func ManifestWrite(modulePath, moduleRoot string, id capabilityid.Identifier) (atomicfs.Write, bool, error) {
+	write, changed, _, err := SelectedManifestWrite(modulePath, moduleRoot, id, "", "", nil)
 	return write, changed, err
 }
 
@@ -111,8 +111,8 @@ func ManifestWrite(moduleRoot string, id capabilityid.Identifier) (atomicfs.Writ
 // current-project document selected by the same explicit and ambient rules as
 // generation. The returned selection identifies the file even when no write
 // is required.
-func SelectedManifestWrite(moduleRoot string, id capabilityid.Identifier, configurationPath, environmentName string, environment []string) (atomicfs.Write, bool, applicationresolve.ConfigurationSelection, error) {
-	target, err := applicationresolve.SelectConfigurationTarget(moduleRoot, configurationPath, environmentName, environment)
+func SelectedManifestWrite(modulePath, moduleRoot string, id capabilityid.Identifier, configurationPath, environmentName string, environment []string) (atomicfs.Write, bool, applicationresolve.ConfigurationSelection, error) {
+	target, err := applicationresolve.SelectConfigurationTarget(modulePath, moduleRoot, configurationPath, environmentName, environment)
 	if err != nil {
 		return atomicfs.Write{}, false, applicationresolve.ConfigurationSelection{}, fmt.Errorf("%w: select current-project configuration: %w", ErrManifestWrite, err)
 	}
@@ -168,7 +168,7 @@ func Expose(ctx context.Context, options Options) (Result, error) {
 	if !capabilityVisible(resolved, id) {
 		return Result{}, fmt.Errorf("%w: %w", ErrExpose, &notVisibleError{id: id})
 	}
-	write, changed, selection, err := SelectedManifestWrite(module.Path(), id, options.ConfigurationPath, options.EnvironmentName, options.Environment)
+	write, changed, selection, err := SelectedManifestWrite(module.ModulePath(), module.Path(), id, options.ConfigurationPath, options.EnvironmentName, options.Environment)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrExpose, err)
 	}

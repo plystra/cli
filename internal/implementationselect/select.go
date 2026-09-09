@@ -75,8 +75,8 @@ func (r Result) Changed() bool { return r.changed }
 
 // SelectedConfigurationWrite plans one concurrency-protected replacement for
 // the current-project document selected by the same rules as generation.
-func SelectedConfigurationWrite(moduleRoot string, id interfaceid.Identifier, constructor constructorsymbol.Symbol, configurationPath, environmentName string, environment []string) (atomicfs.Write, bool, applicationresolve.ConfigurationSelection, error) {
-	target, err := applicationresolve.SelectConfigurationTarget(moduleRoot, configurationPath, environmentName, environment)
+func SelectedConfigurationWrite(modulePath, moduleRoot string, id interfaceid.Identifier, constructor constructorsymbol.Symbol, configurationPath, environmentName string, environment []string) (atomicfs.Write, bool, applicationresolve.ConfigurationSelection, error) {
+	target, err := applicationresolve.SelectConfigurationTarget(modulePath, moduleRoot, configurationPath, environmentName, environment)
 	if err != nil {
 		return atomicfs.Write{}, false, applicationresolve.ConfigurationSelection{}, fmt.Errorf("%w: select current-project configuration: %w", ErrConfigurationWrite, err)
 	}
@@ -118,7 +118,7 @@ func Select(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrSelect, err)
 	}
-	write, changed, selection, err := SelectedConfigurationWrite(module.Path(), id, constructor, options.ConfigurationPath, options.EnvironmentName, options.Environment)
+	write, changed, selection, err := SelectedConfigurationWrite(module.ModulePath(), module.Path(), id, constructor, options.ConfigurationPath, options.EnvironmentName, options.Environment)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}

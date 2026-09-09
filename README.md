@@ -871,6 +871,10 @@ inherited value, Secret-reference target, and machine-specific path.
 owning current-Project document as an `exposure` source at `1:1`. Root,
 environment-overlay, and complete-replacement declarations keep their selected
 module-relative paths; dependency exposure remains ignored.
+`PLYSTRA_CONFIGURATION_INVALID` emits a malformed selected current-Project
+environment or complete-replacement document at `1:1` as a
+`configuration-declaration` source. Its source fact contains no configured
+value or absolute path.
 `PLYSTRA_ENVIRONMENT_OVERLAY_INVALID` emits the selected current-Project
 environment document at `1:1` as a `configuration-declaration` source when its
 typed application over root configuration is invalid. The problem identifies
@@ -979,6 +983,12 @@ in the selected root, environment, or complete-replacement document, or remove
 the public exposure. The problem retains every exposed Interface and field;
 the diagnostic emits every distinct owning current-Project document at `1:1`
 as an `exposure` source without exposing an absolute path.
+
+A malformed selected environment or complete-replacement document fails with
+`PLYSTRA_CONFIGURATION_INVALID`. Correct the emitted `Source:` in the selected
+current-Project document. The diagnostic reports it at `1:1` as a
+`configuration-declaration` source without exposing configured values or an
+absolute path.
 
 A selected sparse environment overlay whose typed application over root
 configuration is invalid fails with `PLYSTRA_ENVIRONMENT_OVERLAY_INVALID`.

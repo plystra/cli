@@ -2001,6 +2001,10 @@ Interface and field in the problem, then emits each distinct owning
 current-Project document at `1:1` as an `exposure` source. Root,
 environment-overlay, and complete-replacement declarations keep their
 module-relative paths; dependency exposure remains ignored.
+A malformed selected environment or complete-replacement document uses
+`PLYSTRA_CONFIGURATION_INVALID` and emits that current-Project document at
+`1:1` as a `configuration-declaration` source. The source fact contains no
+configured value, absolute path, or Module Cache path.
 An invalid environment overlay emits the selected current-Project environment
 document at `1:1` as a `configuration-declaration` source. The problem
 identifies the invalid typed field relationship without exposing values, an
@@ -2104,6 +2108,14 @@ transport in the selected root, environment, or complete-replacement document,
 or remove the public exposure. The problem retains every exposed Interface and
 field, while the diagnostic emits every distinct owning current-Project
 document at `1:1` as an `exposure` source without exposing an absolute path.
+
+### Invalid selected configuration document
+
+`PLYSTRA_CONFIGURATION_INVALID` identifies a malformed selected environment or
+complete-replacement document. Correct the emitted `Source:` in that selected
+current-Project document. The diagnostic reports it at `1:1` as a
+`configuration-declaration` source without exposing configured values, an
+absolute path, or a Module Cache path.
 
 ### Invalid environment overlay
 

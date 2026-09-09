@@ -66,17 +66,17 @@ func (t ConfigurationTarget) EnvironmentOverlay() bool {
 // SelectConfigurationTarget applies the same explicit and ambient selector
 // rules as complete application resolution, safely reads the selected file,
 // validates it for its mode, and computes its normalized non-secret digest.
-// moduleRoot must already be the detected Plystra Project root.
-func SelectConfigurationTarget(moduleRoot, explicitConfiguration, explicitEnvironment string, environment []string) (ConfigurationTarget, error) {
+// modulePath and moduleRoot must identify the already detected Plystra Project.
+func SelectConfigurationTarget(modulePath, moduleRoot, explicitConfiguration, explicitEnvironment string, environment []string) (ConfigurationTarget, error) {
 	selector, err := resolveConfigurationSelector(moduleRoot, explicitConfiguration, explicitEnvironment, environment)
 	if err != nil {
 		return ConfigurationTarget{}, fmt.Errorf("%w: %w", ErrConfigurationSelection, err)
 	}
 	var snapshot ManifestSnapshot
 	if selector.mode == configurationModeEnvironment {
-		snapshot, _, err = loadEnvironmentOverlay(moduleRoot, selector.path)
+		snapshot, _, err = loadEnvironmentOverlay(modulePath, moduleRoot, selector.path)
 	} else {
-		snapshot, _, err = loadConfiguration(moduleRoot, selector.path)
+		snapshot, _, err = loadConfiguration(modulePath, moduleRoot, selector.path)
 	}
 	if err != nil {
 		return ConfigurationTarget{}, fmt.Errorf("%w: %w", ErrConfigurationSelection, err)

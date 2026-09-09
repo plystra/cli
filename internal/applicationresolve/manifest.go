@@ -17,17 +17,20 @@ import (
 const applicationManifestName = "plystra.yaml"
 
 const manifestSourceKind = "project-marker"
+const configurationSourceKind = "configuration-declaration"
 
 const (
 	generatedApplicationManifestName = "generated/manifest.json"
 	maximumGeneratedManifestSize     = 16 << 20
 )
 
-// ManifestSourceError attaches stable owning-Project provenance to a root
-// manifest failure without changing its human message or typed error chain.
+// ManifestSourceError attaches stable owning-Project provenance to an
+// application manifest failure without changing its human message or typed
+// error chain.
 type ManifestSourceError struct {
 	modulePath string
 	sourcePath string
+	sourceKind string
 	line       int
 	column     int
 	cause      error
@@ -54,7 +57,7 @@ func (e *ManifestSourceError) SourceKind() string {
 	if e == nil {
 		return ""
 	}
-	return manifestSourceKind
+	return e.sourceKind
 }
 
 // Line returns the one-based document line, or zero when no readable document
@@ -107,8 +110,8 @@ func (s ManifestSnapshot) Path() string { return s.path }
 // precondition.
 func (s ManifestSnapshot) Data() []byte { return append([]byte(nil), s.data...) }
 
-func loadConfiguration(moduleRoot, relativePath string) (ManifestSnapshot, applicationmeta.Manifest, error) {
-	return loadConfigurationWithParser(moduleRoot, relativePath, applicationmeta.ParseSource)
+func loadConfiguration(modulePath, moduleRoot, relativePath string) (ManifestSnapshot, applicationmeta.Manifest, error) {
+	return loadConfigurationWithParser(modulePath, moduleRoot, relativePath, applicationmeta.ParseSource)
 }
 
 func loadProjectManifest(modulePath, moduleRoot string) (ManifestSnapshot, applicationmeta.Manifest, error) {
@@ -135,18 +138,24 @@ func loadProjectManifest(modulePath, moduleRoot string) (ManifestSnapshot, appli
 	return snapshot, manifest, nil
 }
 
-func loadEnvironmentOverlay(moduleRoot, relativePath string) (ManifestSnapshot, applicationmeta.Manifest, error) {
-	return loadConfigurationWithParser(moduleRoot, relativePath, applicationmeta.ParseOverlaySource)
+func loadEnvironmentOverlay(modulePath, moduleRoot, relativePath string) (ManifestSnapshot, applicationmeta.Manifest, error) {
+	return loadConfigurationWithParser(modulePath, moduleRoot, relativePath, applicationmeta.ParseOverlaySource)
 }
 
-func loadConfigurationWithParser(moduleRoot, relativePath string, parse func(string, []byte) (applicationmeta.Manifest, error)) (ManifestSnapshot, applicationmeta.Manifest, error) {
+func loadConfigurationWithParser(modulePath, moduleRoot, relativePath string, parse func(string, []byte) (applicationmeta.Manifest, error)) (ManifestSnapshot, applicationmeta.Manifest, error) {
 	snapshot, err := readManifestSnapshot(moduleRoot, relativePath)
 	if err != nil {
 		return ManifestSnapshot{}, applicationmeta.Manifest{}, fmt.Errorf("%w: %w", ErrManifest, err)
 	}
 	manifest, err := parse(snapshot.path, snapshot.data)
 	if err != nil {
-		return ManifestSnapshot{}, applicationmeta.Manifest{}, fmt.Errorf("%w: %w", ErrManifest, err)
+		return ManifestSnapshot{}, applicationmeta.Manifest{}, configurationSourceError(
+			modulePath,
+			snapshot.path,
+			1,
+			1,
+			fmt.Errorf("%w: %w", ErrManifest, err),
+		)
 	}
 	return snapshot, manifest, nil
 }
@@ -196,12 +205,21 @@ func loadDependencyManifests(dependencies []moduledependency.Module) ([]dependen
 }
 
 func manifestSourceError(modulePath, sourcePath string, line, column int, cause error) error {
+	return newManifestSourceError(modulePath, sourcePath, manifestSourceKind, line, column, cause)
+}
+
+func configurationSourceError(modulePath, sourcePath string, line, column int, cause error) error {
+	return newManifestSourceError(modulePath, sourcePath, configurationSourceKind, line, column, cause)
+}
+
+func newManifestSourceError(modulePath, sourcePath, sourceKind string, line, column int, cause error) error {
 	if cause == nil {
 		return nil
 	}
 	return &ManifestSourceError{
 		modulePath: modulePath,
 		sourcePath: filepath.ToSlash(sourcePath),
+		sourceKind: sourceKind,
 		line:       line,
 		column:     column,
 		cause:      cause,

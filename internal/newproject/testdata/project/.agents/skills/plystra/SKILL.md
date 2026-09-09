@@ -1247,7 +1247,7 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   Interface ID / constructor. Both precede mutation; Recovery retains selector.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID / PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID:
   fix the reported schema or safe field at Source; values stay redacted.
-- PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
+- PLYSTRA_CONFIGURATION_INVALID / PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: reported sources own config;
   select or make its constructor reachable, or remove it. Values stay redacted.
 - Incompatible contract: compare the full typed contract and metadata. Implement
