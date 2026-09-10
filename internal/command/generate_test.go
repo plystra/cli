@@ -20,6 +20,7 @@ import (
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/diagnosticcode"
+	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/newproject"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
@@ -249,6 +250,55 @@ func TestRunGenerateReportsOwnershipConflictSourceWithoutMutation(t *testing.T) 
 		t.Fatalf("ownership-conflict generate changed Project:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 	assertNoCommandTransactions(t, root)
+}
+
+func TestRunGenerateReportsInvalidOwnershipManifestSourceWithoutMutation(t *testing.T) {
+	root := writeCapabilityCommandModule(t)
+	environment := commandGoEnvironment()
+	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, filepath.Join(root, "records"), environment)
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/library in "+root+"\n" {
+		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "# Production-only configuration.\n{}\n")
+	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), "# Complete replacement.\n{}\n")
+	writeCommandFile(t, filepath.Join(root, filepath.FromSlash(generatedfiles.ManifestPath)), "{\"version\":3")
+	before := commandTree(t, root)
+
+	tests := []struct {
+		name     string
+		args     []string
+		recovery string
+	}{
+		{
+			name:     "generate",
+			args:     []string{"generate"},
+			recovery: "Restore generated/.plystra-manifest.json from a known-good generated state, then run `plystra generate`.",
+		},
+		{
+			name:     "environment check",
+			args:     []string{"generate", "--check", "--env", "production"},
+			recovery: "Restore generated/.plystra-manifest.json from a known-good generated state, then run `plystra generate --env \"production\"`.",
+		},
+		{
+			name:     "replacement check",
+			args:     []string{"check", "--config", "deploy/customer.yaml"},
+			recovery: "Restore generated/.plystra-manifest.json from a known-good generated state, then run `plystra generate --config \"deploy/customer.yaml\"`.",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			exitCode, stdout, stderr := runCommand(t, test.args, filepath.Join(root, "records"), environment)
+			wantSuffix := "\n\nSource: example.com/acme/library:" + generatedfiles.ManifestPath + " (generated-artifact)\n\n" +
+				"Recovery:\n" + test.recovery + "\n\nDiagnostic: " + diagnosticcode.GeneratedManifestInvalid + "\n"
+			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "invalid managed generated manifest") || !strings.Contains(stderr, "decode "+generatedfiles.ManifestPath) || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+				t.Fatalf("%s = exit %d, stdout %q, stderr %q", test.name, exitCode, stdout, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%s changed Project:\nbefore: %#v\nafter:  %#v", test.name, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
 }
 
 func TestRunGenerateProjectsAuthoredInterfaceMessages(t *testing.T) {

@@ -301,7 +301,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	previousBaseline, previousProvenance, err := loadGeneratedDependencyBaseline(module.Path(), selector)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, generatedManifestSourceError(module.ModulePath(), err))
 	}
 	previousLocalPaths, _ := previousProvenance.CurrentProjectPathsForSelection(selector.mode, selector.path)
 	maintenanceSnapshot := configurationSnapshot

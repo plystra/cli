@@ -170,6 +170,9 @@ configuration document at 1:1 as a configuration-declaration source.
 PLYSTRA_GENERATED_OWNERSHIP_CONFLICT reports the desired managed path occupied
 by different unowned bytes or a non-regular entry as a generated-artifact source
 without a fabricated span.
+PLYSTRA_GENERATED_MANIFEST_INVALID reports the current Project's
+generated/.plystra-manifest.json as a generated-artifact source without a
+fabricated span.
 PLYSTRA_GENERATED_DRIFT reports each stale, missing, or manually modified
 managed path as a generated-artifact source without a fabricated span.
 PLYSTRA_GENERATED_UNEXPECTED_OUTPUT reports each unexpected unowned path as a
@@ -223,6 +226,9 @@ configuration document at 1:1 as a configuration-declaration source.
 PLYSTRA_GENERATED_OWNERSHIP_CONFLICT reports the desired managed path occupied
 by different unowned bytes or a non-regular entry as a generated-artifact source
 without a fabricated span.
+PLYSTRA_GENERATED_MANIFEST_INVALID reports the current Project's
+generated/.plystra-manifest.json as a generated-artifact source without a
+fabricated span.
 PLYSTRA_GENERATED_DRIFT reports each stale, missing, or manually modified
 managed path as a generated-artifact source without a fabricated span.
 PLYSTRA_GENERATED_UNEXPECTED_OUTPUT reports each unexpected unowned path as a

@@ -29,6 +29,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/generatedfiles"
+	"github.com/plystra/cli/internal/interfacecompatibility"
 	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/pluginmeta"
@@ -328,6 +329,47 @@ func TestGenerateOwnershipConflictCarriesProjectRelativeSource(t *testing.T) {
 			assertNoTransactions(t, root)
 		})
 	}
+}
+
+func TestGenerateManagedBaselineFailureCarriesProjectRelativeManifestSource(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "example.com/acme/generated-manifest-source"
+	root := t.TempDir()
+	writeApplicationModule(t, root, modulePath)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	environment := goEnvironment(nil)
+	if result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Environment: environment,
+		Validate:    func(_ context.Context, _ string) error { return nil },
+	}); err != nil || !result.Report().Clean() {
+		t.Fatalf("initial Generate = %#v, %v", result.Report().Changes(), err)
+	}
+	if err := os.Remove(filepath.Join(root, filepath.FromSlash(interfacecompatibility.Path))); err != nil {
+		t.Fatalf("Remove(%s): %v", interfacecompatibility.Path, err)
+	}
+	before := snapshotTree(t, root)
+
+	_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start:       root,
+		Check:       true,
+		Environment: environment,
+	})
+	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, generatedfiles.ErrManifest) || !strings.Contains(err.Error(), interfacecompatibility.Path) {
+		t.Fatalf("managed baseline failure = %v", err)
+	}
+	var source *applicationgenerate.GeneratedManifestSourceError
+	if !errors.As(err, &source) || source == nil || source.ModulePath() != modulePath || source.SourcePath() != generatedfiles.ManifestPath || source.SourceKind() != "generated-artifact" || source.Line() != 0 || source.Column() != 0 {
+		t.Fatalf("generated-manifest source = %#v, %v", source, err)
+	}
+	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+		t.Fatalf("generated-manifest failure exposed the Project path: %v", err)
+	}
+	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("generated-manifest check changed the Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	assertNoTransactions(t, root)
 }
 
 func TestGenerateRecordsDormantSelectionOnlyInConfigurationProvenance(t *testing.T) {

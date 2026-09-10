@@ -412,6 +412,16 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Kind:   unexpected.SourceKind(),
 			})
 		}
+	case diagnosticGeneratedManifestInvalid:
+		var located diagnosticSourceLocation
+		if !errors.As(err, &located) || located == nil || located.SourceKind() != "generated-artifact" || located.SourcePath() != generatedfiles.ManifestPath {
+			return nil
+		}
+		sources = append(sources, diagnosticjson.Source{
+			Module: located.ModulePath(),
+			Path:   located.SourcePath(),
+			Kind:   located.SourceKind(),
+		})
 	case diagnosticConstructorConfigurationUnselected:
 		var unowned *applicationresolve.UnownedConstructorConfigurationError
 		if !errors.As(err, &unowned) || unowned == nil {

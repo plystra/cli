@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/moduledependency"
 )
 
@@ -18,15 +19,15 @@ const applicationManifestName = "plystra.yaml"
 
 const manifestSourceKind = "project-marker"
 const configurationSourceKind = "configuration-declaration"
+const generatedArtifactSourceKind = "generated-artifact"
 
 const (
 	generatedApplicationManifestName = "generated/manifest.json"
 	maximumGeneratedManifestSize     = 16 << 20
 )
 
-// ManifestSourceError attaches stable owning-Project provenance to an
-// application manifest failure without changing its human message or typed
-// error chain.
+// ManifestSourceError attaches stable owning-Project provenance to a manifest
+// failure without changing its human message or typed error chain.
 type ManifestSourceError struct {
 	modulePath string
 	sourcePath string
@@ -210,6 +211,13 @@ func manifestSourceError(modulePath, sourcePath string, line, column int, cause 
 
 func configurationSourceError(modulePath, sourcePath string, line, column int, cause error) error {
 	return newManifestSourceError(modulePath, sourcePath, configurationSourceKind, line, column, cause)
+}
+
+func generatedManifestSourceError(modulePath string, cause error) error {
+	if !errors.Is(cause, generatedfiles.ErrManifest) {
+		return cause
+	}
+	return newManifestSourceError(modulePath, generatedfiles.ManifestPath, generatedArtifactSourceKind, 0, 0, cause)
 }
 
 func newManifestSourceError(modulePath, sourcePath, sourceKind string, line, column int, cause error) error {

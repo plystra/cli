@@ -216,7 +216,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		}
 		report, err := generatedfiles.Check(prepared.resolved.Module().Path(), prepared.output)
 		if err != nil {
-			return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
+			return Result{}, fmt.Errorf("%w: %w", ErrGenerate, generatedManifestSourceError(prepared.resolved.Module().ModulePath(), err))
 		}
 		return Result{
 			module:                  prepared.resolved.Module(),
@@ -282,6 +282,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		if errors.Is(err, atomicfs.ErrConcurrentChange) && !errors.Is(err, ErrConcurrentChange) {
 			err = errors.Join(ErrConcurrentChange, err)
 		}
+		err = generatedManifestSourceError(prepared.resolved.Module().ModulePath(), err)
 		var conflict *generatedfiles.OwnershipConflictError
 		if errors.As(err, &conflict) && conflict != nil {
 			err = ownershipConflictSourceError(prepared.resolved.Module().ModulePath(), conflict.Path(), err)
@@ -374,7 +375,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		interfacecompatibility.MaximumBytes,
 	)
 	if err != nil {
-		return preparedGeneration{}, fmt.Errorf("read prior authored Interface compatibility baseline: %w", err)
+		return preparedGeneration{}, generatedManifestSourceError(resolved.Module().ModulePath(), fmt.Errorf("read prior authored Interface compatibility baseline: %w", err))
 	}
 	interfaceBaseline, interfaceComparison, err := interfacecompatibility.Reconcile(
 		contracts,
@@ -390,7 +391,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		interfacecompatibility.MetadataMaximumBytes,
 	)
 	if err != nil {
-		return preparedGeneration{}, fmt.Errorf("read prior Interface metadata compatibility baseline: %w", err)
+		return preparedGeneration{}, generatedManifestSourceError(resolved.Module().ModulePath(), fmt.Errorf("read prior Interface metadata compatibility baseline: %w", err))
 	}
 	metadataBaseline, metadataComparison, err := interfacecompatibility.ReconcileMetadata(
 		metadataInputs,
@@ -446,7 +447,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		interfacecompatibility.JavaScriptMaximumBytes,
 	)
 	if err != nil {
-		return preparedGeneration{}, fmt.Errorf("read prior Interface JavaScript compatibility baseline: %w", err)
+		return preparedGeneration{}, generatedManifestSourceError(resolved.Module().ModulePath(), fmt.Errorf("read prior Interface JavaScript compatibility baseline: %w", err))
 	}
 	javaScriptBaseline, javaScriptComparison, err := interfacecompatibility.ReconcileJavaScript(
 		javaScriptAPI,
@@ -462,7 +463,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		interfacecompatibility.DocumentationMaximumBytes,
 	)
 	if err != nil {
-		return preparedGeneration{}, fmt.Errorf("read prior Interface documentation compatibility baseline: %w", err)
+		return preparedGeneration{}, generatedManifestSourceError(resolved.Module().ModulePath(), fmt.Errorf("read prior Interface documentation compatibility baseline: %w", err))
 	}
 	interfaceProxies, err := interfaceProxyInputs(resolved, interfaceProtobufModel)
 	if err != nil {
@@ -482,7 +483,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	}
 	previousWireMap, previousWireMapExists, err := generatedfiles.ReadOwnedFile(resolved.Module().Path(), protobufwiremap.Path, protobufwiremap.MaximumBytes)
 	if err != nil {
-		return preparedGeneration{}, fmt.Errorf("read prior Protobuf wire history: %w", err)
+		return preparedGeneration{}, generatedManifestSourceError(resolved.Module().ModulePath(), fmt.Errorf("read prior Protobuf wire history: %w", err))
 	}
 	wireMap, err := protobufwiremap.Build(
 		protobufProjection,
@@ -508,7 +509,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		interfacecompatibility.TransportMaximumBytes,
 	)
 	if err != nil {
-		return preparedGeneration{}, fmt.Errorf("read prior Interface transport compatibility baseline: %w", err)
+		return preparedGeneration{}, generatedManifestSourceError(resolved.Module().ModulePath(), fmt.Errorf("read prior Interface transport compatibility baseline: %w", err))
 	}
 	transportBaseline, transportComparison, err := interfacecompatibility.ReconcileTransport(
 		wireMap,

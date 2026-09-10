@@ -894,6 +894,10 @@ occupied by different unowned bytes or a non-regular entry as a
 `generated-artifact` source in the current Project module, without a fabricated
 span. Move the reported entry outside `generated/`, then rerun generation with
 the same selection; the existing entry is never overwritten.
+`PLYSTRA_GENERATED_MANIFEST_INVALID` emits the current Project's
+`generated/.plystra-manifest.json` as a `generated-artifact` source without a
+fabricated span. Restore the manifest from a known-good generated state, then
+regenerate with the same selection.
 `PLYSTRA_GENERATED_UNEXPECTED_OUTPUT` emits every unexpected unowned path as a
 sorted `generated-artifact` source in the current Project module, also without
 a fabricated span. Move each reported path outside `generated/`, then rerun
