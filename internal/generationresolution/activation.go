@@ -101,6 +101,76 @@ func (e SelectedExtension) Namespaces() []string {
 	return result
 }
 
+// SelectedProviderExtensionError reports one valid ordinary Provider choice
+// whose Provider does not own the generation extension required by the
+// associated namespace.
+type SelectedProviderExtensionError struct {
+	namespace  string
+	capability capabilityid.Identifier
+	selection  providerresolution.Selection
+	cause      error
+}
+
+// Namespace returns the extension namespace that the selected Provider cannot
+// interpret.
+func (e *SelectedProviderExtensionError) Namespace() string {
+	if e == nil {
+		return ""
+	}
+	return e.namespace
+}
+
+// Capability returns the exact activation Capability whose Provider was
+// selected.
+func (e *SelectedProviderExtensionError) Capability() capabilityid.Identifier {
+	if e == nil {
+		return capabilityid.Identifier{}
+	}
+	return e.capability
+}
+
+// PluginID returns the selected Provider's canonical Plugin ID.
+func (e *SelectedProviderExtensionError) PluginID() string {
+	if e == nil {
+		return ""
+	}
+	return e.selection.PluginID()
+}
+
+// ProviderDeclarationSource returns the selected Provider's typed declaration
+// provenance when the resolver caller supplied it.
+func (e *SelectedProviderExtensionError) ProviderDeclarationSource() (providerresolution.ProviderSource, bool) {
+	if e == nil {
+		return providerresolution.ProviderSource{}, false
+	}
+	return e.selection.DeclarationSource()
+}
+
+// ChoiceSources returns every effective declaration that selected this
+// Provider.
+func (e *SelectedProviderExtensionError) ChoiceSources() []providerresolution.ChoiceSource {
+	if e == nil {
+		return nil
+	}
+	return e.selection.ChoiceSources()
+}
+
+func (e *SelectedProviderExtensionError) Error() string {
+	if e == nil || e.cause == nil {
+		return ErrSelectExtension.Error()
+	}
+	return e.cause.Error()
+}
+
+// Unwrap preserves the extension-selection and activation-catalog failure
+// chain.
+func (e *SelectedProviderExtensionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
 // Result is one immutable stable activation closure.
 type Result struct {
 	providerResolution providerresolution.Result
@@ -330,14 +400,19 @@ func selectExtensions(catalog generationactivation.Catalog, requirements generat
 		for _, namespace := range namespaces {
 			extension, err := catalog.Select(namespace, provider.PluginID())
 			if err != nil {
-				issues = append(issues, fmt.Errorf(
-					"%w: namespace %q activation Capability %s selected plugin %q: %w",
-					ErrSelectExtension,
-					namespace,
-					requirement.Capability(),
-					provider.PluginID(),
-					err,
-				))
+				issues = append(issues, &SelectedProviderExtensionError{
+					namespace:  namespace,
+					capability: requirement.Capability(),
+					selection:  provider,
+					cause: fmt.Errorf(
+						"%w: namespace %q activation Capability %s selected plugin %q: %w",
+						ErrSelectExtension,
+						namespace,
+						requirement.Capability(),
+						provider.PluginID(),
+						err,
+					),
+				})
 				continue
 			}
 			builder, exists := builders[extension.PluginID()]

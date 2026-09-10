@@ -133,6 +133,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_GENERATION_ACTIVATION_MISSING`" + ` reports every retained typed Capability requirement source for the reported unclaimed extension namespace in its owning Project module. Declaration and exposure sources are included; shared canonicalization sorts and deduplicates the facts. Because no visible ` + "`generation.activations`" + ` declaration exists, the diagnostic never fabricates an activation source. Add the association to the intended Plugin's ` + "`plugin.yaml`" + `, then rerun with the same selection.
 
+` + "`PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING`" + ` reports the selected Provider's existing ` + "`capability.yaml`" + ` at ` + "`1:1`" + ` as a ` + "`provider-declaration`" + ` source and every effective current-Project or dependency-Project ` + "`capabilities.use`" + ` document at ` + "`1:1`" + ` as a ` + "`provider-selection`" + ` source. Shared canonicalization sorts and deduplicates those authored facts. It never fabricates a source for the absent generation declaration, and the bare internal sentinel remains source-less. Add compatible generation support to the selected Provider in its owning Project or choose a compatible Provider reported by the diagnostic, then rerun with the same selection.
+
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. A normalized Project-contained document that cannot be loaded reports one path-only ` + "`configuration-selection`" + ` source without a fabricated span. Conflicting, duplicated, or unsafe selectors report no source because no document is trustworthy. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 ` + "`plystra plugin create`" + ` uses ` + "`PLYSTRA_PLUGIN_CREATE_NAME_INVALID`" + ` for an invalid or reserved root-level name, ` + "`PLYSTRA_PLUGIN_CREATE_ID_INVALID`" + ` when the Project module namespace and name cannot form a canonical Plugin ID, and ` + "`PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS`" + ` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.
@@ -1482,8 +1484,9 @@ Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
   implementation-selection; fix constructor, or set the selected document entry to null.
 - PLYSTRA_CAPABILITY_MANIFEST_INVALID: provider-declaration at 1:1; fix owning capability.yaml.
 - PLYSTRA_PLUGIN_TARGET_AMBIGUOUS: candidate plugin-declaration Sources at 1:1; --plugin.
-- PLYSTRA_GENERATION_ACTIVATION_CONFLICT: exact conflicting plugin-declaration Sources; use one Capability per namespace.
-- PLYSTRA_GENERATION_ACTIVATION_MISSING: requirement declaration/exposure Sources; add association; no fabricated activation Source.
+- PLYSTRA_GENERATION_ACTIVATION_CONFLICT: plugin Sources; unify namespace.
+- PLYSTRA_GENERATION_ACTIVATION_MISSING: requirements; add association; no invented Source.
+- PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING: provider/choice Sources; add support.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,

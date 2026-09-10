@@ -2089,6 +2089,15 @@ canonicalization sorts and deduplicates the facts. The diagnostic never
 fabricates a source for the absent `generation.activations` declaration. Add
 the association to the intended Plugin's `plugin.yaml`, then rerun generation
 or checking with the same selection.
+`PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING` emits the selected Provider's
+existing `capability.yaml` at `1:1` as `provider-declaration` and every effective
+current-Project or dependency-Project `capabilities.use` document at `1:1` as
+`provider-selection`. Shared canonicalization sorts and deduplicates those
+authored facts. The absent generation declaration has no fabricated source, and
+a bare internal sentinel remains source-less. Add compatible generation support
+to the selected Provider in its owning Project or select a compatible Provider
+listed by the diagnostic, then rerun generation or checking with the same
+selection.
 An unavailable constructor configuration schema uses
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
 current or dependency Project document as `configuration-declaration` at
@@ -2474,6 +2483,15 @@ directly.
 Edit those current or dependency Project declarations so the namespace names
 one exact activation Capability, then rerun with the same selection. Do not
 edit a Module Cache copy or infer a source from an untyped internal error.
+
+### Selected activation Provider lacks generation support
+
+`PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING` points to the selected
+Provider's existing `capability.yaml` and every effective `capabilities.use`
+document that selected it. Add a matching generation declaration to that
+Provider's `plugin.yaml` in its owning Project, or select one of the compatible
+Providers named by the diagnostic. The absent declaration has no source to
+report; do not edit a Module Cache copy or invent one from the error text.
 
 ### Extension helper fails
 

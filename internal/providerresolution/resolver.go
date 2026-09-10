@@ -212,11 +212,13 @@ func (c ResolvedCapability) Sources() []RequirementSource {
 
 // Selection records one selected ordinary provider.
 type Selection struct {
-	capability       capabilityid.Identifier
-	pluginID         string
-	providerSource   string
-	choiceSources    []ChoiceSource
-	explicitlyChosen bool
+	capability                   capabilityid.Identifier
+	pluginID                     string
+	providerSource               string
+	providerDeclarationSource    ProviderSource
+	hasProviderDeclarationSource bool
+	choiceSources                []ChoiceSource
+	explicitlyChosen             bool
 }
 
 // Capability returns the exact canonical Capability being provided.
@@ -227,6 +229,12 @@ func (s Selection) PluginID() string { return s.pluginID }
 
 // ProviderSource returns the selected provider declaration provenance.
 func (s Selection) ProviderSource() string { return s.providerSource }
+
+// DeclarationSource returns typed selected-Provider declaration provenance
+// when the resolver caller supplied it.
+func (s Selection) DeclarationSource() (ProviderSource, bool) {
+	return s.providerDeclarationSource, s.hasProviderDeclarationSource
+}
 
 // Explicit reports whether capabilities.use selected this provider.
 func (s Selection) Explicit() bool { return s.explicitlyChosen }
@@ -823,10 +831,12 @@ func validateChoices(choices []normalizedChoice, requirements []requirementGroup
 
 func newSelection(capability capabilityid.Identifier, provider normalizedCandidate, choice normalizedChoice, explicit bool) Selection {
 	selection := Selection{
-		capability:       capability,
-		pluginID:         provider.pluginID,
-		providerSource:   provider.contract.source,
-		explicitlyChosen: explicit,
+		capability:                   capability,
+		pluginID:                     provider.pluginID,
+		providerSource:               provider.contract.source,
+		providerDeclarationSource:    provider.declarationSource,
+		hasProviderDeclarationSource: provider.hasDeclarationSource,
+		explicitlyChosen:             explicit,
 	}
 	if explicit {
 		selection.choiceSources = append([]ChoiceSource(nil), choice.sources...)

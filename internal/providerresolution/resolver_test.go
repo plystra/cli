@@ -48,6 +48,9 @@ func TestResolveSelectsSoleOrdinaryProviderAndIntrinsicCapability(t *testing.T) 
 	if !ok || selection.PluginID() != "example.audit" || selection.ProviderSource() != "audit/capabilities/audit.write/v1/capability.yaml" || selection.Explicit() || selection.ChoiceSource() != "" {
 		t.Fatalf("SelectedProvider(audit) = %#v, %t", selection, ok)
 	}
+	if source, available := selection.DeclarationSource(); available || source != (providerresolution.ProviderSource{}) {
+		t.Fatalf("synthetic Provider declaration source = %#v, %t", source, available)
+	}
 	if _, ok := result.SelectedProvider(mustID(t, "kernel.health/v1")); ok {
 		t.Fatal("intrinsic Capability unexpectedly has a plugin provider")
 	}
@@ -360,6 +363,9 @@ func TestResolveRequiresExplicitChoiceForSeveralProviders(t *testing.T) {
 	selection, ok := result.SelectedProvider(mustID(t, "email.send/v1"))
 	if !ok || selection.PluginID() != "zeta.email" || !selection.Explicit() || selection.ChoiceSource() != "plystra.yaml capabilities.use.email.send/v1" {
 		t.Fatalf("explicit selection = %#v, %t", selection, ok)
+	}
+	if source, available := selection.DeclarationSource(); !available || source != providerSource("example.com/zeta", "zeta/capabilities/email.send/v1/capability.yaml") {
+		t.Fatalf("explicit selected Provider declaration source = %#v, %t", source, available)
 	}
 	sources := selection.ChoiceSources()
 	if len(sources) != 1 || sources[0].Kind != providerresolution.ChoiceSourceCurrentProject || sources[0].ModulePath != "example.com/project" || sources[0].Path != "plystra.yaml" {

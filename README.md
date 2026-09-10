@@ -958,6 +958,15 @@ canonicalization sorts and deduplicates the facts. Because no visible
 `generation.activations` declaration exists, the diagnostic never fabricates
 an activation source. Add the association to the intended Plugin's
 `plugin.yaml`, then rerun with the same selection.
+`PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING` reports the selected Provider's
+existing `capability.yaml` at `1:1` as a `provider-declaration` source and every
+effective current-Project or dependency-Project `capabilities.use` document at
+`1:1` as a `provider-selection` source. Shared canonicalization sorts and
+deduplicates those authored facts. It never fabricates a source for the absent
+generation declaration, and the bare internal sentinel remains source-less.
+Add compatible generation support to the selected Provider in its owning
+Project or choose a compatible Provider reported by the diagnostic, then rerun
+with the same selection.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses

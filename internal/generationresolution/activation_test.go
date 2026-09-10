@@ -191,7 +191,17 @@ func TestResolveReportsActivationProviderFailures(t *testing.T) {
 			Candidates: []providerresolution.Candidate{
 				orderProvider,
 				{PluginID: "example.authn-password", Contract: verify, Source: "password/session.verify"},
-				{PluginID: "example.authn-legacy", Contract: verify, Source: "legacy/session.verify"},
+				{
+					PluginID: "example.authn-legacy",
+					Contract: verify,
+					Source:   "legacy/session.verify",
+					DeclarationSource: providerresolution.ProviderSource{
+						ModulePath: "example.com/legacy",
+						Path:       "legacy/capabilities/authn.session.verify/v1/capability.yaml",
+						Line:       1,
+						Column:     1,
+					},
+				},
 			},
 			Choices: []providerresolution.Choice{{Capability: "authn.session.verify/v1", PluginID: "example.authn-legacy", Sources: activationChoiceSources("plystra.yaml capabilities.use.authn")}},
 			Activations: activationCatalog(t,
@@ -204,6 +214,22 @@ func TestResolveReportsActivationProviderFailures(t *testing.T) {
 		var closure *generationresolution.ClosureError
 		if !errors.As(err, &closure) || len(closure.Issues()) != 1 {
 			t.Fatalf("ClosureError = %#v", closure)
+		}
+		var missing *generationresolution.SelectedProviderExtensionError
+		if !errors.As(err, &missing) || missing.Namespace() != "authn" || missing.Capability().String() != "authn.session.verify/v1" || missing.PluginID() != "example.authn-legacy" {
+			t.Fatalf("SelectedProviderExtensionError = %T %#v", err, missing)
+		}
+		providerSource, available := missing.ProviderDeclarationSource()
+		if !available || providerSource.ModulePath != "example.com/legacy" || providerSource.Path != "legacy/capabilities/authn.session.verify/v1/capability.yaml" || providerSource.Line != 1 || providerSource.Column != 1 {
+			t.Fatalf("selected Provider declaration source = %#v, %t", providerSource, available)
+		}
+		choiceSources := missing.ChoiceSources()
+		if len(choiceSources) != 1 || choiceSources[0].ModulePath != "example.com/app" || choiceSources[0].Path != "plystra.yaml" {
+			t.Fatalf("selected Provider choice sources = %#v", choiceSources)
+		}
+		choiceSources[0] = providerresolution.ChoiceSource{}
+		if missing.ChoiceSources()[0].ModulePath != "example.com/app" {
+			t.Fatal("SelectedProviderExtensionError exposed mutable choice sources")
 		}
 		issues := closure.Issues()
 		issues[0] = nil

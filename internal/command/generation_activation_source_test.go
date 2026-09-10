@@ -86,6 +86,45 @@ func TestPublicGenerationCommandsReportConflictingActivationDeclarationSourcesWi
 	}
 }
 
+func TestPublicGenerationCommandsReportSelectedProviderExtensionSourcesWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := []struct {
+		name      string
+		arguments []string
+	}{
+		{name: "generate", arguments: []string{"generate"}},
+		{name: "generate-check", arguments: []string{"generate", "--check"}},
+		{name: "check", arguments: []string{"check"}},
+	}
+	for _, command := range commands {
+		command := command
+		t.Run(command.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := writeSelectedProviderWithoutGenerationExtensionProject(t)
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, command.arguments, filepath.Join(root, "records"), commandGoEnvironment())
+			wantSuffix := "\n\n" +
+				"Source: example.com/acme/legacy:audit-legacy/capabilities/audit.write/v1/capability.yaml:1:1 (provider-declaration)\n" +
+				"Source: example.com/acme/legacy:legacy/capabilities/authn.session.verify/v1/capability.yaml:1:1 (provider-declaration)\n" +
+				"Source: example.com/acme/library:plystra.yaml:1:1 (provider-selection)\n\n" +
+				"Recovery:\nAdd a compatible generation declaration to the selected activation Provider's plugin.yaml.\n\n" +
+				"Diagnostic: " + diagnosticcode.GenerationProviderExtensionMissing + "\n"
+			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "selected provider \"acme.library.authn-legacy\"") || !strings.Contains(stderr, "compatible extension providers: [acme.library.authn-password]") || !strings.Contains(stderr, "selected provider \"acme.library.audit-legacy\"") || !strings.Contains(stderr, "compatible extension providers: [acme.library.audit]") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 3 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+				t.Fatalf("%s = exit %d, stdout %q, stderr %q", command.name, exitCode, stdout, stderr)
+			}
+			if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, "pkg\\mod") || strings.Contains(stderr, "pkg/mod") {
+				t.Fatalf("%s exposed an absolute or Module Cache path: %q", command.name, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%s mutated the selected-Provider-extension Project:\nbefore: %#v\nafter:  %#v", command.name, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func writeMissingGenerationActivationProject(t *testing.T) string {
 	t.Helper()
 
@@ -157,5 +196,71 @@ request: {}
 response: {}
 errors: []
 `)
+	return root
+}
+
+func writeSelectedProviderWithoutGenerationExtensionProject(t *testing.T) string {
+	t.Helper()
+
+	root := writeCapabilityCommandModule(t)
+	legacyRoot := filepath.Join(root, "legacy-dependency")
+	writeCommandFile(t, filepath.Join(legacyRoot, "go.mod"), "module example.com/acme/legacy\n\ngo 1.26\n")
+	writeCommandFile(t, filepath.Join(legacyRoot, "plystra.yaml"), "{}\n")
+	goMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatalf("read application go.mod: %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.mod"), string(goMod)+"\nrequire example.com/acme/legacy v1.2.3\n\nreplace example.com/acme/legacy => ./legacy-dependency\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `capabilities:
+  require: [records.get/v1]
+  use:
+    authn.session.verify/v1: acme.library.authn-legacy
+    audit.write/v1: acme.library.audit-legacy
+`)
+	writeCommandFile(t, filepath.Join(root, "records", "plugin.yaml"), "id: acme.library.records\nprovides: [records.get/v1]\n")
+	writeCommandFile(t, filepath.Join(root, "records", "capabilities", "records.get", "v1", "capability.yaml"), `id: records.get/v1
+request: {}
+response: {}
+errors: []
+extensions:
+  authn: {authenticated: true}
+  audit: {durable: true}
+`)
+	verifyContract := `id: authn.session.verify/v1
+request: {}
+response: {}
+errors: []
+`
+	writeCommandFile(t, filepath.Join(root, "password", "plugin.yaml"), `id: acme.library.authn-password
+provides: [authn.session.verify/v1]
+generation:
+  api: v1
+  package: ./generation
+  activations:
+    - namespace: authn
+      capability: authn.session.verify/v1
+`)
+	writeCommandFile(t, filepath.Join(root, "password", "generation", "extension.go"), "package generation\n")
+	writeCommandFile(t, filepath.Join(root, "password", "capabilities", "authn.session.verify", "v1", "capability.yaml"), verifyContract)
+	auditContract := `id: audit.write/v1
+request: {}
+response: {}
+errors: []
+`
+	writeCommandFile(t, filepath.Join(root, "audit", "plugin.yaml"), `id: acme.library.audit
+provides: [audit.write/v1]
+generation:
+  api: v1
+  package: ./generation
+  activations:
+    - namespace: audit
+      capability: audit.write/v1
+`)
+	writeCommandFile(t, filepath.Join(root, "audit", "generation", "extension.go"), "package generation\n")
+	writeCommandFile(t, filepath.Join(root, "audit", "capabilities", "audit.write", "v1", "capability.yaml"), auditContract)
+	writeCommandFile(t, filepath.Join(legacyRoot, "legacy", "plugin.yaml"), "id: acme.library.authn-legacy\nprovides: [authn.session.verify/v1]\n")
+	writeCommandFile(t, filepath.Join(legacyRoot, "legacy", "capabilities", "authn.session.verify", "v1", "capability.yaml"), verifyContract)
+	writeCommandFile(t, filepath.Join(legacyRoot, "audit-legacy", "plugin.yaml"), "id: acme.library.audit-legacy\nprovides: [audit.write/v1]\n")
+	writeCommandFile(t, filepath.Join(legacyRoot, "audit-legacy", "capabilities", "audit.write", "v1", "capability.yaml"), auditContract)
 	return root
 }

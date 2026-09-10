@@ -57,9 +57,9 @@ command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
 Typed source-bearing failures, including invalid Project and Go Module
 declarations, safe missing configuration selections, current-Project
 configuration-composition, concurrent Project inputs, generated-output conflicts
-and drift, application module dependency drift, missing or conflicting
-generation-activation associations, ambiguous local Plugin targets, invalid
-explicit choices, and
+and drift, application module dependency drift, generation-activation failures,
+selected-Provider generation-extension mismatches, ambiguous local Plugin
+targets, invalid explicit choices, and
 missing, ambiguous, or cyclic Interface Implementation resolution, add
 canonical module-relative Source lines first.
 `
@@ -215,6 +215,11 @@ PLYSTRA_GENERATION_ACTIVATION_MISSING reports retained typed Capability
 requirement sources for the reported unclaimed extension namespace, including
 declaration and exposure sources, in shared sorted and deduplicated order. It
 never fabricates a source for the absent generation.activations declaration.
+PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING reports the selected Provider's
+capability.yaml at 1:1 as a provider-declaration source and every effective
+capabilities.use document at 1:1 as a provider-selection source. Sources are
+sorted and deduplicated; it never fabricates a source for absent generation
+support.
 PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
 configuration, go.mod/go.sum, or generated path as a sorted path-only
 configuration-declaration, module-dependency, or generated-artifact source
@@ -294,6 +299,11 @@ PLYSTRA_GENERATION_ACTIVATION_MISSING reports retained typed Capability
 requirement sources for the reported unclaimed extension namespace, including
 declaration and exposure sources, in shared sorted and deduplicated order. It
 never fabricates a source for the absent generation.activations declaration.
+PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING reports the selected Provider's
+capability.yaml at 1:1 as a provider-declaration source and every effective
+capabilities.use document at 1:1 as a provider-selection source. Sources are
+sorted and deduplicated; it never fabricates a source for absent generation
+support.
 PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
 configuration, go.mod/go.sum, or generated path as a sorted path-only
 configuration-declaration, module-dependency, or generated-artifact source

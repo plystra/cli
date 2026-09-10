@@ -340,6 +340,7 @@ func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 		{name: "interactive selection failed", err: fmt.Errorf("author Capability: %w", plugintarget.ErrSelection), code: diagnosticPluginTargetInvalid},
 		{name: "activation conflict without typed candidates", err: fmt.Errorf("resolve generation: %w", generationactivation.ErrAssociationConflict), code: diagnosticGenerationActivationConflict},
 		{name: "missing activation without requirement provenance", err: fmt.Errorf("resolve generation: %w", generationactivation.ErrMissingAssociation), code: diagnosticGenerationActivationMissing},
+		{name: "selected Provider extension without typed selection", err: fmt.Errorf("resolve generation: %w", generationactivation.ErrSelectedProviderExtension), code: diagnosticGenerationProviderExtensionMissing},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {

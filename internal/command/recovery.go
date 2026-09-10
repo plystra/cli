@@ -458,6 +458,52 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				sources = append(sources, candidate)
 			}
 		}
+	case diagnosticGenerationProviderExtensionMissing:
+		var failures []*generationresolution.SelectedProviderExtensionError
+		var closure *generationresolution.ClosureError
+		if errors.As(err, &closure) && closure != nil {
+			for _, issue := range closure.Issues() {
+				var missing *generationresolution.SelectedProviderExtensionError
+				if errors.As(issue, &missing) && missing != nil {
+					failures = append(failures, missing)
+				}
+			}
+		}
+		if len(failures) == 0 {
+			var missing *generationresolution.SelectedProviderExtensionError
+			if !errors.As(err, &missing) || missing == nil {
+				return nil
+			}
+			failures = append(failures, missing)
+		}
+		seen := make(map[diagnosticjson.Source]struct{})
+		appendSource := func(source diagnosticjson.Source) {
+			if _, exists := seen[source]; exists {
+				return
+			}
+			seen[source] = struct{}{}
+			sources = append(sources, source)
+		}
+		for _, missing := range failures {
+			if source, available := missing.ProviderDeclarationSource(); available {
+				appendSource(diagnosticjson.Source{
+					Module: source.ModulePath,
+					Path:   source.Path,
+					Kind:   "provider-declaration",
+					Line:   source.Line,
+					Column: source.Column,
+				})
+			}
+			for _, source := range missing.ChoiceSources() {
+				appendSource(diagnosticjson.Source{
+					Module: source.ModulePath,
+					Path:   source.Path,
+					Kind:   "provider-selection",
+					Line:   source.Line,
+					Column: source.Column,
+				})
+			}
+		}
 	case diagnosticGeneratedOwnershipConflict:
 		var conflict *applicationgenerate.OwnershipConflictSourceError
 		if !errors.As(err, &conflict) || conflict == nil {
