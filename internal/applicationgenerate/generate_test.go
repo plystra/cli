@@ -1915,6 +1915,17 @@ func TestGenerateRejectsEventAndStreamConnectExposureWithoutMutation(t *testing.
 				options.ConfigurationPath = "deploy/customer-a.yaml"
 			},
 		},
+		{
+			name:         "ambient full replacement",
+			selectedPath: "deploy/automation.yaml",
+			configure: func(options *applicationgenerate.Options) {
+				options.Environment = goEnvironment(map[string]string{
+					"GOWORK":         "off",
+					"GOPROXY":        "off",
+					"PLYSTRA_CONFIG": "deploy/automation.yaml",
+				})
+			},
+		},
 	}
 	surfaces := []struct {
 		name string
@@ -1968,7 +1979,21 @@ capabilities:
 							selection.configure(&options)
 						}
 						_, err := applicationgenerate.Generate(t.Context(), options)
-						if !errors.Is(err, protobufmodel.ErrOperationKind) {
+						var unsupported *protobufmodel.OperationKindError
+						var source *applicationgenerate.ProtobufOperationKindSourceError
+						if !errors.Is(err, protobufmodel.ErrOperationKind) ||
+							!errors.As(err, &unsupported) ||
+							unsupported == nil ||
+							unsupported.CapabilityID().String() != "records.archived/v1" ||
+							string(unsupported.Kind()) != kind.name ||
+							!errors.As(err, &source) ||
+							source == nil ||
+							source.CapabilityID().String() != "records.archived/v1" ||
+							source.ModulePath() != "example.com/acme/connect-"+kind.name ||
+							source.SourcePath() != selection.selectedPath ||
+							source.SourceKind() != "exposure" ||
+							source.Line() != 1 ||
+							source.Column() != 1 {
 							t.Fatalf("Generate(check=%t) error = %v", check, err)
 						}
 						for _, want := range []string{
@@ -1983,6 +2008,9 @@ capabilities:
 							if !strings.Contains(err.Error(), want) {
 								t.Fatalf("Generate error %q omits %q", err, want)
 							}
+						}
+						if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+							t.Fatalf("Generate error exposed the Project path: %v", err)
 						}
 						if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 							t.Fatalf("failed generation mutated Project:\nbefore: %#v\nafter:  %#v", before, after)

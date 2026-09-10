@@ -479,7 +479,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	}
 	protobufProjection, err := applicationgen.ProtobufProjection(httpTransports, resolved.Resolution())
 	if err != nil {
-		return preparedGeneration{}, fmt.Errorf("build final Protobuf projection: %w", err)
+		return preparedGeneration{}, fmt.Errorf("build final Protobuf projection: %w", protobufOperationKindSourceError(resolved.Manifest().HTTPExposures(), err))
 	}
 	previousWireMap, previousWireMapExists, err := generatedfiles.ReadOwnedFile(resolved.Module().Path(), protobufwiremap.Path, protobufwiremap.MaximumBytes)
 	if err != nil {

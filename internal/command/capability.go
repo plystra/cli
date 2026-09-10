@@ -34,6 +34,8 @@ The current Connect unary boundary accepts a canonical Capability whose
 explicit semantics.kind is query or command. Exposing an event or stream fails
 the transaction; remove it from http.expose until that operation kind is
 supported rather than relabeling the contract.
+PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED reports the effective http.expose
+document at 1:1 as an exposure source before selector-aware recovery.
 
 PLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit
 selector is present; setting both is an error. Explicit --env or --config

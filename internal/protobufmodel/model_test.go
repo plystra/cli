@@ -212,7 +212,15 @@ func TestBuildRejectsEventAndStreamKindsAtTheUnaryConnectBoundary(t *testing.T) 
 
 			target := projectionTarget(t, "id: customer.profile.get/v1\n"+test.semantics, generation.Exposure{HTTP: true})
 			model, err := protobufmodel.Build(true, []protobufmodel.CanonicalTargetView{target}, nil)
-			if model.Valid() || !errors.Is(err, protobufmodel.ErrBuild) || !errors.Is(err, protobufmodel.ErrTarget) || !errors.Is(err, protobufmodel.ErrOperationKind) {
+			var unsupported *protobufmodel.OperationKindError
+			if model.Valid() ||
+				!errors.Is(err, protobufmodel.ErrBuild) ||
+				!errors.Is(err, protobufmodel.ErrTarget) ||
+				!errors.Is(err, protobufmodel.ErrOperationKind) ||
+				!errors.As(err, &unsupported) ||
+				unsupported == nil ||
+				unsupported.CapabilityID().String() != "customer.profile.get/v1" ||
+				unsupported.Kind() != test.kind {
 				t.Fatalf("Build = %#v, %v", model, err)
 			}
 			for _, want := range []string{

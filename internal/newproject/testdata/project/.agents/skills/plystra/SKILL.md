@@ -220,8 +220,8 @@ dispatch entry. The current Connect boundary accepts canonical contracts with
 explicit semantics.kind: query or command and projects each as one unary
 procedure; an Alias reuses that canonical target. Selecting an event or stream
 for Connect fails before output and identifies the Capability, typed kind,
-supported unary kinds, and http.expose remediation. Do not relabel an event or
-stream to bypass this check. Both accept only Connect
+supported unary kinds, and http.expose remediation.
+Do not relabel an event or stream to bypass this check. Both accept only Connect
 POST requests encoded as binary
 Protobuf or ProtoJSON, require Connect-Protocol-Version: 1, and reject gRPC and
 gRPC-Web before root-context or Provider invocation. Binary Protobuf requests
@@ -1308,10 +1308,11 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   Rename one conflicting member in the reported interface-contract Source.
   Never patch generated names or wire history; generation and generate --check
   stay read-only on failure.
-- Unsupported Connect operation kind: the current unary boundary accepts a
-  canonical contract with semantics.kind: query or command. Remove the named
-  event or stream from http.expose until its operation kind is supported; do
-  not relabel the contract to bypass this check.
+- Unsupported Connect operation kind
+  (PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED): the current unary boundary
+  accepts a canonical contract with semantics.kind: query or command. Remove
+  the named event or stream from http.expose at the reported exposure Source,
+  then regenerate with the same selector. Do not relabel the contract.
 - Stale output after removal: run plystra generate so the managed-file manifest
   can remove obsolete contracts, clients, adapters, Alias surfaces, docs, and
   SDK operations transactionally.

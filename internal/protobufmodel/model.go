@@ -35,6 +35,46 @@ var (
 	ErrOperationKind = errors.New("unsupported Connect operation kind")
 )
 
+// OperationKindError identifies the exact canonical Capability and typed
+// semantics that cannot enter the currently supported Connect operation
+// boundary. The sentinel remains available through errors.Is.
+type OperationKindError struct {
+	capabilityID generation.CapabilityID
+	kind         capabilitymeta.CapabilityKind
+	cause        error
+}
+
+// CapabilityID returns the exact canonical Capability rejected by projection.
+func (e *OperationKindError) CapabilityID() generation.CapabilityID {
+	if e == nil {
+		return generation.CapabilityID{}
+	}
+	return e.capabilityID
+}
+
+// Kind returns the rejected provider-independent operation kind.
+func (e *OperationKindError) Kind() capabilitymeta.CapabilityKind {
+	if e == nil {
+		return ""
+	}
+	return e.kind
+}
+
+func (e *OperationKindError) Error() string {
+	if e == nil || e.cause == nil {
+		return ErrOperationKind.Error()
+	}
+	return e.cause.Error()
+}
+
+// Unwrap preserves the unsupported-operation sentinel and human detail.
+func (e *OperationKindError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
 // CanonicalTargetView is the exact resolved canonical surface and immutable
 // contract provenance required by the Protobuf projection.
 // generation.CapabilityView satisfies this interface.
@@ -259,7 +299,12 @@ func Build(connect bool, targets []CanonicalTargetView, aliasViews []AliasView) 
 			return Model{}, fmt.Errorf("%w: %w: canonical operation kind for %s: %v", ErrBuild, ErrTarget, operation.ID(), err)
 		}
 		if kind != capabilitymeta.CapabilityKindQuery && kind != capabilitymeta.CapabilityKindCommand {
-			return Model{}, fmt.Errorf("%w: %w: %w: Capability %s declares semantics.kind %q for the requested Connect surface; the current unary boundary supports only semantics.kind %q or %q; remove %s from http.expose until its Connect operation kind is supported", ErrBuild, ErrTarget, ErrOperationKind, operation.ID(), kind, capabilitymeta.CapabilityKindQuery, capabilitymeta.CapabilityKindCommand, operation.ID())
+			cause := fmt.Errorf("%w: Capability %s declares semantics.kind %q for the requested Connect surface; the current unary boundary supports only semantics.kind %q or %q; remove %s from http.expose until its Connect operation kind is supported", ErrOperationKind, operation.ID(), kind, capabilitymeta.CapabilityKindQuery, capabilitymeta.CapabilityKindCommand, operation.ID())
+			return Model{}, fmt.Errorf("%w: %w: %w", ErrBuild, ErrTarget, &OperationKindError{
+				capabilityID: operation.ID(),
+				kind:         kind,
+				cause:        cause,
+			})
 		}
 		operations[index] = Operation{
 			id:             operation.ID(),

@@ -87,6 +87,8 @@ Common actionable Plystra CLI failures end with exactly one `Recovery:` block fo
 
 `PLYSTRA_PROTOBUF_IDENTITY_COLLISION` reports the owning Interface Go file at the trusted declaration position as an `interface-contract` source. Rename one conflicting authored field or enum member, then regenerate with the same selection; never patch generated names or wire history.
 
+`PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED` reports the effective `http.expose` document at `1:1` as an `exposure` source. Remove the named event or stream there, then regenerate with the same selector; never relabel the canonical contract to bypass the unary boundary.
+
 `PLYSTRA_GO_MODULE_INVALID` reports the exact current-Project `go.mod` module or requirement position as a `module-dependency` source once Project identity is valid. Correct that declaration; a file that cannot establish a trustworthy module identity receives no invented source.
 
 `PLYSTRA_APPLICATION_DEPENDENCY_DRIFT` reports the current Project `go.mod` at `1:1` as a `module-dependency` source when the Kernel is missing or only transitive, or a generated runtime requirement has drifted. `plystra generate --check` and `plystra check` are read-only; normal generation transactionally restores the CLI-supported direct Kernel release and required runtime modules before validation.

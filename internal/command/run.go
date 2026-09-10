@@ -198,6 +198,8 @@ PLYSTRA_RESOLVE_RESERVED_INTERFACE reports the module-relative declaration that
 uses the reserved kernel.* namespace before recovery.
 PLYSTRA_PROTOBUF_IDENTITY_COLLISION reports the owning Interface Go contract at
 its declaration position as an interface-contract source before recovery.
+PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED reports the effective http.expose
+document at 1:1 as an exposure source before selector-aware recovery.
 `
 	checkUsage = `Usage:
   plystra check [--env <environment>|--config <yaml-path>]
@@ -259,6 +261,8 @@ PLYSTRA_RESOLVE_RESERVED_INTERFACE reports the module-relative declaration that
 uses the reserved kernel.* namespace before recovery.
 PLYSTRA_PROTOBUF_IDENTITY_COLLISION reports the owning Interface Go contract at
 its declaration position as an interface-contract source before recovery.
+PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED reports the effective http.expose
+document at 1:1 as an exposure source before selector-aware recovery.
 `
 	inspectUsage = `Usage:
   plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]

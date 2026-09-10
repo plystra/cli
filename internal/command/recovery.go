@@ -444,6 +444,18 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			Line:   located.Line(),
 			Column: located.Column(),
 		})
+	case diagnosticProtobufOperationKindUnsupported:
+		var located diagnosticSourceLocation
+		if !errors.As(err, &located) || located == nil || located.SourceKind() != "exposure" {
+			return nil
+		}
+		sources = append(sources, diagnosticjson.Source{
+			Module: located.ModulePath(),
+			Path:   located.SourcePath(),
+			Kind:   located.SourceKind(),
+			Line:   located.Line(),
+			Column: located.Column(),
+		})
 	case diagnosticConstructorConfigurationUnselected:
 		var unowned *applicationresolve.UnownedConstructorConfigurationError
 		if !errors.As(err, &unowned) || unowned == nil {
@@ -1096,7 +1108,7 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, protobufidentity.ErrCollision):
 		return recoveryDiagnostic(diagnosticProtobufIdentityCollision, "Rename one conflicting authored field or enum member in the owning Interface contract, then run `plystra generate"+context.selectorSuffix()+"`.")
 	case errors.Is(err, protobufmodel.ErrOperationKind):
-		return recoveryDiagnostic(diagnosticProtobufOperationKindUnsupported, "Remove the unsupported Capability from http.expose in "+context.configurationTarget()+", then regenerate.")
+		return recoveryDiagnostic(diagnosticProtobufOperationKindUnsupported, "Remove the unsupported Capability from http.expose in "+context.configurationTarget()+", then run `plystra generate"+context.selectorSuffix()+"`.")
 	case errors.Is(err, generatedfiles.ErrConflict):
 		return recoveryDiagnostic(diagnosticGeneratedOwnershipConflict, generatedOwnershipRecovery(context))
 	case errors.Is(err, generatedfiles.ErrUnexpected):

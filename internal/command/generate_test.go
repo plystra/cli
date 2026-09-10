@@ -590,6 +590,100 @@ func (*Service) Read(context.Context, collisionv1.Request) (collisionv1.Response
 	}
 }
 
+func TestRunGenerateReportsUnsupportedOperationExposureSourceWithoutMutation(t *testing.T) {
+	kinds := []struct {
+		name      string
+		semantics string
+	}{
+		{
+			name: "event",
+			semantics: `semantics:
+  kind: event
+  effects: external-write
+  idempotency: {mode: none}
+  retry: {safety: never}
+  cancellation: {mode: best-effort}
+  completion: {mode: accepted-for-processing}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`,
+		},
+		{
+			name: "stream",
+			semantics: `semantics:
+  kind: stream
+  effects: none
+  idempotency: {mode: none}
+  retry: {safety: never}
+  cancellation: {mode: best-effort}
+  completion: {mode: accepted-for-processing}
+  ordering: {mode: none}
+  data: {request: public, response: public}
+`,
+		},
+	}
+	commands := []struct {
+		name         string
+		arguments    []string
+		overrides    map[string]string
+		selectedPath string
+		recovery     string
+	}{
+		{name: "default generate", arguments: []string{"generate"}, selectedPath: "plystra.yaml", recovery: "Remove the unsupported Capability from http.expose in plystra.yaml, then run `plystra generate`."},
+		{name: "default check", arguments: []string{"generate", "--check"}, selectedPath: "plystra.yaml", recovery: "Remove the unsupported Capability from http.expose in plystra.yaml, then run `plystra generate`."},
+		{name: "environment check", arguments: []string{"generate", "--check", "--env", "production"}, selectedPath: "plystra.production.yaml", recovery: "Remove the unsupported Capability from http.expose in plystra.production.yaml, then run `plystra generate --env \"production\"`."},
+		{name: "replacement check", arguments: []string{"check", "--config", "deploy/customer.yaml"}, selectedPath: "deploy/customer.yaml", recovery: "Remove the unsupported Capability from http.expose in deploy/customer.yaml, then run `plystra generate --config \"deploy/customer.yaml\"`."},
+		{name: "ambient replacement check", arguments: []string{"check"}, overrides: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"}, selectedPath: "deploy/customer.yaml", recovery: "Remove the unsupported Capability from http.expose in deploy/customer.yaml, then run `plystra generate --config \"deploy/customer.yaml\"`."},
+	}
+
+	for _, kind := range kinds {
+		kind := kind
+		for _, commandCase := range commands {
+			commandCase := commandCase
+			t.Run(kind.name+"/"+commandCase.name, func(t *testing.T) {
+				root := writeCapabilityCommandModule(t)
+				selectedData := "http: {expose: [records.archived/v1]}\n"
+				rootData := "{}\n"
+				if commandCase.selectedPath == "plystra.yaml" {
+					rootData = selectedData
+				}
+				writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootData)
+				if commandCase.selectedPath != "plystra.yaml" {
+					writeCommandFile(t, filepath.Join(root, filepath.FromSlash(commandCase.selectedPath)), selectedData)
+				}
+				writeCommandFile(t, filepath.Join(root, "records", "plugin.yaml"), "id: acme.library.records\nprovides: [records.archived/v1]\n")
+				writeCommandFile(t, filepath.Join(root, "records", "capabilities", "records.archived", "v1", "capability.yaml"), "id: records.archived/v1\nrequest: {record_id: {type: string, required: true}}\nresponse: {}\nerrors: []\n"+kind.semantics)
+				before := commandTree(t, root)
+				environment := commandGoEnvironment()
+				if commandCase.overrides != nil {
+					environment = commandGoEnvironmentWith(commandCase.overrides)
+				}
+				exitCode, stdout, stderr := runCommand(t, commandCase.arguments, filepath.Join(root, "records"), environment)
+				wantSuffix := "\n\nSource: example.com/acme/library:" + commandCase.selectedPath + ":1:1 (exposure)\n\n" +
+					"Recovery:\n" + commandCase.recovery + "\n\nDiagnostic: " + diagnosticcode.ProtobufOperationKindUnsupported + "\n"
+				if exitCode != 1 ||
+					stdout != "" ||
+					!strings.Contains(stderr, "unsupported Connect operation kind") ||
+					!strings.Contains(stderr, "Capability records.archived/v1") ||
+					!strings.Contains(stderr, `semantics.kind "`+kind.name+`"`) ||
+					!strings.HasSuffix(stderr, wantSuffix) ||
+					strings.Count(stderr, "Source: ") != 1 ||
+					strings.Count(stderr, "Recovery:") != 1 ||
+					strings.Count(stderr, "Diagnostic:") != 1 ||
+					strings.Contains(stderr, "capability.yaml") ||
+					strings.Contains(stderr, root) ||
+					strings.Contains(stderr, filepath.ToSlash(root)) {
+					t.Fatalf("%s = exit %d, stdout %q, stderr %q", commandCase.name, exitCode, stdout, stderr)
+				}
+				if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+					t.Fatalf("%s changed the Project:\nbefore: %#v\nafter:  %#v", commandCase.name, before, after)
+				}
+				assertNoCommandTransactions(t, root)
+			})
+		}
+	}
+}
+
 func TestRunGenerateInstallsConnectRuntimeRequirementsAndCheckIsReadOnly(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)

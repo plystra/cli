@@ -539,7 +539,10 @@ projects either operation as one unary procedure, and every Alias reuses the
 same canonical target. Selecting an `event` or `stream` for Connect fails
 before output with the exact Capability, typed kind, supported unary kinds,
 and instruction to remove the Capability from `http.expose` until that
-operation kind is supported. Do not relabel an event or stream to bypass this
+operation kind is supported. The
+`PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED` diagnostic reports the effective
+module-relative configuration document at `1:1` as an `exposure` source before
+selector-aware recovery. Do not relabel an event or stream to bypass this
 validation.
 The application supplies one `RootContext` function for each generated
 canonical handler. It receives the live external request context plus a cloned
@@ -2037,6 +2040,11 @@ fabricated span. Restore the exact last known-good generated ledger, then rerun
 at its trusted declaration position as an `interface-contract` source. The
 problem retains the Interface, message, conflicting field names, and generated
 identity without an absolute or Module Cache path.
+`PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED` emits the effective
+`http.expose` configuration document at `1:1` as an `exposure` source. The
+problem retains the exact Capability and typed event or stream kind; recovery
+removes that exposure from the selected root, environment, or complete
+replacement document and reruns generation with the same selector.
 `PLYSTRA_GENERATED_UNEXPECTED_OUTPUT` emits every unexpected unowned path as a
 sorted `generated-artifact` source in the current Project module, also without
 a fabricated span. Move each reported path outside `generated/`, then rerun
@@ -2371,6 +2379,14 @@ conflicting member, then regenerate with the same selector. The source uses the
 trusted Interface declaration position because field spans are not retained.
 Do not patch generated Go, Protobuf, descriptor, or wire-history artifacts.
 Ordinary generation and `plystra generate --check` leave the Project unchanged.
+
+### Unsupported Connect operation kind
+
+`PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED` identifies the exact event or
+stream Capability rejected by the current unary Connect boundary and reports
+the effective selected `http.expose` document as an `exposure` source at `1:1`.
+Remove that exposure and regenerate with the same selector. Do not relabel the
+canonical contract as a query or command to evade the transport constraint.
 
 ### Plugin target is ambiguous
 

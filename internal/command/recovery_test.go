@@ -201,6 +201,13 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			code:    diagnosticProtobufIdentityCollision,
 		},
 		{
+			name:    "Protobuf operation kind",
+			err:     fmt.Errorf("project operation: %w", protobufmodel.ErrOperationKind),
+			context: commandRecoveryContext("", "", []string{"PLYSTRA_CONFIG=deploy/customer.yaml"}),
+			want:    "Remove the unsupported Capability from http.expose in deploy/customer.yaml, then run `plystra generate --config \"deploy/customer.yaml\"`.",
+			code:    diagnosticProtobufOperationKindUnsupported,
+		},
+		{
 			name: "Capability create confirmation",
 			err:  errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrConfirmationRequired),
 			want: "Review the visible Capability versions, then rerun the same `plystra capability create` command with `--confirm`.",

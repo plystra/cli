@@ -102,8 +102,11 @@ dispatch entry. The current Connect boundary accepts canonical contracts whose
 explicit `semantics.kind` is `query` or `command` and projects each as one unary
 procedure; an Alias reuses that canonical target. Selecting an `event` or
 `stream` for Connect fails before generated output and names the Capability,
-declared kind, supported unary kinds, and `http.expose` remediation. Do not
-relabel an event or stream to bypass this validation.
+declared kind, supported unary kinds, and `http.expose` remediation. The
+`PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED` diagnostic reports the effective
+module-relative configuration document at `1:1` as an `exposure` source before
+selector-aware recovery. Do not relabel an event or stream to bypass this
+validation.
 The configured `RootContext` receives the live external request context and
 returns the trusted Kernel root used by the canonical invocation. Generated
 handlers preserve explicit caller cancellation and the earlier caller or
@@ -908,6 +911,11 @@ fabricated span. Restore the exact last known-good generated ledger, then rerun
 as an `interface-contract` source at the trusted declaration position. Rename
 one conflicting authored field or enum member in that contract, then regenerate
 with the same selection; never patch generated names or wire history.
+`PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED` emits the effective
+`http.expose` configuration document at `1:1` as an `exposure` source. Remove
+the named event or stream from that selected document, then regenerate with the
+same selector; never relabel the canonical contract to bypass the unary
+boundary.
 `PLYSTRA_GENERATED_UNEXPECTED_OUTPUT` emits every unexpected unowned path as a
 sorted `generated-artifact` source in the current Project module, also without
 a fabricated span. Move each reported path outside `generated/`, then rerun

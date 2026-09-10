@@ -386,6 +386,9 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	if !bytes.Contains(skill, []byte("PLYSTRA_PROTOBUF_IDENTITY_COLLISION")) || !bytes.Contains(skill, []byte("interface-contract Source")) {
 		t.Fatal("maximum-length Project skill omits Protobuf identity-collision source guidance")
 	}
+	if !bytes.Contains(skill, []byte("PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED")) || !bytes.Contains(skill, []byte("reported exposure Source")) {
+		t.Fatal("maximum-length Project skill omits unsupported-operation source guidance")
+	}
 }
 
 func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
@@ -1163,6 +1166,8 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID` reports `generated/proto/wire-map.json`"),
 		[]byte("`PLYSTRA_PROTOBUF_IDENTITY_COLLISION` reports the owning Interface Go file"),
 		[]byte("`interface-contract` source"),
+		[]byte("`PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED` reports the effective `http.expose` document"),
+		[]byte("`exposure` source"),
 		[]byte("`PLYSTRA_GENERATED_OWNERSHIP_CONFLICT` reports the single desired managed path"),
 		[]byte("`PLYSTRA_GENERATED_UNEXPECTED_OUTPUT` reports every unexpected unowned path"),
 		[]byte("`generated-artifact` source"),
@@ -2228,6 +2233,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_GENERATED_MANIFEST_INVALID",
 		"PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID",
 		"PLYSTRA_PROTOBUF_IDENTITY_COLLISION",
+		"PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED",
 		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
 		"generated-artifact Sources",
@@ -2363,6 +2369,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"http_status and h_t_t_p_status both derive one HTTPStatusEnum type",
 		"Protobuf naming collision",
 		"Unsupported Connect operation kind",
+		"PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED",
+		"reported exposure Source",
 		"generated/proto/descriptor-set.pb is the self-contained deterministic",
 		"A selected Connect surface also emits a Go handler",
 		"explicit semantics.kind: query or command",
@@ -2491,6 +2499,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_GENERATED_MANIFEST_INVALID",
 		"PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID",
 		"PLYSTRA_PROTOBUF_IDENTITY_COLLISION",
+		"PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED",
 		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
 		"generated-artifact",
