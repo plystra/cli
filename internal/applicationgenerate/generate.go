@@ -493,7 +493,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		resolved.PreviousManifestProvenance().ProtobufWireMapDigest(),
 	)
 	if err != nil {
-		return preparedGeneration{}, err
+		return preparedGeneration{}, protobufWireHistorySourceError(resolved.Module().ModulePath(), err)
 	}
 	descriptorEvidence, err := protobufdescriptor.BuildWithInterfaces(
 		protobufProjection,

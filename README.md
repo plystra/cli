@@ -898,6 +898,10 @@ the same selection; the existing entry is never overwritten.
 `generated/.plystra-manifest.json` as a `generated-artifact` source without a
 fabricated span. Restore the manifest from a known-good generated state, then
 regenerate with the same selection.
+`PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID` emits the current Project's
+`generated/proto/wire-map.json` as a `generated-artifact` source without a
+fabricated span. Restore the exact last known-good generated ledger, then rerun
+`plystra generate` with the same selection.
 `PLYSTRA_GENERATED_UNEXPECTED_OUTPUT` emits every unexpected unowned path as a
 sorted `generated-artifact` source in the current Project module, also without
 a fabricated span. Move each reported path outside `generated/`, then rerun

@@ -107,18 +107,31 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 	writeFile(t, interfacePath, interfaceProtobufSource(9))
 	beforeCheck := snapshotTree(t, root)
 	options.Check = true
-	if result, err := applicationgenerate.Generate(t.Context(), options); !errors.Is(err, protobufwiremap.ErrHistory) ||
+	result, err := applicationgenerate.Generate(t.Context(), options)
+	if !errors.Is(err, protobufwiremap.ErrHistory) ||
 		!strings.Contains(err.Error(), `field "page_size" authored number changed from 7 to 9`) {
 		t.Fatalf("Generate --check(renumbered) = %#v, %v", result, err)
+	}
+	var wireSource *applicationgenerate.ProtobufWireHistorySourceError
+	if !errors.As(err, &wireSource) || wireSource == nil || wireSource.ModulePath() != modulePath || wireSource.SourcePath() != protobufwiremap.Path || wireSource.SourceKind() != "generated-artifact" || wireSource.Line() != 0 || wireSource.Column() != 0 {
+		t.Fatalf("Protobuf wire-history source = %#v, %v", wireSource, err)
+	}
+	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+		t.Fatalf("Protobuf wire-history failure exposed the Project path: %v", err)
 	}
 	if afterCheck := snapshotTree(t, root); !reflect.DeepEqual(afterCheck, beforeCheck) {
 		t.Fatal("Generate --check mutated the renumbered Interface Project")
 	}
 
 	options.Check = false
-	if result, err := applicationgenerate.Generate(t.Context(), options); !errors.Is(err, protobufwiremap.ErrHistory) ||
+	result, err = applicationgenerate.Generate(t.Context(), options)
+	if !errors.Is(err, protobufwiremap.ErrHistory) ||
 		!reflect.DeepEqual(snapshotTree(t, root), beforeCheck) {
 		t.Fatalf("Generate(renumbered) = %#v, %v", result, err)
+	}
+	wireSource = nil
+	if !errors.As(err, &wireSource) || wireSource == nil || wireSource.ModulePath() != modulePath || wireSource.SourcePath() != protobufwiremap.Path || wireSource.SourceKind() != "generated-artifact" || wireSource.Line() != 0 || wireSource.Column() != 0 {
+		t.Fatalf("normal Protobuf wire-history source = %#v, %v", wireSource, err)
 	}
 
 	writeFile(t, interfacePath, interfaceProtobufSource(0))

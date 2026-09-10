@@ -1250,7 +1250,8 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
 - PLYSTRA_CONFIGURATION_INVALID / PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
 - PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT: fix Source.
 - PLYSTRA_GENERATED_DRIFT / PLYSTRA_GENERATED_MANIFEST_INVALID /
-  PLYSTRA_GENERATED_OWNERSHIP_CONFLICT / PLYSTRA_GENERATED_UNEXPECTED_OUTPUT:
+  PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID / PLYSTRA_GENERATED_OWNERSHIP_CONFLICT /
+  PLYSTRA_GENERATED_UNEXPECTED_OUTPUT:
   restore, regenerate, or move generated-artifact Sources.
 - PLYSTRA_GO_MODULE_INVALID: fix exact go.mod Source.
 - PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: go.mod module-dependency; generate repairs
@@ -1291,13 +1292,12 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   files replace it.
 - Alias error: point directly to one resolved canonical Interface target with
   the same version and exposure no broader than that target.
-- Protobuf wire-history drift: recover the exact previously generated
-  generated/proto/wire-map.json. Never edit or delete it to force new field
-  or enum-member numbers. Every visible authored Interface enters the ledger
-  after successful generation, even before exposure. Use an unused field number
-  for an additive field; define a new Interface version for a wire change.
-  Generation rejects missing, modified, corrupt, renumbered, reused, or
-  projection-inconsistent history instead of guessing.
+- PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID: restore the reported
+  generated/proto/wire-map.json generated-artifact Source. Never edit it to
+  force numbers. Every visible Interface enters history before exposure. Use a
+  new number for an additive field and a new Interface version for a wire
+  change. Missing, modified, corrupt, renumbered, reused, or inconsistent
+  history is rejected.
 - Protobuf schema or descriptor drift: never patch generated .proto files or
   generated/proto/descriptor-set.pb. Restore or regenerate the complete
   CLI-owned output, then rerun plystra generate --check.

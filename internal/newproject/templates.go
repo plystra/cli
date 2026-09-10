@@ -113,6 +113,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_GENERATED_MANIFEST_INVALID`" + ` reports ` + "`generated/.plystra-manifest.json`" + ` as a path-only ` + "`generated-artifact`" + ` source. Restore it from a known-good generated state, then regenerate with the same selection.
 
+` + "`PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID`" + ` reports ` + "`generated/proto/wire-map.json`" + ` as a path-only ` + "`generated-artifact`" + ` source. Restore its exact last known-good generated state, then regenerate with the same selection.
+
 ` + "`PLYSTRA_GO_MODULE_INVALID`" + ` reports the exact current-Project ` + "`go.mod`" + ` module or requirement position as a ` + "`module-dependency`" + ` source once Project identity is valid. Correct that declaration; a file that cannot establish a trustworthy module identity receives no invented source.
 
 ` + "`PLYSTRA_APPLICATION_DEPENDENCY_DRIFT`" + ` reports the current Project ` + "`go.mod`" + ` at ` + "`1:1`" + ` as a ` + "`module-dependency`" + ` source when the Kernel is missing or only transitive, or a generated runtime requirement has drifted. ` + "`plystra generate --check`" + ` and ` + "`plystra check`" + ` are read-only; normal generation transactionally restores the CLI-supported direct Kernel release and required runtime modules before validation.
@@ -1483,7 +1485,8 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
 - PLYSTRA_CONFIGURATION_INVALID / PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
 - PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT: fix Source.
 - PLYSTRA_GENERATED_DRIFT / PLYSTRA_GENERATED_MANIFEST_INVALID /
-  PLYSTRA_GENERATED_OWNERSHIP_CONFLICT / PLYSTRA_GENERATED_UNEXPECTED_OUTPUT:
+  PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID / PLYSTRA_GENERATED_OWNERSHIP_CONFLICT /
+  PLYSTRA_GENERATED_UNEXPECTED_OUTPUT:
   restore, regenerate, or move generated-artifact Sources.
 - PLYSTRA_GO_MODULE_INVALID: fix exact go.mod Source.
 - PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: go.mod module-dependency; generate repairs
@@ -1524,13 +1527,12 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   files replace it.
 - Alias error: point directly to one resolved canonical Interface target with
   the same version and exposure no broader than that target.
-- Protobuf wire-history drift: recover the exact previously generated
-  generated/proto/wire-map.json. Never edit or delete it to force new field
-  or enum-member numbers. Every visible authored Interface enters the ledger
-  after successful generation, even before exposure. Use an unused field number
-  for an additive field; define a new Interface version for a wire change.
-  Generation rejects missing, modified, corrupt, renumbered, reused, or
-  projection-inconsistent history instead of guessing.
+- PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID: restore the reported
+  generated/proto/wire-map.json generated-artifact Source. Never edit it to
+  force numbers. Every visible Interface enters history before exposure. Use a
+  new number for an additive field and a new Interface version for a wire
+  change. Missing, modified, corrupt, renumbered, reused, or inconsistent
+  history is rejected.
 - Protobuf schema or descriptor drift: never patch generated .proto files or
   generated/proto/descriptor-set.pb. Restore or regenerate the complete
   CLI-owned output, then rerun plystra generate --check.

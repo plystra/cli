@@ -22,6 +22,7 @@ import (
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/newproject"
+	"github.com/plystra/cli/internal/protobufwiremap"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 )
@@ -405,6 +406,8 @@ replace github.com/plystra/kernel => %s
 	}
 	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "# Production-only configuration.\n{}\n")
+	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), "# Complete replacement.\n{}\n")
 	interfacePath := filepath.Join(root, "interfaces", "records", "list", "v1", "interface.go")
 	writeInterface := func(fieldName string) {
 		t.Helper()
@@ -438,20 +441,47 @@ type Response struct{}
 
 	writeInterface("Replacement")
 	before := commandTree(t, root)
-	for _, arguments := range [][]string{
-		{"generate", "--check"},
-		{"generate"},
+	for _, test := range []struct {
+		name      string
+		arguments []string
+		recovery  string
+	}{
+		{
+			name:      "default check",
+			arguments: []string{"generate", "--check"},
+			recovery:  "Restore generated/proto/wire-map.json from its last known-good generated state, then run `plystra generate`.",
+		},
+		{
+			name:      "default generate",
+			arguments: []string{"generate"},
+			recovery:  "Restore generated/proto/wire-map.json from its last known-good generated state, then run `plystra generate`.",
+		},
+		{
+			name:      "environment check",
+			arguments: []string{"generate", "--check", "--env", "production"},
+			recovery:  "Restore generated/proto/wire-map.json from its last known-good generated state, then run `plystra generate --env \"production\"`.",
+		},
+		{
+			name:      "replacement check",
+			arguments: []string{"check", "--config", "deploy/customer.yaml"},
+			recovery:  "Restore generated/proto/wire-map.json from its last known-good generated state, then run `plystra generate --config \"deploy/customer.yaml\"`.",
+		},
 	} {
-		exitCode, stdout, stderr = runCommand(t, arguments, root, environment)
+		exitCode, stdout, stderr = runCommand(t, test.arguments, root, environment)
+		wantSuffix := "\n\nSource: example.com/acme/interface-history:" + protobufwiremap.Path + " (generated-artifact)\n\n" +
+			"Recovery:\n" + test.recovery + "\n\nDiagnostic: " + diagnosticcode.ProtobufWireHistoryInvalid + "\n"
 		if exitCode != 1 ||
 			stdout != "" ||
 			!strings.Contains(stderr, `field "replacement" authored number 7 is permanently occupied by legacy`) ||
-			!strings.Contains(stderr, "\n\nRecovery:\nRestore generated/proto/wire-map.json from its last known-good generated state, then regenerate.\n\nDiagnostic: "+diagnosticcode.ProtobufWireHistoryInvalid+"\n") ||
-			strings.Count(stderr, "Recovery:") != 1 {
-			t.Fatalf("%v = exit %d, stdout %q, stderr %q", arguments, exitCode, stdout, stderr)
+			!strings.HasSuffix(stderr, wantSuffix) ||
+			strings.Count(stderr, "Source: ") != 1 ||
+			strings.Count(stderr, "Recovery:") != 1 ||
+			strings.Contains(stderr, root) ||
+			strings.Contains(stderr, filepath.ToSlash(root)) {
+			t.Fatalf("%s = exit %d, stdout %q, stderr %q", test.name, exitCode, stdout, stderr)
 		}
 		if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
-			t.Fatalf("%v mutated the Project after unexposed field-number reuse", arguments)
+			t.Fatalf("%s mutated the Project after unexposed field-number reuse", test.name)
 		}
 		assertNoCommandTransactions(t, root)
 	}

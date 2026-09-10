@@ -83,6 +83,8 @@ Common actionable Plystra CLI failures end with exactly one `Recovery:` block fo
 
 `PLYSTRA_GENERATED_MANIFEST_INVALID` reports `generated/.plystra-manifest.json` as a path-only `generated-artifact` source. Restore it from a known-good generated state, then regenerate with the same selection.
 
+`PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID` reports `generated/proto/wire-map.json` as a path-only `generated-artifact` source. Restore its exact last known-good generated state, then regenerate with the same selection.
+
 `PLYSTRA_GO_MODULE_INVALID` reports the exact current-Project `go.mod` module or requirement position as a `module-dependency` source once Project identity is valid. Correct that declaration; a file that cannot establish a trustworthy module identity receives no invented source.
 
 `PLYSTRA_APPLICATION_DEPENDENCY_DRIFT` reports the current Project `go.mod` at `1:1` as a `module-dependency` source when the Kernel is missing or only transitive, or a generated runtime requirement has drifted. `plystra generate --check` and `plystra check` are read-only; normal generation transactionally restores the CLI-supported direct Kernel release and required runtime modules before validation.

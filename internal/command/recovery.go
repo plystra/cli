@@ -422,6 +422,16 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			Path:   located.SourcePath(),
 			Kind:   located.SourceKind(),
 		})
+	case diagnosticProtobufWireHistoryInvalid:
+		var located diagnosticSourceLocation
+		if !errors.As(err, &located) || located == nil || located.SourceKind() != "generated-artifact" || located.SourcePath() != protobufwiremap.Path {
+			return nil
+		}
+		sources = append(sources, diagnosticjson.Source{
+			Module: located.ModulePath(),
+			Path:   located.SourcePath(),
+			Kind:   located.SourceKind(),
+		})
 	case diagnosticConstructorConfigurationUnselected:
 		var unowned *applicationresolve.UnownedConstructorConfigurationError
 		if !errors.As(err, &unowned) || unowned == nil {
@@ -1070,7 +1080,7 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, generationresolution.ErrAliasResolution):
 		return recoveryDiagnostic(diagnosticAliasResolutionFailed, aliasRecovery())
 	case errors.Is(err, protobufwiremap.ErrHistory):
-		return recoveryDiagnostic(diagnosticProtobufWireHistoryInvalid, "Restore generated/proto/wire-map.json from its last known-good generated state, then regenerate.")
+		return recoveryDiagnostic(diagnosticProtobufWireHistoryInvalid, "Restore generated/proto/wire-map.json from its last known-good generated state, then run `plystra generate"+context.selectorSuffix()+"`.")
 	case errors.Is(err, protobufidentity.ErrCollision):
 		return recoveryDiagnostic(diagnosticProtobufIdentityCollision, "Rename one conflicting authored field or enum member in capability.yaml, then regenerate.")
 	case errors.Is(err, protobufmodel.ErrOperationKind):

@@ -173,6 +173,9 @@ without a fabricated span.
 PLYSTRA_GENERATED_MANIFEST_INVALID reports the current Project's
 generated/.plystra-manifest.json as a generated-artifact source without a
 fabricated span.
+PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID reports the current Project's
+generated/proto/wire-map.json as a generated-artifact source without a
+fabricated span.
 PLYSTRA_GENERATED_DRIFT reports each stale, missing, or manually modified
 managed path as a generated-artifact source without a fabricated span.
 PLYSTRA_GENERATED_UNEXPECTED_OUTPUT reports each unexpected unowned path as a
@@ -228,6 +231,9 @@ by different unowned bytes or a non-regular entry as a generated-artifact source
 without a fabricated span.
 PLYSTRA_GENERATED_MANIFEST_INVALID reports the current Project's
 generated/.plystra-manifest.json as a generated-artifact source without a
+fabricated span.
+PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID reports the current Project's
+generated/proto/wire-map.json as a generated-artifact source without a
 fabricated span.
 PLYSTRA_GENERATED_DRIFT reports each stale, missing, or manually modified
 managed path as a generated-artifact source without a fabricated span.

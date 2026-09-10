@@ -187,10 +187,11 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			code:    diagnosticGeneratedUnexpectedOutput,
 		},
 		{
-			name: "Protobuf history",
-			err:  fmt.Errorf("allocate fields: %w", protobufwiremap.ErrHistory),
-			want: "Restore generated/proto/wire-map.json from its last known-good generated state, then regenerate.",
-			code: diagnosticProtobufWireHistoryInvalid,
+			name:    "Protobuf history",
+			err:     fmt.Errorf("allocate fields: %w", protobufwiremap.ErrHistory),
+			context: commandRecoveryContext("", "production", nil),
+			want:    "Restore generated/proto/wire-map.json from its last known-good generated state, then run `plystra generate --env \"production\"`.",
+			code:    diagnosticProtobufWireHistoryInvalid,
 		},
 		{
 			name: "Capability create confirmation",
