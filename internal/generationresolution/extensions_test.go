@@ -615,10 +615,32 @@ func TestResolveExtensionsDetectsMixedActivationGeneratedCycle(t *testing.T) {
 	if len(edges) != 2 || edges[0].Kind() != DependencyActivation || edges[0].Source().String() != "audit.write/v1" || edges[0].Target().String() != "order.create/v1" || edges[1].Kind() != DependencyGenerated || edges[1].Source().String() != "order.create/v1" || edges[1].Target().String() != "audit.write/v1" {
 		t.Fatalf("mixed cycle edges = %#v", edges)
 	}
+	wantSource := providerresolution.RequirementSource{
+		Kind:             providerresolution.RequirementGenerationRule,
+		Reference:        `generation plugin "example.authn" rule "authn.require-audit" extensions.authn on order.create/v1`,
+		ModulePath:       "example.com/application",
+		Path:             "authn/plugin.yaml",
+		Line:             1,
+		Column:           1,
+		PluginID:         "example.authn",
+		Namespace:        "authn",
+		SourceCapability: "order.create/v1",
+		RuleID:           "authn.require-audit",
+	}
+	firstSources := edges[0].RequirementSourceDetails()
+	secondSources := edges[1].RequirementSourceDetails()
+	if !slices.Equal(firstSources, []providerresolution.RequirementSource{wantSource}) || !slices.Equal(secondSources, []providerresolution.RequirementSource{wantSource}) || !slices.Equal(edges[0].RequirementSources(), []string{wantSource.String()}) || !slices.Equal(edges[1].RequirementSources(), []string{wantSource.String()}) {
+		t.Fatalf("mixed cycle sources = %#v, %#v", firstSources, secondSources)
+	}
 	for _, detail := range []string{"order.create/v1", "audit.write/v1", "example.authn", "authn.require-audit", "extensions.authn", "example.business", "extensions.audit", "correction:"} {
 		if !strings.Contains(err.Error(), detail) {
 			t.Fatalf("cycle error omits %q: %v", detail, err)
 		}
+	}
+	firstSources[0] = providerresolution.RequirementSource{}
+	secondSources[0] = providerresolution.RequirementSource{}
+	if edges[0].RequirementSourceDetails()[0] != wantSource || edges[1].RequirementSourceDetails()[0] != wantSource {
+		t.Fatal("DependencyEdge exposed mutable typed requirement sources")
 	}
 	edges[0] = DependencyEdge{}
 	if cycle.Edges()[0].Source().String() != "audit.write/v1" {

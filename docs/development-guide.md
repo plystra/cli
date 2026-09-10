@@ -2106,6 +2106,15 @@ deduplicates repeated edge facts, and a bare internal cycle sentinel remains
 source-less. Use the reported edge path to remove the semantic cycle from the
 owning Capability metadata or `generation.activations` declarations; execution
 order cannot make the cycle valid.
+`PLYSTRA_GENERATION_DEPENDENCY_CYCLE` emits every retained typed requirement
+source carried by the complete deterministic mixed activation and generated-
+requirement cycle. Authored `declaration` and `exposure` facts and derived
+`activation` and `generation-rule` facts retain their module-relative
+locations; a generation-rule fact identifies the generating Plugin's
+`plugin.yaml` at `1:1`. Shared canonicalization sorts and deduplicates repeated
+edge facts, and a bare internal dependency-cycle sentinel remains source-less.
+Use the complete edge path to remove the semantic cycle from Capability
+metadata or the owning generation rule; execution order cannot make it valid.
 An unavailable constructor configuration schema uses
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
 current or dependency Project document as `configuration-declaration` at
@@ -2510,6 +2519,18 @@ Capabilities from those module-relative sources, then edit the owning
 Capability metadata or `generation.activations` declarations to remove the
 cycle. Reordering extension execution cannot repair a semantic requirement
 cycle, and a bare internal sentinel has no source to invent.
+
+### Generation dependency cycle
+
+`PLYSTRA_GENERATION_DEPENDENCY_CYCLE` prints the complete deterministic mixed
+activation and generated-requirement edge path. Its sources point to the root
+declarations or exposures, derived activation facts, and generating Plugin
+rules that made the cycle reachable; generation-rule sources identify the
+owning `plugin.yaml` at `1:1`. Trace the named Capabilities, namespaces,
+Plugins, and rules, then remove one semantic dependency from the owning
+Capability metadata or generation rule. Reordering extension execution cannot
+repair the cycle, and a bare internal dependency-cycle sentinel has no source
+to invent.
 
 ### Extension helper fails
 

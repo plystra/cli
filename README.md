@@ -975,6 +975,16 @@ deduplicates repeated edge facts, while the bare internal cycle sentinel
 remains source-less. Use the cycle details to edit the owning Capability
 metadata or `generation.activations` declarations so the semantic cycle is
 removed; changing execution order is not a fix.
+`PLYSTRA_GENERATION_DEPENDENCY_CYCLE` reports every retained typed requirement
+source carried by the complete deterministic mixed activation and generated-
+requirement cycle. Authored `declaration` and `exposure` facts and derived
+`activation` and `generation-rule` facts retain their originating module-
+relative location; generation-rule facts identify the generating Plugin's
+`plugin.yaml` at `1:1`. Shared canonicalization sorts and deduplicates repeated
+edge facts, while the bare internal dependency-cycle sentinel remains source-
+less. Use the complete edge path and reported sources to remove the semantic
+cycle from Capability metadata or the owning generation rule; changing
+execution order cannot make the dependency cycle valid.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses

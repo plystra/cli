@@ -867,6 +867,8 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"set it to null",
 		"PLYSTRA_GENERATION_ACTIVATION_CYCLE",
 		"deduplicated edge Sources",
+		"PLYSTRA_GENERATION_DEPENDENCY_CYCLE",
+		"mixed edge Sources",
 		"plystra implement email.send/v1 --package ./mailer",
 		"creates no copied contract",
 		"Before a contract appears in any published tag",

@@ -413,6 +413,9 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_ACTIVATION_CYCLE")) || !bytes.Contains(skill, []byte("deduplicated edge Sources")) {
 		t.Fatal("maximum-length Project skill omits activation-cycle source guidance")
 	}
+	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_DEPENDENCY_CYCLE")) || !bytes.Contains(skill, []byte("mixed edge Sources")) {
+		t.Fatal("maximum-length Project skill omits dependency-cycle source guidance")
+	}
 }
 
 func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
@@ -1210,6 +1213,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_GENERATION_ACTIVATION_CYCLE` reports every retained typed requirement source"),
 		[]byte("derived `activation` facts retain their originating module-relative path"),
 		[]byte("bare internal cycle sentinel remains source-less"),
+		[]byte("`PLYSTRA_GENERATION_DEPENDENCY_CYCLE` reports every retained typed requirement source"),
+		[]byte("derived `activation` and `generation-rule` facts retain their originating module-relative location"),
+		[]byte("bare internal dependency-cycle sentinel remains source-less"),
 		[]byte("one path-only `configuration-selection` source"),
 		[]byte("unsafe selectors report no source"),
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration"),
@@ -2285,6 +2291,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"provider/choice Sources",
 		"PLYSTRA_GENERATION_ACTIVATION_CYCLE",
 		"deduplicated edge Sources",
+		"PLYSTRA_GENERATION_DEPENDENCY_CYCLE",
+		"mixed edge Sources",
 		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
 		"generated-artifact Sources",

@@ -350,7 +350,7 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 		}
 
 		generated := generatedRequirementValues(generatedByKey)
-		if cycle := findDependencyCycle(activation, generated); cycle != nil {
+		if cycle := findDependencyCycle(activation, generated, plugins); cycle != nil {
 			return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w", ErrResolveExtensions, pass, cycle)
 		}
 
@@ -1008,7 +1008,7 @@ type DependencyEdge struct {
 	namespace          string
 	pluginID           string
 	ruleID             string
-	requirementSources []string
+	requirementSources []providerresolution.RequirementSource
 }
 
 // Kind returns activation or generated.
@@ -1029,9 +1029,16 @@ func (e DependencyEdge) PluginID() string { return e.pluginID }
 // RuleID returns the generation rule for generated edges.
 func (e DependencyEdge) RuleID() string { return e.ruleID }
 
-// RequirementSources returns root/source provenance for activation edges.
+// RequirementSources returns retained provenance for activation and generated
+// requirement edges.
 func (e DependencyEdge) RequirementSources() []string {
-	return append([]string(nil), e.requirementSources...)
+	return requirementSourceLabels(e.requirementSources)
+}
+
+// RequirementSourceDetails returns typed module-relative provenance without
+// requiring consumers to parse retained activation or generation-rule text.
+func (e DependencyEdge) RequirementSourceDetails() []providerresolution.RequirementSource {
+	return append([]providerresolution.RequirementSource(nil), e.requirementSources...)
 }
 
 // DependencyCycleError contains one complete closed mixed dependency path.
@@ -1065,7 +1072,7 @@ func (e *DependencyCycleError) Error() string {
 				" --activation extensions.%s via selected plugin %q from [%s]--> %s",
 				edge.namespace,
 				edge.pluginID,
-				strings.Join(edge.requirementSources, ", "),
+				strings.Join(edge.RequirementSources(), ", "),
 				edge.target,
 			)
 		case DependencyGenerated:
@@ -1086,7 +1093,7 @@ func (e *DependencyCycleError) Error() string {
 // Unwrap supports errors.Is with ErrDependencyCycle.
 func (*DependencyCycleError) Unwrap() error { return ErrDependencyCycle }
 
-func findDependencyCycle(activation Result, generated []GeneratedRequirement) *DependencyCycleError {
+func findDependencyCycle(activation Result, generated []GeneratedRequirement, plugins map[string]Plugin) *DependencyCycleError {
 	edges := make([]DependencyEdge, 0)
 	resolution := activation.ProviderResolution()
 	for _, requirement := range activation.ActivationRequirements().Requirements() {
@@ -1098,18 +1105,19 @@ func findDependencyCycle(activation Result, generated []GeneratedRequirement) *D
 				target:             requirement.Capability(),
 				namespace:          use.Namespace(),
 				pluginID:           provider.PluginID(),
-				requirementSources: requirementSourceLabels(use.RequirementSources()),
+				requirementSources: use.RequirementSources(),
 			})
 		}
 	}
 	for _, requirement := range generated {
 		edges = append(edges, DependencyEdge{
-			kind:      DependencyGenerated,
-			source:    requirement.source,
-			target:    requirement.capability,
-			namespace: requirement.namespace,
-			pluginID:  requirement.pluginID,
-			ruleID:    requirement.ruleID,
+			kind:               DependencyGenerated,
+			source:             requirement.source,
+			target:             requirement.capability,
+			namespace:          requirement.namespace,
+			pluginID:           requirement.pluginID,
+			ruleID:             requirement.ruleID,
+			requirementSources: []providerresolution.RequirementSource{generatedRequirementSource(requirement, plugins[requirement.pluginID])},
 		})
 	}
 
@@ -1189,6 +1197,6 @@ func dependencyEdgeKey(edge DependencyEdge) string {
 		edge.namespace,
 		edge.pluginID,
 		edge.ruleID,
-		strings.Join(edge.requirementSources, "\x01"),
+		strings.Join(edge.RequirementSources(), "\x01"),
 	}, "\x00")
 }

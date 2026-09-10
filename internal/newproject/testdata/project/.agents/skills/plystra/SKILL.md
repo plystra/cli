@@ -1237,6 +1237,7 @@ Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
 - PLYSTRA_GENERATION_ACTIVATION_MISSING: requirements; add association; no invented Source.
 - PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING: provider/choice Sources; add support.
 - PLYSTRA_GENERATION_ACTIVATION_CYCLE: deduplicated edge Sources; break cycle.
+- PLYSTRA_GENERATION_DEPENDENCY_CYCLE: mixed edge Sources; break cycle.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,
