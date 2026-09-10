@@ -128,6 +128,44 @@ func (e *ContributionCycleError) Error() string {
 // Unwrap supports errors.Is with ErrContributionCycle.
 func (*ContributionCycleError) Unwrap() error { return ErrContributionCycle }
 
+// UnorderedContributionsError contains every simultaneously ready contribution
+// at one ordered generation point.
+type UnorderedContributionsError struct {
+	point         generation.GenerationPoint
+	contributions []ResolvedContribution
+}
+
+// Point returns the ordered generation point with ambiguous semantic work.
+func (e *UnorderedContributionsError) Point() generation.GenerationPoint {
+	if e == nil {
+		return ""
+	}
+	return e.point
+}
+
+// Contributions returns defensive entries in deterministic diagnostic order.
+func (e *UnorderedContributionsError) Contributions() []ResolvedContribution {
+	if e == nil {
+		return nil
+	}
+	return append([]ResolvedContribution(nil), e.contributions...)
+}
+
+func (e *UnorderedContributionsError) Error() string {
+	if e == nil || len(e.contributions) == 0 {
+		return ErrUnorderedContributions.Error()
+	}
+	return fmt.Sprintf(
+		"%s: ordered point %q has simultaneously ready semantic work %s; declare requires/provides dependencies that establish one order",
+		ErrUnorderedContributions,
+		e.point,
+		describeContributionList(e.contributions),
+	)
+}
+
+// Unwrap supports errors.Is with ErrUnorderedContributions.
+func (*UnorderedContributionsError) Unwrap() error { return ErrUnorderedContributions }
+
 func resolveContributionGraph(outputs []ExtensionOutput, plugins map[string]Plugin) ([]ResolvedContribution, error) {
 	contributions := make([]ResolvedContribution, 0)
 	byID := make(map[string][]ResolvedContribution)
@@ -385,12 +423,10 @@ func orderContributions(contributions []ResolvedContribution, adjacency map[stri
 					unordered = append(unordered, contribution)
 				}
 				sortContributionsForDiagnostics(unordered)
-				return nil, contributionGraphError(
-					ErrUnorderedContributions,
-					"ordered point %q has simultaneously ready semantic work %s; declare requires/provides dependencies that establish one order",
-					point,
-					describeContributionList(unordered),
-				)
+				return nil, fmt.Errorf("%w: %w", ErrContributionGraph, &UnorderedContributionsError{
+					point:         point,
+					contributions: unordered,
+				})
 			}
 			var current ResolvedContribution
 			for _, contribution := range ready {

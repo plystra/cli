@@ -574,6 +574,28 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			appendContribution(dependency.Provider())
 			appendContribution(dependency.Consumer())
 		}
+	case diagnosticGenerationContributionsUnordered:
+		var unordered *generationresolution.UnorderedContributionsError
+		if !errors.As(err, &unordered) || unordered == nil {
+			return nil
+		}
+		seen := make(map[diagnosticjson.Source]struct{})
+		for _, contribution := range unordered.Contributions() {
+			for _, source := range contribution.RequirementSourceDetails() {
+				candidate := diagnosticjson.Source{
+					Module: source.ModulePath,
+					Path:   source.Path,
+					Kind:   string(source.Kind),
+					Line:   source.Line,
+					Column: source.Column,
+				}
+				if _, exists := seen[candidate]; exists {
+					continue
+				}
+				seen[candidate] = struct{}{}
+				sources = append(sources, candidate)
+			}
+		}
 	case diagnosticGeneratedOwnershipConflict:
 		var conflict *applicationgenerate.OwnershipConflictSourceError
 		if !errors.As(err, &conflict) || conflict == nil {

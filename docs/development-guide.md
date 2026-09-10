@@ -2123,6 +2123,14 @@ canonicalization sorts and deduplicates repeated endpoint facts, and a bare
 internal contribution-cycle sentinel remains source-less. Use the contribution
 and token path to remove the semantic cycle from the owning generation rules;
 execution order cannot make it valid.
+`PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED` emits the typed `generation-rule`
+source for every simultaneously ready contribution at an ordered generation
+point. Each source identifies the selected Plugin's owning Project module and
+module-relative `plugin.yaml` at `1:1`. Shared canonicalization sorts the
+sources and deduplicates multiple contributions from one declaration, and a
+bare internal unordered sentinel remains source-less. Add `requires` and
+`provides` tokens that establish one semantic order among the reported
+contributions; discovery order cannot choose one safely.
 An unavailable constructor configuration schema uses
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
 current or dependency Project document as `configuration-declaration` at
@@ -2548,6 +2556,16 @@ rules produced a contribution in that cycle. Edit those owning Plugins at the
 reported module-relative `plugin.yaml` sources so at least one token dependency
 is removed. Discovery or execution order cannot repair the semantic cycle, and
 a bare internal contribution-cycle sentinel has no source to invent.
+
+### Unordered generation contributions
+
+`PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED` prints the deterministic set of
+simultaneously ready contributions at the ordered generation point and points
+to each selected Plugin whose generation rules produced that work. Edit those
+owning Plugins at the reported module-relative `plugin.yaml` sources and add
+`requires` and `provides` tokens that establish one semantic order. Discovery
+or execution order is not an allowed tie-break, and a bare internal unordered
+sentinel has no source to invent.
 
 ### Extension helper fails
 

@@ -219,6 +219,65 @@ func TestResolveContributionGraphReportsCompleteCycle(t *testing.T) {
 	}
 }
 
+func TestResolveContributionGraphReportsUnorderedContributions(t *testing.T) {
+	generationContext := contributionTestContext(t)
+	outputs := []ExtensionOutput{
+		contributionTestOutput(t, generationContext, "example.authn",
+			contributionTestValue(t, "authn.verify", "authn", generation.GenerationPointInvocationPrepare, nil, nil),
+			contributionTestValue(t, "authn.attach", "authn", generation.GenerationPointInvocationPrepare, nil, nil),
+		),
+		contributionTestOutput(t, generationContext, "example.audit",
+			contributionTestValue(t, "audit.record", "audit", generation.GenerationPointInvocationPrepare, nil, nil),
+		),
+	}
+
+	plugins := contributionTestPlugins(outputs)
+	_, err := resolveContributionGraph(outputs, plugins)
+	if !errors.Is(err, ErrContributionGraph) || !errors.Is(err, ErrUnorderedContributions) {
+		t.Fatalf("unordered error = %v", err)
+	}
+	var unordered *UnorderedContributionsError
+	if !errors.As(err, &unordered) {
+		t.Fatalf("unordered error type = %T", err)
+	}
+	if unordered.Point() != generation.GenerationPointInvocationPrepare {
+		t.Fatalf("unordered point = %q", unordered.Point())
+	}
+	contributions := unordered.Contributions()
+	if got := resolvedContributionIDs(contributions); !slices.Equal(got, []string{"audit.record", "authn.attach", "authn.verify"}) {
+		t.Fatalf("unordered contributions = %v", got)
+	}
+	wantSources := []struct {
+		path     string
+		pluginID string
+		ruleID   string
+	}{
+		{path: "audit/plugin.yaml", pluginID: "example.audit", ruleID: "audit.record"},
+		{path: "authn/plugin.yaml", pluginID: "example.authn", ruleID: "authn.attach"},
+		{path: "authn/plugin.yaml", pluginID: "example.authn", ruleID: "authn.verify"},
+	}
+	for index, contribution := range contributions {
+		sources := contribution.RequirementSourceDetails()
+		want := wantSources[index]
+		if len(sources) != 1 || sources[0].Kind != "generation-rule" || sources[0].ModulePath != "example.com/application" || sources[0].Path != want.path || sources[0].Line != 1 || sources[0].Column != 1 || sources[0].PluginID != want.pluginID || sources[0].RuleID != want.ruleID {
+			t.Fatalf("unordered contribution %d sources = %#v", index, sources)
+		}
+	}
+	firstSources := contributions[0].RequirementSourceDetails()
+	firstSources[0] = contributions[1].RequirementSourceDetails()[0]
+	contributions[0] = ResolvedContribution{}
+	if fresh := unordered.Contributions(); fresh[0].ID() != "audit.record" || fresh[0].RequirementSourceDetails()[0].Path != "audit/plugin.yaml" {
+		t.Fatal("UnorderedContributionsError exposed mutable contribution storage")
+	}
+
+	reversed := append([]ExtensionOutput(nil), outputs...)
+	slices.Reverse(reversed)
+	_, reversedErr := resolveContributionGraph(reversed, plugins)
+	if reversedErr == nil || reversedErr.Error() != err.Error() {
+		t.Fatalf("reversed unordered error = %v, want %v", reversedErr, err)
+	}
+}
+
 func TestResolveExtensionsRejectsInvalidFinalContributionGraph(t *testing.T) {
 	order := extensionTestContract(t, "order.create/v1", "extensions:\n  authn: {authenticated: true}\n")
 	verify := extensionTestContract(t, "authn.session.verify/v1", "")

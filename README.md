@@ -993,6 +993,14 @@ canonicalization sorts and deduplicates repeated endpoint facts. The bare
 internal contribution-cycle sentinel remains source-less. Use the contribution
 and token path to remove the semantic cycle from the owning generation rules;
 discovery or execution order cannot make the token cycle valid.
+`PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED` reports the typed
+`generation-rule` source for every simultaneously ready contribution at an
+ordered generation point. Each fact identifies the selected contribution owner
+by its Project module and module-relative `plugin.yaml` at `1:1`; shared
+canonicalization sorts the sources and deduplicates multiple contributions from
+one declaration. The bare internal unordered sentinel remains source-less. Add
+`requires` and `provides` tokens that establish one semantic order among the
+reported contributions; discovery order is never used as an implicit tie-break.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses
