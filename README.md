@@ -944,6 +944,13 @@ Current-Project and dependency `plystra.yaml` documents use
 `generated-artifact`. Sources are sorted, deduplicated, module-relative, and
 omit a fabricated span. Stop concurrent Project edits and rerun against
 unchanged inputs; rollback preserves bytes written by the other editor.
+`PLYSTRA_GENERATION_ACTIVATION_MISSING` reports every retained typed Capability
+requirement source for the reported unclaimed extension namespace in its owning
+Project module. Declaration and exposure sources are included; shared
+canonicalization sorts and deduplicates the facts. Because no visible
+`generation.activations` declaration exists, the diagnostic never fabricates
+an activation source. Add the association to the intended Plugin's
+`plugin.yaml`, then rerun with the same selection.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses

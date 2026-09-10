@@ -328,7 +328,7 @@ func TestWriteCommandFailureReportsInheritedConfigurationConflictSources(t *test
 	}
 }
 
-func TestWriteCommandFailureDoesNotInventPluginTargetSources(t *testing.T) {
+func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
@@ -338,6 +338,7 @@ func TestWriteCommandFailureDoesNotInventPluginTargetSources(t *testing.T) {
 	}{
 		{name: "explicit target not found", err: fmt.Errorf("author Capability: %w", plugintarget.ErrNotFound), code: diagnosticPluginTargetNotFound},
 		{name: "interactive selection failed", err: fmt.Errorf("author Capability: %w", plugintarget.ErrSelection), code: diagnosticPluginTargetInvalid},
+		{name: "missing activation without requirement provenance", err: fmt.Errorf("resolve generation: %w", generationactivation.ErrMissingAssociation), code: diagnosticGenerationActivationMissing},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
@@ -346,7 +347,7 @@ func TestWriteCommandFailureDoesNotInventPluginTargetSources(t *testing.T) {
 			writeCommandFailure(&output, "", test.err, recoveryContext{})
 			got := output.String()
 			if strings.Contains(got, "Source: ") || !strings.Contains(got, "Diagnostic: "+test.code+"\n") {
-				t.Fatalf("plugin target failure output = %q", got)
+				t.Fatalf("source-less failure output = %q", got)
 			}
 		})
 	}

@@ -129,6 +129,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_PROJECT_CONCURRENT_CHANGE`" + ` reports every deterministically known path that changed while resolution or generation verified a stable snapshot. Current-Project and dependency ` + "`plystra.yaml`" + ` documents use ` + "`configuration-declaration`" + `; current-Project ` + "`go.mod`" + ` or ` + "`go.sum`" + ` uses ` + "`module-dependency`" + `; and managed ` + "`generated/...`" + ` paths use ` + "`generated-artifact`" + `. Sources are sorted, deduplicated, module-relative, and omit a fabricated span. Stop concurrent Project edits and rerun against unchanged inputs; rollback preserves bytes written by the other editor.
 
+` + "`PLYSTRA_GENERATION_ACTIVATION_MISSING`" + ` reports every retained typed Capability requirement source for the reported unclaimed extension namespace in its owning Project module. Declaration and exposure sources are included; shared canonicalization sorts and deduplicates the facts. Because no visible ` + "`generation.activations`" + ` declaration exists, the diagnostic never fabricates an activation source. Add the association to the intended Plugin's ` + "`plugin.yaml`" + `, then rerun with the same selection.
+
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. A normalized Project-contained document that cannot be loaded reports one path-only ` + "`configuration-selection`" + ` source without a fabricated span. Conflicting, duplicated, or unsafe selectors report no source because no document is trustworthy. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 ` + "`plystra plugin create`" + ` uses ` + "`PLYSTRA_PLUGIN_CREATE_NAME_INVALID`" + ` for an invalid or reserved root-level name, ` + "`PLYSTRA_PLUGIN_CREATE_ID_INVALID`" + ` when the Project module namespace and name cannot form a canonical Plugin ID, and ` + "`PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS`" + ` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.
@@ -1478,6 +1480,7 @@ Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
   implementation-selection; fix constructor, or set the selected document entry to null.
 - PLYSTRA_CAPABILITY_MANIFEST_INVALID: provider-declaration at 1:1; fix owning capability.yaml.
 - PLYSTRA_PLUGIN_TARGET_AMBIGUOUS: candidate plugin-declaration Sources at 1:1; --plugin.
+- PLYSTRA_GENERATION_ACTIVATION_MISSING: retained requirement Sources, including declaration/exposure; add generation.activations; no fabricated activation Source.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,
@@ -1534,12 +1537,7 @@ Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
 - PLYSTRA_CONFIGURATION_SELECTION_INVALID: missing file has one path-only configuration-selection Source; conflicts or unsafe selectors have none; select one mode.
 - Alias error: point directly to one resolved canonical Interface target with
   the same version and exposure no broader than that target.
-- PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID: restore the reported
-  generated/proto/wire-map.json generated-artifact Source. Never edit it to
-  force numbers. Every visible Interface enters history before exposure. Use a
-  new number for an additive field and a new Interface version for a wire
-  change. Missing, modified, corrupt, renumbered, reused, or inconsistent
-  history is rejected.
+- PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID: restore reported generated/proto/wire-map.json Source; never edit or reuse wire history.
 - Protobuf schema or descriptor drift: never patch generated .proto files or
   generated/proto/descriptor-set.pb. Restore or regenerate the complete
   CLI-owned output, then rerun plystra generate --check.

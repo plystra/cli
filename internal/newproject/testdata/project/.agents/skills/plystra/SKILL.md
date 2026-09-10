@@ -1233,6 +1233,7 @@ Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
   implementation-selection; fix constructor, or set the selected document entry to null.
 - PLYSTRA_CAPABILITY_MANIFEST_INVALID: provider-declaration at 1:1; fix owning capability.yaml.
 - PLYSTRA_PLUGIN_TARGET_AMBIGUOUS: candidate plugin-declaration Sources at 1:1; --plugin.
+- PLYSTRA_GENERATION_ACTIVATION_MISSING: retained requirement Sources, including declaration/exposure; add generation.activations; no fabricated activation Source.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,
@@ -1289,12 +1290,7 @@ Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
 - PLYSTRA_CONFIGURATION_SELECTION_INVALID: missing file has one path-only configuration-selection Source; conflicts or unsafe selectors have none; select one mode.
 - Alias error: point directly to one resolved canonical Interface target with
   the same version and exposure no broader than that target.
-- PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID: restore the reported
-  generated/proto/wire-map.json generated-artifact Source. Never edit it to
-  force numbers. Every visible Interface enters history before exposure. Use a
-  new number for an additive field and a new Interface version for a wire
-  change. Missing, modified, corrupt, renumbered, reused, or inconsistent
-  history is rejected.
+- PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID: restore reported generated/proto/wire-map.json Source; never edit or reuse wire history.
 - Protobuf schema or descriptor drift: never patch generated .proto files or
   generated/proto/descriptor-set.pb. Restore or regenerate the complete
   CLI-owned output, then rerun plystra generate --check.

@@ -2075,6 +2075,13 @@ Current-Project and dependency `plystra.yaml` documents use
 `generated-artifact`. Sources are sorted, deduplicated, module-relative, and
 omit a fabricated span. Stop concurrent Project edits and rerun against
 unchanged inputs; rollback preserves bytes written by the other editor.
+`PLYSTRA_GENERATION_ACTIVATION_MISSING` emits every retained typed Capability
+requirement source for the reported unclaimed extension namespace in its owning
+Project module, including `declaration` and `exposure` sources. Shared
+canonicalization sorts and deduplicates the facts. The diagnostic never
+fabricates a source for the absent `generation.activations` declaration. Add
+the association to the intended Plugin's `plugin.yaml`, then rerun generation
+or checking with the same selection.
 An unavailable constructor configuration schema uses
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
 current or dependency Project document as `configuration-declaration` at
@@ -2445,9 +2452,13 @@ for Secrets. Generation does not read the referenced value; bootstrap does.
 
 ### Unclaimed extension namespace
 
-Make a compatible activation provider and its declared generation package
-visible and selected. Do not make the Kernel or application source interpret
-the metadata directly.
+`PLYSTRA_GENERATION_ACTIVATION_MISSING` points to the retained requirement
+sources, including declarations and exposures, that require the reported
+namespace. Add a compatible `generation.activations` association and its
+declared generation package to the intended visible Plugin, then select its
+activation Capability if necessary. The absent association has no fabricated
+source. Do not make the Kernel or application source interpret the metadata
+directly.
 
 ### Extension helper fails
 

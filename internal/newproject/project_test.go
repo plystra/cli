@@ -401,6 +401,9 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	if !bytes.Contains(skill, []byte("PLYSTRA_PLUGIN_TARGET_AMBIGUOUS")) || !bytes.Contains(skill, []byte("candidate plugin-declaration Sources at 1:1")) {
 		t.Fatal("maximum-length Project skill omits Plugin-target source guidance")
 	}
+	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_ACTIVATION_MISSING")) || !bytes.Contains(skill, []byte("no fabricated activation Source")) {
+		t.Fatal("maximum-length Project skill omits generation-activation source guidance")
+	}
 }
 
 func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
@@ -1187,6 +1190,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`module-dependency` source"),
 		[]byte("`PLYSTRA_PROJECT_CONCURRENT_CHANGE` reports every deterministically known path"),
 		[]byte("Sources are sorted, deduplicated, module-relative"),
+		[]byte("`PLYSTRA_GENERATION_ACTIVATION_MISSING` reports every retained typed Capability requirement source"),
+		[]byte("Declaration and exposure sources are included"),
+		[]byte("never fabricates an activation source"),
 		[]byte("one path-only `configuration-selection` source"),
 		[]byte("unsafe selectors report no source"),
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration"),
@@ -2253,6 +2259,9 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_CAPABILITY_MANIFEST_INVALID",
 		"PLYSTRA_PLUGIN_TARGET_AMBIGUOUS",
 		"candidate plugin-declaration Sources at 1:1",
+		"PLYSTRA_GENERATION_ACTIVATION_MISSING",
+		"retained requirement Sources, including declaration/exposure",
+		"no fabricated activation Source",
 		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
 		"generated-artifact Sources",
