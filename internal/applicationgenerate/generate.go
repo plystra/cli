@@ -677,8 +677,9 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 }
 
 func interfaceProtobufProjection(ctx context.Context, resolved applicationresolve.Result, transports applicationmeta.HTTPTransports, options Options) (protobufmodel.InterfaceModel, []interfaceinventory.Interface, error) {
+	visibleInterfaces := resolved.Interfaces().Interfaces()
 	definitions := make(map[string]protobufmodel.InterfaceInput)
-	for _, definition := range resolved.Interfaces().Interfaces() {
+	for _, definition := range visibleInterfaces {
 		contract := definition.Contract()
 		identifier := contract.ID().String()
 		if _, duplicate := definitions[identifier]; duplicate {
@@ -732,6 +733,7 @@ func interfaceProtobufProjection(ctx context.Context, resolved applicationresolv
 		}
 		definitions[identifier] = input
 	}
+	sourceDefinitions := append(append([]interfaceinventory.Interface(nil), visibleInterfaces...), intrinsicDefinitions...)
 
 	if !transports.Connect {
 		history := make([]protobufmodel.InterfaceInput, 0, len(definitions))
@@ -739,7 +741,7 @@ func interfaceProtobufProjection(ctx context.Context, resolved applicationresolv
 			history = append(history, input)
 		}
 		model, err := protobufmodel.BuildInterfaceSelection(false, nil, history)
-		return model, intrinsicDefinitions, err
+		return model, intrinsicDefinitions, protobufIdentityCollisionSourceError(sourceDefinitions, err)
 	}
 
 	inputs := make([]protobufmodel.InterfaceInput, 0, len(exposures))
@@ -758,7 +760,7 @@ func interfaceProtobufProjection(ctx context.Context, resolved applicationresolv
 		history = append(history, input)
 	}
 	model, err := protobufmodel.BuildInterfaceSelection(true, inputs, history)
-	return model, intrinsicDefinitions, err
+	return model, intrinsicDefinitions, protobufIdentityCollisionSourceError(sourceDefinitions, err)
 }
 
 func intrinsicInterfaceProtobufInputs(

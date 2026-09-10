@@ -29,6 +29,37 @@ var (
 	ErrInterfaceInput = errors.New("invalid Interface Protobuf projection input")
 )
 
+// InterfaceIdentityCollisionError identifies the authored Interface whose
+// canonical Go contract projects two names onto one generated Protobuf
+// identity. The underlying collision remains available through errors.Is.
+type InterfaceIdentityCollisionError struct {
+	interfaceID interfaceid.Identifier
+	cause       error
+}
+
+// InterfaceID returns the exact canonical Interface containing the collision.
+func (e *InterfaceIdentityCollisionError) InterfaceID() interfaceid.Identifier {
+	if e == nil {
+		return interfaceid.Identifier{}
+	}
+	return e.interfaceID
+}
+
+func (e *InterfaceIdentityCollisionError) Error() string {
+	if e == nil || e.cause == nil {
+		return protobufidentity.ErrCollision.Error()
+	}
+	return e.cause.Error()
+}
+
+// Unwrap preserves the generated Protobuf identity collision chain.
+func (e *InterfaceIdentityCollisionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
 // InterfaceInput contains the canonical authored facts required to project one
 // externally exposed Interface. It contains no Implementation or runtime state.
 type InterfaceInput struct {
@@ -331,7 +362,8 @@ func normalizeInterfaceInputs(inputs []InterfaceInput) ([]InterfaceOperation, er
 	for index, input := range ordered {
 		operation, err := normalizeInterfaceInput(input, identityByID[input.InterfaceID.String()])
 		if err != nil {
-			return nil, fmt.Errorf("%w: %w: inputs[%d] Interface %s: %v", ErrInterfaceBuild, ErrInterfaceInput, index, input.InterfaceID, err)
+			err = interfaceIdentityCollisionError(input.InterfaceID, err)
+			return nil, fmt.Errorf("%w: %w: inputs[%d] Interface %s: %w", ErrInterfaceBuild, ErrInterfaceInput, index, input.InterfaceID, err)
 		}
 		operations[index] = operation
 	}
@@ -391,7 +423,7 @@ func normalizeInterfaceInput(input InterfaceInput, identity protobufidentity.Ide
 			return InterfaceOperation{}, fmt.Errorf("message %s has no generated identity", message.Name())
 		}
 		if previous, duplicate := protobufOwners[protobufName]; duplicate {
-			return InterfaceOperation{}, fmt.Errorf("messages %s and %s produce duplicate Protobuf name %s", previous, message.Name(), protobufName)
+			return InterfaceOperation{}, fmt.Errorf("%w: messages %s and %s produce duplicate Protobuf name %s", protobufidentity.ErrCollision, previous, message.Name(), protobufName)
 		}
 		protobufOwners[protobufName] = message.Name()
 		fields, err := normalizeInterfaceFields(message, messageNames)
@@ -444,7 +476,7 @@ func normalizeInterfaceFields(message interfacecontract.Message, messageNames ma
 			return nil, fmt.Errorf("message %s field %s: %v", message.Name(), field.Name(), err)
 		}
 		if previous, duplicate := protobufOwners[protobufName]; duplicate {
-			return nil, fmt.Errorf("message %s fields %s and %s produce duplicate Protobuf name %s", message.Name(), previous, field.Name(), protobufName)
+			return nil, fmt.Errorf("%w: message %s fields %s and %s produce duplicate Protobuf name %s", protobufidentity.ErrCollision, message.Name(), previous, field.Name(), protobufName)
 		}
 		protobufOwners[protobufName] = field.Name()
 		number := field.Number()
@@ -468,6 +500,17 @@ func normalizeInterfaceFields(message interfacecontract.Message, messageNames ma
 		}
 	}
 	return result, nil
+}
+
+func interfaceIdentityCollisionError(interfaceID interfaceid.Identifier, cause error) error {
+	if cause == nil || interfaceID.String() == "" || !errors.Is(cause, protobufidentity.ErrCollision) {
+		return cause
+	}
+	var existing *InterfaceIdentityCollisionError
+	if errors.As(cause, &existing) && existing != nil {
+		return cause
+	}
+	return &InterfaceIdentityCollisionError{interfaceID: interfaceID, cause: cause}
 }
 
 func validateInterfaceType(value interfacecontract.Type, messageNames map[string]string) error {

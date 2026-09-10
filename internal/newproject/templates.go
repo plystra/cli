@@ -115,6 +115,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID`" + ` reports ` + "`generated/proto/wire-map.json`" + ` as a path-only ` + "`generated-artifact`" + ` source. Restore its exact last known-good generated state, then regenerate with the same selection.
 
+` + "`PLYSTRA_PROTOBUF_IDENTITY_COLLISION`" + ` reports the owning Interface Go file at the trusted declaration position as an ` + "`interface-contract`" + ` source. Rename one conflicting authored field or enum member, then regenerate with the same selection; never patch generated names or wire history.
+
 ` + "`PLYSTRA_GO_MODULE_INVALID`" + ` reports the exact current-Project ` + "`go.mod`" + ` module or requirement position as a ` + "`module-dependency`" + ` source once Project identity is valid. Correct that declaration; a file that cannot establish a trustworthy module identity receives no invented source.
 
 ` + "`PLYSTRA_APPLICATION_DEPENDENCY_DRIFT`" + ` reports the current Project ` + "`go.mod`" + ` at ` + "`1:1`" + ` as a ` + "`module-dependency`" + ` source when the Kernel is missing or only transitive, or a generated runtime requirement has drifted. ` + "`plystra generate --check`" + ` and ` + "`plystra check`" + ` are read-only; normal generation transactionally restores the CLI-supported direct Kernel release and required runtime modules before validation.
@@ -1536,12 +1538,13 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
 - Protobuf schema or descriptor drift: never patch generated .proto files or
   generated/proto/descriptor-set.pb. Restore or regenerate the complete
   CLI-owned output, then rerun plystra generate --check.
-- Protobuf naming collision: Protobuf-derived names must be unique within each request and response.
-  For example, foo1 and foo_1 both derive the ProtoJSON name foo1.
-  Likewise, http_status and h_t_t_p_status both derive one HTTPStatusEnum type.
-  Rename one of the two canonical fields named by the diagnostic in the
-  authored Interface Go package. Do not patch generated names or the wire map;
-  ordinary generation and generate --check leave the Project unchanged.
+- Protobuf naming collision (PLYSTRA_PROTOBUF_IDENTITY_COLLISION):
+  Protobuf-derived names must be unique within each request and response.
+  foo1 and foo_1 both derive the ProtoJSON name foo1;
+  http_status and h_t_t_p_status both derive one HTTPStatusEnum type.
+  Rename one conflicting member in the reported interface-contract Source.
+  Never patch generated names or wire history; generation and generate --check
+  stay read-only on failure.
 - Unsupported Connect operation kind: the current unary boundary accepts a
   canonical contract with semantics.kind: query or command. Remove the named
   event or stream from http.expose until its operation kind is supported; do

@@ -194,6 +194,13 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			code:    diagnosticProtobufWireHistoryInvalid,
 		},
 		{
+			name:    "Protobuf identity collision",
+			err:     fmt.Errorf("project names: %w", protobufidentity.ErrCollision),
+			context: commandRecoveryContext("", "", []string{"PLYSTRA_CONFIG=deploy/customer.yaml"}),
+			want:    "Rename one conflicting authored field or enum member in the owning Interface contract, then run `plystra generate --config \"deploy/customer.yaml\"`.",
+			code:    diagnosticProtobufIdentityCollision,
+		},
+		{
 			name: "Capability create confirmation",
 			err:  errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrConfirmationRequired),
 			want: "Review the visible Capability versions, then rerun the same `plystra capability create` command with `--confirm`.",

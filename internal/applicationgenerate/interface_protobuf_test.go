@@ -14,6 +14,8 @@ import (
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/protobufdescriptor"
+	"github.com/plystra/cli/internal/protobufidentity"
+	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 )
 
@@ -198,6 +200,93 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 	clean, err := applicationgenerate.Generate(t.Context(), options)
 	if err != nil || !clean.Report().Clean() {
 		t.Fatalf("Generate --check(clean) = changes %#v, %v", clean.Report().Changes(), err)
+	}
+}
+
+func TestGenerateReportsAuthoredInterfaceIdentityCollisionSourceWithoutMutation(t *testing.T) {
+	for _, check := range []bool{false, true} {
+		check := check
+		name := "generate"
+		if check {
+			name = "generate check"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			const modulePath = "example.com/interface-identity-collision"
+			const sourcePath = "interfaces/records/collision/v1/interface.go"
+			writeConnectApplicationModule(t, root, modulePath)
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: [records.collision/v1]}\n")
+			writeFile(t, filepath.Join(root, filepath.FromSlash(sourcePath)), `package collisionv1
+
+import "context"
+
+//plystra:interface records.collision/v1
+type Interface interface {
+	Read(context.Context, Request) (Response, error)
+}
+
+type Request struct {
+	HTTPStatus string `+"`plystra:\"1\"`"+`
+	HttpStatus string `+"`plystra:\"2\"`"+`
+}
+
+type Response struct{}
+`)
+			writeFile(t, filepath.Join(root, "records", "service.go"), `package records
+
+import (
+	"context"
+
+	collisionv1 "example.com/interface-identity-collision/interfaces/records/collision/v1"
+)
+
+type Service struct{}
+
+//plystra:implements records.collision/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) Read(context.Context, collisionv1.Request) (collisionv1.Response, error) {
+	return collisionv1.Response{}, nil
+}
+`)
+
+			before := snapshotTree(t, root)
+			_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+				Start:       root,
+				Check:       check,
+				Environment: goEnvironment(nil),
+			})
+			var collision *protobufmodel.InterfaceIdentityCollisionError
+			var source *applicationgenerate.ProtobufIdentityCollisionSourceError
+			if !errors.Is(err, protobufidentity.ErrCollision) ||
+				!errors.As(err, &collision) ||
+				collision == nil ||
+				collision.InterfaceID().String() != "records.collision/v1" ||
+				!errors.As(err, &source) ||
+				source == nil ||
+				source.InterfaceID().String() != "records.collision/v1" ||
+				source.ModulePath() != modulePath ||
+				source.SourcePath() != sourcePath ||
+				source.SourceKind() != "interface-contract" ||
+				source.Line() != 5 ||
+				source.Column() != 1 {
+				t.Fatalf("Generate collision = %v; model = %#v; source = %#v", err, collision, source)
+			}
+			for _, want := range []string{"records.collision/v1", "Request", "HTTPStatus", "HttpStatus", "http_status"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("Generate error %q omits %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("Generate collision exposed the Project path: %v", err)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed generation changed the Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			assertNoTransactions(t, root)
+		})
 	}
 }
 

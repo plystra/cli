@@ -589,10 +589,11 @@ projections are later transport work.
 Protobuf-derived names must also be unique within each request and response.
 For example, `foo1` and `foo_1` both become the ProtoJSON name `foo1`, while
 enum fields `http_status` and `h_t_t_p_status` both become a generated
-`HTTPStatusEnum` type. Generation reports the Capability, request or response,
-both canonical field names, and the conflicting generated identity before it
-changes generated output. Rename one authored `capability.yaml` field and
-regenerate; request and response names are checked independently.
+`HTTPStatusEnum` type. Generation reports the Interface, Go message, both
+authored field names, and the conflicting generated identity before it changes
+generated output. The diagnostic emits the owning module-relative Go file at
+the trusted Interface declaration position as an `interface-contract` source.
+Rename one authored field and regenerate; messages are checked independently.
 
 `.agents/skills/plystra/` is a creation-time project guide that the project may
 maintain as its authored workflows evolve. It is outside `generated/` and is
@@ -2032,6 +2033,10 @@ regenerate with the same selection.
 `generated/proto/wire-map.json` as a `generated-artifact` source without a
 fabricated span. Restore the exact last known-good generated ledger, then rerun
 `plystra generate` with the same selection.
+`PLYSTRA_PROTOBUF_IDENTITY_COLLISION` emits the owning Interface Go file
+at its trusted declaration position as an `interface-contract` source. The
+problem retains the Interface, message, conflicting field names, and generated
+identity without an absolute or Module Cache path.
 `PLYSTRA_GENERATED_UNEXPECTED_OUTPUT` emits every unexpected unowned path as a
 sorted `generated-artifact` source in the current Project module, also without
 a fabricated span. Move each reported path outside `generated/`, then rerun
@@ -2359,11 +2364,13 @@ compatibility error that generation intentionally refuses to guess through.
 
 ### Protobuf naming collision
 
-If generation reports that two canonical request or response fields produce
-the same ProtoJSON name or generated enum identity, rename one field in the
-authored `capability.yaml`. Do not patch the generated wire map or generated Go
-types. The diagnostic is lexical and stable, and both ordinary generation and
-`plystra generate --check` leave the Project unchanged on this failure.
+`PLYSTRA_PROTOBUF_IDENTITY_COLLISION` identifies two authored fields or
+enum members in one Interface contract that project to the same generated
+identity. Correct the reported `interface-contract` source by renaming one
+conflicting member, then regenerate with the same selector. The source uses the
+trusted Interface declaration position because field spans are not retained.
+Do not patch generated Go, Protobuf, descriptor, or wire-history artifacts.
+Ordinary generation and `plystra generate --check` leave the Project unchanged.
 
 ### Plugin target is ambiguous
 

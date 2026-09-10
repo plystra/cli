@@ -432,6 +432,18 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			Path:   located.SourcePath(),
 			Kind:   located.SourceKind(),
 		})
+	case diagnosticProtobufIdentityCollision:
+		var located diagnosticSourceLocation
+		if !errors.As(err, &located) || located == nil || located.SourceKind() != "interface-contract" {
+			return nil
+		}
+		sources = append(sources, diagnosticjson.Source{
+			Module: located.ModulePath(),
+			Path:   located.SourcePath(),
+			Kind:   located.SourceKind(),
+			Line:   located.Line(),
+			Column: located.Column(),
+		})
 	case diagnosticConstructorConfigurationUnselected:
 		var unowned *applicationresolve.UnownedConstructorConfigurationError
 		if !errors.As(err, &unowned) || unowned == nil {
@@ -1082,7 +1094,7 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, protobufwiremap.ErrHistory):
 		return recoveryDiagnostic(diagnosticProtobufWireHistoryInvalid, "Restore generated/proto/wire-map.json from its last known-good generated state, then run `plystra generate"+context.selectorSuffix()+"`.")
 	case errors.Is(err, protobufidentity.ErrCollision):
-		return recoveryDiagnostic(diagnosticProtobufIdentityCollision, "Rename one conflicting authored field or enum member in capability.yaml, then regenerate.")
+		return recoveryDiagnostic(diagnosticProtobufIdentityCollision, "Rename one conflicting authored field or enum member in the owning Interface contract, then run `plystra generate"+context.selectorSuffix()+"`.")
 	case errors.Is(err, protobufmodel.ErrOperationKind):
 		return recoveryDiagnostic(diagnosticProtobufOperationKindUnsupported, "Remove the unsupported Capability from http.expose in "+context.configurationTarget()+", then regenerate.")
 	case errors.Is(err, generatedfiles.ErrConflict):

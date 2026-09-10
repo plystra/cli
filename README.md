@@ -148,10 +148,12 @@ mount an HTTP server; server mounting and the remaining protocol projections
 remain later transport work. Before
 wire-map reconciliation, the normalized Protobuf model
 rejects two canonical fields in the same request or response when they derive
-the same ProtoJSON name or generated enum type. The diagnostic names the
-Capability, message direction, both authored field names, and the colliding
-identity; ordinary generation and `generate --check` fail without changing the
-Project.
+the same ProtoJSON name or generated enum type. The
+`PLYSTRA_PROTOBUF_IDENTITY_COLLISION` diagnostic names the Interface, Go
+message, both authored field names, and colliding identity, then reports the
+owning module-relative Go file at the trusted Interface declaration position as
+an `interface-contract` source. Ordinary generation and
+`generate --check` fail without changing the Project.
 
 Capability inspection strictly parses the optional `extensions` mapping within the 1 MiB declaration boundary. The CLI preserves every valid lower-kebab namespace, including unknown namespaces, as immutable namespace-sorted canonical JSON-compatible metadata: object key order is normalized, scalar types and array order are preserved, and omitted and empty metadata are equivalent. Normalized extension metadata participates in exact contract equality, so providers cannot add, remove, or change generation-affecting behavior under one Capability ID; conflicts report the differing metadata paths and require a new version. Namespace interpretation remains a selected plugin generation-extension responsibility.
 
@@ -902,6 +904,10 @@ regenerate with the same selection.
 `generated/proto/wire-map.json` as a `generated-artifact` source without a
 fabricated span. Restore the exact last known-good generated ledger, then rerun
 `plystra generate` with the same selection.
+`PLYSTRA_PROTOBUF_IDENTITY_COLLISION` emits the owning Interface Go file
+as an `interface-contract` source at the trusted declaration position. Rename
+one conflicting authored field or enum member in that contract, then regenerate
+with the same selection; never patch generated names or wire history.
 `PLYSTRA_GENERATED_UNEXPECTED_OUTPUT` emits every unexpected unowned path as a
 sorted `generated-artifact` source in the current Project module, also without
 a fabricated span. Move each reported path outside `generated/`, then rerun

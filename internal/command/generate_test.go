@@ -487,6 +487,109 @@ type Response struct{}
 	}
 }
 
+func TestRunGenerateReportsAuthoredInterfaceIdentityCollisionSourceWithoutMutation(t *testing.T) {
+	root := t.TempDir()
+	const modulePath = "example.com/acme/interface-identity-collision"
+	const sourcePath = "interfaces/records/collision/v1/interface.go"
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module %s
+
+go 1.26
+
+require (
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace github.com/plystra/kernel => %s
+`, modulePath, filepath.ToSlash(kernelRoot)))
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("ReadFile(go.sum): %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: [records.collision/v1]}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), "http: {expose: [records.collision/v1]}\n")
+	writeCommandFile(t, filepath.Join(root, filepath.FromSlash(sourcePath)), `package collisionv1
+
+import "context"
+
+//plystra:interface records.collision/v1
+type Interface interface {
+	Read(context.Context, Request) (Response, error)
+}
+
+type Request struct {
+	HTTPStatus string `+"`plystra:\"1\"`"+`
+	HttpStatus string `+"`plystra:\"2\"`"+`
+}
+
+type Response struct{}
+`)
+	writeCommandFile(t, filepath.Join(root, "records", "service.go"), `package records
+
+import (
+	"context"
+
+	collisionv1 "example.com/acme/interface-identity-collision/interfaces/records/collision/v1"
+)
+
+type Service struct{}
+
+//plystra:implements records.collision/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) Read(context.Context, collisionv1.Request) (collisionv1.Response, error) {
+	return collisionv1.Response{}, nil
+}
+`)
+
+	before := commandTree(t, root)
+	for _, test := range []struct {
+		name        string
+		arguments   []string
+		overrides   map[string]string
+		recoveryRun string
+	}{
+		{name: "default check", arguments: []string{"generate", "--check"}, recoveryRun: "plystra generate"},
+		{name: "default generate", arguments: []string{"generate"}, recoveryRun: "plystra generate"},
+		{name: "environment check", arguments: []string{"generate", "--check", "--env", "production"}, recoveryRun: "plystra generate --env \"production\""},
+		{name: "replacement check", arguments: []string{"check", "--config", "deploy/customer.yaml"}, recoveryRun: "plystra generate --config \"deploy/customer.yaml\""},
+		{name: "ambient replacement check", arguments: []string{"check"}, overrides: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"}, recoveryRun: "plystra generate --config \"deploy/customer.yaml\""},
+	} {
+		environment := commandGoEnvironment()
+		if test.overrides != nil {
+			environment = commandGoEnvironmentWith(test.overrides)
+		}
+		exitCode, stdout, stderr := runCommand(t, test.arguments, root, environment)
+		wantSuffix := "\n\nSource: " + modulePath + ":" + sourcePath + ":5:1 (interface-contract)\n\n" +
+			"Recovery:\nRename one conflicting authored field or enum member in the owning Interface contract, then run `" + test.recoveryRun + "`.\n\n" +
+			"Diagnostic: " + diagnosticcode.ProtobufIdentityCollision + "\n"
+		if exitCode != 1 ||
+			stdout != "" ||
+			!strings.Contains(stderr, "generated Protobuf identity collision") ||
+			!strings.Contains(stderr, "records.collision/v1") ||
+			!strings.Contains(stderr, "HTTPStatus") ||
+			!strings.Contains(stderr, "HttpStatus") ||
+			!strings.Contains(stderr, "http_status") ||
+			!strings.HasSuffix(stderr, wantSuffix) ||
+			strings.Count(stderr, "Source: ") != 1 ||
+			strings.Count(stderr, "Recovery:") != 1 ||
+			strings.Contains(stderr, "capability.yaml") ||
+			strings.Contains(stderr, root) ||
+			strings.Contains(stderr, filepath.ToSlash(root)) {
+			t.Fatalf("%s = exit %d, stdout %q, stderr %q", test.name, exitCode, stdout, stderr)
+		}
+		if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+			t.Fatalf("%s changed the Project:\nbefore: %#v\nafter:  %#v", test.name, before, after)
+		}
+		assertNoCommandTransactions(t, root)
+	}
+}
+
 func TestRunGenerateInstallsConnectRuntimeRequirementsAndCheckIsReadOnly(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)

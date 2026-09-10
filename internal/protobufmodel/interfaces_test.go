@@ -16,6 +16,7 @@ import (
 
 	"github.com/plystra/cli/internal/interfacecontract"
 	"github.com/plystra/cli/internal/interfacedecl"
+	"github.com/plystra/cli/internal/protobufidentity"
 	"github.com/plystra/cli/internal/protobufmodel"
 )
 
@@ -270,16 +271,17 @@ type Response struct{}
 	collision.Source = "example.com/interfaces@v1/records/collision/v1/interface.go:3:1"
 
 	tests := []struct {
-		name   string
-		inputs []protobufmodel.InterfaceInput
-		want   string
+		name      string
+		inputs    []protobufmodel.InterfaceInput
+		want      string
+		collision bool
 	}{
 		{name: "duplicate", inputs: []protobufmodel.InterfaceInput{valid, valid}, want: "appears more than once"},
 		{name: "package mismatch", inputs: []protobufmodel.InterfaceInput{withInterfacePackage(valid, "example.com/other")}, want: "does not match input package"},
 		{name: "unsafe source", inputs: []protobufmodel.InterfaceInput{withInterfaceSource(valid, "bad\nsource")}, want: "bounded nonempty line"},
 		{name: "invalid digest", inputs: []protobufmodel.InterfaceInput{withInterfaceDigest(valid, "sha256:no")}, want: "lower-case SHA-256"},
 		{name: "reserved field number", inputs: []protobufmodel.InterfaceInput{reserved}, want: "outside the available Protobuf field-number space"},
-		{name: "field identity collision", inputs: []protobufmodel.InterfaceInput{collision}, want: "duplicate Protobuf name http_status"},
+		{name: "field identity collision", inputs: []protobufmodel.InterfaceInput{collision}, want: "duplicate Protobuf name http_status", collision: true},
 	}
 	for _, test := range tests {
 		test := test
@@ -288,6 +290,15 @@ type Response struct{}
 			model, err := protobufmodel.BuildInterfaces(true, test.inputs)
 			if !strings.Contains(errString(err), test.want) || model.Valid() || !errorsAreInterfaceProjection(err) {
 				t.Fatalf("BuildInterfaces = %s, %v; want %q", model.CanonicalJSON(), err, test.want)
+			}
+			if test.collision {
+				var collision *protobufmodel.InterfaceIdentityCollisionError
+				if !errors.Is(err, protobufidentity.ErrCollision) ||
+					!errors.As(err, &collision) ||
+					collision == nil ||
+					collision.InterfaceID().String() != "records.collision/v1" {
+					t.Fatalf("BuildInterfaces collision = %#v, %v", collision, err)
+				}
 			}
 		})
 	}
