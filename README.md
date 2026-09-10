@@ -985,6 +985,14 @@ edge facts, while the bare internal dependency-cycle sentinel remains source-
 less. Use the complete edge path and reported sources to remove the semantic
 cycle from Capability metadata or the owning generation rule; changing
 execution order cannot make the dependency cycle valid.
+`PLYSTRA_GENERATION_CONTRIBUTION_CYCLE` reports the typed `generation-rule`
+source for every contribution that provides or consumes a token in the complete
+deterministic cycle. Each fact identifies the selected contribution owner by
+its Project module and module-relative `plugin.yaml` at `1:1`; shared
+canonicalization sorts and deduplicates repeated endpoint facts. The bare
+internal contribution-cycle sentinel remains source-less. Use the contribution
+and token path to remove the semantic cycle from the owning generation rules;
+discovery or execution order cannot make the token cycle valid.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses

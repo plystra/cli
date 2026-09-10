@@ -372,7 +372,7 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 				if err := validateFinalProviderChoices(activation.ProviderResolution(), input.Candidates, input.Choices); err != nil {
 					return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w", ErrResolveExtensions, pass, err)
 				}
-				contributions, err := resolveContributionGraph(outputs)
+				contributions, err := resolveContributionGraph(outputs, plugins)
 				if err != nil {
 					return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w", ErrResolveExtensions, pass, err)
 				}
@@ -948,12 +948,32 @@ func generatedRequirementValues(values map[string]GeneratedRequirement) []Genera
 }
 
 func generatedRequirementSource(requirement GeneratedRequirement, plugin Plugin) providerresolution.RequirementSource {
+	return generationRuleSource(
+		requirement.pluginID,
+		requirement.namespace,
+		requirement.source.String(),
+		requirement.ruleID,
+		plugin,
+	)
+}
+
+func contributionRequirementSource(pluginID string, contribution generation.NormalizedContribution, plugin Plugin) providerresolution.RequirementSource {
+	return generationRuleSource(
+		pluginID,
+		contribution.Namespace(),
+		contribution.Source().String(),
+		contribution.ID(),
+		plugin,
+	)
+}
+
+func generationRuleSource(pluginID, namespace, sourceCapability, ruleID string, plugin Plugin) providerresolution.RequirementSource {
 	value := fmt.Sprintf(
 		"generation plugin %q rule %q extensions.%s on %s",
-		requirement.pluginID,
-		requirement.ruleID,
-		requirement.namespace,
-		requirement.source,
+		pluginID,
+		ruleID,
+		namespace,
+		sourceCapability,
 	)
 	if len(value) > maximumRequirementSourceSize {
 		sum := sha256.Sum256([]byte(value))
@@ -971,10 +991,10 @@ func generatedRequirementSource(requirement GeneratedRequirement, plugin Plugin)
 		Path:             sourcePath,
 		Line:             1,
 		Column:           1,
-		PluginID:         requirement.pluginID,
-		Namespace:        requirement.namespace,
-		SourceCapability: requirement.source.String(),
-		RuleID:           requirement.ruleID,
+		PluginID:         pluginID,
+		Namespace:        namespace,
+		SourceCapability: sourceCapability,
+		RuleID:           ruleID,
 	}
 }
 

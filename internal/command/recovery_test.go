@@ -343,6 +343,7 @@ func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 		{name: "selected Provider extension without typed selection", err: fmt.Errorf("resolve generation: %w", generationactivation.ErrSelectedProviderExtension), code: diagnosticGenerationProviderExtensionMissing},
 		{name: "activation cycle without typed edges", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrActivationCycle), code: diagnosticGenerationActivationCycle},
 		{name: "dependency cycle without typed edges", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrDependencyCycle), code: diagnosticGenerationDependencyCycle},
+		{name: "contribution cycle without typed edges", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrContributionCycle), code: diagnosticGenerationContributionCycle},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {

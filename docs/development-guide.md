@@ -2115,6 +2115,14 @@ locations; a generation-rule fact identifies the generating Plugin's
 edge facts, and a bare internal dependency-cycle sentinel remains source-less.
 Use the complete edge path to remove the semantic cycle from Capability
 metadata or the owning generation rule; execution order cannot make it valid.
+`PLYSTRA_GENERATION_CONTRIBUTION_CYCLE` emits the typed `generation-rule`
+source for every contribution that provides or consumes a token in the complete
+deterministic contribution cycle. Each source identifies the selected Plugin's
+owning Project module and module-relative `plugin.yaml` at `1:1`. Shared
+canonicalization sorts and deduplicates repeated endpoint facts, and a bare
+internal contribution-cycle sentinel remains source-less. Use the contribution
+and token path to remove the semantic cycle from the owning generation rules;
+execution order cannot make it valid.
 An unavailable constructor configuration schema uses
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
 current or dependency Project document as `configuration-declaration` at
@@ -2531,6 +2539,15 @@ Plugins, and rules, then remove one semantic dependency from the owning
 Capability metadata or generation rule. Reordering extension execution cannot
 repair the cycle, and a bare internal dependency-cycle sentinel has no source
 to invent.
+
+### Generation contribution cycle
+
+`PLYSTRA_GENERATION_CONTRIBUTION_CYCLE` prints the complete deterministic
+contribution and token path and points to each selected Plugin whose generation
+rules produced a contribution in that cycle. Edit those owning Plugins at the
+reported module-relative `plugin.yaml` sources so at least one token dependency
+is removed. Discovery or execution order cannot repair the semantic cycle, and
+a bare internal contribution-cycle sentinel has no source to invent.
 
 ### Extension helper fails
 

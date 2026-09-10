@@ -37,11 +37,12 @@ func TestResolveContributionGraphUsesPointAndDependencyOrder(t *testing.T) {
 	}
 	wantIDs := []string{"z-ingress", "z-verify", "a-authorize", "m-record", "a-egress"}
 	wantPlugins := []string{"example.z-ingress", "example.z-authn", "example.a-authz", "example.m-audit", "example.a-egress"}
+	plugins := contributionTestPlugins(outputs)
 
 	permutations := 0
 	forEachExtensionOutputPermutation(outputs, func(permutation []ExtensionOutput) {
 		permutations++
-		resolved, err := resolveContributionGraph(permutation)
+		resolved, err := resolveContributionGraph(permutation, plugins)
 		if err != nil {
 			t.Fatalf("resolveContributionGraph permutation %d: %v", permutations, err)
 		}
@@ -136,7 +137,8 @@ func TestResolveContributionGraphRejectsInvalidGraphsDeterministically(t *testin
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, firstErr := resolveContributionGraph(test.outputs)
+			plugins := contributionTestPlugins(test.outputs)
+			_, firstErr := resolveContributionGraph(test.outputs, plugins)
 			if !errors.Is(firstErr, ErrContributionGraph) || !errors.Is(firstErr, test.target) {
 				t.Fatalf("error = %v, want ErrContributionGraph and %v", firstErr, test.target)
 			}
@@ -148,7 +150,7 @@ func TestResolveContributionGraphRejectsInvalidGraphsDeterministically(t *testin
 
 			reversed := append([]ExtensionOutput(nil), test.outputs...)
 			slices.Reverse(reversed)
-			_, reversedErr := resolveContributionGraph(reversed)
+			_, reversedErr := resolveContributionGraph(reversed, plugins)
 			if reversedErr == nil || reversedErr.Error() != firstErr.Error() {
 				t.Fatalf("reversed error = %v, want %v", reversedErr, firstErr)
 			}
@@ -170,7 +172,8 @@ func TestResolveContributionGraphReportsCompleteCycle(t *testing.T) {
 		)),
 	}
 
-	_, err := resolveContributionGraph(outputs)
+	plugins := contributionTestPlugins(outputs)
+	_, err := resolveContributionGraph(outputs, plugins)
 	if !errors.Is(err, ErrContributionGraph) || !errors.Is(err, ErrContributionCycle) {
 		t.Fatalf("cycle error = %v", err)
 	}
@@ -195,10 +198,22 @@ func TestResolveContributionGraphReportsCompleteCycle(t *testing.T) {
 	if cycle.Dependencies()[0].Provider().ID() != "audit.c" {
 		t.Fatal("ContributionCycleError exposed mutable dependency storage")
 	}
+	providerSources := cycle.Dependencies()[0].Provider().RequirementSourceDetails()
+	if len(providerSources) != 1 || providerSources[0].Kind != "generation-rule" || providerSources[0].ModulePath != "example.com/application" || providerSources[0].Path != "audit/plugin.yaml" || providerSources[0].Line != 1 || providerSources[0].Column != 1 || providerSources[0].PluginID != "example.audit" || providerSources[0].Namespace != "audit" || providerSources[0].SourceCapability != "order.create/v1" || providerSources[0].RuleID != "audit.c" {
+		t.Fatalf("cycle provider sources = %#v", providerSources)
+	}
+	consumerSources := cycle.Dependencies()[0].Consumer().RequirementSourceDetails()
+	if len(consumerSources) != 1 || consumerSources[0].Path != "authn/plugin.yaml" || consumerSources[0].PluginID != "example.authn" || consumerSources[0].RuleID != "authn.a" {
+		t.Fatalf("cycle consumer sources = %#v", consumerSources)
+	}
+	providerSources[0] = consumerSources[0]
+	if fresh := cycle.Dependencies()[0].Provider().RequirementSourceDetails(); len(fresh) != 1 || fresh[0].Path != "audit/plugin.yaml" {
+		t.Fatal("ResolvedContribution exposed mutable requirement-source storage")
+	}
 
 	reversed := append([]ExtensionOutput(nil), outputs...)
 	slices.Reverse(reversed)
-	_, reversedErr := resolveContributionGraph(reversed)
+	_, reversedErr := resolveContributionGraph(reversed, plugins)
 	if reversedErr == nil || reversedErr.Error() != err.Error() {
 		t.Fatalf("reversed cycle error = %v, want %v", reversedErr, err)
 	}
@@ -280,6 +295,27 @@ func contributionTestValue(t *testing.T, id, namespace string, point generation.
 		Requires:  append([]generation.ContributionToken(nil), requires...),
 		Provides:  append([]generation.ContributionToken(nil), provides...),
 	}
+}
+
+func contributionTestPlugins(outputs []ExtensionOutput) map[string]Plugin {
+	plugins := make(map[string]Plugin)
+	for _, output := range outputs {
+		if _, exists := plugins[output.pluginID]; exists {
+			continue
+		}
+		pluginPath := output.pluginID
+		if separator := strings.LastIndex(pluginPath, "."); separator >= 0 {
+			pluginPath = pluginPath[separator+1:]
+		}
+		plugins[output.pluginID] = Plugin{
+			Context: generation.PluginInput{
+				ID:         output.pluginID,
+				ModulePath: "example.com/application",
+			},
+			PluginPath: pluginPath,
+		}
+	}
+	return plugins
 }
 
 func forEachExtensionOutputPermutation(values []ExtensionOutput, visit func([]ExtensionOutput)) {

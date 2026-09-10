@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/providerresolution"
 )
 
 var (
@@ -31,8 +32,9 @@ var (
 // provider provenance. Result order is semantic execution order, not canonical
 // serialization order.
 type ResolvedContribution struct {
-	pluginID     string
-	contribution generation.NormalizedContribution
+	pluginID          string
+	contribution      generation.NormalizedContribution
+	requirementSource providerresolution.RequirementSource
 }
 
 // PluginID returns the selected extension owner.
@@ -63,6 +65,15 @@ func (c ResolvedContribution) Provides() []generation.ContributionToken {
 // Nodes returns immutable operations in contribution-local semantic order.
 func (c ResolvedContribution) Nodes() []generation.NormalizedGeneratedNode {
 	return c.contribution.Nodes()
+}
+
+// RequirementSourceDetails returns the typed module-relative generation-rule
+// provenance for this selected contribution.
+func (c ResolvedContribution) RequirementSourceDetails() []providerresolution.RequirementSource {
+	if c.requirementSource.Kind == "" {
+		return nil
+	}
+	return []providerresolution.RequirementSource{c.requirementSource}
 }
 
 // ContributionDependency is one token-labelled provider-to-consumer edge.
@@ -117,15 +128,16 @@ func (e *ContributionCycleError) Error() string {
 // Unwrap supports errors.Is with ErrContributionCycle.
 func (*ContributionCycleError) Unwrap() error { return ErrContributionCycle }
 
-func resolveContributionGraph(outputs []ExtensionOutput) ([]ResolvedContribution, error) {
+func resolveContributionGraph(outputs []ExtensionOutput, plugins map[string]Plugin) ([]ResolvedContribution, error) {
 	contributions := make([]ResolvedContribution, 0)
 	byID := make(map[string][]ResolvedContribution)
 	providersByToken := make(map[generation.ContributionToken][]ResolvedContribution)
 	for _, output := range outputs {
 		for _, contribution := range output.output.Contributions() {
 			resolved := ResolvedContribution{
-				pluginID:     output.pluginID,
-				contribution: contribution,
+				pluginID:          output.pluginID,
+				contribution:      contribution,
+				requirementSource: contributionRequirementSource(output.pluginID, contribution, plugins[output.pluginID]),
 			}
 			contributions = append(contributions, resolved)
 			byID[resolved.ID()] = append(byID[resolved.ID()], resolved)

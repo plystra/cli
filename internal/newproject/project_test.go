@@ -410,11 +410,14 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING")) || !bytes.Contains(skill, []byte("provider/choice Sources")) {
 		t.Fatal("maximum-length Project skill omits selected-Provider extension source guidance")
 	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_ACTIVATION_CYCLE")) || !bytes.Contains(skill, []byte("deduplicated edge Sources")) {
-		t.Fatal("maximum-length Project skill omits activation-cycle source guidance")
-	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_DEPENDENCY_CYCLE")) || !bytes.Contains(skill, []byte("mixed edge Sources")) {
-		t.Fatal("maximum-length Project skill omits dependency-cycle source guidance")
+	for _, code := range [][]byte{
+		[]byte("PLYSTRA_GENERATION_ACTIVATION_CYCLE"),
+		[]byte("PLYSTRA_GENERATION_DEPENDENCY_CYCLE"),
+		[]byte("PLYSTRA_GENERATION_CONTRIBUTION_CYCLE"),
+	} {
+		if !bytes.Contains(skill, code) || !bytes.Contains(skill, []byte("deduplicated cycle Sources")) {
+			t.Fatalf("maximum-length Project skill omits generation-cycle source guidance for %s", code)
+		}
 	}
 }
 
@@ -1216,6 +1219,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_GENERATION_DEPENDENCY_CYCLE` reports every retained typed requirement source"),
 		[]byte("derived `activation` and `generation-rule` facts retain their originating module-relative location"),
 		[]byte("bare internal dependency-cycle sentinel remains source-less"),
+		[]byte("`PLYSTRA_GENERATION_CONTRIBUTION_CYCLE` reports the typed `generation-rule` source"),
+		[]byte("every contribution that provides or consumes a token"),
+		[]byte("bare internal contribution-cycle sentinel remains source-less"),
 		[]byte("one path-only `configuration-selection` source"),
 		[]byte("unsafe selectors report no source"),
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration"),
@@ -2290,9 +2296,9 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING",
 		"provider/choice Sources",
 		"PLYSTRA_GENERATION_ACTIVATION_CYCLE",
-		"deduplicated edge Sources",
 		"PLYSTRA_GENERATION_DEPENDENCY_CYCLE",
-		"mixed edge Sources",
+		"PLYSTRA_GENERATION_CONTRIBUTION_CYCLE",
+		"deduplicated cycle Sources",
 		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
 		"generated-artifact Sources",

@@ -548,6 +548,32 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				sources = append(sources, candidate)
 			}
 		}
+	case diagnosticGenerationContributionCycle:
+		var cycle *generationresolution.ContributionCycleError
+		if !errors.As(err, &cycle) || cycle == nil {
+			return nil
+		}
+		seen := make(map[diagnosticjson.Source]struct{})
+		appendContribution := func(contribution generationresolution.ResolvedContribution) {
+			for _, source := range contribution.RequirementSourceDetails() {
+				candidate := diagnosticjson.Source{
+					Module: source.ModulePath,
+					Path:   source.Path,
+					Kind:   string(source.Kind),
+					Line:   source.Line,
+					Column: source.Column,
+				}
+				if _, exists := seen[candidate]; exists {
+					continue
+				}
+				seen[candidate] = struct{}{}
+				sources = append(sources, candidate)
+			}
+		}
+		for _, dependency := range cycle.Dependencies() {
+			appendContribution(dependency.Provider())
+			appendContribution(dependency.Consumer())
+		}
 	case diagnosticGeneratedOwnershipConflict:
 		var conflict *applicationgenerate.OwnershipConflictSourceError
 		if !errors.As(err, &conflict) || conflict == nil {

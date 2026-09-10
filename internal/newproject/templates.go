@@ -139,6 +139,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_GENERATION_DEPENDENCY_CYCLE`" + ` reports every retained typed requirement source carried by the complete deterministic mixed activation and generated-requirement cycle. Authored ` + "`declaration`" + ` and ` + "`exposure`" + ` facts and derived ` + "`activation`" + ` and ` + "`generation-rule`" + ` facts retain their originating module-relative location; generation-rule facts identify the generating Plugin's ` + "`plugin.yaml`" + ` at ` + "`1:1`" + `. Shared canonicalization sorts and deduplicates repeated edge facts, while the bare internal dependency-cycle sentinel remains source-less. Use the complete edge path and reported sources to remove the semantic cycle from Capability metadata or the owning generation rule; changing execution order cannot make the dependency cycle valid.
 
+` + "`PLYSTRA_GENERATION_CONTRIBUTION_CYCLE`" + ` reports the typed ` + "`generation-rule`" + ` source for every contribution that provides or consumes a token in the complete deterministic cycle. Each fact identifies the selected contribution owner by its Project module and module-relative ` + "`plugin.yaml`" + ` at ` + "`1:1`" + `; shared canonicalization sorts and deduplicates repeated endpoint facts. The bare internal contribution-cycle sentinel remains source-less. Use the contribution and token path to remove the semantic cycle from the owning generation rules; discovery or execution order cannot make the token cycle valid.
+
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. A normalized Project-contained document that cannot be loaded reports one path-only ` + "`configuration-selection`" + ` source without a fabricated span. Conflicting, duplicated, or unsafe selectors report no source because no document is trustworthy. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 ` + "`plystra plugin create`" + ` uses ` + "`PLYSTRA_PLUGIN_CREATE_NAME_INVALID`" + ` for an invalid or reserved root-level name, ` + "`PLYSTRA_PLUGIN_CREATE_ID_INVALID`" + ` when the Project module namespace and name cannot form a canonical Plugin ID, and ` + "`PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS`" + ` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.
@@ -1491,8 +1493,8 @@ Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
 - PLYSTRA_GENERATION_ACTIVATION_CONFLICT: plugin Sources; unify namespace.
 - PLYSTRA_GENERATION_ACTIVATION_MISSING: requirements; add association; no invented Source.
 - PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING: provider/choice Sources; add support.
-- PLYSTRA_GENERATION_ACTIVATION_CYCLE: deduplicated edge Sources; break cycle.
-- PLYSTRA_GENERATION_DEPENDENCY_CYCLE: mixed edge Sources; break cycle.
+- PLYSTRA_GENERATION_ACTIVATION_CYCLE / PLYSTRA_GENERATION_DEPENDENCY_CYCLE /
+  PLYSTRA_GENERATION_CONTRIBUTION_CYCLE: deduplicated cycle Sources; break cycle.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,

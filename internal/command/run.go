@@ -228,6 +228,9 @@ PLYSTRA_GENERATION_DEPENDENCY_CYCLE reports retained typed sources carried by
 the complete mixed activation and generated-requirement cycle, including
 declaration, exposure, activation, and generation-rule facts, in sorted and
 deduplicated order. A bare dependency-cycle sentinel has no source.
+PLYSTRA_GENERATION_CONTRIBUTION_CYCLE reports the generation-rule source for
+every contribution in the complete token-dependency cycle, in sorted and
+deduplicated order. A bare contribution-cycle sentinel has no source.
 PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
 configuration, go.mod/go.sum, or generated path as a sorted path-only
 configuration-declaration, module-dependency, or generated-artifact source
@@ -320,6 +323,9 @@ PLYSTRA_GENERATION_DEPENDENCY_CYCLE reports retained typed sources carried by
 the complete mixed activation and generated-requirement cycle, including
 declaration, exposure, activation, and generation-rule facts, in sorted and
 deduplicated order. A bare dependency-cycle sentinel has no source.
+PLYSTRA_GENERATION_CONTRIBUTION_CYCLE reports the generation-rule source for
+every contribution in the complete token-dependency cycle, in sorted and
+deduplicated order. A bare contribution-cycle sentinel has no source.
 PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
 configuration, go.mod/go.sum, or generated path as a sorted path-only
 configuration-declaration, module-dependency, or generated-artifact source

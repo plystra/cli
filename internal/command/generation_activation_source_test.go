@@ -203,6 +203,44 @@ func TestPublicGenerationCommandsReportDependencyCycleSourcesWithoutMutation(t *
 	}
 }
 
+func TestPublicGenerationCommandsReportContributionCycleSourcesWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := []struct {
+		name      string
+		arguments []string
+	}{
+		{name: "generate", arguments: []string{"generate"}},
+		{name: "generate-check", arguments: []string{"generate", "--check"}},
+		{name: "check", arguments: []string{"check"}},
+	}
+	for _, command := range commands {
+		command := command
+		t.Run(command.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := writeGenerationContributionCycleProject(t)
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, command.arguments, filepath.Join(root, "order"), commandGoEnvironment())
+			wantSuffix := "\n\n" +
+				"Source: example.com/acme/library:audit/plugin.yaml:1:1 (generation-rule)\n" +
+				"Source: example.com/acme/library:authn/plugin.yaml:1:1 (generation-rule)\n\n" +
+				"Recovery:\nEdit the reported generation declarations to remove the dependency cycle or unordered token flow.\n\n" +
+				"Diagnostic: " + diagnosticcode.GenerationContributionCycle + "\n"
+			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "contribution \"audit.record\"") || !strings.Contains(stderr, "--token \"audit-recorded\"--> contribution \"authn.verify\"") || !strings.Contains(stderr, "--token \"authn-verified\"--> contribution \"audit.record\"") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 2 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+				t.Fatalf("%s = exit %d, stdout %q, stderr %q", command.name, exitCode, stdout, stderr)
+			}
+			if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, "pkg\\mod") || strings.Contains(stderr, "pkg/mod") {
+				t.Fatalf("%s exposed an absolute or Module Cache path: %q", command.name, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%s mutated the contribution-cycle Project:\nbefore: %#v\nafter:  %#v", command.name, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func writeMissingGenerationActivationProject(t *testing.T) string {
 	t.Helper()
 
@@ -454,6 +492,70 @@ errors: []
 	return root
 }
 
+func writeGenerationContributionCycleProject(t *testing.T) string {
+	t.Helper()
+
+	root := writeCapabilityCommandModule(t)
+	cliRoot := commandRepositoryRoot(t)
+	goMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatalf("read application go.mod: %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.mod"), string(goMod)+`
+require (
+	github.com/plystra/cli v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace github.com/plystra/cli => `+filepath.ToSlash(cliRoot)+"\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `capabilities:
+  require: [order.create/v1]
+http:
+  expose: [order.create/v1]
+`)
+	writeCommandFile(t, filepath.Join(root, "order", "plugin.yaml"), "id: acme.library.order\nprovides: [order.create/v1]\n")
+	writeCommandFile(t, filepath.Join(root, "order", "capabilities", "order.create", "v1", "capability.yaml"), `id: order.create/v1
+request: {}
+response: {}
+errors: []
+extensions:
+  authn: {authenticated: true}
+  audit: {event: order.create}
+`)
+	writeCommandFile(t, filepath.Join(root, "authn", "plugin.yaml"), `id: acme.library.authn
+provides: [authn.session.verify/v1]
+generation:
+  api: v1
+  package: ./generation
+  activations:
+    - namespace: authn
+      capability: authn.session.verify/v1
+`)
+	writeCommandFile(t, filepath.Join(root, "authn", "generation", "extension.go"), authnContributionCycleGenerationExtensionSource)
+	writeCommandFile(t, filepath.Join(root, "authn", "capabilities", "authn.session.verify", "v1", "capability.yaml"), `id: authn.session.verify/v1
+request: {}
+response: {}
+errors: []
+`)
+	writeCommandFile(t, filepath.Join(root, "audit", "plugin.yaml"), `id: acme.library.audit
+provides: [audit.write/v1]
+generation:
+  api: v1
+  package: ./generation
+  activations:
+    - namespace: audit
+      capability: audit.write/v1
+`)
+	writeCommandFile(t, filepath.Join(root, "audit", "generation", "extension.go"), auditContributionCycleGenerationExtensionSource)
+	writeCommandFile(t, filepath.Join(root, "audit", "capabilities", "audit.write", "v1", "capability.yaml"), `id: audit.write/v1
+request: {}
+response: {}
+errors: []
+`)
+	return root
+}
+
 const emptyGenerationExtensionSource = `package generation
 
 import generation "github.com/plystra/cli/generation/v1"
@@ -475,6 +577,40 @@ func Generate(generation.GenerationContext) (generation.Output, error) {
 		Namespace:  "audit",
 		Source:     source,
 		Capability: requirement,
+	}}}, nil
+}
+`
+
+const authnContributionCycleGenerationExtensionSource = `package generation
+
+import generation "github.com/plystra/cli/generation/v1"
+
+func Generate(generation.GenerationContext) (generation.Output, error) {
+	source, _ := generation.ParseCapabilityID("order.create/v1")
+	return generation.Output{Contributions: []generation.Contribution{{
+		ID:        "authn.verify",
+		Namespace: "authn",
+		Source:    source,
+		Point:     generation.GenerationPointInvocationPrepare,
+		Requires:  []generation.ContributionToken{"audit-recorded"},
+		Provides:  []generation.ContributionToken{"authn-verified"},
+	}}}, nil
+}
+`
+
+const auditContributionCycleGenerationExtensionSource = `package generation
+
+import generation "github.com/plystra/cli/generation/v1"
+
+func Generate(generation.GenerationContext) (generation.Output, error) {
+	source, _ := generation.ParseCapabilityID("order.create/v1")
+	return generation.Output{Contributions: []generation.Contribution{{
+		ID:        "audit.record",
+		Namespace: "audit",
+		Source:    source,
+		Point:     generation.GenerationPointInvocationPrepare,
+		Requires:  []generation.ContributionToken{"authn-verified"},
+		Provides:  []generation.ContributionToken{"audit-recorded"},
 	}}}, nil
 }
 `
