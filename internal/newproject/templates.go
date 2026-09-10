@@ -129,6 +129,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_PROJECT_CONCURRENT_CHANGE`" + ` reports every deterministically known path that changed while resolution or generation verified a stable snapshot. Current-Project and dependency ` + "`plystra.yaml`" + ` documents use ` + "`configuration-declaration`" + `; current-Project ` + "`go.mod`" + ` or ` + "`go.sum`" + ` uses ` + "`module-dependency`" + `; and managed ` + "`generated/...`" + ` paths use ` + "`generated-artifact`" + `. Sources are sorted, deduplicated, module-relative, and omit a fabricated span. Stop concurrent Project edits and rerun against unchanged inputs; rollback preserves bytes written by the other editor.
 
+` + "`PLYSTRA_GENERATION_ACTIVATION_CONFLICT`" + ` reports every conflicting visible ` + "`generation.activations`" + ` entry at its exact ` + "`plugin.yaml`" + ` position as a ` + "`plugin-declaration`" + ` source. Shared canonicalization sorts and deduplicates current-Project and dependency-Project declarations. The bare internal conflict sentinel remains source-less rather than fabricating an entry. Make every declaration for the reported namespace name one exact activation Capability, then rerun with the same selection.
+
 ` + "`PLYSTRA_GENERATION_ACTIVATION_MISSING`" + ` reports every retained typed Capability requirement source for the reported unclaimed extension namespace in its owning Project module. Declaration and exposure sources are included; shared canonicalization sorts and deduplicates the facts. Because no visible ` + "`generation.activations`" + ` declaration exists, the diagnostic never fabricates an activation source. Add the association to the intended Plugin's ` + "`plugin.yaml`" + `, then rerun with the same selection.
 
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. A normalized Project-contained document that cannot be loaded reports one path-only ` + "`configuration-selection`" + ` source without a fabricated span. Conflicting, duplicated, or unsafe selectors report no source because no document is trustworthy. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
@@ -1480,7 +1482,8 @@ Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
   implementation-selection; fix constructor, or set the selected document entry to null.
 - PLYSTRA_CAPABILITY_MANIFEST_INVALID: provider-declaration at 1:1; fix owning capability.yaml.
 - PLYSTRA_PLUGIN_TARGET_AMBIGUOUS: candidate plugin-declaration Sources at 1:1; --plugin.
-- PLYSTRA_GENERATION_ACTIVATION_MISSING: retained requirement Sources, including declaration/exposure; add generation.activations; no fabricated activation Source.
+- PLYSTRA_GENERATION_ACTIVATION_CONFLICT: exact conflicting plugin-declaration Sources; use one Capability per namespace.
+- PLYSTRA_GENERATION_ACTIVATION_MISSING: requirement declaration/exposure Sources; add association; no fabricated activation Source.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,

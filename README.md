@@ -944,6 +944,13 @@ Current-Project and dependency `plystra.yaml` documents use
 `generated-artifact`. Sources are sorted, deduplicated, module-relative, and
 omit a fabricated span. Stop concurrent Project edits and rerun against
 unchanged inputs; rollback preserves bytes written by the other editor.
+`PLYSTRA_GENERATION_ACTIVATION_CONFLICT` reports every conflicting visible
+`generation.activations` entry at its exact `plugin.yaml` position as a
+`plugin-declaration` source. Shared canonicalization sorts and deduplicates
+current-Project and dependency-Project declarations. The bare internal
+conflict sentinel remains source-less rather than fabricating an entry. Make
+every declaration for the reported namespace name one exact activation
+Capability, then rerun with the same selection.
 `PLYSTRA_GENERATION_ACTIVATION_MISSING` reports every retained typed Capability
 requirement source for the reported unclaimed extension namespace in its owning
 Project module. Declaration and exposure sources are included; shared

@@ -1233,7 +1233,8 @@ Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
   implementation-selection; fix constructor, or set the selected document entry to null.
 - PLYSTRA_CAPABILITY_MANIFEST_INVALID: provider-declaration at 1:1; fix owning capability.yaml.
 - PLYSTRA_PLUGIN_TARGET_AMBIGUOUS: candidate plugin-declaration Sources at 1:1; --plugin.
-- PLYSTRA_GENERATION_ACTIVATION_MISSING: retained requirement Sources, including declaration/exposure; add generation.activations; no fabricated activation Source.
+- PLYSTRA_GENERATION_ACTIVATION_CONFLICT: exact conflicting plugin-declaration Sources; use one Capability per namespace.
+- PLYSTRA_GENERATION_ACTIVATION_MISSING: requirement declaration/exposure Sources; add association; no fabricated activation Source.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,

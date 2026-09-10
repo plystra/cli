@@ -47,7 +47,7 @@ config:
 		t.Fatalf("Generation = %#v, %t", generation, ok)
 	}
 	activations := generation.Activations()
-	if len(activations) != 2 || activations[0].Namespace() != "authn" || activations[0].Capability().String() != "authn.session.verify/v1" || activations[1].Namespace() != "authz" || activations[1].Capability().String() != "authz.check/v1" {
+	if len(activations) != 2 || activations[0].Namespace() != "authn" || activations[0].Capability().String() != "authn.session.verify/v1" || activations[0].Line() != 9 || activations[0].Column() != 7 || activations[1].Namespace() != "authz" || activations[1].Capability().String() != "authz.check/v1" || activations[1].Line() != 7 || activations[1].Column() != 7 {
 		t.Fatalf("Activations = %#v", activations)
 	}
 	provided := metadata.Provides()
@@ -212,6 +212,9 @@ func FuzzParse(f *testing.F) {
 				}
 				if !containsIdentifier(provided, activation.Capability()) {
 					t.Fatalf("Activation %q names unprovided %s", activation.Namespace(), activation.Capability())
+				}
+				if activation.Line() < 1 || activation.Column() < 1 {
+					t.Fatalf("Activation %q has invalid source position %d:%d", activation.Namespace(), activation.Line(), activation.Column())
 				}
 			}
 		}

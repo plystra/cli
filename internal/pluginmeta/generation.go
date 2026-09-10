@@ -44,6 +44,8 @@ func (g Generation) Activations() []GenerationActivation {
 type GenerationActivation struct {
 	namespace  string
 	capability capabilityid.Identifier
+	line       int
+	column     int
 }
 
 // Namespace returns the canonical lower-kebab extension namespace.
@@ -51,6 +53,12 @@ func (a GenerationActivation) Namespace() string { return a.namespace }
 
 // Capability returns the exact canonical activation Capability.
 func (a GenerationActivation) Capability() capabilityid.Identifier { return a.capability }
+
+// Line returns the one-based plugin.yaml line of the activation entry.
+func (a GenerationActivation) Line() int { return a.line }
+
+// Column returns the one-based plugin.yaml column of the activation entry.
+func (a GenerationActivation) Column() int { return a.column }
 
 func parseGeneration(node *yaml.Node, provides []capabilityid.Identifier) (Generation, error) {
 	if node == nil || node.Kind != yaml.MappingNode {
@@ -197,7 +205,7 @@ func parseGenerationActivation(index int, node *yaml.Node) (GenerationActivation
 	if err != nil {
 		return GenerationActivation{}, invalid("%s.capability %q is not canonical", pathPrefix, capabilityValue)
 	}
-	return GenerationActivation{namespace: namespace, capability: capability}, nil
+	return GenerationActivation{namespace: namespace, capability: capability, line: node.Line, column: node.Column}, nil
 }
 
 func requiredActivationString(field string, node *yaml.Node) (string, error) {

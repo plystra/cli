@@ -1,6 +1,7 @@
 package command_test
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -47,6 +48,44 @@ func TestPublicGenerationCommandsReportMissingActivationRequirementSourcesWithou
 	}
 }
 
+func TestPublicGenerationCommandsReportConflictingActivationDeclarationSourcesWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := []struct {
+		name      string
+		arguments []string
+	}{
+		{name: "generate", arguments: []string{"generate"}},
+		{name: "generate-check", arguments: []string{"generate", "--check"}},
+		{name: "check", arguments: []string{"check"}},
+	}
+	for _, command := range commands {
+		command := command
+		t.Run(command.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := writeConflictingGenerationActivationProject(t)
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, command.arguments, filepath.Join(root, "password"), commandGoEnvironment())
+			wantSuffix := "\n\n" +
+				"Source: example.com/acme/legacy:legacy/plugin.yaml:7:7 (plugin-declaration)\n" +
+				"Source: example.com/acme/library:password/plugin.yaml:8:7 (plugin-declaration)\n\n" +
+				"Recovery:\nEdit plugin.yaml generation.activations so the reported namespace uses one exact activation Capability.\n\n" +
+				"Diagnostic: " + diagnosticcode.GenerationActivationConflict + "\n"
+			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "namespace \"authn\"") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 2 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+				t.Fatalf("%s = exit %d, stdout %q, stderr %q", command.name, exitCode, stdout, stderr)
+			}
+			if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, "pkg\\mod") || strings.Contains(stderr, "pkg/mod") {
+				t.Fatalf("%s exposed an absolute or Module Cache path: %q", command.name, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%s mutated the conflicting-activation Project:\nbefore: %#v\nafter:  %#v", command.name, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func writeMissingGenerationActivationProject(t *testing.T) string {
 	t.Helper()
 
@@ -71,6 +110,52 @@ errors: []
 extensions:
   authn: {authenticated: true}
   audit: {event: records.listed}
+`)
+	return root
+}
+
+func writeConflictingGenerationActivationProject(t *testing.T) string {
+	t.Helper()
+
+	root := writeCapabilityCommandModule(t)
+	legacyRoot := filepath.Join(root, "legacy-dependency")
+	writeCommandFile(t, filepath.Join(legacyRoot, "go.mod"), "module example.com/acme/legacy\n\ngo 1.26\n")
+	writeCommandFile(t, filepath.Join(legacyRoot, "plystra.yaml"), "{}\n")
+	goMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatalf("read application go.mod: %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.mod"), string(goMod)+"\nrequire example.com/acme/legacy v1.2.3\n\nreplace example.com/acme/legacy => ./legacy-dependency\n")
+	writeCommandFile(t, filepath.Join(legacyRoot, "legacy", "plugin.yaml"), `id: acme.library.authn-legacy
+provides: [authn.token.verify/v1]
+generation:
+  api: v1
+  package: ./generation
+  activations:
+    - namespace: authn
+      capability: authn.token.verify/v1
+`)
+	writeCommandFile(t, filepath.Join(legacyRoot, "legacy", "generation", "extension.go"), "package generation\n")
+	writeCommandFile(t, filepath.Join(legacyRoot, "legacy", "capabilities", "authn.token.verify", "v1", "capability.yaml"), `id: authn.token.verify/v1
+request: {}
+response: {}
+errors: []
+`)
+	writeCommandFile(t, filepath.Join(root, "password", "plugin.yaml"), `id: acme.library.authn-password
+provides: [authn.session.verify/v1]
+generation:
+  api: v1
+  package: ./generation
+  activations:
+    # Keep this declaration on a distinct trusted source line.
+    - namespace: authn
+      capability: authn.session.verify/v1
+`)
+	writeCommandFile(t, filepath.Join(root, "password", "generation", "extension.go"), "package generation\n")
+	writeCommandFile(t, filepath.Join(root, "password", "capabilities", "authn.session.verify", "v1", "capability.yaml"), `id: authn.session.verify/v1
+request: {}
+response: {}
+errors: []
 `)
 	return root
 }

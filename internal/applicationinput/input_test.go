@@ -17,6 +17,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/capabilitysource"
+	"github.com/plystra/cli/internal/generationactivation"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/moduledependency"
@@ -135,6 +136,63 @@ capabilities:
 		if candidate.PluginID == "example.business" && !bytes.Equal(candidate.Contract, wantOrder) {
 			t.Fatalf("business contract = %s, want %s", candidate.Contract, wantOrder)
 		}
+	}
+}
+
+func TestBuildReportsGenerationActivationConflictSources(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	appRoot := filepath.Join(root, "app")
+	providersRoot := filepath.Join(root, "providers")
+	writeModule(t, appRoot, "example.com/app")
+	writeModule(t, providersRoot, "example.com/providers")
+	writeFile(t, filepath.Join(providersRoot, "plystra.yaml"), "{}\n")
+	writePlugin(t, providersRoot, "legacy", `id: example.authn-legacy
+provides: [authn.token.verify/v1]
+generation:
+  api: v1
+  package: ./generation
+  activations:
+    - namespace: authn
+      capability: authn.token.verify/v1
+`)
+	writeFile(t, filepath.Join(providersRoot, "legacy", "generation", "extension.go"), "package generation\n")
+	writeCapability(t, providersRoot, "legacy", "authn.token.verify/v1", "id: authn.token.verify/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	writePlugin(t, appRoot, "password", `id: example.authn-password
+provides: [authn.session.verify/v1]
+generation:
+  api: v1
+  package: ./generation
+  activations:
+    # Distinct source position from the dependency declaration.
+    - namespace: authn
+      capability: authn.session.verify/v1
+`)
+	writeFile(t, filepath.Join(appRoot, "password", "generation", "extension.go"), "package generation\n")
+	writeCapability(t, appRoot, "password", "authn.session.verify/v1", "id: authn.session.verify/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
+	dependency := dependency{path: "example.com/providers", version: "v1.2.3", root: providersRoot}
+	inventory := configureInventory(t, appRoot, dependency)
+	input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, applicationInputSourceContext(dependency), nil, generationexec.BuildOptions{})
+	if !errors.Is(err, applicationinput.ErrBuild) || !errors.Is(err, generationactivation.ErrAssociationConflict) || len(input.Plugins) != 0 {
+		t.Fatalf("Build = %#v, %v; want generation activation conflict", input, err)
+	}
+	var conflict *generationactivation.AssociationConflictError
+	if !errors.As(err, &conflict) || conflict.Namespace() != "authn" {
+		t.Fatalf("Build conflict = %T %#v", err, conflict)
+	}
+	candidates := conflict.Candidates()
+	if len(candidates) != 2 || candidates[0].PluginID() != "example.authn-legacy" || candidates[0].ModulePath() != "example.com/providers" || candidates[0].SourcePath() != "legacy/plugin.yaml" || candidates[0].Line() != 7 || candidates[0].Column() != 7 || candidates[1].PluginID() != "example.authn-password" || candidates[1].ModulePath() != "example.com/app" || candidates[1].SourcePath() != "password/plugin.yaml" || candidates[1].Line() != 8 || candidates[1].Column() != 7 {
+		t.Fatalf("activation conflict candidates = %#v", candidates)
+	}
+	for _, privatePath := range []string{appRoot, filepath.ToSlash(appRoot), providersRoot, filepath.ToSlash(providersRoot)} {
+		if strings.Contains(err.Error(), privatePath) {
+			t.Fatalf("Build error exposed private path %q: %v", privatePath, err)
+		}
+	}
+	candidates[0] = generationactivation.ConflictCandidate{}
+	if conflict.Candidates()[0].PluginID() != "example.authn-legacy" {
+		t.Fatal("Build conflict exposed mutable candidate storage")
 	}
 }
 

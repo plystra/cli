@@ -2075,6 +2075,13 @@ Current-Project and dependency `plystra.yaml` documents use
 `generated-artifact`. Sources are sorted, deduplicated, module-relative, and
 omit a fabricated span. Stop concurrent Project edits and rerun against
 unchanged inputs; rollback preserves bytes written by the other editor.
+`PLYSTRA_GENERATION_ACTIVATION_CONFLICT` emits every conflicting visible
+`generation.activations` entry at its exact `plugin.yaml` position as a
+`plugin-declaration` source. Shared canonicalization sorts and deduplicates
+current-Project and dependency-Project declarations. A bare internal conflict
+sentinel has no fabricated source. Make every declaration for the namespace
+name one exact activation Capability, then rerun generation or checking with
+the same selection.
 `PLYSTRA_GENERATION_ACTIVATION_MISSING` emits every retained typed Capability
 requirement source for the reported unclaimed extension namespace in its owning
 Project module, including `declaration` and `exposure` sources. Shared
@@ -2459,6 +2466,14 @@ declared generation package to the intended visible Plugin, then select its
 activation Capability if necessary. The absent association has no fabricated
 source. Do not make the Kernel or application source interpret the metadata
 directly.
+
+### Conflicting extension namespace activation
+
+`PLYSTRA_GENERATION_ACTIVATION_CONFLICT` points to each conflicting
+`generation.activations` entry at its exact owning `plugin.yaml` position.
+Edit those current or dependency Project declarations so the namespace names
+one exact activation Capability, then rerun with the same selection. Do not
+edit a Module Cache copy or infer a source from an untyped internal error.
 
 ### Extension helper fails
 

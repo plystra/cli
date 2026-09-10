@@ -416,6 +416,26 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: candidate.Column(),
 			})
 		}
+	case diagnosticGenerationActivationConflict:
+		var conflict *generationactivation.AssociationConflictError
+		if !errors.As(err, &conflict) || conflict == nil {
+			return nil
+		}
+		seen := make(map[diagnosticjson.Source]struct{})
+		for _, candidate := range conflict.Candidates() {
+			source := diagnosticjson.Source{
+				Module: candidate.ModulePath(),
+				Path:   candidate.SourcePath(),
+				Kind:   "plugin-declaration",
+				Line:   candidate.Line(),
+				Column: candidate.Column(),
+			}
+			if _, exists := seen[source]; exists {
+				continue
+			}
+			seen[source] = struct{}{}
+			sources = append(sources, source)
+		}
 	case diagnosticGenerationActivationMissing:
 		var missing *generationactivation.MissingAssociationError
 		if !errors.As(err, &missing) || missing == nil {

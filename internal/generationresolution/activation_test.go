@@ -389,7 +389,7 @@ func activationDeclaration(t *testing.T, pluginID string, bindings []activationB
 	if !exists {
 		t.Fatalf("plugin %s has no generation declaration", pluginID)
 	}
-	return generationactivation.Declaration{PluginID: pluginID, Source: pluginID + "/plugin.yaml", Generation: generation}
+	return generationactivation.Declaration{PluginID: pluginID, Source: pluginID + "/plugin.yaml", ModulePath: "example.com/project", SourcePath: pluginID + "/plugin.yaml", Generation: generation}
 }
 
 func activationCatalog(t *testing.T, declarations ...generationactivation.Declaration) generationactivation.Catalog {

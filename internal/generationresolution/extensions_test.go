@@ -1061,6 +1061,8 @@ func extensionTestDeclaration(t testing.TB, pluginID, namespace, capability stri
 	return generationactivation.Declaration{
 		PluginID:   pluginID,
 		Source:     pluginID + "/plugin.yaml",
+		ModulePath: "example.com/project",
+		SourcePath: pluginID + "/plugin.yaml",
 		Generation: declaration,
 	}
 }

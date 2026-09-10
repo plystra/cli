@@ -6,11 +6,14 @@ package generationactivation
 import (
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/pluginid"
 	"github.com/plystra/cli/internal/pluginmeta"
 )
@@ -32,17 +35,21 @@ var (
 	ErrSelectedProviderExtension = errors.New("selected provider has no matching generation extension")
 )
 
-// Declaration adds one normalized plugin generation declaration and its
-// module-relative or module-version provenance to the visible catalog.
+// Declaration adds one normalized plugin generation declaration, its bounded
+// display source, and its typed module-relative plugin.yaml provenance.
 type Declaration struct {
 	PluginID   string
 	Source     string
+	ModulePath string
+	SourcePath string
 	Generation pluginmeta.Generation
 }
 
 type normalizedDeclaration struct {
 	pluginID   string
 	source     string
+	modulePath string
+	sourcePath string
 	generation pluginmeta.Generation
 }
 
@@ -103,11 +110,20 @@ func New(inputs []Declaration) (Catalog, error) {
 		if input.Source == "" || len(input.Source) > 1024 || !utf8.ValidString(input.Source) || strings.ContainsAny(input.Source, "\x00\r\n") {
 			return Catalog{}, fmt.Errorf("%w: %w: declarations[%d].source must be non-empty valid single-line UTF-8, at most 1024 bytes", ErrCatalog, ErrInvalidDeclaration, index)
 		}
+		if err := modulepath.CheckProject(input.ModulePath); err != nil {
+			return Catalog{}, fmt.Errorf("%w: %w: declarations[%d].module_path %q is invalid: %v", ErrCatalog, ErrInvalidDeclaration, index, input.ModulePath, err)
+		}
+		if !validDeclarationSourcePath(input.SourcePath) {
+			return Catalog{}, fmt.Errorf("%w: %w: declarations[%d].source_path %q must be one safe module-relative slash path", ErrCatalog, ErrInvalidDeclaration, index, input.SourcePath)
+		}
 		generation := input.Generation
 		if generation.API() == "" || generation.Package() == "" || len(generation.Activations()) == 0 {
 			return Catalog{}, fmt.Errorf("%w: %w: plugin %q at %q has an incomplete generation declaration", ErrCatalog, ErrInvalidDeclaration, input.PluginID, input.Source)
 		}
 		for _, activation := range generation.Activations() {
+			if activation.Line() < 1 || activation.Column() < 1 {
+				return Catalog{}, fmt.Errorf("%w: %w: plugin %q at %q has an activation without a trusted source position", ErrCatalog, ErrInvalidDeclaration, input.PluginID, input.Source)
+			}
 			if strings.HasPrefix(activation.Capability().Name(), "kernel.") {
 				return Catalog{}, fmt.Errorf(
 					"%w: %w: plugin %q at %q associates namespace %q with intrinsic Capability %s; generation extensions must activate through an ordinary canonical Capability provided by the selected plugin",
@@ -120,7 +136,7 @@ func New(inputs []Declaration) (Catalog, error) {
 				)
 			}
 		}
-		declarations[index] = normalizedDeclaration{pluginID: input.PluginID, source: input.Source, generation: generation}
+		declarations[index] = normalizedDeclaration{pluginID: input.PluginID, source: input.Source, modulePath: input.ModulePath, sourcePath: input.SourcePath, generation: generation}
 	}
 	sort.Slice(declarations, func(left, right int) bool {
 		if declarations[left].pluginID != declarations[right].pluginID {
@@ -152,6 +168,10 @@ func New(inputs []Declaration) (Catalog, error) {
 				api:         generation.API(),
 				packagePath: generation.Package(),
 				source:      declaration.source,
+				modulePath:  declaration.modulePath,
+				sourcePath:  declaration.sourcePath,
+				line:        activation.Line(),
+				column:      activation.Column(),
 			})
 		}
 	}
@@ -250,6 +270,10 @@ type ConflictCandidate struct {
 	api         string
 	packagePath string
 	source      string
+	modulePath  string
+	sourcePath  string
+	line        int
+	column      int
 }
 
 // PluginID returns the declaring Plugin ID.
@@ -266,6 +290,18 @@ func (c ConflictCandidate) Package() string { return c.packagePath }
 
 // Source returns declaration provenance.
 func (c ConflictCandidate) Source() string { return c.source }
+
+// ModulePath returns the owning Project's canonical Go Module path.
+func (c ConflictCandidate) ModulePath() string { return c.modulePath }
+
+// SourcePath returns the slash-separated module-relative plugin.yaml path.
+func (c ConflictCandidate) SourcePath() string { return c.sourcePath }
+
+// Line returns the one-based generation.activations entry line.
+func (c ConflictCandidate) Line() int { return c.line }
+
+// Column returns the one-based generation.activations entry column.
+func (c ConflictCandidate) Column() int { return c.column }
 
 // AssociationConflictError contains every visible candidate for one
 // ambiguously associated extension namespace.
@@ -313,3 +349,10 @@ func (e *AssociationConflictError) Error() string {
 
 // Unwrap supports errors.Is with ErrAssociationConflict.
 func (*AssociationConflictError) Unwrap() error { return ErrAssociationConflict }
+
+func validDeclarationSourcePath(value string) bool {
+	if value == "" || len(value) > 1024 || !utf8.ValidString(value) || path.IsAbs(value) || path.Clean(value) != value || value == "." || value == ".." || strings.HasPrefix(value, "../") || strings.Contains(value, "\\") || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return false
+	}
+	return len(value) < 2 || value[1] != ':' || (value[0] < 'A' || value[0] > 'Z') && (value[0] < 'a' || value[0] > 'z')
+}

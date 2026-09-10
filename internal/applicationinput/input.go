@@ -129,6 +129,8 @@ func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, s
 			declarations = append(declarations, generationactivation.Declaration{
 				PluginID:   plugin.ID(),
 				Source:     boundedSource(plugin.Source()),
+				ModulePath: plugin.ModulePath(),
+				SourcePath: path.Join(plugin.Path(), "plugin.yaml"),
 				Generation: declaration,
 			})
 		}

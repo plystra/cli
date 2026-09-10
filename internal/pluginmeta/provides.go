@@ -99,8 +99,9 @@ func sameGeneration(left, right Manifest) bool {
 	if len(leftActivations) != len(rightActivations) {
 		return false
 	}
+	// Encoder rewrites may move an entry without changing its declaration.
 	for index := range leftActivations {
-		if leftActivations[index] != rightActivations[index] {
+		if leftActivations[index].Namespace() != rightActivations[index].Namespace() || leftActivations[index].Capability() != rightActivations[index].Capability() {
 			return false
 		}
 	}

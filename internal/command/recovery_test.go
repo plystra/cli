@@ -338,6 +338,7 @@ func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 	}{
 		{name: "explicit target not found", err: fmt.Errorf("author Capability: %w", plugintarget.ErrNotFound), code: diagnosticPluginTargetNotFound},
 		{name: "interactive selection failed", err: fmt.Errorf("author Capability: %w", plugintarget.ErrSelection), code: diagnosticPluginTargetInvalid},
+		{name: "activation conflict without typed candidates", err: fmt.Errorf("resolve generation: %w", generationactivation.ErrAssociationConflict), code: diagnosticGenerationActivationConflict},
 		{name: "missing activation without requirement provenance", err: fmt.Errorf("resolve generation: %w", generationactivation.ErrMissingAssociation), code: diagnosticGenerationActivationMissing},
 	} {
 		test := test
@@ -350,6 +351,44 @@ func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 				t.Fatalf("source-less failure output = %q", got)
 			}
 		})
+	}
+}
+
+func TestWriteCommandFailureCanonicalizesConflictingActivationSources(t *testing.T) {
+	t.Parallel()
+
+	declaration := func(pluginID, capability string) generationactivation.Declaration {
+		t.Helper()
+		manifest, err := pluginmeta.Parse([]byte("id: " + pluginID + "\nprovides: [" + capability + "]\ngeneration:\n  api: v1\n  package: ./generation\n  activations:\n    - namespace: authn\n      capability: " + capability + "\n"))
+		if err != nil {
+			t.Fatalf("Parse(%s): %v", pluginID, err)
+		}
+		generation, exists := manifest.Generation()
+		if !exists {
+			t.Fatalf("Parse(%s) returned no generation", pluginID)
+		}
+		return generationactivation.Declaration{
+			PluginID:   pluginID,
+			Source:     pluginID + " at shared/plugin.yaml",
+			ModulePath: "example.com/project",
+			SourcePath: "shared/plugin.yaml",
+			Generation: generation,
+		}
+	}
+	_, conflict := generationactivation.New([]generationactivation.Declaration{
+		declaration("example.authn-password", "authn.session.verify/v1"),
+		declaration("example.authn-legacy", "authn.token.verify/v1"),
+	})
+	if !errors.Is(conflict, generationactivation.ErrAssociationConflict) {
+		t.Fatalf("New error = %v, want activation conflict", conflict)
+	}
+
+	var output strings.Builder
+	writeCommandFailure(&output, "generate", fmt.Errorf("resolve application: %w", conflict), recoveryContext{})
+	got := output.String()
+	wantSource := "Source: example.com/project:shared/plugin.yaml:7:7 (plugin-declaration)\n"
+	if strings.Count(got, "Source: ") != 1 || !strings.Contains(got, wantSource) || !strings.Contains(got, "Diagnostic: "+diagnosticGenerationActivationConflict+"\n") {
+		t.Fatalf("activation conflict output = %q", got)
 	}
 }
 

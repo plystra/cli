@@ -57,8 +57,9 @@ command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
 Typed source-bearing failures, including invalid Project and Go Module
 declarations, safe missing configuration selections, current-Project
 configuration-composition, concurrent Project inputs, generated-output conflicts
-and drift, application module dependency drift, missing generation-activation
-associations, ambiguous local Plugin targets, invalid explicit choices, and
+and drift, application module dependency drift, missing or conflicting
+generation-activation associations, ambiguous local Plugin targets, invalid
+explicit choices, and
 missing, ambiguous, or cyclic Interface Implementation resolution, add
 canonical module-relative Source lines first.
 `
@@ -207,6 +208,9 @@ PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED reports the effective http.expose
 document at 1:1 as an exposure source before selector-aware recovery.
 PLYSTRA_CAPABILITY_MANIFEST_INVALID reports the invalid authored capability.yaml
 at 1:1 as a provider-declaration source before recovery.
+PLYSTRA_GENERATION_ACTIVATION_CONFLICT reports each conflicting plugin.yaml
+generation.activations entry at its exact position as a sorted and deduplicated
+plugin-declaration source.
 PLYSTRA_GENERATION_ACTIVATION_MISSING reports retained typed Capability
 requirement sources for the reported unclaimed extension namespace, including
 declaration and exposure sources, in shared sorted and deduplicated order. It
@@ -283,6 +287,9 @@ PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED reports the effective http.expose
 document at 1:1 as an exposure source before selector-aware recovery.
 PLYSTRA_CAPABILITY_MANIFEST_INVALID reports the invalid authored capability.yaml
 at 1:1 as a provider-declaration source before recovery.
+PLYSTRA_GENERATION_ACTIVATION_CONFLICT reports each conflicting plugin.yaml
+generation.activations entry at its exact position as a sorted and deduplicated
+plugin-declaration source.
 PLYSTRA_GENERATION_ACTIVATION_MISSING reports retained typed Capability
 requirement sources for the reported unclaimed extension namespace, including
 declaration and exposure sources, in shared sorted and deduplicated order. It

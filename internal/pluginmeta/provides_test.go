@@ -153,7 +153,20 @@ func sameGenerationMetadata(left, right pluginmeta.Manifest) bool {
 	if leftExists != rightExists || !leftExists {
 		return leftExists == rightExists
 	}
-	return leftGeneration.API() == rightGeneration.API() && leftGeneration.Package() == rightGeneration.Package() && reflect.DeepEqual(leftGeneration.Activations(), rightGeneration.Activations())
+	if leftGeneration.API() != rightGeneration.API() || leftGeneration.Package() != rightGeneration.Package() {
+		return false
+	}
+	leftActivations := leftGeneration.Activations()
+	rightActivations := rightGeneration.Activations()
+	if len(leftActivations) != len(rightActivations) {
+		return false
+	}
+	for index := range leftActivations {
+		if leftActivations[index].Namespace() != rightActivations[index].Namespace() || leftActivations[index].Capability() != rightActivations[index].Capability() {
+			return false
+		}
+	}
+	return true
 }
 
 func mustCapability(t *testing.T, value string) capabilityid.Identifier {

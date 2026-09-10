@@ -404,6 +404,9 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_ACTIVATION_MISSING")) || !bytes.Contains(skill, []byte("no fabricated activation Source")) {
 		t.Fatal("maximum-length Project skill omits generation-activation source guidance")
 	}
+	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_ACTIVATION_CONFLICT")) || !bytes.Contains(skill, []byte("exact conflicting plugin-declaration Sources")) {
+		t.Fatal("maximum-length Project skill omits generation-activation conflict source guidance")
+	}
 }
 
 func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
@@ -1190,6 +1193,8 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`module-dependency` source"),
 		[]byte("`PLYSTRA_PROJECT_CONCURRENT_CHANGE` reports every deterministically known path"),
 		[]byte("Sources are sorted, deduplicated, module-relative"),
+		[]byte("`PLYSTRA_GENERATION_ACTIVATION_CONFLICT` reports every conflicting visible"),
+		[]byte("exact `plugin.yaml` position"),
 		[]byte("`PLYSTRA_GENERATION_ACTIVATION_MISSING` reports every retained typed Capability requirement source"),
 		[]byte("Declaration and exposure sources are included"),
 		[]byte("never fabricates an activation source"),
@@ -2259,8 +2264,10 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_CAPABILITY_MANIFEST_INVALID",
 		"PLYSTRA_PLUGIN_TARGET_AMBIGUOUS",
 		"candidate plugin-declaration Sources at 1:1",
+		"PLYSTRA_GENERATION_ACTIVATION_CONFLICT",
+		"exact conflicting plugin-declaration Sources",
 		"PLYSTRA_GENERATION_ACTIVATION_MISSING",
-		"retained requirement Sources, including declaration/exposure",
+		"requirement declaration/exposure Sources",
 		"no fabricated activation Source",
 		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",

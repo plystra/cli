@@ -77,6 +77,13 @@ func TestCatalogRejectsConflictingNamespaceAssociationsDeterministically(t *test
 		if len(candidates) != 2 || candidates[0].PluginID() != "example.authn-legacy" || candidates[0].Capability().String() != "authn.token.verify/v1" || candidates[1].PluginID() != "example.authn-password" || candidates[1].Capability().String() != "authn.session.verify/v1" {
 			t.Fatalf("conflict Candidates = %#v", candidates)
 		}
+		if candidates[0].ModulePath() != "example.com/app" || candidates[0].SourcePath() != "legacy/plugin.yaml" || candidates[0].Line() != 7 || candidates[0].Column() != 7 || candidates[1].ModulePath() != "example.com/app" || candidates[1].SourcePath() != "password/plugin.yaml" || candidates[1].Line() != 7 || candidates[1].Column() != 7 {
+			t.Fatalf("conflict candidate sources = %#v", candidates)
+		}
+		candidates[0] = generationactivation.ConflictCandidate{}
+		if conflict.Candidates()[0].PluginID() != "example.authn-legacy" {
+			t.Fatal("AssociationConflictError exposed mutable candidate storage")
+		}
 		message := err.Error()
 		for _, detail := range []string{"authn", "example.authn-legacy", "legacy/plugin.yaml", "authn.token.verify/v1", "example.authn-password", "password/plugin.yaml", "authn.session.verify/v1", "./generation", "correction:"} {
 			if !strings.Contains(message, detail) {
@@ -122,13 +129,21 @@ func TestCatalogRejectsInvalidOrDuplicatePluginDeclarations(t *testing.T) {
 	t.Parallel()
 	valid := declaration(t, "example.authn", "authn.session.verify/v1", "authn", "authn/plugin.yaml")
 	tests := map[string][]generationactivation.Declaration{
-		"invalid plugin":       {{PluginID: "Example", Source: valid.Source, Generation: valid.Generation}},
-		"missing source":       {{PluginID: valid.PluginID, Generation: valid.Generation}},
-		"multiline source":     {{PluginID: valid.PluginID, Source: "plugin.yaml\nforged", Generation: valid.Generation}},
-		"invalid UTF-8":        {{PluginID: valid.PluginID, Source: string([]byte{0xff}), Generation: valid.Generation}},
-		"empty generation":     {{PluginID: valid.PluginID, Source: valid.Source}},
+		"invalid plugin":       {{PluginID: "Example", Source: valid.Source, ModulePath: valid.ModulePath, SourcePath: valid.SourcePath, Generation: valid.Generation}},
+		"missing source":       {{PluginID: valid.PluginID, ModulePath: valid.ModulePath, SourcePath: valid.SourcePath, Generation: valid.Generation}},
+		"multiline source":     {{PluginID: valid.PluginID, Source: "plugin.yaml\nforged", ModulePath: valid.ModulePath, SourcePath: valid.SourcePath, Generation: valid.Generation}},
+		"invalid UTF-8":        {{PluginID: valid.PluginID, Source: string([]byte{0xff}), ModulePath: valid.ModulePath, SourcePath: valid.SourcePath, Generation: valid.Generation}},
+		"missing module":       {{PluginID: valid.PluginID, Source: valid.Source, SourcePath: valid.SourcePath, Generation: valid.Generation}},
+		"invalid module":       {{PluginID: valid.PluginID, Source: valid.Source, ModulePath: "example.com/app@v1", SourcePath: valid.SourcePath, Generation: valid.Generation}},
+		"missing source path":  {{PluginID: valid.PluginID, Source: valid.Source, ModulePath: valid.ModulePath, Generation: valid.Generation}},
+		"unsafe source path":   {{PluginID: valid.PluginID, Source: valid.Source, ModulePath: valid.ModulePath, SourcePath: "../plugin.yaml", Generation: valid.Generation}},
+		"private source path":  {{PluginID: valid.PluginID, Source: valid.Source, ModulePath: valid.ModulePath, SourcePath: "C:/private/plugin.yaml", Generation: valid.Generation}},
+		"long source path":     {{PluginID: valid.PluginID, Source: valid.Source, ModulePath: valid.ModulePath, SourcePath: strings.Repeat("a", 1025), Generation: valid.Generation}},
+		"control source path":  {{PluginID: valid.PluginID, Source: valid.Source, ModulePath: valid.ModulePath, SourcePath: "plugin\t.yaml", Generation: valid.Generation}},
+		"invalid path UTF-8":   {{PluginID: valid.PluginID, Source: valid.Source, ModulePath: valid.ModulePath, SourcePath: string([]byte{0xff}), Generation: valid.Generation}},
+		"empty generation":     {{PluginID: valid.PluginID, Source: valid.Source, ModulePath: valid.ModulePath, SourcePath: valid.SourcePath}},
 		"intrinsic activation": {declaration(t, "example.kernel", "kernel.health/v1", "health", "kernel/plugin.yaml")},
-		"duplicate plugin":     {valid, {PluginID: valid.PluginID, Source: "duplicate/plugin.yaml", Generation: valid.Generation}},
+		"duplicate plugin":     {valid, {PluginID: valid.PluginID, Source: "duplicate/plugin.yaml", ModulePath: valid.ModulePath, SourcePath: "duplicate/plugin.yaml", Generation: valid.Generation}},
 	}
 	for name, inputs := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -152,7 +167,7 @@ func declaration(t *testing.T, pluginID, capability, namespace, source string) g
 	if !exists {
 		t.Fatalf("Parse(%s) returned no generation declaration", pluginID)
 	}
-	return generationactivation.Declaration{PluginID: pluginID, Source: source, Generation: generation}
+	return generationactivation.Declaration{PluginID: pluginID, Source: source, ModulePath: "example.com/app", SourcePath: source, Generation: generation}
 }
 
 func associationStrings(associations []generationactivation.Association) []string {
