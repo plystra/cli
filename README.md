@@ -992,6 +992,14 @@ Malformed `plystra capability create`, `plystra capability implement`, and
 discovery or mutation; recovery uses canonical placeholders and preserves a
 safe exposure selector.
 
+Non-interactive `capability create` and `capability implement` with several
+valid local Plugins and no exact target emit `PLYSTRA_PLUGIN_TARGET_AMBIGUOUS`.
+The diagnostic reports every candidate as a sorted current-Project
+`plugin-declaration` source at its module-relative `plugin.yaml:1:1`, never an
+absolute checkout path. An explicit target that is absent and a failed
+interactive selection remain source-less because no existing declaration owns
+those failures.
+
 `PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE` identifies a well-formed exact exposure
 target absent from the selected visible canonical catalog. Classification
 requires the owning exposure boundary and the preserved unknown-Interface

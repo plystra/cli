@@ -1219,9 +1219,8 @@ boundary.
 
 Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>
 Source: <module>:<module-relative-path>[:line:column] (<kind>)
-PLYSTRA_CONFIGURATION_INHERITED_CONFLICT and
-PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS use configuration-declaration.
-Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
+PLYSTRA_CONFIGURATION_INHERITED_CONFLICT / PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS: configuration-declaration.
+Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
 
 - PLYSTRA_PROJECT_MANIFEST_INVALID: project-marker; malformed 1:1; else no span
 - PLYSTRA_RESOLVE_UNKNOWN_INTERFACE: declaration, exposure, or implementation-selection; correct selected YAML.
@@ -1233,6 +1232,7 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: effective interfaces.use sources are
   implementation-selection; fix constructor, or set the selected document entry to null.
 - PLYSTRA_CAPABILITY_MANIFEST_INVALID: provider-declaration at 1:1; fix owning capability.yaml.
+- PLYSTRA_PLUGIN_TARGET_AMBIGUOUS: candidate plugin-declaration Sources at 1:1; --plugin.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,
@@ -1286,10 +1286,7 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
 - Unavailable generated client: wait for constructor completion and publication.
 - Invalid runtime configuration: match compiled Config; keep Secrets as valid
   env/file references.
-- PLYSTRA_CONFIGURATION_SELECTION_INVALID: a missing selected file has one
-  path-only configuration-selection Source; conflicts or unsafe selectors have
-  none. Select one --env or --config; automation sets
-  PLYSTRA_ENV or PLYSTRA_CONFIG.
+- PLYSTRA_CONFIGURATION_SELECTION_INVALID: missing file has one path-only configuration-selection Source; conflicts or unsafe selectors have none; select one mode.
 - Alias error: point directly to one resolved canonical Interface target with
   the same version and exposure no broader than that target.
 - PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID: restore the reported

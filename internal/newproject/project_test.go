@@ -398,6 +398,9 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	if !bytes.Contains(skill, []byte("path-only configuration-selection Source")) || !bytes.Contains(skill, []byte("conflicts or unsafe selectors have")) {
 		t.Fatal("maximum-length Project skill omits configuration-selection source guidance")
 	}
+	if !bytes.Contains(skill, []byte("PLYSTRA_PLUGIN_TARGET_AMBIGUOUS")) || !bytes.Contains(skill, []byte("candidate plugin-declaration Sources at 1:1")) {
+		t.Fatal("maximum-length Project skill omits Plugin-target source guidance")
+	}
 }
 
 func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
@@ -2248,6 +2251,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_PROTOBUF_IDENTITY_COLLISION",
 		"PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED",
 		"PLYSTRA_CAPABILITY_MANIFEST_INVALID",
+		"PLYSTRA_PLUGIN_TARGET_AMBIGUOUS",
+		"candidate plugin-declaration Sources at 1:1",
 		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
 		"generated-artifact Sources",

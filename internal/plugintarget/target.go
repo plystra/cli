@@ -4,6 +4,7 @@ package plugintarget
 import (
 	"errors"
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -59,6 +60,61 @@ func (t Target) ModuleRoot() string { return t.moduleRoot }
 // used to select this target.
 func (t Target) ManifestData() []byte { return append([]byte(nil), t.manifest...) }
 
+// Candidate identifies one local Plugin declaration retained by an ambiguity
+// diagnostic without exposing its absolute directory path.
+type Candidate struct {
+	id         string
+	directory  string
+	modulePath string
+	sourcePath string
+}
+
+// ID returns the candidate's canonical Plugin ID.
+func (c Candidate) ID() string { return c.id }
+
+// Directory returns the candidate's direct-child directory name.
+func (c Candidate) Directory() string { return c.directory }
+
+// ModulePath returns the current Project's Go Module identity.
+func (c Candidate) ModulePath() string { return c.modulePath }
+
+// SourcePath returns the slash-separated module-relative plugin.yaml path.
+func (c Candidate) SourcePath() string { return c.sourcePath }
+
+// Line returns the conservative one-based document location.
+func (Candidate) Line() int { return 1 }
+
+// Column returns the conservative one-based document location.
+func (Candidate) Column() int { return 1 }
+
+// AmbiguousError identifies every valid local Plugin candidate in deterministic
+// module-relative path order.
+type AmbiguousError struct {
+	candidates []Candidate
+}
+
+// Candidates returns a defensive path-ordered view of the valid declarations.
+func (e *AmbiguousError) Candidates() []Candidate {
+	if e == nil {
+		return nil
+	}
+	return append([]Candidate(nil), e.candidates...)
+}
+
+func (e *AmbiguousError) Error() string {
+	if e == nil {
+		return ErrAmbiguous.Error()
+	}
+	values := make([]string, len(e.candidates))
+	for index, candidate := range e.candidates {
+		values[index] = fmt.Sprintf("%s (%s)", candidate.id, candidate.directory)
+	}
+	return fmt.Sprintf("%s: %s: multiple local plugins: %s; use --plugin or an interactive terminal", ErrInfer, ErrAmbiguous, strings.Join(values, ", "))
+}
+
+// Unwrap preserves both established ambiguity sentinel chains.
+func (*AmbiguousError) Unwrap() []error { return []error{ErrInfer, ErrAmbiguous} }
+
 // Infer selects an explicit reference, enclosing plugin, sole local plugin, or
 // selector result in that exact order.
 func Infer(options Options) (Target, error) {
@@ -110,7 +166,7 @@ func InferIndexed(options Options, module modulelocate.Module, index pluginindex
 		candidates[index] = makeTarget(module.Path(), plugins[index])
 	}
 	if options.Select == nil {
-		return Target{}, ambiguous(candidates)
+		return Target{}, ambiguous(module.ModulePath(), plugins)
 	}
 	selected, err := options.Select(append([]Target(nil), candidates...))
 	if err != nil {
@@ -152,10 +208,15 @@ func makeTarget(moduleRoot string, plugin pluginindex.Plugin) Target {
 	}
 }
 
-func ambiguous(candidates []Target) error {
-	values := make([]string, len(candidates))
-	for index, candidate := range candidates {
-		values[index] = fmt.Sprintf("%s (%s)", candidate.id, candidate.directory)
+func ambiguous(modulePath string, plugins []pluginindex.Plugin) error {
+	candidates := make([]Candidate, len(plugins))
+	for index, plugin := range plugins {
+		candidates[index] = Candidate{
+			id:         plugin.ID(),
+			directory:  plugin.Name(),
+			modulePath: modulePath,
+			sourcePath: path.Join(plugin.Path(), "plugin.yaml"),
+		}
 	}
-	return fmt.Errorf("%w: %w: multiple local plugins: %s; use --plugin or an interactive terminal", ErrInfer, ErrAmbiguous, strings.Join(values, ", "))
+	return &AmbiguousError{candidates: candidates}
 }

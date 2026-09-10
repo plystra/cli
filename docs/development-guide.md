@@ -2411,6 +2411,14 @@ canonical contract as a query or command to evade the transport constraint.
 
 ### Plugin target is ambiguous
 
+Non-interactive `capability create` and `capability implement` use
+`PLYSTRA_PLUGIN_TARGET_AMBIGUOUS` when several valid current-Project Plugins are
+available and no exact target can be inferred. Every candidate is reported in
+deterministic order as
+`Source: <current-module>:<plugin-directory>/plugin.yaml:1:1 (plugin-declaration)`;
+the diagnostic exposes no absolute checkout path. An absent explicit target and
+a failed interactive selection have no fabricated source.
+
 Run from inside the target Plugin or pass its directory or exact Plugin ID:
 
 ```powershell

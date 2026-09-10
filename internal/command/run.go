@@ -57,9 +57,9 @@ command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
 Typed source-bearing failures, including invalid Project and Go Module
 declarations, safe missing configuration selections, current-Project
 configuration-composition, concurrent Project inputs, generated-output conflicts
-and drift, application module dependency drift, invalid explicit choices, and
-missing, ambiguous, or cyclic Interface Implementation resolution, add
-canonical module-relative Source lines first.
+and drift, application module dependency drift, ambiguous local Plugin targets,
+invalid explicit choices, and missing, ambiguous, or cyclic Interface
+Implementation resolution, add canonical module-relative Source lines first.
 `
 	addUsage = `Usage:
   plystra add <go-module-query>

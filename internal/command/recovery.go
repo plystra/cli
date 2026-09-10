@@ -402,6 +402,20 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			Line:   located.Line(),
 			Column: located.Column(),
 		})
+	case diagnosticPluginTargetAmbiguous:
+		var ambiguous *plugintarget.AmbiguousError
+		if !errors.As(err, &ambiguous) || ambiguous == nil {
+			return nil
+		}
+		for _, candidate := range ambiguous.Candidates() {
+			sources = append(sources, diagnosticjson.Source{
+				Module: candidate.ModulePath(),
+				Path:   candidate.SourcePath(),
+				Kind:   "plugin-declaration",
+				Line:   candidate.Line(),
+				Column: candidate.Column(),
+			})
+		}
 	case diagnosticGeneratedOwnershipConflict:
 		var conflict *applicationgenerate.OwnershipConflictSourceError
 		if !errors.As(err, &conflict) || conflict == nil {

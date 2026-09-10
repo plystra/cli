@@ -65,8 +65,41 @@ func TestInferHandlesInteractiveAndNonInteractiveAmbiguity(t *testing.T) {
 	root := createModule(t)
 	writePlugin(t, root, "profile", "acme.app.profile")
 	writePlugin(t, root, "account", "acme.app.account")
-	if _, err := plugintarget.Infer(plugintarget.Options{Start: root}); !errors.Is(err, plugintarget.ErrInfer) || !errors.Is(err, plugintarget.ErrAmbiguous) || !strings.Contains(err.Error(), "acme.app.account (account), acme.app.profile (profile)") {
-		t.Fatalf("non-interactive Infer error = %v", err)
+	_, ambiguityErr := plugintarget.Infer(plugintarget.Options{Start: root})
+	wantError := "infer plugin target: plugin target is ambiguous: multiple local plugins: acme.app.account (account), acme.app.profile (profile); use --plugin or an interactive terminal"
+	if !errors.Is(ambiguityErr, plugintarget.ErrInfer) || !errors.Is(ambiguityErr, plugintarget.ErrAmbiguous) || ambiguityErr.Error() != wantError {
+		t.Fatalf("non-interactive Infer error = %v, want %q", ambiguityErr, wantError)
+	}
+	var ambiguity *plugintarget.AmbiguousError
+	if !errors.As(ambiguityErr, &ambiguity) || ambiguity == nil {
+		t.Fatalf("non-interactive Infer error type = %T, want *AmbiguousError", ambiguityErr)
+	}
+	candidates := ambiguity.Candidates()
+	if len(candidates) != 2 {
+		t.Fatalf("ambiguity candidates = %#v, want two", candidates)
+	}
+	for index, want := range []struct {
+		id        string
+		directory string
+		path      string
+	}{
+		{id: "acme.app.account", directory: "account", path: "account/plugin.yaml"},
+		{id: "acme.app.profile", directory: "profile", path: "profile/plugin.yaml"},
+	} {
+		candidate := candidates[index]
+		if candidate.ID() != want.id || candidate.Directory() != want.directory || candidate.ModulePath() != "example.com/acme/app" || candidate.SourcePath() != want.path || candidate.Line() != 1 || candidate.Column() != 1 {
+			t.Fatalf("candidate %d = ID %q, directory %q, module %q, source %q:%d:%d", index, candidate.ID(), candidate.Directory(), candidate.ModulePath(), candidate.SourcePath(), candidate.Line(), candidate.Column())
+		}
+		if strings.Contains(candidate.SourcePath(), root) || filepath.IsAbs(candidate.SourcePath()) {
+			t.Fatalf("candidate %d exposed absolute source path %q", index, candidate.SourcePath())
+		}
+	}
+	candidates[0] = plugintarget.Candidate{}
+	if ambiguity.Candidates()[0].ID() != "acme.app.account" {
+		t.Fatal("Candidates exposed mutable ambiguity storage")
+	}
+	if strings.Contains(ambiguityErr.Error(), root) {
+		t.Fatalf("non-interactive Infer error exposed absolute root: %v", ambiguityErr)
 	}
 
 	var output bytes.Buffer

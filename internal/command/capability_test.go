@@ -130,6 +130,38 @@ func TestRunCapabilityAuthoringReportsSchemaConflictSourcesWithoutMutation(t *te
 	}
 }
 
+func TestRunCapabilityAuthoringReportsAmbiguousPluginSourcesWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := [][]string{
+		{"capability", "create", "account.register", "--query"},
+		{"capability", "implement", "account.register/v1"},
+	}
+	for _, arguments := range commands {
+		arguments := arguments
+		t.Run(strings.Join(arguments[:2], " "), func(t *testing.T) {
+			t.Parallel()
+			root := writeCapabilityCommandModule(t)
+			writeCommandFile(t, filepath.Join(root, "account", "plugin.yaml"), "id: acme.library.account\n")
+			before := commandTree(t, root)
+
+			exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
+			wantSuffix := "\n\n" +
+				"Source: example.com/acme/library:account/plugin.yaml:1:1 (plugin-declaration)\n" +
+				"Source: example.com/acme/library:records/plugin.yaml:1:1 (plugin-declaration)\n\n" +
+				"Recovery:\nRerun with `--plugin <plugin-directory-or-id>` to select one exact local Plugin.\n\n" +
+				"Diagnostic: " + diagnosticcode.PluginTargetAmbiguous + "\n"
+			if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 2 || strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+				t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%v mutated ambiguous-target Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func TestRunCapabilityRejectsInvalidReferencesBeforeProjectDiscoveryOrMutation(t *testing.T) {
 	root := t.TempDir()
 	writeCommandFile(t, filepath.Join(root, "preserve.txt"), "preserve\n")

@@ -65,6 +65,8 @@ Malformed ` + "`add`" + ` and ` + "`update`" + ` queries emit ` + "`PLYSTRA_DEPE
 
 Malformed ` + "`capability create`" + `, ` + "`capability implement`" + `, and ` + "`capability expose`" + ` references emit ` + "`PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID`" + `, ` + "`PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID`" + `, and ` + "`PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID`" + ` before Project discovery or mutation. Recovery uses canonical placeholders and retains only a safe exposure selector. A valid exact action mismatch emits ` + "`PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE`" + ` or ` + "`PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE`" + ` and switches to the counterpart authoring command without mutation. An explicit older or skipped new version uses ` + "`PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED`" + ` and requires the same create command with ` + "`--confirm`" + `. An omitted version above the maximum visible major uses ` + "`PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED`" + ` and requires a new canonical Capability identity. Missing new-identity profiles use ` + "`PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED`" + `; profiles on copied later versions use ` + "`PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED`" + `.
 
+Non-interactive Capability creation or implementation with several local Plugins and no inferred target emits ` + "`PLYSTRA_PLUGIN_TARGET_AMBIGUOUS`" + ` with every current-Project ` + "`plugin.yaml`" + ` at ` + "`1:1`" + ` as a sorted ` + "`plugin-declaration`" + ` source. Missing explicit targets and failed interactive selections have no fabricated source.
+
 A well-formed ` + "`capability expose`" + ` target absent from the selected visible catalog emits ` + "`PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE`" + ` before write planning or mutation. Recovery retains a safe selector and substitutes the canonical Capability placeholder instead of copying the missing target.
 
 A template's default Provider model must be unambiguous. If several compatible Plugins provide one required Capability, the template publisher must record one ` + "`capabilities.use`" + ` choice in the template's root ` + "`plystra.yaml`" + ` and publish a corrected version. Creation otherwise reports every candidate and leaves no target Project to repair.
@@ -1462,9 +1464,8 @@ boundary.
 
 Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>
 Source: <module>:<module-relative-path>[:line:column] (<kind>)
-PLYSTRA_CONFIGURATION_INHERITED_CONFLICT and
-PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS use configuration-declaration.
-Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
+PLYSTRA_CONFIGURATION_INHERITED_CONFLICT / PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS: configuration-declaration.
+Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
 
 - PLYSTRA_PROJECT_MANIFEST_INVALID: project-marker; malformed 1:1; else no span
 - PLYSTRA_RESOLVE_UNKNOWN_INTERFACE: declaration, exposure, or implementation-selection; correct selected YAML.
@@ -1476,6 +1477,7 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: effective interfaces.use sources are
   implementation-selection; fix constructor, or set the selected document entry to null.
 - PLYSTRA_CAPABILITY_MANIFEST_INVALID: provider-declaration at 1:1; fix owning capability.yaml.
+- PLYSTRA_PLUGIN_TARGET_AMBIGUOUS: candidate plugin-declaration Sources at 1:1; --plugin.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,
@@ -1529,10 +1531,7 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
 - Unavailable generated client: wait for constructor completion and publication.
 - Invalid runtime configuration: match compiled Config; keep Secrets as valid
   env/file references.
-- PLYSTRA_CONFIGURATION_SELECTION_INVALID: a missing selected file has one
-  path-only configuration-selection Source; conflicts or unsafe selectors have
-  none. Select one --env or --config; automation sets
-  PLYSTRA_ENV or PLYSTRA_CONFIG.
+- PLYSTRA_CONFIGURATION_SELECTION_INVALID: missing file has one path-only configuration-selection Source; conflicts or unsafe selectors have none; select one mode.
 - Alias error: point directly to one resolved canonical Interface target with
   the same version and exposure no broader than that target.
 - PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID: restore the reported

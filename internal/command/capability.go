@@ -84,6 +84,9 @@ A missing new-identity profile emits
 PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED; a profile supplied while
 copying a later version emits PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
 Both failures occur before Project mutation.
+If non-interactive local Plugin inference is ambiguous, the command emits
+PLYSTRA_PLUGIN_TARGET_AMBIGUOUS with every current-Project candidate plugin.yaml
+at 1:1 as a module-relative plugin-declaration source before mutation.
 If visible Providers disagree on the source exact contract, the command emits
 PLYSTRA_CAPABILITY_SCHEMA_CONFLICT with every module-relative capability.yaml
 declaration before mutation.
@@ -103,6 +106,9 @@ discovery or mutation.
 A valid exact version that is not visible emits
 PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE and directs the developer to the
 creation command without changing the Project.
+If non-interactive local Plugin inference is ambiguous, the command emits
+PLYSTRA_PLUGIN_TARGET_AMBIGUOUS with every current-Project candidate plugin.yaml
+at 1:1 as a module-relative plugin-declaration source before mutation.
 If visible Providers disagree on that exact contract, the command emits
 PLYSTRA_CAPABILITY_SCHEMA_CONFLICT with every module-relative capability.yaml
 declaration before mutation.
