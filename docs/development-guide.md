@@ -2351,7 +2351,10 @@ ambient selector, a duplicated selector environment variable, an unsafe
 selector, or a selected document that cannot be loaded. An explicit `--env`
 plus `--config` pair fails before Project discovery or mutation. Follow the
 emitted recovery with exactly one intended selector; the recovery does not echo
-the rejected selector value.
+the rejected selector value. A normalized selected path that stays within the
+Project but cannot be loaded reports one span-less `configuration-selection`
+source for the current Project. Conflicting, duplicated, and unsafe selectors
+report no source because they do not establish a trustworthy document.
 
 If drift or a Provider choice does not match the intended deployment, inspect
 the active model with `plystra inspect` and the intended `--env` or `--config`.

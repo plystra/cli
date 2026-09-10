@@ -368,6 +368,16 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			Line:   located.Line(),
 			Column: located.Column(),
 		})
+	case diagnosticConfigurationSelectionInvalid:
+		var located diagnosticSourceLocation
+		if !errors.As(err, &located) || located == nil || located.SourceKind() != "configuration-selection" || located.Line() != 0 || located.Column() != 0 {
+			return nil
+		}
+		sources = append(sources, diagnosticjson.Source{
+			Module: located.ModulePath(),
+			Path:   located.SourcePath(),
+			Kind:   located.SourceKind(),
+		})
 	case diagnosticConfigurationInvalid:
 		var located diagnosticSourceLocation
 		if !errors.As(err, &located) || located == nil || located.SourceKind() != "configuration-declaration" {

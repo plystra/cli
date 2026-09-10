@@ -959,8 +959,12 @@ Configuration-selection failures use
 `PLYSTRA_CONFIGURATION_SELECTION_INVALID`. An explicit `--env` plus `--config`
 pair is rejected before Project discovery or mutation; conflicting or duplicate
 ambient selector variables, unsafe values, and missing selected documents use
-the same code at the shared selection boundary. The recovery action names no
-selector value and directs the command to exactly one intended selection.
+the same code at the shared selection boundary. A normalized selected path that
+stays within the Project but cannot be loaded emits exactly one path-only
+`configuration-selection` source for the current Project, without a fabricated
+span. Conflicting, duplicate, or unsafe selectors emit no source because no
+selected document is trustworthy. The recovery action names no selector value
+and directs the command to exactly one intended selection.
 
 `plystra plugin create` distinguishes an invalid or reserved root-level name,
 a Project module namespace that cannot form a canonical Plugin ID, and an

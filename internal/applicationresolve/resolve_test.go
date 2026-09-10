@@ -912,19 +912,56 @@ replace example.com/platform-b => ../platform-b
 	}
 }
 
-func TestResolveRequiresSelectedEnvironmentOverlay(t *testing.T) {
+func TestResolveReportsMissingSelectedConfigurationSource(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	writeModule(t, root, "example.com/app")
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
-	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
-		Start:           root,
-		EnvironmentName: "production",
-		Environment:     goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
-	})
-	if err == nil || !errors.Is(err, applicationresolve.ErrConfigurationSelection) || !strings.Contains(err.Error(), "plystra.production.yaml") {
-		t.Fatalf("Resolve missing environment overlay error = %v", err)
+	tests := []struct {
+		name      string
+		path      string
+		configure func(*applicationresolve.Options)
+	}{
+		{
+			name: "environment",
+			path: "plystra.production.yaml",
+			configure: func(options *applicationresolve.Options) {
+				options.EnvironmentName = "production"
+			},
+		},
+		{
+			name: "explicit",
+			path: "deploy/customer.yaml",
+			configure: func(options *applicationresolve.Options) {
+				options.ConfigurationPath = "deploy/customer.yaml"
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeModule(t, root, "example.com/app")
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+			before := snapshotTree(t, root)
+			options := applicationresolve.Options{
+				Start:       root,
+				Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+			}
+			test.configure(&options)
+			_, err := applicationresolve.Resolve(t.Context(), options)
+			var source *applicationresolve.ManifestSourceError
+			if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrConfigurationSelection) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.As(err, &source) || source == nil || !strings.Contains(err.Error(), test.path) {
+				t.Fatalf("Resolve missing selected configuration = %v", err)
+			}
+			if source.ModulePath() != "example.com/app" || source.SourcePath() != test.path || source.SourceKind() != "configuration-selection" || source.Line() != 0 || source.Column() != 0 {
+				t.Fatalf("missing selected configuration source = %#v", source)
+			}
+			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("selected configuration error exposed Project root %q: %v", root, err)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("missing selected configuration mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
 	}
 }
 

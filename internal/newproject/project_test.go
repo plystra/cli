@@ -395,6 +395,9 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	if !bytes.Contains(skill, []byte("PLYSTRA_PROJECT_CONCURRENT_CHANGE")) || !bytes.Contains(skill, []byte("sorted path-only Sources")) {
 		t.Fatal("maximum-length Project skill omits concurrent-change source guidance")
 	}
+	if !bytes.Contains(skill, []byte("path-only configuration-selection Source")) || !bytes.Contains(skill, []byte("conflicts or unsafe selectors have")) {
+		t.Fatal("maximum-length Project skill omits configuration-selection source guidance")
+	}
 }
 
 func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
@@ -1181,6 +1184,8 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`module-dependency` source"),
 		[]byte("`PLYSTRA_PROJECT_CONCURRENT_CHANGE` reports every deterministically known path"),
 		[]byte("Sources are sorted, deduplicated, module-relative"),
+		[]byte("one path-only `configuration-selection` source"),
+		[]byte("unsafe selectors report no source"),
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration"),
 		[]byte("`PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION`"),
 		[]byte("every root declaration or exposure"),
@@ -2249,6 +2254,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"interface-contract Source",
 		"PLYSTRA_PROJECT_CONCURRENT_CHANGE",
 		"sorted path-only Sources",
+		"path-only configuration-selection Source",
+		"conflicts or unsafe selectors have",
 		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED",
 		"### Select one environment",
 		"Use --config only when the task",
@@ -2520,6 +2527,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"module-dependency",
 		"PLYSTRA_PROJECT_CONCURRENT_CHANGE",
 		"sorted path-only Sources",
+		"path-only configuration-selection Source",
+		"conflicts or unsafe selectors have",
 		"PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION",
 		"PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID",
 		"PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID",

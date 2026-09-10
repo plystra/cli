@@ -55,10 +55,11 @@ const (
 Common actionable failures end with one Recovery block containing the primary
 command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
 Typed source-bearing failures, including invalid Project and Go Module
-declarations, current-Project configuration-composition, concurrent Project
-inputs, generated-output conflicts and drift, application module dependency
-drift, invalid explicit choices, and missing, ambiguous, or cyclic Interface
-Implementation resolution, add canonical module-relative Source lines first.
+declarations, safe missing configuration selections, current-Project
+configuration-composition, concurrent Project inputs, generated-output conflicts
+and drift, application module dependency drift, invalid explicit choices, and
+missing, ambiguous, or cyclic Interface Implementation resolution, add
+canonical module-relative Source lines first.
 `
 	addUsage = `Usage:
   plystra add <go-module-query>
@@ -156,6 +157,9 @@ configuration paths are resolved from the detected Plystra Project root. Root
 plystra.yaml remains mandatory and is not merged beneath --config. Invalid or
 conflicting selections emit the stable PLYSTRA_CONFIGURATION_SELECTION_INVALID
 diagnostic.
+A normalized Project-contained selected document that cannot be loaded reports
+one span-less configuration-selection source; conflicting or unsafe selectors
+report none.
 PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
 Project plystra.yaml as a project-marker source. Malformed readable documents
 use 1:1; unsafe or unreadable markers omit the unavailable span.
@@ -222,6 +226,9 @@ and the two flags cannot be combined. Relative configuration paths are resolved
 from the detected Plystra Project root. Root plystra.yaml remains mandatory and
 is not merged beneath --config. Invalid or conflicting selections emit the
 stable PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
+A normalized Project-contained selected document that cannot be loaded reports
+one span-less configuration-selection source; conflicting or unsafe selectors
+report none.
 Inherited configuration conflicts, ambiguous ownership, and invalid or
 unselected constructor configuration failures emit module-relative
 configuration-declaration sources before selector-aware recovery.
@@ -294,6 +301,9 @@ cannot be combined. Relative configuration paths are resolved from the detected
 Plystra Project root. Root plystra.yaml remains mandatory and is not merged
 beneath --config. Invalid or conflicting selections emit the stable
 PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
+A normalized Project-contained selected document that cannot be loaded reports
+one span-less configuration-selection source; conflicting or unsafe selectors
+report none.
 `
 	explainUsage = `Usage:
   plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
@@ -320,6 +330,9 @@ and the two flags cannot be combined. Relative configuration paths are resolved
 from the detected Plystra Project root. Root plystra.yaml remains mandatory and
 is not merged beneath --config. Invalid or conflicting selections emit the
 stable PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
+A normalized Project-contained selected document that cannot be loaded reports
+one span-less configuration-selection source; conflicting or unsafe selectors
+report none.
 `
 )
 

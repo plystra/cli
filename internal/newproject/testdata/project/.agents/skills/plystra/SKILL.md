@@ -1286,10 +1286,10 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
 - Unavailable generated client: wait for constructor completion and publication.
 - Invalid runtime configuration: match compiled Config; keep Secrets as valid
   env/file references.
-- PLYSTRA_CONFIGURATION_SELECTION_INVALID: select exactly one safe existing
-  configuration with --env or --config. Automation sets exactly one of
-  PLYSTRA_ENV or PLYSTRA_CONFIG; environments overlay root, while explicit
-  files replace it.
+- PLYSTRA_CONFIGURATION_SELECTION_INVALID: a missing selected file has one
+  path-only configuration-selection Source; conflicts or unsafe selectors have
+  none. Select one --env or --config; automation sets
+  PLYSTRA_ENV or PLYSTRA_CONFIG.
 - Alias error: point directly to one resolved canonical Interface target with
   the same version and exposure no broader than that target.
 - PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID: restore the reported

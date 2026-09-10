@@ -442,8 +442,9 @@ func TestRunCapabilityExposeRejectsUnsafeOrMissingSelectionWithoutMutation(t *te
 		arguments   []string
 		environment []string
 		wantError   string
+		wantSource  string
 	}{
-		{name: "missing environment overlay", arguments: []string{"capability", "expose", "kernel.health/v1", "--env", "missing"}, environment: commandGoEnvironment(), wantError: "plystra.missing.yaml"},
+		{name: "missing environment overlay", arguments: []string{"capability", "expose", "kernel.health/v1", "--env", "missing"}, environment: commandGoEnvironment(), wantError: "plystra.missing.yaml", wantSource: "Source: example.com/acme/library:plystra.missing.yaml (configuration-selection)"},
 		{name: "unsafe environment", arguments: []string{"capability", "expose", "kernel.health/v1", "--env", "../outside"}, environment: commandGoEnvironment(), wantError: "one safe filename component"},
 		{name: "escaping replacement", arguments: []string{"capability", "expose", "kernel.health/v1", "--config", "../outside.yaml"}, environment: commandGoEnvironment(), wantError: "within the Project root"},
 		{name: "ambient selector conflict", arguments: []string{"capability", "expose", "kernel.health/v1"}, environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "production", "PLYSTRA_CONFIG": "plystra.yaml"}), wantError: "PLYSTRA_CONFIG and PLYSTRA_ENV cannot be used together"},
@@ -452,8 +453,14 @@ func TestRunCapabilityExposeRejectsUnsafeOrMissingSelectionWithoutMutation(t *te
 		t.Run(test.name, func(t *testing.T) {
 			before := commandTree(t, root)
 			exitCode, stdout, stderr := runCommand(t, test.arguments, filepath.Join(root, "records"), test.environment)
-			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, test.wantError) {
+			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, test.wantError) || !strings.Contains(stderr, "Diagnostic: "+diagnosticcode.ConfigurationSelectionInvalid) {
 				t.Fatalf("capability expose = exit %d, stdout %q, stderr %q; want error containing %q", exitCode, stdout, stderr, test.wantError)
+			}
+			if test.wantSource == "" && strings.Contains(stderr, "Source: ") {
+				t.Fatalf("unsafe or conflicting selection exposed a source: %q", stderr)
+			}
+			if test.wantSource != "" && (!strings.Contains(stderr, test.wantSource) || strings.Count(stderr, "Source: ") != 1) {
+				t.Fatalf("missing selection source = %q, want %q", stderr, test.wantSource)
 			}
 			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("rejected selector changed Project:\nbefore: %#v\nafter:  %#v", before, after)

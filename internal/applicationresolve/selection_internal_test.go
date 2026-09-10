@@ -50,6 +50,11 @@ func TestSelectConfigurationTargetUsesResolutionSelectorAndParserRules(t *testin
 	}
 	if _, err := SelectConfigurationTarget(modulePath, root, "", "missing", nil); !errors.Is(err, ErrConfigurationSelection) {
 		t.Fatalf("missing environment error = %v, want ErrConfigurationSelection", err)
+	} else {
+		var source *ManifestSourceError
+		if !errors.As(err, &source) || source == nil || source.ModulePath() != modulePath || source.SourcePath() != "plystra.missing.yaml" || source.SourceKind() != configurationSelectionSourceKind || source.Line() != 0 || source.Column() != 0 {
+			t.Fatalf("missing environment source = %#v, %v", source, err)
+		}
 	}
 }
 

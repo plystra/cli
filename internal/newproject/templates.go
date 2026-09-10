@@ -127,7 +127,7 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_PROJECT_CONCURRENT_CHANGE`" + ` reports every deterministically known path that changed while resolution or generation verified a stable snapshot. Current-Project and dependency ` + "`plystra.yaml`" + ` documents use ` + "`configuration-declaration`" + `; current-Project ` + "`go.mod`" + ` or ` + "`go.sum`" + ` uses ` + "`module-dependency`" + `; and managed ` + "`generated/...`" + ` paths use ` + "`generated-artifact`" + `. Sources are sorted, deduplicated, module-relative, and omit a fabricated span. Stop concurrent Project edits and rerun against unchanged inputs; rollback preserves bytes written by the other editor.
 
-` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
+` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. A normalized Project-contained document that cannot be loaded reports one path-only ` + "`configuration-selection`" + ` source without a fabricated span. Conflicting, duplicated, or unsafe selectors report no source because no document is trustworthy. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 ` + "`plystra plugin create`" + ` uses ` + "`PLYSTRA_PLUGIN_CREATE_NAME_INVALID`" + ` for an invalid or reserved root-level name, ` + "`PLYSTRA_PLUGIN_CREATE_ID_INVALID`" + ` when the Project module namespace and name cannot form a canonical Plugin ID, and ` + "`PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS`" + ` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.
 
@@ -1529,10 +1529,10 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
 - Unavailable generated client: wait for constructor completion and publication.
 - Invalid runtime configuration: match compiled Config; keep Secrets as valid
   env/file references.
-- PLYSTRA_CONFIGURATION_SELECTION_INVALID: select exactly one safe existing
-  configuration with --env or --config. Automation sets exactly one of
-  PLYSTRA_ENV or PLYSTRA_CONFIG; environments overlay root, while explicit
-  files replace it.
+- PLYSTRA_CONFIGURATION_SELECTION_INVALID: a missing selected file has one
+  path-only configuration-selection Source; conflicts or unsafe selectors have
+  none. Select one --env or --config; automation sets
+  PLYSTRA_ENV or PLYSTRA_CONFIG.
 - Alias error: point directly to one resolved canonical Interface target with
   the same version and exposure no broader than that target.
 - PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID: restore the reported

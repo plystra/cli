@@ -20,6 +20,7 @@ const applicationManifestName = "plystra.yaml"
 
 const manifestSourceKind = "project-marker"
 const configurationSourceKind = "configuration-declaration"
+const configurationSelectionSourceKind = "configuration-selection"
 const generatedArtifactSourceKind = "generated-artifact"
 
 const (
@@ -160,7 +161,11 @@ func loadConfigurationWithParser(modulePath, moduleRoot, relativePath string, pa
 				fmt.Errorf("%w: %w", ErrManifest, err),
 			)
 		}
-		return ManifestSnapshot{}, applicationmeta.Manifest{}, fmt.Errorf("%w: %w", ErrManifest, err)
+		return ManifestSnapshot{}, applicationmeta.Manifest{}, configurationSelectionSourceError(
+			modulePath,
+			relativePath,
+			fmt.Errorf("%w: %w", ErrManifest, err),
+		)
 	}
 	manifest, err := parse(snapshot.path, snapshot.data)
 	if err != nil {
@@ -231,6 +236,10 @@ func manifestSourceError(modulePath, sourcePath string, line, column int, cause 
 
 func configurationSourceError(modulePath, sourcePath string, line, column int, cause error) error {
 	return newManifestSourceError(modulePath, sourcePath, configurationSourceKind, line, column, cause)
+}
+
+func configurationSelectionSourceError(modulePath, sourcePath string, cause error) error {
+	return newManifestSourceError(modulePath, sourcePath, configurationSelectionSourceKind, 0, 0, cause)
 }
 
 func generatedManifestSourceError(modulePath string, cause error) error {

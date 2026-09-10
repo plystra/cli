@@ -43,6 +43,9 @@ overrides both variables, and the two flags cannot be combined. Relative
 configuration paths are resolved from the detected Plystra Project root.
 Invalid or conflicting selections emit the stable
 PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
+A normalized Project-contained selected document that cannot be loaded reports
+one span-less configuration-selection source; conflicting or unsafe selectors
+report none.
 Malformed exact Capability IDs emit the stable
 PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID diagnostic before Project discovery
 or mutation.
