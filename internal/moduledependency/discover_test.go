@@ -501,7 +501,7 @@ func TestDiscoverRejectsUnsafeDependencyProjectMarker(t *testing.T) {
 func runHelper(mode string) int {
 	want := []string{"list", "-m", "-json", "-mod=readonly", "all"}
 	switch mode {
-	case "valid", "batch", "synthetic", "missing", "missing-main", "duplicate", "malformed", "older", "unavailable", "oversized":
+	case "valid", "batch", "synthetic", "missing", "missing-main", "duplicate", "malformed", "older", "unavailable", "oversized", "concurrent":
 	default:
 		return 9
 	}
@@ -609,6 +609,18 @@ func runHelper(mode string) int {
 		_ = encoder.Encode(map[string]any{"Path": "example.com/plugin", "Version": "v1.2.3"})
 	case "oversized":
 		_, _ = fmt.Fprint(os.Stdout, strings.Repeat("x", 1025))
+	case "concurrent":
+		if err := encodeMainModule(json.NewEncoder(os.Stdout)); err != nil {
+			return 12
+		}
+		goModPath := filepath.Join(os.Getenv("PLYSTRA_MODULE_APP_ROOT"), "go.mod")
+		data, err := os.ReadFile(goModPath)
+		if err != nil {
+			return 14
+		}
+		if err := os.WriteFile(goModPath, append(data, []byte("\n// concurrent change\n")...), 0o644); err != nil {
+			return 14
+		}
 	}
 	return 0
 }

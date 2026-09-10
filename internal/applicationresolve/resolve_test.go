@@ -28,6 +28,7 @@ import (
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfacemeta"
 	"github.com/plystra/cli/internal/intrinsiccatalog"
+	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/providerresolution"
@@ -1992,11 +1993,65 @@ func TestResolveRejectsMissingUnsafeAndChangingManifest(t *testing.T) {
 		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrConcurrentChange) || !strings.Contains(err.Error(), "plystra.yaml") {
 			t.Fatalf("Resolve error = %v", err)
 		}
+		var source *applicationresolve.ManifestSourceError
+		if !errors.As(err, &source) || source == nil || source.ModulePath() != "example.com/changing" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "configuration-declaration" || source.Line() != 0 || source.Column() != 0 {
+			t.Fatalf("Resolve changed root source = %#v, %v", source, err)
+		}
+	})
+
+	t.Run("selected configuration changed before completion", func(t *testing.T) {
+		root := t.TempDir()
+		appRoot := filepath.Join(root, "app")
+		writeModule(t, appRoot, "example.com/changing")
+		writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
+		selectedPath := filepath.Join(appRoot, "deploy", "customer.yaml")
+		writeFile(t, selectedPath, "{}\n")
+		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+			Start:             appRoot,
+			ConfigurationPath: "deploy/customer.yaml",
+			GoCommand:         os.Args[0],
+			Environment: goEnvironment(map[string]string{
+				"GOWORK":                             "off",
+				"PLYSTRA_APPLICATION_RESOLVE_HELPER": "change-manifest",
+				"PLYSTRA_APPLICATION_MANIFEST":       selectedPath,
+			}),
+		})
+		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrConcurrentChange) || !strings.Contains(err.Error(), "deploy/customer.yaml") {
+			t.Fatalf("Resolve error = %v", err)
+		}
+		var source *applicationresolve.ManifestSourceError
+		if !errors.As(err, &source) || source == nil || source.ModulePath() != "example.com/changing" || source.SourcePath() != "deploy/customer.yaml" || source.SourceKind() != "configuration-declaration" || source.Line() != 0 || source.Column() != 0 {
+			t.Fatalf("Resolve changed selected source = %#v, %v", source, err)
+		}
+	})
+
+	t.Run("go.mod changed during discovery", func(t *testing.T) {
+		root := t.TempDir()
+		appRoot := filepath.Join(root, "app")
+		goModPath := filepath.Join(appRoot, "go.mod")
+		writeModule(t, appRoot, "example.com/changing")
+		writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
+		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+			Start:     appRoot,
+			GoCommand: os.Args[0],
+			Environment: goEnvironment(map[string]string{
+				"GOWORK":                             "off",
+				"PLYSTRA_APPLICATION_RESOLVE_HELPER": "change-go-mod",
+				"PLYSTRA_APPLICATION_GO_MOD":         goModPath,
+			}),
+		})
+		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrConcurrentChange) || !errors.Is(err, moduledependency.ErrConcurrentChange) {
+			t.Fatalf("Resolve error = %v", err)
+		}
+		var source *moduledependency.GoModSourceError
+		if !errors.As(err, &source) || source == nil || source.ModulePath() != "example.com/changing" || source.SourcePath() != "go.mod" || source.SourceKind() != "module-dependency" || source.Line() != 0 || source.Column() != 0 {
+			t.Fatalf("Resolve changed go.mod source = %#v, %v", source, err)
+		}
 	})
 }
 
 func runResolveHelper(mode string) int {
-	if mode != "change-manifest" {
+	if mode != "change-manifest" && mode != "change-go-mod" {
 		return 9
 	}
 	want := []string{"list", "-m", "-json", "-mod=readonly", "all"}
@@ -2008,8 +2063,20 @@ func runResolveHelper(mode string) int {
 			return 11
 		}
 	}
-	if err := os.WriteFile(os.Getenv("PLYSTRA_APPLICATION_MANIFEST"), []byte("timeouts: {}\n"), 0o644); err != nil {
-		return 12
+	switch mode {
+	case "change-manifest":
+		if err := os.WriteFile(os.Getenv("PLYSTRA_APPLICATION_MANIFEST"), []byte("timeouts: {}\n"), 0o644); err != nil {
+			return 12
+		}
+	case "change-go-mod":
+		goModPath := os.Getenv("PLYSTRA_APPLICATION_GO_MOD")
+		data, err := os.ReadFile(goModPath)
+		if err != nil {
+			return 12
+		}
+		if err := os.WriteFile(goModPath, append(data, []byte("\n// concurrent change\n")...), 0o644); err != nil {
+			return 12
+		}
 	}
 	applicationRoot, err := os.Getwd()
 	if err != nil {
@@ -2025,6 +2092,9 @@ func runResolveHelper(mode string) int {
 		return 14
 	}
 	root := os.Getenv("PLYSTRA_APPLICATION_MODULE_ROOT")
+	if root == "" {
+		return 0
+	}
 	if err := encoder.Encode(map[string]any{
 		"Path":    "example.com/dependency",
 		"Version": "v1.2.3",

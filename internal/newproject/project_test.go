@@ -392,6 +392,9 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	if !bytes.Contains(skill, []byte("PLYSTRA_CAPABILITY_MANIFEST_INVALID")) || !bytes.Contains(skill, []byte("provider-declaration at 1:1")) {
 		t.Fatal("maximum-length Project skill omits invalid Capability manifest source guidance")
 	}
+	if !bytes.Contains(skill, []byte("PLYSTRA_PROJECT_CONCURRENT_CHANGE")) || !bytes.Contains(skill, []byte("sorted path-only Sources")) {
+		t.Fatal("maximum-length Project skill omits concurrent-change source guidance")
+	}
 }
 
 func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
@@ -1176,6 +1179,8 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`generated-artifact` source"),
 		[]byte("Kernel is missing or only transitive"),
 		[]byte("`module-dependency` source"),
+		[]byte("`PLYSTRA_PROJECT_CONCURRENT_CHANGE` reports every deterministically known path"),
+		[]byte("Sources are sorted, deduplicated, module-relative"),
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration"),
 		[]byte("`PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION`"),
 		[]byte("every root declaration or exposure"),
@@ -2242,6 +2247,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
 		"generated-artifact Sources",
 		"interface-contract Source",
+		"PLYSTRA_PROJECT_CONCURRENT_CHANGE",
+		"sorted path-only Sources",
 		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED",
 		"### Select one environment",
 		"Use --config only when the task",
@@ -2511,6 +2518,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_GO_MODULE_INVALID",
 		"PLYSTRA_APPLICATION_DEPENDENCY_DRIFT",
 		"module-dependency",
+		"PLYSTRA_PROJECT_CONCURRENT_CHANGE",
+		"sorted path-only Sources",
 		"PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION",
 		"PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID",
 		"PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID",

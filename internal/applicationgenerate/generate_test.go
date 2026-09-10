@@ -2210,6 +2210,7 @@ func TestGenerateChecksAndRepairsDependencyCompositionDriftTransactionally(t *te
 	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
 		t.Fatalf("concurrent recomposition edit = %v", err)
 	}
+	assertConcurrentGenerationSource(t, err, "example.com/acme/composed", "plystra.yaml", "configuration-declaration")
 	if current := readFile(t, appRoot, "plystra.yaml"); !bytes.Equal(current, concurrentManifest) {
 		t.Fatalf("concurrent manifest edit was overwritten:\n%s", current)
 	}
@@ -2413,6 +2414,7 @@ func TestGenerateMaintainsFullReplacementSelectionsIndependently(t *testing.T) {
 	if !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
 		t.Fatalf("concurrent selected edit error = %v", err)
 	}
+	assertConcurrentGenerationSource(t, err, "example.com/acme/selected-config", "deploy/customer.yaml", "configuration-declaration")
 	if !strings.Contains(err.Error(), "recovery data retained in .plystra-files-") {
 		t.Fatalf("concurrent selected edit error does not identify retained recovery data: %v", err)
 	}
@@ -3453,6 +3455,7 @@ func TestGenerateRollsBackValidationFailureAndPreservesConcurrentSourceEdit(t *t
 	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
 		t.Fatalf("concurrent source edit = %v", err)
 	}
+	assertConcurrentGenerationSource(t, err, "example.com/acme/rollback-app", "plystra.yaml", "configuration-declaration")
 	if got := string(readAbsoluteFile(t, manifestPath)); got != withoutAlias {
 		t.Fatalf("concurrent manifest edit was not preserved: %q", got)
 	}
@@ -3498,6 +3501,7 @@ func TestGenerateDetectsConcurrentPrivateConfigurationChange(t *testing.T) {
 	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
 		t.Fatalf("concurrent private configuration edit = %v", err)
 	}
+	assertConcurrentGenerationSource(t, err, modulePath, "plystra.yaml", "configuration-declaration")
 	if got := string(readAbsoluteFile(t, manifestPath)); got != second {
 		t.Fatalf("concurrent private configuration edit was not preserved: %q", got)
 	}
@@ -3603,6 +3607,38 @@ extensions:
 	entries, err = os.ReadDir(temporaryParent)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("temporary extension helpers after changed contribution = %v, %v", entries, err)
+	}
+}
+
+func assertConcurrentGenerationSource(t testing.TB, err error, modulePath, sourcePath, sourceKind string) {
+	t.Helper()
+	var concurrent *applicationgenerate.ConcurrentChangeSourceError
+	if !errors.As(err, &concurrent) || concurrent == nil {
+		t.Fatalf("concurrent source error missing from %v", err)
+	}
+	found := false
+	for _, source := range concurrent.Sources() {
+		if source.ModulePath() == modulePath && source.SourcePath() == sourcePath && source.SourceKind() == sourceKind && source.Line() == 0 && source.Column() == 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("concurrent sources = %#v, want %s:%s (%s)", concurrent.Sources(), modulePath, sourcePath, sourceKind)
+	}
+	sources := concurrent.Sources()
+	if len(sources) != 0 {
+		sources[0] = applicationgenerate.ConcurrentChangeSource{}
+	}
+	found = false
+	for _, source := range concurrent.Sources() {
+		if source.ModulePath() == modulePath && source.SourcePath() == sourcePath && source.SourceKind() == sourceKind {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("ConcurrentChangeSourceError.Sources exposed mutable storage")
 	}
 }
 

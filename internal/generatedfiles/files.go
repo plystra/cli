@@ -305,6 +305,7 @@ func validateInstalledOutput(root string, output Output, rejectUnexpected bool) 
 
 func invalidInstalledReport(report Report, rejectUnexpected bool) error {
 	concurrent := make([]string, 0)
+	concurrentPaths := make([]string, 0)
 	unexpected := make([]string, 0)
 	for _, change := range report.changes {
 		description := fmt.Sprintf("%s file %s", change.kind, change.path)
@@ -315,10 +316,14 @@ func invalidInstalledReport(report Report, rejectUnexpected bool) error {
 			continue
 		}
 		concurrent = append(concurrent, description)
+		concurrentPaths = append(concurrentPaths, change.path)
 	}
 	var result error
 	if len(concurrent) != 0 {
-		result = errors.Join(result, fmt.Errorf("%w: %s", atomicfs.ErrConcurrentChange, strings.Join(concurrent, ", ")))
+		result = errors.Join(result, atomicfs.NewConcurrentChangeError(
+			concurrentPaths,
+			fmt.Errorf("%w: %s", atomicfs.ErrConcurrentChange, strings.Join(concurrent, ", ")),
+		))
 	}
 	if len(unexpected) != 0 {
 		result = errors.Join(result, newUnexpectedOutputError(unexpected))
@@ -723,7 +728,10 @@ func readStableRootFile(root *os.Root, filePath string, before fs.FileInfo, maxi
 	}
 	if !sameManifestFile(before, opened) {
 		_ = file.Close()
-		return nil, fmt.Errorf("%w: %w: %s was replaced before open", ErrManifest, atomicfs.ErrConcurrentChange, filePath)
+		return nil, atomicfs.NewConcurrentChangeError(
+			[]string{filePath},
+			fmt.Errorf("%w: %w: %s was replaced before open", ErrManifest, atomicfs.ErrConcurrentChange, filePath),
+		)
 	}
 	data, dataErr := io.ReadAll(io.LimitReader(file, maximumBytes+1))
 	closeErr := file.Close()
@@ -738,7 +746,10 @@ func readStableRootFile(root *os.Root, filePath string, before fs.FileInfo, maxi
 	}
 	after, err := root.Lstat(filepath.FromSlash(filePath))
 	if err != nil || !sameManifestFile(opened, after) {
-		return nil, fmt.Errorf("%w: %w: %s changed while it was read", ErrManifest, atomicfs.ErrConcurrentChange, filePath)
+		return nil, atomicfs.NewConcurrentChangeError(
+			[]string{filePath},
+			fmt.Errorf("%w: %w: %s changed while it was read", ErrManifest, atomicfs.ErrConcurrentChange, filePath),
+		)
 	}
 	return data, nil
 }
@@ -793,7 +804,10 @@ func ReadApplicationManifestRecovery(rootPath string) (result []byte, exists boo
 	}
 	if !sameManifestFile(before, opened) {
 		_ = file.Close()
-		return nil, false, fmt.Errorf("%w: %w: %s was replaced before open", ErrManifest, atomicfs.ErrConcurrentChange, ManifestPath)
+		return nil, false, atomicfs.NewConcurrentChangeError(
+			[]string{ManifestPath},
+			fmt.Errorf("%w: %w: %s was replaced before open", ErrManifest, atomicfs.ErrConcurrentChange, ManifestPath),
+		)
 	}
 	data, dataErr := io.ReadAll(io.LimitReader(file, maximumManifestBytes+1))
 	closeErr := file.Close()
@@ -808,7 +822,10 @@ func ReadApplicationManifestRecovery(rootPath string) (result []byte, exists boo
 	}
 	after, err := root.Lstat(manifestPath)
 	if err != nil || !sameManifestFile(opened, after) {
-		return nil, false, fmt.Errorf("%w: %w: %s changed while it was read", ErrManifest, atomicfs.ErrConcurrentChange, ManifestPath)
+		return nil, false, atomicfs.NewConcurrentChangeError(
+			[]string{ManifestPath},
+			fmt.Errorf("%w: %w: %s changed while it was read", ErrManifest, atomicfs.ErrConcurrentChange, ManifestPath),
+		)
 	}
 	document, err := decodeManifestDocument(data)
 	if err != nil {

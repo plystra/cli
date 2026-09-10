@@ -1255,10 +1255,9 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   PLYSTRA_GENERATED_UNEXPECTED_OUTPUT:
   restore, regenerate, or move generated-artifact Sources.
 - PLYSTRA_GO_MODULE_INVALID: fix exact go.mod Source.
-- PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: go.mod module-dependency; generate repairs
-  Kernel/runtime requirements; checks are read-only.
-- PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: reported sources own config;
-  select or make its constructor reachable, or remove it. Values stay redacted.
+- PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: generate fixes module-dependency; checks read-only.
+- PLYSTRA_PROJECT_CONCURRENT_CHANGE: stop edits; rerun when sorted path-only Sources settle.
+- PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: select or reach constructor, or remove config; values stay redacted.
 - Incompatible contract: compare full contract/metadata; implement it or create
   a version. Never weaken validation.
 - Interface authoring codes:

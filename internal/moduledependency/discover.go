@@ -168,7 +168,11 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 	goModPath := filepath.Join(application.Path(), "go.mod")
 	before, err := readGoMod(goModPath)
 	if err != nil {
-		return Index{}, fmt.Errorf("%w: %w: %v", ErrDiscover, ErrInvalidGoMod, err)
+		cause := fmt.Errorf("%w: %w", ErrInvalidGoMod, err)
+		if errors.Is(err, ErrConcurrentChange) {
+			cause = goModSourceError(application.ModulePath(), 0, 0, cause)
+		}
+		return Index{}, fmt.Errorf("%w: %w", ErrDiscover, cause)
 	}
 	requirements, err := parseRequirements(before.data, application.ModulePath())
 	if err != nil {
@@ -193,14 +197,23 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		if err == nil {
 			err = ErrConcurrentChange
 		}
-		return Index{}, fmt.Errorf("%w: %w: application go.mod changed: %v", ErrDiscover, ErrConcurrentChange, err)
+		return Index{}, fmt.Errorf(
+			"%w: %w",
+			ErrDiscover,
+			goModSourceError(
+				application.ModulePath(),
+				0,
+				0,
+				fmt.Errorf("%w: application go.mod changed: %v", ErrConcurrentChange, err),
+			),
+		)
 	}
 
 	modules, err := decodeModules(output, application, requirements)
 	if err != nil {
 		return Index{}, fmt.Errorf("%w: %w", ErrDiscover, err)
 	}
-	if err := resolveMissingSources(ctx, application.Path(), before, modules, options, outputLimit); err != nil {
+	if err := resolveMissingSources(ctx, application.Path(), application.ModulePath(), before, modules, options, outputLimit); err != nil {
 		return Index{}, fmt.Errorf("%w: %w", ErrDiscover, err)
 	}
 	for index := range modules {
@@ -432,7 +445,7 @@ type downloadedModule struct {
 	GoMod   string `json:"GoMod"`
 }
 
-func resolveMissingSources(ctx context.Context, applicationRoot string, expectedGoMod fileSnapshot, modules []Module, options Options, outputLimit int) error {
+func resolveMissingSources(ctx context.Context, applicationRoot, applicationModulePath string, expectedGoMod fileSnapshot, modules []Module, options Options, outputLimit int) error {
 	missing := false
 	for _, dependency := range modules {
 		if dependency.root == "" {
@@ -501,7 +514,12 @@ func resolveMissingSources(ctx context.Context, applicationRoot string, expected
 		if err == nil {
 			err = ErrConcurrentChange
 		}
-		return fmt.Errorf("%w: application go.mod changed while resolving sources: %v", ErrConcurrentChange, err)
+		return goModSourceError(
+			applicationModulePath,
+			0,
+			0,
+			fmt.Errorf("%w: application go.mod changed while resolving sources: %v", ErrConcurrentChange, err),
+		)
 	}
 	return nil
 }

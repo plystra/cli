@@ -55,10 +55,10 @@ const (
 Common actionable failures end with one Recovery block containing the primary
 command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
 Typed source-bearing failures, including invalid Project and Go Module
-declarations, current-Project configuration-composition, generated-output
-conflicts and drift, application module dependency drift, invalid explicit
-choices, and missing, ambiguous, or cyclic Interface Implementation resolution,
-add canonical module-relative Source lines first.
+declarations, current-Project configuration-composition, concurrent Project
+inputs, generated-output conflicts and drift, application module dependency
+drift, invalid explicit choices, and missing, ambiguous, or cyclic Interface
+Implementation resolution, add canonical module-relative Source lines first.
 `
 	addUsage = `Usage:
   plystra add <go-module-query>
@@ -202,6 +202,10 @@ PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED reports the effective http.expose
 document at 1:1 as an exposure source before selector-aware recovery.
 PLYSTRA_CAPABILITY_MANIFEST_INVALID reports the invalid authored capability.yaml
 at 1:1 as a provider-declaration source before recovery.
+PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
+configuration, go.mod/go.sum, or generated path as a sorted path-only
+configuration-declaration, module-dependency, or generated-artifact source
+without a fabricated span.
 `
 	checkUsage = `Usage:
   plystra check [--env <environment>|--config <yaml-path>]
@@ -267,6 +271,10 @@ PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED reports the effective http.expose
 document at 1:1 as an exposure source before selector-aware recovery.
 PLYSTRA_CAPABILITY_MANIFEST_INVALID reports the invalid authored capability.yaml
 at 1:1 as a provider-declaration source before recovery.
+PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
+configuration, go.mod/go.sum, or generated path as a sorted path-only
+configuration-declaration, module-dependency, or generated-artifact source
+without a fabricated span.
 `
 	inspectUsage = `Usage:
   plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]

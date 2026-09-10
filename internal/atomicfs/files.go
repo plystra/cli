@@ -21,6 +21,99 @@ var (
 	ErrConcurrentChange = errors.New("transaction target changed concurrently")
 )
 
+// ConcurrentChangeError retains every transaction-relative path affected by a
+// concurrent change without altering the established human-readable error.
+type ConcurrentChangeError struct {
+	paths []string
+	cause error
+}
+
+// Paths returns defensive, sorted slash-separated transaction-relative paths.
+func (e *ConcurrentChangeError) Paths() []string {
+	if e == nil {
+		return nil
+	}
+	return append([]string(nil), e.paths...)
+}
+
+func (e *ConcurrentChangeError) Error() string {
+	if e == nil || e.cause == nil {
+		return ErrConcurrentChange.Error()
+	}
+	return e.cause.Error()
+}
+
+// Unwrap preserves the original transaction failure chain.
+func (e *ConcurrentChangeError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+// Is preserves the concurrent-change classification even when a caller wraps
+// a lower-level filesystem error that did not itself carry the sentinel.
+func (e *ConcurrentChangeError) Is(target error) bool {
+	return e != nil && target == ErrConcurrentChange
+}
+
+// NewConcurrentChangeError attaches affected transaction-relative paths to a
+// concurrent-change failure. Empty paths are ignored and duplicates collapse.
+func NewConcurrentChangeError(paths []string, cause error) error {
+	if cause == nil {
+		return nil
+	}
+	paths = canonicalConcurrentChangePaths(paths)
+	if len(paths) == 0 {
+		return cause
+	}
+	return &ConcurrentChangeError{paths: paths, cause: cause}
+}
+
+// ConcurrentChangePaths returns every typed affected path found across an
+// ordinary or errors.Join error tree in deterministic order.
+func ConcurrentChangePaths(err error) []string {
+	var paths []string
+	var walk func(error)
+	walk = func(current error) {
+		if current == nil {
+			return
+		}
+		if concurrent, ok := current.(*ConcurrentChangeError); ok {
+			paths = append(paths, concurrent.paths...)
+			walk(concurrent.cause)
+			return
+		}
+		switch current := current.(type) {
+		case interface{ Unwrap() []error }:
+			for _, child := range current.Unwrap() {
+				walk(child)
+			}
+		case interface{ Unwrap() error }:
+			walk(current.Unwrap())
+		}
+	}
+	walk(err)
+	return canonicalConcurrentChangePaths(paths)
+}
+
+func canonicalConcurrentChangePaths(paths []string) []string {
+	unique := make(map[string]struct{}, len(paths))
+	for _, value := range paths {
+		value = filepath.ToSlash(filepath.Clean(value))
+		if value == "" || value == "." {
+			continue
+		}
+		unique[value] = struct{}{}
+	}
+	canonical := make([]string, 0, len(unique))
+	for value := range unique {
+		canonical = append(canonical, value)
+	}
+	sort.Strings(canonical)
+	return canonical
+}
+
 // Write describes one complete file replacement.
 type Write struct {
 	Path               string
@@ -265,14 +358,20 @@ func planWrites(root *os.Root, writes []Write, seen map[string]struct{}) ([]plan
 				return nil, fmt.Errorf("%w: read %s: %w", ErrWriteFiles, canonical, err)
 			}
 			if item.expectOriginal && !bytes.Equal(item.original, item.expected) {
-				return nil, fmt.Errorf("%w: %w: %s does not match the planned source snapshot", ErrWriteFiles, ErrConcurrentChange, canonical)
+				return nil, NewConcurrentChangeError(
+					[]string{canonical},
+					fmt.Errorf("%w: %w: %s does not match the planned source snapshot", ErrWriteFiles, ErrConcurrentChange, canonical),
+				)
 			}
 			if write.Mode.Perm() == 0 {
 				item.mode = item.originalMode
 			}
 		case errors.Is(err, fs.ErrNotExist):
 			if item.expectOriginal {
-				return nil, fmt.Errorf("%w: %w: %s is missing from the planned source snapshot", ErrWriteFiles, ErrConcurrentChange, canonical)
+				return nil, NewConcurrentChangeError(
+					[]string{canonical},
+					fmt.Errorf("%w: %w: %s is missing from the planned source snapshot", ErrWriteFiles, ErrConcurrentChange, canonical),
+				)
 			}
 		case err != nil:
 			return nil, fmt.Errorf("%w: inspect %s: %w", ErrWriteFiles, canonical, err)
@@ -316,7 +415,10 @@ func planRemoves(root *os.Root, removes []Remove, seen map[string]struct{}) ([]p
 			return nil, fmt.Errorf("%w: read remove target %s: %w", ErrWriteFiles, canonical, err)
 		}
 		if remove.ExpectedData != nil && !bytes.Equal(original, remove.ExpectedData) {
-			return nil, fmt.Errorf("%w: %w: %s does not match the planned removal snapshot", ErrWriteFiles, ErrConcurrentChange, canonical)
+			return nil, NewConcurrentChangeError(
+				[]string{canonical},
+				fmt.Errorf("%w: %w: %s does not match the planned removal snapshot", ErrWriteFiles, ErrConcurrentChange, canonical),
+			)
 		}
 		planned = append(planned, plannedRemove{
 			path:         canonical,
@@ -409,7 +511,10 @@ func createParentDirectories(root *os.Root, planned []plannedWrite) ([]string, e
 			switch {
 			case err == nil:
 				if _, appeared := expectedMissing[current]; appeared {
-					return created, fmt.Errorf("%w: parent %s appeared", ErrConcurrentChange, filepath.ToSlash(current))
+					return created, NewConcurrentChangeError(
+						[]string{current},
+						fmt.Errorf("%w: parent %s appeared", ErrConcurrentChange, filepath.ToSlash(current)),
+					)
 				}
 				if !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
 					return created, fmt.Errorf("%w: parent %s is not a regular directory", ErrUnsafePath, filepath.ToSlash(current))
@@ -417,7 +522,10 @@ func createParentDirectories(root *os.Root, planned []plannedWrite) ([]string, e
 			case errors.Is(err, fs.ErrNotExist):
 				if err := root.Mkdir(current, 0o755); err != nil {
 					if errors.Is(err, fs.ErrExist) {
-						return created, fmt.Errorf("%w: parent %s appeared", ErrConcurrentChange, filepath.ToSlash(current))
+						return created, NewConcurrentChangeError(
+							[]string{current},
+							fmt.Errorf("%w: parent %s appeared", ErrConcurrentChange, filepath.ToSlash(current)),
+						)
 					}
 					return created, fmt.Errorf("%w: create parent %s: %w", ErrWriteFiles, filepath.ToSlash(current), err)
 				}
@@ -437,22 +545,22 @@ func confirmUnchanged(root *os.Root, write plannedWrite) error {
 			return nil
 		}
 		if err == nil {
-			return fmt.Errorf("%w: %s appeared", ErrConcurrentChange, write.path)
+			return NewConcurrentChangeError([]string{write.path}, fmt.Errorf("%w: %s appeared", ErrConcurrentChange, write.path))
 		}
 		return fmt.Errorf("%w: inspect %s: %v", ErrWriteFiles, write.path, err)
 	}
 	if err != nil {
-		return fmt.Errorf("%w: %s disappeared", ErrConcurrentChange, write.path)
+		return NewConcurrentChangeError([]string{write.path}, fmt.Errorf("%w: %s disappeared", ErrConcurrentChange, write.path))
 	}
 	if !info.Mode().IsRegular() || info.Mode()&fs.ModeSymlink != 0 || info.Mode().Perm() != write.originalMode {
-		return fmt.Errorf("%w: %s metadata changed", ErrConcurrentChange, write.path)
+		return NewConcurrentChangeError([]string{write.path}, fmt.Errorf("%w: %s metadata changed", ErrConcurrentChange, write.path))
 	}
 	current, err := root.ReadFile(write.osPath)
 	if err != nil {
 		return fmt.Errorf("%w: read %s: %v", ErrWriteFiles, write.path, err)
 	}
 	if !bytes.Equal(current, write.original) {
-		return fmt.Errorf("%w: %s contents changed", ErrConcurrentChange, write.path)
+		return NewConcurrentChangeError([]string{write.path}, fmt.Errorf("%w: %s contents changed", ErrConcurrentChange, write.path))
 	}
 	return nil
 }
@@ -460,17 +568,17 @@ func confirmUnchanged(root *os.Root, write plannedWrite) error {
 func confirmRemoveUnchanged(root *os.Root, remove plannedRemove) error {
 	info, err := root.Lstat(remove.osPath)
 	if err != nil {
-		return fmt.Errorf("%w: %s disappeared", ErrConcurrentChange, remove.path)
+		return NewConcurrentChangeError([]string{remove.path}, fmt.Errorf("%w: %s disappeared", ErrConcurrentChange, remove.path))
 	}
 	if !info.Mode().IsRegular() || info.Mode()&fs.ModeSymlink != 0 || info.Mode().Perm() != remove.originalMode {
-		return fmt.Errorf("%w: %s metadata changed", ErrConcurrentChange, remove.path)
+		return NewConcurrentChangeError([]string{remove.path}, fmt.Errorf("%w: %s metadata changed", ErrConcurrentChange, remove.path))
 	}
 	current, err := root.ReadFile(remove.osPath)
 	if err != nil {
 		return fmt.Errorf("%w: read %s: %v", ErrWriteFiles, remove.path, err)
 	}
 	if !bytes.Equal(current, remove.original) {
-		return fmt.Errorf("%w: %s contents changed", ErrConcurrentChange, remove.path)
+		return NewConcurrentChangeError([]string{remove.path}, fmt.Errorf("%w: %s contents changed", ErrConcurrentChange, remove.path))
 	}
 	return nil
 }
@@ -486,7 +594,10 @@ func rollbackWrites(root *os.Root, applied []appliedWrite, createdDirectories []
 				continue
 			}
 			if !matches {
-				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("%w: %s changed during validation", ErrConcurrentChange, filepath.ToSlash(write.path)))
+				rollbackErr = errors.Join(rollbackErr, NewConcurrentChangeError(
+					[]string{write.path},
+					fmt.Errorf("%w: %s changed during validation", ErrConcurrentChange, filepath.ToSlash(write.path)),
+				))
 				continue
 			}
 			if err := root.Remove(write.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -496,7 +607,10 @@ func rollbackWrites(root *os.Root, applied []appliedWrite, createdDirectories []
 		}
 		if write.existed {
 			if _, err := root.Lstat(write.path); err == nil {
-				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("%w: %s appeared before restore", ErrConcurrentChange, filepath.ToSlash(write.path)))
+				rollbackErr = errors.Join(rollbackErr, NewConcurrentChangeError(
+					[]string{write.path},
+					fmt.Errorf("%w: %s appeared before restore", ErrConcurrentChange, filepath.ToSlash(write.path)),
+				))
 				continue
 			} else if !errors.Is(err, fs.ErrNotExist) {
 				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("inspect restore target %s: %w", filepath.ToSlash(write.path), err))
@@ -523,7 +637,10 @@ func rollbackRemoves(root *os.Root, removed []appliedRemove) error {
 	for index := len(removed) - 1; index >= 0; index-- {
 		remove := removed[index]
 		if _, err := root.Lstat(remove.path); err == nil {
-			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("%w: %s appeared before restore", ErrConcurrentChange, filepath.ToSlash(remove.path)))
+			rollbackErr = errors.Join(rollbackErr, NewConcurrentChangeError(
+				[]string{remove.path},
+				fmt.Errorf("%w: %s appeared before restore", ErrConcurrentChange, filepath.ToSlash(remove.path)),
+			))
 			continue
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("inspect removed target %s: %w", filepath.ToSlash(remove.path), err))

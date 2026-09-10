@@ -125,6 +125,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_APPLICATION_DEPENDENCY_DRIFT`" + ` reports the current Project ` + "`go.mod`" + ` at ` + "`1:1`" + ` as a ` + "`module-dependency`" + ` source when the Kernel is missing or only transitive, or a generated runtime requirement has drifted. ` + "`plystra generate --check`" + ` and ` + "`plystra check`" + ` are read-only; normal generation transactionally restores the CLI-supported direct Kernel release and required runtime modules before validation.
 
+` + "`PLYSTRA_PROJECT_CONCURRENT_CHANGE`" + ` reports every deterministically known path that changed while resolution or generation verified a stable snapshot. Current-Project and dependency ` + "`plystra.yaml`" + ` documents use ` + "`configuration-declaration`" + `; current-Project ` + "`go.mod`" + ` or ` + "`go.sum`" + ` uses ` + "`module-dependency`" + `; and managed ` + "`generated/...`" + ` paths use ` + "`generated-artifact`" + `. Sources are sorted, deduplicated, module-relative, and omit a fabricated span. Stop concurrent Project edits and rerun against unchanged inputs; rollback preserves bytes written by the other editor.
+
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 ` + "`plystra plugin create`" + ` uses ` + "`PLYSTRA_PLUGIN_CREATE_NAME_INVALID`" + ` for an invalid or reserved root-level name, ` + "`PLYSTRA_PLUGIN_CREATE_ID_INVALID`" + ` when the Project module namespace and name cannot form a canonical Plugin ID, and ` + "`PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS`" + ` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.
@@ -1496,10 +1498,9 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   PLYSTRA_GENERATED_UNEXPECTED_OUTPUT:
   restore, regenerate, or move generated-artifact Sources.
 - PLYSTRA_GO_MODULE_INVALID: fix exact go.mod Source.
-- PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: go.mod module-dependency; generate repairs
-  Kernel/runtime requirements; checks are read-only.
-- PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: reported sources own config;
-  select or make its constructor reachable, or remove it. Values stay redacted.
+- PLYSTRA_APPLICATION_DEPENDENCY_DRIFT: generate fixes module-dependency; checks read-only.
+- PLYSTRA_PROJECT_CONCURRENT_CHANGE: stop edits; rerun when sorted path-only Sources settle.
+- PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: select or reach constructor, or remove config; values stay redacted.
 - Incompatible contract: compare full contract/metadata; implement it or create
   a version. Never weaken validation.
 - Interface authoring codes:

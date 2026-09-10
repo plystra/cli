@@ -859,6 +859,8 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"PLYSTRA_GO_MODULE_INVALID",
 		"PLYSTRA_APPLICATION_DEPENDENCY_DRIFT",
 		"module-dependency",
+		"PLYSTRA_PROJECT_CONCURRENT_CHANGE",
+		"sorted path-only Sources",
 		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID",
 		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID",
 		"effective interfaces.use sources",

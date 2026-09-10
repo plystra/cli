@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/moduledependency"
 )
@@ -118,7 +119,11 @@ func loadConfiguration(modulePath, moduleRoot, relativePath string) (ManifestSna
 func loadProjectManifest(modulePath, moduleRoot string) (ManifestSnapshot, applicationmeta.Manifest, error) {
 	snapshot, err := ReadManifestSnapshot(moduleRoot)
 	if err != nil {
-		return ManifestSnapshot{}, applicationmeta.Manifest{}, manifestSourceError(
+		sourceError := manifestSourceError
+		if errors.Is(err, ErrConcurrentChange) {
+			sourceError = configurationSourceError
+		}
+		return ManifestSnapshot{}, applicationmeta.Manifest{}, sourceError(
 			modulePath,
 			applicationManifestName,
 			0,
@@ -146,6 +151,15 @@ func loadEnvironmentOverlay(modulePath, moduleRoot, relativePath string) (Manife
 func loadConfigurationWithParser(modulePath, moduleRoot, relativePath string, parse func(string, []byte) (applicationmeta.Manifest, error)) (ManifestSnapshot, applicationmeta.Manifest, error) {
 	snapshot, err := readManifestSnapshot(moduleRoot, relativePath)
 	if err != nil {
+		if errors.Is(err, ErrConcurrentChange) {
+			return ManifestSnapshot{}, applicationmeta.Manifest{}, configurationSourceError(
+				modulePath,
+				relativePath,
+				0,
+				0,
+				fmt.Errorf("%w: %w", ErrManifest, err),
+			)
+		}
 		return ManifestSnapshot{}, applicationmeta.Manifest{}, fmt.Errorf("%w: %w", ErrManifest, err)
 	}
 	manifest, err := parse(snapshot.path, snapshot.data)
@@ -162,9 +176,10 @@ func loadConfigurationWithParser(modulePath, moduleRoot, relativePath string, pa
 }
 
 type dependencyManifestSnapshot struct {
-	identity string
-	root     string
-	snapshot ManifestSnapshot
+	modulePath string
+	identity   string
+	root       string
+	snapshot   ManifestSnapshot
 }
 
 func loadDependencyManifests(dependencies []moduledependency.Module) ([]dependencyManifestSnapshot, []applicationmeta.Dependency, error) {
@@ -173,7 +188,11 @@ func loadDependencyManifests(dependencies []moduledependency.Module) ([]dependen
 	for _, dependency := range dependencies {
 		snapshot, err := ReadManifestSnapshot(dependency.Root())
 		if err != nil {
-			return nil, nil, manifestSourceError(
+			sourceError := manifestSourceError
+			if errors.Is(err, ErrConcurrentChange) {
+				sourceError = configurationSourceError
+			}
+			return nil, nil, sourceError(
 				dependency.Path(),
 				applicationManifestName,
 				0,
@@ -192,9 +211,10 @@ func loadDependencyManifests(dependencies []moduledependency.Module) ([]dependen
 			)
 		}
 		snapshots = append(snapshots, dependencyManifestSnapshot{
-			identity: dependencyIdentity(dependency),
-			root:     dependency.Root(),
-			snapshot: snapshot,
+			modulePath: dependency.Path(),
+			identity:   dependencyIdentity(dependency),
+			root:       dependency.Root(),
+			snapshot:   snapshot,
 		})
 		manifests = append(manifests, applicationmeta.Dependency{
 			ModulePath:    dependency.Path(),
@@ -214,10 +234,16 @@ func configurationSourceError(modulePath, sourcePath string, line, column int, c
 }
 
 func generatedManifestSourceError(modulePath string, cause error) error {
-	if !errors.Is(cause, generatedfiles.ErrManifest) {
+	if !errors.Is(cause, generatedfiles.ErrManifest) && !errors.Is(cause, ErrConcurrentChange) && !errors.Is(cause, atomicfs.ErrConcurrentChange) {
 		return cause
 	}
-	return newManifestSourceError(modulePath, generatedfiles.ManifestPath, generatedArtifactSourceKind, 0, 0, cause)
+	sourcePath := generatedfiles.ManifestPath
+	if paths := atomicfs.ConcurrentChangePaths(cause); len(paths) != 0 {
+		sourcePath = paths[0]
+	} else if errors.Is(cause, ErrConcurrentChange) && !errors.Is(cause, generatedfiles.ErrManifest) {
+		sourcePath = generatedApplicationManifestName
+	}
+	return newManifestSourceError(modulePath, sourcePath, generatedArtifactSourceKind, 0, 0, cause)
 }
 
 func newManifestSourceError(modulePath, sourcePath, sourceKind string, line, column int, cause error) error {
@@ -238,10 +264,22 @@ func recheckDependencyManifests(snapshots []dependencyManifestSnapshot) error {
 	for _, before := range snapshots {
 		after, err := ReadManifestSnapshot(before.root)
 		if err != nil {
-			return fmt.Errorf("%w: dependency Project %s plystra.yaml: %v", ErrConcurrentChange, before.identity, err)
+			return configurationSourceError(
+				before.modulePath,
+				before.snapshot.path,
+				0,
+				0,
+				fmt.Errorf("%w: dependency Project %s plystra.yaml: %v", ErrConcurrentChange, before.identity, err),
+			)
 		}
 		if !sameManifestSnapshot(before.snapshot, after) {
-			return fmt.Errorf("%w: dependency Project %s plystra.yaml changed before resolution completed", ErrConcurrentChange, before.identity)
+			return configurationSourceError(
+				before.modulePath,
+				before.snapshot.path,
+				0,
+				0,
+				fmt.Errorf("%w: dependency Project %s plystra.yaml changed before resolution completed", ErrConcurrentChange, before.identity),
+			)
 		}
 	}
 	return nil
@@ -441,7 +479,10 @@ func readGeneratedApplicationManifest(moduleRoot string) (result []byte, exists 
 	}
 	if !opened.Mode().IsRegular() || !sameFile(before, opened) {
 		_ = file.Close()
-		return nil, false, fmt.Errorf("%w: %s was replaced before open", ErrConcurrentChange, generatedApplicationManifestName)
+		return nil, false, atomicfs.NewConcurrentChangeError(
+			[]string{generatedApplicationManifestName},
+			fmt.Errorf("%w: %s was replaced before open", ErrConcurrentChange, generatedApplicationManifestName),
+		)
 	}
 	data, dataErr := io.ReadAll(io.LimitReader(file, maximumGeneratedManifestSize+1))
 	closeErr := file.Close()
@@ -453,7 +494,10 @@ func readGeneratedApplicationManifest(moduleRoot string) (result []byte, exists 
 	}
 	after, err := root.Lstat(filepath.FromSlash(generatedApplicationManifestName))
 	if err != nil || !sameFile(opened, after) {
-		return nil, false, fmt.Errorf("%w: %s changed while it was read", ErrConcurrentChange, generatedApplicationManifestName)
+		return nil, false, atomicfs.NewConcurrentChangeError(
+			[]string{generatedApplicationManifestName},
+			fmt.Errorf("%w: %s changed while it was read", ErrConcurrentChange, generatedApplicationManifestName),
+		)
 	}
 	if len(data) > maximumGeneratedManifestSize {
 		return nil, false, fmt.Errorf("%s exceeds %d bytes", generatedApplicationManifestName, maximumGeneratedManifestSize)

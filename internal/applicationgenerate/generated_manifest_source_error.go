@@ -3,6 +3,8 @@ package applicationgenerate
 import (
 	"errors"
 
+	"github.com/plystra/cli/internal/applicationresolve"
+	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/generatedfiles"
 )
 
@@ -62,7 +64,8 @@ func (e *GeneratedManifestSourceError) Unwrap() error {
 }
 
 func generatedManifestSourceError(modulePath string, cause error) error {
-	if modulePath == "" || cause == nil || !errors.Is(cause, generatedfiles.ErrManifest) {
+	if modulePath == "" || cause == nil || !errors.Is(cause, generatedfiles.ErrManifest) ||
+		errors.Is(cause, ErrConcurrentChange) || errors.Is(cause, applicationresolve.ErrConcurrentChange) || errors.Is(cause, atomicfs.ErrConcurrentChange) {
 		return cause
 	}
 	var existing *GeneratedManifestSourceError

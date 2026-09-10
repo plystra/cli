@@ -70,7 +70,7 @@ func (e *GoModSourceError) Unwrap() error {
 }
 
 func goModSourceError(modulePath string, line, column int, cause error) error {
-	if cause == nil || modulePath == "" || line <= 0 || column <= 0 {
+	if cause == nil || modulePath == "" || line < 0 || column < 0 || line == 0 && column != 0 || line != 0 && column == 0 {
 		return cause
 	}
 	return &GoModSourceError{

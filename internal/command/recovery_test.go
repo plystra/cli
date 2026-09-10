@@ -581,6 +581,42 @@ type Response struct{}
 	}
 }
 
+func TestWriteCommandFailureReportsJoinedConcurrentChangeSources(t *testing.T) {
+	t.Parallel()
+
+	moduleChange := &concurrentSourceTestError{
+		modulePath: "example.com/a",
+		sourcePath: "go.mod",
+		sourceKind: "module-dependency",
+		cause:      fmt.Errorf("application go.mod changed: %w", moduledependency.ErrConcurrentChange),
+	}
+	configurationChange := &concurrentSourceTestError{
+		modulePath: "example.com/z",
+		sourcePath: "plystra.yaml",
+		sourceKind: "configuration-declaration",
+		cause:      fmt.Errorf("root configuration changed: %w", applicationresolve.ErrConcurrentChange),
+	}
+	joined := fmt.Errorf(
+		"generate Project: %w",
+		errors.Join(generatedfiles.ErrManifest, configurationChange, moduleChange, moduleChange),
+	)
+
+	var output strings.Builder
+	writeCommandFailure(&output, "generate", joined, recoveryContext{})
+	got := output.String()
+	wantSuffix := "\n\n" +
+		"Source: example.com/a:go.mod (module-dependency)\n" +
+		"Source: example.com/z:plystra.yaml (configuration-declaration)\n\n" +
+		"Recovery:\nStop concurrent Project edits, then rerun the command against the unchanged authored inputs.\n\n" +
+		"Diagnostic: " + diagnosticProjectConcurrentChange + "\n"
+	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 2 {
+		t.Fatalf("concurrent change output = %q, want suffix %q", got, wantSuffix)
+	}
+	if strings.Contains(got, "Diagnostic: "+diagnosticGeneratedManifestInvalid) || strings.Count(got, "Diagnostic: ") != 1 {
+		t.Fatalf("concurrent change output did not retain primary classification: %q", got)
+	}
+}
+
 func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 	t.Parallel()
 
@@ -1037,6 +1073,21 @@ func recoveryProviderFailures(t *testing.T) (missing, ambiguous, invalidChoice, 
 	}
 	return missing, ambiguous, invalidChoice, mismatch, contractConflict
 }
+
+type concurrentSourceTestError struct {
+	modulePath string
+	sourcePath string
+	sourceKind string
+	cause      error
+}
+
+func (e *concurrentSourceTestError) Error() string      { return e.cause.Error() }
+func (e *concurrentSourceTestError) Unwrap() error      { return e.cause }
+func (e *concurrentSourceTestError) ModulePath() string { return e.modulePath }
+func (e *concurrentSourceTestError) SourcePath() string { return e.sourcePath }
+func (e *concurrentSourceTestError) SourceKind() string { return e.sourceKind }
+func (*concurrentSourceTestError) Line() int            { return 0 }
+func (*concurrentSourceTestError) Column() int          { return 0 }
 
 func recoveryContract(fieldType string) []byte {
 	return []byte("id: email.send/v1\nrequest: {value: {type: " + fieldType + "}}\n" + `semantics:

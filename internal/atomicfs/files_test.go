@@ -48,6 +48,38 @@ func TestWriteFilesCommitsAfterValidation(t *testing.T) {
 	assertNoFileTransaction(t, root)
 }
 
+func TestConcurrentChangeErrorPreservesMessageAndCollectsJoinedPaths(t *testing.T) {
+	t.Parallel()
+
+	firstCause := errors.New("first concurrent failure")
+	first := atomicfs.NewConcurrentChangeError([]string{"zeta/file.txt", `alpha\file.txt`, "zeta/file.txt", ""}, firstCause)
+	second := atomicfs.NewConcurrentChangeError([]string{"middle/file.txt"}, errors.New("second concurrent failure"))
+	joined := errors.Join(first, second)
+
+	if first.Error() != firstCause.Error() {
+		t.Fatalf("ConcurrentChangeError message = %q, want %q", first.Error(), firstCause)
+	}
+	if !errors.Is(first, atomicfs.ErrConcurrentChange) {
+		t.Fatalf("ConcurrentChangeError = %v, want ErrConcurrentChange", first)
+	}
+	var concurrent *atomicfs.ConcurrentChangeError
+	if !errors.As(first, &concurrent) || concurrent == nil {
+		t.Fatalf("ConcurrentChangeError type missing from %v", first)
+	}
+	wantFirst := "alpha/file.txt,zeta/file.txt"
+	if got := strings.Join(concurrent.Paths(), ","); got != wantFirst {
+		t.Fatalf("ConcurrentChangeError.Paths = %q, want %q", got, wantFirst)
+	}
+	paths := concurrent.Paths()
+	paths[0] = "mutated"
+	if got := strings.Join(concurrent.Paths(), ","); got != wantFirst {
+		t.Fatalf("ConcurrentChangeError.Paths changed through returned slice: %q", got)
+	}
+	if got, want := strings.Join(atomicfs.ConcurrentChangePaths(joined), ","), "alpha/file.txt,middle/file.txt,zeta/file.txt"; got != want {
+		t.Fatalf("ConcurrentChangePaths = %q, want %q", got, want)
+	}
+}
+
 func TestApplyFilesCommitsWritesAndRemovalsAfterValidation(t *testing.T) {
 	t.Parallel()
 
@@ -300,6 +332,9 @@ func TestApplyFilesPreservesConcurrentCreationAndRemovalRecoveryBackup(t *testin
 	if !errors.Is(err, validationErr) || !errors.Is(err, atomicfs.ErrConcurrentChange) {
 		t.Fatalf("ApplyFiles error = %v", err)
 	}
+	if got := strings.Join(atomicfs.ConcurrentChangePaths(err), ","); got != "obsolete.txt" {
+		t.Fatalf("ApplyFiles concurrent paths = %q, want obsolete.txt", got)
+	}
 	if !strings.Contains(err.Error(), "recovery data retained in .plystra-files-") {
 		t.Fatalf("ApplyFiles error does not identify recovery data: %v", err)
 	}
@@ -350,6 +385,9 @@ func TestWriteFilesRejectsStaleOrMissingExpectedSource(t *testing.T) {
 			})
 			if !errors.Is(err, atomicfs.ErrWriteFiles) || !errors.Is(err, atomicfs.ErrConcurrentChange) {
 				t.Fatalf("WriteFiles error = %v", err)
+			}
+			if got := strings.Join(atomicfs.ConcurrentChangePaths(err), ","); got != "target.txt" {
+				t.Fatalf("WriteFiles concurrent paths = %q, want target.txt", got)
 			}
 			if validated {
 				t.Fatal("validation ran after source snapshot precondition failed")
@@ -504,6 +542,9 @@ func TestWriteFilesPreservesConcurrentValidationEditAndRecoveryBackup(t *testing
 	})
 	if !errors.Is(err, validationErr) || !errors.Is(err, atomicfs.ErrConcurrentChange) {
 		t.Fatalf("WriteFiles error = %v", err)
+	}
+	if got := strings.Join(atomicfs.ConcurrentChangePaths(err), ","); got != "existing.txt" {
+		t.Fatalf("WriteFiles concurrent paths = %q, want existing.txt", got)
 	}
 	if !strings.Contains(err.Error(), "recovery data retained in .plystra-files-") {
 		t.Fatalf("WriteFiles error does not identify recovery data: %v", err)

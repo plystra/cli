@@ -3,6 +3,7 @@
 package applicationgenerate
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -216,7 +217,11 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		}
 		report, err := generatedfiles.Check(prepared.resolved.Module().Path(), prepared.output)
 		if err != nil {
-			return Result{}, fmt.Errorf("%w: %w", ErrGenerate, generatedManifestSourceError(prepared.resolved.Module().ModulePath(), err))
+			err = normalizeGenerationConcurrentChange(prepared.resolved, err)
+			if !errors.Is(err, ErrConcurrentChange) {
+				err = generatedManifestSourceError(prepared.resolved.Module().ModulePath(), err)
+			}
+			return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
 		}
 		return Result{
 			module:                  prepared.resolved.Module(),
@@ -267,10 +272,20 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 				return fmt.Errorf("confirm generation inputs: %w", err)
 			}
 			if prepared.fingerprint != confirmed.fingerprint {
-				return fmt.Errorf("%w: resolved application or generated output no longer matches the planned snapshot", ErrConcurrentChange)
+				return concurrentChangeSourceError(
+					generationFingerprintChangeSources(prepared, confirmed),
+					fmt.Errorf("%w: resolved application or generated output no longer matches the planned snapshot", ErrConcurrentChange),
+				)
 			}
 			if confirmed.resolved.ConfigurationMaintenance().Changed() {
-				return fmt.Errorf("%w: dependency-derived Project configuration remains stale after installation", ErrConcurrentChange)
+				return concurrentChangeSourceError(
+					[]ConcurrentChangeSource{concurrentChangeSource(
+						confirmed.resolved.Module().ModulePath(),
+						confirmed.resolved.ConfigurationMaintenancePath(),
+						"configuration-declaration",
+					)},
+					fmt.Errorf("%w: dependency-derived Project configuration remains stale after installation", ErrConcurrentChange),
+				)
 			}
 			if err := validateRuntimeRequirements(confirmed.resolved, confirmed.runtimeRequirements); err != nil {
 				return err
@@ -279,17 +294,17 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		})
 	})
 	if err != nil {
-		if errors.Is(err, atomicfs.ErrConcurrentChange) && !errors.Is(err, ErrConcurrentChange) {
-			err = errors.Join(ErrConcurrentChange, err)
-		}
-		err = generatedManifestSourceError(prepared.resolved.Module().ModulePath(), err)
-		var conflict *generatedfiles.OwnershipConflictError
-		if errors.As(err, &conflict) && conflict != nil {
-			err = ownershipConflictSourceError(prepared.resolved.Module().ModulePath(), conflict.Path(), err)
-		}
-		var unexpected *generatedfiles.UnexpectedOutputError
-		if errors.As(err, &unexpected) && unexpected != nil {
-			err = unexpectedOutputSourceError(prepared.resolved.Module().ModulePath(), unexpected.Paths(), err)
+		err = normalizeGenerationConcurrentChange(prepared.resolved, err)
+		if !errors.Is(err, ErrConcurrentChange) {
+			err = generatedManifestSourceError(prepared.resolved.Module().ModulePath(), err)
+			var conflict *generatedfiles.OwnershipConflictError
+			if errors.As(err, &conflict) && conflict != nil {
+				err = ownershipConflictSourceError(prepared.resolved.Module().ModulePath(), conflict.Path(), err)
+			}
+			var unexpected *generatedfiles.UnexpectedOutputError
+			if errors.As(err, &unexpected) && unexpected != nil {
+				err = unexpectedOutputSourceError(prepared.resolved.Module().ModulePath(), unexpected.Paths(), err)
+			}
 		}
 		return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
 	}
@@ -327,6 +342,105 @@ func runModuleMutation(ctx context.Context, options Options, root string, requir
 		return errors.New("module mutation did not call generation validation")
 	}
 	return nil
+}
+
+func normalizeGenerationConcurrentChange(resolved applicationresolve.Result, cause error) error {
+	if cause == nil || !errors.Is(cause, ErrConcurrentChange) && !errors.Is(cause, applicationresolve.ErrConcurrentChange) && !errors.Is(cause, atomicfs.ErrConcurrentChange) {
+		return cause
+	}
+	return concurrentChangeSourceError(
+		concurrentSourcesForPaths(resolved, atomicfs.ConcurrentChangePaths(cause)),
+		cause,
+	)
+}
+
+func concurrentSourcesForPaths(resolved applicationresolve.Result, paths []string) []ConcurrentChangeSource {
+	modulePath := resolved.Module().ModulePath()
+	configurationPaths := map[string]struct{}{
+		"plystra.yaml": {},
+	}
+	for _, sourcePath := range []string{
+		resolved.ConfigurationSelection().Path(),
+		resolved.ConfigurationMaintenancePath(),
+	} {
+		sourcePath = path.Clean(strings.ReplaceAll(sourcePath, `\`, "/"))
+		if sourcePath != "" && sourcePath != "." {
+			configurationPaths[sourcePath] = struct{}{}
+		}
+	}
+	sources := make([]ConcurrentChangeSource, 0, len(paths))
+	for _, sourcePath := range paths {
+		sourcePath = path.Clean(strings.ReplaceAll(sourcePath, `\`, "/"))
+		kind := ""
+		switch {
+		case sourcePath == "go.mod", sourcePath == "go.sum":
+			kind = "module-dependency"
+		case sourcePath == "generated", strings.HasPrefix(sourcePath, "generated/"):
+			kind = "generated-artifact"
+		default:
+			if _, exists := configurationPaths[sourcePath]; exists {
+				kind = "configuration-declaration"
+			}
+		}
+		if kind != "" {
+			sources = append(sources, concurrentChangeSource(modulePath, sourcePath, kind))
+		}
+	}
+	return canonicalConcurrentChangeSources(sources)
+}
+
+func generationFingerprintChangeSources(prepared, confirmed preparedGeneration) []ConcurrentChangeSource {
+	modulePath := prepared.resolved.Module().ModulePath()
+	sources := make([]ConcurrentChangeSource, 0)
+	if prepared.resolved.RootConfigurationDigest() != confirmed.resolved.RootConfigurationDigest() {
+		sources = append(sources, concurrentChangeSource(modulePath, "plystra.yaml", "configuration-declaration"))
+	}
+	preparedSelection := prepared.resolved.ConfigurationSelection()
+	confirmedSelection := confirmed.resolved.ConfigurationSelection()
+	if preparedSelection.Mode() != confirmedSelection.Mode() ||
+		preparedSelection.Environment() != confirmedSelection.Environment() ||
+		preparedSelection.Path() != confirmedSelection.Path() ||
+		preparedSelection.Digest() != confirmedSelection.Digest() ||
+		prepared.resolved.Configurations().Digest() != confirmed.resolved.Configurations().Digest() {
+		for _, sourcePath := range []string{preparedSelection.Path(), confirmedSelection.Path()} {
+			sources = append(sources, concurrentChangeSource(modulePath, sourcePath, "configuration-declaration"))
+		}
+	}
+	for _, sourcePath := range changedGeneratedOutputPaths(prepared.output, confirmed.output) {
+		sources = append(sources, concurrentChangeSource(modulePath, sourcePath, "generated-artifact"))
+	}
+	if !bytes.Equal(prepared.output.ManifestJSON(), confirmed.output.ManifestJSON()) {
+		sources = append(sources, concurrentChangeSource(modulePath, generatedfiles.ManifestPath, "generated-artifact"))
+	}
+	if len(sources) == 0 {
+		sources = append(sources, concurrentChangeSource(modulePath, generatedfiles.ApplicationManifestPath, "generated-artifact"))
+	}
+	return canonicalConcurrentChangeSources(sources)
+}
+
+func changedGeneratedOutputPaths(left, right generatedfiles.Output) []string {
+	leftFiles := make(map[string][]byte)
+	for _, file := range left.Files() {
+		leftFiles[file.Path()] = file.Data()
+	}
+	rightFiles := make(map[string][]byte)
+	for _, file := range right.Files() {
+		rightFiles[file.Path()] = file.Data()
+	}
+	paths := make([]string, 0)
+	for sourcePath, leftData := range leftFiles {
+		rightData, exists := rightFiles[sourcePath]
+		if !exists || !bytes.Equal(leftData, rightData) {
+			paths = append(paths, sourcePath)
+		}
+	}
+	for sourcePath := range rightFiles {
+		if _, exists := leftFiles[sourcePath]; !exists {
+			paths = append(paths, sourcePath)
+		}
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 type preparedGeneration struct {

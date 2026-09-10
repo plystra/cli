@@ -51,6 +51,35 @@ var (
 	ErrUnownedConstructorConfiguration = errors.New("constructor configuration has no explicit selection or reachable constructor")
 )
 
+type dependencyConcurrentChangeError struct {
+	cause error
+}
+
+func (e *dependencyConcurrentChangeError) Error() string {
+	if e == nil || e.cause == nil {
+		return ErrConcurrentChange.Error()
+	}
+	return e.cause.Error()
+}
+
+func (e *dependencyConcurrentChangeError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+func (e *dependencyConcurrentChangeError) Is(target error) bool {
+	return e != nil && target == ErrConcurrentChange
+}
+
+func normalizeDependencyConcurrentChange(cause error) error {
+	if cause == nil || errors.Is(cause, ErrConcurrentChange) || !errors.Is(cause, moduledependency.ErrConcurrentChange) {
+		return cause
+	}
+	return &dependencyConcurrentChangeError{cause: cause}
+}
+
 // UnownedConstructorConfigurationError reports one effective constructor
 // configuration together with every contributing Project document.
 // Configuration values and Secret-reference targets are never retained by
@@ -266,6 +295,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		OutputLimit: options.DependencyOutputLimit,
 	})
 	if err != nil {
+		err = normalizeDependencyConcurrentChange(err)
 		if errors.Is(err, projectlocate.ErrInvalidManifest) {
 			err = fmt.Errorf("%w: %w", ErrManifest, err)
 		}
@@ -421,18 +451,42 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	after, err := ReadManifestSnapshot(module.Path())
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w: recheck plystra.yaml: %v", ErrResolve, ErrConcurrentChange, err)
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, configurationSourceError(
+			module.ModulePath(),
+			applicationManifestName,
+			0,
+			0,
+			fmt.Errorf("%w: recheck plystra.yaml: %v", ErrConcurrentChange, err),
+		))
 	}
 	if !sameManifestSnapshot(rootSnapshot, after) {
-		return Result{}, fmt.Errorf("%w: %w: plystra.yaml changed before resolution completed", ErrResolve, ErrConcurrentChange)
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, configurationSourceError(
+			module.ModulePath(),
+			applicationManifestName,
+			0,
+			0,
+			fmt.Errorf("%w: plystra.yaml changed before resolution completed", ErrConcurrentChange),
+		))
 	}
 	if selector.path != applicationManifestName {
 		after, err := readManifestSnapshot(module.Path(), selector.path)
 		if err != nil {
-			return Result{}, fmt.Errorf("%w: %w: recheck selected configuration %s: %v", ErrResolve, ErrConcurrentChange, selector.path, err)
+			return Result{}, fmt.Errorf("%w: %w", ErrResolve, configurationSourceError(
+				module.ModulePath(),
+				selector.path,
+				0,
+				0,
+				fmt.Errorf("%w: recheck selected configuration %s: %v", ErrConcurrentChange, selector.path, err),
+			))
 		}
 		if !sameManifestSnapshot(configurationSnapshot, after) {
-			return Result{}, fmt.Errorf("%w: %w: selected configuration %s changed before resolution completed", ErrResolve, ErrConcurrentChange, selector.path)
+			return Result{}, fmt.Errorf("%w: %w", ErrResolve, configurationSourceError(
+				module.ModulePath(),
+				selector.path,
+				0,
+				0,
+				fmt.Errorf("%w: selected configuration %s changed before resolution completed", ErrConcurrentChange, selector.path),
+			))
 		}
 	}
 	if err := recheckDependencyManifests(dependencySnapshots); err != nil {

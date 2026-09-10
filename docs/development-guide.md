@@ -2067,6 +2067,14 @@ module metadata.
 Normal `plystra generate` transactionally selects the direct Kernel release
 supported by the CLI, repairs generated runtime requirements, and validates the
 complete selected Project before committing either module or generated output.
+`PLYSTRA_PROJECT_CONCURRENT_CHANGE` emits every deterministically known path
+that changed while resolution or generation verified a stable snapshot.
+Current-Project and dependency `plystra.yaml` documents use
+`configuration-declaration`; current-Project `go.mod` or `go.sum` uses
+`module-dependency`; and managed `generated/...` paths use
+`generated-artifact`. Sources are sorted, deduplicated, module-relative, and
+omit a fabricated span. Stop concurrent Project edits and rerun against
+unchanged inputs; rollback preserves bytes written by the other editor.
 An unavailable constructor configuration schema uses
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
 current or dependency Project document as `configuration-declaration` at

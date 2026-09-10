@@ -305,6 +305,8 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: source.Column,
 			})
 		}
+	case diagnosticProjectConcurrentChange:
+		sources = append(sources, concurrentDiagnosticSources(err)...)
 	case diagnosticConfigurationInheritedConflict:
 		var conflict *applicationmeta.InheritedConflictError
 		if !errors.As(err, &conflict) || conflict == nil {
@@ -807,6 +809,61 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 	return canonical
 }
 
+func concurrentDiagnosticSources(err error) []diagnosticjson.Source {
+	var sources []diagnosticjson.Source
+	seen := make(map[diagnosticjson.Source]struct{})
+	appendSource := func(source diagnosticjson.Source) {
+		if _, exists := seen[source]; exists {
+			return
+		}
+		seen[source] = struct{}{}
+		sources = append(sources, source)
+	}
+	var walk func(error)
+	walk = func(current error) {
+		if current == nil {
+			return
+		}
+		if concurrent, ok := current.(*applicationgenerate.ConcurrentChangeSourceError); ok {
+			for _, source := range concurrent.Sources() {
+				appendSource(diagnosticjson.Source{
+					Module: source.ModulePath(),
+					Path:   source.SourcePath(),
+					Kind:   source.SourceKind(),
+					Line:   source.Line(),
+					Column: source.Column(),
+				})
+			}
+		}
+		if located, ok := current.(diagnosticSourceLocation); ok && concurrentFailure(current) {
+			appendSource(diagnosticjson.Source{
+				Module: located.ModulePath(),
+				Path:   located.SourcePath(),
+				Kind:   located.SourceKind(),
+				Line:   located.Line(),
+				Column: located.Column(),
+			})
+		}
+		switch current := current.(type) {
+		case interface{ Unwrap() []error }:
+			for _, child := range current.Unwrap() {
+				walk(child)
+			}
+		case interface{ Unwrap() error }:
+			walk(current.Unwrap())
+		}
+	}
+	walk(err)
+	return sources
+}
+
+func concurrentFailure(err error) bool {
+	return errors.Is(err, atomicfs.ErrConcurrentChange) ||
+		errors.Is(err, moduledependency.ErrConcurrentChange) ||
+		errors.Is(err, applicationresolve.ErrConcurrentChange) ||
+		errors.Is(err, applicationgenerate.ErrConcurrentChange)
+}
+
 func primaryFailureMessage(err error) string {
 	if errors.Is(err, newproject.ErrInvalidTemplate) {
 		if problem, _, found := splitEmbeddedRecovery(err.Error()); found {
@@ -855,6 +912,9 @@ func primaryFailureMessage(err error) string {
 }
 
 func primaryActionableDiagnostic(err error, context recoveryContext) (actionableDiagnostic, bool) {
+	if concurrentFailure(err) {
+		return recoveryDiagnostic(diagnosticProjectConcurrentChange, "Stop concurrent Project edits, then rerun the command against the unchanged authored inputs.")
+	}
 	if errors.Is(err, errNewChoiceRequired) {
 		return recoveryDiagnostic(diagnosticProjectCreateChoiceRequired, "Rerun `plystra new <project-name> [options]` with exactly one of `--git` or `--no-git`, one of `--github-ci` or `--no-github-ci`, and one of `--skills` or `--no-skills`.")
 	}
@@ -1129,8 +1189,6 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticGeneratedManifestInvalid, "Restore generated/.plystra-manifest.json from a known-good generated state, then run `plystra generate"+context.selectorSuffix()+"`.")
 	case errors.Is(err, capabilitymeta.ErrInvalidManifest):
 		return recoveryDiagnostic(diagnosticCapabilityManifestInvalid, "Correct the reported authored capability.yaml, then rerun the command.")
-	case errors.Is(err, atomicfs.ErrConcurrentChange), errors.Is(err, applicationresolve.ErrConcurrentChange), errors.Is(err, applicationgenerate.ErrConcurrentChange):
-		return recoveryDiagnostic(diagnosticProjectConcurrentChange, "Stop concurrent Project edits, then rerun the command against the unchanged authored inputs.")
 	default:
 		return actionableDiagnostic{}, false
 	}

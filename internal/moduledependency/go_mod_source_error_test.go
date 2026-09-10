@@ -3,6 +3,7 @@ package moduledependency_test
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -84,5 +85,31 @@ func TestDiscoverReportsChangedModuleDirectiveSource(t *testing.T) {
 	var source *moduledependency.GoModSourceError
 	if !errors.As(err, &source) || source == nil || source.ModulePath() != "example.com/app" || source.SourcePath() != "go.mod" || source.SourceKind() != "module-dependency" || source.Line() != 1 || source.Column() != 1 {
 		t.Fatalf("Discover source = %#v, %v", source, err)
+	}
+}
+
+func TestDiscoverReportsConcurrentApplicationGoModSource(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/app\n\ngo 1.26\n")
+	application := locate(t, root)
+
+	_, err := moduledependency.Discover(context.Background(), application, moduledependency.Options{
+		GoCommand: os.Args[0],
+		Environment: append(os.Environ(),
+			"PLYSTRA_MODULE_DEPENDENCY_HELPER=concurrent",
+			"PLYSTRA_MODULE_APP_ROOT="+root,
+		),
+	})
+	if !errors.Is(err, moduledependency.ErrDiscover) || !errors.Is(err, moduledependency.ErrConcurrentChange) {
+		t.Fatalf("Discover error = %v, want ErrDiscover and ErrConcurrentChange", err)
+	}
+	var source *moduledependency.GoModSourceError
+	if !errors.As(err, &source) || source == nil || source.ModulePath() != "example.com/app" || source.SourcePath() != "go.mod" || source.SourceKind() != "module-dependency" || source.Line() != 0 || source.Column() != 0 {
+		t.Fatalf("Discover source = %#v, %v", source, err)
+	}
+	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+		t.Fatalf("Discover exposed current Project root %q: %v", root, err)
 	}
 }

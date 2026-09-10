@@ -574,6 +574,9 @@ func TestInstallWithWritesPreservesEmptyExpectedDataPrecondition(t *testing.T) {
 	if !errors.Is(err, generatedfiles.ErrInstall) || !errors.Is(err, atomicfs.ErrConcurrentChange) {
 		t.Fatalf("InstallWithWrites error = %v", err)
 	}
+	if got := atomicfs.ConcurrentChangePaths(err); !slices.Equal(got, []string{"plystra.yaml"}) {
+		t.Fatalf("InstallWithWrites concurrent paths = %v, want [plystra.yaml]", got)
+	}
 	if validated {
 		t.Fatal("validation ran after a stale empty-file precondition")
 	}
@@ -724,6 +727,9 @@ func TestInstallPreservesConcurrentValidationEditAndRecoveryBackup(t *testing.T)
 	if !errors.Is(err, generatedfiles.ErrInstall) || !errors.Is(err, atomicfs.ErrConcurrentChange) {
 		t.Fatalf("Install error = %v", err)
 	}
+	if got := atomicfs.ConcurrentChangePaths(err); !slices.Equal(got, []string{"generated/go/shared.go"}) {
+		t.Fatalf("Install concurrent paths = %v, want [generated/go/shared.go]", got)
+	}
 	if !strings.Contains(err.Error(), "recovery data retained in .plystra-files-") {
 		t.Fatalf("Install error does not identify recovery data: %v", err)
 	}
@@ -744,6 +750,43 @@ func TestInstallPreservesConcurrentValidationEditAndRecoveryBackup(t *testing.T)
 	transactionRoot := filepath.Dir(filepath.Dir(backups[0]))
 	t.Cleanup(func() {
 		if err := os.RemoveAll(transactionRoot); err != nil {
+			t.Errorf("remove recovery transaction: %v", err)
+		}
+	})
+}
+
+func TestInstallReportsEveryConcurrentValidationPath(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	oldOutput := managedOutput(t,
+		"generated/go/alpha.go", "alpha before",
+		"generated/go/zeta.go", "zeta before",
+	)
+	writeOutput(t, root, oldOutput)
+	newOutput := managedOutput(t,
+		"generated/go/alpha.go", "alpha after",
+		"generated/go/zeta.go", "zeta after",
+	)
+	_, err := generatedfiles.Install(root, newOutput, func(string) error {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash("generated/go/zeta.go")), []byte("zeta concurrent"), 0o644); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(root, filepath.FromSlash("generated/go/alpha.go")), []byte("alpha concurrent"), 0o644)
+	})
+	if !errors.Is(err, generatedfiles.ErrInstall) || !errors.Is(err, atomicfs.ErrConcurrentChange) {
+		t.Fatalf("Install error = %v", err)
+	}
+	want := []string{"generated/go/alpha.go", "generated/go/zeta.go"}
+	if got := atomicfs.ConcurrentChangePaths(err); !slices.Equal(got, want) {
+		t.Fatalf("Install concurrent paths = %v, want %v", got, want)
+	}
+	transactions, globErr := filepath.Glob(filepath.Join(root, ".plystra-files-*"))
+	if globErr != nil || len(transactions) != 1 {
+		t.Fatalf("recovery transactions = %v, %v", transactions, globErr)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(transactions[0]); err != nil {
 			t.Errorf("remove recovery transaction: %v", err)
 		}
 	})
