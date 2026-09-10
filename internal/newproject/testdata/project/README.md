@@ -63,6 +63,8 @@ Common actionable Plystra CLI failures end with exactly one `Recovery:` block fo
 
 `PLYSTRA_PROJECT_MANIFEST_INVALID` reports exactly one current or dependency Project `plystra.yaml` as a `project-marker` source. A malformed readable document uses the conservative `1:1` span; an unsafe or unreadable marker omits the unavailable line and column. Correct the owning Project, or select a corrected dependency version, rather than editing a Module Cache copy.
 
+`PLYSTRA_CAPABILITY_MANIFEST_INVALID` reports an invalid current or dependency Provider `capability.yaml` at `1:1` as a `provider-declaration` source. Correct it in the owning Project or select a corrected dependency version. Generation, checks, inspection, explanation, and Capability creation, implementation, or exposure fail before mutation and never print an absolute or Module Cache path.
+
 `PLYSTRA_RESOLVE_UNKNOWN_INTERFACE` reports every effective `interfaces.require` or `http.expose` declaration as a `declaration` or `exposure` source, or every effective `interfaces.use` declaration as `implementation-selection`. Current selected documents and every same-valued inherited dependency contributor retain their owning Project module and module-relative path.
 
 `PLYSTRA_RESOLVE_RESERVED_INTERFACE` reports an application-authored `kernel.*` Interface as one `interface-declaration` source in its owning current or dependency Project. Remove that declaration there and import the canonical Kernel Interface package; never edit a Module Cache copy.

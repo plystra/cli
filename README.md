@@ -811,6 +811,8 @@ reports every source that requires one of the incompatible exact contracts.
 `capability.yaml` declaration carrying one of the conflicting exact contracts.
 `PLYSTRA_CAPABILITY_SCHEMA_CONFLICT` reports both Provider declarations whose
 source contract blocks Capability creation or implementation.
+`PLYSTRA_CAPABILITY_MANIFEST_INVALID` reports the invalid authored Provider
+`capability.yaml` at `1:1` as a `provider-declaration` source.
 `PLYSTRA_PROVIDER_MISSING` reports every typed requirement source that made the
 exact Capability necessary.
 `PLYSTRA_PROVIDER_AMBIGUOUS` reports those requirement sources together with
@@ -993,6 +995,13 @@ become `capability create`. Neither action mismatch mutates the Project.
 different exact source contracts during Capability creation or implementation.
 It reports both owning-module `capability.yaml` declarations before recovery,
 leaks no absolute or Module Cache path, and leaves the Project unchanged.
+
+`PLYSTRA_CAPABILITY_MANIFEST_INVALID` identifies an invalid authored visible
+Provider contract while resolving the application or preparing Capability
+creation, implementation, or exposure. It reports the owning module-relative
+`capability.yaml` at `1:1` as a `provider-declaration` source, preserves the
+typed manifest failure, exposes no checkout or Module Cache path, and fails
+before mutation.
 
 `PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED` identifies an explicit older
 or skipped new version that must be reviewed and repeated with `--confirm`.

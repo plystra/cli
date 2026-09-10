@@ -93,6 +93,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_PROJECT_MANIFEST_INVALID`" + ` reports exactly one current or dependency Project ` + "`plystra.yaml`" + ` as a ` + "`project-marker`" + ` source. A malformed readable document uses the conservative ` + "`1:1`" + ` span; an unsafe or unreadable marker omits the unavailable line and column. Correct the owning Project, or select a corrected dependency version, rather than editing a Module Cache copy.
 
+` + "`PLYSTRA_CAPABILITY_MANIFEST_INVALID`" + ` reports an invalid current or dependency Provider ` + "`capability.yaml`" + ` at ` + "`1:1`" + ` as a ` + "`provider-declaration`" + ` source. Correct it in the owning Project or select a corrected dependency version. Generation, checks, inspection, explanation, and Capability creation, implementation, or exposure fail before mutation and never print an absolute or Module Cache path.
+
 ` + "`PLYSTRA_RESOLVE_UNKNOWN_INTERFACE`" + ` reports every effective ` + "`interfaces.require`" + ` or ` + "`http.expose`" + ` declaration as a ` + "`declaration`" + ` or ` + "`exposure`" + ` source, or every effective ` + "`interfaces.use`" + ` declaration as ` + "`implementation-selection`" + `. Current selected documents and every same-valued inherited dependency contributor retain their owning Project module and module-relative path.
 
 ` + "`PLYSTRA_RESOLVE_RESERVED_INTERFACE`" + ` reports an application-authored ` + "`kernel.*`" + ` Interface as one ` + "`interface-declaration`" + ` source in its owning current or dependency Project. Remove that declaration there and import the canonical Kernel Interface package; never edit a Module Cache copy.
@@ -1471,6 +1473,7 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
 - PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION / PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION /
   PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: effective interfaces.use sources are
   implementation-selection; fix constructor, or set the selected document entry to null.
+- PLYSTRA_CAPABILITY_MANIFEST_INVALID: provider-declaration at 1:1; fix owning capability.yaml.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,
@@ -1497,8 +1500,8 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   Kernel/runtime requirements; checks are read-only.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: reported sources own config;
   select or make its constructor reachable, or remove it. Values stay redacted.
-- Incompatible contract: compare the full typed contract and metadata. Implement
-  it or create a new version; never weaken validation.
+- Incompatible contract: compare full contract/metadata; implement it or create
+  a version. Never weaken validation.
 - Interface authoring codes:
   PLYSTRA_INTERFACE_DECLARATION_INVALID,
   PLYSTRA_INTERFACE_CONTRACT_INVALID,
@@ -1523,8 +1526,8 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   PLYSTRA_IMPLEMENTATION_CONFORMANCE_INVALID. Apply Recovery to the owning
   Source or select a corrected dependency version; never edit Module Cache.
 - Unavailable generated client: wait for constructor completion and publication.
-- Invalid runtime configuration: match the selected constructor's compiled
-  Config schema; keep Secrets behind valid env/file references.
+- Invalid runtime configuration: match compiled Config; keep Secrets as valid
+  env/file references.
 - PLYSTRA_CONFIGURATION_SELECTION_INVALID: select exactly one safe existing
   configuration with --env or --config. Automation sets exactly one of
   PLYSTRA_ENV or PLYSTRA_CONFIG; environments overlay root, while explicit

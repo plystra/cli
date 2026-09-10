@@ -268,8 +268,12 @@ func TestResolveSourcesRejectsInvalidSchemaWithoutPartialResult(t *testing.T) {
 	if !errors.Is(err, capabilitycreate.ErrResolveSources) || !errors.Is(err, capabilitymeta.ErrInvalidManifest) || resolved != nil {
 		t.Fatalf("ResolveSources(invalid schema) = %#v, %v", resolved, err)
 	}
-	if !strings.Contains(err.Error(), "acme.app.profile") || !strings.Contains(err.Error(), filepath.Join(root, "profile")) {
-		t.Fatalf("invalid schema error lacks provider location: %v", err)
+	var source *capabilitysource.ManifestSourceError
+	if !errors.As(err, &source) || source == nil || source.CapabilityID() != id || source.ModulePath() != "example.com/acme/app" || source.SourcePath() != "profile/capabilities/account.register/v1/capability.yaml" || source.SourceKind() != "provider-declaration" || source.Line() != 1 || source.Column() != 1 {
+		t.Fatalf("invalid schema source = %#v, %v", source, err)
+	}
+	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+		t.Fatalf("invalid schema error exposes absolute source path: %v", err)
 	}
 }
 

@@ -1939,7 +1939,9 @@ source that requires one of the incompatible exact contracts. A visible
 Capability contract conflict emits every Provider's `capability.yaml`
 declaration carrying one of the conflicting exact contracts. A Capability
 authoring schema conflict emits both Provider declarations whose source
-contract blocks creation or implementation. A missing Capability Provider
+contract blocks creation or implementation. An invalid authored Capability
+manifest emits its one owning Provider `capability.yaml` at `1:1` as a
+`provider-declaration` source. A missing Capability Provider
 emits every requirement source that made the exact Capability necessary. An
 ambiguous Capability Provider emits those requirement sources and every
 compatible Provider's `capability.yaml` declaration. An invalid Provider
@@ -2232,6 +2234,14 @@ The typed failure retains both absolute paths for internal filesystem work but
 public error text and canonical `Source:` facts use only the owning module and
 module-relative `capability.yaml` path. Both commands fail before mutation and
 leave no transaction artifact.
+
+`PLYSTRA_CAPABILITY_MANIFEST_INVALID` identifies an invalid authored visible
+Provider contract during application resolution or Capability creation,
+implementation, or exposure. The typed failure retains the original manifest
+cause while public output reports exactly one owning module-relative
+`capability.yaml` at `1:1` as a `provider-declaration` source. It exposes no
+checkout or Module Cache path, mutates no Project file, and leaves no
+transaction artifact.
 
 Explicit older or skipped new versions retain the broad confirmation-required
 error but are classified only beneath the owning create-operation boundary as

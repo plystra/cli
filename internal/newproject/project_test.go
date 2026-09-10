@@ -389,6 +389,9 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	if !bytes.Contains(skill, []byte("PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED")) || !bytes.Contains(skill, []byte("reported exposure Source")) {
 		t.Fatal("maximum-length Project skill omits unsupported-operation source guidance")
 	}
+	if !bytes.Contains(skill, []byte("PLYSTRA_CAPABILITY_MANIFEST_INVALID")) || !bytes.Contains(skill, []byte("provider-declaration at 1:1")) {
+		t.Fatal("maximum-length Project skill omits invalid Capability manifest source guidance")
+	}
 }
 
 func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
@@ -2234,6 +2237,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID",
 		"PLYSTRA_PROTOBUF_IDENTITY_COLLISION",
 		"PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED",
+		"PLYSTRA_CAPABILITY_MANIFEST_INVALID",
 		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
 		"generated-artifact Sources",

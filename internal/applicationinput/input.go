@@ -138,11 +138,11 @@ func Build(manifest applicationmeta.Manifest, inventory plugininventory.Index, s
 			}
 			source, err := capabilitysource.Load(plugin.PluginRoot(), provided)
 			if err != nil {
-				return generationresolution.ExtensionInput{}, fmt.Errorf("%w: plugin %q Capability %s: %w", ErrBuild, plugin.ID(), provided, err)
+				return generationresolution.ExtensionInput{}, fmt.Errorf("%w: plugin %q Capability %s: %w", ErrBuild, plugin.ID(), provided, capabilitysource.WithManifestSource(plugin.ModulePath(), plugin.Path(), provided, err))
 			}
 			canonical, err := capabilitymeta.NormalizeSchema(source.Data())
 			if err != nil {
-				return generationresolution.ExtensionInput{}, fmt.Errorf("%w: plugin %q Capability %s: normalize contract: %w", ErrBuild, plugin.ID(), provided, err)
+				return generationresolution.ExtensionInput{}, fmt.Errorf("%w: plugin %q Capability %s: normalize contract: %w", ErrBuild, plugin.ID(), provided, capabilitysource.WithManifestSource(plugin.ModulePath(), plugin.Path(), provided, err))
 			}
 			provenance := capabilityProvenance(plugin, source.RelativePath())
 			declarationSource := providerresolution.ProviderSource{

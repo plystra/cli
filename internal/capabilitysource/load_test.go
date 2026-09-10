@@ -28,6 +28,9 @@ func TestLoadReadsExactConventionalSource(t *testing.T) {
 	if source.ID() != id || source.RelativePath() != "capabilities/account.register/v2/capability.yaml" || source.Path() != wantPath || !bytes.Equal(source.Data(), data) {
 		t.Fatalf("Source = ID %q, relative %q, path %q, data %q", source.ID(), source.RelativePath(), source.Path(), source.Data())
 	}
+	if got := capabilitysource.RelativePath(id); got != source.RelativePath() {
+		t.Fatalf("RelativePath(%s) = %q, want %q", id, got, source.RelativePath())
+	}
 	returned := source.Data()
 	returned[0] = 'x'
 	if bytes.Equal(returned, source.Data()) {

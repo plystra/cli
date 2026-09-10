@@ -1232,6 +1232,7 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
 - PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION / PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION /
   PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: effective interfaces.use sources are
   implementation-selection; fix constructor, or set the selected document entry to null.
+- PLYSTRA_CAPABILITY_MANIFEST_INVALID: provider-declaration at 1:1; fix owning capability.yaml.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,
@@ -1258,8 +1259,8 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   Kernel/runtime requirements; checks are read-only.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED: reported sources own config;
   select or make its constructor reachable, or remove it. Values stay redacted.
-- Incompatible contract: compare the full typed contract and metadata. Implement
-  it or create a new version; never weaken validation.
+- Incompatible contract: compare full contract/metadata; implement it or create
+  a version. Never weaken validation.
 - Interface authoring codes:
   PLYSTRA_INTERFACE_DECLARATION_INVALID,
   PLYSTRA_INTERFACE_CONTRACT_INVALID,
@@ -1284,8 +1285,8 @@ Redact absolute/cache paths and unsafe selectors; unknowns stay uncoded.
   PLYSTRA_IMPLEMENTATION_CONFORMANCE_INVALID. Apply Recovery to the owning
   Source or select a corrected dependency version; never edit Module Cache.
 - Unavailable generated client: wait for constructor completion and publication.
-- Invalid runtime configuration: match the selected constructor's compiled
-  Config schema; keep Secrets behind valid env/file references.
+- Invalid runtime configuration: match compiled Config; keep Secrets as valid
+  env/file references.
 - PLYSTRA_CONFIGURATION_SELECTION_INVALID: select exactly one safe existing
   configuration with --env or --config. Automation sets exactly one of
   PLYSTRA_ENV or PLYSTRA_CONFIG; environments overlay root, while explicit

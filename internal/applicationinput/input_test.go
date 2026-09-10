@@ -354,6 +354,54 @@ func TestBuildRejectsMissingAndMismatchedCapabilitySources(t *testing.T) {
 	}
 }
 
+func TestBuildReportsInvalidCapabilityManifestSource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		dependency bool
+		wantModule string
+	}{
+		{name: "current Project", wantModule: "example.com/app"},
+		{name: "dependency Project", dependency: true, wantModule: "example.com/providers"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			parent := t.TempDir()
+			appRoot := filepath.Join(parent, "app")
+			writeModule(t, appRoot, "example.com/app")
+			providerRoot := appRoot
+			var dependencies []dependency
+			if test.dependency {
+				providerRoot = filepath.Join(parent, "providers")
+				writeModule(t, providerRoot, "example.com/providers")
+				writeFile(t, filepath.Join(providerRoot, "plystra.yaml"), "{}\n")
+				dependencies = append(dependencies, dependency{path: "example.com/providers", version: "v1.2.3", root: providerRoot})
+			}
+			writePlugin(t, providerRoot, "smtp", "id: example.smtp\nprovides: [email.send/v1]\n")
+			writeCapability(t, providerRoot, "smtp", "email.send/v1", "id: email.send/v1\nunknown: true\n")
+
+			inventory := configureInventory(t, appRoot, dependencies...)
+			input, err := applicationinput.Build(parseManifest(t, "{}\n"), inventory, applicationInputSourceContext(dependencies...), nil, generationexec.BuildOptions{})
+			var source *capabilitysource.ManifestSourceError
+			if !errors.Is(err, applicationinput.ErrBuild) || !errors.Is(err, capabilitymeta.ErrInvalidManifest) || !errors.As(err, &source) || source == nil {
+				t.Fatalf("Build = %#v, %v; want typed invalid Capability manifest source", input, err)
+			}
+			if source.CapabilityID().String() != "email.send/v1" || source.ModulePath() != test.wantModule || source.SourcePath() != "smtp/capabilities/email.send/v1/capability.yaml" || source.SourceKind() != "provider-declaration" || source.Line() != 1 || source.Column() != 1 {
+				t.Fatalf("Capability manifest source = ID %s, module %q, path %q, kind %q, position %d:%d", source.CapabilityID(), source.ModulePath(), source.SourcePath(), source.SourceKind(), source.Line(), source.Column())
+			}
+			for _, privatePath := range []string{appRoot, filepath.ToSlash(appRoot), providerRoot, filepath.ToSlash(providerRoot)} {
+				if strings.Contains(err.Error(), privatePath) {
+					t.Fatalf("Build error exposed private path %q: %v", privatePath, err)
+				}
+			}
+		})
+	}
+}
+
 func TestBuildRejectsConflictingVisibleProviderContracts(t *testing.T) {
 	t.Parallel()
 

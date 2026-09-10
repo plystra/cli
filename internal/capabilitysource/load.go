@@ -88,7 +88,7 @@ func Load(pluginPath string, expected capabilityid.Identifier) (result Source, l
 		return Source{}, fmt.Errorf("%w: %w: plugin root was replaced before open", ErrLoad, ErrConcurrentChange)
 	}
 
-	relativePath := sourcePath(expected)
+	relativePath := RelativePath(expected)
 	before, err := inspectPath(root, relativePath)
 	if err != nil {
 		return Source{}, err
@@ -202,7 +202,9 @@ func sameFile(left, right fs.FileInfo) bool {
 	return left != nil && right != nil && os.SameFile(left, right) && left.Mode() == right.Mode() && left.Size() == right.Size() && left.ModTime().Equal(right.ModTime())
 }
 
-func sourcePath(identifier capabilityid.Identifier) string {
+// RelativePath returns the conventional slash-separated capability.yaml path
+// below one Plugin root for an already validated Capability identity.
+func RelativePath(identifier capabilityid.Identifier) string {
 	return path.Join(
 		"capabilities",
 		identifier.Name(),

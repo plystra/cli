@@ -61,11 +61,11 @@ func validateDeclarations(root string, plan Plan, sources []ResolvedSource) erro
 	}
 	targetSource, err := capabilitysource.Load(filepath.Join(root, filepath.FromSlash(indexedTarget.Path())), capability)
 	if err != nil {
-		return fmt.Errorf("load target schema: %w", err)
+		return fmt.Errorf("load target schema: %w", capabilitysource.WithManifestSource(plan.ModulePath(), indexedTarget.Path(), capability, err))
 	}
 	targetSchema, err := capabilitymeta.NormalizeSchema(targetSource.Data())
 	if err != nil {
-		return fmt.Errorf("normalize target schema: %w", err)
+		return fmt.Errorf("normalize target schema: %w", capabilitysource.WithManifestSource(plan.ModulePath(), indexedTarget.Path(), capability, err))
 	}
 
 	for position, resolved := range sources {
@@ -88,7 +88,7 @@ func validateDeclarations(root string, plan Plan, sources []ResolvedSource) erro
 		}
 		current, err := capabilitysource.Load(filepath.Join(providerRoot, filepath.FromSlash(indexedProvider.Path())), resolved.Source().ID())
 		if err != nil {
-			return fmt.Errorf("load source provider %s: %w", provider.PluginID(), err)
+			return fmt.Errorf("load source provider %s: %w", provider.PluginID(), capabilitysource.WithManifestSource(provider.ModulePath(), indexedProvider.Path(), resolved.Source().ID(), err))
 		}
 		currentData := current.Data()
 		if !bytes.Equal(currentData, resolved.Source().Data()) {
@@ -96,11 +96,11 @@ func validateDeclarations(root string, plan Plan, sources []ResolvedSource) erro
 		}
 		retargeted, err := capabilitymeta.RetargetSchema(currentData, capability)
 		if err != nil {
-			return fmt.Errorf("retarget source provider %s: %w", provider.PluginID(), err)
+			return fmt.Errorf("retarget source provider %s: %w", provider.PluginID(), capabilitysource.WithManifestSource(provider.ModulePath(), indexedProvider.Path(), resolved.Source().ID(), err))
 		}
 		sourceSchema, err := capabilitymeta.NormalizeSchema(retargeted)
 		if err != nil {
-			return fmt.Errorf("normalize source provider %s: %w", provider.PluginID(), err)
+			return fmt.Errorf("normalize source provider %s: %w", provider.PluginID(), capabilitysource.WithManifestSource(provider.ModulePath(), indexedProvider.Path(), resolved.Source().ID(), err))
 		}
 		if !bytes.Equal(targetSchema, sourceSchema) {
 			return fmt.Errorf("%w: rendered %s differs from retained source provider %s at position %d", ErrSchemaConflict, capability, provider.PluginID(), position)

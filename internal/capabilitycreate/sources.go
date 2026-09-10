@@ -53,11 +53,11 @@ func ResolveSources(plan Plan) ([]ResolvedSource, error) {
 		}
 		source, err := capabilitysource.Load(provider.Path(), sourceID)
 		if err != nil {
-			return nil, fmt.Errorf("%w: provider %s at %s: %w", ErrResolveSources, provider.PluginID(), provider.Path(), err)
+			return nil, fmt.Errorf("%w: provider %s in module %s: %w", ErrResolveSources, provider.PluginID(), provider.ModulePath(), capabilitysource.WithManifestSource(provider.ModulePath(), provider.Directory(), sourceID, err))
 		}
 		canonical, err := capabilitymeta.NormalizeSchema(source.Data())
 		if err != nil {
-			return nil, fmt.Errorf("%w: provider %s source %s: %w", ErrResolveSources, provider.PluginID(), source.Path(), err)
+			return nil, fmt.Errorf("%w: provider %s in module %s: normalize source: %w", ErrResolveSources, provider.PluginID(), provider.ModulePath(), capabilitysource.WithManifestSource(provider.ModulePath(), provider.Directory(), sourceID, err))
 		}
 		candidate := ResolvedSource{provider: provider, source: source}
 		if len(resolved) == 0 {
