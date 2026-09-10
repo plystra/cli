@@ -474,7 +474,7 @@ type ActivationEdge struct {
 	source             capabilityid.Identifier
 	target             capabilityid.Identifier
 	namespace          string
-	requirementSources []string
+	requirementSources []providerresolution.RequirementSource
 }
 
 // Source returns the metadata-bearing required Capability.
@@ -488,7 +488,13 @@ func (e ActivationEdge) Namespace() string { return e.namespace }
 
 // RequirementSources returns source requirement provenance.
 func (e ActivationEdge) RequirementSources() []string {
-	return append([]string(nil), e.requirementSources...)
+	return requirementSourceLabels(e.requirementSources)
+}
+
+// RequirementSourceDetails returns typed module-relative provenance without
+// requiring consumers to parse the retained diagnostic references.
+func (e ActivationEdge) RequirementSourceDetails() []providerresolution.RequirementSource {
+	return append([]providerresolution.RequirementSource(nil), e.requirementSources...)
 }
 
 // ActivationCycleError contains one complete deterministic activation cycle.
@@ -519,7 +525,7 @@ func (e *ActivationCycleError) Error() string {
 			&message,
 			" --extensions.%s from [%s]--> %s",
 			edge.namespace,
-			strings.Join(edge.requirementSources, ", "),
+			strings.Join(edge.RequirementSources(), ", "),
 			edge.target,
 		)
 	}
@@ -540,7 +546,7 @@ func findActivationCycle(requirements generationactivation.RequirementSet) *Acti
 				source:             use.SourceCapability(),
 				target:             requirement.Capability(),
 				namespace:          use.Namespace(),
-				requirementSources: requirementSourceLabels(use.RequirementSources()),
+				requirementSources: use.RequirementSources(),
 			}
 			key := edge.source.String() + "\x00" + edge.target.String() + "\x00" + edge.namespace
 			if _, duplicate := seenEdges[key]; duplicate {

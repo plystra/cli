@@ -220,6 +220,10 @@ capability.yaml at 1:1 as a provider-declaration source and every effective
 capabilities.use document at 1:1 as a provider-selection source. Sources are
 sorted and deduplicated; it never fabricates a source for absent generation
 support.
+PLYSTRA_GENERATION_ACTIVATION_CYCLE reports retained typed sources carried by
+the complete cycle edges, including declaration, exposure, and derived
+activation facts, in sorted and deduplicated order. A bare cycle sentinel has no
+source.
 PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
 configuration, go.mod/go.sum, or generated path as a sorted path-only
 configuration-declaration, module-dependency, or generated-artifact source
@@ -304,6 +308,10 @@ capability.yaml at 1:1 as a provider-declaration source and every effective
 capabilities.use document at 1:1 as a provider-selection source. Sources are
 sorted and deduplicated; it never fabricates a source for absent generation
 support.
+PLYSTRA_GENERATION_ACTIVATION_CYCLE reports retained typed sources carried by
+the complete cycle edges, including declaration, exposure, and derived
+activation facts, in sorted and deduplicated order. A bare cycle sentinel has no
+source.
 PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
 configuration, go.mod/go.sum, or generated path as a sorted path-only
 configuration-declaration, module-dependency, or generated-artifact source

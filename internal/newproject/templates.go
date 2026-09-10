@@ -135,6 +135,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING`" + ` reports the selected Provider's existing ` + "`capability.yaml`" + ` at ` + "`1:1`" + ` as a ` + "`provider-declaration`" + ` source and every effective current-Project or dependency-Project ` + "`capabilities.use`" + ` document at ` + "`1:1`" + ` as a ` + "`provider-selection`" + ` source. Shared canonicalization sorts and deduplicates those authored facts. It never fabricates a source for the absent generation declaration, and the bare internal sentinel remains source-less. Add compatible generation support to the selected Provider in its owning Project or choose a compatible Provider reported by the diagnostic, then rerun with the same selection.
 
+` + "`PLYSTRA_GENERATION_ACTIVATION_CYCLE`" + ` reports every retained typed requirement source carried by the complete deterministic activation cycle. Authored ` + "`declaration`" + ` and ` + "`exposure`" + ` facts and derived ` + "`activation`" + ` facts retain their originating module-relative path and span. Shared canonicalization sorts and deduplicates repeated edge facts, while the bare internal cycle sentinel remains source-less. Use the cycle details to edit the owning Capability metadata or ` + "`generation.activations`" + ` declarations so the semantic cycle is removed; changing execution order is not a fix.
+
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. A normalized Project-contained document that cannot be loaded reports one path-only ` + "`configuration-selection`" + ` source without a fabricated span. Conflicting, duplicated, or unsafe selectors report no source because no document is trustworthy. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 ` + "`plystra plugin create`" + ` uses ` + "`PLYSTRA_PLUGIN_CREATE_NAME_INVALID`" + ` for an invalid or reserved root-level name, ` + "`PLYSTRA_PLUGIN_CREATE_ID_INVALID`" + ` when the Project module namespace and name cannot form a canonical Plugin ID, and ` + "`PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS`" + ` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.
@@ -1474,19 +1476,20 @@ PLYSTRA_CONFIGURATION_INHERITED_CONFLICT / PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIG
 Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
 
 - PLYSTRA_PROJECT_MANIFEST_INVALID: project-marker; malformed 1:1; else no span
-- PLYSTRA_RESOLVE_UNKNOWN_INTERFACE: declaration, exposure, or implementation-selection; correct selected YAML.
-- PLYSTRA_RESOLVE_RESERVED_INTERFACE: interface-declaration; remove kernel.*.
-- PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION: root and requiring-constructor sources; add constructor.
-- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS: constructor sources; run plystra use <interface-id> <constructor-symbol>.
-- PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: cycle-constructor sources; break cycle.
+- PLYSTRA_RESOLVE_UNKNOWN_INTERFACE / PLYSTRA_RESOLVE_RESERVED_INTERFACE:
+  fix listed declaration/selection Source; never declare kernel.*.
+- PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION / PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS /
+  PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: fix listed root/constructor Sources; select
+  with plystra use or break the cycle.
 - PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION / PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION /
-  PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: effective interfaces.use sources are
-  implementation-selection; fix constructor, or set the selected document entry to null.
+  PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: fix the implementation-selection Source
+  or set it to null.
 - PLYSTRA_CAPABILITY_MANIFEST_INVALID: provider-declaration at 1:1; fix owning capability.yaml.
 - PLYSTRA_PLUGIN_TARGET_AMBIGUOUS: candidate plugin-declaration Sources at 1:1; --plugin.
 - PLYSTRA_GENERATION_ACTIVATION_CONFLICT: plugin Sources; unify namespace.
 - PLYSTRA_GENERATION_ACTIVATION_MISSING: requirements; add association; no invented Source.
 - PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING: provider/choice Sources; add support.
+- PLYSTRA_GENERATION_ACTIVATION_CYCLE: deduplicated edge Sources; break cycle.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,

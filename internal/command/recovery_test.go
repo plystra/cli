@@ -341,6 +341,7 @@ func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 		{name: "activation conflict without typed candidates", err: fmt.Errorf("resolve generation: %w", generationactivation.ErrAssociationConflict), code: diagnosticGenerationActivationConflict},
 		{name: "missing activation without requirement provenance", err: fmt.Errorf("resolve generation: %w", generationactivation.ErrMissingAssociation), code: diagnosticGenerationActivationMissing},
 		{name: "selected Provider extension without typed selection", err: fmt.Errorf("resolve generation: %w", generationactivation.ErrSelectedProviderExtension), code: diagnosticGenerationProviderExtensionMissing},
+		{name: "activation cycle without typed edges", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrActivationCycle), code: diagnosticGenerationActivationCycle},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {

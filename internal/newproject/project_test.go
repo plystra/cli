@@ -410,6 +410,9 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING")) || !bytes.Contains(skill, []byte("provider/choice Sources")) {
 		t.Fatal("maximum-length Project skill omits selected-Provider extension source guidance")
 	}
+	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_ACTIVATION_CYCLE")) || !bytes.Contains(skill, []byte("deduplicated edge Sources")) {
+		t.Fatal("maximum-length Project skill omits activation-cycle source guidance")
+	}
 }
 
 func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
@@ -1204,6 +1207,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING` reports the selected Provider's"),
 		[]byte("every effective current-Project or dependency-Project `capabilities.use` document"),
 		[]byte("bare internal sentinel remains source-less"),
+		[]byte("`PLYSTRA_GENERATION_ACTIVATION_CYCLE` reports every retained typed requirement source"),
+		[]byte("derived `activation` facts retain their originating module-relative path"),
+		[]byte("bare internal cycle sentinel remains source-less"),
 		[]byte("one path-only `configuration-selection` source"),
 		[]byte("unsafe selectors report no source"),
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration"),
@@ -2277,6 +2283,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"no invented Source",
 		"PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING",
 		"provider/choice Sources",
+		"PLYSTRA_GENERATION_ACTIVATION_CYCLE",
+		"deduplicated edge Sources",
 		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
 		"generated-artifact Sources",
@@ -2308,17 +2316,14 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra capability create records.read --query --plugin records --expose",
 		"PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED",
 		"PLYSTRA_RESOLVE_UNKNOWN_INTERFACE",
-		"declaration, exposure, or",
-		"correct selected YAML",
+		"declaration/selection Source",
 		"PLYSTRA_RESOLVE_RESERVED_INTERFACE",
 		"PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION",
-		"root and requiring-constructor sources",
+		"root/constructor Sources",
 		"PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE",
-		"cycle-constructor sources",
 		"PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION",
 		"PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION",
-		"effective interfaces.use sources",
-		"implementation-selection",
+		"implementation-selection Source",
 		"plystra implement email.send/v1 --package ./mailer",
 		"creates no copied contract",
 		"capabilities/records.read/v1/capability.yaml",

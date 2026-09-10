@@ -2098,6 +2098,14 @@ a bare internal sentinel remains source-less. Add compatible generation support
 to the selected Provider in its owning Project or select a compatible Provider
 listed by the diagnostic, then rerun generation or checking with the same
 selection.
+`PLYSTRA_GENERATION_ACTIVATION_CYCLE` emits every retained typed requirement
+source carried by the complete deterministic activation cycle. Authored
+`declaration` and `exposure` facts and derived `activation` facts retain their
+originating module-relative location. Shared canonicalization sorts and
+deduplicates repeated edge facts, and a bare internal cycle sentinel remains
+source-less. Use the reported edge path to remove the semantic cycle from the
+owning Capability metadata or `generation.activations` declarations; execution
+order cannot make the cycle valid.
 An unavailable constructor configuration schema uses
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
 current or dependency Project document as `configuration-declaration` at
@@ -2492,6 +2500,16 @@ document that selected it. Add a matching generation declaration to that
 Provider's `plugin.yaml` in its owning Project, or select one of the compatible
 Providers named by the diagnostic. The absent declaration has no source to
 report; do not edit a Module Cache copy or invent one from the error text.
+
+### Generation activation cycle
+
+`PLYSTRA_GENERATION_ACTIVATION_CYCLE` prints the complete deterministic edge
+path and points to the retained declaration, exposure, and derived activation
+requirements that made it reachable. Trace the named namespaces and
+Capabilities from those module-relative sources, then edit the owning
+Capability metadata or `generation.activations` declarations to remove the
+cycle. Reordering extension execution cannot repair a semantic requirement
+cycle, and a bare internal sentinel has no source to invent.
 
 ### Extension helper fails
 

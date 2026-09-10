@@ -967,6 +967,14 @@ generation declaration, and the bare internal sentinel remains source-less.
 Add compatible generation support to the selected Provider in its owning
 Project or choose a compatible Provider reported by the diagnostic, then rerun
 with the same selection.
+`PLYSTRA_GENERATION_ACTIVATION_CYCLE` reports every retained typed requirement
+source carried by the complete deterministic activation cycle. Authored
+`declaration` and `exposure` facts and derived `activation` facts retain their
+originating module-relative path and span. Shared canonicalization sorts and
+deduplicates repeated edge facts, while the bare internal cycle sentinel
+remains source-less. Use the cycle details to edit the owning Capability
+metadata or `generation.activations` declarations so the semantic cycle is
+removed; changing execution order is not a fix.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses

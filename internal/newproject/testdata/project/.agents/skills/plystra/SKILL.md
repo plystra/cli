@@ -1223,19 +1223,20 @@ PLYSTRA_CONFIGURATION_INHERITED_CONFLICT / PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIG
 Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
 
 - PLYSTRA_PROJECT_MANIFEST_INVALID: project-marker; malformed 1:1; else no span
-- PLYSTRA_RESOLVE_UNKNOWN_INTERFACE: declaration, exposure, or implementation-selection; correct selected YAML.
-- PLYSTRA_RESOLVE_RESERVED_INTERFACE: interface-declaration; remove kernel.*.
-- PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION: root and requiring-constructor sources; add constructor.
-- PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS: constructor sources; run plystra use <interface-id> <constructor-symbol>.
-- PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: cycle-constructor sources; break cycle.
+- PLYSTRA_RESOLVE_UNKNOWN_INTERFACE / PLYSTRA_RESOLVE_RESERVED_INTERFACE:
+  fix listed declaration/selection Source; never declare kernel.*.
+- PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION / PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS /
+  PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: fix listed root/constructor Sources; select
+  with plystra use or break the cycle.
 - PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION / PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION /
-  PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: effective interfaces.use sources are
-  implementation-selection; fix constructor, or set the selected document entry to null.
+  PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: fix the implementation-selection Source
+  or set it to null.
 - PLYSTRA_CAPABILITY_MANIFEST_INVALID: provider-declaration at 1:1; fix owning capability.yaml.
 - PLYSTRA_PLUGIN_TARGET_AMBIGUOUS: candidate plugin-declaration Sources at 1:1; --plugin.
 - PLYSTRA_GENERATION_ACTIVATION_CONFLICT: plugin Sources; unify namespace.
 - PLYSTRA_GENERATION_ACTIVATION_MISSING: requirements; add association; no invented Source.
 - PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING: provider/choice Sources; add support.
+- PLYSTRA_GENERATION_ACTIVATION_CYCLE: deduplicated edge Sources; break cycle.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,

@@ -251,8 +251,9 @@ func TestResolveRejectsCompleteActivationCycles(t *testing.T) {
 		t.Parallel()
 		alpha := generationContract("alpha.call/v1", "extensions: {authn: {authenticated: true}}\n")
 		verify := generationContract("authn.session.verify/v1", "extensions: {audit: {event: authn.verify}}\n")
+		rootSource := activationResolutionTestSource("alpha route")
 		_, err := generationresolution.Resolve(generationresolution.Input{
-			Requirements: []providerresolution.Requirement{{Contract: alpha, Source: activationResolutionTestSource("alpha route")}},
+			Requirements: []providerresolution.Requirement{{Contract: alpha, Source: rootSource}},
 			Candidates: []providerresolution.Candidate{
 				{PluginID: "example.alpha", Contract: alpha, Source: "alpha/call"},
 				{PluginID: "example.authn", Contract: verify, Source: "authn/verify"},
@@ -275,6 +276,26 @@ func TestResolveRejectsCompleteActivationCycles(t *testing.T) {
 		}
 		if !slices.Equal(edges[0].RequirementSources(), []string{"alpha route"}) || !slices.Equal(edges[1].RequirementSources(), []string{"extensions.authn on alpha.call/v1"}) {
 			t.Fatalf("cycle provenance = %#v", edges)
+		}
+		firstSources := edges[0].RequirementSourceDetails()
+		secondSources := edges[1].RequirementSourceDetails()
+		wantActivationSource := providerresolution.RequirementSource{
+			Kind:             providerresolution.RequirementActivation,
+			Reference:        "extensions.authn on alpha.call/v1",
+			ModulePath:       "example.com/project",
+			Path:             "plystra.yaml",
+			Line:             1,
+			Column:           1,
+			Namespace:        "authn",
+			SourceCapability: "alpha.call/v1",
+		}
+		if !reflect.DeepEqual(firstSources, []providerresolution.RequirementSource{rootSource}) || !reflect.DeepEqual(secondSources, []providerresolution.RequirementSource{wantActivationSource}) {
+			t.Fatalf("typed cycle provenance = %#v, %#v", firstSources, secondSources)
+		}
+		firstSources[0] = providerresolution.RequirementSource{}
+		secondSources[0] = providerresolution.RequirementSource{}
+		if edges[0].RequirementSourceDetails()[0] != rootSource || edges[1].RequirementSourceDetails()[0] != wantActivationSource {
+			t.Fatal("ActivationEdge exposed mutable typed requirement sources")
 		}
 		edges[0] = generationresolution.ActivationEdge{}
 		if cycle.Edges()[0].Source().String() != "alpha.call/v1" {
