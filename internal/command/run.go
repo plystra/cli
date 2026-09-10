@@ -234,6 +234,9 @@ deduplicated order. A bare contribution-cycle sentinel has no source.
 PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED reports the generation-rule source
 for every simultaneously ready contribution at the ordered generation point,
 in sorted and deduplicated order. A bare unordered sentinel has no source.
+PLYSTRA_GENERATION_STATE_REPEATED reports each selected extension declaration
+whose output changed for identical normalized input as a sorted and deduplicated
+plugin-declaration source. A bare repeated-state sentinel has no source.
 PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
 configuration, go.mod/go.sum, or generated path as a sorted path-only
 configuration-declaration, module-dependency, or generated-artifact source
@@ -332,6 +335,9 @@ deduplicated order. A bare contribution-cycle sentinel has no source.
 PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED reports the generation-rule source
 for every simultaneously ready contribution at the ordered generation point,
 in sorted and deduplicated order. A bare unordered sentinel has no source.
+PLYSTRA_GENERATION_STATE_REPEATED reports each selected extension declaration
+whose output changed for identical normalized input as a sorted and deduplicated
+plugin-declaration source. A bare repeated-state sentinel has no source.
 PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
 configuration, go.mod/go.sum, or generated path as a sorted path-only
 configuration-declaration, module-dependency, or generated-artifact source

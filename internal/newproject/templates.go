@@ -143,6 +143,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED`" + ` reports the typed ` + "`generation-rule`" + ` source for every simultaneously ready contribution at an ordered generation point. Each fact identifies the selected contribution owner by its Project module and module-relative ` + "`plugin.yaml`" + ` at ` + "`1:1`" + `; shared canonicalization sorts the sources and deduplicates multiple contributions from one declaration. The bare internal unordered sentinel remains source-less. Add ` + "`requires`" + ` and ` + "`provides`" + ` tokens that establish one semantic order among the reported contributions; discovery order is never used as an implicit tie-break.
 
+` + "`PLYSTRA_GENERATION_STATE_REPEATED`" + ` reports each selected extension whose normalized output changed for the identical immutable context. Every ` + "`plugin-declaration`" + ` source identifies the owning Project module and module-relative ` + "`plugin.yaml`" + ` at ` + "`1:1`" + `; shared canonicalization sorts and deduplicates the declarations, stable extensions are excluded, and the bare internal sentinel remains source-less. Make each reported generation package deterministic and convergent for identical normalized input.
+
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. A normalized Project-contained document that cannot be loaded reports one path-only ` + "`configuration-selection`" + ` source without a fabricated span. Conflicting, duplicated, or unsafe selectors report no source because no document is trustworthy. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 ` + "`plystra plugin create`" + ` uses ` + "`PLYSTRA_PLUGIN_CREATE_NAME_INVALID`" + ` for an invalid or reserved root-level name, ` + "`PLYSTRA_PLUGIN_CREATE_ID_INVALID`" + ` when the Project module namespace and name cannot form a canonical Plugin ID, and ` + "`PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS`" + ` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.
@@ -1479,14 +1481,14 @@ boundary.
 Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>
 Source: <module>:<module-relative-path>[:line:column] (<kind>)
 PLYSTRA_CONFIGURATION_INHERITED_CONFLICT / PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS: configuration-declaration.
-Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
+Redact unsafe paths/selectors; leave unknowns uncoded.
 
 - PLYSTRA_PROJECT_MANIFEST_INVALID: project-marker; malformed 1:1; else no span
 - PLYSTRA_RESOLVE_UNKNOWN_INTERFACE / PLYSTRA_RESOLVE_RESERVED_INTERFACE:
   fix listed declaration/selection Source; never declare kernel.*.
 - PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION / PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS /
-  PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: fix listed root/constructor Sources; select
-  with plystra use or break the cycle.
+  PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: fix root/constructor Sources; select or
+  break the cycle.
 - PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION / PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION /
   PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: fix the implementation-selection Source
   or set it to null.
@@ -1496,8 +1498,8 @@ Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
 - PLYSTRA_GENERATION_ACTIVATION_MISSING: requirements; add association; no invented Source.
 - PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING: provider/choice Sources; add support.
 - PLYSTRA_GENERATION_ACTIVATION_CYCLE / PLYSTRA_GENERATION_DEPENDENCY_CYCLE /
-  PLYSTRA_GENERATION_CONTRIBUTION_CYCLE / PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED:
-  dedup Sources; fix graph.
+  PLYSTRA_GENERATION_CONTRIBUTION_CYCLE / PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED /
+  PLYSTRA_GENERATION_STATE_REPEATED: dedup Sources; fix cause.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,

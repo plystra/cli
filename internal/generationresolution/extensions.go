@@ -138,6 +138,92 @@ func (o ExtensionOutput) Namespaces() []string {
 // Output returns the immutable normalized helper output.
 func (o ExtensionOutput) Output() generation.NormalizedOutput { return o.output }
 
+// RepeatedStateExtension identifies one selected extension whose normalized
+// output changed for an already observed immutable generation context.
+type RepeatedStateExtension struct {
+	pluginID             string
+	modulePath           string
+	sourcePath           string
+	firstOutputDigest    string
+	repeatedOutputDigest string
+}
+
+// PluginID returns the selected extension owner.
+func (e RepeatedStateExtension) PluginID() string { return e.pluginID }
+
+// ModulePath returns the owning Project module.
+func (e RepeatedStateExtension) ModulePath() string { return e.modulePath }
+
+// SourcePath returns the module-relative root Plugin declaration path.
+func (e RepeatedStateExtension) SourcePath() string { return e.sourcePath }
+
+// FirstOutputDigest returns the extension's normalized output digest from the
+// first observation of the repeated context.
+func (e RepeatedStateExtension) FirstOutputDigest() string { return e.firstOutputDigest }
+
+// RepeatedOutputDigest returns the extension's different normalized output
+// digest from the repeated observation.
+func (e RepeatedStateExtension) RepeatedOutputDigest() string { return e.repeatedOutputDigest }
+
+// RepeatedStateError retains the aggregate fixed-point evidence and only the
+// selected extensions whose normalized outputs changed for one context.
+type RepeatedStateError struct {
+	contextDigest        string
+	firstOutputDigest    string
+	repeatedOutputDigest string
+	extensions           []RepeatedStateExtension
+}
+
+// ContextDigest returns the immutable generation context observed twice.
+func (e *RepeatedStateError) ContextDigest() string {
+	if e == nil {
+		return ""
+	}
+	return e.contextDigest
+}
+
+// FirstOutputDigest returns the first aggregate selected-extension output
+// digest for the repeated context.
+func (e *RepeatedStateError) FirstOutputDigest() string {
+	if e == nil {
+		return ""
+	}
+	return e.firstOutputDigest
+}
+
+// RepeatedOutputDigest returns the different aggregate selected-extension
+// output digest for the repeated context.
+func (e *RepeatedStateError) RepeatedOutputDigest() string {
+	if e == nil {
+		return ""
+	}
+	return e.repeatedOutputDigest
+}
+
+// Extensions returns defensive changed-extension records in Plugin ID order.
+func (e *RepeatedStateError) Extensions() []RepeatedStateExtension {
+	if e == nil {
+		return nil
+	}
+	return append([]RepeatedStateExtension(nil), e.extensions...)
+}
+
+func (e *RepeatedStateError) Error() string {
+	if e == nil {
+		return ErrRepeatedState.Error()
+	}
+	return fmt.Sprintf(
+		"%s: context %s first produced %s and then %s",
+		ErrRepeatedState,
+		e.contextDigest,
+		e.firstOutputDigest,
+		e.repeatedOutputDigest,
+	)
+}
+
+// Unwrap supports errors.Is with ErrRepeatedState.
+func (*RepeatedStateError) Unwrap() error { return ErrRepeatedState }
+
 // ExtensionResult is one immutable stable activation, provider, extension
 // context, generation-derived requirement closure, semantic contribution plan,
 // and final application Alias map.
@@ -270,7 +356,7 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 		return ExtensionResult{}, fmt.Errorf("%w: %w: %w", ErrResolveExtensions, ErrApplicationContext, err)
 	}
 	generatedByKey := make(map[string]GeneratedRequirement)
-	observedOutputs := make(map[string]string)
+	observedOutputs := make(map[string]observedExtensionOutputs)
 	maximumPasses := 2*(len(input.Capabilities)+1) + 1
 	for pass := 1; pass <= maximumPasses; pass++ {
 		if err := ctx.Err(); err != nil {
@@ -354,18 +440,15 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 			return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w", ErrResolveExtensions, pass, cycle)
 		}
 
-		outputDigest := extensionOutputDigest(outputs)
+		observed := observeExtensionOutputs(outputs)
 		contextDigest := generationContext.Digest()
 		if previous, seen := observedOutputs[contextDigest]; seen {
-			if previous != outputDigest {
+			if previous.digest != observed.digest {
 				return ExtensionResult{}, fmt.Errorf(
-					"%w: pass %d: %w: context %s first produced %s and then %s",
+					"%w: pass %d: %w",
 					ErrResolveExtensions,
 					pass,
-					ErrRepeatedState,
-					contextDigest,
-					previous,
-					outputDigest,
+					newRepeatedStateError(contextDigest, previous, observed, plugins),
 				)
 			}
 			if added == 0 {
@@ -391,7 +474,7 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 				}, nil
 			}
 		} else {
-			observedOutputs[contextDigest] = outputDigest
+			observedOutputs[contextDigest] = observed
 		}
 	}
 	return ExtensionResult{}, fmt.Errorf(
@@ -1007,6 +1090,69 @@ func extensionOutputDigest(outputs []ExtensionOutput) string {
 		_, _ = hash.Write([]byte{0})
 	}
 	return "sha256:" + hex.EncodeToString(hash.Sum(nil))
+}
+
+type observedExtensionOutputs struct {
+	digest   string
+	byPlugin map[string]string
+}
+
+func observeExtensionOutputs(outputs []ExtensionOutput) observedExtensionOutputs {
+	byPlugin := make(map[string]string, len(outputs))
+	for _, output := range outputs {
+		byPlugin[output.pluginID] = output.output.Digest()
+	}
+	return observedExtensionOutputs{
+		digest:   extensionOutputDigest(outputs),
+		byPlugin: byPlugin,
+	}
+}
+
+func newRepeatedStateError(
+	contextDigest string,
+	first observedExtensionOutputs,
+	repeated observedExtensionOutputs,
+	plugins map[string]Plugin,
+) *RepeatedStateError {
+	pluginIDs := make(map[string]struct{}, len(first.byPlugin)+len(repeated.byPlugin))
+	for pluginID := range first.byPlugin {
+		pluginIDs[pluginID] = struct{}{}
+	}
+	for pluginID := range repeated.byPlugin {
+		pluginIDs[pluginID] = struct{}{}
+	}
+	ordered := make([]string, 0, len(pluginIDs))
+	for pluginID := range pluginIDs {
+		ordered = append(ordered, pluginID)
+	}
+	sort.Strings(ordered)
+
+	changed := make([]RepeatedStateExtension, 0, len(ordered))
+	for _, pluginID := range ordered {
+		firstDigest := first.byPlugin[pluginID]
+		repeatedDigest := repeated.byPlugin[pluginID]
+		if firstDigest == repeatedDigest {
+			continue
+		}
+		plugin := plugins[pluginID]
+		sourcePath := "plugin.yaml"
+		if plugin.PluginPath != "" {
+			sourcePath = path.Join(plugin.PluginPath, "plugin.yaml")
+		}
+		changed = append(changed, RepeatedStateExtension{
+			pluginID:             pluginID,
+			modulePath:           plugin.Context.ModulePath,
+			sourcePath:           sourcePath,
+			firstOutputDigest:    firstDigest,
+			repeatedOutputDigest: repeatedDigest,
+		})
+	}
+	return &RepeatedStateError{
+		contextDigest:        contextDigest,
+		firstOutputDigest:    first.digest,
+		repeatedOutputDigest: repeated.digest,
+		extensions:           changed,
+	}
 }
 
 // DependencyEdgeKind identifies one edge in a mixed activation/generated

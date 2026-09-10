@@ -649,40 +649,95 @@ func TestResolveExtensionsDetectsMixedActivationGeneratedCycle(t *testing.T) {
 }
 
 func TestResolveExtensionsRejectsDifferentOutputForRepeatedContext(t *testing.T) {
-	order := extensionTestContract(t, "order.create/v1", "extensions:\n  authn: {authenticated: true}\n")
+	order := extensionTestContract(t, "order.create/v1", "extensions:\n  audit: {event: order.create}\n  authn: {authenticated: true}\n  authz: {permission: order.create}\n")
 	verify := extensionTestContract(t, "authn.session.verify/v1", "")
+	audit := extensionTestContract(t, "audit.write/v1", "")
+	check := extensionTestContract(t, "authz.check/v1", "")
 	input := ExtensionInput{
 		Input: Input{
 			Requirements: []providerresolution.Requirement{{Contract: order, Source: extensionRequirementSource("order route")}},
 			Candidates: []providerresolution.Candidate{
 				{PluginID: "example.business", Contract: order, Source: "business/order.create"},
 				{PluginID: "example.authn", Contract: verify, Source: "authn/session.verify"},
+				{PluginID: "example.audit", Contract: audit, Source: "audit/audit.write"},
+				{PluginID: "example.authz", Contract: check, Source: "authz/check"},
 			},
-			Activations: extensionTestCatalog(t, extensionTestDeclaration(t, "example.authn", "authn", "authn.session.verify/v1")),
+			Activations: extensionTestCatalog(t,
+				extensionTestDeclaration(t, "example.authz", "authz", "authz.check/v1"),
+				extensionTestDeclaration(t, "example.authn", "authn", "authn.session.verify/v1"),
+				extensionTestDeclaration(t, "example.audit", "audit", "audit.write/v1"),
+			),
 		},
 		Plugins: []Plugin{
 			extensionTestPlugin("example.business", "business", "order.create/v1"),
+			extensionTestPlugin("example.authz", "authz", "authz.check/v1"),
 			extensionTestPlugin("example.authn", "authn", "authn.session.verify/v1"),
+			extensionTestPlugin("example.audit", "audit", "audit.write/v1"),
 		},
-		Capabilities: []generation.CapabilityInput{{ContractJSON: order}, {ContractJSON: verify}},
+		Capabilities: []generation.CapabilityInput{{ContractJSON: order}, {ContractJSON: verify}, {ContractJSON: audit}, {ContractJSON: check}},
 	}
 	builder := newFakeExtensionBuilder(map[string]*fakeExtensionHelper{
-		"example.authn": {
+		"example.audit": {
 			output: func(call int, _ generation.Context) (generation.Output, error) {
 				return generation.Output{Diagnostics: []generation.Diagnostic{{
-					Code:      "authn.state",
+					Code:      "audit.state",
 					Severity:  generation.DiagnosticInfo,
 					Message:   fmt.Sprintf("pass %d", call),
-					Namespace: "authn",
+					Namespace: "audit",
 					Source:    extensionTestCapabilityID(t, "order.create/v1"),
-					RuleID:    "authn.observe",
+					RuleID:    "audit.observe",
+				}}}, nil
+			},
+		},
+		"example.authn": {output: emptyExtensionOutput},
+		"example.authz": {
+			output: func(call int, _ generation.Context) (generation.Output, error) {
+				return generation.Output{Diagnostics: []generation.Diagnostic{{
+					Code:      "authz.state",
+					Severity:  generation.DiagnosticInfo,
+					Message:   fmt.Sprintf("pass %d", call),
+					Namespace: "authz",
+					Source:    extensionTestCapabilityID(t, "order.create/v1"),
+					RuleID:    "authz.observe",
 				}}}, nil
 			},
 		},
 	})
 	_, err := resolveExtensions(t.Context(), input, builder.Build)
-	if !errors.Is(err, ErrRepeatedState) || !strings.Contains(err.Error(), "first produced sha256:") || !strings.Contains(err.Error(), "and then sha256:") {
+	if !errors.Is(err, ErrResolveExtensions) || !errors.Is(err, ErrRepeatedState) || !strings.Contains(err.Error(), "first produced sha256:") || !strings.Contains(err.Error(), "and then sha256:") {
 		t.Fatalf("repeated state error = %v", err)
+	}
+	var repeated *RepeatedStateError
+	if !errors.As(err, &repeated) {
+		t.Fatalf("repeated state error type = %T", err)
+	}
+	if !strings.HasPrefix(repeated.ContextDigest(), "sha256:") || !strings.HasPrefix(repeated.FirstOutputDigest(), "sha256:") || !strings.HasPrefix(repeated.RepeatedOutputDigest(), "sha256:") || repeated.FirstOutputDigest() == repeated.RepeatedOutputDigest() {
+		t.Fatalf("repeated state digests = context %q, first %q, repeated %q", repeated.ContextDigest(), repeated.FirstOutputDigest(), repeated.RepeatedOutputDigest())
+	}
+	extensions := repeated.Extensions()
+	if len(extensions) != 2 || extensions[0].PluginID() != "example.audit" || extensions[1].PluginID() != "example.authz" {
+		t.Fatalf("changed extensions = %#v", extensions)
+	}
+	for index, want := range []struct {
+		pluginID string
+		path     string
+	}{{pluginID: "example.audit", path: "audit/plugin.yaml"}, {pluginID: "example.authz", path: "authz/plugin.yaml"}} {
+		extension := extensions[index]
+		if extension.PluginID() != want.pluginID || extension.ModulePath() != "example.com/application" || extension.SourcePath() != want.path || !strings.HasPrefix(extension.FirstOutputDigest(), "sha256:") || !strings.HasPrefix(extension.RepeatedOutputDigest(), "sha256:") || extension.FirstOutputDigest() == extension.RepeatedOutputDigest() {
+			t.Fatalf("changed extension %d = %#v", index, extension)
+		}
+	}
+	extensions[0] = RepeatedStateExtension{}
+	if repeated.Extensions()[0].PluginID() != "example.audit" {
+		t.Fatal("RepeatedStateError exposed mutable extension storage")
+	}
+	if builder.helpers["example.authn"].calls != 2 {
+		t.Fatalf("stable extension calls = %d, want 2", builder.helpers["example.authn"].calls)
+	}
+	for pluginID, helper := range builder.helpers {
+		if !helper.closed {
+			t.Fatalf("helper %s was not closed", pluginID)
+		}
 	}
 }
 

@@ -279,6 +279,44 @@ func TestPublicGenerationCommandsReportUnorderedContributionSourcesWithoutMutati
 	}
 }
 
+func TestPublicGenerationCommandsReportRepeatedStateSourcesWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := []struct {
+		name      string
+		arguments []string
+	}{
+		{name: "generate", arguments: []string{"generate"}},
+		{name: "generate-check", arguments: []string{"generate", "--check"}},
+		{name: "check", arguments: []string{"check"}},
+	}
+	for _, command := range commands {
+		command := command
+		t.Run(command.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := writeGenerationRepeatedStateProject(t)
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, command.arguments, filepath.Join(root, "order"), commandGoEnvironment())
+			wantSuffix := "\n\n" +
+				"Source: example.com/acme/library:audit/plugin.yaml:1:1 (plugin-declaration)\n" +
+				"Source: example.com/acme/library:authz/plugin.yaml:1:1 (plugin-declaration)\n\n" +
+				"Recovery:\nMake the selected generation extensions deterministic and convergent for identical normalized input.\n\n" +
+				"Diagnostic: " + diagnosticcode.GenerationStateRepeated + "\n"
+			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "generation extension repeated input state with different output") || !strings.Contains(stderr, "first produced sha256:") || !strings.Contains(stderr, "and then sha256:") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 2 || strings.Contains(stderr, ":authn/plugin.yaml:") || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+				t.Fatalf("%s = exit %d, stdout %q, stderr %q", command.name, exitCode, stdout, stderr)
+			}
+			if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, "pkg\\mod") || strings.Contains(stderr, "pkg/mod") {
+				t.Fatalf("%s exposed an absolute or Module Cache path: %q", command.name, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%s mutated the repeated-state Project:\nbefore: %#v\nafter:  %#v", command.name, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func writeMissingGenerationActivationProject(t *testing.T) string {
 	t.Helper()
 
@@ -603,6 +641,87 @@ func writeGenerationUnorderedContributionsProject(t *testing.T) string {
 	return root
 }
 
+func writeGenerationRepeatedStateProject(t *testing.T) string {
+	t.Helper()
+
+	root := writeCapabilityCommandModule(t)
+	cliRoot := commandRepositoryRoot(t)
+	goMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatalf("read application go.mod: %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.mod"), string(goMod)+`
+require (
+	github.com/plystra/cli v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace github.com/plystra/cli => `+filepath.ToSlash(cliRoot)+"\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `capabilities:
+  require: [order.create/v1]
+`)
+	writeCommandFile(t, filepath.Join(root, "order", "plugin.yaml"), "id: acme.library.order\nprovides: [order.create/v1]\n")
+	writeCommandFile(t, filepath.Join(root, "order", "capabilities", "order.create", "v1", "capability.yaml"), `id: order.create/v1
+request: {}
+response: {}
+errors: []
+extensions:
+  audit: {event: order.create}
+  authn: {authenticated: true}
+  authz: {permission: order.create}
+  trace: {span: order.create}
+`)
+	writeCommandFile(t, filepath.Join(root, "authn", "plugin.yaml"), `id: acme.library.authn
+provides: [authn.session.verify/v1]
+generation:
+  api: v1
+  package: ./generation
+  activations:
+    - namespace: authn
+      capability: authn.session.verify/v1
+`)
+	writeCommandFile(t, filepath.Join(root, "authn", "generation", "extension.go"), emptyGenerationExtensionSource)
+	writeCommandFile(t, filepath.Join(root, "authn", "capabilities", "authn.session.verify", "v1", "capability.yaml"), `id: authn.session.verify/v1
+request: {}
+response: {}
+errors: []
+`)
+	writeCommandFile(t, filepath.Join(root, "audit", "plugin.yaml"), `id: acme.library.audit
+provides: [audit.write/v1]
+generation:
+  api: v1
+  package: ./generation
+  activations:
+    - namespace: trace
+      capability: audit.write/v1
+    - namespace: audit
+      capability: audit.write/v1
+`)
+	writeCommandFile(t, filepath.Join(root, "audit", "generation", "extension.go"), auditRepeatedStateGenerationExtensionSource)
+	writeCommandFile(t, filepath.Join(root, "audit", "capabilities", "audit.write", "v1", "capability.yaml"), `id: audit.write/v1
+request: {}
+response: {}
+errors: []
+`)
+	writeCommandFile(t, filepath.Join(root, "authz", "plugin.yaml"), `id: acme.library.authz
+provides: [authz.check/v1]
+generation:
+  api: v1
+  package: ./generation
+  activations:
+    - namespace: authz
+      capability: authz.check/v1
+`)
+	writeCommandFile(t, filepath.Join(root, "authz", "generation", "extension.go"), authzRepeatedStateGenerationExtensionSource)
+	writeCommandFile(t, filepath.Join(root, "authz", "capabilities", "authz.check", "v1", "capability.yaml"), `id: authz.check/v1
+request: {}
+response: {}
+errors: []
+`)
+	return root
+}
+
 const emptyGenerationExtensionSource = `package generation
 
 import generation "github.com/plystra/cli/generation/v1"
@@ -696,6 +815,50 @@ func Generate(generation.GenerationContext) (generation.Output, error) {
 		Namespace: "audit",
 		Source:    source,
 		Point:     generation.GenerationPointInvocationPrepare,
+	}}}, nil
+}
+`
+
+const auditRepeatedStateGenerationExtensionSource = `package generation
+
+import (
+	"fmt"
+	"time"
+
+	generation "github.com/plystra/cli/generation/v1"
+)
+
+func Generate(generation.GenerationContext) (generation.Output, error) {
+	source, _ := generation.ParseCapabilityID("order.create/v1")
+	return generation.Output{Diagnostics: []generation.Diagnostic{{
+		Code:      "audit.state",
+		Severity:  generation.DiagnosticInfo,
+		Message:   fmt.Sprintf("time %d", time.Now().UnixNano()),
+		Namespace: "audit",
+		Source:    source,
+		RuleID:    "audit.observe",
+	}}}, nil
+}
+`
+
+const authzRepeatedStateGenerationExtensionSource = `package generation
+
+import (
+	"fmt"
+	"time"
+
+	generation "github.com/plystra/cli/generation/v1"
+)
+
+func Generate(generation.GenerationContext) (generation.Output, error) {
+	source, _ := generation.ParseCapabilityID("order.create/v1")
+	return generation.Output{Diagnostics: []generation.Diagnostic{{
+		Code:      "authz.state",
+		Severity:  generation.DiagnosticInfo,
+		Message:   fmt.Sprintf("time %d", time.Now().UnixNano()),
+		Namespace: "authz",
+		Source:    source,
+		RuleID:    "authz.observe",
 	}}}, nil
 }
 `

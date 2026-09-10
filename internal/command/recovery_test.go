@@ -345,6 +345,7 @@ func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 		{name: "dependency cycle without typed edges", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrDependencyCycle), code: diagnosticGenerationDependencyCycle},
 		{name: "contribution cycle without typed edges", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrContributionCycle), code: diagnosticGenerationContributionCycle},
 		{name: "unordered contributions without typed entries", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrUnorderedContributions), code: diagnosticGenerationContributionsUnordered},
+		{name: "repeated state without typed extensions", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrRepeatedState), code: diagnosticGenerationStateRepeated},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {

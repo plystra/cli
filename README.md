@@ -1001,6 +1001,13 @@ canonicalization sorts the sources and deduplicates multiple contributions from
 one declaration. The bare internal unordered sentinel remains source-less. Add
 `requires` and `provides` tokens that establish one semantic order among the
 reported contributions; discovery order is never used as an implicit tie-break.
+`PLYSTRA_GENERATION_STATE_REPEATED` reports each selected extension whose
+normalized output changed for the identical immutable context. Every
+`plugin-declaration` source identifies the owning Project module and
+module-relative `plugin.yaml` at `1:1`; shared canonicalization sorts and
+deduplicates the declarations, stable extensions are excluded, and the bare
+internal sentinel remains source-less. Make each reported generation package
+deterministic and convergent for identical normalized input.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses

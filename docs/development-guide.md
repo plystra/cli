@@ -2131,6 +2131,13 @@ sources and deduplicates multiple contributions from one declaration, and a
 bare internal unordered sentinel remains source-less. Add `requires` and
 `provides` tokens that establish one semantic order among the reported
 contributions; discovery order cannot choose one safely.
+`PLYSTRA_GENERATION_STATE_REPEATED` emits one `plugin-declaration` source for
+each selected extension whose normalized output changed for the identical
+immutable context. Each source identifies the owning Project module and
+module-relative `plugin.yaml` at `1:1`. Shared canonicalization sorts and
+deduplicates the declarations, stable extensions are excluded, and a bare
+internal sentinel remains source-less. Make every reported generation package
+deterministic and convergent for identical normalized input.
 An unavailable constructor configuration schema uses
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
 current or dependency Project document as `configuration-declaration` at
@@ -2566,6 +2573,16 @@ owning Plugins at the reported module-relative `plugin.yaml` sources and add
 `requires` and `provides` tokens that establish one semantic order. Discovery
 or execution order is not an allowed tie-break, and a bare internal unordered
 sentinel has no source to invent.
+
+### Repeated generation state
+
+`PLYSTRA_GENERATION_STATE_REPEATED` points only to selected extensions whose
+normalized output changed when the CLI called them again with the identical
+immutable context. Use each reported owning `plugin.yaml` to identify the
+generation package, then remove time, randomness, mutable external state, and
+filesystem-order dependence so identical normalized input produces one exact
+output. Stable selected extensions are deliberately omitted, and a bare
+internal repeated-state sentinel has no source to invent.
 
 ### Extension helper fails
 

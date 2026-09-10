@@ -596,6 +596,26 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				sources = append(sources, candidate)
 			}
 		}
+	case diagnosticGenerationStateRepeated:
+		var repeated *generationresolution.RepeatedStateError
+		if !errors.As(err, &repeated) || repeated == nil {
+			return nil
+		}
+		seen := make(map[diagnosticjson.Source]struct{})
+		for _, extension := range repeated.Extensions() {
+			candidate := diagnosticjson.Source{
+				Module: extension.ModulePath(),
+				Path:   extension.SourcePath(),
+				Kind:   "plugin-declaration",
+				Line:   1,
+				Column: 1,
+			}
+			if _, exists := seen[candidate]; exists {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			sources = append(sources, candidate)
+		}
 	case diagnosticGeneratedOwnershipConflict:
 		var conflict *applicationgenerate.OwnershipConflictSourceError
 		if !errors.As(err, &conflict) || conflict == nil {

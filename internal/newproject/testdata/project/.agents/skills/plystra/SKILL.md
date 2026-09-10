@@ -1220,14 +1220,14 @@ boundary.
 Recovery then Diagnostic: PLYSTRA_<AREA>_<CONDITION>
 Source: <module>:<module-relative-path>[:line:column] (<kind>)
 PLYSTRA_CONFIGURATION_INHERITED_CONFLICT / PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS: configuration-declaration.
-Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
+Redact unsafe paths/selectors; leave unknowns uncoded.
 
 - PLYSTRA_PROJECT_MANIFEST_INVALID: project-marker; malformed 1:1; else no span
 - PLYSTRA_RESOLVE_UNKNOWN_INTERFACE / PLYSTRA_RESOLVE_RESERVED_INTERFACE:
   fix listed declaration/selection Source; never declare kernel.*.
 - PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION / PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS /
-  PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: fix listed root/constructor Sources; select
-  with plystra use or break the cycle.
+  PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE: fix root/constructor Sources; select or
+  break the cycle.
 - PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION / PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION /
   PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION: fix the implementation-selection Source
   or set it to null.
@@ -1237,8 +1237,8 @@ Redact absolute/cache paths and unsafe selectors; leave unknowns uncoded.
 - PLYSTRA_GENERATION_ACTIVATION_MISSING: requirements; add association; no invented Source.
 - PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING: provider/choice Sources; add support.
 - PLYSTRA_GENERATION_ACTIVATION_CYCLE / PLYSTRA_GENERATION_DEPENDENCY_CYCLE /
-  PLYSTRA_GENERATION_CONTRIBUTION_CYCLE / PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED:
-  dedup Sources; fix graph.
+  PLYSTRA_GENERATION_CONTRIBUTION_CYCLE / PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED /
+  PLYSTRA_GENERATION_STATE_REPEATED: dedup Sources; fix cause.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,
