@@ -75,7 +75,7 @@ func TestResolveBuildsStableActivationClosureAndExcludesUnselectedExtensions(t *
 		t.Fatalf("activation requirements = %v", got)
 	}
 	extensions := result.Extensions()
-	if len(extensions) != 1 || extensions[0].PluginID() != "example.security" || extensions[0].API() != "v1" || extensions[0].Package() != "./generation" || extensions[0].Source() != "example.security/plugin.yaml" || !slices.Equal(extensions[0].Namespaces(), []string{"authn", "authz"}) {
+	if len(extensions) != 1 || extensions[0].PluginID() != "example.security" || extensions[0].API() != "v1" || extensions[0].Package() != "./generation" || extensions[0].Source() != "example.security/plugin.yaml" || extensions[0].ModulePath() != "example.com/project" || extensions[0].SourcePath() != "example.security/plugin.yaml" || extensions[0].PackageLine() != 7 || extensions[0].PackageColumn() != 12 || !slices.Equal(extensions[0].Namespaces(), []string{"authn", "authz"}) {
 		t.Fatalf("Extensions = %#v", extensions)
 	}
 	activations := extensions[0].Activations()

@@ -48,6 +48,74 @@ var (
 	ErrAliasResolution = errors.New("resolve final generation Capability Aliases")
 )
 
+const extensionPackageSourceKind = "plugin-declaration"
+
+// ExtensionPackageSourceError attaches the selected generation.package
+// declaration to a helper compilation failure without changing its text or
+// established sentinel chain.
+type ExtensionPackageSourceError struct {
+	modulePath string
+	sourcePath string
+	line       int
+	column     int
+	cause      error
+}
+
+// ModulePath returns the Project module that owns the selected declaration.
+func (e *ExtensionPackageSourceError) ModulePath() string {
+	if e == nil {
+		return ""
+	}
+	return e.modulePath
+}
+
+// SourcePath returns the slash-separated module-relative declaration path.
+func (e *ExtensionPackageSourceError) SourcePath() string {
+	if e == nil {
+		return ""
+	}
+	return e.sourcePath
+}
+
+// SourceKind returns the canonical diagnostic source category.
+func (e *ExtensionPackageSourceError) SourceKind() string {
+	if e == nil {
+		return ""
+	}
+	return extensionPackageSourceKind
+}
+
+// Line returns the one-based generation.package declaration line.
+func (e *ExtensionPackageSourceError) Line() int {
+	if e == nil {
+		return 0
+	}
+	return e.line
+}
+
+// Column returns the one-based generation.package declaration column.
+func (e *ExtensionPackageSourceError) Column() int {
+	if e == nil {
+		return 0
+	}
+	return e.column
+}
+
+func (e *ExtensionPackageSourceError) Error() string {
+	if e == nil || e.cause == nil {
+		return generationexec.ErrCompile.Error()
+	}
+	return e.cause.Error()
+}
+
+// Unwrap preserves the original helper compilation failure chain.
+func (e *ExtensionPackageSourceError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
 // Plugin supplies one visible plugin's supported public generation context
 // together with CLI-private selection and filesystem provenance. Local marks a
 // root-level application plugin, which is included independently of provider
@@ -918,6 +986,7 @@ func runExtensions(
 			var err error
 			helper, err = build(ctx, spec, options)
 			if err != nil {
+				err = extensionPackageSourceError(extension, err)
 				return nil, fmt.Errorf("%w: plugin %q declaration %q: %w", ErrExtensionExecution, extension.PluginID(), extension.Source(), err)
 			}
 			if helper == nil {
@@ -942,6 +1011,19 @@ func runExtensions(
 		})
 	}
 	return outputs, nil
+}
+
+func extensionPackageSourceError(extension SelectedExtension, cause error) error {
+	if cause == nil || !errors.Is(cause, generationexec.ErrCompile) || extension.ModulePath() == "" || extension.SourcePath() == "" || extension.PackageLine() < 1 || extension.PackageColumn() < 1 {
+		return cause
+	}
+	return &ExtensionPackageSourceError{
+		modulePath: extension.ModulePath(),
+		sourcePath: extension.SourcePath(),
+		line:       extension.PackageLine(),
+		column:     extension.PackageColumn(),
+		cause:      cause,
+	}
 }
 
 func extensionSpecKey(spec generationexec.Spec) string {

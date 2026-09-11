@@ -873,6 +873,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"PLYSTRA_GENERATION_NONCONVERGENT",
 		"PLYSTRA_GENERATION_API_UNSUPPORTED",
 		"PLYSTRA_GENERATION_PACKAGE_INVALID",
+		"PLYSTRA_GENERATION_COMPILE_FAILED",
 		"exact scalar Source",
 		"dedup Sources",
 		"plystra implement email.send/v1 --package ./mailer",

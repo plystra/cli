@@ -1023,6 +1023,33 @@ func TestResolveExtensionsFailsClosedWhenHelperCleanupFails(t *testing.T) {
 	}
 }
 
+func TestResolveExtensionsRetainsSelectedPackageSourceForCompileFailure(t *testing.T) {
+	order := extensionTestContract(t, "order.create/v1", "extensions:\n  authn: {authenticated: true}\n")
+	verify := extensionTestContract(t, "authn.session.verify/v1", "")
+	audit := extensionTestContract(t, "audit.write/v1", "")
+	input := extensionTestInput(t, order, verify, audit)
+	compileFailure := fmt.Errorf("%w: incompatible Generate signature", generationexec.ErrCompile)
+
+	result, err := resolveExtensions(t.Context(), input, func(context.Context, generationexec.Spec, generationexec.BuildOptions) (extensionHelper, error) {
+		return nil, compileFailure
+	})
+	if result.Passes() != 0 || !errors.Is(err, ErrResolveExtensions) || !errors.Is(err, ErrExtensionExecution) || !errors.Is(err, generationexec.ErrCompile) {
+		t.Fatalf("compile result = %#v, %v", result, err)
+	}
+	var source *ExtensionPackageSourceError
+	if !errors.As(err, &source) || source == nil || source.ModulePath() != "example.com/project" || source.SourcePath() != "example.authn/plugin.yaml" || source.SourceKind() != "plugin-declaration" || source.Line() != 5 || source.Column() != 12 {
+		t.Fatalf("ExtensionPackageSourceError = %#v, %v", source, err)
+	}
+	if source.Error() != compileFailure.Error() || !errors.Is(source, generationexec.ErrCompile) {
+		t.Fatalf("source error changed compile failure: %v", source)
+	}
+
+	var zero *ExtensionPackageSourceError
+	if zero.ModulePath() != "" || zero.SourcePath() != "" || zero.SourceKind() != "" || zero.Line() != 0 || zero.Column() != 0 || zero.Unwrap() != nil || zero.Error() != generationexec.ErrCompile.Error() {
+		t.Fatalf("nil ExtensionPackageSourceError accessors returned nonzero values")
+	}
+}
+
 func TestResolveExtensionsRejectsContextCatalogDrift(t *testing.T) {
 	required := extensionTestContract(t, "order.read/v1", "")
 	drifted := extensionTestContract(t, "order.read/v1", "extensions:\n  audit: {record: true}\n")

@@ -68,11 +68,15 @@ func (a SelectedActivation) Uses() []generationactivation.NamespaceUse {
 // SelectedExtension is one selected provider plugin's eligible generation
 // package. Unselected providers never appear here.
 type SelectedExtension struct {
-	pluginID    string
-	api         string
-	packagePath string
-	source      string
-	activations []SelectedActivation
+	pluginID      string
+	api           string
+	packagePath   string
+	source        string
+	modulePath    string
+	sourcePath    string
+	packageLine   int
+	packageColumn int
+	activations   []SelectedActivation
 }
 
 // PluginID returns the selected extension owner.
@@ -86,6 +90,18 @@ func (e SelectedExtension) Package() string { return e.packagePath }
 
 // Source returns deterministic generation declaration provenance.
 func (e SelectedExtension) Source() string { return e.source }
+
+// ModulePath returns the Project module that owns the generation declaration.
+func (e SelectedExtension) ModulePath() string { return e.modulePath }
+
+// SourcePath returns the slash-separated module-relative declaration path.
+func (e SelectedExtension) SourcePath() string { return e.sourcePath }
+
+// PackageLine returns the one-based generation.package declaration line.
+func (e SelectedExtension) PackageLine() int { return e.packageLine }
+
+// PackageColumn returns the one-based generation.package declaration column.
+func (e SelectedExtension) PackageColumn() int { return e.packageColumn }
 
 // Activations returns defensive namespace bindings in canonical order.
 func (e SelectedExtension) Activations() []SelectedActivation {
@@ -368,11 +384,15 @@ func activationRequirementSource(use generationactivation.NamespaceUse, cause pr
 }
 
 type extensionBuilder struct {
-	pluginID    string
-	api         string
-	packagePath string
-	source      string
-	activations []SelectedActivation
+	pluginID      string
+	api           string
+	packagePath   string
+	source        string
+	modulePath    string
+	sourcePath    string
+	packageLine   int
+	packageColumn int
+	activations   []SelectedActivation
 }
 
 func selectExtensions(catalog generationactivation.Catalog, requirements generationactivation.RequirementSet, resolution providerresolution.Result) ([]SelectedExtension, error) {
@@ -418,13 +438,17 @@ func selectExtensions(catalog generationactivation.Catalog, requirements generat
 			builder, exists := builders[extension.PluginID()]
 			if !exists {
 				builder = &extensionBuilder{
-					pluginID:    extension.PluginID(),
-					api:         extension.API(),
-					packagePath: extension.Package(),
-					source:      extension.Source(),
+					pluginID:      extension.PluginID(),
+					api:           extension.API(),
+					packagePath:   extension.Package(),
+					source:        extension.Source(),
+					modulePath:    extension.ModulePath(),
+					sourcePath:    extension.SourcePath(),
+					packageLine:   extension.PackageLine(),
+					packageColumn: extension.PackageColumn(),
 				}
 				builders[extension.PluginID()] = builder
-			} else if builder.api != extension.API() || builder.packagePath != extension.Package() || builder.source != extension.Source() {
+			} else if builder.api != extension.API() || builder.packagePath != extension.Package() || builder.source != extension.Source() || builder.modulePath != extension.ModulePath() || builder.sourcePath != extension.SourcePath() || builder.packageLine != extension.PackageLine() || builder.packageColumn != extension.PackageColumn() {
 				issues = append(issues, fmt.Errorf(
 					"%w: selected plugin %q has inconsistent generation declarations across namespaces",
 					ErrInvariant,
@@ -458,11 +482,15 @@ func selectExtensions(catalog generationactivation.Catalog, requirements generat
 			return builder.activations[left].capability.String() < builder.activations[right].capability.String()
 		})
 		extensions[index] = SelectedExtension{
-			pluginID:    builder.pluginID,
-			api:         builder.api,
-			packagePath: builder.packagePath,
-			source:      builder.source,
-			activations: append([]SelectedActivation(nil), builder.activations...),
+			pluginID:      builder.pluginID,
+			api:           builder.api,
+			packagePath:   builder.packagePath,
+			source:        builder.source,
+			modulePath:    builder.modulePath,
+			sourcePath:    builder.sourcePath,
+			packageLine:   builder.packageLine,
+			packageColumn: builder.packageColumn,
+			activations:   append([]SelectedActivation(nil), builder.activations...),
 		}
 	}
 	return extensions, nil

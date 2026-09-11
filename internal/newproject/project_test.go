@@ -421,7 +421,7 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 			t.Fatalf("maximum-length Project skill omits generation-graph source guidance for %s", code)
 		}
 	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_API_UNSUPPORTED")) || !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_PACKAGE_INVALID")) || !bytes.Contains(skill, []byte("exact scalar Source")) {
+	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_API_UNSUPPORTED")) || !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_PACKAGE_INVALID")) || !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_COMPILE_FAILED")) || !bytes.Contains(skill, []byte("exact scalar Source")) {
 		t.Fatal("maximum-length Project skill omits generation-declaration source guidance")
 	}
 }
@@ -1242,6 +1242,10 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_GENERATION_PACKAGE_INVALID` reports the exact `generation.package` scalar"),
 		[]byte("Create a real non-symbolic Go package at the reported confined path"),
 		[]byte("bare package sentinel remains source-less"),
+		[]byte("`PLYSTRA_GENERATION_COMPILE_FAILED` reports the exact `generation.package` scalar"),
+		[]byte("Fix the reported package's source, imports, dependencies, or `Generate` signature"),
+		[]byte("Compiler output never exposes checkout, Module Cache, or helper temporary paths"),
+		[]byte("bare compile sentinel remains source-less"),
 		[]byte("one path-only `configuration-selection` source"),
 		[]byte("unsafe selectors report no source"),
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration"),
@@ -2321,6 +2325,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_GENERATION_NONCONVERGENT",
 		"PLYSTRA_GENERATION_API_UNSUPPORTED",
 		"PLYSTRA_GENERATION_PACKAGE_INVALID",
+		"PLYSTRA_GENERATION_COMPILE_FAILED",
 		"exact scalar Source",
 		"dedup Sources",
 		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",

@@ -1029,6 +1029,13 @@ scalar at its current-Project or dependency-Project `plugin.yaml` position as a
 than inventing a declaration. Create a real non-symbolic Go package at the
 reported confined path or update the declaration to an existing safe package,
 then rerun the same command.
+`PLYSTRA_GENERATION_COMPILE_FAILED` reports the exact `generation.package`
+scalar for the selected helper at its current-Project or dependency-Project
+`plugin.yaml` position as a `plugin-declaration` source. A bare compile sentinel
+remains source-less rather than inventing a declaration. Fix the reported
+package's source, imports, dependencies, or `Generate` signature, then rerun the
+same command. Compiler output never exposes checkout, Module Cache, or helper
+temporary paths.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses

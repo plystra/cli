@@ -182,7 +182,11 @@ func Build(ctx context.Context, spec Spec, options BuildOptions) (_ *Helper, bui
 		return nil, fmt.Errorf("%w: %w: %s: %w", ErrBuild, ErrCompile, normalized.label(), compileContextErr)
 	}
 	if result.err != nil {
-		diagnostic := sanitizeDiagnostic(commandOutput(result), moduleRoot, temporaryRoot)
+		privatePaths := []string{moduleRoot, temporaryRoot}
+		if relativeTemporaryRoot, relativeErr := filepath.Rel(moduleRoot, temporaryRoot); relativeErr == nil && relativeTemporaryRoot != "." {
+			privatePaths = append(privatePaths, relativeTemporaryRoot)
+		}
+		diagnostic := sanitizeDiagnostic(commandOutput(result), privatePaths...)
 		if diagnostic == "" {
 			diagnostic = result.err.Error()
 		}

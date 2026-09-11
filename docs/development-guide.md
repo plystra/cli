@@ -2159,6 +2159,13 @@ scalar at its current-Project or dependency-Project `plugin.yaml` position as a
 than inventing a declaration. Create a real non-symbolic Go package at the
 reported confined path or update the declaration to an existing safe package,
 then rerun the same command.
+`PLYSTRA_GENERATION_COMPILE_FAILED` emits the exact `generation.package` scalar
+for the selected helper at its current-Project or dependency-Project
+`plugin.yaml` position as a `plugin-declaration` source. A bare compile sentinel
+remains source-less rather than inventing a declaration. Fix the reported
+package's source, imports, dependencies, or `Generate` signature, then rerun the
+same command. Compiler output never exposes checkout, Module Cache, or helper
+temporary paths.
 An unavailable constructor configuration schema uses
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
 current or dependency Project document as `configuration-declaration` at
@@ -2631,6 +2638,16 @@ a real non-symbolic Go package at that confined path or change the declaration
 to an existing safe package before retrying generation or checking. An
 unlocated package sentinel has no trustworthy authored source and therefore
 emits none.
+
+### Generation package does not compile
+
+`PLYSTRA_GENERATION_COMPILE_FAILED` points directly to the selected helper's
+`generation.package` scalar in the owning module-relative `plugin.yaml`. Fix
+the package's source, imports, dependencies, or exported `Generate` signature
+before retrying generation or checking. An unlocated compile sentinel has no
+trustworthy authored source and therefore emits none. Compiler output is
+sanitized so checkout, Module Cache, and helper temporary paths do not become
+public diagnostics.
 
 ### Extension helper fails
 

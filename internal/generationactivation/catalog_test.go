@@ -46,7 +46,7 @@ func TestCatalogAssociatesOneCapabilityWithSeveralProviderExtensions(t *testing.
 	if err != nil {
 		t.Fatalf("Select: %v", err)
 	}
-	if selected.PluginID() != "example.authn-password" || selected.API() != "v1" || selected.Package() != "./generation" || selected.Source() != "password/plugin.yaml" {
+	if selected.PluginID() != "example.authn-password" || selected.API() != "v1" || selected.Package() != "./generation" || selected.Source() != "password/plugin.yaml" || selected.ModulePath() != "example.com/app" || selected.SourcePath() != "password/plugin.yaml" || selected.PackageLine() != 5 || selected.PackageColumn() != 12 {
 		t.Fatalf("selected Extension = %#v", selected)
 	}
 	if _, err := catalog.Select("authn", "example.unselected"); !errors.Is(err, generationactivation.ErrSelectedProviderExtension) || !strings.Contains(err.Error(), "example.authn-passkey") || !strings.Contains(err.Error(), "example.authn-password") {

@@ -342,7 +342,7 @@ func TestBuildRejectsUnsupportedAPIAndCompileFailuresWithoutArtifacts(t *testing
 			t.Fatalf("compile error omits %q: %v", detail, err)
 		}
 	}
-	if strings.Contains(message, fixture.root) || strings.Contains(message, fixture.temporaryParent) {
+	if strings.Contains(message, fixture.root) || strings.Contains(message, fixture.temporaryParent) || strings.Contains(message, ".plystra-generation-") {
 		t.Fatalf("compile error leaked private paths: %v", err)
 	}
 	assertDirectoryEmpty(t, fixture.temporaryParent)

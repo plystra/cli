@@ -56,10 +56,14 @@ type normalizedDeclaration struct {
 // Extension identifies one plugin package eligible to interpret a namespace
 // only when that plugin is selected for the association's Capability.
 type Extension struct {
-	pluginID    string
-	api         string
-	packagePath string
-	source      string
+	pluginID      string
+	api           string
+	packagePath   string
+	source        string
+	modulePath    string
+	sourcePath    string
+	packageLine   int
+	packageColumn int
 }
 
 // PluginID returns the canonical owning Plugin ID.
@@ -73,6 +77,18 @@ func (e Extension) Package() string { return e.packagePath }
 
 // Source returns deterministic declaration provenance suitable for diagnostics.
 func (e Extension) Source() string { return e.source }
+
+// ModulePath returns the owning Project's canonical Go Module path.
+func (e Extension) ModulePath() string { return e.modulePath }
+
+// SourcePath returns the slash-separated module-relative plugin.yaml path.
+func (e Extension) SourcePath() string { return e.sourcePath }
+
+// PackageLine returns the one-based generation.package declaration line.
+func (e Extension) PackageLine() int { return e.packageLine }
+
+// PackageColumn returns the one-based generation.package declaration column.
+func (e Extension) PackageColumn() int { return e.packageColumn }
 
 // Association binds one extension namespace to one exact canonical activation
 // Capability and all compatible candidate-provider extensions.
@@ -120,6 +136,9 @@ func New(inputs []Declaration) (Catalog, error) {
 		if generation.API() == "" || generation.Package() == "" || len(generation.Activations()) == 0 {
 			return Catalog{}, fmt.Errorf("%w: %w: plugin %q at %q has an incomplete generation declaration", ErrCatalog, ErrInvalidDeclaration, input.PluginID, input.Source)
 		}
+		if generation.PackageLine() < 1 || generation.PackageColumn() < 1 {
+			return Catalog{}, fmt.Errorf("%w: %w: plugin %q at %q has a generation package without a trusted source position", ErrCatalog, ErrInvalidDeclaration, input.PluginID, input.Source)
+		}
 		for _, activation := range generation.Activations() {
 			if activation.Line() < 1 || activation.Column() < 1 {
 				return Catalog{}, fmt.Errorf("%w: %w: plugin %q at %q has an activation without a trusted source position", ErrCatalog, ErrInvalidDeclaration, input.PluginID, input.Source)
@@ -163,15 +182,17 @@ func New(inputs []Declaration) (Catalog, error) {
 		for _, activation := range generation.Activations() {
 			namespace := activation.Namespace()
 			byNamespace[namespace] = append(byNamespace[namespace], ConflictCandidate{
-				pluginID:    declaration.pluginID,
-				capability:  activation.Capability(),
-				api:         generation.API(),
-				packagePath: generation.Package(),
-				source:      declaration.source,
-				modulePath:  declaration.modulePath,
-				sourcePath:  declaration.sourcePath,
-				line:        activation.Line(),
-				column:      activation.Column(),
+				pluginID:      declaration.pluginID,
+				capability:    activation.Capability(),
+				api:           generation.API(),
+				packagePath:   generation.Package(),
+				source:        declaration.source,
+				modulePath:    declaration.modulePath,
+				sourcePath:    declaration.sourcePath,
+				packageLine:   generation.PackageLine(),
+				packageColumn: generation.PackageColumn(),
+				line:          activation.Line(),
+				column:        activation.Column(),
 			})
 		}
 	}
@@ -203,10 +224,14 @@ func New(inputs []Declaration) (Catalog, error) {
 		extensions := make([]Extension, len(candidates))
 		for index, candidate := range candidates {
 			extensions[index] = Extension{
-				pluginID:    candidate.pluginID,
-				api:         candidate.api,
-				packagePath: candidate.packagePath,
-				source:      candidate.source,
+				pluginID:      candidate.pluginID,
+				api:           candidate.api,
+				packagePath:   candidate.packagePath,
+				source:        candidate.source,
+				modulePath:    candidate.modulePath,
+				sourcePath:    candidate.sourcePath,
+				packageLine:   candidate.packageLine,
+				packageColumn: candidate.packageColumn,
 			}
 		}
 		associations = append(associations, Association{namespace: namespace, capability: capability, extensions: extensions})
@@ -265,15 +290,17 @@ func (c Catalog) Select(namespace, selectedProvider string) (Extension, error) {
 // ConflictCandidate records one complete declaration involved in a namespace
 // association conflict.
 type ConflictCandidate struct {
-	pluginID    string
-	capability  capabilityid.Identifier
-	api         string
-	packagePath string
-	source      string
-	modulePath  string
-	sourcePath  string
-	line        int
-	column      int
+	pluginID      string
+	capability    capabilityid.Identifier
+	api           string
+	packagePath   string
+	source        string
+	modulePath    string
+	sourcePath    string
+	packageLine   int
+	packageColumn int
+	line          int
+	column        int
 }
 
 // PluginID returns the declaring Plugin ID.

@@ -391,6 +391,43 @@ func TestPublicGenerationCommandsReportInvalidPackageSourceWithoutMutation(t *te
 	}
 }
 
+func TestPublicGenerationCommandsReportCompileFailureSourceWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := []struct {
+		name      string
+		arguments []string
+	}{
+		{name: "generate", arguments: []string{"generate"}},
+		{name: "generate-check", arguments: []string{"generate", "--check"}},
+		{name: "check", arguments: []string{"check"}},
+	}
+	for _, command := range commands {
+		command := command
+		t.Run(command.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := writeGenerationCompileFailureProject(t)
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, command.arguments, filepath.Join(root, "order"), commandGoEnvironment())
+			wantSuffix := "\n\n" +
+				"Source: example.com/acme/library:authn/plugin.yaml:5:12 (plugin-declaration)\n\n" +
+				"Recovery:\nFix the selected generation package reported above, then rerun the command.\n\n" +
+				"Diagnostic: " + diagnosticcode.GenerationCompileFailed + "\n"
+			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "compile generation helper") || !strings.Contains(stderr, `plugin "acme.library.authn"`) || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+				t.Fatalf("%s = exit %d, stdout %q, stderr %q", command.name, exitCode, stdout, stderr)
+			}
+			if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, "pkg\\mod") || strings.Contains(stderr, "pkg/mod") || strings.Contains(stderr, ".plystra-generation-") {
+				t.Fatalf("%s exposed an absolute, Module Cache, or helper path: %q", command.name, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%s mutated the compile-failure Project:\nbefore: %#v\nafter:  %#v", command.name, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func writeMissingGenerationActivationProject(t *testing.T) string {
 	t.Helper()
 
@@ -844,6 +881,50 @@ generation:
 	return root
 }
 
+func writeGenerationCompileFailureProject(t *testing.T) string {
+	t.Helper()
+
+	root := writeCapabilityCommandModule(t)
+	cliRoot := commandRepositoryRoot(t)
+	goMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatalf("read application go.mod: %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.mod"), string(goMod)+`
+require (
+	github.com/plystra/cli v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace github.com/plystra/cli => `+filepath.ToSlash(cliRoot)+"\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "capabilities:\n  require: [order.create/v1]\n")
+	writeCommandFile(t, filepath.Join(root, "order", "plugin.yaml"), "id: acme.library.order\nprovides: [order.create/v1]\n")
+	writeCommandFile(t, filepath.Join(root, "order", "capabilities", "order.create", "v1", "capability.yaml"), `id: order.create/v1
+request: {}
+response: {}
+errors: []
+extensions:
+  authn: {authenticated: true}
+`)
+	writeCommandFile(t, filepath.Join(root, "authn", "plugin.yaml"), `id: acme.library.authn
+provides: [authn.session.verify/v1]
+generation:
+  api: v1
+  package: ./generation
+  activations:
+    - namespace: authn
+      capability: authn.session.verify/v1
+`)
+	writeCommandFile(t, filepath.Join(root, "authn", "generation", "extension.go"), invalidGenerationSignatureSource)
+	writeCommandFile(t, filepath.Join(root, "authn", "capabilities", "authn.session.verify", "v1", "capability.yaml"), `id: authn.session.verify/v1
+request: {}
+response: {}
+errors: []
+`)
+	return root
+}
+
 const emptyGenerationExtensionSource = `package generation
 
 import generation "github.com/plystra/cli/generation/v1"
@@ -851,6 +932,11 @@ import generation "github.com/plystra/cli/generation/v1"
 func Generate(generation.GenerationContext) (generation.Output, error) {
 	return generation.Output{}, nil
 }
+`
+
+const invalidGenerationSignatureSource = `package generation
+
+func Generate() {}
 `
 
 const dependencyCycleGenerationExtensionSource = `package generation

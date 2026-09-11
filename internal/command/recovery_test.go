@@ -350,6 +350,7 @@ func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 		{name: "unsupported helper API without typed declaration", err: fmt.Errorf("resolve generation: %w", generationexec.ErrUnsupportedAPI), code: diagnosticGenerationAPIUnsupported},
 		{name: "unsupported manifest API without typed declaration", err: fmt.Errorf("resolve generation: %w", pluginmeta.ErrUnsupportedGenerationAPI), code: diagnosticGenerationAPIUnsupported},
 		{name: "invalid generation package without typed declaration", err: fmt.Errorf("resolve generation: %w", pluginindex.ErrInvalidGenerationPackage), code: diagnosticGenerationPackageInvalid},
+		{name: "generation compile failure without typed declaration", err: fmt.Errorf("resolve generation: %w", generationexec.ErrCompile), code: diagnosticGenerationCompileFailed},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {

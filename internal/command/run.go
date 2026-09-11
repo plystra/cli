@@ -244,6 +244,9 @@ PLYSTRA_GENERATION_API_UNSUPPORTED reports the exact unsupported generation.api
 scalar as a plugin-declaration source. A bare API sentinel has no source.
 PLYSTRA_GENERATION_PACKAGE_INVALID reports the exact generation.package scalar
 as a plugin-declaration source. A bare package sentinel has no source.
+PLYSTRA_GENERATION_COMPILE_FAILED reports the selected helper's exact
+generation.package scalar as a plugin-declaration source. A bare compile
+sentinel has no source.
 PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
 configuration, go.mod/go.sum, or generated path as a sorted path-only
 configuration-declaration, module-dependency, or generated-artifact source
@@ -352,6 +355,9 @@ PLYSTRA_GENERATION_API_UNSUPPORTED reports the exact unsupported generation.api
 scalar as a plugin-declaration source. A bare API sentinel has no source.
 PLYSTRA_GENERATION_PACKAGE_INVALID reports the exact generation.package scalar
 as a plugin-declaration source. A bare package sentinel has no source.
+PLYSTRA_GENERATION_COMPILE_FAILED reports the selected helper's exact
+generation.package scalar as a plugin-declaration source. A bare compile
+sentinel has no source.
 PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
 configuration, go.mod/go.sum, or generated path as a sorted path-only
 configuration-declaration, module-dependency, or generated-artifact source
