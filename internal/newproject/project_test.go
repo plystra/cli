@@ -401,10 +401,10 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	if !bytes.Contains(skill, []byte("PLYSTRA_PLUGIN_TARGET_AMBIGUOUS")) || !bytes.Contains(skill, []byte("candidate plugin-declaration Sources at 1:1")) {
 		t.Fatal("maximum-length Project skill omits Plugin-target source guidance")
 	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_ACTIVATION_MISSING")) || !bytes.Contains(skill, []byte("no invented Source")) {
+	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_ACTIVATION_MISSING")) || !bytes.Contains(skill, []byte("none invented")) {
 		t.Fatal("maximum-length Project skill omits generation-activation source guidance")
 	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_ACTIVATION_CONFLICT")) || !bytes.Contains(skill, []byte("plugin Sources; unify namespace")) {
+	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_ACTIVATION_CONFLICT")) || !bytes.Contains(skill, []byte("plugin Sources; unify")) {
 		t.Fatal("maximum-length Project skill omits generation-activation conflict source guidance")
 	}
 	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING")) || !bytes.Contains(skill, []byte("provider/choice Sources")) {
@@ -420,6 +420,9 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 		if !bytes.Contains(skill, code) || !bytes.Contains(skill, []byte("dedup Sources")) {
 			t.Fatalf("maximum-length Project skill omits generation-graph source guidance for %s", code)
 		}
+	}
+	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_API_UNSUPPORTED")) || !bytes.Contains(skill, []byte("exact API Source")) {
+		t.Fatal("maximum-length Project skill omits unsupported generation API source guidance")
 	}
 }
 
@@ -1233,6 +1236,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_GENERATION_NONCONVERGENT` reports the typed `generation-rule` sources"),
 		[]byte("most recent pass that introduced previously unseen canonical requirements"),
 		[]byte("rules that added no requirement in that growth pass are excluded"),
+		[]byte("`PLYSTRA_GENERATION_API_UNSUPPORTED` reports the exact unsupported `generation.api` scalar"),
+		[]byte("current-Project or dependency-Project `plugin.yaml` position"),
+		[]byte("bare helper or manifest API sentinel remains source-less"),
 		[]byte("one path-only `configuration-selection` source"),
 		[]byte("unsafe selectors report no source"),
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration"),
@@ -2300,10 +2306,9 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_PLUGIN_TARGET_AMBIGUOUS",
 		"candidate plugin-declaration Sources at 1:1",
 		"PLYSTRA_GENERATION_ACTIVATION_CONFLICT",
-		"plugin Sources; unify namespace",
+		"plugin Sources; unify",
 		"PLYSTRA_GENERATION_ACTIVATION_MISSING",
-		"requirements; add association",
-		"no invented Source",
+		"Sources; add; none invented",
 		"PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING",
 		"provider/choice Sources",
 		"PLYSTRA_GENERATION_ACTIVATION_CYCLE",
@@ -2312,6 +2317,8 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED",
 		"PLYSTRA_GENERATION_STATE_REPEATED",
 		"PLYSTRA_GENERATION_NONCONVERGENT",
+		"PLYSTRA_GENERATION_API_UNSUPPORTED",
+		"exact API Source",
 		"dedup Sources",
 		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",

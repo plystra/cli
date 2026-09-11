@@ -23,7 +23,7 @@ func TestScanBuildsDeterministicImmutableIndex(t *testing.T) {
 	accountManifest := []byte("id: acme.app.account\nprovides:\n  - profile.get/v2\n  - account.register/v1\nrequires: [email.send/v1, audit.write/v1]\nconfig: {token: {type: secret, required: true}}\ngeneration: {api: v1, package: ./generation, activations: [{namespace: profile, capability: profile.get/v2}]}\n")
 	writeManifest(t, root, "account", string(accountManifest))
 	writeGenerationPackage(t, root, "account", "generation")
-	index, err := pluginindex.Scan(root)
+	index, err := pluginindex.Scan(root, "example.com/acme/app")
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestScanRejectsDuplicateIDs(t *testing.T) {
 	root := t.TempDir()
 	writePlugin(t, root, "account", "acme.app.shared")
 	writePlugin(t, root, "profile", "acme.app.shared")
-	index, err := pluginindex.Scan(root)
+	index, err := pluginindex.Scan(root, "example.com/acme/app")
 	if !errors.Is(err, pluginindex.ErrIndex) || !errors.Is(err, pluginindex.ErrDuplicateID) {
 		t.Fatalf("Scan error = %v, want ErrIndex and ErrDuplicateID", err)
 	}
@@ -121,10 +121,36 @@ func TestScanRejectsInvalidIndexedMetadata(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
 			writeManifest(t, root, "account", declaration)
-			if _, err := pluginindex.Scan(root); !errors.Is(err, pluginindex.ErrIndex) {
+			if _, err := pluginindex.Scan(root, "example.com/acme/app"); !errors.Is(err, pluginindex.ErrIndex) {
 				t.Fatalf("Scan error = %v, want ErrIndex", err)
 			}
 		})
+	}
+}
+
+func TestScanLocatesUnsupportedGenerationAPI(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeManifest(t, root, "account", `id: acme.app.account
+provides: [authn.session.verify/v1]
+generation:
+  api: v2
+  package: ./generation
+  activations:
+    - namespace: authn
+      capability: authn.session.verify/v1
+`)
+	_, err := pluginindex.Scan(root, "example.com/acme/app")
+	if !errors.Is(err, pluginindex.ErrIndex) || !errors.Is(err, pluginmeta.ErrInvalidManifest) || !errors.Is(err, pluginmeta.ErrUnsupportedGenerationAPI) {
+		t.Fatalf("Scan error = %v", err)
+	}
+	var source *pluginindex.ManifestSourceError
+	if !errors.As(err, &source) || source == nil || source.ModulePath() != "example.com/acme/app" || source.SourcePath() != "account/plugin.yaml" || source.SourceKind() != "plugin-declaration" || source.Line() != 4 || source.Column() != 8 {
+		t.Fatalf("ManifestSourceError = %#v", source)
+	}
+	if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+		t.Fatalf("Scan error exposed root %q: %v", root, err)
 	}
 }
 
@@ -155,7 +181,7 @@ func TestScanRejectsMissingAndNonDirectoryGenerationPackages(t *testing.T) {
 			root := t.TempDir()
 			writeManifest(t, root, "account", manifest)
 			prepare(t, root)
-			index, err := pluginindex.Scan(root)
+			index, err := pluginindex.Scan(root, "example.com/acme/app")
 			if !errors.Is(err, pluginindex.ErrIndex) || !errors.Is(err, pluginindex.ErrInvalidGenerationPackage) {
 				t.Fatalf("Scan error = %v, want ErrIndex and ErrInvalidGenerationPackage", err)
 			}

@@ -142,7 +142,7 @@ func Build(application modulelocate.Module, dependencies moduledependency.Index)
 
 	plugins := make([]Plugin, 0)
 	for _, source := range sources {
-		indexed, err := pluginindex.Scan(source.root)
+		indexed, err := pluginindex.Scan(source.root, source.path)
 		if err != nil {
 			return Index{}, fmt.Errorf("%w: scan %s: %w", ErrBuild, source.label(), err)
 		}

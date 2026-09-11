@@ -45,7 +45,7 @@ func WriteDeclarations(plan Plan, sources []ResolvedSource) error {
 func validateDeclarations(root string, plan Plan, sources []ResolvedSource) error {
 	target := plan.Target()
 	capability := plan.Version().Target()
-	index, err := pluginindex.Scan(root)
+	index, err := pluginindex.Scan(root, plan.ModulePath())
 	if err != nil {
 		return fmt.Errorf("index updated plugins: %w", err)
 	}
@@ -77,7 +77,7 @@ func validateDeclarations(root string, plan Plan, sources []ResolvedSource) erro
 			if providerRoot == "" {
 				return fmt.Errorf("source provider %s has no module root provenance", provider.PluginID())
 			}
-			providerIndex, err = pluginindex.Scan(providerRoot)
+			providerIndex, err = pluginindex.Scan(providerRoot, provider.ModulePath())
 			if err != nil {
 				return fmt.Errorf("index source provider %s module: %w", provider.PluginID(), err)
 			}

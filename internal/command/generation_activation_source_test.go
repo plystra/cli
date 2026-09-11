@@ -317,6 +317,43 @@ func TestPublicGenerationCommandsReportRepeatedStateSourcesWithoutMutation(t *te
 	}
 }
 
+func TestPublicGenerationCommandsReportUnsupportedAPISourceWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := []struct {
+		name      string
+		arguments []string
+	}{
+		{name: "generate", arguments: []string{"generate"}},
+		{name: "generate-check", arguments: []string{"generate", "--check"}},
+		{name: "check", arguments: []string{"check"}},
+	}
+	for _, command := range commands {
+		command := command
+		t.Run(command.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := writeUnsupportedGenerationAPIProject(t)
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, command.arguments, root, commandGoEnvironment())
+			wantSuffix := "\n\n" +
+				"Source: example.com/acme/unsupported:legacy/plugin.yaml:4:8 (plugin-declaration)\n\n" +
+				"Recovery:\nEdit the Plugin generation declaration to use a supported API and a safe existing package, then rerun the command.\n\n" +
+				"Diagnostic: " + diagnosticcode.GenerationAPIUnsupported + "\n"
+			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, `generation.api "v2" is not supported`) || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+				t.Fatalf("%s = exit %d, stdout %q, stderr %q", command.name, exitCode, stdout, stderr)
+			}
+			if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, "pkg\\mod") || strings.Contains(stderr, "pkg/mod") {
+				t.Fatalf("%s exposed an absolute or Module Cache path: %q", command.name, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%s mutated the unsupported-API Project:\nbefore: %#v\nafter:  %#v", command.name, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func writeMissingGenerationActivationProject(t *testing.T) string {
 	t.Helper()
 
@@ -718,6 +755,30 @@ generation:
 request: {}
 response: {}
 errors: []
+`)
+	return root
+}
+
+func writeUnsupportedGenerationAPIProject(t *testing.T) string {
+	t.Helper()
+
+	root := writeCapabilityCommandModule(t)
+	dependencyRoot := filepath.Join(root, "unsupported-dependency")
+	writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), "module example.com/acme/unsupported\n\ngo 1.26\n")
+	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
+	goMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatalf("read application go.mod: %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.mod"), string(goMod)+"\nrequire example.com/acme/unsupported v1.2.3\n\nreplace example.com/acme/unsupported => ./unsupported-dependency\n")
+	writeCommandFile(t, filepath.Join(dependencyRoot, "legacy", "plugin.yaml"), `id: acme.unsupported.legacy
+provides: [authn.session.verify/v1]
+generation:
+  api: v2
+  package: ./generation
+  activations:
+    - namespace: authn
+      capability: authn.session.verify/v1
 `)
 	return root
 }

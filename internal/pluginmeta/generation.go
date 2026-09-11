@@ -21,6 +21,57 @@ const (
 // generation-extension protocol version.
 var ErrUnsupportedGenerationAPI = errors.New("unsupported generation API")
 
+// UnsupportedGenerationAPIError retains the exact unsupported protocol value
+// and its authored plugin.yaml position without changing the established
+// manifest or unsupported-API error chains.
+type UnsupportedGenerationAPIError struct {
+	api    string
+	line   int
+	column int
+}
+
+// API returns the exact unsupported generation protocol value.
+func (e *UnsupportedGenerationAPIError) API() string {
+	if e == nil {
+		return ""
+	}
+	return e.api
+}
+
+// Line returns the one-based plugin.yaml line of generation.api.
+func (e *UnsupportedGenerationAPIError) Line() int {
+	if e == nil {
+		return 0
+	}
+	return e.line
+}
+
+// Column returns the one-based plugin.yaml column of generation.api.
+func (e *UnsupportedGenerationAPIError) Column() int {
+	if e == nil {
+		return 0
+	}
+	return e.column
+}
+
+func (e *UnsupportedGenerationAPIError) Error() string {
+	if e == nil {
+		return ErrUnsupportedGenerationAPI.Error()
+	}
+	return fmt.Sprintf(
+		"%s: %s: generation.api %q is not supported; supported API is %q",
+		ErrInvalidManifest,
+		ErrUnsupportedGenerationAPI,
+		e.api,
+		GenerationAPIV1,
+	)
+}
+
+// Unwrap preserves both established sentinel chains.
+func (*UnsupportedGenerationAPIError) Unwrap() []error {
+	return []error{ErrInvalidManifest, ErrUnsupportedGenerationAPI}
+}
+
 // Generation is one immutable trusted build-time extension declaration.
 type Generation struct {
 	api         string
@@ -93,7 +144,11 @@ func parseGeneration(node *yaml.Node, provides []capabilityid.Identifier) (Gener
 		return Generation{}, err
 	}
 	if api != GenerationAPIV1 {
-		return Generation{}, fmt.Errorf("%w: %w: generation.api %q is not supported; supported API is %q", ErrInvalidManifest, ErrUnsupportedGenerationAPI, api, GenerationAPIV1)
+		return Generation{}, &UnsupportedGenerationAPIError{
+			api:    api,
+			line:   apiNode.Line,
+			column: apiNode.Column,
+		}
 	}
 	packagePath, err := requiredGenerationString("package", packageNode)
 	if err != nil {

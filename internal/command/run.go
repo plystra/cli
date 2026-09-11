@@ -240,6 +240,8 @@ plugin-declaration source. A bare repeated-state sentinel has no source.
 PLYSTRA_GENERATION_NONCONVERGENT reports generation-rule sources from the most
 recent pass that added unseen requirements, in sorted and deduplicated order. A
 bare convergence sentinel has no source.
+PLYSTRA_GENERATION_API_UNSUPPORTED reports the exact unsupported generation.api
+scalar as a plugin-declaration source. A bare API sentinel has no source.
 PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
 configuration, go.mod/go.sum, or generated path as a sorted path-only
 configuration-declaration, module-dependency, or generated-artifact source
@@ -344,6 +346,8 @@ plugin-declaration source. A bare repeated-state sentinel has no source.
 PLYSTRA_GENERATION_NONCONVERGENT reports generation-rule sources from the most
 recent pass that added unseen requirements, in sorted and deduplicated order. A
 bare convergence sentinel has no source.
+PLYSTRA_GENERATION_API_UNSUPPORTED reports the exact unsupported generation.api
+scalar as a plugin-declaration source. A bare API sentinel has no source.
 PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
 configuration, go.mod/go.sum, or generated path as a sorted path-only
 configuration-declaration, module-dependency, or generated-artifact source

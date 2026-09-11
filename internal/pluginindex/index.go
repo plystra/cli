@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/pluginmeta"
 	"github.com/plystra/cli/internal/pluginscan"
 	kernelmanifest "github.com/plystra/kernel/plugin/manifest"
@@ -110,8 +111,12 @@ func (i Index) ByReference(reference string) (Plugin, bool) {
 	return Plugin{}, false
 }
 
-// Scan discovers and indexes every safe direct-child plugin in rootPath.
-func Scan(rootPath string) (result Index, indexErr error) {
+// Scan discovers and indexes every safe direct-child plugin in rootPath with
+// stable provenance rooted in modulePath.
+func Scan(rootPath, modulePath string) (result Index, indexErr error) {
+	if err := modulepath.CheckProject(modulePath); err != nil {
+		return Index{}, fmt.Errorf("%w: module path %q is not canonical: %w", ErrIndex, modulePath, err)
+	}
 	directories, err := pluginscan.ScanRoot(rootPath)
 	if err != nil {
 		return Index{}, fmt.Errorf("%w: %w", ErrIndex, err)
@@ -138,7 +143,7 @@ func Scan(rootPath string) (result Index, indexErr error) {
 		}
 		metadata, err := pluginmeta.Parse(data)
 		if err != nil {
-			return Index{}, fmt.Errorf("%w: %s: %w", ErrIndex, markerPath, err)
+			return Index{}, fmt.Errorf("%w: %s: %w", ErrIndex, markerPath, manifestSourceError(modulePath, markerPath, err))
 		}
 		id := metadata.ID()
 		if previous, duplicate := ids[id]; duplicate {

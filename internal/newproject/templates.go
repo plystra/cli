@@ -147,6 +147,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_GENERATION_NONCONVERGENT`" + ` reports the typed ` + "`generation-rule`" + ` sources from the most recent pass that introduced previously unseen canonical requirements. Each source identifies the selected extension owner's Project module and module-relative ` + "`plugin.yaml`" + ` at ` + "`1:1`" + `; shared canonicalization sorts the sources and deduplicates multiple rules from one declaration. Stable extensions and rules that added no requirement in that growth pass are excluded, and the bare internal sentinel remains source-less. Remove or bound the reported generation-rule chain so it reaches a stable closure within the finite catalog-derived pass bound.
 
+` + "`PLYSTRA_GENERATION_API_UNSUPPORTED`" + ` reports the exact unsupported ` + "`generation.api`" + ` scalar at its current-Project or dependency-Project ` + "`plugin.yaml`" + ` position as a ` + "`plugin-declaration`" + ` source. A bare helper or manifest API sentinel remains source-less rather than inventing a declaration. Change the reported declaration to the supported generation API, then rerun the same command.
+
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. A normalized Project-contained document that cannot be loaded reports one path-only ` + "`configuration-selection`" + ` source without a fabricated span. Conflicting, duplicated, or unsafe selectors report no source because no document is trustworthy. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 ` + "`plystra plugin create`" + ` uses ` + "`PLYSTRA_PLUGIN_CREATE_NAME_INVALID`" + ` for an invalid or reserved root-level name, ` + "`PLYSTRA_PLUGIN_CREATE_ID_INVALID`" + ` when the Project module namespace and name cannot form a canonical Plugin ID, and ` + "`PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS`" + ` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.
@@ -1495,12 +1497,13 @@ Redact unsafe paths/selectors; leave unknowns uncoded.
   or set it to null.
 - PLYSTRA_CAPABILITY_MANIFEST_INVALID: provider-declaration at 1:1; fix owning capability.yaml.
 - PLYSTRA_PLUGIN_TARGET_AMBIGUOUS: candidate plugin-declaration Sources at 1:1; --plugin.
-- PLYSTRA_GENERATION_ACTIVATION_CONFLICT: plugin Sources; unify namespace.
-- PLYSTRA_GENERATION_ACTIVATION_MISSING: requirements; add association; no invented Source.
-- PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING: provider/choice Sources; add support.
-- PLYSTRA_GENERATION_ACTIVATION_CYCLE / PLYSTRA_GENERATION_DEPENDENCY_CYCLE /
-  PLYSTRA_GENERATION_CONTRIBUTION_CYCLE / PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED /
-  PLYSTRA_GENERATION_STATE_REPEATED / PLYSTRA_GENERATION_NONCONVERGENT: dedup Sources.
+- PLYSTRA_GENERATION_ACTIVATION_CONFLICT: plugin Sources; unify.
+- PLYSTRA_GENERATION_ACTIVATION_MISSING: Sources; add; none invented.
+- PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING: provider/choice Sources; fix.
+- PLYSTRA_GENERATION_ACTIVATION_CYCLE/PLYSTRA_GENERATION_DEPENDENCY_CYCLE/
+  PLYSTRA_GENERATION_CONTRIBUTION_CYCLE/PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED/
+  PLYSTRA_GENERATION_STATE_REPEATED/PLYSTRA_GENERATION_NONCONVERGENT: dedup Sources.
+- PLYSTRA_GENERATION_API_UNSUPPORTED: exact API Source.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,

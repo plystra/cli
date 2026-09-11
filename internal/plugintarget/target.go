@@ -122,7 +122,7 @@ func Infer(options Options) (Target, error) {
 	if err != nil {
 		return Target{}, fmt.Errorf("%w: locate Project: %w", ErrInfer, err)
 	}
-	index, err := pluginindex.Scan(module.Path())
+	index, err := pluginindex.Scan(module.Path(), module.ModulePath())
 	if err != nil {
 		return Target{}, fmt.Errorf("%w: %w", ErrInfer, err)
 	}

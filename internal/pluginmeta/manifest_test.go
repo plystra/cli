@@ -130,6 +130,27 @@ func TestParseRejectsInvalidGenerationDeclarations(t *testing.T) {
 	}
 }
 
+func TestParseRetainsUnsupportedGenerationAPIPosition(t *testing.T) {
+	t.Parallel()
+
+	_, err := pluginmeta.Parse([]byte(`id: acme.app.account
+provides: [authn.session.verify/v1]
+generation:
+  api: v2
+  package: ./generation
+  activations:
+    - namespace: authn
+      capability: authn.session.verify/v1
+`))
+	if !errors.Is(err, pluginmeta.ErrInvalidManifest) || !errors.Is(err, pluginmeta.ErrUnsupportedGenerationAPI) || err.Error() != `invalid plugin manifest metadata: unsupported generation API: generation.api "v2" is not supported; supported API is "v1"` {
+		t.Fatalf("Parse error = %v", err)
+	}
+	var unsupported *pluginmeta.UnsupportedGenerationAPIError
+	if !errors.As(err, &unsupported) || unsupported == nil || unsupported.API() != "v2" || unsupported.Line() != 4 || unsupported.Column() != 8 {
+		t.Fatalf("UnsupportedGenerationAPIError = %#v", unsupported)
+	}
+}
+
 func TestParseRejectsInvalidMetadataEnvelopes(t *testing.T) {
 	t.Parallel()
 

@@ -640,6 +640,18 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			seen[candidate] = struct{}{}
 			sources = append(sources, candidate)
 		}
+	case diagnosticGenerationAPIUnsupported:
+		var located diagnosticSourceLocation
+		if !errors.As(err, &located) || located == nil || located.SourceKind() != "plugin-declaration" {
+			return nil
+		}
+		sources = append(sources, diagnosticjson.Source{
+			Module: located.ModulePath(),
+			Path:   located.SourcePath(),
+			Kind:   located.SourceKind(),
+			Line:   located.Line(),
+			Column: located.Column(),
+		})
 	case diagnosticGeneratedOwnershipConflict:
 		var conflict *applicationgenerate.OwnershipConflictSourceError
 		if !errors.As(err, &conflict) || conflict == nil {

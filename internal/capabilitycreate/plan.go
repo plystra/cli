@@ -167,7 +167,7 @@ func Prepare(options Options) (Plan, error) {
 	if err != nil {
 		return Plan{}, fmt.Errorf("%w: locate Project: %w", ErrPlan, err)
 	}
-	index, err := pluginindex.Scan(module.Path())
+	index, err := pluginindex.Scan(module.Path(), module.ModulePath())
 	if err != nil {
 		return Plan{}, fmt.Errorf("%w: index plugins: %w", ErrPlan, err)
 	}
@@ -223,7 +223,7 @@ func PrepareVisible(ctx context.Context, options Options) (Plan, error) {
 	if err != nil {
 		return Plan{}, fmt.Errorf("%w: locate Project: %w", ErrPlan, err)
 	}
-	local, err := pluginindex.Scan(module.Path())
+	local, err := pluginindex.Scan(module.Path(), module.ModulePath())
 	if err != nil {
 		return Plan{}, fmt.Errorf("%w: index local plugins: %w", ErrPlan, err)
 	}

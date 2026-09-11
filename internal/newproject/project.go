@@ -871,6 +871,8 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED",
 		"PLYSTRA_GENERATION_STATE_REPEATED",
 		"PLYSTRA_GENERATION_NONCONVERGENT",
+		"PLYSTRA_GENERATION_API_UNSUPPORTED",
+		"exact API Source",
 		"dedup Sources",
 		"plystra implement email.send/v1 --package ./mailer",
 		"creates no copied contract",

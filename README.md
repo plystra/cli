@@ -1017,6 +1017,12 @@ extensions and rules that added no requirement in that growth pass are
 excluded, and the bare internal sentinel remains source-less. Remove or bound
 the reported generation-rule chain so it reaches a stable closure within the
 finite catalog-derived pass bound.
+`PLYSTRA_GENERATION_API_UNSUPPORTED` reports the exact unsupported
+`generation.api` scalar at its current-Project or dependency-Project
+`plugin.yaml` position as a `plugin-declaration` source. A bare helper or
+manifest API sentinel remains source-less rather than inventing a declaration.
+Change the reported declaration to the supported generation API, then rerun the
+same command.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses

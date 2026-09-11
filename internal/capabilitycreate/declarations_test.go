@@ -53,7 +53,7 @@ func TestWriteDeclarationsCommitsOneValidatedTransaction(t *testing.T) {
 			t.Fatalf("manifest mode = %#v, %v", info, err)
 		}
 	}
-	index, err := pluginindex.Scan(root)
+	index, err := pluginindex.Scan(root, plan.ModulePath())
 	plugin, ok := index.ByName("account")
 	if err != nil || !ok || len(plugin.Provides()) != 1 || plugin.Provides()[0] != plan.Version().Target() {
 		t.Fatalf("updated index = %#v, %t, %v", plugin, ok, err)

@@ -347,6 +347,8 @@ func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 		{name: "unordered contributions without typed entries", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrUnorderedContributions), code: diagnosticGenerationContributionsUnordered},
 		{name: "repeated state without typed extensions", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrRepeatedState), code: diagnosticGenerationStateRepeated},
 		{name: "nonconvergent generation without typed rules", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrExtensionConvergence), code: diagnosticGenerationNonconvergent},
+		{name: "unsupported helper API without typed declaration", err: fmt.Errorf("resolve generation: %w", generationexec.ErrUnsupportedAPI), code: diagnosticGenerationAPIUnsupported},
+		{name: "unsupported manifest API without typed declaration", err: fmt.Errorf("resolve generation: %w", pluginmeta.ErrUnsupportedGenerationAPI), code: diagnosticGenerationAPIUnsupported},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
