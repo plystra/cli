@@ -741,6 +741,134 @@ func TestResolveExtensionsRejectsDifferentOutputForRepeatedContext(t *testing.T)
 	}
 }
 
+func TestResolveExtensionsReportsLastGrowingRulesAtPassBound(t *testing.T) {
+	order := extensionTestContract(t, "order.create/v1", "extensions:\n  authn: {authenticated: true}\n  authz: {permission: order.create}\n")
+	verify := extensionTestContract(t, "authn.session.verify/v1", "")
+	check := extensionTestContract(t, "authz.check/v1", "")
+	audit := extensionTestContract(t, "audit.write/v1", "")
+	metrics := extensionTestContract(t, "metrics.write/v1", "")
+	storage := extensionTestContract(t, "storage.write/v1", "")
+	input := ExtensionInput{
+		Input: Input{
+			Requirements: []providerresolution.Requirement{{Contract: order, Source: extensionRequirementSource("order route")}},
+			Candidates: []providerresolution.Candidate{
+				{PluginID: "example.business", Contract: order, Source: "business/order.create"},
+				{PluginID: "example.authn", Contract: verify, Source: "authn/session.verify"},
+				{PluginID: "example.authz", Contract: check, Source: "authz/check"},
+				{PluginID: "example.audit", Contract: audit, Source: "audit/audit.write"},
+				{PluginID: "example.metrics", Contract: metrics, Source: "metrics/metrics.write"},
+				{PluginID: "example.storage", Contract: storage, Source: "storage/storage.write"},
+			},
+			Activations: extensionTestCatalog(t,
+				extensionTestDeclaration(t, "example.authn", "authn", "authn.session.verify/v1"),
+				extensionTestDeclaration(t, "example.authz", "authz", "authz.check/v1"),
+			),
+		},
+		Plugins: []Plugin{
+			extensionTestPlugin("example.business", "business", "order.create/v1"),
+			extensionTestPlugin("example.authn", "authn", "authn.session.verify/v1"),
+			extensionTestPlugin("example.authz", "authz", "authz.check/v1"),
+			extensionTestPlugin("example.audit", "audit", "audit.write/v1"),
+			extensionTestPlugin("example.metrics", "metrics", "metrics.write/v1"),
+			extensionTestPlugin("example.storage", "storage", "storage.write/v1"),
+		},
+		Capabilities: []generation.CapabilityInput{
+			{ContractJSON: order},
+			{ContractJSON: verify},
+			{ContractJSON: check},
+			{ContractJSON: audit},
+			{ContractJSON: metrics},
+			{ContractJSON: storage},
+		},
+	}
+	builder := newFakeExtensionBuilder(map[string]*fakeExtensionHelper{
+		"example.authn": {
+			output: func(call int, _ generation.Context) (generation.Output, error) {
+				requirements := []generation.Requirement{
+					{
+						RuleID:     "authn.require-audit",
+						Namespace:  "authn",
+						Source:     extensionTestCapabilityID(t, "order.create/v1"),
+						Capability: extensionTestCapabilityID(t, "audit.write/v1"),
+					},
+				}
+				if call > 1 {
+					requirements = append(requirements,
+						generation.Requirement{
+							RuleID:     "authn.require-storage",
+							Namespace:  "authn",
+							Source:     extensionTestCapabilityID(t, "order.create/v1"),
+							Capability: extensionTestCapabilityID(t, "storage.write/v1"),
+						},
+						generation.Requirement{
+							RuleID:     "authn.require-metrics",
+							Namespace:  "authn",
+							Source:     extensionTestCapabilityID(t, "order.create/v1"),
+							Capability: extensionTestCapabilityID(t, "metrics.write/v1"),
+						},
+					)
+				}
+				return generation.Output{Requirements: requirements}, nil
+			},
+		},
+		"example.authz": {output: emptyExtensionOutput},
+	})
+
+	_, err := resolveExtensionsWithinPassLimit(t.Context(), input, builder.Build, 2)
+	if !errors.Is(err, ErrResolveExtensions) || !errors.Is(err, ErrExtensionConvergence) || err.Error() != "resolve generation extension requirements: generation extension requirements did not converge after 2 passes across 6 visible canonical Capabilities" {
+		t.Fatalf("convergence error = %v", err)
+	}
+	var convergence *ExtensionConvergenceError
+	if !errors.As(err, &convergence) {
+		t.Fatalf("convergence error type = %T", err)
+	}
+	if convergence.MaximumPasses() != 2 || convergence.VisibleCapabilities() != 6 {
+		t.Fatalf("convergence bound = %d passes, %d Capabilities", convergence.MaximumPasses(), convergence.VisibleCapabilities())
+	}
+	wantSources := []providerresolution.RequirementSource{
+		{
+			Kind:             providerresolution.RequirementGenerationRule,
+			Reference:        `generation plugin "example.authn" rule "authn.require-metrics" extensions.authn on order.create/v1`,
+			ModulePath:       "example.com/application",
+			Path:             "authn/plugin.yaml",
+			Line:             1,
+			Column:           1,
+			PluginID:         "example.authn",
+			Namespace:        "authn",
+			SourceCapability: "order.create/v1",
+			RuleID:           "authn.require-metrics",
+		},
+		{
+			Kind:             providerresolution.RequirementGenerationRule,
+			Reference:        `generation plugin "example.authn" rule "authn.require-storage" extensions.authn on order.create/v1`,
+			ModulePath:       "example.com/application",
+			Path:             "authn/plugin.yaml",
+			Line:             1,
+			Column:           1,
+			PluginID:         "example.authn",
+			Namespace:        "authn",
+			SourceCapability: "order.create/v1",
+			RuleID:           "authn.require-storage",
+		},
+	}
+	sources := convergence.RequirementSources()
+	if !slices.Equal(sources, wantSources) {
+		t.Fatalf("convergence sources = %#v", sources)
+	}
+	sources[0] = providerresolution.RequirementSource{}
+	if !slices.Equal(convergence.RequirementSources(), wantSources) {
+		t.Fatal("ExtensionConvergenceError exposed mutable requirement source storage")
+	}
+	if builder.helpers["example.authn"].calls != 2 || builder.helpers["example.authz"].calls != 2 {
+		t.Fatalf("extension calls = authn %d, authz %d", builder.helpers["example.authn"].calls, builder.helpers["example.authz"].calls)
+	}
+	for pluginID, helper := range builder.helpers {
+		if !helper.closed {
+			t.Fatalf("helper %s was not closed", pluginID)
+		}
+	}
+}
+
 func TestResolveExtensionsRejectsOutputOutsideSelectedActivationInputs(t *testing.T) {
 	order := extensionTestContract(t, "order.create/v1", "extensions:\n  authn: {authenticated: true}\n  authz: {permission: order.create}\n")
 	verify := extensionTestContract(t, "authn.session.verify/v1", "")

@@ -75,6 +75,10 @@ type diagnosticSourceLocation interface {
 	Column() int
 }
 
+type diagnosticRequirementSources interface {
+	RequirementSources() []providerresolution.RequirementSource
+}
+
 const (
 	diagnosticTemplateInvalid                    = diagnosticcode.TemplateInvalid
 	diagnosticCapabilityRequirementConflict      = diagnosticcode.CapabilityRequirementConflict
@@ -609,6 +613,26 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Kind:   "plugin-declaration",
 				Line:   1,
 				Column: 1,
+			}
+			if _, exists := seen[candidate]; exists {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			sources = append(sources, candidate)
+		}
+	case diagnosticGenerationNonconvergent:
+		var convergence diagnosticRequirementSources
+		if !errors.As(err, &convergence) || convergence == nil {
+			return nil
+		}
+		seen := make(map[diagnosticjson.Source]struct{})
+		for _, source := range convergence.RequirementSources() {
+			candidate := diagnosticjson.Source{
+				Module: source.ModulePath,
+				Path:   source.Path,
+				Kind:   string(source.Kind),
+				Line:   source.Line,
+				Column: source.Column,
 			}
 			if _, exists := seen[candidate]; exists {
 				continue

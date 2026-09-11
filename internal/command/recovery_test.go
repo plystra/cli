@@ -346,6 +346,7 @@ func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 		{name: "contribution cycle without typed edges", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrContributionCycle), code: diagnosticGenerationContributionCycle},
 		{name: "unordered contributions without typed entries", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrUnorderedContributions), code: diagnosticGenerationContributionsUnordered},
 		{name: "repeated state without typed extensions", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrRepeatedState), code: diagnosticGenerationStateRepeated},
+		{name: "nonconvergent generation without typed rules", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrExtensionConvergence), code: diagnosticGenerationNonconvergent},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
@@ -357,6 +358,51 @@ func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 				t.Fatalf("source-less failure output = %q", got)
 			}
 		})
+	}
+}
+
+func TestWriteCommandFailureCanonicalizesNonconvergentGenerationSources(t *testing.T) {
+	t.Parallel()
+
+	authz := providerresolution.RequirementSource{
+		Kind:             providerresolution.RequirementGenerationRule,
+		Reference:        "generation authz rule",
+		ModulePath:       "example.com/z-security",
+		Path:             "shared/plugin.yaml",
+		Line:             1,
+		Column:           1,
+		PluginID:         "example.authz",
+		Namespace:        "authz",
+		SourceCapability: "order.create/v1",
+		RuleID:           "authz.require-policy",
+	}
+	authn := providerresolution.RequirementSource{
+		Kind:             providerresolution.RequirementGenerationRule,
+		Reference:        "generation authn rule",
+		ModulePath:       "example.com/a-security",
+		Path:             "authn/plugin.yaml",
+		Line:             1,
+		Column:           1,
+		PluginID:         "example.authn",
+		Namespace:        "authn",
+		SourceCapability: "order.create/v1",
+		RuleID:           "authn.require-session",
+	}
+	failure := &recoveryRequirementSourceError{
+		cause:   generationresolution.ErrExtensionConvergence,
+		sources: []providerresolution.RequirementSource{authz, authn, authz},
+	}
+
+	var output strings.Builder
+	writeCommandFailure(&output, "generate", fmt.Errorf("resolve application: %w", failure), recoveryContext{})
+	got := output.String()
+	wantSuffix := "\n\n" +
+		"Source: example.com/a-security:authn/plugin.yaml:1:1 (generation-rule)\n" +
+		"Source: example.com/z-security:shared/plugin.yaml:1:1 (generation-rule)\n\n" +
+		"Recovery:\nMake the selected generation extensions deterministic and convergent for identical normalized input.\n\n" +
+		"Diagnostic: " + diagnosticGenerationNonconvergent + "\n"
+	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 2 {
+		t.Fatalf("nonconvergent generation output = %q, want suffix %q", got, wantSuffix)
 	}
 }
 
@@ -1158,6 +1204,17 @@ func (e *concurrentSourceTestError) SourcePath() string { return e.sourcePath }
 func (e *concurrentSourceTestError) SourceKind() string { return e.sourceKind }
 func (*concurrentSourceTestError) Line() int            { return 0 }
 func (*concurrentSourceTestError) Column() int          { return 0 }
+
+type recoveryRequirementSourceError struct {
+	cause   error
+	sources []providerresolution.RequirementSource
+}
+
+func (e *recoveryRequirementSourceError) Error() string { return e.cause.Error() }
+func (e *recoveryRequirementSourceError) Unwrap() error { return e.cause }
+func (e *recoveryRequirementSourceError) RequirementSources() []providerresolution.RequirementSource {
+	return append([]providerresolution.RequirementSource(nil), e.sources...)
+}
 
 func recoveryContract(fieldType string) []byte {
 	return []byte("id: email.send/v1\nrequest: {value: {type: " + fieldType + "}}\n" + `semantics:

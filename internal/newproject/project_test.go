@@ -415,6 +415,7 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 		[]byte("PLYSTRA_GENERATION_DEPENDENCY_CYCLE"),
 		[]byte("PLYSTRA_GENERATION_CONTRIBUTION_CYCLE"),
 		[]byte("PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED"),
+		[]byte("PLYSTRA_GENERATION_NONCONVERGENT"),
 	} {
 		if !bytes.Contains(skill, code) || !bytes.Contains(skill, []byte("dedup Sources")) {
 			t.Fatalf("maximum-length Project skill omits generation-graph source guidance for %s", code)
@@ -1229,6 +1230,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_GENERATION_STATE_REPEATED` reports each selected extension"),
 		[]byte("Every `plugin-declaration` source identifies the owning Project module"),
 		[]byte("stable extensions are excluded"),
+		[]byte("`PLYSTRA_GENERATION_NONCONVERGENT` reports the typed `generation-rule` sources"),
+		[]byte("most recent pass that introduced previously unseen canonical requirements"),
+		[]byte("rules that added no requirement in that growth pass are excluded"),
 		[]byte("one path-only `configuration-selection` source"),
 		[]byte("unsafe selectors report no source"),
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration"),
@@ -2307,6 +2311,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_GENERATION_CONTRIBUTION_CYCLE",
 		"PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED",
 		"PLYSTRA_GENERATION_STATE_REPEATED",
+		"PLYSTRA_GENERATION_NONCONVERGENT",
 		"dedup Sources",
 		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",

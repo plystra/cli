@@ -1212,8 +1212,7 @@ or manually modified managed paths. If it reports drift:
 2. Change the named authored input; move handwritten files out of generated.
 3. Run plystra generate and plystra generate --check with the same selector.
 
-Keep go.work optional; Go Module resolution remains the build and distribution
-boundary.
+Keep go.work optional; modules remain the build/distribution boundary.
 
 ## Diagnose common failures
 
@@ -1238,7 +1237,7 @@ Redact unsafe paths/selectors; leave unknowns uncoded.
 - PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING: provider/choice Sources; add support.
 - PLYSTRA_GENERATION_ACTIVATION_CYCLE / PLYSTRA_GENERATION_DEPENDENCY_CYCLE /
   PLYSTRA_GENERATION_CONTRIBUTION_CYCLE / PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED /
-  PLYSTRA_GENERATION_STATE_REPEATED: dedup Sources; fix cause.
+  PLYSTRA_GENERATION_STATE_REPEATED / PLYSTRA_GENERATION_NONCONVERGENT: dedup Sources.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,

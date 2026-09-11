@@ -97,6 +97,11 @@ type GeneratedRequirement struct {
 	capability capabilityid.Identifier
 }
 
+type trackedGeneratedRequirement struct {
+	requirement    GeneratedRequirement
+	introducedPass int
+}
+
 // PluginID returns the selected extension owner.
 func (r GeneratedRequirement) PluginID() string { return r.pluginID }
 
@@ -224,6 +229,55 @@ func (e *RepeatedStateError) Error() string {
 // Unwrap supports errors.Is with ErrRepeatedState.
 func (*RepeatedStateError) Unwrap() error { return ErrRepeatedState }
 
+// ExtensionConvergenceError retains the finite pass bound and the exact
+// generation rules from the most recent pass that grew the requirement set.
+type ExtensionConvergenceError struct {
+	maximumPasses       int
+	visibleCapabilities int
+	requirementSources  []providerresolution.RequirementSource
+}
+
+// MaximumPasses returns the exhausted finite extension-resolution bound.
+func (e *ExtensionConvergenceError) MaximumPasses() int {
+	if e == nil {
+		return 0
+	}
+	return e.maximumPasses
+}
+
+// VisibleCapabilities returns the canonical Capability count used to derive
+// the production pass bound.
+func (e *ExtensionConvergenceError) VisibleCapabilities() int {
+	if e == nil {
+		return 0
+	}
+	return e.visibleCapabilities
+}
+
+// RequirementSources returns defensive typed provenance for the most recent
+// generation rules that introduced previously unseen requirements.
+func (e *ExtensionConvergenceError) RequirementSources() []providerresolution.RequirementSource {
+	if e == nil {
+		return nil
+	}
+	return append([]providerresolution.RequirementSource(nil), e.requirementSources...)
+}
+
+func (e *ExtensionConvergenceError) Error() string {
+	if e == nil {
+		return ErrExtensionConvergence.Error()
+	}
+	return fmt.Sprintf(
+		"%s after %d passes across %d visible canonical Capabilities",
+		ErrExtensionConvergence,
+		e.maximumPasses,
+		e.visibleCapabilities,
+	)
+}
+
+// Unwrap supports errors.Is with ErrExtensionConvergence.
+func (*ExtensionConvergenceError) Unwrap() error { return ErrExtensionConvergence }
+
 // ExtensionResult is one immutable stable activation, provider, extension
 // context, generation-derived requirement closure, semantic contribution plan,
 // and final application Alias map.
@@ -285,6 +339,11 @@ func ResolveExtensions(ctx context.Context, input ExtensionInput) (ExtensionResu
 }
 
 func resolveExtensions(ctx context.Context, input ExtensionInput, build extensionHelperBuilder) (result ExtensionResult, resolveErr error) {
+	maximumPasses := 2*(len(input.Capabilities)+1) + 1
+	return resolveExtensionsWithinPassLimit(ctx, input, build, maximumPasses)
+}
+
+func resolveExtensionsWithinPassLimit(ctx context.Context, input ExtensionInput, build extensionHelperBuilder, maximumPasses int) (result ExtensionResult, resolveErr error) {
 	if ctx == nil {
 		return ExtensionResult{}, fmt.Errorf("%w: context is nil", ErrResolveExtensions)
 	}
@@ -355,9 +414,9 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 	if err != nil {
 		return ExtensionResult{}, fmt.Errorf("%w: %w: %w", ErrResolveExtensions, ErrApplicationContext, err)
 	}
-	generatedByKey := make(map[string]GeneratedRequirement)
+	generatedByKey := make(map[string]trackedGeneratedRequirement)
 	observedOutputs := make(map[string]observedExtensionOutputs)
-	maximumPasses := 2*(len(input.Capabilities)+1) + 1
+	lastAddedPass := 0
 	for pass := 1; pass <= maximumPasses; pass++ {
 		if err := ctx.Err(); err != nil {
 			return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w", ErrResolveExtensions, pass, err)
@@ -426,13 +485,19 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 				if _, exists := generatedByKey[key]; exists {
 					continue
 				}
-				generatedByKey[key] = record
+				generatedByKey[key] = trackedGeneratedRequirement{
+					requirement:    record,
+					introducedPass: pass,
+				}
 				requirements = append(requirements, providerresolution.Requirement{
 					Capability: record.capability.String(),
 					Source:     generatedRequirementSource(record, plugins[record.pluginID]),
 				})
 				added++
 			}
+		}
+		if added != 0 {
+			lastAddedPass = pass
 		}
 
 		generated := generatedRequirementValues(generatedByKey)
@@ -477,13 +542,12 @@ func resolveExtensions(ctx context.Context, input ExtensionInput, build extensio
 			observedOutputs[contextDigest] = observed
 		}
 	}
-	return ExtensionResult{}, fmt.Errorf(
-		"%w: %w after %d passes across %d visible canonical Capabilities",
-		ErrResolveExtensions,
-		ErrExtensionConvergence,
+	return ExtensionResult{}, fmt.Errorf("%w: %w", ErrResolveExtensions, newExtensionConvergenceError(
 		maximumPasses,
 		len(input.Capabilities),
-	)
+		generatedRequirementValuesForPass(generatedByKey, lastAddedPass),
+		plugins,
+	))
 }
 
 // validateFinalProviderChoices rejects explicit choices that never became
@@ -1019,10 +1083,23 @@ func generatedRequirementIdentity(requirement GeneratedRequirement) string {
 	}, "\x00")
 }
 
-func generatedRequirementValues(values map[string]GeneratedRequirement) []GeneratedRequirement {
+func generatedRequirementValues(values map[string]trackedGeneratedRequirement) []GeneratedRequirement {
 	result := make([]GeneratedRequirement, 0, len(values))
 	for _, value := range values {
-		result = append(result, value)
+		result = append(result, value.requirement)
+	}
+	sort.Slice(result, func(left, right int) bool {
+		return generatedRequirementIdentity(result[left]) < generatedRequirementIdentity(result[right])
+	})
+	return result
+}
+
+func generatedRequirementValuesForPass(values map[string]trackedGeneratedRequirement, pass int) []GeneratedRequirement {
+	result := make([]GeneratedRequirement, 0)
+	for _, value := range values {
+		if value.introducedPass == pass {
+			result = append(result, value.requirement)
+		}
 	}
 	sort.Slice(result, func(left, right int) bool {
 		return generatedRequirementIdentity(result[left]) < generatedRequirementIdentity(result[right])
@@ -1038,6 +1115,18 @@ func generatedRequirementSource(requirement GeneratedRequirement, plugin Plugin)
 		requirement.ruleID,
 		plugin,
 	)
+}
+
+func newExtensionConvergenceError(maximumPasses, visibleCapabilities int, generated []GeneratedRequirement, plugins map[string]Plugin) *ExtensionConvergenceError {
+	sources := make([]providerresolution.RequirementSource, len(generated))
+	for index, requirement := range generated {
+		sources[index] = generatedRequirementSource(requirement, plugins[requirement.pluginID])
+	}
+	return &ExtensionConvergenceError{
+		maximumPasses:       maximumPasses,
+		visibleCapabilities: visibleCapabilities,
+		requirementSources:  sources,
+	}
 }
 
 func contributionRequirementSource(pluginID string, contribution generation.NormalizedContribution, plugin Plugin) providerresolution.RequirementSource {

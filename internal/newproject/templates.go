@@ -145,6 +145,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_GENERATION_STATE_REPEATED`" + ` reports each selected extension whose normalized output changed for the identical immutable context. Every ` + "`plugin-declaration`" + ` source identifies the owning Project module and module-relative ` + "`plugin.yaml`" + ` at ` + "`1:1`" + `; shared canonicalization sorts and deduplicates the declarations, stable extensions are excluded, and the bare internal sentinel remains source-less. Make each reported generation package deterministic and convergent for identical normalized input.
 
+` + "`PLYSTRA_GENERATION_NONCONVERGENT`" + ` reports the typed ` + "`generation-rule`" + ` sources from the most recent pass that introduced previously unseen canonical requirements. Each source identifies the selected extension owner's Project module and module-relative ` + "`plugin.yaml`" + ` at ` + "`1:1`" + `; shared canonicalization sorts the sources and deduplicates multiple rules from one declaration. Stable extensions and rules that added no requirement in that growth pass are excluded, and the bare internal sentinel remains source-less. Remove or bound the reported generation-rule chain so it reaches a stable closure within the finite catalog-derived pass bound.
+
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. A normalized Project-contained document that cannot be loaded reports one path-only ` + "`configuration-selection`" + ` source without a fabricated span. Conflicting, duplicated, or unsafe selectors report no source because no document is trustworthy. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 ` + "`plystra plugin create`" + ` uses ` + "`PLYSTRA_PLUGIN_CREATE_NAME_INVALID`" + ` for an invalid or reserved root-level name, ` + "`PLYSTRA_PLUGIN_CREATE_ID_INVALID`" + ` when the Project module namespace and name cannot form a canonical Plugin ID, and ` + "`PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS`" + ` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.
@@ -1473,8 +1475,7 @@ or manually modified managed paths. If it reports drift:
 2. Change the named authored input; move handwritten files out of generated.
 3. Run plystra generate and plystra generate --check with the same selector.
 
-Keep go.work optional; Go Module resolution remains the build and distribution
-boundary.
+Keep go.work optional; modules remain the build/distribution boundary.
 
 ## Diagnose common failures
 
@@ -1499,7 +1500,7 @@ Redact unsafe paths/selectors; leave unknowns uncoded.
 - PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING: provider/choice Sources; add support.
 - PLYSTRA_GENERATION_ACTIVATION_CYCLE / PLYSTRA_GENERATION_DEPENDENCY_CYCLE /
   PLYSTRA_GENERATION_CONTRIBUTION_CYCLE / PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED /
-  PLYSTRA_GENERATION_STATE_REPEATED: dedup Sources; fix cause.
+  PLYSTRA_GENERATION_STATE_REPEATED / PLYSTRA_GENERATION_NONCONVERGENT: dedup Sources.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,

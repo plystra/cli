@@ -1008,6 +1008,15 @@ module-relative `plugin.yaml` at `1:1`; shared canonicalization sorts and
 deduplicates the declarations, stable extensions are excluded, and the bare
 internal sentinel remains source-less. Make each reported generation package
 deterministic and convergent for identical normalized input.
+`PLYSTRA_GENERATION_NONCONVERGENT` reports the typed `generation-rule` sources
+from the most recent pass that introduced previously unseen canonical
+requirements. Each source identifies the selected extension owner's Project
+module and module-relative `plugin.yaml` at `1:1`; shared canonicalization sorts
+the sources and deduplicates multiple rules from one declaration. Stable
+extensions and rules that added no requirement in that growth pass are
+excluded, and the bare internal sentinel remains source-less. Remove or bound
+the reported generation-rule chain so it reaches a stable closure within the
+finite catalog-derived pass bound.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses
