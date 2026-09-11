@@ -2153,6 +2153,12 @@ finite catalog-derived pass bound.
 manifest API sentinel remains source-less rather than inventing a declaration.
 Change the reported declaration to the supported generation API, then rerun the
 same command.
+`PLYSTRA_GENERATION_PACKAGE_INVALID` emits the exact `generation.package`
+scalar at its current-Project or dependency-Project `plugin.yaml` position as a
+`plugin-declaration` source. A bare package sentinel remains source-less rather
+than inventing a declaration. Create a real non-symbolic Go package at the
+reported confined path or update the declaration to an existing safe package,
+then rerun the same command.
 An unavailable constructor configuration schema uses
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
 current or dependency Project document as `configuration-declaration` at
@@ -2616,6 +2622,15 @@ invent.
 reported declaration to the supported API before retrying generation or
 checking. An unlocated helper or manifest sentinel has no trustworthy authored
 source and therefore emits none.
+
+### Invalid generation package
+
+`PLYSTRA_GENERATION_PACKAGE_INVALID` points directly to the invalid
+`generation.package` scalar in the owning module-relative `plugin.yaml`. Create
+a real non-symbolic Go package at that confined path or change the declaration
+to an existing safe package before retrying generation or checking. An
+unlocated package sentinel has no trustworthy authored source and therefore
+emits none.
 
 ### Extension helper fails
 

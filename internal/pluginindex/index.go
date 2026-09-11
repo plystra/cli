@@ -154,7 +154,7 @@ func Scan(rootPath, modulePath string) (result Index, indexErr error) {
 		if hasGeneration {
 			snapshot, err := inspectGenerationPackage(root, id, directory.Path(), generation)
 			if err != nil {
-				return Index{}, fmt.Errorf("%w: %s: %w", ErrIndex, markerPath, err)
+				return Index{}, fmt.Errorf("%w: %s: %w", ErrIndex, markerPath, generationPackageSourceError(modulePath, markerPath, generation, err))
 			}
 			generationPackagePath = snapshot.modulePath
 			generationPackages = append(generationPackages, snapshot)

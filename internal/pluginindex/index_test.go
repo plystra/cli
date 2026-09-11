@@ -157,7 +157,15 @@ generation:
 func TestScanRejectsMissingAndNonDirectoryGenerationPackages(t *testing.T) {
 	t.Parallel()
 
-	manifest := "id: acme.app.account\nprovides: [authn.session.verify/v1]\ngeneration: {api: v1, package: ./generation/nested, activations: [{namespace: authn, capability: authn.session.verify/v1}]}\n"
+	manifest := `id: acme.app.account
+provides: [authn.session.verify/v1]
+generation:
+  api: v1
+  package: ./generation/nested
+  activations:
+    - namespace: authn
+      capability: authn.session.verify/v1
+`
 	tests := map[string]func(*testing.T, string){
 		"missing": func(t *testing.T, root string) {
 			if err := os.Mkdir(filepath.Join(root, "account", "generation"), 0o755); err != nil {
@@ -189,6 +197,13 @@ func TestScanRejectsMissingAndNonDirectoryGenerationPackages(t *testing.T) {
 				if !strings.Contains(err.Error(), detail) {
 					t.Fatalf("Scan error %q does not contain %q", err, detail)
 				}
+			}
+			var source *pluginindex.ManifestSourceError
+			if !errors.As(err, &source) || source == nil || source.ModulePath() != "example.com/acme/app" || source.SourcePath() != "account/plugin.yaml" || source.SourceKind() != "plugin-declaration" || source.Line() != 5 || source.Column() != 12 {
+				t.Fatalf("ManifestSourceError = %#v", source)
+			}
+			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("Scan error exposed root %q: %v", root, err)
 			}
 			if len(index.Plugins()) != 0 {
 				t.Fatalf("invalid Scan returned %#v", index.Plugins())

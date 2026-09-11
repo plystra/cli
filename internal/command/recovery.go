@@ -640,7 +640,7 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			seen[candidate] = struct{}{}
 			sources = append(sources, candidate)
 		}
-	case diagnosticGenerationAPIUnsupported:
+	case diagnosticGenerationAPIUnsupported, diagnosticGenerationPackageInvalid:
 		var located diagnosticSourceLocation
 		if !errors.As(err, &located) || located == nil || located.SourceKind() != "plugin-declaration" {
 			return nil

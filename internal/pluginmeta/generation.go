@@ -74,9 +74,11 @@ func (*UnsupportedGenerationAPIError) Unwrap() []error {
 
 // Generation is one immutable trusted build-time extension declaration.
 type Generation struct {
-	api         string
-	packagePath string
-	activations []GenerationActivation
+	api           string
+	packagePath   string
+	packageLine   int
+	packageColumn int
+	activations   []GenerationActivation
 }
 
 // API returns the exact generation protocol version.
@@ -84,6 +86,12 @@ func (g Generation) API() string { return g.api }
 
 // Package returns the canonical plugin-relative Go package path.
 func (g Generation) Package() string { return g.packagePath }
+
+// PackageLine returns the one-based plugin.yaml line of generation.package.
+func (g Generation) PackageLine() int { return g.packageLine }
+
+// PackageColumn returns the one-based plugin.yaml column of generation.package.
+func (g Generation) PackageColumn() int { return g.packageColumn }
 
 // Activations returns a defensive copy sorted by extension namespace.
 func (g Generation) Activations() []GenerationActivation {
@@ -166,7 +174,13 @@ func parseGeneration(node *yaml.Node, provides []capabilityid.Identifier) (Gener
 			return Generation{}, invalid("generation activation namespace %q names capability %s, which the plugin does not provide", activation.namespace, activation.capability)
 		}
 	}
-	return Generation{api: api, packagePath: packagePath, activations: activations}, nil
+	return Generation{
+		api:           api,
+		packagePath:   packagePath,
+		packageLine:   packageNode.Line,
+		packageColumn: packageNode.Column,
+		activations:   activations,
+	}, nil
 }
 
 func requiredGenerationString(field string, node *yaml.Node) (string, error) {

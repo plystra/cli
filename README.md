@@ -1023,6 +1023,12 @@ finite catalog-derived pass bound.
 manifest API sentinel remains source-less rather than inventing a declaration.
 Change the reported declaration to the supported generation API, then rerun the
 same command.
+`PLYSTRA_GENERATION_PACKAGE_INVALID` reports the exact `generation.package`
+scalar at its current-Project or dependency-Project `plugin.yaml` position as a
+`plugin-declaration` source. A bare package sentinel remains source-less rather
+than inventing a declaration. Create a real non-symbolic Go package at the
+reported confined path or update the declaration to an existing safe package,
+then rerun the same command.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses

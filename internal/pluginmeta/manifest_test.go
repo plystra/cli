@@ -43,7 +43,7 @@ config:
 		t.Fatalf("Config token = %#v, %t", token, ok)
 	}
 	generation, ok := metadata.Generation()
-	if !ok || generation.API() != pluginmeta.GenerationAPIV1 || generation.Package() != "./generation" {
+	if !ok || generation.API() != pluginmeta.GenerationAPIV1 || generation.Package() != "./generation" || generation.PackageLine() != 5 || generation.PackageColumn() != 12 {
 		t.Fatalf("Generation = %#v, %t", generation, ok)
 	}
 	activations := generation.Activations()
@@ -223,7 +223,7 @@ func FuzzParse(f *testing.F) {
 			}
 		}
 		if generation, ok := metadata.Generation(); ok {
-			if generation.API() != pluginmeta.GenerationAPIV1 || !strings.HasPrefix(generation.Package(), "./") || len(generation.Activations()) == 0 {
+			if generation.API() != pluginmeta.GenerationAPIV1 || !strings.HasPrefix(generation.Package(), "./") || generation.PackageLine() < 1 || generation.PackageColumn() < 1 || len(generation.Activations()) == 0 {
 				t.Fatalf("Generation is not canonical: %#v", generation)
 			}
 			activations := generation.Activations()

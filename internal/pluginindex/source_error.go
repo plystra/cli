@@ -8,8 +8,8 @@ import (
 
 const manifestSourceKind = "plugin-declaration"
 
-// ManifestSourceError attaches stable owning-Project provenance to an invalid
-// authored plugin manifest without changing its human message or typed error
+// ManifestSourceError attaches stable owning-Project provenance to an authored
+// plugin manifest failure without changing its human message or typed error
 // chain.
 type ManifestSourceError struct {
 	modulePath string
@@ -93,6 +93,19 @@ func manifestSourceError(modulePath, sourcePath string, cause error) error {
 		sourcePath: sourcePath,
 		line:       line,
 		column:     column,
+		cause:      cause,
+	}
+}
+
+func generationPackageSourceError(modulePath, sourcePath string, declaration pluginmeta.Generation, cause error) error {
+	if cause == nil || !errors.Is(cause, ErrInvalidGenerationPackage) || declaration.PackageLine() < 1 || declaration.PackageColumn() < 1 {
+		return cause
+	}
+	return &ManifestSourceError{
+		modulePath: modulePath,
+		sourcePath: sourcePath,
+		line:       declaration.PackageLine(),
+		column:     declaration.PackageColumn(),
 		cause:      cause,
 	}
 }
