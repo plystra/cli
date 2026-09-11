@@ -428,6 +428,43 @@ func TestPublicGenerationCommandsReportCompileFailureSourceWithoutMutation(t *te
 	}
 }
 
+func TestPublicGenerationCommandsReportInvocationFailureSourceWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := []struct {
+		name      string
+		arguments []string
+	}{
+		{name: "generate", arguments: []string{"generate"}},
+		{name: "generate-check", arguments: []string{"generate", "--check"}},
+		{name: "check", arguments: []string{"check"}},
+	}
+	for _, command := range commands {
+		command := command
+		t.Run(command.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := writeGenerationInvocationFailureProject(t)
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, command.arguments, filepath.Join(root, "order"), commandGoEnvironment())
+			wantSuffix := "\n\n" +
+				"Source: example.com/acme/library:authn/plugin.yaml:5:12 (plugin-declaration)\n\n" +
+				"Recovery:\nFix the selected generation package reported above, then rerun the command.\n\n" +
+				"Diagnostic: " + diagnosticcode.GenerationExtensionFailed + "\n"
+			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "generation extension returned an error") || !strings.Contains(stderr, `plugin "acme.library.authn"`) || !strings.Contains(stderr, "extension failed in .") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+				t.Fatalf("%s = exit %d, stdout %q, stderr %q", command.name, exitCode, stdout, stderr)
+			}
+			if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, "pkg\\mod") || strings.Contains(stderr, "pkg/mod") || strings.Contains(stderr, ".plystra-generation-") || strings.Contains(stderr, `:\`) || strings.Contains(stderr, ":/") {
+				t.Fatalf("%s exposed an absolute, Module Cache, or helper path: %q", command.name, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%s mutated the invocation-failure Project:\nbefore: %#v\nafter:  %#v", command.name, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func writeMissingGenerationActivationProject(t *testing.T) string {
 	t.Helper()
 
@@ -925,6 +962,14 @@ errors: []
 	return root
 }
 
+func writeGenerationInvocationFailureProject(t *testing.T) string {
+	t.Helper()
+
+	root := writeGenerationCompileFailureProject(t)
+	writeCommandFile(t, filepath.Join(root, "authn", "generation", "extension.go"), generationInvocationFailureSource)
+	return root
+}
+
 const emptyGenerationExtensionSource = `package generation
 
 import generation "github.com/plystra/cli/generation/v1"
@@ -937,6 +982,24 @@ func Generate(generation.GenerationContext) (generation.Output, error) {
 const invalidGenerationSignatureSource = `package generation
 
 func Generate() {}
+`
+
+const generationInvocationFailureSource = `package generation
+
+import (
+	"fmt"
+	"os"
+
+	generation "github.com/plystra/cli/generation/v1"
+)
+
+func Generate(generation.GenerationContext) (generation.Output, error) {
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return generation.Output{}, fmt.Errorf("inspect helper working directory: %w", err)
+	}
+	return generation.Output{}, fmt.Errorf("extension failed in %s", workingDirectory)
+}
 `
 
 const dependencyCycleGenerationExtensionSource = `package generation

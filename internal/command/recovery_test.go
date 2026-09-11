@@ -351,6 +351,17 @@ func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 		{name: "unsupported manifest API without typed declaration", err: fmt.Errorf("resolve generation: %w", pluginmeta.ErrUnsupportedGenerationAPI), code: diagnosticGenerationAPIUnsupported},
 		{name: "invalid generation package without typed declaration", err: fmt.Errorf("resolve generation: %w", pluginindex.ErrInvalidGenerationPackage), code: diagnosticGenerationPackageInvalid},
 		{name: "generation compile failure without typed declaration", err: fmt.Errorf("resolve generation: %w", generationexec.ErrCompile), code: diagnosticGenerationCompileFailed},
+		{name: "generation execution failure without typed declaration", err: fmt.Errorf("resolve generation: %w", generationexec.ErrExecute), code: diagnosticGenerationExecutionFailed},
+		{name: "generation orchestration failure without typed declaration", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrExtensionExecution), code: diagnosticGenerationExecutionFailed},
+		{name: "generation extension failure without typed declaration", err: fmt.Errorf("resolve generation: %w", generationexec.ErrExtension), code: diagnosticGenerationExtensionFailed},
+		{name: "generation crash without typed declaration", err: fmt.Errorf("resolve generation: %w", generationexec.ErrCrash), code: diagnosticGenerationCrashed},
+		{name: "generation timeout without typed declaration", err: fmt.Errorf("resolve generation: %w", generationexec.ErrTimeout), code: diagnosticGenerationTimeout},
+		{name: "generation request size failure without typed declaration", err: fmt.Errorf("resolve generation: %w", generationexec.ErrRequestTooLarge), code: diagnosticGenerationRequestTooLarge},
+		{name: "generation output size failure without typed declaration", err: fmt.Errorf("resolve generation: %w", generationexec.ErrOutputTooLarge), code: diagnosticGenerationOutputTooLarge},
+		{name: "generation malformed output without typed declaration", err: fmt.Errorf("resolve generation: %w", generationexec.ErrMalformedOutput), code: diagnosticGenerationOutputMalformed},
+		{name: "generation invalid output without typed declaration", err: fmt.Errorf("resolve generation: %w", generationexec.ErrInvalidOutput), code: diagnosticGenerationOutputInvalid},
+		{name: "generation compile timeout without typed declaration", err: fmt.Errorf("resolve generation: %w", errors.Join(generationexec.ErrCompile, generationexec.ErrTimeout)), code: diagnosticGenerationTimeout},
+		{name: "generation extension diagnostic without typed rule", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrExtensionDiagnostic), code: diagnosticGenerationExtensionDiagnostic},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
@@ -362,6 +373,73 @@ func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 				t.Fatalf("source-less failure output = %q", got)
 			}
 		})
+	}
+}
+
+func TestWriteCommandFailureReportsGenerationInvocationSources(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		cause error
+		code  string
+	}{
+		{name: "execution", cause: fmt.Errorf("%w: create isolated working directory: access denied", generationexec.ErrExecute), code: diagnosticGenerationExecutionFailed},
+		{name: "extension", cause: fmt.Errorf("%w: %w: rejected input", generationexec.ErrExecute, generationexec.ErrExtension), code: diagnosticGenerationExtensionFailed},
+		{name: "crash", cause: fmt.Errorf("%w: %w: abnormal exit", generationexec.ErrExecute, generationexec.ErrCrash), code: diagnosticGenerationCrashed},
+		{name: "timeout", cause: fmt.Errorf("%w: %w", generationexec.ErrExecute, generationexec.ErrTimeout), code: diagnosticGenerationTimeout},
+		{name: "compile timeout", cause: fmt.Errorf("%w: %w", generationexec.ErrCompile, generationexec.ErrTimeout), code: diagnosticGenerationTimeout},
+		{name: "request too large", cause: fmt.Errorf("%w: %w", generationexec.ErrExecute, generationexec.ErrRequestTooLarge), code: diagnosticGenerationRequestTooLarge},
+		{name: "output too large", cause: fmt.Errorf("%w: %w", generationexec.ErrExecute, generationexec.ErrOutputTooLarge), code: diagnosticGenerationOutputTooLarge},
+		{name: "malformed output", cause: fmt.Errorf("%w: %w", generationexec.ErrExecute, generationexec.ErrMalformedOutput), code: diagnosticGenerationOutputMalformed},
+		{name: "invalid output", cause: fmt.Errorf("%w: %w", generationexec.ErrExecute, generationexec.ErrInvalidOutput), code: diagnosticGenerationOutputInvalid},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			failure := &locatedGenerationSourceTestError{
+				modulePath: "example.com/acme/library",
+				sourcePath: "authn/plugin.yaml",
+				sourceKind: "plugin-declaration",
+				line:       5,
+				column:     12,
+				cause:      test.cause,
+			}
+			var output strings.Builder
+			writeCommandFailure(&output, "generate", fmt.Errorf("resolve application: %w", failure), recoveryContext{})
+			got := output.String()
+			wantSuffix := "\n\n" +
+				"Source: example.com/acme/library:authn/plugin.yaml:5:12 (plugin-declaration)\n\n" +
+				"Recovery:\nFix the selected generation package reported above, then rerun the command.\n\n" +
+				"Diagnostic: " + test.code + "\n"
+			if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 1 || strings.Count(got, "Recovery:") != 1 || strings.Count(got, "Diagnostic:") != 1 {
+				t.Fatalf("generation invocation output = %q, want suffix %q", got, wantSuffix)
+			}
+		})
+	}
+}
+
+func TestWriteCommandFailureOmitsGenerationInvocationSourceForCleanupAggregate(t *testing.T) {
+	t.Parallel()
+
+	invocation := &locatedGenerationSourceTestError{
+		modulePath: "example.com/acme/library",
+		sourcePath: "authn/plugin.yaml",
+		sourceKind: "plugin-declaration",
+		line:       5,
+		column:     12,
+		cause:      fmt.Errorf("%w: %w: rejected input", generationexec.ErrExecute, generationexec.ErrExtension),
+	}
+	failure := errors.Join(
+		fmt.Errorf("resolve application: %w", invocation),
+		fmt.Errorf("%w: remove helper artifacts: access denied", generationexec.ErrCleanup),
+	)
+	var output strings.Builder
+	writeCommandFailure(&output, "generate", failure, recoveryContext{})
+	got := output.String()
+	if strings.Contains(got, "Source: ") || strings.Count(got, "Recovery:") != 1 || strings.Count(got, "Diagnostic:") != 1 || !strings.HasSuffix(got, "Diagnostic: "+diagnosticGenerationExtensionFailed+"\n") {
+		t.Fatalf("cleanup aggregate output = %q, want no source and one extension diagnostic", got)
 	}
 }
 
@@ -1208,6 +1286,23 @@ func (e *concurrentSourceTestError) SourcePath() string { return e.sourcePath }
 func (e *concurrentSourceTestError) SourceKind() string { return e.sourceKind }
 func (*concurrentSourceTestError) Line() int            { return 0 }
 func (*concurrentSourceTestError) Column() int          { return 0 }
+
+type locatedGenerationSourceTestError struct {
+	modulePath string
+	sourcePath string
+	sourceKind string
+	line       int
+	column     int
+	cause      error
+}
+
+func (e *locatedGenerationSourceTestError) Error() string      { return e.cause.Error() }
+func (e *locatedGenerationSourceTestError) Unwrap() error      { return e.cause }
+func (e *locatedGenerationSourceTestError) ModulePath() string { return e.modulePath }
+func (e *locatedGenerationSourceTestError) SourcePath() string { return e.sourcePath }
+func (e *locatedGenerationSourceTestError) SourceKind() string { return e.sourceKind }
+func (e *locatedGenerationSourceTestError) Line() int          { return e.line }
+func (e *locatedGenerationSourceTestError) Column() int        { return e.column }
 
 type recoveryRequirementSourceError struct {
 	cause   error

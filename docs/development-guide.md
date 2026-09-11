@@ -2166,6 +2166,19 @@ remains source-less rather than inventing a declaration. Fix the reported
 package's source, imports, dependencies, or `Generate` signature, then rerun the
 same command. Compiler output never exposes checkout, Module Cache, or helper
 temporary paths.
+Selected-helper invocation failures use `PLYSTRA_GENERATION_EXECUTION_FAILED`,
+`PLYSTRA_GENERATION_EXTENSION_FAILED`, `PLYSTRA_GENERATION_CRASHED`,
+`PLYSTRA_GENERATION_TIMEOUT`, `PLYSTRA_GENERATION_REQUEST_TOO_LARGE`,
+`PLYSTRA_GENERATION_OUTPUT_TOO_LARGE`, `PLYSTRA_GENERATION_OUTPUT_MALFORMED`, or
+`PLYSTRA_GENERATION_OUTPUT_INVALID`. Each emits the exact `generation.package`
+scalar at its current-Project or dependency-Project `plugin.yaml` position as a
+`plugin-declaration` source. A compile deadline is classified as
+`PLYSTRA_GENERATION_TIMEOUT` and retains the same source. Bare or unlocated
+invocation and orchestration sentinels and aggregate helper-cleanup failures
+remain source-less rather than inventing one selected declaration. The source
+identifies the selected invocation boundary; it does not by itself imply faulty
+helper code. Use the diagnostic code to correct local execution prerequisites,
+request size, helper behavior, or returned output, then rerun the same command.
 An unavailable constructor configuration schema uses
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` and emits the one owning
 current or dependency Project document as `configuration-declaration` at
@@ -2648,6 +2661,24 @@ before retrying generation or checking. An unlocated compile sentinel has no
 trustworthy authored source and therefore emits none. Compiler output is
 sanitized so checkout, Module Cache, and helper temporary paths do not become
 public diagnostics.
+
+### Generation helper invocation fails
+
+`PLYSTRA_GENERATION_EXECUTION_FAILED`, `PLYSTRA_GENERATION_EXTENSION_FAILED`,
+`PLYSTRA_GENERATION_CRASHED`, `PLYSTRA_GENERATION_TIMEOUT`,
+`PLYSTRA_GENERATION_REQUEST_TOO_LARGE`, `PLYSTRA_GENERATION_OUTPUT_TOO_LARGE`,
+`PLYSTRA_GENERATION_OUTPUT_MALFORMED`, and `PLYSTRA_GENERATION_OUTPUT_INVALID`
+point directly to the selected helper's `generation.package` scalar in the
+owning module-relative `plugin.yaml`. A compile deadline is classified as
+`PLYSTRA_GENERATION_TIMEOUT` before the generic compile category and retains
+the package source attached at the build boundary. Fix the reported package or
+the local process, size, and filesystem prerequisites needed to invoke it before
+retrying generation or checking. The reported location identifies the selected
+invocation boundary rather than proving its package code caused the failure; in
+particular, a request-size failure describes the normalized context presented at
+that boundary. A bare or unlocated invocation or orchestration sentinel and an
+aggregate helper-cleanup failure have no one trustworthy selected declaration
+and therefore emit none.
 
 ### Extension helper fails
 

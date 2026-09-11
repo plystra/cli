@@ -421,8 +421,8 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 			t.Fatalf("maximum-length Project skill omits generation-graph source guidance for %s", code)
 		}
 	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_API_UNSUPPORTED")) || !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_PACKAGE_INVALID")) || !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_COMPILE_FAILED")) || !bytes.Contains(skill, []byte("exact scalar Source")) {
-		t.Fatal("maximum-length Project skill omits generation-declaration source guidance")
+	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_API_UNSUPPORTED: generation.api Source")) || !bytes.Contains(skill, []byte("PACKAGE_INVALID/COMPILE_FAILED/invocation failures")) || !bytes.Contains(skill, []byte("generation.package Source")) || !bytes.Contains(skill, []byte("bare/unlocated none")) {
+		t.Fatal("maximum-length Project skill omits generation helper source guidance")
 	}
 }
 
@@ -1246,6 +1246,15 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("Fix the reported package's source, imports, dependencies, or `Generate` signature"),
 		[]byte("Compiler output never exposes checkout, Module Cache, or helper temporary paths"),
 		[]byte("bare compile sentinel remains source-less"),
+		[]byte("Selected-helper invocation failures use `PLYSTRA_GENERATION_EXECUTION_FAILED`"),
+		[]byte("`PLYSTRA_GENERATION_EXTENSION_FAILED`, `PLYSTRA_GENERATION_CRASHED`"),
+		[]byte("`PLYSTRA_GENERATION_REQUEST_TOO_LARGE`"),
+		[]byte("`PLYSTRA_GENERATION_OUTPUT_TOO_LARGE`"),
+		[]byte("`PLYSTRA_GENERATION_OUTPUT_MALFORMED`"),
+		[]byte("`PLYSTRA_GENERATION_OUTPUT_INVALID`"),
+		[]byte("compile deadline is classified as `PLYSTRA_GENERATION_TIMEOUT`"),
+		[]byte("Bare or unlocated invocation and orchestration sentinels"),
+		[]byte("source identifies the selected invocation boundary"),
 		[]byte("one path-only `configuration-selection` source"),
 		[]byte("unsafe selectors report no source"),
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration"),
@@ -2323,10 +2332,10 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED",
 		"PLYSTRA_GENERATION_STATE_REPEATED",
 		"PLYSTRA_GENERATION_NONCONVERGENT",
-		"PLYSTRA_GENERATION_API_UNSUPPORTED",
-		"PLYSTRA_GENERATION_PACKAGE_INVALID",
-		"PLYSTRA_GENERATION_COMPILE_FAILED",
-		"exact scalar Source",
+		"PLYSTRA_GENERATION_API_UNSUPPORTED: generation.api Source",
+		"PACKAGE_INVALID/COMPILE_FAILED/invocation failures",
+		"generation.package Source",
+		"bare/unlocated none",
 		"dedup Sources",
 		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
 		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",

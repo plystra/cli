@@ -1036,6 +1036,20 @@ remains source-less rather than inventing a declaration. Fix the reported
 package's source, imports, dependencies, or `Generate` signature, then rerun the
 same command. Compiler output never exposes checkout, Module Cache, or helper
 temporary paths.
+Selected-helper invocation failures use `PLYSTRA_GENERATION_EXECUTION_FAILED`,
+`PLYSTRA_GENERATION_EXTENSION_FAILED`, `PLYSTRA_GENERATION_CRASHED`,
+`PLYSTRA_GENERATION_TIMEOUT`, `PLYSTRA_GENERATION_REQUEST_TOO_LARGE`,
+`PLYSTRA_GENERATION_OUTPUT_TOO_LARGE`, `PLYSTRA_GENERATION_OUTPUT_MALFORMED`, or
+`PLYSTRA_GENERATION_OUTPUT_INVALID`. Each reports the exact
+`generation.package` scalar at its current-Project or dependency-Project
+`plugin.yaml` position as a `plugin-declaration` source. A compile deadline is
+classified as `PLYSTRA_GENERATION_TIMEOUT` and retains the same source. Bare or
+unlocated invocation and orchestration sentinels and aggregate helper-cleanup
+failures remain source-less rather than inventing one selected declaration. The
+source identifies the selected invocation boundary; it does not by itself imply
+faulty helper code. Use the diagnostic code to correct local execution
+prerequisites, request size, helper behavior, or returned output, then rerun the
+same command.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
 dependency Project document whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses

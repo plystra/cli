@@ -1021,6 +1021,47 @@ func TestResolveExtensionsFailsClosedWhenHelperCleanupFails(t *testing.T) {
 	if result.Passes() != 0 || !errors.Is(err, ErrResolveExtensions) || !errors.Is(err, ErrExtensionExecution) || !errors.Is(err, cleanupFailure) {
 		t.Fatalf("cleanup result = %#v, %v", result, err)
 	}
+	var source *ExtensionPackageSourceError
+	if errors.As(err, &source) {
+		t.Fatalf("cleanup failure invented selected package source %#v: %v", source, err)
+	}
+}
+
+func TestResolveExtensionsDoesNotInventSelectedPackageSourceForUntypedHelperFailures(t *testing.T) {
+	order := extensionTestContract(t, "order.create/v1", "extensions:\n  authn: {authenticated: true}\n")
+	verify := extensionTestContract(t, "authn.session.verify/v1", "")
+	audit := extensionTestContract(t, "audit.write/v1", "")
+	input := extensionTestInput(t, order, verify, audit)
+	tests := []struct {
+		name  string
+		build extensionHelperBuilder
+	}{
+		{
+			name: "untyped builder failure",
+			build: func(context.Context, generationexec.Spec, generationexec.BuildOptions) (extensionHelper, error) {
+				return nil, errors.New("builder failed")
+			},
+		},
+		{
+			name: "nil helper",
+			build: func(context.Context, generationexec.Spec, generationexec.BuildOptions) (extensionHelper, error) {
+				return nil, nil
+			},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			result, err := resolveExtensions(t.Context(), input, test.build)
+			if result.Passes() != 0 || !errors.Is(err, ErrResolveExtensions) || !errors.Is(err, ErrExtensionExecution) {
+				t.Fatalf("untyped helper result = %#v, %v", result, err)
+			}
+			var source *ExtensionPackageSourceError
+			if errors.As(err, &source) {
+				t.Fatalf("untyped helper failure invented selected package source %#v: %v", source, err)
+			}
+		})
+	}
 }
 
 func TestResolveExtensionsRetainsSelectedPackageSourceForCompileFailure(t *testing.T) {
@@ -1028,25 +1069,149 @@ func TestResolveExtensionsRetainsSelectedPackageSourceForCompileFailure(t *testi
 	verify := extensionTestContract(t, "authn.session.verify/v1", "")
 	audit := extensionTestContract(t, "audit.write/v1", "")
 	input := extensionTestInput(t, order, verify, audit)
-	compileFailure := fmt.Errorf("%w: incompatible Generate signature", generationexec.ErrCompile)
-
-	result, err := resolveExtensions(t.Context(), input, func(context.Context, generationexec.Spec, generationexec.BuildOptions) (extensionHelper, error) {
-		return nil, compileFailure
-	})
-	if result.Passes() != 0 || !errors.Is(err, ErrResolveExtensions) || !errors.Is(err, ErrExtensionExecution) || !errors.Is(err, generationexec.ErrCompile) {
-		t.Fatalf("compile result = %#v, %v", result, err)
+	tests := []struct {
+		name      string
+		failure   error
+		sentinels []error
+	}{
+		{name: "compile", failure: fmt.Errorf("%w: incompatible Generate signature", generationexec.ErrCompile), sentinels: []error{generationexec.ErrCompile}},
+		{name: "compile timeout", failure: fmt.Errorf("%w: %w", generationexec.ErrCompile, generationexec.ErrTimeout), sentinels: []error{generationexec.ErrCompile, generationexec.ErrTimeout}},
 	}
-	var source *ExtensionPackageSourceError
-	if !errors.As(err, &source) || source == nil || source.ModulePath() != "example.com/project" || source.SourcePath() != "example.authn/plugin.yaml" || source.SourceKind() != "plugin-declaration" || source.Line() != 5 || source.Column() != 12 {
-		t.Fatalf("ExtensionPackageSourceError = %#v, %v", source, err)
-	}
-	if source.Error() != compileFailure.Error() || !errors.Is(source, generationexec.ErrCompile) {
-		t.Fatalf("source error changed compile failure: %v", source)
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			result, err := resolveExtensions(t.Context(), input, func(context.Context, generationexec.Spec, generationexec.BuildOptions) (extensionHelper, error) {
+				return nil, test.failure
+			})
+			if result.Passes() != 0 || !errors.Is(err, ErrResolveExtensions) || !errors.Is(err, ErrExtensionExecution) {
+				t.Fatalf("compile result = %#v, %v", result, err)
+			}
+			for _, sentinel := range test.sentinels {
+				if !errors.Is(err, sentinel) {
+					t.Fatalf("compile error %v does not retain %v", err, sentinel)
+				}
+			}
+			var source *ExtensionPackageSourceError
+			if !errors.As(err, &source) || source == nil || source.ModulePath() != "example.com/project" || source.SourcePath() != "example.authn/plugin.yaml" || source.SourceKind() != "plugin-declaration" || source.Line() != 5 || source.Column() != 12 {
+				t.Fatalf("ExtensionPackageSourceError = %#v, %v", source, err)
+			}
+			if source.Error() != test.failure.Error() {
+				t.Fatalf("source error changed compile failure: got %q, want %q", source.Error(), test.failure.Error())
+			}
+		})
 	}
 
 	var zero *ExtensionPackageSourceError
 	if zero.ModulePath() != "" || zero.SourcePath() != "" || zero.SourceKind() != "" || zero.Line() != 0 || zero.Column() != 0 || zero.Unwrap() != nil || zero.Error() != generationexec.ErrCompile.Error() {
 		t.Fatalf("nil ExtensionPackageSourceError accessors returned nonzero values")
+	}
+}
+
+func TestRunExtensionsDoesNotInventSelectedPackageSourceForOrchestrationFailures(t *testing.T) {
+	selected := []SelectedExtension{{
+		pluginID:      "example.authn",
+		api:           "v1",
+		packagePath:   "./generation",
+		source:        "authn/plugin.yaml",
+		modulePath:    "example.com/application",
+		sourcePath:    "authn/plugin.yaml",
+		packageLine:   5,
+		packageColumn: 12,
+		activations:   []SelectedActivation{{namespace: "authn"}},
+	}}
+	plugin := extensionTestPlugin("example.authn", "authn", "authn.session.verify/v1")
+	tests := []struct {
+		name        string
+		want        string
+		plugins     map[string]Plugin
+		helpers     map[string]extensionHelper
+		helperSpecs map[string]string
+	}{
+		{name: "missing plugin provenance", want: "has no module provenance"},
+		{
+			name:        "helper identity drift",
+			want:        "changed generation helper identity between passes",
+			plugins:     map[string]Plugin{"example.authn": plugin},
+			helpers:     map[string]extensionHelper{"example.authn": &fakeExtensionHelper{output: emptyExtensionOutput}},
+			helperSpecs: map[string]string{"example.authn": "stale"},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			_, err := runExtensions(
+				t.Context(),
+				selected,
+				generation.Context{},
+				test.plugins,
+				generationexec.BuildOptions{},
+				test.helpers,
+				test.helperSpecs,
+				func(context.Context, generationexec.Spec, generationexec.BuildOptions) (extensionHelper, error) {
+					t.Fatal("unexpected helper build")
+					return nil, nil
+				},
+			)
+			if !errors.Is(err, ErrExtensionExecution) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("orchestration error = %v", err)
+			}
+			var source *ExtensionPackageSourceError
+			if errors.As(err, &source) {
+				t.Fatalf("orchestration failure invented package source %#v: %v", source, err)
+			}
+		})
+	}
+}
+
+func TestResolveExtensionsRetainsSelectedPackageSourceForInvocationFailures(t *testing.T) {
+	order := extensionTestContract(t, "order.create/v1", "extensions:\n  authn: {authenticated: true}\n")
+	verify := extensionTestContract(t, "authn.session.verify/v1", "")
+	audit := extensionTestContract(t, "audit.write/v1", "")
+	input := extensionTestInput(t, order, verify, audit)
+	tests := []struct {
+		name      string
+		failure   error
+		sentinels []error
+	}{
+		{name: "generic execution", failure: fmt.Errorf("%w: create isolated working directory: access denied", generationexec.ErrExecute), sentinels: []error{generationexec.ErrExecute}},
+		{name: "extension error", failure: fmt.Errorf("%w: %w: rejected input", generationexec.ErrExecute, generationexec.ErrExtension), sentinels: []error{generationexec.ErrExecute, generationexec.ErrExtension}},
+		{name: "crash", failure: fmt.Errorf("%w: %w: abnormal exit", generationexec.ErrExecute, generationexec.ErrCrash), sentinels: []error{generationexec.ErrExecute, generationexec.ErrCrash}},
+		{name: "timeout", failure: fmt.Errorf("%w: %w", generationexec.ErrExecute, generationexec.ErrTimeout), sentinels: []error{generationexec.ErrExecute, generationexec.ErrTimeout}},
+		{name: "request too large", failure: fmt.Errorf("%w: %w", generationexec.ErrExecute, generationexec.ErrRequestTooLarge), sentinels: []error{generationexec.ErrExecute, generationexec.ErrRequestTooLarge}},
+		{name: "output too large", failure: fmt.Errorf("%w: %w", generationexec.ErrExecute, generationexec.ErrOutputTooLarge), sentinels: []error{generationexec.ErrExecute, generationexec.ErrOutputTooLarge}},
+		{name: "malformed output", failure: fmt.Errorf("%w: %w", generationexec.ErrExecute, generationexec.ErrMalformedOutput), sentinels: []error{generationexec.ErrExecute, generationexec.ErrMalformedOutput}},
+		{name: "invalid output", failure: fmt.Errorf("%w: %w", generationexec.ErrExecute, generationexec.ErrInvalidOutput), sentinels: []error{generationexec.ErrExecute, generationexec.ErrInvalidOutput}},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			helper := &fakeExtensionHelper{
+				output: func(_ int, _ generation.Context) (generation.Output, error) {
+					return generation.Output{}, test.failure
+				},
+			}
+			builder := newFakeExtensionBuilder(map[string]*fakeExtensionHelper{"example.authn": helper})
+
+			result, err := resolveExtensions(t.Context(), input, builder.Build)
+			if result.Passes() != 0 || !errors.Is(err, ErrResolveExtensions) || !errors.Is(err, ErrExtensionExecution) {
+				t.Fatalf("invocation result = %#v, %v", result, err)
+			}
+			for _, sentinel := range test.sentinels {
+				if !errors.Is(err, sentinel) {
+					t.Fatalf("invocation error %v does not retain %v", err, sentinel)
+				}
+			}
+			var source *ExtensionPackageSourceError
+			if !errors.As(err, &source) || source == nil || source.ModulePath() != "example.com/project" || source.SourcePath() != "example.authn/plugin.yaml" || source.SourceKind() != "plugin-declaration" || source.Line() != 5 || source.Column() != 12 {
+				t.Fatalf("ExtensionPackageSourceError = %#v, %v", source, err)
+			}
+			if source.Error() != test.failure.Error() {
+				t.Fatalf("source error changed invocation failure: got %q, want %q", source.Error(), test.failure.Error())
+			}
+			if helper.calls != 1 || !helper.closed {
+				t.Fatalf("failed helper calls=%d closed=%t", helper.calls, helper.closed)
+			}
+		})
 	}
 }
 

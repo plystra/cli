@@ -247,6 +247,10 @@ as a plugin-declaration source. A bare package sentinel has no source.
 PLYSTRA_GENERATION_COMPILE_FAILED reports the selected helper's exact
 generation.package scalar as a plugin-declaration source. A bare compile
 sentinel has no source.
+PLYSTRA_GENERATION_* helper invocation failures report the selected helper's
+exact generation.package scalar as a plugin-declaration source. A compile
+timeout uses PLYSTRA_GENERATION_TIMEOUT with the same source. Bare or unlocated
+invocation, orchestration, and aggregate cleanup errors have no source.
 PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
 configuration, go.mod/go.sum, or generated path as a sorted path-only
 configuration-declaration, module-dependency, or generated-artifact source
@@ -358,6 +362,10 @@ as a plugin-declaration source. A bare package sentinel has no source.
 PLYSTRA_GENERATION_COMPILE_FAILED reports the selected helper's exact
 generation.package scalar as a plugin-declaration source. A bare compile
 sentinel has no source.
+PLYSTRA_GENERATION_* helper invocation failures report the selected helper's
+exact generation.package scalar as a plugin-declaration source. A compile
+timeout uses PLYSTRA_GENERATION_TIMEOUT with the same source. Bare or unlocated
+invocation, orchestration, and aggregate cleanup errors have no source.
 PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project
 configuration, go.mod/go.sum, or generated path as a sorted path-only
 configuration-declaration, module-dependency, or generated-artifact source

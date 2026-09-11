@@ -51,8 +51,8 @@ var (
 const extensionPackageSourceKind = "plugin-declaration"
 
 // ExtensionPackageSourceError attaches the selected generation.package
-// declaration to a helper compilation failure without changing its text or
-// established sentinel chain.
+// declaration to a helper build or invocation failure without changing its
+// text or established sentinel chain.
 type ExtensionPackageSourceError struct {
 	modulePath string
 	sourcePath string
@@ -108,7 +108,7 @@ func (e *ExtensionPackageSourceError) Error() string {
 	return e.cause.Error()
 }
 
-// Unwrap preserves the original helper compilation failure chain.
+// Unwrap preserves the original helper failure chain.
 func (e *ExtensionPackageSourceError) Unwrap() error {
 	if e == nil {
 		return nil
@@ -986,7 +986,7 @@ func runExtensions(
 			var err error
 			helper, err = build(ctx, spec, options)
 			if err != nil {
-				err = extensionPackageSourceError(extension, err)
+				err = selectedExtensionPackageSourceError(extension, err)
 				return nil, fmt.Errorf("%w: plugin %q declaration %q: %w", ErrExtensionExecution, extension.PluginID(), extension.Source(), err)
 			}
 			if helper == nil {
@@ -997,6 +997,7 @@ func runExtensions(
 		}
 		normalized, err := helper.Generate(ctx, generationContext)
 		if err != nil {
+			err = selectedExtensionPackageSourceError(extension, err)
 			return nil, fmt.Errorf("%w: plugin %q declaration %q: %w", ErrExtensionExecution, extension.PluginID(), extension.Source(), err)
 		}
 		if err := validateExtensionProvenance(extension, normalized); err != nil {
@@ -1013,8 +1014,8 @@ func runExtensions(
 	return outputs, nil
 }
 
-func extensionPackageSourceError(extension SelectedExtension, cause error) error {
-	if cause == nil || !errors.Is(cause, generationexec.ErrCompile) || extension.ModulePath() == "" || extension.SourcePath() == "" || extension.PackageLine() < 1 || extension.PackageColumn() < 1 {
+func selectedExtensionPackageSourceError(extension SelectedExtension, cause error) error {
+	if cause == nil || (!errors.Is(cause, generationexec.ErrCompile) && !errors.Is(cause, generationexec.ErrExecute)) || extension.ModulePath() == "" || extension.SourcePath() == "" || extension.PackageLine() < 1 || extension.PackageColumn() < 1 {
 		return cause
 	}
 	return &ExtensionPackageSourceError{

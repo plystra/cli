@@ -640,7 +640,20 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			seen[candidate] = struct{}{}
 			sources = append(sources, candidate)
 		}
-	case diagnosticGenerationAPIUnsupported, diagnosticGenerationPackageInvalid, diagnosticGenerationCompileFailed:
+	case diagnosticGenerationAPIUnsupported,
+		diagnosticGenerationPackageInvalid,
+		diagnosticGenerationCompileFailed,
+		diagnosticGenerationExecutionFailed,
+		diagnosticGenerationExtensionFailed,
+		diagnosticGenerationCrashed,
+		diagnosticGenerationTimeout,
+		diagnosticGenerationRequestTooLarge,
+		diagnosticGenerationOutputTooLarge,
+		diagnosticGenerationOutputMalformed,
+		diagnosticGenerationOutputInvalid:
+		if errors.Is(err, generationexec.ErrCleanup) {
+			return nil
+		}
 		var located diagnosticSourceLocation
 		if !errors.As(err, &located) || located == nil || located.SourceKind() != "plugin-declaration" {
 			return nil

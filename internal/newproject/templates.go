@@ -153,6 +153,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_GENERATION_COMPILE_FAILED`" + ` reports the exact ` + "`generation.package`" + ` scalar for the selected helper at its current-Project or dependency-Project ` + "`plugin.yaml`" + ` position as a ` + "`plugin-declaration`" + ` source. A bare compile sentinel remains source-less rather than inventing a declaration. Fix the reported package's source, imports, dependencies, or ` + "`Generate`" + ` signature, then rerun the same command. Compiler output never exposes checkout, Module Cache, or helper temporary paths.
 
+Selected-helper invocation failures use ` + "`PLYSTRA_GENERATION_EXECUTION_FAILED`" + `, ` + "`PLYSTRA_GENERATION_EXTENSION_FAILED`" + `, ` + "`PLYSTRA_GENERATION_CRASHED`" + `, ` + "`PLYSTRA_GENERATION_TIMEOUT`" + `, ` + "`PLYSTRA_GENERATION_REQUEST_TOO_LARGE`" + `, ` + "`PLYSTRA_GENERATION_OUTPUT_TOO_LARGE`" + `, ` + "`PLYSTRA_GENERATION_OUTPUT_MALFORMED`" + `, or ` + "`PLYSTRA_GENERATION_OUTPUT_INVALID`" + `. Each reports the exact ` + "`generation.package`" + ` scalar at its current-Project or dependency-Project ` + "`plugin.yaml`" + ` position as a ` + "`plugin-declaration`" + ` source. A compile deadline is classified as ` + "`PLYSTRA_GENERATION_TIMEOUT`" + ` and retains the same source. Bare or unlocated invocation and orchestration sentinels and aggregate helper-cleanup failures remain source-less rather than inventing one selected declaration. The source identifies the selected invocation boundary; it does not by itself imply faulty helper code. Use the diagnostic code to correct local execution prerequisites, request size, helper behavior, or returned output, then rerun the same command.
+
 ` + "`PLYSTRA_CONFIGURATION_SELECTION_INVALID`" + ` identifies conflicting explicit or ambient modes, duplicated selector variables, unsafe selectors, and missing selected documents. A normalized Project-contained document that cannot be loaded reports one path-only ` + "`configuration-selection`" + ` source without a fabricated span. Conflicting, duplicated, or unsafe selectors report no source because no document is trustworthy. Use exactly one intended selector; an explicit mode conflict fails before Project discovery or mutation, and its recovery never echoes either value.
 
 ` + "`plystra plugin create`" + ` uses ` + "`PLYSTRA_PLUGIN_CREATE_NAME_INVALID`" + ` for an invalid or reserved root-level name, ` + "`PLYSTRA_PLUGIN_CREATE_ID_INVALID`" + ` when the Project module namespace and name cannot form a canonical Plugin ID, and ` + "`PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS`" + ` for an existing Plugin directory. Each failure occurs before scaffold installation, leaves the Project unchanged, and emits recovery with placeholders instead of rejected input.
@@ -1505,7 +1507,7 @@ Redact unsafe paths/selectors; leave unknowns uncoded.
 - PLYSTRA_GENERATION_ACTIVATION_CYCLE/PLYSTRA_GENERATION_DEPENDENCY_CYCLE/
   PLYSTRA_GENERATION_CONTRIBUTION_CYCLE/PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED/
   PLYSTRA_GENERATION_STATE_REPEATED/PLYSTRA_GENERATION_NONCONVERGENT: dedup Sources.
-- PLYSTRA_GENERATION_API_UNSUPPORTED/PLYSTRA_GENERATION_PACKAGE_INVALID/PLYSTRA_GENERATION_COMPILE_FAILED: exact scalar Source.
+- PLYSTRA_GENERATION_API_UNSUPPORTED: generation.api Source; PACKAGE_INVALID/COMPILE_FAILED/invocation failures: generation.package Source; bare/unlocated none.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,
   PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID,
