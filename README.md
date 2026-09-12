@@ -508,6 +508,13 @@ Commands below a module root use the nearest real enclosing `go.mod`; nested mod
 
 ## Authoring behavior
 
+`PLYSTRA_INTERFACE_CREATE_TARGET_EXISTS` reports an occupied target as a
+module-relative `authored-package` path without a fabricated span. When another
+visible package defines the requested ID, it reports that owning current or
+dependency Project's `interface-declaration` and exact directive span. Choose
+a different unversioned Interface name; the command never changes the existing
+source or a dependency cache copy.
+
 Create the initial `/v1` package for one canonical unversioned Interface name:
 
 ```powershell

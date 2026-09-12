@@ -141,7 +141,7 @@ Authored Implementation failures distinguish invalid directives, Config schemas,
 
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED` identifies constructor-keyed configuration whose constructor is neither named by an effective `interfaces.use` choice nor reachable from an active Interface. Name it in an effective choice, make it reachable through an Interface requirement, or remove its configuration from the selected document. The diagnostic reports every effective contributing Project document at `1:1` as a sorted `configuration-declaration` source and never prints configured values or Secret-reference targets.
 
-Interface and Implementation scaffold failures distinguish invalid or missing identities, unsafe package paths, and existing targets before mutation. Follow the emitted corrected command or replacement choice.
+Interface and Implementation scaffold failures distinguish invalid or missing identities, unsafe package paths, and existing targets before mutation. Interface creation collisions report the occupied module-relative package path without a fabricated span, or the owning current or dependency Interface declaration with its exact span. Follow the emitted corrected command or replacement choice; existing source remains unchanged.
 
 Generated source under `generated/` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 

@@ -171,7 +171,7 @@ Authored Implementation failures distinguish invalid directives, Config schemas,
 
 ` + "`PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED`" + ` identifies constructor-keyed configuration whose constructor is neither named by an effective ` + "`interfaces.use`" + ` choice nor reachable from an active Interface. Name it in an effective choice, make it reachable through an Interface requirement, or remove its configuration from the selected document. The diagnostic reports every effective contributing Project document at ` + "`1:1`" + ` as a sorted ` + "`configuration-declaration`" + ` source and never prints configured values or Secret-reference targets.
 
-Interface and Implementation scaffold failures distinguish invalid or missing identities, unsafe package paths, and existing targets before mutation. Follow the emitted corrected command or replacement choice.
+Interface and Implementation scaffold failures distinguish invalid or missing identities, unsafe package paths, and existing targets before mutation. Interface creation collisions report the occupied module-relative package path without a fabricated span, or the owning current or dependency Interface declaration with its exact span. Follow the emitted corrected command or replacement choice; existing source remains unchanged.
 
 Generated source under ` + "`generated/`" + ` is owned by the Plystra CLI. Do not edit it manually; commit it to Git.
 
@@ -1541,16 +1541,16 @@ Redact unsafe paths/selectors; leave unknowns uncoded.
   PLYSTRA_INTERFACE_METADATA_INVALID,
   PLYSTRA_INTERFACE_ID_DUPLICATE, and PLYSTRA_AUTHORING_PACKAGE_INVALID.
   Apply Recovery to the owning Source, never Module Cache.
-- Scaffold-command codes:
+- Scaffold codes:
   PLYSTRA_PLUGIN_CREATE_NAME_INVALID, PLYSTRA_PLUGIN_CREATE_ID_INVALID,
   PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS,
   PLYSTRA_INTERFACE_CREATE_NAME_INVALID,
-  PLYSTRA_INTERFACE_CREATE_TARGET_EXISTS,
+  PLYSTRA_INTERFACE_CREATE_TARGET_EXISTS (Source: path or declaration span),
   PLYSTRA_IMPLEMENTATION_CREATE_INTERFACE_INVALID,
   PLYSTRA_IMPLEMENTATION_CREATE_INTERFACE_NOT_FOUND,
   PLYSTRA_IMPLEMENTATION_CREATE_PACKAGE_INVALID, and
   PLYSTRA_IMPLEMENTATION_CREATE_TARGET_EXISTS.
-- Implementation authoring codes, in validation order:
+- Implementation authoring codes:
   PLYSTRA_IMPLEMENTATION_DECLARATION_INVALID,
   PLYSTRA_IMPLEMENTATION_CONFIG_INVALID,
   PLYSTRA_IMPLEMENTATION_REQUIRED_INTERFACE_INVALID,

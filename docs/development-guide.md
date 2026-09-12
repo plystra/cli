@@ -2405,6 +2405,13 @@ leave authored, generated, and module files unchanged.
 
 ### Interface and Implementation creation
 
+`PLYSTRA_INTERFACE_CREATE_TARGET_EXISTS` reports an occupied target as a
+module-relative `authored-package` path without a fabricated span. When another
+visible package defines the requested ID, it reports that owning current or
+dependency Project's `interface-declaration` and exact directive span. Choose
+a different unversioned Interface name; the command never changes the existing
+source or a dependency cache copy.
+
 Public scaffold commands classify pre-mutation input and target failures:
 
 - `PLYSTRA_INTERFACE_CREATE_NAME_INVALID` and

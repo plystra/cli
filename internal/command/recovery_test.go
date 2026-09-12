@@ -336,6 +336,7 @@ func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 		err  error
 		code string
 	}{
+		{name: "Interface collision without typed target", err: fmt.Errorf("%w: %w", interfacecreate.ErrCreate, interfacecreate.ErrTargetExists), code: diagnosticInterfaceCreateTargetExists},
 		{name: "explicit target not found", err: fmt.Errorf("author Capability: %w", plugintarget.ErrNotFound), code: diagnosticPluginTargetNotFound},
 		{name: "interactive selection failed", err: fmt.Errorf("author Capability: %w", plugintarget.ErrSelection), code: diagnosticPluginTargetInvalid},
 		{name: "activation conflict without typed candidates", err: fmt.Errorf("resolve generation: %w", generationactivation.ErrAssociationConflict), code: diagnosticGenerationActivationConflict},

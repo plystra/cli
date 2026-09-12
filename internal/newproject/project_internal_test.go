@@ -49,6 +49,20 @@ func TestGeneratedSkillDescribesStagedContractLifecycle(t *testing.T) {
 	}
 }
 
+func TestGeneratedSkillRequiresArtifactEntryGuidance(t *testing.T) {
+	t.Parallel()
+	const modulePath = "example.com/acme/application"
+	text := fmt.Sprintf(skillTemplate, modulePath)
+	const guidance = "generated/.plystra-manifest.json entry"
+	if !strings.Contains(text, guidance) {
+		t.Fatal("skill omits artifact entry guidance")
+	}
+	without := strings.ReplaceAll(text, guidance, "generated manifest")
+	if err := validateGeneratedSkill([]byte(without), modulePath); err == nil || !strings.Contains(err.Error(), guidance) {
+		t.Fatalf("missing artifact entry guidance error = %v", err)
+	}
+}
+
 func TestValidateSkillProgressiveDisclosureRejectsAdvancedConceptsInOrdinaryPath(t *testing.T) {
 	t.Parallel()
 

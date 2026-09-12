@@ -90,6 +90,9 @@ func create(ctx context.Context, options Options, after postValidate) (Result, e
 		return Result{}, fmt.Errorf("%w: derive target: %w", ErrCreate, err)
 	}
 	if err := requireAbsentDirectory(target.packagePath, path.Dir(target.sourcePath)); err != nil {
+		if errors.Is(err, ErrTargetExists) {
+			err = &TargetExistsError{modulePath: project.ModulePath(), sourcePath: path.Dir(target.sourcePath), cause: err}
+		}
 		return Result{}, fmt.Errorf("%w: %w", ErrCreate, err)
 	}
 
@@ -98,7 +101,14 @@ func create(ctx context.Context, options Options, after postValidate) (Result, e
 		return Result{}, fmt.Errorf("%w: validate visible Interfaces before mutation: %w", ErrCreate, err)
 	}
 	if existing, found := findID(before, identifier.String()); found {
-		return Result{}, fmt.Errorf("%w: %w: %s is already defined by package %q at %s", ErrCreate, ErrTargetExists, identifier, existing.PackagePath(), existing.Source())
+		position := existing.Declaration().Position()
+		return Result{}, fmt.Errorf("%w: %w", ErrCreate, &TargetExistsError{
+			modulePath: existing.ModulePath(),
+			sourcePath: existing.SourcePath(),
+			line:       position.Line,
+			column:     position.Column,
+			cause:      fmt.Errorf("%w: %s is already defined by package %q at %s", ErrTargetExists, identifier, existing.PackagePath(), existing.Source()),
+		})
 	}
 
 	source, err := render(identifier, target.packageName, target.methodName)

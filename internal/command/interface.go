@@ -20,6 +20,9 @@ const (
 Creates the initial v1 canonical Go package for one unversioned Interface name.
 The name must contain two or more lower-case dot-separated segments. The command
 does not create optional metadata or edit application configuration.
+An existing target reports its module-relative package path. A visible ID in
+another package reports the owning Interface declaration and its exact span.
+Choose a different name; the existing source is never changed.
 `
 )
 

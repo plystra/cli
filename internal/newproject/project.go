@@ -805,7 +805,7 @@ func validateGeneratedSkill(data []byte, modulePath string) error {
 		"Read only the section that matches the current task",
 		"## Module and file ownership",
 		"per-file generator/input/source provenance",
-		"Read that path's generated/.plystra-manifest.json entry",
+		"generated/.plystra-manifest.json entry",
 		"plystra new app",
 		"plystra new app --module github.com/acme/app",
 		"plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3",

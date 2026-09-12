@@ -111,6 +111,10 @@ func TestCreateRejectsExistingTargetPackageWithoutMutation(t *testing.T) {
 	if !errors.Is(err, interfacecreate.ErrCreate) || !errors.Is(err, interfacecreate.ErrTargetExists) {
 		t.Fatalf("Create error = %v", err)
 	}
+	var conflict *interfacecreate.TargetExistsError
+	if !errors.As(err, &conflict) || conflict.ModulePath() != "example.com/acme/existing" || conflict.SourcePath() != "interfaces/order/create/v1" || conflict.SourceKind() != "authored-package" || conflict.Line() != 0 || conflict.Column() != 0 {
+		t.Fatalf("target source = %#v", conflict)
+	}
 	assertFile(t, keep, "keep\n")
 	if _, statErr := os.Stat(filepath.Join(filepath.Dir(keep), "interface.go")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("interface.go changed: %v", statErr)
@@ -132,6 +136,10 @@ type Response struct{}
 	if !errors.Is(err, interfacecreate.ErrCreate) || !errors.Is(err, interfacecreate.ErrTargetExists) || !strings.Contains(err.Error(), "example.com/acme/visible/contracts/legacy") {
 		t.Fatalf("Create error = %v", err)
 	}
+	var conflict *interfacecreate.TargetExistsError
+	if !errors.As(err, &conflict) || conflict.ModulePath() != "example.com/acme/visible" || conflict.SourcePath() != "contracts/legacy/interface.go" || conflict.SourceKind() != "interface-declaration" || conflict.Line() != 3 || conflict.Column() != 1 {
+		t.Fatalf("declaration source = %#v", conflict)
+	}
 	if _, statErr := os.Stat(filepath.Join(root, "interfaces")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("target tree changed: %v", statErr)
 	}
@@ -143,6 +151,15 @@ func TestCreateRequiresContext(t *testing.T) {
 	_, err := interfacecreate.Create(nil, interfacecreate.Options{Name: "order.create"})
 	if !errors.Is(err, interfacecreate.ErrCreate) || !strings.Contains(err.Error(), "context is nil") {
 		t.Fatalf("Create error = %v", err)
+	}
+}
+
+func TestTargetExistsErrorWithoutProvenance(t *testing.T) {
+	t.Parallel()
+	for _, conflict := range []*interfacecreate.TargetExistsError{nil, {}} {
+		if conflict.ModulePath() != "" || conflict.SourcePath() != "" || conflict.SourceKind() != "" || conflict.Line() != 0 || conflict.Column() != 0 || conflict.Unwrap() != nil || conflict.Error() != interfacecreate.ErrTargetExists.Error() {
+			t.Fatalf("empty target source = %#v", conflict)
+		}
 	}
 }
 
