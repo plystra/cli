@@ -20,7 +20,8 @@ func TestGenerateComparesGeneratedDocumentation(t *testing.T) {
 	writeConnectApplicationModule(t, root, modulePath)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
   expose:
-    - email.send/v1
+    email.send/v1:
+      transport: connect
 `)
 	writePlugin(t, root, "business", "id: acme.business\nprovides: [email.send/v1]\n")
 	initialContract := `id: email.send/v1

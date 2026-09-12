@@ -65,7 +65,7 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if _, exists := first.Manifest().HTTPAddress(); exists || len(first.Manifest().Requirements()) != 0 || len(first.Manifest().Aliases()) != 0 {
 		t.Fatalf("Manifest is not empty: %#v", first.Manifest())
 	}
-	if transports := first.Manifest().HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
+	if transports := first.Manifest().HTTPTransports(); transports != (applicationmeta.HTTPTransports{}) {
 		t.Fatalf("default HTTP transports = %#v", transports)
 	}
 	if cors, exists := first.Manifest().HTTPCORS(); exists {
@@ -101,7 +101,7 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if !evidence.Valid() || evidence.SelectedModelDigest() != resolved.Context().Digest() || evidence.BuildModelDigest() != resolved.Context().BuildModelDigest() {
 		t.Fatalf("ResolutionEvidence = valid %t selected %q build %q", evidence.Valid(), evidence.SelectedModelDigest(), evidence.BuildModelDigest())
 	}
-	if transports, exists := evidence.HTTPTransports(); !exists || transports != (applicationmeta.HTTPTransports{Connect: true}) {
+	if transports, exists := evidence.HTTPTransports(); !exists || transports != (applicationmeta.HTTPTransports{}) {
 		t.Fatalf("ResolutionEvidence HTTP transports = %#v, %t", transports, exists)
 	}
 	assertStaticAssemblyMatchesResolution(t, first)
@@ -677,8 +677,8 @@ require example.com/platform v1.0.0
 
 replace example.com/platform => ../platform
 `)
-	rootConfiguration := "http: {address: \":8080\", transports: {connect: false, rest: false}, cors: {allowed_origins: ['*']}}\ncapabilities: {require: [kernel.health/v1]}\n"
-	selectedConfiguration := "# selected file remains independently authored\nhttp: {address: \":9090\", transports: {rest: true}, cors: {allowed_origins: [https://customer.example], allow_credentials: true}}\ncapabilities: {require: [kernel.info/v1]}\n"
+	rootConfiguration := "http: {address: \":8080\", cors: {allowed_origins: ['*']}}\ncapabilities: {require: [kernel.health/v1]}\n"
+	selectedConfiguration := "# selected file remains independently authored\nhttp: {address: \":9090\", cors: {allowed_origins: ['https://customer.example'], allow_credentials: true}}\ncapabilities: {require: [kernel.info/v1]}\n"
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), rootConfiguration)
 	writeFile(t, filepath.Join(appRoot, "deploy", "customer.yaml"), selectedConfiguration)
 	before := snapshotTree(t, appRoot)
@@ -714,7 +714,7 @@ replace example.com/platform => ../platform
 	if address, exists := result.Manifest().HTTPAddress(); !exists || address != ":9090" {
 		t.Fatalf("effective HTTP address = %q, %t; root replacement leaked", address, exists)
 	}
-	if transports := result.Manifest().HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true, REST: true}) {
+	if transports := result.Manifest().HTTPTransports(); transports != (applicationmeta.HTTPTransports{}) {
 		t.Fatalf("effective replacement HTTP transports = %#v; root replacement leaked", transports)
 	}
 	cors, exists := result.Manifest().HTTPCORS()
@@ -829,7 +829,7 @@ func TestResolveAppliesOneEnvironmentOverlayAboveRootAndDependencies(t *testing.
 	dependencyBRoot := filepath.Join(root, "platform-b")
 	writeModule(t, dependencyARoot, "example.com/platform-a")
 	writeModule(t, dependencyBRoot, "example.com/platform-b")
-	writeFile(t, filepath.Join(dependencyARoot, "plystra.yaml"), "http: {cors: {allowed_origins: ['*']}, expose: [kernel.info/v1]}\ncapabilities: {require: [kernel.health/v1]}\n")
+	writeFile(t, filepath.Join(dependencyARoot, "plystra.yaml"), "http: {cors: {allowed_origins: ['*']}, expose: {kernel.info/v1: {transport: connect}}}\ncapabilities: {require: [kernel.health/v1]}\n")
 	writeFile(t, filepath.Join(dependencyARoot, "plystra.production.yaml"), "capabilities: {require: [kernel.info/v1]}\n")
 	writeFile(t, filepath.Join(dependencyBRoot, "plystra.yaml"), "capabilities: {require: {remove: [kernel.health/v1]}}\n")
 	writeFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
@@ -845,8 +845,8 @@ replace example.com/platform-a => ../platform-a
 
 replace example.com/platform-b => ../platform-b
 `)
-	rootConfiguration := "# shared root\nhttp: {address: \":8080\", transports: {connect: false, rest: true}, cors: {allowed_origins: [https://shared.example], allow_credentials: true}}\ncapabilities: {require: [kernel.info/v1]}\n"
-	overlayConfiguration := "# sparse production overlay\nhttp: {address: \":9090\", transports: {connect: true, rest: null}, cors: {allow_credentials: null}}\ncapabilities:\n  require: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n"
+	rootConfiguration := "# shared root\nhttp: {address: \":8080\", cors: {allowed_origins: ['https://shared.example'], allow_credentials: true}}\ncapabilities: {require: [kernel.info/v1]}\n"
+	overlayConfiguration := "# sparse production overlay\nhttp: {address: \":9090\", cors: {allow_credentials: null}}\ncapabilities:\n  require: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n"
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), rootConfiguration)
 	writeFile(t, filepath.Join(appRoot, "plystra.production.yaml"), overlayConfiguration)
 	before := snapshotTree(t, appRoot)
@@ -868,9 +868,9 @@ replace example.com/platform-b => ../platform-b
 	if httpAddressEvidence.Owner() != resolutionevidence.ConfigurationOwnerEnvironment || len(httpAddressEvidence.Contributors()) != 2 || httpAddressEvidence.Contributors()[0].Owner() != resolutionevidence.ConfigurationOwnerRoot || httpAddressEvidence.Contributors()[1].Owner() != resolutionevidence.ConfigurationOwnerEnvironment || httpAddressEvidence.Contributors()[1].Sources()[0].Path() != "plystra.production.yaml" {
 		t.Fatalf("environment HTTP address evidence = %#v", httpAddressEvidence)
 	}
-	restRemoval := resolvedConfigurationField(t, result, "http.transports.rest")
-	if !restRemoval.Effective() || !restRemoval.Removed() || restRemoval.Owner() != resolutionevidence.ConfigurationOwnerEnvironment || restRemoval.Summary() != "removal" || len(restRemoval.Contributors()) != 2 {
-		t.Fatalf("environment transport removal evidence = %#v", restRemoval)
+	corsRemoval := resolvedConfigurationField(t, result, "http.cors.allow_credentials")
+	if !corsRemoval.Effective() || !corsRemoval.Removed() || corsRemoval.Owner() != resolutionevidence.ConfigurationOwnerEnvironment || corsRemoval.Summary() != "removal" || len(corsRemoval.Contributors()) != 2 {
+		t.Fatalf("environment CORS removal evidence = %#v", corsRemoval)
 	}
 	infoRemoval := resolvedConfigurationField(t, result, `capabilities.require["kernel.info/v1"]`)
 	if !infoRemoval.Effective() || !infoRemoval.Removed() || infoRemoval.Owner() != resolutionevidence.ConfigurationOwnerEnvironment {
@@ -879,7 +879,7 @@ replace example.com/platform-b => ../platform-b
 	if address, exists := result.Manifest().HTTPAddress(); !exists || address != ":9090" {
 		t.Fatalf("effective HTTP address = %q, %t", address, exists)
 	}
-	if transports := result.Manifest().HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
+	if transports := result.Manifest().HTTPTransports(); transports != (applicationmeta.HTTPTransports{}) {
 		t.Fatalf("effective environment HTTP transports = %#v", transports)
 	}
 	cors, exists := result.Manifest().HTTPCORS()
@@ -1033,15 +1033,15 @@ func TestResolveDerivesExposureFromEverySelectedConfigurationMode(t *testing.T) 
 		{
 			name:         "default",
 			mode:         applicationgen.ConfigurationModeDefault,
-			rootData:     "http: {expose: [kernel.health/v1]}\n",
+			rootData:     "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
 			selectedPath: "plystra.yaml",
 		},
 		{
 			name:         "environment overlay",
 			mode:         applicationgen.ConfigurationModeEnvironment,
-			rootData:     "http: {expose: [kernel.info/v1]}\n",
+			rootData:     "http: {expose: {kernel.info/v1: {transport: connect}}}\n",
 			selectedPath: "plystra.production.yaml",
-			selectedData: "http:\n  expose: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n",
+			selectedData: "http:\n  expose: {kernel.health/v1: {transport: connect}, kernel.info/v1: null}\n",
 			configure: func(options *applicationresolve.Options) {
 				options.EnvironmentName = "production"
 			},
@@ -1049,9 +1049,9 @@ func TestResolveDerivesExposureFromEverySelectedConfigurationMode(t *testing.T) 
 		{
 			name:         "full replacement",
 			mode:         applicationgen.ConfigurationModeExplicit,
-			rootData:     "http: {expose: [kernel.info/v1]}\n",
+			rootData:     "http: {expose: {kernel.info/v1: {transport: connect}}}\n",
 			selectedPath: "deploy/customer.yaml",
-			selectedData: "http: {expose: [kernel.health/v1]}\n",
+			selectedData: "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
 			configure: func(options *applicationresolve.Options) {
 				options.ConfigurationPath = "deploy/customer.yaml"
 			},
@@ -1118,7 +1118,7 @@ func TestResolveDerivesExposureFromEverySelectedConfigurationMode(t *testing.T) 
 	}
 }
 
-func TestResolveRejectsSelectedExposureWithoutHTTPTransport(t *testing.T) {
+func TestResolveRejectsSelectedExposureWithoutDeclaredTransport(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
@@ -1131,7 +1131,7 @@ func TestResolveRejectsSelectedExposureWithoutHTTPTransport(t *testing.T) {
 	}{
 		{
 			name:      "default",
-			rootData:  "http: {transports: {connect: false, rest: false}, expose: [kernel.health/v1]}\n",
+			rootData:  "http: {expose: {kernel.health/v1: {}}}\n",
 			path:      "plystra.yaml",
 			exposeKey: "http.expose",
 		},
@@ -1139,8 +1139,8 @@ func TestResolveRejectsSelectedExposureWithoutHTTPTransport(t *testing.T) {
 			name:      "environment overlay",
 			rootData:  "{}\n",
 			path:      "plystra.production.yaml",
-			exposeKey: "http.expose.add",
-			selected:  "http: {transports: {connect: false, rest: false}, expose: {add: [kernel.health/v1]}}\n",
+			exposeKey: "http.expose",
+			selected:  "http: {expose: {kernel.health/v1: {}}}\n",
 			configure: func(options *applicationresolve.Options) {
 				options.EnvironmentName = "production"
 			},
@@ -1150,7 +1150,7 @@ func TestResolveRejectsSelectedExposureWithoutHTTPTransport(t *testing.T) {
 			rootData:  "{}\n",
 			path:      "deploy/customer.yaml",
 			exposeKey: "http.expose",
-			selected:  "http: {transports: {connect: false, rest: false}, expose: [kernel.health/v1]}\n",
+			selected:  "http: {expose: {kernel.health/v1: {}}}\n",
 			configure: func(options *applicationresolve.Options) {
 				options.ConfigurationPath = "deploy/customer.yaml"
 			},
@@ -1175,13 +1175,11 @@ func TestResolveRejectsSelectedExposureWithoutHTTPTransport(t *testing.T) {
 			}
 
 			result, err := applicationresolve.Resolve(t.Context(), options)
-			if !errors.Is(err, applicationmeta.ErrHTTPTransportSelection) || result.Module().Path() != "" {
+			if !errors.Is(err, applicationmeta.ErrInvalidManifest) || result.Module().Path() != "" {
 				t.Fatalf("Resolve = %#v, %v", result, err)
 			}
 			for _, want := range []string{
-				"http.expose is nonempty",
-				"http.transports.connect and http.transports.rest are both false",
-				`kernel.health/v1 at ` + test.path + ` ` + test.exposeKey + `["kernel.health/v1"]`,
+				`http.expose["kernel.health/v1"].transport must be connect`,
 			} {
 				if !strings.Contains(err.Error(), want) {
 					t.Fatalf("Resolve error %q does not contain %q", err, want)
@@ -1203,7 +1201,7 @@ func TestResolveClosesLocalRequirementsThroughDependencyProvidersAndAliases(t *t
 	writeModule(t, providerRoot, "example.com/providers")
 	writeFile(t, filepath.Join(providerRoot, "plystra.yaml"), `http:
   address: ":9090"
-  expose: [email.send/v1]
+  expose: {email.send/v1: {transport: connect}}
 timeouts: {startup: 1s}
 capabilities:
   use: {email.send/v1: example.smtp}
@@ -1338,7 +1336,7 @@ func TestResolveComposesDirectAndTransitiveDependencyProjectDeclarations(t *test
 
 	writeFile(t, filepath.Join(directRoot, "go.mod"), "module example.com/direct\n\ngo 1.26\n\nrequire example.com/transitive v1.4.0\n")
 	writeFile(t, filepath.Join(directRoot, "plystra.yaml"), `http:
-  expose: [email.send/v1]
+  expose: {email.send/v1: {transport: connect}}
 capabilities:
   use: {email.send/v1: example.smtp}
 `)
@@ -1364,7 +1362,7 @@ replace example.com/direct => ../direct
 replace example.com/transitive => ../transitive
 replace example.com/ordinary => ../ordinary
 `)
-	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "http: {expose: [email.send/v1]}\n")
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "http: {expose: {email.send/v1: {transport: connect}}}\n")
 	writePlugin(t, appRoot, "app", "id: example.app\n")
 
 	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{

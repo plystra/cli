@@ -453,7 +453,7 @@ func safeConfigurationDocumentPath(value string) bool {
 
 func validConfigurationFieldPath(value string) bool {
 	switch value {
-	case "http.address", "http.transports.connect", "http.transports.rest", "http.cors", "http.cors.allowed_origins", "http.cors.allow_credentials", "timeouts.startup":
+	case "http.address", "http.cors", "http.cors.allowed_origins", "http.cors.allow_credentials", "timeouts.startup":
 		return true
 	}
 	if keys, ok := configurationPathKeys(value, "http.expose"); ok && len(keys) == 1 {

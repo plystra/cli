@@ -45,6 +45,7 @@ type maintenanceDecision struct {
 	providerID  string
 	constructor constructorsymbol.Symbol
 	policy      InterfacePolicy
+	exposure    HTTPExposure
 	alias       Alias
 	config      constructorConfigDecision
 	source      string
@@ -297,9 +298,10 @@ func maintenanceDecisions(manifest Manifest, schemas SchemaLookup) ([]maintenanc
 	for _, exposure := range manifest.httpExposures {
 		result = append(result, maintenanceDecision{
 			path:        fmt.Sprintf("http.expose[%q]", exposure.id.String()),
-			digest:      interfaceDeclarationDigest("http.expose", exposure.id, false),
+			digest:      httpExposureDigest(exposure),
 			field:       maintenanceHTTPExposure,
 			interfaceID: exposure.id,
+			exposure:    exposure,
 			source:      exposure.source,
 		})
 	}
@@ -675,7 +677,6 @@ func sameCurrentProjectProcessSettings(left, right Manifest) bool {
 	rightAddress, rightHasAddress := right.HTTPAddress()
 	return leftAddress == rightAddress && leftHasAddress == rightHasAddress &&
 		left.removeHTTPAddress == right.removeHTTPAddress &&
-		left.httpTransports == right.httpTransports &&
 		equalHTTPCORSLayers(left.httpCORS, right.httpCORS) &&
 		left.StartupTimeout() == right.StartupTimeout() &&
 		left.hasStartupTimeout == right.hasStartupTimeout &&
@@ -732,7 +733,7 @@ func applyMaintenanceDecisions(root *yaml.Node, current, target map[string]maint
 func removeMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) error {
 	switch decision.field {
 	case maintenanceHTTPExposure:
-		return removeSetMaintenanceDecision(root, []string{"http", "expose"}, decision.interfaceID.String(), decision.removed)
+		return removeKeyedMaintenanceDecision(root, []string{"http", "expose"}, decision.interfaceID.String())
 	case maintenanceRequirement:
 		return removeSetMaintenanceDecision(root, []string{"capabilities", "require"}, decision.id.String(), decision.removed)
 	case maintenanceProvider:
@@ -755,7 +756,11 @@ func removeMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) er
 func setMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) error {
 	switch decision.field {
 	case maintenanceHTTPExposure:
-		return setSetMaintenanceDecision(root, []string{"http", "expose"}, decision.interfaceID.String(), decision.removed)
+		value := nullYAMLNode()
+		if !decision.removed {
+			value = httpExposureYAML(decision.exposure)
+		}
+		return setKeyedMaintenanceDecision(root, []string{"http", "expose"}, decision.interfaceID.String(), value)
 	case maintenanceRequirement:
 		return setSetMaintenanceDecision(root, []string{"capabilities", "require"}, decision.id.String(), decision.removed)
 	case maintenanceProvider:

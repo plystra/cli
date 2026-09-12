@@ -389,7 +389,7 @@ Composition uses field-specific rules:
 - Plugin configuration merges only by fields declared in plugin.yaml.
   Declared objects merge recursively; scalar and array fields replace as one
   value. Null removes one inherited field or a complete Plugin config entry.
-- Dependency http.expose, http.address, http.transports, http.cors, and
+- Dependency http.expose, http.address, http.cors, and
   timeouts.startup never enter this Project's public or process settings. Add
   http.expose in the selected current-Project document to publish an imported
   Interface.
@@ -458,9 +458,9 @@ tombstones:
       acme.email.smtp:
         legacy_host: null
 
-Dependency exposure is ignored rather than inherited. An environment overlay
-may use http.expose.remove only to remove exposure from this same current
-Project's root configuration.
+Dependency exposure is ignored and requires no consumer removal. To remove an
+exposure inherited from this Project's root, set its exact http.expose entry
+to null in the selected environment overlay.
 
 The same Capability cannot appear in both add and remove. A null entry removes
 only that keyed Provider, Alias, Plugin object, or declared Plugin field.
@@ -476,19 +476,13 @@ and default configuration. Add only environment-specific differences to one
 optional sparse project-root overlay, for example plystra.production.yaml:
 
     http:
-      transports:
-        rest: true
+      expose:
+        kernel.health/v1: null
+        kernel.info/v1:
+          transport: connect
       cors:
         allowed_origins:
           - https://app.example.com
-    capabilities:
-      use:
-        email.send/v1: acme.email.smtp
-    config:
-      acme.email.smtp:
-        endpoint: https://smtp.production.example
-        token:
-          env: SMTP_PRODUCTION_TOKEN
 
 Generate and check that exact environment consistently:
 
@@ -522,24 +516,19 @@ Provider construction and instructs the operator to rebuild with the same
 selector. Runtime-only address, timeouts.startup, Plugin configuration, and Secret-
 reference differences remain valid when they pass typed validation.
 
-http.transports is a closed current-Project object. It accepts only boolean
-connect and rest fields. New Project scaffolds write both fields explicitly as
-connect: true and rest: false. When omitted from another selected document,
-the same schema defaults apply. In an environment overlay, those fields replace
-independently: omission inherits the root value and null restores that field's
-schema default. A complete --config document does not inherit root transport
-choices; omitted fields use the same defaults. Dependency Project transport
-settings are ignored.
+http.expose is keyed by exact Interface ID. Each entry requires transport:
+connect. Exposure makes the Interface an application root and generates its
+Connect and JavaScript surfaces. New Projects start with http.expose: {}; no
+external transport is selected without effective exposure.
 
-The selected transport values participate in the generated application-model
-digest. A nonempty http.expose set requires at least one enabled transport.
-The official generated JavaScript SDK requires connect: true whenever the
-selected model contains JavaScript Capability or Alias surfaces. Generation
-fails before output with the selected configuration path and every affected
-surface when Connect is disabled. Enable Connect in that current-Project
-selection or remove those surfaces. Connect handlers are generated for
-selected surfaces; server mounting and the optional REST projection remain
-later transport work, so rest: true does not yet create a REST adapter.
+In an environment overlay, omitted entries inherit, complete entries replace,
+and an exact-key null removes inherited exposure. Empty mappings preserve
+inherited entries. The complete http.expose field cannot be null. Full
+replacement inherits no root exposure, and dependency exposure is ignored.
+
+Exposure lists, add/remove set forms, global http.transports switches, missing
+transports, and unsupported fields are invalid. REST routes remain deferred.
+Regenerate and check with the same selector after exposure changes.
 
 http.cors is an optional closed current-Project object. When present it
 requires one nonempty allowed_origins list and accepts only optional boolean
@@ -845,15 +834,13 @@ generated source:
 
     http:
       address: ":8080"
-      transports:
-        connect: true
-        rest: false
       cors:
         allowed_origins:
           - https://app.example.com
         allow_credentials: true
       expose:
-        - records.read/v1
+        records.read/v1:
+          transport: connect
 
     timeouts:
       startup: 2m
@@ -1009,7 +996,7 @@ Expose an existing exact canonical Capability with:
 
 Default updates root plystra.yaml; --env updates only
 the sparse project-root plystra.production.yaml overlay while preserving
-comments, unrelated values, and explicit add/remove tombstones. For an
+comments, unrelated values, and exact-entry null tombstones. For an
 advanced replacement, use:
 
     plystra capability expose records.read/v1 --config deploy/customer-a.yaml
@@ -1025,18 +1012,12 @@ document's http.expose declaration. The CLI generates a strict POST handler at:
 
     /api/v1/capabilities/records.read/v1/invoke
 
-Keep transport selection in the selected current-Project document. Only
-connect and rest are valid keys. New Project scaffolds record connect: true and
-rest: false; omitted values in another selected document use those same schema
-defaults. Environment overlays replace the two booleans independently, and
-dependency Project transport choices never override the current Project.
-JavaScript SDK generation requires Connect. A REST-only selected model with
-JavaScript Capability or Alias surfaces fails before output and names every
-affected surface; enable connect: true in the selected current-Project
-configuration or remove those surfaces.
-The generated strict JSON handler remains the implemented HTTP surface, and a
-selected Connect surface also receives a generated canonical handler plus any
-Alias forwards. Those handlers accept only Connect POST requests encoded as
+Canonical Interface exposure generates a Connect handler that invokes the same
+governed Interface proxy. Each http.expose entry selects transport: connect;
+global switches are not supported. REST/OpenAPI generation for canonical
+Interfaces remains deferred. Existing legacy Capability workflows retain their
+transitional strict JSON handlers until the architecture migration removes
+them. Connect handlers accept only Connect POST requests encoded as
 binary Protobuf or ProtoJSON, require Connect-Protocol-Version: 1, and reject
 gRPC and gRPC-Web before root-context or Provider invocation. Their binary
 decoder accepts at most 1 MiB, at most 64 nested messages, and at most 65,536
@@ -1252,7 +1233,7 @@ Redact unsafe paths/selectors; leave unknowns uncoded.
   Interface ID / constructor; both precede mutation and retain selector.
 - PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID / PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID:
   fix schema or safe field at Source; values stay redacted.
-- PLYSTRA_CONFIGURATION_INVALID / PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
+- PLYSTRA_CONFIGURATION_INVALID / PLYSTRA_ENVIRONMENT_OVERLAY_INVALID: fix Source.
 - PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT: fix Source.
 - PLYSTRA_GENERATED_DRIFT / PLYSTRA_GENERATED_MANIFEST_INVALID /
   PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID / PLYSTRA_GENERATED_OWNERSHIP_CONFLICT /

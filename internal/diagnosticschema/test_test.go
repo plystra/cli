@@ -117,7 +117,7 @@ func TestTestV1SupportsProjectScopeAndEveryConfigurationMode(t *testing.T) {
 		{name: "explicit", configuration: "deploy/customer.yaml", mode: generation.ConfigurationModeExplicit},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			evidence := resolvedInspectEvidenceFor(t, test.configuration, test.environment)
+			evidence := resolvedInspectEvidenceFor(t, test.configuration, test.environment, false)
 			result, err := NewTest(TestInput{Evidence: evidence, Slice: TestSliceInput{Scope: TestScopeProject}, Outcomes: []TestOutcome{{Order: 1, ID: "go-packages", Kind: "go-package", Subject: "example.com/inspect", Status: TestStatusPassed, Summary: "All Go package tests passed."}}})
 			if err != nil || !result.Valid() || result.Envelope().ConfigurationMode() != test.mode || result.Slice().Scope != TestScopeProject || result.Slice().TargetPlugin != "" || len(result.Slice().Providers) != 0 || len(result.Slice().Intrinsics) != 2 {
 				t.Fatalf("NewTest = configuration %#v slice %#v, %v", result.Configuration(), result.Slice(), err)

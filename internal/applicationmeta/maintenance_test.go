@@ -23,7 +23,7 @@ func TestMaintainDependencyConfigurationMaterializesBaselineWithoutOverwritingLo
 		Manifest: composeManifest(t, `
 http:
   cors: {allowed_origins: ['*']}
-  expose: [records.read/v1]
+  expose: {records.read/v1: {transport: connect}}
 capabilities:
   require: [email.send/v1]
   use:
@@ -41,14 +41,12 @@ config:
 	current := []byte(`# Shared application configuration.
 http:
   address: ":9090" # local process setting
-  transports:
-    connect: false # local Connect decision
-    rest: true # local REST decision
   cors:
-    allowed_origins: [https://app.example.com] # local CORS origin
+    allowed_origins: ['https://app.example.com'] # local CORS origin
     allow_credentials: true # local CORS credentials
   expose:
-    - local.health/v1 # explicit local exposure
+    local.health/v1: # explicit local exposure
+      transport: connect # local Connect decision
 capabilities:
   require: []
   use:
@@ -86,7 +84,6 @@ config:
 		[]byte("# Shared application configuration."),
 		[]byte("# local process setting"),
 		[]byte("# local Connect decision"),
-		[]byte("# local REST decision"),
 		[]byte("# local CORS origin"),
 		[]byte("# local CORS credentials"),
 		[]byte("# explicit local exposure"),
@@ -107,7 +104,7 @@ config:
 		t.Fatalf("dependency-owned exposure was materialized into current configuration:\n%s", data)
 	}
 	manifest := composeManifest(t, string(data))
-	if transports := manifest.HTTPTransports(); transports != (applicationmeta.HTTPTransports{REST: true}) {
+	if transports := manifest.HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
 		t.Fatalf("maintained HTTP transports = %#v", transports)
 	}
 	cors, exists := manifest.HTTPCORS()
@@ -177,7 +174,7 @@ func TestMaintainDependencyConfigurationFollowsChangedBaselineAndPreservesExplic
 		ModulePath:    "example.com/platform",
 		ModuleVersion: "v1.0.0",
 		Manifest: composeManifest(t, `
-http: {expose: [records.old/v1, records.stable/v1]}
+http: {expose: {records.old/v1: {transport: connect}, records.stable/v1: {transport: connect}}}
 capabilities:
   require: [email.send/v1]
   use: {email.send/v1: acme.smtp}
@@ -205,7 +202,7 @@ config:
 		ModulePath:    "example.com/platform",
 		ModuleVersion: "v2.0.0",
 		Manifest: composeManifest(t, `
-http: {expose: [records.new/v1, records.stable/v1]}
+http: {expose: {records.new/v1: {transport: connect}, records.stable/v1: {transport: connect}}}
 capabilities:
   require: [email.send/v1, audit.write/v1]
   use: {email.send/v1: acme.smtp}

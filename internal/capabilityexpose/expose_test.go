@@ -23,8 +23,8 @@ func TestSelectedManifestWriteUsesEnvironmentAndReplacementTargets(t *testing.T)
 	const modulePath = "example.com/application"
 	root := t.TempDir()
 	rootData := []byte("http:\n  cors:\n    allowed_origins: [https://app.example.com]\n")
-	overlayData := []byte("# Production.\nhttp:\n  cors:\n    # Inherit root origins.\n    allow_credentials: true\n  expose:\n    remove: [records.read/v1, records.write/v1]\n")
-	replacementData := []byte("# Customer.\nhttp: {expose: []}\n")
+	overlayData := []byte("# Production.\nhttp:\n  cors:\n    # Inherit root origins.\n    allow_credentials: true\n  expose:\n    records.read/v1: null\n    records.write/v1: null\n")
+	replacementData := []byte("# Customer.\nhttp: {expose: {}}\n")
 	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), rootData)
 	writeExposureFile(t, filepath.Join(root, "plystra.production.yaml"), overlayData)
 	writeExposureFile(t, filepath.Join(root, "deploy", "customer.yaml"), replacementData)
@@ -38,8 +38,8 @@ func TestSelectedManifestWriteUsesEnvironmentAndReplacementTargets(t *testing.T)
 		[]byte("# Production."),
 		[]byte("# Inherit root origins."),
 		[]byte("allow_credentials: true"),
-		[]byte("add:\n      - records.read/v1"),
-		[]byte("remove: [records.write/v1]"),
+		[]byte("records.read/v1:\n      transport: connect"),
+		[]byte("records.write/v1: null"),
 	} {
 		if !bytes.Contains(overlayWrite.Data, retained) {
 			t.Fatalf("environment write omits %q:\n%s", retained, overlayWrite.Data)
@@ -81,7 +81,7 @@ func TestManifestWriteUsesExactSafeSnapshot(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("ManifestWrite = changed %t, %#v, %v", changed, write, err)
 	}
-	if write.Path != "plystra.yaml" || !bytes.Equal(write.ExpectedData, original) || !bytes.Contains(write.Data, []byte("- records.read/v1\n")) || !bytes.Contains(write.Data, []byte("# Application.")) {
+	if write.Path != "plystra.yaml" || !bytes.Equal(write.ExpectedData, original) || !bytes.Contains(write.Data, []byte("records.read/v1:\n      transport: connect")) || !bytes.Contains(write.Data, []byte("# Application.")) {
 		t.Fatalf("ManifestWrite = %#v", write)
 	}
 	write.ExpectedData[0] = 'x'
@@ -91,7 +91,7 @@ func TestManifestWriteUsesExactSafeSnapshot(t *testing.T) {
 		t.Fatalf("planned write changed source manifest: %q, %v", current, err)
 	}
 
-	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), []byte("http: {expose: [records.read/v1]}\n"))
+	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), []byte("http: {expose: {records.read/v1: {transport: connect}}}\n"))
 	repeated, repeatedChanged, err := capabilityexpose.ManifestWrite(modulePath, root, id)
 	if err != nil || repeatedChanged || repeated.Path != "" || repeated.Data != nil || repeated.ExpectedData != nil {
 		t.Fatalf("idempotent ManifestWrite = changed %t, %#v, %v", repeatedChanged, repeated, err)
@@ -103,7 +103,7 @@ func TestManifestWriteReplacesExactSparseRemoval(t *testing.T) {
 
 	const modulePath = "example.com/application"
 	root := t.TempDir()
-	original := []byte("# Selected environment.\nhttp:\n  expose:\n    remove:\n      - records.read/v1\n      - records.write/v1\n")
+	original := []byte("# Selected environment.\nhttp:\n  expose:\n    records.read/v1: null\n    records.write/v1: null\n")
 	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), original)
 
 	write, changed, err := capabilityexpose.ManifestWrite(modulePath, root, mustCapabilityID(t, "records.read/v1"))
@@ -112,8 +112,8 @@ func TestManifestWriteReplacesExactSparseRemoval(t *testing.T) {
 	}
 	for _, expected := range [][]byte{
 		[]byte("# Selected environment."),
-		[]byte("add:\n      - records.read/v1"),
-		[]byte("remove:\n      - records.write/v1"),
+		[]byte("records.read/v1:\n      transport: connect"),
+		[]byte("records.write/v1: null"),
 	} {
 		if !bytes.Contains(write.Data, expected) {
 			t.Fatalf("ManifestWrite data omits %q:\n%s", expected, write.Data)

@@ -54,9 +54,8 @@ PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE before write planning or mutation.
 An invalid authored source contract emits PLYSTRA_CAPABILITY_MANIFEST_INVALID
 with its owning module-relative capability.yaml at 1:1 as a
 provider-declaration source before mutation.
-An exposure with no enabled HTTP transport emits
-PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID with effective exposure sources and
-rolls back the attempted write.
+Exposure writes an exact http.expose entry with transport: connect.
+Superseded global switches and exposure set forms fail before mutation.
 `
 	capabilityCreateHelp = `Usage:
   ` + capabilityCreateSynopsis + `
@@ -93,9 +92,8 @@ declaration before mutation.
 An invalid authored source contract emits PLYSTRA_CAPABILITY_MANIFEST_INVALID
 with its owning module-relative capability.yaml at 1:1 as a
 provider-declaration source before mutation.
-If --expose leaves no enabled HTTP transport, the command emits
-PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID with effective exposure sources and
-rolls back the attempted creation.
+The --expose option writes an exact http.expose entry with transport: connect.
+Invalid exposure configuration fails without installing the creation.
 `
 	capabilityImplementHelp = `Usage:
   ` + capabilityImplementSynopsis + `

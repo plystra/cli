@@ -92,7 +92,6 @@ const (
 	diagnosticProjectManifestInvalid             = diagnosticcode.ProjectManifestInvalid
 	diagnosticConfigurationInheritedConflict     = diagnosticcode.ConfigurationInheritedConflict
 	diagnosticConfigurationOwnershipAmbiguous    = diagnosticcode.ConfigurationOwnershipAmbiguous
-	diagnosticHTTPTransportSelectionInvalid      = diagnosticcode.HTTPTransportSelectionInvalid
 	diagnosticEnvironmentOverlayInvalid          = diagnosticcode.EnvironmentOverlayInvalid
 	diagnosticConfigurationInvalid               = diagnosticcode.ConfigurationInvalid
 	diagnosticPluginConfigurationUnselected      = diagnosticcode.PluginConfigurationUnselected
@@ -350,27 +349,6 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Line:   source.Line(),
 				Column: source.Column(),
 			})
-		}
-	case diagnosticHTTPTransportSelectionInvalid:
-		var invalid *applicationmeta.HTTPTransportSelectionError
-		if !errors.As(err, &invalid) || invalid == nil {
-			return nil
-		}
-		seen := make(map[diagnosticjson.Source]struct{})
-		for _, exposure := range invalid.Exposures() {
-			source := exposure.DeclarationSource()
-			candidate := diagnosticjson.Source{
-				Module: source.ModulePath(),
-				Path:   source.Path(),
-				Kind:   "exposure",
-				Line:   source.Line(),
-				Column: source.Column(),
-			}
-			if _, exists := seen[candidate]; exists {
-				continue
-			}
-			seen[candidate] = struct{}{}
-			sources = append(sources, candidate)
 		}
 	case diagnosticEnvironmentOverlayInvalid:
 		var located diagnosticSourceLocation
@@ -1372,8 +1350,6 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticConfigurationInheritedConflict, "Set or remove the conflicting field explicitly in "+context.configurationTarget()+", then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrAmbiguousConfigurationOwnership):
 		return recoveryDiagnostic(diagnosticConfigurationOwnershipAmbiguous, "Make the inherited field intent explicit in "+context.configurationTarget()+" by restoring it or writing its typed removal.")
-	case errors.Is(err, applicationmeta.ErrHTTPTransportSelection):
-		return recoveryDiagnostic(diagnosticHTTPTransportSelectionInvalid, "Enable a supported transport in "+context.configurationTarget()+" or remove the public exposure, then regenerate.")
 	case errors.Is(err, applicationmeta.ErrConfigurationSchema):
 		return recoveryDiagnostic(diagnosticConstructorConfigurationSchemaInvalid, "Correct the reported owning Project document by using the fully qualified symbol of a discovered constructor with a compiled Go Config schema, or remove that constructor configuration entry, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrConfigurationValues):

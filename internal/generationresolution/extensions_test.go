@@ -1505,9 +1505,9 @@ func extensionTestHTTPExposures(t testing.TB, capabilities ...string) []Applicat
 	var source strings.Builder
 	source.WriteString("http:\n  expose:\n")
 	for _, capability := range capabilities {
-		source.WriteString("    - ")
+		source.WriteString("    ")
 		source.WriteString(capability)
-		source.WriteByte('\n')
+		source.WriteString(": {transport: connect}\n")
 	}
 	manifest, err := applicationmeta.Parse([]byte(source.String()))
 	if err != nil {

@@ -14,7 +14,7 @@ import (
 	"github.com/plystra/cli/internal/interfaceid"
 )
 
-const applicationModelCompatibilityVersion = 1
+const applicationModelCompatibilityVersion = 2
 
 // ErrInvalidApplicationModelCompatibility reports a compatibility projection
 // that cannot be tied to one complete generated application model.
@@ -38,17 +38,16 @@ type applicationModelCompatibilityDocument struct {
 }
 
 type applicationModelCompatibilityProjection struct {
-	HTTPTransports        applicationModelCompatibilityHTTPTransports   `json:"http_transports"`
 	HTTPCORS              *applicationModelCompatibilityHTTPCORS        `json:"http_cors"`
-	HTTPExposures         []string                                      `json:"http_exposures"`
+	HTTPExposures         []applicationModelCompatibilityExposure       `json:"http_exposures"`
 	InterfaceRequirements []string                                      `json:"interface_requirements"`
 	ImplementationChoices []applicationModelCompatibilityImplementation `json:"implementation_choices"`
 	InterfacePolicies     []applicationModelCompatibilityPolicy         `json:"interface_policies"`
 }
 
-type applicationModelCompatibilityHTTPTransports struct {
-	Connect bool `json:"connect"`
-	REST    bool `json:"rest"`
+type applicationModelCompatibilityExposure struct {
+	Interface string `json:"interface"`
+	Transport string `json:"transport"`
 }
 
 type applicationModelCompatibilityHTTPCORS struct {
@@ -96,13 +95,8 @@ func newApplicationModelCompatibility(applicationModelDigest string, manifest ap
 	if !validApplicationModelCompatibilityDigest(applicationModelDigest) {
 		return ApplicationModelCompatibility{}, fmt.Errorf("%w: application-model digest is not a canonical SHA-256 digest", ErrInvalidApplicationModelCompatibility)
 	}
-	transports := manifest.HTTPTransports()
 	projection := applicationModelCompatibilityProjection{
-		HTTPTransports: applicationModelCompatibilityHTTPTransports{
-			Connect: transports.Connect,
-			REST:    transports.REST,
-		},
-		HTTPExposures:         make([]string, 0),
+		HTTPExposures:         make([]applicationModelCompatibilityExposure, 0),
 		InterfaceRequirements: make([]string, 0),
 		ImplementationChoices: make([]applicationModelCompatibilityImplementation, 0),
 		InterfacePolicies:     make([]applicationModelCompatibilityPolicy, 0),
@@ -118,7 +112,9 @@ func newApplicationModelCompatibility(applicationModelDigest string, manifest ap
 		}
 	}
 	for _, exposure := range manifest.HTTPExposures() {
-		projection.HTTPExposures = append(projection.HTTPExposures, exposure.ID().String())
+		projection.HTTPExposures = append(projection.HTTPExposures, applicationModelCompatibilityExposure{
+			Interface: exposure.ID().String(), Transport: string(exposure.Transport()),
+		})
 	}
 	for _, requirement := range manifest.InterfaceRequirements() {
 		projection.InterfaceRequirements = append(projection.InterfaceRequirements, requirement.ID().String())
@@ -140,7 +136,9 @@ func newApplicationModelCompatibility(applicationModelDigest string, manifest ap
 			Timeout:   policy.Timeout().String(),
 		})
 	}
-	sort.Strings(projection.HTTPExposures)
+	sort.Slice(projection.HTTPExposures, func(left, right int) bool {
+		return projection.HTTPExposures[left].Interface < projection.HTTPExposures[right].Interface
+	})
 	sort.Strings(projection.InterfaceRequirements)
 	sort.Slice(projection.ImplementationChoices, func(left, right int) bool {
 		return projection.ImplementationChoices[left].Interface < projection.ImplementationChoices[right].Interface
@@ -245,7 +243,6 @@ func encodeApplicationModelCompatibility(document applicationModelCompatibilityD
 		"projection": map[string]any{
 			"http_cors":              cors,
 			"http_exposures":         document.Projection.HTTPExposures,
-			"http_transports":        map[string]any{"connect": document.Projection.HTTPTransports.Connect, "rest": document.Projection.HTTPTransports.REST},
 			"implementation_choices": implementations,
 			"interface_policies":     policies,
 			"interface_requirements": document.Projection.InterfaceRequirements,

@@ -18,7 +18,8 @@ func TestGenerateComparesInterfaceDescriptorProcedureAndWireMapProjections(t *te
 	writeConnectApplicationModule(t, root, modulePath)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
   expose:
-    - records.list/v1
+    records.list/v1:
+      transport: connect
 `)
 	interfacePath := filepath.Join(root, "interfaces", "records", "list", "v1", "interface.go")
 	writeFile(t, interfacePath, interfaceProtobufSource(7))

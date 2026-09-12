@@ -912,11 +912,10 @@ func TestApplicationSelectsCompleteReplacement(t *testing.T) {
 func TestRuntimeEnvironmentComposesEveryApplicationField(t *testing.T) {
 	root := ` + "`" + `http:
   address: ":8080"
-  transports: {connect: true, rest: false}
   cors:
-    allowed_origins: [https://shared.example]
+    allowed_origins: ['https://shared.example']
     allow_credentials: true
-  expose: [kernel.health/v1]
+  expose: {kernel.health/v1: {transport: connect}}
 timeouts: {startup: 1m}
 interfaces:
   require: [records.read/v1]
@@ -925,12 +924,12 @@ config: {}
 ` + "`" + `
 	overlay := ` + "`" + `http:
   address: ":9090"
-  transports: {rest: true}
   cors:
-    allowed_origins: [https://production.example, https://production.example]
+    allowed_origins: ['https://production.example', 'https://production.example']
   expose:
-    add: [kernel.info/v1]
-    remove: [kernel.health/v1]
+    kernel.info/v1:
+      transport: connect
+    kernel.health/v1: null
 timeouts: {startup: 45s}
 interfaces:
   require:
@@ -948,12 +947,13 @@ interfaces:
 	var effective struct {
 		HTTP struct {
 			Address    string          ` + "`" + `yaml:"address"` + "`" + `
-			Transports map[string]bool ` + "`" + `yaml:"transports"` + "`" + `
 			CORS       struct {
 				AllowedOrigins   []string ` + "`" + `yaml:"allowed_origins"` + "`" + `
 				AllowCredentials bool     ` + "`" + `yaml:"allow_credentials"` + "`" + `
 			} ` + "`" + `yaml:"cors"` + "`" + `
-			Expose []string ` + "`" + `yaml:"expose"` + "`" + `
+			Expose map[string]struct {
+				Transport string ` + "`" + `yaml:"transport"` + "`" + `
+			} ` + "`" + `yaml:"expose"` + "`" + `
 		} ` + "`" + `yaml:"http"` + "`" + `
 		Timeouts struct {
 			Startup string ` + "`" + `yaml:"startup"` + "`" + `
@@ -966,14 +966,56 @@ interfaces:
 	if err := yaml.Unmarshal(document, &effective); err != nil {
 		t.Fatalf("decode effective runtime configuration: %v", err)
 	}
-	if effective.HTTP.Address != ":9090" || !effective.HTTP.Transports["connect"] || !effective.HTTP.Transports["rest"] || !effective.HTTP.CORS.AllowCredentials {
+	if effective.HTTP.Address != ":9090" || !effective.HTTP.CORS.AllowCredentials {
 		t.Fatalf("HTTP composition = %#v", effective.HTTP)
 	}
-	if strings.Join(effective.HTTP.CORS.AllowedOrigins, ",") != "https://production.example" || strings.Join(effective.HTTP.Expose, ",") != "kernel.info/v1" {
-		t.Fatalf("HTTP set composition = %#v", effective.HTTP)
+	if strings.Join(effective.HTTP.CORS.AllowedOrigins, ",") != "https://production.example" || len(effective.HTTP.Expose) != 1 || effective.HTTP.Expose["kernel.info/v1"].Transport != "connect" {
+		t.Fatalf("HTTP exposure composition = %#v", effective.HTTP)
 	}
 	if effective.Timeouts.Startup != "45s" || strings.Join(effective.Interfaces.Require, ",") != "records.write/v1" || effective.Interfaces.Use["records.read/v1"] != "example.com/assemblydependency/remote-store.New" {
 		t.Fatalf("application composition = %#v, %#v", effective.Timeouts, effective.Interfaces)
+	}
+}
+
+func TestRuntimeEnvironmentEmptyExposureMappingPreservesRoot(t *testing.T) {
+	root := ` + "`" + `http:
+  expose:
+    kernel.health/v1:
+      transport: connect
+` + "`" + `
+	overlay := ` + "`" + `http:
+  expose: {}
+` + "`" + `
+	writeRuntimeDocument(t, root)
+	writeEnvironmentDocument(t, "empty-exposure", overlay)
+	rootDigest, err := runtimeApplicationModelCompatibilityDigest([]byte(root))
+	if err != nil {
+		t.Fatalf("runtimeApplicationModelCompatibilityDigest(root): %v", err)
+	}
+	effective, err := loadRuntimeDocument(RuntimeOptions{Arguments: []string{"--env", "empty-exposure"}})
+	if err != nil {
+		t.Fatalf("loadRuntimeDocument(empty exposure): %v", err)
+	}
+	var document struct {
+		HTTP struct {
+			Expose map[string]struct {
+				Transport string ` + "`" + `yaml:"transport"` + "`" + `
+			} ` + "`" + `yaml:"expose"` + "`" + `
+		} ` + "`" + `yaml:"http"` + "`" + `
+	}
+	if err := yaml.Unmarshal(effective, &document); err != nil {
+		t.Fatalf("decode effective empty-exposure document: %v", err)
+	}
+	entry, exists := document.HTTP.Expose["kernel.health/v1"]
+	if len(document.HTTP.Expose) != 1 || !exists || entry.Transport != "connect" {
+		t.Fatalf("empty exposure mapping changed effective exposure = %#v", document.HTTP.Expose)
+	}
+	effectiveDigest, err := runtimeApplicationModelCompatibilityDigest(effective)
+	if err != nil {
+		t.Fatalf("runtimeApplicationModelCompatibilityDigest(effective): %v", err)
+	}
+	if effectiveDigest != rootDigest {
+		t.Fatalf("empty exposure mapping changed compatibility digest: root %s, effective %s", rootDigest, effectiveDigest)
 	}
 }
 
@@ -987,14 +1029,14 @@ func TestApplicationRejectsBuildAffectingRuntimeChangesBeforeConstructors(t *tes
 		{
 			name: "default",
 			prepare: func(t *testing.T) {
-				writeRuntimeDocument(t, "http: {transports: {connect: false}}\n"+validRuntimeDocument)
+				writeRuntimeDocument(t, "http: {expose: {kernel.health/v1: {transport: connect}}}\n"+validRuntimeDocument)
 			},
 		},
 		{
 			name: "environment",
 			prepare: func(t *testing.T) {
 				writeRuntimeDocument(t, validRuntimeDocument)
-				writeEnvironmentDocument(t, "production", "http: {expose: [kernel.health/v1]}\n")
+				writeEnvironmentDocument(t, "production", "http: {expose: {kernel.health/v1: {transport: connect}}}\n")
 			},
 			options: RuntimeOptions{Arguments: []string{"--env", "production"}},
 		},
@@ -1022,6 +1064,47 @@ func TestApplicationRejectsBuildAffectingRuntimeChangesBeforeConstructors(t *tes
 			assertNoBootstrapConstructorCalls(t)
 			assertSafeBootstrapError(t, err)
 		})
+	}
+}
+
+func TestApplicationRejectsInvalidExposureBeforeConstructors(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	invalid := []string{
+		"http: {transports: {connect: true}}\n",
+		"http: {expose: [kernel.health/v1]}\n",
+		"http: {expose: {add: [kernel.health/v1]}}\n",
+		"http: {expose: {remove: [kernel.health/v1]}}\n",
+		"http: {expose: null}\n",
+		"http: {expose: {kernel.health/v1: {}}}\n",
+		"http: {expose: {kernel.health/v1: {transport: rest}}}\n",
+		"http: {expose: {kernel.health/v1: {transport: Connect}}}\n",
+		"http: {expose: {kernel.health/v1: {transport: connect, path: /health}}}\n",
+	}
+	for index, source := range invalid {
+		for _, mode := range []string{"default", "environment", "replacement"} {
+			t.Run(fmt.Sprintf("%d/%s", index, mode), func(t *testing.T) {
+				writeRuntimeDocument(t, validRuntimeDocument)
+				options := RuntimeOptions{}
+				switch mode {
+				case "default":
+					writeRuntimeDocument(t, source+validRuntimeDocument)
+				case "environment":
+					writeEnvironmentDocument(t, "invalid-exposure", source)
+					options.Arguments = []string{"--env", "invalid-exposure"}
+				case "replacement":
+					writeReplacementDocument(t, "invalid-exposure.yaml", source+validRuntimeDocument)
+					options.Arguments = []string{"--config", "invalid-exposure.yaml"}
+				}
+				localservice.Reset()
+				remotestore.Reset()
+				application, err := New(context.Background(), options)
+				if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrRuntimeConfiguration) {
+					t.Fatalf("New accepted invalid exposure: %#v, %v", application, err)
+				}
+				assertNoBootstrapConstructorCalls(t)
+				assertSafeBootstrapError(t, err)
+			})
+		}
 	}
 }
 

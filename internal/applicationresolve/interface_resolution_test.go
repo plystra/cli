@@ -833,7 +833,7 @@ require example.com/interface-implementations v1.2.3
 replace example.com/interface-implementations => ../implementations
 `)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {expose: [app.run/v1]}\n")
+	writeFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {expose: {app.run/v1: {transport: connect}}}\n")
 	before := snapshotTree(t, parent)
 	environment := goEnvironment(map[string]string{
 		"GOWORK":  "off",
@@ -886,7 +886,7 @@ func TestResolveCollectsIntrinsicKernelRequirementsWithApplicationProvenance(t *
 	root := t.TempDir()
 	writeModule(t, root, "example.com/intrinsic-application")
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
-  expose: [kernel.health/v1]
+  expose: {kernel.health/v1: {transport: connect}}
 interfaces:
   require: [kernel.info/v1]
 `)
@@ -1234,7 +1234,7 @@ func TestResolveIgnoresDependencyExposureWithoutConsumerResolutionState(t *testi
 	parent := t.TempDir()
 	dependencyRoot := filepath.Join(parent, "platform")
 	writeModule(t, dependencyRoot, "example.com/interface-platform")
-	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "http: {expose: [app.run/v1]}\n")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "http: {expose: {app.run/v1: {transport: connect}}}\n")
 	writeResolvedInterface(t, dependencyRoot, "app/run/v1", "runv1", "app.run/v1", "Run")
 	writeFile(t, filepath.Join(dependencyRoot, "app", "service.go"), `package app
 
@@ -1376,7 +1376,7 @@ func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) {
 `)
 	writeFile(t, filepath.Join(directRoot, "plystra.yaml"), `http:
   address: ":7102"
-  expose: [app.run/v1]
+  expose: {app.run/v1: {transport: connect}}
 interfaces:
   use:
     app.run/v1: example.com/direct/app.New
@@ -1407,8 +1407,7 @@ replace example.com/ordinary => ../ordinary
 `)
 	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `http:
   address: ":9090"
-  transports: {connect: true}
-  expose: [app.run/v1]
+  expose: {app.run/v1: {transport: connect}}
 timeouts:
   startup: 7s
 `)
@@ -1541,7 +1540,7 @@ func TestResolveRejectsInvalidExposedInterfaceBeforeLegacyResolution(t *testing.
 				identifier = "app.run/v1"
 				test.prepare(t, root)
 			}
-			writeFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: ["+identifier+"]}\n")
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: {"+identifier+": {transport: connect}}}\n")
 			before := snapshotTree(t, root)
 			_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
 				Start: root,

@@ -925,7 +925,7 @@ func normalizeInterfaceProtobufModel(transports applicationmeta.HTTPTransports, 
 		return protobufmodel.BuildInterfaces(transports.Connect, nil)
 	}
 	if model.Enabled() != transports.Connect {
-		return protobufmodel.InterfaceModel{}, errors.New("interface Protobuf model transport selection does not match http.transports.connect")
+		return protobufmodel.InterfaceModel{}, errors.New("interface Protobuf model transport selection does not match the effective Connect exposure")
 	}
 	return model, nil
 }

@@ -352,13 +352,11 @@ func TestRenderRequiresConnectForJavaScriptSDK(t *testing.T) {
 		t.Fatalf("Render = %#v, %v", output, err)
 	}
 	for _, want := range []string{
-		`http.transports.connect is false for selected configuration "plystra.yaml"`,
-		"official generated JavaScript SDK requires Connect",
+		`selected configuration "plystra.yaml" has JavaScript surfaces without Connect exposure`,
 		"Alias compat.send/v1 -> email.send/v1",
 		"Capability email.send/v1",
 		"Capability kernel.health/v1",
-		"enable http.transports.connect",
-		"http.expose and capabilities.aliases",
+		"declare transport: connect on the exact http.expose Interface entries",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("Render error %q does not contain %q", err, want)
@@ -886,7 +884,7 @@ func testComposition() applicationmeta.Composition {
 func dependencyComposition(t testing.TB) applicationmeta.Composition {
 	t.Helper()
 	schema := applicationConfigurationSchema(t)
-	dependency, err := applicationmeta.Parse([]byte("http: {expose: {remove: [diagnostics.internal/v1]}}\nconfig: {example.com/acme/business.New: {legacy: null, password: {env: PRIVATE_APPLICATION_TOKEN}}}\n"))
+	dependency, err := applicationmeta.Parse([]byte("http: {expose: {diagnostics.internal/v1: null}}\nconfig: {example.com/acme/business.New: {legacy: null, password: {env: PRIVATE_APPLICATION_TOKEN}}}\n"))
 	if err != nil {
 		t.Fatalf("applicationmeta.Parse dependency: %v", err)
 	}

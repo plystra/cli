@@ -42,7 +42,7 @@ func TestGenerateIsDeterministicAcrossEffectiveGraphPermutations(t *testing.T) {
 		writeFile(t, filepath.Join(dependencyRoots["a"], "plystra.yaml"), fmt.Sprintf(`interfaces:
   require: [configuration.owner/v1]
 http:
-  expose: [email.send/v1]
+  expose: {email.send/v1: {transport: connect}}
 capabilities:
   require: [email.send/v1]
   use: {email.send/v1: example.smtp}
@@ -299,11 +299,10 @@ interfaces:
     configuration.owner/v1: {timeout: 5s}
 http:
   address: ":8080"
-  transports: {connect: true, rest: false}
   cors:
     allowed_origins: [https://B.example:443, https://a.example, https://a.example:443]
     allow_credentials: false
-  expose: [configuration.owner/v1, kernel.health/v1]
+  expose: {configuration.owner/v1: {transport: connect}, kernel.health/v1: {transport: connect}}
 timeouts: {startup: 5s}
 config:
   ` + constructor + `:
@@ -317,11 +316,8 @@ config:
 timeouts:
   startup: 5000ms
 http:
-  expose: [kernel.health/v1, configuration.owner/v1]
+  expose: {kernel.health/v1: {transport: connect}, configuration.owner/v1: {transport: connect}}
   cors: {allow_credentials: false, allowed_origins: [https://a.example:443, https://b.example]}
-  transports:
-    rest: false
-    connect: true
   address: ':8080'
 interfaces:
   policies:
@@ -370,11 +366,10 @@ interfaces:
   policies: {configuration.owner/v1: {timeout: 9s}}
 http:
   address: ":9090"
-  transports: {connect: true, rest: false}
   cors:
     allowed_origins: [https://CUSTOMER.example:443, https://admin.customer.example]
     allow_credentials: false
-  expose: [configuration.owner/v1, kernel.health/v1]
+  expose: {configuration.owner/v1: {transport: connect}, kernel.health/v1: {transport: connect}}
 timeouts: {startup: 9s}
 config:
   ` + constructor + `:
@@ -388,11 +383,8 @@ config:
 timeouts: {startup: 9000ms}
 http:
   cors: {allow_credentials: false, allowed_origins: [https://admin.customer.example, https://customer.example]}
-  expose: [kernel.health/v1, configuration.owner/v1]
+  expose: {kernel.health/v1: {transport: connect}, configuration.owner/v1: {transport: connect}}
   address: ':9090'
-  transports:
-    rest: false
-    connect: true
 interfaces:
   use: {configuration.owner/v1: `+constructor+`}
   policies:

@@ -16,11 +16,10 @@ func TestApplicationModelCompatibilityIsDeterministicAndSecretFree(t *testing.T)
 	first := compatibilityManifest(t, `
 http:
   address: ":8080"
-  transports: {connect: true, rest: true}
   cors:
-    allowed_origins: [https://b.example, https://a.example, https://a.example]
+    allowed_origins: ['https://b.example', 'https://a.example', 'https://a.example']
     allow_credentials: true
-  expose: [records.read/v1]
+  expose: {records.read/v1: {transport: connect}}
 timeouts: {startup: 45s}
 interfaces:
   require: [records.read/v1]
@@ -42,11 +41,10 @@ interfaces:
   require: [records.read/v1]
 timeouts: {startup: 2m}
 http:
-  expose: [records.read/v1]
+  expose: {records.read/v1: {transport: connect}}
   cors:
     allow_credentials: true
-    allowed_origins: [https://a.example, https://b.example]
-  transports: {rest: true, connect: true}
+    allowed_origins: ['https://a.example', 'https://b.example']
   address: ":9090"
 `)
 	digest := bootstrapDigest("a")
@@ -64,8 +62,8 @@ http:
 	canonical := string(left.CanonicalJSON())
 	for _, required := range []string{
 		`"application_model_digest":"` + digest + `"`,
-		`"http_transports":{"connect":true,"rest":true}`,
-		`"http_exposures":["records.read/v1"]`,
+		`"version":2`,
+		`"http_exposures":[{"interface":"records.read/v1","transport":"connect"}]`,
 		`"interface_requirements":["records.read/v1"]`,
 		`"interface":"records.read/v1"`,
 		`"constructor":"example.com/acme/records.New"`,
@@ -87,6 +85,7 @@ http:
 		"PRIVATE_TOKEN_TWO",
 		`"config"`,
 		`"secret"`,
+		`"http_transports"`,
 	} {
 		if strings.Contains(canonical, forbidden) {
 			t.Fatalf("canonical projection contains runtime-only or secret-bearing input %q: %s", forbidden, canonical)
@@ -110,9 +109,8 @@ func TestApplicationModelCompatibilityChangesForEveryBuildAffectingDeclaration(t
 		name string
 		yaml string
 	}{
-		{name: "transport", yaml: "http: {transports: {connect: false}}\n"},
 		{name: "CORS", yaml: "http: {cors: {allowed_origins: [https://app.example]}}\n"},
-		{name: "exposure", yaml: "http: {expose: [kernel.health/v1]}\n"},
+		{name: "exposure", yaml: "http: {expose: {kernel.health/v1: {transport: connect}}}\n"},
 		{name: "Interface requirement", yaml: "interfaces: {require: [records.read/v1]}\n"},
 		{name: "Implementation choice", yaml: "interfaces: {use: {records.read/v1: example.com/acme/records.New}}\n"},
 		{name: "Interface policy", yaml: "interfaces: {policies: {records.read/v1: {timeout: 5s}}}\n"},

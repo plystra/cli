@@ -25,7 +25,8 @@ func TestGenerateProjectsExposedAuthoredInterfaceMessages(t *testing.T) {
 	writeConnectApplicationModule(t, root, modulePath)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
   expose:
-    - records.list/v1
+    records.list/v1:
+      transport: connect
 `)
 	interfacePath := filepath.Join(root, "interfaces", "records", "list", "v1", "interface.go")
 	writeFile(t, interfacePath, interfaceProtobufSource(7))
@@ -217,7 +218,7 @@ func TestGenerateReportsAuthoredInterfaceIdentityCollisionSourceWithoutMutation(
 			const modulePath = "example.com/interface-identity-collision"
 			const sourcePath = "interfaces/records/collision/v1/interface.go"
 			writeConnectApplicationModule(t, root, modulePath)
-			writeFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: [records.collision/v1]}\n")
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: {records.collision/v1: {transport: connect}}}\n")
 			writeFile(t, filepath.Join(root, filepath.FromSlash(sourcePath)), `package collisionv1
 
 import "context"
@@ -298,10 +299,7 @@ func TestGenerateRejectsFieldNumberReuseFromUnexposedInterfaceHistory(t *testing
 		{name: "connect enabled", manifest: "{}\n"},
 		{
 			name: "connect disabled",
-			manifest: `http:
-  transports:
-    connect: false
-    rest: false
+			manifest: `http: {}
 `,
 		},
 	} {
@@ -440,8 +438,10 @@ func TestGenerateProjectsExposedIntrinsicKernelInterfaceMessages(t *testing.T) {
 	writeConnectApplicationModule(t, root, modulePath)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
   expose:
-    - kernel.info/v1
-    - kernel.health/v1
+    kernel.info/v1:
+      transport: connect
+    kernel.health/v1:
+      transport: connect
 `)
 
 	options := applicationgenerate.Options{
@@ -588,7 +588,7 @@ func TestGenerateTransitionalAliasAgainstIntrinsicInterfaceCompiles(t *testing.T
 	root := t.TempDir()
 	writeConnectApplicationModule(t, root, "example.com/intrinsic-interface-alias")
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
-  expose: [kernel.health/v1]
+  expose: {kernel.health/v1: {transport: connect}}
 capabilities:
   aliases:
     health.status/v1: kernel.health/v1

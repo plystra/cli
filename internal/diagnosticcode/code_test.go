@@ -20,7 +20,6 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.ProjectManifestInvalid,
 		diagnosticcode.ConfigurationInheritedConflict,
 		diagnosticcode.ConfigurationOwnershipAmbiguous,
-		diagnosticcode.HTTPTransportSelectionInvalid,
 		diagnosticcode.ConstructorConfigurationSchemaInvalid,
 		diagnosticcode.ConstructorConfigurationValuesInvalid,
 		diagnosticcode.ConstructorConfigurationUnselected,

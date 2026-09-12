@@ -47,7 +47,7 @@ func TestBuildLoadsDeterministicFilesystemResolutionInput(t *testing.T) {
 	writeCapability(t, providersRoot, "audit", "audit.write/v1", auditSource)
 	inventory := configureInventory(t, appRoot, dependency{path: "example.com/providers", version: "v1.2.0", root: providersRoot})
 	manifest := parseManifest(t, `http:
-  expose: [order.create/v1]
+  expose: {order.create/v1: {transport: connect}}
 capabilities:
   require: [kernel.info/v1]
   use:
@@ -204,7 +204,8 @@ func TestBuildPreservesEffectiveDependencySourcesAndSparseOverlayLocations(t *te
 	inventory := configureInventory(t, root)
 	manifest, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte(`http:
   expose:
-    add: [kernel.health/v1]
+    kernel.health/v1:
+      transport: connect
 capabilities:
   require:
     add: [kernel.info/v1]
@@ -251,7 +252,7 @@ capabilities:
 		t.Fatalf("ApplicationHTTPExposures = %#v", input.ApplicationHTTPExposures)
 	}
 	exposureSource := input.ApplicationHTTPExposures[0].Sources[0]
-	if exposureSource.Kind != providerresolution.RequirementExposure || exposureSource.ModulePath != "example.com/app" || exposureSource.Path != "plystra.production.yaml" || exposureSource.String() != `plystra.production.yaml http.expose.add["kernel.health/v1"]` {
+	if exposureSource.Kind != providerresolution.RequirementExposure || exposureSource.ModulePath != "example.com/app" || exposureSource.Path != "plystra.production.yaml" || exposureSource.String() != `plystra.production.yaml http.expose["kernel.health/v1"]` {
 		t.Fatalf("sparse overlay exposure source = %#v", exposureSource)
 	}
 	if len(input.Choices) != 1 || len(input.Choices[0].Sources) != 1 || input.Choices[0].Sources[0].Kind != providerresolution.ChoiceSourceCurrentProject || input.Choices[0].Sources[0].ModulePath != "example.com/app" || input.Choices[0].Sources[0].Path != "plystra.production.yaml" {

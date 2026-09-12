@@ -25,6 +25,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/configurationgen"
@@ -1404,7 +1405,7 @@ func TestGenerateCheckReportsMissingConnectRuntimeRequirementsWithoutMutation(t 
 
 	root := t.TempDir()
 	writeApplicationModule(t, root, "example.com/acme/missing-connect-runtime")
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: [kernel.health/v1]}\n")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: {kernel.health/v1: {transport: connect}}}\n")
 	before := snapshotTree(t, root)
 	_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       root,
@@ -1476,8 +1477,7 @@ func TestGenerateMaintainsStableOwnedProtobufFieldHistoryTransactionally(t *test
 	root := t.TempDir()
 	writeConnectApplicationModule(t, root, "example.com/acme/wire-history")
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
-  transports: {connect: true, rest: false}
-  expose: [customer.enroll/v1]
+  expose: {customer.enroll/v1: {transport: connect}}
 capabilities:
   require: [customer.enroll/v1]
 `)
@@ -1597,8 +1597,7 @@ func TestGenerateMaintainsStableOwnedProtobufEnumHistoryTransactionally(t *testi
 	root := t.TempDir()
 	writeConnectApplicationModule(t, root, "example.com/acme/enum-wire-history")
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
-  transports: {connect: true, rest: false}
-  expose: [delivery.route/v1]
+  expose: {delivery.route/v1: {transport: connect}}
 capabilities:
   require: [delivery.route/v1]
 `)
@@ -1716,8 +1715,7 @@ func TestGenerateRejectsProtobufNamingCollisionsWithoutMutation(t *testing.T) {
 			root := t.TempDir()
 			writeApplicationModule(t, root, "example.com/acme/protobuf-collision")
 			writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
-  transports: {connect: true, rest: false}
-  expose: [naming.collision/v1]
+  expose: {naming.collision/v1: {transport: connect}}
 capabilities:
   require: [naming.collision/v1]
 `)
@@ -1763,11 +1761,11 @@ func TestGenerateSupportsUnaryCommandConnectExposure(t *testing.T) {
 		{
 			name:         "default",
 			selectedPath: "plystra.yaml",
-			selectedData: "http: {expose: [records.archive/v1]}\n",
+			selectedData: "http: {expose: {records.archive/v1: {transport: connect}}}\n",
 		},
 		{
 			name:         "environment",
-			rootData:     "http: {expose: [records.archive/v1]}\n",
+			rootData:     "http: {expose: {records.archive/v1: {transport: connect}}}\n",
 			selectedPath: "plystra.production.yaml",
 			selectedData: "{}\n",
 			configure: func(options *applicationgenerate.Options) {
@@ -1778,7 +1776,7 @@ func TestGenerateSupportsUnaryCommandConnectExposure(t *testing.T) {
 			name:         "full replacement",
 			rootData:     "{}\n",
 			selectedPath: "deploy/customer-a.yaml",
-			selectedData: "http: {expose: [records.archive/v1]}\n",
+			selectedData: "http: {expose: {records.archive/v1: {transport: connect}}}\n",
 			configure: func(options *applicationgenerate.Options) {
 				options.ConfigurationPath = "deploy/customer-a.yaml"
 			},
@@ -1931,10 +1929,10 @@ func TestGenerateRejectsEventAndStreamConnectExposureWithoutMutation(t *testing.
 		name string
 		yaml string
 	}{
-		{name: "canonical", yaml: "http: {expose: [records.archived/v1]}\n"},
+		{name: "canonical", yaml: "http: {expose: {records.archived/v1: {transport: connect}}}\n"},
 		{
 			name: "canonical with Alias",
-			yaml: `http: {expose: [records.archived/v1]}
+			yaml: `http: {expose: {records.archived/v1: {transport: connect}}}
 capabilities:
   aliases: {records.archive-notification/v1: records.archived/v1}
 `,
@@ -2248,7 +2246,7 @@ func TestGenerateIgnoresDependencyExposureChanges(t *testing.T) {
 	appRoot := filepath.Join(root, "app")
 	dependencyRoot := filepath.Join(root, "platform")
 	writeModule(t, dependencyRoot, "example.com/platform", "")
-	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "http: {expose: [kernel.info/v1]}\n")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "http: {expose: {kernel.info/v1: {transport: connect}}}\n")
 	writeApplicationModule(t, appRoot, "example.com/acme/dependency-exposure")
 	goModPath := filepath.Join(appRoot, "go.mod")
 	goMod := string(readAbsoluteFile(t, goModPath)) + fmt.Sprintf("\nrequire example.com/platform v1.0.0\n\nreplace example.com/platform => %s\n", filepath.ToSlash(dependencyRoot))
@@ -2273,7 +2271,7 @@ func TestGenerateIgnoresDependencyExposureChanges(t *testing.T) {
 	assertFileMissing(t, appRoot, "generated/proto/plystra/generated/kernel/info/v1/capability.proto")
 	assertFileMissing(t, appRoot, "generated/sdk/javascript/src/interfaces/kernel/info/v1.ts")
 
-	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "http: {expose: [kernel.health/v1]}\n")
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "http: {expose: {kernel.health/v1: {transport: connect}}}\n")
 	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       appRoot,
 		Check:       true,
@@ -2516,7 +2514,7 @@ func TestGenerateDetectsDependencyPluginConfigurationSchemaDrift(t *testing.T) {
 	}
 }
 
-func TestGenerateSelectedHTTPTransportsCauseApplicationModelDrift(t *testing.T) {
+func TestGenerateKeyedExposureChangesCauseApplicationModelDrift(t *testing.T) {
 	tests := []struct {
 		name         string
 		rootData     string
@@ -2528,25 +2526,25 @@ func TestGenerateSelectedHTTPTransportsCauseApplicationModelDrift(t *testing.T) 
 		{
 			name:         "default",
 			selectedPath: "plystra.yaml",
-			selectedData: "http:\n  transports: {connect: true, rest: false}\n",
-			changedData:  "http:\n  transports: {connect: false, rest: true}\n",
+			selectedData: "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
+			changedData:  "http: {expose: {kernel.info/v1: {transport: connect}}}\n",
 		},
 		{
 			name:         "environment",
-			rootData:     "http:\n  transports: {connect: true, rest: false}\n",
+			rootData:     "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
 			selectedPath: "plystra.production.yaml",
-			selectedData: "http:\n  transports: {connect: true, rest: false}\n",
-			changedData:  "http:\n  transports: {connect: false, rest: true}\n",
+			selectedData: "http: {expose: {kernel.info/v1: {transport: connect}}}\n",
+			changedData:  "http: {expose: {kernel.health/v1: null, kernel.info/v1: {transport: connect}}}\n",
 			configure: func(options *applicationgenerate.Options) {
 				options.EnvironmentName = "production"
 			},
 		},
 		{
 			name:         "full replacement",
-			rootData:     "http:\n  transports: {connect: true, rest: false}\n",
+			rootData:     "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
 			selectedPath: "deploy/customer-a.yaml",
-			selectedData: "http:\n  transports: {connect: true, rest: false}\n",
-			changedData:  "http:\n  transports: {connect: false, rest: true}\n",
+			selectedData: "http: {expose: {kernel.info/v1: {transport: connect}}}\n",
+			changedData:  "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
 			configure: func(options *applicationgenerate.Options) {
 				options.ConfigurationPath = "deploy/customer-a.yaml"
 			},
@@ -2555,7 +2553,7 @@ func TestGenerateSelectedHTTPTransportsCauseApplicationModelDrift(t *testing.T) 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeApplicationModule(t, root, "example.com/acme/transport-"+strings.ReplaceAll(test.name, " ", "-"))
+			writeConnectApplicationModule(t, root, "example.com/acme/transport-"+strings.ReplaceAll(test.name, " ", "-"))
 			rootData := test.rootData
 			if test.selectedPath == "plystra.yaml" {
 				rootData = test.selectedData
@@ -2628,13 +2626,13 @@ func TestGenerateSelectedHTTPCORSCausesApplicationModelDrift(t *testing.T) {
 		{
 			name:           "default",
 			selectedPath:   "plystra.yaml",
-			selectedData:   "http:\n  cors:\n    allowed_origins: [https://B.example:443, https://a.example, https://a.example:443]\n  expose: [kernel.health/v1]\n",
-			equivalentData: "http:\n  cors:\n    allowed_origins: [https://a.example, https://b.example]\n  expose: [kernel.health/v1]\n",
-			changedData:    "http:\n  cors:\n    allowed_origins: [https://api.example]\n  expose: [kernel.health/v1]\n",
+			selectedData:   "http:\n  cors:\n    allowed_origins: ['https://B.example:443', 'https://a.example', 'https://a.example:443']\n  expose: {kernel.health/v1: {transport: connect}}\n",
+			equivalentData: "http:\n  cors:\n    allowed_origins: ['https://a.example', 'https://b.example']\n  expose: {kernel.health/v1: {transport: connect}}\n",
+			changedData:    "http:\n  cors:\n    allowed_origins: ['https://api.example']\n  expose: {kernel.health/v1: {transport: connect}}\n",
 		},
 		{
 			name:           "environment",
-			rootData:       "http:\n  cors:\n    allowed_origins: [https://root.example]\n  expose: [kernel.health/v1]\n",
+			rootData:       "http:\n  cors:\n    allowed_origins: ['https://root.example']\n  expose: {kernel.health/v1: {transport: connect}}\n",
 			selectedPath:   "plystra.production.yaml",
 			selectedData:   "http:\n  cors:\n    allowed_origins: [https://B.example:443, https://a.example, https://a.example:443]\n    allow_credentials: false\n",
 			equivalentData: "http:\n  cors:\n    allowed_origins: [https://a.example, https://b.example]\n",
@@ -2647,9 +2645,9 @@ func TestGenerateSelectedHTTPCORSCausesApplicationModelDrift(t *testing.T) {
 			name:           "full replacement",
 			rootData:       "http:\n  cors:\n    allowed_origins: [https://root.example]\n",
 			selectedPath:   "deploy/customer-a.yaml",
-			selectedData:   "http:\n  cors:\n    allowed_origins: [https://B.example:443, https://a.example, https://a.example:443]\n  expose: [kernel.health/v1]\n",
-			equivalentData: "http:\n  cors:\n    allowed_origins: [https://a.example, https://b.example]\n  expose: [kernel.health/v1]\n",
-			changedData:    "http:\n  cors:\n    allowed_origins: [https://api.example]\n  expose: [kernel.health/v1]\n",
+			selectedData:   "http:\n  cors:\n    allowed_origins: ['https://B.example:443', 'https://a.example', 'https://a.example:443']\n  expose: {kernel.health/v1: {transport: connect}}\n",
+			equivalentData: "http:\n  cors:\n    allowed_origins: ['https://a.example', 'https://b.example']\n  expose: {kernel.health/v1: {transport: connect}}\n",
+			changedData:    "http:\n  cors:\n    allowed_origins: ['https://api.example']\n  expose: {kernel.health/v1: {transport: connect}}\n",
 			configure: func(options *applicationgenerate.Options) {
 				options.ConfigurationPath = "deploy/customer-a.yaml"
 			},
@@ -2749,25 +2747,25 @@ func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
 		{
 			name:         "default",
 			selectedPath: "plystra.yaml",
-			selectedData: "http: {expose: [kernel.info/v1]}\n",
-			changedData:  "http: {expose: [kernel.health/v1]}\n",
+			selectedData: "http: {expose: {kernel.info/v1: {transport: connect}}}\n",
+			changedData:  "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
 		},
 		{
 			name:         "environment",
-			rootData:     "http: {expose: [kernel.info/v1]}\n",
+			rootData:     "http: {expose: {kernel.info/v1: {transport: connect}}}\n",
 			selectedPath: "plystra.production.yaml",
 			selectedData: "{}\n",
-			changedData:  "http:\n  expose: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n",
+			changedData:  "http:\n  expose: {kernel.health/v1: {transport: connect}, kernel.info/v1: null}\n",
 			configure: func(options *applicationgenerate.Options) {
 				options.EnvironmentName = "production"
 			},
 		},
 		{
 			name:         "full replacement",
-			rootData:     "http: {expose: [kernel.health/v1]}\n",
+			rootData:     "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
 			selectedPath: "deploy/customer-a.yaml",
-			selectedData: "http: {expose: [kernel.info/v1]}\n",
-			changedData:  "http: {expose: [kernel.health/v1]}\n",
+			selectedData: "http: {expose: {kernel.info/v1: {transport: connect}}}\n",
+			changedData:  "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
 			configure: func(options *applicationgenerate.Options) {
 				options.ConfigurationPath = "deploy/customer-a.yaml"
 			},
@@ -2851,7 +2849,7 @@ func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
 	}
 }
 
-func TestGenerateRequiresConnectForSelectedJavaScriptSDK(t *testing.T) {
+func TestGenerateRejectsUnsupportedSelectedExposureTransport(t *testing.T) {
 	tests := []struct {
 		name         string
 		rootData     string
@@ -2862,13 +2860,13 @@ func TestGenerateRequiresConnectForSelectedJavaScriptSDK(t *testing.T) {
 		{
 			name:         "default",
 			selectedPath: "plystra.yaml",
-			selectedData: "http: {transports: {connect: false, rest: true}, expose: [kernel.health/v1]}\n",
+			selectedData: "http: {expose: {kernel.health/v1: {transport: rest}}}\n",
 		},
 		{
 			name:         "environment",
-			rootData:     "http: {expose: [kernel.health/v1]}\n",
+			rootData:     "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
 			selectedPath: "plystra.production.yaml",
-			selectedData: "http: {transports: {connect: false, rest: true}}\n",
+			selectedData: "http: {expose: {kernel.health/v1: {transport: rest}}}\n",
 			configure: func(options *applicationgenerate.Options) {
 				options.EnvironmentName = "production"
 			},
@@ -2877,7 +2875,7 @@ func TestGenerateRequiresConnectForSelectedJavaScriptSDK(t *testing.T) {
 			name:         "full replacement",
 			rootData:     "{}\n",
 			selectedPath: "deploy/customer-a.yaml",
-			selectedData: "http: {transports: {connect: false, rest: true}, expose: [kernel.health/v1]}\n",
+			selectedData: "http: {expose: {kernel.health/v1: {transport: rest}}}\n",
 			configure: func(options *applicationgenerate.Options) {
 				options.ConfigurationPath = "deploy/customer-a.yaml"
 			},
@@ -2912,13 +2910,11 @@ func TestGenerateRequiresConnectForSelectedJavaScriptSDK(t *testing.T) {
 					selectedOptions.Validate = nil
 				}
 				result, err := applicationgenerate.Generate(t.Context(), selectedOptions)
-				if !errors.Is(err, applicationgen.ErrJavaScriptTransport) || result.Module().Path() != "" {
+				if !errors.Is(err, applicationmeta.ErrInvalidManifest) || result.Module().Path() != "" {
 					t.Fatalf("Generate(check=%t) = %#v, %v", check, result, err)
 				}
 				for _, want := range []string{
-					`http.transports.connect is false for selected configuration "` + test.selectedPath + `"`,
-					"official generated JavaScript SDK requires Connect for Capability kernel.health/v1",
-					"enable http.transports.connect",
+					`http.expose["kernel.health/v1"].transport must be connect`,
 				} {
 					if !strings.Contains(err.Error(), want) {
 						t.Fatalf("Generate(check=%t) error %q does not contain %q", check, err, want)
@@ -2940,7 +2936,7 @@ func TestGenerateApplicationModelDigestExcludesRuntimeValuesAndMachinePaths(t *t
 	writePlugin(t, root, "mailer", "id: acme.mailer\nprovides: [email.send/v1]\n")
 	writeCapability(t, root, "mailer", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 	configurationPath := filepath.Join(root, "plystra.yaml")
-	writeFile(t, configurationPath, fmt.Sprintf("http:\n  transports: {connect: true, rest: false}\ncapabilities: {require: [email.send/v1]}\ninterfaces: {use: {configuration.owner/v1: %s}}\nconfig:\n  %s:\n    endpoint: 'C:/private/machine-one'\n    password: {env: PRIVATE_TOKEN_ONE}\n", configurationOwner, configurationOwner))
+	writeFile(t, configurationPath, fmt.Sprintf("http: {}\ncapabilities: {require: [email.send/v1]}\ninterfaces: {use: {configuration.owner/v1: %s}}\nconfig:\n  %s:\n    endpoint: 'C:/private/machine-one'\n    password: {env: PRIVATE_TOKEN_ONE}\n", configurationOwner, configurationOwner))
 	options := applicationgenerate.Options{
 		Start:       root,
 		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "PRIVATE_TOKEN_ONE": "resolved-super-secret-one", "PRIVATE_TOKEN_TWO": "resolved-super-secret-two"}),
@@ -2956,7 +2952,7 @@ func TestGenerateApplicationModelDigestExcludesRuntimeValuesAndMachinePaths(t *t
 	}
 	initialBootstrapData := readFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
 
-	writeFile(t, configurationPath, fmt.Sprintf("http:\n  transports: {connect: true, rest: false}\ncapabilities: {require: [email.send/v1]}\ninterfaces: {use: {configuration.owner/v1: %s}}\nconfig:\n  %s:\n    endpoint: 'D:/private/machine-two'\n    password: {env: PRIVATE_TOKEN_TWO}\n", configurationOwner, configurationOwner))
+	writeFile(t, configurationPath, fmt.Sprintf("http: {}\ncapabilities: {require: [email.send/v1]}\ninterfaces: {use: {configuration.owner/v1: %s}}\nconfig:\n  %s:\n    endpoint: 'D:/private/machine-two'\n    password: {env: PRIVATE_TOKEN_TWO}\n", configurationOwner, configurationOwner))
 	updated, err := applicationgenerate.Generate(t.Context(), options)
 	if err != nil || !updated.Report().Clean() {
 		t.Fatalf("updated Generate = changes %#v, %v", updated.Report().Changes(), err)
@@ -3298,7 +3294,7 @@ func (*Plugin) Send(_ context.Context, request contract.Request) (contract.Respo
 }
 `)
 	withAlias := `http:
-  expose: [email.send/v1]
+  expose: {email.send/v1: {transport: connect}}
 capabilities:
   aliases:
     mail.deliver/v1:
@@ -3387,7 +3383,7 @@ capabilities:
 		}
 	}
 
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "http:\n  expose: [email.send/v1]\n")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "http:\n  expose: {email.send/v1: {transport: connect}}\n")
 	withoutAlias, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       root,
 		Environment: environment,

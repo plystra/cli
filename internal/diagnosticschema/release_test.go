@@ -109,7 +109,7 @@ func TestReleaseV1SupportsKindsStatusesPoliciesAndConfigurationModes(t *testing.
 		{name: "explicit prerelease", configuration: "deploy/customer.yaml", mode: generation.ConfigurationModeExplicit, kind: ReleaseKindPrereleaseCandidate},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			evidence := resolvedInspectEvidenceFor(t, test.configuration, test.environment)
+			evidence := resolvedInspectEvidenceFor(t, test.configuration, test.environment, false)
 			input := completeReleaseInput(evidence)
 			input.Kind = test.kind
 			result, err := NewRelease(input)

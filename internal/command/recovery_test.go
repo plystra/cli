@@ -877,7 +877,6 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "Project manifest", err: applicationresolve.ErrManifest, code: diagnosticcode.ProjectManifestInvalid},
 		{name: "inherited configuration conflict", err: applicationmeta.ErrInheritedConflict, code: diagnosticcode.ConfigurationInheritedConflict},
 		{name: "configuration ownership", err: applicationmeta.ErrAmbiguousConfigurationOwnership, code: diagnosticcode.ConfigurationOwnershipAmbiguous},
-		{name: "HTTP transport", err: applicationmeta.ErrHTTPTransportSelection, code: diagnosticcode.HTTPTransportSelectionInvalid},
 		{name: "constructor configuration schema", err: applicationmeta.ErrConfigurationSchema, code: diagnosticcode.ConstructorConfigurationSchemaInvalid},
 		{name: "constructor configuration values", err: applicationmeta.ErrConfigurationValues, code: diagnosticcode.ConstructorConfigurationValuesInvalid},
 		{name: "unselected constructor configuration", err: applicationresolve.ErrUnownedConstructorConfiguration, code: diagnosticcode.ConstructorConfigurationUnselected},

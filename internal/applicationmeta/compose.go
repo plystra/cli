@@ -18,9 +18,6 @@ import (
 var (
 	// ErrCompose reports that typed Project configuration composition failed.
 	ErrCompose = errors.New("compose Project configuration")
-	// ErrHTTPTransportSelection reports an effective public HTTP surface with
-	// no selected external transport.
-	ErrHTTPTransportSelection = errors.New("invalid HTTP transport selection")
 	// ErrInheritedConflict reports incompatible dependency declarations that
 	// the current Project did not explicitly replace.
 	ErrInheritedConflict = errors.New("inherited Project configuration conflict")
@@ -217,7 +214,6 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 		httpAddress:           current.httpAddress,
 		hasHTTPAddress:        current.hasHTTPAddress,
 		removeHTTPAddress:     current.removeHTTPAddress,
-		httpTransports:        current.httpTransports,
 		httpCORS:              cloneHTTPCORSLayer(current.httpCORS),
 		httpExposures:         exposures,
 		requirements:          requirements,
@@ -230,9 +226,6 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 		startupTimeout:        current.startupTimeout,
 		hasStartupTimeout:     current.hasStartupTimeout,
 		removeStartupTimeout:  current.removeStartupTimeout,
-	}
-	if err := validateHTTPTransportSelection(manifest); err != nil {
-		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
 	return Composition{
 		manifest:          manifest,
@@ -261,7 +254,7 @@ func effectiveResolutionSources(manifest Manifest, provenance []Provenance) []Pr
 	effectiveConfigurationRoots := make(map[string]struct{}, len(manifest.configurations))
 	for _, exposure := range manifest.httpExposures {
 		path := fmt.Sprintf("http.expose[%q]", exposure.id.String())
-		effective[path] = interfaceDeclarationDigest("http.expose", exposure.id, false)
+		effective[path] = httpExposureDigest(exposure)
 	}
 	for _, requirement := range manifest.requirements {
 		path := fmt.Sprintf("capabilities.require[%q]", requirement.id.String())
@@ -302,19 +295,6 @@ func effectiveResolutionSources(manifest Manifest, provenance []Provenance) []Pr
 		}
 	}
 	return cloneProvenance(result)
-}
-
-func validateHTTPTransportSelection(manifest Manifest) error {
-	exposures := manifest.HTTPExposures()
-	if len(exposures) == 0 {
-		return nil
-	}
-	transports := manifest.HTTPTransports()
-	if transports.Connect || transports.REST {
-		return nil
-	}
-
-	return newHTTPTransportSelectionError(exposures)
 }
 
 type provenanceRecord struct {

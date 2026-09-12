@@ -1,9 +1,6 @@
 http:
   address: ":8080"
-  transports:
-    connect: true
-    rest: false
-  expose: []
+  expose: {}
 
 timeouts:
   startup: 2m

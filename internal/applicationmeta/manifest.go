@@ -35,12 +35,6 @@ const (
 	// DefaultInvocationTimeout bounds one raw canonical Kernel dispatch when
 	// the caller and generated application path provide no earlier deadline.
 	DefaultInvocationTimeout = 30 * time.Second
-	// DefaultConnectTransport enables the initial external transport when
-	// http.transports.connect is omitted.
-	DefaultConnectTransport = true
-	// DefaultRESTTransport keeps the optional REST projection disabled when
-	// http.transports.rest is omitted.
-	DefaultRESTTransport = false
 )
 
 // ErrInvalidManifest reports unsafe or invalid plystra.yaml metadata.
@@ -83,12 +77,22 @@ func (a Alias) Source() string { return a.source }
 // HTTP and browser-facing application surfaces.
 type HTTPExposure struct {
 	id                interfaceid.Identifier
+	transport         HTTPTransport
 	source            string
 	declarationSource ConfigurationDeclarationSource
 }
 
 // ID returns the exact canonical Interface ID declared under http.expose.
 func (e HTTPExposure) ID() interfaceid.Identifier { return e.id }
+
+// HTTPTransport identifies one supported external Interface projection.
+type HTTPTransport string
+
+// HTTPTransportConnect selects the canonical unary Connect projection.
+const HTTPTransportConnect HTTPTransport = "connect"
+
+// Transport returns the exact selected external projection.
+func (e HTTPExposure) Transport() HTTPTransport { return e.transport }
 
 // Source returns stable configuration-path provenance for diagnostics.
 func (e HTTPExposure) Source() string { return e.source }
@@ -99,21 +103,11 @@ func (e HTTPExposure) DeclarationSource() ConfigurationDeclarationSource {
 	return e.declarationSource
 }
 
-// HTTPTransports is the closed selected-current-project external transport
-// choice. The zero value is not the schema default; callers obtain resolved
-// defaults through Manifest.HTTPTransports.
+// HTTPTransports summarizes the transports required by the selected exposure
+// entries. It is derived state, not an authored configuration object.
 type HTTPTransports struct {
 	Connect bool
 	REST    bool
-}
-
-type httpTransportLayer struct {
-	connect       bool
-	hasConnect    bool
-	removeConnect bool
-	rest          bool
-	hasREST       bool
-	removeREST    bool
 }
 
 // HTTPCORS is one selected-current-project cross-origin policy. Values returned
@@ -244,7 +238,6 @@ type Manifest struct {
 	httpAddress                  string
 	hasHTTPAddress               bool
 	removeHTTPAddress            bool
-	httpTransports               httpTransportLayer
 	httpCORS                     httpCORSLayer
 	httpExposures                []HTTPExposure
 	removedHTTPExposures         []interfaceRemoval
@@ -311,18 +304,13 @@ func (Manifest) LogValue() slog.Value {
 // result means the http section or address field was omitted.
 func (m Manifest) HTTPAddress() (string, bool) { return m.httpAddress, m.hasHTTPAddress }
 
-// HTTPTransports returns the selected closed transport values after applying
-// the schema defaults for omitted or explicitly removed fields.
+// HTTPTransports returns the transport summary of the effective exposures.
 func (m Manifest) HTTPTransports() HTTPTransports {
-	result := HTTPTransports{
-		Connect: DefaultConnectTransport,
-		REST:    DefaultRESTTransport,
-	}
-	if m.httpTransports.hasConnect {
-		result.Connect = m.httpTransports.connect
-	}
-	if m.httpTransports.hasREST {
-		result.REST = m.httpTransports.rest
+	result := HTTPTransports{}
+	for _, exposure := range m.httpExposures {
+		if exposure.transport == HTTPTransportConnect {
+			result.Connect = true
+		}
 	}
 	return result
 }
@@ -439,7 +427,7 @@ func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, erro
 			return Manifest{}, invalid("unknown key %q", key)
 		}
 	}
-	address, hasAddress, removeAddress, transports, cors, exposures, removedExposures, err := parseHTTP(values["http"], sparseOverlay)
+	address, hasAddress, removeAddress, cors, exposures, removedExposures, err := parseHTTP(values["http"], sparseOverlay)
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -464,7 +452,6 @@ func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, erro
 		httpAddress:                  address,
 		hasHTTPAddress:               hasAddress,
 		removeHTTPAddress:            removeAddress,
-		httpTransports:               transports,
 		httpCORS:                     cors,
 		httpExposures:                exposures,
 		removedHTTPExposures:         removedExposures,
@@ -619,19 +606,19 @@ func parseConfigurations(node *yaml.Node) ([]ConstructorConfiguration, []constru
 	return configurations, removals, nil
 }
 
-func parseHTTP(node *yaml.Node, sparseOverlay bool) (string, bool, bool, httpTransportLayer, httpCORSLayer, []HTTPExposure, []interfaceRemoval, error) {
+func parseHTTP(node *yaml.Node, sparseOverlay bool) (string, bool, bool, httpCORSLayer, []HTTPExposure, []interfaceRemoval, error) {
 	if node == nil {
-		return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, nil
+		return "", false, false, httpCORSLayer{}, nil, nil, nil
 	}
 	values, err := mapping(node, "http")
 	if err != nil {
-		return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, err
+		return "", false, false, httpCORSLayer{}, nil, nil, err
 	}
 	for _, key := range sortedNodeKeys(values) {
 		switch key {
-		case "address", "transports", "cors", "expose":
+		case "address", "cors", "expose":
 		default:
-			return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, invalid("http contains unknown key %q", key)
+			return "", false, false, httpCORSLayer{}, nil, nil, invalid("http contains unknown key %q", key)
 		}
 	}
 	address := ""
@@ -643,75 +630,63 @@ func parseHTTP(node *yaml.Node, sparseOverlay bool) (string, bool, bool, httpTra
 		} else {
 			address, err = strictString(addressNode)
 			if err != nil || address == "" || len(address) > 4096 || strings.TrimSpace(address) != address || strings.ContainsRune(address, '\x00') {
-				return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, invalid("http.address must be a non-empty trimmed string of at most 4096 bytes with no NUL or null")
+				return "", false, false, httpCORSLayer{}, nil, nil, invalid("http.address must be a non-empty trimmed string of at most 4096 bytes with no NUL or null")
 			}
 			hasAddress = true
 		}
 	}
-	transports, err := parseHTTPTransports(values["transports"])
-	if err != nil {
-		return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, err
-	}
 	cors, err := parseHTTPCORS(values["cors"], sparseOverlay)
 	if err != nil {
-		return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, err
+		return "", false, false, httpCORSLayer{}, nil, nil, err
 	}
 	exposeNode, exists := values["expose"]
 	if !exists {
-		return address, hasAddress, removeAddress, transports, cors, nil, nil, nil
+		return address, hasAddress, removeAddress, cors, nil, nil, nil
 	}
-	exposures, removals, err := parseInterfaceSet(exposeNode, "http.expose", func(id interfaceid.Identifier, source string) HTTPExposure {
-		return HTTPExposure{
-			id:                id,
-			source:            source,
-			declarationSource: ConfigurationDeclarationSource{path: "plystra.yaml", line: 1, column: 1},
-		}
-	})
+	exposures, removals, err := parseHTTPExposures(exposeNode)
 	if err != nil {
-		return "", false, false, httpTransportLayer{}, httpCORSLayer{}, nil, nil, err
+		return "", false, false, httpCORSLayer{}, nil, nil, err
 	}
-	return address, hasAddress, removeAddress, transports, cors, exposures, removals, nil
+	return address, hasAddress, removeAddress, cors, exposures, removals, nil
 }
 
-func parseHTTPTransports(node *yaml.Node) (httpTransportLayer, error) {
-	if node == nil {
-		return httpTransportLayer{}, nil
-	}
-	values, err := mapping(node, "http.transports")
+func parseHTTPExposures(node *yaml.Node) ([]HTTPExposure, []interfaceRemoval, error) {
+	values, err := mapping(node, "http.expose")
 	if err != nil {
-		return httpTransportLayer{}, err
+		return nil, nil, err
 	}
+	exposures := make([]HTTPExposure, 0, len(values))
+	var removals []interfaceRemoval
 	for _, key := range sortedNodeKeys(values) {
-		switch key {
-		case "connect", "rest":
-		default:
-			return httpTransportLayer{}, invalid("http.transports contains unknown key %q", key)
+		id, err := interfaceid.Parse(key)
+		if err != nil {
+			return nil, nil, invalid("http.expose key %q is not a canonical Interface ID", key)
 		}
-	}
-	result := httpTransportLayer{}
-	if connect, exists := values["connect"]; exists {
-		if isNull(connect) {
-			result.removeConnect = true
-		} else {
-			result.connect, err = strictBool(connect)
-			if err != nil {
-				return httpTransportLayer{}, invalid("http.transports.connect must be true, false, or null")
+		field := fmt.Sprintf("http.expose[%q]", key)
+		source := "plystra.yaml " + field
+		if isNull(values[key]) {
+			removals = append(removals, interfaceRemoval{id: id, source: source})
+			continue
+		}
+		entry, err := mapping(values[key], field)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, name := range sortedNodeKeys(entry) {
+			if name != "transport" {
+				return nil, nil, invalid("%s contains unknown key %q", field, name)
 			}
-			result.hasConnect = true
 		}
-	}
-	if rest, exists := values["rest"]; exists {
-		if isNull(rest) {
-			result.removeREST = true
-		} else {
-			result.rest, err = strictBool(rest)
-			if err != nil {
-				return httpTransportLayer{}, invalid("http.transports.rest must be true, false, or null")
-			}
-			result.hasREST = true
+		transport, err := strictString(entry["transport"])
+		if err != nil || HTTPTransport(transport) != HTTPTransportConnect {
+			return nil, nil, invalid("%s.transport must be connect", field)
 		}
+		exposures = append(exposures, HTTPExposure{
+			id: id, transport: HTTPTransport(transport), source: source,
+			declarationSource: ConfigurationDeclarationSource{path: "plystra.yaml", line: 1, column: 1},
+		})
 	}
-	return result, nil
+	return exposures, removals, nil
 }
 
 func parseHTTPCORS(node *yaml.Node, sparseOverlay bool) (httpCORSLayer, error) {

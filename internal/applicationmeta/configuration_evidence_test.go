@@ -24,11 +24,10 @@ func TestConfigurationDecisionsAreTypedDeterministicAndRedacted(t *testing.T) {
 	data := []byte(`
 http:
   address: ":9123"
-  transports: {connect: false, rest: true}
   cors:
-    allowed_origins: [https://private.example]
+    allowed_origins: ['https://private.example']
     allow_credentials: true
-  expose: [email.send/v1]
+  expose: {email.send/v1: {transport: connect}}
 timeouts: {startup: 9s}
 capabilities:
   require: [audit.write/v1]
@@ -70,8 +69,6 @@ config:
 		`http.cors.allow_credentials`:  applicationmeta.ConfigurationSummaryBoolean,
 		`http.cors.allowed_origins`:    applicationmeta.ConfigurationSummaryArray,
 		`http.expose["email.send/v1"]`: applicationmeta.ConfigurationSummaryInterface,
-		`http.transports.connect`:      applicationmeta.ConfigurationSummaryBoolean,
-		`http.transports.rest`:         applicationmeta.ConfigurationSummaryBoolean,
 		`timeouts.startup`:             applicationmeta.ConfigurationSummaryDuration,
 	}
 	seen := make(map[string]struct{}, len(first))
@@ -81,8 +78,6 @@ config:
 		"http.cors.allow_credentials":  {},
 		"http.cors.allowed_origins":    {},
 		`http.expose["email.send/v1"]`: {},
-		"http.transports.connect":      {},
-		"http.transports.rest":         {},
 		"timeouts.startup":             {},
 	}
 	var bounded strings.Builder
@@ -222,11 +217,10 @@ interfaces:
     email.send/v1: {timeout: 5s}
 http:
   address: ":8080"
-  transports: {connect: true, rest: false}
   cors:
-    allowed_origins: [https://B.example:443, https://a.example, https://a.example:443]
+    allowed_origins: ['https://B.example:443', 'https://a.example', 'https://a.example:443']
     allow_credentials: false
-  expose: [email.send/v1, audit.write/v1]
+  expose: {email.send/v1: {transport: connect}, audit.write/v1: {transport: connect}}
 timeouts: {startup: 5s}
 config:
   example.com/acme/service.New:
@@ -244,12 +238,11 @@ timeouts:
   startup: 5000ms
 http:
   expose:
-    - audit.write/v1
-    - email.send/v1
-  cors: {allow_credentials: false, allowed_origins: [https://a.example:443, https://b.example]}
-  transports:
-    rest: false
-    connect: true
+    audit.write/v1:
+      transport: connect
+    email.send/v1:
+      transport: connect
+  cors: {allow_credentials: false, allowed_origins: ['https://a.example:443', 'https://b.example']}
   address: ':8080'
 interfaces:
   policies:

@@ -20,7 +20,7 @@ func TestParseNormalizesProviderInputsAndMultipleAliases(t *testing.T) {
 
 	data := []byte(`http:
   address: ":8080"
-  expose: []
+  expose: {}
 timeouts:
   startup: 2m
 capabilities:
@@ -105,7 +105,7 @@ capabilities:
   use: {authz.check/v1: plystra.authz.rbac.default, email.send/v1: acme.email.smtp}
   require: [email.send/v1, kernel.info/v1]
 timeouts: {startup: 2m}
-http: {expose: [], address: ":8080"}
+http: {expose: {}, address: ":8080"}
 `)
 	second, err := applicationmeta.Parse(reordered)
 	if err != nil || second.StartupTimeout() != manifest.StartupTimeout() || !slices.Equal(aliasStrings(second.Aliases()), aliasStrings(manifest.Aliases())) || !slices.Equal(requirementStrings(second.Requirements()), requirementStrings(manifest.Requirements())) || !slices.Equal(providerChoiceStrings(second.ProviderChoices()), providerChoiceStrings(manifest.ProviderChoices())) {
@@ -125,9 +125,12 @@ func TestParseNormalizesHTTPAddressAndCanonicalExposure(t *testing.T) {
 
 	data := []byte(`http:
   expose:
-    - customer.profile.get/v1
-    - kernel.health/v1
-    - authn.login.password/v1
+    customer.profile.get/v1:
+      transport: connect
+    kernel.health/v1:
+      transport: connect
+    authn.login.password/v1:
+      transport: connect
   address: ":8080"
 `)
 	manifest, err := applicationmeta.Parse(data)
@@ -151,14 +154,14 @@ func TestParseNormalizesHTTPAddressAndCanonicalExposure(t *testing.T) {
 		t.Fatal("Manifest exposed mutable HTTP exposure storage")
 	}
 
-	reordered, err := applicationmeta.Parse([]byte(`http: {address: ":8080", expose: [kernel.health/v1, authn.login.password/v1, customer.profile.get/v1]}
+	reordered, err := applicationmeta.Parse([]byte(`http: {address: ":8080", expose: {kernel.health/v1: {transport: connect}, authn.login.password/v1: {transport: connect}, customer.profile.get/v1: {transport: connect}}}
 `))
 	if err != nil || !slices.Equal(httpExposureStrings(reordered.HTTPExposures()), httpExposureStrings(manifest.HTTPExposures())) {
 		t.Fatalf("reordered Parse = %v, %v", httpExposureStrings(reordered.HTTPExposures()), err)
 	}
 }
 
-func TestParseNormalizesClosedHTTPTransportSelection(t *testing.T) {
+func TestParseDerivesTransportsFromCanonicalExposure(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -167,19 +170,19 @@ func TestParseNormalizesClosedHTTPTransportSelection(t *testing.T) {
 		want applicationmeta.HTTPTransports
 	}{
 		{
-			name: "omitted defaults",
+			name: "omitted exposure",
 			data: "{}\n",
-			want: applicationmeta.HTTPTransports{Connect: true},
+			want: applicationmeta.HTTPTransports{},
 		},
 		{
 			name: "explicit values",
-			data: "http: {transports: {rest: true, connect: false}}\n",
-			want: applicationmeta.HTTPTransports{REST: true},
+			data: "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
+			want: applicationmeta.HTTPTransports{Connect: true},
 		},
 		{
-			name: "field removals restore defaults",
-			data: "http: {transports: {connect: null, rest: null}}\n",
-			want: applicationmeta.HTTPTransports{Connect: true},
+			name: "removed exposure",
+			data: "http: {expose: {kernel.health/v1: null}}\n",
+			want: applicationmeta.HTTPTransports{},
 		},
 	}
 	for _, test := range tests {
@@ -329,10 +332,10 @@ func TestParseAllowsEmptyOptionalSections(t *testing.T) {
 	for _, data := range [][]byte{
 		[]byte(`{}`),
 		[]byte("http: {}\n"),
-		[]byte("http: {transports: {}}\n"),
-		[]byte("http: {transports: {connect: null, rest: null}}\n"),
-		[]byte("http: {expose: []}\n"),
-		[]byte("http: {address: null, expose: {add: [], remove: []}}\n"),
+		[]byte("http: {}\n"),
+		[]byte("http: {}\n"),
+		[]byte("http: {expose: {}}\n"),
+		[]byte("http: {address: null, expose: {}}\n"),
 		[]byte("capabilities: {}\n"),
 		[]byte("capabilities:\n  aliases: {}\n"),
 		[]byte("capabilities: {require: {add: [], remove: []}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n"),
@@ -342,7 +345,7 @@ func TestParseAllowsEmptyOptionalSections(t *testing.T) {
 	} {
 		manifest, err := applicationmeta.Parse(data)
 		address, hasAddress := manifest.HTTPAddress()
-		if err != nil || len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.InterfacePolicies()) != 0 || len(manifest.Configurations()) != 0 || manifest.StartupTimeout() != applicationmeta.DefaultStartupTimeout || manifest.HTTPTransports() != (applicationmeta.HTTPTransports{Connect: true}) || hasAddress || address != "" || len(manifest.HTTPExposures()) != 0 {
+		if err != nil || len(manifest.Aliases()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.InterfacePolicies()) != 0 || len(manifest.Configurations()) != 0 || manifest.StartupTimeout() != applicationmeta.DefaultStartupTimeout || manifest.HTTPTransports() != (applicationmeta.HTTPTransports{}) || hasAddress || address != "" || len(manifest.HTTPExposures()) != 0 {
 			t.Fatalf("Parse(%q) = %#v, %v", data, manifest, err)
 		}
 	}
@@ -373,10 +376,16 @@ func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 		{name: "untrimmed http address", data: `http: {address: " :8080 "}` + "\n", want: "http.address must be"},
 		{name: "oversized http address", data: "http:\n  address: " + overlongAddress + "\n", want: "at most 4096 bytes"},
 		{name: "NUL http address", data: `http: {address: "bad\0address"}` + "\n", want: "no NUL"},
-		{name: "http transports type", data: "http: {transports: []}\n", want: "http.transports must be a mapping"},
-		{name: "unknown http transport", data: "http: {transports: {grpc: true}}\n", want: `http.transports contains unknown key "grpc"`},
-		{name: "connect transport type", data: "http: {transports: {connect: enabled}}\n", want: "http.transports.connect must be true, false, or null"},
-		{name: "REST transport type", data: "http: {transports: {rest: 1}}\n", want: "http.transports.rest must be true, false, or null"},
+		{name: "legacy global transports", data: "http: {transports: {connect: true}}\n", want: `http contains unknown key "transports"`},
+		{name: "legacy malformed transports", data: "http: {transports: []}\n", want: `http contains unknown key "transports"`},
+		{name: "missing exposure transport", data: "http: {expose: {email.send/v1: {}}}\n", want: `http.expose["email.send/v1"].transport must be connect`},
+		{name: "unsupported exposure transport", data: "http: {expose: {email.send/v1: {transport: rest}}}\n", want: "transport must be connect"},
+		{name: "exposure transport case", data: "http: {expose: {email.send/v1: {transport: Connect}}}\n", want: "transport must be connect"},
+		{name: "exposure transport whitespace", data: "http: {expose: {email.send/v1: {transport: ' connect '}}}\n", want: "transport must be connect"},
+		{name: "exposure transport type", data: "http: {expose: {email.send/v1: {transport: true}}}\n", want: "transport must be connect"},
+		{name: "exposure entry type", data: "http: {expose: {email.send/v1: connect}}\n", want: `http.expose["email.send/v1"] must be a mapping`},
+		{name: "unknown exposure field", data: "http: {expose: {email.send/v1: {transport: connect, path: /mail}}}\n", want: `contains unknown key "path"`},
+		{name: "whole exposure removal", data: "http: {expose: null}\n", want: "http.expose must be a mapping"},
 		{name: "CORS type", data: "http: {cors: []}\n", want: "http.cors must be a mapping"},
 		{name: "unknown CORS field", data: "http: {cors: {allowed_origins: ['*'], allowed_headers: ['*']}}\n", want: `http.cors contains unknown key "allowed_headers"`},
 		{name: "missing CORS origins", data: "http: {cors: {allow_credentials: false}}\n", want: "http.cors.allowed_origins is required"},
@@ -390,13 +399,13 @@ func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 		{name: "CORS origin port", data: "http: {cors: {allowed_origins: ['https://example.com:0']}}\n", want: "port from 1 through 65535"},
 		{name: "CORS credentials type", data: "http: {cors: {allowed_origins: ['https://example.com'], allow_credentials: yes}}\n", want: "allow_credentials must be true, false, or null"},
 		{name: "credentialed wildcard CORS", data: "http: {cors: {allowed_origins: ['*'], allow_credentials: true}}\n", want: "cannot combine wildcard origin"},
-		{name: "http exposure sparse key", data: "http: {expose: {append: []}}\n", want: `unknown sparse-edit key "append"`},
-		{name: "http exposure sparse add type", data: "http: {expose: {add: {}}}\n", want: "http.expose.add must be a sequence"},
-		{name: "http exposure sparse remove type", data: "http: {expose: {remove: true}}\n", want: "http.expose.remove must be a sequence"},
-		{name: "http exposure ambiguous edit", data: "http: {expose: {add: [order.create/v1], remove: [order.create/v1]}}\n", want: "cannot both add and remove"},
-		{name: "http exposure item type", data: "http: {expose: [true]}\n", want: "http.expose[0] must be"},
-		{name: "invalid HTTP exposure", data: "http: {expose: [Order.Create/v1]}\n", want: "not a canonical Interface ID"},
-		{name: "duplicate HTTP exposure", data: "http: {expose: [order.create/v1, order.create/v1]}\n", want: "duplicates Interface"},
+		{name: "http exposure sparse key", data: "http: {expose: {append: []}}\n", want: "not a canonical Interface ID"},
+		{name: "http exposure sparse add", data: "http: {expose: {add: [email.send/v1]}}\n", want: "not a canonical Interface ID"},
+		{name: "http exposure sparse remove", data: "http: {expose: {remove: [email.send/v1]}}\n", want: "not a canonical Interface ID"},
+		{name: "http exposure ambiguous edit", data: "http: {expose: {order.create/v1: {transport: connect}, order.create/v1: null}}\n", want: "duplicate key"},
+		{name: "http exposure sequence", data: "http: {expose: [email.send/v1]}\n", want: "http.expose must be a mapping"},
+		{name: "invalid HTTP exposure", data: "http: {expose: {Order.Create/v1: {transport: connect}}}\n", want: "not a canonical Interface ID"},
+		{name: "duplicate HTTP exposure", data: "http: {expose: {order.create/v1: {transport: connect}, order.create/v1: {transport: connect}}}\n", want: "duplicate key"},
 		{name: "timeouts type", data: "timeouts: []\n", want: "timeouts must be a mapping"},
 		{name: "unknown timeout", data: "timeouts: {shutdown: 1m}\n", want: `timeouts contains unknown key "shutdown"`},
 		{name: "startup timeout type", data: "timeouts: {startup: 120}\n", want: "timeouts.startup must be"},
@@ -485,12 +494,12 @@ func TestParseRejectsOversizedManifest(t *testing.T) {
 func FuzzParseApplicationManifest(f *testing.F) {
 	for _, seed := range []string{
 		"{}\n",
-		"http: {address: \":8080\", expose: [kernel.health/v1, order.create/v1]}\n",
-		"http: {transports: {connect: false, rest: true}}\n",
-		"http: {transports: {connect: null, rest: null}}\n",
+		"http: {address: \":8080\", expose: {kernel.health/v1: {transport: connect}, order.create/v1: {transport: connect}}}\n",
+		"http: {}\n",
+		"http: {}\n",
 		"http: {cors: {allowed_origins: [https://example.com, http://localhost:80], allow_credentials: true}}\n",
 		"http: {cors: null}\n",
-		"http: {address: null, expose: {add: [kernel.health/v1], remove: [order.create/v1]}}\n",
+		"http: {address: null, expose: {kernel.health/v1: {transport: connect}, order.create/v1: null}}\n",
 		"capabilities: {aliases: {}}\n",
 		"capabilities: {require: {remove: [order.create/v1]}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n",
 		"interfaces: {policies: {email.send/v1: {timeout: 5000ms}, audit.write/v1: null}}\n",

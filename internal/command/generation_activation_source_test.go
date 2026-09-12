@@ -523,7 +523,7 @@ func writeMissingGenerationActivationProject(t *testing.T) string {
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `capabilities:
   require: [records.get/v1, records.list/v1]
 http:
-  expose: [records.get/v1, records.list/v1]
+  expose: {records.get/v1: {transport: connect}, records.list/v1: {transport: connect}}
 `)
 	writeCommandFile(t, filepath.Join(root, "records", "plugin.yaml"), "id: acme.library.records\nprovides: [records.get/v1, records.list/v1]\n")
 	writeCommandFile(t, filepath.Join(root, "records", "capabilities", "records.get", "v1", "capability.yaml"), `id: records.get/v1
@@ -663,7 +663,7 @@ func writeGenerationActivationCycleProject(t *testing.T) string {
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `capabilities:
   require: [alpha.call/v1]
 http:
-  expose: [alpha.call/v1]
+  expose: {alpha.call/v1: {transport: connect}}
 `)
 	writeCommandFile(t, filepath.Join(root, "alpha", "plugin.yaml"), `id: acme.library.alpha
 provides: [alpha.call/v1]
@@ -722,7 +722,7 @@ replace github.com/plystra/cli => `+filepath.ToSlash(cliRoot)+"\n")
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `capabilities:
   require: [order.create/v1]
 http:
-  expose: [order.create/v1]
+  expose: {order.create/v1: {transport: connect}}
 `)
 	writeCommandFile(t, filepath.Join(root, "order", "plugin.yaml"), "id: acme.library.order\nprovides: [order.create/v1]\n")
 	writeCommandFile(t, filepath.Join(root, "order", "capabilities", "order.create", "v1", "capability.yaml"), `id: order.create/v1
@@ -787,7 +787,7 @@ replace github.com/plystra/cli => `+filepath.ToSlash(cliRoot)+"\n")
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `capabilities:
   require: [order.create/v1]
 http:
-  expose: [order.create/v1]
+  expose: {order.create/v1: {transport: connect}}
 `)
 	writeCommandFile(t, filepath.Join(root, "order", "plugin.yaml"), "id: acme.library.order\nprovides: [order.create/v1]\n")
 	writeCommandFile(t, filepath.Join(root, "order", "capabilities", "order.create", "v1", "capability.yaml"), `id: order.create/v1

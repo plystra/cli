@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 
 	"github.com/plystra/cli/internal/interfaceid"
 	"go.yaml.in/yaml/v3"
@@ -50,41 +49,10 @@ func addHTTPExposure(data []byte, id interfaceid.Identifier, parse func([]byte) 
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: %w", ErrAddHTTPExposure, err)
 	}
-	root := document
-	httpNode := mappingChild(root, "http")
-	if httpNode == nil {
-		httpNode = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		root.Content = append(root.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "http"},
-			httpNode,
-		)
+	exposure := HTTPExposure{id: id, transport: HTTPTransportConnect}
+	if err := setKeyedMaintenanceDecision(document, []string{"http", "expose"}, id.String(), httpExposureYAML(exposure)); err != nil {
+		return nil, false, fmt.Errorf("%w: %w", ErrAddHTTPExposure, err)
 	}
-	exposeNode := mappingChild(httpNode, "expose")
-	if exposeNode == nil {
-		exposeNode = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-		httpNode.Content = append(httpNode.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "expose"},
-			exposeNode,
-		)
-	}
-	addNode := exposeNode
-	if exposeNode.Kind == yaml.MappingNode {
-		addNode = mappingChild(exposeNode, "add")
-		if addNode == nil {
-			addNode = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-			exposeNode.Content = append(exposeNode.Content,
-				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "add"},
-				addNode,
-			)
-		}
-		if removeNode := mappingChild(exposeNode, "remove"); removeNode != nil {
-			removeSequenceValue(removeNode, id.String())
-		}
-	}
-	addNode.Content = append(addNode.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: id.String()})
-	sort.Slice(addNode.Content, func(left, right int) bool {
-		return addNode.Content[left].Value < addNode.Content[right].Value
-	})
 
 	var output bytes.Buffer
 	encoder := yaml.NewEncoder(&output)
@@ -142,9 +110,6 @@ func manifestDifferenceOutsideHTTPExposure(left, right Manifest) string {
 	rightAddress, rightHasAddress := right.HTTPAddress()
 	if leftAddress != rightAddress || leftHasAddress != rightHasAddress {
 		return "http.address"
-	}
-	if left.httpTransports != right.httpTransports {
-		return "http.transports"
 	}
 	if !equalHTTPCORSLayers(left.httpCORS, right.httpCORS) {
 		return "http.cors"
@@ -231,18 +196,27 @@ func hasExactlyOneAddedExposure(before, after []HTTPExposure, added interfaceid.
 	if len(after) != len(before)+1 {
 		return false
 	}
-	beforeIDs := make([]interfaceid.Identifier, len(before))
-	for index, exposure := range before {
-		beforeIDs[index] = exposure.ID()
-	}
-	afterIDs := make([]interfaceid.Identifier, 0, len(after)-1)
+	retained := make([]HTTPExposure, 0, len(before))
 	found := 0
 	for _, exposure := range after {
 		if exposure.ID() == added {
+			if exposure.Transport() != HTTPTransportConnect {
+				return false
+			}
 			found++
 			continue
 		}
-		afterIDs = append(afterIDs, exposure.ID())
+		retained = append(retained, exposure)
 	}
-	return found == 1 && slices.Equal(beforeIDs, afterIDs)
+	return found == 1 && slices.Equal(before, retained)
+}
+
+func httpExposureYAML(exposure HTTPExposure) *yaml.Node {
+	value := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	setMappingValue(value, "transport", stringYAMLNode(string(exposure.transport)))
+	return value
+}
+
+func httpExposureDigest(exposure HTTPExposure) string {
+	return digestStrings("http.expose", exposure.id.String(), string(exposure.transport))
 }

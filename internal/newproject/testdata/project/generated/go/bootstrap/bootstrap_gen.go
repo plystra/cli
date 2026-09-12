@@ -34,9 +34,9 @@ const (
 	defaultRuntimeDocument = "plystra.yaml"
 	defaultStartupTimeout  = time.Duration(120000000000)
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:42841c7f77ca73646234782cba79d92a75509e5d65e52ea261c1054b065cf302\",\"projection\":{\"http_cors\":null,\"http_exposures\":[],\"http_transports\":{\"connect\":true,\"rest\":false},\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":1}"
-	compiledApplicationModelCompatibilityDigest = "sha256:1210d1716dd594e732b2373e2b7667d6da959b5189f9263f3716d2fad01dfdf4"
-	compiledApplicationModelDigest              = "sha256:42841c7f77ca73646234782cba79d92a75509e5d65e52ea261c1054b065cf302"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:7a78eba0e36b526894f69425fbe9aab34d200925956d7baa6951a1c211a2475b\",\"projection\":{\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":2}"
+	compiledApplicationModelCompatibilityDigest = "sha256:6cf521c8f62e0e2c49715f72617e9785f0a4b9e95d487be4ba869b9b37cf8ea7"
+	compiledApplicationModelDigest              = "sha256:7a78eba0e36b526894f69425fbe9aab34d200925956d7baa6951a1c211a2475b"
 )
 
 var (
@@ -314,7 +314,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 	if err != nil {
 		return "", err
 	}
-	transports, cors, exposures, err := runtimeApplicationModelHTTP(values["http"])
+	cors, exposures, err := runtimeApplicationModelHTTP(values["http"])
 	if err != nil {
 		return "", err
 	}
@@ -327,12 +327,11 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 		"projection": map[string]any{
 			"http_cors":              cors,
 			"http_exposures":         exposures,
-			"http_transports":        transports,
 			"implementation_choices": implementations,
 			"interface_policies":     policies,
 			"interface_requirements": requirements,
 		},
-		"version": 1,
+		"version": 2,
 	})
 	if err != nil {
 		return "", runtimeConfigurationError("encode build-affecting runtime projection")
@@ -341,44 +340,26 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
-func runtimeApplicationModelHTTP(node *yaml.Node) (map[string]any, any, []string, error) {
-	values, err := runtimeOptionalMapping(node, "http", runtimeKeySet("address", "transports", "cors", "expose"))
+func runtimeApplicationModelHTTP(node *yaml.Node) (any, []map[string]any, error) {
+	values, err := runtimeOptionalMapping(node, "http", runtimeKeySet("address", "cors", "expose"))
 	if err != nil {
-		return nil, nil, nil, err
-	}
-	connect := true
-	rest := false
-	transports, err := runtimeOptionalMapping(values["transports"], "http.transports", runtimeKeySet("connect", "rest"))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if selected := transports["connect"]; selected != nil {
-		connect, err = runtimeApplicationModelBoolean(selected, "http.transports.connect")
-		if err != nil {
-			return nil, nil, nil, err
-		}
-	}
-	if selected := transports["rest"]; selected != nil {
-		rest, err = runtimeApplicationModelBoolean(selected, "http.transports.rest")
-		if err != nil {
-			return nil, nil, nil, err
-		}
+		return nil, nil, err
 	}
 	var cors any
 	if corsNode := values["cors"]; corsNode != nil {
 		fields, mappingErr := runtimeMapping(corsNode, "http.cors", runtimeKeySet("allowed_origins", "allow_credentials"))
 		if mappingErr != nil {
-			return nil, nil, nil, mappingErr
+			return nil, nil, mappingErr
 		}
 		origins, sequenceErr := runtimeApplicationModelStrings(fields["allowed_origins"], "http.cors.allowed_origins")
 		if sequenceErr != nil {
-			return nil, nil, nil, sequenceErr
+			return nil, nil, sequenceErr
 		}
 		credentials := false
 		if selected := fields["allow_credentials"]; selected != nil {
 			credentials, err = runtimeApplicationModelBoolean(selected, "http.cors.allow_credentials")
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, err
 			}
 		}
 		cors = map[string]any{
@@ -386,11 +367,27 @@ func runtimeApplicationModelHTTP(node *yaml.Node) (map[string]any, any, []string
 			"allowed_origins":   origins,
 		}
 	}
-	exposures, err := runtimeApplicationModelStrings(values["expose"], "http.expose")
+	entries, err := runtimeOptionalMapping(values["expose"], "http.expose", nil)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	return map[string]any{"connect": connect, "rest": rest}, cors, exposures, nil
+	identifiers := make([]string, 0, len(entries))
+	for identifier := range entries {
+		identifiers = append(identifiers, identifier)
+	}
+	sort.Strings(identifiers)
+	exposures := make([]map[string]any, 0, len(identifiers))
+	for _, identifier := range identifiers {
+		if !validRuntimeInterfaceID(identifier) {
+			return nil, nil, runtimeConfigurationError("http.expose key %q is not a canonical Interface ID", identifier)
+		}
+		entry, err := normalizeRuntimeExposure(entries[identifier], "http.expose["+strconv.Quote(identifier)+"]")
+		if err != nil {
+			return nil, nil, err
+		}
+		exposures = append(exposures, map[string]any{"interface": identifier, "transport": entry.Content[1].Value})
+	}
+	return cors, exposures, nil
 }
 
 func runtimeApplicationModelInterfaces(node *yaml.Node) ([]string, []map[string]any, []map[string]any, error) {
@@ -858,7 +855,7 @@ func mergeRuntimeHTTP(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error)
 	if lowerNode == nil && upperNode == nil {
 		return nil, false, nil
 	}
-	allowed := runtimeKeySet("address", "transports", "cors", "expose")
+	allowed := runtimeKeySet("address", "cors", "expose")
 	lower, err := runtimeOptionalMapping(lowerNode, "http", allowed)
 	if err != nil {
 		return nil, false, err
@@ -875,13 +872,6 @@ func mergeRuntimeHTTP(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error)
 	if present {
 		result["address"] = address
 	}
-	transports, present, err := mergeRuntimeTransports(lower["transports"], upper["transports"])
-	if err != nil {
-		return nil, false, err
-	}
-	if present {
-		result["transports"] = transports
-	}
 	cors, present, err := mergeRuntimeCORS(lower["cors"], upper["cors"])
 	if err != nil {
 		return nil, false, err
@@ -889,7 +879,7 @@ func mergeRuntimeHTTP(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error)
 	if present {
 		result["cors"] = cors
 	}
-	expose, present, err := mergeRuntimeInterfaceSet(lower["expose"], upper["expose"], "http.expose")
+	expose, present, err := mergeRuntimeExposures(lower["expose"], upper["expose"])
 	if err != nil {
 		return nil, false, err
 	}
@@ -899,30 +889,49 @@ func mergeRuntimeHTTP(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error)
 	return runtimeMappingNode(result), true, nil
 }
 
-func mergeRuntimeTransports(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error) {
+func mergeRuntimeExposures(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error) {
 	if lowerNode == nil && upperNode == nil {
 		return nil, false, nil
 	}
-	allowed := runtimeKeySet("connect", "rest")
-	lower, err := runtimeOptionalMapping(lowerNode, "http.transports", allowed)
-	if err != nil {
-		return nil, false, err
-	}
-	upper, err := runtimeOptionalMapping(upperNode, "http.transports", allowed)
-	if err != nil {
-		return nil, false, err
-	}
 	result := make(map[string]*yaml.Node)
-	for _, name := range []string{"connect", "rest"} {
-		value, present, err := selectRuntimeValue(lower[name], upper[name], "http.transports."+name, validateRuntimeBoolean)
+	for _, layer := range []*yaml.Node{lowerNode, upperNode} {
+		entries, err := runtimeOptionalMapping(layer, "http.expose", nil)
 		if err != nil {
 			return nil, false, err
 		}
-		if present {
-			result[name] = value
+		identifiers := make([]string, 0, len(entries))
+		for identifier := range entries {
+			identifiers = append(identifiers, identifier)
+		}
+		sort.Strings(identifiers)
+		for _, identifier := range identifiers {
+			if !validRuntimeInterfaceID(identifier) {
+				return nil, false, runtimeConfigurationError("http.expose key %q is not a canonical Interface ID", identifier)
+			}
+			if runtimeNull(entries[identifier]) {
+				delete(result, identifier)
+				continue
+			}
+			entry, err := normalizeRuntimeExposure(entries[identifier], "http.expose["+strconv.Quote(identifier)+"]")
+			if err != nil {
+				return nil, false, err
+			}
+			result[identifier] = entry
 		}
 	}
 	return runtimeMappingNode(result), true, nil
+}
+
+func normalizeRuntimeExposure(node *yaml.Node, path string) (*yaml.Node, error) {
+	fields, err := runtimeMapping(node, path, runtimeKeySet("transport"))
+	if err != nil {
+		return nil, err
+	}
+	transport, err := runtimeString(fields["transport"])
+	if err != nil || transport != "connect" {
+		return nil, runtimeConfigurationError("%s.transport must be connect", path)
+	}
+	return runtimeMappingNode(map[string]*yaml.Node{"transport": runtimeStringNode(transport)}), nil
 }
 
 func mergeRuntimeCORS(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error) {

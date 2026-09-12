@@ -116,7 +116,7 @@ func TestExplainV1SupportsEverySubjectAndChangeKind(t *testing.T) {
 		{name: "explicit", configuration: "deploy/customer.yaml", mode: generation.ConfigurationModeExplicit},
 	} {
 		t.Run("mode-"+test.name, func(t *testing.T) {
-			evidence := resolvedInspectEvidenceFor(t, test.configuration, test.environment)
+			evidence := resolvedInspectEvidenceFor(t, test.configuration, test.environment, false)
 			primary := intrinsicExplainSource(t, evidence, "kernel.health/v1")
 			result, err := NewExplain(ExplainInput{
 				Evidence:       evidence,
@@ -150,7 +150,7 @@ func TestExplainV1CanonicalizesSourceAndDiagnosticPermutations(t *testing.T) {
 		result, err := NewExplain(ExplainInput{
 			Evidence:       evidence,
 			SubjectKind:    ExplainSubjectConfiguration,
-			Subject:        "http.transports.rest",
+			Subject:        `http.expose["records.read/v1"]`,
 			Outcome:        "effective",
 			Reason:         "environment-override",
 			PrimarySources: primary,
@@ -158,7 +158,7 @@ func TestExplainV1CanonicalizesSourceAndDiagnosticPermutations(t *testing.T) {
 				Kind:   ExplainChangeFile,
 				Module: "example.com/inspect",
 				Path:   "plystra.production.yaml",
-				Field:  "http.transports.rest",
+				Field:  `http.expose["records.read/v1"]`,
 			},
 			Diagnostics: diagnostics,
 			Sources:     additional,

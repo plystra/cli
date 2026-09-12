@@ -695,7 +695,7 @@ Composition is typed and independent of dependency order:
   replace as complete values. A keyed `null` removes one inherited field, and
   `config.<plugin-id>: null` removes that Plugin's inherited object. Unknown
   fields and invalid or changing types fail.
-- Dependency `http.expose`, `http.address`, `http.transports`, `http.cors`,
+- Dependency `http.expose`, `http.address`, `http.cors`,
   `timeouts.startup`, and other public/process settings do not enter the
   current Project. Add `http.expose` in the selected current-Project document
   when an imported Interface should become public.
@@ -786,10 +786,9 @@ removal, the current Project must make that same exact decision. Removing a
 required Plugin field still fails final configuration validation unless a
 valid default supplies it.
 
-`http.expose` is not an inherited set. A dependency Project's exposure is
-ignored by consumers and needs no removal tombstone. An environment overlay
-may still use sparse `http.expose.remove` to remove an exposure declared by the
-same current Project's root configuration.
+Dependency exposure is ignored and requires no consumer removal. To remove an
+exposure inherited from this Project's root, set its exact `http.expose` entry
+to `null` in the selected environment overlay.
 
 After manually changing a replacement or dependency version, run:
 
@@ -825,21 +824,13 @@ in `plystra.production.yaml`:
 
 ```yaml
 http:
-  transports:
-    rest: true
+  expose:
+    kernel.health/v1: null
+    kernel.info/v1:
+      transport: connect
   cors:
     allowed_origins:
       - https://app.example.com
-
-capabilities:
-  use:
-    email.send/v1: acme.email.smtp
-
-config:
-  acme.email.smtp:
-    endpoint: https://smtp.production.example
-    token:
-      env: SMTP_PRODUCTION_TOKEN
 ```
 
 Generate and check with the same selector:
@@ -858,34 +849,31 @@ field, keyed objects merge by declared field path, set fields use their sparse
 Unknown fields and type mismatches remain errors. A dependency Project's own
 environment files are never inherited.
 
-`http.transports` is a closed current-Project object. It accepts only boolean
-`connect` and `rest` fields. A new Project records the default selection
-explicitly in root `plystra.yaml`:
+`http.expose` is keyed by exact Interface ID. Each entry requires the supported
+transport explicitly:
 
 ```yaml
 http:
-  transports:
-    connect: true
-    rest: false
+  expose:
+    kernel.health/v1:
+      transport: connect
 ```
 
-When omitted from another selected document, Connect still defaults to enabled
-and REST to disabled. In an environment overlay the two fields replace
-independently: an omitted field inherits the root choice, while `null` restores
-that field's schema default. A full-replacement file does not inherit root
-transport choices; omitted transport fields use the same defaults. Dependency
-Project transport settings never participate in composition.
+The Interface must be visible. Exposure makes it an application root. New
+Projects start with `http.expose: {}`; without effective exposure, no external
+transport is selected. JavaScript SDK generation requires Connect, which is
+selected by each canonical exposure entry.
 
-The selected transport values are build-affecting and participate in the
-generated application-model digest. A nonempty `http.expose` set requires at
-least one enabled transport. JavaScript SDK generation requires Connect, so a
-selected default, environment, or full-replacement model with JavaScript
-Capability or Alias surfaces and `connect: false` fails before output. The
-diagnostic identifies the selected configuration and every affected surface;
-enable `connect: true` in that current-Project selection or remove those
-surfaces. Connect handlers are generated for selected surfaces, while server
-mounting and the optional REST projection remain in later transport gates;
-setting `rest: true` does not yet create a REST adapter.
+An environment overlay inherits omitted entries, replaces a supplied complete
+entry, and removes an inherited entry with `null`. An empty mapping adds
+nothing and does not clear inherited exposure. The complete `http.expose`
+field cannot be null. A full replacement inherits no root exposure, and
+dependency exposure never becomes the consumer's public surface.
+
+Exposure lists, `add`/`remove` exposure sets, global `http.transports` switches,
+missing transports, and unsupported fields are invalid. REST route
+configuration remains deferred. Exposure and its transport participate in
+normalized configuration identity and generated runtime compatibility.
 
 `http.cors` is an optional closed current-Project object. When present it
 requires one nonempty `allowed_origins` list and accepts only an optional
@@ -1435,7 +1423,7 @@ plystra capability expose catalog.item.get/v1 --env production
 
 The default command writes root `plystra.yaml`. The environment form writes
 only the sparse project-root `plystra.production.yaml` overlay, preserving its
-comments, unrelated values, and explicit add/remove tombstones. For an
+comments, unrelated values, and exact-entry null tombstones. For an
 advanced complete replacement, use:
 
 ```powershell
@@ -1502,8 +1490,8 @@ before Provider construction; unselected overlays and replacement files are
 not read. Generate, check, and start with the same selector. Compiled selection
 provenance and the versioned application-model compatibility projection are
 visible in `generated/go/bootstrap/bootstrap_gen.go` as canonical non-secret
-JSON plus digests. The projection covers selected transports, CORS, public
-exposure, requirements, explicit Provider choices, and Alias declarations and
+JSON plus digests. The projection covers selected public exposure entries with
+their transports, CORS, requirements, explicit Provider choices, and Alias declarations and
 is cryptographically associated with the complete generated application-model
 digest. Startup derives the same projection from the normalized selected
 runtime document and rejects a mismatch with rebuild guidance before reading
@@ -2002,11 +1990,6 @@ ordering for every Project document that contributed the prior inherited
 decision. It identifies the disappeared field and its prior module/version
 references without exposing the inherited value, a Secret-reference target, an
 absolute path, or a Module Cache path.
-An invalid HTTP transport selection retains every effective `http.expose`
-Interface and field in the problem, then emits each distinct owning
-current-Project document at `1:1` as an `exposure` source. Root,
-environment-overlay, and complete-replacement declarations keep their
-module-relative paths; dependency exposure remains ignored.
 A malformed selected environment or complete-replacement document uses
 `PLYSTRA_CONFIGURATION_INVALID` and emits that current-Project document at
 `1:1` as a `configuration-declaration` source. The source fact contains no
@@ -2279,14 +2262,12 @@ environment, complete-replacement, or dependency document. It exposes neither
 configured values, unknown authored keys, nor Secret-reference targets,
 absolute paths, or Module Cache paths.
 
-### Public exposure without an HTTP transport
+### Invalid public exposure configuration
 
-`PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID` identifies a nonempty effective
-`http.expose` set when both Connect and REST are disabled. Enable one supported
-transport in the selected root, environment, or complete-replacement document,
-or remove the public exposure. The problem retains every exposed Interface and
-field, while the diagnostic emits every distinct owning current-Project
-document at `1:1` as an `exposure` source without exposing an absolute path.
+Correct `http.expose` in the selected document so every entry is an exact
+Interface ID with `transport: connect`, or an exact-entry `null` removal.
+Remove obsolete lists, exposure set edits, global transport switches, and
+unsupported REST fields. Regenerate and check with the same selector.
 
 ### Invalid selected configuration document
 

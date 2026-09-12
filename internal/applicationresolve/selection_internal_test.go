@@ -19,7 +19,7 @@ func TestSelectConfigurationTargetUsesResolutionSelectorAndParserRules(t *testin
 	files := map[string]string{
 		"plystra.yaml":            "http:\n  cors:\n    allowed_origins: [https://app.example.com]\n",
 		"plystra.production.yaml": "# Production.\nhttp:\n  cors:\n    allow_credentials: true\n",
-		"deploy/customer.yaml":    "http: {expose: [kernel.info/v1]}\n",
+		"deploy/customer.yaml":    "http: {expose: {kernel.info/v1: {transport: connect}}}\n",
 	}
 	for name, data := range files {
 		path := filepath.Join(root, filepath.FromSlash(name))

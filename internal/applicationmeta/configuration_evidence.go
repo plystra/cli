@@ -370,20 +370,6 @@ func processConfigurationDecisions(manifest Manifest) []ConfigurationDecision {
 		}
 		add("http.address", digest, ConfigurationSummaryString, manifest.removeHTTPAddress)
 	}
-	if manifest.httpTransports.hasConnect || manifest.httpTransports.removeConnect {
-		digest := digestStrings("http.transports.connect", "removed")
-		if manifest.httpTransports.hasConnect {
-			digest = digestStrings("http.transports.connect", strconv.FormatBool(manifest.httpTransports.connect))
-		}
-		add("http.transports.connect", digest, ConfigurationSummaryBoolean, manifest.httpTransports.removeConnect)
-	}
-	if manifest.httpTransports.hasREST || manifest.httpTransports.removeREST {
-		digest := digestStrings("http.transports.rest", "removed")
-		if manifest.httpTransports.hasREST {
-			digest = digestStrings("http.transports.rest", strconv.FormatBool(manifest.httpTransports.rest))
-		}
-		add("http.transports.rest", digest, ConfigurationSummaryBoolean, manifest.httpTransports.removeREST)
-	}
 	if manifest.httpCORS.present || manifest.httpCORS.remove {
 		if manifest.httpCORS.remove {
 			add("http.cors", digestStrings("http.cors", "removed"), ConfigurationSummaryRemoval, true)

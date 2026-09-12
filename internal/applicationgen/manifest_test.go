@@ -29,7 +29,7 @@ capabilities:
   require:
     - email.send/v1
 http:
-  expose: []
+  expose: {}
 config:
   example.com/acme/mailer.New:
     retries: 1
@@ -37,7 +37,7 @@ config:
 `)
 	right := []byte(`config:
   example.com/acme/mailer.New: {enabled: true, retries: 01}
-http: {expose: []}
+http: {expose: {}}
 capabilities:
   require: [email.send/v1]
   use:

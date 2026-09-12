@@ -22,7 +22,7 @@ func TestGenerateTreatsCompatibleImplementationReplacementAsWireNeutral(t *testi
   use:
     records.list/v1: example.com/implementation-replacement/smtp.New
 http:
-  expose: [records.list/v1]
+  expose: {records.list/v1: {transport: connect}}
 `)
 	overlayPath := filepath.Join(root, "plystra.test.yaml")
 	writeFile(t, overlayPath, "# Test-only Implementation replacement.\n{}\n")

@@ -20,7 +20,7 @@ func TestPublicResolvingCommandsRejectInvalidRequiredConstructorGraphWithoutMuta
 		sourceKind    string
 	}{
 		{name: "requirement", configuration: "interfaces: {require: [app.run/v1]}\n", sourceKind: "declaration"},
-		{name: "exposure", configuration: "http: {expose: [app.run/v1]}\n", sourceKind: "exposure"},
+		{name: "exposure", configuration: "http: {expose: {app.run/v1: {transport: connect}}}\n", sourceKind: "exposure"},
 	}
 	for _, rootKind := range rootKinds {
 		rootKind := rootKind
@@ -932,7 +932,7 @@ var _ echov1.Interface = (*Service)(nil)
 	}
 }
 
-func TestPublicResolvingCommandsReportHTTPTransportSelectionSourcesWithoutMutation(t *testing.T) {
+func TestPublicResolvingCommandsReportInvalidExposureSourcesWithoutMutation(t *testing.T) {
 	t.Parallel()
 
 	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
@@ -947,24 +947,24 @@ func TestPublicResolvingCommandsReportHTTPTransportSelectionSourcesWithoutMutati
 	}{
 		{
 			name:           "default",
-			root:           "http: {transports: {connect: false, rest: false}, expose: [kernel.info/v1, kernel.health/v1]}\n",
+			root:           "http: {expose: {kernel.health/v1: {transport: rest}}}\n",
 			recoveryTarget: "plystra.yaml",
 			sources:        []string{"plystra.yaml"},
 		},
 		{
 			name:           "environment",
-			root:           "http: {transports: {connect: true, rest: false}, expose: [kernel.health/v1]}\n",
+			root:           "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
 			selectedPath:   "plystra.production.yaml",
-			selected:       "http: {transports: {connect: false, rest: false}, expose: {add: [kernel.info/v1]}}\n",
+			selected:       "http: {expose: {kernel.health/v1: {transport: rest}}}\n",
 			selector:       []string{"--env", "production"},
 			recoveryTarget: "plystra.production.yaml",
-			sources:        []string{"plystra.production.yaml", "plystra.yaml"},
+			sources:        []string{"plystra.production.yaml"},
 		},
 		{
 			name:           "replacement",
 			root:           "{}\n",
 			selectedPath:   "deploy/customer.yaml",
-			selected:       "http: {transports: {connect: false, rest: false}, expose: [kernel.health/v1]}\n",
+			selected:       "http: {expose: {kernel.health/v1: {transport: rest}}}\n",
 			selector:       []string{"--config", "deploy/customer.yaml"},
 			recoveryTarget: "deploy/customer.yaml",
 			sources:        []string{"deploy/customer.yaml"},
@@ -983,18 +983,22 @@ func TestPublicResolvingCommandsReportHTTPTransportSelectionSourcesWithoutMutati
 					}
 					before := commandTree(t, root)
 					exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "records"), commandGoEnvironment())
+					code, kind := diagnosticcode.ConfigurationInvalid, "configuration-declaration"
+					recovery := "Edit " + mode.recoveryTarget + " so every value matches a selected Plugin's closed typed schema, then rerun the command."
+					if mode.name == "default" {
+						code, kind = diagnosticcode.ProjectManifestInvalid, "project-marker"
+						recovery = "Correct the reported root or dependency Project plystra.yaml, then rerun the command."
+					}
 					if exitCode != 1 || stdout != "" || !commandContainsAll(
 						stderr,
-						"invalid HTTP transport selection",
-						"http.expose is nonempty",
-						"http.transports.connect and http.transports.rest are both false",
-						"Recovery:\nEnable a supported transport in "+mode.recoveryTarget+" or remove the public exposure, then regenerate.\n",
-						"Diagnostic: "+diagnosticcode.HTTPTransportSelectionInvalid,
+						`http.expose["kernel.health/v1"].transport must be connect`,
+						"Recovery:\n"+recovery+"\n",
+						"Diagnostic: "+code,
 					) || strings.Count(stderr, "Source: ") != len(mode.sources) || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
 						t.Fatalf("%v invalid HTTP transport selection = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
 					}
 					for _, source := range mode.sources {
-						want := "Source: example.com/acme/library:" + source + ":1:1 (exposure)"
+						want := "Source: example.com/acme/library:" + source + ":1:1 (" + kind + ")"
 						if !strings.Contains(stderr, want) {
 							t.Fatalf("%v stderr %q does not contain %q", arguments, stderr, want)
 						}
@@ -1428,7 +1432,7 @@ func TestPublicResolvingCommandsReportUnknownInterfaceConfigurationSources(t *te
 				root := t.TempDir()
 				writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/unknown-exposure\n\ngo 1.26\n")
 				writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
-				writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {expose: [records.missing/v1]}\n")
+				writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {expose: {records.missing/v1: {transport: connect}}}\n")
 				return fixture{
 					root:          root,
 					roots:         []string{root},

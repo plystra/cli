@@ -220,7 +220,7 @@ func writeExposedInterfaceFailureProject(t testing.TB, ambiguous bool) string {
 	t.Helper()
 	root := t.TempDir()
 	writeModule(t, root, "example.com/exposed-interface", "")
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: [app.run/v1]}\n")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: {app.run/v1: {transport: connect}}}\n")
 	writeFile(t, filepath.Join(root, "generated", "sentinel.txt"), "must remain unchanged\n")
 	if !ambiguous {
 		return root

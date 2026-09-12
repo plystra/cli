@@ -16,7 +16,7 @@ func TestParseSourceRetainsSelectedDocumentProvenance(t *testing.T) {
 	t.Parallel()
 
 	manifest, err := applicationmeta.ParseSource("plystra.production.yaml", []byte(`
-http: {expose: [email.send/v1]}
+http: {expose: {email.send/v1: {transport: connect}}}
 capabilities:
   require: [email.send/v1]
   use: {email.send/v1: acme.smtp}
@@ -79,11 +79,10 @@ func TestApplyOverlayUsesTypedFieldPrecedenceAndPreservesRemovals(t *testing.T) 
 	base := parseOverlayManifest(t, "plystra.yaml", `
 http:
   address: ":8080"
-  transports: {connect: false, rest: true}
   cors:
-    allowed_origins: [https://shared.example]
+    allowed_origins: ['https://shared.example']
     allow_credentials: true
-  expose: [audit.write/v1, email.send/v1]
+  expose: {audit.write/v1: {transport: connect}, email.send/v1: {transport: connect}}
 timeouts: {startup: 1m}
 capabilities:
   require: [audit.write/v1, email.send/v1]
@@ -103,13 +102,13 @@ config:
 	overlay := parseOverlayManifest(t, "plystra.production.yaml", `
 http:
   address: ":9090"
-  transports: {connect: true, rest: null}
   cors:
-    allowed_origins: [https://production.example, https://PRODUCTION.example:443]
+    allowed_origins: ['https://production.example', 'https://PRODUCTION.example:443']
     allow_credentials: null
   expose:
-    add: [reports.read/v1]
-    remove: [audit.write/v1]
+    reports.read/v1:
+      transport: connect
+    audit.write/v1: null
 timeouts: {startup: null}
 capabilities:
   require:
@@ -173,7 +172,7 @@ config:
 			ModulePath:    "example.com/a",
 			ModuleVersion: "v1.0.0",
 			Manifest: parseOverlayManifest(t, "plystra.yaml", `
-http: {transports: {connect: false, rest: true}, cors: {allowed_origins: ['*']}, expose: [audit.write/v1]}
+http: {cors: {allowed_origins: ['*']}, expose: {audit.write/v1: {transport: connect}}}
 capabilities:
   require: [audit.write/v1]
   use:
@@ -248,9 +247,8 @@ func TestApplyOverlayInheritsOmittedFieldsAndRejectsInvalidChanges(t *testing.T)
 	base := parseOverlayManifest(t, "plystra.yaml", `
 http:
   address: ":8080"
-  transports: {connect: false, rest: true}
-  cors: {allowed_origins: [https://shared.example], allow_credentials: true}
-  expose: [email.send/v1]
+  cors: {allowed_origins: ['https://shared.example'], allow_credentials: true}
+  expose: {email.send/v1: {transport: connect}}
 timeouts: {startup: 45s}
 capabilities: {require: [email.send/v1]}
 config: {example.com/acme/smtp.New: {host: shared.example, settings: {mode: shared}}}
@@ -262,8 +260,21 @@ config: {example.com/acme/smtp.New: {host: shared.example, settings: {mode: shar
 	if address, exists := inherited.HTTPAddress(); !exists || address != ":8080" || inherited.StartupTimeout() != 45*time.Second {
 		t.Fatalf("inherited process settings = %q/%t %s", address, exists, inherited.StartupTimeout())
 	}
-	if transports := inherited.HTTPTransports(); transports != (applicationmeta.HTTPTransports{REST: true}) {
+	if transports := inherited.HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
 		t.Fatalf("inherited HTTP transports = %#v", transports)
+	}
+	emptyExposure, err := applicationmeta.ApplyOverlay(base, parseOverlayManifest(t, "plystra.test.yaml", "http: {expose: {}}\n"), lookup)
+	if err != nil {
+		t.Fatalf("ApplyOverlay(explicit empty exposure): %v", err)
+	}
+	if got := overlayExposureIDs(emptyExposure); !reflect.DeepEqual(got, []string{"email.send/v1"}) {
+		t.Fatalf("explicit empty exposure mapping changed inherited exposures = %v", got)
+	}
+	if exposures := emptyExposure.HTTPExposures(); len(exposures) != 1 || exposures[0].Transport() != applicationmeta.HTTPTransportConnect {
+		t.Fatalf("explicit empty exposure mapping changed transport entries = %#v", exposures)
+	}
+	if transports := emptyExposure.HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
+		t.Fatalf("explicit empty exposure mapping changed HTTP transports = %#v", transports)
 	}
 	inheritedCORS, exists := inherited.HTTPCORS()
 	if !exists || !reflect.DeepEqual(inheritedCORS.AllowedOrigins, []string{"https://shared.example"}) || !inheritedCORS.AllowCredentials {

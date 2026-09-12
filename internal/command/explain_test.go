@@ -685,8 +685,8 @@ func TestExplainCapabilityReportsEveryCompatibleInheritedSelectionSource(t *test
 	bRoot := filepath.Join(root, "b")
 	writeCommandFile(t, filepath.Join(aRoot, "go.mod"), "module example.com/a\n\ngo 1.26\n")
 	writeCommandFile(t, filepath.Join(bRoot, "go.mod"), "module example.com/b\n\ngo 1.26\n")
-	writeCommandFile(t, filepath.Join(aRoot, "plystra.yaml"), "capabilities: {use: {email.send/v1: example.smtp}, aliases: {mail.send/v1: email.send/v1}}\nhttp: {expose: [email.send/v1]}\n")
-	writeCommandFile(t, filepath.Join(bRoot, "plystra.yaml"), "capabilities: {use: {email.send/v1: example.smtp}, aliases: {mail.send/v1: email.send/v1}}\nhttp: {expose: [email.send/v1]}\n")
+	writeCommandFile(t, filepath.Join(aRoot, "plystra.yaml"), "capabilities: {use: {email.send/v1: example.smtp}, aliases: {mail.send/v1: email.send/v1}}\nhttp: {expose: {email.send/v1: {transport: connect}}}\n")
+	writeCommandFile(t, filepath.Join(bRoot, "plystra.yaml"), "capabilities: {use: {email.send/v1: example.smtp}, aliases: {mail.send/v1: email.send/v1}}\nhttp: {expose: {email.send/v1: {transport: connect}}}\n")
 	writeCommandFile(t, filepath.Join(aRoot, "smtp", "plugin.yaml"), "id: example.smtp\nprovides: [email.send/v1]\n")
 	writeCommandFile(t, filepath.Join(aRoot, "smtp", "capabilities", "email.send", "v1", "capability.yaml"), "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 	writeCommandFile(t, filepath.Join(appRoot, "go.mod"), `module example.com/app
@@ -701,7 +701,7 @@ require (
 replace example.com/a => ../a
 replace example.com/b => ../b
 `)
-	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), "capabilities: {require: [email.send/v1]}\nhttp: {expose: [email.send/v1]}\n")
+	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), "capabilities: {require: [email.send/v1]}\nhttp: {expose: {email.send/v1: {transport: connect}}}\n")
 	nested := filepath.Join(appRoot, "nested")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatalf("MkdirAll(%s): %v", nested, err)
@@ -954,10 +954,10 @@ func TestExplainExposureVerboseIncludesCompleteIndentedEvidence(t *testing.T) {
 func createExplainCommandProject(t *testing.T) (string, string) {
 	t.Helper()
 	root := writeProviderCommandProject(t)
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "capabilities:\n  require: [email.send/v1]\n  use: {email.send/v1: acme.email.smtp}\n  aliases: {mail.send/v1: email.send/v1}\nhttp:\n  address: resolved-secret-marker\n  expose: [email.send/v1]\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "capabilities:\n  require: [email.send/v1]\n  use: {email.send/v1: acme.email.smtp}\n  aliases: {mail.send/v1: email.send/v1}\nhttp:\n  address: resolved-secret-marker\n  expose: {email.send/v1: {transport: connect}}\n")
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "capabilities:\n  use: {email.send/v1: acme.email.local}\n  aliases:\n    mail.send/v1: {target: email.send/v1, expose: {go: true, http: false, javascript: false}}\n")
 	writeCommandFile(t, filepath.Join(root, "plystra.ignored.yaml"), "capabilities:\n  use: {email.send/v1: acme.email.smtp}\n")
-	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), "capabilities:\n  require: [email.send/v1]\n  use: {email.send/v1: acme.email.local}\n  aliases: {mail.send/v1: email.send/v1}\nhttp:\n  expose: [email.send/v1]\n")
+	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), "capabilities:\n  require: [email.send/v1]\n  use: {email.send/v1: acme.email.local}\n  aliases: {mail.send/v1: email.send/v1}\nhttp:\n  expose: {email.send/v1: {transport: connect}}\n")
 	writeCommandFile(t, filepath.Join(root, "deploy", "ignored.yaml"), "capabilities:\n  require: [email.send/v1]\n  use: {email.send/v1: acme.email.smtp}\n")
 	nested := filepath.Join(root, "smtp", "nested")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
@@ -1000,9 +1000,9 @@ replace github.com/plystra/kernel => %q
     orders.submit/v1: order.create/v1
 http:
   address: generation-private-marker
-  expose: [order.create/v1]
+  expose: {order.create/v1: {transport: connect}}
 `)
-	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {expose: {remove: [order.create/v1]}}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {expose: {order.create/v1: null}}\n")
 	writeCommandFile(t, filepath.Join(root, "business", "plugin.yaml"), "id: example.business\nprovides: [order.create/v1]\n")
 	writeCommandFile(t, filepath.Join(root, "business", "capabilities", "order.create", "v1", "capability.yaml"), `id: order.create/v1
 request: {}

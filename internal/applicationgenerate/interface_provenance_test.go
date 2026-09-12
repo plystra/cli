@@ -73,7 +73,7 @@ func (*Service) Create(context.Context, createv1.Request) (createv1.Response, er
 }
 `)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `http:
-  expose: [order.create/v1, kernel.health/v1]
+  expose: {order.create/v1: {transport: connect}, kernel.health/v1: {transport: connect}}
 interfaces:
   require: [order.create/v1]
   use:

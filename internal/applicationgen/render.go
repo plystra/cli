@@ -716,7 +716,7 @@ func validateJavaScriptTransport(options Options, context generation.Context, al
 		selectedPath = rootConfigurationPath
 	}
 	return fmt.Errorf(
-		"%w: http.transports.connect is false for selected configuration %q, but the official generated JavaScript SDK requires Connect for %s; enable http.transports.connect in the selected current-project configuration or remove those JavaScript surfaces from http.expose and capabilities.aliases",
+		"%w: selected configuration %q has JavaScript surfaces without Connect exposure: %s; declare transport: connect on the exact http.expose Interface entries or remove those JavaScript surfaces",
 		ErrJavaScriptTransport,
 		selectedPath,
 		strings.Join(surfaces, ", "),

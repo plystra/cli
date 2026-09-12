@@ -50,7 +50,7 @@ func TestGenerateIsolatesDormantDependencyArtifactProvenance(t *testing.T) {
 				selectedPath = options.ConfigurationPath
 				writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
 			}
-			const exposure = "http: {transports: {connect: true, rest: false}, expose: [kernel.health/v1]}\n"
+			const exposure = "http: {expose: {kernel.health/v1: {transport: connect}}}\n"
 			writeFile(t, filepath.Join(applicationRoot, selectedPath), exposure)
 			generate := func() applicationgen.ManifestProvenance {
 				t.Helper()

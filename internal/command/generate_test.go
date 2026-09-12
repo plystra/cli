@@ -323,7 +323,7 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("ReadFile(go.sum): %v", err)
 	}
 	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: [records.list/v1]}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: {records.list/v1: {transport: connect}}}\n")
 	writeCommandFile(t, filepath.Join(root, "interfaces", "records", "list", "v1", "interface.go"), `package listv1
 
 import "context"
@@ -510,9 +510,9 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("ReadFile(go.sum): %v", err)
 	}
 	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: [records.collision/v1]}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: {records.collision/v1: {transport: connect}}}\n")
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "{}\n")
-	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), "http: {expose: [records.collision/v1]}\n")
+	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), "http: {expose: {records.collision/v1: {transport: connect}}}\n")
 	writeCommandFile(t, filepath.Join(root, filepath.FromSlash(sourcePath)), `package collisionv1
 
 import "context"
@@ -642,7 +642,7 @@ func TestRunGenerateReportsUnsupportedOperationExposureSourceWithoutMutation(t *
 			commandCase := commandCase
 			t.Run(kind.name+"/"+commandCase.name, func(t *testing.T) {
 				root := writeCapabilityCommandModule(t)
-				selectedData := "http: {expose: [records.archived/v1]}\n"
+				selectedData := "http: {expose: {records.archived/v1: {transport: connect}}}\n"
 				rootData := "{}\n"
 				if commandCase.selectedPath == "plystra.yaml" {
 					rootData = selectedData
@@ -708,11 +708,9 @@ replace github.com/plystra/kernel => %s
 	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
 	addLegacyProtobufReplacement(t, root)
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `http:
-  transports:
-    connect: true
-    rest: false
   expose:
-    - kernel.health/v1
+    kernel.health/v1:
+      transport: connect
 `)
 	environment := commandGoEnvironment()
 
@@ -871,7 +869,7 @@ func TestRunGenerateRollsBackKernelDependencyRepairAfterValidationFailure(t *tes
 	assertNoCommandTransactions(t, root)
 }
 
-func TestRunGenerateRequiresConnectForJavaScriptSDKWithoutMutation(t *testing.T) {
+func TestRunGenerateRejectsUnsupportedExposureTransportWithoutMutation(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
 	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
@@ -893,7 +891,7 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("ReadFile(go.sum): %v", err)
 	}
 	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {transports: {connect: false, rest: true}, expose: [kernel.health/v1]}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: {kernel.health/v1: {transport: rest}}}\n")
 	before := commandTree(t, root)
 
 	for _, arguments := range [][]string{{"generate", "--check"}, {"generate"}} {
@@ -902,10 +900,8 @@ replace github.com/plystra/kernel => %s
 			t.Fatalf("%v = exit %d, stdout %q, stderr %q", arguments, exitCode, stdout, stderr)
 		}
 		for _, want := range []string{
-			"invalid JavaScript SDK transport selection",
-			`http.transports.connect is false for selected configuration "plystra.yaml"`,
-			"official generated JavaScript SDK requires Connect for Capability kernel.health/v1",
-			"enable http.transports.connect",
+			`http.expose["kernel.health/v1"].transport must be connect`,
+			"Diagnostic: " + diagnosticcode.ProjectManifestInvalid,
 		} {
 			if !strings.Contains(stderr, want) {
 				t.Fatalf("%v stderr %q does not contain %q", arguments, stderr, want)
@@ -1353,14 +1349,14 @@ replace github.com/plystra/kernel => %s
 	writeCommandFile(t, filepath.Join(applicationRoot, "go.sum"), string(goSum))
 	rootConfiguration := `# shared root configuration must be excluded in replacement mode
 http:
-  expose: [kernel.health/v1]
+  expose: {kernel.health/v1: {transport: connect}}
 interfaces:
   require: [kernel.health/v1]
 `
 	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), rootConfiguration)
 	selectedConfiguration := `# complete customer configuration
 http:
-  expose: [kernel.info/v1]
+  expose: {kernel.info/v1: {transport: connect}}
 interfaces:
   require: [kernel.info/v1]
 `
@@ -1456,7 +1452,7 @@ interfaces:
 			}
 		})
 	}
-	changedSelected := bytes.Replace(selected, []byte("expose: [kernel.info/v1]"), []byte("expose: [kernel.health/v1]"), 1)
+	changedSelected := bytes.Replace(selected, []byte("expose: {kernel.info/v1: {transport: connect}}"), []byte("expose: {kernel.health/v1: {transport: connect}}"), 1)
 	if bytes.Equal(changedSelected, selected) {
 		t.Fatal("test replacement did not contain the compiled exposure declaration")
 	}

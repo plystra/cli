@@ -465,8 +465,8 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
 		"TEMPLATE_ONLY.md": []byte("This file must remain in the dependency source.\n"),
 		"plystra.yaml": []byte(`http:
   expose:
-    - kernel.health/v1
-
+    kernel.health/v1:
+      transport: connect
 interfaces:
   require:
     - email.send/v1
@@ -552,8 +552,8 @@ var _ sendv1.Interface = (*Service)(nil)
 	if len(exposures) != 0 {
 		t.Fatalf("dependency HTTP exposure entered created Project = %#v", exposures)
 	}
-	if transports := model.HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
-		t.Fatalf("composed HTTP transports = %#v, want Connect enabled and REST disabled", transports)
+	if transports := model.HTTPTransports(); transports != (applicationmeta.HTTPTransports{}) {
+		t.Fatalf("composed HTTP transports = %#v, want no transport without exposure", transports)
 	}
 	requirements := model.InterfaceRequirements()
 	if len(requirements) != 2 || requirements[0].ID().String() != "email.send/v1" || requirements[1].ID().String() != "kernel.info/v1" {
@@ -599,7 +599,7 @@ func TestCreateIgnoresTemplateExposureWithoutGeneratingJavaScriptSDK(t *testing.
 	templateQuery := templatePath + "@" + templateVersion
 	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
 		"template.go":  []byte("package platform\n"),
-		"plystra.yaml": []byte("http:\n  expose: [kernel.health/v1]\n"),
+		"plystra.yaml": []byte("http:\n  expose: {kernel.health/v1: {transport: connect}}\n"),
 	})
 	logPath := filepath.Join(t.TempDir(), "npm.log")
 	environment := isolatedGoEnvironment(t, proxy)
@@ -1173,9 +1173,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 			t.Fatalf("generated README omits available workflow %q:\n%s", available, readme)
 		}
 	}
-	for _, transport := range [][]byte{[]byte("http.transports.connect: true"), []byte("http.transports.rest: false")} {
+	for _, transport := range [][]byte{[]byte("http.expose: {}"), []byte("transport: connect")} {
 		if !bytes.Contains(readme, transport) {
-			t.Fatalf("generated README omits explicit default transport %q:\n%s", transport, readme)
+			t.Fatalf("generated README omits canonical exposure guidance %q:\n%s", transport, readme)
 		}
 	}
 	if !bytes.Contains(readme, []byte("JavaScript SDK generation requires Connect")) {
@@ -1196,7 +1196,6 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` identifies constructor-keyed configuration"),
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID` identifies a safe declared field"),
 		[]byte("`PLYSTRA_CONFIGURATION_INVALID` reports a malformed selected"),
-		[]byte("`PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID` retains every effective"),
 		[]byte("`PLYSTRA_ENVIRONMENT_OVERLAY_INVALID` reports the selected"),
 		[]byte("`PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT` reports the maintained"),
 		[]byte("`PLYSTRA_GENERATED_DRIFT` reports every stale, missing, or manually modified"),
@@ -2285,9 +2284,9 @@ func assertGitInitialized(t *testing.T, root string) {
 
 func assertDefaultTransportScaffold(t *testing.T, configuration []byte) {
 	t.Helper()
-	const expected = "  transports:\n    connect: true\n    rest: false\n"
-	if !bytes.Contains(configuration, []byte(expected)) {
-		t.Fatalf("Project configuration omits explicit default transports:\n%s", configuration)
+	const expected = "  expose: {}\n"
+	if !bytes.Contains(configuration, []byte(expected)) || bytes.Contains(configuration, []byte("transports:")) {
+		t.Fatalf("Project configuration must have empty keyed exposure without global switches:\n%s", configuration)
 	}
 }
 
@@ -2316,7 +2315,6 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID",
 		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID",
 		"PLYSTRA_CONFIGURATION_INVALID",
-		"PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID",
 		"PLYSTRA_ENVIRONMENT_OVERLAY_INVALID",
 		"PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT",
 		"PLYSTRA_GENERATED_DRIFT",
@@ -2397,11 +2395,11 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra use email.send/v1 example.com/acme/email/customer.New --config deploy/customer-a.yaml",
 		"rolls back every owned file after",
 		"Remove only exact inherited composable declarations with sparse edits and null",
-		"Dependency exposure is ignored rather than inherited",
+		"Dependency exposure is ignored and requires no consumer removal",
 		"email.send/v1: null",
 		"legacy_host: null",
 		"Declared objects merge recursively",
-		"Dependency http.expose, http.address, http.transports, http.cors, and",
+		"Dependency http.expose, http.address, http.cors, and",
 		"interfaces.use and interfaces.policies replace",
 		"Only positive timeout is accepted",
 		"Values normalize and replace",
@@ -2431,11 +2429,11 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"plystra capability expose records.read/v1 --env production",
 		"plystra capability expose records.read/v1 --config deploy/customer-a.yaml",
 		"regenerates with the same selection",
-		"http.transports is a closed current-Project object",
-		"New Project scaffolds write both fields explicitly",
-		"null restores that field's",
-		"Dependency Project transport",
-		"official generated JavaScript SDK requires connect: true",
+		"http.expose is keyed by exact Interface ID",
+		"New Projects start with http.expose: {}",
+		"exact-key null removes inherited exposure",
+		"Empty mappings preserve",
+		"REST routes remain deferred",
 		"http.cors is an optional closed current-Project object",
 		"requires one nonempty allowed_origins list",
 		"http.cors to null",
@@ -2602,7 +2600,6 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID",
 		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID",
 		"PLYSTRA_CONFIGURATION_INVALID",
-		"PLYSTRA_HTTP_TRANSPORT_SELECTION_INVALID",
 		"PLYSTRA_ENVIRONMENT_OVERLAY_INVALID",
 		"PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT",
 		"PLYSTRA_GENERATED_DRIFT",

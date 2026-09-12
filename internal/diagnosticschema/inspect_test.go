@@ -54,7 +54,7 @@ func TestInspectV1BuildsExactFilesystemResult(t *testing.T) {
 	if result.SelectedPluginCount() != 0 || result.AvailableCapabilityCount() != 2 || result.RequiredCapabilityCount() != 0 || result.ExposedCapabilityCount() != 0 || result.CapabilityAliasCount() != 0 || result.AuthNActive() || result.AuthZActive() {
 		t.Fatalf("inspect summary = plugins %d available %d required %d exposed %d aliases %d authn %t authz %t", result.SelectedPluginCount(), result.AvailableCapabilityCount(), result.RequiredCapabilityCount(), result.ExposedCapabilityCount(), result.CapabilityAliasCount(), result.AuthNActive(), result.AuthZActive())
 	}
-	if !slices.Equal(result.Transports(), []Transport{TransportREST}) || result.Readiness() != ReadinessReady || result.ProblemCount() != 0 || result.NextAction() != input.NextAction {
+	if len(result.Transports()) != 0 || result.Readiness() != ReadinessReady || result.ProblemCount() != 0 || result.NextAction() != input.NextAction {
 		t.Fatalf("inspect runtime summary = transports %#v readiness %q problems %d next %q", result.Transports(), result.Readiness(), result.ProblemCount(), result.NextAction())
 	}
 	if !bytes.Equal(result.ResolutionEvidenceJSON(), evidence.CanonicalJSON()) {
@@ -64,7 +64,7 @@ func TestInspectV1BuildsExactFilesystemResult(t *testing.T) {
 	wantResult := canonicalObject(t, `{
 		"project":{"module":"example.com/inspect"},
 		"configuration":{"mode":"environment","environment":"production","path":"plystra.production.yaml"},
-		"summary":{"selected_plugin_count":0,"available_capability_count":2,"required_capability_count":0,"exposed_capability_count":0,"capability_alias_count":0,"authn_active":false,"authz_active":false,"transports":["rest"]},
+		"summary":{"selected_plugin_count":0,"available_capability_count":2,"required_capability_count":0,"exposed_capability_count":0,"capability_alias_count":0,"authn_active":false,"authz_active":false,"transports":[]},
 		"readiness":{"state":"ready","problem_count":0,"next_action":`+strconv.Quote(input.NextAction)+`},
 		"resolution_evidence":`+string(evidence.CanonicalJSON())+`
 	}`)
@@ -108,12 +108,12 @@ func TestInspectV1UsesEverySelectedConfigurationMode(t *testing.T) {
 		transports    []Transport
 	}{
 		{name: "default", mode: generation.ConfigurationModeDefault, path: "plystra.yaml"},
-		{name: "environment", environment: "production", mode: generation.ConfigurationModeEnvironment, path: "plystra.production.yaml", transports: []Transport{TransportREST}},
-		{name: "explicit", configuration: "deploy/customer.yaml", mode: generation.ConfigurationModeExplicit, path: "deploy/customer.yaml", transports: []Transport{TransportConnect, TransportREST}},
+		{name: "environment", environment: "production", mode: generation.ConfigurationModeEnvironment, path: "plystra.production.yaml"},
+		{name: "explicit", configuration: "deploy/customer.yaml", mode: generation.ConfigurationModeExplicit, path: "deploy/customer.yaml"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			evidence := resolvedInspectEvidenceFor(t, test.configuration, test.environment)
+			evidence := resolvedInspectEvidenceFor(t, test.configuration, test.environment, false)
 			result, err := NewInspect(InspectInput{Evidence: evidence, NextAction: "Run plystra check to validate the selected model."})
 			if err != nil {
 				t.Fatalf("NewInspect: %v", err)
@@ -213,7 +213,7 @@ func TestInspectV1RejectsIncompleteAndUnsafeInput(t *testing.T) {
 func TestInspectV1StorageIsDefensive(t *testing.T) {
 	t.Parallel()
 
-	evidence := resolvedInspectEvidence(t)
+	evidence := resolvedInspectEvidenceFor(t, "", "production", true)
 	diagnostics := []diagnosticjson.Diagnostic{{Code: "PLYSTRA_READY", Severity: diagnosticjson.SeverityInfo, Message: "The application is ready."}}
 	sources := []diagnosticjson.Source{{Module: "example.com/inspect", Path: "plystra.production.yaml", Kind: "inspect-selection", Line: 1, Column: 1}}
 	result, err := NewInspect(InspectInput{Evidence: evidence, Diagnostics: diagnostics, Sources: sources, NextAction: "Run `plystra dev --env production` to start the application."})
@@ -224,14 +224,14 @@ func TestInspectV1StorageIsDefensive(t *testing.T) {
 	diagnostics[0].Message = "mutated"
 	sources[0].Path = "mutated"
 	transports := result.Transports()
-	transports[0] = TransportConnect
+	transports[0] = TransportREST
 	evidenceJSON := result.ResolutionEvidenceJSON()
 	evidenceJSON[0] = '['
 	resultJSON := result.Envelope().ResultJSON()
 	resultJSON[0] = '['
 	canonical := result.Envelope().CanonicalJSON()
 	canonical[0] = '['
-	if !result.Valid() || !bytes.Equal(before, result.Envelope().CanonicalJSON()) || !slices.Equal(result.Transports(), []Transport{TransportREST}) || !bytes.Equal(result.ResolutionEvidenceJSON(), evidence.CanonicalJSON()) {
+	if !result.Valid() || !bytes.Equal(before, result.Envelope().CanonicalJSON()) || !slices.Equal(result.Transports(), []Transport{TransportConnect}) || !bytes.Equal(result.ResolutionEvidenceJSON(), evidence.CanonicalJSON()) {
 		t.Fatal("inspect result storage aliases mutable input or returned data")
 	}
 	if (InspectResult{}).Valid() {
@@ -330,17 +330,20 @@ func syntheticInspectEvidence(t testing.TB, selection, assembly, transports bool
 
 func resolvedInspectEvidence(t testing.TB) resolutionevidence.Evidence {
 	t.Helper()
-	return resolvedInspectEvidenceFor(t, "", "production")
+	return resolvedInspectEvidenceFor(t, "", "production", false)
 }
 
-func resolvedInspectEvidenceFor(t testing.TB, configuration, environment string) resolutionevidence.Evidence {
+func resolvedInspectEvidenceFor(t testing.TB, configuration, environment string, expose bool) resolutionevidence.Evidence {
 	t.Helper()
 
 	root := t.TempDir()
 	writeInspectFile(t, filepath.Join(root, "go.mod"), "module example.com/inspect\n\ngo 1.26\n")
-	writeInspectFile(t, filepath.Join(root, "plystra.yaml"), "http: {address: resolved-secret-marker, transports: {connect: false}}\n")
-	writeInspectFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {transports: {rest: true}}\n")
-	writeInspectFile(t, filepath.Join(root, "deploy", "customer.yaml"), "http: {transports: {connect: true, rest: true}}\n")
+	writeInspectFile(t, filepath.Join(root, "plystra.yaml"), "http: {address: resolved-secret-marker}\n")
+	writeInspectFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {}\n")
+	if expose {
+		writeInspectFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {expose: {kernel.health/v1: {transport: connect}}}\n")
+	}
+	writeInspectFile(t, filepath.Join(root, "deploy", "customer.yaml"), "http: {}\n")
 	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
 		Start:             root,
 		ConfigurationPath: configuration,

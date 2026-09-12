@@ -111,7 +111,7 @@ func TestCheckV1SupportsEveryStatusAndConfigurationMode(t *testing.T) {
 		{name: "explicit", configuration: "deploy/customer.yaml", mode: generation.ConfigurationModeExplicit},
 	} {
 		t.Run("mode-"+test.name, func(t *testing.T) {
-			evidence := resolvedInspectEvidenceFor(t, test.configuration, test.environment)
+			evidence := resolvedInspectEvidenceFor(t, test.configuration, test.environment, false)
 			result, err := NewCheck(CheckInput{Evidence: evidence, Checks: []Check{{Order: 1, ID: "resolution", Status: CheckStatusPassed, Summary: "Resolution passed."}}})
 			if err != nil || result.Envelope().ConfigurationMode() != test.mode {
 				t.Fatalf("configuration mode = %q, %v", result.Envelope().ConfigurationMode(), err)

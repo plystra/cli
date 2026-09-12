@@ -35,7 +35,7 @@ func TestComposeDeterministicallyAppliesTypedDependencyDeclarations(t *testing.T
 		Manifest: composeManifest(t, `
 http:
   address: ":9001"
-  expose: [email.send/v1]
+  expose: {email.send/v1: {transport: connect}}
 timeouts: {startup: 1s}
 capabilities:
   require: [audit.write/v1]
@@ -54,7 +54,7 @@ config:
 		Manifest: composeManifest(t, `
 http:
   address: ":9002"
-  expose: [email.send/v1, order.create/v1]
+  expose: {email.send/v1: {transport: connect}, order.create/v1: {transport: connect}}
 timeouts: {startup: 9s}
 capabilities:
   require: [audit.write/v1]
@@ -70,7 +70,7 @@ config:
 	current := composeManifest(t, `
 http:
   address: ":8080"
-  expose: [kernel.health/v1]
+  expose: {kernel.health/v1: {transport: connect}}
 timeouts: {startup: 3s}
 capabilities:
   require: [kernel.info/v1]
@@ -166,19 +166,19 @@ config:
 	}
 }
 
-func TestComposeKeepsDependencyHTTPTransportsOutsideInheritance(t *testing.T) {
+func TestComposeKeepsDependencyExposureTransportsOutsideInheritance(t *testing.T) {
 	t.Parallel()
 
 	dependencies := []applicationmeta.Dependency{
 		{
 			ModulePath:    "example.com/connect-off",
 			ModuleVersion: "v1.0.0",
-			Manifest:      composeManifest(t, "http: {transports: {connect: false, rest: true}}\n"),
+			Manifest:      composeManifest(t, "http: {expose: {kernel.health/v1: {transport: connect}}}\n"),
 		},
 		{
 			ModulePath:    "example.com/rest-off",
 			ModuleVersion: "v2.0.0",
-			Manifest:      composeManifest(t, "http: {transports: {connect: true, rest: false}}\n"),
+			Manifest:      composeManifest(t, "http: {expose: {kernel.info/v1: {transport: connect}}}\n"),
 		},
 	}
 
@@ -188,14 +188,14 @@ func TestComposeKeepsDependencyHTTPTransportsOutsideInheritance(t *testing.T) {
 		want    applicationmeta.HTTPTransports
 	}{
 		{
-			name:    "omitted current choice uses schema defaults",
+			name:    "omitted current exposure enables no transport",
 			current: "{}\n",
-			want:    applicationmeta.HTTPTransports{Connect: true},
+			want:    applicationmeta.HTTPTransports{},
 		},
 		{
 			name:    "explicit current choice wins",
-			current: "http: {transports: {connect: false, rest: true}}\n",
-			want:    applicationmeta.HTTPTransports{REST: true},
+			current: "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
+			want:    applicationmeta.HTTPTransports{Connect: true},
 		},
 	} {
 		test := test
@@ -225,74 +225,56 @@ func TestComposeKeepsDependencyHTTPTransportsOutsideInheritance(t *testing.T) {
 	}
 }
 
-func TestComposeRequiresSelectedHTTPTransportForEffectiveExposure(t *testing.T) {
+func TestComposeDerivesTransportFromEffectiveExposure(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
 		name         string
 		dependencies []applicationmeta.Dependency
 		current      string
-		want         []string
+		want         applicationmeta.HTTPTransports
 	}{
 		{
-			name:    "empty exposure permits every transport disabled",
-			current: "http: {transports: {connect: false, rest: false}}\n",
+			name:    "empty exposure selects no transport",
+			current: "http: {}\n",
 		},
 		{
 			name:    "Connect carries exposure",
-			current: "http: {transports: {connect: true, rest: false}, expose: [kernel.health/v1]}\n",
+			current: "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
+			want:    applicationmeta.HTTPTransports{Connect: true},
 		},
 		{
-			name:    "REST carries exposure",
-			current: "http: {transports: {connect: false, rest: true}, expose: [kernel.health/v1]}\n",
-		},
-		{
-			name:    "local exposure without transport",
-			current: "http: {transports: {connect: false, rest: false}, expose: [kernel.health/v1]}\n",
-			want: []string{
-				applicationmeta.ErrHTTPTransportSelection.Error(),
-				"http.expose is nonempty",
-				"http.transports.connect and http.transports.rest are both false",
-				"enable at least one transport in the selected current-project configuration",
-				`kernel.health/v1 at plystra.yaml http.expose["kernel.health/v1"]`,
-			},
+			name:    "removed exposure selects no transport",
+			current: "http: {expose: {kernel.health/v1: null}}\n",
 		},
 		{
 			name: "dependency exposure is ignored without transport",
 			dependencies: []applicationmeta.Dependency{{
 				ModulePath:    "example.com/platform",
 				ModuleVersion: "v1.2.0",
-				Manifest:      composeManifest(t, "http: {expose: [kernel.info/v1]}\n"),
+				Manifest:      composeManifest(t, "http: {expose: {kernel.info/v1: {transport: connect}}}\n"),
 			}},
-			current: "http: {transports: {connect: false, rest: false}}\n",
+			current: "http: {}\n",
 		},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			composition, err := applicationmeta.Compose(test.dependencies, composeManifest(t, test.current), composeSchemaLookup(nil))
-			if len(test.want) == 0 {
-				if err != nil || !composition.Valid() {
-					t.Fatalf("Compose = %#v, %v", composition, err)
-				}
-				return
-			}
-			if !errors.Is(err, applicationmeta.ErrCompose) || !errors.Is(err, applicationmeta.ErrHTTPTransportSelection) || composition.Valid() {
+			if err != nil || !composition.Valid() {
 				t.Fatalf("Compose = %#v, %v", composition, err)
 			}
-			for _, want := range test.want {
-				if !strings.Contains(err.Error(), want) {
-					t.Fatalf("Compose error %q does not contain %q", err, want)
-				}
+			if got := composition.Manifest().HTTPTransports(); got != test.want {
+				t.Fatalf("HTTPTransports = %#v, want %#v", got, test.want)
 			}
 		})
 	}
 }
 
-func TestComposeReportsHTTPTransportExposureSources(t *testing.T) {
+func TestComposeRetainsExposureTransportAndSources(t *testing.T) {
 	t.Parallel()
 
-	base, err := applicationmeta.ParseSource("plystra.yaml", []byte("http: {transports: {connect: true, rest: false}, expose: [kernel.health/v1]}\n"))
+	base, err := applicationmeta.ParseSource("plystra.yaml", []byte("http: {expose: {kernel.health/v1: {transport: connect}}}\n"))
 	if err != nil {
 		t.Fatalf("ParseSource(base): %v", err)
 	}
@@ -300,7 +282,7 @@ func TestComposeReportsHTTPTransportExposureSources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WithProjectModule(base): %v", err)
 	}
-	overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte("http: {transports: {connect: false, rest: false}, expose: {add: [kernel.info/v1]}}\n"))
+	overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte("http: {expose: {kernel.info/v1: {transport: connect}}}\n"))
 	if err != nil {
 		t.Fatalf("ParseOverlaySource: %v", err)
 	}
@@ -314,23 +296,25 @@ func TestComposeReportsHTTPTransportExposureSources(t *testing.T) {
 	}
 
 	composition, err := applicationmeta.Compose(nil, selected, composeSchemaLookup(nil))
-	var selection *applicationmeta.HTTPTransportSelectionError
-	if composition.Valid() || !errors.As(err, &selection) || selection == nil || !errors.Is(err, applicationmeta.ErrCompose) || !errors.Is(err, applicationmeta.ErrHTTPTransportSelection) {
+	if !composition.Valid() || err != nil {
 		t.Fatalf("Compose = %#v, %v", composition, err)
 	}
-	exposures := selection.Exposures()
+	exposures := composition.Manifest().HTTPExposures()
 	if len(exposures) != 2 || exposures[0].ID().String() != "kernel.health/v1" || exposures[1].ID().String() != "kernel.info/v1" {
 		t.Fatalf("transport selection exposures = %#v", exposures)
 	}
 	for index, wantPath := range []string{"plystra.yaml", "plystra.production.yaml"} {
+		if exposures[index].Transport() != applicationmeta.HTTPTransportConnect {
+			t.Fatalf("exposure transport = %q", exposures[index].Transport())
+		}
 		source := exposures[index].DeclarationSource()
 		if source.ModulePath() != "example.com/application" || source.Path() != wantPath || source.Line() != 1 || source.Column() != 1 {
 			t.Fatalf("transport selection source %d = %#v", index, source)
 		}
 	}
 	exposures[0] = applicationmeta.HTTPExposure{}
-	if selection.Exposures()[0].ID().String() != "kernel.health/v1" {
-		t.Fatal("HTTPTransportSelectionError exposed mutable storage")
+	if composition.Manifest().HTTPExposures()[0].ID().String() != "kernel.health/v1" {
+		t.Fatal("Manifest exposed mutable exposure storage")
 	}
 }
 
@@ -463,7 +447,7 @@ func TestComposeAppliesExactCurrentProjectDeclarationRemovals(t *testing.T) {
 		ModuleVersion: "v1.4.0",
 		Manifest: composeManifest(t, `
 http:
-  expose: [email.send/v1]
+  expose: {email.send/v1: {transport: connect}}
 capabilities:
   require: [audit.write/v1]
   use: {email.send/v1: acme.smtp}
@@ -473,7 +457,7 @@ capabilities:
 	current := composeManifest(t, `
 http:
   address: null
-  expose: {remove: [email.send/v1]}
+  expose: {email.send/v1: null}
 timeouts: {startup: null}
 capabilities:
   require: {remove: [audit.write/v1]}
@@ -582,10 +566,10 @@ func TestComposeIgnoresDependencyHTTPExposureConflicts(t *testing.T) {
 	t.Parallel()
 
 	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/add", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "http: {expose: [email.send/v1]}\n")},
-		{ModulePath: "example.com/remove", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "http: {expose: {remove: [email.send/v1]}}\n")},
+		{ModulePath: "example.com/add", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "http: {expose: {email.send/v1: {transport: connect}}}\n")},
+		{ModulePath: "example.com/remove", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "http: {expose: {email.send/v1: null}}\n")},
 	}
-	current := composeManifest(t, "http: {transports: {connect: false, rest: true}, expose: [app.health/v1]}\n")
+	current := composeManifest(t, "http: {expose: {app.health/v1: {transport: connect}}}\n")
 	composed, err := applicationmeta.Compose(dependencies, current, composeSchemaLookup(nil))
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
@@ -606,7 +590,7 @@ func TestComposeDeduplicatesCompatibleInheritedRemovals(t *testing.T) {
 	t.Parallel()
 
 	source := `
-http: {expose: {remove: [email.send/v1]}}
+http: {expose: {email.send/v1: null}}
 capabilities:
   require: {remove: [audit.write/v1]}
   use: {email.send/v1: null}

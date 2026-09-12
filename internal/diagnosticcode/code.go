@@ -19,7 +19,6 @@ const (
 	ProjectManifestInvalid             = Prefix + "PROJECT_MANIFEST_INVALID"
 	ConfigurationInheritedConflict     = Prefix + "CONFIGURATION_INHERITED_CONFLICT"
 	ConfigurationOwnershipAmbiguous    = Prefix + "CONFIGURATION_OWNERSHIP_AMBIGUOUS"
-	HTTPTransportSelectionInvalid      = Prefix + "HTTP_TRANSPORT_SELECTION_INVALID"
 	EnvironmentOverlayInvalid          = Prefix + "ENVIRONMENT_OVERLAY_INVALID"
 	ConfigurationInvalid               = Prefix + "CONFIGURATION_INVALID"
 	PluginConfigurationUnselected      = Prefix + "PLUGIN_CONFIGURATION_UNSELECTED"

@@ -38,7 +38,6 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, app
 	} else if overlay.hasHTTPAddress {
 		httpAddress, hasHTTPAddress, removeHTTPAddress = overlay.httpAddress, true, false
 	}
-	httpTransports := overlayHTTPTransports(base.httpTransports, overlay.httpTransports)
 	httpCORS, err := overlayHTTPCORS(base.httpCORS, overlay.httpCORS)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("%w: %w", ErrApplyOverlay, err)
@@ -74,7 +73,6 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, app
 		httpAddress:                  httpAddress,
 		hasHTTPAddress:               hasHTTPAddress,
 		removeHTTPAddress:            removeHTTPAddress,
-		httpTransports:               httpTransports,
 		httpCORS:                     httpCORS,
 		httpExposures:                exposures,
 		removedHTTPExposures:         removedExposures,
@@ -96,21 +94,6 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, app
 		hasStartupTimeout:            hasStartupTimeout,
 		removeStartupTimeout:         removeStartupTimeout,
 	}, nil
-}
-
-func overlayHTTPTransports(base, overlay httpTransportLayer) httpTransportLayer {
-	result := base
-	if overlay.removeConnect {
-		result.connect, result.hasConnect, result.removeConnect = false, false, true
-	} else if overlay.hasConnect {
-		result.connect, result.hasConnect, result.removeConnect = overlay.connect, true, false
-	}
-	if overlay.removeREST {
-		result.rest, result.hasREST, result.removeREST = false, false, true
-	} else if overlay.hasREST {
-		result.rest, result.hasREST, result.removeREST = overlay.rest, true, false
-	}
-	return result
 }
 
 func overlayHTTPCORS(base, overlay httpCORSLayer) (httpCORSLayer, error) {

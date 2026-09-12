@@ -300,7 +300,7 @@ func (r InspectResult) Valid() bool {
 			CapabilityAliasCount:     r.capabilityAliasCount,
 			AuthNActive:              r.authnActive,
 			AuthZActive:              r.authzActive,
-			Transports:               append([]Transport(nil), r.transports...),
+			Transports:               append([]Transport{}, r.transports...),
 		},
 		Readiness: inspectReadiness{
 			State:        r.readiness,

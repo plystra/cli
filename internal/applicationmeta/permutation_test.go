@@ -61,7 +61,7 @@ func permutationDependencies(t testing.TB) []applicationmeta.Dependency {
 			ModuleVersion: "v1.2.0",
 			Manifest: composeManifest(t, `
 http:
-  expose: [reports.read/v1, email.send/v1]
+  expose: {reports.read/v1: {transport: connect}, email.send/v1: {transport: connect}}
 capabilities:
   require: [inventory.read/v1, audit.write/v1]
   use: {email.send/v1: acme.smtp.dependency-a}
@@ -90,14 +90,14 @@ capabilities:
   use:
     email.send/v1: acme.smtp.dependency-b
   require: [audit.write/v1]
-http: {expose: [email.send/v1]}
+http: {expose: {email.send/v1: {transport: connect}}}
 `),
 		},
 		{
 			ModulePath:    "example.com/platform/c",
 			ModuleVersion: "v0.9.0",
 			Manifest: composeManifest(t, `
-http: {expose: [order.create/v1]}
+http: {expose: {order.create/v1: {transport: connect}}}
 capabilities:
   require: [billing.charge/v1]
 config:
@@ -117,7 +117,7 @@ config:
   example.com/acme/smtp.New:
     settings: {legacy: null}
 http:
-  expose: {remove: [reports.read/v1]}
+  expose: {reports.read/v1: null}
 `),
 		},
 	}
@@ -128,13 +128,13 @@ func permutationDefaultManifest(t testing.TB) applicationmeta.Manifest {
 	return composeManifest(t, `
 http:
   address: ":8080"
-  transports: {connect: true, rest: false}
   cors:
-    allowed_origins: [https://app.example, https://admin.example]
+    allowed_origins: ['https://app.example', 'https://admin.example']
     allow_credentials: true
   expose:
-    add: [kernel.health/v1]
-    remove: [reports.read/v1]
+    kernel.health/v1:
+      transport: connect
+    reports.read/v1: null
 timeouts: {startup: 7s}
 capabilities:
   require:
@@ -156,8 +156,7 @@ func permutationEnvironmentManifest(t testing.TB, lookup applicationmeta.SchemaL
 	overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte(`
 http:
   address: ":8443"
-  transports: {rest: true}
-  expose: {add: [status.read/v1]}
+  expose: {status.read/v1: {transport: connect}}
 capabilities:
   use: {email.send/v1: acme.smtp.production}
 config:
@@ -180,7 +179,7 @@ func permutationFullReplacementManifest(t testing.TB) applicationmeta.Manifest {
 	return composeManifest(t, `
 http:
   address: ":9000"
-  expose: {remove: [reports.read/v1]}
+  expose: {reports.read/v1: null}
 capabilities:
   require: {remove: [inventory.read/v1]}
   use: {email.send/v1: acme.smtp.customer}
@@ -246,12 +245,12 @@ func compositionSnapshot(composition applicationmeta.Composition) []string {
 func assertMaintenancePermutationDeterminism(t testing.TB, lookup applicationmeta.SchemaLookup) {
 	t.Helper()
 	oldDependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "http: {expose: [email.send/v1]}\ncapabilities: {require: [audit.write/v1]}\n")},
+		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "http: {expose: {email.send/v1: {transport: connect}}}\ncapabilities: {require: [audit.write/v1]}\n")},
 		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {require: [inventory.read/v1], use: {email.send/v1: acme.smtp}, aliases: {mail.send/v1: email.send/v1}}\nconfig: {example.com/acme/smtp.New: {endpoint: dependency.example}}\n")},
 		{ModulePath: "example.com/c", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {require: [audit.write/v1], use: {email.send/v1: acme.smtp}, aliases: {mail.send/v1: email.send/v1}}\nconfig: {example.com/acme/smtp.New: {endpoint: dependency.example}}\n")},
 		{ModulePath: "example.com/d", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {port: 587}}\n")},
 	}
-	data := []byte("# current-project comment\nhttp:\n  address: \":8080\" # retained\n  expose: [kernel.health/v1]\ncapabilities:\n  require: [kernel.info/v1]\n")
+	data := []byte("# current-project comment\nhttp:\n  address: \":8080\" # retained\n  expose: {kernel.health/v1: {transport: connect}}\ncapabilities:\n  require: [kernel.info/v1]\n")
 	var maintained []byte
 	var maintainedLocalPaths []string
 	for index, ordered := range dependencyPermutations(oldDependencies) {

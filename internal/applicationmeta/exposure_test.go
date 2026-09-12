@@ -15,11 +15,11 @@ func TestAddHTTPExposurePreservesApplicationSemantics(t *testing.T) {
 
 	input := []byte(`# Application settings.
 http:
-  transports:
-    connect: false # keep the selected transport decision
-    rest: true
+  expose:
+    records.read/v1:
+      transport: connect # keep the selected transport decision
   cors:
-    allowed_origins: [https://app.example.com] # keep the CORS origin
+    allowed_origins: ['https://app.example.com'] # keep the CORS origin
     allow_credentials: true
 timeouts:
   startup: 45s
@@ -51,17 +51,17 @@ config:
 		[]byte("health.status/v1:"),
 		[]byte("email.send/v1: {timeout: 5s} # keep the Interface policy"),
 		[]byte("env: SMTP_PASSWORD"),
-		[]byte("expose:\n    - kernel.health/v1"),
+		[]byte("kernel.health/v1:\n      transport: connect"),
 	} {
 		if !bytes.Contains(updated, retained) {
 			t.Fatalf("updated manifest omits %q:\n%s", retained, updated)
 		}
 	}
 	manifest, err := applicationmeta.Parse(updated)
-	if err != nil || len(manifest.HTTPExposures()) != 1 || manifest.HTTPExposures()[0].ID() != id {
+	if err != nil || len(manifest.HTTPExposures()) != 2 || manifest.HTTPExposures()[0].ID() != id || manifest.HTTPExposures()[1].ID().String() != "records.read/v1" {
 		t.Fatalf("updated manifest exposures = %#v, %v", manifest.HTTPExposures(), err)
 	}
-	if transports := manifest.HTTPTransports(); transports != (applicationmeta.HTTPTransports{REST: true}) {
+	if transports := manifest.HTTPTransports(); transports != (applicationmeta.HTTPTransports{Connect: true}) {
 		t.Fatalf("updated HTTP transports = %#v", transports)
 	}
 	cors, exists := manifest.HTTPCORS()
@@ -82,7 +82,7 @@ config:
 func TestAddHTTPExposureSortsAndIsByteIdempotent(t *testing.T) {
 	t.Parallel()
 
-	input := []byte("http:\r\n  address: \":8080\"\r\n  expose: [records.write/v1, records.read/v1]\r\n")
+	input := []byte("http:\n  address: \":8080\"\n  expose: {records.write/v1: {transport: connect}, records.read/v1: {transport: connect}}\n")
 	updated, changed, err := applicationmeta.AddHTTPExposure(input, mustExposureID(t, "kernel.health/v1"))
 	if err != nil || !changed {
 		t.Fatalf("AddHTTPExposure = changed %t, %v", changed, err)
@@ -113,11 +113,10 @@ func TestAddHTTPExposureUpdatesSparseEditWithoutLosingRemovals(t *testing.T) {
 	input := []byte(`# Environment-specific exposure decisions.
 http:
   expose:
-    add:
-      - records.write/v1
-    remove:
-      - kernel.health/v1
-      - records.read/v1
+    records.write/v1:
+      transport: connect
+    kernel.health/v1: null
+    records.read/v1: null
 `)
 	updated, changed, err := applicationmeta.AddHTTPExposure(input, mustExposureID(t, "kernel.health/v1"))
 	if err != nil || !changed {
@@ -125,8 +124,9 @@ http:
 	}
 	for _, retained := range [][]byte{
 		[]byte("# Environment-specific exposure decisions."),
-		[]byte("add:\n      - kernel.health/v1\n      - records.write/v1"),
-		[]byte("remove:\n      - records.read/v1"),
+		[]byte("kernel.health/v1:\n      transport: connect"),
+		[]byte("records.write/v1:\n      transport: connect"),
+		[]byte("records.read/v1: null"),
 	} {
 		if !bytes.Contains(updated, retained) {
 			t.Fatalf("updated sparse edit omits %q:\n%s", retained, updated)
@@ -147,9 +147,8 @@ http:
     # Inherit allowed_origins from root.
     allow_credentials: true
   expose:
-    remove:
-      - kernel.health/v1
-      - records.read/v1
+    kernel.health/v1: null
+    records.read/v1: null
 capabilities:
   use:
     email.send/v1: acme.email.smtp # keep provider choice
@@ -162,8 +161,8 @@ capabilities:
 		[]byte("# Production-only choices."),
 		[]byte("# Inherit allowed_origins from root."),
 		[]byte("allow_credentials: true"),
-		[]byte("add:\n      - kernel.health/v1"),
-		[]byte("remove:\n      - records.read/v1"),
+		[]byte("kernel.health/v1:\n      transport: connect"),
+		[]byte("records.read/v1: null"),
 		[]byte("email.send/v1: acme.email.smtp # keep provider choice"),
 	} {
 		if !bytes.Contains(updated, retained) {
@@ -189,7 +188,7 @@ func TestAddHTTPExposureRejectsInvalidInputsWithoutPartialOutput(t *testing.T) {
 	}{
 		{name: "empty Interface", data: []byte("{}\n")},
 		{name: "invalid manifest", data: []byte("unknown: true\n"), id: mustExposureID(t, "kernel.health/v1")},
-		{name: "duplicate exposure", data: []byte("http: {expose: [kernel.health/v1, kernel.health/v1]}\n"), id: mustExposureID(t, "kernel.info/v1")},
+		{name: "duplicate exposure", data: []byte("http: {expose: {kernel.health/v1: {transport: connect}, kernel.health/v1: {transport: connect}}}\n"), id: mustExposureID(t, "kernel.info/v1")},
 	}
 	for _, test := range tests {
 		test := test

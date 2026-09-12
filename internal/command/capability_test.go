@@ -375,7 +375,7 @@ func TestRunCapabilityExposeSelectsEnvironmentAndReplacementConfiguration(t *tes
 	root := writeCapabilityCommandModule(t)
 	pluginRoot := filepath.Join(root, "records")
 	rootData := "# Shared defaults.\n{}\n"
-	productionData := "# Production choices.\nhttp:\n  expose:\n    remove: [kernel.health/v1, kernel.info/v1]\n"
+	productionData := "# Production choices.\nhttp:\n  expose:\n    kernel.health/v1: null\n    kernel.info/v1: null\n"
 	stagingData := "# Staging choices.\n{}\n"
 	customerData := "# Customer A.\n{}\n"
 	automationData := "# Automation.\n{}\n"
@@ -396,7 +396,7 @@ func TestRunCapabilityExposeSelectsEnvironmentAndReplacementConfiguration(t *tes
 		t.Fatalf("explicit environment expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	production := string(readCommandFile(t, root, "plystra.production.yaml"))
-	for _, retained := range []string{"# Production choices.", "add:\n      - kernel.health/v1", "remove: [kernel.info/v1]"} {
+	for _, retained := range []string{"# Production choices.", "kernel.health/v1:\n      transport: connect", "kernel.info/v1: null"} {
 		if !strings.Contains(production, retained) {
 			t.Fatalf("production overlay omits %q:\n%s", retained, production)
 		}
@@ -502,18 +502,19 @@ func TestRunCapabilityExposeRejectsUnsafeOrMissingSelectionWithoutMutation(t *te
 	}
 }
 
-func TestRunCapabilityExposeRejectsMissingHTTPTransportAndRollsBack(t *testing.T) {
+func TestRunCapabilityExposeRejectsSupersededHTTPTransportConfigurationWithoutMutation(t *testing.T) {
 	root := writeCapabilityCommandModule(t)
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {transports: {connect: false, rest: false}}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {transports: {connect: true}}\n")
 	before := commandTree(t, root)
 
 	for _, test := range []struct {
-		name       string
-		arguments  []string
-		capability string
+		name      string
+		arguments []string
+		kind      string
+		code      string
 	}{
-		{name: "standalone exposure", arguments: []string{"capability", "expose", "kernel.health/v1"}, capability: "kernel.health/v1"},
-		{name: "authored exposure", arguments: []string{"capability", "create", "records.disabled", "--query", "--expose", "--plugin", "records"}, capability: "records.disabled/v1"},
+		{name: "standalone exposure", arguments: []string{"capability", "expose", "kernel.health/v1"}, kind: "project-marker", code: diagnosticcode.ProjectManifestInvalid},
+		{name: "authored exposure", arguments: []string{"capability", "create", "records.disabled", "--query", "--expose", "--plugin", "records"}, kind: "configuration-declaration", code: diagnosticcode.ConfigurationInvalid},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			exitCode, stdout, stderr := runCommand(t, test.arguments, filepath.Join(root, "records"), commandGoEnvironment())
@@ -521,13 +522,9 @@ func TestRunCapabilityExposeRejectsMissingHTTPTransportAndRollsBack(t *testing.T
 				t.Fatalf("command = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 			}
 			for _, want := range []string{
-				"invalid HTTP transport selection",
-				"http.expose is nonempty",
-				"http.transports.connect and http.transports.rest are both false",
-				"enable at least one transport in the selected current-project configuration",
-				test.capability + ` at plystra.yaml http.expose["` + test.capability + `"]`,
-				"Source: example.com/acme/library:plystra.yaml:1:1 (exposure)",
-				"Diagnostic: " + diagnosticcode.HTTPTransportSelectionInvalid,
+				`http contains unknown key "transports"`,
+				"Source: example.com/acme/library:plystra.yaml:1:1 (" + test.kind + ")",
+				"Diagnostic: " + test.code,
 			} {
 				if !strings.Contains(stderr, want) {
 					t.Fatalf("stderr %q does not contain %q", stderr, want)

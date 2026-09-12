@@ -18,9 +18,7 @@ func TestGeneratedInterfaceCallsKeepConnectExternal(t *testing.T) {
 	writeApplicationModule(t, root, modulePath)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `interfaces:
   require: [records.echo/v1]
-http:
-  transports:
-    connect: false
+http: {}
 `)
 	writeFile(t, filepath.Join(root, "interfaces", "records", "echo", "v1", "interface.go"), `package echov1
 
@@ -205,9 +203,7 @@ func kernelError(code kernelinvocation.ErrorCode) error {
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `interfaces:
   require: [records.echo/v1]
 http:
-  transports:
-    connect: true
-  expose: [records.echo/v1]
+  expose: {records.echo/v1: {transport: connect}}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

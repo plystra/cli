@@ -60,7 +60,7 @@ func TestInspectHumanOutputIsConciseAndReadOnlyFromNestedDirectory(t *testing.T)
 		"Capabilities: 2 available, 0 required, 0 exposed, 0 aliases\n" +
 		"AuthN: inactive\n" +
 		"AuthZ: inactive\n" +
-		"Transports: connect\n" +
+		"Transports: none\n" +
 		"Readiness: ready (0 problems)\n" +
 		"Next action: Run plystra check to validate the selected model.\n"
 	if exitCode != 0 || stdout != want || stderr != "" {
@@ -91,7 +91,7 @@ func TestInspectJSONOwnsStdoutAndIsDeterministic(t *testing.T) {
 	if document.Result.Project.Module != "example.com/acme/inspect" || document.Result.Configuration.Mode != "default" || document.Result.Configuration.Path != "plystra.yaml" {
 		t.Fatalf("inspect result identity = %#v", document.Result)
 	}
-	if document.Result.Summary.SelectedPluginCount != 0 || document.Result.Summary.AvailableCapabilityCount != 2 || !reflect.DeepEqual(document.Result.Summary.Transports, []string{"connect"}) {
+	if document.Result.Summary.SelectedPluginCount != 0 || document.Result.Summary.AvailableCapabilityCount != 2 || !reflect.DeepEqual(document.Result.Summary.Transports, []string{}) {
 		t.Fatalf("inspect summary = %#v", document.Result.Summary)
 	}
 	if document.Result.Readiness.State != "ready" || document.Result.Readiness.ProblemCount != 0 || document.Result.Readiness.NextAction != "Run plystra check to validate the selected model." || len(document.Result.ResolutionEvidence) == 0 {
@@ -123,7 +123,7 @@ func TestInspectSelectorsUseOneSharedSelectedModel(t *testing.T) {
 			mode:        "environment",
 			selectedEnv: "production",
 			path:        "plystra.production.yaml",
-			transports:  []string{"rest"},
+			transports:  []string{"connect"},
 			nextAction:  "Run plystra check --env \"production\" to validate the selected model.",
 		},
 		{
@@ -133,7 +133,7 @@ func TestInspectSelectorsUseOneSharedSelectedModel(t *testing.T) {
 			mode:        "environment",
 			selectedEnv: "production",
 			path:        "plystra.production.yaml",
-			transports:  []string{"rest"},
+			transports:  []string{"connect"},
 			nextAction:  "Run plystra check --env \"production\" to validate the selected model.",
 		},
 		{
@@ -142,7 +142,7 @@ func TestInspectSelectorsUseOneSharedSelectedModel(t *testing.T) {
 			environment: map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"},
 			mode:        "explicit-config",
 			path:        "deploy/customer.yaml",
-			transports:  []string{"connect", "rest"},
+			transports:  []string{"connect"},
 			nextAction:  "Run plystra check --config \"deploy/customer.yaml\" to validate the selected model.",
 		},
 		{
@@ -151,7 +151,7 @@ func TestInspectSelectorsUseOneSharedSelectedModel(t *testing.T) {
 			environment: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"},
 			mode:        "explicit-config",
 			path:        "deploy/customer.yaml",
-			transports:  []string{"connect", "rest"},
+			transports:  []string{"connect"},
 			nextAction:  "Run plystra check --config \"deploy/customer.yaml\" to validate the selected model.",
 		},
 	}
@@ -179,7 +179,7 @@ func TestInspectVerboseIncludesCompleteIndentedEvidence(t *testing.T) {
 	exitCode, stdout, stderr := runCommand(t, []string{"inspect", "--verbose", "--env", "production"}, root, inspectCommandEnvironment(nil))
 	for _, fragment := range []string{
 		"Configuration: environment \"production\" (plystra.production.yaml)\n",
-		"Transports: rest\n",
+		"Transports: connect\n",
 		"Resolution evidence:\n  {\n",
 		"    \"modules\": [",
 		"    \"configuration_selection\": {",
@@ -227,9 +227,9 @@ func createInspectCommandProject(t testing.TB) (string, string) {
 	t.Helper()
 	root := t.TempDir()
 	writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/acme/inspect\n\ngo 1.26\n")
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http:\n  address: resolved-secret-marker\n  transports:\n    connect: true\n    rest: false\n")
-	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "http:\n  transports:\n    connect: false\n    rest: true\n")
-	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), "http:\n  transports:\n    connect: true\n    rest: true\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http:\n  address: resolved-secret-marker\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {expose: {kernel.health/v1: {transport: connect}}}\n")
+	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), "http: {expose: {kernel.info/v1: {transport: connect}}}\n")
 	nested := filepath.Join(root, "nested")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatalf("MkdirAll(%s): %v", nested, err)
