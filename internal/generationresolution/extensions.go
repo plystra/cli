@@ -116,6 +116,33 @@ func (e *ExtensionPackageSourceError) Unwrap() error {
 	return e.cause
 }
 
+// ExtensionDiagnosticError retains the generation rules that returned one or
+// more structured error diagnostics without changing the established public
+// error text or sentinel chain.
+type ExtensionDiagnosticError struct {
+	diagnostics        []string
+	requirementSources []providerresolution.RequirementSource
+}
+
+// RequirementSources returns defensive typed provenance for every distinct
+// generation rule that returned an error diagnostic.
+func (e *ExtensionDiagnosticError) RequirementSources() []providerresolution.RequirementSource {
+	if e == nil {
+		return nil
+	}
+	return append([]providerresolution.RequirementSource(nil), e.requirementSources...)
+}
+
+func (e *ExtensionDiagnosticError) Error() string {
+	if e == nil || len(e.diagnostics) == 0 {
+		return ErrExtensionDiagnostic.Error()
+	}
+	return fmt.Sprintf("%s: %s", ErrExtensionDiagnostic, strings.Join(e.diagnostics, "; "))
+}
+
+// Unwrap supports errors.Is with ErrExtensionDiagnostic.
+func (*ExtensionDiagnosticError) Unwrap() error { return ErrExtensionDiagnostic }
+
 // Plugin supplies one visible plugin's supported public generation context
 // together with CLI-private selection and filesystem provenance. Local marks a
 // root-level application plugin, which is included independently of provider
@@ -538,7 +565,7 @@ func resolveExtensionsWithinPassLimit(ctx context.Context, input ExtensionInput,
 		if err != nil {
 			return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w", ErrResolveExtensions, pass, err)
 		}
-		if err := rejectErrorDiagnostics(outputs); err != nil {
+		if err := rejectErrorDiagnostics(outputs, plugins); err != nil {
 			return ExtensionResult{}, fmt.Errorf("%w: pass %d: %w", ErrResolveExtensions, pass, err)
 		}
 
@@ -1114,8 +1141,9 @@ func allowedOutputSource(allowed map[string]map[string]struct{}, namespace, sour
 	return exists
 }
 
-func rejectErrorDiagnostics(outputs []ExtensionOutput) error {
+func rejectErrorDiagnostics(outputs []ExtensionOutput, plugins map[string]Plugin) error {
 	var diagnostics []string
+	var sources []providerresolution.RequirementSource
 	for _, output := range outputs {
 		for _, diagnostic := range output.output.Diagnostics() {
 			if diagnostic.Severity != generation.DiagnosticError {
@@ -1130,12 +1158,24 @@ func rejectErrorDiagnostics(outputs []ExtensionOutput) error {
 				diagnostic.Source.String(),
 				diagnostic.Message,
 			))
+			if plugin, exists := plugins[output.pluginID]; exists {
+				sources = append(sources, generationRuleSource(
+					output.pluginID,
+					diagnostic.Namespace,
+					diagnostic.Source.String(),
+					diagnostic.RuleID,
+					plugin,
+				))
+			}
 		}
 	}
 	if len(diagnostics) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%w: %s", ErrExtensionDiagnostic, strings.Join(diagnostics, "; "))
+	return &ExtensionDiagnosticError{
+		diagnostics:        append([]string(nil), diagnostics...),
+		requirementSources: uniqueSortedRequirementSources(sources),
+	}
 }
 
 func generatedRequirement(pluginID string, requirement generation.Requirement) (GeneratedRequirement, error) {
@@ -1251,6 +1291,38 @@ func generationRuleSource(pluginID, namespace, sourceCapability, ruleID string, 
 		SourceCapability: sourceCapability,
 		RuleID:           ruleID,
 	}
+}
+
+func uniqueSortedRequirementSources(values []providerresolution.RequirementSource) []providerresolution.RequirementSource {
+	result := append([]providerresolution.RequirementSource(nil), values...)
+	sort.Slice(result, func(left, right int) bool {
+		return requirementSourceIdentity(result[left]) < requirementSourceIdentity(result[right])
+	})
+	write := 0
+	for _, value := range result {
+		if write != 0 && result[write-1] == value {
+			continue
+		}
+		result[write] = value
+		write++
+	}
+	return append([]providerresolution.RequirementSource(nil), result[:write]...)
+}
+
+func requirementSourceIdentity(value providerresolution.RequirementSource) string {
+	return strings.Join([]string{
+		string(value.Kind),
+		value.ModulePath,
+		value.Path,
+		fmt.Sprintf("%010d", value.Line),
+		fmt.Sprintf("%010d", value.Column),
+		value.PluginID,
+		value.Alias,
+		value.Namespace,
+		value.SourceCapability,
+		value.RuleID,
+		value.Reference,
+	}, "\x00")
 }
 
 func extensionOutputDigest(outputs []ExtensionOutput) string {

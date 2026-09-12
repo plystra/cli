@@ -632,13 +632,13 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			seen[candidate] = struct{}{}
 			sources = append(sources, candidate)
 		}
-	case diagnosticGenerationNonconvergent:
-		var convergence diagnosticRequirementSources
-		if !errors.As(err, &convergence) || convergence == nil {
+	case diagnosticGenerationNonconvergent, diagnosticGenerationExtensionDiagnostic:
+		var reported diagnosticRequirementSources
+		if !errors.As(err, &reported) || reported == nil {
 			return nil
 		}
 		seen := make(map[diagnosticjson.Source]struct{})
-		for _, source := range convergence.RequirementSources() {
+		for _, source := range reported.RequirementSources() {
 			candidate := diagnosticjson.Source{
 				Module: source.ModulePath,
 				Path:   source.Path,

@@ -2147,6 +2147,15 @@ extensions and rules that added no requirement in that growth pass are
 excluded, and a bare internal sentinel remains source-less. Remove or bound the
 reported generation-rule chain so it reaches a stable closure within the
 finite catalog-derived pass bound.
+`PLYSTRA_GENERATION_EXTENSION_DIAGNOSTIC` emits the typed `generation-rule`
+sources for every distinct selected-extension rule that returned a structured
+error diagnostic. Each source identifies the selected extension owner's
+Project module and module-relative `plugin.yaml` at `1:1`. Shared
+canonicalization sorts the sources and collapses multiple error diagnostics or
+rules from one declaration to one human location. Info and warning diagnostics
+do not fail generation, and a bare internal sentinel remains source-less. Fix
+the reported selected generation package so its error diagnostics are resolved,
+then rerun the same command.
 `PLYSTRA_GENERATION_API_UNSUPPORTED` emits the exact unsupported
 `generation.api` scalar at its current-Project or dependency-Project
 `plugin.yaml` position as a `plugin-declaration` source. A bare helper or
@@ -2641,6 +2650,19 @@ so those rules stop introducing an unbounded chain of previously unseen
 requirements. Multiple rules from one declaration share one canonical source;
 stable extensions and a bare internal convergence sentinel have no source to
 invent.
+
+### Generation extension reports an error diagnostic
+
+`PLYSTRA_GENERATION_EXTENSION_DIAGNOSTIC` points to every distinct selected
+generation rule that returned a structured error diagnostic. The retained typed
+facts identify Plugin ID, namespace, source Capability, rule ID, owning Project
+module, and the module-relative `plugin.yaml` at `1:1`; human output sorts and
+deduplicates rules owned by the same declaration. Info and warning diagnostics
+do not reject generation. Use the reported Plugin declaration to find its
+selected generation package, resolve the error diagnostics named in the problem
+text, and rerun generation or checking. A bare internal sentinel has no rule
+source to invent, and the CLI never substitutes the `generation.package` scalar
+for this semantic rule provenance.
 
 ### Unsupported generation API
 

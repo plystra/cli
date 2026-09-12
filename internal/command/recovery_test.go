@@ -363,6 +363,8 @@ func TestWriteCommandFailureDoesNotInventUnavailableSources(t *testing.T) {
 		{name: "generation invalid output without typed declaration", err: fmt.Errorf("resolve generation: %w", generationexec.ErrInvalidOutput), code: diagnosticGenerationOutputInvalid},
 		{name: "generation compile timeout without typed declaration", err: fmt.Errorf("resolve generation: %w", errors.Join(generationexec.ErrCompile, generationexec.ErrTimeout)), code: diagnosticGenerationTimeout},
 		{name: "generation extension diagnostic without typed rule", err: fmt.Errorf("resolve generation: %w", generationresolution.ErrExtensionDiagnostic), code: diagnosticGenerationExtensionDiagnostic},
+		{name: "zero generation extension diagnostic", err: fmt.Errorf("resolve generation: %w", &generationresolution.ExtensionDiagnosticError{}), code: diagnosticGenerationExtensionDiagnostic},
+		{name: "nil generation extension diagnostic", err: fmt.Errorf("resolve generation: %w", (*generationresolution.ExtensionDiagnosticError)(nil)), code: diagnosticGenerationExtensionDiagnostic},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
@@ -486,6 +488,54 @@ func TestWriteCommandFailureCanonicalizesNonconvergentGenerationSources(t *testi
 		"Diagnostic: " + diagnosticGenerationNonconvergent + "\n"
 	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 2 {
 		t.Fatalf("nonconvergent generation output = %q, want suffix %q", got, wantSuffix)
+	}
+}
+
+func TestWriteCommandFailureCanonicalizesExtensionDiagnosticSources(t *testing.T) {
+	t.Parallel()
+
+	authz := providerresolution.RequirementSource{
+		Kind:             providerresolution.RequirementGenerationRule,
+		Reference:        "generation authz diagnostic",
+		ModulePath:       "example.com/z-security",
+		Path:             "shared/plugin.yaml",
+		Line:             1,
+		Column:           1,
+		PluginID:         "example.authz",
+		Namespace:        "authz",
+		SourceCapability: "order.create/v1",
+		RuleID:           "authz.validate",
+	}
+	authnValidate := providerresolution.RequirementSource{
+		Kind:             providerresolution.RequirementGenerationRule,
+		Reference:        "generation authn validation diagnostic",
+		ModulePath:       "example.com/a-security",
+		Path:             "authn/plugin.yaml",
+		Line:             1,
+		Column:           1,
+		PluginID:         "example.authn",
+		Namespace:        "authn",
+		SourceCapability: "order.create/v1",
+		RuleID:           "authn.validate",
+	}
+	authnRequire := authnValidate
+	authnRequire.Reference = "generation authn requirement diagnostic"
+	authnRequire.RuleID = "authn.require-session"
+	failure := &recoveryRequirementSourceError{
+		cause:   generationresolution.ErrExtensionDiagnostic,
+		sources: []providerresolution.RequirementSource{authz, authnValidate, authnRequire, authz},
+	}
+
+	var output strings.Builder
+	writeCommandFailure(&output, "generate", fmt.Errorf("resolve application: %w", failure), recoveryContext{})
+	got := output.String()
+	wantSuffix := "\n\n" +
+		"Source: example.com/a-security:authn/plugin.yaml:1:1 (generation-rule)\n" +
+		"Source: example.com/z-security:shared/plugin.yaml:1:1 (generation-rule)\n\n" +
+		"Recovery:\nFix the selected generation package reported above, then rerun the command.\n\n" +
+		"Diagnostic: " + diagnosticGenerationExtensionDiagnostic + "\n"
+	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 2 || strings.Contains(got, "plugin-declaration") {
+		t.Fatalf("generation extension diagnostic output = %q, want suffix %q", got, wantSuffix)
 	}
 }
 

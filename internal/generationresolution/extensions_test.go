@@ -47,6 +47,13 @@ func TestResolveExtensionsBuildsStableGeneratedRequirementClosure(t *testing.T) 
 						Namespace: "authn",
 						Source:    extensionTestCapabilityID(t, "order.create/v1"),
 						RuleID:    "authn.require-audit",
+					}, {
+						Code:      "authn.advisory",
+						Severity:  generation.DiagnosticWarning,
+						Message:   "authentication metadata is discouraged",
+						Namespace: "authn",
+						Source:    extensionTestCapabilityID(t, "order.create/v1"),
+						RuleID:    "authn.observe",
 					}},
 					Contributions: []generation.Contribution{{
 						ID:        "authn.verify",
@@ -100,8 +107,13 @@ func TestResolveExtensionsBuildsStableGeneratedRequirementClosure(t *testing.T) 
 		t.Fatalf("GeneratedRequirements = %#v", generated)
 	}
 	outputs := result.Outputs()
-	if len(outputs) != 1 || outputs[0].PluginID() != "example.authn" || outputs[0].API() != "v1" || outputs[0].Package() != "./generation" || !slices.Equal(outputs[0].Namespaces(), []string{"authn"}) || len(outputs[0].Output().Diagnostics()) != 1 {
+	if len(outputs) != 1 || outputs[0].PluginID() != "example.authn" || outputs[0].API() != "v1" || outputs[0].Package() != "./generation" || !slices.Equal(outputs[0].Namespaces(), []string{"authn"}) || len(outputs[0].Output().Diagnostics()) != 2 {
 		t.Fatalf("Outputs = %#v", outputs)
+	}
+	if diagnostics := outputs[0].Output().Diagnostics(); !slices.ContainsFunc(diagnostics, func(diagnostic generation.Diagnostic) bool {
+		return diagnostic.Severity == generation.DiagnosticWarning
+	}) {
+		t.Fatalf("successful resolution discarded warning diagnostics: %#v", diagnostics)
 	}
 	contributions := result.Contributions()
 	if len(contributions) != 1 || contributions[0].PluginID() != "example.authn" || contributions[0].ID() != "authn.verify" || contributions[0].Namespace() != "authn" || contributions[0].Source().String() != "order.create/v1" || contributions[0].Point() != generation.GenerationPointInvocationPrepare || !slices.Equal(contributions[0].Provides(), []generation.ContributionToken{"verified-authn-context"}) {
@@ -966,34 +978,88 @@ func TestResolveExtensionsRejectsOutputOutsideSelectedActivationInputs(t *testin
 }
 
 func TestResolveExtensionsFailsOnStructuredErrorDiagnostic(t *testing.T) {
-	order := extensionTestContract(t, "order.create/v1", "extensions:\n  authn: {authenticated: true}\n")
+	order := extensionTestContract(t, "order.create/v1", "extensions:\n  authn: {authenticated: true}\n  audit: {event: order.created}\n")
 	verify := extensionTestContract(t, "authn.session.verify/v1", "")
+	audit := extensionTestContract(t, "audit.write/v1", "")
 	input := ExtensionInput{
 		Input: Input{
 			Requirements: []providerresolution.Requirement{{Contract: order, Source: extensionRequirementSource("order route")}},
 			Candidates: []providerresolution.Candidate{
 				{PluginID: "example.business", Contract: order, Source: "business/order.create"},
 				{PluginID: "example.authn", Contract: verify, Source: "authn/session.verify"},
+				{PluginID: "example.audit", Contract: audit, Source: "audit/audit.write"},
 			},
-			Activations: extensionTestCatalog(t, extensionTestDeclaration(t, "example.authn", "authn", "authn.session.verify/v1")),
+			Activations: extensionTestCatalog(
+				t,
+				extensionTestDeclaration(t, "example.authn", "authn", "authn.session.verify/v1"),
+				extensionTestDeclaration(t, "example.audit", "audit", "audit.write/v1"),
+			),
 		},
 		Plugins: []Plugin{
 			extensionTestPlugin("example.business", "business", "order.create/v1"),
 			extensionTestPlugin("example.authn", "authn", "authn.session.verify/v1"),
+			extensionTestPlugin("example.audit", "audit", "audit.write/v1"),
 		},
-		Capabilities: []generation.CapabilityInput{{ContractJSON: order}, {ContractJSON: verify}},
+		Capabilities: []generation.CapabilityInput{{ContractJSON: order}, {ContractJSON: verify}, {ContractJSON: audit}},
 	}
+	orderID := extensionTestCapabilityID(t, "order.create/v1")
 	builder := newFakeExtensionBuilder(map[string]*fakeExtensionHelper{
-		"example.authn": {
+		"example.audit": {
 			output: func(_ int, _ generation.Context) (generation.Output, error) {
 				return generation.Output{Diagnostics: []generation.Diagnostic{{
-					Code:      "authn.unsupported",
+					Code:      "audit.required",
 					Severity:  generation.DiagnosticError,
-					Message:   "authentication metadata is unsupported",
-					Namespace: "authn",
-					Source:    extensionTestCapabilityID(t, "order.create/v1"),
-					RuleID:    "authn.validate",
+					Message:   "audit metadata is required",
+					Namespace: "audit",
+					Source:    orderID,
+					RuleID:    "audit.validate",
 				}}}, nil
+			},
+		},
+		"example.authn": {
+			output: func(_ int, _ generation.Context) (generation.Output, error) {
+				return generation.Output{Diagnostics: []generation.Diagnostic{
+					{
+						Code:      "authn.unsupported",
+						Severity:  generation.DiagnosticError,
+						Message:   "authentication metadata is unsupported",
+						Namespace: "authn",
+						Source:    orderID,
+						RuleID:    "authn.validate",
+					},
+					{
+						Code:      "authn.denied",
+						Severity:  generation.DiagnosticError,
+						Message:   "authentication metadata is denied",
+						Namespace: "authn",
+						Source:    orderID,
+						RuleID:    "authn.validate",
+					},
+					{
+						Code:      "authn.required",
+						Severity:  generation.DiagnosticError,
+						Message:   "authentication metadata is required",
+						Namespace: "authn",
+						Source:    orderID,
+						RuleID:    "authn.require-session",
+					},
+					{
+						Code:      "authn.advisory",
+						Severity:  generation.DiagnosticWarning,
+						Message:   "authentication metadata is discouraged",
+						Namespace: "authn",
+						Source:    orderID,
+						RuleID:    "authn.observe",
+					},
+					{
+						Code:      "authn.observed",
+						Severity:  generation.DiagnosticInfo,
+						Message:   "authentication metadata was observed",
+						Namespace: "authn",
+						Source:    orderID,
+						RuleID:    "authn.observe",
+					},
+				}}, nil
 			},
 		},
 	})
@@ -1001,10 +1067,84 @@ func TestResolveExtensionsFailsOnStructuredErrorDiagnostic(t *testing.T) {
 	if !errors.Is(err, ErrExtensionDiagnostic) {
 		t.Fatalf("error diagnostic result = %v", err)
 	}
-	for _, detail := range []string{"example.authn", "authn.unsupported", "authn.validate", "extensions.authn", "order.create/v1", "authentication metadata is unsupported"} {
+	for _, detail := range []string{"example.audit", "audit.required", "audit.validate", "extensions.audit", "example.authn", "authn.unsupported", "authn.denied", "authn.required", "authn.validate", "authn.require-session", "extensions.authn", "order.create/v1", "authentication metadata is unsupported"} {
 		if !strings.Contains(err.Error(), detail) {
 			t.Fatalf("diagnostic error omits %q: %v", detail, err)
 		}
+	}
+	for _, excluded := range []string{"authn.advisory", "authn.observed", "authentication metadata is discouraged", "authentication metadata was observed"} {
+		if strings.Contains(err.Error(), excluded) {
+			t.Fatalf("diagnostic error includes non-error detail %q: %v", excluded, err)
+		}
+	}
+
+	var diagnostic *ExtensionDiagnosticError
+	if !errors.As(err, &diagnostic) || diagnostic == nil {
+		t.Fatalf("error diagnostic type = %T, %v", err, err)
+	}
+	wantSources := []providerresolution.RequirementSource{
+		{
+			Kind:             providerresolution.RequirementGenerationRule,
+			Reference:        `generation plugin "example.audit" rule "audit.validate" extensions.audit on order.create/v1`,
+			ModulePath:       "example.com/application",
+			Path:             "audit/plugin.yaml",
+			Line:             1,
+			Column:           1,
+			PluginID:         "example.audit",
+			Namespace:        "audit",
+			SourceCapability: "order.create/v1",
+			RuleID:           "audit.validate",
+		},
+		{
+			Kind:             providerresolution.RequirementGenerationRule,
+			Reference:        `generation plugin "example.authn" rule "authn.require-session" extensions.authn on order.create/v1`,
+			ModulePath:       "example.com/application",
+			Path:             "authn/plugin.yaml",
+			Line:             1,
+			Column:           1,
+			PluginID:         "example.authn",
+			Namespace:        "authn",
+			SourceCapability: "order.create/v1",
+			RuleID:           "authn.require-session",
+		},
+		{
+			Kind:             providerresolution.RequirementGenerationRule,
+			Reference:        `generation plugin "example.authn" rule "authn.validate" extensions.authn on order.create/v1`,
+			ModulePath:       "example.com/application",
+			Path:             "authn/plugin.yaml",
+			Line:             1,
+			Column:           1,
+			PluginID:         "example.authn",
+			Namespace:        "authn",
+			SourceCapability: "order.create/v1",
+			RuleID:           "authn.validate",
+		},
+	}
+	sources := diagnostic.RequirementSources()
+	if !slices.Equal(sources, wantSources) {
+		t.Fatalf("error diagnostic sources = %#v, want %#v", sources, wantSources)
+	}
+	sources[0] = providerresolution.RequirementSource{}
+	if !slices.Equal(diagnostic.RequirementSources(), wantSources) {
+		t.Fatalf("error diagnostic sources were mutable: %#v", diagnostic.RequirementSources())
+	}
+
+	slices.Reverse(input.Plugins)
+	slices.Reverse(input.Candidates)
+	slices.Reverse(input.Capabilities)
+	helpers := make(map[string]*fakeExtensionHelper)
+	for pluginID, helper := range builder.helpers {
+		output := helper.output
+		helpers[pluginID] = &fakeExtensionHelper{output: func(call int, ctx generation.Context) (generation.Output, error) {
+			result, err := output(call, ctx)
+			slices.Reverse(result.Diagnostics)
+			return result, err
+		}}
+	}
+	_, reorderedError := resolveExtensions(t.Context(), input, newFakeExtensionBuilder(helpers).Build)
+	var reorderedDiagnostic *ExtensionDiagnosticError
+	if !errors.As(reorderedError, &reorderedDiagnostic) || reorderedError.Error() != err.Error() || !slices.Equal(reorderedDiagnostic.RequirementSources(), wantSources) {
+		t.Fatalf("permuted inputs changed error diagnostics: %v", reorderedError)
 	}
 }
 

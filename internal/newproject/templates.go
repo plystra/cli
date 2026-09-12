@@ -147,6 +147,8 @@ Common actionable Plystra CLI failures end with exactly one ` + "`Recovery:`" + 
 
 ` + "`PLYSTRA_GENERATION_NONCONVERGENT`" + ` reports the typed ` + "`generation-rule`" + ` sources from the most recent pass that introduced previously unseen canonical requirements. Each source identifies the selected extension owner's Project module and module-relative ` + "`plugin.yaml`" + ` at ` + "`1:1`" + `; shared canonicalization sorts the sources and deduplicates multiple rules from one declaration. Stable extensions and rules that added no requirement in that growth pass are excluded, and the bare internal sentinel remains source-less. Remove or bound the reported generation-rule chain so it reaches a stable closure within the finite catalog-derived pass bound.
 
+` + "`PLYSTRA_GENERATION_EXTENSION_DIAGNOSTIC`" + ` reports the typed ` + "`generation-rule`" + ` sources for every distinct selected-extension rule that returned a structured error diagnostic. Each source identifies the selected extension owner's Project module and module-relative ` + "`plugin.yaml`" + ` at ` + "`1:1`" + `; shared canonicalization sorts the sources and collapses multiple error diagnostics or rules from one declaration to one human location. Info and warning diagnostics do not fail generation, and the bare internal sentinel remains source-less. Fix the reported selected generation package so its error diagnostics are resolved, then rerun the same command.
+
 ` + "`PLYSTRA_GENERATION_API_UNSUPPORTED`" + ` reports the exact unsupported ` + "`generation.api`" + ` scalar at its current-Project or dependency-Project ` + "`plugin.yaml`" + ` position as a ` + "`plugin-declaration`" + ` source. A bare helper or manifest API sentinel remains source-less rather than inventing a declaration. Change the reported declaration to the supported generation API, then rerun the same command.
 
 ` + "`PLYSTRA_GENERATION_PACKAGE_INVALID`" + ` reports the exact ` + "`generation.package`" + ` scalar at its current-Project or dependency-Project ` + "`plugin.yaml`" + ` position as a ` + "`plugin-declaration`" + ` source. A bare package sentinel remains source-less rather than inventing a declaration. Create a real non-symbolic Go package at the reported confined path or update the declaration to an existing safe package, then rerun the same command.
@@ -1463,24 +1465,23 @@ Run the narrowest relevant test first, then the complete module checks:
     go build ./...
     go mod verify
 
-Plystra inspect reads the selected model without mutation. Default output
-summarizes configuration, Plugin/Capability counts, AuthN/AuthZ, transports,
-readiness, and the matching check action. Use --verbose for complete evidence
-or --format json for one plystra.inspect v1 document; JSON diagnostics stay on
-stderr. Keep one --env or --config selector across inspect, generate, check,
-and generated application startup.
+Plystra inspect is read-only. It summarizes configuration, Plugin/Capability
+counts, AuthN/AuthZ, transports, readiness, and the matching check action. Use
+--verbose for complete evidence or --format json for one plystra.inspect v1
+document; JSON diagnostics stay on stderr. Reuse one --env or --config selector
+across inspect, generate, check, and application startup.
 
-Plystra check verifies the selected configuration and generated fixed point,
-then runs go test -mod=readonly ./... from the Project root. Use the same --env
-or --config selector used for generation. The command is read-only and never
-repairs YAML, generated output, or module metadata.
+Plystra check is read-only: it verifies selected configuration and the generated
+fixed point, then runs go test -mod=readonly ./... from the Project root. Reuse
+generation's --env or --config selector; it never repairs YAML, output, or
+module metadata.
 
-plystra generate --check is read-only and fails on stale, missing, unexpected,
-or manually modified managed paths. If it reports drift:
+plystra generate --check is read-only and reports stale, missing, unexpected,
+or modified managed paths:
 
-1. Read that path's generated/.plystra-manifest.json entry for its generator,
-   input IDs, sources, output kind, and cleanup owner.
-2. Change the named authored input; move handwritten files out of generated.
+1. Read its generated/.plystra-manifest.json entry: generator, input IDs,
+   sources, output kind, and cleanup owner.
+2. Change the authored input; move handwritten files out of generated.
 3. Run plystra generate and plystra generate --check with the same selector.
 
 ## Diagnose common failures
@@ -1507,6 +1508,7 @@ Redact unsafe paths/selectors; leave unknowns uncoded.
 - PLYSTRA_GENERATION_ACTIVATION_CYCLE/PLYSTRA_GENERATION_DEPENDENCY_CYCLE/
   PLYSTRA_GENERATION_CONTRIBUTION_CYCLE/PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED/
   PLYSTRA_GENERATION_STATE_REPEATED/PLYSTRA_GENERATION_NONCONVERGENT: dedup Sources.
+- PLYSTRA_GENERATION_EXTENSION_DIAGNOSTIC: error-only generation-rule Sources; dedup; bare none.
 - PLYSTRA_GENERATION_API_UNSUPPORTED: generation.api Source; PACKAGE_INVALID/COMPILE_FAILED/invocation failures: generation.package Source; bare/unlocated none.
 - Pre-mutation Capability codes:
   PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID,

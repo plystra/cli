@@ -465,6 +465,57 @@ func TestPublicGenerationCommandsReportInvocationFailureSourceWithoutMutation(t 
 	}
 }
 
+func TestPublicGenerationCommandsReportExtensionDiagnosticRuleSourceWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	commands := []struct {
+		name       string
+		arguments  []string
+		dependency bool
+	}{
+		{name: "generate", arguments: []string{"generate"}},
+		{name: "generate-check", arguments: []string{"generate", "--check"}},
+		{name: "check", arguments: []string{"check"}},
+		{name: "generate-dependency", arguments: []string{"generate"}, dependency: true},
+		{name: "generate-check-dependency", arguments: []string{"generate", "--check"}, dependency: true},
+		{name: "check-dependency", arguments: []string{"check"}, dependency: true},
+	}
+	for _, command := range commands {
+		command := command
+		t.Run(command.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := writeGenerationErrorDiagnosticProject(t, command.dependency)
+			authnModule := "example.com/acme/library"
+			if command.dependency {
+				authnModule = "example.com/acme/security"
+			}
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, command.arguments, filepath.Join(root, "order"), commandGoEnvironment())
+			wantSuffix := "\n\n" +
+				"Source: example.com/acme/library:audit/plugin.yaml:1:1 (generation-rule)\n" +
+				"Source: " + authnModule + ":authn/plugin.yaml:1:1 (generation-rule)\n\n" +
+				"Recovery:\nFix the selected generation package reported above, then rerun the command.\n\n" +
+				"Diagnostic: " + diagnosticcode.GenerationExtensionDiagnostic + "\n"
+			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "generation extension reported an error") || !strings.Contains(stderr, `plugin "acme.library.audit"`) || !strings.Contains(stderr, `rule "audit.validate"`) || !strings.Contains(stderr, `plugin "acme.library.authn"`) || !strings.Contains(stderr, `rule "authn.require-session"`) || !strings.Contains(stderr, `rule "authn.validate"`) || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 2 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+				t.Fatalf("%s = exit %d, stdout %q, stderr %q", command.name, exitCode, stdout, stderr)
+			}
+			for _, excluded := range []string{"authn.advisory", "authentication metadata is discouraged", "audit/plugin.yaml:5:12 (plugin-declaration)", "authn/plugin.yaml:5:12 (plugin-declaration)"} {
+				if strings.Contains(stderr, excluded) {
+					t.Fatalf("%s exposed excluded diagnostic detail %q: %q", command.name, excluded, stderr)
+				}
+			}
+			if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) || strings.Contains(stderr, "pkg\\mod") || strings.Contains(stderr, "pkg/mod") || strings.Contains(stderr, ".plystra-generation-") {
+				t.Fatalf("%s exposed an absolute, Module Cache, or helper path: %q", command.name, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%s mutated the extension-diagnostic Project:\nbefore: %#v\nafter:  %#v", command.name, before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func writeMissingGenerationActivationProject(t *testing.T) string {
 	t.Helper()
 
@@ -970,6 +1021,33 @@ func writeGenerationInvocationFailureProject(t *testing.T) string {
 	return root
 }
 
+func writeGenerationErrorDiagnosticProject(t *testing.T, dependency bool) string {
+	t.Helper()
+
+	root := writeGenerationContributionCycleProject(t)
+	writeCommandFile(t, filepath.Join(root, "authn", "generation", "extension.go"), generationErrorDiagnosticSource)
+	writeCommandFile(t, filepath.Join(root, "audit", "generation", "extension.go"), auditErrorDiagnosticSource)
+	if dependency {
+		dependencyRoot := filepath.Join(root, "security-dependency")
+		goMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+		if err != nil {
+			t.Fatalf("read application go.mod: %v", err)
+		}
+		writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), strings.Replace(string(goMod), "module example.com/acme/library", "module example.com/acme/security", 1))
+		goSum, err := os.ReadFile(filepath.Join(root, "go.sum"))
+		if err != nil {
+			t.Fatalf("read fixture go.sum: %v", err)
+		}
+		writeCommandFile(t, filepath.Join(dependencyRoot, "go.sum"), string(goSum))
+		writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
+		if err := os.Rename(filepath.Join(root, "authn"), filepath.Join(dependencyRoot, "authn")); err != nil {
+			t.Fatalf("move fixture extension into dependency Project: %v", err)
+		}
+		writeCommandFile(t, filepath.Join(root, "go.mod"), string(goMod)+"\nrequire example.com/acme/security v1.2.3\n\nreplace example.com/acme/security => ./security-dependency\n")
+	}
+	return root
+}
+
 const emptyGenerationExtensionSource = `package generation
 
 import generation "github.com/plystra/cli/generation/v1"
@@ -999,6 +1077,66 @@ func Generate(generation.GenerationContext) (generation.Output, error) {
 		return generation.Output{}, fmt.Errorf("inspect helper working directory: %w", err)
 	}
 	return generation.Output{}, fmt.Errorf("extension failed in %s", workingDirectory)
+}
+`
+
+const generationErrorDiagnosticSource = `package generation
+
+import generation "github.com/plystra/cli/generation/v1"
+
+func Generate(generation.GenerationContext) (generation.Output, error) {
+	source, _ := generation.ParseCapabilityID("order.create/v1")
+	return generation.Output{Diagnostics: []generation.Diagnostic{
+		{
+			Code:      "authn.unsupported",
+			Severity:  generation.DiagnosticError,
+			Message:   "authentication metadata is unsupported",
+			Namespace: "authn",
+			Source:    source,
+			RuleID:    "authn.validate",
+		},
+		{
+			Code:      "authn.denied",
+			Severity:  generation.DiagnosticError,
+			Message:   "authentication metadata is denied",
+			Namespace: "authn",
+			Source:    source,
+			RuleID:    "authn.validate",
+		},
+		{
+			Code:      "authn.required",
+			Severity:  generation.DiagnosticError,
+			Message:   "authentication metadata is required",
+			Namespace: "authn",
+			Source:    source,
+			RuleID:    "authn.require-session",
+		},
+		{
+			Code:      "authn.advisory",
+			Severity:  generation.DiagnosticWarning,
+			Message:   "authentication metadata is discouraged",
+			Namespace: "authn",
+			Source:    source,
+			RuleID:    "authn.observe",
+		},
+	}}, nil
+}
+`
+
+const auditErrorDiagnosticSource = `package generation
+
+import generation "github.com/plystra/cli/generation/v1"
+
+func Generate(generation.GenerationContext) (generation.Output, error) {
+	source, _ := generation.ParseCapabilityID("order.create/v1")
+	return generation.Output{Diagnostics: []generation.Diagnostic{{
+		Code:      "audit.required",
+		Severity:  generation.DiagnosticError,
+		Message:   "audit metadata is required",
+		Namespace: "audit",
+		Source:    source,
+		RuleID:    "audit.validate",
+	}}}, nil
 }
 `
 

@@ -1024,6 +1024,15 @@ extensions and rules that added no requirement in that growth pass are
 excluded, and the bare internal sentinel remains source-less. Remove or bound
 the reported generation-rule chain so it reaches a stable closure within the
 finite catalog-derived pass bound.
+`PLYSTRA_GENERATION_EXTENSION_DIAGNOSTIC` reports the typed `generation-rule`
+sources for every distinct selected-extension rule that returned a structured
+error diagnostic. Each source identifies the selected extension owner's
+Project module and module-relative `plugin.yaml` at `1:1`; shared
+canonicalization sorts the sources and collapses multiple error diagnostics or
+rules from one declaration to one human location. Info and warning diagnostics
+do not fail generation, and the bare internal sentinel remains source-less.
+Fix the reported selected generation package so its error diagnostics are
+resolved, then rerun the same command.
 `PLYSTRA_GENERATION_API_UNSUPPORTED` reports the exact unsupported
 `generation.api` scalar at its current-Project or dependency-Project
 `plugin.yaml` position as a `plugin-declaration` source. A bare helper or

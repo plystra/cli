@@ -240,6 +240,11 @@ plugin-declaration source. A bare repeated-state sentinel has no source.
 PLYSTRA_GENERATION_NONCONVERGENT reports generation-rule sources from the most
 recent pass that added unseen requirements, in sorted and deduplicated order. A
 bare convergence sentinel has no source.
+PLYSTRA_GENERATION_EXTENSION_DIAGNOSTIC reports generation-rule sources for
+every distinct selected-extension rule that returned a structured error
+diagnostic, in sorted and deduplicated order. Several rules owned by one Plugin
+share one human source, info and warning diagnostics do not fail generation,
+and a bare extension-diagnostic sentinel has no source.
 PLYSTRA_GENERATION_API_UNSUPPORTED reports the exact unsupported generation.api
 scalar as a plugin-declaration source. A bare API sentinel has no source.
 PLYSTRA_GENERATION_PACKAGE_INVALID reports the exact generation.package scalar
@@ -355,6 +360,11 @@ plugin-declaration source. A bare repeated-state sentinel has no source.
 PLYSTRA_GENERATION_NONCONVERGENT reports generation-rule sources from the most
 recent pass that added unseen requirements, in sorted and deduplicated order. A
 bare convergence sentinel has no source.
+PLYSTRA_GENERATION_EXTENSION_DIAGNOSTIC reports generation-rule sources for
+every distinct selected-extension rule that returned a structured error
+diagnostic, in sorted and deduplicated order. Several rules owned by one Plugin
+share one human source, info and warning diagnostics do not fail generation,
+and a bare extension-diagnostic sentinel has no source.
 PLYSTRA_GENERATION_API_UNSUPPORTED reports the exact unsupported generation.api
 scalar as a plugin-declaration source. A bare API sentinel has no source.
 PLYSTRA_GENERATION_PACKAGE_INVALID reports the exact generation.package scalar

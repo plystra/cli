@@ -421,6 +421,9 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 			t.Fatalf("maximum-length Project skill omits generation-graph source guidance for %s", code)
 		}
 	}
+	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_EXTENSION_DIAGNOSTIC")) || !bytes.Contains(skill, []byte("error-only generation-rule Sources")) || !bytes.Contains(skill, []byte("bare none")) {
+		t.Fatal("maximum-length Project skill omits extension-diagnostic rule source guidance")
+	}
 	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_API_UNSUPPORTED: generation.api Source")) || !bytes.Contains(skill, []byte("PACKAGE_INVALID/COMPILE_FAILED/invocation failures")) || !bytes.Contains(skill, []byte("generation.package Source")) || !bytes.Contains(skill, []byte("bare/unlocated none")) {
 		t.Fatal("maximum-length Project skill omits generation helper source guidance")
 	}
@@ -1236,6 +1239,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_GENERATION_NONCONVERGENT` reports the typed `generation-rule` sources"),
 		[]byte("most recent pass that introduced previously unseen canonical requirements"),
 		[]byte("rules that added no requirement in that growth pass are excluded"),
+		[]byte("`PLYSTRA_GENERATION_EXTENSION_DIAGNOSTIC` reports the typed `generation-rule` sources"),
+		[]byte("distinct selected-extension rule that returned a structured error diagnostic"),
+		[]byte("Info and warning diagnostics do not fail generation"),
 		[]byte("`PLYSTRA_GENERATION_API_UNSUPPORTED` reports the exact unsupported `generation.api` scalar"),
 		[]byte("current-Project or dependency-Project `plugin.yaml` position"),
 		[]byte("bare helper or manifest API sentinel remains source-less"),
