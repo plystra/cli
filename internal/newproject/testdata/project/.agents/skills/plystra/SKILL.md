@@ -1138,6 +1138,9 @@ values must never appear in the browser package.
 Run the narrowest relevant test first, then the complete module checks:
 
     plystra inspect
+    plystra inspect modules
+    plystra inspect modules --env production
+    plystra inspect modules --config deploy/customer-a.yaml
     plystra inspect --env production
     plystra inspect --config deploy/customer-a.yaml
     plystra inspect --format json
@@ -1175,9 +1178,13 @@ Run the narrowest relevant test first, then the complete module checks:
 
 Plystra inspect is read-only. It summarizes configuration, Plugin/Capability
 counts, AuthN/AuthZ, transports, readiness, and the matching check action. Use
---verbose for complete evidence or --format json for one plystra.inspect v1
-document; JSON diagnostics stay on stderr. Reuse one --env or --config selector
-across inspect, generate, check, and application startup.
+`plystra inspect modules` for the participating current and dependency Project
+module graph; its human and JSON forms use the versioned `plystra.graph` v1
+schema with project-relative source references and no resolved Secrets or
+unrestricted configuration values. Use --verbose for complete evidence or
+--format json for one plystra.inspect v1 document; JSON diagnostics stay on
+stderr. Reuse one --env or --config selector across inspect, generate, check,
+and application startup.
 
 Plystra check is read-only: it verifies selected configuration and the generated
 fixed point, then runs go test -mod=readonly ./... from the Project root. Reuse

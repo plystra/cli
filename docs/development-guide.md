@@ -1762,6 +1762,9 @@ selection:
 
 ```powershell
 plystra inspect
+plystra inspect modules
+plystra inspect modules --env production
+plystra inspect modules --config deploy/customer-a.yaml
 plystra inspect --env production
 plystra inspect --config deploy/customer-a.yaml
 plystra explain capability email.send/v1
@@ -1795,7 +1798,10 @@ indented resolution evidence or `--format json` for one deterministic
 `plystra.inspect` v1 document on stdout; JSON progress and diagnostics use
 stderr. The JSON form is suitable for automation and contains stable
 module-relative provenance rather than unrestricted configuration, Secrets, or
-machine-specific Project paths.
+machine-specific Project paths. Use `plystra inspect modules` to show the
+participating current and dependency Project modules as a deterministic
+`plystra.graph` v1 view; its source references stay project-relative and its
+structured result omits resolved Secrets and unrestricted configuration values.
 
 Use `plystra explain capability <capability-name>/vN` when a particular
 Capability's selection is unexpected. A required Capability reports the

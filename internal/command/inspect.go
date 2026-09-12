@@ -15,6 +15,7 @@ import (
 )
 
 type inspectArguments struct {
+	graphType         diagnosticschema.GraphType
 	format            commandFormat
 	verbose           bool
 	configurationPath string
@@ -49,6 +50,23 @@ func runInspect(arguments []string, stdout, stderr io.Writer, workingDirectory s
 		writeCommandFailure(output.diagnosticWriter(), "inspect selected application", err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
 		return 1
 	}
+	if parsed.graphType == diagnosticschema.GraphTypeModules {
+		result, err := inspectModulesGraph(resolved.ResolutionEvidence())
+		if err != nil {
+			writeCommandFailure(output.diagnosticWriter(), "inspect module graph", err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
+			return 1
+		}
+		if parsed.format == commandFormatJSON {
+			_, _ = output.resultWriter().Write(result.Envelope().CanonicalJSON())
+			_, _ = io.WriteString(output.resultWriter(), "\n")
+			return 0
+		}
+		if err := writeHumanModuleGraph(output.resultWriter(), result, resolved.ResolutionEvidence(), parsed.verbose); err != nil {
+			_, _ = fmt.Fprintf(output.diagnosticWriter(), "render inspect module graph: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 
 	result, err := diagnosticschema.NewInspect(diagnosticschema.InspectInput{
 		Evidence:   resolved.ResolutionEvidence(),
@@ -75,10 +93,18 @@ func parseInspectArguments(arguments []string) (inspectArguments, bool) {
 		return inspectArguments{}, false
 	}
 	result := inspectArguments{format: commandFormatHuman}
+	index := 1
+	if index < len(arguments) && !strings.HasPrefix(arguments[index], "--") {
+		if arguments[index] != string(diagnosticschema.GraphTypeModules) {
+			return inspectArguments{}, false
+		}
+		result.graphType = diagnosticschema.GraphTypeModules
+		index++
+	}
 	formatSet := false
 	configurationSet := false
 	environmentSet := false
-	for index := 1; index < len(arguments); index++ {
+	for ; index < len(arguments); index++ {
 		switch arguments[index] {
 		case "--verbose":
 			if result.verbose {

@@ -47,6 +47,34 @@ type inspectCommandEnvelope struct {
 	} `json:"result"`
 }
 
+type inspectGraphCommandEnvelope struct {
+	Schema                 string `json:"schema"`
+	SchemaVersion          int    `json:"schema_version"`
+	ConfigurationMode      string `json:"configuration_mode"`
+	ApplicationModelDigest string `json:"application_model_digest"`
+	Result                 struct {
+		Type  string `json:"type"`
+		Nodes []struct {
+			ID      string `json:"id"`
+			Kind    string `json:"kind"`
+			Label   string `json:"label"`
+			Sources []struct {
+				Module string `json:"module"`
+				Path   string `json:"path"`
+				Kind   string `json:"kind"`
+			} `json:"sources"`
+		} `json:"nodes"`
+		Edges []struct {
+			ID     string `json:"id"`
+			Kind   string `json:"kind"`
+			From   string `json:"from"`
+			To     string `json:"to"`
+			Reason string `json:"reason"`
+		} `json:"edges"`
+		ResolutionEvidence json.RawMessage `json:"resolution_evidence"`
+	} `json:"result"`
+}
+
 func TestInspectHumanOutputIsConciseAndReadOnlyFromNestedDirectory(t *testing.T) {
 	t.Parallel()
 
@@ -195,6 +223,70 @@ func TestInspectVerboseIncludesCompleteIndentedEvidence(t *testing.T) {
 	}
 }
 
+func TestInspectModulesHumanAndJSONAreDeterministicAndReadOnly(t *testing.T) {
+	t.Parallel()
+
+	root, nested := createInspectCommandProject(t)
+	before := snapshotInspectProject(t, root)
+	humanExit, humanStdout, humanStderr := runCommand(t, []string{"inspect", "modules"}, nested, inspectCommandEnvironment(nil))
+	wantHuman := inspectProgress +
+		"Module graph: 1 modules, 0 dependencies\n" +
+		"Module: example.com/acme/inspect (current)\n" +
+		"  Source: example.com/acme/inspect:plystra.yaml:1:1 (project-marker)\n"
+	if humanExit != 0 || humanStdout != wantHuman || humanStderr != "" {
+		t.Fatalf("human module graph = exit %d, stdout %q, stderr %q; want stdout %q", humanExit, humanStdout, humanStderr, wantHuman)
+	}
+
+	firstExit, firstStdout, firstStderr := runCommand(t, []string{"inspect", "modules", "--format", "json"}, nested, inspectCommandEnvironment(nil))
+	secondExit, secondStdout, secondStderr := runCommand(t, []string{"inspect", "modules", "--verbose", "--format", "json"}, root, inspectCommandEnvironment(nil))
+	if firstExit != 0 || secondExit != 0 || firstStderr != inspectProgress || secondStderr != inspectProgress || firstStdout != secondStdout {
+		t.Fatalf("JSON module graph = first (%d, %q, %q) second (%d, %q, %q)", firstExit, firstStdout, firstStderr, secondExit, secondStdout, secondStderr)
+	}
+	if strings.Count(firstStdout, "\n") != 1 || !strings.HasSuffix(firstStdout, "\n") {
+		t.Fatalf("module graph JSON is not one document: %q", firstStdout)
+	}
+	document := decodeInspectGraphCommandEnvelope(t, firstStdout)
+	if document.Schema != "plystra.graph" || document.SchemaVersion != 1 || document.ConfigurationMode != "default" || document.ApplicationModelDigest == "" {
+		t.Fatalf("module graph envelope = %#v", document)
+	}
+	if document.Result.Type != "modules" || len(document.Result.Nodes) != 1 || len(document.Result.Edges) != 0 || len(document.Result.ResolutionEvidence) == 0 {
+		t.Fatalf("module graph result = %#v", document.Result)
+	}
+	if document.Result.Nodes[0].ID != "module:example.com/acme/inspect" || document.Result.Nodes[0].Kind != "module" || document.Result.Nodes[0].Label != "example.com/acme/inspect" || len(document.Result.Nodes[0].Sources) != 1 || document.Result.Nodes[0].Sources[0].Path != "plystra.yaml" {
+		t.Fatalf("module graph node = %#v", document.Result.Nodes[0])
+	}
+	if strings.Contains(firstStdout, root) || strings.Contains(firstStdout, "resolved-secret-marker") {
+		t.Fatalf("module graph leaked a Project path or unrestricted configuration: %s", firstStdout)
+	}
+	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("module graph mutated the Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestInspectModulesIncludesDeterministicDependencyEdges(t *testing.T) {
+	t.Parallel()
+
+	root, nested := createInspectModuleGraphProject(t)
+	exitCode, stdout, stderr := runCommand(t, []string{"inspect", "modules", "--format", "json"}, nested, inspectCommandEnvironment(nil))
+	if exitCode != 0 || stderr != inspectProgress {
+		t.Fatalf("module graph dependency inspect = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	document := decodeInspectGraphCommandEnvelope(t, stdout)
+	if document.ConfigurationMode != "default" || len(document.Result.Nodes) != 2 || len(document.Result.Edges) != 1 {
+		t.Fatalf("module graph dependency shape = mode %q nodes %d edges %d", document.ConfigurationMode, len(document.Result.Nodes), len(document.Result.Edges))
+	}
+	if document.Result.Nodes[0].ID != "module:example.com/acme/inspect" || document.Result.Nodes[1].ID != "module:example.com/acme/library" {
+		t.Fatalf("module graph node order = %#v", document.Result.Nodes)
+	}
+	edge := document.Result.Edges[0]
+	if edge.ID != "requires:example.com/acme/inspect->example.com/acme/library" || edge.Kind != "requires" || edge.From != "module:example.com/acme/inspect" || edge.To != "module:example.com/acme/library" || edge.Reason != "replacement" {
+		t.Fatalf("module graph edge = %#v", edge)
+	}
+	if strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
+		t.Fatalf("module graph dependency output leaked a path or secret: %s", stdout)
+	}
+}
+
 func TestInspectFailuresKeepJSONStdoutEmptyAndDoNotMutate(t *testing.T) {
 	t.Parallel()
 
@@ -237,11 +329,35 @@ func createInspectCommandProject(t testing.TB) (string, string) {
 	return root, nested
 }
 
+func createInspectModuleGraphProject(t testing.TB) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/acme/inspect\n\ngo 1.26\n\nrequire example.com/acme/library v0.0.0\n\nreplace example.com/acme/library => ./library\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http:\n  address: resolved-secret-marker\n")
+	writeCommandFile(t, filepath.Join(root, "library", "go.mod"), "module example.com/acme/library\n\ngo 1.26\n")
+	writeCommandFile(t, filepath.Join(root, "library", "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(root, "library", "library.go"), "package library\n")
+	nested := filepath.Join(root, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", nested, err)
+	}
+	return root, nested
+}
+
 func decodeInspectCommandEnvelope(t testing.TB, output string) inspectCommandEnvelope {
 	t.Helper()
 	var result inspectCommandEnvelope
 	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		t.Fatalf("decode inspect JSON: %v\n%s", err, output)
+	}
+	return result
+}
+
+func decodeInspectGraphCommandEnvelope(t testing.TB, output string) inspectGraphCommandEnvelope {
+	t.Helper()
+	var result inspectGraphCommandEnvelope
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("decode inspect graph JSON: %v\n%s", err, output)
 	}
 	return result
 }

@@ -43,7 +43,7 @@ const (
   plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
   plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
-  plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
+  plystra inspect [modules] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain config <field-path> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
@@ -379,21 +379,27 @@ without a fabricated span.
 `
 	inspectUsage = `Usage:
   plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
+  plystra inspect modules [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
+
+Views:
+  modules                Show the selected current-model module graph.
 
 Options:
   --verbose              Add the complete deterministic resolution evidence to human output.
-  --format human|json    Select concise human output or the plystra.inspect v1 JSON schema.
+  --format human|json    Select concise human output or the versioned inspect schema.
   --env <environment>    Inspect root plystra.yaml with plystra.<environment>.yaml.
   --config <yaml-path>   Inspect one complete current-project configuration instead of root plystra.yaml.
 
 The command is read-only and resolves the same selected application model used
 by generation and validation. JSON stdout contains exactly one schema document;
-progress and diagnostics use stderr. PLYSTRA_ENV and PLYSTRA_CONFIG supply
-equivalent selectors when no explicit selector is present; setting both is an
-error. Explicit --env or --config overrides both variables, and the two flags
-cannot be combined. Relative configuration paths are resolved from the detected
-Plystra Project root. Root plystra.yaml remains mandatory and is not merged
-beneath --config. Invalid or conflicting selections emit the stable
+progress and diagnostics use stderr. The modules view emits the versioned
+plystra.graph v1 schema with project-relative source references and no resolved
+Secrets or unrestricted configuration values. PLYSTRA_ENV and PLYSTRA_CONFIG
+supply equivalent selectors when no explicit selector is present; setting both
+is an error. Explicit --env or --config overrides both variables, and the two
+flags cannot be combined. Relative configuration paths are resolved from the
+detected Plystra Project root. Root plystra.yaml remains mandatory and is not
+merged beneath --config. Invalid or conflicting selections emit the stable
 PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
 A normalized Project-contained selected document that cannot be loaded reports
 one span-less configuration-selection source; conflicting or unsafe selectors
@@ -633,7 +639,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 	case "capability":
 		return runCapability(arguments, stdout, stderr, workingDirectory, environment, selectPlugin)
 	case "inspect":
-		if len(arguments) == 2 && isHelp(arguments[1]) {
+		if len(arguments) == 2 && isHelp(arguments[1]) || len(arguments) == 3 && arguments[1] == "modules" && isHelp(arguments[2]) {
 			_, _ = io.WriteString(stdout, inspectUsage)
 			return 0
 		}

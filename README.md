@@ -697,6 +697,7 @@ plystra dev
 plystra test
 plystra build
 plystra inspect
+plystra inspect modules
 plystra inspect --verbose
 plystra inspect --format json
 plystra explain capability <capability-name>/vN
@@ -737,9 +738,12 @@ output reports the Project and selected configuration, Plugin and Capability
 counts, AuthN/AuthZ activation, transports, readiness, and the matching
 `plystra check` action. `--verbose` appends the complete deterministic resolution
 evidence. `--format json` writes exactly one `plystra.inspect` v1 schema document
-to stdout while progress and diagnostics remain on stderr. The command accepts
-the same `--env`, `--config`, `PLYSTRA_ENV`, and `PLYSTRA_CONFIG` selectors as
-generation and check.
+to stdout while progress and diagnostics remain on stderr. Use `plystra inspect
+modules` for the participating current and dependency Project module graph; its
+human and JSON forms use the versioned `plystra.graph` v1 schema with
+project-relative source references and omit resolved Secrets and unrestricted
+configuration values. The command accepts the same `--env`, `--config`,
+`PLYSTRA_ENV`, and `PLYSTRA_CONFIG` selectors as generation and check.
 
 `plystra explain capability <capability-name>/vN` is the corresponding causal
 read-only view. For a required Capability it reports the selected ordinary
