@@ -83,14 +83,14 @@ func newArtifactEvidenceIndex(provenance ManifestProvenance) (artifactEvidenceIn
 	if provenance.Mode() == ConfigurationModeEnvironment {
 		base.sources = append(base.sources, provenance.RootPath())
 	}
-	for _, record := range provenance.DependencyBaseline().Records() {
-		base.sources = append(base.sources, record.Sources...)
-	}
 	base = canonicalArtifactEvidence(base)
 	configuration := artifactEvidence{inputs: []string{
 		dependencyCompositionInputPrefix + provenance.DependencyBaseline().Digest(),
 		configurationSelectionInputPrefix + provenance.Mode() + ":" + provenance.SelectedPath() + ":" + provenance.SelectedDigest(),
 	}}
+	for _, record := range provenance.DependencyBaseline().Records() {
+		configuration.sources = append(configuration.sources, record.Sources...)
+	}
 	index := artifactEvidenceIndex{
 		base:          base,
 		configuration: canonicalArtifactEvidence(configuration),
@@ -117,6 +117,7 @@ func newArtifactEvidenceIndex(provenance ManifestProvenance) (artifactEvidenceIn
 		if constructor, exists := constructors[binding.Selection().Constructor()]; exists {
 			evidence = mergeArtifactEvidence(evidence, constructorArtifactEvidence(constructor))
 		}
+		index.all = mergeArtifactEvidence(index.all, evidence)
 		index.addMappings(binding.Mappings(), evidence)
 	}
 	for _, intrinsic := range provenance.InterfaceProvenance().Intrinsics() {
