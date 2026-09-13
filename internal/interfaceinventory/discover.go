@@ -427,7 +427,7 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 	}
 	arguments := []string{"list", "-deps", "-export", "-json", "-e", "-mod=readonly"}
 	for _, candidate := range candidates {
-		arguments = append(arguments, candidate.pattern)
+		arguments = append(arguments, candidate.importPath)
 	}
 	output, err := gocommand.Output(ctx, gocommand.Options{
 		Command:     options.GoCommand,
@@ -669,7 +669,6 @@ func (s moduleSource) label() string {
 type packageCandidate struct {
 	source     moduleSource
 	importPath string
-	pattern    string
 	directory  string
 }
 
@@ -735,10 +734,8 @@ func probeModule(source moduleSource, applicationPath string) ([]packageCandidat
 		}
 		relative = filepath.ToSlash(relative)
 		importPath := source.path
-		pattern := "."
 		if relative != "." {
 			importPath = path.Join(source.path, relative)
-			pattern = "./" + relative
 		}
 		if err := module.CheckImportPath(importPath); err != nil {
 			return nil, fmt.Errorf("candidate package %q has invalid import path: %v", relative, err)
@@ -749,7 +746,6 @@ func probeModule(source moduleSource, applicationPath string) ([]packageCandidat
 		candidates = append(candidates, packageCandidate{
 			source:     source,
 			importPath: importPath,
-			pattern:    pattern,
 			directory:  directory,
 		})
 	}
@@ -784,9 +780,7 @@ func exactPackageCandidates(source moduleSource, applicationPath string, package
 		}
 
 		directory := root
-		pattern := "."
 		if relative != "." {
-			pattern = "./" + relative
 			for _, component := range strings.Split(relative, "/") {
 				if ReservedDirectory(component) {
 					return nil, fmt.Errorf("exact Interface package %q is inside reserved directory %q", packagePath, component)
@@ -814,7 +808,6 @@ func exactPackageCandidates(source moduleSource, applicationPath string, package
 		candidates[index] = packageCandidate{
 			source:     source,
 			importPath: packagePath,
-			pattern:    pattern,
 			directory:  directory,
 		}
 	}

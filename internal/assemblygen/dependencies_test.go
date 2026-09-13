@@ -15,6 +15,7 @@ import (
 	"github.com/plystra/cli/internal/contractgen"
 	"github.com/plystra/cli/internal/dependencygen"
 	"github.com/plystra/cli/internal/invocationgen"
+	"github.com/plystra/cli/internal/testkernel"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
@@ -88,7 +89,7 @@ func TestGeneratedRuntimeInjectsLocalAndDependencyModuleClients(t *testing.T) {
 	applicationRoot := filepath.Join(root, "application")
 	dependencyRoot := filepath.Join(root, "dependency")
 	cliRoot := repositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 
 	writeFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module %s
 

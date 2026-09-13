@@ -16,6 +16,7 @@ import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationselect"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 func TestSelectedConfigurationWriteTargetsOnlyTheSelectedCurrentProjectLayer(t *testing.T) {
@@ -192,7 +193,7 @@ func writeTransactionalImplementationProject(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("resolve CLI root: %v", err)
 	}
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	writeImplementationFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module example.com/acme/implementation-rollback
 
 go 1.26

@@ -205,6 +205,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -311,15 +312,37 @@ func TestRealBrowserCanonicalAndAliasInvocation(t *testing.T) {
 		"--user-data-dir="+profile,
 		server.URL,
 	)
-	output, err := command.CombinedOutput()
-	if ctx.Err() != nil {
-		t.Fatalf("real browser canonical invocation timed out: %v\n%s", ctx.Err(), output)
+	output := newBrowserOutput()
+	command.Stdout = output
+	command.Stderr = output
+	command.WaitDelay = time.Second
+	if err := command.Start(); err != nil {
+		t.Fatalf("start real browser canonical invocation: %v", err)
 	}
-	if err != nil {
-		t.Fatalf("real browser canonical invocation failed: %v\n%s", err, output)
+	wait := make(chan error, 1)
+	go func() {
+		wait <- command.Wait()
+	}()
+	passed := false
+	var waitErr error
+	select {
+	case waitErr = <-wait:
+	case <-output.passed:
+		passed = true
+		cancel()
+		waitErr = <-wait
+	case <-ctx.Done():
+		waitErr = <-wait
 	}
-	document := string(output)
-	if !strings.Contains(document, "data-result=\"pass\"") || !strings.Contains(document, "canonical:42:blocked;alias:84:blocked") {
+	document := output.String()
+	passed = passed || browserOutputPassed(document)
+	if ctx.Err() != nil && !passed {
+		t.Fatalf("real browser canonical invocation timed out: %v\n%s", ctx.Err(), document)
+	}
+	if waitErr != nil && !passed {
+		t.Fatalf("real browser canonical invocation failed: %v\n%s", waitErr, document)
+	}
+	if !passed {
 		t.Fatalf("real browser canonical result was not successful:\n%s", document)
 	}
 	if calls := providerCalls.Load(); calls != 2 {
@@ -334,6 +357,43 @@ func TestRealBrowserCanonicalAndAliasInvocation(t *testing.T) {
 	if calls := aliasRequests.Load(); calls != 1 {
 		t.Fatalf("Alias Connect requests = %d, want 1", calls)
 	}
+}
+
+const (
+	browserPassAttribute = "data-result=\"pass\""
+	browserPassBody      = "canonical:42:blocked;alias:84:blocked"
+)
+
+type browserOutput struct {
+	mu     sync.Mutex
+	data   []byte
+	passed chan struct{}
+	once   sync.Once
+}
+
+func newBrowserOutput() *browserOutput {
+	return &browserOutput{passed: make(chan struct{})}
+}
+
+func (o *browserOutput) Write(data []byte) (int, error) {
+	o.mu.Lock()
+	o.data = append(o.data, data...)
+	passed := browserOutputPassed(string(o.data))
+	o.mu.Unlock()
+	if passed {
+		o.once.Do(func() { close(o.passed) })
+	}
+	return len(data), nil
+}
+
+func (o *browserOutput) String() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return string(o.data)
+}
+
+func browserOutputPassed(output string) bool {
+	return strings.Contains(output, browserPassAttribute) && strings.Contains(output, browserPassBody)
 }
 
 func browserExecutable(t *testing.T) string {

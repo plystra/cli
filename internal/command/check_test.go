@@ -9,12 +9,13 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/diagnosticcode"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 func TestRunCheckUsesSelectedReadOnlyProjectWorkflow(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf(`module example.com/acme/check
 
 go 1.26
@@ -209,7 +210,7 @@ func TestRunCheckReportsEveryAmbiguousConfigurationOwnershipSource(t *testing.T)
 	platformRoot := filepath.Join(parent, "platform")
 	applicationRoot := filepath.Join(parent, "application")
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 
 	writeCommandFile(t, filepath.Join(platformRoot, "go.mod"), "module example.com/platform\n\ngo 1.26\n")
 	writeCommandGraphInterface(t, platformRoot, "email/send/v1", "sendv1", "email.send/v1", "Send")
@@ -355,7 +356,7 @@ require (
 func TestRunCheckReportsGoTestFailureWithoutMutation(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf("module example.com/acme/failing-check\n\ngo 1.26\n\nrequire (\n\tgithub.com/plystra/kernel v0.0.0\n\tgo.yaml.in/yaml/v3 v3.0.4 // indirect\n\tgolang.org/x/mod v0.38.0 // indirect\n)\n\nreplace github.com/plystra/kernel => %s\n", filepath.ToSlash(kernelRoot))
 	writeCommandFile(t, filepath.Join(root, "go.mod"), goMod)
 	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))

@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 type explainCommandEnvelope struct {
@@ -973,7 +975,7 @@ func createExplainGenerationAliasProject(t *testing.T) (string, string) {
 	if err != nil {
 		t.Fatalf("resolve CLI repository root: %v", err)
 	}
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module example.com/alias-explain
 
 go 1.26

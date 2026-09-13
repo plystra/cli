@@ -13,6 +13,7 @@ import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationadaptergen"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 func TestRenderProducesDeterministicTypedImplementationAdapters(t *testing.T) {
@@ -149,7 +150,7 @@ func TestGeneratedAdapterInvokesUnexportedConcretePointerAndNormalizesSemanticEr
 	if err != nil {
 		t.Fatalf("resolve CLI root: %v", err)
 	}
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	writeAdapterFile(t, root, "go.mod", fmt.Sprintf(`module example.com/adapterfixture
 
 go 1.26

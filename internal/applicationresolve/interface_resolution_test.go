@@ -16,6 +16,7 @@ import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/interfaceresolution"
+	"github.com/plystra/cli/internal/testkernel"
 	"github.com/plystra/cli/internal/transporttoolchain"
 )
 
@@ -614,7 +615,7 @@ func TestResolveOwnsAndValidatesDormantConstructorConfigurationWithoutRuntimeMem
 	const modulePath = "example.com/dormant-configuration"
 	const selectedConstructor = modulePath + "/smtp.New"
 	cliRoot := repositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	writeFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf("module %s\n\ngo 1.26\n\nrequire (\n\tgithub.com/plystra/kernel v0.0.0\n\tgo.yaml.in/yaml/v3 v3.0.4 // indirect\n)\n\nreplace github.com/plystra/kernel => %s\n", modulePath, filepath.ToSlash(kernelRoot)))
 	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
 	if err != nil {

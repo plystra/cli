@@ -44,7 +44,7 @@ replace example.com/contracts => ../contracts
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.InterfaceID().String() != "email.send/v1" || result.ModuleRoot() != root || result.PackagePath() != filepath.Join(root, "smtp") || result.ImportPath() != "example.com/shop/smtp" || result.SourcePath() != "smtp/implementation.go" || result.Constructor().String() != "example.com/shop/smtp.New" {
+	if result.InterfaceID().String() != "email.send/v1" || !samePhysicalDirectory(t, result.ModuleRoot(), root) || !samePhysicalDirectory(t, result.PackagePath(), filepath.Join(root, "smtp")) || result.ImportPath() != "example.com/shop/smtp" || result.SourcePath() != "smtp/implementation.go" || result.Constructor().String() != "example.com/shop/smtp.New" {
 		t.Fatalf("Result = %#v", result)
 	}
 	want := `package smtp
@@ -234,6 +234,19 @@ type Interface interface {
 type Request struct{}
 type Response struct{}
 `
+}
+
+func samePhysicalDirectory(t testing.TB, left, right string) bool {
+	t.Helper()
+	leftInfo, err := os.Stat(left)
+	if err != nil {
+		t.Fatalf("Stat(%q): %v", left, err)
+	}
+	rightInfo, err := os.Stat(right)
+	if err != nil {
+		t.Fatalf("Stat(%q): %v", right, err)
+	}
+	return leftInfo.IsDir() && rightInfo.IsDir() && os.SameFile(leftInfo, rightInfo)
 }
 
 func newProject(t testing.TB, modulePath string) string {

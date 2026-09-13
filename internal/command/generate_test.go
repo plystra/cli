@@ -23,6 +23,7 @@ import (
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/newproject"
 	"github.com/plystra/cli/internal/protobufwiremap"
+	"github.com/plystra/cli/internal/testkernel"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 )
@@ -63,7 +64,7 @@ func assertGeneratedDriftArtifactSources(t *testing.T, stderr, modulePath string
 func TestRunGenerateAndCheckUsePublicApplicationSurface(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf(`module example.com/acme/app
 
 go 1.26
@@ -305,7 +306,7 @@ func TestRunGenerateReportsInvalidOwnershipManifestSourceWithoutMutation(t *test
 func TestRunGenerateProjectsAuthoredInterfaceMessages(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module example.com/acme/interface-protobuf
 
 go 1.26
@@ -387,7 +388,7 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 func TestRunGenerateRejectsFieldNumberReuseFromUnexposedInterfaceHistory(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module example.com/acme/interface-history
 
 go 1.26
@@ -492,7 +493,7 @@ func TestRunGenerateReportsAuthoredInterfaceIdentityCollisionSourceWithoutMutati
 	const modulePath = "example.com/acme/interface-identity-collision"
 	const sourcePath = "interfaces/records/collision/v1/interface.go"
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module %s
 
 go 1.26
@@ -687,7 +688,7 @@ func TestRunGenerateReportsUnsupportedOperationExposureSourceWithoutMutation(t *
 func TestRunGenerateInstallsConnectRuntimeRequirementsAndCheckIsReadOnly(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf(`module example.com/acme/connect-runtime
 
 go 1.26
@@ -788,7 +789,7 @@ func TestRunGenerateRepairsKernelDependencyAndReadOnlyCommandsReportSource(t *te
 	root := t.TempDir()
 	const modulePath = "example.com/acme/missing-kernel"
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf("module %s\n\ngo 1.26\n\nreplace github.com/plystra/kernel => %s\n", modulePath, filepath.ToSlash(kernelRoot)))
 	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
 	if err != nil {
@@ -848,7 +849,7 @@ func TestRunGenerateRepairsKernelDependencyAndReadOnlyCommandsReportSource(t *te
 func TestRunGenerateRollsBackKernelDependencyRepairAfterValidationFailure(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf("module example.com/acme/kernel-repair-rollback\n\ngo 1.26\n\nreplace github.com/plystra/kernel => %s\n", filepath.ToSlash(kernelRoot)))
 	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
 	if err != nil {
@@ -872,7 +873,7 @@ func TestRunGenerateRollsBackKernelDependencyRepairAfterValidationFailure(t *tes
 func TestRunGenerateRejectsUnsupportedExposureTransportWithoutMutation(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf(`module example.com/acme/javascript-connect
 
 go 1.26
@@ -919,7 +920,7 @@ func TestRunGenerateCheckReportsDependencyCompositionDriftWithoutMutation(t *tes
 	applicationRoot := filepath.Join(root, "application")
 	dependencyRoot := filepath.Join(root, "platform")
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 
 	writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), "module example.com/platform\n\ngo 1.26\n")
 	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities:\n  require: [kernel.health/v1]\n")
@@ -975,7 +976,7 @@ func TestRunGeneratePreservesCurrentProjectInterfaceEditAcrossDependencyBaseline
 	applicationRoot := filepath.Join(parent, "application")
 	dependencyRoot := filepath.Join(parent, "platform")
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 
 	writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), "module example.com/platform\n\ngo 1.26\n")
 	writeCommandGraphInterface(t, dependencyRoot, "email/send/v1", "sendv1", "email.send/v1", "Send")
@@ -1137,7 +1138,7 @@ func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
 func TestRunGenerateSelectsEnvironmentOverlayThroughPublicCommand(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf(`module example.com/acme/environment
 
 go 1.26
@@ -1321,7 +1322,7 @@ func TestRunGenerateSelectsCompleteConfigurationThroughPublicCommand(t *testing.
 	applicationRoot := filepath.Join(root, "application")
 	dependencyRoot := filepath.Join(root, "platform")
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 
 	writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), "module example.com/platform\n\ngo 1.26\n")
 	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "interfaces: {require: [kernel.health/v1]}\n")
@@ -1553,7 +1554,7 @@ interfaces:
 func TestRunGenerateCarriesInterfacePoliciesThroughEveryConfigurationMode(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf(`module example.com/acme/policy
 
 go 1.26
@@ -1738,7 +1739,7 @@ interfaces:
 func TestRunGenerateBuildsUnrequiredLocalCapabilityDeveloperSurfaces(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf(`module example.com/acme/authoring
 
 go 1.26
@@ -1817,7 +1818,7 @@ func (*Plugin) Send(_ context.Context, request contract.Request) (contract.Respo
 func TestRunGenerateBuildsCompleteProjectAssembly(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf(`module example.com/acme/library
 
 go 1.26

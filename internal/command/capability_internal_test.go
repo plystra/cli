@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/plugintarget"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 func TestParseCapabilityArguments(t *testing.T) {
@@ -150,7 +151,7 @@ func writeInteractiveCapabilityModule(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("resolve CLI root: %v", err)
 	}
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	root := t.TempDir()
 	goMod := fmt.Sprintf("module example.com/acme/app\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\n\nreplace github.com/plystra/kernel => %s\n", filepath.ToSlash(kernelRoot))
 	writeInteractiveCapabilityFile(t, filepath.Join(root, "go.mod"), goMod)

@@ -13,6 +13,7 @@ import (
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/interfaceprovenance"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 func TestRunUseSelectsImplementationOnlyInRequestedConfigurationLayer(t *testing.T) {
@@ -430,7 +431,7 @@ func writeImplementationSelectionCommandProject(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module example.com/acme/implementation-use
 
 go 1.26

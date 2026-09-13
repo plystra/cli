@@ -98,7 +98,7 @@ func Change(ctx context.Context, root string, options ChangeOptions, operation f
 		if validate == nil {
 			return fmt.Errorf("%w: validation callback is nil", ErrChange)
 		}
-		if mutationRoot != root {
+		if !sameModuleRoot(mutationRoot, root) {
 			return fmt.Errorf("%w: generation changed module root from %q to %q", ErrChange, root, mutationRoot)
 		}
 		normalized, normalizeErr := normalizeModuleMetadata(ctx, root, options.GoCommand, options.Environment, preserved, requirements)
@@ -199,7 +199,7 @@ func Tidy(ctx context.Context, root, goCommand string, environment []string, ope
 		if validate == nil {
 			return fmt.Errorf("%w: validation callback is nil", ErrTidy)
 		}
-		if mutationRoot != root {
+		if !sameModuleRoot(mutationRoot, root) {
 			return fmt.Errorf("%w: generation changed module root from %q to %q", ErrTidy, root, mutationRoot)
 		}
 		normalized, err = normalizeModuleMetadata(ctx, root, goCommand, environment, before, requirements)
@@ -262,6 +262,12 @@ func normalizeModuleMetadata(
 		return normalized, operationErr
 	}
 	return normalized, nil
+}
+
+func sameModuleRoot(left, right string) bool {
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	return leftErr == nil && rightErr == nil && leftInfo.IsDir() && rightInfo.IsDir() && os.SameFile(leftInfo, rightInfo)
 }
 
 func normalizeRuntimeRequirements(requirements []applicationgenerate.ModuleRequirement) ([]applicationgenerate.ModuleRequirement, error) {

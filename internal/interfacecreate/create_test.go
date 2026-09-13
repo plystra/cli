@@ -27,7 +27,7 @@ func TestCreateScaffoldsCanonicalV1Package(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ID().String() != "order.create/v1" || result.ModuleRoot() != root || result.ImportPath() != "example.com/acme/orders/interfaces/order/create/v1" || result.SourcePath() != "interfaces/order/create/v1/interface.go" || result.PackagePath() != filepath.Join(root, "interfaces", "order", "create", "v1") {
+	if result.ID().String() != "order.create/v1" || !samePhysicalDirectory(t, result.ModuleRoot(), root) || result.ImportPath() != "example.com/acme/orders/interfaces/order/create/v1" || result.SourcePath() != "interfaces/order/create/v1/interface.go" || !samePhysicalDirectory(t, result.PackagePath(), filepath.Join(root, "interfaces", "order", "create", "v1")) {
 		t.Fatalf("result = %#v", result)
 	}
 	want := `package createv1
@@ -161,6 +161,19 @@ func TestTargetExistsErrorWithoutProvenance(t *testing.T) {
 			t.Fatalf("empty target source = %#v", conflict)
 		}
 	}
+}
+
+func samePhysicalDirectory(t testing.TB, left, right string) bool {
+	t.Helper()
+	leftInfo, err := os.Stat(left)
+	if err != nil {
+		t.Fatalf("Stat(%q): %v", left, err)
+	}
+	rightInfo, err := os.Stat(right)
+	if err != nil {
+		t.Fatalf("Stat(%q): %v", right, err)
+	}
+	return leftInfo.IsDir() && rightInfo.IsDir() && os.SameFile(leftInfo, rightInfo)
 }
 
 func newProject(t testing.TB, modulePath string) string {

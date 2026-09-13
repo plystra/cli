@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 // writeProviderCommandProject remains only for pre-Gate-14 explain-command
@@ -13,7 +15,7 @@ func writeProviderCommandProject(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module example.com/acme/provider-use
 
 go 1.26

@@ -33,6 +33,7 @@ import (
 	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/providerresolution"
 	"github.com/plystra/cli/internal/resolutionevidence"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 func TestMain(main *testing.M) {
@@ -1819,7 +1820,7 @@ func TestResolveExecutesSelectedFilesystemGenerationExtension(t *testing.T) {
 	root := t.TempDir()
 	temporaryParent := t.TempDir()
 	cliRoot := repositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf(
 		"module example.com/extension-app\n\ngo 1.26\n\nrequire (\n\tgithub.com/plystra/cli v0.0.0\n\tgithub.com/plystra/kernel v0.0.0\n\tgo.yaml.in/yaml/v3 v3.0.4 // indirect\n\tgolang.org/x/mod v0.38.0 // indirect\n)\n\nreplace github.com/plystra/cli => %s\n\nreplace github.com/plystra/kernel => %s\n",
 		strconv.Quote(filepath.ToSlash(cliRoot)),

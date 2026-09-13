@@ -22,6 +22,7 @@ import (
 	"github.com/plystra/cli/internal/contractgen"
 	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/invocationgen"
+	"github.com/plystra/cli/internal/testkernel"
 	kernelcatalog "github.com/plystra/kernel/capability/catalog"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 )
@@ -254,7 +255,7 @@ func TestGeneratedInvocationsBridgeModulesAndPublishCanonicalRuntime(t *testing.
 	applicationRoot := filepath.Join(root, "application")
 	dependencyRoot := filepath.Join(root, "dependency")
 	cliRoot := repositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 
 	writeFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/runtime-application
 

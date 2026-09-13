@@ -26,6 +26,16 @@ func TestMain(main *testing.M) {
 	os.Exit(main.Run())
 }
 
+func TestSameModuleRootAcceptsEquivalentDirectorySpelling(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	alias := root + string(os.PathSeparator)
+	if !sameModuleRoot(root, alias) {
+		t.Fatalf("sameModuleRoot(%q, %q) = false", root, alias)
+	}
+}
+
 func runRuntimeRequirementHelper() int {
 	data, err := os.ReadFile("go.mod")
 	if err != nil {

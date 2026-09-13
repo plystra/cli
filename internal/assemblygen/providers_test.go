@@ -21,6 +21,7 @@ import (
 	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/implementationassemblygen"
+	"github.com/plystra/cli/internal/testkernel"
 	"github.com/plystra/cli/internal/transportprovenance"
 	"github.com/plystra/kernel/plugin/manifest"
 )
@@ -124,7 +125,7 @@ func TestGeneratedBootstrapConstructsLocalAndDependencyPluginsSafely(t *testing.
 	applicationRoot := filepath.Join(root, "application")
 	dependencyRoot := filepath.Join(root, "dependency")
 	cliRoot := repositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 
 	writeFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/assemblyapp
 
@@ -245,7 +246,7 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 func TestGeneratedBootstrapRunsWithoutSelectedProviders(t *testing.T) {
 	applicationRoot := t.TempDir()
 	cliRoot := repositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 
 	writeFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/emptyapp
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceproxygen"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 func TestRenderProducesDeterministicTypedProxyPackages(t *testing.T) {
@@ -114,7 +115,7 @@ func TestGeneratedProxyImplementsAndInvokesAuthoredInterface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve CLI root: %v", err)
 	}
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	writeProxyFile(t, root, "go.mod", fmt.Sprintf(`module example.com/proxyfixture
 
 go 1.26

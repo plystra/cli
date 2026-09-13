@@ -16,6 +16,7 @@ import (
 	"time"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 const helperTestExecutionTimeout = 30 * time.Second
@@ -420,7 +421,7 @@ func newExtensionFixture(t *testing.T, source string) extensionFixture {
 	root := t.TempDir()
 	temporaryParent := t.TempDir()
 	cliRoot := repositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf("module example.com/extensiontest\n\ngo 1.26\n\nrequire (\n\tgithub.com/plystra/cli v0.0.0\n\tgithub.com/plystra/kernel v0.0.0\n\tgo.yaml.in/yaml/v3 v3.0.4 // indirect\n\tgolang.org/x/mod v0.38.0 // indirect\n)\n\nreplace github.com/plystra/cli => %s\n\nreplace github.com/plystra/kernel => %s\n", strconv.Quote(filepath.ToSlash(cliRoot)), strconv.Quote(filepath.ToSlash(kernelRoot)))
 	writeTestFile(t, filepath.Join(root, "go.mod"), goMod)
 	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))

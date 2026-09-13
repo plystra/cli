@@ -23,6 +23,7 @@ import (
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/pluginscan"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 var updatePluginGolden = flag.Bool("update", false, "update generated plugin scaffold golden files")
@@ -228,11 +229,7 @@ func TestCreateTidiesModuleForGeneratedConfiguration(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	cliRoot, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolve CLI root: %v", err)
-	}
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	catalogRoot := filepath.Join(t.TempDir(), "catalog")
 	if err := os.MkdirAll(catalogRoot, 0o755); err != nil {
 		t.Fatalf("create catalog root: %v", err)
@@ -296,11 +293,7 @@ func TestCreateRestoresModuleMetadataWhenGeneratedValidationFails(t *testing.T) 
 	t.Parallel()
 
 	root := t.TempDir()
-	cliRoot, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolve CLI root: %v", err)
-	}
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	writeFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module example.com/acme/rollback
 
 go 1.26
@@ -457,7 +450,7 @@ func createModule(t *testing.T, modulePath string) string {
 	if err != nil {
 		t.Fatalf("resolve CLI root: %v", err)
 	}
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf(`module %s
 
 go 1.26

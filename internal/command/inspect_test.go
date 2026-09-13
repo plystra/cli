@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 const inspectProgress = "Resolving selected application model...\n"
@@ -874,7 +876,7 @@ func createInspectInterfaceGraphProject(t testing.TB) (string, string) {
 	t.Helper()
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module example.com/acme/interface-inspect
 
 go 1.26
@@ -1009,8 +1011,7 @@ func (*Service) Read(context.Context, readv1.Request) (readv1.Response, error) {
 func createInspectImplementationGraphProject(t testing.TB) (string, string) {
 	t.Helper()
 	root, nested := createInspectInterfaceGraphProject(t)
-	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goSum, err := os.ReadFile(filepath.Join(root, "go.sum"))
 	if err != nil {
 		t.Fatalf("read fixture go.sum: %v", err)

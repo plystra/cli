@@ -39,6 +39,7 @@ import (
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/resolutionevidence"
+	"github.com/plystra/cli/internal/testkernel"
 	"github.com/plystra/cli/internal/transporttoolchain"
 )
 
@@ -3135,8 +3136,7 @@ func TestGenerateRequiresDirectKernelDependency(t *testing.T) {
 func TestGenerateReportsTransitiveOnlyKernelDependencySource(t *testing.T) {
 	t.Parallel()
 
-	cliRoot := repositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	dependencyRoot := t.TempDir()
 	writeModule(t, dependencyRoot, "example.com/platform", "require github.com/plystra/kernel v0.0.0\n")
 
@@ -3511,7 +3511,7 @@ func TestGenerateExecutesRealSelectedExtensionAndCleansHelpers(t *testing.T) {
 	root := t.TempDir()
 	temporaryParent := t.TempDir()
 	cliRoot := repositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf(`module example.com/acme/extension-app
 
 go 1.26
@@ -3959,8 +3959,7 @@ func resolvedConfigurationField(t testing.TB, result applicationresolve.Result, 
 
 func writeApplicationModuleDefinition(t testing.TB, root, modulePath string) {
 	t.Helper()
-	cliRoot := repositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	extra := fmt.Sprintf(`require (
 	github.com/plystra/kernel v0.0.0
 	go.yaml.in/yaml/v3 v3.0.4

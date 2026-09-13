@@ -15,6 +15,7 @@ import (
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/capabilitycreate"
 	"github.com/plystra/cli/internal/generatedfiles"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 func TestCreateCommitsCapabilityImplementationAndGeneratedProject(t *testing.T) {
@@ -237,7 +238,7 @@ func createBuildableAuthoringModule(t *testing.T, modulePath, catalogRoot string
 	if err != nil {
 		t.Fatalf("resolve CLI root: %v", err)
 	}
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	requireCatalog := ""
 	replaceCatalog := ""
 	if catalogRoot != "" {

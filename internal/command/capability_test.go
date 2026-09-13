@@ -10,6 +10,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/diagnosticcode"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 func TestRunCapabilityCreateAndImplementUsePublicTransactionalSurface(t *testing.T) {
@@ -811,7 +812,7 @@ func writeCapabilityCommandModule(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf(`module example.com/acme/library
 
 go 1.26
