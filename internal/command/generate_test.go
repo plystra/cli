@@ -21,9 +21,9 @@ import (
 	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/generatedfiles"
-	"github.com/plystra/cli/internal/newproject"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/testkernel"
+	"github.com/plystra/cli/internal/version"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 )
@@ -831,7 +831,7 @@ func TestRunGenerateRepairsKernelDependencyAndReadOnlyCommandsReportSource(t *te
 			break
 		}
 	}
-	if kernelRequirement == nil || kernelRequirement.Indirect || kernelRequirement.Mod.Version != newproject.KernelVersion {
+	if kernelRequirement == nil || kernelRequirement.Indirect || kernelRequirement.Mod.Version != version.KernelVersion {
 		t.Fatalf("repaired Kernel requirement = %#v", kernelRequirement)
 	}
 	assertNoCommandTransactions(t, root)

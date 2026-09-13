@@ -1,4 +1,0 @@
-interface:
-  display_name: "Plystra Development"
-  short_description: "Operate and develop Plystra Projects"
-  default_prompt: "Use $plystra for this Go Module, Plugin, Capability, or plystra.yaml task."

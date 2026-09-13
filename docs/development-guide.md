@@ -239,8 +239,10 @@ no longer needed.
 
 ## Create a Plystra Go Module
 
-Interactive creation asks, in order, whether to initialize Git, include GitHub
-Actions CI, and include `.agents/skills/plystra/`. Enter accepts yes.
+Project creation is non-interactive by default. It generates version-matched
+guidance under `.agents/skills/plystra/`; Git initialization and GitHub Actions
+CI default off. Only `--interactive` permits prompts for omitted Git and CI
+choices, and Enter accepts yes.
 
 ```powershell
 plystra new orders
@@ -340,13 +342,15 @@ environment enters generated source or manifest provenance. The CLI does not
 guess a value for an undeclared required field; that omission fails the
 creation transaction and the target directory is not installed.
 
-Automation must answer all three choices explicitly:
+Use explicit opt-ins for Git and CI, and the explicit opt-out only when Agent
+guidance is not wanted:
 
 ```powershell
-plystra new orders --module example.com/acme/orders --no-git --no-github-ci --skills
-plystra new orders --module example.com/acme/orders --template example.com/acme/platform@v1.2.3 --no-git --no-github-ci --skills
-plystra new contracts --module example.com/acme/contracts --no-git --no-github-ci --no-skills
-plystra new orders --module example.com/acme/orders --plugin catalog --git --github-ci --skills
+plystra new orders --module example.com/acme/orders
+plystra new orders --module example.com/acme/orders --template example.com/acme/platform@v1.2.3
+plystra new contracts --module example.com/acme/contracts --no-agent-guidance
+plystra new orders --module example.com/acme/orders --plugin catalog --git --github-ci
+plystra new orders --module example.com/acme/orders --interactive
 ```
 
 Non-template creation reports the installed module and target:
@@ -384,16 +388,17 @@ Every Plystra Project contains mandatory root `plystra.yaml` and is
 independently runnable. A new Project may validly contain zero local Plugins,
 primarily distribute reusable Plugins, or obtain selected Providers from
 dependency Projects. Project creation also emits `.gitignore`,
-`.gitattributes`, a complete generated foundation, and the optional files
-selected by the user. It pins the exact Kernel version supported by that CLI
-build.
+`.gitattributes`, a complete generated foundation, and default Agent guidance.
+It pins the exact Kernel version supported by that CLI build. `--git` and
+`--github-ci` add their independent files, while `--no-agent-guidance` omits the
+guidance tree.
 
-If a non-interactive caller omits any choice, the command fails before creating
-the target with `PLYSTRA_PROJECT_CREATE_CHOICE_REQUIRED` and one command
-recovery. Repeated or contradictory choice flags also fail without mutation.
+Repeated opt-in or opt-out flags fail without mutation. Unsupported historical
+choice flags are rejected as usage errors.
 If requested Git initialization fails, the staged tree is removed, no target is
 installed, and `PLYSTRA_PROJECT_CREATE_GIT_INITIALIZATION_FAILED` directs the
-caller to correct Git and retry with `--git` or deliberately choose `--no-git`.
+caller to correct Git and retry with `--git` or omit `--git` when no repository
+is intended.
 
 ## Understand authored and CLI-owned files
 
@@ -598,14 +603,13 @@ generated output. The diagnostic emits the owning module-relative Go file at
 the trusted Interface declaration position as an `interface-contract` source.
 Rename one authored field and regenerate; messages are checked independently.
 
-`.agents/skills/plystra/` is a creation-time project guide that the project may
-maintain as its authored workflows evolve. It is outside `generated/` and is
-not part of `plystra generate --check` ownership. The current guide begins with
-the supported Project, Interface, Implementation, configuration, and generation
-path. Once Gates 16-18 implement Data, the generated guide must add only the
-implemented Resource declaration, named-instance binding, selected-dialect
-generation, and migration workflows; it must not ask users to precreate every
-environment or expose unresolved Secrets.
+`.agents/skills/plystra/` is a version-matched CLI projection outside
+`generated/`. Its `plystra.agent-guidance/v1` manifest records release facts,
+the catalog digest, and every CLI-owned path digest. `SKILL.md` routes Agents to
+six task-scoped references rather than duplicating one broad guide. Do not edit
+manifest-owned files; put Project-specific additions in optional user-owned
+`local.md`. The CLI does not create or claim `local.md`, unlisted files, sibling
+skills, or repository-wide instructions.
 
 The current CLI does not scaffold or run Data migrations. Resource contracts,
 the official Data compiler, PostgreSQL/D1 generation, and explicit

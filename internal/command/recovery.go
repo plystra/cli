@@ -170,7 +170,6 @@ const (
 	diagnosticProjectCreatePluginIDInvalid          = diagnosticcode.ProjectCreatePluginIDInvalid
 	diagnosticProjectCreateTargetExists             = diagnosticcode.ProjectCreateTargetExists
 	diagnosticProjectCreateGitInitializationFailed  = diagnosticcode.ProjectCreateGitInitializationFailed
-	diagnosticProjectCreateChoiceRequired           = diagnosticcode.ProjectCreateChoiceRequired
 	diagnosticPluginCreateNameInvalid               = diagnosticcode.PluginCreateNameInvalid
 	diagnosticPluginCreateIDInvalid                 = diagnosticcode.PluginCreateIDInvalid
 	diagnosticPluginCreateTargetExists              = diagnosticcode.PluginCreateTargetExists
@@ -1178,29 +1177,26 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	if concurrentFailure(err) {
 		return recoveryDiagnostic(diagnosticProjectConcurrentChange, "Stop concurrent Project edits, then rerun the command against the unchanged authored inputs.")
 	}
-	if errors.Is(err, errNewChoiceRequired) {
-		return recoveryDiagnostic(diagnosticProjectCreateChoiceRequired, "Rerun `plystra new <project-name> [options]` with exactly one of `--git` or `--no-git`, one of `--github-ci` or `--no-github-ci`, and one of `--skills` or `--no-skills`.")
-	}
 	if errors.Is(err, newproject.ErrInvalidProjectName) {
 		return recoveryDiagnostic(diagnosticProjectCreateNameInvalid, "Rerun `plystra new <project-name> [options]` with one lower-case ASCII kebab-case child directory name; put any independent Go Module identity in `--module <go-module-path>`.")
 	}
 	if errors.Is(err, newproject.ErrInvalidModulePath) {
-		return recoveryDiagnostic(diagnosticProjectCreateModuleInvalid, "Rerun `plystra new <project-name> --module <go-module-path> [options]` with one valid Go Module path and every required choice flag.")
+		return recoveryDiagnostic(diagnosticProjectCreateModuleInvalid, "Rerun `plystra new <project-name> --module <go-module-path> [options]` with one valid Go Module path.")
 	}
 	if errors.Is(err, newproject.ErrInvalidTemplateQuery) {
-		return recoveryDiagnostic(diagnosticProjectCreateTemplateInvalid, "Rerun `plystra new <project-name> --template <go-module-query> [options]` with one valid non-removal Go Module query and every required choice flag.")
+		return recoveryDiagnostic(diagnosticProjectCreateTemplateInvalid, "Rerun `plystra new <project-name> --template <go-module-query> [options]` with one valid non-removal Go Module query.")
 	}
 	if errors.Is(err, newproject.ErrInvalidPluginName) {
-		return recoveryDiagnostic(diagnosticProjectCreatePluginNameInvalid, "Rerun `plystra new <project-name> --plugin <plugin-name> [options]` with one lower-case ASCII kebab-case initial Plugin name that is not reserved and every required choice flag.")
+		return recoveryDiagnostic(diagnosticProjectCreatePluginNameInvalid, "Rerun `plystra new <project-name> --plugin <plugin-name> [options]` with one lower-case ASCII kebab-case initial Plugin name that is not reserved.")
 	}
 	if errors.Is(err, newproject.ErrInvalidPluginID) {
-		return recoveryDiagnostic(diagnosticProjectCreatePluginIDInvalid, "Rerun `plystra new <project-name> --module <go-module-path> --plugin <plugin-name> [options]` with values that derive one canonical Plugin ID and every required choice flag.")
+		return recoveryDiagnostic(diagnosticProjectCreatePluginIDInvalid, "Rerun `plystra new <project-name> --module <go-module-path> --plugin <plugin-name> [options]` with values that derive one canonical Plugin ID.")
 	}
 	if errors.Is(err, newproject.ErrTargetExists) {
 		return recoveryDiagnostic(diagnosticProjectCreateTargetExists, "Rerun `plystra new <project-name> [options]` with a different canonical Project name whose target does not exist, or run it from a different parent directory.")
 	}
 	if errors.Is(err, newproject.ErrGitInitialization) {
-		return recoveryDiagnostic(diagnosticProjectCreateGitInitializationFailed, "Correct the reported Git installation or initialization failure, then rerun `plystra new <project-name> [options]` with `--git`; use `--no-git` only when the Project intentionally needs no repository.")
+		return recoveryDiagnostic(diagnosticProjectCreateGitInitializationFailed, "Correct the reported Git installation or initialization failure, then rerun `plystra new <project-name> [options]` with `--git`; omit `--git` when the Project intentionally needs no repository.")
 	}
 	if errors.Is(err, newproject.ErrInvalidTemplate) {
 		if _, action, found := splitEmbeddedRecovery(err.Error()); found {

@@ -343,9 +343,9 @@ When exactly one login method is resolved and explicitly exposed, generated Go, 
 
 ## Project creation
 
-Interactive creation asks whether to initialize Git, include GitHub Actions CI,
-and include the Plystra-specific development skill under
-`.agents/skills/plystra/`:
+Project creation is non-interactive by default. It generates version-matched
+Plystra Agent guidance under `.agents/skills/plystra/`, while Git initialization
+and GitHub Actions CI default off:
 
 ```powershell
 plystra new my-app
@@ -436,42 +436,36 @@ manifest provenance. A required Plugin field omitted by the template is not
 invented; generation fails transactionally until the template declares a valid
 local value or reference.
 
-Each prompt defaults to yes and accepts `yes`/`y`, `no`/`n`, or Enter. Scripts
-and other non-interactive callers must choose every option explicitly:
+Use `--git` and `--github-ci` to opt into those independent tools. Use
+`--no-agent-guidance` to omit the default guidance. Only `--interactive` permits
+prompts for omitted Git and GitHub CI choices; terminal detection never prompts.
+Each requested prompt defaults to yes and accepts `yes`/`y`, `no`/`n`, or Enter.
 
 ```powershell
-plystra new my-app --module github.com/acme/my-app --git --github-ci --skills
-plystra new my-app --module github.com/acme/my-app --template github.com/acme/platform@v1.2.3 --git --github-ci --skills
-plystra new email --module github.com/acme/email --no-git --no-github-ci --no-skills
+plystra new my-app --module github.com/acme/my-app
+plystra new my-app --module github.com/acme/my-app --git --github-ci
+plystra new my-app --module github.com/acme/my-app --interactive
+plystra new email --module github.com/acme/email --no-agent-guidance
 ```
 
-The independent flag pairs are `--git`/`--no-git`,
-`--github-ci`/`--no-github-ci`, and `--skills`/`--no-skills`. This permits, for
-example, generating GitHub CI inside a project directory already governed by a
-parent repository without initializing a nested repository. Requested Git
-initialization creates an empty repository on branch `main`; requested CI emits
-`.github/workflows/ci.yml`; requested skills emit a complete, validated
-Plystra-specific `SKILL.md` and agent metadata rather than generic advice or
-TODO placeholders. The skill embeds the created module path and provides
-an immediate task-oriented route for operating a template-created Project and
-another for ordinary development through only Go Module, Plugin, Capability,
-and `plystra.yaml`. It presents environment selection on that ordinary path,
-identifies complete `--config` replacement as advanced, and places resolution,
-generation, wire-history, and other mechanism-heavy guidance after an explicit
-detailed-reference boundary. The complete reference still covers operational
-module layout, Plugin and Capability authoring, configuration, provider
-selection, cross-Plugin generated-client use, Alias, HTTP, JavaScript, runtime,
-validation, and troubleshooting workflows. It contains no Git, branch, commit,
-or push instructions. `plystra new --help` documents the complete creation
-contract.
+This permits, for example, generating GitHub CI inside a project directory
+already governed by a parent repository without initializing a nested
+repository. Requested Git initialization creates an empty repository on branch
+`main`; requested CI emits `.github/workflows/ci.yml`.
+
+The guidance projection contains a small `SKILL.md`, six task-scoped references,
+and `manifest.json` with schema `plystra.agent-guidance/v1`. The manifest records
+the installed CLI version, supported Kernel version, specification revision,
+catalog digest, and exact digest of every CLI-owned guidance file. The CLI does
+not own optional `.agents/skills/plystra/local.md`, unlisted files, sibling
+skills, or repository-wide instructions. Generated guidance contains no Git,
+branch, commit, review, release, or team workflow rules. `plystra new --help`
+documents the complete creation contract.
 
 If requested Git initialization fails, creation emits
 `PLYSTRA_PROJECT_CREATE_GIT_INITIALIZATION_FAILED`, removes the staged tree,
 and leaves no target Project. Recovery directs the caller to correct Git and
-retry with `--git`, or deliberately choose `--no-git`.
-
-Omitting any choice pair in a non-interactive invocation fails before target
-creation with `PLYSTRA_PROJECT_CREATE_CHOICE_REQUIRED` and one command recovery.
+retry with `--git`, or omit `--git` when no repository is intended.
 
 Successful template creation reports the selected query:
 

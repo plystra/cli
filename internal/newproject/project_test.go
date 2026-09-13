@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/plystra/cli/internal/agentguidance"
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationmeta"
@@ -32,6 +33,7 @@ import (
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/projectcheck"
 	"github.com/plystra/cli/internal/projectsmoke"
+	"github.com/plystra/cli/internal/version"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
@@ -75,8 +77,8 @@ func TestKernelVersionMatchesCLIModuleRequirement(t *testing.T) {
 		if requirement.Indirect {
 			t.Fatal("CLI Kernel requirement is indirect")
 		}
-		if requirement.Mod.Version != newproject.KernelVersion {
-			t.Fatalf("new Project Kernel version %s does not match CLI requirement %s", newproject.KernelVersion, requirement.Mod.Version)
+		if requirement.Mod.Version != version.KernelVersion {
+			t.Fatalf("new Project Kernel version %s does not match CLI requirement %s", version.KernelVersion, requirement.Mod.Version)
 		}
 		return
 	}
@@ -239,7 +241,6 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 		ModulePath:  modulePath,
 		Git:         true,
 		GitHubCI:    true,
-		Skills:      true,
 		Environment: environment,
 	})
 	if err != nil {
@@ -252,7 +253,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	commandParent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	if exitCode := command.RunIn([]string{"new", projectName, "--module", modulePath, "--git", "--github-ci", "--skills"}, &stdout, &stderr, commandParent, environment); exitCode != 0 {
+	if exitCode := command.RunIn([]string{"new", projectName, "--module", modulePath, "--git", "--github-ci"}, &stdout, &stderr, commandParent, environment); exitCode != 0 {
 		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
 	}
 	commandTarget := filepath.Join(commandParent, "my-app")
@@ -268,7 +269,13 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	}
 	wantFiles := []string{
 		".agents/skills/plystra/SKILL.md",
-		".agents/skills/plystra/agents/openai.yaml",
+		".agents/skills/plystra/manifest.json",
+		".agents/skills/plystra/tasks/configuration-and-secrets.md",
+		".agents/skills/plystra/tasks/diagnostics-and-recovery.md",
+		".agents/skills/plystra/tasks/interfaces-and-implementations.md",
+		".agents/skills/plystra/tasks/project-and-dependencies.md",
+		".agents/skills/plystra/tasks/resources-and-data.md",
+		".agents/skills/plystra/tasks/verify-build-and-release.md",
 		".gitattributes",
 		".github/workflows/ci.yml",
 		".gitignore",
@@ -330,7 +337,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	assertDefaultTransportScaffold(t, directTree["plystra.yaml"])
 	assertReadmeUsesAvailableCommands(t, directTree["README.md"])
 	assertCIUsesCurrentActions(t, directTree[".github/workflows/ci.yml"])
-	assertPlystraSkill(t, direct.Path(), modulePath)
+	assertPlystraGuidance(t, direct.Path(), modulePath)
 	provenance, err := applicationgen.DecodeManifestProvenance(directTree["generated/manifest.json"])
 	if err != nil || !provenance.TransportToolchain().Valid() {
 		t.Fatalf("generated Project transport toolchain = %#v, %v", provenance.TransportToolchain(), err)
@@ -356,7 +363,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	}
 }
 
-func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
+func TestCreateSupportsMaximumProjectNameWithBoundedGuidance(t *testing.T) {
 	proxy := createKernelProxy(t)
 	environment := isolatedGoEnvironment(t, proxy)
 	projectName := strings.Repeat("a", 64)
@@ -364,7 +371,6 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	result, err := newproject.Create(context.Background(), newproject.Options{
 		Parent:      t.TempDir(),
 		ProjectName: projectName,
-		Skills:      true,
 		Environment: environment,
 	})
 	if err != nil {
@@ -373,62 +379,17 @@ func TestCreateSupportsMaximumProjectNameWithBoundedSkill(t *testing.T) {
 	if result.ModulePath() != projectName {
 		t.Fatalf("module path = %q, want %q", result.ModulePath(), projectName)
 	}
-	skill, err := os.ReadFile(filepath.Join(result.Path(), ".agents", "skills", "plystra", "SKILL.md"))
+	projection, err := agentguidance.Render(projectName)
 	if err != nil {
-		t.Fatalf("ReadFile(generated skill): %v", err)
+		t.Fatalf("Render maximum-length Project guidance: %v", err)
 	}
-	if len(skill) > 64<<10 {
-		t.Fatalf("maximum-length Project skill = %d bytes, want at most %d", len(skill), 64<<10)
-	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATED_DRIFT")) || !bytes.Contains(skill, []byte("PLYSTRA_GENERATED_MANIFEST_INVALID")) || !bytes.Contains(skill, []byte("PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID")) || !bytes.Contains(skill, []byte("PLYSTRA_GENERATED_OWNERSHIP_CONFLICT")) || !bytes.Contains(skill, []byte("PLYSTRA_GENERATED_UNEXPECTED_OUTPUT")) || !bytes.Contains(skill, []byte("generated-artifact Sources")) {
-		t.Fatal("maximum-length Project skill omits generated-output source guidance")
-	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_PROTOBUF_IDENTITY_COLLISION")) || !bytes.Contains(skill, []byte("interface-contract Source")) {
-		t.Fatal("maximum-length Project skill omits Protobuf identity-collision source guidance")
-	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED")) || !bytes.Contains(skill, []byte("reported exposure Source")) {
-		t.Fatal("maximum-length Project skill omits unsupported-operation source guidance")
-	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_CAPABILITY_MANIFEST_INVALID")) || !bytes.Contains(skill, []byte("provider-declaration at 1:1")) {
-		t.Fatal("maximum-length Project skill omits invalid Capability manifest source guidance")
-	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_PROJECT_CONCURRENT_CHANGE")) || !bytes.Contains(skill, []byte("sorted path-only Sources")) {
-		t.Fatal("maximum-length Project skill omits concurrent-change source guidance")
-	}
-	if !bytes.Contains(skill, []byte("path-only configuration-selection Source")) || !bytes.Contains(skill, []byte("conflicts or unsafe selectors have")) {
-		t.Fatal("maximum-length Project skill omits configuration-selection source guidance")
-	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_PLUGIN_TARGET_AMBIGUOUS")) || !bytes.Contains(skill, []byte("candidate plugin-declaration Sources at 1:1")) {
-		t.Fatal("maximum-length Project skill omits Plugin-target source guidance")
-	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_ACTIVATION_MISSING")) || !bytes.Contains(skill, []byte("none invented")) {
-		t.Fatal("maximum-length Project skill omits generation-activation source guidance")
-	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_ACTIVATION_CONFLICT")) || !bytes.Contains(skill, []byte("plugin/provider/choice Sources")) {
-		t.Fatal("maximum-length Project skill omits generation-activation conflict source guidance")
-	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING")) || !bytes.Contains(skill, []byte("plugin/provider/choice Sources")) {
-		t.Fatal("maximum-length Project skill omits selected-Provider extension source guidance")
-	}
-	for _, code := range [][]byte{
-		[]byte("PLYSTRA_GENERATION_ACTIVATION_CYCLE"),
-		[]byte("PLYSTRA_GENERATION_DEPENDENCY_CYCLE"),
-		[]byte("PLYSTRA_GENERATION_CONTRIBUTION_CYCLE"),
-		[]byte("PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED"),
-		[]byte("PLYSTRA_GENERATION_NONCONVERGENT"),
-	} {
-		if !bytes.Contains(skill, code) || !bytes.Contains(skill, []byte("dedup Sources")) {
-			t.Fatalf("maximum-length Project skill omits generation-graph source guidance for %s", code)
+	for _, file := range projection.Files() {
+		if size := len(file.Data()); size == 0 || size > 64<<10 {
+			t.Fatalf("maximum-length Project guidance %s = %d bytes, want 1..%d", file.Path(), size, 64<<10)
 		}
 	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_EXTENSION_DIAGNOSTIC")) || !bytes.Contains(skill, []byte("error-only generation-rule Sources")) || !bytes.Contains(skill, []byte("bare none")) {
-		t.Fatal("maximum-length Project skill omits extension-diagnostic rule source guidance")
-	}
-	if !bytes.Contains(skill, []byte("PLYSTRA_GENERATION_API_UNSUPPORTED: generation.api Source")) || !bytes.Contains(skill, []byte("PACKAGE_INVALID/COMPILE_FAILED/invocation failures")) || !bytes.Contains(skill, []byte("generation.package Source")) || !bytes.Contains(skill, []byte("bare/unlocated none")) {
-		t.Fatal("maximum-length Project skill omits generation helper source guidance")
-	}
+	assertPlystraGuidance(t, result.Path(), projectName)
 }
-
 func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
 	proxy := createKernelProxy(t)
 	environment := isolatedGoEnvironment(t, proxy)
@@ -436,7 +397,7 @@ func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	exitCode := command.RunIn([]string{"new", "my-app", "--plugin", "records", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, environment)
+	exitCode := command.RunIn([]string{"new", "my-app", "--plugin", "records"}, &stdout, &stderr, parent, environment)
 	if exitCode != 0 {
 		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
 	}
@@ -525,7 +486,6 @@ var _ sendv1.Interface = (*Service)(nil)
 		"new", "my-app",
 		"--module", "example.com/acme/my-app",
 		"--template", templateQuery,
-		"--no-git", "--no-github-ci", "--skills",
 	}
 	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 0 {
 		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
@@ -583,7 +543,7 @@ var _ sendv1.Interface = (*Service)(nil)
 	if err != nil || !checked.Report().Clean() || checked.ConfigurationChanged() {
 		t.Fatalf("template generation check = changes %#v, configuration changed %t, %v", checked.Report().Changes(), checked.ConfigurationChanged(), err)
 	}
-	assertPlystraSkill(t, target, "example.com/acme/my-app")
+	assertPlystraGuidance(t, target, "example.com/acme/my-app")
 	if cacheAfter := snapshotTree(t, cacheRoot); !reflect.DeepEqual(cacheAfter, cacheBefore) {
 		t.Fatalf("template Module Cache source changed:\nbefore: %#v\nafter:  %#v", cacheBefore, cacheAfter)
 	}
@@ -693,7 +653,7 @@ func TestPublicCommandRejectsTemplateWithAmbiguousDefaultProvidersAndRollsBack(t
 		"new", "my-app",
 		"--module", "example.com/acme/my-app",
 		"--template", templateQuery,
-		"--no-git", "--no-github-ci", "--no-skills",
+		"--no-agent-guidance",
 	}
 
 	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 1 {
@@ -754,7 +714,7 @@ func TestPublicCommandRejectsPrivateTemplateGraphAndRollsBack(t *testing.T) {
 		"new", "my-app",
 		"--module", "example.com/acme/my-app",
 		"--template", templateQuery,
-		"--no-git", "--no-github-ci", "--no-skills",
+		"--no-agent-guidance",
 	}
 
 	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 1 {
@@ -820,7 +780,7 @@ func TestPublicCommandRejectsRelativeReplacementsAcrossTemplateProjectsAndRollsB
 		"new", "my-app",
 		"--module", "example.com/acme/my-app",
 		"--template", templateQuery,
-		"--no-git", "--no-github-ci", "--no-skills",
+		"--no-agent-guidance",
 	}
 
 	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 1 {
@@ -1379,8 +1339,58 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 
 func writeGoldenTree(t *testing.T, root string, tree map[string][]byte) {
 	t.Helper()
+	absoluteRoot, err := filepath.Abs(root)
+	if err != nil {
+		t.Fatalf("Abs(%s): %v", root, err)
+	}
+	existing := snapshotTree(t, absoluteRoot)
+	directories := make(map[string]struct{})
+	for name := range existing {
+		if _, retained := tree[name]; retained {
+			continue
+		}
+		relative := filepath.Clean(filepath.FromSlash(name))
+		if relative == "." || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			t.Fatalf("obsolete golden path %q is not confined to %s", name, absoluteRoot)
+		}
+		path := filepath.Join(absoluteRoot, relative)
+		confined, err := filepath.Rel(absoluteRoot, path)
+		if err != nil || confined != relative {
+			t.Fatalf("resolve obsolete golden path %q: relative %q, %v", name, confined, err)
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatalf("Lstat(%s): %v", path, err)
+		}
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			t.Fatalf("obsolete golden path %s is not a regular file", path)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("Remove(%s): %v", path, err)
+		}
+		for directory := filepath.Dir(path); directory != absoluteRoot; directory = filepath.Dir(directory) {
+			directories[directory] = struct{}{}
+		}
+	}
+	orderedDirectories := make([]string, 0, len(directories))
+	for directory := range directories {
+		orderedDirectories = append(orderedDirectories, directory)
+	}
+	sort.Slice(orderedDirectories, func(left, right int) bool { return len(orderedDirectories[left]) > len(orderedDirectories[right]) })
+	for _, directory := range orderedDirectories {
+		entries, err := os.ReadDir(directory)
+		if errors.Is(err, os.ErrNotExist) || err == nil && len(entries) != 0 {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("ReadDir(%s): %v", directory, err)
+		}
+		if err := os.Remove(directory); err != nil {
+			t.Fatalf("Remove(%s): %v", directory, err)
+		}
+	}
 	for name, data := range tree {
-		path := filepath.Join(root, filepath.FromSlash(name))
+		path := filepath.Join(absoluteRoot, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%s): %v", filepath.Dir(path), err)
 		}
@@ -1409,7 +1419,7 @@ func TestCreateWithInitialPluginComposesProjectTransactions(t *testing.T) {
 	commandParent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	arguments := []string{"new", "my-app", "--module", modulePath, "--plugin", pluginName, "--no-git", "--no-github-ci", "--no-skills"}
+	arguments := []string{"new", "my-app", "--module", modulePath, "--plugin", pluginName}
 	if exitCode := command.RunIn(arguments, &stdout, &stderr, commandParent, environment); exitCode != 0 {
 		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
 	}
@@ -1448,7 +1458,7 @@ func TestPublicCommandRejectsRemovedLibraryFlagWithoutMutation(t *testing.T) {
 	parent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := command.RunIn([]string{"new", "my-app", "--library", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
+	exitCode := command.RunIn([]string{"new", "my-app", "--library"}, &stdout, &stderr, parent, nil)
 	if exitCode != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "plystra new <project-name>") || strings.Contains(stderr.String(), "Create a non-runnable") {
 		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
 	}
@@ -1463,7 +1473,7 @@ func TestPublicCommandRejectsOldPositionalModulePathWithoutMutation(t *testing.T
 	parent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := command.RunIn([]string{"new", "example.com/acme/my-app", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
+	exitCode := command.RunIn([]string{"new", "example.com/acme/my-app"}, &stdout, &stderr, parent, nil)
 	wantStderr := "create project: create Plystra project: invalid Plystra project name: project name \"example.com/acme/my-app\" must be one lower-case ASCII kebab-case child directory\n\n" +
 		"Recovery:\nRerun `plystra new <project-name> [options]` with one lower-case ASCII kebab-case child directory name; put any independent Go Module identity in `--module <go-module-path>`.\n\n" +
 		"Diagnostic: " + diagnosticcode.ProjectCreateNameInvalid + "\n"
@@ -1481,9 +1491,9 @@ func TestPublicCommandRejectsInvalidModuleOverrideWithoutMutation(t *testing.T) 
 	parent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := command.RunIn([]string{"new", "my-app", "--module", "local-module", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
+	exitCode := command.RunIn([]string{"new", "my-app", "--module", "local-module"}, &stdout, &stderr, parent, nil)
 	if exitCode != 1 || stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "create project: create Plystra project: invalid Plystra project module path: invalid explicit Go Module path \"local-module\":") ||
-		!strings.Contains(stderr.String(), "\n\nRecovery:\nRerun `plystra new <project-name> --module <go-module-path> [options]` with one valid Go Module path and every required choice flag.\n\nDiagnostic: "+diagnosticcode.ProjectCreateModuleInvalid+"\n") ||
+		!strings.Contains(stderr.String(), "\n\nRecovery:\nRerun `plystra new <project-name> --module <go-module-path> [options]` with one valid Go Module path.\n\nDiagnostic: "+diagnosticcode.ProjectCreateModuleInvalid+"\n") ||
 		strings.Count(stderr.String(), "Recovery:") != 1 || strings.Count(stderr.String(), "Diagnostic:") != 1 {
 		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
 	}
@@ -1498,8 +1508,8 @@ func TestPublicCommandRejectsInvalidTemplateQueryWithoutMutation(t *testing.T) {
 	parent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := command.RunIn([]string{"new", "my-app", "--template", "../platform@v1.0.0", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
-	wantRecovery := "\n\nRecovery:\nRerun `plystra new <project-name> --template <go-module-query> [options]` with one valid non-removal Go Module query and every required choice flag.\n\nDiagnostic: " + diagnosticcode.ProjectCreateTemplateInvalid + "\n"
+	exitCode := command.RunIn([]string{"new", "my-app", "--template", "../platform@v1.0.0"}, &stdout, &stderr, parent, nil)
+	wantRecovery := "\n\nRecovery:\nRerun `plystra new <project-name> --template <go-module-query> [options]` with one valid non-removal Go Module query.\n\nDiagnostic: " + diagnosticcode.ProjectCreateTemplateInvalid + "\n"
 	if exitCode != 1 || stdout.Len() != 0 ||
 		!strings.HasPrefix(stderr.String(), "create project: create Plystra project: invalid Plystra project template query: invalid Go Module path ") ||
 		!strings.Contains(stderr.String(), wantRecovery) || strings.Contains(stderr.String(), "Usage:") ||
@@ -1532,7 +1542,7 @@ func TestPublicCommandClassifiesInvalidInitialPluginWithoutMutation(t *testing.T
 			modulePath:   "example.com/acme/my-app",
 			pluginName:   "Account",
 			wantPrefix:   "create project: create Plystra project: invalid initial Plystra plugin name: invalid plugin name ",
-			wantRecovery: "Rerun `plystra new <project-name> --plugin <plugin-name> [options]` with one lower-case ASCII kebab-case initial Plugin name that is not reserved and every required choice flag.",
+			wantRecovery: "Rerun `plystra new <project-name> --plugin <plugin-name> [options]` with one lower-case ASCII kebab-case initial Plugin name that is not reserved.",
 			wantCode:     diagnosticcode.ProjectCreatePluginNameInvalid,
 			rejected:     []string{"Account"},
 		},
@@ -1541,7 +1551,7 @@ func TestPublicCommandClassifiesInvalidInitialPluginWithoutMutation(t *testing.T
 			modulePath:   "example.com",
 			pluginName:   "account",
 			wantPrefix:   "create project: create Plystra project: invalid initial Plystra plugin ID: derive plugin ID: module path ",
-			wantRecovery: "Rerun `plystra new <project-name> --module <go-module-path> --plugin <plugin-name> [options]` with values that derive one canonical Plugin ID and every required choice flag.",
+			wantRecovery: "Rerun `plystra new <project-name> --module <go-module-path> --plugin <plugin-name> [options]` with values that derive one canonical Plugin ID.",
 			wantCode:     diagnosticcode.ProjectCreatePluginIDInvalid,
 			rejected:     []string{"example.com", "account"},
 		},
@@ -1553,7 +1563,7 @@ func TestPublicCommandClassifiesInvalidInitialPluginWithoutMutation(t *testing.T
 			parent := t.TempDir()
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
-			exitCode := command.RunIn([]string{"new", "my-app", "--module", test.modulePath, "--plugin", test.pluginName, "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
+			exitCode := command.RunIn([]string{"new", "my-app", "--module", test.modulePath, "--plugin", test.pluginName}, &stdout, &stderr, parent, nil)
 			wantBlock := "\n\nRecovery:\n" + test.wantRecovery + "\n\nDiagnostic: " + test.wantCode + "\n"
 			stderrText := stderr.String()
 			if exitCode != 1 || stdout.Len() != 0 || !strings.HasPrefix(stderrText, test.wantPrefix) ||
@@ -1600,7 +1610,7 @@ func TestPublicCommandClassifiesExistingProjectTargetWithoutMutation(t *testing.
 
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
-			exitCode := command.RunIn([]string{"new", "my-app", "--module", "example.com/acme/my-app", "--no-git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, nil)
+			exitCode := command.RunIn([]string{"new", "my-app", "--module", "example.com/acme/my-app"}, &stdout, &stderr, parent, nil)
 			wantRecovery := "Rerun `plystra new <project-name> [options]` with a different canonical Project name whose target does not exist, or run it from a different parent directory."
 			wantBlock := "\n\nRecovery:\n" + wantRecovery + "\n\nDiagnostic: " + diagnosticcode.ProjectCreateTargetExists + "\n"
 			stderrText := stderr.String()
@@ -1622,21 +1632,21 @@ func TestPublicCommandClassifiesExistingProjectTargetWithoutMutation(t *testing.
 	}
 }
 
-func TestCreateHonorsOptionalProjectChoices(t *testing.T) {
+func TestCreateHonorsProjectScaffoldOptions(t *testing.T) {
 	proxy := createKernelProxy(t)
 	environment := isolatedGoEnvironment(t, proxy)
 	tests := []struct {
-		name       string
-		modulePath string
-		git        bool
-		githubCI   bool
-		skills     bool
+		name            string
+		modulePath      string
+		git             bool
+		githubCI        bool
+		noAgentGuidance bool
 	}{
-		{name: "minimal"},
+		{name: "default"},
 		{name: "git", git: true},
 		{name: "github-ci", githubCI: true},
-		{name: "skills", skills: true},
-		{name: "github-module", modulePath: "github.com/plystra/core-example", skills: true},
+		{name: "no-agent-guidance", noAgentGuidance: true},
+		{name: "github-module", modulePath: "github.com/plystra/core-example"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1648,13 +1658,13 @@ func TestCreateHonorsOptionalProjectChoices(t *testing.T) {
 				expectedModulePath = projectName
 			}
 			result, err := newproject.Create(t.Context(), newproject.Options{
-				Parent:      parent,
-				ProjectName: projectName,
-				ModulePath:  modulePath,
-				Git:         test.git,
-				GitHubCI:    test.githubCI,
-				Skills:      test.skills,
-				Environment: environment,
+				Parent:          parent,
+				ProjectName:     projectName,
+				ModulePath:      modulePath,
+				Git:             test.git,
+				GitHubCI:        test.githubCI,
+				NoAgentGuidance: test.noAgentGuidance,
+				Environment:     environment,
 			})
 			if err != nil {
 				t.Fatalf("Create: %v", err)
@@ -1665,33 +1675,33 @@ func TestCreateHonorsOptionalProjectChoices(t *testing.T) {
 			assertModuleState(t, result.Path(), expectedModulePath)
 			assertPathPresence(t, filepath.Join(result.Path(), ".git"), test.git)
 			assertPathPresence(t, filepath.Join(result.Path(), ".github", "workflows", "ci.yml"), test.githubCI)
-			assertPathPresence(t, filepath.Join(result.Path(), ".agents", "skills", "plystra", "SKILL.md"), test.skills)
+			guidance := !test.noAgentGuidance
+			assertPathPresence(t, filepath.Join(result.Path(), ".agents", "skills", "plystra", "manifest.json"), guidance)
 			if test.git {
 				assertGitInitialized(t, result.Path())
 			}
-			if test.skills {
-				assertPlystraSkill(t, result.Path(), expectedModulePath)
+			if guidance {
+				assertPlystraGuidance(t, result.Path(), expectedModulePath)
 			}
 		})
 	}
 }
 
-func TestPublicCommandRequiresExplicitNonInteractiveChoices(t *testing.T) {
-	t.Parallel()
-
+func TestPublicCommandUsesStableNonInteractiveDefaults(t *testing.T) {
+	proxy := createKernelProxy(t)
+	environment := isolatedGoEnvironment(t, proxy)
 	parent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := command.RunIn([]string{"new", "my-app"}, &stdout, &stderr, parent, nil)
-	wantStderr := "new project choice is required in non-interactive mode; specify --git or --no-git, --github-ci or --no-github-ci, --skills or --no-skills\n\n" +
-		"Recovery:\nRerun `plystra new <project-name> [options]` with exactly one of `--git` or `--no-git`, one of `--github-ci` or `--no-github-ci`, and one of `--skills` or `--no-skills`.\n\n" +
-		"Diagnostic: " + diagnosticcode.ProjectCreateChoiceRequired + "\n"
-	if exitCode != 1 || stdout.Len() != 0 || stderr.String() != wantStderr {
+	exitCode := command.RunIn([]string{"new", "my-app"}, &stdout, &stderr, parent, environment)
+	target := filepath.Join(parent, "my-app")
+	wantStdout := fmt.Sprintf("created my-app in %s\n", target)
+	if exitCode != 0 || stdout.String() != wantStdout || stderr.Len() != 0 {
 		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
 	}
-	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("non-interactive choice failure created target: %v", err)
-	}
+	assertPathPresence(t, filepath.Join(target, ".git"), false)
+	assertPathPresence(t, filepath.Join(target, ".github", "workflows", "ci.yml"), false)
+	assertPlystraGuidance(t, target, "my-app")
 }
 
 func TestPublicCommandClassifiesGitInitializationFailureAndRollsBack(t *testing.T) {
@@ -1723,8 +1733,8 @@ func TestPublicCommandClassifiesGitInitializationFailureAndRollsBack(t *testing.
 	parent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := command.RunIn([]string{"new", "my-app", "--module", "example.com/acme/my-app", "--git", "--no-github-ci", "--no-skills"}, &stdout, &stderr, parent, environment)
-	wantRecovery := "Correct the reported Git installation or initialization failure, then rerun `plystra new <project-name> [options]` with `--git`; use `--no-git` only when the Project intentionally needs no repository."
+	exitCode := command.RunIn([]string{"new", "my-app", "--module", "example.com/acme/my-app", "--git"}, &stdout, &stderr, parent, environment)
+	wantRecovery := "Correct the reported Git installation or initialization failure, then rerun `plystra new <project-name> [options]` with `--git`; omit `--git` when the Project intentionally needs no repository."
 	wantStderr := "create project: create Plystra project: create directory transaction: populate staging directory: initialize Git repository: git init failed\n\n" +
 		"Recovery:\n" + wantRecovery + "\n\n" +
 		"Diagnostic: " + diagnosticcode.ProjectCreateGitInitializationFailed + "\n"
@@ -1944,7 +1954,7 @@ func createKernelProxy(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("EscapePath: %v", err)
 	}
-	escapedVersion, err := module.EscapeVersion(newproject.KernelVersion)
+	escapedVersion, err := module.EscapeVersion(version.KernelVersion)
 	if err != nil {
 		t.Fatalf("EscapeVersion: %v", err)
 	}
@@ -1952,8 +1962,8 @@ func createKernelProxy(t *testing.T) string {
 	if err := os.MkdirAll(versionRoot, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	writeTestFile(t, filepath.Join(versionRoot, "list"), []byte(newproject.KernelVersion+"\n"))
-	writeTestFile(t, filepath.Join(versionRoot, escapedVersion+".info"), fmt.Appendf(nil, "{\"Version\":%q,\"Time\":\"2026-07-15T00:00:00Z\"}\n", newproject.KernelVersion))
+	writeTestFile(t, filepath.Join(versionRoot, "list"), []byte(version.KernelVersion+"\n"))
+	writeTestFile(t, filepath.Join(versionRoot, escapedVersion+".info"), fmt.Appendf(nil, "{\"Version\":%q,\"Time\":\"2026-07-15T00:00:00Z\"}\n", version.KernelVersion))
 	moduleFile := []byte("module github.com/plystra/kernel\n\ngo 1.26\n")
 	writeTestFile(t, filepath.Join(versionRoot, escapedVersion+".mod"), moduleFile)
 
@@ -1962,7 +1972,7 @@ func createKernelProxy(t *testing.T) string {
 		t.Fatalf("Create zip: %v", err)
 	}
 	archive := zip.NewWriter(archiveFile)
-	prefix := "github.com/plystra/kernel@" + newproject.KernelVersion + "/"
+	prefix := "github.com/plystra/kernel@" + version.KernelVersion + "/"
 	files := []struct {
 		name string
 		data []byte
@@ -2186,7 +2196,7 @@ func assertModuleState(t *testing.T, root, modulePath string) {
 		t.Fatalf("module directive = %#v", parsed.Module)
 	}
 	want := map[string]string{
-		"github.com/plystra/kernel": newproject.KernelVersion,
+		"github.com/plystra/kernel": version.KernelVersion,
 		bootstrapgen.YAMLModulePath: bootstrapgen.YAMLModuleVersion,
 	}
 	if len(parsed.Require) != len(want) {
@@ -2290,370 +2300,30 @@ func assertDefaultTransportScaffold(t *testing.T, configuration []byte) {
 	}
 }
 
-func assertPlystraSkill(t *testing.T, root, modulePath string) {
+func assertPlystraGuidance(t *testing.T, root, modulePath string) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "plystra", "SKILL.md"))
+	projection, err := agentguidance.Render(modulePath)
 	if err != nil {
-		t.Fatalf("read Plystra skill: %v", err)
+		t.Fatalf("render installed Plystra guidance: %v", err)
 	}
-	for _, required := range []string{
-		"name: plystra",
-		"The current Go Module path is " + modulePath,
-		"Replace MODULE_PATH below with it",
-		"## Choose the smallest workflow",
-		"### Operate a Project created from a template",
-		"The current CLI does not advertise any template as qualified",
-		"### Change ordinary business behavior",
-		"adds two public concepts",
-		"the other concrete Implementation package",
-		"Implementations are candidates, not roots",
-		"transitively required Interfaces activate them",
-		"interfaces.use only selects",
-		"validates dormant config.<constructor-symbol> immediately",
-		"including Secret-reference syntax, without resolving",
-		"Dormant configuration creates no runtime, bootstrap, Secret, or Kernel state",
-		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID",
-		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID",
-		"PLYSTRA_CONFIGURATION_INVALID",
-		"PLYSTRA_ENVIRONMENT_OVERLAY_INVALID",
-		"PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT",
-		"PLYSTRA_GENERATED_DRIFT",
-		"PLYSTRA_GENERATED_MANIFEST_INVALID",
-		"PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID",
-		"PLYSTRA_PROTOBUF_IDENTITY_COLLISION",
-		"PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED",
-		"PLYSTRA_CAPABILITY_MANIFEST_INVALID",
-		"PLYSTRA_PLUGIN_TARGET_AMBIGUOUS",
-		"candidate plugin-declaration Sources at 1:1",
-		"PLYSTRA_GENERATION_ACTIVATION_CONFLICT",
-		"PLYSTRA_GENERATION_ACTIVATION_MISSING",
-		"PLYSTRA_GENERATION_PROVIDER_EXTENSION_MISSING",
-		"plugin/provider/choice Sources",
-		"none invented",
-		"PLYSTRA_GENERATION_ACTIVATION_CYCLE",
-		"PLYSTRA_GENERATION_DEPENDENCY_CYCLE",
-		"PLYSTRA_GENERATION_CONTRIBUTION_CYCLE",
-		"PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED",
-		"PLYSTRA_GENERATION_STATE_REPEATED",
-		"PLYSTRA_GENERATION_NONCONVERGENT",
-		"PLYSTRA_GENERATION_API_UNSUPPORTED: generation.api Source",
-		"PACKAGE_INVALID/COMPILE_FAILED/invocation failures",
-		"generation.package Source",
-		"bare/unlocated none",
-		"dedup Sources",
-		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
-		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
-		"generated-artifact Sources",
-		"interface-contract Source",
-		"PLYSTRA_PROJECT_CONCURRENT_CHANGE",
-		"sorted path-only Sources",
-		"path-only configuration-selection Source",
-		"conflicts or unsafe selectors have",
-		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED",
-		"### Select one environment",
-		"Use --config only when the task",
-		"one complete replacement document; it is an advanced",
-		"## Detailed task reference",
-		"Read only the section that matches the current task",
-		"## Module and file ownership",
-		"plystra new app",
-		"plystra new app --module github.com/acme/app",
-		"plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3",
-		"Template-declared operational values and Secret-reference placeholders",
-		"immediate plystra generate --check equivalent",
-		"runs the same read-only workflow as plystra check",
-		"builds every staged Go package with -mod=readonly",
-		"builds generated/go/application with GOWORK=off",
-		"invokes intrinsic kernel.health/v1",
-		"stops lifecycle providers cleanly",
-		"does not read PLATFORM_SMTP_PASSWORD",
-		"invent values for required fields omitted by the template",
-		"plystra plugin create records",
-		"plystra capability create records.read --query --plugin records --expose",
-		"PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED",
-		"PLYSTRA_RESOLVE_UNKNOWN_INTERFACE",
-		"declaration/selection Source",
-		"PLYSTRA_RESOLVE_RESERVED_INTERFACE",
-		"PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION",
-		"root/constructor Sources",
-		"PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE",
-		"PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION",
-		"PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION",
-		"implementation-selection Source",
-		"plystra implement email.send/v1 --package ./mailer",
-		"plystra inspect configuration",
-		"creates no copied contract",
-		"capabilities/records.read/v1/capability.yaml",
-		"plugin.yaml",
-		"plystra.yaml",
-		"## Compose dependency Project configuration",
-		"Every direct or transitive",
-		"Dependency files such",
-		"as plystra.production.yaml and plystra.test.yaml are never inherited",
-		"Resolve an inherited Implementation conflict with one exact current-Project choice",
-		"plystra use email.send/v1 example.com/acme/email/smtp.New",
-		"plystra use email.send/v1 example.com/acme/email/production.New --env production",
-		"plystra use email.send/v1 example.com/acme/email/customer.New --config deploy/customer-a.yaml",
-		"rolls back every owned file after",
-		"Remove only exact inherited composable declarations with sparse edits and null",
-		"Dependency exposure is ignored and requires no consumer removal",
-		"email.send/v1: null",
-		"legacy_host: null",
-		"Declared objects merge recursively",
-		"Dependency http.expose, http.address, http.cors, and",
-		"interfaces.use and interfaces.policies replace",
-		"Only positive timeout is accepted",
-		"Values normalize and replace",
-		"Enforcement is deferred",
-		"plystra add github.com/acme/email@v1.4.2",
-		"plystra remove github.com/acme/email",
-		"plystra update github.com/acme/email@v1.5.0",
-		"retains the selected module as a direct",
-		"preserves an existing direct requirement",
-		"only that module query",
-		"restores every transaction-owned module",
-		"non-secret composition",
-		"## Select an environment or one complete current-Project configuration",
-		"plystra generate --env production",
-		"plystra generate --check --env production",
-		"go run ./generated/go/application --env production",
-		"Generated startup accepts the same --env selector or PLYSTRA_ENV",
-		"--config selector or PLYSTRA_CONFIG",
-		"Manifest provenance records the selected document and dependency composition",
-		"bounded executable compatibility projection",
-		"artifact-provenance",
-		"rebuild with the same",
-		"Runtime-only address",
-		"go run ./generated/go/application --config deploy/customer-a.yaml",
-		"does not merge it beneath",
-		"PLYSTRA_ENV supplies the same environment name",
-		"plystra capability expose records.read/v1 --env production",
-		"plystra capability expose records.read/v1 --config deploy/customer-a.yaml",
-		"regenerates with the same selection",
-		"http.expose is keyed by exact Interface ID",
-		"New Projects start with http.expose: {}",
-		"exact-key null removes inherited exposure",
-		"Empty mappings preserve",
-		"REST routes remain deferred",
-		"http.cors is an optional closed current-Project object",
-		"requires one nonempty allowed_origins list",
-		"http.cors to null",
-		"CORS settings are ignored",
-		"Generated Connect handlers enforce the policy before",
-		"Authorization, Connect-Protocol-Version, Connect-Timeout-Ms",
-		"normalized HTTP/HTTPS",
-		"at most four",
-		"totaling at most 4096",
-		"return 403",
-		"Without http.cors",
-		"reject cross-origin preflight",
-		"Do not combine --env and --config",
-		"preserves the sparse overlay",
-		"plystra generate --config deploy/customer-a.yaml",
-		"plystra generate --check --config deploy/customer-a.yaml",
-		"PLYSTRA_CONFIG supplies the same path",
-		"generated/compatibility/{interfaces,interface-metadata,interface-transport,interface-javascript,interface-documentation}.json",
-		"interface-documentation.json records doc kind, path, digest",
-		"an empty state",
-		"API-documentation generator",
-		"Refresh with plystra generate",
-		"use plystra generate",
-		"plystra generate --check",
-		"never edit them.",
-		"generated/proto/wire-map.json is durable CLI-owned compatibility history",
-		"every visible authored Interface message",
-		"exposed or not and even with Connect",
-		"Authored positive plystra numbers are wire numbers",
-		"rejects renumbering or reuse",
-		"permanently reserves removed Protobuf names",
-		"Only exposed Connect Interfaces become active",
-		"emit schemas",
-		"descriptors, handlers, or SDK output",
-		"exactly one unary service from every exposed Interface package",
-		"procedure path is derived from the exact Interface ID",
-		"temporary legacy",
-		"owns no competing messages, service, or procedure",
-		"Protobuf-derived names must be unique within each request and response",
-		"foo1 and foo_1 both derive the ProtoJSON name foo1",
-		"http_status and h_t_t_p_status both derive one HTTPStatusEnum type",
-		"Protobuf naming collision",
-		"Unsupported Connect operation kind",
-		"PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED",
-		"reported exposure Source",
-		"generated/proto/descriptor-set.pb is the self-contained deterministic",
-		"A selected Connect surface also emits a Go handler",
-		"explicit semantics.kind: query or command",
-		"projects each as one unary",
-		"event or stream from http.expose",
-		"Binary Protobuf requests",
-		"limited to 1 MiB",
-		"maximum message depth of 64",
-		"65,536-node budget",
-		"unknown fields at",
-		"any message depth",
-		"Binary Protobuf responses",
-		"same size, depth, and node",
-		"bounds. Generated conversion",
-		"serializes deterministically",
-		"no partial response",
-		"ProtoJSON requests independently accept at most 1 MiB",
-		"65,536 structural tokens",
-		"Unknown or duplicate fields",
-		"invalid UTF-8",
-		"Optional non-nullable null becomes absence",
-		"full-range integers remain exact",
-		"ProtoJSON responses use the",
-		"same exact generated message and canonical response validation",
-		"Canonical and",
-		"Alias binary and ProtoJSON paths agree",
-		"RootContext receives the live external request context",
-		"pre-cancelled direct",
-		"earlier caller or trusted-root",
-		"Connect-Timeout-Ms deadlines",
-		"context.DeadlineExceeded",
-		"Cancellation and deadlines are best-effort",
-		"@bufbuild/protobuf, @connectrpc/connect, and @connectrpc/connect-web runtime",
-		"never receive ConnectError as the public error model",
-		"ClientOptions requires credentialPolicy",
-		"Cookie uses",
-		"fetchCredentials same-origin or include",
-		"Bearer is",
-		"getAccessToken for one bounded raw token",
-		"Fetch omit",
-		"fail before dispatch as PlystraError",
-		"PlystraError credential_error",
-		"without token data",
-		"AbortSignal in the second argument",
-		"bearer acquisition",
-		"in-flight cancellation",
-		"reaches fetch",
-		"Implementation rollback guarantee",
-		"plystra.generated.transport.v1.PlystraErrorDetail",
-		"requested_interface_id",
-		"canonical_interface_id",
-		"inspect its immutable detail; do not parse messages or Connect internals",
-		"mismatched, or undeclared detail fails closed to internal",
-		"src/descriptors.ts",
-		"sends binary Connect requests",
-		"versioned canonical constraint",
-		"exact contract and",
-		"constraint digests",
-		"Configuration schema v7",
-		"dormant_implementation_selections",
-		"dormant_constructor_configurations",
-		"normalized field digests and redacted summaries",
-		"constructor active through any binding has none",
-		"Activation removes the affected entries",
-		"current_project_paths",
-		"Protobuf wire-map digest",
-		"top-level transport_toolchain",
-		"embedded go/format",
-		"generated Go/npm dependencies",
-		"global protoc",
-		"hosted generator",
-		"environment, or explicit-config mode",
-		"root dependency baseline",
-		"merged beneath deploy/customer-a.yaml",
-		"There is no handwritten provider registration",
-		"dependencies.Dependencies",
-		"generated/go/dependencies/",
-		"generated/go/application entrypoint",
-		"npm run typecheck",
-		"plystra inspect --format json",
-		"plystra generate --check",
-		"Diagnostic: PLYSTRA_<AREA>_<CONDITION>",
-		"Source: <module>:<module-relative-path>[:line:column] (<kind>)",
-		"PLYSTRA_PROJECT_MANIFEST_INVALID",
-		"project-marker",
-		"malformed 1:1",
-		"else no span",
-		"PLYSTRA_CONFIGURATION_INHERITED_CONFLICT",
-		"PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS",
-		"configuration-declaration",
-		"PLYSTRA_CONFIGURATION_SELECTION_INVALID",
-		"PLYSTRA_PROJECT_CREATE_NAME_INVALID",
-		"PLYSTRA_PROJECT_CREATE_MODULE_INVALID",
-		"PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID",
-		"PLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID",
-		"PLYSTRA_PROJECT_CREATE_PLUGIN_ID_INVALID",
-		"PLYSTRA_PLUGIN_CREATE_NAME_INVALID",
-		"PLYSTRA_PLUGIN_CREATE_ID_INVALID",
-		"PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS",
-		"PLYSTRA_IMPLEMENTATION_DECLARATION_INVALID",
-		"PLYSTRA_IMPLEMENTATION_CONFIG_INVALID",
-		"PLYSTRA_IMPLEMENTATION_REQUIRED_INTERFACE_INVALID",
-		"PLYSTRA_IMPLEMENTATION_OPTIONAL_INTERFACE_INVALID",
-		"PLYSTRA_IMPLEMENTATION_RESULT_INVALID",
-		"PLYSTRA_IMPLEMENTATION_CONFORMANCE_INVALID",
-		"PLYSTRA_INTERFACE_DECLARATION_INVALID",
-		"PLYSTRA_INTERFACE_CONTRACT_INVALID",
-		"PLYSTRA_INTERFACE_METADATA_INVALID",
-		"PLYSTRA_INTERFACE_ID_DUPLICATE",
-		"PLYSTRA_AUTHORING_PACKAGE_INVALID",
-		"PLYSTRA_INTERFACE_CREATE_NAME_INVALID",
-		"PLYSTRA_INTERFACE_CREATE_TARGET_EXISTS",
-		"PLYSTRA_IMPLEMENTATION_CREATE_INTERFACE_INVALID",
-		"PLYSTRA_IMPLEMENTATION_CREATE_INTERFACE_NOT_FOUND",
-		"PLYSTRA_IMPLEMENTATION_CREATE_PACKAGE_INVALID",
-		"PLYSTRA_IMPLEMENTATION_CREATE_TARGET_EXISTS",
-		"PLYSTRA_USE_INTERFACE_INVALID",
-		"PLYSTRA_USE_CONSTRUCTOR_INVALID",
-		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID",
-		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID",
-		"PLYSTRA_CONFIGURATION_INVALID",
-		"PLYSTRA_ENVIRONMENT_OVERLAY_INVALID",
-		"PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT",
-		"PLYSTRA_GENERATED_DRIFT",
-		"PLYSTRA_GENERATED_MANIFEST_INVALID",
-		"PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID",
-		"PLYSTRA_PROTOBUF_IDENTITY_COLLISION",
-		"PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED",
-		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
-		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
-		"generated-artifact",
-		"interface-contract Source",
-		"PLYSTRA_GO_MODULE_INVALID",
-		"PLYSTRA_APPLICATION_DEPENDENCY_DRIFT",
-		"module-dependency",
-		"PLYSTRA_PROJECT_CONCURRENT_CHANGE",
-		"sorted path-only Sources",
-		"path-only configuration-selection Source",
-		"conflicts or unsafe selectors have",
-		"PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION",
-		"PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID",
-		"PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID",
-		"PLYSTRA_DEPENDENCY_REMOVE_NOT_SELECTED",
-		"PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID",
-		"PLYSTRA_DEPENDENCY_UPDATE_NOT_SELECTED",
-		"PLYSTRA_CAPABILITY_CREATE_REFERENCE_INVALID",
-		"PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE",
-		"PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED",
-		"PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED",
-		"PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED",
-		"PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID",
-		"PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE",
-		"PLYSTRA_CAPABILITY_EXPOSE_REFERENCE_INVALID",
-		"PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE",
-	} {
-		if !strings.Contains(string(data), required) {
-			t.Fatalf("Plystra skill omits %q:\n%s", required, data)
+	want := make(map[string][]byte)
+	for _, file := range projection.Files() {
+		relative := strings.TrimPrefix(file.Path(), agentguidance.Root+"/")
+		if relative == file.Path() {
+			t.Fatalf("projected guidance path %q is outside %q", file.Path(), agentguidance.Root)
 		}
+		want[relative] = file.Data()
 	}
-	processGuidance := strings.ReplaceAll(string(data), modulePath, "module-path")
-	lower := strings.ToLower(processGuidance)
-	for _, forbidden := range []string{"TODO", "commit", "branch", "push", "pull request", "repository", "version control"} {
-		if strings.Contains(lower, strings.ToLower(forbidden)) {
-			t.Fatalf("Plystra skill contains forbidden %q guidance:\n%s", forbidden, data)
-		}
+	guidanceRoot := filepath.Join(root, filepath.FromSlash(agentguidance.Root))
+	if got := snapshotTree(t, guidanceRoot); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Plystra guidance differs from installed catalog:\n got: %#v\nwant: %#v", got, want)
 	}
-	for _, unavailable := range []string{"plystra dev", "plystra build"} {
-		if strings.Contains(lower, unavailable) {
-			t.Fatalf("Plystra skill advertises unavailable command %q:\n%s", unavailable, data)
-		}
+	manifest, err := agentguidance.ParseManifest(want["manifest.json"])
+	if err != nil {
+		t.Fatalf("parse generated Plystra guidance manifest: %v", err)
 	}
-	metadata, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "plystra", "agents", "openai.yaml"))
-	if err != nil || !bytes.Contains(metadata, []byte("Use $plystra")) || !bytes.Contains(metadata, []byte("Go Module, Plugin, Capability, or plystra.yaml")) {
-		t.Fatalf("Plystra skill metadata = %q, %v", metadata, err)
+	if !reflect.DeepEqual(manifest, projection.Manifest()) {
+		t.Fatalf("generated Plystra guidance manifest = %#v, want %#v", manifest, projection.Manifest())
 	}
 }
 

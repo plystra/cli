@@ -98,7 +98,6 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.ProjectCreatePluginIDInvalid,
 		diagnosticcode.ProjectCreateTargetExists,
 		diagnosticcode.ProjectCreateGitInitializationFailed,
-		diagnosticcode.ProjectCreateChoiceRequired,
 		diagnosticcode.PluginCreateNameInvalid,
 		diagnosticcode.PluginCreateIDInvalid,
 		diagnosticcode.PluginCreateTargetExists,

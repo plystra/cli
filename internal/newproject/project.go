@@ -2,6 +2,7 @@
 package newproject
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"strings"
 
 	generation "github.com/plystra/cli/generation/v1"
+	"github.com/plystra/cli/internal/agentguidance"
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationinput"
@@ -43,12 +45,10 @@ import (
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
 	"github.com/plystra/cli/internal/transporttoolchain"
+	"github.com/plystra/cli/internal/version"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
-
-// KernelVersion is the exact Kernel release targeted by this CLI release.
-const KernelVersion = "v0.0.0-20260724160327-26ece9a0df89"
 
 const maximumGoEnvironmentValueBytes = 64 << 10
 
@@ -87,11 +87,13 @@ type Options struct {
 	Plugin      string
 	Git         bool
 	GitHubCI    bool
-	Skills      bool
-	GoCommand   string
-	NPMCommand  string
-	GitCommand  string
-	Environment []string
+	// NoAgentGuidance explicitly opts out of the default installed-release
+	// guidance projection.
+	NoAgentGuidance bool
+	GoCommand       string
+	NPMCommand      string
+	GitCommand      string
+	Environment     []string
 }
 
 // Result identifies a successfully committed project.
@@ -160,7 +162,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	}
 
 	err = atomicfs.CreateDirectory(target, func(stagingRoot string) error {
-		if err := populate(ctx, stagingRoot, modulePath, options.ProjectName, options.GitHubCI, options.Skills); err != nil {
+		if err := populate(ctx, stagingRoot, modulePath, options.ProjectName, options.GitHubCI, !options.NoAgentGuidance); err != nil {
 			return err
 		}
 		for _, arguments := range [][]string{{"mod", "download"}, {"mod", "tidy"}} {
@@ -202,7 +204,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 				return err
 			}
 		}
-		return verifyChoices(stagingRoot, modulePath, options.Git, options.GitHubCI, options.Skills)
+		return verifyScaffoldOptions(stagingRoot, modulePath, options.Git, options.GitHubCI, !options.NoAgentGuidance)
 	})
 	if err != nil {
 		if errors.Is(err, atomicfs.ErrTargetExists) {
@@ -559,7 +561,7 @@ func relativeReplacementPath(value string) bool {
 	return normalized == "." || normalized == ".." || strings.HasPrefix(normalized, "./") || strings.HasPrefix(normalized, "../")
 }
 
-func populate(ctx context.Context, root, modulePath, name string, githubCI, skills bool) error {
+func populate(ctx context.Context, root, modulePath, name string, githubCI, agentGuidance bool) error {
 	currentManifest, err := applicationmeta.Parse([]byte(plystraTemplate))
 	if err != nil {
 		return fmt.Errorf("parse initial Project configuration: %w", err)
@@ -608,7 +610,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	}
 	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
 		ModulePath:             modulePath,
-		KernelModuleVersion:    KernelVersion,
+		KernelModuleVersion:    version.KernelVersion,
 		HTTPTransports:         currentManifest.HTTPTransports(),
 		HTTPCORS:               httpCORS,
 		Resolution:             resolution,
@@ -671,7 +673,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	}
 	generated, err := applicationgen.Render(applicationgen.Options{
 		ModulePath:             modulePath,
-		KernelModuleVersion:    KernelVersion,
+		KernelModuleVersion:    version.KernelVersion,
 		HTTPTransports:         currentManifest.HTTPTransports(),
 		HTTPCORS:               httpCORS,
 		Composition:            composition,
@@ -690,15 +692,15 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if githubCI {
 		readme += githubCIReadmeTemplate
 	}
-	if skills {
-		readme += skillsReadmeTemplate
+	if agentGuidance {
+		readme += agentGuidanceReadmeTemplate
 	}
 	type projectFile struct {
 		path string
 		data []byte
 	}
 	files := []projectFile{
-		{path: "go.mod", data: fmt.Appendf(nil, goModuleTemplate, modulePath, KernelVersion, bootstrapgen.YAMLModuleVersion)},
+		{path: "go.mod", data: fmt.Appendf(nil, goModuleTemplate, modulePath, version.KernelVersion, bootstrapgen.YAMLModuleVersion)},
 		{path: "README.md", data: []byte(readme)},
 		{path: ".gitignore", data: []byte(gitignoreTemplate)},
 		{path: ".gitattributes", data: []byte(gitattributesTemplate)},
@@ -706,11 +708,14 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, skil
 	if githubCI {
 		files = append(files, projectFile{path: ".github/workflows/ci.yml", data: []byte(ciTemplate)})
 	}
-	if skills {
-		files = append(files,
-			projectFile{path: ".agents/skills/plystra/SKILL.md", data: fmt.Appendf(nil, skillTemplate, modulePath)},
-			projectFile{path: ".agents/skills/plystra/agents/openai.yaml", data: []byte(skillAgentTemplate)},
-		)
+	if agentGuidance {
+		guidance, err := agentguidance.Render(modulePath)
+		if err != nil {
+			return err
+		}
+		for _, file := range guidance.Files() {
+			files = append(files, projectFile{path: file.Path(), data: file.Data()})
+		}
 	}
 	files = append(files, projectFile{path: "plystra.yaml", data: []byte(plystraTemplate)})
 	for _, file := range generated.Files() {
@@ -753,275 +758,42 @@ func initializeGit(ctx context.Context, root, command string, environment []stri
 	return fmt.Errorf("%w: git init failed: %s", ErrGitInitialization, message)
 }
 
-func verifyChoices(root, modulePath string, git, githubCI, skills bool) error {
+func verifyScaffoldOptions(root, modulePath string, git, githubCI, agentGuidance bool) error {
 	if err := verifyChoicePath(root, ".git", git, true); err != nil {
 		return err
 	}
 	if err := verifyChoicePath(root, ".github/workflows/ci.yml", githubCI, false); err != nil {
 		return err
 	}
-	if err := verifyChoicePath(root, ".agents/skills/plystra/SKILL.md", skills, false); err != nil {
+	return verifyAgentGuidance(root, modulePath, agentGuidance)
+}
+
+func verifyAgentGuidance(root, modulePath string, expected bool) error {
+	if !expected {
+		return verifyChoicePath(root, agentguidance.Root, false, true)
+	}
+	projection, err := agentguidance.Render(modulePath)
+	if err != nil {
 		return err
 	}
-	if err := verifyChoicePath(root, ".agents/skills/plystra/agents/openai.yaml", skills, false); err != nil {
-		return err
-	}
-	if skills {
-		data, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "plystra", "SKILL.md"))
+	for _, file := range projection.Files() {
+		fullPath := filepath.Join(root, filepath.FromSlash(file.Path()))
+		info, err := os.Lstat(fullPath)
 		if err != nil {
-			return fmt.Errorf("read generated Plystra skill: %w", err)
+			return fmt.Errorf("inspect generated Agent guidance path %s: %w", file.Path(), err)
 		}
-		if err := validateGeneratedSkill(data, modulePath); err != nil {
-			return err
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("generated Agent guidance path %s is not a regular file", file.Path())
 		}
-	}
-	return nil
-}
-
-func validateGeneratedSkill(data []byte, modulePath string) error {
-	if len(data) == 0 || len(data) > 64<<10 {
-		return fmt.Errorf("generated Plystra skill has an invalid size: %d bytes", len(data))
-	}
-	text := string(data)
-	if !strings.HasPrefix(text, "---\nname: plystra\n") || strings.Contains(text, "TODO") {
-		return errors.New("generated Plystra skill is incomplete")
-	}
-	required := []string{
-		"description: Develop Plystra Projects through ordinary Go Modules, versioned Interfaces, Implementations, and plystra.yaml",
-		"The current Go Module path is " + modulePath,
-		"Replace MODULE_PATH below with it",
-		"## Choose the smallest workflow",
-		"### Operate a Project created from a template",
-		"The current CLI does not advertise any template as qualified",
-		"### Change ordinary business behavior",
-		"adds two public concepts",
-		"the other concrete Implementation package",
-		"Implementations are candidates, not roots",
-		"interfaces.use only selects",
-		"### Select one environment",
-		"Use --config only when the task",
-		"one complete replacement document; it is an advanced",
-		"## Detailed task reference",
-		"Read only the section that matches the current task",
-		"## Module and file ownership",
-		"per-file generator/input/source provenance",
-		"generated/.plystra-manifest.json entry",
-		"plystra new app",
-		"plystra new app --module github.com/acme/app",
-		"plystra new app --module github.com/acme/app --template github.com/acme/platform@v1.2.3",
-		"PLYSTRA_PROJECT_CREATE_NAME_INVALID",
-		"PLYSTRA_PROJECT_CREATE_MODULE_INVALID",
-		"PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID",
-		"PLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID",
-		"PLYSTRA_PROJECT_CREATE_PLUGIN_ID_INVALID",
-		"PLYSTRA_PROJECT_CREATE_TARGET_EXISTS",
-		"Template-declared operational values and Secret-reference placeholders",
-		"does not read PLATFORM_SMTP_PASSWORD",
-		"invent values for required fields omitted by the template",
-		"Template creation requires an unambiguous default Provider model",
-		"Template dependencies must not match the effective GOPRIVATE setting",
-		"Template dependency Projects must not declare relative replace directives",
-		"plystra plugin create records",
-		"plystra capability create records.read --query --plugin records --expose",
-		"PLYSTRA_CAPABILITY_CREATE_ALREADY_VISIBLE",
-		"PLYSTRA_CAPABILITY_CREATE_CONFIRMATION_REQUIRED",
-		"PLYSTRA_CAPABILITY_CREATE_VERSION_EXHAUSTED",
-		"PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED",
-		"PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED",
-		"PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE",
-		"PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE",
-		"PLYSTRA_RESOLVE_UNKNOWN_INTERFACE",
-		"declaration/selection Source",
-		"PLYSTRA_RESOLVE_RESERVED_INTERFACE",
-		"PLYSTRA_RESOLVE_MISSING_IMPLEMENTATION",
-		"root/constructor Sources",
-		"PLYSTRA_RESOLVE_CONSTRUCTOR_CYCLE",
-		"PLYSTRA_RESOLVE_UNKNOWN_IMPLEMENTATION",
-		"PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION",
-		"PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION",
-		"PLYSTRA_CONFIGURATION_INVALID",
-		"http.expose is keyed by exact Interface ID",
-		"PLYSTRA_ENVIRONMENT_OVERLAY_INVALID",
-		"PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT",
-		"PLYSTRA_GENERATED_DRIFT",
-		"PLYSTRA_GENERATED_MANIFEST_INVALID",
-		"PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID",
-		"PLYSTRA_PROTOBUF_IDENTITY_COLLISION",
-		"PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED",
-		"PLYSTRA_CAPABILITY_MANIFEST_INVALID",
-		"provider-declaration at 1:1",
-		"PLYSTRA_GENERATED_OWNERSHIP_CONFLICT",
-		"PLYSTRA_GENERATED_UNEXPECTED_OUTPUT",
-		"generated-artifact Sources",
-		"interface-contract Source",
-		"PLYSTRA_GO_MODULE_INVALID",
-		"PLYSTRA_APPLICATION_DEPENDENCY_DRIFT",
-		"module-dependency",
-		"PLYSTRA_PROJECT_CONCURRENT_CHANGE",
-		"sorted path-only Sources",
-		"path-only configuration-selection Source",
-		"conflicts or unsafe selectors have",
-		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID",
-		"PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID",
-		"implementation-selection Source",
-		"set it to null",
-		"PLYSTRA_GENERATION_ACTIVATION_CYCLE",
-		"PLYSTRA_GENERATION_DEPENDENCY_CYCLE",
-		"PLYSTRA_GENERATION_CONTRIBUTION_CYCLE",
-		"PLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED",
-		"PLYSTRA_GENERATION_STATE_REPEATED",
-		"PLYSTRA_GENERATION_NONCONVERGENT",
-		"PLYSTRA_GENERATION_API_UNSUPPORTED: generation.api Source",
-		"PACKAGE_INVALID/COMPILE_FAILED/invocation failures",
-		"generation.package Source",
-		"bare/unlocated none",
-		"dedup Sources",
-		"plystra implement email.send/v1 --package ./mailer",
-		"creates no copied contract",
-		"Before a contract appears in any published tag",
-		"A published v0.0.1-rc.N tag and its artifacts are immutable",
-		"A newer RC may revise the same",
-		"After stable v0.0.1, an incompatible exact contract change requires",
-		"capabilities/records.read/v1/capability.yaml",
-		"There is no handwritten provider registration",
-		"dependencies.Dependencies",
-		"generated/go/dependencies/",
-		"plystra add github.com/acme/email@v1.4.2",
-		"plystra remove github.com/acme/email",
-		"plystra update github.com/acme/email@v1.5.0",
-		"generated/go/application entrypoint",
-		"Manifest provenance records the selected document and dependency composition",
-		"bounded executable compatibility projection",
-		"artifact-provenance",
-		"rebuild with the same",
-		"Runtime-only address",
-		"client.records.echo.v1(request)",
-		"createRecordsEchoV1(options)(request)",
-		"npm run typecheck",
-		"plystra inspect --format json",
-		"plystra generate --check",
-	}
-	for _, phrase := range required {
-		if !strings.Contains(text, phrase) {
-			return fmt.Errorf("generated Plystra skill omits required guidance %q", phrase)
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			return fmt.Errorf("read generated Agent guidance path %s: %w", file.Path(), err)
 		}
-	}
-	if err := validateSkillProgressiveDisclosure(text); err != nil {
-		return err
-	}
-	return validateSkillProcessGuidance(text, modulePath)
-}
-
-func validateSkillProgressiveDisclosure(text string) error {
-	const (
-		workflowHeading = "## Choose the smallest workflow"
-		templateHeading = "### Operate a Project created from a template"
-		businessHeading = "### Change ordinary business behavior"
-		detailHeading   = "## Detailed task reference"
-	)
-	workflowStart := strings.Index(text, workflowHeading)
-	templateStart := strings.Index(text, templateHeading)
-	businessStart := strings.Index(text, businessHeading)
-	detailStart := strings.Index(text, detailHeading)
-	if workflowStart < 0 || templateStart <= workflowStart || businessStart <= templateStart || detailStart <= businessStart {
-		return errors.New("generated Plystra skill has no progressive-disclosure boundary")
-	}
-
-	templatePath := strings.ToLower(text[templateStart:businessStart])
-	for _, term := range []string{"plugin", "capability", "provider", "alias", "protobuf", "connect"} {
-		if strings.Contains(templatePath, term) {
-			return fmt.Errorf("generated Plystra skill exposes concept %q in the template-consumer workflow", term)
-		}
-	}
-
-	ordinaryPath := strings.ToLower(text[workflowStart:detailStart])
-	for _, term := range []string{
-		"provider",
-		"alias",
-		"generation extension",
-		"fixed-point",
-		"contribution graph",
-		"normalized application model",
-		"composition provenance",
-		"template provenance",
-		"wire-map",
-		"protobuf",
-		"connect",
-		"connectrpc",
-		"candidate lineage",
-		"release candidate",
-		"release evidence",
-		"kernel assembly",
-	} {
-		if strings.Contains(ordinaryPath, term) {
-			return fmt.Errorf("generated Plystra skill exposes advanced concept %q before the detailed reference", term)
+		if !bytes.Equal(data, file.Data()) {
+			return fmt.Errorf("generated Agent guidance path %s differs from the installed catalog", file.Path())
 		}
 	}
 	return nil
-}
-
-func validateSkillProcessGuidance(text, modulePath string) error {
-	forbiddenWords := map[string]struct{}{
-		"branch": {}, "branches": {}, "checkout": {}, "checkouts": {},
-		"commit": {}, "commits": {}, "committed": {}, "committing": {},
-		"git": {}, "github": {}, "pull": {}, "pulled": {}, "pulling": {}, "pulls": {},
-		"push": {}, "pushed": {}, "pushes": {}, "pushing": {},
-		"repositories": {}, "repository": {},
-	}
-	processGuidance := strings.ReplaceAll(text, modulePath, "module-path")
-	processGuidance = redactGoModuleReferences(processGuidance)
-	words := strings.FieldsFunc(strings.ToLower(processGuidance), func(character rune) bool {
-		return character < 'a' || character > 'z'
-	})
-	for _, word := range words {
-		if _, forbidden := forbiddenWords[word]; forbidden {
-			return fmt.Errorf("generated Plystra skill contains unrelated development-process guidance %q", word)
-		}
-	}
-	if strings.Contains(strings.ToLower(processGuidance), "version control") {
-		return errors.New("generated Plystra skill contains unrelated development-process guidance")
-	}
-	return nil
-}
-
-func redactGoModuleReferences(text string) string {
-	redacted := []byte(text)
-	for start := 0; start < len(text); {
-		if !isModuleReferenceStart(text[start]) {
-			start++
-			continue
-		}
-		end := start + 1
-		for end < len(text) && isModuleReferenceByte(text[end]) {
-			end++
-		}
-		candidate := text[start:end]
-		path := candidate
-		if separator := strings.LastIndexByte(candidate, '@'); separator >= 0 {
-			path = candidate[:separator]
-			if separator == len(candidate)-1 {
-				start = end
-				continue
-			}
-		}
-		if strings.Contains(path, "/") && module.CheckPath(path) == nil {
-			for index := start; index < end; index++ {
-				redacted[index] = ' '
-			}
-		}
-		start = end
-	}
-	return string(redacted)
-}
-
-func isModuleReferenceStart(character byte) bool {
-	return character >= 'a' && character <= 'z' ||
-		character >= 'A' && character <= 'Z' ||
-		character >= '0' && character <= '9'
-}
-
-func isModuleReferenceByte(character byte) bool {
-	return isModuleReferenceStart(character) || strings.ContainsRune("-._~+/@", rune(character))
 }
 
 func verifyChoicePath(root, relativePath string, expected, directory bool) error {
@@ -1059,7 +831,7 @@ func verifyModule(root, modulePath string) error {
 	foundKernel := false
 	foundYAML := false
 	for _, requirement := range parsed.Require {
-		if requirement.Mod.Path == "github.com/plystra/kernel" && requirement.Mod.Version == KernelVersion && !requirement.Indirect {
+		if requirement.Mod.Path == "github.com/plystra/kernel" && requirement.Mod.Version == version.KernelVersion && !requirement.Indirect {
 			foundKernel = true
 		}
 		if requirement.Mod.Path == bootstrapgen.YAMLModulePath && requirement.Mod.Version == bootstrapgen.YAMLModuleVersion && !requirement.Indirect {
@@ -1067,7 +839,7 @@ func verifyModule(root, modulePath string) error {
 		}
 	}
 	if !foundKernel {
-		return fmt.Errorf("generated go.mod does not require github.com/plystra/kernel %s", KernelVersion)
+		return fmt.Errorf("generated go.mod does not require github.com/plystra/kernel %s", version.KernelVersion)
 	}
 	if !foundYAML {
 		return fmt.Errorf("generated go.mod does not require %s %s", bootstrapgen.YAMLModulePath, bootstrapgen.YAMLModuleVersion)

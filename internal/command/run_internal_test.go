@@ -22,9 +22,10 @@ func TestParseNewArguments(t *testing.T) {
 		{name: "module", arguments: []string{"new", "app", "--module", "example.com/acme/app"}, want: newArguments{projectName: "app", modulePath: "example.com/acme/app"}, ok: true},
 		{name: "template", arguments: []string{"new", "app", "--template", "example.com/acme/platform@v1.2.3"}, want: newArguments{projectName: "app", template: "example.com/acme/platform@v1.2.3"}, ok: true},
 		{name: "plugin", arguments: []string{"new", "app", "--plugin", "account"}, want: newArguments{projectName: "app", plugin: "account"}, ok: true},
-		{name: "all choices enabled", arguments: []string{"new", "app", "--git", "--github-ci", "--skills"}, want: newArguments{projectName: "app", git: choiceYes, githubCI: choiceYes, skills: choiceYes}, ok: true},
-		{name: "all choices disabled", arguments: []string{"new", "app", "--no-skills", "--no-git", "--no-github-ci"}, want: newArguments{projectName: "app", git: choiceNo, githubCI: choiceNo, skills: choiceNo}, ok: true},
-		{name: "mixed choices", arguments: []string{"new", "app", "--no-git", "--github-ci", "--no-skills"}, want: newArguments{projectName: "app", git: choiceNo, githubCI: choiceYes, skills: choiceNo}, ok: true},
+		{name: "tool opt ins", arguments: []string{"new", "app", "--git", "--github-ci"}, want: newArguments{projectName: "app", git: choiceYes, githubCI: choiceYes}, ok: true},
+		{name: "interactive", arguments: []string{"new", "app", "--interactive"}, want: newArguments{projectName: "app", interactive: true}, ok: true},
+		{name: "guidance opt out", arguments: []string{"new", "app", "--no-agent-guidance"}, want: newArguments{projectName: "app", noAgentGuidance: true}, ok: true},
+		{name: "all options", arguments: []string{"new", "app", "--no-agent-guidance", "--interactive", "--github-ci", "--git"}, want: newArguments{projectName: "app", git: choiceYes, githubCI: choiceYes, interactive: true, noAgentGuidance: true}, ok: true},
 		{name: "missing project", arguments: []string{"new"}},
 		{name: "removed library option", arguments: []string{"new", "app", "--library"}},
 		{name: "option as project", arguments: []string{"new", "--library"}},
@@ -38,11 +39,13 @@ func TestParseNewArguments(t *testing.T) {
 		{name: "option as plugin", arguments: []string{"new", "app", "--plugin", "--library"}},
 		{name: "duplicate plugin", arguments: []string{"new", "app", "--plugin", "account", "--plugin", "profile"}},
 		{name: "duplicate git", arguments: []string{"new", "app", "--git", "--git"}},
-		{name: "conflicting git", arguments: []string{"new", "app", "--git", "--no-git"}},
+		{name: "removed no git", arguments: []string{"new", "app", "--no-git"}},
 		{name: "duplicate github ci", arguments: []string{"new", "app", "--github-ci", "--github-ci"}},
-		{name: "conflicting github ci", arguments: []string{"new", "app", "--no-github-ci", "--github-ci"}},
-		{name: "duplicate skills", arguments: []string{"new", "app", "--skills", "--skills"}},
-		{name: "conflicting skills", arguments: []string{"new", "app", "--no-skills", "--skills"}},
+		{name: "removed no github ci", arguments: []string{"new", "app", "--no-github-ci"}},
+		{name: "removed skills", arguments: []string{"new", "app", "--skills"}},
+		{name: "removed no skills", arguments: []string{"new", "app", "--no-skills"}},
+		{name: "duplicate interactive", arguments: []string{"new", "app", "--interactive", "--interactive"}},
+		{name: "duplicate guidance opt out", arguments: []string{"new", "app", "--no-agent-guidance", "--no-agent-guidance"}},
 		{name: "unknown", arguments: []string{"new", "app", "--unknown"}},
 	}
 	for _, test := range tests {
@@ -57,42 +60,50 @@ func TestParseNewArguments(t *testing.T) {
 	}
 }
 
-func TestResolveNewChoicesUsesFlagsAndPromptsOnlyMissingValues(t *testing.T) {
+func TestResolveNewChoicesUsesStableDefaultsAndExplicitInteraction(t *testing.T) {
 	t.Parallel()
 
-	prompts := make([]string, 0, 2)
-	choices, err := resolveNewChoices(newArguments{
-		git:      choiceNo,
-		githubCI: choiceYes,
-	}, func(question string, defaultValue bool) (bool, error) {
+	defaults, err := resolveNewChoices(newArguments{}, func(string, bool) (bool, error) {
+		t.Fatal("non-interactive defaults prompted")
+		return false, nil
+	})
+	if err != nil || defaults != (resolvedNewChoices{agentGuidance: true}) {
+		t.Fatalf("default resolveNewChoices = %#v, %v", defaults, err)
+	}
+
+	optedIn, err := resolveNewChoices(newArguments{git: choiceYes, githubCI: choiceYes}, func(string, bool) (bool, error) {
+		t.Fatal("explicit non-interactive choices prompted")
+		return false, nil
+	})
+	if err != nil || optedIn != (resolvedNewChoices{git: true, githubCI: true, agentGuidance: true}) {
+		t.Fatalf("opt-in resolveNewChoices = %#v, %v", optedIn, err)
+	}
+
+	withoutGuidance, err := resolveNewChoices(newArguments{noAgentGuidance: true}, func(string, bool) (bool, error) {
+		t.Fatal("guidance opt-out prompted")
+		return false, nil
+	})
+	if err != nil || withoutGuidance != (resolvedNewChoices{}) {
+		t.Fatalf("guidance opt-out resolveNewChoices = %#v, %v", withoutGuidance, err)
+	}
+
+	prompts := make([]string, 0, 1)
+	interactive, err := resolveNewChoices(newArguments{git: choiceYes, interactive: true, noAgentGuidance: true}, func(question string, defaultValue bool) (bool, error) {
 		prompts = append(prompts, question)
 		if !defaultValue {
 			t.Fatal("new project prompts must default to yes")
 		}
 		return false, nil
 	})
-	if err != nil || choices != (resolvedNewChoices{git: false, githubCI: true, skills: false}) {
-		t.Fatalf("resolveNewChoices = %#v, %v", choices, err)
+	if err != nil || interactive != (resolvedNewChoices{git: true}) {
+		t.Fatalf("interactive resolveNewChoices = %#v, %v", interactive, err)
 	}
-	if !reflect.DeepEqual(prompts, []string{"Include Plystra development skills?"}) {
+	if !reflect.DeepEqual(prompts, []string{"Include GitHub Actions CI?"}) {
 		t.Fatalf("prompts = %q", prompts)
 	}
 
-	allExplicit, err := resolveNewChoices(newArguments{git: choiceYes, githubCI: choiceNo, skills: choiceYes}, func(string, bool) (bool, error) {
-		t.Fatal("explicit choices prompted")
-		return false, nil
-	})
-	if err != nil || allExplicit != (resolvedNewChoices{git: true, githubCI: false, skills: true}) {
-		t.Fatalf("explicit resolveNewChoices = %#v, %v", allExplicit, err)
-	}
-}
-
-func TestResolveNewChoicesRejectsOmissionsWithoutTerminal(t *testing.T) {
-	t.Parallel()
-
-	choices, err := resolveNewChoices(newArguments{git: choiceYes}, nil)
-	if choices != (resolvedNewChoices{}) || !errors.Is(err, errNewChoiceRequired) || !strings.Contains(err.Error(), "--github-ci or --no-github-ci") || !strings.Contains(err.Error(), "--skills or --no-skills") {
-		t.Fatalf("resolveNewChoices = %#v, %v", choices, err)
+	if choices, err := resolveNewChoices(newArguments{interactive: true}, nil); choices != (resolvedNewChoices{}) || !errors.Is(err, errNewChoicePrompt) || !strings.Contains(err.Error(), "interactive input is unavailable") {
+		t.Fatalf("unavailable interactive input = %#v, %v", choices, err)
 	}
 }
 
@@ -100,7 +111,7 @@ func TestPromptNewProjectAcceptsDefaultsAndRetriesInvalidInput(t *testing.T) {
 	t.Parallel()
 
 	var output strings.Builder
-	prompt := promptNewProject(strings.NewReader("later\n\nno\nyes\n"), &output)
+	prompt := promptNewProject(strings.NewReader("later\n\nno\n"), &output)
 	git, err := prompt("Initialize a Git repository?", true)
 	if err != nil || !git {
 		t.Fatalf("Git prompt = %t, %v", git, err)
@@ -109,14 +120,9 @@ func TestPromptNewProjectAcceptsDefaultsAndRetriesInvalidInput(t *testing.T) {
 	if err != nil || ci {
 		t.Fatalf("CI prompt = %t, %v", ci, err)
 	}
-	skills, err := prompt("Include Plystra development skills?", true)
-	if err != nil || !skills {
-		t.Fatalf("skills prompt = %t, %v", skills, err)
-	}
 	want := "Initialize a Git repository? [Y/n]: Please enter yes or no.\n" +
 		"Initialize a Git repository? [Y/n]: " +
-		"Include GitHub Actions CI? [Y/n]: " +
-		"Include Plystra development skills? [Y/n]: "
+		"Include GitHub Actions CI? [Y/n]: "
 	if output.String() != want {
 		t.Fatalf("prompt output = %q, want %q", output.String(), want)
 	}
