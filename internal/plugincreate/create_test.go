@@ -24,6 +24,7 @@ import (
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/pluginscan"
 	"github.com/plystra/cli/internal/testkernel"
+	"github.com/plystra/cli/internal/testmodulecache"
 )
 
 var updatePluginGolden = flag.Bool("update", false, "update generated plugin scaffold golden files")
@@ -450,6 +451,12 @@ func createModule(t *testing.T, modulePath string) string {
 	if err != nil {
 		t.Fatalf("resolve CLI root: %v", err)
 	}
+	testmodulecache.Ensure(t,
+		"go.yaml.in/yaml/v3@v3.0.4",
+		"golang.org/x/mod@v0.38.0",
+		"golang.org/x/tools@v0.47.0",
+		"gopkg.in/check.v1@v0.0.0-20161208181325-20d25e280405",
+	)
 	kernelRoot := testkernel.Root(t)
 	goMod := fmt.Sprintf(`module %s
 

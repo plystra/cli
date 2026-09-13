@@ -33,6 +33,7 @@ import (
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/projectcheck"
 	"github.com/plystra/cli/internal/projectsmoke"
+	"github.com/plystra/cli/internal/testmodulecache"
 	"github.com/plystra/cli/internal/version"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -2026,6 +2027,7 @@ func createKernelProxy(t *testing.T) string {
 
 func copyCachedProxyModule(t *testing.T, proxyRoot, modulePath, version string) {
 	t.Helper()
+	testmodulecache.Ensure(t, modulePath+"@"+version)
 	escapedPath, err := module.EscapePath(modulePath)
 	if err != nil {
 		t.Fatalf("EscapePath(%s): %v", modulePath, err)

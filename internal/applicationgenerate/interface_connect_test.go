@@ -10,11 +10,18 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/command"
+	"github.com/plystra/cli/internal/connectgen"
+	"github.com/plystra/cli/internal/testmodulecache"
 )
 
 func TestGeneratedInterfaceCallsKeepConnectExternal(t *testing.T) {
 	root := t.TempDir()
 	const modulePath = "example.com/interface-connect"
+	testmodulecache.Ensure(t,
+		connectgen.ConnectModulePath+"@"+connectgen.ConnectModuleVersion,
+		"github.com/google/go-cmp@v0.7.0",
+		connectgen.ProtobufModulePath+"@"+connectgen.ProtobufModuleVersion,
+	)
 	writeApplicationModule(t, root, modulePath)
 	writeFile(t, filepath.Join(root, "plystra.yaml"), `interfaces:
   require: [records.echo/v1]
