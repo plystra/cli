@@ -44,6 +44,7 @@ plystra inspect
 plystra inspect modules
 plystra inspect interfaces
 plystra inspect implementations
+plystra inspect configuration
 plystra explain capability records.read/v1
 plystra explain plugin <plugin-id>
 plystra explain config config.<plugin-id>.<field>
@@ -62,6 +63,8 @@ A Project with zero non-intrinsic roots is valid. Generation still emits intrins
 Mutating Plystra commands regenerate automatically. Add an ordinary Go Module dependency with ` + "`plystra add github.com/acme/platform@v1.0.0`" + `, update it with ` + "`plystra update github.com/acme/platform@v1.1.0`" + `, and remove it with ` + "`plystra remove github.com/acme/platform`" + `. A Project created with ` + "`plystra new app --template github.com/acme/platform@v1.0.0 --no-git --no-github-ci --skills`" + ` retains the selected template as the same kind of ordinary direct dependency: its dependency-composable root declarations, typed values, and Secret-reference placeholders compose into this Project, but its source is not copied and it receives no resolution priority. Dependency public exposure and process settings do not compose; declare them in the selected current-Project document. Creation validates composable values without reading referenced ` + "`env`" + ` or ` + "`file`" + ` Secrets; generated source and manifest provenance contain neither reference targets nor resolved values. Run ` + "`plystra generate`" + ` after manual declaration edits and use ` + "`plystra generate --check`" + ` as the read-only consistency gate. Use ` + "`plystra inspect`" + ` for a concise read-only summary of the same selected model, ` + "`plystra inspect modules`" + ` for participating Project modules, and ` + "`plystra inspect interfaces`" + ` for every visible authored and intrinsic Interface, module ownership, root requirements, active selected constructors and reasons, constructor dependency availability, and inactive visible Interfaces. Graph views use the versioned ` + "`plystra.graph`" + ` v1 schema with project-relative sources and no resolved Secrets or unrestricted configuration values; use ` + "`--verbose`" + ` for complete resolution evidence or ` + "`--format json`" + ` for deterministic automation output. Use ` + "`plystra explain capability <capability-name>/vN`" + ` with the same selector to see a Capability's selected Provider, direct reason and source, and the exact command or configuration field that changes that decision. Use ` + "`plystra explain plugin <plugin-id>`" + ` to see whether a Plugin is selected from the current Project, selected as an exact Capability Provider, or visible but unselected, together with the direct source and selector-matched change. Use ` + "`plystra explain config config.<plugin-id>.<field>`" + ` to see the typed configuration owner, winning source, explicit removal or ancestor suppression, and exact selected document field to edit without exposing configuration values or Secret-reference targets. Use ` + "`plystra explain alias <alias-name>/vN`" + ` to see its direct canonical target, inherited or narrowed exposure, every compatible application or generation-extension source, and the selector-matched field or activation decision that changes the result. Use ` + "`plystra explain exposure <capability-or-alias-name>/vN`" + ` to see why that identity is public or internal and the selected exposure, Alias, or activation decision that changes the surface.
 
 ` + "`plystra inspect implementations`" + ` shows every visible constructor candidate, active, dormant-explicit, or unselected state, implemented Interfaces, declared and resolved dependencies, constructor-owned configuration provenance, and reachable assembly membership.
+
+` + "`plystra inspect configuration`" + ` shows selected layers, redacted field summaries, owners, precedence, effective and overridden contributions, removals, and ancestor suppression.
 
 Malformed ` + "`add`" + ` and ` + "`update`" + ` queries emit ` + "`PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID`" + ` and ` + "`PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID`" + `; a malformed exact ` + "`remove`" + ` path emits ` + "`PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID`" + `. Each failure occurs before Project discovery or mutation and supplies one placeholder-based corrected command. A valid ` + "`remove`" + ` path or ` + "`update`" + ` query absent from ` + "`go.mod`" + ` emits ` + "`PLYSTRA_DEPENDENCY_REMOVE_NOT_SELECTED`" + ` or ` + "`PLYSTRA_DEPENDENCY_UPDATE_NOT_SELECTED`" + ` before mutation, with placeholder-only recovery.
 
@@ -1416,6 +1419,9 @@ Run the narrowest relevant test first, then the complete module checks:
     plystra inspect implementations
     plystra inspect implementations --env production
     plystra inspect implementations --config deploy/customer-a.yaml
+    plystra inspect configuration
+    plystra inspect configuration --env production
+    plystra inspect configuration --config deploy/customer-a.yaml
     plystra inspect --format json
     plystra explain capability email.send/v1
     plystra explain capability email.send/v1 --env production
@@ -1455,11 +1461,13 @@ counts, activation, transports, readiness, and the matching check action. Use
 visible authored and intrinsic Interfaces, roots, selections, dependencies, and
 inactive state, and ` + "`plystra inspect implementations`" + ` for visible constructor
 candidates, active or dormant selection state, dependencies, configuration
-provenance, and assembly membership. Graph views use ` + "`plystra.graph`" + ` v1 with
-project-relative sources and no resolved Secrets or unrestricted configuration
-values. Use --verbose for complete evidence or --format json for one versioned
-schema document; JSON diagnostics stay on stderr. Reuse one --env or --config
-selector across inspect, generate, check, and application startup.
+provenance, and assembly membership. Use ` + "`plystra inspect configuration`" + ` for
+selected layers, redacted field summaries, precedence, removals, and suppression.
+Graph views use ` + "`plystra.graph`" + ` v1 with project-relative sources and no
+resolved Secrets or unrestricted configuration values. Use --verbose for
+complete evidence or --format json for one versioned schema document; JSON
+diagnostics stay on stderr. Reuse one --env or --config selector across inspect,
+generate, check, and application startup.
 
 Plystra check is read-only: it verifies selected configuration and the generated
 fixed point, then runs go test -mod=readonly ./... from the Project root. Reuse

@@ -125,6 +125,21 @@ func TestGraphRelationshipIDBoundsLongCompositeIdentities(t *testing.T) {
 	}
 }
 
+func TestGraphNodeIDBoundsLongIdentities(t *testing.T) {
+	t.Parallel()
+
+	if got := GraphNodeID("configuration-field", `config["example.com/app.New"]["host"]`); got != `configuration-field:config["example.com/app.New"]["host"]` {
+		t.Fatalf("short node ID = %q", got)
+	}
+	identity := strings.Repeat("a", maximumGraphIdentityLength+1)
+	first := GraphNodeID("configuration-field", identity)
+	second := GraphNodeID("configuration-field", identity)
+	changed := GraphNodeID("configuration-field", identity+"b")
+	if len(first) > maximumGraphIdentityLength || !strings.HasPrefix(first, "configuration-field:sha256:") || first != second || first == changed {
+		t.Fatalf("bounded node IDs = first %q second %q changed %q", first, second, changed)
+	}
+}
+
 func TestGraphV1CanonicalizesPermutations(t *testing.T) {
 	t.Parallel()
 

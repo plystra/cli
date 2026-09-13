@@ -700,6 +700,7 @@ plystra inspect
 plystra inspect modules
 plystra inspect interfaces
 plystra inspect implementations
+plystra inspect configuration
 plystra inspect --verbose
 plystra inspect --format json
 plystra explain capability <capability-name>/vN
@@ -749,8 +750,10 @@ optional constructor dependencies; visible unconnected Interfaces remain
 explicitly inactive. `plystra inspect implementations` shows every visible
 constructor candidate, its active, dormant-explicit, or unselected state,
 implemented Interfaces, declared and resolved dependencies, constructor-owned
-configuration provenance, and reachable assembly membership. All three graph
-views use the versioned
+configuration provenance, and reachable assembly membership. `plystra inspect
+configuration` shows selected layers, redacted field summaries, ownership and
+precedence, effective and overridden contributions, explicit removals, and
+ancestor suppression. All four graph views use the versioned
 `plystra.graph` v1 schema with project-relative source references and omit
 resolved Secrets and unrestricted configuration values. The command accepts the same `--env`, `--config`,
 `PLYSTRA_ENV`, and `PLYSTRA_CONFIG` selectors as generation and check.

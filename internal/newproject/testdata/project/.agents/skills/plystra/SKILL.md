@@ -1143,6 +1143,9 @@ Run the narrowest relevant test first, then the complete module checks:
     plystra inspect implementations
     plystra inspect implementations --env production
     plystra inspect implementations --config deploy/customer-a.yaml
+    plystra inspect configuration
+    plystra inspect configuration --env production
+    plystra inspect configuration --config deploy/customer-a.yaml
     plystra inspect --format json
     plystra explain capability email.send/v1
     plystra explain capability email.send/v1 --env production
@@ -1182,11 +1185,13 @@ counts, activation, transports, readiness, and the matching check action. Use
 visible authored and intrinsic Interfaces, roots, selections, dependencies, and
 inactive state, and `plystra inspect implementations` for visible constructor
 candidates, active or dormant selection state, dependencies, configuration
-provenance, and assembly membership. Graph views use `plystra.graph` v1 with
-project-relative sources and no resolved Secrets or unrestricted configuration
-values. Use --verbose for complete evidence or --format json for one versioned
-schema document; JSON diagnostics stay on stderr. Reuse one --env or --config
-selector across inspect, generate, check, and application startup.
+provenance, and assembly membership. Use `plystra inspect configuration` for
+selected layers, redacted field summaries, precedence, removals, and suppression.
+Graph views use `plystra.graph` v1 with project-relative sources and no
+resolved Secrets or unrestricted configuration values. Use --verbose for
+complete evidence or --format json for one versioned schema document; JSON
+diagnostics stay on stderr. Reuse one --env or --config selector across inspect,
+generate, check, and application startup.
 
 Plystra check is read-only: it verifies selected configuration and the generated
 fixed point, then runs go test -mod=readonly ./... from the Project root. Reuse

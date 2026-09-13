@@ -127,7 +127,7 @@ func appendHumanGraphEvidence(content *strings.Builder, result diagnosticschema.
 }
 
 func inspectGraphNodeID(kind diagnosticschema.GraphNodeKind, identity string) string {
-	return string(kind) + ":" + identity
+	return diagnosticschema.GraphNodeID(kind, identity)
 }
 
 type inspectGraphEdges map[string]diagnosticschema.GraphEdge

@@ -1771,6 +1771,9 @@ plystra inspect interfaces --config deploy/customer-a.yaml
 plystra inspect implementations
 plystra inspect implementations --env production
 plystra inspect implementations --config deploy/customer-a.yaml
+plystra inspect configuration
+plystra inspect configuration --env production
+plystra inspect configuration --config deploy/customer-a.yaml
 plystra inspect --env production
 plystra inspect --config deploy/customer-a.yaml
 plystra explain capability email.send/v1
@@ -1813,9 +1816,12 @@ and visible inactive Interfaces. Use `plystra inspect implementations` to show
 every visible constructor candidate, active, dormant-explicit, or unselected
 state, implemented Interfaces, declared and resolved dependencies,
 constructor-owned configuration provenance, and reachable assembly membership.
-All three are deterministic `plystra.graph` v1 views whose source references
-stay project-relative and whose structured results omit resolved Secrets and
-unrestricted configuration values.
+Use `plystra inspect configuration` to show the selected current-Project layer,
+dependency composition, redacted field summaries, ownership and precedence,
+effective and overridden contributions, explicit removals, and ancestor
+suppression. All four are deterministic `plystra.graph` v1 views whose source
+references stay project-relative and whose structured results omit resolved
+Secrets and unrestricted configuration values.
 
 Use `plystra explain capability <capability-name>/vN` when a particular
 Capability's selection is unexpected. A required Capability reports the

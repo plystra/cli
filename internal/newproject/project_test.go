@@ -2381,6 +2381,7 @@ func assertPlystraSkill(t *testing.T, root, modulePath string) {
 		"PLYSTRA_RESOLVE_INCOMPATIBLE_IMPLEMENTATION",
 		"implementation-selection Source",
 		"plystra implement email.send/v1 --package ./mailer",
+		"plystra inspect configuration",
 		"creates no copied contract",
 		"capabilities/records.read/v1/capability.yaml",
 		"plugin.yaml",

@@ -208,6 +208,7 @@ func TestParseInspectArguments(t *testing.T) {
 		{arguments: []string{"inspect", "modules"}, graphType: diagnosticschema.GraphTypeModules, format: commandFormatHuman, ok: true},
 		{arguments: []string{"inspect", "interfaces"}, graphType: diagnosticschema.GraphTypeInterfaces, format: commandFormatHuman, ok: true},
 		{arguments: []string{"inspect", "implementations"}, graphType: diagnosticschema.GraphTypeImplementations, format: commandFormatHuman, ok: true},
+		{arguments: []string{"inspect", "configuration"}, graphType: diagnosticschema.GraphTypeConfiguration, format: commandFormatHuman, ok: true},
 		{arguments: []string{"inspect", "--config", "deploy/customer.yaml", "--format", "json"}, format: commandFormatJSON, configurationPath: "deploy/customer.yaml", ok: true},
 		{arguments: []string{"inspect", "--env", "production", "--verbose"}, format: commandFormatHuman, verbose: true, environmentName: "production", ok: true},
 		{arguments: nil},

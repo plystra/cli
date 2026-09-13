@@ -99,6 +99,22 @@ func runInspect(arguments []string, stdout, stderr io.Writer, workingDirectory s
 			return 1
 		}
 		return 0
+	case diagnosticschema.GraphTypeConfiguration:
+		result, err := inspectConfigurationGraph(resolved.ResolutionEvidence())
+		if err != nil {
+			writeCommandFailure(output.diagnosticWriter(), "inspect configuration graph", err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
+			return 1
+		}
+		if parsed.format == commandFormatJSON {
+			_, _ = output.resultWriter().Write(result.Envelope().CanonicalJSON())
+			_, _ = io.WriteString(output.resultWriter(), "\n")
+			return 0
+		}
+		if err := writeHumanConfigurationGraph(output.resultWriter(), result, resolved.ResolutionEvidence(), parsed.verbose); err != nil {
+			_, _ = fmt.Fprintf(output.diagnosticWriter(), "render inspect configuration graph: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 
 	result, err := diagnosticschema.NewInspect(diagnosticschema.InspectInput{
@@ -129,7 +145,7 @@ func parseInspectArguments(arguments []string) (inspectArguments, bool) {
 	index := 1
 	if index < len(arguments) && !strings.HasPrefix(arguments[index], "--") {
 		switch diagnosticschema.GraphType(arguments[index]) {
-		case diagnosticschema.GraphTypeModules, diagnosticschema.GraphTypeInterfaces, diagnosticschema.GraphTypeImplementations:
+		case diagnosticschema.GraphTypeModules, diagnosticschema.GraphTypeInterfaces, diagnosticschema.GraphTypeImplementations, diagnosticschema.GraphTypeConfiguration:
 			result.graphType = diagnosticschema.GraphType(arguments[index])
 		default:
 			return inspectArguments{}, false

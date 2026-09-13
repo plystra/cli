@@ -279,10 +279,20 @@ func validGraphType(value GraphType) bool {
 	}
 }
 
+// GraphNodeID returns a deterministic kind-namespaced node identity, retaining
+// the readable form unless it exceeds the schema bound.
+func GraphNodeID(kind GraphNodeKind, identity string) string {
+	return boundedGraphElementID(string(kind), identity)
+}
+
 // GraphRelationshipID returns a deterministic kind-namespaced relationship
 // identity, retaining the readable form unless it exceeds the schema bound.
 func GraphRelationshipID(kind GraphEdgeKind, identity string) string {
-	prefix := string(kind) + ":"
+	return boundedGraphElementID(string(kind), identity)
+}
+
+func boundedGraphElementID(namespace, identity string) string {
+	prefix := namespace + ":"
 	candidate := prefix + identity
 	if len(candidate) <= maximumGraphIdentityLength {
 		return candidate
