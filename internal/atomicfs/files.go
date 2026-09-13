@@ -100,7 +100,7 @@ func ConcurrentChangePaths(err error) []string {
 func canonicalConcurrentChangePaths(paths []string) []string {
 	unique := make(map[string]struct{}, len(paths))
 	for _, value := range paths {
-		value = filepath.ToSlash(filepath.Clean(value))
+		value = path.Clean(strings.ReplaceAll(value, "\\", "/"))
 		if value == "" || value == "." {
 			continue
 		}

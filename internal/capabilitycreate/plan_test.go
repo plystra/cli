@@ -52,7 +52,8 @@ func TestPrepareVisibleUsesExplicitDependencyCapabilitySources(t *testing.T) {
 		t.Fatalf("SourceProviders = %#v", providers)
 	}
 	provider := providers[0]
-	if provider.PluginID() != "catalog.email" || provider.Directory() != "email" || provider.Path() != filepath.Join(dependencyRoot, "email") || provider.ModulePath() != "example.com/catalog" || provider.ModuleVersion() != "v0.0.0" || provider.ModuleRoot() != dependencyRoot || provider.Local() || provider.Capability() != identifier {
+	canonicalDependencyRoot := canonicalFilesystemPath(t, dependencyRoot)
+	if provider.PluginID() != "catalog.email" || provider.Directory() != "email" || provider.Path() != filepath.Join(canonicalDependencyRoot, "email") || provider.ModulePath() != "example.com/catalog" || provider.ModuleVersion() != "v0.0.0" || provider.ModuleRoot() != canonicalDependencyRoot || provider.Local() || provider.Capability() != identifier {
 		t.Fatalf("dependency Provider = ID %q, directory %q, path %q, module %s@%s at %q, local %t, capability %s", provider.PluginID(), provider.Directory(), provider.Path(), provider.ModulePath(), provider.ModuleVersion(), provider.ModuleRoot(), provider.Local(), provider.Capability())
 	}
 	resolved, err := capabilitycreate.ResolveSources(plan)
@@ -212,9 +213,18 @@ func createModule(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(root, "plystra.yaml"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(plystra.yaml): %v", err)
 	}
-	canonical, err := filepath.EvalSymlinks(root)
+	return canonicalFilesystemPath(t, root)
+}
+
+func canonicalFilesystemPath(t testing.TB, name string) string {
+	t.Helper()
+	absolute, err := filepath.Abs(name)
 	if err != nil {
-		t.Fatalf("EvalSymlinks: %v", err)
+		t.Fatalf("Abs(%s): %v", name, err)
+	}
+	canonical, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", name, err)
 	}
 	return canonical
 }

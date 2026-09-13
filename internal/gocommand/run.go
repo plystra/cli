@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/plystra/cli/internal/modulelocate"
@@ -252,12 +253,45 @@ func (b *limitedBuffer) bytes() []byte {
 // bounded command diagnostics.
 func SanitizeOutput(output string, privatePaths ...string) string {
 	message := strings.TrimSpace(output)
-	for _, privatePath := range privatePaths {
-		if privatePath == "" {
-			continue
-		}
+	for _, privatePath := range privatePathSpellings(privatePaths) {
 		message = strings.ReplaceAll(message, privatePath, ".")
-		message = strings.ReplaceAll(message, filepath.ToSlash(privatePath), ".")
 	}
 	return commandOutputURL.ReplaceAllString(message, "<redacted-url>")
+}
+
+func privatePathSpellings(privatePaths []string) []string {
+	unique := make(map[string]struct{}, len(privatePaths)*4)
+	add := func(value string) {
+		if value == "" || value == "." {
+			return
+		}
+		unique[value] = struct{}{}
+		unique[filepath.ToSlash(value)] = struct{}{}
+	}
+	for _, privatePath := range privatePaths {
+		add(privatePath)
+		add(filepath.Clean(privatePath))
+		if !filepath.IsAbs(privatePath) {
+			continue
+		}
+		absolute, err := filepath.Abs(privatePath)
+		if err != nil {
+			continue
+		}
+		add(absolute)
+		if canonical, err := filepath.EvalSymlinks(absolute); err == nil {
+			add(canonical)
+		}
+	}
+	spellings := make([]string, 0, len(unique))
+	for spelling := range unique {
+		spellings = append(spellings, spelling)
+	}
+	sort.Slice(spellings, func(left, right int) bool {
+		if len(spellings[left]) != len(spellings[right]) {
+			return len(spellings[left]) > len(spellings[right])
+		}
+		return spellings[left] < spellings[right]
+	})
+	return spellings
 }

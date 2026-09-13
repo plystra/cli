@@ -60,7 +60,7 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 	if err != nil {
 		t.Fatalf("Generate check: %v", err)
 	}
-	if !checked.Checked() || checked.Module().Path() != root || checked.Module().ModulePath() != "example.com/Acme/empty" {
+	if !checked.Checked() || checked.Module().Path() != canonicalFilesystemPath(t, root) || checked.Module().ModulePath() != "example.com/Acme/empty" {
 		t.Fatalf("checked result = %#v", checked)
 	}
 	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/compatibility/interface-documentation.json", "generated/compatibility/interface-javascript.json", "generated/compatibility/interface-metadata.json", "generated/compatibility/interface-transport.json", "generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}; !reflect.DeepEqual(got, want) {
@@ -4287,6 +4287,19 @@ func repositoryRoot(t testing.TB) string {
 		t.Fatalf("Abs(repository root): %v", err)
 	}
 	return root
+}
+
+func canonicalFilesystemPath(t testing.TB, name string) string {
+	t.Helper()
+	absolute, err := filepath.Abs(name)
+	if err != nil {
+		t.Fatalf("Abs(%s): %v", name, err)
+	}
+	canonical, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", name, err)
+	}
+	return canonical
 }
 
 const realExtensionSource = `package extension

@@ -48,7 +48,7 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	exitCode, stdout, stderr = runCommand(t, []string{"check"}, start, environment)
-	if exitCode != 0 || stdout != "Project checks passed for example.com/acme/check in "+root+"\n" || stderr != "" {
+	if exitCode != 0 || stdout != "Project checks passed for example.com/acme/check in "+commandCanonicalPath(t, root)+"\n" || stderr != "" {
 		t.Fatalf("check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 
@@ -293,7 +293,7 @@ require (
 	environment := commandGoEnvironment()
 
 	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, applicationRoot, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated example.com/application in "+applicationRoot+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/application in "+commandCanonicalPath(t, applicationRoot)+"\n" {
 		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	materialized := string(readCommandFile(t, applicationRoot, "plystra.yaml"))

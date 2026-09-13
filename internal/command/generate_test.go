@@ -137,7 +137,7 @@ replace github.com/plystra/kernel => %s
 	}
 
 	exitCode, stdout, stderr = runCommand(t, []string{"generate"}, start, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/app in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/app in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	for _, name := range []string{
@@ -162,7 +162,7 @@ replace github.com/plystra/kernel => %s
 	assertCommandBootstrapExcludesSelectorOnlyProvenance(t, root)
 
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, start, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/app in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/app in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("clean check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 
@@ -258,7 +258,7 @@ func TestRunGenerateReportsInvalidOwnershipManifestSourceWithoutMutation(t *test
 	root := writeCapabilityCommandModule(t)
 	environment := commandGoEnvironment()
 	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, filepath.Join(root, "records"), environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/library in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/library in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "# Production-only configuration.\n{}\n")
@@ -361,7 +361,7 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 `)
 	environment := commandGoEnvironment()
 	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, root, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/interface-protobuf in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/interface-protobuf in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 
@@ -380,7 +380,7 @@ func (*Service) List(context.Context, listv1.Request) (listv1.Response, error) {
 	}
 
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/interface-protobuf in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/interface-protobuf in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("generate --check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 }
@@ -433,7 +433,7 @@ type Response struct{}
 
 	environment := commandGoEnvironment()
 	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, root, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/interface-history in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/interface-history in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if _, err := os.Stat(filepath.Join(root, "generated", "proto", "plystra", "generated", "records", "list", "v1", "interface.proto")); !errors.Is(err, fs.ErrNotExist) {
@@ -741,7 +741,7 @@ replace github.com/plystra/kernel => %s
 	}
 
 	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, root, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/connect-runtime in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/connect-runtime in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("Connect generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	assertCommandFile(t, root, "generated/go/adapters/connect/kernel/health/v1/handler_gen.go")
@@ -777,7 +777,7 @@ replace github.com/plystra/kernel => %s
 
 	beforeCleanCheck := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/connect-runtime in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/connect-runtime in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("clean Connect check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeCleanCheck) {
@@ -817,7 +817,7 @@ func TestRunGenerateRepairsKernelDependencyAndReadOnlyCommandsReportSource(t *te
 	}
 
 	exitCode, stdout, stderr := runCommand(t, []string{"generate", "--env", "production"}, root, environment)
-	if exitCode != 0 || stdout != "generated "+modulePath+" in "+root+"\n" || stderr != "" {
+	if exitCode != 0 || stdout != "generated "+modulePath+" in "+commandCanonicalPath(t, root)+"\n" || stderr != "" {
 		t.Fatalf("generate repair = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	parsed, err := modfile.Parse("go.mod", readCommandFile(t, root, "go.mod"), nil)
@@ -838,7 +838,7 @@ func TestRunGenerateRepairsKernelDependencyAndReadOnlyCommandsReportSource(t *te
 
 	afterRepair := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--env", "production"}, root, environment)
-	if exitCode != 0 || stdout != "generated output is current for "+modulePath+" in "+root+"\n" || stderr != "" {
+	if exitCode != 0 || stdout != "generated output is current for "+modulePath+" in "+commandCanonicalPath(t, root)+"\n" || stderr != "" {
 		t.Fatalf("clean repaired check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, afterRepair) {
@@ -949,7 +949,7 @@ replace github.com/plystra/kernel => %s
 	environment := commandGoEnvironment()
 
 	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, applicationRoot, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/composed in "+applicationRoot+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/composed in "+commandCanonicalPath(t, applicationRoot)+"\n" {
 		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities:\n  require: [kernel.info/v1]\n")
@@ -1080,7 +1080,7 @@ func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
 	environment := commandGoEnvironment()
 
 	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, applicationRoot, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/maintenance in "+applicationRoot+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/maintenance in "+commandCanonicalPath(t, applicationRoot)+"\n" {
 		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	oldRoot := readCommandFile(t, applicationRoot, "plystra.yaml")
@@ -1098,7 +1098,7 @@ func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
 `)
 
 	exitCode, stdout, stderr = runCommand(t, []string{"generate"}, applicationRoot, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/maintenance in "+applicationRoot+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/maintenance in "+commandCanonicalPath(t, applicationRoot)+"\n" {
 		t.Fatalf("updated generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	maintained := readCommandFile(t, applicationRoot, "plystra.yaml")
@@ -1126,7 +1126,7 @@ func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
 	}
 	beforeCheck := commandTree(t, applicationRoot)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, applicationRoot, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/maintenance in "+applicationRoot+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/maintenance in "+commandCanonicalPath(t, applicationRoot)+"\n" {
 		t.Fatalf("generate --check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, beforeCheck) {
@@ -1168,7 +1168,7 @@ replace github.com/plystra/kernel => %s
 	environment := commandGoEnvironment()
 
 	exitCode, stdout, stderr := runCommand(t, []string{"generate", "--env", "production"}, start, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/environment in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/environment in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("generate --env = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if got := string(readCommandFile(t, root, "plystra.yaml")); got != rootConfiguration {
@@ -1184,7 +1184,7 @@ replace github.com/plystra/kernel => %s
 	assertCommandBootstrapExcludesSelectorOnlyProvenance(t, root)
 
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, start, commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "production"}))
-	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/environment in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/environment in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("PLYSTRA_ENV check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	explicitEnvironment := commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "missing.yaml"})
@@ -1372,7 +1372,7 @@ interfaces:
 	}
 	environment := commandGoEnvironment()
 	exitCode, stdout, stderr := runCommand(t, []string{"generate", "--config", selectedPath}, nestedStart, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/config-select in "+applicationRoot+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/config-select in "+commandCanonicalPath(t, applicationRoot)+"\n" {
 		t.Fatalf("generate --config from nested Plugin = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if got := string(readCommandFile(t, applicationRoot, "plystra.yaml")); got != rootConfiguration {
@@ -1469,7 +1469,7 @@ interfaces:
 	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), rootConfiguration)
 
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--config", "deploy/customer.yaml"}, nestedStart, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/config-select in "+applicationRoot+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/config-select in "+commandCanonicalPath(t, applicationRoot)+"\n" {
 		t.Fatalf("clean generate --check --config = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 
@@ -1613,7 +1613,7 @@ interfaces:
 	environment := commandGoEnvironment()
 
 	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, root, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/policy in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/policy in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("default policy generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	defaultManifest, err := applicationgen.DecodeManifestProvenance(readCommandFile(t, root, "generated/manifest.json"))
@@ -1787,7 +1787,7 @@ func (*Plugin) Send(_ context.Context, request contract.Request) (contract.Respo
 `)
 	environment := commandGoEnvironment()
 	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, filepath.Join(root, "business"), environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/authoring in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/authoring in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	for _, name := range []string{
@@ -1810,7 +1810,7 @@ func (*Plugin) Send(_ context.Context, request contract.Request) (contract.Respo
 		}
 	}
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/authoring in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/authoring in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("clean check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 }
@@ -1860,7 +1860,7 @@ func (*Plugin) Send(_ context.Context, _ contract.Request) (contract.Response, e
 `)
 	environment := commandGoEnvironment()
 	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, filepath.Join(root, "email"), environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/library in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/library in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("generate Project = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	for _, name := range []string{
@@ -1879,7 +1879,7 @@ func (*Plugin) Send(_ context.Context, _ contract.Request) (contract.Response, e
 		assertCommandFile(t, root, name)
 	}
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
-	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/library in "+root+"\n" {
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/library in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("clean Project check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 }
@@ -2074,4 +2074,17 @@ func commandRepositoryRoot(t testing.TB) string {
 		t.Fatalf("Abs(repository root): %v", err)
 	}
 	return root
+}
+
+func commandCanonicalPath(t testing.TB, name string) string {
+	t.Helper()
+	absolute, err := filepath.Abs(name)
+	if err != nil {
+		t.Fatalf("Abs(%s): %v", name, err)
+	}
+	canonical, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", name, err)
+	}
+	return canonical
 }

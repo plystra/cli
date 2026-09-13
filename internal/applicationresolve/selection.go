@@ -3,6 +3,7 @@ package applicationresolve
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -200,8 +201,9 @@ func projectRelativeConfigurationPath(moduleRoot, selected string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("resolve Project root: %w", err)
 	}
+	absoluteSelection := filepath.IsAbs(selected)
 	candidate := selected
-	if !filepath.IsAbs(candidate) {
+	if !absoluteSelection {
 		candidate = filepath.Join(root, candidate)
 	}
 	candidate, err = filepath.Abs(candidate)
@@ -209,12 +211,56 @@ func projectRelativeConfigurationPath(moduleRoot, selected string) (string, erro
 		return "", fmt.Errorf("resolve selected configuration path %q: %w", selected, err)
 	}
 	relative, err := filepath.Rel(root, candidate)
+	if err == nil {
+		if clean, valid := validProjectRelativeConfigurationPath(relative); valid {
+			return filepath.ToSlash(clean), nil
+		}
+	}
+	if absoluteSelection {
+		rootInfo, statErr := os.Stat(root)
+		if statErr != nil {
+			return "", fmt.Errorf("inspect Project root: %w", statErr)
+		}
+		if !rootInfo.IsDir() {
+			return "", errors.New("Project root is not a directory")
+		}
+		if aliasRelative, matched := projectRootAliasRelativePath(rootInfo, candidate); matched {
+			if clean, valid := validProjectRelativeConfigurationPath(aliasRelative); valid {
+				return filepath.ToSlash(clean), nil
+			}
+		}
+	}
 	if err != nil {
 		return "", fmt.Errorf("locate selected configuration path %q within the Project: %w", selected, err)
 	}
-	clean := filepath.Clean(relative)
-	if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("selected configuration path %q must identify a file within the Project root", selected)
+	return "", fmt.Errorf("selected configuration path %q must identify a file within the Project root", selected)
+}
+
+func validProjectRelativeConfigurationPath(value string) (string, bool) {
+	clean := filepath.Clean(value)
+	return clean, clean != "." && !filepath.IsAbs(clean) && clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
+}
+
+func projectRootAliasRelativePath(rootInfo os.FileInfo, candidate string) (string, bool) {
+	current := candidate
+	relative := "."
+	matched := ""
+	found := false
+	for {
+		if info, err := os.Stat(current); err == nil && info.IsDir() && os.SameFile(rootInfo, info) {
+			matched = relative
+			found = true
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		if relative == "." {
+			relative = filepath.Base(current)
+		} else {
+			relative = filepath.Join(filepath.Base(current), relative)
+		}
+		current = parent
 	}
-	return filepath.ToSlash(clean), nil
+	return matched, found
 }

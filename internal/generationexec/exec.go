@@ -183,7 +183,12 @@ func Build(ctx context.Context, spec Spec, options BuildOptions) (_ *Helper, bui
 	}
 	if result.err != nil {
 		privatePaths := []string{moduleRoot, temporaryRoot}
-		if relativeTemporaryRoot, relativeErr := filepath.Rel(moduleRoot, temporaryRoot); relativeErr == nil && relativeTemporaryRoot != "." {
+		diagnosticTemporaryRoot := temporaryRoot
+		if canonicalTemporaryRoot, canonicalErr := filepath.EvalSymlinks(temporaryRoot); canonicalErr == nil {
+			diagnosticTemporaryRoot = canonicalTemporaryRoot
+			privatePaths = append(privatePaths, canonicalTemporaryRoot)
+		}
+		if relativeTemporaryRoot, relativeErr := filepath.Rel(moduleRoot, diagnosticTemporaryRoot); relativeErr == nil && relativeTemporaryRoot != "." {
 			privatePaths = append(privatePaths, relativeTemporaryRoot)
 		}
 		diagnostic := sanitizeDiagnostic(commandOutput(result), privatePaths...)

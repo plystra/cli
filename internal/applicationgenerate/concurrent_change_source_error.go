@@ -1,8 +1,9 @@
 package applicationgenerate
 
 import (
-	"path/filepath"
+	"path"
 	"sort"
+	"strings"
 )
 
 // ConcurrentChangeSource is one whole-file Project-relative input or generated
@@ -66,7 +67,7 @@ func (e *ConcurrentChangeSourceError) Is(target error) bool {
 func concurrentChangeSource(modulePath, sourcePath, sourceKind string) ConcurrentChangeSource {
 	return ConcurrentChangeSource{
 		modulePath: modulePath,
-		sourcePath: filepath.ToSlash(filepath.Clean(sourcePath)),
+		sourcePath: path.Clean(strings.ReplaceAll(sourcePath, "\\", "/")),
 		sourceKind: sourceKind,
 	}
 }

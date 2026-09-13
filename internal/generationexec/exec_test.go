@@ -164,6 +164,39 @@ func TestHelperClassifiesBoundedExecutionFailures(t *testing.T) {
 	}
 }
 
+func TestHelperRedactsCanonicalWorkingDirectoryAlias(t *testing.T) {
+	fixture := newExtensionFixture(t, validExtensionSource)
+	temporaryTarget := t.TempDir()
+	temporaryAlias := filepath.Join(t.TempDir(), "helpers")
+	if err := os.Symlink(temporaryTarget, temporaryAlias); err != nil {
+		t.Skipf("helper directory alias unavailable: %v", err)
+	}
+	fixture.temporaryParent = temporaryAlias
+	helper, err := Build(t.Context(), fixture.spec, fixture.options(helperTestExecutionTimeout))
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := helper.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+	canonicalHelperRoot, err := filepath.EvalSymlinks(helper.root)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(helper root): %v", err)
+	}
+
+	_, err = helper.Generate(t.Context(), extensionContext(t, "path-error"))
+	if !errors.Is(err, ErrExecute) || !errors.Is(err, ErrExtension) || !strings.Contains(err.Error(), "extension failed in .") {
+		t.Fatalf("Generate(path-error) = %v", err)
+	}
+	for _, privatePath := range []string{helper.root, filepath.ToSlash(helper.root), canonicalHelperRoot, filepath.ToSlash(canonicalHelperRoot), ".plystra-generation-"} {
+		if strings.Contains(err.Error(), privatePath) {
+			t.Fatalf("Generate(path-error) leaked %q: %v", privatePath, err)
+		}
+	}
+}
+
 func TestHelperUsesFreshWorkingDirectoryForEveryInvocation(t *testing.T) {
 	fixture := newExtensionFixture(t, validExtensionSource)
 	helper, err := Build(t.Context(), fixture.spec, fixture.options(helperTestExecutionTimeout))
@@ -621,6 +654,12 @@ func Generate(context generation.GenerationContext) (generation.Output, error) {
 		return generation.Output{Diagnostics: []generation.Diagnostic{{Code: "configuration.provenance", Severity: generation.DiagnosticInfo, Message: string(provenance.Mode()) + ":" + provenance.Environment() + ":" + provenance.SelectedPath(), Namespace: "authn", Source: order, RuleID: "authn.provenance"}}}, nil
 	case "error":
 		return generation.Output{}, errors.New("request failed at https://person:secret@example.com/private?token=secret")
+	case "path-error":
+		workingDirectory, err := os.Getwd()
+		if err != nil {
+			return generation.Output{}, err
+		}
+		return generation.Output{}, fmt.Errorf("extension failed in %s", workingDirectory)
 	case "panic":
 		panic("extension panic")
 	case "crash":

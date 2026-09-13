@@ -60,6 +60,35 @@ func TestSanitizeOutput(t *testing.T) {
 	}
 }
 
+func TestSanitizeOutputReplacesLongerPrivatePathsFirst(t *testing.T) {
+	t.Parallel()
+
+	input := "/private/var/work/run-1\n/var/work/run-2"
+	want := "./run-1\n./run-2"
+	if got := SanitizeOutput(input, "/var/work", "/private/var/work"); got != want {
+		t.Fatalf("SanitizeOutput() = %q, want %q", got, want)
+	}
+}
+
+func TestSanitizeOutputRedactsCanonicalAbsoluteAlias(t *testing.T) {
+	t.Parallel()
+
+	target := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "private")
+	if err := os.Symlink(target, alias); err != nil {
+		t.Skipf("directory alias unavailable: %v", err)
+	}
+	canonical, err := filepath.EvalSymlinks(alias)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(alias): %v", err)
+	}
+	input := filepath.Join(canonical, "work")
+	want := "." + string(filepath.Separator) + "work"
+	if got := SanitizeOutput(input, alias); got != want {
+		t.Fatalf("SanitizeOutput() = %q, want %q", got, want)
+	}
+}
+
 func TestRunUsesDirectoryEnvironmentAndArguments(t *testing.T) {
 	t.Parallel()
 

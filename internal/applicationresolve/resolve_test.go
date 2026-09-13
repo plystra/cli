@@ -59,7 +59,7 @@ func TestResolveEmptyApplicationDeterministicallyWithoutMutation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if first.Module().Path() != root || first.Module().ModulePath() != "example.com/empty" {
+	if first.Module().Path() != canonicalFilesystemPath(t, root) || first.Module().ModulePath() != "example.com/empty" {
 		t.Fatalf("Module = %#v", first.Module())
 	}
 	assertResolvedConfigurationProvenance(t, first)
@@ -1776,7 +1776,7 @@ func TestResolveUsesActiveGoWorkspaceDependencySource(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 	plugins := result.Inventory().Plugins()
-	if len(plugins) != 1 || plugins[0].ID() != "example.smtp" || plugins[0].ModuleRoot() != providerRoot || plugins[0].ModuleVersion() != "" || plugins[0].Source() != "example.com/providers@local/smtp/plugin.yaml" {
+	if len(plugins) != 1 || plugins[0].ID() != "example.smtp" || plugins[0].ModuleRoot() != canonicalFilesystemPath(t, providerRoot) || plugins[0].ModuleVersion() != "" || plugins[0].Source() != "example.com/providers@local/smtp/plugin.yaml" {
 		t.Fatalf("workspace plugin = %#v, summaries %v", plugins, pluginSummaries(plugins))
 	}
 	provider, exists := result.Resolution().Context().SelectedProvider(parseGenerationCapability(t, "email.send/v1"))
@@ -2434,6 +2434,19 @@ func repositoryRoot(t testing.TB) string {
 		t.Fatalf("Abs(repository root): %v", err)
 	}
 	return root
+}
+
+func canonicalFilesystemPath(t testing.TB, name string) string {
+	t.Helper()
+	absolute, err := filepath.Abs(name)
+	if err != nil {
+		t.Fatalf("Abs(%s): %v", name, err)
+	}
+	canonical, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", name, err)
+	}
+	return canonical
 }
 
 const realExtensionSource = `package extension

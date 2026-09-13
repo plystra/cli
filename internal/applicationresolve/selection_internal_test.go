@@ -134,6 +134,58 @@ func TestResolveConfigurationSelectorPrecedenceAndNormalization(t *testing.T) {
 	}
 }
 
+func TestResolveConfigurationSelectorAcceptsAbsoluteProjectRootAlias(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "example.com/application"
+	root := t.TempDir()
+	configurationPath := filepath.Join(root, "deploy", "customer.yaml")
+	if err := os.MkdirAll(filepath.Dir(configurationPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(configurationPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	aliasRoot := filepath.Join(t.TempDir(), "project")
+	if err := os.Symlink(root, aliasRoot); err != nil {
+		t.Skipf("Project root alias unavailable: %v", err)
+	}
+
+	target, err := SelectConfigurationTarget(modulePath, root, filepath.Join(aliasRoot, "deploy", "customer.yaml"), "", nil)
+	if err != nil || target.Selection().Mode() != configurationModeExplicit || target.Selection().Path() != "deploy/customer.yaml" {
+		t.Fatalf("aliased absolute target = %#v, %v", target.Selection(), err)
+	}
+}
+
+func TestProjectRootAliasPreservesSymbolicComponentsInsideProject(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configurationPath := filepath.Join(root, "deploy", "customer.yaml")
+	if err := os.MkdirAll(filepath.Dir(configurationPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(configurationPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	reentry := filepath.Join(root, "reentry")
+	if err := os.Symlink(root, reentry); err != nil {
+		t.Skipf("Project-internal symbolic link unavailable: %v", err)
+	}
+	aliasRoot := filepath.Join(t.TempDir(), "project")
+	if err := os.Symlink(root, aliasRoot); err != nil {
+		t.Skipf("Project root alias unavailable: %v", err)
+	}
+
+	selected, err := projectRelativeConfigurationPath(root, filepath.Join(aliasRoot, "reentry", "deploy", "customer.yaml"))
+	if err != nil || selected != "reentry/deploy/customer.yaml" {
+		t.Fatalf("aliased symbolic path = %q, %v", selected, err)
+	}
+	if _, _, err := loadConfiguration("example.com/application", root, selected); err == nil || !strings.Contains(err.Error(), "symbolic path component") {
+		t.Fatalf("loadConfiguration(aliased symbolic component) error = %v", err)
+	}
+}
+
 func TestResolveConfigurationSelectorRejectsUnsafeAndAmbiguousInputs(t *testing.T) {
 	t.Parallel()
 
