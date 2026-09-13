@@ -77,7 +77,7 @@ func TestGraphV1BuildsExactTypedResult(t *testing.T) {
 func TestGraphV1SupportsEveryGraphAndConfigurationType(t *testing.T) {
 	t.Parallel()
 
-	for _, graphType := range []GraphType{GraphTypeModules, GraphTypeInterfaces, GraphTypePlugins, GraphTypeCapabilities, GraphTypeGeneration, GraphTypeConfiguration} {
+	for _, graphType := range []GraphType{GraphTypeModules, GraphTypeInterfaces, GraphTypeImplementations, GraphTypePlugins, GraphTypeCapabilities, GraphTypeGeneration, GraphTypeConfiguration} {
 		t.Run(string(graphType), func(t *testing.T) {
 			evidence := resolvedInspectEvidence(t)
 			result, err := NewGraph(GraphInput{Evidence: evidence, Type: graphType})

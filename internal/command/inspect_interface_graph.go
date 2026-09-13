@@ -41,7 +41,7 @@ func inspectInterfacesGraph(resolved applicationresolve.Result) (diagnosticschem
 		nodes = append(nodes, diagnosticschema.GraphNode{ID: nodeID, Kind: "module", Label: intrinsicKernelModulePath})
 	}
 
-	edges := make(interfaceGraphEdges)
+	edges := make(inspectGraphEdges)
 	interfaceNodes := make(map[string]string)
 	for _, definition := range resolved.Interfaces().Interfaces() {
 		identifier := definition.ID()
@@ -256,32 +256,6 @@ func interfaceGraphConstructorNodeID(symbol string) string {
 	return "constructor:" + symbol
 }
 
-type interfaceGraphEdges map[string]diagnosticschema.GraphEdge
-
-func (e interfaceGraphEdges) add(kind diagnosticschema.GraphEdgeKind, from, to, reason string, sources []diagnosticjson.Source) {
-	key := string(kind) + "\x00" + from + "\x00" + to + "\x00" + reason
-	edge := e[key]
-	if edge.ID == "" {
-		edge = diagnosticschema.GraphEdge{
-			ID:     diagnosticschema.GraphRelationshipID(kind, from+"->"+to+"#"+reason),
-			Kind:   kind,
-			From:   from,
-			To:     to,
-			Reason: reason,
-		}
-	}
-	edge.Sources = append(edge.Sources, sources...)
-	e[key] = edge
-}
-
-func (e interfaceGraphEdges) values() []diagnosticschema.GraphEdge {
-	result := make([]diagnosticschema.GraphEdge, 0, len(e))
-	for _, edge := range e {
-		result = append(result, edge)
-	}
-	return result
-}
-
 func writeHumanInterfaceGraph(writer io.Writer, result diagnosticschema.GraphResult, verbose bool) error {
 	nodes := result.Nodes()
 	edges := result.Edges()
@@ -389,7 +363,7 @@ func writeHumanInterfaceRelationships(content *strings.Builder, heading string, 
 }
 
 func interfaceGraphRelationshipIdentity(value string) string {
-	for _, prefix := range []string{"module:", "interface:", "constructor:"} {
+	for _, prefix := range []string{"module:", "interface:", "constructor:", "configuration:"} {
 		if strings.HasPrefix(value, prefix) {
 			return strings.TrimPrefix(value, prefix)
 		}

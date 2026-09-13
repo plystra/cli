@@ -699,6 +699,7 @@ plystra build
 plystra inspect
 plystra inspect modules
 plystra inspect interfaces
+plystra inspect implementations
 plystra inspect --verbose
 plystra inspect --format json
 plystra explain capability <capability-name>/vN
@@ -745,7 +746,11 @@ modules` shows the participating current and dependency Project module graph.
 its owning module and stable source, active root requirements, selected
 constructors and selection reasons, and required or available/unavailable
 optional constructor dependencies; visible unconnected Interfaces remain
-explicitly inactive. Both graph views use the versioned
+explicitly inactive. `plystra inspect implementations` shows every visible
+constructor candidate, its active, dormant-explicit, or unselected state,
+implemented Interfaces, declared and resolved dependencies, constructor-owned
+configuration provenance, and reachable assembly membership. All three graph
+views use the versioned
 `plystra.graph` v1 schema with project-relative source references and omit
 resolved Secrets and unrestricted configuration values. The command accepts the same `--env`, `--config`,
 `PLYSTRA_ENV`, and `PLYSTRA_CONFIG` selectors as generation and check.

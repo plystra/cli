@@ -83,6 +83,22 @@ func runInspect(arguments []string, stdout, stderr io.Writer, workingDirectory s
 			return 1
 		}
 		return 0
+	case diagnosticschema.GraphTypeImplementations:
+		result, err := inspectImplementationsGraph(resolved)
+		if err != nil {
+			writeCommandFailure(output.diagnosticWriter(), "inspect Implementation graph", err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
+			return 1
+		}
+		if parsed.format == commandFormatJSON {
+			_, _ = output.resultWriter().Write(result.Envelope().CanonicalJSON())
+			_, _ = io.WriteString(output.resultWriter(), "\n")
+			return 0
+		}
+		if err := writeHumanImplementationGraph(output.resultWriter(), result, parsed.verbose); err != nil {
+			_, _ = fmt.Fprintf(output.diagnosticWriter(), "render inspect Implementation graph: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 
 	result, err := diagnosticschema.NewInspect(diagnosticschema.InspectInput{
@@ -113,7 +129,7 @@ func parseInspectArguments(arguments []string) (inspectArguments, bool) {
 	index := 1
 	if index < len(arguments) && !strings.HasPrefix(arguments[index], "--") {
 		switch diagnosticschema.GraphType(arguments[index]) {
-		case diagnosticschema.GraphTypeModules, diagnosticschema.GraphTypeInterfaces:
+		case diagnosticschema.GraphTypeModules, diagnosticschema.GraphTypeInterfaces, diagnosticschema.GraphTypeImplementations:
 			result.graphType = diagnosticschema.GraphType(arguments[index])
 		default:
 			return inspectArguments{}, false

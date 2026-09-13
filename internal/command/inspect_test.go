@@ -439,6 +439,154 @@ func TestInspectInterfacesSelectorsChangeOptionalAvailabilityDeterministically(t
 	}
 }
 
+func TestInspectImplementationsHumanAndJSONAreDeterministicAndReadOnly(t *testing.T) {
+	t.Parallel()
+
+	root, nested := createInspectImplementationGraphProject(t)
+	before := snapshotInspectProject(t, root)
+	environment := inspectImplementationGraphEnvironment()
+	firstHumanExit, firstHumanStdout, firstHumanStderr := runCommand(t, []string{"inspect", "implementations"}, nested, environment)
+	secondHumanExit, secondHumanStdout, secondHumanStderr := runCommand(t, []string{"inspect", "implementations"}, root, environment)
+	if firstHumanExit != 0 || secondHumanExit != 0 || firstHumanStderr != "" || secondHumanStderr != "" || firstHumanStdout != secondHumanStdout {
+		t.Fatalf("human Implementation graph = first (%d, %q, %q) second (%d, %q, %q)", firstHumanExit, firstHumanStdout, firstHumanStderr, secondHumanExit, secondHumanStdout, secondHumanStderr)
+	}
+	for _, fragment := range []string{
+		inspectProgress + "Implementation graph: 4 candidates, 2 active, 1 dormant explicit, 1 unselected, 3 configuration schemas, 26 relationships\n",
+		"Implementation: example.com/acme/interface-inspect/app.New (active)\n  Module: example.com/acme/interface-inspect\n  Configuration: example.com/acme/interface-inspect/app.Config\n",
+		"Implementation: example.com/acme/interface-inspect/cleanup.New (unselected-candidate)\n",
+		"Implementation: example.com/acme/interface-library/cache.New (dormant-explicit)\n",
+		"Implemented Interfaces:\n  example.com/acme/interface-inspect/app.New -> app.run/v1 (declared)\n",
+		"  example.com/acme/interface-inspect/app.New -> reports.read/v1 (declared)\n",
+		"Active selections:\n  app.run/v1 -> example.com/acme/interface-inspect/app.New (unique-compatible)\n",
+		"Dormant explicit selections:\n  cache.read/v1 -> example.com/acme/interface-library/cache.New (explicit)\n",
+		"  reports.read/v1 -> example.com/acme/interface-inspect/app.New (explicit)\n",
+		"Declared dependencies:\n  example.com/acme/interface-inspect/app.New -> audit.write/v1 (required)\n",
+		"  example.com/acme/interface-inspect/cleanup.New -> cache.read/v1 (optional)\n",
+		"Resolved dependencies:\n  example.com/acme/interface-inspect/app.New -> audit.write/v1 (required)\n",
+		"  example.com/acme/interface-inspect/app.New -> cache.read/v1 (optional-unavailable)\n",
+		"Assembly:\n  example.com/acme/interface-inspect -> example.com/acme/interface-inspect/app.New (active-reachable)\n",
+		"Configuration ownership:\n  example.com/acme/interface-inspect/app.New -> example.com/acme/interface-inspect/app.New (schema)\n",
+		"Configuration sources:\n  example.com/acme/interface-inspect -> example.com/acme/interface-inspect/app.New (current-project-root)\n",
+		"  example.com/acme/interface-inspect -> example.com/acme/interface-library/cache.New (current-project-root)\n",
+	} {
+		if !strings.Contains(firstHumanStdout, fragment) {
+			t.Fatalf("human Implementation graph omits %q:\n%s", fragment, firstHumanStdout)
+		}
+	}
+	if strings.Contains(firstHumanStdout, "Resolved dependencies:\n  example.com/acme/interface-inspect/cleanup.New") {
+		t.Fatalf("inactive constructor received resolved dependency state:\n%s", firstHumanStdout)
+	}
+
+	firstExit, firstStdout, firstStderr := runCommand(t, []string{"inspect", "implementations", "--format", "json"}, nested, environment)
+	secondExit, secondStdout, secondStderr := runCommand(t, []string{"inspect", "implementations", "--verbose", "--format", "json"}, root, environment)
+	if firstExit != 0 || secondExit != 0 || firstStderr != inspectProgress || secondStderr != inspectProgress || firstStdout != secondStdout {
+		t.Fatalf("JSON Implementation graph = first (%d, %q, %q) second (%d, %q, %q)", firstExit, firstStdout, firstStderr, secondExit, secondStdout, secondStderr)
+	}
+	if strings.Count(firstStdout, "\n") != 1 || !strings.HasSuffix(firstStdout, "\n") {
+		t.Fatalf("Implementation graph JSON is not one document: %q", firstStdout)
+	}
+	document := decodeInspectGraphCommandEnvelope(t, firstStdout)
+	if document.Schema != "plystra.graph" || document.SchemaVersion != 1 || document.ConfigurationMode != "default" || document.ApplicationModelDigest == "" {
+		t.Fatalf("Implementation graph envelope = %#v", document)
+	}
+	if document.Result.Type != "implementations" || len(document.Result.Nodes) != 14 || len(document.Result.Edges) != 26 || len(document.Result.ResolutionEvidence) == 0 {
+		t.Fatalf("Implementation graph result = type %q nodes %d edges %d evidence %d", document.Result.Type, len(document.Result.Nodes), len(document.Result.Edges), len(document.Result.ResolutionEvidence))
+	}
+	appNode := inspectGraphNodeByID(t, document.Result.Nodes, "constructor:example.com/acme/interface-inspect/app.New")
+	if appNode.Kind != "constructor" || appNode.Label != "example.com/acme/interface-inspect/app.New" || len(appNode.Sources) != 1 || appNode.Sources[0].Kind != "implementation-constructor" {
+		t.Fatalf("app constructor node = %#v", appNode)
+	}
+	configNode := inspectGraphNodeByID(t, document.Result.Nodes, "configuration:example.com/acme/interface-library/cache.New")
+	if configNode.Kind != "configuration" || configNode.Label != "example.com/acme/interface-library/cache.Config" || len(configNode.Sources) != 1 || configNode.Sources[0].Kind != "implementation-constructor" {
+		t.Fatalf("cache configuration node = %#v", configNode)
+	}
+	assertInspectGraphEdge(t, document.Result.Edges, "defines-constructor", "module:example.com/acme/interface-library", "constructor:example.com/acme/interface-library/cache.New", "authored", "example.com/acme/interface-library", "cache/service.go", "implementation-constructor")
+	assertInspectGraphEdge(t, document.Result.Edges, "implements-interface", "constructor:example.com/acme/interface-inspect/app.New", "interface:reports.read/v1", "declared", "example.com/acme/interface-inspect", "app/service.go", "implementation-declaration")
+	assertInspectGraphEdge(t, document.Result.Edges, "selects-constructor", "interface:app.run/v1", "constructor:example.com/acme/interface-inspect/app.New", "unique-compatible", "example.com/acme/interface-inspect", "app/service.go", "implementation-constructor")
+	assertInspectGraphEdge(t, document.Result.Edges, "dormant-selects-constructor", "interface:reports.read/v1", "constructor:example.com/acme/interface-inspect/app.New", "explicit", "example.com/acme/interface-inspect", "plystra.yaml", "implementation-selection")
+	assertInspectGraphEdge(t, document.Result.Edges, "dormant-selects-constructor", "interface:cache.read/v1", "constructor:example.com/acme/interface-library/cache.New", "explicit", "example.com/acme/interface-inspect", "plystra.yaml", "implementation-selection")
+	assertInspectGraphEdge(t, document.Result.Edges, "declares-dependency", "constructor:example.com/acme/interface-inspect/cleanup.New", "interface:audit.write/v1", "required", "example.com/acme/interface-inspect", "cleanup/service.go", "implementation-constructor")
+	assertInspectGraphEdge(t, document.Result.Edges, "depends-on-interface", "constructor:example.com/acme/interface-inspect/app.New", "interface:cache.read/v1", "optional-unavailable", "example.com/acme/interface-inspect", "app/service.go", "implementation-constructor")
+	assertInspectGraphEdge(t, document.Result.Edges, "assembles-constructor", "module:example.com/acme/interface-inspect", "constructor:example.com/acme/interface-inspect/audit.New", "active-reachable", "example.com/acme/interface-inspect", "audit/service.go", "implementation-constructor")
+	assertInspectGraphEdge(t, document.Result.Edges, "owns-configuration", "constructor:example.com/acme/interface-inspect/cleanup.New", "configuration:example.com/acme/interface-inspect/cleanup.New", "schema", "example.com/acme/interface-inspect", "cleanup/service.go", "implementation-constructor")
+	assertInspectGraphEdge(t, document.Result.Edges, "supplies-configuration", "module:example.com/acme/interface-inspect", "configuration:example.com/acme/interface-library/cache.New", "current-project-root", "example.com/acme/interface-inspect", "plystra.yaml", "configuration-value")
+	if _, exists := findInspectGraphEdge(document.Result.Edges, "depends-on-interface", "constructor:example.com/acme/interface-inspect/cleanup.New", "interface:audit.write/v1", "required"); exists {
+		t.Fatalf("inactive cleanup candidate received resolved dependency state: %#v", document.Result.Edges)
+	}
+	assertInspectImplementationGraphRedacted(t, root, firstHumanStdout, firstStdout)
+	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("Implementation graph mutated the Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestInspectImplementationsSelectorsActivateDormantChoicesDeterministically(t *testing.T) {
+	t.Parallel()
+
+	root, nested := createInspectImplementationGraphProject(t)
+	before := snapshotInspectProject(t, root)
+	environment := inspectImplementationGraphEnvironment()
+	tests := []struct {
+		name               string
+		arguments          []string
+		mode               string
+		selectionPath      string
+		configurationPath  string
+		configurationOwner string
+	}{
+		{
+			name:               "environment",
+			arguments:          []string{"inspect", "implementations", "--env", "production", "--format", "json"},
+			mode:               "environment",
+			selectionPath:      "plystra.yaml",
+			configurationPath:  "plystra.production.yaml",
+			configurationOwner: "current-project-environment",
+		},
+		{
+			name:               "complete replacement",
+			arguments:          []string{"inspect", "implementations", "--config", "deploy/customer.yaml", "--format", "json"},
+			mode:               "explicit-config",
+			selectionPath:      "deploy/customer.yaml",
+			configurationPath:  "deploy/customer.yaml",
+			configurationOwner: "current-project-config",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			exitCode, stdout, stderr := runCommand(t, test.arguments, nested, environment)
+			if exitCode != 0 || stderr != inspectProgress {
+				t.Fatalf("selected Implementation graph = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			document := decodeInspectGraphCommandEnvelope(t, stdout)
+			if document.ConfigurationMode != test.mode || document.Result.Type != "implementations" || len(document.Result.Nodes) != 14 || len(document.Result.Edges) != 27 {
+				t.Fatalf("selected Implementation graph = mode %q type %q nodes %d edges %d", document.ConfigurationMode, document.Result.Type, len(document.Result.Nodes), len(document.Result.Edges))
+			}
+			assertInspectGraphEdge(t, document.Result.Edges, "selects-constructor", "interface:reports.read/v1", "constructor:example.com/acme/interface-inspect/app.New", "explicit", "example.com/acme/interface-inspect", test.selectionPath, "implementation-selection")
+			assertInspectGraphEdge(t, document.Result.Edges, "selects-constructor", "interface:cache.read/v1", "constructor:example.com/acme/interface-library/cache.New", "unique-compatible", "example.com/acme/interface-library", "cache/service.go", "implementation-constructor")
+			assertInspectGraphEdge(t, document.Result.Edges, "depends-on-interface", "constructor:example.com/acme/interface-inspect/app.New", "interface:cache.read/v1", "optional-available", "example.com/acme/interface-inspect", "app/service.go", "implementation-constructor")
+			assertInspectGraphEdge(t, document.Result.Edges, "assembles-constructor", "module:example.com/acme/interface-inspect", "constructor:example.com/acme/interface-library/cache.New", "active-reachable", "example.com/acme/interface-library", "cache/service.go", "implementation-constructor")
+			assertInspectGraphEdge(t, document.Result.Edges, "supplies-configuration", "module:example.com/acme/interface-inspect", "configuration:example.com/acme/interface-library/cache.New", test.configurationOwner, "example.com/acme/interface-inspect", test.configurationPath, "configuration-value")
+			if _, exists := findInspectGraphEdge(document.Result.Edges, "dormant-selects-constructor", "interface:reports.read/v1", "constructor:example.com/acme/interface-inspect/app.New", "explicit"); exists {
+				t.Fatalf("active report choice remained dormant: %#v", document.Result.Edges)
+			}
+			if _, exists := findInspectGraphEdge(document.Result.Edges, "dormant-selects-constructor", "interface:cache.read/v1", "constructor:example.com/acme/interface-library/cache.New", "explicit"); exists {
+				t.Fatalf("removed cache choice remained dormant: %#v", document.Result.Edges)
+			}
+			if _, exists := findInspectGraphEdge(document.Result.Edges, "depends-on-interface", "constructor:example.com/acme/interface-inspect/cleanup.New", "interface:audit.write/v1", "required"); exists {
+				t.Fatalf("inactive cleanup candidate received resolved dependency state: %#v", document.Result.Edges)
+			}
+			humanArguments := append([]string(nil), test.arguments[:len(test.arguments)-2]...)
+			humanExit, humanStdout, humanStderr := runCommand(t, humanArguments, nested, environment)
+			if humanExit != 0 || humanStderr != "" || !strings.Contains(humanStdout, "Implementation graph: 4 candidates, 3 active, 0 dormant explicit, 1 unselected, 3 configuration schemas, 27 relationships\n") || !strings.Contains(humanStdout, "Implementation: example.com/acme/interface-library/cache.New (active)\n") || !strings.Contains(humanStdout, "example.com/acme/interface-inspect/app.New -> cache.read/v1 (optional-available)\n") {
+				t.Fatalf("selected human Implementation graph for %s = exit %d, stdout %q, stderr %q", test.name, humanExit, humanStdout, humanStderr)
+			}
+			assertInspectImplementationGraphRedacted(t, root, humanStdout, stdout)
+		})
+	}
+	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("selected Implementation graphs mutated the Project:\nbefore: %#v\nafter: %#v", before, after)
+	}
+}
+
 func TestInspectFailuresKeepJSONStdoutEmptyAndDoNotMutate(t *testing.T) {
 	t.Parallel()
 
@@ -452,6 +600,7 @@ func TestInspectFailuresKeepJSONStdoutEmptyAndDoNotMutate(t *testing.T) {
 	}{
 		{name: "missing overlay", arguments: []string{"inspect", "--format", "json", "--env", "missing"}, want: "plystra.missing.yaml"},
 		{name: "Interface graph missing overlay", arguments: []string{"inspect", "interfaces", "--format", "json", "--env", "missing"}, want: "plystra.missing.yaml"},
+		{name: "Implementation graph missing overlay", arguments: []string{"inspect", "implementations", "--format", "json", "--env", "missing"}, want: "plystra.missing.yaml"},
 		{name: "unsafe environment", arguments: []string{"inspect", "--format", "json", "--env", "../test"}, want: "safe filename component"},
 		{name: "ambient conflict", arguments: []string{"inspect", "--format", "json"}, environment: map[string]string{"PLYSTRA_ENV": "production", "PLYSTRA_CONFIG": "deploy/customer.yaml"}, want: "PLYSTRA_CONFIG and PLYSTRA_ENV cannot be used together"},
 	}
@@ -633,6 +782,125 @@ func (*Service) Read(context.Context, readv1.Request) (readv1.Response, error) {
 	return root, nested
 }
 
+func createInspectImplementationGraphProject(t testing.TB) (string, string) {
+	t.Helper()
+	root, nested := createInspectInterfaceGraphProject(t)
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := filepath.Clean(filepath.Join(cliRoot, "..", "kernel"))
+	goSum, err := os.ReadFile(filepath.Join(root, "go.sum"))
+	if err != nil {
+		t.Fatalf("read fixture go.sum: %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "library", "go.sum"), string(goSum))
+	writeCommandFile(t, filepath.Join(root, "library", "go.mod"), fmt.Sprintf(`module example.com/acme/interface-library
+
+go 1.26
+
+require (
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot)))
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `http:
+  address: private-http-address-marker
+  expose:
+    app.run/v1: {transport: connect}
+    kernel.health/v1: {transport: connect}
+interfaces:
+  require: [app.run/v1, kernel.health/v1]
+  use:
+    cache.read/v1: example.com/acme/interface-library/cache.New
+    reports.read/v1: example.com/acme/interface-inspect/app.New
+config:
+  example.com/acme/interface-inspect/app.New:
+    endpoint: private-endpoint-marker
+    password: {env: INTERFACE_GRAPH_PASSWORD}
+  example.com/acme/interface-library/cache.New:
+    endpoint: private-cache-endpoint-marker
+    password: {env: IMPLEMENTATION_GRAPH_CACHE_PASSWORD}
+`)
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), `interfaces:
+  require: [cache.read/v1, reports.read/v1]
+  use:
+    cache.read/v1: null
+config:
+  example.com/acme/interface-library/cache.New:
+    endpoint: private-production-cache-endpoint-marker
+    password: {env: IMPLEMENTATION_GRAPH_CACHE_PASSWORD_PRODUCTION}
+`)
+	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), `http:
+  address: private-http-address-marker
+  expose:
+    app.run/v1: {transport: connect}
+    kernel.health/v1: {transport: connect}
+interfaces:
+  require: [app.run/v1, cache.read/v1, kernel.health/v1, reports.read/v1]
+  use:
+    reports.read/v1: example.com/acme/interface-inspect/app.New
+config:
+  example.com/acme/interface-inspect/app.New:
+    endpoint: private-endpoint-marker
+    password: {env: INTERFACE_GRAPH_PASSWORD}
+  example.com/acme/interface-library/cache.New:
+    endpoint: private-cache-endpoint-marker
+    password: {env: IMPLEMENTATION_GRAPH_CACHE_PASSWORD}
+`)
+	writeCommandFile(t, filepath.Join(root, "library", "cache", "service.go"), `package cache
+
+import (
+	"context"
+
+	readv1 "example.com/acme/interface-library/interfaces/cache/read/v1"
+	"github.com/plystra/kernel/configuration"
+)
+
+type Config struct {
+	Endpoint string
+	Password configuration.Secret
+}
+
+type Service struct{}
+
+//plystra:implements cache.read/v1
+func New(_ Config) (*Service, error) { return &Service{}, nil }
+
+func (*Service) Read(context.Context, readv1.Request) (readv1.Response, error) {
+	return readv1.Response{}, nil
+}
+`)
+	writeCommandGraphInterface(t, root, "cleanup/run/v1", "runv1", "cleanup.run/v1", "Run")
+	writeCommandFile(t, filepath.Join(root, "cleanup", "service.go"), `package cleanup
+
+import (
+	"context"
+
+	readv1 "example.com/acme/interface-library/interfaces/cache/read/v1"
+	writev1 "example.com/acme/interface-inspect/interfaces/audit/write/v1"
+	runv1 "example.com/acme/interface-inspect/interfaces/cleanup/run/v1"
+	plystra "github.com/plystra/kernel"
+)
+
+type Config struct {
+	BatchSize int
+}
+
+type Service struct{}
+
+//plystra:implements cleanup.run/v1
+func New(_ Config, _ writev1.Interface, _ plystra.Optional[readv1.Interface]) (*Service, error) {
+	return &Service{}, nil
+}
+
+func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) {
+	return runv1.Response{}, nil
+}
+`)
+	return root, nested
+}
+
 func decodeInspectCommandEnvelope(t testing.TB, output string) inspectCommandEnvelope {
 	t.Helper()
 	var result inspectCommandEnvelope
@@ -712,6 +980,14 @@ func inspectInterfaceGraphEnvironment() []string {
 	})
 }
 
+func inspectImplementationGraphEnvironment() []string {
+	return inspectCommandEnvironment(map[string]string{
+		"IMPLEMENTATION_GRAPH_CACHE_PASSWORD":            "resolved-cache-password-marker",
+		"IMPLEMENTATION_GRAPH_CACHE_PASSWORD_PRODUCTION": "resolved-production-cache-password-marker",
+		"INTERFACE_GRAPH_PASSWORD":                       "resolved-interface-password-marker",
+	})
+}
+
 func assertInspectInterfaceGraphRedacted(t testing.TB, root string, outputs ...string) {
 	t.Helper()
 	for _, output := range outputs {
@@ -724,6 +1000,29 @@ func assertInspectInterfaceGraphRedacted(t testing.TB, root string, outputs ...s
 		} {
 			if strings.Contains(output, private) {
 				t.Fatalf("Interface graph leaked %q: %s", private, output)
+			}
+		}
+	}
+}
+
+func assertInspectImplementationGraphRedacted(t testing.TB, root string, outputs ...string) {
+	t.Helper()
+	for _, output := range outputs {
+		for _, private := range []string{
+			root,
+			"private-http-address-marker",
+			"private-endpoint-marker",
+			"private-cache-endpoint-marker",
+			"private-production-cache-endpoint-marker",
+			"INTERFACE_GRAPH_PASSWORD",
+			"IMPLEMENTATION_GRAPH_CACHE_PASSWORD",
+			"IMPLEMENTATION_GRAPH_CACHE_PASSWORD_PRODUCTION",
+			"resolved-interface-password-marker",
+			"resolved-cache-password-marker",
+			"resolved-production-cache-password-marker",
+		} {
+			if strings.Contains(output, private) {
+				t.Fatalf("Implementation graph leaked %q: %s", private, output)
 			}
 		}
 	}

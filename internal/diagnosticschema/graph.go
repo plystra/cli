@@ -34,12 +34,13 @@ var (
 type GraphType string
 
 const (
-	GraphTypeModules       GraphType = "modules"
-	GraphTypeInterfaces    GraphType = "interfaces"
-	GraphTypePlugins       GraphType = "plugins"
-	GraphTypeCapabilities  GraphType = "capabilities"
-	GraphTypeGeneration    GraphType = "generation"
-	GraphTypeConfiguration GraphType = "configuration"
+	GraphTypeModules         GraphType = "modules"
+	GraphTypeInterfaces      GraphType = "interfaces"
+	GraphTypeImplementations GraphType = "implementations"
+	GraphTypePlugins         GraphType = "plugins"
+	GraphTypeCapabilities    GraphType = "capabilities"
+	GraphTypeGeneration      GraphType = "generation"
+	GraphTypeConfiguration   GraphType = "configuration"
 )
 
 // GraphNodeKind is a stable lower-kebab node vocabulary owned by a typed
@@ -248,7 +249,7 @@ func (r GraphResult) Valid() bool {
 // Envelope returns the immutable shared diagnostic envelope.
 func (r GraphResult) Envelope() diagnosticjson.Envelope { return r.envelope }
 
-// Type returns modules, interfaces, plugins, capabilities, generation, or configuration.
+// Type returns one closed public graph projection.
 func (r GraphResult) Type() GraphType { return r.graphType }
 
 // Nodes returns a defensive copy in canonical ID order.
@@ -271,7 +272,7 @@ func (r GraphResult) ResolutionEvidenceJSON() []byte {
 
 func validGraphType(value GraphType) bool {
 	switch value {
-	case GraphTypeModules, GraphTypeInterfaces, GraphTypePlugins, GraphTypeCapabilities, GraphTypeGeneration, GraphTypeConfiguration:
+	case GraphTypeModules, GraphTypeInterfaces, GraphTypeImplementations, GraphTypePlugins, GraphTypeCapabilities, GraphTypeGeneration, GraphTypeConfiguration:
 		return true
 	default:
 		return false

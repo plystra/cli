@@ -125,3 +125,33 @@ func appendHumanGraphEvidence(content *strings.Builder, result diagnosticschema.
 	}
 	return nil
 }
+
+func inspectGraphNodeID(kind diagnosticschema.GraphNodeKind, identity string) string {
+	return string(kind) + ":" + identity
+}
+
+type inspectGraphEdges map[string]diagnosticschema.GraphEdge
+
+func (e inspectGraphEdges) add(kind diagnosticschema.GraphEdgeKind, from, to, reason string, sources []diagnosticjson.Source) {
+	key := string(kind) + "\x00" + from + "\x00" + to + "\x00" + reason
+	edge := e[key]
+	if edge.ID == "" {
+		edge = diagnosticschema.GraphEdge{
+			ID:     diagnosticschema.GraphRelationshipID(kind, from+"->"+to+"#"+reason),
+			Kind:   kind,
+			From:   from,
+			To:     to,
+			Reason: reason,
+		}
+	}
+	edge.Sources = append(edge.Sources, sources...)
+	e[key] = edge
+}
+
+func (e inspectGraphEdges) values() []diagnosticschema.GraphEdge {
+	result := make([]diagnosticschema.GraphEdge, 0, len(e))
+	for _, edge := range e {
+		result = append(result, edge)
+	}
+	return result
+}
