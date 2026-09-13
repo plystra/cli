@@ -50,7 +50,8 @@ func runInspect(arguments []string, stdout, stderr io.Writer, workingDirectory s
 		writeCommandFailure(output.diagnosticWriter(), "inspect selected application", err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
 		return 1
 	}
-	if parsed.graphType == diagnosticschema.GraphTypeModules {
+	switch parsed.graphType {
+	case diagnosticschema.GraphTypeModules:
 		result, err := inspectModulesGraph(resolved.ResolutionEvidence())
 		if err != nil {
 			writeCommandFailure(output.diagnosticWriter(), "inspect module graph", err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
@@ -63,6 +64,22 @@ func runInspect(arguments []string, stdout, stderr io.Writer, workingDirectory s
 		}
 		if err := writeHumanModuleGraph(output.resultWriter(), result, resolved.ResolutionEvidence(), parsed.verbose); err != nil {
 			_, _ = fmt.Fprintf(output.diagnosticWriter(), "render inspect module graph: %v\n", err)
+			return 1
+		}
+		return 0
+	case diagnosticschema.GraphTypeInterfaces:
+		result, err := inspectInterfacesGraph(resolved)
+		if err != nil {
+			writeCommandFailure(output.diagnosticWriter(), "inspect Interface graph", err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
+			return 1
+		}
+		if parsed.format == commandFormatJSON {
+			_, _ = output.resultWriter().Write(result.Envelope().CanonicalJSON())
+			_, _ = io.WriteString(output.resultWriter(), "\n")
+			return 0
+		}
+		if err := writeHumanInterfaceGraph(output.resultWriter(), result, parsed.verbose); err != nil {
+			_, _ = fmt.Fprintf(output.diagnosticWriter(), "render inspect Interface graph: %v\n", err)
 			return 1
 		}
 		return 0
@@ -95,10 +112,12 @@ func parseInspectArguments(arguments []string) (inspectArguments, bool) {
 	result := inspectArguments{format: commandFormatHuman}
 	index := 1
 	if index < len(arguments) && !strings.HasPrefix(arguments[index], "--") {
-		if arguments[index] != string(diagnosticschema.GraphTypeModules) {
+		switch diagnosticschema.GraphType(arguments[index]) {
+		case diagnosticschema.GraphTypeModules, diagnosticschema.GraphTypeInterfaces:
+			result.graphType = diagnosticschema.GraphType(arguments[index])
+		default:
 			return inspectArguments{}, false
 		}
-		result.graphType = diagnosticschema.GraphTypeModules
 		index++
 	}
 	formatSet := false

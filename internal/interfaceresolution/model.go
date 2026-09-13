@@ -66,9 +66,10 @@ type Input struct {
 // its canonical package and complete stable requirement provenance. It has no
 // ordinary Implementation selection.
 type IntrinsicRequirement struct {
-	interfaceID interfaceid.Identifier
-	packagePath string
-	sources     []string
+	interfaceID        interfaceid.Identifier
+	packagePath        string
+	sources            []string
+	requirementSources []RequirementSource
 }
 
 // InterfaceID returns the exact reserved Interface ID.
@@ -80,6 +81,12 @@ func (r IntrinsicRequirement) PackagePath() string { return r.packagePath }
 // Sources returns sorted unique Kernel and current-application provenance.
 func (r IntrinsicRequirement) Sources() []string {
 	return append([]string(nil), r.sources...)
+}
+
+// RequirementSources returns every sorted unique authored requirement or
+// exposure that also made this intrinsic Interface a root.
+func (r IntrinsicRequirement) RequirementSources() []RequirementSource {
+	return append([]RequirementSource(nil), r.requirementSources...)
 }
 
 // Result is one immutable resolved selection closure and validated constructor
@@ -104,6 +111,7 @@ func (r Result) IntrinsicRequirements() []IntrinsicRequirement {
 	result := append([]IntrinsicRequirement(nil), r.intrinsicRequirements...)
 	for index := range result {
 		result[index].sources = append([]string(nil), result[index].sources...)
+		result[index].requirementSources = append([]RequirementSource(nil), result[index].requirementSources...)
 	}
 	return result
 }

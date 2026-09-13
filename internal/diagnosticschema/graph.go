@@ -2,6 +2,7 @@ package diagnosticschema
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,8 +17,8 @@ import (
 )
 
 const (
-	maximumGraphNodes          = 4_096
-	maximumGraphEdges          = 16_384
+	maximumGraphNodes          = 16_384
+	maximumGraphEdges          = 32_768
 	maximumGraphIdentityLength = 1_024
 )
 
@@ -34,6 +35,7 @@ type GraphType string
 
 const (
 	GraphTypeModules       GraphType = "modules"
+	GraphTypeInterfaces    GraphType = "interfaces"
 	GraphTypePlugins       GraphType = "plugins"
 	GraphTypeCapabilities  GraphType = "capabilities"
 	GraphTypeGeneration    GraphType = "generation"
@@ -246,7 +248,7 @@ func (r GraphResult) Valid() bool {
 // Envelope returns the immutable shared diagnostic envelope.
 func (r GraphResult) Envelope() diagnosticjson.Envelope { return r.envelope }
 
-// Type returns modules, plugins, capabilities, generation, or configuration.
+// Type returns modules, interfaces, plugins, capabilities, generation, or configuration.
 func (r GraphResult) Type() GraphType { return r.graphType }
 
 // Nodes returns a defensive copy in canonical ID order.
@@ -269,11 +271,23 @@ func (r GraphResult) ResolutionEvidenceJSON() []byte {
 
 func validGraphType(value GraphType) bool {
 	switch value {
-	case GraphTypeModules, GraphTypePlugins, GraphTypeCapabilities, GraphTypeGeneration, GraphTypeConfiguration:
+	case GraphTypeModules, GraphTypeInterfaces, GraphTypePlugins, GraphTypeCapabilities, GraphTypeGeneration, GraphTypeConfiguration:
 		return true
 	default:
 		return false
 	}
+}
+
+// GraphRelationshipID returns a deterministic kind-namespaced relationship
+// identity, retaining the readable form unless it exceeds the schema bound.
+func GraphRelationshipID(kind GraphEdgeKind, identity string) string {
+	prefix := string(kind) + ":"
+	candidate := prefix + identity
+	if len(candidate) <= maximumGraphIdentityLength {
+		return candidate
+	}
+	digest := sha256.Sum256([]byte(candidate))
+	return fmt.Sprintf("%ssha256:%x", prefix, digest)
 }
 
 func normalizeGraphElements(graphType GraphType, mode generation.ConfigurationMode, digest string, inputNodes []GraphNode, inputEdges []GraphEdge) ([]GraphNode, []GraphEdge, error) {

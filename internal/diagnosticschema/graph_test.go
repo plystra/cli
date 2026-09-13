@@ -3,6 +3,7 @@ package diagnosticschema
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -76,7 +77,7 @@ func TestGraphV1BuildsExactTypedResult(t *testing.T) {
 func TestGraphV1SupportsEveryGraphAndConfigurationType(t *testing.T) {
 	t.Parallel()
 
-	for _, graphType := range []GraphType{GraphTypeModules, GraphTypePlugins, GraphTypeCapabilities, GraphTypeGeneration, GraphTypeConfiguration} {
+	for _, graphType := range []GraphType{GraphTypeModules, GraphTypeInterfaces, GraphTypePlugins, GraphTypeCapabilities, GraphTypeGeneration, GraphTypeConfiguration} {
 		t.Run(string(graphType), func(t *testing.T) {
 			evidence := resolvedInspectEvidence(t)
 			result, err := NewGraph(GraphInput{Evidence: evidence, Type: graphType})
@@ -106,6 +107,21 @@ func TestGraphV1SupportsEveryGraphAndConfigurationType(t *testing.T) {
 				t.Fatalf("configuration mode = %q, %v", result.Envelope().ConfigurationMode(), err)
 			}
 		})
+	}
+}
+
+func TestGraphRelationshipIDBoundsLongCompositeIdentities(t *testing.T) {
+	t.Parallel()
+
+	if got := GraphRelationshipID("requires", "module:a->module:b"); got != "requires:module:a->module:b" {
+		t.Fatalf("short relationship ID = %q", got)
+	}
+	identity := strings.Repeat("a", maximumGraphIdentityLength) + "->" + strings.Repeat("b", maximumGraphIdentityLength)
+	first := GraphRelationshipID("depends-on-interface", identity)
+	second := GraphRelationshipID("depends-on-interface", identity)
+	changed := GraphRelationshipID("depends-on-interface", identity+"c")
+	if len(first) > maximumGraphIdentityLength || !strings.HasPrefix(first, "depends-on-interface:sha256:") || first != second || first == changed {
+		t.Fatalf("bounded relationship IDs = first %q second %q changed %q", first, second, changed)
 	}
 }
 
@@ -181,7 +197,6 @@ func TestGraphV1RejectsIncompleteAndUnsafeInput(t *testing.T) {
 		{name: "node unix path", mutate: func(input *GraphInput) { input.Nodes[0].ID = "module:/home/person/project" }, want: "absolute path"},
 		{name: "node label", mutate: func(input *GraphInput) { input.Nodes[0].Label = "Open /home/person/project." }, want: "absolute path"},
 		{name: "duplicate node", mutate: func(input *GraphInput) { input.Nodes = append(input.Nodes, input.Nodes[0]) }, want: "duplicated"},
-		{name: "node count", mutate: func(input *GraphInput) { input.Nodes = make([]GraphNode, maximumGraphNodes+1) }, want: "node count"},
 		{name: "edge kind", mutate: func(input *GraphInput) { input.Edges[0].Kind = "Bad Kind" }, want: "kind"},
 		{name: "edge namespace", mutate: func(input *GraphInput) { input.Edges[0].ID = "edge:kernel.health/v1" }, want: "namespace"},
 		{name: "edge from", mutate: func(input *GraphInput) { input.Edges[0].From = "module:missing" }, want: "does not identify"},
@@ -189,7 +204,6 @@ func TestGraphV1RejectsIncompleteAndUnsafeInput(t *testing.T) {
 		{name: "self edge", mutate: func(input *GraphInput) { input.Edges[0].To = input.Edges[0].From }, want: "self edge"},
 		{name: "edge reason", mutate: func(input *GraphInput) { input.Edges[0].Reason = "Bad Reason" }, want: "reason"},
 		{name: "duplicate edge id", mutate: func(input *GraphInput) { input.Edges = append(input.Edges, input.Edges[0]) }, want: "duplicated"},
-		{name: "edge count", mutate: func(input *GraphInput) { input.Edges = make([]GraphEdge, maximumGraphEdges+1) }, want: "edge count"},
 		{name: "duplicate relationship", mutate: func(input *GraphInput) {
 			duplicate := input.Edges[0]
 			duplicate.ID = "declared-requirement:duplicate"
@@ -220,6 +234,54 @@ func TestGraphV1RejectsIncompleteAndUnsafeInput(t *testing.T) {
 				t.Fatalf("NewGraph = %#v, %v; want ErrGraph containing %q", result, err, test.want)
 			}
 		})
+	}
+}
+
+func TestGraphV1EnforcesGraphCountBounds(t *testing.T) {
+	t.Parallel()
+
+	evidence := resolvedInspectEvidence(t)
+	for _, test := range []struct {
+		name  string
+		input GraphInput
+		want  string
+	}{
+		{name: "nodes", input: GraphInput{Evidence: evidence, Type: GraphTypeInterfaces, Nodes: make([]GraphNode, maximumGraphNodes+1)}, want: "node count"},
+		{name: "edges", input: GraphInput{Evidence: evidence, Type: GraphTypeInterfaces, Edges: make([]GraphEdge, maximumGraphEdges+1)}, want: "edge count"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := NewGraph(test.input)
+			if !errors.Is(err, ErrGraph) || !strings.Contains(err.Error(), test.want) || result.Valid() {
+				t.Fatalf("NewGraph = %#v, %v; want ErrGraph containing %q", result, err, test.want)
+			}
+		})
+	}
+}
+
+func TestGraphV1RejectsSubLimitGraphPayloadByEnvelopeSize(t *testing.T) {
+	t.Parallel()
+
+	nodes := make([]GraphNode, 1_100)
+	label := strings.Repeat("a", maximumGraphIdentityLength)
+	for index := range nodes {
+		nodes[index] = GraphNode{ID: fmt.Sprintf("node:%d", index), Kind: "node", Label: label}
+	}
+	result, err := NewGraph(GraphInput{Evidence: resolvedInspectEvidence(t), Type: GraphTypeInterfaces, Nodes: nodes})
+	if !errors.Is(err, ErrGraph) || !strings.Contains(err.Error(), "JSON exceeds 1048576 bytes") || result.Valid() {
+		t.Fatalf("NewGraph = %#v, %v; want bounded envelope-size failure", result, err)
+	}
+}
+
+func TestGraphV1RejectsSubLimitGraphPayloadByJSONNodeCount(t *testing.T) {
+	t.Parallel()
+
+	nodes := make([]GraphNode, 13_100)
+	for index := range nodes {
+		nodes[index] = GraphNode{ID: fmt.Sprintf("node:%d", index), Kind: "node", Label: "n"}
+	}
+	result, err := NewGraph(GraphInput{Evidence: resolvedInspectEvidence(t), Type: GraphTypeInterfaces, Nodes: nodes})
+	if !errors.Is(err, ErrGraph) || !strings.Contains(err.Error(), "maximum node count 65536") || result.Valid() {
+		t.Fatalf("NewGraph = %#v, %v; want bounded JSON-node failure", result, err)
 	}
 }
 

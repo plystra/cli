@@ -1765,6 +1765,9 @@ plystra inspect
 plystra inspect modules
 plystra inspect modules --env production
 plystra inspect modules --config deploy/customer-a.yaml
+plystra inspect interfaces
+plystra inspect interfaces --env production
+plystra inspect interfaces --config deploy/customer-a.yaml
 plystra inspect --env production
 plystra inspect --config deploy/customer-a.yaml
 plystra explain capability email.send/v1
@@ -1799,9 +1802,13 @@ indented resolution evidence or `--format json` for one deterministic
 stderr. The JSON form is suitable for automation and contains stable
 module-relative provenance rather than unrestricted configuration, Secrets, or
 machine-specific Project paths. Use `plystra inspect modules` to show the
-participating current and dependency Project modules as a deterministic
-`plystra.graph` v1 view; its source references stay project-relative and its
-structured result omits resolved Secrets and unrestricted configuration values.
+participating current and dependency Project modules. Use `plystra inspect
+interfaces` to show every visible authored and intrinsic Interface, module
+ownership, root requirements, active selected constructors and selection
+reasons, required dependencies, available or unavailable optional dependencies,
+and visible inactive Interfaces. Both are deterministic `plystra.graph` v1 views whose source references stay
+project-relative and whose structured results omit resolved Secrets and
+unrestricted configuration values.
 
 Use `plystra explain capability <capability-name>/vN` when a particular
 Capability's selection is unexpected. A required Capability reports the

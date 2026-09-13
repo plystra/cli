@@ -43,7 +43,7 @@ const (
   plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
   plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
-  plystra inspect [modules] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
+  plystra inspect [modules|interfaces] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain config <field-path> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
@@ -380,9 +380,11 @@ without a fabricated span.
 	inspectUsage = `Usage:
   plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra inspect modules [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
+  plystra inspect interfaces [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
 
 Views:
   modules                Show the selected current-model module graph.
+  interfaces             Show visible Interfaces, active selections, and constructor dependencies.
 
 Options:
   --verbose              Add the complete deterministic resolution evidence to human output.
@@ -392,9 +394,12 @@ Options:
 
 The command is read-only and resolves the same selected application model used
 by generation and validation. JSON stdout contains exactly one schema document;
-progress and diagnostics use stderr. The modules view emits the versioned
-plystra.graph v1 schema with project-relative source references and no resolved
-Secrets or unrestricted configuration values. PLYSTRA_ENV and PLYSTRA_CONFIG
+progress and diagnostics use stderr. Graph views emit the versioned plystra.graph
+v1 schema with project-relative source references and no resolved Secrets or
+unrestricted configuration values. The interfaces view retains visible inactive
+Interfaces, intrinsic Kernel ownership, root requirements, active constructor
+selections and reasons, and required or optional constructor dependencies.
+PLYSTRA_ENV and PLYSTRA_CONFIG
 supply equivalent selectors when no explicit selector is present; setting both
 is an error. Explicit --env or --config overrides both variables, and the two
 flags cannot be combined. Relative configuration paths are resolved from the
@@ -639,7 +644,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 	case "capability":
 		return runCapability(arguments, stdout, stderr, workingDirectory, environment, selectPlugin)
 	case "inspect":
-		if len(arguments) == 2 && isHelp(arguments[1]) || len(arguments) == 3 && arguments[1] == "modules" && isHelp(arguments[2]) {
+		if len(arguments) == 2 && isHelp(arguments[1]) || len(arguments) == 3 && (arguments[1] == "modules" || arguments[1] == "interfaces") && isHelp(arguments[2]) {
 			_, _ = io.WriteString(stdout, inspectUsage)
 			return 0
 		}

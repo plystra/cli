@@ -125,7 +125,12 @@ func TestResolveCollectsIntrinsicKernelRequirementsOutsideImplementationSelectio
 	requirements[0] = interfaceresolution.IntrinsicRequirement{}
 	sources := result.IntrinsicRequirements()[0].Sources()
 	sources[0] = "mutated"
-	if repeated := result.IntrinsicRequirements(); repeated[0].InterfaceID() != healthID || repeated[0].Sources()[0] == "mutated" {
+	typedSources := result.IntrinsicRequirements()[0].RequirementSources()
+	if len(typedSources) != 2 || typedSources[0].Kind != interfaceresolution.RequirementDeclaration || typedSources[1].Kind != interfaceresolution.RequirementExposure {
+		t.Fatalf("intrinsic typed requirement sources = %#v", typedSources)
+	}
+	typedSources[0] = interfaceresolution.RequirementSource{}
+	if repeated := result.IntrinsicRequirements(); repeated[0].InterfaceID() != healthID || repeated[0].Sources()[0] == "mutated" || len(repeated[0].RequirementSources()) != 2 || repeated[0].RequirementSources()[0].ModulePath == "" {
 		t.Fatal("IntrinsicRequirements returned aliased storage")
 	}
 

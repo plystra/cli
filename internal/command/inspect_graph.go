@@ -104,17 +104,24 @@ func writeHumanModuleGraph(writer io.Writer, result diagnosticschema.GraphResult
 		}
 	}
 	if verbose {
-		var evidenceJSON bytes.Buffer
-		if err := json.Indent(&evidenceJSON, result.ResolutionEvidenceJSON(), "", "  "); err != nil {
-			return fmt.Errorf("format resolution evidence: %w", err)
-		}
-		content.WriteString("Resolution evidence:\n")
-		for _, line := range strings.Split(evidenceJSON.String(), "\n") {
-			content.WriteString("  ")
-			content.WriteString(line)
-			content.WriteByte('\n')
+		if err := appendHumanGraphEvidence(&content, result); err != nil {
+			return err
 		}
 	}
 	_, err := io.WriteString(writer, content.String())
 	return err
+}
+
+func appendHumanGraphEvidence(content *strings.Builder, result diagnosticschema.GraphResult) error {
+	var evidenceJSON bytes.Buffer
+	if err := json.Indent(&evidenceJSON, result.ResolutionEvidenceJSON(), "", "  "); err != nil {
+		return fmt.Errorf("format resolution evidence: %w", err)
+	}
+	content.WriteString("Resolution evidence:\n")
+	for _, line := range strings.Split(evidenceJSON.String(), "\n") {
+		content.WriteString("  ")
+		content.WriteString(line)
+		content.WriteByte('\n')
+	}
+	return nil
 }

@@ -194,6 +194,7 @@ func buildCatalog(interfaces interfaceinventory.Index, implementations implement
 func normalizeRequirements(inputs []Requirement, interfaces map[string]interfaceinventory.Interface, intrinsics map[string]intrinsicinterface.Definition) ([]Requirement, []IntrinsicRequirement, error) {
 	result := make([]Requirement, 0, len(inputs))
 	intrinsicSources := make(map[string][]string, len(intrinsics))
+	intrinsicRequirementSources := make(map[string][]RequirementSource, len(intrinsics))
 	unknown := make(map[string]*UnknownInterfaceError)
 	for identifier, definition := range intrinsics {
 		intrinsicSources[identifier] = []string{definition.Source()}
@@ -208,6 +209,7 @@ func normalizeRequirements(inputs []Requirement, interfaces map[string]interface
 		}
 		if _, intrinsic := intrinsics[identifier]; intrinsic {
 			intrinsicSources[identifier] = append(intrinsicSources[identifier], input.Source.Reference)
+			intrinsicRequirementSources[identifier] = append(intrinsicRequirementSources[identifier], input.Source)
 			continue
 		}
 		if strings.HasPrefix(input.InterfaceID.Name(), "kernel.") {
@@ -249,9 +251,10 @@ func normalizeRequirements(inputs []Requirement, interfaces map[string]interface
 	intrinsicRequirements := make([]IntrinsicRequirement, 0, len(intrinsics))
 	for identifier, definition := range intrinsics {
 		intrinsicRequirements = append(intrinsicRequirements, IntrinsicRequirement{
-			interfaceID: definition.ID(),
-			packagePath: definition.PackagePath(),
-			sources:     uniqueSorted(intrinsicSources[identifier]),
+			interfaceID:        definition.ID(),
+			packagePath:        definition.PackagePath(),
+			sources:            uniqueSorted(intrinsicSources[identifier]),
+			requirementSources: uniqueSortedRequirementSources(intrinsicRequirementSources[identifier]),
 		})
 	}
 	sort.Slice(intrinsicRequirements, func(left, right int) bool {
@@ -322,6 +325,7 @@ func cloneIntrinsicRequirements(values []IntrinsicRequirement) []IntrinsicRequir
 	result := append([]IntrinsicRequirement(nil), values...)
 	for index := range result {
 		result[index].sources = append([]string(nil), result[index].sources...)
+		result[index].requirementSources = append([]RequirementSource(nil), result[index].requirementSources...)
 	}
 	return result
 }
