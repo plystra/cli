@@ -1430,10 +1430,13 @@ interfaces:
 	}
 
 	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "root: [intentionally-invalid\n")
-	for _, runtime := range []struct {
+	runtimeOutsidePath := filepath.Join(root, "runtime-outside.yaml")
+	writeCommandFile(t, runtimeOutsidePath, "{}\n")
+	runtimeCases := []struct {
 		name        string
 		arguments   []string
 		environment []string
+		wantError   string
 	}{
 		{
 			name:        "explicit relative replacement overrides ambient selectors",
@@ -1450,15 +1453,61 @@ interfaces:
 			arguments:   []string{"run", "./generated/go/application", "--smoke"},
 			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"}),
 		},
-	} {
+		{
+			name:        "outside-Project absolute replacement rejection",
+			arguments:   []string{"run", "./generated/go/application", "--smoke", "--config", runtimeOutsidePath},
+			environment: environment,
+			wantError:   "selected configuration must identify a file within the runtime Project directory",
+		},
+	}
+	runtimeLinkPaths := make([]string, 0, 2)
+	aliasRoot := filepath.Join(filepath.Dir(applicationRoot), filepath.Base(applicationRoot)+"-alias")
+	if err := os.Symlink(applicationRoot, aliasRoot); err == nil {
+		runtimeLinkPaths = append(runtimeLinkPaths, aliasRoot)
+		runtimeCases = append(runtimeCases, struct {
+			name        string
+			arguments   []string
+			environment []string
+			wantError   string
+		}{
+			name:        "absolute replacement through Project root alias",
+			arguments:   []string{"run", "./generated/go/application", "--smoke", "--config", filepath.Join(aliasRoot, "deploy", "customer.yaml")},
+			environment: environment,
+		})
+	}
+	runtimeLinkedDeploy := filepath.Join(applicationRoot, "runtime-linked-deploy")
+	if err := os.Symlink(filepath.Join(applicationRoot, "deploy"), runtimeLinkedDeploy); err == nil {
+		runtimeLinkPaths = append(runtimeLinkPaths, runtimeLinkedDeploy)
+		runtimeCases = append(runtimeCases, struct {
+			name        string
+			arguments   []string
+			environment []string
+			wantError   string
+		}{
+			name:        "Project-internal symbolic replacement rejection",
+			arguments:   []string{"run", "./generated/go/application", "--smoke", "--config", filepath.Join(runtimeLinkedDeploy, "customer.yaml")},
+			environment: environment,
+			wantError:   "must be an existing regular Project file without symbolic path components",
+		})
+	}
+	for _, runtime := range runtimeCases {
 		t.Run("generated binary "+runtime.name, func(t *testing.T) {
 			process := exec.CommandContext(t.Context(), "go", runtime.arguments...)
 			process.Dir = applicationRoot
 			process.Env = runtime.environment
-			if output, err := process.CombinedOutput(); err != nil {
+			output, err := process.CombinedOutput()
+			if runtime.wantError == "" && err != nil {
 				t.Fatalf("generated application %s: %v\n%s", runtime.name, err, output)
 			}
+			if runtime.wantError != "" && (err == nil || !strings.Contains(string(output), runtime.wantError)) {
+				t.Fatalf("generated application %s error = %v, output:\n%s", runtime.name, err, output)
+			}
 		})
+	}
+	for _, path := range runtimeLinkPaths {
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("remove runtime configuration path alias: %v", err)
+		}
 	}
 	changedSelected := bytes.Replace(selected, []byte("expose: {kernel.info/v1: {transport: connect}}"), []byte("expose: {kernel.health/v1: {transport: connect}}"), 1)
 	if bytes.Equal(changedSelected, selected) {

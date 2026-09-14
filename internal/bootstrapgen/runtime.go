@@ -570,6 +570,10 @@ func runtimeProjectRelativeConfigurationPath(value, source string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("%w: resolve runtime Project directory", ErrRuntimeSelector)
 	}
+	rootInfo, err := os.Stat(root)
+	if err != nil || rootInfo == nil || !rootInfo.IsDir() {
+		return "", fmt.Errorf("%w: inspect runtime Project directory", ErrRuntimeSelector)
+	}
 	candidate := value
 	if !filepath.IsAbs(candidate) {
 		candidate = filepath.Join(root, candidate)
@@ -578,8 +582,8 @@ func runtimeProjectRelativeConfigurationPath(value, source string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("%w: resolve selected configuration path", ErrRuntimeSelector)
 	}
-	relative, err := filepath.Rel(root, candidate)
-	if err != nil {
+	relative, ok := runtimeRelativePathFromRootIdentity(rootInfo, candidate)
+	if !ok {
 		return "", fmt.Errorf("%w: selected configuration must identify a file within the runtime Project directory", ErrRuntimeSelector)
 	}
 	clean := filepath.Clean(relative)
@@ -587,6 +591,21 @@ func runtimeProjectRelativeConfigurationPath(value, source string) (string, erro
 		return "", fmt.Errorf("%w: selected configuration must identify a file within the runtime Project directory", ErrRuntimeSelector)
 	}
 	return clean, nil
+}
+
+func runtimeRelativePathFromRootIdentity(root os.FileInfo, candidate string) (string, bool) {
+	for current := candidate; ; {
+		info, err := os.Stat(current)
+		if err == nil && info != nil && info.IsDir() && os.SameFile(root, info) {
+			relative, err := filepath.Rel(current, candidate)
+			return relative, err == nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", false
+		}
+		current = parent
+	}
 }
 
 type runtimeConfigurationPathState struct {
