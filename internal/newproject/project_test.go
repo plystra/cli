@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/command"
+	"github.com/plystra/cli/internal/commandschema"
 	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/gocommand"
@@ -247,20 +249,38 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if direct.ModulePath() != modulePath || direct.Path() != filepath.Join(directParent, "my-app") {
-		t.Fatalf("Create result = module %q, path %q", direct.ModulePath(), direct.Path())
+	if direct.ModulePath() != modulePath || direct.Directory() != projectName || direct.Path() != filepath.Join(directParent, projectName) {
+		t.Fatalf("Create result = module %q, directory %q, path %q", direct.ModulePath(), direct.Directory(), direct.Path())
 	}
 
 	commandParent := t.TempDir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	if exitCode := command.RunIn([]string{"new", projectName, "--module", modulePath, "--git", "--github-ci"}, &stdout, &stderr, commandParent, environment); exitCode != 0 {
+	if exitCode := command.RunIn([]string{"new", projectName, "--module", modulePath, "--git", "--github-ci", "--format", "json"}, &stdout, &stderr, commandParent, environment); exitCode != 0 {
 		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
 	}
-	commandTarget := filepath.Join(commandParent, "my-app")
-	wantOutput := fmt.Sprintf("created %s in %s\n", modulePath, commandTarget)
-	if stdout.String() != wantOutput || stderr.Len() != 0 {
-		t.Fatalf("RunIn output = stdout %q, stderr %q", stdout.String(), stderr.String())
+	var creation struct {
+		Schema    string `json:"schema"`
+		Operation string `json:"operation"`
+		Status    string `json:"status"`
+		ExitClass int    `json:"exit_class"`
+		Payload   *struct {
+			Schema     string `json:"schema"`
+			ModulePath string `json:"module_path"`
+			Directory  string `json:"directory"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &creation); err != nil {
+		t.Fatalf("decode public creation result: %v\n%s", err, stdout.String())
+	}
+	if stderr.Len() != 0 || creation.Schema != commandschema.ResultSchemaV1 || creation.Operation != "new" || creation.Status != "changed" || creation.ExitClass != 0 || creation.Payload == nil || creation.Payload.Schema != commandschema.ProjectCreatedSchemaV1 || creation.Payload.ModulePath != modulePath || creation.Payload.Directory != projectName {
+		t.Fatalf("RunIn result = %#v, stderr %q", creation, stderr.String())
+	}
+	commandTarget := filepath.Join(commandParent, creation.Payload.Directory)
+	var checkStdout bytes.Buffer
+	var checkStderr bytes.Buffer
+	if exitCode := command.RunIn([]string{"check"}, &checkStdout, &checkStderr, commandTarget, environment); exitCode != 0 || checkStderr.Len() != 0 {
+		t.Fatalf("public check = exit %d, stdout %q, stderr %q", exitCode, checkStdout.String(), checkStderr.String())
 	}
 
 	directTree := snapshotTree(t, direct.Path())
@@ -724,7 +744,7 @@ func TestPublicCommandRejectsPrivateTemplateGraphAndRollsBack(t *testing.T) {
 		"--no-agent-guidance",
 	}
 
-	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 1 {
+	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 3 {
 		t.Fatalf("RunIn exit code = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
 	}
 	if stdout.Len() != 0 {
@@ -790,7 +810,7 @@ func TestPublicCommandRejectsRelativeReplacementsAcrossTemplateProjectsAndRollsB
 		"--no-agent-guidance",
 	}
 
-	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 1 {
+	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 3 {
 		t.Fatalf("RunIn exit code = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
 	}
 	if stdout.Len() != 0 {
@@ -1561,7 +1581,7 @@ func TestPublicCommandRejectsOldPositionalModulePathWithoutMutation(t *testing.T
 	wantStderr := "create project: create Plystra project: invalid Plystra project name: project name \"example.com/acme/my-app\" must be one lower-case ASCII kebab-case child directory\n\n" +
 		"Recovery:\nRerun `plystra new <project-name> [options]` with one lower-case ASCII kebab-case child directory name; put any independent Go Module identity in `--module <go-module-path>`.\n\n" +
 		"Diagnostic: " + diagnosticcode.ProjectCreateNameInvalid + "\n"
-	if exitCode != 1 || stdout.Len() != 0 || stderr.String() != wantStderr {
+	if exitCode != 3 || stdout.Len() != 0 || stderr.String() != wantStderr {
 		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
 	}
 	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
@@ -1576,7 +1596,7 @@ func TestPublicCommandRejectsInvalidModuleOverrideWithoutMutation(t *testing.T) 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := command.RunIn([]string{"new", "my-app", "--module", "local-module"}, &stdout, &stderr, parent, nil)
-	if exitCode != 1 || stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "create project: create Plystra project: invalid Plystra project module path: invalid explicit Go Module path \"local-module\":") ||
+	if exitCode != 3 || stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "create project: create Plystra project: invalid Plystra project module path: invalid explicit Go Module path \"local-module\":") ||
 		!strings.Contains(stderr.String(), "\n\nRecovery:\nRerun `plystra new <project-name> --module <go-module-path> [options]` with one valid Go Module path.\n\nDiagnostic: "+diagnosticcode.ProjectCreateModuleInvalid+"\n") ||
 		strings.Count(stderr.String(), "Recovery:") != 1 || strings.Count(stderr.String(), "Diagnostic:") != 1 {
 		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
@@ -1594,7 +1614,7 @@ func TestPublicCommandRejectsInvalidTemplateQueryWithoutMutation(t *testing.T) {
 	var stderr bytes.Buffer
 	exitCode := command.RunIn([]string{"new", "my-app", "--template", "../platform@v1.0.0"}, &stdout, &stderr, parent, nil)
 	wantRecovery := "\n\nRecovery:\nRerun `plystra new <project-name> --template <go-module-query> [options]` with one valid non-removal Go Module query.\n\nDiagnostic: " + diagnosticcode.ProjectCreateTemplateInvalid + "\n"
-	if exitCode != 1 || stdout.Len() != 0 ||
+	if exitCode != 3 || stdout.Len() != 0 ||
 		!strings.HasPrefix(stderr.String(), "create project: create Plystra project: invalid Plystra project template query: invalid Go Module path ") ||
 		!strings.Contains(stderr.String(), wantRecovery) || strings.Contains(stderr.String(), "Usage:") ||
 		strings.Count(stderr.String(), "Recovery:") != 1 || strings.Count(stderr.String(), "Diagnostic:") != 1 {
@@ -1650,7 +1670,7 @@ func TestPublicCommandClassifiesInvalidInitialPluginWithoutMutation(t *testing.T
 			exitCode := command.RunIn([]string{"new", "my-app", "--module", test.modulePath, "--plugin", test.pluginName}, &stdout, &stderr, parent, nil)
 			wantBlock := "\n\nRecovery:\n" + test.wantRecovery + "\n\nDiagnostic: " + test.wantCode + "\n"
 			stderrText := stderr.String()
-			if exitCode != 1 || stdout.Len() != 0 || !strings.HasPrefix(stderrText, test.wantPrefix) ||
+			if exitCode != 3 || stdout.Len() != 0 || !strings.HasPrefix(stderrText, test.wantPrefix) ||
 				!strings.Contains(stderrText, wantBlock) || strings.Contains(stderrText, "Usage:") ||
 				strings.Count(stderrText, "Recovery:") != 1 || strings.Count(stderrText, "Diagnostic:") != 1 {
 				t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderrText)
@@ -1698,7 +1718,7 @@ func TestPublicCommandClassifiesExistingProjectTargetWithoutMutation(t *testing.
 			wantRecovery := "Rerun `plystra new <project-name> [options]` with a different canonical Project name whose target does not exist, or run it from a different parent directory."
 			wantBlock := "\n\nRecovery:\n" + wantRecovery + "\n\nDiagnostic: " + diagnosticcode.ProjectCreateTargetExists + "\n"
 			stderrText := stderr.String()
-			if exitCode != 1 || stdout.Len() != 0 || !strings.HasPrefix(stderrText, "create project: create Plystra project: plystra project target already exists: transaction target already exists: ") ||
+			if exitCode != 3 || stdout.Len() != 0 || !strings.HasPrefix(stderrText, "create project: create Plystra project: plystra project target already exists: transaction target already exists: ") ||
 				!strings.Contains(stderrText, wantBlock) || strings.Contains(stderrText, "Usage:") ||
 				strings.Count(stderrText, "Recovery:") != 1 || strings.Count(stderrText, "Diagnostic:") != 1 {
 				t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderrText)
@@ -1753,8 +1773,8 @@ func TestCreateHonorsProjectScaffoldOptions(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create: %v", err)
 			}
-			if result.ModulePath() != expectedModulePath || result.Path() != filepath.Join(parent, projectName) {
-				t.Fatalf("Create result = module %q path %q", result.ModulePath(), result.Path())
+			if result.ModulePath() != expectedModulePath || result.Directory() != projectName || result.Path() != filepath.Join(parent, projectName) {
+				t.Fatalf("Create result = module %q directory %q path %q", result.ModulePath(), result.Directory(), result.Path())
 			}
 			assertModuleState(t, result.Path(), expectedModulePath)
 			assertPathPresence(t, filepath.Join(result.Path(), ".git"), test.git)
@@ -1788,7 +1808,72 @@ func TestPublicCommandUsesStableNonInteractiveDefaults(t *testing.T) {
 	assertPlystraGuidance(t, target, "my-app")
 }
 
-func TestPublicCommandClassifiesGitInitializationFailureAndRollsBack(t *testing.T) {
+func TestPublicCommandClassifiesMissingGitAndRollsBack(t *testing.T) {
+	configureProjectCommandPath(t, false)
+	proxy := createKernelProxy(t)
+	environment := isolatedGoEnvironment(t, proxy)
+	parent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := command.RunIn([]string{"new", "my-app", "--module", "example.com/acme/my-app", "--git"}, &stdout, &stderr, parent, environment)
+	wantRecovery := "Install or select a working Git executable, then rerun `plystra new <project-name> [options]` with `--git`; omit `--git` when the Project intentionally needs no repository."
+	wantStderr := "create project: create Plystra project: create directory transaction: populate staging directory: initialize Git repository: git init failed\n\n" +
+		"Recovery:\n" + wantRecovery + "\n\n" +
+		"Diagnostic: " + diagnosticcode.ProjectCreateGitUnavailable + "\n"
+	if exitCode != 4 || stdout.Len() != 0 || stderr.String() != wantStderr {
+		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
+	}
+	recoveryIndex := strings.Index(stderr.String(), "Recovery:")
+	if recoveryIndex < 0 || strings.Contains(stderr.String()[recoveryIndex:], "my-app") || strings.Contains(stderr.String()[recoveryIndex:], parent) {
+		t.Fatalf("recovery echoed rejected Project input: %q", stderr.String())
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Git initialization failure created target: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
+}
+
+func TestPublicCommandClassifiesStartedGitFailureAndRollsBack(t *testing.T) {
+	configureProjectCommandPath(t, true)
+	proxy := createKernelProxy(t)
+	environment := isolatedGoEnvironment(t, proxy)
+	parent := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := command.RunIn([]string{"new", "my-app", "--module", "example.com/acme/my-app", "--git"}, &stdout, &stderr, parent, environment)
+	wantRecovery := "\n\nRecovery:\nCorrect the reported Git installation or initialization failure, then rerun `plystra new <project-name> [options]` with `--git`; omit `--git` when the Project intentionally needs no repository.\n\nDiagnostic: " + diagnosticcode.ProjectCreateGitInitializationFailed + "\n"
+	if exitCode != 8 || stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "create project: create Plystra project: create directory transaction: populate staging directory: initialize Git repository: git init failed") || !strings.HasSuffix(stderr.String(), wantRecovery) {
+		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Git initialization failure created target: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
+}
+
+func TestCreateClassifiesMissingGitAndRollsBack(t *testing.T) {
+	proxy := createKernelProxy(t)
+	environment := isolatedGoEnvironment(t, proxy)
+	parent := t.TempDir()
+	_, err := newproject.Create(t.Context(), newproject.Options{
+		Parent:      parent,
+		ProjectName: "my-app",
+		ModulePath:  "example.com/acme/my-app",
+		Git:         true,
+		GitCommand:  filepath.Join(parent, "missing-git-command"),
+		Environment: environment,
+	})
+	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrGitInitialization) || !errors.Is(err, newproject.ErrGitUnavailable) {
+		t.Fatalf("Create error = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists after Git failure: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
+}
+
+func configureProjectCommandPath(t *testing.T, includeFailingGit bool) {
+	t.Helper()
 	realGo, err := exec.LookPath("go")
 	if err != nil {
 		t.Fatalf("LookPath(go): %v", err)
@@ -1806,54 +1891,19 @@ func TestPublicCommandClassifiesGitInitializationFailureAndRollsBack(t *testing.
 		t.Fatalf("ReadFile(go): %v", err)
 	}
 	commandDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(commandDirectory, filepath.Base(realGo)), goData, goInfo.Mode().Perm()); err != nil {
-		t.Fatalf("WriteFile(go copy): %v", err)
+	for _, name := range []string{filepath.Base(realGo)} {
+		if err := os.WriteFile(filepath.Join(commandDirectory, name), goData, goInfo.Mode().Perm()); err != nil {
+			t.Fatalf("WriteFile(%s): %v", name, err)
+		}
+	}
+	if includeFailingGit {
+		gitName := "git" + filepath.Ext(realGo)
+		if err := os.WriteFile(filepath.Join(commandDirectory, gitName), goData, goInfo.Mode().Perm()); err != nil {
+			t.Fatalf("WriteFile(%s): %v", gitName, err)
+		}
 	}
 	t.Setenv("PATH", commandDirectory)
 	t.Setenv("GOROOT", strings.TrimSpace(string(goRootOutput)))
-
-	proxy := createKernelProxy(t)
-	environment := isolatedGoEnvironment(t, proxy)
-	parent := t.TempDir()
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	exitCode := command.RunIn([]string{"new", "my-app", "--module", "example.com/acme/my-app", "--git"}, &stdout, &stderr, parent, environment)
-	wantRecovery := "Correct the reported Git installation or initialization failure, then rerun `plystra new <project-name> [options]` with `--git`; omit `--git` when the Project intentionally needs no repository."
-	wantStderr := "create project: create Plystra project: create directory transaction: populate staging directory: initialize Git repository: git init failed\n\n" +
-		"Recovery:\n" + wantRecovery + "\n\n" +
-		"Diagnostic: " + diagnosticcode.ProjectCreateGitInitializationFailed + "\n"
-	if exitCode != 1 || stdout.Len() != 0 || stderr.String() != wantStderr {
-		t.Fatalf("RunIn = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
-	}
-	recoveryIndex := strings.Index(stderr.String(), "Recovery:")
-	if recoveryIndex < 0 || strings.Contains(stderr.String()[recoveryIndex:], "my-app") || strings.Contains(stderr.String()[recoveryIndex:], parent) {
-		t.Fatalf("recovery echoed rejected Project input: %q", stderr.String())
-	}
-	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("Git initialization failure created target: %v", err)
-	}
-	assertNoTransactionFiles(t, parent)
-}
-
-func TestCreateRollsBackGitInitializationFailure(t *testing.T) {
-	proxy := createKernelProxy(t)
-	environment := isolatedGoEnvironment(t, proxy)
-	parent := t.TempDir()
-	_, err := newproject.Create(t.Context(), newproject.Options{
-		Parent:      parent,
-		ProjectName: "my-app",
-		ModulePath:  "example.com/acme/my-app",
-		Git:         true,
-		GitCommand:  filepath.Join(parent, "missing-git-command"),
-		Environment: environment,
-	})
-	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrGitInitialization) {
-		t.Fatalf("Create error = %v", err)
-	}
-	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("target exists after Git failure: %v", err)
-	}
-	assertNoTransactionFiles(t, parent)
 }
 
 func TestCreateRollsBackGoValidationFailure(t *testing.T) {

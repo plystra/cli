@@ -2,6 +2,7 @@ package command_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -9,13 +10,60 @@ import (
 )
 
 const (
-	wantUsage                    = "Usage:\n  plystra help\n  plystra version\n  plystra new <project-name> [options]\n  plystra add <go-module-query>\n  plystra remove <go-module-path>\n  plystra update <go-module-query>\n  plystra use <interface-id> <constructor-symbol> [--env <environment>|--config <yaml-path>]\n  plystra plugin create <name>\n  plystra interface create <interface-name>\n  plystra implement <interface-id> --package <project-relative-package>\n  plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n  plystra guidance sync [--replace-generated]\n  plystra guidance check\n  plystra inspect [modules|interfaces|implementations|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain config <field-path> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain alias <alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain exposure <capability-or-alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra check [--env <environment>|--config <yaml-path>]\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]\n\nCommon actionable failures end with one Recovery block containing the primary\ncommand or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.\n"
-	wantUsageSource              = "Typed source-bearing failures, including invalid Project and Go Module\ndeclarations, safe missing configuration selections, concurrent Project inputs,\ngenerated-output conflicts and drift, application module dependency drift,\ngeneration-activation failures,\nselected-Provider generation-extension mismatches, ambiguous local Plugin\ntargets, invalid explicit choices, and\nmissing, ambiguous, or cyclic Interface Implementation resolution, add\ncanonical module-relative Source lines first.\n"
-	wantAddUsage                 = "Usage:\n  plystra add <go-module-query>\n\nAdds one ordinary Go Module dependency, regenerates, tidies, and validates the\ncomplete Project in one rollback boundary. Dependency Project configuration\nremains inert unless the selected current Project explicitly adopts a named export.\n\nMalformed queries emit PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID before Project\ndiscovery or mutation.\n"
-	wantRemoveUsage              = "Usage:\n  plystra remove <go-module-path>\n\nRemoves one ordinary Go Module dependency, regenerates, tidies, and validates\nthe complete Project in one rollback boundary. Dependency Project configuration\nremains inert unless the selected current Project explicitly adopts a named export.\n\nMalformed paths emit PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID before Project\ndiscovery or mutation.\nValid paths absent from go.mod emit PLYSTRA_DEPENDENCY_REMOVE_NOT_SELECTED\nbefore mutation.\n"
-	wantUpdateUsage              = "Usage:\n  plystra update <go-module-query>\n\nUpdates one selected ordinary Go Module dependency, regenerates, tidies, and\nvalidates the complete Project in one rollback boundary. Dependency Project\nconfiguration remains inert unless the selected current Project explicitly\nadopts a named export.\n\nMalformed queries emit PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID before Project\ndiscovery or mutation.\nValid queries whose module path is absent from go.mod emit\nPLYSTRA_DEPENDENCY_UPDATE_NOT_SELECTED before mutation.\n"
-	wantUseUsage                 = "Usage:\n  plystra use <interface-id> <constructor-symbol> [--env <environment>|--config <yaml-path>]\n\nOptions:\n  --env <environment>    Write the Implementation choice to plystra.<environment>.yaml.\n  --config <yaml-path>   Write the Implementation choice to one complete replacement configuration.\n\nAn exact compatible choice may be recorded before its Interface is required. It\nremains dormant without creating a root, binding, constructor, or generated\nInterface runtime until that Interface becomes reachable; invalid choices are\nrejected immediately.\n\nAn effective choice for an intrinsic kernel.* Interface emits\nPLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION with every contributing\nimplementation-selection Source. Set that interfaces.use entry to null in the\nselected current-Project document to remove either a local or adopted-export choice.\n\nPLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit\nselector is present; setting both is an error. Explicit --env or --config\noverrides both variables, and the two flags cannot be combined. Relative\nconfiguration paths are resolved from the detected Plystra Project root.\nInvalid or conflicting selections emit the stable\nPLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.\nA normalized Project-contained selected document that cannot be loaded reports\none span-less configuration-selection source; conflicting or unsafe selectors\nreport none.\n"
-	wantNewUsage                 = "Usage:\n  plystra new <project-name> [--module <go-module-path>] [--template <go-module-query>] [--adopt-export <name>]... [--plugin <name>] [--git] [--github-ci] [--interactive] [--no-agent-guidance]\n\nOptions:\n  --module <go-module-path> Set the Go Module path; defaults to the project name.\n  --template <module-query> Create from one public, portable Plystra Project dependency.\n  --adopt-export <name>     Adopt one named export from the resolved template; repeatable.\n  --plugin <name>           Create an initial root-level plugin.\n  --git                     Initialize a Git repository; default is off.\n  --github-ci               Include GitHub Actions CI; default is off.\n  --interactive             Prompt for omitted Git and GitHub CI choices.\n  --no-agent-guidance       Omit version-matched Plystra Agent guidance.\n\nCreation is non-interactive by default in every environment. Agent guidance is\ngenerated by default. Only --interactive permits prompts; terminal detection\nnever activates them.\n\nWithout --adopt-export, the template's Project configuration remains inert.\nEvery requested export must exist in the resolved template's root inventory.\n\nInvalid Project names, explicit Go Module paths, template queries, and template\nexport adoptions emit\nPLYSTRA_PROJECT_CREATE_NAME_INVALID, PLYSTRA_PROJECT_CREATE_MODULE_INVALID,\nand PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID.\n\nInvalid initial Plugin names and derived IDs emit\nPLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID and\nPLYSTRA_PROJECT_CREATE_PLUGIN_ID_INVALID.\n\nAn existing Project target emits PLYSTRA_PROJECT_CREATE_TARGET_EXISTS and is\nnever replaced or modified.\n\nRequested Git initialization failures emit\nPLYSTRA_PROJECT_CREATE_GIT_INITIALIZATION_FAILED and leave no target Project.\n\nTemplate dependencies must be public, portable, and generation-stable. Creation\nrejects the staged Project unless immediate generation checking, applicable\nJavaScript SDK dependency installation plus typecheck/build/package validation,\nProject checks, the read-only Go package build, and an isolated lifecycle health\nsmoke all succeed. Validation-only npm output is removed before installation.\n"
+	wantUsage       = "Usage:\n  plystra help\n  plystra version\n  plystra new <project-name> [options]\n  plystra add <go-module-query>\n  plystra remove <go-module-path>\n  plystra update <go-module-query>\n  plystra use <interface-id> <constructor-symbol> [--env <environment>|--config <yaml-path>]\n  plystra plugin create <name>\n  plystra interface create <interface-name>\n  plystra implement <interface-id> --package <project-relative-package>\n  plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n  plystra guidance sync [--replace-generated]\n  plystra guidance check\n  plystra inspect [modules|interfaces|implementations|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain config <field-path> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain alias <alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain exposure <capability-or-alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra check [--env <environment>|--config <yaml-path>]\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]\n\nCommon actionable failures end with one Recovery block containing the primary\ncommand or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.\n"
+	wantUsageSource = "Typed source-bearing failures, including invalid Project and Go Module\ndeclarations, safe missing configuration selections, concurrent Project inputs,\ngenerated-output conflicts and drift, application module dependency drift,\ngeneration-activation failures,\nselected-Provider generation-extension mismatches, ambiguous local Plugin\ntargets, invalid explicit choices, and\nmissing, ambiguous, or cyclic Interface Implementation resolution, add\ncanonical module-relative Source lines first.\n"
+	wantAddUsage    = "Usage:\n  plystra add <go-module-query>\n\nAdds one ordinary Go Module dependency, regenerates, tidies, and validates the\ncomplete Project in one rollback boundary. Dependency Project configuration\nremains inert unless the selected current Project explicitly adopts a named export.\n\nMalformed queries emit PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID before Project\ndiscovery or mutation.\n"
+	wantRemoveUsage = "Usage:\n  plystra remove <go-module-path>\n\nRemoves one ordinary Go Module dependency, regenerates, tidies, and validates\nthe complete Project in one rollback boundary. Dependency Project configuration\nremains inert unless the selected current Project explicitly adopts a named export.\n\nMalformed paths emit PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID before Project\ndiscovery or mutation.\nValid paths absent from go.mod emit PLYSTRA_DEPENDENCY_REMOVE_NOT_SELECTED\nbefore mutation.\n"
+	wantUpdateUsage = "Usage:\n  plystra update <go-module-query>\n\nUpdates one selected ordinary Go Module dependency, regenerates, tidies, and\nvalidates the complete Project in one rollback boundary. Dependency Project\nconfiguration remains inert unless the selected current Project explicitly\nadopts a named export.\n\nMalformed queries emit PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID before Project\ndiscovery or mutation.\nValid queries whose module path is absent from go.mod emit\nPLYSTRA_DEPENDENCY_UPDATE_NOT_SELECTED before mutation.\n"
+	wantUseUsage    = "Usage:\n  plystra use <interface-id> <constructor-symbol> [--env <environment>|--config <yaml-path>]\n\nOptions:\n  --env <environment>    Write the Implementation choice to plystra.<environment>.yaml.\n  --config <yaml-path>   Write the Implementation choice to one complete replacement configuration.\n\nAn exact compatible choice may be recorded before its Interface is required. It\nremains dormant without creating a root, binding, constructor, or generated\nInterface runtime until that Interface becomes reachable; invalid choices are\nrejected immediately.\n\nAn effective choice for an intrinsic kernel.* Interface emits\nPLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION with every contributing\nimplementation-selection Source. Set that interfaces.use entry to null in the\nselected current-Project document to remove either a local or adopted-export choice.\n\nPLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit\nselector is present; setting both is an error. Explicit --env or --config\noverrides both variables, and the two flags cannot be combined. Relative\nconfiguration paths are resolved from the detected Plystra Project root.\nInvalid or conflicting selections emit the stable\nPLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.\nA normalized Project-contained selected document that cannot be loaded reports\none span-less configuration-selection source; conflicting or unsafe selectors\nreport none.\n"
+	wantNewUsage    = `Usage:
+  plystra new <project-name> [--module <go-module-path>] [--template <go-module-query>] [--adopt-export <name>]... [--plugin <name>] [--git] [--github-ci] [--interactive] [--no-agent-guidance] [--format human|json]
+
+Options:
+  --module <go-module-path> Set the Go Module path; defaults to the project name.
+  --template <module-query> Create from one public, portable Plystra Project dependency.
+  --adopt-export <name>     Adopt one named export from the resolved template; repeatable.
+  --plugin <name>           Create an initial root-level plugin.
+  --git                     Initialize a Git repository; default is off.
+  --github-ci               Include GitHub Actions CI; default is off.
+  --interactive             Prompt for omitted Git and GitHub CI choices.
+  --no-agent-guidance       Omit version-matched Plystra Agent guidance.
+  --format human|json       Select human output or one plystra.result/v1 document.
+
+Creation is non-interactive by default in every environment. Agent guidance is
+generated by default. Only --interactive permits prompts; terminal detection
+never activates them.
+
+JSON success nests one plystra.project-created/v1 payload with the Go Module
+path and relative created directory. Enter payload.directory and run
+plystra check independently before treating creation as complete.
+
+Without --adopt-export, the template's Project configuration remains inert.
+Every requested export must exist in the resolved template's root inventory.
+
+Invalid Project names, explicit Go Module paths, template queries, and template
+export adoptions emit
+PLYSTRA_PROJECT_CREATE_NAME_INVALID, PLYSTRA_PROJECT_CREATE_MODULE_INVALID,
+and PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID.
+
+Invalid initial Plugin names and derived IDs emit
+PLYSTRA_PROJECT_CREATE_PLUGIN_NAME_INVALID and
+PLYSTRA_PROJECT_CREATE_PLUGIN_ID_INVALID.
+
+An existing Project target emits PLYSTRA_PROJECT_CREATE_TARGET_EXISTS and is
+never replaced or modified.
+
+Unavailable Git emits PLYSTRA_PROJECT_CREATE_GIT_UNAVAILABLE. Git processes
+that start but fail initialization emit
+PLYSTRA_PROJECT_CREATE_GIT_INITIALIZATION_FAILED. Both leave no target Project.
+
+Template dependencies must be public, portable, and generation-stable. Creation
+rejects the staged Project unless immediate generation checking, applicable
+JavaScript SDK dependency installation plus typecheck/build/package validation,
+Project checks, the read-only Go package build, and an isolated lifecycle health
+smoke all succeed. Validation-only npm output is removed before installation.
+`
+	wantNewInvalidInvocation     = wantNewUsage + "\nRecovery:\nReview `plystra new --help`, then rerun `plystra new <project-name> [options]` with one valid argument form.\n\nDiagnostic: PLYSTRA_PROJECT_CREATE_INVOCATION_INVALID\n"
 	wantPluginUsage              = "Usage:\n  plystra plugin create <name>\n"
 	wantPluginCreateUsage        = "Usage:\n  plystra plugin create <name>\n\nCreates one root-level Plugin scaffold and derives its exact Plugin ID from the\ncurrent Project module namespace plus the lower-case ASCII kebab-case name. The\nname must not be reserved, and the target directory must not already exist.\n\nInvalid names, unformable derived IDs, and existing targets emit\nPLYSTRA_PLUGIN_CREATE_NAME_INVALID, PLYSTRA_PLUGIN_CREATE_ID_INVALID, and\nPLYSTRA_PLUGIN_CREATE_TARGET_EXISTS respectively.\n"
 	wantGenerateUsage            = "Usage:\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]\n\nOptions:\n  --check                Report drift without modifying configuration or generated files.\n  --env <environment>    Overlay root plystra.yaml with plystra.<environment>.yaml.\n  --config <yaml-path>   Use one complete current-project configuration instead of root plystra.yaml.\n\nPLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit\nselector is present; setting both is an error. Explicit --env or --config\noverrides both variables, and the two flags cannot be combined. Relative\nconfiguration paths are resolved from the detected Plystra Project root. Root\nplystra.yaml remains mandatory and is not merged beneath --config. Invalid or\nconflicting selections emit the stable PLYSTRA_CONFIGURATION_SELECTION_INVALID\ndiagnostic.\nA normalized Project-contained selected document that cannot be loaded reports\none span-less configuration-selection source; conflicting or unsafe selectors\nreport none.\nDependency Project roots contribute only explicitly adopted named exports.\nGeneration does not rewrite the selected current-Project configuration document.\n"
@@ -344,22 +392,24 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "unknown", arguments: []string{"unknown"}, wantError: "unknown command \"unknown\"\n\n" + wantUsage + wantUsageSource},
 		{name: "help arguments", arguments: []string{"help", "extra"}, wantError: "help does not accept arguments\n"},
 		{name: "version arguments", arguments: []string{"version", "extra"}, wantError: "version does not accept arguments\n"},
-		{name: "new missing project", arguments: []string{"new"}, wantError: wantNewUsage},
-		{name: "new unknown option", arguments: []string{"new", "app", "--unknown"}, wantError: wantNewUsage},
-		{name: "new missing module path", arguments: []string{"new", "app", "--module"}, wantError: wantNewUsage},
-		{name: "new duplicate module path", arguments: []string{"new", "app", "--module", "example.com/a", "--module", "example.com/b"}, wantError: wantNewUsage},
-		{name: "new missing template query", arguments: []string{"new", "app", "--template"}, wantError: wantNewUsage},
-		{name: "new duplicate template query", arguments: []string{"new", "app", "--template", "example.com/a", "--template", "example.com/b"}, wantError: wantNewUsage},
-		{name: "new missing adopted export", arguments: []string{"new", "app", "--template", "example.com/a", "--adopt-export"}, wantError: wantNewUsage},
-		{name: "new adopted export without template", arguments: []string{"new", "app", "--adopt-export", "defaults"}, wantError: wantNewUsage},
-		{name: "new missing plugin name", arguments: []string{"new", "app", "--plugin"}, wantError: wantNewUsage},
-		{name: "new removed library option", arguments: []string{"new", "app", "--library"}, wantError: wantNewUsage},
-		{name: "new extra argument", arguments: []string{"new", "app", "extra"}, wantError: wantNewUsage},
-		{name: "new duplicate git", arguments: []string{"new", "app", "--git", "--git"}, wantError: wantNewUsage},
-		{name: "new removed no git", arguments: []string{"new", "app", "--no-git"}, wantError: wantNewUsage},
-		{name: "new removed no github ci", arguments: []string{"new", "app", "--no-github-ci"}, wantError: wantNewUsage},
-		{name: "new removed skills", arguments: []string{"new", "app", "--skills"}, wantError: wantNewUsage},
-		{name: "new removed no skills", arguments: []string{"new", "app", "--no-skills"}, wantError: wantNewUsage},
+		{name: "new missing project", arguments: []string{"new"}, wantError: wantNewInvalidInvocation},
+		{name: "new unknown option", arguments: []string{"new", "app", "--unknown"}, wantError: wantNewInvalidInvocation},
+		{name: "new missing module path", arguments: []string{"new", "app", "--module"}, wantError: wantNewInvalidInvocation},
+		{name: "new duplicate module path", arguments: []string{"new", "app", "--module", "example.com/a", "--module", "example.com/b"}, wantError: wantNewInvalidInvocation},
+		{name: "new missing template query", arguments: []string{"new", "app", "--template"}, wantError: wantNewInvalidInvocation},
+		{name: "new duplicate template query", arguments: []string{"new", "app", "--template", "example.com/a", "--template", "example.com/b"}, wantError: wantNewInvalidInvocation},
+		{name: "new missing adopted export", arguments: []string{"new", "app", "--template", "example.com/a", "--adopt-export"}, wantError: wantNewInvalidInvocation},
+		{name: "new adopted export without template", arguments: []string{"new", "app", "--adopt-export", "defaults"}, wantError: wantNewInvalidInvocation},
+		{name: "new missing plugin name", arguments: []string{"new", "app", "--plugin"}, wantError: wantNewInvalidInvocation},
+		{name: "new removed library option", arguments: []string{"new", "app", "--library"}, wantError: wantNewInvalidInvocation},
+		{name: "new extra argument", arguments: []string{"new", "app", "extra"}, wantError: wantNewInvalidInvocation},
+		{name: "new duplicate git", arguments: []string{"new", "app", "--git", "--git"}, wantError: wantNewInvalidInvocation},
+		{name: "new removed no git", arguments: []string{"new", "app", "--no-git"}, wantError: wantNewInvalidInvocation},
+		{name: "new removed no github ci", arguments: []string{"new", "app", "--no-github-ci"}, wantError: wantNewInvalidInvocation},
+		{name: "new removed skills", arguments: []string{"new", "app", "--skills"}, wantError: wantNewInvalidInvocation},
+		{name: "new removed no skills", arguments: []string{"new", "app", "--no-skills"}, wantError: wantNewInvalidInvocation},
+		{name: "new missing format", arguments: []string{"new", "app", "--format"}, wantError: wantNewInvalidInvocation},
+		{name: "new invalid format", arguments: []string{"new", "app", "--format", "yaml"}, wantError: wantNewInvalidInvocation},
 		{name: "add missing query", arguments: []string{"add"}, wantError: wantAddUsage},
 		{name: "add option", arguments: []string{"add", "--upgrade"}, wantError: wantAddUsage},
 		{name: "add extra argument", arguments: []string{"add", "example.com/platform", "extra"}, wantError: wantAddUsage},
@@ -448,6 +498,32 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 				t.Fatalf("Run(%q) stderr = %q, want %q", test.arguments, stderr.String(), test.wantError)
 			}
 		})
+	}
+}
+
+func TestRunNewPreservesJSONIntentForDuplicateFormat(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := command.Run([]string{"new", "app", "--format", "human", "--format", "json"}, &stdout, &stderr)
+	if exitCode != 2 || stderr.Len() != 0 || !strings.HasSuffix(stdout.String(), "\n") || strings.Count(strings.TrimSpace(stdout.String()), "\n") != 0 {
+		t.Fatalf("Run duplicate format = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
+	}
+	var document struct {
+		Schema      string `json:"schema"`
+		Operation   string `json:"operation"`
+		Status      string `json:"status"`
+		ExitClass   int    `json:"exit_class"`
+		Diagnostics []struct {
+			Code string `json:"code"`
+		} `json:"diagnostics"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &document); err != nil {
+		t.Fatalf("decode duplicate-format result: %v", err)
+	}
+	if document.Schema != "plystra.result/v1" || document.Operation != "new" || document.Status != "invalid_invocation" || document.ExitClass != 2 || len(document.Diagnostics) != 1 || document.Diagnostics[0].Code != "PLYSTRA_PROJECT_CREATE_INVOCATION_INVALID" {
+		t.Fatalf("duplicate-format result = %#v", document)
 	}
 }
 

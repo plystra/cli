@@ -355,11 +355,13 @@ Use this task for Project creation, module identity, templates, and ordinary Go 
     plystra update example.com/acme/email@v1.5.0
     plystra remove example.com/acme/email
 
-Project creation is non-interactive by default. Agent guidance is generated unless ` + "`" + `--no-agent-guidance` + "`" + ` is supplied. Git initialization and GitHub CI default off; ` + "`" + `--git` + "`" + ` and ` + "`" + `--github-ci` + "`" + ` opt in. Only ` + "`" + `--interactive` + "`" + ` permits prompts for omitted tool choices.
+` + "`" + `plystra new` + "`" + ` is non-interactive by default. Guidance is generated unless ` + "`" + `--no-agent-guidance` + "`" + ` is set. Git and CI default off and opt in with ` + "`" + `--git` + "`" + ` and ` + "`" + `--github-ci` + "`" + `; prompts require ` + "`" + `--interactive` + "`" + `.
 
-The positional Project name is one safe child directory. ` + "`" + `--module` + "`" + ` sets an independent Go Module identity. A new Project contains root ` + "`" + `plystra.yaml` + "`" + `, ordinary module files, and committed CLI-owned generated source; it does not create an environment overlay, example configuration, or ` + "`" + `go.work` + "`" + `.
+The positional name is one safe child directory; ` + "`" + `--module` + "`" + ` sets its independent Go Module identity. A new Project contains root ` + "`" + `plystra.yaml` + "`" + `, module files, and committed generated source, but no environment overlay, example configuration, or ` + "`" + `go.work` + "`" + `.
 
-` + "`" + `--template` + "`" + ` records one ordinary direct dependency. Its Project configuration stays inert unless repeatable ` + "`" + `--adopt-export <name>` + "`" + ` selects an exact root ` + "`" + `composition.exports` + "`" + ` entry; that option is valid only with ` + "`" + `--template` + "`" + `. Source is never copied, and template origin grants no priority.
+` + "`" + `--template` + "`" + ` records one direct dependency. Its configuration stays inert unless repeatable ` + "`" + `--adopt-export <name>` + "`" + ` selects an exact root export; source is never copied and template origin grants no priority.
+
+` + "`" + `--format json` + "`" + ` returns one ` + "`" + `plystra.result/v1` + "`" + ` document. Success nests ` + "`" + `plystra.project-created/v1` + "`" + `; enter ` + "`" + `payload.directory` + "`" + ` and run ` + "`" + `plystra check` + "`" + ` independently.
 
 ## Completion checks
 
@@ -465,7 +467,7 @@ Inspect versioned Agent guidance before refreshing it:
 
 ` + "`" + `guidance check` + "`" + ` is always non-mutating. Ordinary sync changes or removes only unchanged prior-manifest-owned files, and any drift blocks the complete transaction. ` + "`" + `--replace-generated` + "`" + ` can replace only an existing bounded regular prior-owned file; missing prior-owned paths and desired paths absent from previous ownership remain blocked whether missing or occupied. Neither sync mode touches optional ` + "`" + `local.md` + "`" + `, another unlisted file, a sibling skill, or repository-wide Agent instructions.
 
-Reuse the same ` + "`" + `--env` + "`" + ` or ` + "`" + `--config` + "`" + ` selector. ` + "`" + `--format json` + "`" + ` returns the installed versioned inspect or explain schema; this release does not yet wrap every command in the planned shared result envelope.
+Reuse the same ` + "`" + `--env` + "`" + ` or ` + "`" + `--config` + "`" + ` selector. ` + "`" + `--format json` + "`" + ` returns the installed schema: ` + "`" + `plystra new` + "`" + ` uses ` + "`" + `plystra.result/v1` + "`" + `, while inspect and explain retain their current top-level schemas.
 
 Actionable human failures end with one ` + "`" + `Recovery:` + "`" + ` block and one stable ` + "`" + `Diagnostic: PLYSTRA_<AREA>_<CONDITION>` + "`" + ` code. Source-bearing failures add deterministic module-relative ` + "`" + `Source:` + "`" + ` lines. Use the code as the automation identity, apply the recovery to the reported authored source, and rerun the same selected command.
 

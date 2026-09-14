@@ -396,6 +396,7 @@ and GitHub Actions CI default off:
 plystra new my-app
 plystra new my-app --module github.com/acme/my-app
 plystra new my-app --module github.com/acme/my-app --template github.com/acme/platform@v1.2.3 --adopt-export application
+plystra new my-app --module github.com/acme/my-app --format json
 ```
 
 The positional value is one lower-case ASCII kebab-case child-directory name.
@@ -489,6 +490,16 @@ Use `--git` and `--github-ci` to opt into those independent tools. Use
 prompts for omitted Git and GitHub CI choices; terminal detection never prompts.
 Each requested prompt defaults to yes and accepts `yes`/`y`, `no`/`n`, or Enter.
 
+Human output is the default. `--format json` writes exactly one canonical
+`plystra.result/v1` document to stdout. Successful creation returns `changed`
+with exit class `0`, one observed `project_write`, and a nested
+`plystra.project-created/v1` payload containing the module path and safe
+relative `directory`. Enter that directory and run `plystra check` through the
+public CLI before using the Project. Structured failures keep diagnostics,
+typed recovery, and all four effect-disposition arrays in the same document;
+invalid invocations use exit class `2`, validation failures `3`, missing
+prerequisites `4`, cancellation `5`, and execution failures `8`.
+
 ```powershell
 plystra new my-app --module github.com/acme/my-app
 plystra new my-app --module github.com/acme/my-app --git --github-ci
@@ -540,10 +551,12 @@ inspection, the command reports `PLYSTRA_PROJECT_CONCURRENT_CHANGE` with every
 deterministically known affected guidance path and does not claim a successful
 refresh.
 
-If requested Git initialization fails, creation emits
-`PLYSTRA_PROJECT_CREATE_GIT_INITIALIZATION_FAILED`, removes the staged tree,
-and leaves no target Project. Recovery directs the caller to correct Git and
-retry with `--git`, or omit `--git` when no repository is intended.
+If Git cannot be started, creation emits
+`PLYSTRA_PROJECT_CREATE_GIT_UNAVAILABLE` with exit class `4`. If Git starts but
+`git init` fails, it emits `PLYSTRA_PROJECT_CREATE_GIT_INITIALIZATION_FAILED`
+with exit class `8`. Both remove the staged tree, leave no target Project, and
+direct the caller to correct Git and retry with `--git` or omit `--git` when no
+repository is intended.
 
 Successful template creation reports the selected query:
 

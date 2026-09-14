@@ -12,11 +12,13 @@ Use this task for Project creation, module identity, templates, and ordinary Go 
     plystra update example.com/acme/email@v1.5.0
     plystra remove example.com/acme/email
 
-Project creation is non-interactive by default. Agent guidance is generated unless `--no-agent-guidance` is supplied. Git initialization and GitHub CI default off; `--git` and `--github-ci` opt in. Only `--interactive` permits prompts for omitted tool choices.
+`plystra new` is non-interactive by default. Guidance is generated unless `--no-agent-guidance` is set. Git and CI default off and opt in with `--git` and `--github-ci`; prompts require `--interactive`.
 
-The positional Project name is one safe child directory. `--module` sets an independent Go Module identity. A new Project contains root `plystra.yaml`, ordinary module files, and committed CLI-owned generated source; it does not create an environment overlay, example configuration, or `go.work`.
+The positional name is one safe child directory; `--module` sets its independent Go Module identity. A new Project contains root `plystra.yaml`, module files, and committed generated source, but no environment overlay, example configuration, or `go.work`.
 
-`--template` records one ordinary direct dependency. Its Project configuration stays inert unless repeatable `--adopt-export <name>` selects an exact root `composition.exports` entry; that option is valid only with `--template`. Source is never copied, and template origin grants no priority.
+`--template` records one direct dependency. Its configuration stays inert unless repeatable `--adopt-export <name>` selects an exact root export; source is never copied and template origin grants no priority.
+
+`--format json` returns one `plystra.result/v1` document. Success nests `plystra.project-created/v1`; enter `payload.directory` and run `plystra check` independently.
 
 ## Completion checks
 

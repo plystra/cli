@@ -92,13 +92,17 @@ const (
 )
 
 const (
+	ProjectCreateInvocationInvalid        = Prefix + "PROJECT_CREATE_INVOCATION_INVALID"
 	ProjectCreateNameInvalid              = Prefix + "PROJECT_CREATE_NAME_INVALID"
 	ProjectCreateModuleInvalid            = Prefix + "PROJECT_CREATE_MODULE_INVALID"
 	ProjectCreateTemplateInvalid          = Prefix + "PROJECT_CREATE_TEMPLATE_INVALID"
 	ProjectCreatePluginNameInvalid        = Prefix + "PROJECT_CREATE_PLUGIN_NAME_INVALID"
 	ProjectCreatePluginIDInvalid          = Prefix + "PROJECT_CREATE_PLUGIN_ID_INVALID"
 	ProjectCreateTargetExists             = Prefix + "PROJECT_CREATE_TARGET_EXISTS"
+	ProjectCreateGitUnavailable           = Prefix + "PROJECT_CREATE_GIT_UNAVAILABLE"
 	ProjectCreateGitInitializationFailed  = Prefix + "PROJECT_CREATE_GIT_INITIALIZATION_FAILED"
+	ProjectCreateCancelled                = Prefix + "PROJECT_CREATE_CANCELLED"
+	ProjectCreateFailed                   = Prefix + "PROJECT_CREATE_FAILED"
 	PluginCreateNameInvalid               = Prefix + "PLUGIN_CREATE_NAME_INVALID"
 	PluginCreateIDInvalid                 = Prefix + "PLUGIN_CREATE_ID_INVALID"
 	PluginCreateTargetExists              = Prefix + "PLUGIN_CREATE_TARGET_EXISTS"

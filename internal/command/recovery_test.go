@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -56,6 +57,18 @@ import (
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
 )
+
+func TestPrimaryActionableDiagnosticScopesCancellationToNew(t *testing.T) {
+	t.Parallel()
+
+	if diagnostic, ok := primaryActionableDiagnostic(context.Canceled, recoveryContext{}); ok {
+		t.Fatalf("generic cancellation = %#v, true; want no Project-creation classification", diagnostic)
+	}
+	diagnostic, ok := primaryActionableDiagnostic(context.Canceled, recoveryContext{operation: "new"})
+	if !ok || diagnostic.code != diagnosticProjectCreateCancelled {
+		t.Fatalf("new cancellation = %#v, %t; want %s", diagnostic, ok, diagnosticProjectCreateCancelled)
+	}
+}
 
 func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *testing.T) {
 	t.Parallel()

@@ -1,6 +1,7 @@
 package command
 
 import (
+	stdcontext "context"
 	"errors"
 	"fmt"
 	"io"
@@ -58,6 +59,7 @@ import (
 )
 
 type recoveryContext struct {
+	operation         string
 	configurationPath string
 	environmentName   string
 	environment       []string
@@ -166,13 +168,17 @@ const (
 )
 
 const (
+	diagnosticProjectCreateInvocationInvalid        = diagnosticcode.ProjectCreateInvocationInvalid
 	diagnosticProjectCreateNameInvalid              = diagnosticcode.ProjectCreateNameInvalid
 	diagnosticProjectCreateModuleInvalid            = diagnosticcode.ProjectCreateModuleInvalid
 	diagnosticProjectCreateTemplateInvalid          = diagnosticcode.ProjectCreateTemplateInvalid
 	diagnosticProjectCreatePluginNameInvalid        = diagnosticcode.ProjectCreatePluginNameInvalid
 	diagnosticProjectCreatePluginIDInvalid          = diagnosticcode.ProjectCreatePluginIDInvalid
 	diagnosticProjectCreateTargetExists             = diagnosticcode.ProjectCreateTargetExists
+	diagnosticProjectCreateGitUnavailable           = diagnosticcode.ProjectCreateGitUnavailable
 	diagnosticProjectCreateGitInitializationFailed  = diagnosticcode.ProjectCreateGitInitializationFailed
+	diagnosticProjectCreateCancelled                = diagnosticcode.ProjectCreateCancelled
+	diagnosticProjectCreateFailed                   = diagnosticcode.ProjectCreateFailed
 	diagnosticPluginCreateNameInvalid               = diagnosticcode.PluginCreateNameInvalid
 	diagnosticPluginCreateIDInvalid                 = diagnosticcode.PluginCreateIDInvalid
 	diagnosticPluginCreateTargetExists              = diagnosticcode.PluginCreateTargetExists
@@ -1202,6 +1208,12 @@ func primaryFailureMessage(err error) string {
 }
 
 func primaryActionableDiagnostic(err error, context recoveryContext) (actionableDiagnostic, bool) {
+	if errors.Is(err, errNewInvocation) {
+		return recoveryDiagnostic(diagnosticProjectCreateInvocationInvalid, "Review `plystra new --help`, then rerun `plystra new <project-name> [options]` with one valid argument form.")
+	}
+	if errors.Is(err, errNewChoicePrompt) || context.operation == "new" && errors.Is(err, stdcontext.Canceled) {
+		return recoveryDiagnostic(diagnosticProjectCreateCancelled, "Rerun `plystra new <project-name> [options]` when the complete creation intent can be supplied.")
+	}
 	if concurrentFailure(err) {
 		return recoveryDiagnostic(diagnosticProjectConcurrentChange, "Stop concurrent Project edits, then rerun the command against the unchanged authored inputs.")
 	}
@@ -1232,6 +1244,9 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	if errors.Is(err, newproject.ErrTargetExists) {
 		return recoveryDiagnostic(diagnosticProjectCreateTargetExists, "Rerun `plystra new <project-name> [options]` with a different canonical Project name whose target does not exist, or run it from a different parent directory.")
 	}
+	if errors.Is(err, newproject.ErrGitUnavailable) {
+		return recoveryDiagnostic(diagnosticProjectCreateGitUnavailable, "Install or select a working Git executable, then rerun `plystra new <project-name> [options]` with `--git`; omit `--git` when the Project intentionally needs no repository.")
+	}
 	if errors.Is(err, newproject.ErrGitInitialization) {
 		return recoveryDiagnostic(diagnosticProjectCreateGitInitializationFailed, "Correct the reported Git installation or initialization failure, then rerun `plystra new <project-name> [options]` with `--git`; omit `--git` when the Project intentionally needs no repository.")
 	}
@@ -1240,6 +1255,9 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 			return recoveryDiagnostic(diagnosticTemplateInvalid, action)
 		}
 		return recoveryDiagnostic(diagnosticTemplateInvalid, "Use a corrected published template version whose clean Project passes generation, check, build, and lifecycle validation.")
+	}
+	if errors.Is(err, newproject.ErrCreate) {
+		return recoveryDiagnostic(diagnosticProjectCreateFailed, "Inspect and correct the reported Project creation failure, then rerun the same `plystra new` invocation.")
 	}
 	var requirementConflict *providerresolution.RequirementConflictError
 	if errors.As(err, &requirementConflict) && requirementConflict != nil {

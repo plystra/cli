@@ -76,6 +76,9 @@ var (
 	ErrTargetExists = errors.New("plystra project target already exists")
 	// ErrGitInitialization reports a failed requested Git repository setup.
 	ErrGitInitialization = errors.New("initialize Git repository")
+	// ErrGitUnavailable reports that requested Git repository setup could not
+	// start because the configured Git executable was unavailable.
+	ErrGitUnavailable = errors.New("git executable unavailable")
 	// ErrInvalidTemplate reports a resolved module that cannot serve as a
 	// Plystra Project template dependency.
 	ErrInvalidTemplate = errors.New("invalid Plystra Project template")
@@ -103,11 +106,16 @@ type Options struct {
 // Result identifies a successfully committed project.
 type Result struct {
 	modulePath string
+	directory  string
 	path       string
 }
 
 // ModulePath returns the generated Go Module path.
 func (r Result) ModulePath() string { return r.modulePath }
+
+// Directory returns the relative child directory created below the requested
+// parent.
+func (r Result) Directory() string { return r.directory }
 
 // Path returns the absolute committed project directory.
 func (r Result) Path() string { return r.path }
@@ -220,7 +228,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		}
 		return Result{}, fmt.Errorf("%w: %w", ErrCreate, err)
 	}
-	return Result{modulePath: modulePath, path: target}, nil
+	return Result{modulePath: modulePath, directory: options.ProjectName, path: target}, nil
 }
 
 func installTemplateDependency(ctx context.Context, root, query, modulePath string, adoptExports []string, goCommand, npmCommand string, environment []string) error {
@@ -819,6 +827,9 @@ func initializeGit(ctx context.Context, root, command string, environment []stri
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return fmt.Errorf("%w: %v", ErrGitInitialization, ctxErr)
 	}
+	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
+		return gitUnavailableError{cause: err}
+	}
 	message := gocommand.SanitizeOutput(string(output), root)
 	if len(message) > 4096 {
 		message = message[:4096] + "..."
@@ -827,6 +838,18 @@ func initializeGit(ctx context.Context, root, command string, environment []stri
 		return fmt.Errorf("%w: git init failed", ErrGitInitialization)
 	}
 	return fmt.Errorf("%w: git init failed: %s", ErrGitInitialization, message)
+}
+
+type gitUnavailableError struct {
+	cause error
+}
+
+func (gitUnavailableError) Error() string {
+	return ErrGitInitialization.Error() + ": git init failed"
+}
+
+func (e gitUnavailableError) Unwrap() []error {
+	return []error{ErrGitInitialization, ErrGitUnavailable, e.cause}
 }
 
 func verifyScaffoldOptions(root, modulePath string, git, githubCI, agentGuidance bool) error {

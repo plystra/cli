@@ -21,7 +21,7 @@ Inspect versioned Agent guidance before refreshing it:
 
 `guidance check` is always non-mutating. Ordinary sync changes or removes only unchanged prior-manifest-owned files, and any drift blocks the complete transaction. `--replace-generated` can replace only an existing bounded regular prior-owned file; missing prior-owned paths and desired paths absent from previous ownership remain blocked whether missing or occupied. Neither sync mode touches optional `local.md`, another unlisted file, a sibling skill, or repository-wide Agent instructions.
 
-Reuse the same `--env` or `--config` selector. `--format json` returns the installed versioned inspect or explain schema; this release does not yet wrap every command in the planned shared result envelope.
+Reuse the same `--env` or `--config` selector. `--format json` returns the installed schema: `plystra new` uses `plystra.result/v1`, while inspect and explain retain their current top-level schemas.
 
 Actionable human failures end with one `Recovery:` block and one stable `Diagnostic: PLYSTRA_<AREA>_<CONDITION>` code. Source-bearing failures add deterministic module-relative `Source:` lines. Use the code as the automation identity, apply the recovery to the reported authored source, and rerun the same selected command.
 

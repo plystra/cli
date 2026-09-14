@@ -248,6 +248,7 @@ choices, and Enter accepts yes.
 plystra new orders
 plystra new orders --module example.com/acme/orders
 plystra new orders --module example.com/acme/orders --template example.com/acme/platform@v1.2.3 --adopt-export application
+plystra new orders --module example.com/acme/orders --format json
 ```
 
 The positional value creates exactly `./orders/`. Without `--module`, the
@@ -335,14 +336,13 @@ is removed after success, failure, timeout, or cancellation. Any failure rolls
 back the complete target. This is not the later public `plystra build`
 executable, `dist/` output, or selector-aware runtime startup contract.
 
-The template's root configuration is also the source of its verified local
-operational inputs. Typed values and Secret-reference placeholders declared
-there are composed into the new Project's root `plystra.yaml` and validated
-against the selected Plugin schemas. Creation never resolves an `env` or
-`file` reference, so neither its target nor a value present in the process
-environment enters generated source or manifest provenance. The CLI does not
-guess a value for an undeclared required field; that omission fails the
-creation transaction and the target directory is not installed.
+Only explicitly adopted template exports contribute configuration. The new
+root `plystra.yaml` records their exact module and export identities but never
+materializes their values. Creation composes and validates adopted values in
+memory against selected Plugin schemas without resolving an `env` or `file`
+reference, so neither Secret targets nor process values enter generated source
+or manifest provenance. The CLI does not guess an undeclared required field;
+that omission fails the transaction and leaves no target directory.
 
 Use explicit opt-ins for Git and CI, and the explicit opt-out only when Agent
 guidance is not wanted:
@@ -374,6 +374,16 @@ Next:
   plystra check
 ```
 
+For automation, `--format json` writes one canonical `plystra.result/v1`
+document to stdout. A successful result has `status: "changed"`, exit class
+`0`, one observed Project write, and a nested `plystra.project-created/v1`
+payload. Resolve the new Project only from its relative `payload.directory`,
+enter that directory, and run the public `plystra check` command independently.
+Failures keep diagnostics, typed recovery, and all four effect dispositions in
+the same document. Invalid invocation, validation, missing-prerequisite,
+cancellation, and execution-failure outcomes use exit classes `2`, `3`, `4`,
+`5`, and `8` respectively.
+
 The template form proves read-only Go package tests and builds, isolated runtime
 startup, intrinsic health, and clean shutdown. When a generated JavaScript SDK
 is present, creation also runs `npm install --ignore-scripts --no-audit --no-fund`,
@@ -397,10 +407,12 @@ guidance tree.
 
 Repeated opt-in or opt-out flags fail without mutation. Unsupported historical
 choice flags are rejected as usage errors.
-If requested Git initialization fails, the staged tree is removed, no target is
-installed, and `PLYSTRA_PROJECT_CREATE_GIT_INITIALIZATION_FAILED` directs the
-caller to correct Git and retry with `--git` or omit `--git` when no repository
-is intended.
+If Git cannot be started, the command emits
+`PLYSTRA_PROJECT_CREATE_GIT_UNAVAILABLE` with exit class `4`. A Git process that
+starts but fails initialization emits
+`PLYSTRA_PROJECT_CREATE_GIT_INITIALIZATION_FAILED` with exit class `8`. Both
+remove the staged tree, install no target, and direct the caller to correct Git
+and retry with `--git` or omit `--git` when no repository is intended.
 
 ## Understand authored and CLI-owned files
 
