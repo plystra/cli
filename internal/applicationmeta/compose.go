@@ -40,6 +40,7 @@ var (
 type Dependency struct {
 	ModulePath    string
 	ModuleVersion string
+	ExportName    string
 	Manifest      Manifest
 }
 
@@ -74,6 +75,7 @@ func (p Provenance) Sources() []string { return append([]string(nil), p.sources.
 // Composition is one immutable effective Manifest plus its complete
 // dependency-derived non-secret provenance.
 type Composition struct {
+	current           Manifest
 	manifest          Manifest
 	provenance        []Provenance
 	resolutionSources []Provenance
@@ -105,6 +107,15 @@ func (c Composition) Manifest() Manifest {
 		return Manifest{}
 	}
 	return c.manifest
+}
+
+// CurrentManifest returns the selected current-Project declaration before any
+// adopted export contributes its lower-precedence values.
+func (c Composition) CurrentManifest() Manifest {
+	if !c.Valid() {
+		return Manifest{}
+	}
+	return c.current
 }
 
 // Provenance returns defensive path-and-digest-sorted dependency baseline
@@ -158,11 +169,18 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 		if ordered[left].ModulePath != ordered[right].ModulePath {
 			return ordered[left].ModulePath < ordered[right].ModulePath
 		}
+		if ordered[left].ExportName != ordered[right].ExportName {
+			return ordered[left].ExportName < ordered[right].ExportName
+		}
 		return ordered[left].ModuleVersion < ordered[right].ModuleVersion
 	})
 	for index := 1; index < len(ordered); index++ {
-		if ordered[index-1].ModulePath == ordered[index].ModulePath {
-			return Composition{}, fmt.Errorf("%w: dependency module %q is repeated", ErrCompose, ordered[index].ModulePath)
+		if ordered[index-1].ModulePath == ordered[index].ModulePath && ordered[index-1].ExportName == ordered[index].ExportName {
+			identity := ordered[index].ModulePath
+			if ordered[index].ExportName != "" {
+				identity += "#" + ordered[index].ExportName
+			}
+			return Composition{}, fmt.Errorf("%w: dependency configuration source %q is repeated", ErrCompose, identity)
 		}
 	}
 
@@ -209,25 +227,30 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 		return Composition{}, fmt.Errorf("%w: encode dependency provenance: %v", ErrCompose, err)
 	}
 	manifest := Manifest{
-		modulePath:            current.modulePath,
-		source:                current.source,
-		httpAddress:           current.httpAddress,
-		hasHTTPAddress:        current.hasHTTPAddress,
-		removeHTTPAddress:     current.removeHTTPAddress,
-		httpCORS:              cloneHTTPCORSLayer(current.httpCORS),
-		httpExposures:         exposures,
-		requirements:          requirements,
-		providerChoices:       choices,
-		interfaceRequirements: interfaceRequirements,
-		implementationChoices: implementationChoices,
-		interfacePolicies:     interfacePolicies,
-		aliases:               aliases,
-		configurations:        configurations,
-		startupTimeout:        current.startupTimeout,
-		hasStartupTimeout:     current.hasStartupTimeout,
-		removeStartupTimeout:  current.removeStartupTimeout,
+		modulePath:             current.modulePath,
+		source:                 current.source,
+		exports:                append([]ConfigurationExport(nil), current.exports...),
+		exportAdoptions:        append([]ExportAdoption(nil), current.exportAdoptions...),
+		removedExportAdoptions: append([]ExportAdoption(nil), current.removedExportAdoptions...),
+		adoptionMode:           current.adoptionMode,
+		httpAddress:            current.httpAddress,
+		hasHTTPAddress:         current.hasHTTPAddress,
+		removeHTTPAddress:      current.removeHTTPAddress,
+		httpCORS:               cloneHTTPCORSLayer(current.httpCORS),
+		httpExposures:          exposures,
+		requirements:           requirements,
+		providerChoices:        choices,
+		interfaceRequirements:  interfaceRequirements,
+		implementationChoices:  implementationChoices,
+		interfacePolicies:      interfacePolicies,
+		aliases:                aliases,
+		configurations:         configurations,
+		startupTimeout:         current.startupTimeout,
+		hasStartupTimeout:      current.hasStartupTimeout,
+		removeStartupTimeout:   current.removeStartupTimeout,
 	}
 	return Composition{
+		current:           current,
 		manifest:          manifest,
 		provenance:        provenance,
 		resolutionSources: effectiveResolutionSources(manifest, provenance),
@@ -641,10 +664,18 @@ func inheritedAliasConflict(id capabilityid.Identifier, candidates map[string]*a
 }
 
 func dependencySource(dependency Dependency, source string) string {
-	return dependencyIdentity(dependency) + "/" + source
+	return dependencyModuleIdentity(dependency) + "/" + source
 }
 
 func dependencyIdentity(dependency Dependency) string {
+	identity := dependencyModuleIdentity(dependency)
+	if dependency.ExportName != "" {
+		identity += "#" + dependency.ExportName
+	}
+	return identity
+}
+
+func dependencyModuleIdentity(dependency Dependency) string {
 	version := dependency.ModuleVersion
 	if version == "" {
 		version = "workspace"

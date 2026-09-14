@@ -756,7 +756,7 @@ import (
 
 const bootstrapRemoteConfiguration = "  zeta.remote-store:\n    endpoint: runtime-private-endpoint\n    token: {env: PLYSTRA_ASSEMBLY_PRIVATE_SECRET}\n"
 
-const validRuntimeDocument = "config:\n" + bootstrapRemoteConfiguration
+const validRuntimeDocument = "composition:\n  exports: {ignored: {}}\n  adopt: []\nconfig:\n" + bootstrapRemoteConfiguration
 
 func TestApplicationConstructsStartsAndStopsSelectedProviders(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
@@ -1031,6 +1031,12 @@ func TestApplicationRejectsBuildAffectingRuntimeChangesBeforeConstructors(t *tes
 			name: "default",
 			prepare: func(t *testing.T) {
 				writeRuntimeDocument(t, "http: {expose: {kernel.health/v1: {transport: connect}}}\n"+validRuntimeDocument)
+			},
+		},
+		{
+			name: "export adoption",
+			prepare: func(t *testing.T) {
+				writeRuntimeDocument(t, "composition: {adopt: [{module: example.com/platform, export: defaults}]}\nconfig:\n"+bootstrapRemoteConfiguration)
 			},
 		},
 		{

@@ -231,10 +231,14 @@ func (ConstructorConfiguration) LogValue() slog.Value {
 }
 
 // Manifest is the immutable normalized application metadata used by typed
-// Interface selection, dependency composition, exposure, and runtime input.
+// Interface selection, adopted-export composition, exposure, and runtime input.
 type Manifest struct {
 	modulePath                   string
 	source                       string
+	exports                      []ConfigurationExport
+	exportAdoptions              []ExportAdoption
+	removedExportAdoptions       []ExportAdoption
+	adoptionMode                 adoptionSetMode
 	httpAddress                  string
 	hasHTTPAddress               bool
 	removeHTTPAddress            bool
@@ -267,6 +271,16 @@ func WithProjectModule(manifest Manifest, projectModule string) (Manifest, error
 		return Manifest{}, fmt.Errorf("%w: Project module %q is invalid: %v", ErrInvalidManifest, projectModule, err)
 	}
 	manifest.modulePath = projectModule
+	manifest.exports = append([]ConfigurationExport(nil), manifest.exports...)
+	for index := range manifest.exports {
+		fragment, err := WithProjectModule(manifest.exports[index].manifest, projectModule)
+		if err != nil {
+			return Manifest{}, err
+		}
+		manifest.exports[index].manifest = fragment
+	}
+	manifest.exportAdoptions = append([]ExportAdoption(nil), manifest.exportAdoptions...)
+	manifest.removedExportAdoptions = append([]ExportAdoption(nil), manifest.removedExportAdoptions...)
 	manifest.httpExposures = append([]HTTPExposure(nil), manifest.httpExposures...)
 	for index := range manifest.httpExposures {
 		manifest.httpExposures[index].declarationSource.modulePath = projectModule
@@ -409,8 +423,8 @@ func ParseOverlaySource(source string, data []byte) (Manifest, error) {
 }
 
 func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, error) {
-	if source == "" || strings.TrimSpace(source) == "" || strings.IndexFunc(source, unicode.IsControl) >= 0 {
-		return Manifest{}, invalid("configuration source must be non-empty and contain no control characters")
+	if err := validateConfigurationSource(source); err != nil {
+		return Manifest{}, err
 	}
 	root, err := decodeDocument(data)
 	if err != nil {
@@ -422,10 +436,14 @@ func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, erro
 	}
 	for _, key := range sortedNodeKeys(values) {
 		switch key {
-		case "http", "timeouts", "capabilities", "interfaces", "config":
+		case "composition", "http", "timeouts", "capabilities", "interfaces", "config":
 		default:
 			return Manifest{}, invalid("unknown key %q", key)
 		}
+	}
+	exports, exportAdoptions, removedExportAdoptions, adoptionMode, err := parseComposition(values["composition"], source, sparseOverlay, source == "plystra.yaml")
+	if err != nil {
+		return Manifest{}, err
 	}
 	address, hasAddress, removeAddress, cors, exposures, removedExposures, err := parseHTTP(values["http"], sparseOverlay)
 	if err != nil {
@@ -449,6 +467,10 @@ func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, erro
 	}
 	manifest := Manifest{
 		source:                       source,
+		exports:                      exports,
+		exportAdoptions:              exportAdoptions,
+		removedExportAdoptions:       removedExportAdoptions,
+		adoptionMode:                 adoptionMode,
 		httpAddress:                  address,
 		hasHTTPAddress:               hasAddress,
 		removeHTTPAddress:            removeAddress,
@@ -508,8 +530,26 @@ func parseTimeouts(node *yaml.Node) (time.Duration, bool, bool, error) {
 	return duration, true, false, nil
 }
 
+func validateConfigurationSource(source string) error {
+	if source == "" || strings.TrimSpace(source) == "" || strings.IndexFunc(source, unicode.IsControl) >= 0 {
+		return invalid("configuration source must be non-empty and contain no control characters")
+	}
+	return nil
+}
+
 func rewriteManifestSource(manifest *Manifest, source string) {
+	rewriteManifestSourcePrefix(manifest, source, "")
+}
+
+func rewriteManifestSourcePrefix(manifest *Manifest, source, fieldPrefix string) {
 	rewrite := func(value string) string {
+		if fieldPrefix != "" {
+			suffix := strings.TrimPrefix(value, "plystra.yaml")
+			if suffix == "" {
+				return source + " " + strings.TrimSuffix(fieldPrefix, ".")
+			}
+			return source + " " + fieldPrefix + strings.TrimPrefix(suffix, " ")
+		}
 		if value == "plystra.yaml" {
 			return source
 		}

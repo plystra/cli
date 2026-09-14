@@ -29,7 +29,7 @@ func TestGenerateIsolatesDormantDependencyArtifactProvenance(t *testing.T) {
 			applicationRoot := filepath.Join(root, "application")
 			writeApplicationModule(t, dependencyRoot, dependencyModule)
 			constructor := writeConstructorConfigurationOwner(t, dependencyRoot, dependencyModule, true)
-			writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
+			writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "composition: {exports: {defaults: {}}}\n")
 			writeConnectApplicationModule(t, applicationRoot, "example.com/acme/dormant-artifacts")
 			goModPath := filepath.Join(applicationRoot, "go.mod")
 			writeFile(t, goModPath, string(readAbsoluteFile(t, goModPath))+fmt.Sprintf(
@@ -51,7 +51,8 @@ func TestGenerateIsolatesDormantDependencyArtifactProvenance(t *testing.T) {
 				writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
 			}
 			const exposure = "http: {expose: {kernel.health/v1: {transport: connect}}}\n"
-			writeFile(t, filepath.Join(applicationRoot, selectedPath), exposure)
+			adoption := fmt.Sprintf("composition: {adopt: [{module: %s, export: defaults}]}\n", dependencyModule)
+			writeFile(t, filepath.Join(applicationRoot, selectedPath), exposure+adoption)
 			generate := func() applicationgen.ManifestProvenance {
 				t.Helper()
 				dependencyBefore := snapshotTree(t, dependencyRoot)
@@ -77,9 +78,10 @@ func TestGenerateIsolatesDormantDependencyArtifactProvenance(t *testing.T) {
 				}
 			}
 			previousDigest := baseline.DependencyBaseline().Digest()
-			selection := fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\n", constructor)
-			configuration := fmt.Sprintf("config: {%s: {endpoint: private.internal, password: {env: PLYSTRA_DORMANT_DEPENDENCY_SECRET}}}\n", constructor)
-			for _, source := range []string{selection, selection + configuration, selection, "{}\n"} {
+			emptyExport := "composition: {exports: {defaults: {}}}\n"
+			selection := fmt.Sprintf("composition: {exports: {defaults: {interfaces: {use: {configuration.owner/v1: %s}}}}}\n", constructor)
+			selectionAndConfiguration := fmt.Sprintf("composition: {exports: {defaults: {interfaces: {use: {configuration.owner/v1: %s}}, config: {%s: {endpoint: private.internal, password: {env: PLYSTRA_DORMANT_DEPENDENCY_SECRET}}}}}}\n", constructor, constructor)
+			for _, source := range []string{selection, selectionAndConfiguration, selection, emptyExport} {
 				writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), source)
 				beforeCheck := snapshotTree(t, root)
 				checkOptions := options
@@ -137,8 +139,8 @@ func TestGenerateIsolatesDormantDependencyArtifactProvenance(t *testing.T) {
 				}
 			}
 
-			writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), selection+configuration)
-			writeFile(t, filepath.Join(applicationRoot, selectedPath), exposure+"interfaces: {require: [configuration.owner/v1]}\n")
+			writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), selectionAndConfiguration)
+			writeFile(t, filepath.Join(applicationRoot, selectedPath), exposure+adoption+"interfaces: {require: [configuration.owner/v1]}\n")
 			active := generate()
 			bindings := active.InterfaceProvenance().Bindings()
 			if len(bindings) != 1 || bindings[0].Selection().Constructor() != constructor {
@@ -147,8 +149,8 @@ func TestGenerateIsolatesDormantDependencyArtifactProvenance(t *testing.T) {
 			if active.ApplicationModelDigest() == baseline.ApplicationModelDigest() || len(active.DormantImplementationSelections()) != 0 || len(active.DormantConstructorConfigurations()) != 0 {
 				t.Fatal("activation did not promote dormant intent into executable provenance")
 			}
-			selectionSource := dependencyModule + `@v1.0.0/plystra.yaml interfaces.use["configuration.owner/v1"]`
-			configurationSource := fmt.Sprintf("%s@v1.0.0/plystra.yaml config[%q]", dependencyModule, constructor)
+			selectionSource := dependencyModule + `@v1.0.0/plystra.yaml composition.exports["defaults"].interfaces.use["configuration.owner/v1"]`
+			configurationSource := fmt.Sprintf("%s@v1.0.0/plystra.yaml composition.exports[\"defaults\"].config[%q]", dependencyModule, constructor)
 			for _, name := range []string{bindings[0].Mappings().ProxyPath(), bindings[0].Mappings().AssemblyPath(), "generated/go/bootstrap/bootstrap_gen.go"} {
 				artifact, exists, err := generatedfiles.ReadArtifact(applicationRoot, name)
 				if err != nil || !exists || !slices.Contains(artifact.Sources(), selectionSource) || !slices.Contains(artifact.Sources(), configurationSource) {

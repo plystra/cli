@@ -9,7 +9,7 @@ The CLI is a separate Go Module from `github.com/plystra/kernel`. It completes b
 The CLI owns:
 
 - Go Module, Plugin, and Capability creation.
-- Root-level Plugin scanning, effective-graph dependency-Project discovery, and typed dependency configuration composition.
+- Root-level Plugin scanning, effective-graph dependency Project export discovery, and explicit typed export composition.
 - The complete normalized application model.
 - Official and intrinsic Capability discovery.
 - Exact requirement closure and ordinary provider resolution.
@@ -201,7 +201,24 @@ The CLI accepts only a supported generation API, a canonical plugin-relative pac
 
 The public v1 input contract is `github.com/plystra/cli/generation/v1`. It validates complete resolved state, exposes only defensive immutable views, canonically orders every collection and JSON-compatible metadata value, and provides stable SHA-256 input and contract digests. Its empty context is valid for applications with no plugins or extensions.
 
-Filesystem-backed contexts also expose immutable configuration provenance: selection mode, selected environment when applicable, stable Project-relative root and selected-document paths, normalized root and selected-document digests, and the dependency-composition digest. They never expose YAML values, resolved Secrets, absolute paths, the process environment, or generated-output locations. `Digest` covers this complete extension input and survives the helper-process round trip. `BuildModelDigest` excludes document provenance so a runtime-only configuration change does not alter static assembly unless an extension actually changes its normalized output. Before built-in transport or bootstrap generation begins, the CLI cross-checks that bounded identity against the typed dependency composition and generated-manifest provenance and ties it to the final application-model digest. Bootstrap and the Connect, REST/JSON, JavaScript, and API-document renderers require the validated identity but do not serialize selector-only paths or document digests into executable or public output. Equal effective build models therefore retain byte-stable executable/public artifacts while `generated/manifest.json` and its ownership manifest still record selection and composition drift.
+Filesystem-backed contexts also expose immutable configuration provenance:
+selection mode, selected environment when applicable, stable Project-relative
+root and selected-document paths, normalized root and selected-document
+digests, and the adopted-export composition digest. They never expose YAML
+values, resolved Secrets, absolute paths, the process environment, or
+generated-output locations. `Digest` covers this complete extension input and
+survives the helper-process round trip. `BuildModelDigest` excludes document
+provenance so a runtime-only configuration change does not alter static
+assembly unless an extension actually changes its normalized output. Before
+built-in transport or bootstrap generation begins, the CLI cross-checks that
+bounded identity against the typed adopted-export composition and
+generated-manifest provenance and ties it to the final application-model
+digest. Bootstrap and the Connect, REST/JSON, JavaScript, and API-document
+renderers require the validated identity but do not serialize selector-only
+paths or document digests into executable or public output. Equal effective
+build models therefore retain byte-stable executable/public artifacts while
+`generated/manifest.json` and its ownership manifest retain selection and
+composition provenance.
 
 Each compatible generation package exports exactly:
 
@@ -228,17 +245,45 @@ Rule inputs, outputs, dependency graphs, contribution digests, and final results
 
 ## Runtime configuration resolution
 
-Before provider resolution, the CLI loads the regular root `plystra.yaml` from every direct and transitive dependency Plystra Project in the effective Go Module graph. It never loads a dependency environment overlay, and a markerless Go dependency remains unscanned. Dependency `capabilities.require` and `interfaces.require` values form deterministic canonical-ID unions. Their sparse `{add: [...], remove: [...]}` form records exact set decisions, while `null` under keyed composable declarations removes that exact inherited choice or field. Declared object configuration fields merge recursively; declared scalars and arrays replace as complete values. Identical composable additions, removals, selections, Alias declarations, and typed configuration paths deduplicate with all-source provenance; incompatible inherited add/remove, value/removal, or typed decisions fail with the exact field plus every contributing `module@version/plystra.yaml` location unless the selected current-Project layer explicitly resolves that exact decision. Directness, graph depth, version, discovery order, filesystem order, and declaration sorting never choose a dependency winner. Dependency `http.expose`, `http.address`, `http.cors`, and `timeouts.startup` are ignored because public exposure and process settings remain current-Project-owned. Expose an imported Interface by declaring it in the selected current Project; dependency exposure creates no consumer root, provenance, maintenance entry, transport, or SDK surface.
+Before provider resolution, the CLI reads root `plystra.yaml` from each direct
+and transitive dependency Plystra Project only as a Project marker and inert
+`composition.exports` inventory. Dependency top-level requirements, choices,
+configuration, exposure, process settings, and adoptions have no consumer
+effect. Dependency environment overlays are never inspected, and a markerless
+Go dependency remains unscanned.
 
-Root `plystra.yaml` is the mandatory Project marker, shared current-Project layer, and default configuration for every invocation. `plystra generate --env production` adds exactly one sparse project-root `plystra.production.yaml` overlay above that root; the overlay must exist, omitted fields inherit, and typed scalar, keyed-object, set, and tombstone semantics determine each field rather than a generic YAML deep merge. Within `http.expose`, omitted Interface entries inherit, a supplied complete entry replaces that exact choice, and `null` removes that entry. An empty mapping preserves inherited entries; the complete exposure field cannot be null. A supplied `http.cors.allowed_origins` list replaces the complete normalized root list while omitted origins inherit and credentials replace independently; `http.cors: null` disables inherited current-project CORS. The selected environment applies only to the current Project: dependency environment files are never loaded, unselected overlays are ignored, and dependency-baseline maintenance still updates root `plystra.yaml` without materializing inherited values into the overlay.
+Only exact `{module, export}` identities in the selected current Project's
+`composition.adopt` set activate reusable configuration. This installed CLI
+accepts `interfaces` and `config` declarations inside an export; `resources`
+is recognized but reported as unsupported. Adopted exports form one unordered
+lower-precedence layer. Identical declarations deduplicate with all-source
+provenance, incompatible declarations fail with every contributing
+`module@version/plystra.yaml` location, and the selected current-Project layer
+may resolve that exact decision. Directness, graph depth, version, discovery
+order, filesystem order, template origin, and declaration sorting never choose
+a winner. Expose an imported Interface in the selected current Project;
+dependency exposure creates no consumer root, transport, or SDK surface.
 
-`plystra generate --config deploy/customer-a.yaml` instead uses that one complete document as the current-Project layer above dependency composition; root `plystra.yaml` is not merged beneath it. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` supply their corresponding selector for automation. Setting both variables is an error, `--env` and `--config` cannot be combined, and either explicit selector overrides both ambient variables. Relative configuration paths are resolved from the detected Project root even when the command starts inside a Plugin; an absolute path is accepted only when it resolves within that root. Selecting an environment or configuration never changes Project, Plugin, or dependency discovery.
+Root `plystra.yaml` is the mandatory Project marker, shared current-Project layer, and default configuration for every invocation. `plystra generate --env production` adds exactly one sparse project-root `plystra.production.yaml` overlay above that root; the overlay must exist, omitted fields inherit, and typed scalar, keyed-object, set, and tombstone semantics determine each field rather than a generic YAML deep merge. Within `http.expose`, omitted Interface entries inherit, a supplied complete entry replaces that exact choice, and `null` removes that entry. An empty mapping preserves inherited entries; the complete exposure field cannot be null. A supplied `http.cors.allowed_origins` list replaces the complete normalized root list while omitted origins inherit and credentials replace independently; `http.cors: null` disables inherited current-project CORS. The overlay may replace or sparsely add and remove exact export adoptions. Dependency environment files are never loaded, unselected overlays are ignored, and generation preserves both authored current-Project documents byte-for-byte.
+
+`plystra generate --config deploy/customer-a.yaml` instead uses that one complete
+document as the current-Project layer and resolves the adoption set declared in
+that document. Root `plystra.yaml` remains the Project marker and current-module
+export inventory but its top-level application declarations are not merged
+beneath the selected file. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` supply their
+corresponding selector for automation. Setting both variables is an error,
+`--env` and `--config` cannot be combined, and either explicit selector
+overrides both ambient variables. Relative configuration paths are resolved
+from the detected Project root even when the command starts inside a Plugin;
+an absolute path is accepted only when it resolves within that root. Selecting
+an environment or configuration never changes Project, Plugin, or dependency
+discovery.
 
 The CLI indexes each visible plugin's strict Kernel configuration declaration and composes Plugin values only at declared typed field boundaries. It validates `timeouts.startup` as an optional positive Go duration, using `2m` when omitted; generated bootstrap reads that runtime-only application lifecycle bound again from the bounded runtime document rather than embedding it. The closed `interfaces.policies` schema separately accepts exactly one positive Go-duration `timeout` for each canonical non-intrinsic Interface ID. Those normalized per-invocation policies are build-affecting, compose and overlay by exact Interface key, and compile into the static application model; they are not aliases for `timeouts.startup`. This gate carries policy through configuration, provenance, generation, and startup compatibility; Kernel execution of the timeout remains deferred to Gate 19. After the provider and generation fixed point stabilizes, the CLI validates exactly one object for every selected Plugin ID with the Kernel's non-resolving validator. Omitted objects normalize to `{}` so optional fields and defaults remain usable; missing required fields, unknown fields, invalid values or Secret-reference syntax, and configuration for an unselected plugin fail before rendering. Environment variables and files are never read during generation.
 
-Private values and Secret reference targets do not enter generation-extension context, generated source, SDKs, documentation, or diagnostics. `generated/manifest.json` records one versioned canonical constraint projection containing every resolved canonical Capability ID, its exact contract and constraint digests, and each constrained request or response field's path, type, and normalized constraint object. Unconstrained Capabilities retain empty field lists, and an aggregate constraint-projection digest makes addition, removal, or semantic constraint changes deterministic drift. Configuration schema v7 records `default`, `environment`, or `explicit-config` mode; the selected environment and overlay reference when applicable; stable Project-relative paths; normalized semantic document digests; dependency-composition baseline history; per-selection `current_project_paths` ownership; the committed Protobuf wire-map digest; and the final build-affecting application-model digest. It requires canonically ordered `dormant_implementation_selections` and constructor-keyed `dormant_constructor_configurations` arrays, each with an aggregate digest. A dormant selection retains the exact Interface and constructor, constructor module/version/source, canonical `interfaces.use` path and normalized decision digest, effective configuration owner, and ordered replacement/removal contributions with module-relative sources. A dormant constructor-configuration record appears once even when the same constructor has several dormant selections; it retains the exact constructor identity, canonical `config["<constructor>"]` path, every normalized field digest and redacted summary, effective/removal state, owner, suppressed descendants, and complete ordered contribution history. A constructor active through any reachable binding is excluded from this dormant configuration class. Empty Projects record explicit empty arrays and canonical digests. Neither record contains a raw configuration value, Secret-reference target, resolved Secret, or machine path, and both remain disjoint from executable `interface_provenance`; activation removes the dormant records and places the same choice and configuration ownership in ordinary reachable binding and constructor provenance instead.
+Private values and Secret reference targets do not enter generation-extension context, generated source, SDKs, documentation, or diagnostics. `generated/manifest.json` records one versioned canonical constraint projection containing every resolved canonical Capability ID, its exact contract and constraint digests, and each constrained request or response field's path, type, and normalized constraint object. Unconstrained Capabilities retain empty field lists, and an aggregate constraint-projection digest makes addition, removal, or semantic constraint changes deterministic drift. Configuration schema v7 records `default`, `environment`, or `explicit-config` mode; the selected environment and overlay reference when applicable; stable Project-relative paths; normalized semantic document digests; per-selection adopted-export composition digests and redacted source provenance; `current_project_paths` ownership; the committed Protobuf wire-map digest; and the final build-affecting application-model digest. It requires canonically ordered `dormant_implementation_selections` and constructor-keyed `dormant_constructor_configurations` arrays, each with an aggregate digest. A dormant selection retains the exact Interface and constructor, constructor module/version/source, canonical `interfaces.use` path and normalized decision digest, effective configuration owner, and ordered replacement/removal contributions with module-relative sources. A dormant constructor-configuration record appears once even when the same constructor has several dormant selections; it retains the exact constructor identity, canonical `config["<constructor>"]` path, every normalized field digest and redacted summary, effective/removal state, owner, suppressed descendants, and complete ordered contribution history. A constructor active through any reachable binding is excluded from this dormant configuration class. Empty Projects record explicit empty arrays and canonical digests. Neither record contains a raw configuration value, Secret-reference target, resolved Secret, or machine path, and both remain disjoint from executable `interface_provenance`; activation removes the dormant records and places the same choice and configuration ownership in ordinary reachable binding and constructor provenance instead.
 
-The required top-level `transport_toolchain` record contains the exact embedded `go/format` runtime, built-in Protobuf-model, descriptor, wire-map, Connect, JavaScript, and API-documentation generator versions, pinned generated Go and npm dependency versions, and a canonical digest. Generation never consults an implicit global `protoc`, another generator executable, or a hosted generation service; changing this embedded identity changes the manifest and is detected by `plystra generate --check`. `generated/go/bootstrap/bootstrap_gen.go` records only the bounded executable compatibility projection: selected public Interface exposure entries with their transports, CORS policy, explicit Interface requirements, exact executable Interface-to-Implementation constructor choices, normalized Interface timeout policies, and the complete application-model digest. Dormant choices and dormant constructor-configuration records remain only in manifest configuration/composition provenance until activation, so a dormant-only edit changes manifest provenance without changing bootstrap source or artifact provenance. The projection digest keeps the runtime check cryptographically associated with the exact generated assembly. Process address, `timeouts.startup`, runtime configuration, Secret references, resolved Secrets, source paths, selector-only document identity, and machine-specific absolute paths are excluded. Changing selected CORS origins, credential handling, or an Interface timeout policy creates deterministic generation drift while equivalent normalized values retain one static model identity. Environment mode retains the root dependency baseline because the sparse overlay never owns dependency maintenance; overlay-owned dormant evidence therefore carries its exact environment owner and overlay source without being added to retained root-maintenance ownership. Baseline records contain only deterministic path/digest/removal/source provenance, and their sorted ownership paths distinguish explicit current-Project intent from an identical inherited declaration across later recomposition. A separate private digest covers validated runtime configuration only for concurrent-input detection during the generation transaction.
+The required top-level `transport_toolchain` record contains the exact embedded `go/format` runtime, built-in Protobuf-model, descriptor, wire-map, Connect, JavaScript, and API-documentation generator versions, pinned generated Go and npm dependency versions, and a canonical digest. Generation never consults an implicit global `protoc`, another generator executable, or a hosted generation service; changing this embedded identity changes the manifest and is detected by `plystra generate --check`. `generated/go/bootstrap/bootstrap_gen.go` records only the bounded executable compatibility projection: selected public Interface exposure entries with their transports, CORS policy, explicit Interface requirements, exact executable Interface-to-Implementation constructor choices, normalized Interface timeout policies, and the complete application-model digest. Dormant choices and dormant constructor-configuration records remain only in manifest configuration/composition provenance until activation, so a dormant-only edit changes manifest provenance without changing bootstrap source or artifact provenance. The projection digest keeps the runtime check cryptographically associated with the exact generated assembly. Process address, `timeouts.startup`, runtime configuration, Secret references, resolved Secrets, source paths, selector-only document identity, and machine-specific absolute paths are excluded. Changing selected CORS origins, credential handling, an adoption, or an Interface timeout policy creates deterministic generation drift when it changes the normalized selected model; equivalent normalized values retain one static model identity. Adopted-export records contain deterministic path, digest, removal, module/export, and source provenance, while current-project ownership remains separate. A separate private digest covers validated runtime configuration only for concurrent-input detection during the generation transaction.
 
 The required top-level `interface_provenance` record in
 `generated/manifest.json` uses schema `plystra.interface-provenance/v1`. It
@@ -350,7 +395,7 @@ and GitHub Actions CI default off:
 ```powershell
 plystra new my-app
 plystra new my-app --module github.com/acme/my-app
-plystra new my-app --module github.com/acme/my-app --template github.com/acme/platform@v1.2.3
+plystra new my-app --module github.com/acme/my-app --template github.com/acme/platform@v1.2.3 --adopt-export application
 ```
 
 The positional value is one lower-case ASCII kebab-case child-directory name.
@@ -375,20 +420,23 @@ Plugin command or echoing rejected input.
 `--template` rejects a malformed query before staging with
 `PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID`. It resolves one standard Go Module
 query, requires that selected module to contain regular root `plystra.yaml`,
-and retains it as an ordinary direct dependency. The CLI composes the
-dependency Project's root declarations
-into the new Project and regenerates the application; it does not clone or copy
-the dependency source, inspect dependency environment overlays, modify the Go
-Module Cache, create `go.work`, or grant the template any Provider or
-configuration priority. A module without root `plystra.yaml` is rejected and
-the target directory is not installed.
+and retains it as an ordinary direct dependency. Its top-level Project
+configuration remains inert. Repeatable `--adopt-export <name>` options select
+exact entries from that template module's root `composition.exports` inventory
+and record their module/export identities under the new Project's
+`composition.adopt` set. The flag is invalid without `--template`; duplicate,
+malformed, or absent export names reject creation before target installation.
+The CLI does not clone or copy dependency source, inspect dependency
+environment overlays, modify the Go Module Cache, create `go.work`, or grant
+the template any Provider or configuration priority. A module without root
+`plystra.yaml` is rejected and the target directory is not installed.
 
-The template's default application model must resolve without Provider
-ambiguity. If several compatible Plugins provide one required Capability and
-the template root does not select one under `capabilities.use`, creation rejects
-the template before installing the target. The diagnostic names every candidate
-and requires the template publisher to record the explicit default choice in
-root `plystra.yaml` and publish a corrected module version.
+Only explicitly adopted template exports enter the staged application model.
+If those exports introduce several compatible Providers for one required
+Capability without an exact choice, creation reports every candidate and
+leaves no target directory. The template publisher can place the intended
+choice in the adopted export, or the consumer can create without that export
+and author its own current-Project intent.
 
 The complete effective template graph must also use public Go Modules. Creation
 rejects every direct or transitive module matched by the effective `GOPRIVATE`
@@ -404,11 +452,11 @@ replacements before publishing a corrected template.
 
 Creation then requires the generated application to be a fixed point. After
 installing generated output, the CLI immediately performs the equivalent of
-`plystra generate --check`. Dependency-composition drift or any stale,
-missing, unexpected, or manually modified generated path rejects the template and rolls
-back the target. The template publisher must make generation deterministic,
-run `plystra generate` followed by `plystra generate --check` in a fresh
-Project directory, and publish a corrected module version.
+`plystra generate --check`. Any stale, missing, unexpected, or manually
+modified generated path rejects the template and rolls back the target. The
+template publisher must make generation deterministic, run `plystra generate`
+followed by `plystra generate --check` in a fresh Project directory, and
+publish a corrected module version.
 
 Template creation then runs the same read-only validation workflow as
 `plystra check`: it rechecks the selected configuration and generated output,
@@ -426,15 +474,15 @@ surfaced and the temporary executable is removed on every path. Failure remains
 inside the same creation transaction. This private qualification executable is
 not the later public `plystra build` and `dist/` contract.
 
-Typed operational values and Secret-reference placeholders declared by the
-template's root configuration are materialized in the new root `plystra.yaml`
-through that same dependency composition. Creation validates them against the
-selected Plugin schemas but never reads an `env` or `file` reference, even when
-the referenced value exists in the creation environment. Secret-reference
-targets and resolved Secret values are excluded from generated source and
-manifest provenance. A required Plugin field omitted by the template is not
-invented; generation fails transactionally until the template declares a valid
-local value or reference.
+Creation never materializes export values into the new root `plystra.yaml`.
+That document contains only the exact `composition.adopt` identities requested
+by the caller plus ordinary new-Project declarations. Creation validates the
+effective adopted values against selected Plugin schemas but never reads an
+`env` or `file` reference, even when the referenced value exists in the
+creation environment. Secret-reference targets and resolved Secret values are
+excluded from generated source and public manifest provenance. A required
+Plugin field omitted by the selected exports and current Project is not
+invented; generation fails transactionally.
 
 Use `--git` and `--github-ci` to opt into those independent tools. Use
 `--no-agent-guidance` to omit the default guidance. Only `--interactive` permits
@@ -688,7 +736,7 @@ plystra update github.com/acme/email@v1.5.0
 
 Omit the version query to request Go's normal upgrade selection for that module. `plystra update` never performs an implicit whole-graph upgrade.
 
-`plystra add` validates one module query, resolves it through ordinary Go tooling, and records the selected module as a direct requirement. `plystra remove` requires a module already selected in `go.mod`, uses ordinary Go tooling to remove it, and fails if regeneration or tidy would select it again. `plystra update` also requires an existing selection, preserves a direct requirement as direct, and verifies that the module remains selected. All three commands recompose the dependency-derived root `plystra.yaml` baseline, regenerate, tidy, and validate the complete Project. These initial dependency workflows use the default root configuration and never scan for or rewrite environment overlays or alternative YAML files. A failed Go command, resolution, composition, generation, tidy, dependency postcondition, or validation step restores `go.mod`, `go.sum`, root configuration, generated artifacts, and every other transaction-owned file without overwriting a concurrent user edit. The Go Module proxy and cache remain ordinary Go-tool boundaries; the CLI never copies or modifies dependency source.
+`plystra add` validates one module query, resolves it through ordinary Go tooling, and records the selected module as a direct requirement. `plystra remove` requires a module already selected in `go.mod`, uses ordinary Go tooling to remove it, and fails if regeneration or tidy would select it again. `plystra update` also requires an existing selection, preserves a direct requirement as direct, and verifies that the module remains selected. All three commands recompute visible export inventories and the root document's explicit adoption set, regenerate, tidy, and validate the complete Project. They never activate a newly visible export, infer intent from equal values, or rewrite root `plystra.yaml`, an environment overlay, or an alternative YAML file. Removing or updating a module that makes an explicit adoption invalid fails and rolls the transaction back. A failed Go command, resolution, composition, generation, tidy, dependency postcondition, or validation step restores `go.mod`, `go.sum`, generated artifacts, and every other transaction-owned file without overwriting a concurrent user edit. The Go Module proxy and cache remain ordinary Go-tool boundaries; the CLI never copies or modifies dependency source.
 
 Malformed `add` and `update` queries emit
 `PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID` and
@@ -892,9 +940,9 @@ corrected dependency version, rather than editing a Module Cache copy.
 `interfaces.require` or `http.expose` declaration as a `declaration` or
 `exposure` source, or every effective `interfaces.use` declaration as an
 `implementation-selection` source. A selected current-Project reference names
-only the root, environment, or complete-replacement document; an inherited
-reference names every same-valued dependency Project in deterministic module
-order.
+only the root, environment, or complete-replacement document; an adopted
+reference names every same-valued selected module/export contributor in
+deterministic order.
 `PLYSTRA_RESOLVE_RESERVED_INTERFACE` reports the application-authored
 `kernel.*` Interface declaration as an `interface-declaration` source. The
 source retains the owning current or dependency Project module and
@@ -906,21 +954,16 @@ copy.
 `PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION` report every effective
 `interfaces.use` declaration as an `implementation-selection` source. A
 current-Project choice identifies only the selected root, environment, or
-complete-replacement document; an inherited choice identifies every
-same-valued contributing dependency Project in deterministic module order. For
+complete-replacement document; an adopted choice identifies every same-valued
+selected module/export contributor in deterministic order. For
 an intrinsic choice, set the entry to `null` in the selected current-Project
-document to remove the local or inherited effective selection; Kernel supplies
+document to remove the local or adopted effective selection; Kernel supplies
 that Interface intrinsically.
-`PLYSTRA_CONFIGURATION_INHERITED_CONFLICT` reports every Project configuration
-document that contributed a competing declaration, including every module
+`PLYSTRA_CONFIGURATION_INHERITED_CONFLICT` reports every explicitly adopted
+export that contributed a competing declaration, including every module/export
 behind compatible declaration deduplication, as `configuration-declaration`.
 The exact conflicting field remains in the problem text; configuration values
 and Secret-reference targets never enter the source facts.
-`PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS` reports the same complete sorted
-document provenance when a previously inherited field disappears from the
-current-Project document without an explicit typed removal. The diagnostic
-retains the exact field and prior contributor references while omitting the
-inherited value, Secret-reference target, and machine-specific path.
 `PLYSTRA_CONFIGURATION_INVALID` emits a malformed selected current-Project
 environment or complete-replacement document at `1:1` as a
 `configuration-declaration` source. Its source fact contains no configured
@@ -929,12 +972,6 @@ value or absolute path.
 environment document at `1:1` as a `configuration-declaration` source when its
 typed application over root configuration is invalid. The problem identifies
 the invalid field relationship without exposing values or an absolute path.
-`PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT` emits the maintained current-Project
-configuration document at `1:1` as a `configuration-declaration` source when
-dependency composition would change it. Default and environment-overlay checks
-identify root `plystra.yaml`; complete-replacement checks identify the selected
-document. Check modes remain read-only, and normal generation applies the
-maintenance change transactionally.
 `PLYSTRA_GENERATED_DRIFT` emits every stale, missing, or manually modified
 managed path as a sorted `generated-artifact` source in the current Project
 module. These path-only facts omit line and column rather than inventing a span.
@@ -1102,13 +1139,13 @@ source identifies the selected invocation boundary; it does not by itself imply
 faulty helper code. Use the diagnostic code to correct local execution
 prerequisites, request size, helper behavior, or returned output, then rerun the
 same command.
-`PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one current or
-dependency Project document whose constructor-keyed configuration has no
+`PLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID` reports the one selected
+current-Project document or explicitly adopted export whose constructor-keyed configuration has no
 discovered compiled same-package `Config` schema. The source uses
 `configuration-declaration` at `1:1`; the problem identifies the constructor,
 while configured values and Secret-reference targets remain redacted.
 `PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID` reports the one owning
-current or dependency Project document when a value does not match that schema.
+selected current-Project document or explicitly adopted export when a value does not match that schema.
 The source uses `configuration-declaration` at `1:1`; the problem retains only
 the constructor and safe declared field path while values, unknown authored
 keys, and Secret-reference targets remain redacted.
@@ -1240,8 +1277,8 @@ every effective contributing Project document at `1:1` as a sorted
 `configuration-declaration` source; it never prints configured values or
 Secret-reference targets.
 
-The current `plystra check` implementation is read-only. It verifies the
-selected dependency composition and generated fixed point, then runs
+The current `plystra check` implementation is read-only. It validates the
+selected application model and generated fixed point, then runs
 `go test -mod=readonly ./...` from the Project root. Later roadmap gates add
 the remaining transport, JavaScript SDK, formatting, race, and release-era
 checks without changing this command or its configuration selectors.
@@ -1274,9 +1311,29 @@ plystra generate --check --config deploy/customer-a.yaml
 
 `PLYSTRA_CONFIG=deploy/customer-a.yaml` is the automation equivalent when the option is omitted. Setting `PLYSTRA_ENV` and `PLYSTRA_CONFIG` together is an error. An explicit `--env` or `--config` overrides both variables, and the two options cannot be combined.
 
-The command resolves the mandatory root `plystra.yaml`, the effective Go Module graph, every dependency Project and composed root declaration in that graph, canonical providers, selected generation extensions, generation-derived requirements, contributions, and Capability Aliases. Only module roots containing `plystra.yaml` are scanned for dependency Plugins or declarations; markerless modules remain ordinary Go dependencies, and dependency environment overlays are ignored. It renders the complete Project-owned Go, HTTP, JavaScript, documentation, assembly-compatibility, configuration-provenance manifest, invocation, and runtime-bootstrap surfaces. A Go Module without root `plystra.yaml` is an ordinary dependency and is rejected as a generation target.
+The command resolves the mandatory root `plystra.yaml`, the effective Go Module
+graph, every dependency Project export inventory in that graph, the selected
+current-Project adoption set, canonical providers, selected generation
+extensions, generation-derived requirements, contributions, and Capability
+Aliases. Only module roots containing `plystra.yaml` are scanned for dependency
+Plugins or export inventories; markerless modules remain ordinary Go
+dependencies, dependency top-level application configuration remains inert,
+and dependency environment overlays are ignored. It renders the complete
+Project-owned Go, HTTP, JavaScript, documentation, assembly-compatibility,
+configuration-provenance manifest, invocation, and runtime-bootstrap surfaces.
+A Go Module without root `plystra.yaml` is an ordinary dependency and is
+rejected as a generation target.
 
-Generation maintains the current Project from the dependency-derived baseline recorded in the prior ownership manifest. Default and environment modes update root `plystra.yaml`; environment mode then applies the selected sparse overlay without rewriting it. Explicit mode updates only the selected complete file and never synchronizes the same change into root or another alternative. Each maintained selection retains independent baseline history. The typed three-way update preserves comments, explicit current-Project values, and exact removal tombstones while introducing new inherited declarations and removing inherited declarations that disappeared. An inherited value deleted without an explicit typed removal is an ownership error instead of an instruction to overwrite the file. The maintained configuration and generated tree install in one transaction, run `go test -mod=readonly ./...`, and re-resolve the complete application before commit. Validation failure, changed inputs, concurrent configuration edits, or nondeterministic output roll back every safe CLI-owned change while preserving a concurrent user edit and retaining recovery data when that edit prevents a safe restore.
+Generation treats root, environment, and complete-replacement YAML as authored
+input and preserves their bytes. It resolves the exact selected adoption set on
+every run, composes only those named exports beneath the selected current-Project
+layer, and installs generated output plus required module metadata in one
+transaction. It never introduces a newly visible export, materializes adopted
+values into a current-Project document, or infers ownership from a prior
+generated manifest. Validation failure, changed inputs, concurrent
+configuration edits, or nondeterministic output roll back every safe CLI-owned
+change while preserving a concurrent user edit and retaining recovery data when
+that edit prevents a safe restore.
 
 Go subprocesses preserve an explicit `GOWORK` selection. An automatically discovered enclosing `go.work` remains active when it validly includes the nearest module; when it is valid but does not list that module, the CLI runs the subprocess with `GOWORK=off` so an unrelated parent workspace cannot redirect generation or validation. Malformed workspaces, missing `use` directories, and invalid used modules remain active so the Go tool reports the original workspace error instead of having it hidden.
 
@@ -1286,7 +1343,13 @@ Use the read-only consistency gate in local checks and CI:
 plystra generate --check
 ```
 
-Check mode never writes module files or configuration. It reports dependency-composition drift against the selected path, such as `changed plystra.yaml (dependency composition)` or `changed deploy/customer-a.yaml (dependency composition)`, alongside deterministic `stale`, `missing`, `unexpected`, and `manually-modified` generated paths. Switching selections or changing a build-affecting selected value changes generated provenance and output. The command returns a failing exit status while any drift remains. Installation preserves an unexpected unowned file rather than overwriting or deleting it.
+Check mode never writes module files or configuration. It reports deterministic
+`stale`, `missing`, `unexpected`, and `manually-modified` generated paths for
+the exact selected adopted-export composition and current-Project layer.
+Switching selections, changing an adoption, or changing a build-affecting
+selected value changes generated provenance and output. The command returns a
+failing exit status while any drift remains. Installation preserves an
+unexpected unowned file rather than overwriting or deleting it.
 
 ## Development
 

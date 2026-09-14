@@ -94,15 +94,15 @@ config:
 	}
 
 	requirement := configurationField(t, first, `capabilities.require["email.send/v1"]`)
-	if !requirement.Effective() || requirement.Owner() != resolutionevidence.ConfigurationOwnerDependency || requirement.Removed() || requirement.Summary() != "redacted" {
+	if !requirement.Effective() || requirement.Owner() != resolutionevidence.ConfigurationOwnerAdopted || requirement.Removed() || requirement.Summary() != "redacted" {
 		t.Fatalf("inherited requirement = %#v", requirement)
 	}
 	contributions := requirement.Contributors()
-	if len(contributions) != 1 || !contributions[0].Effective() || contributions[0].Precedence() != 1 || contributions[0].Owner() != resolutionevidence.ConfigurationOwnerDependency {
+	if len(contributions) != 1 || !contributions[0].Effective() || contributions[0].Precedence() != 1 || contributions[0].Owner() != resolutionevidence.ConfigurationOwnerAdopted {
 		t.Fatalf("deduplicated inherited contribution = %#v", contributions)
 	}
 	interfaceRequirement := configurationField(t, first, `interfaces.require["audit.write/v1"]`)
-	if !interfaceRequirement.Effective() || interfaceRequirement.Owner() != resolutionevidence.ConfigurationOwnerDependency || interfaceRequirement.Summary() != "redacted" || len(interfaceRequirement.Contributors()) != 1 || len(interfaceRequirement.Contributors()[0].Sources()) != 2 {
+	if !interfaceRequirement.Effective() || interfaceRequirement.Owner() != resolutionevidence.ConfigurationOwnerAdopted || interfaceRequirement.Summary() != "redacted" || len(interfaceRequirement.Contributors()) != 1 || len(interfaceRequirement.Contributors()[0].Sources()) != 2 {
 		t.Fatalf("inherited Interface requirement = %#v", interfaceRequirement)
 	}
 	implementationChoice := configurationField(t, first, `interfaces.use["email.send/v1"]`)
@@ -119,7 +119,7 @@ config:
 		t.Fatalf("root replacement = %#v", host)
 	}
 	contributions = host.Contributors()
-	if len(contributions) != 2 || contributions[0].Owner() != resolutionevidence.ConfigurationOwnerDependency || contributions[0].Effective() || contributions[1].Owner() != resolutionevidence.ConfigurationOwnerRoot || !contributions[1].Effective() || contributions[1].Sources()[0].Path() != "plystra.yaml" {
+	if len(contributions) != 2 || contributions[0].Owner() != resolutionevidence.ConfigurationOwnerAdopted || contributions[0].Effective() || contributions[1].Owner() != resolutionevidence.ConfigurationOwnerRoot || !contributions[1].Effective() || contributions[1].Sources()[0].Path() != "plystra.yaml" {
 		t.Fatalf("root replacement contributions = %#v", contributions)
 	}
 	password := configurationField(t, first, `config["example.com/acme/smtp.New"]["password"]`)
@@ -143,7 +143,7 @@ config:
 	contributions[0] = resolutionevidence.ConfigurationContribution{}
 	sources = host.Contributors()[0].Sources()
 	sources[0] = resolutionevidence.Source{}
-	if configurationField(t, first, host.Path()).Owner() != resolutionevidence.ConfigurationOwnerRoot || host.Contributors()[0].Owner() != resolutionevidence.ConfigurationOwnerDependency || host.Contributors()[0].Sources()[0].Module() != "corp.example/platform-a" || !first.Valid() {
+	if configurationField(t, first, host.Path()).Owner() != resolutionevidence.ConfigurationOwnerRoot || host.Contributors()[0].Owner() != resolutionevidence.ConfigurationOwnerAdopted || host.Contributors()[0].Sources()[0].Module() != "corp.example/platform-a" || !first.Valid() {
 		t.Fatal("configuration evidence accessors are not defensive")
 	}
 

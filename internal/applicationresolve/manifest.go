@@ -117,14 +117,14 @@ func loadConfiguration(modulePath, moduleRoot, relativePath string) (ManifestSna
 	return loadConfigurationWithParser(modulePath, moduleRoot, relativePath, applicationmeta.ParseSource)
 }
 
-func loadProjectManifest(modulePath, moduleRoot string) (ManifestSnapshot, applicationmeta.Manifest, error) {
+func loadProjectManifestSnapshot(modulePath, moduleRoot string) (ManifestSnapshot, error) {
 	snapshot, err := ReadManifestSnapshot(moduleRoot)
 	if err != nil {
 		sourceError := manifestSourceError
 		if errors.Is(err, ErrConcurrentChange) {
 			sourceError = configurationSourceError
 		}
-		return ManifestSnapshot{}, applicationmeta.Manifest{}, sourceError(
+		return ManifestSnapshot{}, sourceError(
 			modulePath,
 			applicationManifestName,
 			0,
@@ -132,9 +132,17 @@ func loadProjectManifest(modulePath, moduleRoot string) (ManifestSnapshot, appli
 			fmt.Errorf("%w: %w", ErrManifest, err),
 		)
 	}
-	manifest, err := applicationmeta.ParseSource(snapshot.path, snapshot.data)
+	return snapshot, nil
+}
+
+func parseProjectManifestSnapshot(modulePath string, snapshot ManifestSnapshot, inventoryOnly bool) (applicationmeta.Manifest, error) {
+	parse := applicationmeta.ParseSource
+	if inventoryOnly {
+		parse = applicationmeta.ParseExportInventorySource
+	}
+	manifest, err := parse(snapshot.path, snapshot.data)
 	if err != nil {
-		return ManifestSnapshot{}, applicationmeta.Manifest{}, manifestSourceError(
+		return applicationmeta.Manifest{}, manifestSourceError(
 			modulePath,
 			snapshot.path,
 			1,
@@ -142,7 +150,7 @@ func loadProjectManifest(modulePath, moduleRoot string) (ManifestSnapshot, appli
 			fmt.Errorf("%w: %w", ErrManifest, err),
 		)
 	}
-	return snapshot, manifest, nil
+	return manifest, nil
 }
 
 func loadEnvironmentOverlay(modulePath, moduleRoot, relativePath string) (ManifestSnapshot, applicationmeta.Manifest, error) {
@@ -205,7 +213,7 @@ func loadDependencyManifests(dependencies []moduledependency.Module) ([]dependen
 				fmt.Errorf("%w: dependency Project %s: %w", ErrManifest, dependencyIdentity(dependency), err),
 			)
 		}
-		manifest, err := applicationmeta.ParseSource(snapshot.path, snapshot.data)
+		manifest, err := applicationmeta.ParseExportInventorySource(snapshot.path, snapshot.data)
 		if err != nil {
 			return nil, nil, manifestSourceError(
 				dependency.Path(),

@@ -504,8 +504,8 @@ func TestBuildRecordsEverySelectedProviderReasonAndChoiceSource(t *testing.T) {
 			{
 				Capability: "queue.push/v1", PluginID: "example.smtp",
 				Sources: []providerresolution.ChoiceSource{
-					{Kind: providerresolution.ChoiceSourceDependencyProject, Reference: "private smtp diagnostic", ModulePath: "example.com/smtp", Path: "plystra.yaml", Line: 3, Column: 7},
-					{Kind: providerresolution.ChoiceSourceDependencyProject, Reference: "private shared diagnostic", ModulePath: "example.com/shared", Path: "plystra.yaml", Line: 4, Column: 2},
+					{Kind: providerresolution.ChoiceSourceAdoptedExport, Reference: "private smtp diagnostic", ModulePath: "example.com/smtp", Path: "plystra.yaml", Line: 3, Column: 7},
+					{Kind: providerresolution.ChoiceSourceAdoptedExport, Reference: "private shared diagnostic", ModulePath: "example.com/shared", Path: "plystra.yaml", Line: 4, Column: 2},
 				},
 			},
 		}
@@ -549,7 +549,7 @@ func TestBuildRecordsEverySelectedProviderReasonAndChoiceSource(t *testing.T) {
 		{"audit.write/v1", resolutionevidence.ProviderSelectionCurrentProject, "example.app-audit", 1},
 		{"email.send/v1", resolutionevidence.ProviderSelectionSoleProvider, "example.smtp", 0},
 		{"kernel.health/v1", resolutionevidence.ProviderSelectionIntrinsic, "", 0},
-		{"queue.push/v1", resolutionevidence.ProviderSelectionInherited, "example.smtp", 2},
+		{"queue.push/v1", resolutionevidence.ProviderSelectionAdopted, "example.smtp", 2},
 	}
 	for index, expected := range want {
 		if providers[index].Capability() != expected.capability || providers[index].SelectionReason() != expected.reason || providers[index].PluginID() != expected.plugin || len(providers[index].SelectionSources()) != expected.sources {

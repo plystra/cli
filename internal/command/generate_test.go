@@ -915,7 +915,7 @@ replace github.com/plystra/kernel => %s
 	}
 }
 
-func TestRunGenerateCheckReportsDependencyCompositionDriftWithoutMutation(t *testing.T) {
+func TestRunGenerateCheckIgnoresDependencyTopLevelConfigurationChanges(t *testing.T) {
 	root := t.TempDir()
 	applicationRoot := filepath.Join(root, "application")
 	dependencyRoot := filepath.Join(root, "platform")
@@ -945,29 +945,34 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("ReadFile(go.sum): %v", err)
 	}
 	writeCommandFile(t, filepath.Join(applicationRoot, "go.sum"), string(goSum))
-	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "capabilities:\n  require: []\n")
+	selectedConfiguration := "capabilities:\n  require: []\n"
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), selectedConfiguration)
 	environment := commandGoEnvironment()
 
 	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, applicationRoot, environment)
 	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/composed in "+commandCanonicalPath(t, applicationRoot)+"\n" {
 		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
+	if got := string(readCommandFile(t, applicationRoot, "plystra.yaml")); got != selectedConfiguration {
+		t.Fatalf("initial generate rewrote selected configuration: %q", got)
+	}
 	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities:\n  require: [kernel.info/v1]\n")
 	for _, arguments := range [][]string{{"generate", "--check"}, {"check"}} {
 		before := commandTree(t, applicationRoot)
 		exitCode, stdout, stderr = runCommand(t, arguments, applicationRoot, environment)
-		wantSuffix := "\n\nSource: example.com/acme/composed:plystra.yaml:1:1 (configuration-declaration)\n\n" +
-			"Recovery:\nRun `plystra generate` to restore the selected generated output.\n\n" +
-			"Diagnostic: " + diagnosticcode.ConfigurationCompositionDrift + "\n"
-		if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed plystra.yaml (dependency composition)\n") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
-			t.Fatalf("%v composition check = exit %d, stdout %q, stderr %q", arguments, exitCode, stdout, stderr)
+		wantStdout := "generated output is current for example.com/acme/composed in " + commandCanonicalPath(t, applicationRoot) + "\n"
+		if arguments[0] == "check" {
+			wantStdout = "Project checks passed for example.com/acme/composed in " + commandCanonicalPath(t, applicationRoot) + "\n"
 		}
-		if strings.Contains(stderr, applicationRoot) || strings.Contains(stderr, filepath.ToSlash(applicationRoot)) {
-			t.Fatalf("%v composition check exposed the Project path: %q", arguments, stderr)
+		if exitCode != 0 || stdout != wantStdout || stderr != "" {
+			t.Fatalf("%v after dependency top-level edit = exit %d, stdout %q, stderr %q", arguments, exitCode, stdout, stderr)
 		}
 		if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, before) {
-			t.Fatalf("%v composition check mutated application:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+			t.Fatalf("%v mutated application after dependency top-level edit:\nbefore: %#v\nafter:  %#v", arguments, before, after)
 		}
+	}
+	if got := string(readCommandFile(t, applicationRoot, "plystra.yaml")); got != selectedConfiguration {
+		t.Fatalf("dependency top-level edit rewrote selected configuration: %q", got)
 	}
 }
 
@@ -1032,10 +1037,13 @@ func (*Service) Write(context.Context, writev1.Request) (writev1.Response, error
 	return writev1.Response{}, nil
 }
 `)
-	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), `interfaces:
-  require: [email.send/v1]
-  use:
-    email.send/v1: example.com/platform/smtp.New
+	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), `composition:
+  exports:
+    defaults:
+      interfaces:
+        require: [email.send/v1]
+        use:
+          email.send/v1: example.com/platform/smtp.New
 `)
 
 	goMod := fmt.Sprintf(`module example.com/acme/maintenance
@@ -1076,47 +1084,48 @@ func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
 	return sendv1.Response{}, nil
 }
 `)
-	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "# shared application configuration\n{}\n")
+	initialConfiguration := `# shared application configuration
+composition:
+  adopt:
+    - {module: example.com/platform, export: defaults}
+`
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), initialConfiguration)
 	environment := commandGoEnvironment()
 
 	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, applicationRoot, environment)
 	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/maintenance in "+commandCanonicalPath(t, applicationRoot)+"\n" {
 		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
-	oldRoot := readCommandFile(t, applicationRoot, "plystra.yaml")
-	locallyEdited := bytes.Replace(oldRoot, []byte("example.com/platform/smtp.New"), []byte("example.com/acme/maintenance/local.New"), 1)
-	if bytes.Equal(locallyEdited, oldRoot) {
-		t.Fatalf("initial dependency baseline omitted selected Implementation:\n%s", oldRoot)
+	if got := string(readCommandFile(t, applicationRoot, "plystra.yaml")); got != initialConfiguration {
+		t.Fatalf("initial generate materialized adopted values into selected configuration:\n%s", got)
 	}
-	locallyEdited = bytes.Replace(locallyEdited, []byte("# shared application configuration"), []byte("# shared application configuration\n# explicit local selection"), 1)
-	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), string(locallyEdited))
-	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), `interfaces:
-  require: [audit.write/v1, email.send/v1]
+	locallyEdited := `# shared application configuration
+# explicit local selection
+composition:
+  adopt:
+    - {module: example.com/platform, export: defaults}
+interfaces:
   use:
-    audit.write/v1: example.com/platform/audit.New
-    email.send/v1: example.com/platform/other.New
+    email.send/v1: example.com/acme/maintenance/local.New
+`
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), locallyEdited)
+	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), `composition:
+  exports:
+    defaults:
+      interfaces:
+        require: [audit.write/v1, email.send/v1]
+        use:
+          audit.write/v1: example.com/platform/audit.New
+          email.send/v1: example.com/platform/other.New
 `)
 
 	exitCode, stdout, stderr = runCommand(t, []string{"generate"}, applicationRoot, environment)
 	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/maintenance in "+commandCanonicalPath(t, applicationRoot)+"\n" {
 		t.Fatalf("updated generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
-	maintained := readCommandFile(t, applicationRoot, "plystra.yaml")
-	for _, expected := range [][]byte{
-		[]byte("# shared application configuration"),
-		[]byte("# explicit local selection"),
-		[]byte("audit.write/v1"),
-		[]byte("example.com/platform/audit.New"),
-		[]byte("example.com/acme/maintenance/local.New"),
-	} {
-		if !bytes.Contains(maintained, expected) {
-			t.Fatalf("maintained root omits %q:\n%s", expected, maintained)
-		}
-	}
-	for _, overwritten := range [][]byte{[]byte("example.com/platform/smtp.New"), []byte("example.com/platform/other.New")} {
-		if bytes.Contains(maintained, overwritten) {
-			t.Fatalf("dependency baseline overwrote local selection with %q:\n%s", overwritten, maintained)
-		}
+	maintained := string(readCommandFile(t, applicationRoot, "plystra.yaml"))
+	if maintained != locallyEdited {
+		t.Fatalf("dependency export update rewrote selected configuration:\n%s", maintained)
 	}
 	generatedAssembly := readCommandFile(t, applicationRoot, "generated/go/assembly/interfaces_gen.go")
 	for _, selected := range [][]byte{[]byte("example.com/platform/audit.New"), []byte("example.com/acme/maintenance/local.New")} {
@@ -1379,10 +1388,8 @@ interfaces:
 		t.Fatalf("replacement generation changed root configuration:\n%s", got)
 	}
 	selected := readCommandFile(t, applicationRoot, "deploy/customer.yaml")
-	for _, required := range [][]byte{[]byte("# complete customer configuration"), []byte("kernel.health/v1"), []byte("kernel.info/v1")} {
-		if !bytes.Contains(selected, required) {
-			t.Fatalf("maintained selected configuration omits %q:\n%s", required, selected)
-		}
+	if string(selected) != selectedConfiguration {
+		t.Fatalf("replacement generation rewrote selected configuration:\n%s", selected)
 	}
 	provenance, err := applicationgen.DecodeManifestProvenance(readCommandFile(t, applicationRoot, "generated/manifest.json"))
 	if err != nil {
@@ -1489,24 +1496,21 @@ interfaces:
 	}
 
 	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "interfaces: {require: [kernel.info/v1]}\n")
-	beforeCompositionCheck := commandTree(t, applicationRoot)
+	beforeDependencyCheck := commandTree(t, applicationRoot)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--config", "deploy/customer.yaml"}, nestedStart, environment)
-	wantCompositionSuffix := "\n\nSource: example.com/acme/config-select:deploy/customer.yaml:1:1 (configuration-declaration)\n\n" +
-		"Recovery:\nRun `plystra generate --config \"deploy/customer.yaml\"` to restore the selected generated output.\n\n" +
-		"Diagnostic: " + diagnosticcode.ConfigurationCompositionDrift + "\n"
-	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, "Project configuration or generated output is not current:\n  changed deploy/customer.yaml (dependency composition)\n") || !strings.HasSuffix(stderr, wantCompositionSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 || strings.Contains(stderr, applicationRoot) || strings.Contains(stderr, filepath.ToSlash(applicationRoot)) {
-		t.Fatalf("selected-path composition drift = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/config-select in "+commandCanonicalPath(t, applicationRoot)+"\n" {
+		t.Fatalf("replacement check after dependency top-level edit = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
-	if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, beforeCompositionCheck) {
-		t.Fatal("selected-path drift check mutated the Project")
+	if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, beforeDependencyCheck) {
+		t.Fatal("replacement check after dependency top-level edit mutated the Project")
 	}
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--config", "deploy/customer.yaml"}, nestedStart, environment)
-	if exitCode != 0 || stderr != "" {
-		t.Fatalf("repair selected composition = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	if exitCode != 0 || stderr != "" || stdout != "generated example.com/acme/config-select in "+commandCanonicalPath(t, applicationRoot)+"\n" {
+		t.Fatalf("replacement generate after dependency top-level edit = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	selected = readCommandFile(t, applicationRoot, "deploy/customer.yaml")
-	if bytes.Contains(selected, []byte("kernel.health/v1")) || !bytes.Contains(selected, []byte("kernel.info/v1")) {
-		t.Fatalf("selected composition was not updated independently:\n%s", selected)
+	if string(selected) != selectedConfiguration {
+		t.Fatalf("dependency top-level edit rewrote replacement configuration:\n%s", selected)
 	}
 	if got := string(readCommandFile(t, applicationRoot, "plystra.yaml")); got != rootConfiguration {
 		t.Fatalf("selected composition repair changed root configuration:\n%s", got)

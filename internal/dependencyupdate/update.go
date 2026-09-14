@@ -58,9 +58,10 @@ func (r Result) Module() modulelocate.Module { return r.module }
 func (r Result) Query() string { return r.query }
 
 // Update resolves one already-selected ordinary Go Module query with go get,
-// recomposes root dependency configuration, regenerates, tidies, validates,
-// and commits only when the complete Project is consistent. It updates exactly
-// one selected module rather than implicitly upgrading the complete graph.
+// recomputes visible named exports and explicit adoptions, regenerates, tidies,
+// validates, and commits only when the complete Project is consistent. It
+// updates exactly one selected module rather than implicitly upgrading the
+// complete graph.
 func Update(ctx context.Context, options Options) (Result, error) {
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: context is nil", ErrUpdate)

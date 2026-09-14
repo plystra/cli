@@ -168,7 +168,7 @@ func (r Result) Module() modulelocate.Module { return r.module }
 func (r Result) Manifest() applicationmeta.Manifest { return r.composition.Manifest() }
 
 // CurrentManifest returns the normalized selected current-project layer before
-// dependency composition. Environment mode includes root plus its overlay.
+// adopted-export composition. Environment mode includes root plus its overlay.
 func (r Result) CurrentManifest() applicationmeta.Manifest { return r.currentManifest }
 
 // Composition returns dependency baseline provenance and the effective
@@ -261,17 +261,21 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrResolve, err)
 	}
-	rootSnapshot, rootManifest, err := loadProjectManifest(module.ModulePath(), module.Path())
+	rootSnapshot, err := loadProjectManifestSnapshot(module.ModulePath(), module.Path())
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	selector, err := resolveConfigurationSelector(module.Path(), options.ConfigurationPath, options.EnvironmentName, options.Environment)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrConfigurationSelection, err)
+	}
+	rootManifest, err := parseProjectManifestSnapshot(module.ModulePath(), rootSnapshot, selector.mode == configurationModeExplicit)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	rootManifest, err = applicationmeta.WithProjectModule(rootManifest, module.ModulePath())
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: associate root configuration with Project module: %w", ErrResolve, err)
-	}
-	selector, err := resolveConfigurationSelector(module.Path(), options.ConfigurationPath, options.EnvironmentName, options.Environment)
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrConfigurationSelection, err)
 	}
 	configurationSnapshot := rootSnapshot
 	selectedManifest := rootManifest
@@ -329,20 +333,19 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		}
 		return implementation.Configuration()
 	}
-	previousBaseline, previousProvenance, err := loadGeneratedDependencyBaseline(module.Path(), selector)
+	_, previousProvenance, err := loadGeneratedDependencyBaseline(module.Path(), selector)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, generatedManifestSourceError(module.ModulePath(), err))
 	}
-	previousLocalPaths, _ := previousProvenance.CurrentProjectPathsForSelection(selector.mode, selector.path)
 	maintenanceSnapshot := configurationSnapshot
 	if selector.mode == configurationModeEnvironment {
 		maintenanceSnapshot = rootSnapshot
 	}
 	var maintenance applicationmeta.ConfigurationMaintenance
 	if selector.mode == configurationModeEnvironment {
-		maintenance, err = applicationmeta.MaintainDependencyConfigurationSourceWithOverlay(maintenanceSnapshot.data, module.ModulePath(), maintenanceSnapshot.path, selectedManifest, previousBaseline, previousLocalPaths, dependencyManifests, schemaLookup)
+		maintenance, err = applicationmeta.MaintainDependencyConfigurationSourceWithOverlay(maintenanceSnapshot.data, module.ModulePath(), maintenanceSnapshot.path, selectedManifest, applicationmeta.DependencyBaseline{}, nil, nil, schemaLookup)
 	} else {
-		maintenance, err = applicationmeta.MaintainDependencyConfigurationSource(maintenanceSnapshot.data, module.ModulePath(), maintenanceSnapshot.path, previousBaseline, previousLocalPaths, dependencyManifests, schemaLookup)
+		maintenance, err = applicationmeta.MaintainDependencyConfigurationSource(maintenanceSnapshot.data, module.ModulePath(), maintenanceSnapshot.path, applicationmeta.DependencyBaseline{}, nil, nil, schemaLookup)
 	}
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
@@ -362,7 +365,15 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 			return Result{}, fmt.Errorf("%w: environment %q: %w", ErrResolve, selector.environment, err)
 		}
 	}
-	composition, err := applicationmeta.Compose(dependencyManifests, currentManifest, schemaLookup)
+	exportInventory := rootManifest
+	if maintenanceSnapshot.path == applicationManifestName {
+		exportInventory = maintainedManifest
+	}
+	adoptedExports, err := applicationmeta.ResolveAdoptedExports(module.ModulePath(), exportInventory, currentManifest, dependencyManifests)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	composition, err := applicationmeta.Compose(adoptedExports, currentManifest, schemaLookup)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}

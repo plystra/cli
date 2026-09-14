@@ -62,7 +62,7 @@ func (p InterfacePolicy) Timeout() time.Duration { return p.timeout }
 func (p InterfacePolicy) Source() string { return p.source }
 
 // interfaceRemoval is one typed null or sparse-set tombstone retained until
-// schema-aware overlay or dependency composition applies it.
+// schema-aware overlay or adopted-export composition applies it.
 type interfaceRemoval struct {
 	id     interfaceid.Identifier
 	source string

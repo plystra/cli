@@ -7,6 +7,24 @@ import (
 	generation "github.com/plystra/cli/generation/v1"
 )
 
+func TestValidConfigurationFieldPathAcceptsCompositionEvidence(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]bool{
+		`composition.exports["defaults"]`:                         true,
+		`composition.adopt["example.com/acme/platform#defaults"]`: true,
+		`composition.exports["Bad"]`:                              false,
+		`composition.adopt["../platform#defaults"]`:               false,
+		`composition.adopt["example.com/acme/platform#Bad"]`:      false,
+		`composition.adopt["example.com/acme/platform"]`:          false,
+	}
+	for path, want := range tests {
+		if got := validConfigurationFieldPath(path); got != want {
+			t.Errorf("validConfigurationFieldPath(%q) = %t, want %t", path, got, want)
+		}
+	}
+}
+
 func TestValidateConfigurationSelectionRejectsMalformedProvenance(t *testing.T) {
 	t.Parallel()
 
@@ -113,7 +131,7 @@ func TestValidateConfigurationFieldsRejectsMalformedEvidence(t *testing.T) {
 	t.Run("contributor order", func(t *testing.T) {
 		field := internalValidConfigurationField()
 		dependency := ConfigurationContribution{
-			owner:      ConfigurationOwnerDependency,
+			owner:      ConfigurationOwnerAdopted,
 			precedence: 1,
 			digest:     internalConfigurationDigest("2"),
 			summary:    "redacted",
@@ -134,11 +152,11 @@ func TestValidateConfigurationFieldsRejectsMalformedEvidence(t *testing.T) {
 	t.Run("source order", func(t *testing.T) {
 		field := internalValidConfigurationField()
 		field.path = `config["acme.smtp"]["host"]`
-		field.owner = ConfigurationOwnerDependency
+		field.owner = ConfigurationOwnerAdopted
 		field.digest = internalConfigurationDigest("2")
 		field.summary = "redacted"
 		field.contributors = []ConfigurationContribution{{
-			owner:      ConfigurationOwnerDependency,
+			owner:      ConfigurationOwnerAdopted,
 			precedence: 1,
 			digest:     field.digest,
 			summary:    field.summary,

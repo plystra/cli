@@ -26,7 +26,7 @@ rejected immediately.
 An effective choice for an intrinsic kernel.* Interface emits
 PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION with every contributing
 implementation-selection Source. Set that interfaces.use entry to null in the
-selected current-Project document to remove either a local or inherited choice.
+selected current-Project document to remove either a local or adopted-export choice.
 
 PLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit
 selector is present; setting both is an error. Explicit --env or --config

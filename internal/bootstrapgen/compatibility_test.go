@@ -14,6 +14,10 @@ func TestApplicationModelCompatibilityIsDeterministicAndSecretFree(t *testing.T)
 	t.Parallel()
 
 	first := compatibilityManifest(t, `
+composition:
+  adopt:
+    - {module: example.com/zeta, export: defaults}
+    - {module: example.com/alpha, export: runtime}
 http:
   address: ":8080"
   cors:
@@ -31,6 +35,10 @@ config:
     token: {env: PRIVATE_TOKEN_ONE}
 `)
 	second := compatibilityManifest(t, `
+composition:
+  adopt:
+    - {export: runtime, module: example.com/alpha}
+    - {export: defaults, module: example.com/zeta}
 config:
   example.com/acme/records.New:
     token: {env: PRIVATE_TOKEN_TWO}
@@ -62,7 +70,8 @@ http:
 	canonical := string(left.CanonicalJSON())
 	for _, required := range []string{
 		`"application_model_digest":"` + digest + `"`,
-		`"version":2`,
+		`"version":3`,
+		`"export_adoptions":[{"export":"runtime","module":"example.com/alpha"},{"export":"defaults","module":"example.com/zeta"}]`,
 		`"http_exposures":[{"interface":"records.read/v1","transport":"connect"}]`,
 		`"interface_requirements":["records.read/v1"]`,
 		`"interface":"records.read/v1"`,
@@ -110,6 +119,7 @@ func TestApplicationModelCompatibilityChangesForEveryBuildAffectingDeclaration(t
 		yaml string
 	}{
 		{name: "CORS", yaml: "http: {cors: {allowed_origins: [https://app.example]}}\n"},
+		{name: "export adoption", yaml: "composition: {adopt: [{module: example.com/platform, export: defaults}]}\n"},
 		{name: "exposure", yaml: "http: {expose: {kernel.health/v1: {transport: connect}}}\n"},
 		{name: "Interface requirement", yaml: "interfaces: {require: [records.read/v1]}\n"},
 		{name: "Implementation choice", yaml: "interfaces: {use: {records.read/v1: example.com/acme/records.New}}\n"},

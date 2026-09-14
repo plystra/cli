@@ -61,19 +61,6 @@ func inspectConfigurationGraph(evidence resolutionevidence.Evidence) (diagnostic
 
 	edges := make(inspectGraphEdges)
 	edges.add("selects-configuration", currentModuleNode, selectionNode, string(selection.Mode()), []diagnosticjson.Source{selectionSource})
-	for _, module := range modules {
-		if module.Role() != resolutionevidence.ModuleRoleDependency {
-			continue
-		}
-		edges.add(
-			"composes-configuration",
-			inspectGraphNodeID("module", module.Path()),
-			selectionNode,
-			"dependency-baseline",
-			[]diagnosticjson.Source{explainSource(module.Source())},
-		)
-	}
-
 	fields := evidence.ConfigurationFields()
 	fieldNodes := make(map[string]string, len(fields))
 	for _, field := range fields {
@@ -101,6 +88,9 @@ func inspectConfigurationGraph(evidence resolutionevidence.Evidence) (diagnostic
 				return diagnosticschema.GraphResult{}, fmt.Errorf("configuration field %s: %w", field.Path(), err)
 			}
 			for moduleNode, sources := range groups {
+				if contribution.Owner() == resolutionevidence.ConfigurationOwnerAdopted {
+					edges.add("composes-configuration", moduleNode, selectionNode, string(resolutionevidence.ConfigurationOwnerAdopted), sources)
+				}
 				edges.add("contributes-configuration", moduleNode, fieldNode, string(contribution.Owner()), sources)
 				if !contribution.Effective() {
 					continue
@@ -157,11 +147,11 @@ func configurationGraphSourceGroups(sources []resolutionevidence.Source, moduleN
 func configurationGraphSelectionLabel(selection resolutionevidence.ConfigurationSelection) string {
 	switch selection.Mode() {
 	case generation.ConfigurationModeDefault:
-		return fmt.Sprintf("default: %s over dependency composition", selection.SelectedPath())
+		return fmt.Sprintf("default: %s", selection.SelectedPath())
 	case generation.ConfigurationModeEnvironment:
-		return fmt.Sprintf("environment %q: %s over %s and dependency composition", selection.Environment(), selection.SelectedPath(), selection.RootPath())
+		return fmt.Sprintf("environment %q: %s over %s", selection.Environment(), selection.SelectedPath(), selection.RootPath())
 	case generation.ConfigurationModeExplicit:
-		return fmt.Sprintf("explicit-config: %s over dependency composition; %s is Project marker only", selection.SelectedPath(), selection.RootPath())
+		return fmt.Sprintf("explicit-config: %s; %s is Project marker and export inventory only", selection.SelectedPath(), selection.RootPath())
 	default:
 		return string(selection.Mode())
 	}

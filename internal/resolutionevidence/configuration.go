@@ -15,6 +15,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/modulepath"
 )
 
 type configurationCandidate struct {
@@ -71,7 +72,7 @@ func configurationEvidenceFromInput(input *ConfigurationInput, context generatio
 			path:       record.Path,
 			digest:     record.Digest,
 			removed:    record.Removed,
-			owner:      ConfigurationOwnerDependency,
+			owner:      ConfigurationOwnerAdopted,
 			precedence: 1,
 			summary:    "redacted",
 		}
@@ -79,7 +80,7 @@ func configurationEvidenceFromInput(input *ConfigurationInput, context generatio
 			candidate.summary = string(applicationmeta.ConfigurationSummaryRemoval)
 		}
 		for _, raw := range record.Sources {
-			source, err := configurationSource(raw, ConfigurationOwnerDependency, record.Removed, modules)
+			source, err := configurationSource(raw, ConfigurationOwnerAdopted, record.Removed, modules)
 			if err != nil {
 				return nil, fmt.Errorf("dependency field %s: %w", record.Path, err)
 			}
@@ -127,7 +128,7 @@ func configurationEvidenceFromInput(input *ConfigurationInput, context generatio
 func validateConfigurationLayers(mode generation.ConfigurationMode, layers []ConfigurationLayerInput) error {
 	counts := map[ConfigurationOwner]int{}
 	for _, layer := range layers {
-		if layer.Owner == ConfigurationOwnerDependency || configurationLayerPrecedence(layer.Owner) == 0 {
+		if layer.Owner == ConfigurationOwnerAdopted || configurationLayerPrecedence(layer.Owner) == 0 {
 			return fmt.Errorf("configuration layer %q is invalid", layer.Owner)
 		}
 		counts[layer.Owner]++
@@ -153,7 +154,7 @@ func validateConfigurationLayers(mode generation.ConfigurationMode, layers []Con
 
 func configurationLayerPrecedence(owner ConfigurationOwner) int {
 	switch owner {
-	case ConfigurationOwnerDependency:
+	case ConfigurationOwnerAdopted:
 		return 1
 	case ConfigurationOwnerRoot, ConfigurationOwnerExplicit:
 		return 2
@@ -180,8 +181,8 @@ func validateConfigurationCandidate(candidate configurationCandidate) error {
 	if candidate.removed != (candidate.summary == string(applicationmeta.ConfigurationSummaryRemoval)) {
 		return fmt.Errorf("configuration path %s has inconsistent removal evidence", candidate.path)
 	}
-	if candidate.owner == ConfigurationOwnerDependency && !configurationPathDependencyComposable(candidate.path) {
-		return fmt.Errorf("configuration path %s cannot be inherited from a dependency Project", candidate.path)
+	if candidate.owner == ConfigurationOwnerAdopted && !configurationPathDependencyComposable(candidate.path) {
+		return fmt.Errorf("configuration path %s cannot be contributed by an adopted export", candidate.path)
 	}
 	if len(candidate.sources) == 0 {
 		return fmt.Errorf("configuration path %s has no source provenance", candidate.path)
@@ -389,10 +390,10 @@ func configurationSource(raw string, owner ConfigurationOwner, removed bool, mod
 	}
 	document := raw
 	module := ""
-	if owner == ConfigurationOwnerDependency {
+	if owner == ConfigurationOwnerAdopted {
 		identities := make([]struct{ identity, module string }, 0, len(modules))
 		for _, candidate := range modules {
-			if candidate.role != ModuleRoleDependency {
+			if candidate.role != ModuleRoleCurrent && candidate.role != ModuleRoleDependency {
 				continue
 			}
 			version := candidate.selectedVersion
@@ -413,7 +414,7 @@ func configurationSource(raw string, owner ConfigurationOwner, removed bool, mod
 			}
 		}
 		if !matched {
-			return Source{}, fmt.Errorf("dependency source %q does not identify a participating module", raw)
+			return Source{}, fmt.Errorf("adopted-export source %q does not identify a participating module", raw)
 		}
 	} else {
 		for _, candidate := range modules {
@@ -455,6 +456,15 @@ func validConfigurationFieldPath(value string) bool {
 	switch value {
 	case "http.address", "http.cors", "http.cors.allowed_origins", "http.cors.allow_credentials", "timeouts.startup":
 		return true
+	}
+	if keys, ok := configurationPathKeys(value, "composition.exports"); ok && len(keys) == 1 {
+		return applicationmeta.CheckExportName(keys[0]) == nil
+	}
+	if keys, ok := configurationPathKeys(value, "composition.adopt"); ok && len(keys) == 1 {
+		separator := strings.LastIndexByte(keys[0], '#')
+		return separator > 0 &&
+			modulepath.CheckProject(keys[0][:separator]) == nil &&
+			applicationmeta.CheckExportName(keys[0][separator+1:]) == nil
 	}
 	if keys, ok := configurationPathKeys(value, "http.expose"); ok && len(keys) == 1 {
 		_, err := interfaceid.Parse(keys[0])
@@ -575,7 +585,7 @@ func validateConfigurationFields(fields []ConfigurationField, modules []Module, 
 			if contribution.removed != (contribution.summary == string(applicationmeta.ConfigurationSummaryRemoval)) {
 				return fmt.Errorf("configuration field %s has inconsistent contribution removal evidence", field.path)
 			}
-			if contribution.owner == ConfigurationOwnerDependency && !configurationPathDependencyComposable(field.path) {
+			if contribution.owner == ConfigurationOwnerAdopted && !configurationPathDependencyComposable(field.path) {
 				return fmt.Errorf("configuration field %s has a dependency-owned process setting", field.path)
 			}
 			if !configurationOwnerAllowed(contribution.owner, selection, hasSelection) {
@@ -666,7 +676,7 @@ func configurationOwnerAllowed(owner ConfigurationOwner, selection Configuration
 		return false
 	}
 	switch owner {
-	case ConfigurationOwnerDependency:
+	case ConfigurationOwnerAdopted:
 		return true
 	case ConfigurationOwnerRoot:
 		return selection.mode == generation.ConfigurationModeDefault || selection.mode == generation.ConfigurationModeEnvironment
@@ -692,9 +702,9 @@ func validateConfigurationSource(source Source, owner ConfigurationOwner, remove
 	var expectedPath string
 	expectedRole := ModuleRoleCurrent
 	switch owner {
-	case ConfigurationOwnerDependency:
+	case ConfigurationOwnerAdopted:
 		expectedPath = "plystra.yaml"
-		expectedRole = ModuleRoleDependency
+		expectedRole = ""
 	case ConfigurationOwnerRoot:
 		expectedPath = selection.rootPath
 	case ConfigurationOwnerEnvironment, ConfigurationOwnerExplicit:
@@ -706,7 +716,11 @@ func validateConfigurationSource(source Source, owner ConfigurationOwner, remove
 		return fmt.Errorf("path %q does not match owner %q", source.path, owner)
 	}
 	for _, module := range modules {
-		if module.role == expectedRole && module.source.module == source.module {
+		roleMatches := module.role == expectedRole
+		if owner == ConfigurationOwnerAdopted {
+			roleMatches = module.role == ModuleRoleCurrent || module.role == ModuleRoleDependency
+		}
+		if roleMatches && module.source.module == source.module {
 			return nil
 		}
 	}

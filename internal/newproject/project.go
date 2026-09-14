@@ -64,6 +64,9 @@ var (
 	// ErrInvalidTemplateQuery reports a malformed Go Module query supplied to
 	// the Project creation command.
 	ErrInvalidTemplateQuery = errors.New("invalid Plystra project template query")
+	// ErrInvalidTemplateExport reports an invalid creation-time reusable
+	// configuration export adoption.
+	ErrInvalidTemplateExport = errors.New("invalid Plystra project template export adoption")
 	// ErrInvalidPluginName reports a malformed or reserved initial Plugin name.
 	ErrInvalidPluginName = errors.New("invalid initial Plystra plugin name")
 	// ErrInvalidPluginID reports inputs that cannot derive a canonical initial
@@ -80,13 +83,14 @@ var (
 
 // Options contains the explicit inputs and process environment for creation.
 type Options struct {
-	Parent      string
-	ProjectName string
-	ModulePath  string
-	Template    string
-	Plugin      string
-	Git         bool
-	GitHubCI    bool
+	Parent       string
+	ProjectName  string
+	ModulePath   string
+	Template     string
+	AdoptExports []string
+	Plugin       string
+	Git          bool
+	GitHubCI     bool
 	// NoAgentGuidance explicitly opts out of the default installed-release
 	// guidance projection.
 	NoAgentGuidance bool
@@ -130,6 +134,10 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		if err != nil {
 			return Result{}, fmt.Errorf("%w: %w: %v", ErrCreate, ErrInvalidTemplateQuery, err)
 		}
+	}
+	adoptExports, err := normalizeTemplateExportAdoptions(options.Template, options.AdoptExports)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrCreate, err)
 	}
 	if options.Plugin != "" {
 		if _, err := plugincreate.DeriveID(modulePath, options.Plugin); err != nil {
@@ -192,7 +200,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 			return err
 		}
 		if templateQuery != "" {
-			if err := installTemplateDependency(ctx, stagingRoot, templateQuery, templateModulePath, goCommand, options.NPMCommand, environment); err != nil {
+			if err := installTemplateDependency(ctx, stagingRoot, templateQuery, templateModulePath, adoptExports, goCommand, options.NPMCommand, environment); err != nil {
 				return err
 			}
 		}
@@ -215,7 +223,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	return Result{modulePath: modulePath, path: target}, nil
 }
 
-func installTemplateDependency(ctx context.Context, root, query, modulePath, goCommand, npmCommand string, environment []string) error {
+func installTemplateDependency(ctx context.Context, root, query, modulePath string, adoptExports []string, goCommand, npmCommand string, environment []string) error {
 	return modulemutation.Change(ctx, root, modulemutation.ChangeOptions{
 		GoCommand:          goCommand,
 		Environment:        environment,
@@ -247,6 +255,9 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 			return err
 		}
 		if err := rejectRelativeTemplateReplacements(query, dependencies); err != nil {
+			return err
+		}
+		if err := installTemplateExportAdoptions(root, query, template, adoptExports); err != nil {
 			return err
 		}
 		if _, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
@@ -338,6 +349,66 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 		}
 		return nil
 	})
+}
+
+func normalizeTemplateExportAdoptions(template string, values []string) ([]string, error) {
+	if len(values) != 0 && template == "" {
+		return nil, fmt.Errorf("%w: --adopt-export requires --template", ErrInvalidTemplateExport)
+	}
+	names := append([]string(nil), values...)
+	sort.Strings(names)
+	for index, name := range names {
+		if err := applicationmeta.CheckExportName(name); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidTemplateExport, err)
+		}
+		if index > 0 && names[index-1] == name {
+			return nil, fmt.Errorf("%w: export name %q is repeated", ErrInvalidTemplateExport, name)
+		}
+	}
+	return names, nil
+}
+
+func installTemplateExportAdoptions(root, query string, template moduledependency.Module, names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	templatePath := filepath.Join(template.Root(), "plystra.yaml")
+	templateData, err := os.ReadFile(templatePath)
+	if err != nil {
+		return fmt.Errorf("%w: read template %q export inventory: %v", ErrInvalidTemplate, query, err)
+	}
+	inventory, err := applicationmeta.ParseExportInventorySource("plystra.yaml", templateData)
+	if err != nil {
+		return fmt.Errorf("%w: template %q export inventory is invalid: %w", ErrInvalidTemplate, query, err)
+	}
+	available := make(map[string]struct{}, len(inventory.Exports()))
+	for _, export := range inventory.Exports() {
+		available[export.Name()] = struct{}{}
+	}
+	for _, name := range names {
+		if _, exists := available[name]; !exists {
+			return fmt.Errorf("%w: %w: template %q does not declare composition.exports[%q]; correction: choose an export declared by that exact template module version or publish a corrected template", ErrInvalidTemplate, ErrInvalidTemplateExport, query, name)
+		}
+	}
+	rootPath := filepath.Join(root, "plystra.yaml")
+	rootData, err := os.ReadFile(rootPath)
+	if err != nil {
+		return fmt.Errorf("%w: read staged root configuration: %v", ErrInvalidTemplate, err)
+	}
+	updated, err := applicationmeta.SetExportAdoptions(rootData, template.Path(), names)
+	if err != nil {
+		return fmt.Errorf("%w: record template export adoptions: %w", ErrInvalidTemplate, err)
+	}
+	info, err := os.Lstat(rootPath)
+	if err != nil {
+		return fmt.Errorf("%w: inspect staged root configuration: %v", ErrInvalidTemplate, err)
+	}
+	return atomicfs.WriteFiles(root, []atomicfs.Write{{
+		Path:         "plystra.yaml",
+		Data:         updated,
+		Mode:         info.Mode().Perm(),
+		ExpectedData: rootData,
+	}}, func(string) error { return nil })
 }
 
 const generatedJavaScriptSDKPath = "generated/sdk/javascript"
@@ -465,7 +536,7 @@ func removeJavaScriptValidationOutput(sdkRoot string) error {
 func templateGenerationDrift(configurationChanged bool, maintenancePath string, report generatedfiles.Report) []string {
 	details := make([]string, 0, len(report.Changes())+1)
 	if configurationChanged {
-		details = append(details, fmt.Sprintf("changed %s (dependency composition)", maintenancePath))
+		details = append(details, fmt.Sprintf("changed %s (configuration composition)", maintenancePath))
 	}
 	for _, change := range report.Changes() {
 		details = append(details, fmt.Sprintf("%s %s", change.Kind(), change.Path()))

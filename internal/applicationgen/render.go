@@ -157,7 +157,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: transport configuration provenance: %v", ErrRender, ErrResolution, err)
 	}
-	modelCompatibility, err := bootstrapgen.NewExecutableApplicationModelCompatibility(modelDigest, options.Composition.Manifest(), executableInterfaceChoices)
+	modelCompatibility, err := bootstrapgen.NewExecutableApplicationModelCompatibility(modelDigest, options.Composition.CurrentManifest(), executableInterfaceChoices)
 	if err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: runtime application-model compatibility: %v", ErrRender, ErrResolution, err)
 	}

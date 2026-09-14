@@ -66,10 +66,15 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, app
 	if err := rejectAliasChains(aliases); err != nil {
 		return Manifest{}, fmt.Errorf("%w: %w", ErrApplyOverlay, err)
 	}
+	exportAdoptions, removedExportAdoptions := overlayExportAdoptions(base, overlay)
 
 	return Manifest{
 		modulePath:                   projectModule,
 		source:                       base.source,
+		exports:                      append([]ConfigurationExport(nil), base.exports...),
+		exportAdoptions:              exportAdoptions,
+		removedExportAdoptions:       removedExportAdoptions,
+		adoptionMode:                 adoptionSetComplete,
 		httpAddress:                  httpAddress,
 		hasHTTPAddress:               hasHTTPAddress,
 		removeHTTPAddress:            removeHTTPAddress,
@@ -94,6 +99,44 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, app
 		hasStartupTimeout:            hasStartupTimeout,
 		removeStartupTimeout:         removeStartupTimeout,
 	}, nil
+}
+
+func overlayExportAdoptions(base, overlay Manifest) ([]ExportAdoption, []ExportAdoption) {
+	if overlay.adoptionMode == adoptionSetAbsent {
+		return append([]ExportAdoption(nil), base.exportAdoptions...), append([]ExportAdoption(nil), base.removedExportAdoptions...)
+	}
+	if overlay.adoptionMode == adoptionSetComplete {
+		return append([]ExportAdoption(nil), overlay.exportAdoptions...), nil
+	}
+	values := make(map[string]ExportAdoption, len(base.exportAdoptions)+len(overlay.exportAdoptions))
+	removals := make(map[string]ExportAdoption, len(base.removedExportAdoptions)+len(overlay.removedExportAdoptions))
+	for _, adoption := range base.exportAdoptions {
+		values[exportAdoptionKey(adoption)] = adoption
+	}
+	for _, removal := range base.removedExportAdoptions {
+		removals[exportAdoptionKey(removal)] = removal
+	}
+	for _, adoption := range overlay.exportAdoptions {
+		key := exportAdoptionKey(adoption)
+		values[key] = adoption
+		delete(removals, key)
+	}
+	for _, removal := range overlay.removedExportAdoptions {
+		key := exportAdoptionKey(removal)
+		delete(values, key)
+		removals[key] = removal
+	}
+	adoptions := make([]ExportAdoption, 0, len(values))
+	for _, adoption := range values {
+		adoptions = append(adoptions, adoption)
+	}
+	removed := make([]ExportAdoption, 0, len(removals))
+	for _, removal := range removals {
+		removed = append(removed, removal)
+	}
+	sortExportAdoptions(adoptions)
+	sortExportAdoptions(removed)
+	return adoptions, removed
 }
 
 func overlayHTTPCORS(base, overlay httpCORSLayer) (httpCORSLayer, error) {

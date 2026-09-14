@@ -429,12 +429,15 @@ func TestCreateFromTemplateDependencyResolvesComposesAndPreservesSources(t *test
   expose:
     kernel.health/v1:
       transport: connect
-interfaces:
-  require:
-    - email.send/v1
-    - kernel.info/v1
-  use:
-    email.send/v1: example.com/acme/platform/mailer.New
+composition:
+  exports:
+    defaults:
+      interfaces:
+        require:
+          - email.send/v1
+          - kernel.info/v1
+        use:
+          email.send/v1: example.com/acme/platform/mailer.New
 `),
 		"plystra.production.yaml": []byte("interfaces:\n  require:\n    - missing.overlay/v1\n"),
 		"interfaces/email/send/v1/interface.go": []byte(`package sendv1
@@ -487,6 +490,7 @@ var _ sendv1.Interface = (*Service)(nil)
 		"new", "my-app",
 		"--module", "example.com/acme/my-app",
 		"--template", templateQuery,
+		"--adopt-export", "defaults",
 	}
 	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 0 {
 		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
@@ -516,13 +520,15 @@ var _ sendv1.Interface = (*Service)(nil)
 	if transports := model.HTTPTransports(); transports != (applicationmeta.HTTPTransports{}) {
 		t.Fatalf("composed HTTP transports = %#v, want no transport without exposure", transports)
 	}
-	requirements := model.InterfaceRequirements()
-	if len(requirements) != 2 || requirements[0].ID().String() != "email.send/v1" || requirements[1].ID().String() != "kernel.info/v1" {
-		t.Fatalf("composed requirements = %#v, want email.send/v1 and kernel.info/v1", requirements)
+	if requirements := model.InterfaceRequirements(); len(requirements) != 0 {
+		t.Fatalf("template requirements were copied into current-project declarations = %#v", requirements)
 	}
-	choices := model.ImplementationChoices()
-	if len(choices) != 1 || choices[0].InterfaceID().String() != "email.send/v1" || choices[0].Constructor().String() != "example.com/acme/platform/mailer.New" {
-		t.Fatalf("composed Implementation choices = %#v, want email.send/v1 -> example.com/acme/platform/mailer.New", choices)
+	if choices := model.ImplementationChoices(); len(choices) != 0 {
+		t.Fatalf("template Implementation choices were copied into current-project declarations = %#v", choices)
+	}
+	adoptions := model.ExportAdoptions()
+	if len(adoptions) != 1 || adoptions[0].ModulePath() != templatePath || adoptions[0].ExportName() != "defaults" {
+		t.Fatalf("resolved template export adoptions = %#v", adoptions)
 	}
 	if bytes.Contains(configuration, []byte("missing.overlay/v1")) {
 		t.Fatalf("dependency environment overlay was inherited:\n%s", configuration)
@@ -533,7 +539,7 @@ var _ sendv1.Interface = (*Service)(nil)
 		}
 	}
 	manifest, err := os.ReadFile(filepath.Join(target, "generated", "manifest.json"))
-	if err != nil || !bytes.Contains(manifest, []byte(templatePath)) {
+	if err != nil || !bytes.Contains(manifest, []byte(templatePath)) || !bytes.Contains(manifest, []byte("email.send/v1")) || !bytes.Contains(manifest, []byte("example.com/acme/platform/mailer.New")) {
 		t.Fatalf("generated manifest template provenance = %q, %v", manifest, err)
 	}
 	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
@@ -632,7 +638,7 @@ func TestCreateRejectsTemplateWithoutRootProjectMarkerAndRollsBack(t *testing.T)
 	assertNoTransactionFiles(t, parent)
 }
 
-func TestPublicCommandRejectsTemplateWithAmbiguousDefaultProvidersAndRollsBack(t *testing.T) {
+func TestPublicCommandIgnoresAmbiguousTemplateTopLevelProviderModel(t *testing.T) {
 	proxy := createKernelProxy(t)
 	const templatePath = "example.com/acme/ambiguous-platform"
 	const templateVersion = "v1.0.0"
@@ -657,30 +663,30 @@ func TestPublicCommandRejectsTemplateWithAmbiguousDefaultProvidersAndRollsBack(t
 		"--no-agent-guidance",
 	}
 
-	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 1 {
+	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 0 {
 		t.Fatalf("RunIn exit code = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
 	}
-	if stdout.Len() != 0 {
-		t.Fatalf("RunIn stdout = %q, want empty output", stdout.String())
-	}
-	for _, detail := range []string{
-		"invalid Plystra Project template",
+	target := filepath.Join(parent, "my-app")
+	wantOutput := fmt.Sprintf(
+		"Created my-app from %s\nConfiguration scaffolded\nGenerated, checked, built, and locally verified\n\nNext:\n  cd my-app\n  plystra check\n",
 		templateQuery,
-		"cannot qualify because its default Provider model is ambiguous",
-		"ambiguous canonical Capability provider",
-		"email.send/v1",
-		"acme.platform.memory",
-		"acme.platform.smtp",
-		"template publisher must add the listed capabilities.use choices to its root plystra.yaml",
-	} {
-		if !strings.Contains(stderr.String(), detail) {
-			t.Fatalf("RunIn stderr omits %q: %s", detail, stderr.String())
-		}
+	)
+	if stdout.String() != wantOutput || stderr.Len() != 0 {
+		t.Fatalf("RunIn output = stdout %q, stderr %q", stdout.String(), stderr.String())
 	}
-	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("target exists after ambiguous template failure: %v", err)
+	assertDirectRequirement(t, target, templatePath, templateVersion)
+	configuration, err := os.ReadFile(filepath.Join(target, "plystra.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile(plystra.yaml): %v", err)
 	}
-	assertNoTransactionFiles(t, parent)
+	manifest, err := applicationmeta.Parse(configuration)
+	if err != nil || len(manifest.InterfaceRequirements()) != 0 || len(manifest.ExportAdoptions()) != 0 {
+		t.Fatalf("created current-project configuration activated template top-level intent = %#v, %v", manifest.InterfaceRequirements(), err)
+	}
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: target, Check: true, Environment: environment})
+	if err != nil || !checked.Report().Clean() || checked.ConfigurationChanged() {
+		t.Fatalf("template generation check = changes %#v, configuration changed %t, %v", checked.Report().Changes(), checked.ConfigurationChanged(), err)
+	}
 }
 
 func TestPublicCommandRejectsPrivateTemplateGraphAndRollsBack(t *testing.T) {
@@ -1071,16 +1077,17 @@ func TestCreateRollsBackTemplateGenerationFailure(t *testing.T) {
 	const templateVersion = "v1.0.0"
 	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
 		"incomplete.go": []byte("package incomplete\n"),
-		"plystra.yaml":  []byte("capabilities:\n  require:\n    - missing.provider/v1\n"),
+		"plystra.yaml":  []byte("composition:\n  exports:\n    broken:\n      interfaces:\n        require:\n          - missing.provider/v1\n"),
 	})
 	environment := isolatedGoEnvironment(t, proxy)
 	parent := t.TempDir()
 	_, err := newproject.Create(t.Context(), newproject.Options{
-		Parent:      parent,
-		ProjectName: "my-app",
-		ModulePath:  "example.com/acme/my-app",
-		Template:    templatePath + "@" + templateVersion,
-		Environment: environment,
+		Parent:       parent,
+		ProjectName:  "my-app",
+		ModulePath:   "example.com/acme/my-app",
+		Template:     templatePath + "@" + templateVersion,
+		AdoptExports: []string{"broken"},
+		Environment:  environment,
 	})
 	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, applicationgenerate.ErrGenerate) {
 		t.Fatalf("Create error = %v", err)
@@ -1106,6 +1113,69 @@ func TestCreateRejectsInvalidTemplateQueryBeforeMutation(t *testing.T) {
 	}
 	if entries, readErr := os.ReadDir(parent); readErr != nil || len(entries) != 0 {
 		t.Fatalf("invalid template query mutated parent: %v, %v", entries, readErr)
+	}
+	assertNoTransactionFiles(t, parent)
+}
+
+func TestCreateRejectsInvalidTemplateExportAdoptionsBeforeMutation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		template string
+		exports  []string
+		want     string
+	}{
+		{name: "without template", exports: []string{"defaults"}, want: "requires --template"},
+		{name: "invalid name", template: "example.com/acme/platform@v1.0.0", exports: []string{"Bad"}, want: "invalid reusable configuration export name"},
+		{name: "duplicate name", template: "example.com/acme/platform@v1.0.0", exports: []string{"defaults", "defaults"}, want: "is repeated"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			parent := t.TempDir()
+			_, err := newproject.Create(t.Context(), newproject.Options{
+				Parent:       parent,
+				ProjectName:  "my-app",
+				Template:     test.template,
+				AdoptExports: test.exports,
+				GoCommand:    filepath.Join(parent, "must-not-run"),
+			})
+			if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrInvalidTemplateExport) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Create error = %v, want ErrInvalidTemplateExport containing %q", err, test.want)
+			}
+			if entries, readErr := os.ReadDir(parent); readErr != nil || len(entries) != 0 {
+				t.Fatalf("invalid template export adoption mutated parent: %v, %v", entries, readErr)
+			}
+			assertNoTransactionFiles(t, parent)
+		})
+	}
+}
+
+func TestCreateRejectsMissingResolvedTemplateExportAndRollsBack(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/platform"
+	const templateVersion = "v1.2.3"
+	const templateQuery = templatePath + "@" + templateVersion
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"platform.go":  []byte("package platform\n"),
+		"plystra.yaml": []byte("composition:\n  exports:\n    defaults: {}\n"),
+	})
+	parent := t.TempDir()
+	_, err := newproject.Create(t.Context(), newproject.Options{
+		Parent:       parent,
+		ProjectName:  "my-app",
+		ModulePath:   "example.com/acme/my-app",
+		Template:     templateQuery,
+		AdoptExports: []string{"missing"},
+		Environment:  isolatedGoEnvironment(t, proxy),
+	})
+	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrInvalidTemplate) || !errors.Is(err, newproject.ErrInvalidTemplateExport) || !strings.Contains(err.Error(), templateQuery) || !strings.Contains(err.Error(), `composition.exports["missing"]`) {
+		t.Fatalf("Create error = %v", err)
+	}
+	if _, statErr := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("target exists after missing template export failure: %v", statErr)
 	}
 	assertNoTransactionFiles(t, parent)
 }
@@ -1171,7 +1241,7 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID` identifies a safe declared field"),
 		[]byte("`PLYSTRA_CONFIGURATION_INVALID` reports a malformed selected"),
 		[]byte("`PLYSTRA_ENVIRONMENT_OVERLAY_INVALID` reports the selected"),
-		[]byte("`PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT` reports the maintained"),
+		[]byte("Dependency Project configuration stays inert unless explicitly adopted"),
 		[]byte("`PLYSTRA_GENERATED_DRIFT` reports every stale, missing, or manually modified"),
 		[]byte("`PLYSTRA_GENERATED_MANIFEST_INVALID` reports `generated/.plystra-manifest.json`"),
 		[]byte("`PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID` reports `generated/proto/wire-map.json`"),

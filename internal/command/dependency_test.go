@@ -18,7 +18,7 @@ import (
 	"golang.org/x/mod/module"
 )
 
-func TestRunAddComposesDependencyProjectAndPreservesUnselectedConfiguration(t *testing.T) {
+func TestRunAddKeepsDependencyConfigurationInertAndPreservesSelectedDocuments(t *testing.T) {
 	proxy := writeCommandDependencyProxy(t, []commandProxyModule{
 		{
 			path:     "example.com/acme/platform",
@@ -58,8 +58,8 @@ func TestRunAddComposesDependencyProjectAndPreservesUnselectedConfiguration(t *t
 		t.Fatalf("go.mod does not retain platform as a direct dependency:\n%s", goMod)
 	}
 	rootConfiguration := string(readCommandFile(t, root, "plystra.yaml"))
-	if !strings.Contains(rootConfiguration, "# Shared application choices.") || !strings.Contains(rootConfiguration, "kernel.health/v1") {
-		t.Fatalf("root dependency composition = %q", rootConfiguration)
+	if rootConfiguration != rootData {
+		t.Fatalf("add rewrote selected root configuration = %q", rootConfiguration)
 	}
 	if got := string(readCommandFile(t, root, "plystra.production.yaml")); got != overlayData {
 		t.Fatalf("add rewrote unselected overlay: %q", got)
@@ -68,13 +68,19 @@ func TestRunAddComposesDependencyProjectAndPreservesUnselectedConfiguration(t *t
 		"generated/.plystra-manifest.json",
 		"generated/go/application/main_gen.go",
 		"generated/go/bootstrap/bootstrap_gen.go",
-		"generated/go/clients/kernel/health/v1/client_gen.go",
-		"generated/go/invocation/kernel/health/v1/invocation_gen.go",
 		"generated/manifest.json",
 		"generated/proto/descriptor-set.pb",
 		"generated/proto/wire-map.json",
 	} {
 		assertCommandFile(t, root, generated)
+	}
+	for _, inert := range []string{
+		"generated/go/clients/kernel/health/v1/client_gen.go",
+		"generated/go/invocation/kernel/health/v1/invocation_gen.go",
+	} {
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(inert))); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("dependency top-level configuration activated %s: %v", inert, err)
+		}
 	}
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
 	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/library in "+root+"\n" {
@@ -145,7 +151,7 @@ func TestRunAddRejectsInvalidModuleQueryBeforeMutation(t *testing.T) {
 	assertNoCommandTransactions(t, root)
 }
 
-func TestRunRemoveRecomposesProjectAndPreservesUnselectedConfiguration(t *testing.T) {
+func TestRunRemoveKeepsSelectedConfigurationByteIdentical(t *testing.T) {
 	proxy := writeCommandDependencyProxy(t, []commandProxyModule{
 		{
 			path:     "example.com/acme/platform",
@@ -166,6 +172,9 @@ func TestRunRemoveRecomposesProjectAndPreservesUnselectedConfiguration(t *testin
 	if exitCode != 0 || stderr != "" || !strings.HasPrefix(stdout, "added dependency "+query) {
 		t.Fatalf("initial plystra add = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
+	if got := string(readCommandFile(t, root, "plystra.yaml")); got != rootData {
+		t.Fatalf("add rewrote selected root configuration = %q", got)
+	}
 
 	modulePath := "example.com/acme/platform"
 	exitCode, stdout, stderr = runCommand(t, []string{"remove", modulePath}, filepath.Join(root, "records"), environment)
@@ -178,8 +187,8 @@ func TestRunRemoveRecomposesProjectAndPreservesUnselectedConfiguration(t *testin
 		t.Fatalf("go.mod retains removed dependency:\n%s", goMod)
 	}
 	rootConfiguration := string(readCommandFile(t, root, "plystra.yaml"))
-	if !strings.Contains(rootConfiguration, "# Shared application choices.") || strings.Contains(rootConfiguration, "kernel.health/v1") {
-		t.Fatalf("root dependency recomposition = %q", rootConfiguration)
+	if rootConfiguration != rootData {
+		t.Fatalf("remove rewrote selected root configuration = %q", rootConfiguration)
 	}
 	if got := string(readCommandFile(t, root, "plystra.production.yaml")); got != overlayData {
 		t.Fatalf("remove rewrote unselected overlay: %q", got)
@@ -295,7 +304,7 @@ func TestRunRemoveRejectsUnselectedModuleBeforeMutation(t *testing.T) {
 	assertNoCommandTransactions(t, root)
 }
 
-func TestRunUpdateResolvesSelectedModuleAndRecomposesProject(t *testing.T) {
+func TestRunUpdateResolvesSelectedModuleWithoutRewritingConfiguration(t *testing.T) {
 	proxy := writeCommandDependencyProxy(t, []commandProxyModule{
 		{
 			path:     "example.com/acme/platform",
@@ -318,6 +327,9 @@ func TestRunUpdateResolvesSelectedModuleAndRecomposesProject(t *testing.T) {
 	exitCode, stdout, stderr := runCommand(t, []string{"add", query}, root, environment)
 	if exitCode != 0 || stderr != "" || !strings.HasPrefix(stdout, "added dependency "+query) {
 		t.Fatalf("initial plystra add = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if got := string(readCommandFile(t, root, "plystra.yaml")); got != rootData {
+		t.Fatalf("add rewrote selected root configuration = %q", got)
 	}
 	proxyBefore := commandTree(t, proxy)
 
@@ -342,15 +354,21 @@ func TestRunUpdateResolvesSelectedModuleAndRecomposesProject(t *testing.T) {
 		t.Fatalf("go.mod does not retain the updated direct dependency:\n%s", goMod)
 	}
 	rootConfiguration := string(readCommandFile(t, root, "plystra.yaml"))
-	if !strings.Contains(rootConfiguration, "# Shared application choices.") || !strings.Contains(rootConfiguration, "kernel.info/v1") || strings.Contains(rootConfiguration, "kernel.health/v1") {
-		t.Fatalf("root dependency recomposition = %q", rootConfiguration)
+	if rootConfiguration != rootData {
+		t.Fatalf("update rewrote selected root configuration = %q", rootConfiguration)
 	}
 	if got := string(readCommandFile(t, root, "plystra.production.yaml")); got != overlayData {
 		t.Fatalf("update rewrote unselected overlay: %q", got)
 	}
-	assertCommandFile(t, root, "generated/go/clients/kernel/info/v1/client_gen.go")
-	if _, err := os.Lstat(filepath.Join(root, "generated", "go", "clients", "kernel", "health", "v1", "client_gen.go")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("obsolete dependency output still exists: %v", err)
+	for _, inert := range []string{
+		"generated/go/clients/kernel/health/v1/client_gen.go",
+		"generated/go/clients/kernel/info/v1/client_gen.go",
+		"generated/go/invocation/kernel/health/v1/invocation_gen.go",
+		"generated/go/invocation/kernel/info/v1/invocation_gen.go",
+	} {
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(inert))); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("dependency top-level configuration activated %s: %v", inert, err)
+		}
 	}
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
 	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/library in "+root+"\n" {

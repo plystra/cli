@@ -247,7 +247,7 @@ choices, and Enter accepts yes.
 ```powershell
 plystra new orders
 plystra new orders --module example.com/acme/orders
-plystra new orders --module example.com/acme/orders --template example.com/acme/platform@v1.2.3
+plystra new orders --module example.com/acme/orders --template example.com/acme/platform@v1.2.3 --adopt-export application
 ```
 
 The positional value creates exactly `./orders/`. Without `--module`, the
@@ -272,24 +272,27 @@ cannot derive one canonical Plugin ID emit
 `PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID`. It accepts one standard Go Module
 query. Go resolves the query, the selected module must contain regular root
 `plystra.yaml`, and the new Project retains it as a direct `go.mod`
-requirement. The CLI composes that dependency
-Project's root declarations, regenerates the complete application, and validates
-the staged Project before installing the target directory. It does not clone a
-source repository, copy Plugin directories, inspect dependency environment
-overlays, modify Module Cache source, generate `go.work`, or assign the template
-special Provider or configuration precedence after creation.
+requirement. Its top-level Project configuration remains inert. Repeatable
+`--adopt-export <name>` options select exact entries from that module's root
+`composition.exports` inventory and record the corresponding module/export
+identities under the new Project's `composition.adopt` set. The option is valid
+only with `--template`; malformed, duplicate, or absent export names reject
+creation before the target is installed. The CLI regenerates the complete
+application and validates the staged Project without cloning a source
+repository, copying Plugin directories, inspecting dependency environment
+overlays, modifying Module Cache source, generating `go.work`, or assigning the
+template special Provider or configuration precedence after creation.
 
 The CLI validates and prepares module state; it never publishes refs. Any
 corrected template, dependency, or release version is handed to the project
 owner for manual publication.
 
-The template's default application model must resolve without Provider
-ambiguity. When several compatible Plugins provide one required Capability,
-the template author must select one under `capabilities.use` in the template's
-root `plystra.yaml` and prepare a corrected module version for owner
-publication.
-Creation otherwise reports every candidate and leaves no target directory for
-the consumer to repair.
+Only explicitly adopted template exports enter the staged application model.
+When those exports create a required Capability with several compatible
+Providers and no exact choice, creation reports every candidate and leaves no
+target directory. The template author can put the intended choice in the named
+export, or the consumer can create without that export and author its own
+current-Project intent.
 
 Template dependencies must not match the effective `GOPRIVATE` setting. The
 CLI checks the complete direct and transitive graph, reports every selected
@@ -307,12 +310,11 @@ provenance, and leaves no target when a relative replacement remains.
 
 The staged generated application must also be a fixed point. Creation installs
 the generated output and immediately runs the equivalent of `plystra generate --check`.
-Dependency-composition drift or any stale,
-missing, unexpected, or manually modified generated path rejects the template and
-restores the transaction. The template author must make generation
-deterministic, run `plystra generate` followed by `plystra generate --check` in
-a fresh Project directory, and prepare a corrected module version for owner
-publication.
+Any stale, missing, unexpected, or manually modified generated path rejects the
+template and restores the transaction. The template author must make
+generation deterministic, run `plystra generate` followed by
+`plystra generate --check` in a fresh Project directory, and prepare a
+corrected module version for owner publication.
 
 Creation next runs the same read-only workflow as `plystra check`. It verifies
 the selected configuration and generated output again, then runs
@@ -660,7 +662,7 @@ the official Data compiler, PostgreSQL/D1 generation, and explicit
 Do not work around that boundary by placing database or migration behavior in a
 legacy Plugin or in `generated/`.
 
-## Compose dependency Project configuration
+## Manage dependencies and adopt configuration exports
 
 Add one ordinary Go Module query through the public transaction:
 
@@ -692,13 +694,15 @@ through ordinary Go tooling, and verifies that regeneration plus tidy did not
 select it again. Update also requires an existing selection, preserves a direct
 requirement as direct, and verifies that the module remains selected. It
 targets one query; ordinary Go resolution may still adjust transitive versions
-required by the selected graph. Each command recomposes the dependency-derived
-root `plystra.yaml` baseline, regenerates, tidies, and runs
-`go test -mod=readonly ./...`. The current dependency surfaces use the default
-root configuration; environment and full-replacement validation for dependency
-mutations remains incomplete. The commands never rewrite an unselected overlay or
-alternative YAML file. Any later failure restores `go.mod`, `go.sum`, root
-configuration, generated output, and every other transaction-owned file.
+required by the selected graph. Each command recomputes the visible export
+inventories and the root document's explicit adoption set, regenerates, tidies,
+and runs `go test -mod=readonly ./...`. The current dependency surfaces use the
+default root configuration; environment and full-replacement validation for
+dependency mutations remains incomplete. The commands never activate a newly
+visible export, infer intent from equal values, or rewrite root `plystra.yaml`,
+an environment overlay, or an alternative YAML file. A removed or updated
+module that makes an explicit adoption invalid fails and restores `go.mod`,
+`go.sum`, generated output, and every other transaction-owned file.
 
 Malformed dependency input is classified before Project discovery or mutation:
 
@@ -725,29 +729,49 @@ selected path or query.
 
 Every direct or transitive module in the effective Go Module graph whose root
 contains regular `plystra.yaml` is a dependency Plystra Project. The CLI scans
-its root-level Plugins and composes only that root configuration. It ignores a
-dependency's `plystra.production.yaml`, `plystra.test.yaml`, and every other
-environment-specific sibling. A markerless Go module remains an ordinary
-dependency even when it contains a file named `plugin.yaml` below its root.
+its root-level Plugins and reads that root configuration only as the Project
+marker plus an inert `composition.exports` inventory. Dependency top-level
+requirements, choices, configuration, exposure, process settings, and
+adoptions have no consumer effect. It ignores `plystra.production.yaml`,
+`plystra.test.yaml`, and every other dependency environment sibling. A
+markerless Go module remains an ordinary dependency even when it contains a
+file named `plugin.yaml` below its root.
 
-Composition is typed and independent of dependency order:
+A reusable Project publishes a named fragment in its root document:
 
-- `capabilities.require` and `interfaces.require` form canonical-ID unions. Use
-  their sparse `{add: [...], remove: [...]}` form for an exact inherited set
-  edit.
-- Identical additions, removals, Provider selections, and Alias declarations
-  deduplicate.
-- Plugin configuration merges by fields declared in that Plugin's
-  `plugin.yaml`. Declared objects merge recursively; scalar and array fields
-  replace as complete values. A keyed `null` removes one inherited field, and
-  `config.<plugin-id>: null` removes that Plugin's inherited object. Unknown
-  fields and invalid or changing types fail.
-- Dependency `http.expose`, `http.address`, `http.cors`,
-  `timeouts.startup`, and other public/process settings do not enter the
-  current Project. Add `http.expose` in the selected current-Project document
-  when an imported Interface should become public.
-- Incompatible inherited Providers, Aliases, or Plugin fields fail with every
-  contributing `module@version/plystra.yaml` source.
+```yaml
+composition:
+  exports:
+    application:
+      interfaces:
+        require:
+          - email.send/v1
+```
+
+The selected current Project activates that exact module/export identity:
+
+```yaml
+composition:
+  adopt:
+    - module: github.com/acme/email
+      export: application
+```
+
+For Project creation, the repeatable
+`--template <query> --adopt-export <name>` form writes those exact identities
+after validating that every named export exists in the resolved template.
+For an existing Project, edit the selected current-Project document and then
+run `plystra generate` with the same selector. This installed CLI accepts
+`interfaces` and `config` inside an export; it recognizes `resources` as a
+specified field but reports it as unsupported.
+
+Adopted exports compose as one unordered lower-precedence layer. Identical
+declarations deduplicate, incompatible declarations fail with every selected
+module/export source, and the selected current-Project layer may replace or
+remove the exact conflicting decision. Directness, graph depth, version,
+discovery order, filesystem order, template origin, and declaration sorting
+never create priority. Dependency exposure and process settings remain inert;
+declare them in the selected current-Project document.
 
 Interface activation is explicit. Every discovered `//plystra:implements`
 constructor is only a compatible candidate, including constructors authored in
@@ -791,47 +815,38 @@ and lifecycle plan. The generated application can start, invoke
 `kernel.health/v1` through its smoke path, and stop cleanly without ordinary
 bindings, runtime configuration, or public transports.
 
-Resolve an inherited Provider conflict in the current Project at the exact
-canonical key:
+Resolve an adopted-export Implementation conflict in the current Project at
+the exact canonical key:
 
 ```yaml
-capabilities:
+interfaces:
   use:
-    email.send/v1: acme.email.smtp
+    email.send/v1: example.com/acme/email/smtp.New
 ```
 
 This is an explicit current-Project replacement. It does not grant priority to
-the dependency that supplies `acme.email.smtp`, and normal provider and exact
-contract validation still runs. Use the same exact-field principle for an
-Alias or Plugin configuration conflict; do not add dependency priority,
-reorder `go.mod`, or copy a dependency's Plugin locally.
+the dependency that supplies the constructor, and normal Implementation and
+exact-contract validation still runs. Use the same exact-field principle for
+constructor configuration conflicts; do not add dependency priority, reorder
+`go.mod`, or copy a dependency package locally.
 
-Record an exact inherited removal without copying the rest of the dependency
-configuration:
+To stop one export from contributing in an environment overlay, remove its
+exact identity without copying any export values:
 
 ```yaml
-capabilities:
-  require:
+composition:
+  adopt:
     remove:
-      - audit.legacy/v1
-  use:
-    email.send/v1: null
-  aliases:
-    mail.send/v1: null
-
-config:
-  acme.email.smtp:
-    legacy_host: null
+      - module: github.com/acme/email
+        export: application
 ```
 
-The sparse set form may contain `add`, `remove`, or both, but the same
-Capability cannot occur in both lists. A keyed `null` removes only that exact
-Provider, Alias, Plugin object, or declared Plugin-field decision. Nested
-object keys merge recursively, while arrays are one replaceable value rather
-than an appendable list. When dependencies disagree between an addition and
-removal, the current Project must make that same exact decision. Removing a
-required Plugin field still fails final configuration validation unless a
-valid default supplies it.
+The sparse adoption form may contain `add`, `remove`, or both, but one exact
+module/export pair cannot occur in both lists. A complete adoption sequence
+replaces the lower set. Removing an adoption does not edit the dependency
+Project and does not materialize the remaining exports locally. To retain the
+export while overriding one supported keyed decision, author the exact
+current-Project replacement or removal at that field.
 
 Dependency exposure is ignored and requires no consumer removal. To remove an
 exposure inherited from this Project's root, set its exact `http.expose` entry
@@ -844,23 +859,19 @@ plystra generate
 plystra generate --check
 ```
 
-`plystra generate` compares the previous dependency baseline, the authored root
-configuration, and the newly resolved dependency baseline. The typed update
-keeps comments, explicit current-Project values, and exact removal tombstones;
-adds newly inherited declarations; and removes disappeared inherited values
-that were not retained locally. Deleting an inherited value by hand is
-ambiguous, so record the field-specific sparse removal or `null` tombstone
-instead. Configuration maintenance and generated output share one rollback
-boundary. `plystra generate --check` reports `changed plystra.yaml (dependency
-composition)` without modifying the configuration or generated tree.
+`plystra generate` parses the selected current-Project document, resolves only
+its exact adoption identities, and regenerates from the resulting model. It
+does not rewrite root `plystra.yaml`, an environment overlay, or a complete
+replacement document. If an updated dependency removes or changes an adopted
+export incompatibly, generation fails with the selected module/export
+provenance instead of deleting or copying authored intent.
 
-Inspect `generated/manifest.json` for the non-secret dependency composition
-digest, path/digest/removal/source baseline, and sorted
-`current_project_paths` for each maintained selection. Those paths preserve
-explicit current-Project ownership even when the selected value currently
-matches an inherited declaration, so a later dependency update cannot silently
-replace it. An explicit tombstone has `"removed": true`; the manifest records
-paths and provenance, not raw Plugin configuration or Secret reference targets.
+Inspect `generated/manifest.json` for the non-secret adopted-export composition
+digest plus deterministic path, digest, removal, module/export, and source
+provenance. `current_project_paths` remains separate selected-document
+ownership evidence. The manifest records no raw Plugin configuration or Secret
+reference targets, and equal values never transfer ownership from an export to
+the current Project.
 
 ## Select an environment or complete alternative configuration
 
@@ -888,8 +899,9 @@ plystra generate --check --env production
 ```
 
 The file must exist; the CLI never creates common environment files or loads
-an unselected `plystra.*.yaml`. The effective declarative order is dependency
-Project composition, root `plystra.yaml`, then the selected sparse overlay.
+an unselected `plystra.*.yaml`. The effective declarative order is the exact
+named exports adopted by root plus the selected overlay, root `plystra.yaml`,
+then that sparse overlay.
 Omitted fields inherit. Scalars and declared arrays replace at their typed
 field, keyed objects merge by declared field path, set fields use their sparse
 `add` and `remove` form, and `null` keeps its existing exact tombstone meaning.
@@ -971,11 +983,13 @@ plystra generate --config deploy/customer-a.yaml
 plystra generate --check --config deploy/customer-a.yaml
 ```
 
-The effective declarative order is dependency Project composition followed by
-the selected complete document. Root `plystra.yaml` remains the Project marker
-but is not merged beneath `deploy/customer-a.yaml`. Put every current-Project
-Provider choice, exposure, Alias, process setting, and Plugin value needed by
-that application model in the selected document.
+The effective declarative order is the exact named exports adopted by the
+selected complete document followed by that document. Root `plystra.yaml`
+remains the Project marker and current-module export inventory but its top-level
+application declarations are not merged beneath `deploy/customer-a.yaml`. Put
+every current-Project adoption, Provider choice, exposure, Alias, process
+setting, and Plugin value needed by that application model in the selected
+document.
 
 Relative paths are resolved from the detected Project root, including when the
 command starts in a nested Plugin directory. An absolute path is accepted only
@@ -989,16 +1003,13 @@ plystra generate --check
 `--env` and `--config` cannot be combined. Setting both `PLYSTRA_ENV` and
 `PLYSTRA_CONFIG` is also an error. Either explicit CLI selector overrides both
 ambient variables, so a stale variable cannot change an explicit invocation.
-Environment generation maintains dependency-derived changes in root
-`plystra.yaml` and preserves the selected overlay as a sparse user-authored
-document. Explicit-config generation maintains only the selected complete
-document; it never copies the same edit into root or another alternative file.
-Dependency baseline history is retained independently for each maintained
-selection, so switching modes does not transfer ownership decisions.
-Configuration maintenance and generated output share one transaction. Check
-mode reports the maintained path, such as
-`changed deploy/customer-a.yaml (dependency composition)`, and does not write
-either surface.
+Root, environment, and complete-replacement YAML remain user-authored inputs.
+Generation and check preserve their bytes, resolve only the adoption set for
+the selected mode, and never copy an export value into root or another
+alternative file. Switching modes therefore changes the selected application
+model without transferring current-Project ownership. Check mode reports
+generated drift for that model and does not write configuration, generated
+output, or module metadata.
 
 `generated/manifest.json` records a versioned canonical constraint projection
 with every resolved canonical Capability ID, its exact contract and constraint
@@ -1008,7 +1019,8 @@ lists, while the aggregate projection digest changes for added, removed, or
 changed constraints. Configuration schema v7 records `default`,
 `environment`, or `explicit-config` mode; the environment name and overlay
 reference when applicable; project-relative paths; normalized document
-digests; dependency baseline history; sorted per-selection
+digests; per-selection adopted-export composition digests and redacted source
+provenance; sorted per-selection
 `current_project_paths`; the committed Protobuf wire-map digest; and the final
 build-affecting application-model digest. It also requires canonically ordered
 `dormant_implementation_selections` and constructor-keyed
@@ -1028,11 +1040,11 @@ resolved Secret, or machine path, never appear as executable bindings, and
 move out of this configuration class when activation records the same exact
 choice and configuration ownership in `interface_provenance`.
 
-The ownership paths contain no values or Secret-reference targets and keep
-explicit current-Project decisions stable across repeated maintenance.
-Environment mode reuses the root dependency baseline because overlays do not
-own dependency maintenance; overlay-owned dormant selection evidence retains
-its environment owner and overlay source separately. The required
+The ownership paths contain no values or Secret-reference targets and remain
+separate from adopted-export provenance even when the normalized values are
+equal. Environment-owned dormant selection evidence retains its environment
+owner and overlay source, and an overlay adoption changes only that selected
+model. The required
 top-level `transport_toolchain` record identifies
 the exact embedded `go/format` runtime; built-in Protobuf-model, descriptor,
 wire-map, Connect, JavaScript, and API-documentation generator versions;
@@ -1760,7 +1772,8 @@ func selectedEnvironment(context plystragen.GenerationContext) (string, bool) {
 The view provides `RootPath`, `RootDigest`, and
 `DependencyCompositionDigest` alongside the selected-document accessors.
 Paths are stable Project-relative slash paths. Digests are normalized
-lowercase SHA-256 identities. No accessor returns YAML content, runtime
+lowercase SHA-256 identities; the retained method name identifies the exact
+normalized adopted-export layer for the selected model. No accessor returns YAML content, runtime
 configuration, Secret values, absolute paths, unrestricted environment state,
 another Plugin's raw files, writable source, or final generated paths.
 Synthetic unit-test contexts may omit the view.
@@ -1775,7 +1788,7 @@ changes the final application model.
 
 Application generation also converts that same bounded identity into one
 internal transport-provenance value. It must agree with the selected
-configuration record in `generated/manifest.json`, the typed dependency
+configuration record in `generated/manifest.json`, the typed adopted-export
 composition digest, and the final build-affecting application-model digest
 before bootstrap, Connect, REST/JSON, JavaScript, or API-document rendering can
 start. Those renderers receive no YAML values or Secret targets and do not
@@ -1864,7 +1877,7 @@ every visible constructor candidate, active, dormant-explicit, or unselected
 state, implemented Interfaces, declared and resolved dependencies,
 constructor-owned configuration provenance, and reachable assembly membership.
 Use `plystra inspect configuration` to show the selected current-Project layer,
-dependency composition, redacted field summaries, ownership and precedence,
+explicitly adopted exports, redacted field summaries, ownership and precedence,
 effective and overridden contributions, explicit removals, and ancestor
 suppression. All four are deterministic `plystra.graph` v1 views whose source
 references stay project-relative and whose structured results omit resolved
@@ -1939,7 +1952,7 @@ plystra check --env production
 plystra check --config deploy/customer-a.yaml
 ```
 
-It verifies dependency-composition and generated-output currency before
+It validates the selected application model and generated-output currency before
 running `go test -mod=readonly ./...` from the Project root. The check never
 repairs YAML, generated output, or module metadata. Transport, JavaScript SDK,
 formatting, race, and release-era validation remain deferred to their later
@@ -2035,8 +2048,8 @@ An unknown Interface emits every effective `interfaces.require` or
 `http.expose` declaration as `declaration` or `exposure`, or every effective
 `interfaces.use` declaration as `implementation-selection`. A selected
 current-Project reference retains the root, environment, or complete-replacement
-document, while an inherited same-valued reference retains every contributing
-dependency Project in deterministic module order.
+document, while an adopted same-valued reference retains every explicitly
+adopted export contributor in deterministic module order.
 An application-authored `kernel.*` Interface uses
 `PLYSTRA_RESOLVE_RESERVED_INTERFACE` and emits its Go declaration as
 `interface-declaration`. The source retains the owning current or dependency
@@ -2046,23 +2059,18 @@ Cache copy.
 An unknown, incompatible, or intrinsic explicit Interface Implementation choice
 emits every effective `interfaces.use` declaration as
 `implementation-selection`. Default, environment, and complete-replacement
-selections retain the selected current-Project document, while an inherited
-same-valued choice retains every contributing dependency Project in
-deterministic module order. The intrinsic class uses
+selections retain the selected current-Project document, while an adopted-export
+choice retains every contributing export owner in deterministic module order.
+The intrinsic class uses
 `PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION`; set the selected
-current-Project entry to `null` to remove either a local or inherited effective
+current-Project entry to `null` to remove either a local or adopted-export effective
 selection because Kernel supplies that Interface intrinsically. No form exposes
 an absolute path or Module Cache location.
-An inherited configuration conflict emits every contributing Project document
-as `configuration-declaration`, including all modules behind compatible
-declaration deduplication. Its document-level span is `1:1`; the exact schema
-field remains in the problem text, and configured values plus Secret-reference
-targets remain redacted.
-An ambiguous configuration-ownership failure uses the same source kind and
-ordering for every Project document that contributed the prior inherited
-decision. It identifies the disappeared field and its prior module/version
-references without exposing the inherited value, a Secret-reference target, an
-absolute path, or a Module Cache path.
+An adopted-export configuration conflict emits every contributing export's
+owning Project document as `configuration-declaration`, including all modules
+behind compatible declaration deduplication. Its document-level span is `1:1`;
+the exact schema field remains in the problem text, and configured values plus
+Secret-reference targets remain redacted.
 A malformed selected environment or complete-replacement document uses
 `PLYSTRA_CONFIGURATION_INVALID` and emits that current-Project document at
 `1:1` as a `configuration-declaration` source. The source fact contains no
@@ -2071,12 +2079,6 @@ An invalid environment overlay emits the selected current-Project environment
 document at `1:1` as a `configuration-declaration` source. The problem
 identifies the invalid typed field relationship without exposing values, an
 absolute path, or a Module Cache path.
-`PLYSTRA_CONFIGURATION_COMPOSITION_DRIFT` emits the maintained current-Project
-configuration document at `1:1` as a `configuration-declaration` source when
-dependency composition would change it. Default and environment-overlay checks
-identify root `plystra.yaml`; complete-replacement checks identify the selected
-document. Check modes remain read-only, and normal generation applies the
-maintenance change transactionally.
 `PLYSTRA_GENERATED_DRIFT` emits every stale, missing, or manually modified
 managed path as a sorted `generated-artifact` source in the current Project
 module. These path-only facts omit line and column rather than inventing a span.
@@ -2492,31 +2494,19 @@ Run the emitted corrected `plystra interface create <domain.operation>` or
 occur before scaffold installation and leave authored and generated files
 unchanged.
 
-### Inherited configuration conflict
+### Adopted-export configuration conflict
 
 `PLYSTRA_CONFIGURATION_INHERITED_CONFLICT` identifies the exact conflicting
 typed set, `capabilities.use`, `capabilities.aliases`, `interfaces.use`,
 `interfaces.policies`, or constructor `config` field. Read every sorted
 `configuration-declaration` source: compatible declarations retain every
-contributing module rather than collapsing to one representative. Add one
-explicit decision or removal for that exact field in the selected root,
-environment, or complete-replacement document, then regenerate with the same
-selector. Source facts identify documents at `1:1`; the problem text identifies
-the exact field, while configuration values and Secret-reference targets stay
-redacted. Changing dependency order, making a module direct, or sorting IDs
-cannot resolve the conflict.
-
-### Ambiguous configuration ownership
-
-`PLYSTRA_CONFIGURATION_OWNERSHIP_AMBIGUOUS` means a field recorded in the prior
-dependency baseline is absent from the selected current-Project document, but
-no typed removal or replacement establishes current-Project intent. Read every
-sorted `configuration-declaration` source to identify all dependency Projects
-that supplied the prior compatible declaration. Restore the exact field or
-write its schema-defined removal in the selected root, environment, or
-complete-replacement document, then regenerate with the same selector. The
-diagnostic reports document spans at `1:1` and prior module/version references;
-it never prints the inherited value or Secret-reference target.
+explicitly adopted export contributor rather than collapsing to one
+representative. Add one explicit decision or removal for that exact field in
+the selected root, environment, or complete-replacement document, then
+regenerate with the same selector. Source facts identify documents at `1:1`;
+the problem text identifies the exact field, while configuration values and
+Secret-reference targets stay redacted. Changing dependency order, making a
+module direct, or sorting IDs cannot resolve the conflict.
 
 ### Wrong configuration selection
 

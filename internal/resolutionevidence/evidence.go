@@ -92,9 +92,9 @@ const (
 	// ProviderSelectionCurrentProject identifies an explicit replacement in the
 	// selected current-Project configuration layer.
 	ProviderSelectionCurrentProject ProviderSelectionReason = "current-project-replacement"
-	// ProviderSelectionInherited identifies one compatible Provider choice
-	// inherited from one or more dependency Projects.
-	ProviderSelectionInherited ProviderSelectionReason = "inherited-selection"
+	// ProviderSelectionAdopted identifies one compatible Provider choice from
+	// one or more explicitly adopted exports.
+	ProviderSelectionAdopted ProviderSelectionReason = "adopted-export-selection"
 	// ProviderSelectionIntrinsic identifies a Kernel-owned intrinsic
 	// implementation outside ordinary Plugin Provider selection.
 	ProviderSelectionIntrinsic ProviderSelectionReason = "intrinsic-kernel"
@@ -140,12 +140,12 @@ const (
 )
 
 // ConfigurationOwner identifies the layer that owns one effective typed
-// configuration decision. Dependency projects are always lower precedence
-// than the selected current-project layer.
+// configuration decision. Adopted exports are always lower precedence than
+// the selected current-project layer.
 type ConfigurationOwner string
 
 const (
-	ConfigurationOwnerDependency  ConfigurationOwner = "dependency-project"
+	ConfigurationOwnerAdopted     ConfigurationOwner = "adopted-export"
 	ConfigurationOwnerRoot        ConfigurationOwner = "current-project-root"
 	ConfigurationOwnerEnvironment ConfigurationOwner = "current-project-environment"
 	ConfigurationOwnerExplicit    ConfigurationOwner = "current-project-config"
@@ -928,7 +928,7 @@ func (s ConfigurationSelection) SelectedPath() string { return s.selectedPath }
 // SelectedDigest returns the normalized selected-document digest.
 func (s ConfigurationSelection) SelectedDigest() string { return s.selectedDigest }
 
-// DependencyCompositionDigest returns the normalized dependency baseline and
+// DependencyCompositionDigest returns the normalized adopted-export layer and
 // all-source provenance digest.
 func (s ConfigurationSelection) DependencyCompositionDigest() string {
 	return s.dependencyDigest
@@ -2924,8 +2924,8 @@ func selectedProvidersFromResolution(
 			switch choiceSources[0].Kind {
 			case providerresolution.ChoiceSourceCurrentProject:
 				value.selectionReason = ProviderSelectionCurrentProject
-			case providerresolution.ChoiceSourceDependencyProject:
-				value.selectionReason = ProviderSelectionInherited
+			case providerresolution.ChoiceSourceAdoptedExport:
+				value.selectionReason = ProviderSelectionAdopted
 			default:
 				return nil, fmt.Errorf("explicit Provider selection %s has invalid source kind %q", identifier, choiceSources[0].Kind)
 			}
@@ -2938,8 +2938,8 @@ func selectedProvidersFromResolution(
 				if choiceSource.Kind == providerresolution.ChoiceSourceCurrentProject && project.role != ModuleRoleCurrent {
 					return nil, fmt.Errorf("provider selection %s current-Project source belongs to dependency %q", identifier, choiceSource.ModulePath)
 				}
-				if choiceSource.Kind == providerresolution.ChoiceSourceDependencyProject && project.role != ModuleRoleDependency {
-					return nil, fmt.Errorf("provider selection %s dependency source belongs to current Project", identifier)
+				if choiceSource.Kind == providerresolution.ChoiceSourceAdoptedExport && project.role != ModuleRoleCurrent && project.role != ModuleRoleDependency {
+					return nil, fmt.Errorf("provider selection %s adopted-export source has an invalid Project role", identifier)
 				}
 				value.selectionSources = append(value.selectionSources, ProviderSelectionSource{
 					projectModule: choiceSource.ModulePath,
@@ -3035,9 +3035,9 @@ func validateSelectedProviders(values []SelectedProvider, modules []Module, cand
 			if len(value.selectionSources) != 1 {
 				return fmt.Errorf("selected_providers[%d] current-project replacement requires one source", index)
 			}
-		case ProviderSelectionInherited:
+		case ProviderSelectionAdopted:
 			if len(value.selectionSources) == 0 {
-				return fmt.Errorf("selected_providers[%d] inherited selection requires sources", index)
+				return fmt.Errorf("selected_providers[%d] adopted-export selection requires sources", index)
 			}
 		default:
 			return fmt.Errorf("selected_providers[%d].selection_reason %q is invalid", index, value.selectionReason)
@@ -3050,8 +3050,8 @@ func validateSelectedProviders(values []SelectedProvider, modules []Module, cand
 			if value.selectionReason == ProviderSelectionCurrentProject && sourceProject.role != ModuleRoleCurrent {
 				return fmt.Errorf("selected_providers[%d] current-project source belongs to a dependency", index)
 			}
-			if value.selectionReason == ProviderSelectionInherited && sourceProject.role != ModuleRoleDependency {
-				return fmt.Errorf("selected_providers[%d] inherited source belongs to the current Project", index)
+			if value.selectionReason == ProviderSelectionAdopted && sourceProject.role != ModuleRoleCurrent && sourceProject.role != ModuleRoleDependency {
+				return fmt.Errorf("selected_providers[%d] adopted-export source has an invalid Project role", index)
 			}
 			if sourceIndex > 0 && providerSelectionSourceKey(value.selectionSources[sourceIndex-1]) >= providerSelectionSourceKey(selectionSource) {
 				return fmt.Errorf("selected_providers[%d].selection_sources are not in unique canonical order", index)

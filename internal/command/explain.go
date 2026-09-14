@@ -806,7 +806,7 @@ func configurationPluginDescription(path string, evidence resolutionevidence.Evi
 
 func configurationFieldChange(selection resolutionevidence.ConfigurationSelection, currentModule, field string, owner resolutionevidence.ConfigurationOwner, sources []resolutionevidence.Source) diagnosticschema.ExplainChange {
 	path := selection.SelectedPath()
-	if owner != resolutionevidence.ConfigurationOwnerDependency {
+	if owner != resolutionevidence.ConfigurationOwnerAdopted {
 		for _, source := range sources {
 			if source.Module() == currentModule {
 				path = source.Path()

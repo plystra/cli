@@ -781,25 +781,25 @@ func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *tes
 		applicationRoot := filepath.Join(root, "application")
 		writeApplicationModule(t, dependencyRoot, dependencyModule)
 		constructor := writeConstructorConfigurationOwner(t, dependencyRoot, dependencyModule, false)
-		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\nconfig: {%s: {endpoint: dependency.internal}}\n", constructor, constructor))
+		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), fmt.Sprintf("composition: {exports: {defaults: {interfaces: {use: {configuration.owner/v1: %s}}, config: {%s: {endpoint: dependency.internal}}}}}\n", constructor, constructor))
 		writeApplicationModule(t, applicationRoot, "example.com/acme/dormant-dependency")
 		goModPath := filepath.Join(applicationRoot, "go.mod")
 		goMod := string(readAbsoluteFile(t, goModPath)) + fmt.Sprintf("\nrequire %s v1.0.0\n\nreplace %s => %s\n", dependencyModule, dependencyModule, filepath.ToSlash(dependencyRoot))
 		writeFile(t, goModPath, goMod)
-		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), fmt.Sprintf("config: {%s: {endpoint: application.internal}}\n", constructor))
+		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), fmt.Sprintf("composition: {adopt: [{module: %s, export: defaults}]}\nconfig: {%s: {endpoint: application.internal}}\n", dependencyModule, constructor))
 
 		result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 			Start: applicationRoot, Environment: environment, Validate: validate,
 		})
-		if err != nil || !result.ConfigurationChanged() {
+		if err != nil || result.ConfigurationChanged() {
 			t.Fatalf("Generate dependency-composed dormant selection = changed %t, %v", result.ConfigurationChanged(), err)
 		}
 		provenance, err := applicationgen.DecodeManifestProvenance(readFile(t, applicationRoot, "generated/manifest.json"))
 		if err != nil {
 			t.Fatalf("DecodeManifestProvenance(dependency): %v", err)
 		}
-		assertDormantSelectionRecord(t, provenance, "configuration.owner/v1", constructor, dependencyModule, "v1.0.0", string(resolutionevidence.ConfigurationOwnerDependency),
-			[]string{string(resolutionevidence.ConfigurationOwnerDependency)},
+		assertDormantSelectionRecord(t, provenance, "configuration.owner/v1", constructor, dependencyModule, "v1.0.0", string(resolutionevidence.ConfigurationOwnerAdopted),
+			[]string{string(resolutionevidence.ConfigurationOwnerAdopted)},
 			[]string{dependencyModule},
 			[]string{"plystra.yaml"})
 		configurationRoot := fmt.Sprintf("config[%q]", constructor)
@@ -809,7 +809,7 @@ func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *tes
 		configuration := onlyDormantConstructorConfiguration(t, provenance, constructor)
 		endpoint := dormantConfigurationField(t, configuration, configurationRoot+`["endpoint"]`)
 		assertDormantConfigurationContributionOwners(t, endpoint, string(resolutionevidence.ConfigurationOwnerRoot), []string{
-			string(resolutionevidence.ConfigurationOwnerDependency),
+			string(resolutionevidence.ConfigurationOwnerAdopted),
 			string(resolutionevidence.ConfigurationOwnerRoot),
 		})
 	})
@@ -2138,7 +2138,7 @@ func sha256Text(data []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-func TestGenerateChecksAndRepairsDependencyCompositionDriftTransactionally(t *testing.T) {
+func TestGenerateIgnoresInertDependencyConfigurationChanges(t *testing.T) {
 	root := t.TempDir()
 	appRoot := filepath.Join(root, "app")
 	dependencyRoot := filepath.Join(root, "platform")
@@ -2148,26 +2148,23 @@ func TestGenerateChecksAndRepairsDependencyCompositionDriftTransactionally(t *te
 	goModPath := filepath.Join(appRoot, "go.mod")
 	goMod := string(readAbsoluteFile(t, goModPath)) + fmt.Sprintf("\nrequire example.com/platform v1.0.0\n\nreplace example.com/platform => %s\n", filepath.ToSlash(dependencyRoot))
 	writeFile(t, goModPath, goMod)
-	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# shared application settings\nhttp:\n  address: \":8080\" # keep process comment\ncapabilities:\n  require: []\n")
+	rootConfiguration := []byte("# shared application settings\nhttp:\n  address: \":8080\" # keep process comment\ncapabilities:\n  require: []\n")
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), string(rootConfiguration))
 	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
-	noValidation := func(_ context.Context, _ string) error { return nil }
+	validate := func(_ context.Context, _ string) error { return nil }
 
 	initial, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       appRoot,
 		Environment: environment,
-		Validate:    noValidation,
+		Validate:    validate,
 	})
-	if err != nil || !initial.ConfigurationChanged() || !initial.Report().Clean() {
+	if err != nil || initial.ConfigurationChanged() || !initial.Report().Clean() {
 		t.Fatalf("initial Generate = changed %t, report %#v, %v", initial.ConfigurationChanged(), initial.Report().Changes(), err)
 	}
-	initialManifest := readFile(t, appRoot, "plystra.yaml")
-	for _, required := range [][]byte{[]byte("kernel.health/v1"), []byte("# shared application settings"), []byte("# keep process comment")} {
-		if !bytes.Contains(initialManifest, required) {
-			t.Fatalf("initial maintained manifest omits %q:\n%s", required, initialManifest)
-		}
+	if current := readFile(t, appRoot, "plystra.yaml"); !bytes.Equal(current, rootConfiguration) || bytes.Contains(current, []byte("kernel.health/v1")) {
+		t.Fatalf("initial generation rewrote current-project configuration:\n%s", current)
 	}
-	beforeDrift := snapshotTree(t, appRoot)
-	generatedBefore := snapshotGenerated(t, appRoot)
+	before := snapshotTree(t, appRoot)
 
 	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities:\n  require: [kernel.info/v1]\n")
 	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
@@ -2175,69 +2172,23 @@ func TestGenerateChecksAndRepairsDependencyCompositionDriftTransactionally(t *te
 		Check:       true,
 		Environment: environment,
 	})
-	if err != nil || !checked.Checked() || !checked.ConfigurationChanged() {
-		t.Fatalf("drift check = checked %t, configuration changed %t, report %#v, %v", checked.Checked(), checked.ConfigurationChanged(), checked.Report().Changes(), err)
+	if err != nil || !checked.Checked() || checked.ConfigurationChanged() || !checked.Report().Clean() {
+		t.Fatalf("inert dependency check = checked %t, configuration changed %t, report %#v, %v", checked.Checked(), checked.ConfigurationChanged(), checked.Report().Changes(), err)
 	}
-	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, beforeDrift) {
-		t.Fatalf("dependency-composition check mutated application:\nbefore: %#v\nafter:  %#v", beforeDrift, after)
-	}
-
-	validationFailure := errors.New("reject recomposed application")
-	_, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:       appRoot,
-		Environment: environment,
-		Validate: func(_ context.Context, _ string) error {
-			return validationFailure
-		},
-	})
-	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, validationFailure) {
-		t.Fatalf("recomposition validation failure = %v", err)
-	}
-	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, beforeDrift) {
-		t.Fatalf("failed recomposition changed application:\nbefore: %#v\nafter:  %#v", beforeDrift, after)
+	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, before) {
+		t.Fatalf("inert dependency check changed the application:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 
-	concurrentManifest := append(append([]byte(nil), initialManifest...), []byte("# concurrent user comment\n")...)
-	_, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+	regenerated, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       appRoot,
 		Environment: environment,
-		Validate: func(_ context.Context, _ string) error {
-			writeFile(t, filepath.Join(appRoot, "plystra.yaml"), string(concurrentManifest))
-			return nil
-		},
+		Validate:    validate,
 	})
-	if !errors.Is(err, applicationgenerate.ErrGenerate) || !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
-		t.Fatalf("concurrent recomposition edit = %v", err)
+	if err != nil || regenerated.ConfigurationChanged() || !regenerated.Report().Clean() {
+		t.Fatalf("inert dependency regeneration = changed %t, report %#v, %v", regenerated.ConfigurationChanged(), regenerated.Report().Changes(), err)
 	}
-	assertConcurrentGenerationSource(t, err, "example.com/acme/composed", "plystra.yaml", "configuration-declaration")
-	if current := readFile(t, appRoot, "plystra.yaml"); !bytes.Equal(current, concurrentManifest) {
-		t.Fatalf("concurrent manifest edit was overwritten:\n%s", current)
-	}
-	if after := snapshotGenerated(t, appRoot); !reflect.DeepEqual(after, generatedBefore) {
-		t.Fatalf("generated rollback after concurrent configuration edit:\nbefore: %#v\nafter:  %#v", generatedBefore, after)
-	}
-	cleanupRecoveryTransactions(t, appRoot)
-
-	installed, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:       appRoot,
-		Environment: environment,
-		Validate:    noValidation,
-	})
-	if err != nil || !installed.ConfigurationChanged() || !installed.Report().Clean() {
-		t.Fatalf("install recomposition = changed %t, report %#v, %v", installed.ConfigurationChanged(), installed.Report().Changes(), err)
-	}
-	updated := readFile(t, appRoot, "plystra.yaml")
-	for _, required := range [][]byte{[]byte("kernel.info/v1"), []byte("# shared application settings"), []byte("# keep process comment"), []byte("# concurrent user comment")} {
-		if !bytes.Contains(updated, required) {
-			t.Fatalf("updated manifest omits %q:\n%s", required, updated)
-		}
-	}
-	if bytes.Contains(updated, []byte("kernel.health/v1")) {
-		t.Fatalf("updated manifest retained disappeared dependency requirement:\n%s", updated)
-	}
-	clean, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: appRoot, Check: true, Environment: environment})
-	if err != nil || clean.ConfigurationChanged() || !clean.Report().Clean() {
-		t.Fatalf("clean composed check = changed %t, report %#v, %v", clean.ConfigurationChanged(), clean.Report().Changes(), err)
+	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, before) {
+		t.Fatalf("inert dependency regeneration changed the application:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 	assertNoTransactions(t, appRoot)
 }
@@ -2299,7 +2250,7 @@ func TestGenerateIgnoresDependencyExposureChanges(t *testing.T) {
 	assertNoTransactions(t, appRoot)
 }
 
-func TestGenerateMaintainsFullReplacementSelectionsIndependently(t *testing.T) {
+func TestGenerateKeepsDefaultAndFullReplacementDocumentsIndependentOfInertDependencies(t *testing.T) {
 	root := t.TempDir()
 	appRoot := filepath.Join(root, "app")
 	dependencyRoot := filepath.Join(root, "platform")
@@ -2309,65 +2260,45 @@ func TestGenerateMaintainsFullReplacementSelectionsIndependently(t *testing.T) {
 	goModPath := filepath.Join(appRoot, "go.mod")
 	goMod := string(readAbsoluteFile(t, goModPath)) + fmt.Sprintf("\nrequire example.com/platform v1.0.0\n\nreplace example.com/platform => %s\n", filepath.ToSlash(dependencyRoot))
 	writeFile(t, goModPath, goMod)
-	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# default document\ncapabilities: {require: []}\n")
+	rootConfiguration := []byte("# default document\ncapabilities: {require: []}\n")
+	selectedConfiguration := []byte("# selected document\ncapabilities: {require: []}\n")
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), string(rootConfiguration))
 	selectedPath := filepath.Join(appRoot, "deploy", "customer.yaml")
-	writeFile(t, selectedPath, "# selected document\ncapabilities: {require: []}\n")
+	writeFile(t, selectedPath, string(selectedConfiguration))
 	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
 	validate := func(_ context.Context, _ string) error { return nil }
 
 	defaultResult, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: appRoot, Environment: environment, Validate: validate})
-	if err != nil || defaultResult.ConfigurationPath() != "plystra.yaml" || !defaultResult.ConfigurationChanged() {
+	if err != nil || defaultResult.ConfigurationPath() != "plystra.yaml" || defaultResult.ConfigurationChanged() {
 		t.Fatalf("default Generate = path %q changed %t, error %v", defaultResult.ConfigurationPath(), defaultResult.ConfigurationChanged(), err)
 	}
-	rootAfterDefault := readFile(t, appRoot, "plystra.yaml")
 	explicitResult, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:             filepath.Join(appRoot, "deploy"),
 		ConfigurationPath: "deploy/customer.yaml",
 		Environment:       environment,
 		Validate:          validate,
 	})
-	if err != nil || explicitResult.ConfigurationPath() != "deploy/customer.yaml" || !explicitResult.ConfigurationChanged() {
+	if err != nil || explicitResult.ConfigurationPath() != "deploy/customer.yaml" || explicitResult.ConfigurationChanged() {
 		t.Fatalf("explicit Generate = path %q changed %t, error %v", explicitResult.ConfigurationPath(), explicitResult.ConfigurationChanged(), err)
 	}
-	if current := readFile(t, appRoot, "plystra.yaml"); !bytes.Equal(current, rootAfterDefault) {
+	if current := readFile(t, appRoot, "plystra.yaml"); !bytes.Equal(current, rootConfiguration) {
 		t.Fatalf("explicit generation rewrote root configuration:\n%s", current)
+	}
+	if current := readAbsoluteFile(t, selectedPath); !bytes.Equal(current, selectedConfiguration) {
+		t.Fatalf("explicit generation rewrote selected configuration:\n%s", current)
 	}
 	provenance, err := applicationgen.DecodeManifestProvenance(readFile(t, appRoot, "generated/manifest.json"))
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance: %v", err)
 	}
 	if _, exists := provenance.BaselineForSelection(applicationgen.ConfigurationModeDefault, "plystra.yaml"); !exists {
-		t.Fatal("generated manifest lost default dependency baseline")
+		t.Fatal("generated manifest lost default composition baseline")
 	}
 	if _, exists := provenance.BaselineForSelection(applicationgen.ConfigurationModeExplicit, "deploy/customer.yaml"); !exists {
-		t.Fatal("generated manifest lost explicit dependency baseline")
+		t.Fatal("generated manifest lost explicit composition baseline")
 	}
 
 	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
-	if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: appRoot, Environment: environment, Validate: validate}); err != nil {
-		t.Fatalf("remove dependency declaration from default: %v", err)
-	}
-	if current := readFile(t, appRoot, "plystra.yaml"); bytes.Contains(current, []byte("kernel.health/v1")) {
-		t.Fatalf("default retained disappeared inherited requirement:\n%s", current)
-	}
-	writeFile(t, selectedPath, "# selected document\ncapabilities:\n  require: [kernel.health/v1, kernel.info/v1]\n")
-	rootBeforeExplicit := readFile(t, appRoot, "plystra.yaml")
-	if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:             appRoot,
-		ConfigurationPath: "deploy/customer.yaml",
-		Environment:       environment,
-		Validate:          validate,
-	}); err != nil {
-		t.Fatalf("remove dependency declaration from explicit selection: %v", err)
-	}
-	selected := readAbsoluteFile(t, selectedPath)
-	if bytes.Contains(selected, []byte("kernel.health/v1")) || !bytes.Contains(selected, []byte("kernel.info/v1")) || !bytes.Contains(selected, []byte("# selected document")) {
-		t.Fatalf("explicit maintenance lost ownership or local edit:\n%s", selected)
-	}
-	if current := readFile(t, appRoot, "plystra.yaml"); !bytes.Equal(current, rootBeforeExplicit) {
-		t.Fatalf("explicit maintenance changed root:\n%s", current)
-	}
-
 	beforeCheck := snapshotTree(t, appRoot)
 	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:             appRoot,
@@ -2376,72 +2307,46 @@ func TestGenerateMaintainsFullReplacementSelectionsIndependently(t *testing.T) {
 		Environment:       environment,
 	})
 	if err != nil || !checked.Checked() || checked.ConfigurationChanged() || !checked.Report().Clean() {
-		t.Fatalf("explicit check = changed %t report %#v, error %v", checked.ConfigurationChanged(), checked.Report().Changes(), err)
+		t.Fatalf("explicit inert-dependency check = changed %t report %#v, error %v", checked.ConfigurationChanged(), checked.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, beforeCheck) {
 		t.Fatal("explicit generate --check mutated the Project")
 	}
 
-	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities: {require: [kernel.health/v1]}\n")
-	rollbackBefore := snapshotTree(t, appRoot)
-	validationFailure := errors.New("reject selected configuration update")
-	_, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+	selectedConfiguration = []byte("# selected document\ncapabilities:\n  require: [kernel.info/v1]\n")
+	writeFile(t, selectedPath, string(selectedConfiguration))
+	rootBeforeExplicit := readFile(t, appRoot, "plystra.yaml")
+	updated, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:             appRoot,
 		ConfigurationPath: "deploy/customer.yaml",
 		Environment:       environment,
-		Validate:          func(_ context.Context, _ string) error { return validationFailure },
+		Validate:          validate,
 	})
-	if !errors.Is(err, validationFailure) {
-		t.Fatalf("selected validation failure = %v", err)
+	if err != nil || updated.ConfigurationChanged() || !updated.Report().Clean() {
+		t.Fatalf("explicit current-project update = changed %t report %#v, error %v", updated.ConfigurationChanged(), updated.Report().Changes(), err)
 	}
-	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, rollbackBefore) {
-		t.Fatal("selected validation failure did not roll back configuration and generated output")
+	if current := readAbsoluteFile(t, selectedPath); !bytes.Equal(current, selectedConfiguration) {
+		t.Fatalf("explicit generation rewrote selected current-project intent:\n%s", current)
+	}
+	if current := readFile(t, appRoot, "plystra.yaml"); !bytes.Equal(current, rootBeforeExplicit) {
+		t.Fatalf("explicit generation changed root:\n%s", current)
 	}
 
-	selectedBeforeConcurrent := readAbsoluteFile(t, selectedPath)
-	concurrent := append(append([]byte(nil), selectedBeforeConcurrent...), []byte("# concurrent selected edit\n")...)
-	generatedBefore := snapshotGenerated(t, appRoot)
-	_, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "capabilities: {require: [kernel.health/v1]}\n")
+	stableBefore := snapshotTree(t, appRoot)
+	stable, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:             appRoot,
+		Check:             true,
 		ConfigurationPath: "deploy/customer.yaml",
 		Environment:       environment,
-		Validate: func(_ context.Context, _ string) error {
-			writeFile(t, selectedPath, string(concurrent))
-			return nil
-		},
 	})
-	if !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
-		t.Fatalf("concurrent selected edit error = %v", err)
+	if err != nil || !stable.Checked() || stable.ConfigurationChanged() || !stable.Report().Clean() {
+		t.Fatalf("stable explicit check = changed %t report %#v, error %v", stable.ConfigurationChanged(), stable.Report().Changes(), err)
 	}
-	assertConcurrentGenerationSource(t, err, "example.com/acme/selected-config", "deploy/customer.yaml", "configuration-declaration")
-	if !strings.Contains(err.Error(), "recovery data retained in .plystra-files-") {
-		t.Fatalf("concurrent selected edit error does not identify retained recovery data: %v", err)
+	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, stableBefore) {
+		t.Fatal("inert dependency change altered the selected Project")
 	}
-	if current := readAbsoluteFile(t, selectedPath); !bytes.Equal(current, concurrent) {
-		t.Fatalf("concurrent selected edit was overwritten:\n%s", current)
-	}
-	if after := snapshotGenerated(t, appRoot); !reflect.DeepEqual(after, generatedBefore) {
-		t.Fatal("generated output changed after concurrent selected edit")
-	}
-	backups, globErr := filepath.Glob(filepath.Join(appRoot, ".plystra-files-*", "backup", "*"))
-	if globErr != nil {
-		t.Fatalf("glob selected-configuration recovery backups: %v", globErr)
-	}
-	foundSelectedBackup := false
-	for _, backup := range backups {
-		data, readErr := os.ReadFile(backup)
-		if readErr != nil {
-			t.Fatalf("read recovery backup %s: %v", backup, readErr)
-		}
-		if bytes.Equal(data, selectedBeforeConcurrent) {
-			foundSelectedBackup = true
-			break
-		}
-	}
-	if !foundSelectedBackup {
-		t.Fatalf("retained recovery transaction omits the pre-transaction selected configuration; backups = %v", backups)
-	}
-	cleanupRecoveryTransactions(t, appRoot)
+	assertNoTransactions(t, appRoot)
 }
 
 func TestGenerateDetectsDependencyPluginConfigurationSchemaDrift(t *testing.T) {
@@ -2998,7 +2903,7 @@ func TestGenerateApplicationModelDigestExcludesRuntimeValuesAndMachinePaths(t *t
 	}
 }
 
-func TestGenerateMaintainsRootAndTracksSelectedEnvironmentOverlay(t *testing.T) {
+func TestGenerateKeepsDependencyConfigurationInertAndTracksSelectedEnvironmentOverlay(t *testing.T) {
 	root := t.TempDir()
 	appRoot := filepath.Join(root, "app")
 	dependencyRoot := filepath.Join(root, "platform")
@@ -3008,7 +2913,8 @@ func TestGenerateMaintainsRootAndTracksSelectedEnvironmentOverlay(t *testing.T) 
 	goModPath := filepath.Join(appRoot, "go.mod")
 	goMod := string(readAbsoluteFile(t, goModPath)) + fmt.Sprintf("\nrequire example.com/platform v1.0.0\n\nreplace example.com/platform => %s\n", filepath.ToSlash(dependencyRoot))
 	writeFile(t, goModPath, goMod)
-	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# shared root\ncapabilities: {require: [kernel.info/v1]}\n")
+	rootData := []byte("# shared root\ncapabilities: {require: [kernel.info/v1]}\n")
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), string(rootData))
 	overlayPath := filepath.Join(appRoot, "plystra.production.yaml")
 	overlayData := []byte("# sparse production overlay\ncapabilities:\n  require: {remove: [kernel.info/v1]}\n")
 	writeFile(t, overlayPath, string(overlayData))
@@ -3021,14 +2927,14 @@ func TestGenerateMaintainsRootAndTracksSelectedEnvironmentOverlay(t *testing.T) 
 		Environment:     environment,
 		Validate:        validate,
 	})
-	if err != nil || !generated.ConfigurationChanged() || generated.ConfigurationPath() != "plystra.production.yaml" || generated.ConfigurationMaintenancePath() != "plystra.yaml" || !generated.Report().Clean() {
+	if err != nil || generated.ConfigurationChanged() || generated.ConfigurationPath() != "plystra.production.yaml" || generated.ConfigurationMaintenancePath() != "plystra.yaml" || !generated.Report().Clean() {
 		t.Fatalf("Generate environment = selection %q maintenance %q changed %t report %#v, %v", generated.ConfigurationPath(), generated.ConfigurationMaintenancePath(), generated.ConfigurationChanged(), generated.Report().Changes(), err)
 	}
 	if current := readAbsoluteFile(t, overlayPath); !bytes.Equal(current, overlayData) {
 		t.Fatalf("environment generation rewrote sparse overlay:\n%s", current)
 	}
-	if current := readFile(t, appRoot, "plystra.yaml"); !bytes.Contains(current, []byte("kernel.health/v1")) || !bytes.Contains(current, []byte("# shared root")) {
-		t.Fatalf("environment generation did not maintain root baseline:\n%s", current)
+	if current := readFile(t, appRoot, "plystra.yaml"); !bytes.Equal(current, rootData) {
+		t.Fatalf("environment generation rewrote current-project root from inert dependency configuration:\n%s", current)
 	}
 	provenance, err := applicationgen.DecodeManifestProvenance(readFile(t, appRoot, "generated/manifest.json"))
 	if err != nil {
@@ -3075,7 +2981,7 @@ func TestGenerateMaintainsRootAndTracksSelectedEnvironmentOverlay(t *testing.T) 
 
 	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
 	rollbackBefore := snapshotTree(t, appRoot)
-	validationFailure := errors.New("reject environment root maintenance")
+	validationFailure := errors.New("reject environment regeneration")
 	_, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:           appRoot,
 		EnvironmentName: "production",
@@ -3086,7 +2992,7 @@ func TestGenerateMaintainsRootAndTracksSelectedEnvironmentOverlay(t *testing.T) 
 		t.Fatalf("environment validation failure = %v", err)
 	}
 	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, rollbackBefore) {
-		t.Fatal("environment validation failure did not roll back root and generated output")
+		t.Fatal("environment validation failure did not roll back generated output")
 	}
 	if current := readAbsoluteFile(t, overlayPath); !bytes.Equal(current, changedOverlay) {
 		t.Fatalf("environment rollback rewrote sparse overlay:\n%s", current)
@@ -3806,7 +3712,7 @@ func assertDormantSelectionRecord(
 		t.Fatalf("dormant selection contributions = %#v, expectations = %v/%v/%v", contributions, contributionOwners, sourceModules, sourcePaths)
 	}
 	precedence := map[string]int{
-		string(resolutionevidence.ConfigurationOwnerDependency):  1,
+		string(resolutionevidence.ConfigurationOwnerAdopted):     1,
 		string(resolutionevidence.ConfigurationOwnerRoot):        2,
 		string(resolutionevidence.ConfigurationOwnerExplicit):    2,
 		string(resolutionevidence.ConfigurationOwnerEnvironment): 3,
@@ -3814,7 +3720,7 @@ func assertDormantSelectionRecord(
 	for index, contribution := range contributions {
 		wantOwner := contributionOwners[index]
 		wantSummary := "implementation"
-		if wantOwner == string(resolutionevidence.ConfigurationOwnerDependency) {
+		if wantOwner == string(resolutionevidence.ConfigurationOwnerAdopted) {
 			wantSummary = "redacted"
 		}
 		if contribution.Owner() != wantOwner ||

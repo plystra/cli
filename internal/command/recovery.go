@@ -1220,6 +1220,9 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	if errors.Is(err, newproject.ErrInvalidTemplateQuery) {
 		return recoveryDiagnostic(diagnosticProjectCreateTemplateInvalid, "Rerun `plystra new <project-name> --template <go-module-query> [options]` with one valid non-removal Go Module query.")
 	}
+	if errors.Is(err, newproject.ErrInvalidTemplateExport) {
+		return recoveryDiagnostic(diagnosticProjectCreateTemplateInvalid, "Rerun `plystra new <project-name> --template <go-module-query> --adopt-export <name> [options]` with unique canonical export names declared by the resolved template.")
+	}
 	if errors.Is(err, newproject.ErrInvalidPluginName) {
 		return recoveryDiagnostic(diagnosticProjectCreatePluginNameInvalid, "Rerun `plystra new <project-name> --plugin <plugin-name> [options]` with one lower-case ASCII kebab-case initial Plugin name that is not reserved.")
 	}

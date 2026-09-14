@@ -51,7 +51,7 @@ func TestDormantImplementationSelectionsNormalizeAndRejectNoncanonicalRecords(t 
 	withHistory := beta
 	withHistory.contributions = append([]DormantSelectionContribution{
 		{
-			owner:      string(resolutionevidence.ConfigurationOwnerDependency),
+			owner:      string(resolutionevidence.ConfigurationOwnerAdopted),
 			precedence: 1,
 			digest:     "sha256:" + strings.Repeat("1", 64),
 			summary:    "redacted",
@@ -72,7 +72,7 @@ func TestDormantImplementationSelectionsNormalizeAndRejectNoncanonicalRecords(t 
 	withRemoval.selectionOwner = string(resolutionevidence.ConfigurationOwnerEnvironment)
 	withRemoval.contributions = []DormantSelectionContribution{
 		{
-			owner:      string(resolutionevidence.ConfigurationOwnerDependency),
+			owner:      string(resolutionevidence.ConfigurationOwnerAdopted),
 			precedence: 1,
 			digest:     "sha256:" + strings.Repeat("1", 64),
 			summary:    "redacted",

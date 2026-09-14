@@ -220,9 +220,9 @@ func validateDormantImplementationSelections(
 		}
 		currentOwned := sortedContains(currentProjectPaths, value.selectionPath)
 		switch resolutionevidence.ConfigurationOwner(value.selectionOwner) {
-		case resolutionevidence.ConfigurationOwnerDependency:
+		case resolutionevidence.ConfigurationOwnerAdopted:
 			if currentOwned {
-				return fmt.Errorf("dormant implementation selection %s dependency ownership disagrees with current-project paths", value.interfaceID)
+				return fmt.Errorf("dormant implementation selection %s adopted-export ownership disagrees with current-project paths", value.interfaceID)
 			}
 		case resolutionevidence.ConfigurationOwnerRoot, resolutionevidence.ConfigurationOwnerExplicit:
 			if !currentOwned {
@@ -429,7 +429,7 @@ func dormantImplementationChoiceDigest(interfaceID, constructor string) string {
 
 func dormantOwnerPrecedence(owner string) int {
 	switch resolutionevidence.ConfigurationOwner(owner) {
-	case resolutionevidence.ConfigurationOwnerDependency:
+	case resolutionevidence.ConfigurationOwnerAdopted:
 		return 1
 	case resolutionevidence.ConfigurationOwnerRoot, resolutionevidence.ConfigurationOwnerExplicit:
 		return 2
@@ -444,7 +444,7 @@ func validDormantOwner(owner string) bool { return dormantOwnerPrecedence(owner)
 
 func dormantOwnerAllowed(owner, mode string) bool {
 	switch resolutionevidence.ConfigurationOwner(owner) {
-	case resolutionevidence.ConfigurationOwnerDependency:
+	case resolutionevidence.ConfigurationOwnerAdopted:
 		return true
 	case resolutionevidence.ConfigurationOwnerRoot:
 		return mode == ConfigurationModeDefault || mode == ConfigurationModeEnvironment
@@ -459,7 +459,7 @@ func dormantOwnerAllowed(owner, mode string) bool {
 
 func dormantSourcePath(owner, rootPath, selectedPath string) string {
 	switch resolutionevidence.ConfigurationOwner(owner) {
-	case resolutionevidence.ConfigurationOwnerDependency, resolutionevidence.ConfigurationOwnerRoot:
+	case resolutionevidence.ConfigurationOwnerAdopted, resolutionevidence.ConfigurationOwnerRoot:
 		return rootPath
 	case resolutionevidence.ConfigurationOwnerEnvironment, resolutionevidence.ConfigurationOwnerExplicit:
 		return selectedPath

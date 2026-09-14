@@ -384,8 +384,9 @@ func (p ConfigurationProvenanceView) SelectedPath() string { return p.selectedPa
 // SelectedDigest returns the normalized selected-document digest.
 func (p ConfigurationProvenanceView) SelectedDigest() string { return p.selectedDigest }
 
-// DependencyCompositionDigest returns the normalized dependency baseline and
-// all-source provenance digest.
+// DependencyCompositionDigest returns the normalized adopted-export layer and
+// all-source provenance digest. The method name is retained by this v1 input
+// contract.
 func (p ConfigurationProvenanceView) DependencyCompositionDigest() string {
 	return p.dependencyCompositionDigest
 }

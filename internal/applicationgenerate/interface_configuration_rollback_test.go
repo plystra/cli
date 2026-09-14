@@ -54,12 +54,15 @@ require example.com/platform v1.0.0
 replace example.com/platform => %s
 `, filepath.ToSlash(dependencyRoot))
 			writeFile(t, goModPath, goMod)
+			adoption := "composition: {adopt: [{module: example.com/platform, export: defaults}]}\n"
 			writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# Shared root configuration.\n{}\n")
-			if test.environmentName != "" {
-				writeFile(t, filepath.Join(appRoot, test.selectedPath), "# Sparse production configuration.\n{}\n")
-			}
-			if test.configuration != "" {
-				writeFile(t, filepath.Join(appRoot, test.selectedPath), "# Complete customer configuration.\n{}\n")
+			switch {
+			case test.environmentName != "":
+				writeFile(t, filepath.Join(appRoot, test.selectedPath), "# Sparse production configuration.\n"+adoption)
+			case test.configuration != "":
+				writeFile(t, filepath.Join(appRoot, test.selectedPath), "# Complete customer configuration.\n"+adoption)
+			default:
+				writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# Shared root configuration.\n"+adoption)
 			}
 
 			environment := goEnvironment(map[string]string{
@@ -75,7 +78,7 @@ replace example.com/platform => %s
 				Validate:          func(context.Context, string) error { return nil },
 			}
 			initial, err := applicationgenerate.Generate(t.Context(), options)
-			if err != nil || !initial.Report().Clean() || !initial.ConfigurationChanged() {
+			if err != nil || !initial.Report().Clean() || initial.ConfigurationChanged() {
 				t.Fatalf("initial Generate = changes %#v configuration changed %t, %v", initial.Report().Changes(), initial.ConfigurationChanged(), err)
 			}
 			if initial.ConfigurationPath() != test.selectedPath || initial.ConfigurationMaintenancePath() != test.maintenancePath {
@@ -87,11 +90,8 @@ replace example.com/platform => %s
 			validationFailure := errors.New("reject changed Interface selection")
 			sawUpdatedTransaction := false
 			options.Validate = func(_ context.Context, updatedRoot string) error {
-				configuration := readFile(t, updatedRoot, test.maintenancePath)
 				assembly := readFile(t, updatedRoot, "generated/go/assembly/interfaces_gen.go")
-				sawUpdatedTransaction = bytes.Contains(configuration, []byte("example.com/platform/memory.New")) &&
-					!bytes.Contains(configuration, []byte("example.com/platform/smtp.New")) &&
-					bytes.Contains(assembly, []byte(`"example.com/platform/memory.New"`)) &&
+				sawUpdatedTransaction = bytes.Contains(assembly, []byte(`"example.com/platform/memory.New"`)) &&
 					!bytes.Contains(assembly, []byte(`"example.com/platform/smtp.New"`))
 				return validationFailure
 			}
@@ -138,9 +138,12 @@ func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
 }
 
 func interfaceRollbackConfiguration(selectedConstructor string) string {
-	return fmt.Sprintf(`interfaces:
-  require: [email.send/v1]
-  use:
-    email.send/v1: %s
+	return fmt.Sprintf(`composition:
+  exports:
+    defaults:
+      interfaces:
+        require: [email.send/v1]
+        use:
+          email.send/v1: %s
 `, selectedConstructor)
 }

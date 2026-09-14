@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/diagnosticcode"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 func TestPublicResolvingCommandsRejectInvalidRequiredConstructorGraphWithoutMutation(t *testing.T) {
@@ -74,8 +75,9 @@ func TestPublicResolvingCommandsReportDependencyMissingImplementationPathSources
 	auditConstructorRoot := filepath.Join(parent, "audit-constructor")
 	alphaRoot := filepath.Join(parent, "alpha-root")
 	zetaRoot := filepath.Join(parent, "zeta-root")
+	kernelRoot := testkernel.Root(t)
 
-	writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/missing-path-consumer
+	writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/missing-path-consumer
 
 go 1.26
 
@@ -85,6 +87,7 @@ require (
 	example.com/contracts v1.0.0
 	example.com/roots/alpha v1.3.0
 	example.com/constructors/app v1.1.0
+	github.com/plystra/kernel v0.0.0
 )
 
 replace example.com/contracts => ../contracts
@@ -92,8 +95,13 @@ replace example.com/constructors/app => ../app-constructor
 replace example.com/constructors/audit => ../audit-constructor
 replace example.com/roots/alpha => ../alpha-root
 replace example.com/roots/zeta => ../zeta-root
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot)))
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `composition:
+  adopt:
+    - {module: example.com/roots/alpha, export: defaults}
+    - {module: example.com/roots/zeta, export: defaults}
 `)
-	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
 	writeCommandFile(t, filepath.Join(applicationRoot, "generated", "sentinel.txt"), "must remain unchanged\n")
 
 	writeCommandFile(t, filepath.Join(contractsRoot, "go.mod"), "module example.com/contracts\n\ngo 1.26\n")
@@ -144,7 +152,7 @@ func (*Service) Write(context.Context, writev1.Request) (writev1.Response, error
 		{path: zetaRoot, modulePath: "example.com/roots/zeta"},
 	} {
 		writeCommandFile(t, filepath.Join(root.path, "go.mod"), "module "+root.modulePath+"\n\ngo 1.26\n")
-		writeCommandFile(t, filepath.Join(root.path, "plystra.yaml"), "interfaces: {require: [app.run/v1]}\n")
+		writeCommandFile(t, filepath.Join(root.path, "plystra.yaml"), "composition: {exports: {defaults: {interfaces: {require: [app.run/v1]}}}}\n")
 	}
 
 	roots := []string{applicationRoot, contractsRoot, appConstructorRoot, auditConstructorRoot, alphaRoot, zetaRoot}
@@ -512,6 +520,7 @@ func TestPublicResolvingCommandsReportEveryInheritedInvalidImplementationChoiceS
 			t.Parallel()
 
 			parent := t.TempDir()
+			kernelRoot := testkernel.Root(t)
 			contractsRoot := filepath.Join(parent, "contracts")
 			alphaRoot := filepath.Join(parent, "alpha")
 			zetaRoot := filepath.Join(parent, "zeta")
@@ -529,9 +538,9 @@ func TestPublicResolvingCommandsReportEveryInheritedInvalidImplementationChoiceS
 				{root: alphaRoot, modulePath: "example.com/alpha"},
 			} {
 				writeCommandFile(t, filepath.Join(dependency.root, "go.mod"), "module "+dependency.modulePath+"\n\ngo 1.26\n")
-				writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {use: {email.send/v1: "+constructor+"}}\n")
+				writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "composition: {exports: {defaults: {interfaces: {use: {email.send/v1: "+constructor+"}}}}}\n")
 			}
-			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/consumer
+			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/consumer
 
 go 1.26
 
@@ -539,13 +548,19 @@ require (
 	example.com/alpha v1.0.0
 	example.com/contracts v1.0.0
 	example.com/zeta v1.0.0
+	github.com/plystra/kernel v0.0.0
 )
 
 replace example.com/alpha => ../alpha
 replace example.com/contracts => ../contracts
 replace example.com/zeta => ../zeta
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot)))
+			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `composition:
+  adopt:
+    - {module: example.com/alpha, export: defaults}
+    - {module: example.com/zeta, export: defaults}
 `)
-			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
 
 			before := map[string]map[string][]byte{
 				"application": commandTree(t, applicationRoot),
@@ -647,6 +662,7 @@ func TestPublicResolvingCommandsReportEveryInheritedIntrinsicImplementationChoic
 			t.Parallel()
 
 			parent := t.TempDir()
+			kernelRoot := testkernel.Root(t)
 			alphaRoot := filepath.Join(parent, "alpha")
 			zetaRoot := filepath.Join(parent, "zeta")
 			applicationRoot := filepath.Join(parent, "application")
@@ -659,21 +675,27 @@ func TestPublicResolvingCommandsReportEveryInheritedIntrinsicImplementationChoic
 				{root: alphaRoot, modulePath: "example.com/alpha"},
 			} {
 				writeCommandFile(t, filepath.Join(dependency.root, "go.mod"), "module "+dependency.modulePath+"\n\ngo 1.26\n")
-				writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {use: {kernel.health/v1: "+constructor+"}}\n")
+				writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "composition: {exports: {defaults: {interfaces: {use: {kernel.health/v1: "+constructor+"}}}}}\n")
 			}
-			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/intrinsic-consumer
+			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/intrinsic-consumer
 
 go 1.26
 
 require (
 	example.com/alpha v1.0.0
 	example.com/zeta v1.0.0
+	github.com/plystra/kernel v0.0.0
 )
 
 replace example.com/alpha => ../alpha
 replace example.com/zeta => ../zeta
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot)))
+			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `composition:
+  adopt:
+    - {module: example.com/alpha, export: defaults}
+    - {module: example.com/zeta, export: defaults}
 `)
-			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
 			writeCommandFile(t, filepath.Join(applicationRoot, "generated", "sentinel.txt"), "must remain unchanged\n")
 			before := commandTree(t, parent)
 
@@ -772,10 +794,13 @@ func TestPublicResolvingCommandsReportDependencyConstructorConfigurationSchemaSo
 			)
 			writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), "module "+dependencyModule+"\n\ngo 1.26\n")
 			writeCommandFile(t, filepath.Join(dependencyRoot, "dependency.go"), "package dependency\n")
-			writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "config: {"+constructor+": {endpoint: "+privateValue+"}}\n")
+			writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "composition: {exports: {defaults: {config: {"+constructor+": {endpoint: "+privateValue+"}}}}}\n")
 			goMod := string(readCommandFile(t, applicationRoot, "go.mod"))
 			goMod += "\nrequire " + dependencyModule + " v1.0.0\n\nreplace " + dependencyModule + " => " + filepath.ToSlash(dependencyRoot) + "\n"
 			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), goMod)
+			selected := string(readCommandFile(t, applicationRoot, "plystra.yaml"))
+			selected += "composition: {adopt: [{module: " + dependencyModule + ", export: defaults}]}\n"
+			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), selected)
 
 			beforeApplication := commandTree(t, applicationRoot)
 			beforeDependency := commandTree(t, dependencyRoot)
@@ -903,10 +928,13 @@ func (*Service) Echo(context.Context, echov1.Request) (echov1.Response, error) {
 
 var _ echov1.Interface = (*Service)(nil)
 `)
-			writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "config: {"+constructor+": {endpoint: {token: "+privateValue+"}}}\n")
+			writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "composition: {exports: {defaults: {config: {"+constructor+": {endpoint: {token: "+privateValue+"}}}}}}\n")
 			goMod := string(readCommandFile(t, applicationRoot, "go.mod"))
 			goMod += "\nrequire " + dependencyModule + " v1.0.0\n\nreplace " + dependencyModule + " => " + filepath.ToSlash(dependencyRoot) + "\n"
 			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), goMod)
+			selected := string(readCommandFile(t, applicationRoot, "plystra.yaml"))
+			selected += "composition: {adopt: [{module: " + dependencyModule + ", export: defaults}]}\n"
+			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), selected)
 
 			beforeApplication := commandTree(t, applicationRoot)
 			beforeDependency := commandTree(t, dependencyRoot)
@@ -1104,6 +1132,7 @@ func TestPublicResolvingCommandsReportEveryUnownedConfigurationContributorWithou
 		baseArguments := baseArguments
 		t.Run(strings.Join(baseArguments, " "), func(t *testing.T) {
 			parent := t.TempDir()
+			kernelRoot := testkernel.Root(t)
 			applicationRoot := filepath.Join(parent, "application")
 			alphaRoot := filepath.Join(parent, "alpha")
 			zetaRoot := filepath.Join(parent, "zeta")
@@ -1117,7 +1146,7 @@ func TestPublicResolvingCommandsReportEveryUnownedConfigurationContributorWithou
 				{root: alphaRoot, modulePath: "example.com/alpha"},
 			} {
 				writeCommandFile(t, filepath.Join(dependency.root, "go.mod"), "module "+dependency.modulePath+"\n\ngo 1.26\n")
-				writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), configuration)
+				writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "composition: {exports: {defaults: {"+strings.TrimSpace(configuration)+"}}}\n")
 			}
 			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/acme/implementation-use
 
@@ -1126,12 +1155,18 @@ go 1.26
 require (
 	example.com/zeta v1.0.0
 	example.com/alpha v1.0.0
+	github.com/plystra/kernel v0.0.0
 )
 
 replace example.com/zeta => %s
 replace example.com/alpha => %s
-`, filepath.ToSlash(zetaRoot), filepath.ToSlash(alphaRoot)))
-			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(zetaRoot), filepath.ToSlash(alphaRoot), filepath.ToSlash(kernelRoot)))
+			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `composition:
+  adopt:
+    - {module: example.com/alpha, export: defaults}
+    - {module: example.com/zeta, export: defaults}
+`)
 			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.production.yaml"), configuration)
 			writeCommandInterface(t, applicationRoot, "reports/read/v1", "readv1", "reports.read/v1", "Read")
 			writeCommandConfigurableImplementation(t, applicationRoot, "reports", "reports.read/v1", "reports/read/v1", "Read")
@@ -1466,6 +1501,7 @@ func TestPublicResolvingCommandsReportUnknownInterfaceConfigurationSources(t *te
 			name: "inherited requirements",
 			setup: func(t testing.TB) fixture {
 				parent := t.TempDir()
+				kernelRoot := testkernel.Root(t)
 				alphaRoot := filepath.Join(parent, "alpha")
 				zetaRoot := filepath.Join(parent, "zeta")
 				applicationRoot := filepath.Join(parent, "application")
@@ -1477,21 +1513,27 @@ func TestPublicResolvingCommandsReportUnknownInterfaceConfigurationSources(t *te
 					{root: alphaRoot, modulePath: "example.com/alpha"},
 				} {
 					writeCommandFile(t, filepath.Join(dependency.root, "go.mod"), "module "+dependency.modulePath+"\n\ngo 1.26\n")
-					writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {require: [records.missing/v1]}\n")
+					writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "composition: {exports: {defaults: {interfaces: {require: [records.missing/v1]}}}}\n")
 				}
-				writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/unknown-consumer
+				writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/unknown-consumer
 
 go 1.26
 
 require (
 	example.com/alpha v1.0.0
 	example.com/zeta v1.0.0
+	github.com/plystra/kernel v0.0.0
 )
 
 replace example.com/alpha => ../alpha
 replace example.com/zeta => ../zeta
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot)))
+				writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `composition:
+  adopt:
+    - {module: example.com/alpha, export: defaults}
+    - {module: example.com/zeta, export: defaults}
 `)
-				writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
 				return fixture{
 					root:          applicationRoot,
 					roots:         []string{applicationRoot, alphaRoot, zetaRoot},

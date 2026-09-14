@@ -394,7 +394,7 @@ func TestExplainConfigurationReportsTypedOwnershipReplacementAndRemoval(t *testi
 			arguments:    []string{"explain", "config", `config["example.com/platform/shared.New"]["password"]`, "--format", "json"},
 			mode:         "default",
 			outcome:      "effective",
-			reason:       "dependency-project",
+			reason:       "adopted-export",
 			sourceModule: "example.com/platform",
 			sourcePath:   "plystra.yaml",
 			changePath:   "plystra.yaml",
@@ -557,8 +557,8 @@ func TestExplainConfigurationHumanOutputNamesPluginAndVerboseEvidence(t *testing
 	exitCode, stdout, stderr := runCommand(t, []string{"explain", "config", `config["example.com/platform/shared.New"]["password"]`, "--verbose"}, root, inspectCommandEnvironment(nil))
 	for _, fragment := range []string{
 		`Configuration: config["example.com/platform/shared.New"]["password"]`,
-		"Decision: effective redacted from dependency-project\n",
-		"Reason: dependency-project\n",
+		"Decision: effective redacted from adopted-export\n",
+		"Reason: adopted-export\n",
 		"Source: example.com/platform:plystra.yaml:1:1 (configuration-value)\n",
 		`Change: edit plystra.yaml at config["example.com/platform/shared.New"]["password"]`,
 		"Resolution evidence:\n  {\n",
@@ -678,7 +678,7 @@ func TestExplainCapabilityCoversAvailableSoleProviderAndIntrinsicDecisions(t *te
 	})
 }
 
-func TestExplainCapabilityReportsEveryCompatibleInheritedSelectionSource(t *testing.T) {
+func TestExplainCapabilityIgnoresDependencyTopLevelApplicationConfiguration(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -703,49 +703,40 @@ require (
 replace example.com/a => ../a
 replace example.com/b => ../b
 `)
-	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), "capabilities: {require: [email.send/v1]}\nhttp: {expose: {email.send/v1: {transport: connect}}}\n")
+	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), "capabilities: {require: [email.send/v1]}\n")
 	nested := filepath.Join(appRoot, "nested")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatalf("MkdirAll(%s): %v", nested, err)
 	}
 
+	before := snapshotInspectProject(t, root)
 	exitCode, stdout, stderr := runCommand(t, []string{"explain", "capability", "email.send/v1", "--format", "json"}, nested, inspectCommandEnvironment(nil))
 	document := decodeExplainCommandEnvelope(t, stdout)
-	if exitCode != 0 || stderr != inspectProgress || document.Result.Decision.Outcome != "required" || document.Result.Reason.Code != "inherited-selection" || len(document.Result.Reason.Sources) != 2 {
-		t.Fatalf("inherited explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
+	if exitCode != 0 || stderr != inspectProgress || document.Result.Decision.Outcome != "required" || document.Result.Reason.Code != "sole-provider" || len(document.Result.Reason.Sources) != 1 {
+		t.Fatalf("dependency-inert explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
 	}
-	if document.Result.Reason.Sources[0].Module != "example.com/a" || document.Result.Reason.Sources[0].Path != "plystra.yaml" || document.Result.Reason.Sources[1].Module != "example.com/b" || document.Result.Reason.Sources[1].Path != "plystra.yaml" {
-		t.Fatalf("inherited explanation sources = %#v", document.Result.Reason.Sources)
+	if document.Result.Reason.Sources[0].Module != "example.com/a" || document.Result.Reason.Sources[0].Path != "smtp/capabilities/email.send/v1/capability.yaml" || document.Result.Reason.Sources[0].Kind != "provider-declaration" {
+		t.Fatalf("dependency-inert explanation sources = %#v", document.Result.Reason.Sources)
 	}
 	if document.Result.Change.Kind != "file" || document.Result.Change.Module != "example.com/app" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `capabilities.use["email.send/v1"]` || strings.Contains(stdout, root) {
-		t.Fatalf("inherited explanation change = %#v", document.Result.Change)
+		t.Fatalf("dependency-inert explanation change = %#v", document.Result.Change)
 	}
 
 	exitCode, stdout, stderr = runCommand(t, []string{"explain", "alias", "mail.send/v1", "--format", "json"}, nested, inspectCommandEnvironment(nil))
-	document = decodeExplainCommandEnvelope(t, stdout)
-	if exitCode != 0 || stderr != inspectProgress || document.Result.Subject.Kind != "alias" || document.Result.Decision.Outcome != "valid" || document.Result.Reason.Code != "compatible-alias-sources" || len(document.Result.Reason.Sources) != 2 {
-		t.Fatalf("inherited Alias explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
-	}
-	if document.Result.Reason.Sources[0].Module != "example.com/a" || document.Result.Reason.Sources[0].Path != "plystra.yaml" || document.Result.Reason.Sources[1].Module != "example.com/b" || document.Result.Reason.Sources[1].Path != "plystra.yaml" {
-		t.Fatalf("inherited Alias explanation sources = %#v", document.Result.Reason.Sources)
-	}
-	if document.Result.Change.Kind != "file" || document.Result.Change.Module != "example.com/app" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `capabilities.aliases["mail.send/v1"]` || strings.Contains(stdout, root) {
-		t.Fatalf("inherited Alias explanation change = %#v", document.Result.Change)
+	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, inspectProgress) || !strings.Contains(stderr, "is not present in the selected application model") {
+		t.Fatalf("dependency Alias was not inert = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 
 	exitCode, stdout, stderr = runCommand(t, []string{"explain", "exposure", "email.send/v1", "--format", "json"}, nested, inspectCommandEnvironment(nil))
 	document = decodeExplainCommandEnvelope(t, stdout)
-	if exitCode != 0 || stderr != inspectProgress || document.Result.Subject.Kind != "exposure" || document.Result.Decision.Outcome != "public" || document.Result.Reason.Code != "http-expose" || len(document.Result.Reason.Sources) != 1 {
-		t.Fatalf("current-Project exposure explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
+	if exitCode != 0 || stderr != inspectProgress || document.Result.Subject.Kind != "exposure" || document.Result.Decision.Outcome != "internal" || document.Result.Reason.Code != "not-publicly-exposed" || len(document.Result.Reason.Sources) != 1 {
+		t.Fatalf("dependency exposure was not inert = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
 	}
 	if document.Result.Reason.Sources[0].Module != "example.com/app" || document.Result.Reason.Sources[0].Path != "plystra.yaml" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `http.expose["email.send/v1"]` {
-		t.Fatalf("current-Project exposure explanation sources or change = sources %#v, change %#v", document.Result.Reason.Sources, document.Result.Change)
+		t.Fatalf("dependency-inert exposure sources or change = sources %#v, change %#v", document.Result.Reason.Sources, document.Result.Change)
 	}
-
-	exitCode, stdout, stderr = runCommand(t, []string{"explain", "exposure", "mail.send/v1", "--format", "json"}, nested, inspectCommandEnvironment(nil))
-	document = decodeExplainCommandEnvelope(t, stdout)
-	if exitCode != 0 || stderr != inspectProgress || document.Result.Decision.Outcome != "public" || document.Result.Reason.Code != "compatible-alias-sources" || len(document.Result.Reason.Sources) != 2 || document.Result.Change.Field != `capabilities.aliases["mail.send/v1"]` {
-		t.Fatalf("inherited Alias exposure explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
+	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("dependency-inert explanations mutated the fixture:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 }
 
@@ -1047,14 +1038,17 @@ require github.com/plystra/kernel v0.0.0
 
 replace github.com/plystra/kernel => %s
 `, filepath.ToSlash(kernelRoot)))
-	writeCommandFile(t, filepath.Join(platformRoot, "plystra.yaml"), `interfaces:
-  use: {email.send/v1: example.com/platform/shared.New}
-config:
-  example.com/platform/shared.New:
-    host: dependency-private.example
-    password: {env: EXPLAIN_PRIVATE_PASSWORD}
-    settings:
-      nested: dependency-private
+	writeCommandFile(t, filepath.Join(platformRoot, "plystra.yaml"), `composition:
+  exports:
+    defaults:
+      interfaces:
+        use: {email.send/v1: example.com/platform/shared.New}
+      config:
+        example.com/platform/shared.New:
+          host: dependency-private.example
+          password: {env: EXPLAIN_PRIVATE_PASSWORD}
+          settings:
+            nested: dependency-private
 `)
 	writeCommandFile(t, filepath.Join(platformRoot, "interfaces", "email", "send", "v1", "interface.go"), `package sendv1
 
@@ -1121,7 +1115,11 @@ require (
 replace example.com/platform => %s
 replace github.com/plystra/kernel => %s
 `, filepath.ToSlash(platformRoot), filepath.ToSlash(kernelRoot)))
-	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), `capabilities:
+	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), `composition:
+  adopt:
+    - module: example.com/platform
+      export: defaults
+capabilities:
   require: [email.send/v1, reports.read/v1]
   use: {email.send/v1: example.shared}
 http:
@@ -1140,7 +1138,11 @@ config:
 	writeCommandFile(t, filepath.Join(appRoot, "plystra.suppressed.yaml"), `config:
   example.com/platform/shared.New: null
 `)
-	writeCommandFile(t, filepath.Join(appRoot, "deploy", "customer.yaml"), `capabilities:
+	writeCommandFile(t, filepath.Join(appRoot, "deploy", "customer.yaml"), `composition:
+  adopt:
+    - module: example.com/platform
+      export: defaults
+capabilities:
   require: [email.send/v1, reports.read/v1]
   use: {email.send/v1: example.alternative}
 config:

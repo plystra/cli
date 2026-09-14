@@ -75,7 +75,7 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 	if err != nil {
 		return nil, err
 	}
-	result := make([]ConfigurationDecision, 0, len(maintenance)+8)
+	result := make([]ConfigurationDecision, 0, len(maintenance)+len(manifest.exports)+len(manifest.exportAdoptions)+len(manifest.removedExportAdoptions)+8)
 	source := manifest.source
 	if source == "" {
 		source = "plystra.yaml"
@@ -109,6 +109,11 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 			dependencyComposable: decision.field != maintenanceHTTPExposure,
 		})
 	}
+	composition, err := compositionConfigurationDecisions(manifest, schemas)
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, composition...)
 	result = append(result, processConfigurationDecisions(manifest)...)
 	// maintenanceDecisions and the process decision builder are both typed and
 	// deterministic, but sort again at this public boundary so future fields do

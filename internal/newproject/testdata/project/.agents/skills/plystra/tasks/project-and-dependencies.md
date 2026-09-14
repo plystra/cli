@@ -6,7 +6,7 @@ Use this task for Project creation, module identity, templates, and ordinary Go 
 
     plystra new app
     plystra new app --module example.com/acme/app
-    plystra new app --template example.com/acme/platform@v1.2.3
+    plystra new app --template example.com/acme/platform@v1.2.3 --adopt-export application
     plystra new app --plugin records
     plystra add example.com/acme/email@v1.4.2
     plystra update example.com/acme/email@v1.5.0
@@ -16,12 +16,12 @@ Project creation is non-interactive by default. Agent guidance is generated unle
 
 The positional Project name is one safe child directory. `--module` sets an independent Go Module identity. A new Project contains root `plystra.yaml`, ordinary module files, and committed CLI-owned generated source; it does not create an environment overlay, example configuration, or `go.work`.
 
-This installed CLI accepts one `--template` query but does not yet expose `--adopt-export`. Treat template workflows as transitional and rely on the installed help and resulting authored Project state rather than planned export-adoption behavior.
+`--template` records one ordinary direct dependency. Its Project configuration stays inert unless repeatable `--adopt-export <name>` selects an exact root `composition.exports` entry; that option is valid only with `--template`. Source is never copied, and template origin grants no priority.
 
 ## Completion checks
 
 1. Confirm `go.mod` has the intended module identity and direct dependencies.
-2. Confirm root `plystra.yaml` is the only automatically created configuration document.
+2. Confirm root `plystra.yaml` is the only automatically created configuration document and contains only intended explicit adoptions.
 3. Run `plystra generate --check`, `plystra check`, and the relevant Go tests.
 4. Follow any emitted `Recovery:` action before retrying.
 

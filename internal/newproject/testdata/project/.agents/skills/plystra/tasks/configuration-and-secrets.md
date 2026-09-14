@@ -4,7 +4,7 @@ Use one selected current-Project configuration mode consistently.
 
 ## Select the document
 
-- No selector: root `plystra.yaml` only.
+- No selector: root `plystra.yaml` only, including its explicit `composition.adopt` set.
 - `--env production`: root plus one sparse project-root `plystra.production.yaml` overlay.
 - `--config deploy/customer-a.yaml`: one complete replacement document; root remains only the Project marker.
 
