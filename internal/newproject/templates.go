@@ -223,6 +223,10 @@ const agentGuidanceReadmeTemplate = `
 ## AI coding agents
 
 Version-matched Plystra guidance lives in ` + "`.agents/skills/plystra/`" + `. The CLI owns ` + "`SKILL.md`" + `, ` + "`manifest.json`" + `, and the task files listed by that manifest. Project-specific additions belong in optional user-owned ` + "`local.md`" + `; the CLI never creates or edits that file, unlisted files, sibling skills, or repository-wide instructions.
+
+Run ` + "`plystra guidance check`" + ` to compare the projection with the installed catalog without mutation. Ordinary ` + "`plystra guidance sync`" + ` installs an absent projection only when desired paths are free, then refreshes or removes only unchanged prior-manifest-owned files. A desired path absent from previous ownership blocks sync whether missing or occupied. Any blocking drift leaves the complete Project unchanged.
+
+` + "`plystra guidance sync --replace-generated`" + ` may discard edits only in existing bounded regular prior-manifest-owned files. Missing prior-owned paths and desired paths absent from previous ownership remain blocked. Restore one complete matching generated projection or move an occupied conflict first. Drift reports ` + "`PLYSTRA_AGENT_GUIDANCE_DRIFT`" + `; an invalid ownership manifest reports ` + "`PLYSTRA_AGENT_GUIDANCE_MANIFEST_INVALID`" + `; and a path that changes after inspection reports ` + "`PLYSTRA_PROJECT_CONCURRENT_CHANGE`" + `. Each affected guidance path is reported as a path-only ` + "`agent-guidance`" + ` source.
 `
 
 const gitignoreTemplate = `/dist/

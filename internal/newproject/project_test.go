@@ -1129,9 +1129,22 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 			t.Fatalf("generated README advertises unavailable command %q:\n%s", unavailable, readme)
 		}
 	}
-	for _, available := range [][]byte{[]byte("plystra add github.com/acme/platform@v1.0.0"), []byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("plystra generate --env"), []byte("PLYSTRA_ENV"), []byte("plystra generate --config"), []byte("PLYSTRA_CONFIG"), []byte("plystra inspect"), []byte("plystra check"), []byte("go run ./generated/go/application --env production"), []byte("go run ./generated/go/application --config deploy/customer-a.yaml"), []byte("go test ./..."), []byte("go build ./..."), []byte("go vet ./...")} {
+	for _, available := range [][]byte{[]byte("plystra add github.com/acme/platform@v1.0.0"), []byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("plystra generate --env"), []byte("PLYSTRA_ENV"), []byte("plystra generate --config"), []byte("PLYSTRA_CONFIG"), []byte("plystra inspect"), []byte("plystra check"), []byte("plystra guidance check"), []byte("plystra guidance sync --replace-generated"), []byte("go run ./generated/go/application --env production"), []byte("go run ./generated/go/application --config deploy/customer-a.yaml"), []byte("go test ./..."), []byte("go build ./..."), []byte("go vet ./...")} {
 		if !bytes.Contains(readme, available) {
 			t.Fatalf("generated README omits available workflow %q:\n%s", available, readme)
+		}
+	}
+	for _, lifecycleGuidance := range [][]byte{
+		[]byte("compare the projection with the installed catalog without mutation"),
+		[]byte("refreshes or removes only unchanged prior-manifest-owned files"),
+		[]byte("Missing prior-owned paths and desired paths absent from previous ownership remain blocked"),
+		[]byte("`PLYSTRA_AGENT_GUIDANCE_DRIFT`"),
+		[]byte("`PLYSTRA_AGENT_GUIDANCE_MANIFEST_INVALID`"),
+		[]byte("`PLYSTRA_PROJECT_CONCURRENT_CHANGE`"),
+		[]byte("path-only `agent-guidance` source"),
+	} {
+		if !bytes.Contains(readme, lifecycleGuidance) {
+			t.Fatalf("generated README omits Agent-guidance lifecycle %q:\n%s", lifecycleGuidance, readme)
 		}
 	}
 	for _, transport := range [][]byte{[]byte("http.expose: {}"), []byte("transport: connect")} {

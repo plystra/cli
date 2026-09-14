@@ -43,6 +43,8 @@ const (
   plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>]
   plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
+  plystra guidance sync [--replace-generated]
+  plystra guidance check
   plystra inspect [modules|interfaces|implementations|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
@@ -646,6 +648,8 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		return runImplement(arguments, stdout, stderr, workingDirectory, environment)
 	case "capability":
 		return runCapability(arguments, stdout, stderr, workingDirectory, environment, selectPlugin)
+	case "guidance":
+		return runGuidance(arguments, stdout, stderr, workingDirectory)
 	case "inspect":
 		if len(arguments) == 2 && isHelp(arguments[1]) || len(arguments) == 3 && (arguments[1] == "modules" || arguments[1] == "interfaces" || arguments[1] == "implementations" || arguments[1] == "configuration") && isHelp(arguments[2]) {
 			_, _ = io.WriteString(stdout, inspectUsage)

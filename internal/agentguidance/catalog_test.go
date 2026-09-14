@@ -3,10 +3,12 @@ package agentguidance
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/diagnosticjson"
 	"github.com/plystra/cli/internal/version"
 )
 
@@ -60,9 +62,25 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"tasks/project-and-dependencies.md",
 		"tasks/resources-and-data.md",
 		"optional `local.md`",
+		"`plystra guidance check` compares this projection",
+		"`plystra guidance sync --replace-generated`",
+		"Missing prior-owned paths",
 	} {
 		if !bytes.Contains(skill, []byte(phrase)) {
 			t.Fatalf("SKILL.md omits %q:\n%s", phrase, skill)
+		}
+	}
+	diagnostics := byPath[Root+"/tasks/diagnostics-and-recovery.md"]
+	for _, phrase := range []string{
+		"plystra guidance check",
+		"Ordinary sync changes or removes only unchanged prior-manifest-owned files",
+		"PLYSTRA_AGENT_GUIDANCE_DRIFT",
+		"PLYSTRA_AGENT_GUIDANCE_MANIFEST_INVALID",
+		"PLYSTRA_PROJECT_CONCURRENT_CHANGE",
+		"path as an `agent-guidance` source",
+	} {
+		if !bytes.Contains(diagnostics, []byte(phrase)) {
+			t.Fatalf("diagnostics guidance omits %q:\n%s", phrase, diagnostics)
 		}
 	}
 	for _, forbidden := range []string{"TODO", "create a feature branch", "open a pull request", "push the change"} {
@@ -119,6 +137,11 @@ func TestParseManifestRejectsUnsafeOrNonCanonicalInput(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 	valid := projection.Manifest()
+	owned := func(filePath string) Manifest {
+		value := valid
+		value.Files = []ManifestFile{{Path: filePath, SHA256: digest(nil)}}
+		return value
+	}
 	encode := func(t *testing.T, manifest Manifest) []byte {
 		t.Helper()
 		data, err := json.Marshal(manifest)
@@ -132,6 +155,8 @@ func TestParseManifestRejectsUnsafeOrNonCanonicalInput(t *testing.T) {
 		name string
 		data []byte
 	}{
+		{name: "empty document", data: nil},
+		{name: "oversized document", data: bytes.Repeat([]byte("x"), maximumGuidanceFileBytes+1)},
 		{name: "unknown schema", data: encode(t, func() Manifest { value := valid; value.Schema = "plystra.agent-guidance/v2"; return value }())},
 		{name: "invalid catalog digest", data: encode(t, func() Manifest { value := valid; value.CatalogDigest = "sha256:bad"; return value }())},
 		{name: "manifest owns itself", data: encode(t, func() Manifest {
@@ -144,14 +169,33 @@ func TestParseManifestRejectsUnsafeOrNonCanonicalInput(t *testing.T) {
 			value.Files = []ManifestFile{{Path: Root + "/local.md", SHA256: digest(nil)}}
 			return value
 		}())},
+		{name: "manifest owns case-variant local", data: encode(t, owned(Root+"/LOCAL.md"))},
+		{name: "manifest owns case-variant manifest", data: encode(t, owned(Root+"/MANIFEST.JSON"))},
 		{name: "path traversal", data: encode(t, func() Manifest {
 			value := valid
 			value.Files = []ManifestFile{{Path: Root + "/tasks/../local.md", SHA256: digest(nil)}}
 			return value
 		}())},
+		{name: "backslash", data: encode(t, owned(Root+`\tasks\unsafe.md`))},
+		{name: "space", data: encode(t, owned(Root+"/tasks/not portable.md"))},
+		{name: "unicode", data: encode(t, owned(Root+"/tasks/caf"+string(rune(0xe9))+".md"))},
+		{name: "colon", data: encode(t, owned(Root+"/tasks/not:portable.md"))},
+		{name: "trailing dot", data: encode(t, owned(Root+"/tasks/not-portable."))},
+		{name: "reserved device", data: encode(t, owned(Root+"/tasks/CON.txt"))},
+		{name: "reserved numbered device", data: encode(t, owned(Root+"/tasks/lpt9.md"))},
+		{name: "oversized component", data: encode(t, owned(Root+"/tasks/"+strings.Repeat("a", maximumGuidanceComponentBytes+1)))},
+		{name: "oversized path", data: encode(t, owned(Root+"/"+strings.Repeat(strings.Repeat("a", 200)+"/", 21)+"task.md"))},
 		{name: "unsorted", data: encode(t, func() Manifest {
 			value := valid
 			value.Files[0], value.Files[1] = value.Files[1], value.Files[0]
+			return value
+		}())},
+		{name: "case-insensitive aliases", data: encode(t, func() Manifest {
+			value := valid
+			value.Files = []ManifestFile{
+				{Path: Root + "/SKILL.md", SHA256: digest(nil)},
+				{Path: Root + "/skill.md", SHA256: digest([]byte("other"))},
+			}
 			return value
 		}())},
 		{name: "unknown field", data: []byte(`{"schema":"plystra.agent-guidance/v1","unknown":true}`)},
@@ -168,6 +212,45 @@ func TestParseManifestRejectsUnsafeOrNonCanonicalInput(t *testing.T) {
 	}
 }
 
+func TestValidateManifestRejectsTooManyOwnedPaths(t *testing.T) {
+	t.Parallel()
+
+	projection, err := Render("application")
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	manifest := projection.Manifest()
+	manifest.Files = make([]ManifestFile, maximumGuidanceManifestFiles+1)
+	for index := range manifest.Files {
+		manifest.Files[index] = ManifestFile{
+			Path:   fmt.Sprintf("%s/tasks/%04d.md", Root, index),
+			SHA256: digest(nil),
+		}
+	}
+	if err := validateManifest(manifest); err == nil {
+		t.Fatal("validateManifest accepted too many owned paths")
+	}
+}
+
+func TestOwnedPathLimitFitsDiagnosticSources(t *testing.T) {
+	t.Parallel()
+
+	accepted := guidancePathWithLength(maximumGuidancePathBytes)
+	if !validOwnedPath(accepted) {
+		t.Fatalf("%d-byte guidance path is invalid", len(accepted))
+	}
+	if _, err := diagnosticjson.CanonicalizeSources([]diagnosticjson.Source{{
+		Module: "application",
+		Path:   accepted,
+		Kind:   "agent-guidance",
+	}}); err != nil {
+		t.Fatalf("maximum guidance path is not a diagnostic source: %v", err)
+	}
+	if oversized := guidancePathWithLength(maximumGuidancePathBytes + 1); validOwnedPath(oversized) {
+		t.Fatalf("%d-byte guidance path is valid", len(oversized))
+	}
+}
+
 func TestRenderRejectsUnsafeModuleLabel(t *testing.T) {
 	t.Parallel()
 
@@ -176,4 +259,14 @@ func TestRenderRejectsUnsafeModuleLabel(t *testing.T) {
 			t.Fatalf("Render(%q) succeeded", value)
 		}
 	}
+}
+
+func guidancePathWithLength(length int) string {
+	result := Root
+	for len(result) < length {
+		remaining := length - len(result) - 1
+		componentLength := min(remaining, maximumGuidanceComponentBytes)
+		result += "/" + strings.Repeat("a", componentLength)
+	}
+	return result
 }

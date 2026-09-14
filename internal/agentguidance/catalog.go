@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"path"
 	"sort"
 	"strings"
@@ -25,11 +26,15 @@ const (
 	// ManifestPath is the Project-relative ownership manifest path.
 	ManifestPath = Root + "/manifest.json"
 
-	catalogSchema = "plystra.agent-guidance-catalog/v1"
-	moduleToken   = "{{MODULE_PATH}}"
-	cliToken      = "{{CLI_VERSION}}"
-	kernelToken   = "{{KERNEL_VERSION}}"
-	specToken     = "{{SPECIFICATION_REVISION}}"
+	catalogSchema                 = "plystra.agent-guidance-catalog/v1"
+	maximumGuidanceFileBytes      = 64 << 10
+	maximumGuidanceManifestFiles  = 1024
+	maximumGuidanceComponentBytes = 255
+	maximumGuidancePathBytes      = 1024
+	moduleToken                   = "{{MODULE_PATH}}"
+	cliToken                      = "{{CLI_VERSION}}"
+	kernelToken                   = "{{KERNEL_VERSION}}"
+	specToken                     = "{{SPECIFICATION_REVISION}}"
 )
 
 // File is one deterministic Project-relative guidance projection.
@@ -62,8 +67,9 @@ type ManifestFile struct {
 
 // Projection is one complete deterministic rendering of the installed catalog.
 type Projection struct {
-	files    []File
-	manifest Manifest
+	modulePath string
+	files      []File
+	manifest   Manifest
 }
 
 // Files returns defensive copies of all projected files, including the
@@ -149,13 +155,16 @@ func Render(modulePath string) (Projection, error) {
 	}
 	manifestJSON = append(manifestJSON, '\n')
 	files = append(files, File{path: ManifestPath, data: manifestJSON})
-	return Projection{files: files, manifest: manifest}, nil
+	return Projection{modulePath: modulePath, files: files, manifest: manifest}, nil
 }
 
 // ParseManifest decodes and validates one v1 ownership manifest. It accepts
 // older release facts while keeping every owned path confined to the Plystra
 // skill root so a later synchronizer can reason about it safely.
 func ParseManifest(data []byte) (Manifest, error) {
+	if len(data) == 0 || len(data) > maximumGuidanceFileBytes {
+		return Manifest{}, fmt.Errorf("invalid Plystra Agent guidance manifest: document must contain 1..%d bytes", maximumGuidanceFileBytes)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var manifest Manifest
@@ -192,10 +201,11 @@ func validateManifest(manifest Manifest) error {
 	if !validDigest(manifest.CatalogDigest) {
 		return errors.New("invalid Plystra Agent guidance manifest: catalog_digest is invalid")
 	}
-	if len(manifest.Files) == 0 {
-		return errors.New("invalid Plystra Agent guidance manifest: files is empty")
+	if len(manifest.Files) == 0 || len(manifest.Files) > maximumGuidanceManifestFiles {
+		return fmt.Errorf("invalid Plystra Agent guidance manifest: files must contain 1..%d entries", maximumGuidanceManifestFiles)
 	}
 	previous := ""
+	aliases := make(map[string]string, len(manifest.Files))
 	for index, file := range manifest.Files {
 		if !validOwnedPath(file.Path) {
 			return fmt.Errorf("invalid Plystra Agent guidance manifest: files[%d].path is invalid", index)
@@ -203,6 +213,11 @@ func validateManifest(manifest Manifest) error {
 		if previous != "" && file.Path <= previous {
 			return errors.New("invalid Plystra Agent guidance manifest: files must be unique and sorted by path")
 		}
+		alias := guidancePathAlias(file.Path)
+		if existing, found := aliases[alias]; found && existing != file.Path {
+			return errors.New("invalid Plystra Agent guidance manifest: files must not contain case-insensitive path aliases")
+		}
+		aliases[alias] = file.Path
 		if !validDigest(file.SHA256) {
 			return fmt.Errorf("invalid Plystra Agent guidance manifest: files[%d].sha256 is invalid", index)
 		}
@@ -212,8 +227,47 @@ func validateManifest(manifest Manifest) error {
 }
 
 func validOwnedPath(value string) bool {
-	return strings.HasPrefix(value, Root+"/") && value != ManifestPath && value != Root+"/local.md" && !strings.Contains(value, `\`) && path.Clean(value) == value
+	if len(value) == 0 || len(value) > maximumGuidancePathBytes || !fs.ValidPath(value) || !strings.HasPrefix(value, Root+"/") || strings.ContainsRune(value, '\\') || path.Clean(value) != value {
+		return false
+	}
+	if strings.EqualFold(value, ManifestPath) || strings.EqualFold(value, Root+"/local.md") {
+		return false
+	}
+	for _, component := range strings.Split(value, "/") {
+		if !validGuidancePathComponent(component) {
+			return false
+		}
+	}
+	return true
 }
+
+func validGuidancePathComponent(value string) bool {
+	if value == "" || len(value) > maximumGuidanceComponentBytes || strings.HasSuffix(value, ".") {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		character := value[index]
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '.' || character == '-' || character == '_' {
+			continue
+		}
+		return false
+	}
+	base := value
+	if index := strings.IndexByte(base, '.'); index >= 0 {
+		base = base[:index]
+	}
+	upper := strings.ToUpper(base)
+	switch upper {
+	case "CON", "PRN", "AUX", "NUL":
+		return false
+	}
+	if len(upper) == 4 && (upper[:3] == "COM" || upper[:3] == "LPT") && upper[3] >= '1' && upper[3] <= '9' {
+		return false
+	}
+	return true
+}
+
+func guidancePathAlias(value string) string { return strings.ToLower(value) }
 
 func validModuleLabel(value string) bool {
 	return validFact(value) && !strings.ContainsRune(value, '`') && len(value) <= 1024
@@ -281,6 +335,10 @@ Start with ` + "`" + `plystra help` + "`" + ` and the exact subcommand help. Rea
 The CLI owns this ` + "`" + `SKILL.md` + "`" + `, ` + "`" + `manifest.json` + "`" + `, and the files listed by that manifest. Do not edit those projections. Project-specific guidance belongs in optional ` + "`" + `local.md` + "`" + `; the CLI never creates, edits, deletes, or claims it.
 
 The CLI also never claims unlisted files, sibling skills, or repository-wide Agent instructions.
+
+` + "`" + `plystra guidance check` + "`" + ` compares this projection with the installed catalog without mutation. Ordinary ` + "`" + `plystra guidance sync` + "`" + ` installs an absent projection only when desired paths are free, then refreshes or removes only unchanged prior-manifest-owned files. A desired path absent from previous ownership blocks sync whether missing or occupied. Any blocking drift leaves every Project file unchanged.
+
+` + "`" + `plystra guidance sync --replace-generated` + "`" + ` may discard edits only in existing bounded regular prior-manifest-owned files. Missing prior-owned paths and desired paths absent from previous ownership remain blocked. Move Project-specific content to ` + "`" + `local.md` + "`" + `, restore one complete matching generated projection or move an occupied conflict, and check again before synchronizing.
 `
 
 const projectAndDependenciesTask = `# Project and dependencies
@@ -399,9 +457,19 @@ Use read-only inspection before changing authored inputs:
     plystra generate --check
     plystra check
 
+Inspect versioned Agent guidance before refreshing it:
+
+    plystra guidance check
+    plystra guidance sync
+    plystra guidance sync --replace-generated
+
+` + "`" + `guidance check` + "`" + ` is always non-mutating. Ordinary sync changes or removes only unchanged prior-manifest-owned files, and any drift blocks the complete transaction. ` + "`" + `--replace-generated` + "`" + ` can replace only an existing bounded regular prior-owned file; missing prior-owned paths and desired paths absent from previous ownership remain blocked whether missing or occupied. Neither sync mode touches optional ` + "`" + `local.md` + "`" + `, another unlisted file, a sibling skill, or repository-wide Agent instructions.
+
 Reuse the same ` + "`" + `--env` + "`" + ` or ` + "`" + `--config` + "`" + ` selector. ` + "`" + `--format json` + "`" + ` returns the installed versioned inspect or explain schema; this release does not yet wrap every command in the planned shared result envelope.
 
 Actionable human failures end with one ` + "`" + `Recovery:` + "`" + ` block and one stable ` + "`" + `Diagnostic: PLYSTRA_<AREA>_<CONDITION>` + "`" + ` code. Source-bearing failures add deterministic module-relative ` + "`" + `Source:` + "`" + ` lines. Use the code as the automation identity, apply the recovery to the reported authored source, and rerun the same selected command.
+
+Agent-guidance drift uses ` + "`" + `PLYSTRA_AGENT_GUIDANCE_DRIFT` + "`" + ` and reports every affected path as an ` + "`" + `agent-guidance` + "`" + ` source. An invalid ownership manifest uses ` + "`" + `PLYSTRA_AGENT_GUIDANCE_MANIFEST_INVALID` + "`" + `. A manifest or transaction path that changes after inspection uses ` + "`" + `PLYSTRA_PROJECT_CONCURRENT_CHANGE` + "`" + ` with every deterministically known affected guidance path.
 
 Never print or persist resolved Secrets, unrestricted configuration values, avoidable absolute paths, or Module Cache paths while diagnosing a Project. Do not edit dependency source in the Module Cache or CLI-owned files under ` + "`" + `generated/` + "`" + `.
 

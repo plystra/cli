@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/plystra/cli/internal/agentguidance"
 	"github.com/plystra/cli/internal/aliasresolution"
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationinput"
@@ -137,6 +138,8 @@ const (
 	diagnosticGeneratedOwnershipConflict         = diagnosticcode.GeneratedOwnershipConflict
 	diagnosticGeneratedUnexpectedOutput          = diagnosticcode.GeneratedUnexpectedOutput
 	diagnosticGeneratedManifestInvalid           = diagnosticcode.GeneratedManifestInvalid
+	diagnosticAgentGuidanceDrift                 = diagnosticcode.AgentGuidanceDrift
+	diagnosticAgentGuidanceManifestInvalid       = diagnosticcode.AgentGuidanceManifestInvalid
 	diagnosticCapabilityManifestInvalid          = diagnosticcode.CapabilityManifestInvalid
 	diagnosticProjectConcurrentChange            = diagnosticcode.ProjectConcurrentChange
 	diagnosticConfigurationCompositionDrift      = diagnosticcode.ConfigurationCompositionDrift
@@ -321,6 +324,20 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 		}
 	case diagnosticProjectConcurrentChange:
 		sources = append(sources, concurrentDiagnosticSources(err)...)
+	case diagnosticAgentGuidanceDrift, diagnosticAgentGuidanceManifestInvalid:
+		var located *agentguidance.SourceError
+		if !errors.As(err, &located) || located == nil {
+			return nil
+		}
+		for _, source := range located.Sources() {
+			sources = append(sources, diagnosticjson.Source{
+				Module: source.ModulePath(),
+				Path:   source.SourcePath(),
+				Kind:   source.SourceKind(),
+				Line:   source.Line(),
+				Column: source.Column(),
+			})
+		}
 	case diagnosticConfigurationInheritedConflict:
 		var conflict *applicationmeta.InheritedConflictError
 		if !errors.As(err, &conflict) || conflict == nil {
@@ -1097,6 +1114,17 @@ func concurrentDiagnosticSources(err error) []diagnosticjson.Source {
 				})
 			}
 		}
+		if concurrent, ok := current.(*agentguidance.SourceError); ok {
+			for _, source := range concurrent.Sources() {
+				appendSource(diagnosticjson.Source{
+					Module: source.ModulePath(),
+					Path:   source.SourcePath(),
+					Kind:   source.SourceKind(),
+					Line:   source.Line(),
+					Column: source.Column(),
+				})
+			}
+		}
 		if located, ok := current.(diagnosticSourceLocation); ok && concurrentFailure(current) {
 			appendSource(diagnosticjson.Source{
 				Module: located.ModulePath(),
@@ -1176,6 +1204,12 @@ func primaryFailureMessage(err error) string {
 func primaryActionableDiagnostic(err error, context recoveryContext) (actionableDiagnostic, bool) {
 	if concurrentFailure(err) {
 		return recoveryDiagnostic(diagnosticProjectConcurrentChange, "Stop concurrent Project edits, then rerun the command against the unchanged authored inputs.")
+	}
+	if errors.Is(err, agentguidance.ErrManifest) {
+		return recoveryDiagnostic(diagnosticAgentGuidanceManifestInvalid, "Restore `.agents/skills/plystra/manifest.json` from a known-good generated state, then run `plystra guidance sync`.")
+	}
+	if errors.Is(err, agentguidance.ErrDrift) {
+		return recoveryDiagnostic(diagnosticAgentGuidanceDrift, agentGuidanceDriftRecovery())
 	}
 	if errors.Is(err, newproject.ErrInvalidProjectName) {
 		return recoveryDiagnostic(diagnosticProjectCreateNameInvalid, "Rerun `plystra new <project-name> [options]` with one lower-case ASCII kebab-case child directory name; put any independent Go Module identity in `--module <go-module-path>`.")
@@ -1493,6 +1527,10 @@ func aliasRecovery() string {
 
 func generatedOwnershipRecovery(context recoveryContext) string {
 	return "Move the reported unowned path outside generated/, then run `plystra generate" + context.selectorSuffix() + "`."
+}
+
+func agentGuidanceDriftRecovery() string {
+	return "Move project-specific additions or occupied unlisted paths to optional `.agents/skills/plystra/local.md`, and restore missing generated guidance together with its matching known-good ownership manifest. Then run `plystra guidance sync`; add `--replace-generated` only to discard edits to existing bounded regular manifest-owned files."
 }
 
 func splitEmbeddedRecovery(message string) (string, string, bool) {

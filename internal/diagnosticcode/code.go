@@ -64,6 +64,8 @@ const (
 	GeneratedOwnershipConflict         = Prefix + "GENERATED_OWNERSHIP_CONFLICT"
 	GeneratedUnexpectedOutput          = Prefix + "GENERATED_UNEXPECTED_OUTPUT"
 	GeneratedManifestInvalid           = Prefix + "GENERATED_MANIFEST_INVALID"
+	AgentGuidanceDrift                 = Prefix + "AGENT_GUIDANCE_DRIFT"
+	AgentGuidanceManifestInvalid       = Prefix + "AGENT_GUIDANCE_MANIFEST_INVALID"
 	CapabilityManifestInvalid          = Prefix + "CAPABILITY_MANIFEST_INVALID"
 	ProjectConcurrentChange            = Prefix + "PROJECT_CONCURRENT_CHANGE"
 	ConfigurationCompositionDrift      = Prefix + "CONFIGURATION_COMPOSITION_DRIFT"

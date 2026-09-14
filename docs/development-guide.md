@@ -611,6 +611,49 @@ manifest-owned files; put Project-specific additions in optional user-owned
 `local.md`. The CLI does not create or claim `local.md`, unlisted files, sibling
 skills, or repository-wide instructions.
 
+## Check and synchronize Agent guidance
+
+Use the public lifecycle instead of editing the generated projection:
+
+```powershell
+plystra guidance check
+plystra guidance sync
+plystra guidance sync --replace-generated
+```
+
+`plystra guidance check` is read-only. It compares the installed release
+catalog with `manifest.json`, every path owned by that manifest, and every path
+desired by the installed catalog. It reports stale, missing, newly occupied,
+and manually modified paths without scanning or changing unrelated Project
+files.
+
+When no prior manifest exists, ordinary `plystra guidance sync` installs the
+catalog only if every desired path is absent. With a prior manifest, ordinary
+sync refreshes or removes only files that still match the digests recorded by
+that manifest. A stale manifest alone can be refreshed, but any missing,
+non-regular, oversized, symbolic, or manually modified prior-owned path blocks
+the complete transaction. A desired catalog path absent from prior manifest
+ownership also blocks installation, whether the path is missing or already
+present. Every blocked sync leaves the Project unchanged.
+
+Use `--replace-generated` only after moving Project-specific content into
+optional user-owned `.agents/skills/plystra/local.md`. Replacement authority is
+limited to existing bounded regular files named by the prior manifest. It does
+not permit recreating a missing prior-owned path, replacing a directory or
+symbolic entry, claiming a desired path that was not previously owned, or
+touching `local.md`, another unlisted file, a sibling skill, or repository-wide
+Agent instructions. Restore one complete matching generated projection when an
+installed catalog changes its owned path set.
+
+`PLYSTRA_AGENT_GUIDANCE_DRIFT` reports each blocking or observed difference as
+a path-only `agent-guidance` source. `PLYSTRA_AGENT_GUIDANCE_MANIFEST_INVALID`
+reports malformed, oversized, non-portable, aliased, or otherwise unsafe
+ownership data at `.agents/skills/plystra/manifest.json`. If the manifest or a
+transaction target changes after inspection, the operation reports
+`PLYSTRA_PROJECT_CONCURRENT_CHANGE` with every deterministically known affected
+guidance path. Correct the reported path or stop the concurrent editor, then
+rerun `plystra guidance check` before synchronizing again.
+
 The current CLI does not scaffold or run Data migrations. Resource contracts,
 the official Data compiler, PostgreSQL/D1 generation, and explicit
 `data migration plan|apply|status` operations remain deferred to Gates 16-18.

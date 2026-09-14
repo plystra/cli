@@ -462,6 +462,36 @@ skills, or repository-wide instructions. Generated guidance contains no Git,
 branch, commit, review, release, or team workflow rules. `plystra new --help`
 documents the complete creation contract.
 
+Manage the projection through the public lifecycle commands:
+
+```powershell
+plystra guidance check
+plystra guidance sync
+plystra guidance sync --replace-generated
+```
+
+`plystra guidance check` compares the installed catalog, prior manifest, and
+owned paths without changing the Project. An initial `plystra guidance sync`
+installs the catalog only when every desired path is unoccupied. With an
+existing manifest, ordinary sync refreshes or removes only prior-owned files
+that still match their recorded digests. A desired catalog path absent from the
+previous manifest blocks sync whether that path is missing or already occupied.
+Any blocking drift leaves every Project file unchanged.
+
+`--replace-generated` may discard edits only in existing bounded regular files
+owned by the prior manifest. Missing prior-owned paths and desired paths absent
+from prior manifest ownership block both sync modes. Restore one complete
+matching generated projection or move an occupied conflict first. Neither mode
+creates, edits, deletes, or claims `local.md`, other unlisted files, sibling
+skills, or repository-wide Agent instructions.
+
+Drift reports `PLYSTRA_AGENT_GUIDANCE_DRIFT` with each affected path as an
+`agent-guidance` source. An invalid or unsafe ownership manifest reports
+`PLYSTRA_AGENT_GUIDANCE_MANIFEST_INVALID`. If a transaction path changes after
+inspection, the command reports `PLYSTRA_PROJECT_CONCURRENT_CHANGE` with every
+deterministically known affected guidance path and does not claim a successful
+refresh.
+
 If requested Git initialization fails, creation emits
 `PLYSTRA_PROJECT_CREATE_GIT_INITIALIZATION_FAILED`, removes the staged tree,
 and leaves no target Project. Recovery directs the caller to correct Git and

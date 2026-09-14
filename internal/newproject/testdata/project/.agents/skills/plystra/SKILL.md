@@ -25,3 +25,7 @@ Start with `plystra help` and the exact subcommand help. Read only the task refe
 The CLI owns this `SKILL.md`, `manifest.json`, and the files listed by that manifest. Do not edit those projections. Project-specific guidance belongs in optional `local.md`; the CLI never creates, edits, deletes, or claims it.
 
 The CLI also never claims unlisted files, sibling skills, or repository-wide Agent instructions.
+
+`plystra guidance check` compares this projection with the installed catalog without mutation. Ordinary `plystra guidance sync` installs an absent projection only when desired paths are free, then refreshes or removes only unchanged prior-manifest-owned files. A desired path absent from previous ownership blocks sync whether missing or occupied. Any blocking drift leaves every Project file unchanged.
+
+`plystra guidance sync --replace-generated` may discard edits only in existing bounded regular prior-manifest-owned files. Missing prior-owned paths and desired paths absent from previous ownership remain blocked. Move Project-specific content to `local.md`, restore one complete matching generated projection or move an occupied conflict, and check again before synchronizing.

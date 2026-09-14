@@ -68,6 +68,8 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.GeneratedOwnershipConflict,
 		diagnosticcode.GeneratedUnexpectedOutput,
 		diagnosticcode.GeneratedManifestInvalid,
+		diagnosticcode.AgentGuidanceDrift,
+		diagnosticcode.AgentGuidanceManifestInvalid,
 		diagnosticcode.CapabilityManifestInvalid,
 		diagnosticcode.ProjectConcurrentChange,
 		diagnosticcode.ConfigurationCompositionDrift,

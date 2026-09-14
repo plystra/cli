@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/agentguidance"
 	"github.com/plystra/cli/internal/aliasresolution"
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationmeta"
@@ -866,6 +867,39 @@ func TestWriteCommandFailureReportsJoinedConcurrentChangeSources(t *testing.T) {
 	}
 }
 
+func TestWriteCommandFailureReportsAgentGuidanceConcurrentChangeSources(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	projection, err := agentguidance.Render("example.com/acme/guidance")
+	if err != nil {
+		t.Fatalf("Render Agent guidance: %v", err)
+	}
+	target := agentguidance.Root + "/SKILL.md"
+	absoluteTarget := filepath.Join(root, filepath.FromSlash(target))
+	if err := os.MkdirAll(filepath.Dir(absoluteTarget), 0o755); err != nil {
+		t.Fatalf("MkdirAll guidance root: %v", err)
+	}
+	if err := os.WriteFile(absoluteTarget, []byte("concurrent owner\n"), 0o644); err != nil {
+		t.Fatalf("Write guidance target: %v", err)
+	}
+	_, guidanceErr := agentguidance.Sync(root, projection, agentguidance.SyncOptions{})
+	if guidanceErr == nil || !errors.Is(guidanceErr, agentguidance.ErrDrift) {
+		t.Fatalf("Sync guidance error = %v, want drift", guidanceErr)
+	}
+
+	var output strings.Builder
+	writeCommandFailure(&output, "synchronize Agent guidance", errors.Join(atomicfs.ErrConcurrentChange, guidanceErr), recoveryContext{})
+	got := output.String()
+	wantSuffix := "\n\n" +
+		"Source: example.com/acme/guidance:" + target + " (agent-guidance)\n\n" +
+		"Recovery:\nStop concurrent Project edits, then rerun the command against the unchanged authored inputs.\n\n" +
+		"Diagnostic: " + diagnosticProjectConcurrentChange + "\n"
+	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 1 || strings.Contains(got, root) || strings.Contains(got, filepath.ToSlash(root)) {
+		t.Fatalf("Agent-guidance concurrent output = %q, want suffix %q", got, wantSuffix)
+	}
+}
+
 func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 	t.Parallel()
 
@@ -934,6 +968,8 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "generated ownership", err: generatedfiles.ErrConflict, code: diagnosticcode.GeneratedOwnershipConflict},
 		{name: "unexpected generated output", err: generatedfiles.ErrUnexpected, code: diagnosticcode.GeneratedUnexpectedOutput},
 		{name: "generated manifest", err: generatedfiles.ErrManifest, code: diagnosticcode.GeneratedManifestInvalid},
+		{name: "Agent guidance drift", err: agentguidance.ErrDrift, code: diagnosticcode.AgentGuidanceDrift},
+		{name: "Agent guidance manifest", err: agentguidance.ErrManifest, code: diagnosticcode.AgentGuidanceManifestInvalid},
 		{name: "Capability manifest", err: capabilitymeta.ErrInvalidManifest, code: diagnosticcode.CapabilityManifestInvalid},
 		{name: "atomic concurrent change", err: atomicfs.ErrConcurrentChange, code: diagnosticcode.ProjectConcurrentChange},
 		{name: "resolution concurrent change", err: applicationresolve.ErrConcurrentChange, code: diagnosticcode.ProjectConcurrentChange},

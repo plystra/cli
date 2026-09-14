@@ -3,11 +3,11 @@
   "cli_version": "0.1.0",
   "kernel_version": "v0.0.0-20260724160327-26ece9a0df89",
   "specification_revision": "c98210bdaa626511a7f6c45a43402354bdb6b331",
-  "catalog_digest": "sha256:1bda91041f08e1ae1568f07c321cf56c8859a2dc4eddddc482db6ebff5eef5e2",
+  "catalog_digest": "sha256:6153dac66e36e3a19b03cb8cdf2a4cf0ccde85999730d3bf5260fd08078ba8a6",
   "files": [
     {
       "path": ".agents/skills/plystra/SKILL.md",
-      "sha256": "sha256:82d45cca5eb1035b027b3d4828c5459b1788ea276f1d4897582e66d6f020a7a4"
+      "sha256": "sha256:870c84a5bb0a947bf3bed8ad4b28237eca91bdfa3650e59296efe6413b1a3495"
     },
     {
       "path": ".agents/skills/plystra/tasks/configuration-and-secrets.md",
@@ -15,7 +15,7 @@
     },
     {
       "path": ".agents/skills/plystra/tasks/diagnostics-and-recovery.md",
-      "sha256": "sha256:2cd65155e9ba3fdb0ba98792f4904cd87fc94030ce161c3ee2e247fd9295cd12"
+      "sha256": "sha256:d67b5d62aa9070deb6ea0c92d73bd07403424e6c2d6aa66aa0daac661afa6c2b"
     },
     {
       "path": ".agents/skills/plystra/tasks/interfaces-and-implementations.md",
