@@ -460,6 +460,14 @@ func (e newResultEncoder) success(created newProjectResult) (commandschema.Resul
 
 func (e newResultEncoder) failure(err error) (commandschema.Result, error) {
 	status, code, message := classifyNewFailure(err)
+	diagnostic, diagnosticErr := commandschema.NewDiagnostic(commandschema.DiagnosticInput{
+		Code:     code,
+		Severity: diagnosticjson.SeverityError,
+		Message:  message,
+	})
+	if diagnosticErr != nil {
+		return commandschema.Result{}, diagnosticErr
+	}
 	recovery, recoveryErr := newFailureRecovery(code)
 	if recoveryErr != nil {
 		return commandschema.Result{}, recoveryErr
@@ -468,13 +476,9 @@ func (e newResultEncoder) failure(err error) (commandschema.Result, error) {
 		Operation:    "new",
 		InvocationID: e.invocationID,
 		Status:       status,
-		Diagnostics: []diagnosticjson.Diagnostic{{
-			Code:     code,
-			Severity: diagnosticjson.SeverityError,
-			Message:  message,
-		}},
-		Recovery: []commandschema.Recovery{recovery},
-		Effects:  e.emptyEffects,
+		Diagnostics:  []commandschema.Diagnostic{diagnostic},
+		Recovery:     []commandschema.Recovery{recovery},
+		Effects:      e.emptyEffects,
 	})
 }
 

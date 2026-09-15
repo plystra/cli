@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
+	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/commandschema"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/diagnosticjson"
@@ -53,6 +55,76 @@ func TestProjectCreatedResultIsCanonicalAndClosed(t *testing.T) {
 	}
 }
 
+func TestResultNestsSnapshotDiagnosticAndCommandPayload(t *testing.T) {
+	t.Parallel()
+
+	snapshot, err := commandschema.NewSelectorSnapshot(commandschema.SelectorSnapshotInput{
+		Mode: generation.ConfigurationModeEnvironment,
+		Name: "production",
+	})
+	if err != nil {
+		t.Fatalf("NewSelectorSnapshot: %v", err)
+	}
+	source := diagnosticjson.Source{
+		Module: "example.com/app",
+		Path:   "plystra.production.yaml",
+		Kind:   "configuration-selection",
+		Line:   2,
+		Column: 3,
+	}
+	diagnostic := newResultDiagnostic(t, "PLYSTRA_EXPLAIN_AVAILABLE", diagnosticjson.SeverityInfo, "The decision is available.", []diagnosticjson.Source{source})
+	schema, err := diagnosticjson.NewSchema("plystra.explain", 1)
+	if err != nil {
+		t.Fatalf("NewSchema: %v", err)
+	}
+	digest := "sha256:" + strings.Repeat("a", 64)
+	envelope, err := diagnosticjson.New(diagnosticjson.Input{
+		Schema:                 schema,
+		ConfigurationMode:      generation.ConfigurationModeEnvironment,
+		ApplicationModelDigest: digest,
+		Diagnostics: []diagnosticjson.Diagnostic{{
+			Code:     "PLYSTRA_EXPLAIN_AVAILABLE",
+			Severity: diagnosticjson.SeverityInfo,
+			Message:  "The decision is available.",
+		}},
+		Sources: []diagnosticjson.Source{source},
+		Result:  []byte(`{"decision":{"outcome":"available"}}`),
+	})
+	if err != nil {
+		t.Fatalf("diagnosticjson.New: %v", err)
+	}
+	payload, err := commandschema.NewDiagnosticPayload(envelope)
+	if err != nil {
+		t.Fatalf("NewDiagnosticPayload: %v", err)
+	}
+	result, err := commandschema.NewResult(commandschema.ResultInput{
+		Operation:    "explain",
+		InvocationID: testInvocationID,
+		Snapshot:     &snapshot,
+		Status:       commandschema.StatusSuccess,
+		Diagnostics:  []commandschema.Diagnostic{diagnostic},
+		Effects:      newEffects(t, commandschema.EffectsInput{}),
+		Payload:      payload,
+	})
+	if err != nil || !result.Valid() {
+		t.Fatalf("NewResult = %#v, %v", result, err)
+	}
+	want := `{"schema":"plystra.result/v1","operation":"explain","invocation_id":"123e4567-e89b-42d3-a456-426614174000","snapshot":{"selector":{"mode":"environment","name":"production"}},"status":"success","exit_class":0,"changes":[],"diagnostics":[{"code":"PLYSTRA_EXPLAIN_AVAILABLE","severity":"info","message":"The decision is available.","locations":[{"module":"example.com/app","path":"plystra.production.yaml","kind":"configuration-selection","line":2,"column":3}]}],"recovery":[],"effects":{"observed":[],"planned":[],"skipped":[],"unverified":[]},"support":[],"payload":{"schema":"plystra.explain/v1","configuration_mode":"environment","application_model_digest":"` + digest + `","sources":[{"module":"example.com/app","path":"plystra.production.yaml","kind":"configuration-selection","line":2,"column":3}],"result":{"decision":{"outcome":"available"}}},"continuation":null}`
+	if got := string(result.CanonicalJSON()); got != want {
+		t.Fatalf("CanonicalJSON = %s\nwant = %s", got, want)
+	}
+	returnedSnapshot, ok := result.Snapshot()
+	if !ok || !returnedSnapshot.Valid() || returnedSnapshot.Mode() != generation.ConfigurationModeEnvironment || returnedSnapshot.Name() != "production" {
+		t.Fatalf("Snapshot = %#v, %t", returnedSnapshot, ok)
+	}
+	canonical := returnedSnapshot.CanonicalJSON()
+	canonical[0] = '['
+	returnedSnapshot, ok = result.Snapshot()
+	if !ok || !returnedSnapshot.Valid() || bytes.HasPrefix(returnedSnapshot.CanonicalJSON(), []byte("[")) {
+		t.Fatal("result exposed mutable snapshot state")
+	}
+}
+
 func TestResultStatusesHaveCanonicalExitClasses(t *testing.T) {
 	t.Parallel()
 
@@ -90,7 +162,7 @@ func TestResultStatusesHaveCanonicalExitClasses(t *testing.T) {
 				Effects:      newEffects(t, commandschema.EffectsInput{}),
 			}
 			if test.exit != 0 {
-				input.Diagnostics = []diagnosticjson.Diagnostic{{Code: diagnosticcode.ProjectCreateFailed, Severity: diagnosticjson.SeverityError, Message: "Project creation failed."}}
+				input.Diagnostics = []commandschema.Diagnostic{newResultDiagnostic(t, diagnosticcode.ProjectCreateFailed, diagnosticjson.SeverityError, "Project creation failed.", nil)}
 			}
 			if test.status == commandschema.StatusChanged {
 				input.Payload = newProjectCreated(t)
@@ -119,6 +191,8 @@ func TestResultRejectsUnsafeIdentityAndIncompleteFailure(t *testing.T) {
 		{name: "uppercase UUID", input: commandschema.ResultInput{Operation: "new", InvocationID: "123E4567-e89b-42d3-a456-426614174000", Status: commandschema.StatusSuccess, Effects: effects}},
 		{name: "leading separator", input: commandschema.ResultInput{Operation: "new", InvocationID: "-invocation", Status: commandschema.StatusSuccess, Effects: effects}},
 		{name: "unsafe invocation ID", input: commandschema.ResultInput{Operation: "new", InvocationID: "../../invocation", Status: commandschema.StatusSuccess, Effects: effects}},
+		{name: "invalid snapshot", input: commandschema.ResultInput{Operation: "new", InvocationID: testInvocationID, Snapshot: &commandschema.SelectorSnapshot{}, Status: commandschema.StatusSuccess, Effects: effects}},
+		{name: "invalid diagnostic", input: commandschema.ResultInput{Operation: "new", InvocationID: testInvocationID, Status: commandschema.StatusSuccess, Diagnostics: []commandschema.Diagnostic{{}}, Effects: effects}},
 		{name: "failure without diagnostic", input: commandschema.ResultInput{Operation: "new", InvocationID: testInvocationID, Status: commandschema.StatusExecutionFailed, Effects: effects}},
 		{name: "changed without payload", input: commandschema.ResultInput{Operation: "new", InvocationID: testInvocationID, Status: commandschema.StatusChanged, Effects: effects}},
 	}
@@ -174,7 +248,7 @@ func TestProjectCreatedAcceptsInitialLocalModulePath(t *testing.T) {
 func TestResultReturnsDefensiveJSONAndDiagnosticCopies(t *testing.T) {
 	t.Parallel()
 
-	diagnostics := []diagnosticjson.Diagnostic{{Code: diagnosticcode.ProjectCreateFailed, Severity: diagnosticjson.SeverityError, Message: "Project creation failed."}}
+	diagnostics := []commandschema.Diagnostic{newResultDiagnostic(t, diagnosticcode.ProjectCreateFailed, diagnosticjson.SeverityError, "Project creation failed.", nil)}
 	result, err := commandschema.NewResult(commandschema.ResultInput{
 		Operation:    "new",
 		InvocationID: testInvocationID,
@@ -185,14 +259,28 @@ func TestResultReturnsDefensiveJSONAndDiagnosticCopies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewResult: %v", err)
 	}
-	diagnostics[0].Message = "changed"
+	diagnostics[0] = commandschema.Diagnostic{}
 	copyDiagnostics := result.Diagnostics()
-	copyDiagnostics[0].Message = "changed again"
+	copyDiagnostics[0] = commandschema.Diagnostic{}
 	canonical := result.CanonicalJSON()
 	canonical[0] = '['
-	if !result.Valid() || bytes.HasPrefix(result.CanonicalJSON(), []byte("[")) || result.Diagnostics()[0].Message != "Project creation failed." {
+	if !result.Valid() || bytes.HasPrefix(result.CanonicalJSON(), []byte("[")) || result.Diagnostics()[0].Message() != "Project creation failed." {
 		t.Fatal("result exposed mutable construction or result state")
 	}
+}
+
+func newResultDiagnostic(t testing.TB, code string, severity diagnosticjson.Severity, message string, locations []diagnosticjson.Source) commandschema.Diagnostic {
+	t.Helper()
+	diagnostic, err := commandschema.NewDiagnostic(commandschema.DiagnosticInput{
+		Code:      code,
+		Severity:  severity,
+		Message:   message,
+		Locations: locations,
+	})
+	if err != nil {
+		t.Fatalf("NewDiagnostic: %v", err)
+	}
+	return diagnostic
 }
 
 func newProjectCreated(t testing.TB) commandschema.ProjectCreated {

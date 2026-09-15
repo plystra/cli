@@ -23,7 +23,8 @@ type inspectCapabilitiesResultDocument struct {
 	Status       string `json:"status"`
 	ExitClass    int    `json:"exit_class"`
 	Diagnostics  []struct {
-		Code string `json:"code"`
+		Code      string            `json:"code"`
+		Locations []json.RawMessage `json:"locations"`
 	} `json:"diagnostics"`
 	Recovery []struct {
 		Schema string `json:"schema"`
@@ -101,7 +102,7 @@ func TestRunInspectCapabilitiesEmitsCanonicalJSONSuccess(t *testing.T) {
 	if !bytes.Equal(document.Payload, capabilities.CanonicalJSON()) {
 		t.Fatalf("payload = %s\nwant = %s", document.Payload, capabilities.CanonicalJSON())
 	}
-	if len(document.Diagnostics) != 0 || len(document.Recovery) != 0 || len(document.Effects.Observed) != 0 || len(document.Effects.Planned) != 0 || len(document.Effects.Skipped) != 0 || len(document.Effects.Unverified) != 0 {
+	if document.Diagnostics == nil || len(document.Diagnostics) != 0 || len(document.Recovery) != 0 || len(document.Effects.Observed) != 0 || len(document.Effects.Planned) != 0 || len(document.Effects.Skipped) != 0 || len(document.Effects.Unverified) != 0 {
 		t.Fatalf("read-only result contains failure or effect facts: %#v", document)
 	}
 	if !strings.HasSuffix(stdout, "\n") || strings.Count(strings.TrimSpace(stdout), "\n") != 0 {
@@ -176,7 +177,7 @@ func TestRunInspectCapabilitiesPreservesJSONIntentForInvalidInvocation(t *testin
 				t.Fatalf("runInspectCapabilities = exit %d, stderr %q", exitCode, stderr)
 			}
 			document := decodeInspectCapabilitiesResult(t, stdout)
-			if document.Status != "invalid_invocation" || document.ExitClass != 2 || len(document.Diagnostics) != 1 || document.Diagnostics[0].Code != diagnosticcode.InspectCapabilitiesInvocationInvalid || string(document.Payload) != "null" {
+			if document.Status != "invalid_invocation" || document.ExitClass != 2 || len(document.Diagnostics) != 1 || document.Diagnostics[0].Code != diagnosticcode.InspectCapabilitiesInvocationInvalid || document.Diagnostics[0].Locations == nil || len(document.Diagnostics[0].Locations) != 0 || string(document.Payload) != "null" {
 				t.Fatalf("invalid result = %#v, payload %s", document, document.Payload)
 			}
 			if len(document.Recovery) != 1 || document.Recovery[0].Schema != commandschema.RecoverySchemaV1 || document.Recovery[0].Kind != "manual" || document.Recovery[0].Target.Kind != "command" || document.Recovery[0].Target.ID != "inspect.capabilities" {
@@ -197,7 +198,7 @@ func TestRunInspectCapabilitiesReportsInstalledProviderFailure(t *testing.T) {
 		t.Fatalf("runInspectCapabilities = exit %d, stderr %q", exitCode, stderr)
 	}
 	document := decodeInspectCapabilitiesResult(t, stdout)
-	if document.Status != "execution_failed" || document.ExitClass != 8 || len(document.Diagnostics) != 1 || document.Diagnostics[0].Code != diagnosticcode.InspectCapabilitiesFailed || string(document.Payload) != "null" {
+	if document.Status != "execution_failed" || document.ExitClass != 8 || len(document.Diagnostics) != 1 || document.Diagnostics[0].Code != diagnosticcode.InspectCapabilitiesFailed || document.Diagnostics[0].Locations == nil || len(document.Diagnostics[0].Locations) != 0 || string(document.Payload) != "null" {
 		t.Fatalf("failure result = %#v, payload %s", document, document.Payload)
 	}
 	if len(document.Recovery) != 1 || document.Recovery[0].Target.Kind != "installation" || document.Recovery[0].Target.ID != "plystra" {

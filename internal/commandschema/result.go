@@ -8,10 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"unicode"
-	"unicode/utf8"
 
-	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/diagnosticjson"
 )
 
@@ -51,13 +48,14 @@ type commandPayload interface {
 }
 
 // ResultInput is the construction-only form of one finite command result.
-// Snapshot, changes, support, and continuation remain explicitly empty in
-// this first result-protocol slice rather than being omitted.
+// Changes, support, and continuation remain explicitly empty in this first
+// result-protocol slice rather than being omitted.
 type ResultInput struct {
 	Operation    string
 	InvocationID string
+	Snapshot     *SelectorSnapshot
 	Status       Status
-	Diagnostics  []diagnosticjson.Diagnostic
+	Diagnostics  []Diagnostic
 	Recovery     []Recovery
 	Effects      Effects
 	Payload      commandPayload
@@ -67,9 +65,10 @@ type ResultInput struct {
 type Result struct {
 	operation     string
 	invocationID  string
+	snapshot      *SelectorSnapshot
 	status        Status
 	exitClass     int
-	diagnostics   []diagnosticjson.Diagnostic
+	diagnostics   []Diagnostic
 	recovery      []Recovery
 	effects       Effects
 	payload       commandPayload
@@ -81,7 +80,7 @@ type resultDocument struct {
 	Schema       string               `json:"schema"`
 	Operation    string               `json:"operation"`
 	InvocationID string               `json:"invocation_id"`
-	Snapshot     any                  `json:"snapshot"`
+	Snapshot     json.RawMessage      `json:"snapshot"`
 	Status       Status               `json:"status"`
 	ExitClass    int                  `json:"exit_class"`
 	Changes      []emptyDocument      `json:"changes"`
@@ -95,12 +94,6 @@ type resultDocument struct {
 
 type emptyDocument struct{}
 
-type diagnosticDocument struct {
-	Code     string                  `json:"code"`
-	Severity diagnosticjson.Severity `json:"severity"`
-	Message  string                  `json:"message"`
-}
-
 // NewResult validates and constructs one complete command result.
 func NewResult(input ResultInput) (Result, error) {
 	if !validToken(input.Operation, 128) {
@@ -112,6 +105,9 @@ func NewResult(input ResultInput) (Result, error) {
 	exitClass, ok := ExitClass(input.Status)
 	if !ok {
 		return Result{}, fmt.Errorf("%w: status %q is not supported", ErrResult, input.Status)
+	}
+	if input.Snapshot != nil && !input.Snapshot.Valid() {
+		return Result{}, fmt.Errorf("%w: snapshot is invalid", ErrResult)
 	}
 	diagnostics, err := normalizeResultDiagnostics(input.Diagnostics)
 	if err != nil {
@@ -142,6 +138,7 @@ func NewResult(input ResultInput) (Result, error) {
 	result := Result{
 		operation:    input.Operation,
 		invocationID: input.InvocationID,
+		snapshot:     cloneSelectorSnapshot(input.Snapshot),
 		status:       input.Status,
 		exitClass:    exitClass,
 		diagnostics:  diagnostics,
@@ -166,6 +163,7 @@ func (r Result) Valid() bool {
 	rebuilt, err := NewResult(ResultInput{
 		Operation:    r.operation,
 		InvocationID: r.invocationID,
+		Snapshot:     cloneSelectorSnapshot(r.snapshot),
 		Status:       r.status,
 		Diagnostics:  r.Diagnostics(),
 		Recovery:     r.Recovery(),
@@ -205,6 +203,14 @@ func (r Result) Operation() string { return r.operation }
 // InvocationID returns the bounded lowercase invocation identity.
 func (r Result) InvocationID() string { return r.invocationID }
 
+// Snapshot returns the selected Project view when one was observed.
+func (r Result) Snapshot() (SelectorSnapshot, bool) {
+	if r.snapshot == nil {
+		return SelectorSnapshot{}, false
+	}
+	return *cloneSelectorSnapshot(r.snapshot), true
+}
+
 // Status returns the closed result status.
 func (r Result) Status() Status { return r.status }
 
@@ -212,8 +218,8 @@ func (r Result) Status() Status { return r.status }
 func (r Result) ExitClass() int { return r.exitClass }
 
 // Diagnostics returns a defensive copy in canonical order.
-func (r Result) Diagnostics() []diagnosticjson.Diagnostic {
-	return append([]diagnosticjson.Diagnostic(nil), r.diagnostics...)
+func (r Result) Diagnostics() []Diagnostic {
+	return append([]Diagnostic(nil), r.diagnostics...)
 }
 
 // Recovery returns a defensive copy in stable action-ID order.
@@ -225,22 +231,14 @@ func (r Result) Effects() Effects { return r.effects }
 // CanonicalJSON returns a defensive copy of the complete result document.
 func (r Result) CanonicalJSON() []byte { return append([]byte(nil), r.canonicalJSON...) }
 
-func normalizeResultDiagnostics(input []diagnosticjson.Diagnostic) ([]diagnosticjson.Diagnostic, error) {
+func normalizeResultDiagnostics(input []Diagnostic) ([]Diagnostic, error) {
 	if len(input) > 4_096 {
 		return nil, errors.New("diagnostic count exceeds 4096")
 	}
-	result := append([]diagnosticjson.Diagnostic(nil), input...)
+	result := append([]Diagnostic(nil), input...)
 	for index, diagnostic := range result {
-		if !diagnosticcode.Valid(diagnostic.Code) {
-			return nil, fmt.Errorf("diagnostics[%d].code is invalid", index)
-		}
-		switch diagnostic.Severity {
-		case diagnosticjson.SeverityInfo, diagnosticjson.SeverityWarning, diagnosticjson.SeverityError:
-		default:
-			return nil, fmt.Errorf("diagnostics[%d].severity is invalid", index)
-		}
-		if diagnostic.Message == "" || len(diagnostic.Message) > maximumMessageLength || !utf8.ValidString(diagnostic.Message) || bytes.IndexByte([]byte(diagnostic.Message), 0) >= 0 || containsControl(diagnostic.Message) {
-			return nil, fmt.Errorf("diagnostics[%d].message is invalid", index)
+		if !diagnostic.Valid() {
+			return nil, fmt.Errorf("diagnostics[%d] is invalid", index)
 		}
 	}
 	sort.Slice(result, func(left, right int) bool {
@@ -273,31 +271,27 @@ func normalizeResultRecovery(input []Recovery) ([]Recovery, error) {
 	return result, nil
 }
 
-func hasErrorDiagnostic(diagnostics []diagnosticjson.Diagnostic) bool {
+func hasErrorDiagnostic(diagnostics []Diagnostic) bool {
 	for _, diagnostic := range diagnostics {
-		if diagnostic.Severity == diagnosticjson.SeverityError {
+		if diagnostic.Severity() == diagnosticjson.SeverityError {
 			return true
 		}
 	}
 	return false
 }
 
-func containsControl(value string) bool {
-	return bytes.IndexFunc([]byte(value), func(character rune) bool { return unicode.IsControl(character) }) >= 0
-}
-
-func resultDiagnosticKey(value diagnosticjson.Diagnostic) string {
-	return value.Code + "\x00" + string(value.Severity) + "\x00" + value.Message
+func resultDiagnosticKey(value Diagnostic) string {
+	return string(value.canonicalJSON)
 }
 
 func (r Result) document() resultDocument {
+	snapshot := json.RawMessage("null")
+	if r.snapshot != nil {
+		snapshot = r.snapshot.CanonicalJSON()
+	}
 	payload := json.RawMessage("null")
 	if r.payload != nil {
 		payload = r.payload.CanonicalJSON()
-	}
-	diagnostics := make([]diagnosticDocument, len(r.diagnostics))
-	for index, value := range r.diagnostics {
-		diagnostics[index] = diagnosticDocument{Code: value.Code, Severity: value.Severity, Message: value.Message}
 	}
 	recovery := make([]recoveryDocument, len(r.recovery))
 	for index, value := range r.recovery {
@@ -307,11 +301,11 @@ func (r Result) document() resultDocument {
 		Schema:       ResultSchemaV1,
 		Operation:    r.operation,
 		InvocationID: r.invocationID,
-		Snapshot:     nil,
+		Snapshot:     snapshot,
 		Status:       r.status,
 		ExitClass:    r.exitClass,
 		Changes:      make([]emptyDocument, 0),
-		Diagnostics:  diagnostics,
+		Diagnostics:  diagnosticDocuments(r.diagnostics),
 		Recovery:     recovery,
 		Effects:      effectsDocumentFrom(r.effects),
 		Support:      make([]emptyDocument, 0),

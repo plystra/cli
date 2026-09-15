@@ -35,8 +35,9 @@ type newResultDocument struct {
 	Status       string `json:"status"`
 	ExitClass    int    `json:"exit_class"`
 	Diagnostics  []struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
+		Code      string            `json:"code"`
+		Message   string            `json:"message"`
+		Locations []json.RawMessage `json:"locations"`
 	} `json:"diagnostics"`
 	Recovery []struct {
 		Schema           string   `json:"schema"`
@@ -93,6 +94,9 @@ func TestRunNewCommandEmitsCanonicalJSONSuccess(t *testing.T) {
 	}
 	if len(document.Effects.Observed) != 1 || len(document.Effects.Planned) != 0 || len(document.Effects.Skipped) != 0 || len(document.Effects.Unverified) != 0 {
 		t.Fatalf("effects = %#v", document.Effects)
+	}
+	if document.Diagnostics == nil {
+		t.Fatal("result omitted the diagnostics collection")
 	}
 	if !strings.HasSuffix(stdout, "\n") || strings.Count(strings.TrimSpace(stdout), "\n") != 0 {
 		t.Fatalf("stdout is not one compact canonical document: %q", stdout)
@@ -227,7 +231,7 @@ func assertNewFailure(t *testing.T, document newResultDocument, status string, e
 	if document.Schema != commandschema.ResultSchemaV1 || document.Operation != "new" || document.InvocationID != newCommandTestInvocationID || document.Status != status || document.ExitClass != exit {
 		t.Fatalf("result identity = %#v", document)
 	}
-	if len(document.Diagnostics) != 1 || document.Diagnostics[0].Code != code || document.Payload != nil {
+	if len(document.Diagnostics) != 1 || document.Diagnostics[0].Code != code || document.Diagnostics[0].Locations == nil || len(document.Diagnostics[0].Locations) != 0 || document.Payload != nil {
 		t.Fatalf("failure facts = diagnostics %#v payload %#v", document.Diagnostics, document.Payload)
 	}
 	if len(document.Effects.Observed) != 0 || len(document.Effects.Planned) != 0 || len(document.Effects.Skipped) != 0 || len(document.Effects.Unverified) != 0 {

@@ -185,6 +185,14 @@ func (e inspectCapabilitiesResultEncoder) failure(err error) (commandschema.Resu
 		recoveryID = "correct-inspect-capabilities-invocation"
 		precondition = "valid_invocation"
 	}
+	diagnostic, diagnosticErr := commandschema.NewDiagnostic(commandschema.DiagnosticInput{
+		Code:     code,
+		Severity: diagnosticjson.SeverityError,
+		Message:  message,
+	})
+	if diagnosticErr != nil {
+		return commandschema.Result{}, diagnosticErr
+	}
 	recovery, recoveryErr := commandschema.NewRecovery(commandschema.RecoveryInput{
 		ID:            recoveryID,
 		Kind:          commandschema.RecoveryManual,
@@ -202,13 +210,9 @@ func (e inspectCapabilitiesResultEncoder) failure(err error) (commandschema.Resu
 		Operation:    "inspect.capabilities",
 		InvocationID: e.invocationID,
 		Status:       status,
-		Diagnostics: []diagnosticjson.Diagnostic{{
-			Code:     code,
-			Severity: diagnosticjson.SeverityError,
-			Message:  message,
-		}},
-		Recovery: []commandschema.Recovery{recovery},
-		Effects:  e.emptyEffects,
+		Diagnostics:  []commandschema.Diagnostic{diagnostic},
+		Recovery:     []commandschema.Recovery{recovery},
+		Effects:      e.emptyEffects,
 	})
 }
 
