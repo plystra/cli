@@ -43,7 +43,7 @@ func TestRunCapabilityCreateAndImplementUsePublicTransactionalSurface(t *testing
 	actionBefore := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.create/v1", "--plugin", "records"}, root, environment)
 	wantError := "create capability: capability authoring action does not match visible contracts: records.create/v1 is already visible; implement the existing exact contract instead\n\n" +
-		"Recovery:\nRerun `plystra capability implement <capability-name>/vN [--plugin <plugin>]` for the existing exact contract.\n\n" +
+		"Recovery:\nRerun `plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]` for the existing exact contract.\n\n" +
 		"Diagnostic: " + diagnosticcode.CapabilityCreateAlreadyVisible + "\n"
 	if exitCode != 1 || stdout != "" || stderr != wantError {
 		t.Fatalf("duplicate capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
@@ -54,7 +54,7 @@ func TestRunCapabilityCreateAndImplementUsePublicTransactionalSurface(t *testing
 
 	exitCode, stdout, stderr = runCommand(t, []string{"capability", "implement", "records.missing/v1", "--plugin", "records"}, root, environment)
 	wantError = "implement capability: capability authoring action does not match visible contracts: records.missing/v1 is not visible; create a new contract instead\n\n" +
-		"Recovery:\nRerun `plystra capability create <capability-name>/vN [--query] [--plugin <plugin>] [--confirm] [--expose]` to author the missing exact contract.\n\n" +
+		"Recovery:\nRerun `plystra capability create <capability-name>/vN [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]` to author the missing exact contract.\n\n" +
 		"Diagnostic: " + diagnosticcode.CapabilityImplementNotVisible + "\n"
 	if exitCode != 1 || stdout != "" || stderr != wantError {
 		t.Fatalf("missing capability implement = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
@@ -150,13 +150,23 @@ func TestRunCapabilityAuthoringReportsAmbiguousPluginSourcesWithoutMutation(t *t
 			wantSuffix := "\n\n" +
 				"Source: example.com/acme/library:account/plugin.yaml:1:1 (plugin-declaration)\n" +
 				"Source: example.com/acme/library:records/plugin.yaml:1:1 (plugin-declaration)\n\n" +
-				"Recovery:\nRerun with `--plugin <plugin-directory-or-id>` to select one exact local Plugin.\n\n" +
+				"Recovery:\nRerun with `--plugin <plugin-directory-or-id>` to select one exact local Plugin, or rerun with `--interactive` in a terminal.\n\n" +
 				"Diagnostic: " + diagnosticcode.PluginTargetAmbiguous + "\n"
 			if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 2 || strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
 				t.Fatalf("%v = exit %d stdout %q stderr %q", arguments, exitCode, stdout, stderr)
 			}
 			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("%v mutated ambiguous-target Project:\nbefore: %#v\nafter:  %#v", arguments, before, after)
+			}
+
+			interactiveArguments := append(append([]string(nil), arguments...), "--interactive")
+			exitCode, stdout, stderr = runCommand(t, interactiveArguments, root, commandGoEnvironment())
+			wantRecovery := "Recovery:\nRerun with `--plugin <plugin-directory-or-id>` to select one exact local Plugin, or rerun with `--interactive` in a terminal.\n"
+			if exitCode != 1 || stdout != "" || !commandContainsAll(stderr, "input and output are required", wantRecovery, "Diagnostic: "+diagnosticcode.PluginTargetInvalid+"\n") || strings.Contains(stderr, "Source:") {
+				t.Fatalf("%v = exit %d stdout %q stderr %q", interactiveArguments, exitCode, stdout, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("%v mutated unavailable-interaction Project:\nbefore: %#v\nafter:  %#v", interactiveArguments, before, after)
 			}
 			assertNoCommandTransactions(t, root)
 		})
@@ -178,14 +188,14 @@ func TestRunCapabilityRejectsInvalidReferencesBeforeProjectDiscoveryOrMutation(t
 			name:      "create",
 			arguments: []string{"capability", "create", "Records.create", "--query"},
 			code:      diagnosticcode.CapabilityCreateReferenceInvalid,
-			recovery:  "Rerun `plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]` with one canonical lower-case Capability name containing at least two dot-separated segments and an optional positive `/vN` major.",
+			recovery:  "Rerun `plystra capability create <capability-name> [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]` with one canonical lower-case Capability name containing at least two dot-separated segments and an optional positive `/vN` major.",
 			rejected:  "Records.create",
 		},
 		{
 			name:      "implement",
 			arguments: []string{"capability", "implement", "records.create/v01"},
 			code:      diagnosticcode.CapabilityImplementReferenceInvalid,
-			recovery:  "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>]` with one canonical lower-case Capability ID containing at least two dot-separated segments and a positive major.",
+			recovery:  "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]` with one canonical lower-case Capability ID containing at least two dot-separated segments and a positive major.",
 			rejected:  "records.create/v01",
 		},
 		{
@@ -244,7 +254,7 @@ semantics:
 	before := commandTree(t, root)
 	exitCode, stdout, stderr := runCommand(t, []string{"capability", "create", "records.archive", "--plugin", "records"}, root, commandGoEnvironment())
 	wantError := "create capability: plan capability authoring: infer capability version: capability major version overflow for records.archive\n\n" +
-		"Recovery:\nRerun `plystra capability create <new-capability-name> --query [--plugin <plugin>] [--expose]` with a new canonical Capability identity; the existing identity has no higher major version.\n\n" +
+		"Recovery:\nRerun `plystra capability create <new-capability-name> --query [--plugin <plugin>] [--interactive] [--expose]` with a new canonical Capability identity; the existing identity has no higher major version.\n\n" +
 		"Diagnostic: " + diagnosticcode.CapabilityCreateVersionExhausted + "\n"
 	if exitCode != 1 || stdout != "" || stderr != wantError {
 		t.Fatalf("exhausted capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
@@ -266,7 +276,7 @@ func TestRunCapabilityCreateAndExposeRegenerateRunnableApplication(t *testing.T)
 	profileBefore := commandTree(t, root)
 	exitCode, stdout, stderr := runCommand(t, []string{"capability", "create", "records.list", "--plugin", "records"}, root, environment)
 	wantError := "create capability: capability creation intent profile is invalid: records.list/v1 is a new Capability identity; select one explicit profile such as --query\n\n" +
-		"Recovery:\nRerun `plystra capability create <capability-name> --query [--plugin <plugin>] [--confirm] [--expose]` with the explicit query intent profile required for a new Capability identity.\n\n" +
+		"Recovery:\nRerun `plystra capability create <capability-name> --query [--plugin <plugin>] [--interactive] [--confirm] [--expose]` with the explicit query intent profile required for a new Capability identity.\n\n" +
 		"Diagnostic: " + diagnosticcode.CapabilityCreateIntentProfileRequired + "\n"
 	if exitCode != 1 || stdout != "" || stderr != wantError {
 		t.Fatalf("name-inferred capability create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
@@ -287,7 +297,7 @@ func TestRunCapabilityCreateAndExposeRegenerateRunnableApplication(t *testing.T)
 	profileBefore = commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"capability", "create", "records.list", "--query", "--plugin", "records"}, root, environment)
 	wantError = "create capability: capability creation intent profile is invalid: records.list/v2 copies semantics from records.list/v1; omit --query\n\n" +
-		"Recovery:\nRerun `plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]` without `--query`; a later version copies the highest visible contract's semantics.\n\n" +
+		"Recovery:\nRerun `plystra capability create <capability-name> [--plugin <plugin>] [--interactive] [--confirm] [--expose]` without `--query`; a later version copies the highest visible contract's semantics.\n\n" +
 		"Diagnostic: " + diagnosticcode.CapabilityCreateIntentProfileNotAllowed + "\n"
 	if exitCode != 1 || stdout != "" || stderr != wantError {
 		t.Fatalf("later-version profile create = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)

@@ -1375,21 +1375,21 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, dependencyupdate.ErrUpdate) && errors.Is(err, dependencyupdate.ErrNotSelected):
 		return recoveryDiagnostic(diagnosticDependencyUpdateNotSelected, "Rerun `plystra update <go-module-query>` with one query whose module path is already selected in go.mod.")
 	case errors.Is(err, capabilitycreate.ErrCreate) && errors.Is(err, capabilitycreate.ErrInvalidReference):
-		return recoveryDiagnostic(diagnosticCapabilityCreateReferenceInvalid, "Rerun `plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]` with one canonical lower-case Capability name containing at least two dot-separated segments and an optional positive `/vN` major.")
+		return recoveryDiagnostic(diagnosticCapabilityCreateReferenceInvalid, "Rerun `plystra capability create <capability-name> [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]` with one canonical lower-case Capability name containing at least two dot-separated segments and an optional positive `/vN` major.")
 	case errors.Is(err, capabilitycreate.ErrCreate) && errors.Is(err, capabilitycreate.ErrActionMismatch) && errors.Is(err, capabilitycreate.ErrCreateAlreadyVisible) && !errors.Is(err, capabilitycreate.ErrImplementNotVisible):
-		return recoveryDiagnostic(diagnosticCapabilityCreateAlreadyVisible, "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>]` for the existing exact contract.")
+		return recoveryDiagnostic(diagnosticCapabilityCreateAlreadyVisible, "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]` for the existing exact contract.")
 	case errors.Is(err, capabilitycreate.ErrCreate) && !errors.Is(err, capabilitycreate.ErrImplement) && errors.Is(err, capabilitycreate.ErrConfirmationRequired):
 		return recoveryDiagnostic(diagnosticCapabilityCreateConfirmationRequired, "Review the visible Capability versions, then rerun the same `plystra capability create` command with `--confirm`.")
 	case errors.Is(err, capabilitycreate.ErrCreate) && !errors.Is(err, capabilitycreate.ErrImplement) && errors.Is(err, capabilitycreate.ErrVersionExhausted) && errors.Is(err, capabilityversion.ErrOverflow):
-		return recoveryDiagnostic(diagnosticCapabilityCreateVersionExhausted, "Rerun `plystra capability create <new-capability-name> --query [--plugin <plugin>] [--expose]` with a new canonical Capability identity; the existing identity has no higher major version.")
+		return recoveryDiagnostic(diagnosticCapabilityCreateVersionExhausted, "Rerun `plystra capability create <new-capability-name> --query [--plugin <plugin>] [--interactive] [--expose]` with a new canonical Capability identity; the existing identity has no higher major version.")
 	case errors.Is(err, capabilitycreate.ErrCreate) && errors.Is(err, capabilitycreate.ErrIntentProfile) && errors.Is(err, capabilitycreate.ErrIntentProfileRequired) && !errors.Is(err, capabilitycreate.ErrIntentProfileNotAllowed):
-		return recoveryDiagnostic(diagnosticCapabilityCreateIntentProfileRequired, "Rerun `plystra capability create <capability-name> --query [--plugin <plugin>] [--confirm] [--expose]` with the explicit query intent profile required for a new Capability identity.")
+		return recoveryDiagnostic(diagnosticCapabilityCreateIntentProfileRequired, "Rerun `plystra capability create <capability-name> --query [--plugin <plugin>] [--interactive] [--confirm] [--expose]` with the explicit query intent profile required for a new Capability identity.")
 	case errors.Is(err, capabilitycreate.ErrCreate) && errors.Is(err, capabilitycreate.ErrIntentProfile) && errors.Is(err, capabilitycreate.ErrIntentProfileNotAllowed) && !errors.Is(err, capabilitycreate.ErrIntentProfileRequired):
-		return recoveryDiagnostic(diagnosticCapabilityCreateIntentProfileNotAllowed, "Rerun `plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]` without `--query`; a later version copies the highest visible contract's semantics.")
+		return recoveryDiagnostic(diagnosticCapabilityCreateIntentProfileNotAllowed, "Rerun `plystra capability create <capability-name> [--plugin <plugin>] [--interactive] [--confirm] [--expose]` without `--query`; a later version copies the highest visible contract's semantics.")
 	case errors.Is(err, capabilitycreate.ErrImplement) && errors.Is(err, capabilitycreate.ErrInvalidReference):
-		return recoveryDiagnostic(diagnosticCapabilityImplementReferenceInvalid, "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>]` with one canonical lower-case Capability ID containing at least two dot-separated segments and a positive major.")
+		return recoveryDiagnostic(diagnosticCapabilityImplementReferenceInvalid, "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]` with one canonical lower-case Capability ID containing at least two dot-separated segments and a positive major.")
 	case errors.Is(err, capabilitycreate.ErrImplement) && errors.Is(err, capabilitycreate.ErrActionMismatch) && errors.Is(err, capabilitycreate.ErrImplementNotVisible) && !errors.Is(err, capabilitycreate.ErrCreateAlreadyVisible):
-		return recoveryDiagnostic(diagnosticCapabilityImplementNotVisible, "Rerun `plystra capability create <capability-name>/vN [--query] [--plugin <plugin>] [--confirm] [--expose]` to author the missing exact contract.")
+		return recoveryDiagnostic(diagnosticCapabilityImplementNotVisible, "Rerun `plystra capability create <capability-name>/vN [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]` to author the missing exact contract.")
 	case errors.Is(err, capabilityexpose.ErrExpose) && errors.Is(err, capabilityexpose.ErrInvalidReference):
 		return recoveryDiagnostic(diagnosticCapabilityExposeReferenceInvalid, "Rerun `plystra capability expose <capability-name>/vN"+context.selectorSuffix()+"` with one canonical lower-case Capability ID containing at least two dot-separated segments and a positive major.")
 	case errors.Is(err, implementationselect.ErrInvalidInterfaceID):
@@ -1433,11 +1433,11 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, gocommand.ErrRun):
 		return recoveryDiagnostic(diagnosticGoCommandFailed, goToolingRecovery())
 	case errors.Is(err, plugintarget.ErrAmbiguous):
-		return recoveryDiagnostic(diagnosticPluginTargetAmbiguous, pluginTargetRecovery())
+		return recoveryDiagnostic(diagnosticPluginTargetAmbiguous, pluginTargetInteractiveRecovery())
 	case errors.Is(err, plugintarget.ErrNotFound):
-		return recoveryDiagnostic(diagnosticPluginTargetNotFound, pluginTargetRecovery())
+		return recoveryDiagnostic(diagnosticPluginTargetNotFound, pluginTargetExplicitRecovery())
 	case errors.Is(err, plugintarget.ErrSelection):
-		return recoveryDiagnostic(diagnosticPluginTargetInvalid, pluginTargetRecovery())
+		return recoveryDiagnostic(diagnosticPluginTargetInvalid, pluginTargetInteractiveRecovery())
 	case errors.Is(err, generationactivation.ErrAssociationConflict):
 		return recoveryDiagnostic(diagnosticGenerationActivationConflict, "Edit plugin.yaml generation.activations so the reported namespace uses one exact activation Capability.")
 	case errors.Is(err, generationactivation.ErrMissingAssociation):
@@ -1533,7 +1533,11 @@ func goToolingRecovery() string {
 	return "Make the reported module or Go command resolve successfully with ordinary Go tooling, then rerun the Plystra command."
 }
 
-func pluginTargetRecovery() string {
+func pluginTargetInteractiveRecovery() string {
+	return "Rerun with `--plugin <plugin-directory-or-id>` to select one exact local Plugin, or rerun with `--interactive` in a terminal."
+}
+
+func pluginTargetExplicitRecovery() string {
 	return "Rerun with `--plugin <plugin-directory-or-id>` to select one exact local Plugin."
 }
 

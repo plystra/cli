@@ -25,7 +25,7 @@ var (
 )
 
 // Selector chooses one zero-based candidate index. Callers provide a selector
-// only when an interactive terminal is available.
+// only after the user explicitly requests interaction.
 type Selector func(candidates []Target) (int, error)
 
 // Options controls one inference operation.
@@ -109,7 +109,7 @@ func (e *AmbiguousError) Error() string {
 	for index, candidate := range e.candidates {
 		values[index] = fmt.Sprintf("%s (%s)", candidate.id, candidate.directory)
 	}
-	return fmt.Sprintf("%s: %s: multiple local plugins: %s; use --plugin or an interactive terminal", ErrInfer, ErrAmbiguous, strings.Join(values, ", "))
+	return fmt.Sprintf("%s: %s: multiple local plugins: %s; use --plugin or rerun with --interactive in a terminal", ErrInfer, ErrAmbiguous, strings.Join(values, ", "))
 }
 
 // Unwrap preserves both established ambiguity sentinel chains.

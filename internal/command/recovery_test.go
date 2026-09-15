@@ -184,8 +184,20 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 		{
 			name: "Plugin targeting",
 			err:  fmt.Errorf("author Capability: %w", plugintarget.ErrAmbiguous),
-			want: "Rerun with `--plugin <plugin-directory-or-id>` to select one exact local Plugin.",
+			want: "Rerun with `--plugin <plugin-directory-or-id>` to select one exact local Plugin, or rerun with `--interactive` in a terminal.",
 			code: diagnosticPluginTargetAmbiguous,
+		},
+		{
+			name: "missing Plugin target",
+			err:  fmt.Errorf("author Capability: %w", plugintarget.ErrNotFound),
+			want: "Rerun with `--plugin <plugin-directory-or-id>` to select one exact local Plugin.",
+			code: diagnosticPluginTargetNotFound,
+		},
+		{
+			name: "invalid interactive Plugin selection",
+			err:  fmt.Errorf("author Capability: %w", plugintarget.ErrSelection),
+			want: "Rerun with `--plugin <plugin-directory-or-id>` to select one exact local Plugin, or rerun with `--interactive` in a terminal.",
+			code: diagnosticPluginTargetInvalid,
 		},
 		{
 			name: "generation helper failure",
@@ -237,19 +249,19 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 		{
 			name: "Capability create version exhaustion",
 			err:  errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrVersionExhausted, capabilityversion.ErrOverflow),
-			want: "Rerun `plystra capability create <new-capability-name> --query [--plugin <plugin>] [--expose]` with a new canonical Capability identity; the existing identity has no higher major version.",
+			want: "Rerun `plystra capability create <new-capability-name> --query [--plugin <plugin>] [--interactive] [--expose]` with a new canonical Capability identity; the existing identity has no higher major version.",
 			code: diagnosticCapabilityCreateVersionExhausted,
 		},
 		{
 			name: "Capability create exact version",
 			err:  errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrCreateAlreadyVisible),
-			want: "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>]` for the existing exact contract.",
+			want: "Rerun `plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]` for the existing exact contract.",
 			code: diagnosticCapabilityCreateAlreadyVisible,
 		},
 		{
 			name: "Capability implement missing version",
 			err:  errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrImplementNotVisible),
-			want: "Rerun `plystra capability create <capability-name>/vN [--query] [--plugin <plugin>] [--confirm] [--expose]` to author the missing exact contract.",
+			want: "Rerun `plystra capability create <capability-name>/vN [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]` to author the missing exact contract.",
 			code: diagnosticCapabilityImplementNotVisible,
 		},
 		{
@@ -262,13 +274,13 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 		{
 			name: "Capability create missing intent profile",
 			err:  errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfile, capabilitycreate.ErrIntentProfileRequired),
-			want: "Rerun `plystra capability create <capability-name> --query [--plugin <plugin>] [--confirm] [--expose]` with the explicit query intent profile required for a new Capability identity.",
+			want: "Rerun `plystra capability create <capability-name> --query [--plugin <plugin>] [--interactive] [--confirm] [--expose]` with the explicit query intent profile required for a new Capability identity.",
 			code: diagnosticCapabilityCreateIntentProfileRequired,
 		},
 		{
 			name: "Capability create inapplicable intent profile",
 			err:  errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrIntentProfile, capabilitycreate.ErrIntentProfileNotAllowed),
-			want: "Rerun `plystra capability create <capability-name> [--plugin <plugin>] [--confirm] [--expose]` without `--query`; a later version copies the highest visible contract's semantics.",
+			want: "Rerun `plystra capability create <capability-name> [--plugin <plugin>] [--interactive] [--confirm] [--expose]` without `--query`; a later version copies the highest visible contract's semantics.",
 			code: diagnosticCapabilityCreateIntentProfileNotAllowed,
 		},
 	}

@@ -34,8 +34,8 @@ plystra remove <go-module-path>
 plystra update <go-module-query>
 plystra use <interface-id> <constructor-symbol> [--env <environment>|--config <yaml-path>]
 plystra plugin create <name>
-plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]
-plystra capability implement <capability-name>/vN [--plugin <plugin>]
+plystra capability create <capability-name> [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]
+plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]
 plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
 plystra inspect capabilities [--format human|json]
 plystra generate [--check] [--env <environment>|--config <yaml-path>]
@@ -2686,8 +2686,12 @@ Non-interactive `capability create` and `capability implement` use
 available and no exact target can be inferred. Every candidate is reported in
 deterministic order as
 `Source: <current-module>:<plugin-directory>/plugin.yaml:1:1 (plugin-declaration)`;
-the diagnostic exposes no absolute checkout path. An absent explicit target and
-a failed interactive selection have no fabricated source.
+the diagnostic exposes no absolute checkout path. Pass
+`--plugin <directory-or-plugin-id>` as complete non-interactive input, or add
+`--interactive` to request a terminal choice. Terminal detection alone never
+prompts. Requested interaction without a terminal and failed selections emit
+`PLYSTRA_PLUGIN_TARGET_INVALID`; absent explicit targets and failed selections
+have no fabricated source.
 
 Run from inside the target Plugin or pass its directory or exact Plugin ID:
 

@@ -6,11 +6,15 @@ Use authored Go as the contract and implementation source. A Plystra Interface i
 
     plystra interface create records.read
     plystra implement records.read/v1 --package ./records
+    plystra capability create records.read --query --plugin records
+    plystra capability implement records.read/v1 --plugin records
     plystra use email.send/v1 example.com/acme/email/smtp.New
     plystra inspect interfaces
     plystra inspect implementations
 
 After scaffolding, edit the authored Interface and Implementation, add package tests, then run `plystra generate`. Interface IDs are provider-independent and use the exact `/vN` suffix. Constructors declare `//plystra:implements <interface-id>` and return one compatible value.
+
+Capability creation and implementation never prompt by default. Pass `--plugin <directory-or-plugin-id>` as complete non-interactive input. Add `--interactive` only to request a terminal choice after enclosing and sole-Plugin inference remain ambiguous; terminal detection alone never prompts, and unavailable requested interaction fails before mutation.
 
 An ordinary `T` field has no separate presence state: omission and its Go zero value normalize identically. A direct `*T` distinguishes absent from a present value, including zero or empty, while direct `**T` adds explicit null. Pointers are allowed only directly on message fields, with a maximum depth of two, and must not create a message cycle. A required ordinary field must occur in representations that retain occurrence; required pointer fields reject absence, while required `**T` still permits explicit null. Constraints apply to a present non-null innermost value.
 

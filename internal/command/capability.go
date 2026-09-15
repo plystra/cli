@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	capabilityCreateSynopsis    = "plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]"
-	capabilityImplementSynopsis = "plystra capability implement <capability-name>/vN [--plugin <plugin>]"
+	capabilityCreateSynopsis    = "plystra capability create <capability-name> [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]"
+	capabilityImplementSynopsis = "plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]"
 	capabilityExposeSynopsis    = "plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]"
 	capabilityUsage             = `Usage:
   ` + capabilityCreateSynopsis + `
@@ -60,8 +60,17 @@ Superseded global switches and exposure set forms fail before mutation.
 	capabilityCreateHelp = `Usage:
   ` + capabilityCreateSynopsis + `
 
+Options:
+  --interactive   Prompt for a Plugin only when target inference remains ambiguous.
+
 Intent profiles:
   --query   Create a read-only, safely retryable query contract for a new Capability identity.
+
+A complete explicit --plugin selection is non-interactive. Without it, the
+command checks the enclosing Plugin and then a sole local Plugin. Only
+--interactive permits a terminal prompt after those forms remain ambiguous;
+requesting interaction without an available terminal emits
+PLYSTRA_PLUGIN_TARGET_INVALID before mutation.
 
 A new Capability identity requires one explicit intent profile. A later version
 copies the complete semantics of its highest visible source contract; omit the
@@ -83,7 +92,7 @@ A missing new-identity profile emits
 PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_REQUIRED; a profile supplied while
 copying a later version emits PLYSTRA_CAPABILITY_CREATE_INTENT_PROFILE_NOT_ALLOWED.
 Both failures occur before Project mutation.
-If non-interactive local Plugin inference is ambiguous, the command emits
+If local Plugin inference is ambiguous without --interactive, the command emits
 PLYSTRA_PLUGIN_TARGET_AMBIGUOUS with every current-Project candidate plugin.yaml
 at 1:1 as a module-relative plugin-declaration source before mutation.
 If visible Providers disagree on the source exact contract, the command emits
@@ -98,13 +107,22 @@ Invalid exposure configuration fails without installing the creation.
 	capabilityImplementHelp = `Usage:
   ` + capabilityImplementSynopsis + `
 
+Options:
+  --interactive   Prompt for a Plugin only when target inference remains ambiguous.
+
+A complete explicit --plugin selection is non-interactive. Without it, the
+command checks the enclosing Plugin and then a sole local Plugin. Only
+--interactive permits a terminal prompt after those forms remain ambiguous;
+requesting interaction without an available terminal emits
+PLYSTRA_PLUGIN_TARGET_INVALID before mutation.
+
 Malformed exact Capability IDs emit the stable
 PLYSTRA_CAPABILITY_IMPLEMENT_REFERENCE_INVALID diagnostic before Project
 discovery or mutation.
 A valid exact version that is not visible emits
 PLYSTRA_CAPABILITY_IMPLEMENT_NOT_VISIBLE and directs the developer to the
 creation command without changing the Project.
-If non-interactive local Plugin inference is ambiguous, the command emits
+If local Plugin inference is ambiguous without --interactive, the command emits
 PLYSTRA_PLUGIN_TARGET_AMBIGUOUS with every current-Project candidate plugin.yaml
 at 1:1 as a module-relative plugin-declaration source before mutation.
 If visible Providers disagree on that exact contract, the command emits
@@ -120,6 +138,7 @@ type capabilityArguments struct {
 	action      string
 	reference   string
 	plugin      string
+	interactive bool
 	confirm     bool
 	expose      bool
 	query       bool
@@ -161,13 +180,20 @@ func runCapability(arguments []string, stdout, stderr io.Writer, workingDirector
 		}
 		return 0
 	}
+	var selector plugintarget.Selector
+	if parsed.interactive {
+		selector = selectPlugin
+		if selector == nil {
+			selector = plugintarget.Prompt(nil, nil)
+		}
+	}
 	options := capabilitycreate.AuthorOptions{
 		Options: capabilitycreate.Options{
 			Start:       workingDirectory,
 			Reference:   parsed.reference,
 			Plugin:      parsed.plugin,
 			Intent:      capabilityIntent(parsed),
-			Select:      selectPlugin,
+			Select:      selector,
 			Environment: environment,
 		},
 		Confirm: parsed.confirm,
@@ -252,6 +278,11 @@ func parseCapabilityArguments(arguments []string) (capabilityArguments, bool) {
 			pluginSet = true
 			index++
 			result.plugin = arguments[index]
+		case "--interactive":
+			if result.interactive {
+				return capabilityArguments{}, false
+			}
+			result.interactive = true
 		case "--confirm":
 			if result.action != "create" || result.confirm {
 				return capabilityArguments{}, false

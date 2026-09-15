@@ -66,7 +66,7 @@ func TestInferHandlesInteractiveAndNonInteractiveAmbiguity(t *testing.T) {
 	writePlugin(t, root, "profile", "acme.app.profile")
 	writePlugin(t, root, "account", "acme.app.account")
 	_, ambiguityErr := plugintarget.Infer(plugintarget.Options{Start: root})
-	wantError := "infer plugin target: plugin target is ambiguous: multiple local plugins: acme.app.account (account), acme.app.profile (profile); use --plugin or an interactive terminal"
+	wantError := "infer plugin target: plugin target is ambiguous: multiple local plugins: acme.app.account (account), acme.app.profile (profile); use --plugin or rerun with --interactive in a terminal"
 	if !errors.Is(ambiguityErr, plugintarget.ErrInfer) || !errors.Is(ambiguityErr, plugintarget.ErrAmbiguous) || ambiguityErr.Error() != wantError {
 		t.Fatalf("non-interactive Infer error = %v, want %q", ambiguityErr, wantError)
 	}

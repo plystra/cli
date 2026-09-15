@@ -38,8 +38,8 @@ const (
   plystra plugin create <name>
   plystra interface create <interface-name>
   plystra implement <interface-id> --package <project-relative-package>
-  plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]
-  plystra capability implement <capability-name>/vN [--plugin <plugin>]
+  plystra capability create <capability-name> [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]
+  plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]
   plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
   plystra guidance sync [--replace-generated]
   plystra guidance check

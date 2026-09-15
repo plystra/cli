@@ -72,6 +72,10 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	}
 	interfaces := byPath[Root+"/tasks/interfaces-and-implementations.md"]
 	for _, phrase := range []string{
+		"plystra capability create records.read --query --plugin records",
+		"Capability creation and implementation never prompt by default",
+		"Add `--interactive` only to request a terminal choice",
+		"terminal detection alone never prompts",
 		"An ordinary `T` field has no separate presence state",
 		"A direct `*T` distinguishes absent from a present value",
 		"direct `**T` adds explicit null",

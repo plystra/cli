@@ -693,7 +693,13 @@ versioned Interface IDs, unsafe Implementation package paths, and existing
 Interface or Implementation targets. Each failure emits one recovery command or
 replacement choice and leaves the Project unchanged.
 
-Plugin-target inference resolves an explicit target, the enclosing plugin, the only local plugin, or an interactive choice when several local plugins remain and a terminal is available. Non-interactive ambiguity fails with every candidate and requires `--plugin <directory-or-plugin-id>`.
+Plugin-target inference resolves an explicit target, the enclosing plugin, or
+the only local plugin without prompting. Only an explicit `--interactive`
+permits a terminal choice when several local plugins remain; terminal detection
+alone never activates interaction. Non-interactive ambiguity fails with every
+candidate and accepts `--plugin <directory-or-plugin-id>` as the complete
+explicit form. Requested interaction without a terminal fails deterministically
+with `PLYSTRA_PLUGIN_TARGET_INVALID` before mutation.
 
 Capability identities use `<capability-name>/v<number>`. Names contain at least two dot-separated lower-case segments, may use any logical hierarchy depth, and never imply a fixed namespace/operation split.
 
@@ -1286,9 +1292,11 @@ Non-interactive `capability create` and `capability implement` with several
 valid local Plugins and no exact target emit `PLYSTRA_PLUGIN_TARGET_AMBIGUOUS`.
 The diagnostic reports every candidate as a sorted current-Project
 `plugin-declaration` source at its module-relative `plugin.yaml:1:1`, never an
-absolute checkout path. An explicit target that is absent and a failed
-interactive selection remain source-less because no existing declaration owns
-those failures.
+absolute checkout path. Pass `--plugin <directory-or-plugin-id>` as complete
+non-interactive input, or add `--interactive` to request a terminal choice.
+Requested interaction without a terminal and failed selections emit
+`PLYSTRA_PLUGIN_TARGET_INVALID`; absent explicit targets and failed selections
+remain source-less because no existing declaration owns those failures.
 
 `PLYSTRA_CAPABILITY_EXPOSE_NOT_VISIBLE` identifies a well-formed exact exposure
 target absent from the selected visible canonical catalog. Classification

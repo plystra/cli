@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/plugintarget"
 	"github.com/plystra/cli/internal/testkernel"
 )
@@ -30,14 +31,14 @@ func TestParseCapabilityArguments(t *testing.T) {
 		},
 		{
 			name:      "create explicit target and confirmation",
-			arguments: []string{"capability", "create", "records.create/v3", "--expose", "--query", "--confirm", "--plugin", "acme.records"},
-			want:      capabilityArguments{action: "create", reference: "records.create/v3", plugin: "acme.records", confirm: true, expose: true, query: true},
+			arguments: []string{"capability", "create", "records.create/v3", "--expose", "--query", "--confirm", "--interactive", "--plugin", "acme.records"},
+			want:      capabilityArguments{action: "create", reference: "records.create/v3", plugin: "acme.records", interactive: true, confirm: true, expose: true, query: true},
 			ok:        true,
 		},
 		{
 			name:      "implement explicit target",
-			arguments: []string{"capability", "implement", "email.send/v1", "--plugin", "mailer"},
-			want:      capabilityArguments{action: "implement", reference: "email.send/v1", plugin: "mailer"},
+			arguments: []string{"capability", "implement", "email.send/v1", "--plugin", "mailer", "--interactive"},
+			want:      capabilityArguments{action: "implement", reference: "email.send/v1", plugin: "mailer", interactive: true},
 			ok:        true,
 		},
 		{
@@ -72,6 +73,8 @@ func TestParseCapabilityArguments(t *testing.T) {
 		{name: "duplicate confirmation", arguments: []string{"capability", "create", "records.create/v3", "--confirm", "--confirm"}},
 		{name: "implement confirmation", arguments: []string{"capability", "implement", "records.create/v1", "--confirm"}},
 		{name: "implement exposure", arguments: []string{"capability", "implement", "records.create/v1", "--expose"}},
+		{name: "duplicate interaction", arguments: []string{"capability", "create", "records.create/v1", "--interactive", "--interactive"}},
+		{name: "expose interaction", arguments: []string{"capability", "expose", "records.create/v1", "--interactive"}},
 		{name: "duplicate exposure", arguments: []string{"capability", "create", "records.create/v1", "--expose", "--expose"}},
 		{name: "duplicate query profile", arguments: []string{"capability", "create", "records.create/v1", "--query", "--query"}},
 		{name: "implement query profile", arguments: []string{"capability", "implement", "records.create/v1", "--query"}},
@@ -105,7 +108,7 @@ func TestRunCapabilityPromptsForAmbiguousPluginTarget(t *testing.T) {
 	var stderr bytes.Buffer
 
 	exitCode := runIn(
-		[]string{"capability", "create", "profile.get", "--query"},
+		[]string{"capability", "create", "profile.get", "--query", "--interactive"},
 		&stdout,
 		&stderr,
 		root,
@@ -131,6 +134,113 @@ func TestRunCapabilityPromptsForAmbiguousPluginTarget(t *testing.T) {
 	}
 }
 
+func TestRunCapabilityDoesNotUseAvailableSelectorWithoutInteractive(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		arguments []string
+	}{
+		{name: "create", arguments: []string{"capability", "create", "profile.get", "--query"}},
+		{name: "implement", arguments: []string{"capability", "implement", "profile.get/v1"}},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			root := writeInteractiveCapabilityModule(t)
+			selected := false
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			exitCode := runIn(
+				test.arguments,
+				&stdout,
+				&stderr,
+				root,
+				interactiveCapabilityEnvironment(),
+				func([]plugintarget.Target) (int, error) {
+					selected = true
+					return 0, nil
+				},
+				nil,
+			)
+			if exitCode != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "Diagnostic: "+diagnosticcode.PluginTargetAmbiguous+"\n") {
+				t.Fatalf("non-interactive %s = exit %d, stdout %q, stderr %q", test.name, exitCode, stdout.String(), stderr.String())
+			}
+			if selected {
+				t.Fatal("available selector was called without --interactive")
+			}
+		})
+	}
+}
+
+func TestRunCapabilityRequestedInteractionFailsWithoutTerminalWhenAmbiguous(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		arguments []string
+	}{
+		{name: "create", arguments: []string{"capability", "create", "profile.get", "--query", "--interactive"}},
+		{name: "implement", arguments: []string{"capability", "implement", "profile.get/v1", "--interactive"}},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			root := writeInteractiveCapabilityModule(t)
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			exitCode := runIn(test.arguments, &stdout, &stderr, root, interactiveCapabilityEnvironment(), nil, nil)
+			if exitCode != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "Diagnostic: "+diagnosticcode.PluginTargetInvalid+"\n") || strings.Contains(stderr.String(), "Source:") {
+				t.Fatalf("unavailable interactive %s = exit %d, stdout %q, stderr %q", test.name, exitCode, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "input and output are required") {
+				t.Fatalf("unavailable interactive %s omitted terminal failure: %q", test.name, stderr.String())
+			}
+		})
+	}
+}
+
+func TestRunCapabilityRequestedInteractionPreservesUnambiguousResolution(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		plugins    []string
+		start      func(string) string
+		arguments  []string
+		wantPlugin string
+	}{
+		{
+			name:       "explicit Plugin",
+			plugins:    []string{"account", "profile"},
+			start:      func(root string) string { return root },
+			arguments:  []string{"capability", "create", "profile.explicit", "--query", "--plugin", "profile", "--interactive"},
+			wantPlugin: "profile",
+		},
+		{
+			name:       "enclosing Plugin",
+			plugins:    []string{"account", "profile"},
+			start:      func(root string) string { return filepath.Join(root, "profile") },
+			arguments:  []string{"capability", "create", "profile.enclosing", "--query", "--interactive"},
+			wantPlugin: "profile",
+		},
+		{
+			name:       "sole Plugin",
+			plugins:    []string{"profile"},
+			start:      func(root string) string { return root },
+			arguments:  []string{"capability", "create", "profile.sole", "--query", "--interactive"},
+			wantPlugin: "profile",
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			root := writeInteractiveCapabilityModuleWithPlugins(t, test.plugins...)
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			exitCode := runIn(test.arguments, &stdout, &stderr, test.start(root), interactiveCapabilityEnvironment(), nil, nil)
+			if exitCode != 0 || stderr.Len() != 0 {
+				t.Fatalf("%s = exit %d, stdout %q, stderr %q", test.name, exitCode, stdout.String(), stderr.String())
+			}
+			wantPath := filepath.Join(root, test.wantPlugin, "capabilities", test.arguments[2], "v1", "capability.yaml")
+			if _, err := os.Stat(wantPath); err != nil {
+				t.Fatalf("%s target: %v", test.name, err)
+			}
+		})
+	}
+}
+
 func TestTerminalPluginSelectorRejectsNonTerminalStreams(t *testing.T) {
 	if selector := terminalPluginSelector(os.Stdin, &bytes.Buffer{}); selector != nil {
 		t.Fatal("buffer output enabled interactive selection")
@@ -147,6 +257,11 @@ func TestTerminalPluginSelectorRejectsNonTerminalStreams(t *testing.T) {
 
 func writeInteractiveCapabilityModule(t *testing.T) string {
 	t.Helper()
+	return writeInteractiveCapabilityModuleWithPlugins(t, "account", "profile")
+}
+
+func writeInteractiveCapabilityModuleWithPlugins(t *testing.T, plugins ...string) string {
+	t.Helper()
 	cliRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatalf("resolve CLI root: %v", err)
@@ -161,7 +276,7 @@ func writeInteractiveCapabilityModule(t *testing.T) string {
 	}
 	writeInteractiveCapabilityFile(t, filepath.Join(root, "go.sum"), string(goSum))
 	writeInteractiveCapabilityFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
-	for _, plugin := range []string{"account", "profile"} {
+	for _, plugin := range plugins {
 		writeInteractiveCapabilityFile(t, filepath.Join(root, plugin, "plugin.yaml"), "id: acme.app."+plugin+"\n")
 		writeInteractiveCapabilityFile(t, filepath.Join(root, plugin, "plugin.go"), "package "+plugin+"\n\ntype Plugin struct{}\n\nfunc New(_ ...any) *Plugin { return &Plugin{} }\n")
 	}
