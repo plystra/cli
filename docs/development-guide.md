@@ -437,14 +437,14 @@ orders/
     .plystra-manifest.json                CLI ownership manifest
     manifest.json                         resolved application manifest
     compatibility/
-      interface-documentation.json        generated documentation baseline
-      interface-javascript.json           public JavaScript API baseline
-      interface-metadata.json             classified metadata digest baseline
-      interface-transport.json            Protobuf, procedure, wire baseline
-      interfaces.json                     authored Interface shape baseline
+      interface-documentation.json        documentation working record
+      interface-javascript.json           JavaScript API working record
+      interface-metadata.json             metadata-class working record
+      interface-transport.json            transport-class working record
+      interfaces.json                     authored-shape working record
     proto/
       descriptor-set.pb                   self-contained descriptor evidence
-      plystra/generated/.../capability.proto
+      plystra/generated/.../interface.proto
                                           canonical and Alias schemas
       wire-map.json                       committed Protobuf wire history
     docs/
@@ -467,26 +467,51 @@ Edit declarations, Plugin Go code, tests, entry points, and Plugin-owned assets
 outside `generated/`. Every path under `generated/` is CLI-owned. Fix its
 authored input and regenerate; never patch generated output by hand.
 
-`generated/compatibility/interfaces.json` is committed compatibility evidence
-for every visible authored Interface, independent of selection and exposure.
-It snapshots the authored package and method, request and response names,
-reachable messages, stable field numbers, Go and JSON names, requiredness, and
-canonical Go types. It excludes metadata, projections, Implementations,
-configuration, Secrets, source paths, and module versions. During prerelease
-development, run `plystra generate` to refresh it transactionally after an
-intentional authored shape change. Use `plystra generate --check` to compare the
-current authored shapes without changing either the baseline or other Project
-files. Never edit the baseline by hand.
+An ordinary Interface message field `T` has no business-observable presence
+state: omission and its Go zero value normalize identically. A direct `*T`
+distinguishes absent from a present value, including zero or empty, while a
+direct `**T` adds explicit null. Pointers are accepted only as one or two direct
+layers at a message-field boundary. They are invalid inside repeated elements,
+map keys or values, or another supported type, and a pointer-to-message edge
+cannot create a recursive cycle.
+
+A `required` ordinary field is meaningful only at a representation that retains
+occurrence, such as a validated example or transport input. A required `*T`
+rejects absence. A required `**T` also rejects absence but still permits
+explicit null because requiredness checks the outer pointer state. The contract
+model applies constraints through pointer layers to a present, non-null
+innermost value and treats nil and allocated-empty bytes, repeated values, and
+maps as the same canonical empty value without changing a pointer field's outer
+absent, null, or present state.
+
+Current support implements that model for Interface declaration parsing,
+`interface.yaml` constraint and example validation, and compatibility
+classification. Generated proxies and Implementation adapters do not yet apply
+pointer-aware requiredness, constraint checks, or empty-collection normalization
+to internal calls. Pointer-bearing Connect exposure therefore fails closed until
+the governed runtime and transport projections preserve those states.
+
+`generated/compatibility/interfaces.json` is the committed, CLI-owned,
+replaceable shape working record for every visible authored Interface,
+independent of selection and exposure. It snapshots the authored package and
+method, request and response names, reachable messages, stable field numbers,
+Go and JSON names, requiredness, direct pointer depth, and canonical Go types.
+It excludes metadata, projections, Implementations, configuration, Secrets,
+source paths, and module versions. Run `plystra generate` to refresh it
+transactionally after an intentional authored shape change. Use
+`plystra generate --check` to compare current authored shapes without changing
+the working record or other Project files. Never edit it by hand.
 
 `generated/compatibility/interface-metadata.json` classifies changes without
-copying authored metadata into generated output. Its exact-contract digest
-covers Go shape, semantics, semantic-error codes, constraints, and Behavioral
-Conformance declarations. Its documentation digest covers descriptions and
-deprecation, and its example digest covers validated request-and-outcome
-examples. Generation maintains this committed CLI-owned file in the same
-transaction as the shape baseline; `plystra generate --check` reports which
-classified digest changed without mutation. Change `interface.go` or
-`interface.yaml`, then regenerate—never patch a compatibility file.
+copying authored metadata into generated output. Schema
+`plystra.interface-metadata-baseline/v2` stores the normalized exact-contract,
+`contract_supplement_digest`, documentation, and example digests. The
+supplement covers semantics, semantic-error codes, constraints, and Behavioral
+Conformance independently of Go shape. Generation migrates an owned canonical
+v1 record to v2 in the same transaction as its ownership manifest and restores
+both on rollback; `plystra generate --check` reports the required migration as
+stale without mutation. Change `interface.go` or `interface.yaml`, then
+regenerate; never patch a compatibility file.
 
 `generated/compatibility/interface-transport.json` records separate
 Protobuf-descriptor, Connect-procedure, and active wire-map digests for every
@@ -496,27 +521,45 @@ generators, contains no raw contract, Implementation, configuration, Secret,
 path, or module-version values, and includes the shared safe-error descriptor
 in each exposed Interface descriptor digest. Generation updates it
 transactionally; `plystra generate --check` classifies transport drift without
-mutation. Never edit this baseline.
+mutation. Never edit this working record.
 
 `generated/compatibility/interface-javascript.json` records the caller-visible
-JavaScript projection for each exposed Interface. Its shared package digest
+JavaScript projection for each successfully projected exposed Interface. Its shared package digest
 covers the npm root export contract and public runtime types. Per-Interface
 digests independently cover the nested client path and factory/export surface,
 request/response/reachable-message TypeScript shapes with requiredness and
 exact scalar mappings, and declared semantic-error union. It stores no
 Implementation, configuration, Secret, source location, or module version.
 Use `plystra generate --check` to compare it without mutation; update authored
-Interface inputs and regenerate instead of editing this history.
+Interface inputs and regenerate instead of editing this working record.
 
 `generated/compatibility/interface-documentation.json` records the current
 managed documentation surface without copying its contents. Each
 `generated/docs/api.md` or `generated/docs/openapi.json` artifact contributes
 its closed kind, stable managed path, and exact content digest. A Project with
-no selected documentation surface retains a valid empty record. The baseline
+no selected documentation surface retains a valid empty record. The working record
 contains no Implementation, configuration, Secret, source location, or module
 version. Regenerate after intentional documentation-input changes; use
 `plystra generate --check` for a non-mutating comparison and never edit the
 record directly.
+
+The five compatibility working records listed above are replaceable
+current-source state whose ownership-manifest output kind is
+`compatibility-working-record`; they are not accepted release baselines.
+Classification is per record and ownership entry, not directory-wide. Accepted
+baselines are distinct immutable release evidence keyed to an exact released
+artifact and source lineage. Ordinary generation, check, cleanup, transaction
+recovery, or relabeling cannot create, overwrite, or delete that evidence.
+
+Changing an existing field among `T`, `*T`, and `**T`, changing its innermost
+type, or otherwise adding or removing an observable state is a breaking
+compatibility classification. Pre-stable development may refresh the
+replaceable working records in place; once an accepted stable baseline applies,
+the change requires a new Interface version. A newly numbered non-required
+pointer field is retained as an additive candidate only when shape and v2
+supplement evidence show that the edit is shape-only. The stable-release
+assessment still reports a version requirement until every public projection
+and immutable accepted ancestor also classifies the new field as optional.
 
 `generated/proto/wire-map.json` is durable compatibility history, not a
 disposable cache. It preserves field numbers for every visible authored
@@ -526,7 +569,9 @@ permanently reserves both its Protobuf name and number; renaming a field cannot
 reuse the old number. Only selected Connect Interfaces are active and produce
 schemas, descriptors, handlers, or SDK output. Removing exposure or disabling
 Connect therefore retains history without expanding the generated public
-surface.
+surface. An inactive pointer-bearing Interface retains its field names and
+numbers in wire history and its pointer shape in the authored-shape working
+record.
 Every scalar contract enum receives a numeric zero `*_UNSPECIFIED` sentinel.
 Its canonical members receive stable positive numbers: reordering does not
 change them, additions use unused positive values without renumbering existing
@@ -538,9 +583,9 @@ CLI-owned file with the rest of generated output, but never edit or delete it.
 If generation reports ledger drift, restore the exact last committed copy
 before rerunning `plystra generate`.
 
-For every canonical Capability on the selected Connect surface, generation
-emits one deterministic
-`generated/proto/plystra/generated/.../capability.proto` schema. An Alias emits
+For every supported pointer-free Interface successfully projected on the
+selected Connect surface, generation emits one deterministic
+`generated/proto/plystra/generated/.../interface.proto` schema. An Alias emits
 a service-only schema that imports and reuses its canonical target messages.
 `generated/proto/descriptor-set.pb` is the deterministic self-contained binary
 descriptor graph, including required well-known descriptors. When no Connect
@@ -563,6 +608,14 @@ operation kind is supported. The
 module-relative configuration document at `1:1` as an `exposure` source before
 selector-aware recovery. Do not relabel an event or stream to bypass this
 validation.
+The current CLI retains unexposed pointer-bearing Interfaces but does not yet
+emit their required Protobuf presence wrappers. Selecting one in `http.expose`
+fails closed with `PLYSTRA_PROTOBUF_POINTER_PROJECTION_UNSUPPORTED`, reports the
+effective declaration's owning configuration document at `1:1` as an
+`exposure` source, and directs the developer to remove that exposure and rerun
+generation with the same selector. The diagnostic exposes no absolute path or
+pointer value, and the failed command changes no authored, generated, module,
+compatibility, or transaction file.
 The application supplies one `RootContext` function for each generated
 canonical handler. It receives the live external request context plus a cloned
 header map and returns the trusted Kernel root. When the returned root
@@ -2117,6 +2170,14 @@ identity without an absolute or Module Cache path.
 problem retains the exact Capability and typed event or stream kind; recovery
 removes that exposure from the selected root, environment, or complete
 replacement document and reruns generation with the same selector.
+`PLYSTRA_PROTOBUF_POINTER_PROJECTION_UNSUPPORTED` emits the effective
+declaration's owning `http.expose` configuration document at `1:1` as an
+`exposure` source when an active Interface requires unavailable
+pointer-presence wrappers. Recovery removes that exposure and reruns generation
+with the same selector, even when a sparse overlay inherited the root
+declaration. The diagnostic exposes neither an absolute path nor a pointer
+value, and generation or checking leaves authored, generated, module,
+compatibility, and transaction files unchanged.
 `PLYSTRA_GENERATED_UNEXPECTED_OUTPUT` emits every unexpected unowned path as a
 sorted `generated-artifact` source in the current Project module, also without
 a fabricated span. Move each reported path outside `generated/`, then rerun
@@ -2584,6 +2645,20 @@ stream Capability rejected by the current unary Connect boundary and reports
 the effective selected `http.expose` document as an `exposure` source at `1:1`.
 Remove that exposure and regenerate with the same selector. Do not relabel the
 canonical contract as a query or command to evade the transport constraint.
+
+### Unsupported Connect pointer projection
+
+`PLYSTRA_PROTOBUF_POINTER_PROJECTION_UNSUPPORTED` identifies an active
+Interface whose direct `*T` or `**T` field requires Protobuf presence wrappers
+that this CLI does not yet generate. Correct the reported `exposure` source by
+removing that Interface from its owning `http.expose` document, then rerun
+generation with the same default, `--env`, or `--config` selector. A sparse
+environment overlay may inherit the declaration from `plystra.yaml`; edit the
+reported source rather than an empty overlay. Keep the authored pointer
+contract intact for internal use and later transport support. Do not collapse
+it to `T` or patch generated Protobuf, compatibility, or wire history. The
+failed command is non-mutating and never exposes an absolute path or pointer
+value.
 
 ### Plugin target is ambiguous
 

@@ -46,16 +46,18 @@ var ignoredGeneratedDirectories = [...]string{
 type ArtifactKind string
 
 const (
-	ArtifactKindGoSource              ArtifactKind = "go-source"
-	ArtifactKindProtobufSource        ArtifactKind = "protobuf-source"
-	ArtifactKindProtobufDescriptor    ArtifactKind = "protobuf-descriptor"
-	ArtifactKindJavaScriptSource      ArtifactKind = "javascript-source"
-	ArtifactKindJavaScriptPackage     ArtifactKind = "javascript-package"
-	ArtifactKindDocumentation         ArtifactKind = "documentation"
-	ArtifactKindCompatibilityBaseline ArtifactKind = "compatibility-baseline"
-	ArtifactKindWireMap               ArtifactKind = "wire-map"
-	ArtifactKindApplicationManifest   ArtifactKind = "application-manifest"
-	ArtifactKindOwnershipManifest     ArtifactKind = "ownership-manifest"
+	ArtifactKindGoSource             ArtifactKind = "go-source"
+	ArtifactKindProtobufSource       ArtifactKind = "protobuf-source"
+	ArtifactKindProtobufDescriptor   ArtifactKind = "protobuf-descriptor"
+	ArtifactKindJavaScriptSource     ArtifactKind = "javascript-source"
+	ArtifactKindJavaScriptPackage    ArtifactKind = "javascript-package"
+	ArtifactKindDocumentation        ArtifactKind = "documentation"
+	ArtifactKindCompatibilityWorking ArtifactKind = "compatibility-working-record"
+	ArtifactKindWireMap              ArtifactKind = "wire-map"
+	ArtifactKindApplicationManifest  ArtifactKind = "application-manifest"
+	ArtifactKindOwnershipManifest    ArtifactKind = "ownership-manifest"
+
+	artifactKindCompatibilityBaselineV1 ArtifactKind = "compatibility-baseline"
 )
 
 // CleanupOwnership is the closed authority used for stale-file removal.
@@ -407,7 +409,8 @@ func validArtifactKind(value ArtifactKind) bool {
 		ArtifactKindJavaScriptSource,
 		ArtifactKindJavaScriptPackage,
 		ArtifactKindDocumentation,
-		ArtifactKindCompatibilityBaseline,
+		ArtifactKindCompatibilityWorking,
+		artifactKindCompatibilityBaselineV1,
 		ArtifactKindWireMap,
 		ArtifactKindApplicationManifest,
 		ArtifactKindOwnershipManifest:

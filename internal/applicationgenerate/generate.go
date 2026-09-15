@@ -477,10 +477,11 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	for _, definition := range definitions {
 		contracts = append(contracts, definition.Contract())
 		metadataInputs = append(metadataInputs, interfacecompatibility.MetadataInput{
-			ID:                  definition.Contract().ID().String(),
-			ContractDigest:      definition.ContractDigest(),
-			DocumentationDigest: definition.DocumentationDigest(),
-			ExampleDigest:       definition.ExampleDigest(),
+			ID:                       definition.Contract().ID().String(),
+			ContractDigest:           definition.ContractDigest(),
+			ContractSupplementDigest: definition.ContractSupplementDigest(),
+			DocumentationDigest:      definition.DocumentationDigest(),
+			ExampleDigest:            definition.ExampleDigest(),
 		})
 	}
 	previousInterfaceBaseline, previousInterfaceBaselineExists, err := generatedfiles.ReadOwnedFile(
@@ -855,7 +856,8 @@ func interfaceProtobufProjection(ctx context.Context, resolved applicationresolv
 			history = append(history, input)
 		}
 		model, err := protobufmodel.BuildInterfaceSelection(false, nil, history)
-		return model, intrinsicDefinitions, protobufIdentityCollisionSourceError(sourceDefinitions, err)
+		err = protobufIdentityCollisionSourceError(sourceDefinitions, err)
+		return model, intrinsicDefinitions, protobufPointerProjectionSourceError(exposures, err)
 	}
 
 	inputs := make([]protobufmodel.InterfaceInput, 0, len(exposures))
@@ -874,7 +876,8 @@ func interfaceProtobufProjection(ctx context.Context, resolved applicationresolv
 		history = append(history, input)
 	}
 	model, err := protobufmodel.BuildInterfaceSelection(true, inputs, history)
-	return model, intrinsicDefinitions, protobufIdentityCollisionSourceError(sourceDefinitions, err)
+	err = protobufIdentityCollisionSourceError(sourceDefinitions, err)
+	return model, intrinsicDefinitions, protobufPointerProjectionSourceError(exposures, err)
 }
 
 func intrinsicInterfaceProtobufInputs(

@@ -83,88 +83,89 @@ type diagnosticRequirementSources interface {
 }
 
 const (
-	diagnosticTemplateInvalid                    = diagnosticcode.TemplateInvalid
-	diagnosticCapabilityRequirementConflict      = diagnosticcode.CapabilityRequirementConflict
-	diagnosticProviderContractConflict           = diagnosticcode.ProviderContractConflict
-	diagnosticProviderContractMismatch           = diagnosticcode.ProviderContractMismatch
-	diagnosticCapabilityContractConflict         = diagnosticcode.CapabilityContractConflict
-	diagnosticCapabilitySchemaConflict           = diagnosticcode.CapabilitySchemaConflict
-	diagnosticProviderSelectionInvalid           = diagnosticcode.ProviderSelectionInvalid
-	diagnosticProviderMissing                    = diagnosticcode.ProviderMissing
-	diagnosticProviderAmbiguous                  = diagnosticcode.ProviderAmbiguous
-	diagnosticProjectManifestInvalid             = diagnosticcode.ProjectManifestInvalid
-	diagnosticConfigurationInheritedConflict     = diagnosticcode.ConfigurationInheritedConflict
-	diagnosticConfigurationOwnershipAmbiguous    = diagnosticcode.ConfigurationOwnershipAmbiguous
-	diagnosticEnvironmentOverlayInvalid          = diagnosticcode.EnvironmentOverlayInvalid
-	diagnosticConfigurationInvalid               = diagnosticcode.ConfigurationInvalid
-	diagnosticPluginConfigurationUnselected      = diagnosticcode.PluginConfigurationUnselected
-	diagnosticPluginConfigurationPluginMissing   = diagnosticcode.PluginConfigurationPluginMissing
-	diagnosticConfigurationSelectionInvalid      = diagnosticcode.ConfigurationSelectionInvalid
-	diagnosticApplicationDependencyDrift         = diagnosticcode.ApplicationDependencyDrift
-	diagnosticProjectNotFound                    = diagnosticcode.ProjectNotFound
-	diagnosticGoModuleNotFound                   = diagnosticcode.GoModuleNotFound
-	diagnosticGoModuleInvalid                    = diagnosticcode.GoModuleInvalid
-	diagnosticGoModuleUnavailable                = diagnosticcode.GoModuleUnavailable
-	diagnosticGoCommandFailed                    = diagnosticcode.GoCommandFailed
-	diagnosticPluginTargetAmbiguous              = diagnosticcode.PluginTargetAmbiguous
-	diagnosticPluginTargetNotFound               = diagnosticcode.PluginTargetNotFound
-	diagnosticPluginTargetInvalid                = diagnosticcode.PluginTargetInvalid
-	diagnosticGenerationActivationConflict       = diagnosticcode.GenerationActivationConflict
-	diagnosticGenerationActivationMissing        = diagnosticcode.GenerationActivationMissing
-	diagnosticGenerationProviderExtensionMissing = diagnosticcode.GenerationProviderExtensionMissing
-	diagnosticGenerationActivationCycle          = diagnosticcode.GenerationActivationCycle
-	diagnosticGenerationDependencyCycle          = diagnosticcode.GenerationDependencyCycle
-	diagnosticGenerationContributionCycle        = diagnosticcode.GenerationContributionCycle
-	diagnosticGenerationContributionsUnordered   = diagnosticcode.GenerationContributionsUnordered
-	diagnosticGenerationStateRepeated            = diagnosticcode.GenerationStateRepeated
-	diagnosticGenerationNonconvergent            = diagnosticcode.GenerationNonconvergent
-	diagnosticGenerationAPIUnsupported           = diagnosticcode.GenerationAPIUnsupported
-	diagnosticGenerationPackageInvalid           = diagnosticcode.GenerationPackageInvalid
-	diagnosticGenerationCompileFailed            = diagnosticcode.GenerationCompileFailed
-	diagnosticGenerationExecutionFailed          = diagnosticcode.GenerationExecutionFailed
-	diagnosticGenerationExtensionFailed          = diagnosticcode.GenerationExtensionFailed
-	diagnosticGenerationCrashed                  = diagnosticcode.GenerationCrashed
-	diagnosticGenerationTimeout                  = diagnosticcode.GenerationTimeout
-	diagnosticGenerationRequestTooLarge          = diagnosticcode.GenerationRequestTooLarge
-	diagnosticGenerationOutputTooLarge           = diagnosticcode.GenerationOutputTooLarge
-	diagnosticGenerationOutputMalformed          = diagnosticcode.GenerationOutputMalformed
-	diagnosticGenerationOutputInvalid            = diagnosticcode.GenerationOutputInvalid
-	diagnosticGenerationExtensionDiagnostic      = diagnosticcode.GenerationExtensionDiagnostic
-	diagnosticAliasConflict                      = diagnosticcode.AliasConflict
-	diagnosticAliasApplicationInvalid            = diagnosticcode.AliasApplicationInvalid
-	diagnosticAliasExtensionOutputInvalid        = diagnosticcode.AliasExtensionOutputInvalid
-	diagnosticAliasResolutionFailed              = diagnosticcode.AliasResolutionFailed
-	diagnosticProtobufWireHistoryInvalid         = diagnosticcode.ProtobufWireHistoryInvalid
-	diagnosticProtobufIdentityCollision          = diagnosticcode.ProtobufIdentityCollision
-	diagnosticProtobufOperationKindUnsupported   = diagnosticcode.ProtobufOperationKindUnsupported
-	diagnosticGeneratedOwnershipConflict         = diagnosticcode.GeneratedOwnershipConflict
-	diagnosticGeneratedUnexpectedOutput          = diagnosticcode.GeneratedUnexpectedOutput
-	diagnosticGeneratedManifestInvalid           = diagnosticcode.GeneratedManifestInvalid
-	diagnosticAgentGuidanceDrift                 = diagnosticcode.AgentGuidanceDrift
-	diagnosticAgentGuidanceManifestInvalid       = diagnosticcode.AgentGuidanceManifestInvalid
-	diagnosticCapabilityManifestInvalid          = diagnosticcode.CapabilityManifestInvalid
-	diagnosticProjectConcurrentChange            = diagnosticcode.ProjectConcurrentChange
-	diagnosticConfigurationCompositionDrift      = diagnosticcode.ConfigurationCompositionDrift
-	diagnosticGeneratedDrift                     = diagnosticcode.GeneratedDrift
-	diagnosticResolveUnknownInterface            = diagnosticcode.ResolveUnknownInterface
-	diagnosticResolveUnknownImplementation       = diagnosticcode.ResolveUnknownImplementation
-	diagnosticResolveIncompatibleImplementation  = diagnosticcode.ResolveIncompatibleImplementation
-	diagnosticResolveMultipleImplementations     = diagnosticcode.ResolveMultipleImplementations
-	diagnosticResolveMissingImplementation       = diagnosticcode.ResolveMissingImplementation
-	diagnosticResolveConstructorCycle            = diagnosticcode.ResolveConstructorCycle
-	diagnosticResolveReservedInterface           = diagnosticcode.ResolveReservedInterface
-	diagnosticResolveIntrinsicInterfaceSelection = diagnosticcode.ResolveIntrinsicInterfaceSelection
-	diagnosticImplementationDeclarationInvalid   = diagnosticcode.ImplementationDeclarationInvalid
-	diagnosticImplementationConfigInvalid        = diagnosticcode.ImplementationConfigInvalid
-	diagnosticImplementationRequiredInvalid      = diagnosticcode.ImplementationRequiredInvalid
-	diagnosticImplementationOptionalInvalid      = diagnosticcode.ImplementationOptionalInvalid
-	diagnosticImplementationResultInvalid        = diagnosticcode.ImplementationResultInvalid
-	diagnosticImplementationConformanceInvalid   = diagnosticcode.ImplementationConformanceInvalid
-	diagnosticInterfaceDeclarationInvalid        = diagnosticcode.InterfaceDeclarationInvalid
-	diagnosticInterfaceContractInvalid           = diagnosticcode.InterfaceContractInvalid
-	diagnosticInterfaceMetadataInvalid           = diagnosticcode.InterfaceMetadataInvalid
-	diagnosticInterfaceIDDuplicate               = diagnosticcode.InterfaceIDDuplicate
-	diagnosticAuthoredPackageInvalid             = diagnosticcode.AuthoredPackageInvalid
+	diagnosticTemplateInvalid                      = diagnosticcode.TemplateInvalid
+	diagnosticCapabilityRequirementConflict        = diagnosticcode.CapabilityRequirementConflict
+	diagnosticProviderContractConflict             = diagnosticcode.ProviderContractConflict
+	diagnosticProviderContractMismatch             = diagnosticcode.ProviderContractMismatch
+	diagnosticCapabilityContractConflict           = diagnosticcode.CapabilityContractConflict
+	diagnosticCapabilitySchemaConflict             = diagnosticcode.CapabilitySchemaConflict
+	diagnosticProviderSelectionInvalid             = diagnosticcode.ProviderSelectionInvalid
+	diagnosticProviderMissing                      = diagnosticcode.ProviderMissing
+	diagnosticProviderAmbiguous                    = diagnosticcode.ProviderAmbiguous
+	diagnosticProjectManifestInvalid               = diagnosticcode.ProjectManifestInvalid
+	diagnosticConfigurationInheritedConflict       = diagnosticcode.ConfigurationInheritedConflict
+	diagnosticConfigurationOwnershipAmbiguous      = diagnosticcode.ConfigurationOwnershipAmbiguous
+	diagnosticEnvironmentOverlayInvalid            = diagnosticcode.EnvironmentOverlayInvalid
+	diagnosticConfigurationInvalid                 = diagnosticcode.ConfigurationInvalid
+	diagnosticPluginConfigurationUnselected        = diagnosticcode.PluginConfigurationUnselected
+	diagnosticPluginConfigurationPluginMissing     = diagnosticcode.PluginConfigurationPluginMissing
+	diagnosticConfigurationSelectionInvalid        = diagnosticcode.ConfigurationSelectionInvalid
+	diagnosticApplicationDependencyDrift           = diagnosticcode.ApplicationDependencyDrift
+	diagnosticProjectNotFound                      = diagnosticcode.ProjectNotFound
+	diagnosticGoModuleNotFound                     = diagnosticcode.GoModuleNotFound
+	diagnosticGoModuleInvalid                      = diagnosticcode.GoModuleInvalid
+	diagnosticGoModuleUnavailable                  = diagnosticcode.GoModuleUnavailable
+	diagnosticGoCommandFailed                      = diagnosticcode.GoCommandFailed
+	diagnosticPluginTargetAmbiguous                = diagnosticcode.PluginTargetAmbiguous
+	diagnosticPluginTargetNotFound                 = diagnosticcode.PluginTargetNotFound
+	diagnosticPluginTargetInvalid                  = diagnosticcode.PluginTargetInvalid
+	diagnosticGenerationActivationConflict         = diagnosticcode.GenerationActivationConflict
+	diagnosticGenerationActivationMissing          = diagnosticcode.GenerationActivationMissing
+	diagnosticGenerationProviderExtensionMissing   = diagnosticcode.GenerationProviderExtensionMissing
+	diagnosticGenerationActivationCycle            = diagnosticcode.GenerationActivationCycle
+	diagnosticGenerationDependencyCycle            = diagnosticcode.GenerationDependencyCycle
+	diagnosticGenerationContributionCycle          = diagnosticcode.GenerationContributionCycle
+	diagnosticGenerationContributionsUnordered     = diagnosticcode.GenerationContributionsUnordered
+	diagnosticGenerationStateRepeated              = diagnosticcode.GenerationStateRepeated
+	diagnosticGenerationNonconvergent              = diagnosticcode.GenerationNonconvergent
+	diagnosticGenerationAPIUnsupported             = diagnosticcode.GenerationAPIUnsupported
+	diagnosticGenerationPackageInvalid             = diagnosticcode.GenerationPackageInvalid
+	diagnosticGenerationCompileFailed              = diagnosticcode.GenerationCompileFailed
+	diagnosticGenerationExecutionFailed            = diagnosticcode.GenerationExecutionFailed
+	diagnosticGenerationExtensionFailed            = diagnosticcode.GenerationExtensionFailed
+	diagnosticGenerationCrashed                    = diagnosticcode.GenerationCrashed
+	diagnosticGenerationTimeout                    = diagnosticcode.GenerationTimeout
+	diagnosticGenerationRequestTooLarge            = diagnosticcode.GenerationRequestTooLarge
+	diagnosticGenerationOutputTooLarge             = diagnosticcode.GenerationOutputTooLarge
+	diagnosticGenerationOutputMalformed            = diagnosticcode.GenerationOutputMalformed
+	diagnosticGenerationOutputInvalid              = diagnosticcode.GenerationOutputInvalid
+	diagnosticGenerationExtensionDiagnostic        = diagnosticcode.GenerationExtensionDiagnostic
+	diagnosticAliasConflict                        = diagnosticcode.AliasConflict
+	diagnosticAliasApplicationInvalid              = diagnosticcode.AliasApplicationInvalid
+	diagnosticAliasExtensionOutputInvalid          = diagnosticcode.AliasExtensionOutputInvalid
+	diagnosticAliasResolutionFailed                = diagnosticcode.AliasResolutionFailed
+	diagnosticProtobufWireHistoryInvalid           = diagnosticcode.ProtobufWireHistoryInvalid
+	diagnosticProtobufIdentityCollision            = diagnosticcode.ProtobufIdentityCollision
+	diagnosticProtobufOperationKindUnsupported     = diagnosticcode.ProtobufOperationKindUnsupported
+	diagnosticProtobufPointerProjectionUnsupported = diagnosticcode.ProtobufPointerProjectionUnsupported
+	diagnosticGeneratedOwnershipConflict           = diagnosticcode.GeneratedOwnershipConflict
+	diagnosticGeneratedUnexpectedOutput            = diagnosticcode.GeneratedUnexpectedOutput
+	diagnosticGeneratedManifestInvalid             = diagnosticcode.GeneratedManifestInvalid
+	diagnosticAgentGuidanceDrift                   = diagnosticcode.AgentGuidanceDrift
+	diagnosticAgentGuidanceManifestInvalid         = diagnosticcode.AgentGuidanceManifestInvalid
+	diagnosticCapabilityManifestInvalid            = diagnosticcode.CapabilityManifestInvalid
+	diagnosticProjectConcurrentChange              = diagnosticcode.ProjectConcurrentChange
+	diagnosticConfigurationCompositionDrift        = diagnosticcode.ConfigurationCompositionDrift
+	diagnosticGeneratedDrift                       = diagnosticcode.GeneratedDrift
+	diagnosticResolveUnknownInterface              = diagnosticcode.ResolveUnknownInterface
+	diagnosticResolveUnknownImplementation         = diagnosticcode.ResolveUnknownImplementation
+	diagnosticResolveIncompatibleImplementation    = diagnosticcode.ResolveIncompatibleImplementation
+	diagnosticResolveMultipleImplementations       = diagnosticcode.ResolveMultipleImplementations
+	diagnosticResolveMissingImplementation         = diagnosticcode.ResolveMissingImplementation
+	diagnosticResolveConstructorCycle              = diagnosticcode.ResolveConstructorCycle
+	diagnosticResolveReservedInterface             = diagnosticcode.ResolveReservedInterface
+	diagnosticResolveIntrinsicInterfaceSelection   = diagnosticcode.ResolveIntrinsicInterfaceSelection
+	diagnosticImplementationDeclarationInvalid     = diagnosticcode.ImplementationDeclarationInvalid
+	diagnosticImplementationConfigInvalid          = diagnosticcode.ImplementationConfigInvalid
+	diagnosticImplementationRequiredInvalid        = diagnosticcode.ImplementationRequiredInvalid
+	diagnosticImplementationOptionalInvalid        = diagnosticcode.ImplementationOptionalInvalid
+	diagnosticImplementationResultInvalid          = diagnosticcode.ImplementationResultInvalid
+	diagnosticImplementationConformanceInvalid     = diagnosticcode.ImplementationConformanceInvalid
+	diagnosticInterfaceDeclarationInvalid          = diagnosticcode.InterfaceDeclarationInvalid
+	diagnosticInterfaceContractInvalid             = diagnosticcode.InterfaceContractInvalid
+	diagnosticInterfaceMetadataInvalid             = diagnosticcode.InterfaceMetadataInvalid
+	diagnosticInterfaceIDDuplicate                 = diagnosticcode.InterfaceIDDuplicate
+	diagnosticAuthoredPackageInvalid               = diagnosticcode.AuthoredPackageInvalid
 )
 
 const (
@@ -731,7 +732,7 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			Line:   located.Line(),
 			Column: located.Column(),
 		})
-	case diagnosticProtobufOperationKindUnsupported:
+	case diagnosticProtobufOperationKindUnsupported, diagnosticProtobufPointerProjectionUnsupported:
 		var located diagnosticSourceLocation
 		if !errors.As(err, &located) || located == nil || located.SourceKind() != "exposure" {
 			return nil
@@ -1493,6 +1494,8 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticProtobufIdentityCollision, "Rename one conflicting authored field or enum member in the owning Interface contract, then run `plystra generate"+context.selectorSuffix()+"`.")
 	case errors.Is(err, protobufmodel.ErrOperationKind):
 		return recoveryDiagnostic(diagnosticProtobufOperationKindUnsupported, "Remove the unsupported Capability from http.expose in "+context.configurationTarget()+", then run `plystra generate"+context.selectorSuffix()+"`.")
+	case errors.Is(err, protobufmodel.ErrPointerProjection):
+		return recoveryDiagnostic(diagnosticProtobufPointerProjectionUnsupported, protobufPointerProjectionRecovery(err, context))
 	case errors.Is(err, generatedfiles.ErrConflict):
 		return recoveryDiagnostic(diagnosticGeneratedOwnershipConflict, generatedOwnershipRecovery(context))
 	case errors.Is(err, generatedfiles.ErrUnexpected):
@@ -1512,6 +1515,18 @@ func recoveryDiagnostic(code, recovery string) (actionableDiagnostic, bool) {
 
 func invalidConfigurationRecovery(context recoveryContext) string {
 	return "Edit " + context.configurationTarget() + " so every value matches a selected Plugin's closed typed schema, then rerun the command."
+}
+
+func protobufPointerProjectionRecovery(err error, context recoveryContext) string {
+	target := context.configurationTarget()
+	var source diagnosticSourceLocation
+	if errors.As(err, &source) && source != nil && source.SourceKind() == "exposure" {
+		if sourcePath, safe := safeConfigurationHint(source.SourcePath()); safe {
+			target = sourcePath
+		}
+	}
+	return "Remove the pointer-bearing Interface from http.expose in " + target +
+		", then run `plystra generate" + context.selectorSuffix() + "`."
 }
 
 func goToolingRecovery() string {

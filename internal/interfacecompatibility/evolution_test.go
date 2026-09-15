@@ -37,6 +37,22 @@ func TestAssessEvolutionClassifiesStableVersionRequirements(t *testing.T) {
 			},
 		},
 		{
+			name:   "additive optional pointer field",
+			mutate: addEvolutionPointerField,
+			want: []string{
+				"records.echo/v1:go_shape:changed",
+				"records.echo/v1:contract:changed",
+			},
+		},
+		{
+			name:   "additive pointer field with contract supplement change",
+			mutate: addEvolutionPointerFieldWithSupplementChange,
+			want: []string{
+				"records.echo/v1:go_shape:changed",
+				"records.echo/v1:contract:changed",
+			},
+		},
+		{
 			name:   "documentation examples and generated documentation",
 			mutate: changeEvolutionPresentation,
 		},
@@ -100,6 +116,70 @@ func TestAssessEvolutionClassifiesStableVersionRequirements(t *testing.T) {
 				t.Fatalf("ValidateStableVersioning error = %v", stableErr)
 			}
 		})
+	}
+}
+
+func TestAssessEvolutionRejectsInconsistentAdditivePointerEvidence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		mutate func(*EvolutionInput)
+		want   string
+	}{
+		{
+			name: "additive shape without contract change",
+			mutate: func(input *EvolutionInput) {
+				setAdditivePointerShape(input)
+			},
+			want: "without a matching contract change",
+		},
+		{
+			name: "shape-only contract without Go shape change",
+			mutate: func(input *EvolutionInput) {
+				setPointerContractChange(input)
+			},
+			want: "without a matching Go shape change",
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			input := cleanEvolutionInput()
+			test.mutate(&input)
+			assessment, err := AssessEvolution(input)
+			if !errors.Is(err, ErrEvolution) || assessment.Valid() || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("AssessEvolution = %#v, %v; want %q", assessment, err, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateAdditivePointerEvidenceChoosesDeterministicFirstInterface(t *testing.T) {
+	t.Parallel()
+
+	shapeChanges := map[string]Change{
+		"zeta.records/v1": {
+			kind:                      ChangeChanged,
+			id:                        "zeta.records/v1",
+			previousDigest:            evolutionTestDigest("zeta-before"),
+			currentDigest:             evolutionTestDigest("zeta-after"),
+			additivePointerFieldsOnly: true,
+		},
+		"accounts.read/v1": {
+			kind:                      ChangeChanged,
+			id:                        "accounts.read/v1",
+			previousDigest:            evolutionTestDigest("accounts-before"),
+			currentDigest:             evolutionTestDigest("accounts-after"),
+			additivePointerFieldsOnly: true,
+		},
+	}
+	for iteration := 0; iteration < 100; iteration++ {
+		err := validateAdditivePointerEvidence(shapeChanges, nil)
+		if !errors.Is(err, ErrEvolution) || !strings.Contains(err.Error(), "Interface accounts.read/v1") {
+			t.Fatalf("iteration %d error = %v", iteration, err)
+		}
 	}
 }
 
@@ -233,6 +313,8 @@ func cleanEvolutionInput() EvolutionInput {
 		Metadata: MetadataComparison{
 			previousDigest: metadataDigest,
 			currentDigest:  metadataDigest,
+			previousSchema: MetadataSchema,
+			currentSchema:  MetadataSchema,
 			changes:        []MetadataChange{},
 			prepared:       true,
 		},
@@ -305,6 +387,44 @@ func changeEvolutionContract(_ testing.TB, input *EvolutionInput) {
 	input.Metadata.changes = []MetadataChange{
 		changedEvolutionMetadata(identifier, "contract-before", "contract-after", MetadataClassContract),
 	}
+}
+
+func addEvolutionPointerField(_ testing.TB, input *EvolutionInput) {
+	setAdditivePointerShape(input)
+	setPointerContractChange(input)
+}
+
+func addEvolutionPointerFieldWithSupplementChange(t testing.TB, input *EvolutionInput) {
+	t.Helper()
+	addEvolutionPointerField(t, input)
+	input.Metadata.changes[0].current.ContractSupplementDigest = evolutionTestDigest("pointer-contract-supplement-after")
+}
+
+func setAdditivePointerShape(input *EvolutionInput) {
+	const identifier = "records.echo/v1"
+	input.Shape.currentDigest = evolutionTestDigest("shape-baseline-pointer-added")
+	input.Shape.changes = []Change{{
+		kind:                      ChangeChanged,
+		id:                        identifier,
+		previousDigest:            evolutionTestDigest("shape-pointer-before"),
+		currentDigest:             evolutionTestDigest("shape-pointer-after"),
+		additivePointerFieldsOnly: true,
+	}}
+}
+
+func setPointerContractChange(input *EvolutionInput) {
+	const identifier = "records.echo/v1"
+	previous := evolutionMetadataInterface(identifier, "pointer-contract")
+	current := previous
+	current.ContractDigest = evolutionTestDigest("pointer-contract-after")
+	input.Metadata.currentDigest = evolutionTestDigest("metadata-baseline-pointer-added")
+	input.Metadata.changes = []MetadataChange{{
+		kind:     ChangeChanged,
+		id:       identifier,
+		classes:  []MetadataClass{MetadataClassContract},
+		previous: previous,
+		current:  current,
+	}}
 }
 
 func changeEvolutionPresentation(t testing.TB, input *EvolutionInput) {
@@ -438,10 +558,11 @@ func changedEvolutionMetadata(
 
 func evolutionMetadataInterface(identifier, suffix string) metadataWireInterface {
 	return metadataWireInterface{
-		ID:                  identifier,
-		ContractDigest:      evolutionTestDigest(suffix + "-contract"),
-		DocumentationDigest: evolutionTestDigest(suffix + "-documentation"),
-		ExampleDigest:       evolutionTestDigest(suffix + "-examples"),
+		ID:                       identifier,
+		ContractDigest:           evolutionTestDigest(suffix + "-contract"),
+		ContractSupplementDigest: evolutionTestDigest(suffix + "-contract-supplement"),
+		DocumentationDigest:      evolutionTestDigest(suffix + "-documentation"),
+		ExampleDigest:            evolutionTestDigest(suffix + "-examples"),
 	}
 }
 

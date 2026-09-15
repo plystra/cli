@@ -208,7 +208,9 @@ func (e *StableVersionError) Requirements() []VersionRequirement {
 // release state. Additions and presentation-only changes remain version
 // neutral. Changed source or generated public projections require a new stable
 // Interface version; a removed transport or JavaScript projection does so only
-// when the canonical Interface itself was also removed.
+// when the canonical Interface itself was also removed. Additive pointer-field
+// evidence remains classified, but cannot waive stable versioning until a
+// release workflow supplies every applicable accepted projection ancestor.
 func AssessEvolution(input EvolutionInput) (EvolutionAssessment, error) {
 	if !input.Shape.Valid() ||
 		!input.Metadata.Valid() ||
@@ -223,6 +225,19 @@ func AssessEvolution(input EvolutionInput) (EvolutionAssessment, error) {
 
 	changesByID := make(map[string]map[VersionSurface]evolutionVersionChange)
 	removedInterfaces := make(map[string]struct{})
+	shapeChanges := make(map[string]Change)
+	metadataContractChanges := make(map[string]MetadataChange)
+	for _, change := range input.Shape.Changes() {
+		shapeChanges[change.ID()] = change
+	}
+	for _, change := range input.Metadata.Changes() {
+		if containsMetadataClass(change.Classes(), MetadataClassContract) {
+			metadataContractChanges[change.ID()] = change
+		}
+	}
+	if err := validateAdditivePointerEvidence(shapeChanges, metadataContractChanges); err != nil {
+		return EvolutionAssessment{}, err
+	}
 	add := func(
 		identifier string,
 		surface VersionSurface,
@@ -392,6 +407,48 @@ func AssessEvolution(input EvolutionInput) (EvolutionAssessment, error) {
 		digest:        digest(canonical),
 		prepared:      true,
 	}, nil
+}
+
+func validateAdditivePointerEvidence(shapeChanges map[string]Change, metadataChanges map[string]MetadataChange) error {
+	shapeIDs := make([]string, 0, len(shapeChanges))
+	for identifier := range shapeChanges {
+		shapeIDs = append(shapeIDs, identifier)
+	}
+	sort.Strings(shapeIDs)
+	for _, identifier := range shapeIDs {
+		shapeChange := shapeChanges[identifier]
+		if !shapeChange.AdditivePointerFieldsOnly() {
+			continue
+		}
+		metadataChange, exists := metadataChanges[identifier]
+		if !exists || metadataChange.Kind() != ChangeChanged {
+			return fmt.Errorf(
+				"%w: Interface %s has additive pointer-field shape evidence without a matching contract change",
+				ErrEvolution,
+				identifier,
+			)
+		}
+	}
+	metadataIDs := make([]string, 0, len(metadataChanges))
+	for identifier := range metadataChanges {
+		metadataIDs = append(metadataIDs, identifier)
+	}
+	sort.Strings(metadataIDs)
+	for _, identifier := range metadataIDs {
+		metadataChange := metadataChanges[identifier]
+		if !metadataChange.ContractShapeOnly() {
+			continue
+		}
+		shapeChange, exists := shapeChanges[identifier]
+		if !exists || shapeChange.Kind() != ChangeChanged {
+			return fmt.Errorf(
+				"%w: Interface %s has shape-only contract evidence without a matching Go shape change",
+				ErrEvolution,
+				identifier,
+			)
+		}
+	}
+	return nil
 }
 
 type evolutionRecord struct {

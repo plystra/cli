@@ -21,38 +21,76 @@ The CLI owns:
 
 The CLI is the sole writer of final `generated/` source.
 
+## Interface field presence
+
+An ordinary Interface message field `T` has no business-observable presence
+state: omission and the Go zero value normalize identically. A direct `*T`
+distinguishes absent from a present value, including zero or empty, and a direct
+`**T` adds explicit null. Pointers are accepted only as one or two direct layers
+at a message-field boundary; they are invalid inside repeated elements, map
+keys or values, or another supported type, and a pointer-to-message edge cannot
+create a recursive cycle.
+
+A `required` ordinary field is meaningful only at representations that retain
+occurrence, such as validated examples or transport input. A required `*T`
+rejects absence. A required `**T` also rejects absence but still accepts explicit
+null because requiredness checks the outer pointer state. The contract model
+applies constraints through pointer layers to a present, non-null innermost
+value and treats nil and allocated-empty bytes, repeated values, and maps as the
+same canonical empty value without changing a pointer field's outer absent,
+null, or present state.
+
+Current support implements that model for Interface declaration parsing,
+`interface.yaml` constraint and example validation, and compatibility
+classification. Generated proxies and Implementation adapters do not yet apply
+pointer-aware requiredness, constraint checks, or empty-collection normalization
+to internal calls. Pointer-bearing Connect exposure therefore fails closed until
+the governed runtime and transport projections preserve those states.
+
 `generated/compatibility/interfaces.json` is the committed, CLI-owned
-compatibility baseline for every visible authored Interface, whether or not it
-is selected or exposed. It records each Interface package and method, request
-and response names, reachable messages, stable field numbers, Go and JSON
-names, requiredness, and canonical Go types. It deliberately excludes
+replaceable shape working record for every visible authored Interface, whether
+or not it is selected or exposed. It records each Interface package and method,
+request and response names, reachable messages, stable field numbers, Go and
+JSON names, requiredness, direct pointer depth, and canonical Go types. It
+deliberately excludes
 Interface metadata, generated projections, Implementations, configuration,
-Secrets, source paths, and module versions. During prerelease development,
-`plystra generate` refreshes this baseline transactionally and
+Secrets, source paths, and module versions. `plystra generate` refreshes this
+working record transactionally and
 `plystra generate --check` reports its drift without mutation. Never edit it
 manually.
 
 `generated/compatibility/interface-metadata.json` is the matching committed,
-CLI-owned compatibility-class baseline for every visible authored Interface.
-It stores only the already normalized exact-contract, documentation, and
-example digests, never the metadata values themselves. The contract class
-covers Go shape, semantics, semantic-error codes, constraints, and Behavioral
-Conformance declarations; the documentation class covers descriptions and
-deprecation; and the example class covers validated request-and-outcome
-examples. `plystra generate` refreshes it in the same transaction, while
-`plystra generate --check` compares each class without mutation.
+CLI-owned compatibility-class working record for every visible authored
+Interface. Schema `plystra.interface-metadata-baseline/v2` stores the normalized
+exact-contract, `contract_supplement_digest`, documentation, and example
+digests, never the metadata values themselves. The supplement covers semantics,
+semantic-error codes, constraints, and Behavioral Conformance independently of
+Go shape. Generation migrates an owned canonical v1 record to v2 in the same
+transaction as its ownership manifest and restores both on rollback;
+`generate --check` reports the migration as stale without mutation.
+
+Changing an existing field among `T`, `*T`, and `**T`, changing its innermost
+type, or otherwise adding or removing an observable state is a breaking
+compatibility classification. Pre-stable development may refresh the
+replaceable working records in place; once an accepted stable baseline applies,
+the change requires a new Interface version. A newly numbered non-required
+pointer field is retained as an additive candidate only when the shape working
+record and v2 supplement prove that the edit is shape-only. The stable-release
+assessment still reports a version requirement until every applicable public
+projection and immutable accepted ancestor can also classify it as optional.
 
 `generated/compatibility/interface-transport.json` is the committed,
-CLI-owned transport baseline for each Interface on the selected Connect
+CLI-owned transport working record for each Interface on the selected Connect
 surface. It stores only separate digests for the exact Protobuf descriptor,
 Connect procedure, and active wire-map projection. The descriptor digest also
 covers the shared safe-error descriptor. `plystra generate` refreshes this
-baseline in the same transaction as its source projections, and
+record in the same transaction as its source projections, and
 `plystra generate --check` reports the exact changed transport classes without
 modifying generated output.
 
 `generated/compatibility/interface-javascript.json` is the committed,
-CLI-owned caller-visible JavaScript API baseline for every exposed Interface.
+CLI-owned caller-visible JavaScript API working record for every successfully
+projected exposed Interface.
 It compares the shared package-root exports and public runtime types separately
 from each Interface's client path and factory, request/response/reachable
 TypeScript shapes, requiredness and exact scalar mappings, and semantic-error
@@ -62,14 +100,23 @@ module-version data. Generation refreshes it in the same transaction, and
 `plystra generate --check` reports API drift without modifying the Project.
 
 `generated/compatibility/interface-documentation.json` is the committed,
-CLI-owned baseline for the documentation artifacts currently emitted under
+CLI-owned working record for the documentation artifacts currently emitted under
 `generated/docs/`. It classifies the Interface reference and OpenAPI document
 by stable managed path and stores only their exact content digests, not the
 documentation bytes, Implementations, configuration, Secrets, source
 locations, or module versions. Generation refreshes it transactionally,
-including a valid empty baseline when the selected model has no documentation
+including a valid empty working record when the selected model has no documentation
 surface. `plystra generate --check` reports documentation drift without
 modifying the Project.
+
+The five compatibility working records listed above are replaceable
+current-source state whose ownership-manifest output kind is
+`compatibility-working-record`. Classification is per record and ownership entry;
+another file is not replaceable merely because it is stored under
+`generated/compatibility/`. Accepted baselines are distinct immutable release
+evidence keyed to an exact released artifact and lineage. Ordinary generation,
+check, cleanup, recovery, or relabeling must not create, overwrite, or delete
+that evidence.
 
 `generated/proto/wire-map.json` is committed, CLI-owned compatibility history
 for the request, response, and reachable same-package messages of every visible
@@ -81,14 +128,15 @@ all visible Interface history, permanently reserves both the Protobuf name and
 number of every removed field, and carries active reservations into generated
 source and the descriptor set. Never-exposed Interfaces, removed exposure, and
 disabled Connect remain inactive and create no schema, descriptor, handler, or
-SDK output. The same ledger temporarily retains separately labelled legacy
+SDK output, while their field names and numbers remain in wire history and their
+pointer shape remains in the authored-shape working record. The same ledger temporarily retains separately labelled legacy
 transport history required by pre-Gate-14 handlers; that bridge is not
 Interface contract authority. The ownership manifest records the exact ledger
 digest, and generation rejects a missing, manually changed, corrupt, reused,
 or projection-inconsistent prior ledger instead of guessing. Never edit or
 delete this file; restore its exact last committed content before
 regenerating. Generation also emits one deterministic schema containing the
-canonical messages and one unary service for each exposed Interface, plus a self-contained
+canonical messages and one unary service for each supported pointer-free exposed Interface, plus a self-contained
 `generated/proto/descriptor-set.pb` containing any required well-known
 descriptors. A Project without a selected Connect surface retains a valid
 empty descriptor set. These schema and descriptor files are CLI-owned, contain
@@ -107,6 +155,15 @@ declared kind, supported unary kinds, and `http.expose` remediation. The
 module-relative configuration document at `1:1` as an `exposure` source before
 selector-aware recovery. Do not relabel an event or stream to bypass this
 validation.
+The current CLI retains unexposed pointer-bearing Interfaces but does not yet
+emit their required Protobuf presence wrappers. Selecting one in `http.expose`
+fails closed with `PLYSTRA_PROTOBUF_POINTER_PROJECTION_UNSUPPORTED`, reports the
+effective declaration's owning configuration document at `1:1` as an
+`exposure` source,
+and directs the developer to remove that exposure and rerun generation with the
+same selector. The diagnostic exposes no absolute path or pointer value, and
+the failed command changes no authored, generated, module, compatibility, or
+transaction file.
 The configured `RootContext` receives the live external request context and
 returns the trusted Kernel root used by the canonical invocation. Generated
 handlers preserve explicit caller cancellation and the earlier caller or
@@ -170,13 +227,13 @@ A Project with zero non-intrinsic roots is valid. Generation still emits the int
 
 Generation emits one managed typed proxy for every reachable authored Interface under `generated/go/proxies/<interface-id>/vN/proxy_gen.go`. Each proxy has a compile-time assignment to the authored `Interface`, preserves its exact request and response method signature, and delegates the call to a typed `github.com/plystra/kernel/invocation.Handle`; it does not copy or redefine the canonical contract. Generation also emits one managed endpoint adapter for every reachable selected Interface binding under `generated/go/adapters/implementations/<interface-id>/vN/adapter_gen.go`. The adapter owns the exact opaque Kernel contract token for that binding, including the Interface's declared semantic-error codes, accepts the authored `Interface` rather than naming the constructor's concrete pointer type, and delegates to the exact authored method. It records the selected constructor symbol and inferred concrete pointer type as deterministic provenance, so a constructor returning an unexported type remains usable and one constructor selected for several Interfaces receives one adapter per binding. Unreachable dependency Interfaces produce neither proxy nor adapter.
 
-Each `http.expose` entry backed by a canonical Interface package emits one deterministic schema at `generated/proto/plystra/generated/<interface-id>/interface.proto` and contributes it to the existing self-contained descriptor set. Authored non-intrinsic packages come from the visible Project graph; intrinsic `kernel.*` packages are loaded only by their exact Kernel-owned inventory paths from the selected Kernel module. The canonical Go request, response, and nested message graph supplies the exact scalar widths, collection and map shapes, well-known types, effective JSON names, required markers, and authored `plystra` field numbers. The same Interface schema owns exactly one deterministic unary service and `Invoke` method whose Connect path is derived from the exact Interface ID and retained in wire history. Generated handlers map declared Interface semantic failures to `failed_precondition`, map every closed Kernel runtime class to its fixed Connect code, and normalize unknown failures, panics, malformed requests, and invalid responses without copying private error text. During the pre-Gate-14 transport transition, an overlapping legacy schema becomes an import-only bridge and declares no competing message, enum, service, or procedure.
+Each supported `http.expose` entry backed by a canonical pointer-free Interface package emits one deterministic schema at `generated/proto/plystra/generated/<interface-id>/interface.proto` and contributes it to the existing self-contained descriptor set. Authored non-intrinsic packages come from the visible Project graph; intrinsic `kernel.*` packages are loaded only by their exact Kernel-owned inventory paths from the selected Kernel module. The canonical Go request, response, and nested message graph supplies the exact scalar widths, collection and map shapes, well-known types, effective JSON names, required markers, and authored `plystra` field numbers. The same Interface schema owns exactly one deterministic unary service and `Invoke` method whose Connect path is derived from the exact Interface ID and retained in wire history. Generated handlers map declared Interface semantic failures to `failed_precondition`, map every closed Kernel runtime class to its fixed Connect code, and normalize unknown failures, panics, malformed requests, and invalid responses without copying private error text. During the pre-Gate-14 transport transition, an overlapping legacy schema becomes an import-only bridge and declares no competing message, enum, service, or procedure.
 
 Generation also owns `generated/go/assembly/interfaces_gen.go`. Its `NewInterfaceRuntime` creates each selected constructor exactly once in dependency-first order, injects required proxies plus available or unavailable `plystra.Optional[T]` values, shares one concrete instance across every Interface declared by that constructor, creates exact Implementation bindings with constructor, module, selection-reason, and contract-digest provenance, and publishes one complete immutable Kernel catalog before returning typed root Interface accessors. Exposed intrinsic Kernel Interfaces receive typed root accessors backed by that same catalog without entering ordinary Implementation selection. It binds lifecycle-aware instances by exact constructor symbol in the same dependency-first order; startup is bounded, a failed or panicking start rolls back every active instance in reverse order, and normal shutdown also runs in reverse order. Internal calls remain ordinary typed in-process method calls through the governed proxies. Proxy, adapter, static-assembly, lifecycle, normalized Interface timeout-policy, canonical Interface Protobuf projection identity and source digests, stable unary procedure identity, governed Connect adapter mapping, exposed intrinsic proxy mapping, and active Interface wire history participate in application-model schema version 16; `plystra generate --check` reports a missing or modified file without changing the Project. Generated bootstrap constructs this `InterfaceRuntime`, includes it in application validity, exposes it through `Application.Interfaces`, and coordinates startup and shutdown with the temporary legacy lifecycle boundary.
 
 Reserved `kernel.*` Interfaces are always collected as intrinsic requirements outside ordinary Implementation selection. The versioned `github.com/plystra/kernel/intrinsic.InterfaceDefinitions` inventory names their canonical `github.com/plystra/kernel/interfaces/kernel/...` packages; the CLI adapts that Kernel-owned inventory and maintains no second intrinsic Interface list. Explicit `interfaces.require` and `http.expose` declarations add deterministic requirement provenance without creating an Implementation choice. An unknown reserved ID, an application-authored `kernel.*` Interface declaration, or an explicit `interfaces.use` choice for an intrinsic Interface fails before generation. A Plystra Project directly requires `github.com/plystra/kernel` in `go.mod`, and generation retains that selected module version or a deterministic local-workspace build identity for intrinsic runtime provenance. Ordinary Implementations are never chosen by priority, official status, discovery order, or filesystem order.
 
-The CLI strictly normalizes `plystra.yaml` `http.address`, optional `http.cors`, and the Interface-keyed `http.expose` mapping. Each exact Interface key requires `transport: connect`. Exposure makes the Interface an application root and generates its Connect and JavaScript surfaces; internal availability alone creates no public surface, including for intrinsic `kernel.*` targets. New Projects start with `http.expose: {}` and select no external transport until an exposure is present. Duplicate or malformed IDs, missing transports, unsupported fields, exposure lists, `add`/`remove` exposure sets, and global `http.transports` switches fail before output. REST route configuration remains deferred. When present, `http.cors` requires one nonempty normalized `allowed_origins` list, accepts only optional boolean `allow_credentials`, defaults credentials to disabled, and rejects malformed origins and credentialed wildcards.
+The CLI strictly normalizes `plystra.yaml` `http.address`, optional `http.cors`, and the Interface-keyed `http.expose` mapping. Each exact Interface key requires `transport: connect`. A supported exposure makes the Interface an application root and generates its Connect and JavaScript surfaces; a pointer-bearing Interface fails closed at the projection boundary described above. Internal availability alone creates no public surface, including for intrinsic `kernel.*` targets. New Projects start with `http.expose: {}` and select no external transport until an exposure is present. Duplicate or malformed IDs, missing transports, unsupported fields, exposure lists, `add`/`remove` exposure sets, and global `http.transports` switches fail before output. REST route configuration remains deferred. When present, `http.cors` requires one nonempty normalized `allowed_origins` list, accepts only optional boolean `allow_credentials`, defaults credentials to disabled, and rejects malformed origins and credentialed wildcards.
 
 Generated Connect handlers enforce a selected CORS policy before protocol dispatch. A request origin must be one canonical normalized HTTP/HTTPS origin serialization, except that literal `null` is accepted only by a noncredentialed wildcard policy; origin input is bounded to 4096 bytes. Preflight accepts only `POST` and the fixed `Authorization`, `Connect-Protocol-Version`, `Connect-Timeout-Ms`, and `Content-Type` request headers, with each name present at most once across no more than four field values totaling at most 4096 bytes. Malformed, noncanonical, duplicate, over-bound, or disallowed cross-origin input fails before trusted-root creation or Implementation invocation; allowed responses carry deterministic origin, credential, and `Vary` headers. Without `http.cors`, generation adds no implicit CORS behavior.
 
@@ -357,7 +414,7 @@ Each validated HTTP-exposed Alias generates only its own route identity and a th
 
 ## Generated JavaScript SDK
 
-Each exposed authored or intrinsic Interface generates exactly one nested exact-version method such as `client.records.echo.v1` and one tree-shakable factory such as `createRecordsEchoV1`. Both forms use the same descriptor-resolved unary Connect procedure, typed request and response, declared semantic-error-code union, safe error mapping, explicit credential policy, and cancellation behavior. Request, response, and reachable same-package message types preserve exact authored JSON names, required markers, scalar widths, bytes, timestamps, durations, repeated values, maps, and recursive messages. `int32` and `uint32` use JavaScript `number`; `int64` and `uint64` use `bigint`; bytes use `Uint8Array`. The wrapper validates shapes and ranges before dispatch, uses bounded cycle-safe traversal, and rejects the unsafe JavaScript object map key `__proto__` rather than allowing the pinned Protobuf object representation to change or drop it. An exact-ID transitional operation cannot compete with the canonical Interface-owned module, method, or factory.
+Each supported pointer-free authored or intrinsic Interface successfully projected through Connect generates exactly one nested exact-version method such as `client.records.echo.v1` and one tree-shakable factory such as `createRecordsEchoV1`. Both forms use the same descriptor-resolved unary Connect procedure, typed request and response, declared semantic-error-code union, safe error mapping, explicit credential policy, and cancellation behavior. Request, response, and reachable same-package message types preserve exact authored JSON names, required markers, scalar widths, bytes, timestamps, durations, repeated values, maps, and recursive messages. `int32` and `uint32` use JavaScript `number`; `int64` and `uint64` use `bigint`; bytes use `Uint8Array`. The wrapper validates shapes and ranges before dispatch, uses bounded cycle-safe traversal, and rejects the unsafe JavaScript object map key `__proto__` rather than allowing the pinned Protobuf object representation to change or drop it. An exact-ID transitional operation cannot compete with the canonical Interface-owned module, method, or factory.
 
 Transitional explicitly JavaScript-exposed canonical Capabilities continue to lower into the same deterministic ESM TypeScript package under `generated/sdk/javascript/` until their Gate 14 removal. Their immutable SDK model and emitted field declarations retain each exact normalized constraint object. Generated request preflight and decoded-response validation enforce Unicode scalar-value length, exact `bigint` or finite-number bounds, and array item counts. Canonical `pattern` remains declared but is not reinterpreted through JavaScript `RegExp`; generated server validation uses the authoritative bounded Go regular-expression semantics. Contract digests include closed field constraints and extension metadata, while Implementation identities, runtime configuration, verified internal context, and Secret values never enter the SDK model or source.
 

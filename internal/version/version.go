@@ -8,5 +8,5 @@ const (
 	KernelVersion = "v0.0.0-20260724160327-26ece9a0df89"
 	// SpecificationRevision is the core-philosophy revision implemented by the
 	// installed release guidance catalog.
-	SpecificationRevision = "c98210bdaa626511a7f6c45a43402354bdb6b331"
+	SpecificationRevision = "b959f277b7661c0725660f394b84f7175c8df54b"
 )

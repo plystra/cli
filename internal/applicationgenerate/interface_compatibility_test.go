@@ -3,6 +3,7 @@ package applicationgenerate_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/interfacecompatibility"
 )
 
@@ -124,6 +126,247 @@ func TestGenerateComparesAuthoredInterfaceShapeAgainstOwnedBaseline(t *testing.T
 	if result, err := applicationgenerate.Generate(t.Context(), options); !errors.Is(err, sentinel) || !reflect.DeepEqual(snapshotTree(t, root), rollbackBefore) {
 		t.Fatalf("Generate(rollback) = %#v, %v", result, err)
 	}
+}
+
+func TestGenerateMigratesOwnedInterfaceShapeV1Transactionally(t *testing.T) {
+	root := t.TempDir()
+	writeApplicationModule(t, root, "example.com/interface-shape-migration")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeFile(
+		t,
+		filepath.Join(root, "interfaces", "records", "echo", "v1", "interface.go"),
+		compatibilityInterfaceSource(false, "name"),
+	)
+
+	options := applicationgenerate.Options{
+		Start:       root,
+		Environment: goEnvironment(nil),
+		Validate:    func(context.Context, string) error { return nil },
+	}
+	if _, err := applicationgenerate.Generate(t.Context(), options); err != nil {
+		t.Fatalf("Generate(initial): %v", err)
+	}
+	assertCompatibilityWorkingRecordKinds(t, root)
+	legacyShape, legacyOwnership := replaceOwnedShapeWithV1(t, root)
+
+	options.Check = true
+	beforeCheck := snapshotTree(t, root)
+	checked, err := applicationgenerate.Generate(t.Context(), options)
+	if err != nil ||
+		!checked.InterfaceShapeComparison().Valid() ||
+		!checked.InterfaceShapeComparison().Clean() ||
+		!slicesContains(checked.Report().Stale(), interfacecompatibility.Path) ||
+		!slicesContains(checked.Report().Stale(), generatedfiles.ManifestPath) {
+		t.Fatalf(
+			"Generate --check(v1) = changes %#v shape %#v, %v",
+			checked.Report().Changes(),
+			checked.InterfaceShapeComparison().Changes(),
+			err,
+		)
+	}
+	assertEvolutionVersionNeutral(t, checked)
+	if afterCheck := snapshotTree(t, root); !reflect.DeepEqual(afterCheck, beforeCheck) {
+		t.Fatal("v1 shape migration check mutated the Project")
+	}
+
+	options.Check = false
+	sentinel := errors.New("forced v1 shape migration validation failure")
+	options.Validate = func(context.Context, string) error { return sentinel }
+	beforeRollback := snapshotTree(t, root)
+	if result, err := applicationgenerate.Generate(t.Context(), options); !errors.Is(err, sentinel) ||
+		!reflect.DeepEqual(snapshotTree(t, root), beforeRollback) {
+		t.Fatalf("Generate(v1 rollback) = %#v, %v", result, err)
+	}
+	if !bytes.Equal(readFile(t, root, interfacecompatibility.Path), legacyShape) ||
+		!bytes.Equal(readFile(t, root, generatedfiles.ManifestPath), legacyOwnership) {
+		t.Fatal("v1 shape migration rollback did not restore shape and ownership")
+	}
+
+	options.Validate = func(context.Context, string) error { return nil }
+	migrated, err := applicationgenerate.Generate(t.Context(), options)
+	if err != nil || !migrated.Report().Clean() || !migrated.InterfaceShapeComparison().Clean() {
+		t.Fatalf(
+			"Generate(v1 migration) = changes %#v shape %#v, %v",
+			migrated.Report().Changes(),
+			migrated.InterfaceShapeComparison().Changes(),
+			err,
+		)
+	}
+	assertCompatibilityWorkingRecordKinds(t, root)
+	assertEvolutionVersionNeutral(t, migrated)
+	migratedShape := readFile(t, root, interfacecompatibility.Path)
+	migratedOwnership := readFile(t, root, generatedfiles.ManifestPath)
+	decoded, err := interfacecompatibility.Decode(migratedShape)
+	if err != nil || decoded.Schema() != interfacecompatibility.Schema ||
+		bytes.Equal(migratedShape, legacyShape) || bytes.Equal(migratedOwnership, legacyOwnership) {
+		t.Fatalf("migrated shape = schema %q, error %v", decoded.Schema(), err)
+	}
+	owned, exists, err := generatedfiles.ReadOwnedFile(
+		root,
+		interfacecompatibility.Path,
+		interfacecompatibility.MaximumBytes,
+	)
+	if err != nil || !exists || !bytes.Equal(owned, migratedShape) {
+		t.Fatalf("ReadOwnedFile(migrated shape) = %t, %v", exists, err)
+	}
+
+	options.Check = true
+	clean, err := applicationgenerate.Generate(t.Context(), options)
+	if err != nil || !clean.Report().Clean() || !clean.InterfaceShapeComparison().Clean() {
+		t.Fatalf("Generate --check(migrated) = changes %#v, %v", clean.Report().Changes(), err)
+	}
+}
+
+type legacyShapeInterface struct {
+	ID          string               `json:"id"`
+	PackagePath string               `json:"package"`
+	Method      string               `json:"method"`
+	Request     string               `json:"request"`
+	Response    string               `json:"response"`
+	Messages    []legacyShapeMessage `json:"messages"`
+	Digest      string               `json:"digest"`
+}
+
+type legacyShapeMessage struct {
+	Name   string             `json:"name"`
+	Fields []legacyShapeField `json:"fields"`
+}
+
+type legacyShapeField struct {
+	Number   uint64 `json:"number"`
+	GoName   string `json:"go_name"`
+	JSONName string `json:"json_name"`
+	Required bool   `json:"required"`
+	Type     string `json:"type"`
+}
+
+func replaceOwnedShapeWithV1(t testing.TB, root string) ([]byte, []byte) {
+	t.Helper()
+
+	current, err := interfacecompatibility.Decode(readFile(t, root, interfacecompatibility.Path))
+	if err != nil || current.Schema() != interfacecompatibility.Schema {
+		t.Fatalf("Decode(current shape) = schema %q, %v", current.Schema(), err)
+	}
+	legacyInterfaces := make([]legacyShapeInterface, len(current.Interfaces()))
+	for interfaceIndex, value := range current.Interfaces() {
+		messages := value.Messages()
+		legacyMessages := make([]legacyShapeMessage, len(messages))
+		for messageIndex, message := range messages {
+			fields := message.Fields()
+			legacyFields := make([]legacyShapeField, len(fields))
+			for fieldIndex, field := range fields {
+				if field.PointerDepth() != 0 {
+					t.Fatalf("shape v1 cannot represent pointer field %s.%s", message.Name(), field.GoName())
+				}
+				legacyFields[fieldIndex] = legacyShapeField{
+					Number:   field.Number(),
+					GoName:   field.GoName(),
+					JSONName: field.JSONName(),
+					Required: field.Required(),
+					Type:     field.Type(),
+				}
+			}
+			legacyMessages[messageIndex] = legacyShapeMessage{
+				Name:   message.Name(),
+				Fields: legacyFields,
+			}
+		}
+		legacyInterfaces[interfaceIndex] = legacyShapeInterface{
+			ID:          value.ID(),
+			PackagePath: value.PackagePath(),
+			Method:      value.Method(),
+			Request:     value.Request(),
+			Response:    value.Response(),
+			Messages:    legacyMessages,
+		}
+		canonicalShape, err := json.Marshal(struct {
+			Schema   string               `json:"schema"`
+			ID       string               `json:"id"`
+			Package  string               `json:"package"`
+			Method   string               `json:"method"`
+			Request  string               `json:"request"`
+			Response string               `json:"response"`
+			Messages []legacyShapeMessage `json:"messages"`
+		}{
+			Schema:   "plystra.interface-shape/v1",
+			ID:       value.ID(),
+			Package:  value.PackagePath(),
+			Method:   value.Method(),
+			Request:  value.Request(),
+			Response: value.Response(),
+			Messages: legacyMessages,
+		})
+		if err != nil {
+			t.Fatalf("Marshal(legacy Interface shape): %v", err)
+		}
+		legacyInterfaces[interfaceIndex].Digest = sha256Text(canonicalShape)
+	}
+	canonical, err := json.Marshal(struct {
+		Schema     string                 `json:"schema"`
+		Interfaces []legacyShapeInterface `json:"interfaces"`
+	}{
+		Schema:     "plystra.interface-shape-baseline/v1",
+		Interfaces: legacyInterfaces,
+	})
+	if err != nil {
+		t.Fatalf("Marshal(legacy shape canonical): %v", err)
+	}
+	legacyDigest := sha256Text(canonical)
+	legacyShape, err := json.Marshal(struct {
+		Schema     string                 `json:"schema"`
+		Interfaces []legacyShapeInterface `json:"interfaces"`
+		Digest     string                 `json:"digest"`
+	}{
+		Schema:     "plystra.interface-shape-baseline/v1",
+		Interfaces: legacyInterfaces,
+		Digest:     legacyDigest,
+	})
+	if err != nil {
+		t.Fatalf("Marshal(legacy shape): %v", err)
+	}
+	writeFile(t, filepath.Join(root, filepath.FromSlash(interfacecompatibility.Path)), string(legacyShape))
+
+	var ownership metadataOwnershipManifest
+	if err := json.Unmarshal(readFile(t, root, generatedfiles.ManifestPath), &ownership); err != nil {
+		t.Fatalf("Unmarshal(ownership manifest): %v", err)
+	}
+	foundFile := false
+	foundInput := false
+	const inputPrefix = "compatibility:interface-shape:"
+	for fileIndex := range ownership.Files {
+		file := &ownership.Files[fileIndex]
+		if file.Path != interfacecompatibility.Path {
+			continue
+		}
+		foundFile = true
+		file.SHA256 = sha256Text(legacyShape)
+		file.OutputKind = "compatibility-baseline"
+		for inputIndex, input := range file.InputRecordIDs {
+			if !strings.HasPrefix(input, inputPrefix) {
+				continue
+			}
+			file.InputRecordIDs[inputIndex] = inputPrefix + legacyDigest
+			foundInput = true
+		}
+	}
+	if !foundFile || !foundInput {
+		t.Fatalf("ownership manifest lacks shape evidence: file=%t input=%t", foundFile, foundInput)
+	}
+	legacyOwnership, err := json.MarshalIndent(ownership, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent(ownership manifest): %v", err)
+	}
+	legacyOwnership = append(legacyOwnership, '\n')
+	writeFile(t, filepath.Join(root, filepath.FromSlash(generatedfiles.ManifestPath)), string(legacyOwnership))
+	owned, exists, err := generatedfiles.ReadOwnedFile(
+		root,
+		interfacecompatibility.Path,
+		interfacecompatibility.MaximumBytes,
+	)
+	if err != nil || !exists || !bytes.Equal(owned, legacyShape) {
+		t.Fatalf("ReadOwnedFile(legacy shape) = %t, %v", exists, err)
+	}
+	return legacyShape, legacyOwnership
 }
 
 func assertEvolutionVersionNeutral(

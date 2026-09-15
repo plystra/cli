@@ -15,18 +15,21 @@ const (
 	// MetadataPath is the one CLI-owned Interface metadata-class baseline.
 	MetadataPath = "generated/compatibility/interface-metadata.json"
 	// MetadataSchema identifies the strict Interface metadata-class baseline.
-	MetadataSchema = "plystra.interface-metadata-baseline/v1"
+	MetadataSchema = "plystra.interface-metadata-baseline/v2"
 	// MetadataMaximumBytes bounds a managed metadata baseline before parsing.
 	MetadataMaximumBytes int64 = 4 << 20
+
+	metadataSchemaV1 = "plystra.interface-metadata-baseline/v1"
 )
 
 // MetadataInput supplies the already validated digest classes for one visible
 // authored Interface.
 type MetadataInput struct {
-	ID                  string
-	ContractDigest      string
-	DocumentationDigest string
-	ExampleDigest       string
+	ID                       string
+	ContractDigest           string
+	ContractSupplementDigest string
+	DocumentationDigest      string
+	ExampleDigest            string
 }
 
 // MetadataBaseline is one immutable exact snapshot of the contract,
@@ -45,7 +48,7 @@ func (b MetadataBaseline) Schema() string {
 	if !b.prepared {
 		return ""
 	}
-	return MetadataSchema
+	return b.record.Schema
 }
 
 // Interfaces returns exact-ID-sorted defensive Interface digest views.
@@ -73,17 +76,17 @@ func (b MetadataBaseline) Digest() string { return b.digest }
 
 // Valid reports whether this value is complete and internally canonical.
 func (b MetadataBaseline) Valid() bool {
-	if !b.prepared || b.record.Schema != MetadataSchema || b.record.Digest != b.digest {
+	if !b.prepared || !validMetadataSchema(b.record.Schema) || b.record.Digest != b.digest {
 		return false
 	}
-	if err := validateMetadataInterfaces(b.record.Interfaces, true); err != nil {
+	if err := validateMetadataInterfaces(b.record.Interfaces, true, b.record.Schema); err != nil {
 		return false
 	}
-	canonical, err := encodeMetadataCanonical(b.record.Interfaces)
+	canonical, err := encodeMetadataCanonical(b.record.Schema, b.record.Interfaces)
 	if err != nil || !bytes.Equal(canonical, b.canonicalJSON) || digest(canonical) != b.digest {
 		return false
 	}
-	record, err := encodeMetadataRecord(b.record.Interfaces, b.digest)
+	record, err := encodeMetadataRecord(b.record.Schema, b.record.Interfaces, b.digest)
 	return err == nil && bytes.Equal(record, b.recordJSON)
 }
 
@@ -97,6 +100,12 @@ func (i MetadataInterface) ID() string { return i.record.ID }
 
 // ContractDigest returns the exact contract compatibility-class digest.
 func (i MetadataInterface) ContractDigest() string { return i.record.ContractDigest }
+
+// ContractSupplementDigest returns the exact shape-independent contract
+// attribution digest when the baseline schema records it.
+func (i MetadataInterface) ContractSupplementDigest() (string, bool) {
+	return i.record.ContractSupplementDigest, validDigest(i.record.ContractSupplementDigest)
+}
 
 // DocumentationDigest returns the documentation compatibility-class digest.
 func (i MetadataInterface) DocumentationDigest() string {
@@ -119,7 +128,7 @@ func NewMetadata(inputs []MetadataInput) (MetadataBaseline, error) {
 	sort.Slice(interfaces, func(left, right int) bool {
 		return interfaces[left].ID < interfaces[right].ID
 	})
-	if err := validateMetadataInterfaces(interfaces, true); err != nil {
+	if err := validateMetadataInterfaces(interfaces, true, MetadataSchema); err != nil {
 		return MetadataBaseline{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	return buildMetadata(interfaces)
@@ -139,27 +148,27 @@ func DecodeMetadata(data []byte) (MetadataBaseline, error) {
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return MetadataBaseline{}, fmt.Errorf("%w: metadata record contains trailing JSON", ErrHistory)
 	}
-	if record.Schema != MetadataSchema {
-		return MetadataBaseline{}, fmt.Errorf("%w: metadata schema must equal %q", ErrHistory, MetadataSchema)
+	if !validMetadataSchema(record.Schema) {
+		return MetadataBaseline{}, fmt.Errorf("%w: metadata schema must equal %q or %q", ErrHistory, metadataSchemaV1, MetadataSchema)
 	}
-	if err := validateMetadataInterfaces(record.Interfaces, true); err != nil {
+	if err := validateMetadataInterfaces(record.Interfaces, true, record.Schema); err != nil {
 		return MetadataBaseline{}, fmt.Errorf("%w: %v", ErrHistory, err)
 	}
-	canonical, err := encodeMetadataCanonical(record.Interfaces)
+	canonical, err := encodeMetadataCanonical(record.Schema, record.Interfaces)
 	if err != nil {
 		return MetadataBaseline{}, fmt.Errorf("%w: encode canonical metadata record: %v", ErrHistory, err)
 	}
 	if !validDigest(record.Digest) || record.Digest != digest(canonical) {
 		return MetadataBaseline{}, fmt.Errorf("%w: metadata digest does not match the canonical digest classes", ErrHistory)
 	}
-	encoded, err := encodeMetadataRecord(record.Interfaces, record.Digest)
+	encoded, err := encodeMetadataRecord(record.Schema, record.Interfaces, record.Digest)
 	if err != nil {
 		return MetadataBaseline{}, fmt.Errorf("%w: encode metadata record: %v", ErrHistory, err)
 	}
 	if !bytes.Equal(encoded, data) {
 		return MetadataBaseline{}, fmt.Errorf("%w: metadata record is not in canonical byte form", ErrHistory)
 	}
-	return buildMetadataWithEncoding(record.Interfaces, canonical, encoded, record.Digest), nil
+	return buildMetadataWithEncoding(record.Schema, record.Interfaces, canonical, encoded, record.Digest), nil
 }
 
 // ReconcileMetadata constructs the current metadata baseline and compares it
@@ -234,10 +243,23 @@ func (c MetadataChange) CurrentDigest(class MetadataClass) (string, bool) {
 	return metadataClassDigest(c.current, class)
 }
 
+// ContractShapeOnly reports whether the exact contract digest changed while
+// the shape-independent contract supplement remained identical. Legacy
+// records without supplement attribution conservatively return false.
+func (c MetadataChange) ContractShapeOnly() bool {
+	return c.kind == ChangeChanged &&
+		containsMetadataClass(c.classes, MetadataClassContract) &&
+		c.previous.ContractDigest != c.current.ContractDigest &&
+		validDigest(c.previous.ContractSupplementDigest) &&
+		c.previous.ContractSupplementDigest == c.current.ContractSupplementDigest
+}
+
 // MetadataComparison is one immutable exact-ID-sorted metadata comparison.
 type MetadataComparison struct {
 	previousDigest string
 	currentDigest  string
+	previousSchema string
+	currentSchema  string
 	changes        []MetadataChange
 	prepared       bool
 }
@@ -267,14 +289,18 @@ func (c MetadataComparison) Changes() []MetadataChange {
 // Valid reports whether the comparison has complete baseline identities and
 // exact compatibility-class differences.
 func (c MetadataComparison) Valid() bool {
-	if !c.prepared || !validDigest(c.previousDigest) || !validDigest(c.currentDigest) {
+	if !c.prepared ||
+		!validDigest(c.previousDigest) ||
+		!validDigest(c.currentDigest) ||
+		!validMetadataSchema(c.previousSchema) ||
+		!validMetadataSchema(c.currentSchema) {
 		return false
 	}
 	for index, change := range c.changes {
 		if index > 0 && c.changes[index-1].id >= change.id {
 			return false
 		}
-		if !validMetadataChange(change) {
+		if !validMetadataChange(change, c.previousSchema, c.currentSchema) {
 			return false
 		}
 	}
@@ -286,6 +312,9 @@ func (c MetadataComparison) Valid() bool {
 func CompareMetadata(previous, current MetadataBaseline) (MetadataComparison, error) {
 	if !previous.Valid() || !current.Valid() {
 		return MetadataComparison{}, fmt.Errorf("%w: both compared metadata baselines must be valid", ErrInvalid)
+	}
+	if previous.record.Schema == MetadataSchema && current.record.Schema == metadataSchemaV1 {
+		return MetadataComparison{}, fmt.Errorf("%w: metadata schema cannot downgrade from v2 to v1", ErrInvalid)
 	}
 	before := make(map[string]metadataWireInterface, len(previous.record.Interfaces))
 	after := make(map[string]metadataWireInterface, len(current.record.Interfaces))
@@ -324,6 +353,14 @@ func CompareMetadata(previous, current MetadataBaseline) (MetadataComparison, er
 				previous: previousValue,
 			})
 		default:
+			if err := validateMetadataTransition(
+				previousValue,
+				currentValue,
+				previous.record.Schema,
+				current.record.Schema,
+			); err != nil {
+				return MetadataComparison{}, fmt.Errorf("%w: Interface %s: %v", ErrInvalid, identifier, err)
+			}
 			classes := changedMetadataClasses(previousValue, currentValue)
 			if len(classes) != 0 {
 				changes = append(changes, MetadataChange{
@@ -339,6 +376,8 @@ func CompareMetadata(previous, current MetadataBaseline) (MetadataComparison, er
 	result := MetadataComparison{
 		previousDigest: previous.digest,
 		currentDigest:  current.digest,
+		previousSchema: previous.record.Schema,
+		currentSchema:  current.record.Schema,
 		changes:        changes,
 		prepared:       true,
 	}
@@ -360,34 +399,35 @@ type metadataCanonicalRecord struct {
 }
 
 type metadataWireInterface struct {
-	ID                  string `json:"id"`
-	ContractDigest      string `json:"contract_digest"`
-	DocumentationDigest string `json:"documentation_digest"`
-	ExampleDigest       string `json:"example_digest"`
+	ID                       string `json:"id"`
+	ContractDigest           string `json:"contract_digest"`
+	ContractSupplementDigest string `json:"contract_supplement_digest,omitempty"`
+	DocumentationDigest      string `json:"documentation_digest"`
+	ExampleDigest            string `json:"example_digest"`
 }
 
 func buildMetadata(interfaces []metadataWireInterface) (MetadataBaseline, error) {
-	canonical, err := encodeMetadataCanonical(interfaces)
+	canonical, err := encodeMetadataCanonical(MetadataSchema, interfaces)
 	if err != nil {
 		return MetadataBaseline{}, fmt.Errorf("%w: encode canonical metadata record: %v", ErrInvalid, err)
 	}
 	identityDigest := digest(canonical)
-	record, err := encodeMetadataRecord(interfaces, identityDigest)
+	record, err := encodeMetadataRecord(MetadataSchema, interfaces, identityDigest)
 	if err != nil {
 		return MetadataBaseline{}, fmt.Errorf("%w: encode metadata record: %v", ErrInvalid, err)
 	}
 	if int64(len(record)) > MetadataMaximumBytes {
 		return MetadataBaseline{}, fmt.Errorf("%w: encoded metadata record exceeds %d bytes", ErrInvalid, MetadataMaximumBytes)
 	}
-	return buildMetadataWithEncoding(interfaces, canonical, record, identityDigest), nil
+	return buildMetadataWithEncoding(MetadataSchema, interfaces, canonical, record, identityDigest), nil
 }
 
-func buildMetadataWithEncoding(interfaces []metadataWireInterface, canonical, record []byte, identityDigest string) MetadataBaseline {
+func buildMetadataWithEncoding(schema string, interfaces []metadataWireInterface, canonical, record []byte, identityDigest string) MetadataBaseline {
 	clonedInterfaces := make([]metadataWireInterface, len(interfaces))
 	copy(clonedInterfaces, interfaces)
 	return MetadataBaseline{
 		record: metadataWireRecord{
-			Schema:     MetadataSchema,
+			Schema:     schema,
 			Interfaces: clonedInterfaces,
 			Digest:     identityDigest,
 		},
@@ -398,22 +438,25 @@ func buildMetadataWithEncoding(interfaces []metadataWireInterface, canonical, re
 	}
 }
 
-func encodeMetadataCanonical(interfaces []metadataWireInterface) ([]byte, error) {
+func encodeMetadataCanonical(schema string, interfaces []metadataWireInterface) ([]byte, error) {
 	return json.Marshal(metadataCanonicalRecord{
-		Schema:     MetadataSchema,
+		Schema:     schema,
 		Interfaces: interfaces,
 	})
 }
 
-func encodeMetadataRecord(interfaces []metadataWireInterface, identityDigest string) ([]byte, error) {
+func encodeMetadataRecord(schema string, interfaces []metadataWireInterface, identityDigest string) ([]byte, error) {
 	return json.Marshal(metadataWireRecord{
-		Schema:     MetadataSchema,
+		Schema:     schema,
 		Interfaces: interfaces,
 		Digest:     identityDigest,
 	})
 }
 
-func validateMetadataInterfaces(values []metadataWireInterface, requireOrdered bool) error {
+func validateMetadataInterfaces(values []metadataWireInterface, requireOrdered bool, schema string) error {
+	if !validMetadataSchema(schema) {
+		return fmt.Errorf("metadata schema %q is unsupported", schema)
+	}
 	if values == nil || len(values) > maximumInterfaces {
 		return fmt.Errorf("metadata interfaces must be an array with at most %d entries", maximumInterfaces)
 	}
@@ -421,14 +464,14 @@ func validateMetadataInterfaces(values []metadataWireInterface, requireOrdered b
 		if requireOrdered && index > 0 && values[index-1].ID >= value.ID {
 			return errors.New("metadata interfaces must be unique and sorted by exact ID")
 		}
-		if err := validateMetadataInterface(value); err != nil {
+		if err := validateMetadataInterface(value, schema); err != nil {
 			return fmt.Errorf("metadata interfaces[%d]: %v", index, err)
 		}
 	}
 	return nil
 }
 
-func validateMetadataInterface(value metadataWireInterface) error {
+func validateMetadataInterface(value metadataWireInterface, schema string) error {
 	identifier, err := interfaceid.Parse(value.ID)
 	if err != nil || identifier.String() != value.ID {
 		return fmt.Errorf("ID %q is not canonical", value.ID)
@@ -436,11 +479,38 @@ func validateMetadataInterface(value metadataWireInterface) error {
 	if !validDigest(value.ContractDigest) {
 		return errors.New("contract digest is invalid")
 	}
+	switch schema {
+	case metadataSchemaV1:
+		if value.ContractSupplementDigest != "" {
+			return errors.New("legacy metadata record cannot contain a contract supplement digest")
+		}
+	case MetadataSchema:
+		if !validDigest(value.ContractSupplementDigest) {
+			return errors.New("contract supplement digest is invalid")
+		}
+	default:
+		return fmt.Errorf("metadata schema %q is unsupported", schema)
+	}
 	if !validDigest(value.DocumentationDigest) {
 		return errors.New("documentation digest is invalid")
 	}
 	if !validDigest(value.ExampleDigest) {
 		return errors.New("example digest is invalid")
+	}
+	return nil
+}
+
+func validMetadataSchema(value string) bool {
+	return value == metadataSchemaV1 || value == MetadataSchema
+}
+
+func validateMetadataTransition(previous, current metadataWireInterface, previousSchema, currentSchema string) error {
+	if previousSchema != MetadataSchema || currentSchema != MetadataSchema {
+		return nil
+	}
+	if previous.ContractDigest == current.ContractDigest &&
+		previous.ContractSupplementDigest != current.ContractSupplementDigest {
+		return errors.New("contract supplement digest changed while the full contract digest remained unchanged")
 	}
 	return nil
 }
@@ -481,7 +551,7 @@ func metadataClassDigest(value metadataWireInterface, class MetadataClass) (stri
 	}
 }
 
-func validMetadataChange(change MetadataChange) bool {
+func validMetadataChange(change MetadataChange, previousSchema, currentSchema string) bool {
 	identifier, err := interfaceid.Parse(change.id)
 	if err != nil || identifier.String() != change.id {
 		return false
@@ -493,16 +563,16 @@ func validMetadataChange(change MetadataChange) bool {
 	case ChangeAdded:
 		return change.previous.ID == "" &&
 			change.current.ID == change.id &&
-			validateMetadataInterface(change.current) == nil
+			validateMetadataInterface(change.current, currentSchema) == nil
 	case ChangeRemoved:
 		return change.previous.ID == change.id &&
-			validateMetadataInterface(change.previous) == nil &&
+			validateMetadataInterface(change.previous, previousSchema) == nil &&
 			change.current.ID == ""
 	case ChangeChanged:
 		return change.previous.ID == change.id &&
 			change.current.ID == change.id &&
-			validateMetadataInterface(change.previous) == nil &&
-			validateMetadataInterface(change.current) == nil &&
+			validateMetadataInterface(change.previous, previousSchema) == nil &&
+			validateMetadataInterface(change.current, currentSchema) == nil &&
 			len(change.classes) != 0
 	default:
 		return false

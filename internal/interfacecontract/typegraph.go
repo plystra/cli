@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/types"
 	"sort"
+	"strings"
 )
 
 // TypeKind is one exact transport-stable Go field shape in the initial
@@ -116,19 +117,31 @@ type messageState struct {
 	complete bool
 }
 
+type messageFrame struct {
+	named           *types.Named
+	incomingPointer bool
+}
+
 type typeGraph struct {
 	checkedPackage *types.Package
 	messages       map[*types.Named]*messageState
+	active         []messageFrame
+	activeIndex    map[*types.Named]int
 }
 
 func newTypeGraph(checkedPackage *types.Package) *typeGraph {
 	return &typeGraph{
 		checkedPackage: checkedPackage,
 		messages:       make(map[*types.Named]*messageState),
+		activeIndex:    make(map[*types.Named]int),
 	}
 }
 
 func (g *typeGraph) normalizeMessage(named *types.Named, role string) ([]Field, error) {
+	return g.normalizeMessageEdge(named, role, false)
+}
+
+func (g *typeGraph) normalizeMessageEdge(named *types.Named, role string, incomingPointer bool) ([]Field, error) {
 	if state, exists := g.messages[named]; exists {
 		return append([]Field(nil), state.message.fields...), nil
 	}
@@ -148,8 +161,15 @@ func (g *typeGraph) normalizeMessage(named *types.Named, role string) ([]Field, 
 		message: Message{name: object.Name()},
 	}
 	g.messages[named] = state
+	g.activeIndex[named] = len(g.active)
+	g.active = append(g.active, messageFrame{named: named, incomingPointer: incomingPointer})
+	defer func() {
+		delete(g.activeIndex, named)
+		g.active = g.active[:len(g.active)-1]
+	}()
 	fields, err := g.normalizeFields(structure, role)
 	if err != nil {
+		delete(g.messages, named)
 		return nil, err
 	}
 	state.message.fields = fields
@@ -192,7 +212,7 @@ func (g *typeGraph) normalizeFields(structure *types.Struct, role string) ([]Fie
 		}
 		jsonNames[effectiveJSONName] = field.Name()
 
-		fieldType, err := g.normalizeType(field.Type(), role+" field "+field.Name())
+		fieldType, pointerDepth, err := g.normalizeFieldType(field.Type(), role+" field "+field.Name())
 		if err != nil {
 			return nil, err
 		}
@@ -203,6 +223,7 @@ func (g *typeGraph) normalizeFields(structure *types.Struct, role string) ([]Fie
 			jsonName:        jsonName,
 			hasExplicitJSON: hasExplicitJSON,
 			fieldType:       fieldType,
+			pointerDepth:    pointerDepth,
 		})
 	}
 	sort.Slice(fields, func(left, right int) bool {
@@ -214,7 +235,30 @@ func (g *typeGraph) normalizeFields(structure *types.Struct, role string) ([]Fie
 	return fields, nil
 }
 
-func (g *typeGraph) normalizeType(value types.Type, fieldPath string) (Type, error) {
+func (g *typeGraph) normalizeFieldType(value types.Type, fieldPath string) (Type, uint8, error) {
+	value = types.Unalias(value)
+	original := value
+	pointerDepth := 0
+	for {
+		pointer, ok := value.(*types.Pointer)
+		if !ok {
+			break
+		}
+		pointerDepth++
+		value = types.Unalias(pointer.Elem())
+	}
+	if pointerDepth > 2 {
+		//lint:ignore ST1005 Interface is the canonical product term in this diagnostic.
+		return Type{}, 0, fmt.Errorf("Interface %s uses unsupported pointer depth %d in %s; at most two direct pointer layers are allowed", fieldPath, pointerDepth, stableTypeString(original))
+	}
+	normalized, err := g.normalizeType(value, fieldPath, pointerDepth != 0)
+	if err != nil {
+		return Type{}, 0, err
+	}
+	return normalized, uint8(pointerDepth), nil
+}
+
+func (g *typeGraph) normalizeType(value types.Type, fieldPath string, pointerMessageEdge bool) (Type, error) {
 	value = types.Unalias(value)
 	switch current := value.(type) {
 	case *types.Basic:
@@ -228,7 +272,7 @@ func (g *typeGraph) normalizeType(value types.Type, fieldPath string) (Type, err
 		if basic, ok := element.(*types.Basic); ok && basic.Kind() == types.Uint8 {
 			return Type{kind: TypeBytes}, nil
 		}
-		normalized, err := g.normalizeType(element, fieldPath+" repeated element")
+		normalized, err := g.normalizeType(element, fieldPath+" repeated element", false)
 		if err != nil {
 			return Type{}, err
 		}
@@ -237,14 +281,14 @@ func (g *typeGraph) normalizeType(value types.Type, fieldPath string) (Type, err
 		}
 		return Type{kind: TypeRepeated, element: typePointer(normalized)}, nil
 	case *types.Map:
-		key, err := g.normalizeType(current.Key(), fieldPath+" map key")
+		key, err := g.normalizeType(current.Key(), fieldPath+" map key", false)
 		if err != nil {
 			return Type{}, err
 		}
 		if !validMapKey(key.kind) {
 			return Type{}, fmt.Errorf("Interface %s uses unsupported map key type %s", fieldPath, stableTypeString(current.Key()))
 		}
-		value, err := g.normalizeType(current.Elem(), fieldPath+" map value")
+		value, err := g.normalizeType(current.Elem(), fieldPath+" map value", false)
 		if err != nil {
 			return Type{}, err
 		}
@@ -272,12 +316,12 @@ func (g *typeGraph) normalizeType(value types.Type, fieldPath string) (Type, err
 		if _, ok := current.Underlying().(*types.Struct); !ok {
 			return Type{}, fmt.Errorf("Interface %s uses unsupported defined non-message type %s", fieldPath, object.Name())
 		}
-		if _, err := g.normalizeMessage(current, "message "+object.Name()); err != nil {
+		if err := g.normalizeMessageReference(current, "message "+object.Name(), fieldPath, pointerMessageEdge); err != nil {
 			return Type{}, err
 		}
 		return Type{kind: TypeMessage, messageName: object.Name()}, nil
 	case *types.Pointer:
-		return Type{}, fmt.Errorf("Interface %s uses unsupported pointer type %s; pointer presence is not part of the initial field graph", fieldPath, stableTypeString(value))
+		return Type{}, fmt.Errorf("Interface %s uses unsupported pointer placement in %s; pointers are allowed only directly at a message-field boundary", fieldPath, stableTypeString(value))
 	case *types.Array:
 		return Type{}, fmt.Errorf("Interface %s uses unsupported fixed array type %s", fieldPath, stableTypeString(value))
 	case *types.Struct:
@@ -293,6 +337,27 @@ func (g *typeGraph) normalizeType(value types.Type, fieldPath string) (Type, err
 	}
 }
 
+func (g *typeGraph) normalizeMessageReference(named *types.Named, role, fieldPath string, pointerEdge bool) error {
+	if index, active := g.activeIndex[named]; active {
+		pointerCycle := pointerEdge
+		for frame := index + 1; frame < len(g.active) && !pointerCycle; frame++ {
+			pointerCycle = g.active[frame].incomingPointer
+		}
+		if pointerCycle {
+			path := make([]string, 0, len(g.active)-index+1)
+			for frame := index; frame < len(g.active); frame++ {
+				path = append(path, g.active[frame].named.Obj().Name())
+			}
+			path = append(path, named.Obj().Name())
+			//lint:ignore ST1005 Interface is the canonical product term in this diagnostic.
+			return fmt.Errorf("Interface %s creates unsupported pointer-to-message cycle %s", fieldPath, strings.Join(path, " -> "))
+		}
+		return nil
+	}
+	_, err := g.normalizeMessageEdge(named, role, pointerEdge)
+	return err
+}
+
 func (g *typeGraph) normalizedMessages() []Message {
 	messages := make([]Message, 0, len(g.messages))
 	for _, state := range g.messages {
@@ -305,6 +370,72 @@ func (g *typeGraph) normalizedMessages() []Message {
 	}
 	sort.Slice(messages, func(left, right int) bool { return messages[left].name < messages[right].name })
 	return messages
+}
+
+func validatePointerMessageCycles(messages []Message) error {
+	byName := make(map[string]Message, len(messages))
+	for _, message := range messages {
+		byName[message.name] = message
+	}
+	for _, message := range messages {
+		for _, field := range message.fields {
+			if field.pointerDepth == 0 || field.fieldType.kind != TypeMessage {
+				continue
+			}
+			target := field.fieldType.messageName
+			path, found := messageReferencePath(target, message.name, byName, make(map[string]bool, len(messages)))
+			if !found {
+				continue
+			}
+			cycle := append([]string{message.name}, path...)
+			//lint:ignore ST1005 Interface is the canonical product term in this diagnostic.
+			return fmt.Errorf(
+				"Interface message %s field %s creates unsupported pointer-to-message cycle %s",
+				message.name,
+				field.name,
+				strings.Join(cycle, " -> "),
+			)
+		}
+	}
+	return nil
+}
+
+func messageReferencePath(current, target string, messages map[string]Message, visiting map[string]bool) ([]string, bool) {
+	if current == target {
+		return []string{current}, true
+	}
+	if visiting[current] {
+		return nil, false
+	}
+	visiting[current] = true
+	defer delete(visiting, current)
+	for _, field := range messages[current].fields {
+		referenced, exists := referencedMessageName(field.fieldType)
+		if !exists {
+			continue
+		}
+		path, found := messageReferencePath(referenced, target, messages, visiting)
+		if found {
+			return append([]string{current}, path...), true
+		}
+	}
+	return nil, false
+}
+
+func referencedMessageName(fieldType Type) (string, bool) {
+	switch fieldType.kind {
+	case TypeMessage:
+		return fieldType.messageName, fieldType.messageName != ""
+	case TypeRepeated:
+		if fieldType.element != nil && fieldType.element.kind == TypeMessage {
+			return fieldType.element.messageName, fieldType.element.messageName != ""
+		}
+	case TypeMap:
+		if fieldType.value != nil && fieldType.value.kind == TypeMessage {
+			return fieldType.value.messageName, fieldType.value.messageName != ""
+		}
+	}
+	return "", false
 }
 
 func basicTypeKind(kind types.BasicKind) (TypeKind, bool) {

@@ -70,6 +70,32 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 			t.Fatalf("SKILL.md omits %q:\n%s", phrase, skill)
 		}
 	}
+	interfaces := byPath[Root+"/tasks/interfaces-and-implementations.md"]
+	for _, phrase := range []string{
+		"An ordinary `T` field has no separate presence state",
+		"A direct `*T` distinguishes absent from a present value",
+		"direct `**T` adds explicit null",
+		"maximum depth of two",
+		"must not create a message cycle",
+		"required `**T` still permits explicit null",
+		"Generated proxies and adapters do not yet apply pointer-aware requiredness",
+		"keep them out of `http.expose`",
+		"five compatibility records currently emitted by this CLI",
+		"Classification is per record and ownership entry, not directory-wide",
+		"not accepted release baselines",
+		"`contract_supplement_digest`",
+		"owned canonical v1 metadata record migrates to v2",
+		"new non-required pointer field is an additive candidate",
+		"Pre-stable development may refresh working records in place",
+		"once an accepted stable baseline applies",
+		"stable-release assessment continues to report a version requirement",
+		"every public projection and immutable accepted ancestor also classifies a newly added pointer field as optional",
+		"Changing an existing field among `T`, `*T`, and `**T` is breaking compatibility",
+	} {
+		if !bytes.Contains(interfaces, []byte(phrase)) {
+			t.Fatalf("Interface guidance omits %q:\n%s", phrase, interfaces)
+		}
+	}
 	diagnostics := byPath[Root+"/tasks/diagnostics-and-recovery.md"]
 	for _, phrase := range []string{
 		"plystra guidance check",
@@ -77,6 +103,10 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"PLYSTRA_AGENT_GUIDANCE_DRIFT",
 		"PLYSTRA_AGENT_GUIDANCE_MANIFEST_INVALID",
 		"PLYSTRA_PROJECT_CONCURRENT_CHANGE",
+		"PLYSTRA_PROTOBUF_POINTER_PROJECTION_UNSUPPORTED",
+		"declaration-owning `http.expose` document",
+		"inherit that declaration from root `plystra.yaml`",
+		"leaves authored, generated, module, and compatibility files unchanged",
 		"path as an `agent-guidance` source",
 	} {
 		if !bytes.Contains(diagnostics, []byte(phrase)) {

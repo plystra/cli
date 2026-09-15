@@ -65,6 +65,7 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.ProtobufWireHistoryInvalid,
 		diagnosticcode.ProtobufIdentityCollision,
 		diagnosticcode.ProtobufOperationKindUnsupported,
+		diagnosticcode.ProtobufPointerProjectionUnsupported,
 		diagnosticcode.GeneratedOwnershipConflict,
 		diagnosticcode.GeneratedUnexpectedOutput,
 		diagnosticcode.GeneratedManifestInvalid,

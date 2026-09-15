@@ -120,6 +120,9 @@ func ResolveExamples(document Document, contract interfacecontract.Contract) ([]
 		} else {
 			example.errorCode = declaration.errorCode
 		}
+		if err := validator.validatePendingConstraints(); err != nil {
+			return nil, err
+		}
 		result = append(result, example)
 	}
 	return result, nil
@@ -222,20 +225,30 @@ type exampleConstraint struct {
 }
 
 type normalizedExampleValue struct {
-	value     ExampleValue
-	text      string
-	length    uint32
-	signed    int64
-	unsigned  uint64
-	floating  float64
-	itemCount uint32
+	value        ExampleValue
+	text         string
+	length       uint32
+	signed       int64
+	unsigned     uint64
+	floating     float64
+	itemCount    uint32
+	goZero       bool
+	explicitNull bool
 }
 
 type exampleValidator struct {
-	sourcePath  string
-	contract    interfacecontract.Contract
-	constraints map[string]exampleConstraint
-	nodes       int
+	sourcePath         string
+	contract           interfacecontract.Contract
+	constraints        map[string]exampleConstraint
+	pendingConstraints []pendingExampleConstraint
+	nodes              int
+}
+
+type pendingExampleConstraint struct {
+	node       *yaml.Node
+	valuePath  string
+	constraint exampleConstraint
+	value      normalizedExampleValue
 }
 
 func (v *exampleValidator) normalizeMessage(node *yaml.Node, message interfacecontract.Message, goPath, valuePath string, depth int) (normalizedExampleValue, error) {
@@ -264,30 +277,121 @@ func (v *exampleValidator) normalizeMessage(node *yaml.Node, message interfaceco
 	}
 
 	pairs := make([]canonicalPair, 0, len(values))
+	goZero := true
 	for _, field := range fields {
 		name := effectiveJSONName(field)
 		fieldNode, exists := values[name]
+		fieldGoPath := goPath + "." + field.Name()
+		fieldValuePath := valuePath + "." + name
 		if !exists {
 			if field.Required() {
 				return normalizedExampleValue{}, v.invalidAt(node, "%s is missing required field %q", valuePath, name)
 			}
+			if field.PointerDepth() != 0 {
+				continue
+			}
+			normalized, err := v.normalizeOmittedValue(node, field.Type(), fieldGoPath, fieldValuePath, depth+1)
+			if err != nil {
+				return normalizedExampleValue{}, err
+			}
+			v.queueConstraints(node, fieldGoPath, fieldValuePath, normalized)
 			continue
 		}
-		fieldGoPath := goPath + "." + field.Name()
-		fieldValuePath := valuePath + "." + name
-		normalized, err := v.normalizeValue(fieldNode, field.Type(), fieldGoPath, fieldValuePath, depth+1)
+		normalized, err := v.normalizeFieldValue(fieldNode, field, fieldGoPath, fieldValuePath, depth+1)
 		if err != nil {
 			return normalizedExampleValue{}, err
 		}
-		if err := v.validateConstraints(fieldNode, fieldGoPath, fieldValuePath, normalized); err != nil {
-			return normalizedExampleValue{}, err
+		if field.Required() || field.PointerDepth() != 0 || !normalized.goZero {
+			goZero = false
+		}
+		v.queueConstraints(fieldNode, fieldGoPath, fieldValuePath, normalized)
+		if field.PointerDepth() == 0 && !field.Required() && normalized.goZero {
+			continue
 		}
 		pairs = append(pairs, canonicalPair{key: name, value: normalized.value.canonical})
 	}
-	return normalizedExampleValue{value: ExampleValue{kind: interfacecontract.TypeMessage, canonical: canonicalObject(pairs)}}, nil
+	return normalizedExampleValue{
+		value:  ExampleValue{kind: interfacecontract.TypeMessage, canonical: canonicalObject(pairs)},
+		goZero: goZero,
+	}, nil
+}
+
+func (v *exampleValidator) normalizeOmittedValue(sourceNode *yaml.Node, fieldType interfacecontract.Type, goPath, valuePath string, depth int) (normalizedExampleValue, error) {
+	if err := v.consumeSynthetic(sourceNode, valuePath, depth); err != nil {
+		return normalizedExampleValue{}, err
+	}
+	switch fieldType.Kind() {
+	case interfacecontract.TypeBoolean:
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: "false"}, goZero: true}, nil
+	case interfacecontract.TypeString:
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: `""`}, goZero: true}, nil
+	case interfacecontract.TypeInt32, interfacecontract.TypeInt64:
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: "0"}, goZero: true}, nil
+	case interfacecontract.TypeUint32, interfacecontract.TypeUint64:
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: "0"}, goZero: true}, nil
+	case interfacecontract.TypeFloat32, interfacecontract.TypeFloat64:
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: "0"}, goZero: true}, nil
+	case interfacecontract.TypeBytes:
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: `""`}, goZero: true}, nil
+	case interfacecontract.TypeRepeated:
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: "[]"}, goZero: true}, nil
+	case interfacecontract.TypeMap:
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: "{}"}, goZero: true}, nil
+	case interfacecontract.TypeTimestamp:
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: `"0001-01-01T00:00:00Z"`}, goZero: true}, nil
+	case interfacecontract.TypeDuration:
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: `"0s"`}, goZero: true}, nil
+	case interfacecontract.TypeMessage:
+		name, _ := fieldType.MessageName()
+		message, exists := v.contract.Message(name)
+		if !exists {
+			return normalizedExampleValue{}, v.invalidAt(sourceNode, "%s references unknown canonical Go message %s", valuePath, name)
+		}
+		for _, field := range message.Fields() {
+			fieldName := effectiveJSONName(field)
+			if field.Required() {
+				return normalizedExampleValue{}, v.invalidAt(sourceNode, "%s is missing required field %q", valuePath, fieldName)
+			}
+			if field.PointerDepth() != 0 {
+				continue
+			}
+			fieldGoPath := goPath + "." + field.Name()
+			fieldValuePath := valuePath + "." + fieldName
+			normalized, err := v.normalizeOmittedValue(sourceNode, field.Type(), fieldGoPath, fieldValuePath, depth+1)
+			if err != nil {
+				return normalizedExampleValue{}, err
+			}
+			v.queueConstraints(sourceNode, fieldGoPath, fieldValuePath, normalized)
+		}
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: "{}"}, goZero: true}, nil
+	default:
+		return normalizedExampleValue{}, v.invalidAt(sourceNode, "%s uses unsupported canonical type %s", valuePath, fieldType.Canonical())
+	}
+}
+
+func (v *exampleValidator) normalizeFieldValue(node *yaml.Node, field interfacecontract.Field, goPath, valuePath string, depth int) (normalizedExampleValue, error) {
+	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
+		if err := v.consume(node, valuePath, depth); err != nil {
+			return normalizedExampleValue{}, err
+		}
+		if field.PointerDepth() != 2 {
+			return normalizedExampleValue{}, v.invalidAt(node, "%s must not be null; explicit null requires a **T field", valuePath)
+		}
+		return normalizedExampleValue{
+			value:        ExampleValue{kind: field.Type().Kind(), canonical: "null"},
+			explicitNull: true,
+		}, nil
+	}
+	return v.normalizeValue(node, field.Type(), goPath, valuePath, depth)
 }
 
 func (v *exampleValidator) normalizeValue(node *yaml.Node, fieldType interfacecontract.Type, goPath, valuePath string, depth int) (normalizedExampleValue, error) {
+	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
+		if err := v.consume(node, valuePath, depth); err != nil {
+			return normalizedExampleValue{}, err
+		}
+		return normalizedExampleValue{}, v.invalidAt(node, "%s must not be null", valuePath)
+	}
 	if fieldType.Kind() == interfacecontract.TypeMessage {
 		name, _ := fieldType.MessageName()
 		message, exists := v.contract.Message(name)
@@ -298,9 +402,6 @@ func (v *exampleValidator) normalizeValue(node *yaml.Node, fieldType interfaceco
 	}
 	if err := v.consume(node, valuePath, depth); err != nil {
 		return normalizedExampleValue{}, err
-	}
-	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
-		return normalizedExampleValue{}, v.invalidAt(node, "%s must not be null", valuePath)
 	}
 
 	switch fieldType.Kind() {
@@ -313,7 +414,7 @@ func (v *exampleValidator) normalizeValue(node *yaml.Node, fieldType interfaceco
 			return normalizedExampleValue{}, v.typeError(node, valuePath, fieldType)
 		}
 		canonical := strconv.FormatBool(value)
-		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: canonical}}, nil
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: canonical}, goZero: !value}, nil
 	case interfacecontract.TypeString:
 		if node.Kind != yaml.ScalarNode || node.Tag != "!!str" || !utf8.ValidString(node.Value) {
 			return normalizedExampleValue{}, v.typeError(node, valuePath, fieldType)
@@ -322,6 +423,7 @@ func (v *exampleValidator) normalizeValue(node *yaml.Node, fieldType interfaceco
 			value:  ExampleValue{kind: fieldType.Kind(), canonical: quoteJSON(node.Value)},
 			text:   node.Value,
 			length: uint32(utf8.RuneCountInString(node.Value)),
+			goZero: node.Value == "",
 		}, nil
 	case interfacecontract.TypeInt32, interfacecontract.TypeInt64:
 		if node.Kind != yaml.ScalarNode || node.Tag != "!!int" || !canonicalSignedInteger(node.Value) {
@@ -336,7 +438,7 @@ func (v *exampleValidator) normalizeValue(node *yaml.Node, fieldType interfaceco
 			return normalizedExampleValue{}, v.typeError(node, valuePath, fieldType)
 		}
 		canonical := strconv.FormatInt(value, 10)
-		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: canonical}, signed: value}, nil
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: canonical}, signed: value, goZero: value == 0}, nil
 	case interfacecontract.TypeUint32, interfacecontract.TypeUint64:
 		if node.Kind != yaml.ScalarNode || node.Tag != "!!int" || !canonicalUnsignedInteger(node.Value) {
 			return normalizedExampleValue{}, v.typeError(node, valuePath, fieldType)
@@ -350,7 +452,7 @@ func (v *exampleValidator) normalizeValue(node *yaml.Node, fieldType interfaceco
 			return normalizedExampleValue{}, v.typeError(node, valuePath, fieldType)
 		}
 		canonical := strconv.FormatUint(value, 10)
-		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: canonical}, unsigned: value}, nil
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: canonical}, unsigned: value, goZero: value == 0}, nil
 	case interfacecontract.TypeFloat32, interfacecontract.TypeFloat64:
 		if node.Kind != yaml.ScalarNode || node.Tag != "!!int" && node.Tag != "!!float" || !canonicalJSONNumber(node.Value) {
 			return normalizedExampleValue{}, v.typeError(node, valuePath, fieldType)
@@ -367,7 +469,7 @@ func (v *exampleValidator) normalizeValue(node *yaml.Node, fieldType interfaceco
 			value = 0
 		}
 		canonical := strconv.FormatFloat(value, 'g', -1, bits)
-		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: canonical}, floating: value}, nil
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: canonical}, floating: value, goZero: value == 0}, nil
 	case interfacecontract.TypeBytes:
 		if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
 			return normalizedExampleValue{}, v.typeError(node, valuePath, fieldType)
@@ -379,6 +481,7 @@ func (v *exampleValidator) normalizeValue(node *yaml.Node, fieldType interfaceco
 		return normalizedExampleValue{
 			value:  ExampleValue{kind: fieldType.Kind(), canonical: quoteJSON(node.Value)},
 			length: uint32(len(decoded)),
+			goZero: len(decoded) == 0,
 		}, nil
 	case interfacecontract.TypeRepeated:
 		if node.Kind != yaml.SequenceNode || node.Tag != "!!seq" {
@@ -396,6 +499,7 @@ func (v *exampleValidator) normalizeValue(node *yaml.Node, fieldType interfaceco
 		return normalizedExampleValue{
 			value:     ExampleValue{kind: fieldType.Kind(), canonical: "[" + strings.Join(values, ",") + "]"},
 			itemCount: uint32(len(node.Content)),
+			goZero:    len(node.Content) == 0,
 		}, nil
 	case interfacecontract.TypeMap:
 		if node.Kind != yaml.MappingNode || node.Tag != "!!map" {
@@ -423,6 +527,7 @@ func (v *exampleValidator) normalizeValue(node *yaml.Node, fieldType interfaceco
 		return normalizedExampleValue{
 			value:     ExampleValue{kind: fieldType.Kind(), canonical: canonicalObject(pairs)},
 			itemCount: uint32(len(pairs)),
+			goZero:    len(pairs) == 0,
 		}, nil
 	case interfacecontract.TypeTimestamp:
 		if node.Kind != yaml.ScalarNode || node.Tag != "!!str" && node.Tag != "!!timestamp" {
@@ -432,7 +537,7 @@ func (v *exampleValidator) normalizeValue(node *yaml.Node, fieldType interfaceco
 		if err != nil || value.Year() < 1 || value.Year() > 9999 {
 			return normalizedExampleValue{}, v.invalidAt(node, "%s must be an RFC 3339 timestamp in the supported year range", valuePath)
 		}
-		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: quoteJSON(value.UTC().Format(time.RFC3339Nano))}}, nil
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: quoteJSON(value.UTC().Format(time.RFC3339Nano))}, goZero: value.IsZero()}, nil
 	case interfacecontract.TypeDuration:
 		if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
 			return normalizedExampleValue{}, v.typeError(node, valuePath, fieldType)
@@ -441,7 +546,7 @@ func (v *exampleValidator) normalizeValue(node *yaml.Node, fieldType interfaceco
 		if err != nil {
 			return normalizedExampleValue{}, v.invalidAt(node, "%s must be a valid Go duration string", valuePath)
 		}
-		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: quoteJSON(value.String())}}, nil
+		return normalizedExampleValue{value: ExampleValue{kind: fieldType.Kind(), canonical: quoteJSON(value.String())}, goZero: value == 0}, nil
 	default:
 		return normalizedExampleValue{}, v.invalidAt(node, "%s uses unsupported canonical type %s", valuePath, fieldType.Canonical())
 	}
@@ -482,35 +587,57 @@ func (v *exampleValidator) normalizeMapKey(node *yaml.Node, keyType interfacecon
 	return "", v.invalidAt(node, "%s contains a map key that is not a canonical %s value", valuePath, keyType.Canonical())
 }
 
-func (v *exampleValidator) validateConstraints(node *yaml.Node, goPath, valuePath string, value normalizedExampleValue) error {
+func (v *exampleValidator) queueConstraints(node *yaml.Node, goPath, valuePath string, value normalizedExampleValue) {
+	if value.explicitNull {
+		return
+	}
 	constraint, exists := v.constraints[goPath]
 	if !exists || constraint.rules.Empty() {
-		return nil
+		return
 	}
-	rules := constraint.rules
+	v.pendingConstraints = append(v.pendingConstraints, pendingExampleConstraint{
+		node:       node,
+		valuePath:  valuePath,
+		constraint: constraint,
+		value:      value,
+	})
+}
+
+func (v *exampleValidator) validatePendingConstraints() error {
+	for _, pending := range v.pendingConstraints {
+		if err := v.validateConstraint(pending); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *exampleValidator) validateConstraint(pending pendingExampleConstraint) error {
+	rules := pending.constraint.rules
+	value := pending.value
 	if minimum, present := rules.MinLength(); present && value.length < minimum {
-		return v.constraintViolation(node, valuePath, constraint.path, "min_length")
+		return v.constraintViolation(pending.node, pending.valuePath, pending.constraint.path, "min_length")
 	}
 	if maximum, present := rules.MaxLength(); present && value.length > maximum {
-		return v.constraintViolation(node, valuePath, constraint.path, "max_length")
+		return v.constraintViolation(pending.node, pending.valuePath, pending.constraint.path, "max_length")
 	}
 	if pattern, present := rules.Pattern(); present {
 		matched, err := regexp.MatchString(pattern, value.text)
 		if err != nil || !matched {
-			return v.constraintViolation(node, valuePath, constraint.path, "pattern")
+			return v.constraintViolation(pending.node, pending.valuePath, pending.constraint.path, "pattern")
 		}
 	}
 	if minimum, present := rules.Minimum(); present && exampleNumberBelow(value, minimum) {
-		return v.constraintViolation(node, valuePath, constraint.path, "minimum")
+		return v.constraintViolation(pending.node, pending.valuePath, pending.constraint.path, "minimum")
 	}
 	if maximum, present := rules.Maximum(); present && exampleNumberAbove(value, maximum) {
-		return v.constraintViolation(node, valuePath, constraint.path, "maximum")
+		return v.constraintViolation(pending.node, pending.valuePath, pending.constraint.path, "maximum")
 	}
 	if minimum, present := rules.MinItems(); present && value.itemCount < minimum {
-		return v.constraintViolation(node, valuePath, constraint.path, "min_items")
+		return v.constraintViolation(pending.node, pending.valuePath, pending.constraint.path, "min_items")
 	}
 	if maximum, present := rules.MaxItems(); present && value.itemCount > maximum {
-		return v.constraintViolation(node, valuePath, constraint.path, "max_items")
+		return v.constraintViolation(pending.node, pending.valuePath, pending.constraint.path, "max_items")
 	}
 	return nil
 }
@@ -547,6 +674,17 @@ func (v *exampleValidator) consume(node *yaml.Node, valuePath string, depth int)
 	if node == nil {
 		return invalidWith(v.sourcePath, 0, 0, ErrInvalidExamples, "%s contains an empty YAML node", valuePath)
 	}
+	if depth > MaximumExampleDepth {
+		return v.invalidAt(node, "%s exceeds the maximum example depth of %d", valuePath, MaximumExampleDepth)
+	}
+	v.nodes++
+	if v.nodes > MaximumExampleNodes {
+		return v.invalidAt(node, "%s exceeds the maximum example node count of %d", valuePath, MaximumExampleNodes)
+	}
+	return nil
+}
+
+func (v *exampleValidator) consumeSynthetic(node *yaml.Node, valuePath string, depth int) error {
 	if depth > MaximumExampleDepth {
 		return v.invalidAt(node, "%s exceeds the maximum example depth of %d", valuePath, MaximumExampleDepth)
 	}

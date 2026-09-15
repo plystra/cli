@@ -35,6 +35,7 @@ import (
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/projectcheck"
 	"github.com/plystra/cli/internal/projectsmoke"
+	"github.com/plystra/cli/internal/testkernel"
 	"github.com/plystra/cli/internal/testmodulecache"
 	"github.com/plystra/cli/internal/version"
 	"golang.org/x/mod/modfile"
@@ -1269,6 +1270,10 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`interface-contract` source"),
 		[]byte("`PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED` reports the effective `http.expose` document"),
 		[]byte("`exposure` source"),
+		[]byte("`PLYSTRA_PROTOBUF_POINTER_PROJECTION_UNSUPPORTED` reports the effective declaration's owning `http.expose` document"),
+		[]byte("sparse environment overlay may inherit the declaration from `plystra.yaml`"),
+		[]byte("changes no authored, generated, module, compatibility, or transaction file"),
+		[]byte("neither an absolute path nor a pointer value"),
 		[]byte("`PLYSTRA_GENERATED_OWNERSHIP_CONFLICT` reports the single desired managed path"),
 		[]byte("`PLYSTRA_GENERATED_UNEXPECTED_OUTPUT` reports every unexpected unowned path"),
 		[]byte("`generated-artifact` source"),
@@ -1341,6 +1346,23 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 			t.Fatalf("generated README omits candidate-only activation guidance %q:\n%s", activationGuidance, readme)
 		}
 	}
+	for _, pointerGuidance := range [][]byte{
+		[]byte("ordinary Interface message field `T` has no business-observable presence state"),
+		[]byte("direct `*T` distinguishes absent from a present value"),
+		[]byte("direct `**T` adds explicit null"),
+		[]byte("one or two direct layers at a message-field boundary"),
+		[]byte("invalid inside repeated elements, map keys or values"),
+		[]byte("pointer-to-message edge cannot create a recursive cycle"),
+		[]byte("`required` ordinary field is meaningful only at a representation that retains occurrence"),
+		[]byte("required `**T` also rejects absence but still permits explicit null"),
+		[]byte("contract model applies constraints through pointer layers"),
+		[]byte("Generated proxies and Implementation adapters do not yet apply pointer-aware requiredness"),
+		[]byte("Pointer-bearing Connect exposure therefore fails closed"),
+	} {
+		if !bytes.Contains(readme, pointerGuidance) {
+			t.Fatalf("generated README omits pointer guidance %q:\n%s", pointerGuidance, readme)
+		}
+	}
 	for _, toolchainGuidance := range [][]byte{
 		[]byte("top-level `transport_toolchain` record"),
 		[]byte("exact embedded `go/format` runtime"),
@@ -1362,12 +1384,14 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`generated/compatibility/interface-transport.json`"),
 		[]byte("every visible authored Interface"),
 		[]byte("whether or not it is selected or exposed"),
-		[]byte("stable field numbers, Go and JSON names, requiredness, and canonical Go types"),
+		[]byte("stable field numbers, Go and JSON names, requiredness, direct pointer depth, and canonical Go types"),
 		[]byte("excluding metadata, projections, Implementations, configuration, Secrets, source paths, and module versions"),
-		[]byte("stores only exact-contract, documentation, and example digests, never metadata values"),
-		[]byte("contract class covers Go shape, semantics, semantic-error codes, constraints, and Behavioral Conformance declarations"),
-		[]byte("documentation covers descriptions and deprecation"),
-		[]byte("examples cover validated requests and outcomes"),
+		[]byte("compatibility-class working record"),
+		[]byte("`plystra.interface-metadata-baseline/v2`"),
+		[]byte("`contract_supplement_digest`"),
+		[]byte("supplement covers semantics, semantic-error codes, constraints, and Behavioral Conformance independently of Go shape"),
+		[]byte("migrates an owned canonical v1 record to v2 in the same transaction as its ownership manifest"),
+		[]byte("reports the migration as stale without mutation"),
 		[]byte("selected Connect surface"),
 		[]byte("separate Protobuf-descriptor, Connect-procedure, and active wire-map digests"),
 		[]byte("shared safe-error descriptor"),
@@ -1376,8 +1400,17 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("valid empty record when no documentation surface is selected"),
 		[]byte("`plystra generate` refreshes it transactionally"),
 		[]byte("`plystra generate --check` reports drift without mutation"),
-		[]byte("`plystra generate --check` compares the classes without mutation"),
+		[]byte("`plystra generate --check` compares those classes without mutation"),
 		[]byte("Never edit it manually"),
+		[]byte("ownership-manifest output kind is `compatibility-working-record`"),
+		[]byte("five compatibility working records listed above"),
+		[]byte("Classification is per record and ownership entry, not directory-wide"),
+		[]byte("not accepted release baselines"),
+		[]byte("Accepted baselines are separate immutable release evidence"),
+		[]byte("newly numbered non-required pointer field is retained as an additive candidate"),
+		[]byte("Pre-stable development may refresh the replaceable working records in place"),
+		[]byte("stable-release assessment still reports a version requirement"),
+		[]byte("every public projection and immutable accepted ancestor also classifies the new field as optional"),
 	} {
 		if !bytes.Contains(readme, compatibilityGuidance) {
 			t.Fatalf("generated README omits Interface compatibility guidance %q:\n%s", compatibilityGuidance, readme)
@@ -1407,9 +1440,10 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("permanently reserves every removed Protobuf field name and number"),
 		[]byte("Never-exposed Interfaces, removed exposure, and disabled Connect remain inactive"),
 		[]byte("create no schema, descriptor, handler, or SDK output"),
+		[]byte("pointer depth remains in the authored-shape working record"),
 		[]byte("separately labelled legacy transport history"),
 		[]byte("not Interface contract authority"),
-		[]byte("exactly one unary service from every exposed Interface package"),
+		[]byte("exactly one unary service from every supported pointer-free exposed Interface package"),
 		[]byte("Connect procedure path is derived from the exact Interface ID"),
 		[]byte("legacy schema is import-only and owns no competing service"),
 		[]byte("generated/proto/descriptor-set.pb"),
@@ -2098,7 +2132,7 @@ func createKernelProxy(t *testing.T) string {
 	}
 	writeTestFile(t, filepath.Join(versionRoot, "list"), []byte(version.KernelVersion+"\n"))
 	writeTestFile(t, filepath.Join(versionRoot, escapedVersion+".info"), fmt.Appendf(nil, "{\"Version\":%q,\"Time\":\"2026-07-15T00:00:00Z\"}\n", version.KernelVersion))
-	moduleFile := []byte("module github.com/plystra/kernel\n\ngo 1.26\n")
+	moduleFile := readPinnedKernelFile(t, "go.mod")
 	writeTestFile(t, filepath.Join(versionRoot, escapedVersion+".mod"), moduleFile)
 
 	archiveFile, err := os.Create(filepath.Join(versionRoot, escapedVersion+".zip"))
@@ -2115,9 +2149,12 @@ func createKernelProxy(t *testing.T) string {
 		{name: "capability/capability.go", data: []byte("package capability\n\nimport \"context\"\n\ntype Identifier struct { value, name string; major uint32 }\ntype Contract[Request, Response any] struct{ id string }\ntype Handler[Request, Response any] func(context.Context, Request) (Response, error)\n\nfunc ParseIdentifier(id string) (Identifier, error) { return Identifier{value: id, name: id, major: 1}, nil }\nfunc (identifier Identifier) String() string { return identifier.value }\nfunc (identifier Identifier) Name() string { return identifier.name }\nfunc (identifier Identifier) Major() uint32 { return identifier.major }\nfunc MustParseContractWithSemanticErrors[Request, Response any](id string, _ ...string) Contract[Request, Response] {\n\treturn Contract[Request, Response]{id: id}\n}\nfunc (contract Contract[Request, Response]) ID() string { return contract.id }\n")},
 		{name: "configuration/configuration.go", data: []byte("package configuration\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"os\"\n\n\t\"github.com/plystra/kernel/plugin/manifest\"\n)\n\nconst MaximumSecretValueBytes = 1 << 20\n\nvar ErrSecretExposure = errors.New(\"Secret serialization is prohibited\")\n\ntype ResolverOptions struct { MaximumValueBytes int }\ntype Resolver struct{}\ntype Secret struct{}\ntype Values struct{}\ntype ObjectMap struct{}\ntype StringMap struct{}\n\nfunc NewResolver(ResolverOptions) (*Resolver, error) { return &Resolver{}, nil }\nfunc LoadDocument(path string) ([]byte, error) { return os.ReadFile(path) }\nfunc (ObjectMap) Names() []string { return nil }\nfunc (ObjectMap) YAML(string) ([]byte, bool) { return nil, false }\nfunc (StringMap) Names() []string { return nil }\nfunc (StringMap) Value(string) (string, bool) { return \"\", false }\nfunc ExtractObjectMap([]byte, string) (ObjectMap, error) { return ObjectMap{}, nil }\nfunc ExtractStringMap([]byte, string) (StringMap, error) { return StringMap{}, nil }\nfunc Decode(context.Context, *Resolver, manifest.Config, []byte) (Values, error) { return Values{}, nil }\n")},
 		{name: "go.mod", data: moduleFile},
+		{name: "invocation/dependencies.go", data: []byte("package invocation\n\nimport _ \"golang.org/x/mod/module\"\n")},
 		{name: "invocation/error.go", data: []byte("package invocation\n\nconst ErrorInternal ErrorCode = \"internal\"\n")},
-		{name: "interfaces/kernel/health/v1/interface.go", data: []byte("package healthv1\n\nimport \"context\"\n\nconst ID = \"kernel.health/v1\"\n\n//plystra:interface kernel.health/v1\ntype Interface interface { Health(context.Context, Request) (Response, error) }\n\ntype Request struct{}\nconst StatusHealthy = \"healthy\"\ntype Response struct { Status string `json:\"status\" plystra:\"1,required\"` }\n")},
-		{name: "interfaces/kernel/info/v1/interface.go", data: []byte("package infov1\n\nimport \"context\"\n\nconst ID = \"kernel.info/v1\"\n\n//plystra:interface kernel.info/v1\ntype Interface interface { Info(context.Context, Request) (Response, error) }\n\ntype Request struct{}\ntype Response struct { AssemblyAPI string `json:\"assembly_api\" plystra:\"1,required\"`; KernelModule string `json:\"kernel_module\" plystra:\"2,required\"`; KernelVersion string `json:\"kernel_version\" plystra:\"3,required\"` }\n")},
+		{name: "interfaces/kernel/health/v1/interface.go", data: readPinnedKernelFile(t, "interfaces/kernel/health/v1/interface.go")},
+		{name: "interfaces/kernel/health/v1/interface.yaml", data: readPinnedKernelFile(t, "interfaces/kernel/health/v1/interface.yaml")},
+		{name: "interfaces/kernel/info/v1/interface.go", data: readPinnedKernelFile(t, "interfaces/kernel/info/v1/interface.go")},
+		{name: "interfaces/kernel/info/v1/interface.yaml", data: readPinnedKernelFile(t, "interfaces/kernel/info/v1/interface.yaml")},
 		{name: "intrinsic/intrinsic.go", data: []byte("package intrinsic\n\nimport (\n\t\"context\"\n\t\"os\"\n\n\t\"github.com/plystra/kernel/capability\"\n\thealthv1 \"github.com/plystra/kernel/interfaces/kernel/health/v1\"\n\tinfov1 \"github.com/plystra/kernel/interfaces/kernel/info/v1\"\n\t\"github.com/plystra/kernel/invocation\"\n)\n\ntype BindingOptions struct { ModuleVersion, BuildIdentity string }\n\nvar healthContract = capability.MustParseContractWithSemanticErrors[healthv1.Request, healthv1.Response](\"kernel.health/v1\")\nvar infoContract = capability.MustParseContractWithSemanticErrors[infov1.Request, infov1.Response](\"kernel.info/v1\")\n\nfunc HealthContract() capability.Contract[healthv1.Request, healthv1.Response] { return healthContract }\nfunc InfoContract() capability.Contract[infov1.Request, infov1.Response] { return infoContract }\nfunc NewBindings(BindingOptions) ([]invocation.Binding, error) {\n\thealthEndpoint, err := invocation.NewEndpoint(healthContract, func(context.Context, healthv1.Request) (healthv1.Response, error) {\n\t\tif os.Getenv(\"PLYSTRA_TEST_HEALTH_UNHEALTHY\") == \"1\" { return healthv1.Response{}, nil }\n\t\treturn healthv1.Response{Status: healthv1.StatusHealthy}, nil\n\t})\n\tif err != nil { return nil, err }\n\thealth, err := invocation.NewBinding(invocation.BindingOptions{}, healthEndpoint)\n\tif err != nil { return nil, err }\n\tinfoEndpoint, err := invocation.NewEndpoint(infoContract, func(context.Context, infov1.Request) (infov1.Response, error) { return infov1.Response{}, nil })\n\tif err != nil { return nil, err }\n\tinfo, err := invocation.NewBinding(invocation.BindingOptions{}, infoEndpoint)\n\tif err != nil { return nil, err }\n\treturn []invocation.Binding{health, info}, nil\n}\n")},
 		{name: "invocation/invocation.go", data: []byte("package invocation\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"time\"\n\n\t\"github.com/plystra/kernel/capability\"\n)\n\ntype Endpoint struct { id string; invoke func(context.Context, any) (any, error) }\ntype ModuleBuild struct{}\ntype BindingKind string\ntype SelectionReason string\ntype BindingOptions struct {\n\tKind BindingKind\n\tConstructor string\n\tModuleBuild ModuleBuild\n\tSelectionReason SelectionReason\n\tContractDigest [32]byte\n}\ntype Binding struct{ endpoint Endpoint }\ntype Catalog struct { bindings []Binding; byID map[string]Binding }\nconst (\n\tBindingKindIntrinsic BindingKind = \"intrinsic\"\n\tBindingKindImplementation BindingKind = \"implementation\"\n\tSelectionReasonIntrinsic SelectionReason = \"intrinsic\"\n\tSelectionReasonUniqueCompatible SelectionReason = \"unique-compatible\"\n\tSelectionReasonExplicit SelectionReason = \"explicit\"\n)\nfunc NewModuleBuild(string, string, string) (ModuleBuild, error) { return ModuleBuild{}, nil }\nfunc NewEndpoint[Request, Response any](contract capability.Contract[Request, Response], handler capability.Handler[Request, Response]) (Endpoint, error) {\n\treturn Endpoint{id: contract.ID(), invoke: func(ctx context.Context, value any) (any, error) {\n\t\trequest, ok := value.(Request); if !ok { return nil, errors.New(\"request type mismatch\") }\n\t\treturn handler(ctx, request)\n\t}}, nil\n}\nfunc NewBinding(_ BindingOptions, endpoint Endpoint) (Binding, error) { return Binding{endpoint: endpoint}, nil }\nfunc NewCatalog(bindings []Binding) (Catalog, error) {\n\tresult := Catalog{bindings: append([]Binding(nil), bindings...), byID: make(map[string]Binding, len(bindings))}\n\tfor _, binding := range bindings { result.byID[binding.endpoint.id] = binding }\n\treturn result, nil\n}\nfunc (c Catalog) Bindings() []Binding { return append([]Binding(nil), c.bindings...) }\ntype DispatcherOptions struct { DefaultTimeout time.Duration }\ntype Dispatcher struct { published bool; catalog Catalog }\nfunc NewDispatcher(DispatcherOptions) (*Dispatcher, error) { return &Dispatcher{}, nil }\nfunc (d *Dispatcher) Publish(catalog Catalog) error { d.catalog = catalog; d.published = true; return nil }\nfunc (d *Dispatcher) Published() bool { return d != nil && d.published }\ntype Handle[Request, Response any] struct { dispatcher *Dispatcher; id string; available bool }\nfunc NewHandle[Request, Response any](dispatcher *Dispatcher, contract capability.Contract[Request, Response], available bool) (Handle[Request, Response], error) { return Handle[Request, Response]{dispatcher: dispatcher, id: contract.ID(), available: available}, nil }\nfunc (h Handle[Request, Response]) Available() bool { return h.available }\nfunc (h Handle[Request, Response]) Invoke(ctx context.Context, request Request) (Response, error) {\n\tvar zero Response\n\tif !h.available || h.dispatcher == nil || !h.dispatcher.published { return zero, errors.New(\"unavailable\") }\n\tbinding, exists := h.dispatcher.catalog.byID[h.id]; if !exists { return zero, errors.New(\"unavailable\") }\n\tvalue, err := binding.endpoint.invoke(ctx, request); if err != nil { return zero, err }\n\tresponse, ok := value.(Response); if !ok { return zero, errors.New(\"response type mismatch\") }\n\treturn response, nil\n}\ntype ErrorCode string\nconst (\n\tErrorInvalidArgument ErrorCode = \"invalid_argument\"\n\tErrorUnauthenticated ErrorCode = \"unauthenticated\"\n\tErrorDenied ErrorCode = \"denied\"\n\tErrorNotFound ErrorCode = \"not_found\"\n\tErrorConflict ErrorCode = \"conflict\"\n\tErrorVersionIncompatible ErrorCode = \"version_incompatible\"\n\tErrorTimeout ErrorCode = \"timeout\"\n\tErrorUnavailable ErrorCode = \"unavailable\"\n\tErrorResultUnknown ErrorCode = \"result_unknown\"\n\tErrorCancelled ErrorCode = \"cancelled\"\n)\nfunc (code ErrorCode) String() string { return string(code) }\nfunc (code ErrorCode) Valid() bool { return code != \"\" }\ntype Error struct { code ErrorCode; detailCode string }\nfunc (*Error) Error() string { return \"invocation error\" }\nfunc (err *Error) Code() ErrorCode { if err == nil { return \"\" }; return err.code }\nfunc (err *Error) DetailCode() string { if err == nil { return \"\" }; return err.detailCode }\ntype SemanticError struct { code string }\nfunc (*SemanticError) Error() string { return \"semantic error\" }\nfunc (err *SemanticError) SemanticErrorCode() string { if err == nil { return \"\" }; return err.code }\nfunc ValidDetailCode(string) bool { return true }\n")},
 		{name: "lifecycle/lifecycle.go", data: []byte("package lifecycle\n\nimport (\n\t\"context\"\n\t\"time\"\n)\n\ntype Instance interface {\n\tStart(context.Context) error\n\tStop(context.Context) error\n}\n\ntype State string\nconst (\n\tStateNew State = \"new\"\n\tStateStarting State = \"starting\"\n\tStateRunning State = \"running\"\n\tStateStopping State = \"stopping\"\n\tStateStopped State = \"stopped\"\n\tStateFailed State = \"failed\"\n)\nfunc (state State) Valid() bool { return state == StateNew || state == StateStarting || state == StateRunning || state == StateStopping || state == StateStopped || state == StateFailed }\ntype Binding struct{ instance Instance }\ntype Manager struct{ bindings []Binding; started int; state State }\ntype ManagerOptions struct { RollbackTimeout time.Duration }\n\nfunc NewBinding(_ string, instance Instance) (Binding, error) { return Binding{instance: instance}, nil }\nfunc NewManager(_ ManagerOptions, bindings []Binding) (*Manager, error) { return &Manager{bindings: append([]Binding(nil), bindings...), state: StateNew}, nil }\nfunc (manager *Manager) State() State { return manager.state }\nfunc (manager *Manager) Start(ctx context.Context) error {\n\tmanager.state = StateStarting\n\tfor index := range manager.bindings {\n\t\tif err := manager.bindings[index].instance.Start(ctx); err != nil { manager.state = StateFailed; return err }\n\t\tmanager.started++\n\t}\n\tmanager.state = StateRunning\n\treturn nil\n}\nfunc (manager *Manager) Stop(ctx context.Context) error {\n\tmanager.state = StateStopping\n\tfor index := manager.started - 1; index >= 0; index-- {\n\t\tif err := manager.bindings[index].instance.Stop(ctx); err != nil { manager.state = StateFailed; return err }\n\t\tmanager.started--\n\t}\n\tmanager.state = StateStopped\n\treturn nil\n}\n")},
@@ -2142,6 +2179,10 @@ func createKernelProxy(t *testing.T) string {
 	if err := archiveFile.Close(); err != nil {
 		t.Fatalf("close zip file: %v", err)
 	}
+	writeProxyModule(t, root, "golang.org/x/mod", "v0.38.0", map[string][]byte{
+		"go.mod":           []byte("module golang.org/x/mod\n\ngo 1.25.0\n"),
+		"module/module.go": []byte("package module\n"),
+	})
 	for _, dependency := range []struct {
 		path    string
 		version string
@@ -2156,6 +2197,15 @@ func createKernelProxy(t *testing.T) string {
 		copyCachedProxyModule(t, root, dependency.path, dependency.version)
 	}
 	return root
+}
+
+func readPinnedKernelFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(testkernel.Root(t), filepath.FromSlash(path)))
+	if err != nil {
+		t.Fatalf("read pinned Kernel file %s: %v", path, err)
+	}
+	return data
 }
 
 func copyCachedProxyModule(t *testing.T, proxyRoot, modulePath, version string) {
@@ -2330,16 +2380,21 @@ func assertModuleState(t *testing.T, root, modulePath string) {
 	if parsed.Module == nil || parsed.Module.Mod.Path != modulePath {
 		t.Fatalf("module directive = %#v", parsed.Module)
 	}
-	want := map[string]string{
-		"github.com/plystra/kernel": version.KernelVersion,
-		bootstrapgen.YAMLModulePath: bootstrapgen.YAMLModuleVersion,
+	type requirementExpectation struct {
+		version  string
+		indirect bool
+	}
+	want := map[string]requirementExpectation{
+		"github.com/plystra/kernel": {version: version.KernelVersion},
+		bootstrapgen.YAMLModulePath: {version: bootstrapgen.YAMLModuleVersion},
+		"golang.org/x/mod":          {version: "v0.38.0", indirect: true},
 	}
 	if len(parsed.Require) != len(want) {
 		t.Fatalf("requirements = %#v", parsed.Require)
 	}
 	for _, requirement := range parsed.Require {
-		version, exists := want[requirement.Mod.Path]
-		if !exists || requirement.Mod.Version != version || requirement.Indirect {
+		expectation, exists := want[requirement.Mod.Path]
+		if !exists || requirement.Mod.Version != expectation.version || requirement.Indirect != expectation.indirect {
 			t.Fatalf("requirements = %#v", parsed.Require)
 		}
 		delete(want, requirement.Mod.Path)

@@ -80,6 +80,48 @@ func TestResolveConstraintTargetsUsesCanonicalFieldGraph(t *testing.T) {
 	}
 }
 
+func TestResolveConstraintTargetsTraversesPointersAndUsesInnermostTypes(t *testing.T) {
+	t.Parallel()
+
+	contract := constraintTestContract(t, pointerConstraintInterfaceSource)
+	document, err := interfacemeta.ParseFile("interfaces/pointers/interface.yaml", []byte(`constraints:
+  request.name: {min_length: 1}
+  request.nullable_name: {pattern: '^[a-z]+$'}
+  request.tags: {min_items: 1}
+  request.detail.name: {max_length: 8}
+  request.details.name: {min_length: 2}
+  request.by_id.name: {pattern: '^[a-z]+$'}
+  response.payload: {min_length: 1}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets, err := interfacemeta.ResolveConstraintTargets(document, contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 7 {
+		t.Fatalf("targets = %#v", targets)
+	}
+	byPath := make(map[string]interfacemeta.ConstraintTarget, len(targets))
+	for _, target := range targets {
+		byPath[target.Path()] = target
+	}
+	assertPointerConstraintTarget(t, byPath["request.name"], interfacecontract.TypeString, 1)
+	assertPointerConstraintTarget(t, byPath["request.nullable_name"], interfacecontract.TypeString, 2)
+	assertPointerConstraintTarget(t, byPath["request.tags"], interfacecontract.TypeRepeated, 2)
+	assertPointerConstraintTarget(t, byPath["request.detail.name"], interfacecontract.TypeString, 1)
+	assertPointerConstraintTarget(t, byPath["request.details.name"], interfacecontract.TypeString, 1)
+	assertPointerConstraintTarget(t, byPath["request.by_id.name"], interfacecontract.TypeString, 1)
+	assertPointerConstraintTarget(t, byPath["response.payload"], interfacecontract.TypeBytes, 1)
+	if minimum, ok := byPath["request.tags"].Rules().MinItems(); !ok || minimum != 1 {
+		t.Fatalf("tags min_items = %d, %t", minimum, ok)
+	}
+	if maximum, ok := byPath["request.detail.name"].Rules().MaxLength(); !ok || maximum != 8 {
+		t.Fatalf("detail.name max_length = %d, %t", maximum, ok)
+	}
+}
+
 func TestResolveConstraintTargetsRejectsUnknownOrNonTraversablePaths(t *testing.T) {
 	t.Parallel()
 
@@ -224,6 +266,14 @@ func constraintTestContract(t testing.TB, source string) interfacecontract.Contr
 	return contract
 }
 
+func assertPointerConstraintTarget(t *testing.T, target interfacemeta.ConstraintTarget, kind interfacecontract.TypeKind, depth uint8) {
+	t.Helper()
+	field := target.Field()
+	if target.Path() == "" || target.GoPath() == "" || field.Type().Kind() != kind || field.PointerDepth() != depth {
+		t.Fatalf("constraint target = path %q Go path %q field %#v", target.Path(), target.GoPath(), field)
+	}
+}
+
 const canonicalConstraintInterfaceSource = `package contract
 
 import "context"
@@ -267,4 +317,29 @@ type Request struct {
 }
 
 type Response struct { Accepted bool ` + "`plystra:\"1\" json:\"accepted\"`" + ` }
+`
+
+const pointerConstraintInterfaceSource = `package contract
+
+import "context"
+
+//plystra:interface pointer.constraints/v1
+type Interface interface { Validate(context.Context, Request) (Response, error) }
+
+type Detail struct {
+	Name *string ` + "`plystra:\"1\" json:\"name\"`" + `
+}
+
+type Request struct {
+	Name *string ` + "`plystra:\"1\" json:\"name\"`" + `
+	NullableName **string ` + "`plystra:\"2\" json:\"nullable_name\"`" + `
+	Tags **[]string ` + "`plystra:\"3\" json:\"tags\"`" + `
+	Detail *Detail ` + "`plystra:\"4\" json:\"detail\"`" + `
+	Details **[]Detail ` + "`plystra:\"5\" json:\"details\"`" + `
+	ByID *map[string]Detail ` + "`plystra:\"6\" json:\"by_id\"`" + `
+}
+
+type Response struct {
+	Payload *[]byte ` + "`plystra:\"1\" json:\"payload\"`" + `
+}
 `

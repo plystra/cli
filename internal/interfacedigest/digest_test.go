@@ -66,7 +66,7 @@ func TestCalculateUsesSeparateVersionedDocumentationAndExampleRepresentations(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantExamples := `{"schema":"plystra.interface.examples/v1","interface_id":"order.create/v1","examples":[{"name":"accepted","request":{"detail":{"total":1},"order_id":"ord_1","tags":["new"]},"response":{"accepted":true}},{"name":"unavailable","request":{"detail":{"total":0},"order_id":"ord_9","tags":["retry"]},"error_code":"unavailable"}]}`
+	wantExamples := `{"schema":"plystra.interface.examples/v1","interface_id":"order.create/v1","examples":[{"name":"accepted","request":{"detail":{"total":1},"order_id":"ord_1","tags":["new"]},"response":{"accepted":true}},{"name":"unavailable","request":{"order_id":"ord_9","tags":["retry"]},"error_code":"unavailable"}]}`
 	if string(canonicalExamples) != wantExamples {
 		t.Fatalf("canonical examples =\n%s\nwant:\n%s", canonicalExamples, wantExamples)
 	}
@@ -74,7 +74,7 @@ func TestCalculateUsesSeparateVersionedDocumentationAndExampleRepresentations(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if exampleDigest != "sha256:8cd238f8e93ed9c0aa6ffce32312e0ef988c9923e2aacf82dafc8468daab49c3" {
+	if exampleDigest != "sha256:1c8e08ffbfdec59f5cabf4911deee62127b903fff2de93572cfa51a91506685d" {
 		t.Fatalf("example digest = %q", exampleDigest)
 	}
 	if documentationDigest == exampleDigest {
@@ -190,6 +190,51 @@ type Response struct { Accepted bool ` + "`plystra:\"1\" json:\"accepted\"`" + `
 				t.Fatalf("%s change preserved contract digest %s", test.name, digest)
 			}
 		})
+	}
+}
+
+func TestCalculateContractSupplementSeparatesShapeFromOtherContractInputs(t *testing.T) {
+	t.Parallel()
+
+	baseSource := `package contract
+import "context"
+//plystra:interface records.read/v1
+type Interface interface { Read(context.Context, Request) (Response, error) }
+type Request struct { Value string ` + "`plystra:\"1\" json:\"value\"`" + ` }
+type Response struct { Accepted bool ` + "`plystra:\"1\" json:\"accepted\"`" + ` }
+`
+	baseMetadata := "semantics: {kind: query}\nconstraints:\n  request.value: {min_length: 1}\n"
+	type digestSet struct {
+		contract   string
+		supplement string
+	}
+	calculate := func(t *testing.T, source, metadataSource string) digestSet {
+		t.Helper()
+		contract, metadata, constraints := digestFixture(t, source, metadataSource)
+		contractDigest, err := CalculateContract(contract, metadata, constraints)
+		if err != nil {
+			t.Fatal(err)
+		}
+		supplementDigest, err := CalculateContractSupplement(contract, metadata, constraints)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return digestSet{contract: contractDigest, supplement: supplementDigest}
+	}
+
+	base := calculate(t, baseSource, baseMetadata)
+	pointer := calculate(t, strings.Replace(baseSource, "Value string", "Value *string", 1), baseMetadata)
+	nullable := calculate(t, strings.Replace(baseSource, "Value string", "Value **string", 1), baseMetadata)
+	if base.contract == pointer.contract || pointer.contract == nullable.contract || base.contract == nullable.contract {
+		t.Fatalf("pointer depths did not produce distinct full contract digests: %#v %#v %#v", base, pointer, nullable)
+	}
+	if base.supplement != pointer.supplement || base.supplement != nullable.supplement {
+		t.Fatalf("shape-only edits changed contract supplement: %#v %#v %#v", base, pointer, nullable)
+	}
+
+	semantic := calculate(t, baseSource, strings.Replace(baseMetadata, "kind: query", "kind: command", 1))
+	if semantic.contract == base.contract || semantic.supplement == base.supplement {
+		t.Fatalf("semantic edit did not change both contract digests: base %#v, changed %#v", base, semantic)
 	}
 }
 
@@ -408,6 +453,10 @@ func TestCalculateRejectsIncompleteContract(t *testing.T) {
 	digest, err := CalculateContract(interfacecontract.Contract{}, interfacemeta.Document{}, nil)
 	if !errors.Is(err, ErrInvalid) || digest != "" {
 		t.Fatalf("Calculate = %q, %v", digest, err)
+	}
+	digest, err = CalculateContractSupplement(interfacecontract.Contract{}, interfacemeta.Document{}, nil)
+	if !errors.Is(err, ErrInvalid) || digest != "" {
+		t.Fatalf("CalculateContractSupplement = %q, %v", digest, err)
 	}
 	digest, err = CalculateDocumentation(interfacecontract.Contract{}, interfacemeta.Document{})
 	if !errors.Is(err, ErrInvalid) || digest != "" {

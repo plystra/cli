@@ -177,7 +177,7 @@ type Response struct{}
 import "context"
 //plystra:interface records.internal/v1
 type Interface interface { Read(context.Context, Request) (Response, error) }
-type Request struct { Legacy string `+"`plystra:\"7\"`"+` }
+type Request struct { Legacy *string `+"`plystra:\"7\"`"+` }
 type Response struct{}
 `)
 
@@ -199,7 +199,8 @@ type Response struct{}
 		len(selected.Operations()) != 1 ||
 		len(selected.HistoryOperations()) != 2 ||
 		selected.HistoryDigest() == activeOnly.HistoryDigest() ||
-		!bytes.Contains(selected.HistoryCanonicalJSON(), []byte(`"interface_id":"records.internal/v1"`)) {
+		!bytes.Contains(selected.HistoryCanonicalJSON(), []byte(`"interface_id":"records.internal/v1"`)) ||
+		!bytes.Contains(selected.HistoryCanonicalJSON(), []byte(`"pointer_depth":1`)) {
 		t.Fatalf(
 			"selected model = active %s history %s",
 			selected.CanonicalJSON(),
@@ -234,6 +235,49 @@ type Response struct{}
 		withoutHistory.Valid() ||
 		!strings.Contains(errString(err), "absent from all-visible history") {
 		t.Fatalf("BuildInterfaceSelection(missing history) = %#v, %v", withoutHistory, err)
+	}
+}
+
+func TestBuildInterfaceSelectionRejectsFirstActivePointerProjectionDeterministically(t *testing.T) {
+	t.Parallel()
+
+	accounts := interfaceProjectionInput(t, "accounts.read/v1", "example.com/interfaces/accounts/read/v1", `package readv1
+import "context"
+//plystra:interface accounts.read/v1
+type Interface interface { Read(context.Context, Request) (Response, error) }
+type Request struct {
+	Later *string `+"`plystra:\"2\"`"+`
+	Earlier **int64 `+"`plystra:\"1\"`"+`
+}
+type Response struct{}
+`)
+	zeta := interfaceProjectionInput(t, "zeta.read/v1", "example.com/interfaces/zeta/read/v1", `package readv1
+import "context"
+//plystra:interface zeta.read/v1
+type Interface interface { Read(context.Context, Request) (Response, error) }
+type Request struct { Value *bool `+"`plystra:\"1\"`"+` }
+type Response struct{}
+`)
+
+	for iteration := 0; iteration < 50; iteration++ {
+		model, err := protobufmodel.BuildInterfaceSelection(
+			true,
+			[]protobufmodel.InterfaceInput{zeta, accounts},
+			[]protobufmodel.InterfaceInput{accounts, zeta},
+		)
+		var unsupported *protobufmodel.InterfacePointerProjectionError
+		if model.Valid() ||
+			!errors.Is(err, protobufmodel.ErrInterfaceBuild) ||
+			!errors.Is(err, protobufmodel.ErrPointerProjection) ||
+			errors.Is(err, protobufmodel.ErrInterfaceInput) ||
+			!errors.As(err, &unsupported) ||
+			unsupported == nil ||
+			unsupported.InterfaceID().String() != "accounts.read/v1" ||
+			unsupported.MessageName() != "Request" ||
+			unsupported.FieldName() != "Earlier" ||
+			unsupported.PointerDepth() != 2 {
+			t.Fatalf("iteration %d BuildInterfaceSelection = %#v, %v; pointer = %#v", iteration, model, err, unsupported)
+		}
 	}
 }
 

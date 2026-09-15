@@ -1,5 +1,6 @@
 // Package interfacedigest calculates versioned Interface contract,
-// documentation, and example digests from normalized typed inputs.
+// contract-supplement, documentation, and example digests from normalized
+// typed inputs.
 package interfacedigest
 
 import (
@@ -16,9 +17,10 @@ import (
 )
 
 const (
-	canonicalContractSchema      = "plystra.interface.contract/v1"
-	canonicalDocumentationSchema = "plystra.interface.documentation/v1"
-	canonicalExamplesSchema      = "plystra.interface.examples/v1"
+	canonicalContractSchema           = "plystra.interface.contract/v1"
+	canonicalContractSupplementSchema = "plystra.interface.contract-supplement/v1"
+	canonicalDocumentationSchema      = "plystra.interface.documentation/v1"
+	canonicalExamplesSchema           = "plystra.interface.examples/v1"
 )
 
 // ErrInvalid reports normalized input that cannot form an Interface digest.
@@ -29,6 +31,18 @@ var ErrInvalid = errors.New("invalid Interface digest input")
 // are not inputs to this digest.
 func CalculateContract(contract interfacecontract.Contract, metadata interfacemeta.Document, constraints []interfacemeta.ConstraintTarget) (string, error) {
 	canonical, err := canonicalizeContract(contract, metadata, constraints)
+	if err != nil {
+		return "", err
+	}
+	return digest(canonical), nil
+}
+
+// CalculateContractSupplement returns the SHA-256 digest of the exact
+// contract inputs that are independent of the authored Go method and message
+// shape. Compatibility assessment uses it to prove that a contract digest
+// changed only because of an additive shape change.
+func CalculateContractSupplement(contract interfacecontract.Contract, metadata interfacemeta.Document, constraints []interfacemeta.ConstraintTarget) (string, error) {
+	canonical, err := canonicalizeContractSupplement(contract, metadata, constraints)
 	if err != nil {
 		return "", err
 	}
@@ -68,6 +82,22 @@ type canonicalContractDocument struct {
 	Conformance *canonicalConformance `json:"behavioral_conformance"`
 }
 
+type canonicalContractSupplementDocument struct {
+	Schema      string                `json:"schema"`
+	ID          string                `json:"interface_id"`
+	Semantics   *canonicalSemantics   `json:"semantics"`
+	Errors      []string              `json:"semantic_errors"`
+	Constraints []canonicalConstraint `json:"constraints"`
+	Conformance *canonicalConformance `json:"behavioral_conformance"`
+}
+
+type canonicalContractSupplement struct {
+	semantics   *canonicalSemantics
+	errors      []string
+	constraints []canonicalConstraint
+	conformance *canonicalConformance
+}
+
 type canonicalMethod struct {
 	Name         string `json:"name"`
 	ContextType  string `json:"context_type"`
@@ -82,11 +112,12 @@ type canonicalMessage struct {
 }
 
 type canonicalField struct {
-	Number   uint64 `json:"number"`
-	GoName   string `json:"go_name"`
-	JSONName string `json:"json_name"`
-	Required bool   `json:"required"`
-	Type     string `json:"type"`
+	Number       uint64 `json:"number"`
+	GoName       string `json:"go_name"`
+	JSONName     string `json:"json_name"`
+	Required     bool   `json:"required"`
+	PointerDepth uint8  `json:"pointer_depth,omitempty"`
+	Type         string `json:"type"`
 }
 
 type canonicalSemantics struct {
@@ -162,16 +193,68 @@ func canonicalizeContract(contract interfacecontract.Contract, metadata interfac
 				jsonName = field.JSONName()
 			}
 			canonicalFields[fieldIndex] = canonicalField{
-				Number:   field.Number(),
-				GoName:   field.Name(),
-				JSONName: jsonName,
-				Required: field.Required(),
-				Type:     typeName,
+				Number:       field.Number(),
+				GoName:       field.Name(),
+				JSONName:     jsonName,
+				Required:     field.Required(),
+				PointerDepth: field.PointerDepth(),
+				Type:         typeName,
 			}
 		}
 		canonicalMessages[messageIndex] = canonicalMessage{Name: message.Name(), Fields: canonicalFields}
 	}
 
+	supplement, err := normalizeContractSupplement(metadata, constraints)
+	if err != nil {
+		return nil, err
+	}
+
+	canonical, err := json.Marshal(canonicalContractDocument{
+		Schema: canonicalContractSchema,
+		ID:     contract.ID().String(),
+		Method: canonicalMethod{
+			Name:         contract.MethodName(),
+			ContextType:  "context.Context",
+			RequestType:  contract.RequestName(),
+			ResponseType: contract.ResponseName(),
+			ErrorType:    "error",
+		},
+		Messages:    canonicalMessages,
+		Semantics:   supplement.semantics,
+		Errors:      supplement.errors,
+		Constraints: supplement.constraints,
+		Conformance: supplement.conformance,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: encode canonical contract: %w", ErrInvalid, err)
+	}
+	return canonical, nil
+}
+
+func canonicalizeContractSupplement(contract interfacecontract.Contract, metadata interfacemeta.Document, constraints []interfacemeta.ConstraintTarget) ([]byte, error) {
+	identifier := contract.ID().String()
+	if identifier == "" {
+		return nil, fmt.Errorf("%w: a normalized Interface identity is required", ErrInvalid)
+	}
+	supplement, err := normalizeContractSupplement(metadata, constraints)
+	if err != nil {
+		return nil, err
+	}
+	canonical, err := json.Marshal(canonicalContractSupplementDocument{
+		Schema:      canonicalContractSupplementSchema,
+		ID:          identifier,
+		Semantics:   supplement.semantics,
+		Errors:      supplement.errors,
+		Constraints: supplement.constraints,
+		Conformance: supplement.conformance,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: encode canonical contract supplement: %w", ErrInvalid, err)
+	}
+	return canonical, nil
+}
+
+func normalizeContractSupplement(metadata interfacemeta.Document, constraints []interfacemeta.ConstraintTarget) (canonicalContractSupplement, error) {
 	var semantics *canonicalSemantics
 	if normalized, present := metadata.Semantics(); present {
 		semantics = &canonicalSemantics{Kind: string(normalized.Kind())}
@@ -191,7 +274,7 @@ func canonicalizeContract(contract interfacecontract.Contract, metadata interfac
 			continue
 		}
 		if target.Path() == "" {
-			return nil, fmt.Errorf("%w: canonical constraint path is empty", ErrInvalid)
+			return canonicalContractSupplement{}, fmt.Errorf("%w: canonical constraint path is empty", ErrInvalid)
 		}
 		canonicalConstraints = append(canonicalConstraints, canonicalConstraint{Path: target.Path(), Rules: rules})
 	}
@@ -202,31 +285,17 @@ func canonicalizeContract(contract interfacecontract.Contract, metadata interfac
 	var conformance *canonicalConformance
 	if normalized, present := metadata.Conformance(); present {
 		if normalized.Package() == "" {
-			return nil, fmt.Errorf("%w: canonical Behavioral Conformance package is empty", ErrInvalid)
+			return canonicalContractSupplement{}, fmt.Errorf("%w: canonical Behavioral Conformance package is empty", ErrInvalid)
 		}
 		conformance = &canonicalConformance{Package: normalized.Package()}
 	}
 
-	canonical, err := json.Marshal(canonicalContractDocument{
-		Schema: canonicalContractSchema,
-		ID:     contract.ID().String(),
-		Method: canonicalMethod{
-			Name:         contract.MethodName(),
-			ContextType:  "context.Context",
-			RequestType:  contract.RequestName(),
-			ResponseType: contract.ResponseName(),
-			ErrorType:    "error",
-		},
-		Messages:    canonicalMessages,
-		Semantics:   semantics,
-		Errors:      canonicalErrors,
-		Constraints: canonicalConstraints,
-		Conformance: conformance,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("%w: encode canonical contract: %w", ErrInvalid, err)
-	}
-	return canonical, nil
+	return canonicalContractSupplement{
+		semantics:   semantics,
+		errors:      canonicalErrors,
+		constraints: canonicalConstraints,
+		conformance: conformance,
+	}, nil
 }
 
 func canonicalizeDocumentation(contract interfacecontract.Contract, metadata interfacemeta.Document) ([]byte, error) {

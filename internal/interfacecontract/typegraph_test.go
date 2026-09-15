@@ -183,6 +183,9 @@ type Request struct {
 	Repeated  []string          ` + "`plystra:\"13\"`" + `
 	Map       map[string]string ` + "`plystra:\"14\"`" + `
 	Required  string            ` + "`plystra:\"15,required\"`" + `
+	Pointer   *string           ` + "`plystra:\"16\"`" + `
+	Nullable  **[]byte          ` + "`plystra:\"17\"`" + `
+	RequiredPointer *Detail     ` + "`plystra:\"18,required\"`" + `
 }
 
 type Response struct {
@@ -211,22 +214,32 @@ type Detail struct {
 		"Message",
 		"Timestamp",
 		"Duration",
+		"Bytes",
+		"Repeated",
+		"Map",
+		"Required",
 	} {
 		if field := requestField(t, contract, name); !field.OmissionEqualsZeroValue() {
 			t.Fatalf("field %s does not normalize omission to the ordinary Go zero value", name)
 		}
 	}
-	for _, name := range []string{"Bytes", "Repeated", "Map", "Required"} {
+	for _, name := range []string{"Pointer", "Nullable", "RequiredPointer"} {
 		if field := requestField(t, contract, name); field.OmissionEqualsZeroValue() {
-			t.Fatalf("field %s claims unsupported zero-value omission semantics", name)
+			t.Fatalf("field %s collapses a pointer presence state", name)
 		}
+	}
+	if got := requestField(t, contract, "Pointer").PointerDepth(); got != 1 {
+		t.Fatalf("Pointer depth = %d, want 1", got)
+	}
+	if got := requestField(t, contract, "Nullable").PointerDepth(); got != 2 {
+		t.Fatalf("Nullable depth = %d, want 2", got)
 	}
 	response := contract.ResponseFields()
 	if len(response) != 1 || !response[0].OmissionEqualsZeroValue() {
 		t.Fatalf("response fields = %#v", response)
 	}
 	detail, exists := contract.Message("Detail")
-	if !exists || len(detail.Fields()) != 2 || !detail.Fields()[0].OmissionEqualsZeroValue() || detail.Fields()[1].OmissionEqualsZeroValue() {
+	if !exists || len(detail.Fields()) != 2 || !detail.Fields()[0].OmissionEqualsZeroValue() || !detail.Fields()[1].OmissionEqualsZeroValue() {
 		t.Fatalf("Detail = %#v, %t", detail, exists)
 	}
 	if (interfacecontract.Field{}).OmissionEqualsZeroValue() {
@@ -241,11 +254,15 @@ func TestValidateAcceptsAliasesOfSupportedExactTypes(t *testing.T) {
 import "context"
 type Text = string
 type Count = int64
+type TextPointer = *Text
+type NullableText = *TextPointer
 //plystra:interface order.create/v1
 type Interface interface { Create(context.Context, Request) (Response, error) }
 type Request struct {
 	Text Text ` + "`plystra:\"1\"`" + `
 	Count Count ` + "`plystra:\"2\"`" + `
+	Pointer TextPointer ` + "`plystra:\"3\"`" + `
+	Nullable NullableText ` + "`plystra:\"4,required\"`" + `
 }
 type Response struct{}
 `
@@ -258,6 +275,205 @@ type Response struct{}
 	}
 	if got := requestField(t, contract, "Count").Type().Canonical(); got != "int64" {
 		t.Fatalf("Count alias = %q", got)
+	}
+	pointer := requestField(t, contract, "Pointer")
+	if got := pointer.Type().Canonical(); got != "string" || pointer.PointerDepth() != 1 {
+		t.Fatalf("Pointer alias = %q depth %d", got, pointer.PointerDepth())
+	}
+	nullable := requestField(t, contract, "Nullable")
+	if got := nullable.Type().Canonical(); got != "string" || nullable.PointerDepth() != 2 || !nullable.Required() {
+		t.Fatalf("Nullable alias = %q depth %d required %t", got, nullable.PointerDepth(), nullable.Required())
+	}
+}
+
+func TestValidateNormalizesEverySupportedPointerFieldForm(t *testing.T) {
+	t.Parallel()
+
+	type fieldTypeCase struct {
+		name      string
+		goType    string
+		canonical string
+	}
+	valueTypes := []fieldTypeCase{
+		{name: "Boolean", goType: "bool", canonical: "boolean"},
+		{name: "String", goType: "string", canonical: "string"},
+		{name: "Int32", goType: "int32", canonical: "int32"},
+		{name: "Int64", goType: "int64", canonical: "int64"},
+		{name: "Uint32", goType: "uint32", canonical: "uint32"},
+		{name: "Uint64", goType: "uint64", canonical: "uint64"},
+		{name: "Float32", goType: "float32", canonical: "float32"},
+		{name: "Float64", goType: "float64", canonical: "float64"},
+		{name: "Bytes", goType: "[]byte", canonical: "bytes"},
+		{name: "Message", goType: "Detail", canonical: "message:Detail"},
+		{name: "Timestamp", goType: "time.Time", canonical: "timestamp"},
+		{name: "Duration", goType: "time.Duration", canonical: "duration"},
+	}
+	fieldTypes := append([]fieldTypeCase(nil), valueTypes...)
+	for _, valueType := range valueTypes {
+		fieldTypes = append(fieldTypes, fieldTypeCase{
+			name:      "Repeated" + valueType.name,
+			goType:    "[]" + valueType.goType,
+			canonical: "repeated<" + valueType.canonical + ">",
+		})
+	}
+	mapKeys := []fieldTypeCase{
+		{name: "Boolean", goType: "bool", canonical: "boolean"},
+		{name: "String", goType: "string", canonical: "string"},
+		{name: "Int32", goType: "int32", canonical: "int32"},
+		{name: "Int64", goType: "int64", canonical: "int64"},
+		{name: "Uint32", goType: "uint32", canonical: "uint32"},
+		{name: "Uint64", goType: "uint64", canonical: "uint64"},
+	}
+	for _, keyType := range mapKeys {
+		for _, valueType := range valueTypes {
+			fieldTypes = append(fieldTypes, fieldTypeCase{
+				name:      "Map" + keyType.name + valueType.name,
+				goType:    "map[" + keyType.goType + "]" + valueType.goType,
+				canonical: "map<" + keyType.canonical + "," + valueType.canonical + ">",
+			})
+		}
+	}
+	var fields strings.Builder
+	number := 1
+	for _, fieldType := range fieldTypes {
+		for depth := 1; depth <= 2; depth++ {
+			fmt.Fprintf(&fields, "\t%sDepth%d %s%s `plystra:\"%d\"`\n", fieldType.name, depth, strings.Repeat("*", depth), fieldType.goType, number)
+			number++
+		}
+	}
+	source := fmt.Sprintf(`package createv1
+import (
+	"context"
+	"time"
+)
+//plystra:interface order.create/v1
+type Interface interface { Create(context.Context, Request) (Response, error) }
+type Request struct {
+%s}
+type Response struct {
+	Result **Detail `+"`plystra:\"1\"`"+`
+}
+type Detail struct {
+	Value string `+"`plystra:\"1\"`"+`
+}
+`, fields.String())
+
+	contract, err := validateSource(t, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fieldType := range fieldTypes {
+		for depth := 1; depth <= 2; depth++ {
+			field := requestField(t, contract, fmt.Sprintf("%sDepth%d", fieldType.name, depth))
+			if got := field.Type().Canonical(); got != fieldType.canonical || field.PointerDepth() != uint8(depth) || field.OmissionEqualsZeroValue() {
+				t.Fatalf("%s depth %d = %q depth %d omission %t", fieldType.name, depth, got, field.PointerDepth(), field.OmissionEqualsZeroValue())
+			}
+		}
+	}
+	response := contract.ResponseFields()
+	if len(response) != 1 || response[0].Type().Canonical() != "message:Detail" || response[0].PointerDepth() != 2 {
+		t.Fatalf("response fields = %#v", response)
+	}
+}
+
+func TestValidateAcceptsCollectionOnlyMessageRecursion(t *testing.T) {
+	t.Parallel()
+
+	source := `package createv1
+import "context"
+//plystra:interface order.create/v1
+type Interface interface { Create(context.Context, Request) (Response, error) }
+type Request struct {
+	Root Node ` + "`plystra:\"1\"`" + `
+}
+type Response struct{}
+type Node struct {
+	Children []Node ` + "`plystra:\"1\"`" + `
+	Index map[string]Node ` + "`plystra:\"2\"`" + `
+	OptionalChildren *[]Node ` + "`plystra:\"3\"`" + `
+	NullableIndex **map[string]Node ` + "`plystra:\"4\"`" + `
+}
+`
+	contract, err := validateSource(t, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, exists := contract.Message("Node")
+	if !exists {
+		t.Fatal("Node message is absent")
+	}
+	want := map[string]struct {
+		canonical string
+		depth     uint8
+	}{
+		"Children":         {canonical: "repeated<message:Node>"},
+		"Index":            {canonical: "map<string,message:Node>"},
+		"OptionalChildren": {canonical: "repeated<message:Node>", depth: 1},
+		"NullableIndex":    {canonical: "map<string,message:Node>", depth: 2},
+	}
+	if len(node.Fields()) != len(want) {
+		t.Fatalf("Node fields = %#v", node.Fields())
+	}
+	for _, field := range node.Fields() {
+		expected, ok := want[field.Name()]
+		if !ok || field.Type().Canonical() != expected.canonical || field.PointerDepth() != expected.depth {
+			t.Fatalf("Node field %s = %q depth %d", field.Name(), field.Type().Canonical(), field.PointerDepth())
+		}
+	}
+}
+
+func TestValidateRejectsPointerCreatedMessageCycles(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		declarations string
+		want         string
+	}{
+		{
+			name: "direct",
+			declarations: `type Request struct { Root Node ` + "`plystra:\"1\"`" + ` }
+type Response struct{}
+type Node struct { Next *Node ` + "`plystra:\"1\"`" + ` }`,
+			want: "pointer-to-message cycle Node -> Node",
+		},
+		{
+			name: "indirect closing pointer",
+			declarations: `type Request struct { Root First ` + "`plystra:\"1\"`" + ` }
+type Response struct{}
+type First struct { Children []Second ` + "`plystra:\"1\"`" + ` }
+type Second struct { Parent *First ` + "`plystra:\"1\"`" + ` }`,
+			want: "pointer-to-message cycle First -> Second -> First",
+		},
+		{
+			name: "indirect earlier pointer",
+			declarations: `type Request struct { Root First ` + "`plystra:\"1\"`" + ` }
+type Response struct{}
+type First struct { Child *Second ` + "`plystra:\"1\"`" + ` }
+type Second struct { Parents []First ` + "`plystra:\"1\"`" + ` }`,
+			want: "pointer-to-message cycle First -> Second -> First",
+		},
+		{
+			name: "pointer target normalized by an earlier field",
+			declarations: `type Request struct {
+	Root Node ` + "`plystra:\"1\"`" + `
+	Cached *Node ` + "`plystra:\"2\"`" + `
+}
+type Response struct{}
+type Node struct { Requests []Request ` + "`plystra:\"1\"`" + ` }`,
+			want: "pointer-to-message cycle Request -> Node -> Request",
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			source := "package createv1\nimport \"context\"\n//plystra:interface order.create/v1\ntype Interface interface { Create(context.Context, Request) (Response, error) }\n" + test.declarations + "\n"
+			contract, err := validateSource(t, source)
+			if !errors.Is(err, interfacecontract.ErrInvalid) || contract.ID().String() != "" || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate = %#v, %v; want %q", contract, err, test.want)
+			}
+		})
 	}
 }
 
@@ -282,9 +498,15 @@ func TestValidateRejectsUnsupportedFieldGraphTypes(t *testing.T) {
 		{name: "complex128", fieldType: "complex128", want: "unsupported Go scalar type complex128"},
 		{name: "defined scalar", declarations: "type Defined string", fieldType: "Defined", want: "unsupported defined non-message type Defined"},
 		{name: "defined slice", declarations: "type Defined []string", fieldType: "Defined", want: "unsupported defined non-message type Defined"},
-		{name: "pointer scalar", fieldType: "*string", want: "pointer presence is not part of the initial field graph"},
-		{name: "pointer message", declarations: taggedNestedMessage, fieldType: "*Nested", want: "pointer presence is not part of the initial field graph"},
-		{name: "pointer timestamp", imports: `"time"`, fieldType: "*time.Time", want: "pointer presence is not part of the initial field graph"},
+		{name: "pointer depth three", fieldType: "***string", want: "unsupported pointer depth 3 in ***string"},
+		{name: "pointer depth four", fieldType: "****string", want: "unsupported pointer depth 4 in ****string"},
+		{name: "pointer unsupported scalar", fieldType: "*int", want: "unsupported Go scalar type int"},
+		{name: "pointer unsupported defined scalar", declarations: "type Defined string", fieldType: "*Defined", want: "unsupported defined non-message type Defined"},
+		{name: "pointer repeated element", fieldType: "[]*string", want: "unsupported pointer placement in *string; pointers are allowed only directly at a message-field boundary"},
+		{name: "pointer map key", fieldType: "map[*string]string", want: "unsupported pointer placement in *string; pointers are allowed only directly at a message-field boundary"},
+		{name: "pointer map value", fieldType: "map[string]*string", want: "unsupported pointer placement in *string; pointers are allowed only directly at a message-field boundary"},
+		{name: "pointer message element", declarations: taggedNestedMessage, fieldType: "[]*Nested", want: "unsupported pointer placement in *example.com/interfaces/order/create/v1.Nested; pointers are allowed only directly at a message-field boundary"},
+		{name: "pointer inside wrapped collection", fieldType: "*[]*string", want: "unsupported pointer placement in *string; pointers are allowed only directly at a message-field boundary"},
 		{name: "fixed array", fieldType: "[2]string", want: "unsupported fixed array type"},
 		{name: "byte array", fieldType: "[16]byte", want: "unsupported fixed array type"},
 		{name: "anonymous struct", fieldType: "struct{ Value string }", want: "unsupported anonymous struct type"},
@@ -339,8 +561,9 @@ type Response struct { Value int ` + "`plystra:\"1\"`" + ` }
 
 func FuzzValidateClosedFieldTypeDispatch(f *testing.F) {
 	types := []struct {
-		value string
-		valid bool
+		value        string
+		valid        bool
+		pointerDepth uint8
 	}{
 		{value: "bool", valid: true},
 		{value: "string", valid: true},
@@ -355,7 +578,13 @@ func FuzzValidateClosedFieldTypeDispatch(f *testing.F) {
 		{value: "map[string]int64", valid: true},
 		{value: "int"},
 		{value: "uint"},
-		{value: "*string"},
+		{value: "*string", valid: true, pointerDepth: 1},
+		{value: "**string", valid: true, pointerDepth: 2},
+		{value: "*[]byte", valid: true, pointerDepth: 1},
+		{value: "**map[string]int64", valid: true, pointerDepth: 2},
+		{value: "***string"},
+		{value: "[]*string"},
+		{value: "map[string]*string"},
 		{value: "[2]string"},
 		{value: "[][]string"},
 		{value: "map[float64]string"},
@@ -371,7 +600,7 @@ func FuzzValidateClosedFieldTypeDispatch(f *testing.F) {
 		source := fmt.Sprintf("package createv1\nimport \"context\"\n//plystra:interface order.create/v1\ntype Interface interface { Create(context.Context, Request) (Response, error) }\ntype Request struct { Value %s `plystra:\"1\"` }\ntype Response struct{}\n", selected.value)
 		contract, err := validateSource(t, source)
 		if selected.valid {
-			if err != nil || len(contract.RequestFields()) != 1 || contract.RequestFields()[0].Type().Canonical() == "" {
+			if err != nil || len(contract.RequestFields()) != 1 || contract.RequestFields()[0].Type().Canonical() == "" || contract.RequestFields()[0].PointerDepth() != selected.pointerDepth {
 				t.Fatalf("valid type %s = %#v, %v", selected.value, contract, err)
 			}
 			return

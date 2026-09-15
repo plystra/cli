@@ -269,7 +269,7 @@ func classifyArtifact(filePath string) (artifactIdentity, error) {
 		interfacecompatibility.TransportPath,
 		interfacecompatibility.JavaScriptPath,
 		interfacecompatibility.DocumentationPath:
-		return artifactIdentity{generator: interfaceCompatibilityGenerator, kind: generatedfiles.ArtifactKindCompatibilityBaseline}, nil
+		return artifactIdentity{generator: interfaceCompatibilityGenerator, kind: generatedfiles.ArtifactKindCompatibilityWorking}, nil
 	case protobufwiremap.Path:
 		return artifactIdentity{generator: protobufWireMapGenerator, kind: generatedfiles.ArtifactKindWireMap}, nil
 	case protobufdescriptor.DescriptorSetPath:

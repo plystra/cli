@@ -98,6 +98,7 @@ type Field struct {
 	jsonName        string
 	hasExplicitJSON bool
 	fieldType       Type
+	pointerDepth    uint8
 }
 
 // Name returns the exported Go field name.
@@ -109,31 +110,16 @@ func (f Field) Number() uint64 { return f.number }
 // Required reports whether the canonical field is required.
 func (f Field) Required() bool { return f.required }
 
+// PointerDepth returns the exact number of direct pointer layers around the
+// field's innermost supported value type. Canonical fields use only 0, 1, or 2.
+func (f Field) PointerDepth() uint8 { return f.pointerDepth }
+
 // OmissionEqualsZeroValue reports whether omitting the field and supplying its
 // ordinary Go zero value are semantically identical after canonical
-// conversion. The initial contract applies this only to non-required scalar
-// and non-pointer value-message fields; byte sequences and collections retain
-// no implied nil-versus-empty semantics.
+// conversion. Required fields still require occurrence at representation
+// boundaries, and pointer fields retain their distinct absent state.
 func (f Field) OmissionEqualsZeroValue() bool {
-	if f.required {
-		return false
-	}
-	switch f.fieldType.Kind() {
-	case TypeBoolean,
-		TypeString,
-		TypeInt32,
-		TypeInt64,
-		TypeUint32,
-		TypeUint64,
-		TypeFloat32,
-		TypeFloat64,
-		TypeMessage,
-		TypeTimestamp,
-		TypeDuration:
-		return true
-	default:
-		return false
-	}
+	return f.pointerDepth == 0 && f.fieldType.Canonical() != ""
 }
 
 // JSONName returns the explicitly declared JSON name, or an empty string.
@@ -212,6 +198,10 @@ func Validate(declaration interfacedecl.Declaration, checkedPackage *types.Packa
 	if err != nil {
 		return Contract{}, invalid(declaration, err.Error())
 	}
+	messages := graph.normalizedMessages()
+	if err := validatePointerMessageCycles(messages); err != nil {
+		return Contract{}, invalid(declaration, err.Error())
+	}
 	if !types.Identical(signature.Results().At(1).Type(), types.Universe.Lookup("error").Type()) {
 		return Contract{}, invalid(declaration, "Interface operation second result must be error")
 	}
@@ -224,7 +214,7 @@ func Validate(declaration interfacedecl.Declaration, checkedPackage *types.Packa
 		responseName:   response.name,
 		requestFields:  requestFields,
 		responseFields: responseFields,
-		messages:       graph.normalizedMessages(),
+		messages:       messages,
 	}, nil
 }
 

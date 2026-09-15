@@ -78,23 +78,24 @@ type ExactInterfacePackages struct {
 // Interface is one parsed and type-checked Interface declaration with stable
 // public module, package, and source provenance.
 type Interface struct {
-	modulePath          string
-	moduleVersion       string
-	packagePath         string
-	sourcePath          string
-	local               bool
-	declaration         interfacedecl.Declaration
-	contract            interfacecontract.Contract
-	contractDigest      string
-	documentationDigest string
-	exampleDigest       string
-	types               *types.Package
-	metadata            interfacemeta.Document
-	hasMetadata         bool
-	constraints         []interfacemeta.ConstraintTarget
-	examples            []interfacemeta.Example
-	deprecation         interfacemeta.Deprecation
-	hasDeprecation      bool
+	modulePath               string
+	moduleVersion            string
+	packagePath              string
+	sourcePath               string
+	local                    bool
+	declaration              interfacedecl.Declaration
+	contract                 interfacecontract.Contract
+	contractDigest           string
+	contractSupplementDigest string
+	documentationDigest      string
+	exampleDigest            string
+	types                    *types.Package
+	metadata                 interfacemeta.Document
+	hasMetadata              bool
+	constraints              []interfacemeta.ConstraintTarget
+	examples                 []interfacemeta.Example
+	deprecation              interfacemeta.Deprecation
+	hasDeprecation           bool
 }
 
 // ID returns the exact canonical Interface ID.
@@ -136,6 +137,11 @@ func (i Interface) Contract() interfacecontract.Contract { return i.contract }
 // ContractDigest returns the versioned SHA-256 digest of the exact normalized
 // Go contract and compatibility metadata.
 func (i Interface) ContractDigest() string { return i.contractDigest }
+
+// ContractSupplementDigest returns the versioned SHA-256 digest of exact
+// semantics, semantic-error codes, constraints, and Behavioral Conformance
+// inputs independent of the authored Go method and message shape.
+func (i Interface) ContractSupplementDigest() string { return i.contractSupplementDigest }
 
 // DocumentationDigest returns the versioned SHA-256 digest of normalized
 // descriptions and deprecation presentation.
@@ -516,6 +522,10 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 			if err != nil {
 				return loadedInventory{}, fmt.Errorf("package %s: calculate Interface contract digest: %w", candidate.importPath, err)
 			}
+			contractSupplementDigest, err := interfacedigest.CalculateContractSupplement(contract, metadata, constraints)
+			if err != nil {
+				return loadedInventory{}, fmt.Errorf("package %s: calculate Interface contract supplement digest: %w", candidate.importPath, err)
+			}
 			documentationDigest, err := interfacedigest.CalculateDocumentation(contract, metadata)
 			if err != nil {
 				return loadedInventory{}, fmt.Errorf("package %s: calculate Interface documentation digest: %w", candidate.importPath, err)
@@ -525,21 +535,22 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 				return loadedInventory{}, fmt.Errorf("package %s: calculate Interface example digest: %w", candidate.importPath, err)
 			}
 			result.interfaces = append(result.interfaces, Interface{
-				modulePath:          candidate.source.path,
-				moduleVersion:       candidate.source.version,
-				packagePath:         candidate.importPath,
-				sourcePath:          declaration.Position().Path,
-				local:               candidate.source.local,
-				declaration:         declaration,
-				contract:            contract,
-				contractDigest:      contractDigest,
-				documentationDigest: documentationDigest,
-				exampleDigest:       exampleDigest,
-				types:               checkedPackage,
-				metadata:            metadata,
-				hasMetadata:         hasMetadata,
-				constraints:         constraints,
-				examples:            examples,
+				modulePath:               candidate.source.path,
+				moduleVersion:            candidate.source.version,
+				packagePath:              candidate.importPath,
+				sourcePath:               declaration.Position().Path,
+				local:                    candidate.source.local,
+				declaration:              declaration,
+				contract:                 contract,
+				contractDigest:           contractDigest,
+				contractSupplementDigest: contractSupplementDigest,
+				documentationDigest:      documentationDigest,
+				exampleDigest:            exampleDigest,
+				types:                    checkedPackage,
+				metadata:                 metadata,
+				hasMetadata:              hasMetadata,
+				constraints:              constraints,
+				examples:                 examples,
 			})
 		}
 	}

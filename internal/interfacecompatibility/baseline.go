@@ -25,12 +25,15 @@ import (
 const (
 	// Path is the one CLI-owned authored Interface shape baseline.
 	Path = "generated/compatibility/interfaces.json"
-	// Schema identifies the strict initial authored Interface shape baseline.
-	Schema = "plystra.interface-shape-baseline/v1"
+	// Schema identifies the strict pointer-aware authored Interface shape record.
+	Schema = "plystra.interface-shape-baseline/v2"
 	// ShapeSchema domain-separates one Interface shape digest.
-	ShapeSchema = "plystra.interface-shape/v1"
+	ShapeSchema = "plystra.interface-shape/v2"
 	// MaximumBytes bounds a managed baseline before parsing.
 	MaximumBytes int64 = 16 << 20
+
+	baselineSchemaV1 = "plystra.interface-shape-baseline/v1"
+	shapeSchemaV1    = "plystra.interface-shape/v1"
 
 	maximumInterfaces = 4096
 	maximumMessages   = 16384
@@ -63,7 +66,7 @@ func (b Baseline) Schema() string {
 	if !b.prepared {
 		return ""
 	}
-	return Schema
+	return b.record.Schema
 }
 
 // Interfaces returns exact-ID-sorted defensive Interface shape views.
@@ -91,17 +94,17 @@ func (b Baseline) Digest() string { return b.digest }
 
 // Valid reports whether this value is complete and internally canonical.
 func (b Baseline) Valid() bool {
-	if !b.prepared || b.record.Schema != Schema || b.record.Digest != b.digest {
+	if !b.prepared || !validBaselineSchema(b.record.Schema) || b.record.Digest != b.digest {
 		return false
 	}
-	if err := validateInterfaces(b.record.Interfaces, true); err != nil {
+	if err := validateInterfaces(b.record.Interfaces, true, b.record.Schema); err != nil {
 		return false
 	}
-	canonical, err := encodeCanonical(b.record.Interfaces)
+	canonical, err := encodeCanonical(b.record.Schema, b.record.Interfaces)
 	if err != nil || !bytes.Equal(canonical, b.canonicalJSON) || digest(canonical) != b.digest {
 		return false
 	}
-	record, err := encodeRecord(b.record.Interfaces, b.digest)
+	record, err := encodeRecord(b.record.Schema, b.record.Interfaces, b.digest)
 	return err == nil && bytes.Equal(record, b.recordJSON)
 }
 
@@ -171,6 +174,10 @@ func (f Field) JSONName() string { return f.record.JSONName }
 // Required reports whether the authored plystra tag marks the field required.
 func (f Field) Required() bool { return f.record.Required }
 
+// PointerDepth returns the exact direct pointer depth around the canonical
+// field value. Valid values are zero, one, or two.
+func (f Field) PointerDepth() uint8 { return f.record.PointerDepth }
+
 // Type returns the canonical closed-graph Go field type.
 func (f Field) Type() string { return f.record.Type }
 
@@ -191,7 +198,7 @@ func New(contracts []interfacecontract.Contract) (Baseline, error) {
 	sort.Slice(interfaces, func(left, right int) bool {
 		return interfaces[left].ID < interfaces[right].ID
 	})
-	if err := validateInterfaces(interfaces, true); err != nil {
+	if err := validateInterfaces(interfaces, true, Schema); err != nil {
 		return Baseline{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	return build(interfaces)
@@ -211,27 +218,27 @@ func Decode(data []byte) (Baseline, error) {
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return Baseline{}, fmt.Errorf("%w: record contains trailing JSON", ErrHistory)
 	}
-	if record.Schema != Schema {
-		return Baseline{}, fmt.Errorf("%w: schema must equal %q", ErrHistory, Schema)
+	if !validBaselineSchema(record.Schema) {
+		return Baseline{}, fmt.Errorf("%w: schema must equal %q or %q", ErrHistory, baselineSchemaV1, Schema)
 	}
-	if err := validateInterfaces(record.Interfaces, true); err != nil {
+	if err := validateInterfaces(record.Interfaces, true, record.Schema); err != nil {
 		return Baseline{}, fmt.Errorf("%w: %v", ErrHistory, err)
 	}
-	canonical, err := encodeCanonical(record.Interfaces)
+	canonical, err := encodeCanonical(record.Schema, record.Interfaces)
 	if err != nil {
 		return Baseline{}, fmt.Errorf("%w: encode canonical record: %v", ErrHistory, err)
 	}
 	if !validDigest(record.Digest) || record.Digest != digest(canonical) {
 		return Baseline{}, fmt.Errorf("%w: digest does not match the canonical Interface shapes", ErrHistory)
 	}
-	encoded, err := encodeRecord(record.Interfaces, record.Digest)
+	encoded, err := encodeRecord(record.Schema, record.Interfaces, record.Digest)
 	if err != nil {
 		return Baseline{}, fmt.Errorf("%w: encode record: %v", ErrHistory, err)
 	}
 	if !bytes.Equal(encoded, data) {
 		return Baseline{}, fmt.Errorf("%w: record is not in canonical byte form", ErrHistory)
 	}
-	return buildWithEncoding(record.Interfaces, canonical, encoded, record.Digest), nil
+	return buildWithEncoding(record.Schema, record.Interfaces, canonical, encoded, record.Digest), nil
 }
 
 // Reconcile constructs the current baseline and compares it with exact prior
@@ -271,10 +278,11 @@ const (
 
 // Change is one immutable exact-ID compatibility difference.
 type Change struct {
-	kind           ChangeKind
-	id             string
-	previousDigest string
-	currentDigest  string
+	kind                      ChangeKind
+	id                        string
+	previousDigest            string
+	currentDigest             string
+	additivePointerFieldsOnly bool
 }
 
 // Kind returns added, removed, or changed.
@@ -288,6 +296,13 @@ func (c Change) PreviousDigest() string { return c.previousDigest }
 
 // CurrentDigest returns the current shape digest when one exists.
 func (c Change) CurrentDigest() string { return c.currentDigest }
+
+// AdditivePointerFieldsOnly reports whether the changed Interface preserves
+// every existing shape byte and only adds non-required one- or two-pointer
+// fields. Any newly reachable messages must be rooted through those fields.
+func (c Change) AdditivePointerFieldsOnly() bool {
+	return c.kind == ChangeChanged && c.additivePointerFieldsOnly
+}
 
 // Comparison is one immutable exact-ID-sorted baseline comparison.
 type Comparison struct {
@@ -323,11 +338,11 @@ func (c Comparison) Valid() bool {
 		}
 		switch change.kind {
 		case ChangeAdded:
-			if change.previousDigest != "" || !validDigest(change.currentDigest) {
+			if change.previousDigest != "" || !validDigest(change.currentDigest) || change.additivePointerFieldsOnly {
 				return false
 			}
 		case ChangeRemoved:
-			if !validDigest(change.previousDigest) || change.currentDigest != "" {
+			if !validDigest(change.previousDigest) || change.currentDigest != "" || change.additivePointerFieldsOnly {
 				return false
 			}
 		case ChangeChanged:
@@ -346,15 +361,18 @@ func Compare(previous, current Baseline) (Comparison, error) {
 	if !previous.Valid() || !current.Valid() {
 		return Comparison{}, fmt.Errorf("%w: both compared baselines must be valid", ErrInvalid)
 	}
-	before := make(map[string]string, len(previous.record.Interfaces))
-	after := make(map[string]string, len(current.record.Interfaces))
+	if previous.record.Schema == Schema && current.record.Schema == baselineSchemaV1 {
+		return Comparison{}, fmt.Errorf("%w: Interface shape schema cannot downgrade from v2 to v1", ErrInvalid)
+	}
+	before := make(map[string]wireInterface, len(previous.record.Interfaces))
+	after := make(map[string]wireInterface, len(current.record.Interfaces))
 	identifiers := make(map[string]struct{}, len(previous.record.Interfaces)+len(current.record.Interfaces))
 	for _, value := range previous.record.Interfaces {
-		before[value.ID] = value.Digest
+		before[value.ID] = value
 		identifiers[value.ID] = struct{}{}
 	}
 	for _, value := range current.record.Interfaces {
-		after[value.ID] = value.Digest
+		after[value.ID] = value
 		identifiers[value.ID] = struct{}{}
 	}
 	ordered := make([]string, 0, len(identifiers))
@@ -364,15 +382,21 @@ func Compare(previous, current Baseline) (Comparison, error) {
 	sort.Strings(ordered)
 	changes := make([]Change, 0)
 	for _, identifier := range ordered {
-		previousDigest, previousExists := before[identifier]
-		currentDigest, currentExists := after[identifier]
+		previousValue, previousExists := before[identifier]
+		currentValue, currentExists := after[identifier]
 		switch {
 		case !previousExists:
-			changes = append(changes, Change{kind: ChangeAdded, id: identifier, currentDigest: currentDigest})
+			changes = append(changes, Change{kind: ChangeAdded, id: identifier, currentDigest: currentValue.Digest})
 		case !currentExists:
-			changes = append(changes, Change{kind: ChangeRemoved, id: identifier, previousDigest: previousDigest})
-		case previousDigest != currentDigest:
-			changes = append(changes, Change{kind: ChangeChanged, id: identifier, previousDigest: previousDigest, currentDigest: currentDigest})
+			changes = append(changes, Change{kind: ChangeRemoved, id: identifier, previousDigest: previousValue.Digest})
+		case !equivalentInterfaceShape(previousValue, previous.record.Schema, currentValue, current.record.Schema):
+			changes = append(changes, Change{
+				kind:                      ChangeChanged,
+				id:                        identifier,
+				previousDigest:            previousValue.Digest,
+				currentDigest:             currentValue.Digest,
+				additivePointerFieldsOnly: onlyAddsOptionalPointerFields(previousValue, currentValue),
+			})
 		}
 	}
 	result := Comparison{
@@ -424,11 +448,12 @@ type wireMessage struct {
 }
 
 type wireField struct {
-	Number   uint64 `json:"number"`
-	GoName   string `json:"go_name"`
-	JSONName string `json:"json_name"`
-	Required bool   `json:"required"`
-	Type     string `json:"type"`
+	Number       uint64 `json:"number"`
+	GoName       string `json:"go_name"`
+	JSONName     string `json:"json_name"`
+	Required     bool   `json:"required"`
+	PointerDepth uint8  `json:"pointer_depth,omitempty"`
+	Type         string `json:"type"`
 }
 
 func interfaceFromContract(contract interfacecontract.Contract) (wireInterface, error) {
@@ -453,11 +478,12 @@ func interfaceFromContract(contract interfacecontract.Contract) (wireInterface, 
 				jsonName = field.JSONName()
 			}
 			value.Messages[messageIndex].Fields[fieldIndex] = wireField{
-				Number:   field.Number(),
-				GoName:   field.Name(),
-				JSONName: jsonName,
-				Required: field.Required(),
-				Type:     field.Type().Canonical(),
+				Number:       field.Number(),
+				GoName:       field.Name(),
+				JSONName:     jsonName,
+				Required:     field.Required(),
+				PointerDepth: field.PointerDepth(),
+				Type:         field.Type().Canonical(),
 			}
 		}
 		sort.Slice(value.Messages[messageIndex].Fields, func(left, right int) bool {
@@ -472,10 +498,10 @@ func interfaceFromContract(contract interfacecontract.Contract) (wireInterface, 
 	sort.Slice(value.Messages, func(left, right int) bool {
 		return value.Messages[left].Name < value.Messages[right].Name
 	})
-	if err := validateInterface(value); err != nil {
+	if err := validateInterface(value, Schema); err != nil {
 		return wireInterface{}, err
 	}
-	shape, err := encodeShape(value)
+	shape, err := encodeShape(Schema, value)
 	if err != nil {
 		return wireInterface{}, err
 	}
@@ -484,25 +510,25 @@ func interfaceFromContract(contract interfacecontract.Contract) (wireInterface, 
 }
 
 func build(interfaces []wireInterface) (Baseline, error) {
-	canonical, err := encodeCanonical(interfaces)
+	canonical, err := encodeCanonical(Schema, interfaces)
 	if err != nil {
 		return Baseline{}, fmt.Errorf("%w: encode canonical record: %v", ErrInvalid, err)
 	}
 	identityDigest := digest(canonical)
-	record, err := encodeRecord(interfaces, identityDigest)
+	record, err := encodeRecord(Schema, interfaces, identityDigest)
 	if err != nil {
 		return Baseline{}, fmt.Errorf("%w: encode record: %v", ErrInvalid, err)
 	}
 	if int64(len(record)) > MaximumBytes {
 		return Baseline{}, fmt.Errorf("%w: encoded record exceeds %d bytes", ErrInvalid, MaximumBytes)
 	}
-	return buildWithEncoding(interfaces, canonical, record, identityDigest), nil
+	return buildWithEncoding(Schema, interfaces, canonical, record, identityDigest), nil
 }
 
-func buildWithEncoding(interfaces []wireInterface, canonical, record []byte, identityDigest string) Baseline {
+func buildWithEncoding(schema string, interfaces []wireInterface, canonical, record []byte, identityDigest string) Baseline {
 	return Baseline{
 		record: wireRecord{
-			Schema:     Schema,
+			Schema:     schema,
 			Interfaces: cloneWireInterfaces(interfaces),
 			Digest:     identityDigest,
 		},
@@ -513,17 +539,21 @@ func buildWithEncoding(interfaces []wireInterface, canonical, record []byte, ide
 	}
 }
 
-func encodeCanonical(interfaces []wireInterface) ([]byte, error) {
-	return json.Marshal(canonicalRecord{Schema: Schema, Interfaces: interfaces})
+func encodeCanonical(schema string, interfaces []wireInterface) ([]byte, error) {
+	return json.Marshal(canonicalRecord{Schema: schema, Interfaces: interfaces})
 }
 
-func encodeRecord(interfaces []wireInterface, identityDigest string) ([]byte, error) {
-	return json.Marshal(wireRecord{Schema: Schema, Interfaces: interfaces, Digest: identityDigest})
+func encodeRecord(schema string, interfaces []wireInterface, identityDigest string) ([]byte, error) {
+	return json.Marshal(wireRecord{Schema: schema, Interfaces: interfaces, Digest: identityDigest})
 }
 
-func encodeShape(value wireInterface) ([]byte, error) {
+func encodeShape(schema string, value wireInterface) ([]byte, error) {
+	shapeSchema, valid := shapeSchemaForBaseline(schema)
+	if !valid {
+		return nil, fmt.Errorf("unsupported Interface shape schema %q", schema)
+	}
 	return json.Marshal(shapeDigestRecord{
-		Schema:   ShapeSchema,
+		Schema:   shapeSchema,
 		ID:       value.ID,
 		Package:  value.PackagePath,
 		Method:   value.Method,
@@ -533,7 +563,37 @@ func encodeShape(value wireInterface) ([]byte, error) {
 	})
 }
 
-func validateInterfaces(values []wireInterface, requireOrdered bool) error {
+func equivalentInterfaceShape(previous wireInterface, previousSchema string, current wireInterface, currentSchema string) bool {
+	if previous.Digest == current.Digest && previousSchema == currentSchema {
+		return true
+	}
+	previousShape, err := encodeShape(currentSchema, previous)
+	if err != nil {
+		return false
+	}
+	currentShape, err := encodeShape(currentSchema, current)
+	return err == nil && bytes.Equal(previousShape, currentShape)
+}
+
+func validBaselineSchema(value string) bool {
+	return value == baselineSchemaV1 || value == Schema
+}
+
+func shapeSchemaForBaseline(value string) (string, bool) {
+	switch value {
+	case baselineSchemaV1:
+		return shapeSchemaV1, true
+	case Schema:
+		return ShapeSchema, true
+	default:
+		return "", false
+	}
+}
+
+func validateInterfaces(values []wireInterface, requireOrdered bool, schema string) error {
+	if !validBaselineSchema(schema) {
+		return fmt.Errorf("Interface shape schema %q is unsupported", schema)
+	}
 	if values == nil || len(values) > maximumInterfaces {
 		return fmt.Errorf("interfaces must be an array with at most %d entries", maximumInterfaces)
 	}
@@ -543,10 +603,10 @@ func validateInterfaces(values []wireInterface, requireOrdered bool) error {
 		if requireOrdered && index > 0 && values[index-1].ID >= value.ID {
 			return errors.New("interfaces must be unique and sorted by exact ID")
 		}
-		if err := validateInterface(value); err != nil {
+		if err := validateInterface(value, schema); err != nil {
 			return fmt.Errorf("interfaces[%d]: %v", index, err)
 		}
-		shape, err := encodeShape(value)
+		shape, err := encodeShape(schema, value)
 		if err != nil {
 			return fmt.Errorf("interfaces[%d]: encode shape: %v", index, err)
 		}
@@ -564,7 +624,7 @@ func validateInterfaces(values []wireInterface, requireOrdered bool) error {
 	return nil
 }
 
-func validateInterface(value wireInterface) error {
+func validateInterface(value wireInterface, schema string) error {
 	identifier, err := interfaceid.Parse(value.ID)
 	if err != nil || identifier.String() != value.ID {
 		return fmt.Errorf("ID %q is not canonical", value.ID)
@@ -597,14 +657,244 @@ func validateInterface(value wireInterface) error {
 		return fmt.Errorf("response message %s is absent", value.Response)
 	}
 	for _, message := range value.Messages {
-		if err := validateMessage(message, messageNames); err != nil {
+		if err := validateMessage(message, messageNames, schema); err != nil {
 			return fmt.Errorf("message %s: %v", message.Name, err)
+		}
+	}
+	if err := validateMessageGraph(value); err != nil {
+		return err
+	}
+	return nil
+}
+
+type messageReference struct {
+	target  string
+	direct  bool
+	pointer bool
+}
+
+func validateMessageGraph(value wireInterface) error {
+	messages := make(map[string]wireMessage, len(value.Messages))
+	for _, message := range value.Messages {
+		messages[message.Name] = message
+	}
+
+	reachable := make(map[string]struct{}, len(messages))
+	var visitReachable func(string)
+	visitReachable = func(name string) {
+		if _, seen := reachable[name]; seen {
+			return
+		}
+		reachable[name] = struct{}{}
+		for _, reference := range messageReferences(messages[name]) {
+			visitReachable(reference.target)
+		}
+	}
+	visitReachable(value.Request)
+	visitReachable(value.Response)
+	for _, message := range value.Messages {
+		if _, exists := reachable[message.Name]; !exists {
+			return fmt.Errorf("message %s is unreachable from request %s or response %s", message.Name, value.Request, value.Response)
+		}
+	}
+
+	if err := validateDirectMessageCycles(value.Messages, messages); err != nil {
+		return err
+	}
+	return validatePointerMessageCycles(value.Messages, messages)
+}
+
+func validateDirectMessageCycles(ordered []wireMessage, messages map[string]wireMessage) error {
+	const (
+		unvisited = iota
+		visiting
+		visited
+	)
+	state := make(map[string]int, len(messages))
+	stack := make([]string, 0, len(messages))
+	stackIndex := make(map[string]int, len(messages))
+	var visit func(string) error
+	visit = func(name string) error {
+		state[name] = visiting
+		stackIndex[name] = len(stack)
+		stack = append(stack, name)
+		defer func() {
+			delete(stackIndex, name)
+			stack = stack[:len(stack)-1]
+			state[name] = visited
+		}()
+		for _, reference := range messageReferences(messages[name]) {
+			if !reference.direct || reference.pointer {
+				continue
+			}
+			switch state[reference.target] {
+			case unvisited:
+				if err := visit(reference.target); err != nil {
+					return err
+				}
+			case visiting:
+				cycle := append([]string(nil), stack[stackIndex[reference.target]:]...)
+				cycle = append(cycle, reference.target)
+				return fmt.Errorf("direct-value message cycle %s is invalid", strings.Join(cycle, " -> "))
+			}
+		}
+		return nil
+	}
+	for _, message := range ordered {
+		if state[message.Name] == unvisited {
+			if err := visit(message.Name); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func validateMessage(value wireMessage, messageNames map[string]struct{}) error {
+func validatePointerMessageCycles(ordered []wireMessage, messages map[string]wireMessage) error {
+	indices := make(map[string]int, len(messages))
+	lowLinks := make(map[string]int, len(messages))
+	onStack := make(map[string]bool, len(messages))
+	stack := make([]string, 0, len(messages))
+	components := make(map[string]int, len(messages))
+	nextIndex := 0
+	nextComponent := 0
+	var connect func(string)
+	connect = func(name string) {
+		indices[name] = nextIndex
+		lowLinks[name] = nextIndex
+		nextIndex++
+		stack = append(stack, name)
+		onStack[name] = true
+		for _, reference := range messageReferences(messages[name]) {
+			if _, seen := indices[reference.target]; !seen {
+				connect(reference.target)
+				if lowLinks[reference.target] < lowLinks[name] {
+					lowLinks[name] = lowLinks[reference.target]
+				}
+			} else if onStack[reference.target] && indices[reference.target] < lowLinks[name] {
+				lowLinks[name] = indices[reference.target]
+			}
+		}
+		if lowLinks[name] != indices[name] {
+			return
+		}
+		for {
+			last := len(stack) - 1
+			member := stack[last]
+			stack = stack[:last]
+			onStack[member] = false
+			components[member] = nextComponent
+			if member == name {
+				break
+			}
+		}
+		nextComponent++
+	}
+	for _, message := range ordered {
+		if _, seen := indices[message.Name]; !seen {
+			connect(message.Name)
+		}
+	}
+	for _, message := range ordered {
+		for _, field := range message.Fields {
+			reference, exists := fieldMessageReference(field)
+			if !exists || !reference.direct || !reference.pointer {
+				continue
+			}
+			if components[message.Name] == components[reference.target] {
+				return fmt.Errorf("pointer-to-message field %s.%s creates a recursive cycle with %s", message.Name, field.GoName, reference.target)
+			}
+		}
+	}
+	return nil
+}
+
+func messageReferences(message wireMessage) []messageReference {
+	result := make([]messageReference, 0, len(message.Fields))
+	for _, field := range message.Fields {
+		if reference, exists := fieldMessageReference(field); exists {
+			result = append(result, reference)
+		}
+	}
+	return result
+}
+
+func fieldMessageReference(field wireField) (messageReference, bool) {
+	if name, found := strings.CutPrefix(field.Type, "message:"); found {
+		return messageReference{target: name, direct: true, pointer: field.PointerDepth != 0}, true
+	}
+	if element, found := boundedGeneric(field.Type, "repeated<"); found {
+		if name, message := strings.CutPrefix(element, "message:"); message {
+			return messageReference{target: name}, true
+		}
+		return messageReference{}, false
+	}
+	if body, found := boundedGeneric(field.Type, "map<"); found {
+		_, mapped, separated := strings.Cut(body, ",")
+		if separated {
+			if name, message := strings.CutPrefix(mapped, "message:"); message {
+				return messageReference{target: name}, true
+			}
+		}
+	}
+	return messageReference{}, false
+}
+
+func onlyAddsOptionalPointerFields(previous, current wireInterface) bool {
+	if previous.ID != current.ID ||
+		previous.PackagePath != current.PackagePath ||
+		previous.Method != current.Method ||
+		previous.Request != current.Request ||
+		previous.Response != current.Response {
+		return false
+	}
+	currentMessages := make(map[string]wireMessage, len(current.Messages))
+	for _, message := range current.Messages {
+		currentMessages[message.Name] = message
+	}
+	added := false
+	for _, previousMessage := range previous.Messages {
+		currentMessage, exists := currentMessages[previousMessage.Name]
+		if !exists {
+			return false
+		}
+		previousIndex := 0
+		currentIndex := 0
+		for previousIndex < len(previousMessage.Fields) && currentIndex < len(currentMessage.Fields) {
+			previousField := previousMessage.Fields[previousIndex]
+			currentField := currentMessage.Fields[currentIndex]
+			switch {
+			case currentField.Number < previousField.Number:
+				if currentField.Required || currentField.PointerDepth == 0 {
+					return false
+				}
+				added = true
+				currentIndex++
+			case currentField.Number > previousField.Number:
+				return false
+			default:
+				if previousField != currentField {
+					return false
+				}
+				previousIndex++
+				currentIndex++
+			}
+		}
+		if previousIndex != len(previousMessage.Fields) {
+			return false
+		}
+		for ; currentIndex < len(currentMessage.Fields); currentIndex++ {
+			field := currentMessage.Fields[currentIndex]
+			if field.Required || field.PointerDepth == 0 {
+				return false
+			}
+			added = true
+		}
+	}
+	return added
+}
+
+func validateMessage(value wireMessage, messageNames map[string]struct{}, schema string) error {
 	if value.Fields == nil || len(value.Fields) > maximumFields {
 		return fmt.Errorf("fields must be an array with at most %d entries", maximumFields)
 	}
@@ -639,6 +929,12 @@ func validateMessage(value wireMessage, messageNames map[string]struct{}) error 
 			return fmt.Errorf("field JSON name %q is duplicated", field.JSONName)
 		}
 		jsonNames[field.JSONName] = struct{}{}
+		if field.PointerDepth > 2 {
+			return fmt.Errorf("field %s pointer depth %d exceeds maximum 2", field.GoName, field.PointerDepth)
+		}
+		if schema == baselineSchemaV1 && field.PointerDepth != 0 {
+			return fmt.Errorf("field %s pointer depth is unavailable in shape schema v1", field.GoName)
+		}
 		if !validCanonicalType(field.Type, messageNames) {
 			return fmt.Errorf("field %s canonical type %q is invalid", field.GoName, field.Type)
 		}

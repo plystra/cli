@@ -23,7 +23,7 @@ constraints:
   response.accepted: {}
 examples:
   - name: rejected
-    request: {order_id: ord_rejected}
+    request: {order_id: ord_rejected, detail: {name: ok}, items: [{name: ok}]}
     error: rejected
   - name: accepted
     request:
@@ -127,6 +127,300 @@ func TestResolveExamplesAcceptsClosedCanonicalFieldGraph(t *testing.T) {
 	}
 }
 
+func TestResolveExamplesNormalizesPointerStatesAndOrdinaryZeroValues(t *testing.T) {
+	t.Parallel()
+
+	contract := constraintTestContract(t, presenceExampleSource)
+	document, err := interfacemeta.ParseFile("interfaces/presence/interface.yaml", []byte(`examples:
+  - name: all-zero
+    request:
+      required_ordinary: ""
+      optional_boolean: false
+      optional_string: ""
+      optional_int64: 0
+      optional_float64: 0
+      optional_bytes: ""
+      optional_repeated: []
+      optional_map: {}
+      optional_message: {}
+      optional_timestamp: 0001-01-01T00:00:00Z
+      optional_duration: 0s
+      required_pointer: ""
+      optional_pointer: ""
+      required_nullable: null
+      optional_nullable: null
+      pointer_bytes: ""
+      nullable_repeated: []
+      pointer_map: {}
+      pointer_message: {}
+      nullable_message: null
+      pointer_timestamp: 0001-01-01T00:00:00Z
+      pointer_duration: 0s
+    response:
+      required_ordinary: false
+      optional_ordinary: false
+      pointer: false
+      nullable: null
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	examples, err := interfacemeta.ResolveExamples(document, contract)
+	if err != nil || len(examples) != 1 {
+		t.Fatalf("ResolveExamples = %#v, %v", examples, err)
+	}
+	wantRequest := `{"required_ordinary":"","required_pointer":"","optional_pointer":"","required_nullable":null,"optional_nullable":null,"pointer_bytes":"","nullable_repeated":[],"pointer_map":{},"pointer_message":{},"nullable_message":null,"pointer_timestamp":"0001-01-01T00:00:00Z","pointer_duration":"0s"}`
+	if got := examples[0].Request().CanonicalJSON(); got != wantRequest {
+		t.Fatalf("request = %s, want %s", got, wantRequest)
+	}
+	response, present := examples[0].Response()
+	if !present || response.CanonicalJSON() != `{"required_ordinary":false,"pointer":false,"nullable":null}` {
+		t.Fatalf("response = %#v, %t", response, present)
+	}
+}
+
+func TestResolveExamplesRetainsPresentMessageWithRequiredZeroValue(t *testing.T) {
+	t.Parallel()
+
+	contract := constraintTestContract(t, exampleFieldGraphSource)
+	document, err := interfacemeta.ParseFile("interfaces/types/interface.yaml", []byte(`examples:
+  - name: required-zero
+    request: {name: valid, detail: {label: ""}}
+    response: {accepted: false}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	examples, err := interfacemeta.ResolveExamples(document, contract)
+	if err != nil || len(examples) != 1 {
+		t.Fatalf("ResolveExamples = %#v, %v", examples, err)
+	}
+	if got, want := examples[0].Request().CanonicalJSON(), `{"name":"valid","detail":{"label":""}}`; got != want {
+		t.Fatalf("request = %s, want %s", got, want)
+	}
+	response, present := examples[0].Response()
+	if !present || response.CanonicalJSON() != `{"accepted":false}` {
+		t.Fatalf("response = %#v, %t", response, present)
+	}
+}
+
+func TestResolveExamplesValidatesPointerRequirednessAndNullStates(t *testing.T) {
+	t.Parallel()
+
+	contract := constraintTestContract(t, presenceExampleSource)
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "missing required pointer",
+			body: "    request: {required_ordinary: ok, required_nullable: ok}\n    response: {required_ordinary: true}\n",
+			want: `missing required field "required_pointer"`,
+		},
+		{
+			name: "missing required nullable",
+			body: "    request: {required_ordinary: ok, required_pointer: ok}\n    response: {required_ordinary: true}\n",
+			want: `missing required field "required_nullable"`,
+		},
+		{
+			name: "null ordinary",
+			body: "    request: {required_ordinary: ok, required_pointer: ok, required_nullable: ok, optional_string: null}\n    response: {required_ordinary: true}\n",
+			want: "optional_string must not be null; explicit null requires a **T field",
+		},
+		{
+			name: "null single pointer",
+			body: "    request: {required_ordinary: ok, required_pointer: ok, required_nullable: ok, optional_pointer: null}\n    response: {required_ordinary: true}\n",
+			want: "optional_pointer must not be null; explicit null requires a **T field",
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			data := []byte("examples:\n  - name: invalid\n" + test.body)
+			document, err := interfacemeta.ParseFile("interfaces/presence/interface.yaml", data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			examples, err := interfacemeta.ResolveExamples(document, contract)
+			if !errors.Is(err, interfacemeta.ErrInvalidExamples) || len(examples) != 0 || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ResolveExamples = %#v, %v; want %q", examples, err, test.want)
+			}
+		})
+	}
+}
+
+func TestResolveExamplesSkipsConstraintsOnlyForAbsentOrNullPointers(t *testing.T) {
+	t.Parallel()
+
+	contract := constraintTestContract(t, presenceExampleSource)
+	metadata := `constraints:
+  request.optional_pointer: {min_length: 1}
+  request.optional_nullable: {min_length: 1}
+  request.pointer_bytes: {min_length: 1}
+  request.nullable_repeated: {min_items: 1}
+  request.pointer_message.text: {min_length: 1}
+  request.nullable_message.text: {min_length: 1}
+examples:
+  - name: checked
+`
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "absent optional pointers",
+			body: "    request: {required_ordinary: ok, required_pointer: ok, required_nullable: ok}\n    response: {required_ordinary: true}\n",
+		},
+		{
+			name: "explicit null nullable pointers",
+			body: "    request: {required_ordinary: ok, required_pointer: ok, required_nullable: ok, optional_nullable: null, nullable_repeated: null, nullable_message: null}\n    response: {required_ordinary: true}\n",
+		},
+		{
+			name: "present zero single pointer",
+			body: "    request: {required_ordinary: ok, required_pointer: ok, required_nullable: ok, optional_pointer: \"\"}\n    response: {required_ordinary: true}\n",
+			want: "optional_pointer violates min_length",
+		},
+		{
+			name: "present zero nullable value",
+			body: "    request: {required_ordinary: ok, required_pointer: ok, required_nullable: ok, optional_nullable: \"\"}\n    response: {required_ordinary: true}\n",
+			want: "optional_nullable violates min_length",
+		},
+		{
+			name: "present empty pointer bytes",
+			body: "    request: {required_ordinary: ok, required_pointer: ok, required_nullable: ok, pointer_bytes: \"\"}\n    response: {required_ordinary: true}\n",
+			want: "pointer_bytes violates min_length",
+		},
+		{
+			name: "present empty nullable repeated",
+			body: "    request: {required_ordinary: ok, required_pointer: ok, required_nullable: ok, nullable_repeated: []}\n    response: {required_ordinary: true}\n",
+			want: "nullable_repeated violates min_items",
+		},
+		{
+			name: "present zero pointer message",
+			body: "    request: {required_ordinary: ok, required_pointer: ok, required_nullable: ok, pointer_message: {text: \"\"}}\n    response: {required_ordinary: true}\n",
+			want: "pointer_message.text violates min_length",
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			document, err := interfacemeta.ParseFile("interfaces/presence/interface.yaml", []byte(metadata+test.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			examples, err := interfacemeta.ResolveExamples(document, contract)
+			if test.want == "" {
+				if err != nil || len(examples) != 1 {
+					t.Fatalf("ResolveExamples = %#v, %v", examples, err)
+				}
+				return
+			}
+			if !errors.Is(err, interfacemeta.ErrInvalidExamples) || len(examples) != 0 || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ResolveExamples = %#v, %v; want %q", examples, err, test.want)
+			}
+		})
+	}
+}
+
+func TestResolveExamplesValidatesConstraintsOnOmittedOrdinaryZeroValues(t *testing.T) {
+	t.Parallel()
+
+	contract := constraintTestContract(t, presenceExampleSource)
+	tests := []struct {
+		name       string
+		constraint string
+		want       string
+	}{
+		{name: "string", constraint: "request.optional_string: {min_length: 1}", want: "optional_string violates min_length"},
+		{name: "bytes", constraint: "request.optional_bytes: {min_length: 1}", want: "optional_bytes violates min_length"},
+		{name: "repeated", constraint: "request.optional_repeated: {min_items: 1}", want: "optional_repeated violates min_items"},
+		{name: "map", constraint: "request.optional_map: {min_items: 1}", want: "optional_map violates min_items"},
+		{name: "nested message", constraint: "request.optional_message.text: {min_length: 1}", want: "optional_message.text violates min_length"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			data := []byte("constraints:\n  " + test.constraint + "\nexamples:\n  - name: omitted-zero\n    request: {required_ordinary: ok, required_pointer: ok, required_nullable: ok}\n    response: {required_ordinary: true}\n")
+			document, err := interfacemeta.ParseFile("interfaces/presence/interface.yaml", data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			examples, err := interfacemeta.ResolveExamples(document, contract)
+			if !errors.Is(err, interfacemeta.ErrInvalidExamples) || len(examples) != 0 || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ResolveExamples = %#v, %v; want %q", examples, err, test.want)
+			}
+		})
+	}
+}
+
+func TestResolveExamplesChecksRequiredPresenceBeforeAnyConstraint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		contract string
+		metadata string
+		want     string
+	}{
+		{
+			name:     "later required request field",
+			contract: presenceExampleSource,
+			metadata: `constraints:
+  request.optional_string: {min_length: 1}
+examples:
+  - name: invalid
+    request: {required_ordinary: ok, required_nullable: ok}
+    response: {required_ordinary: true}
+`,
+			want: `missing required field "required_pointer"`,
+		},
+		{
+			name:     "required response field",
+			contract: presenceExampleSource,
+			metadata: `constraints:
+  request.optional_string: {min_length: 1}
+examples:
+  - name: invalid
+    request: {required_ordinary: ok, required_pointer: ok, required_nullable: ok}
+    response: {}
+`,
+			want: `missing required field "required_ordinary"`,
+		},
+		{
+			name:     "required descendant of omitted ordinary message",
+			contract: exampleFieldGraphSource,
+			metadata: `constraints:
+  request.name: {min_length: 1}
+examples:
+  - name: invalid
+    request: {name: ""}
+    response: {accepted: true}
+`,
+			want: `missing required field "label"`,
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			contract := constraintTestContract(t, test.contract)
+			document, err := interfacemeta.ParseFile("interfaces/presence/interface.yaml", []byte(test.metadata))
+			if err != nil {
+				t.Fatal(err)
+			}
+			examples, err := interfacemeta.ResolveExamples(document, contract)
+			if !errors.Is(err, interfacemeta.ErrInvalidExamples) || len(examples) != 0 || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ResolveExamples = %#v, %v; want %q", examples, err, test.want)
+			}
+		})
+	}
+}
+
 func TestParseFileRejectsInvalidExampleSchema(t *testing.T) {
 	t.Parallel()
 
@@ -183,7 +477,8 @@ func TestResolveExamplesRejectsValuesOutsideCanonicalGoTypes(t *testing.T) {
 		{name: "nested missing required", data: "    request: {name: valid, detail: {}}\n    response: {accepted: true}\n", want: `missing required field "label"`},
 		{name: "invalid timestamp", data: "    request: {name: valid, created_at: never}\n    response: {accepted: true}\n", want: "RFC 3339 timestamp"},
 		{name: "invalid duration", data: "    request: {name: valid, delay: 5}\n    response: {accepted: true}\n", want: "canonical duration value"},
-		{name: "missing required response", data: "    request: {name: valid}\n    response: {}\n", want: `missing required field "accepted"`},
+		{name: "omitted message with required descendant", data: "    request: {name: valid}\n    response: {accepted: true}\n", want: `missing required field "label"`},
+		{name: "missing required response", data: "    request: {name: valid, detail: {label: valid}}\n    response: {}\n", want: `missing required field "accepted"`},
 	}
 	for _, test := range tests {
 		test := test
@@ -223,16 +518,16 @@ examples:
 		body string
 		want string
 	}{
-		{name: "minimum length", body: "    request: {name: ab}\n    response: {accepted: true, result: ok}\n", want: "min_length"},
-		{name: "maximum length", body: "    request: {name: toolongname}\n    response: {accepted: true, result: ok}\n", want: "max_length"},
-		{name: "pattern", body: "    request: {name: BAD}\n    response: {accepted: true, result: ok}\n", want: "pattern"},
-		{name: "byte length", body: "    request: {name: valid, payload: AQ==}\n    response: {accepted: true, result: ok}\n", want: "min_length"},
-		{name: "integer minimum", body: "    request: {name: valid, i32: -3}\n    response: {accepted: true, result: ok}\n", want: "minimum"},
-		{name: "float maximum", body: "    request: {name: valid, f64: 3}\n    response: {accepted: true, result: ok}\n", want: "maximum"},
-		{name: "item minimum", body: "    request: {name: valid, tags: []}\n    response: {accepted: true, result: ok}\n", want: "min_items"},
-		{name: "map maximum", body: "    request: {name: valid, lookup: {a: {label: aa}, b: {label: bb}}}\n    response: {accepted: true, result: ok}\n", want: "max_items"},
-		{name: "nested length", body: "    request: {name: valid, detail: {label: x}}\n    response: {accepted: true, result: ok}\n", want: "min_length"},
-		{name: "response pattern", body: "    request: {name: valid}\n    response: {accepted: true, result: bad}\n", want: "response.result violates pattern"},
+		{name: "minimum length", body: "    request: {name: ab, payload: AQI=, tags: [one], lookup: {a: {label: aa}}, detail: {label: aa}}\n    response: {accepted: true, result: ok}\n", want: "min_length"},
+		{name: "maximum length", body: "    request: {name: toolongname, payload: AQI=, tags: [one], lookup: {a: {label: aa}}, detail: {label: aa}}\n    response: {accepted: true, result: ok}\n", want: "max_length"},
+		{name: "pattern", body: "    request: {name: BAD, payload: AQI=, tags: [one], lookup: {a: {label: aa}}, detail: {label: aa}}\n    response: {accepted: true, result: ok}\n", want: "pattern"},
+		{name: "byte length", body: "    request: {name: valid, payload: AQ==, tags: [one], lookup: {a: {label: aa}}, detail: {label: aa}}\n    response: {accepted: true, result: ok}\n", want: "min_length"},
+		{name: "integer minimum", body: "    request: {name: valid, payload: AQI=, i32: -3, tags: [one], lookup: {a: {label: aa}}, detail: {label: aa}}\n    response: {accepted: true, result: ok}\n", want: "minimum"},
+		{name: "float maximum", body: "    request: {name: valid, payload: AQI=, f64: 3, tags: [one], lookup: {a: {label: aa}}, detail: {label: aa}}\n    response: {accepted: true, result: ok}\n", want: "maximum"},
+		{name: "item minimum", body: "    request: {name: valid, payload: AQI=, tags: [], lookup: {a: {label: aa}}, detail: {label: aa}}\n    response: {accepted: true, result: ok}\n", want: "min_items"},
+		{name: "map maximum", body: "    request: {name: valid, payload: AQI=, tags: [one], lookup: {a: {label: aa}, b: {label: bb}}, detail: {label: aa}}\n    response: {accepted: true, result: ok}\n", want: "max_items"},
+		{name: "nested length", body: "    request: {name: valid, payload: AQI=, tags: [one], lookup: {a: {label: aa}}, detail: {label: x}}\n    response: {accepted: true, result: ok}\n", want: "min_length"},
+		{name: "response pattern", body: "    request: {name: valid, payload: AQI=, tags: [one], lookup: {a: {label: aa}}, detail: {label: aa}}\n    response: {accepted: true, result: bad}\n", want: "response.result violates pattern"},
 	}
 	for _, test := range tests {
 		test := test
@@ -426,4 +721,51 @@ type Node struct {
 
 type Request struct { Root Node ` + "`plystra:\"1,required\" json:\"root\"`" + ` }
 type Response struct { Accepted bool ` + "`plystra:\"1,required\" json:\"accepted\"`" + ` }
+`
+
+const presenceExampleSource = `package contract
+
+import (
+	"context"
+	"time"
+)
+
+//plystra:interface examples.presence/v1
+type Interface interface { Validate(context.Context, Request) (Response, error) }
+
+type Detail struct {
+	Text string ` + "`plystra:\"1\" json:\"text\"`" + `
+}
+
+type Request struct {
+	RequiredOrdinary string ` + "`plystra:\"1,required\" json:\"required_ordinary\"`" + `
+	OptionalBoolean bool ` + "`plystra:\"2\" json:\"optional_boolean\"`" + `
+	OptionalString string ` + "`plystra:\"3\" json:\"optional_string\"`" + `
+	OptionalInt64 int64 ` + "`plystra:\"4\" json:\"optional_int64\"`" + `
+	OptionalFloat64 float64 ` + "`plystra:\"5\" json:\"optional_float64\"`" + `
+	OptionalBytes []byte ` + "`plystra:\"6\" json:\"optional_bytes\"`" + `
+	OptionalRepeated []string ` + "`plystra:\"7\" json:\"optional_repeated\"`" + `
+	OptionalMap map[string]string ` + "`plystra:\"8\" json:\"optional_map\"`" + `
+	OptionalMessage Detail ` + "`plystra:\"9\" json:\"optional_message\"`" + `
+	OptionalTimestamp time.Time ` + "`plystra:\"10\" json:\"optional_timestamp\"`" + `
+	OptionalDuration time.Duration ` + "`plystra:\"11\" json:\"optional_duration\"`" + `
+	RequiredPointer *string ` + "`plystra:\"12,required\" json:\"required_pointer\"`" + `
+	OptionalPointer *string ` + "`plystra:\"13\" json:\"optional_pointer\"`" + `
+	RequiredNullable **string ` + "`plystra:\"14,required\" json:\"required_nullable\"`" + `
+	OptionalNullable **string ` + "`plystra:\"15\" json:\"optional_nullable\"`" + `
+	PointerBytes *[]byte ` + "`plystra:\"16\" json:\"pointer_bytes\"`" + `
+	NullableRepeated **[]string ` + "`plystra:\"17\" json:\"nullable_repeated\"`" + `
+	PointerMap *map[string]string ` + "`plystra:\"18\" json:\"pointer_map\"`" + `
+	PointerMessage *Detail ` + "`plystra:\"19\" json:\"pointer_message\"`" + `
+	NullableMessage **Detail ` + "`plystra:\"20\" json:\"nullable_message\"`" + `
+	PointerTimestamp *time.Time ` + "`plystra:\"21\" json:\"pointer_timestamp\"`" + `
+	PointerDuration *time.Duration ` + "`plystra:\"22\" json:\"pointer_duration\"`" + `
+}
+
+type Response struct {
+	RequiredOrdinary bool ` + "`plystra:\"1,required\" json:\"required_ordinary\"`" + `
+	OptionalOrdinary bool ` + "`plystra:\"2\" json:\"optional_ordinary\"`" + `
+	Pointer *bool ` + "`plystra:\"3\" json:\"pointer\"`" + `
+	Nullable **bool ` + "`plystra:\"4\" json:\"nullable\"`" + `
+}
 `

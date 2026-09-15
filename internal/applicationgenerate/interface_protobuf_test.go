@@ -2,6 +2,7 @@ package applicationgenerate_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/interfacecompatibility"
 	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufidentity"
 	"github.com/plystra/cli/internal/protobufmodel"
@@ -282,6 +284,159 @@ func (*Service) Read(context.Context, collisionv1.Request) (collisionv1.Response
 			}
 			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
 				t.Fatalf("Generate collision exposed the Project path: %v", err)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed generation changed the Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			assertNoTransactions(t, root)
+		})
+	}
+}
+
+func TestGenerateRetainsUnexposedPointerInterfaceWithoutProjection(t *testing.T) {
+	root := t.TempDir()
+	const modulePath = "example.com/interface-pointer-history"
+	writeApplicationModule(t, root, modulePath)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeFile(
+		t,
+		filepath.Join(root, "interfaces", "records", "patch", "v1", "interface.go"),
+		interfacePointerProjectionSource(),
+	)
+
+	options := applicationgenerate.Options{
+		Start:       root,
+		Environment: goEnvironment(nil),
+		Validate:    func(context.Context, string) error { return nil },
+	}
+	initial, err := applicationgenerate.Generate(t.Context(), options)
+	if err != nil || !initial.Report().Clean() {
+		t.Fatalf("Generate = changes %#v, %v", initial.Report().Changes(), err)
+	}
+	assertFileMissing(t, root, "generated/proto/plystra/generated/records/patch/v1/interface.proto")
+	assertFileMissing(t, root, "generated/go/adapters/connect/records/patch/v1/handler_gen.go")
+	shape, err := interfacecompatibility.Decode(readFile(t, root, interfacecompatibility.Path))
+	if err != nil {
+		t.Fatalf("Decode(pointer shape record): %v", err)
+	}
+	var pointerDepth uint8
+	for _, value := range shape.Interfaces() {
+		if value.ID() != "records.patch/v1" {
+			continue
+		}
+		for _, message := range value.Messages() {
+			if message.Name() != "Request" {
+				continue
+			}
+			for _, field := range message.Fields() {
+				if field.GoName() == "Nickname" {
+					pointerDepth = field.PointerDepth()
+				}
+			}
+		}
+	}
+	if pointerDepth != 2 {
+		t.Fatalf("inactive pointer shape depth = %d, want 2", pointerDepth)
+	}
+	history := decodeInterfaceWireHistory(
+		t,
+		readFile(t, root, protobufwiremap.Path),
+		"records.patch/v1",
+		"RecordsPatchV1Request",
+	)
+	field, exists := history.Fields["nickname"]
+	if history.Active || !exists || field.Number != 1 {
+		t.Fatalf("inactive pointer wire history = %#v", history)
+	}
+
+	beforeCheck := snapshotTree(t, root)
+	options.Check = true
+	clean, err := applicationgenerate.Generate(t.Context(), options)
+	if err != nil || !clean.Report().Clean() {
+		t.Fatalf("Generate --check = changes %#v, %v", clean.Report().Changes(), err)
+	}
+	if afterCheck := snapshotTree(t, root); !reflect.DeepEqual(afterCheck, beforeCheck) {
+		t.Fatal("Generate --check mutated the unexposed pointer Interface Project")
+	}
+	assertNoTransactions(t, root)
+}
+
+func TestGenerateReportsExposedPointerProjectionSourceWithoutMutation(t *testing.T) {
+	for _, check := range []bool{false, true} {
+		check := check
+		name := "generate"
+		if check {
+			name = "generate check"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			const (
+				modulePath = "example.com/interface-pointer-projection"
+				sourcePath = "plystra.production.yaml"
+			)
+			writeApplicationModule(t, root, modulePath)
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+			writeFile(t, filepath.Join(root, sourcePath), "http: {expose: {records.patch/v1: {transport: connect}}}\n")
+			writeFile(
+				t,
+				filepath.Join(root, "interfaces", "records", "patch", "v1", "interface.go"),
+				interfacePointerProjectionSource(),
+			)
+			writeFile(t, filepath.Join(root, "records", "service.go"), `package records
+
+import (
+	"context"
+
+	patchv1 "example.com/interface-pointer-projection/interfaces/records/patch/v1"
+)
+
+type Service struct{}
+
+//plystra:implements records.patch/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) Patch(context.Context, patchv1.Request) (patchv1.Response, error) {
+	return patchv1.Response{}, nil
+}
+`)
+
+			before := snapshotTree(t, root)
+			_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+				Start:           filepath.Join(root, "records"),
+				Check:           check,
+				EnvironmentName: "production",
+				Environment:     goEnvironment(nil),
+				Validate:        func(context.Context, string) error { return nil },
+			})
+			var unsupported *protobufmodel.InterfacePointerProjectionError
+			var source *applicationgenerate.ProtobufPointerProjectionSourceError
+			if !errors.Is(err, protobufmodel.ErrInterfaceBuild) ||
+				!errors.Is(err, protobufmodel.ErrPointerProjection) ||
+				!errors.As(err, &unsupported) ||
+				unsupported == nil ||
+				unsupported.InterfaceID().String() != "records.patch/v1" ||
+				unsupported.MessageName() != "Request" ||
+				unsupported.FieldName() != "Nickname" ||
+				unsupported.PointerDepth() != 2 ||
+				!errors.As(err, &source) ||
+				source == nil ||
+				source.InterfaceID().String() != "records.patch/v1" ||
+				source.ModulePath() != modulePath ||
+				source.SourcePath() != sourcePath ||
+				source.SourceKind() != "exposure" ||
+				source.Line() != 1 ||
+				source.Column() != 1 {
+				t.Fatalf("Generate pointer projection = %v; model = %#v; source = %#v", err, unsupported, source)
+			}
+			for _, want := range []string{"records.patch/v1", "Request", "Nickname", "pointer depth 2"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("Generate error %q omits %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("Generate pointer projection exposed the Project path: %v", err)
 			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("failed generation changed the Project:\nbefore: %#v\nafter:  %#v", before, after)
@@ -637,6 +792,24 @@ type Record struct {
 	ID string `+"`json:\"id\" plystra:\"1,required\"`"+`
 }
 `, "PAGE_SIZE_FIELD\n", pageSizeField)
+}
+
+func interfacePointerProjectionSource() string {
+	return `package patchv1
+
+import "context"
+
+//plystra:interface records.patch/v1
+type Interface interface {
+	Patch(context.Context, Request) (Response, error)
+}
+
+type Request struct {
+	Nickname **string ` + "`" + `json:"nickname" plystra:"1"` + "`" + `
+}
+
+type Response struct{}
+`
 }
 
 type interfaceWireHistory struct {

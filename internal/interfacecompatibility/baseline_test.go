@@ -26,7 +26,7 @@ func TestBaselineHasKnownCanonicalShapeAndDefensiveAccess(t *testing.T) {
 	if err != nil || !baseline.Valid() {
 		t.Fatalf("New = %#v, %v", baseline, err)
 	}
-	const wantDigest = "sha256:dc31ef111ec4c8af1d95c9732baed6f65c898327e2e4f3746772095c0a40a4f4"
+	const wantDigest = "sha256:2fdd9aea6edbf047b62d6c3a442cc874618e19cba1a989428867f189370670d7"
 	if baseline.Digest() != wantDigest {
 		t.Fatalf("baseline digest = %q; canonical = %s; record = %s", baseline.Digest(), baseline.CanonicalJSON(), baseline.RecordJSON())
 	}
@@ -262,6 +262,84 @@ func TestComparisonClassifiesAddedRemovedAndChangedInterfaces(t *testing.T) {
 	}
 }
 
+func TestComparisonClassifiesOnlyOptionalPointerFieldAdditions(t *testing.T) {
+	t.Parallel()
+
+	baseSource := baseInterfaceSource()
+	base := parseContract(t, "example.com/acme/interfaces/records/echo/v1", baseSource)
+	previous, err := interfacecompatibility.New([]interfacecontract.Contract{base})
+	if err != nil {
+		t.Fatalf("New(previous): %v", err)
+	}
+	tests := []struct {
+		name     string
+		source   string
+		additive bool
+	}{
+		{
+			name: "optional pointer scalar",
+			source: strings.Replace(
+				baseSource,
+				"\tDetail Detail `plystra:\"2\" json:\"detail\"`",
+				"\tDetail Detail `plystra:\"2\" json:\"detail\"`\n\tComment *string `plystra:\"3\" json:\"comment\"`",
+				1,
+			),
+			additive: true,
+		},
+		{
+			name: "optional nullable newly reachable message graph",
+			source: strings.Replace(
+				baseSource,
+				"\tDetail Detail `plystra:\"2\" json:\"detail\"`",
+				"\tDetail Detail `plystra:\"2\" json:\"detail\"`\n\tExtension **Extension `plystra:\"3\" json:\"extension\"`",
+				1,
+			) + "\ntype Extension struct {\n\tValue string `plystra:\"1,required\" json:\"value\"`\n\tChildren []Extension `plystra:\"2\" json:\"children\"`\n}\n",
+			additive: true,
+		},
+		{
+			name: "required pointer field",
+			source: strings.Replace(
+				baseSource,
+				"\tDetail Detail `plystra:\"2\" json:\"detail\"`",
+				"\tDetail Detail `plystra:\"2\" json:\"detail\"`\n\tComment *string `plystra:\"3,required\" json:\"comment\"`",
+				1,
+			),
+		},
+		{
+			name: "ordinary field",
+			source: strings.Replace(
+				baseSource,
+				"\tDetail Detail `plystra:\"2\" json:\"detail\"`",
+				"\tDetail Detail `plystra:\"2\" json:\"detail\"`\n\tComment string `plystra:\"3\" json:\"comment\"`",
+				1,
+			),
+		},
+		{
+			name:   "existing field pointer state",
+			source: strings.Replace(baseSource, "Name   string", "Name   *string", 1),
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			contract := parseContract(t, "example.com/acme/interfaces/records/echo/v1", test.source)
+			current, err := interfacecompatibility.New([]interfacecontract.Contract{contract})
+			if err != nil {
+				t.Fatalf("New(current): %v", err)
+			}
+			comparison, err := interfacecompatibility.Compare(previous, current)
+			if err != nil || !comparison.Valid() || comparison.Clean() {
+				t.Fatalf("Compare = %#v, %v", comparison, err)
+			}
+			changes := comparison.Changes()
+			if len(changes) != 1 || changes[0].AdditivePointerFieldsOnly() != test.additive {
+				t.Fatalf("changes = %#v; additive = %t, want %t", changes, changes[0].AdditivePointerFieldsOnly(), test.additive)
+			}
+		})
+	}
+}
+
 func TestDecodeRejectsMalformedTamperedAndNoncanonicalHistory(t *testing.T) {
 	t.Parallel()
 
@@ -286,7 +364,7 @@ func TestDecodeRejectsMalformedTamperedAndNoncanonicalHistory(t *testing.T) {
 	tests := map[string][]byte{
 		"empty":          nil,
 		"unknown field":  bytes.Replace(record, []byte(`"schema":`), []byte(`"unknown":true,"schema":`), 1),
-		"unknown schema": bytes.Replace(record, []byte(interfacecompatibility.Schema), []byte("plystra.interface-shape-baseline/v2"), 1),
+		"unknown schema": bytes.Replace(record, []byte(interfacecompatibility.Schema), []byte("plystra.interface-shape-baseline/v3"), 1),
 		"invalid type":   bytes.Replace(record, []byte(`"type":"string"`), []byte(`"type":"pointer"`), 1),
 		"missing request": bytes.Replace(
 			record,

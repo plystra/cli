@@ -591,6 +591,167 @@ func (*Service) Read(context.Context, collisionv1.Request) (collisionv1.Response
 	}
 }
 
+func TestRunGenerateReportsUnsupportedPointerProjectionSourceWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name         string
+		arguments    []string
+		overrides    map[string]string
+		selectedPath string
+		recoveryRun  string
+	}{
+		{name: "default generate", arguments: []string{"generate"}, selectedPath: "plystra.yaml", recoveryRun: "plystra generate"},
+		{name: "default generate check", arguments: []string{"generate", "--check"}, selectedPath: "plystra.yaml", recoveryRun: "plystra generate"},
+		{name: "default check", arguments: []string{"check"}, selectedPath: "plystra.yaml", recoveryRun: "plystra generate"},
+		{name: "environment generate", arguments: []string{"generate", "--env", "production"}, selectedPath: "plystra.production.yaml", recoveryRun: "plystra generate --env \"production\""},
+		{name: "environment generate check", arguments: []string{"generate", "--check", "--env", "production"}, selectedPath: "plystra.production.yaml", recoveryRun: "plystra generate --env \"production\""},
+		{name: "environment check", arguments: []string{"check", "--env", "production"}, selectedPath: "plystra.production.yaml", recoveryRun: "plystra generate --env \"production\""},
+		{name: "ambient environment generate", arguments: []string{"generate"}, overrides: map[string]string{"PLYSTRA_ENV": "production"}, selectedPath: "plystra.production.yaml", recoveryRun: "plystra generate --env \"production\""},
+		{name: "ambient environment generate check", arguments: []string{"generate", "--check"}, overrides: map[string]string{"PLYSTRA_ENV": "production"}, selectedPath: "plystra.production.yaml", recoveryRun: "plystra generate --env \"production\""},
+		{name: "ambient environment check", arguments: []string{"check"}, overrides: map[string]string{"PLYSTRA_ENV": "production"}, selectedPath: "plystra.production.yaml", recoveryRun: "plystra generate --env \"production\""},
+		{name: "replacement generate", arguments: []string{"generate", "--config", "deploy/customer.yaml"}, selectedPath: "deploy/customer.yaml", recoveryRun: "plystra generate --config \"deploy/customer.yaml\""},
+		{name: "replacement generate check", arguments: []string{"generate", "--check", "--config", "deploy/customer.yaml"}, selectedPath: "deploy/customer.yaml", recoveryRun: "plystra generate --config \"deploy/customer.yaml\""},
+		{name: "replacement check", arguments: []string{"check", "--config", "deploy/customer.yaml"}, selectedPath: "deploy/customer.yaml", recoveryRun: "plystra generate --config \"deploy/customer.yaml\""},
+		{name: "ambient replacement generate", arguments: []string{"generate"}, overrides: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"}, selectedPath: "deploy/customer.yaml", recoveryRun: "plystra generate --config \"deploy/customer.yaml\""},
+		{name: "ambient replacement generate check", arguments: []string{"generate", "--check"}, overrides: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"}, selectedPath: "deploy/customer.yaml", recoveryRun: "plystra generate --config \"deploy/customer.yaml\""},
+		{name: "ambient replacement check", arguments: []string{"check"}, overrides: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"}, selectedPath: "deploy/customer.yaml", recoveryRun: "plystra generate --config \"deploy/customer.yaml\""},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			root := writePointerProjectionCommandModule(t, test.selectedPath)
+			before := commandTree(t, root)
+			environment := commandGoEnvironment()
+			if test.overrides != nil {
+				environment = commandGoEnvironmentWith(test.overrides)
+			}
+			exitCode, stdout, stderr := runCommand(t, test.arguments, filepath.Join(root, "records"), environment)
+			wantSuffix := "\n\nSource: example.com/acme/pointer-projection:" + test.selectedPath + ":1:1 (exposure)\n\n" +
+				"Recovery:\nRemove the pointer-bearing Interface from http.expose in " + test.selectedPath + ", then run `" + test.recoveryRun + "`.\n\n" +
+				"Diagnostic: " + diagnosticcode.ProtobufPointerProjectionUnsupported + "\n"
+			if exitCode != 1 ||
+				stdout != "" ||
+				!strings.Contains(stderr, "Interface records.pointer/v1 message Request field Value uses pointer depth 1") ||
+				!strings.Contains(stderr, "cannot yet be projected to Protobuf without collapsing presence states") ||
+				!strings.HasSuffix(stderr, wantSuffix) ||
+				strings.Count(stderr, "Source: ") != 1 ||
+				strings.Count(stderr, "Recovery:") != 1 ||
+				strings.Count(stderr, "Diagnostic:") != 1 ||
+				strings.Contains(stderr, root) ||
+				strings.Contains(stderr, filepath.ToSlash(root)) {
+				t.Fatalf("command = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("command changed the Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
+func TestRunGenerateUsesInheritedPointerExposureSourceForRecovery(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		arguments   []string
+		overrides   map[string]string
+		recoveryRun string
+	}{
+		{name: "explicit environment", arguments: []string{"generate", "--env", "production"}, recoveryRun: "plystra generate --env \"production\""},
+		{name: "ambient environment", arguments: []string{"check"}, overrides: map[string]string{"PLYSTRA_ENV": "production"}, recoveryRun: "plystra generate --env \"production\""},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			root := writePointerProjectionCommandModule(t, "plystra.production.yaml")
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "http: {expose: {records.pointer/v1: {transport: connect}}}\n")
+			writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "{}\n")
+			before := commandTree(t, root)
+			environment := commandGoEnvironment()
+			if test.overrides != nil {
+				environment = commandGoEnvironmentWith(test.overrides)
+			}
+			exitCode, stdout, stderr := runCommand(t, test.arguments, filepath.Join(root, "records"), environment)
+			wantSuffix := "\n\nSource: example.com/acme/pointer-projection:plystra.yaml:1:1 (exposure)\n\n" +
+				"Recovery:\nRemove the pointer-bearing Interface from http.expose in plystra.yaml, then run `" + test.recoveryRun + "`.\n\n" +
+				"Diagnostic: " + diagnosticcode.ProtobufPointerProjectionUnsupported + "\n"
+			if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) ||
+				strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+				t.Fatalf("command = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatalf("command changed the Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
+func writePointerProjectionCommandModule(t testing.TB, selectedPath string) string {
+	t.Helper()
+
+	root := t.TempDir()
+	cliRoot := commandRepositoryRoot(t)
+	kernelRoot := testkernel.Root(t)
+	writeCommandFile(t, filepath.Join(root, "go.mod"), fmt.Sprintf(`module example.com/acme/pointer-projection
+
+go 1.26
+
+require (
+	github.com/plystra/kernel v0.0.0
+	go.yaml.in/yaml/v3 v3.0.4
+	golang.org/x/mod v0.38.0 // indirect
+)
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot)))
+	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("ReadFile(go.sum): %v", err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
+	selectedData := "http: {expose: {records.pointer/v1: {transport: connect}}}\n"
+	rootData := "{}\n"
+	if selectedPath == "plystra.yaml" {
+		rootData = selectedData
+	}
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootData)
+	if selectedPath != "plystra.yaml" {
+		writeCommandFile(t, filepath.Join(root, filepath.FromSlash(selectedPath)), selectedData)
+	}
+	writeCommandFile(t, filepath.Join(root, "interfaces", "records", "pointer", "v1", "interface.go"), `package pointerv1
+
+import "context"
+
+//plystra:interface records.pointer/v1
+type Interface interface {
+	Read(context.Context, Request) (Response, error)
+}
+
+type Request struct {
+	Value *string `+"`plystra:\"1\" json:\"value\"`"+`
+}
+
+type Response struct{}
+`)
+	writeCommandFile(t, filepath.Join(root, "records", "service.go"), `package records
+
+import (
+	"context"
+
+	pointerv1 "example.com/acme/pointer-projection/interfaces/records/pointer/v1"
+)
+
+type Service struct{}
+
+//plystra:implements records.pointer/v1
+func New() (*Service, error) { return &Service{}, nil }
+
+func (*Service) Read(context.Context, pointerv1.Request) (pointerv1.Response, error) {
+	return pointerv1.Response{}, nil
+}
+`)
+	return root
+}
+
 func TestRunGenerateReportsUnsupportedOperationExposureSourceWithoutMutation(t *testing.T) {
 	kinds := []struct {
 		name      string

@@ -5,13 +5,13 @@
       "path": "generated/compatibility/interface-documentation.json",
       "sha256": "sha256:63adbc27b9b79354450da8aeaaf64ce16daa7948a95e732f8f98d2a0cf163dda",
       "generator": "plystra.interface-compatibility/v1",
-      "output_kind": "compatibility-baseline",
+      "output_kind": "compatibility-working-record",
       "input_record_ids": [
         "application-model:sha256:414e339b0c64a0bc01deb9869a066b7b319e464539cc8c561bb7a90dd9a726b3",
         "compatibility:interface-documentation",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -32,13 +32,13 @@
       "path": "generated/compatibility/interface-javascript.json",
       "sha256": "sha256:2b11d6f9a1c4a9be74f47450e16cc3913f184c2d35288ac05564a7bedbe90f8c",
       "generator": "plystra.interface-compatibility/v1",
-      "output_kind": "compatibility-baseline",
+      "output_kind": "compatibility-working-record",
       "input_record_ids": [
         "application-model:sha256:414e339b0c64a0bc01deb9869a066b7b319e464539cc8c561bb7a90dd9a726b3",
         "compatibility:interface-javascript:sha256:ac1559747ce3d5003afe65d941bd111c7fc5c7aac552210707af224f6f9cff57",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -57,15 +57,15 @@
     },
     {
       "path": "generated/compatibility/interface-metadata.json",
-      "sha256": "sha256:91697cb69708e08b33d62caf3a3854160feda6694afa380e150b61019163e380",
+      "sha256": "sha256:a3083f785c474157038d7480103c911f5d9069d83d862773bf88ea281ebd48cc",
       "generator": "plystra.interface-compatibility/v1",
-      "output_kind": "compatibility-baseline",
+      "output_kind": "compatibility-working-record",
       "input_record_ids": [
         "application-model:sha256:414e339b0c64a0bc01deb9869a066b7b319e464539cc8c561bb7a90dd9a726b3",
-        "compatibility:interface-metadata:sha256:b85c7ecbc2068654a1650eefae603ed9822cec9e6ec9da3c4ee128f46239d923",
+        "compatibility:interface-metadata:sha256:bb4211882f90e5a9da55f240c4376f912bdb238ba6611bb36587afa4461ee873",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -86,13 +86,13 @@
       "path": "generated/compatibility/interface-transport.json",
       "sha256": "sha256:28e8b97e949ae145f3bda99ab830d793b3d6f8ed38f0b848d8881b0ed61ddd04",
       "generator": "plystra.interface-compatibility/v1",
-      "output_kind": "compatibility-baseline",
+      "output_kind": "compatibility-working-record",
       "input_record_ids": [
         "application-model:sha256:414e339b0c64a0bc01deb9869a066b7b319e464539cc8c561bb7a90dd9a726b3",
         "compatibility:interface-transport:sha256:a04f0f29744f2523288b8367997e05cde4756c4d50ce70ffd49e2329e87e6a8c",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -111,15 +111,15 @@
     },
     {
       "path": "generated/compatibility/interfaces.json",
-      "sha256": "sha256:892403f2ccf7a2c1ce5e37edb9706ab840bad6e47bc7e58ba13bcc2387194c70",
+      "sha256": "sha256:4b55d8c33486170783fd353c7fb1981b0dbd3b3b41952e6ee8b2def4123aaa2f",
       "generator": "plystra.interface-compatibility/v1",
-      "output_kind": "compatibility-baseline",
+      "output_kind": "compatibility-working-record",
       "input_record_ids": [
         "application-model:sha256:414e339b0c64a0bc01deb9869a066b7b319e464539cc8c561bb7a90dd9a726b3",
-        "compatibility:interface-shape:sha256:78062255644016831e1588fe5261912ede39098cb39a721b304e39965b8f2dc0",
+        "compatibility:interface-shape:sha256:fb3f135d4d0f3d717cc46c840fcdd0381b2f2d4cc87c0b9614e2ec20b17625a4",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -145,7 +145,7 @@
         "application-model:sha256:414e339b0c64a0bc01deb9869a066b7b319e464539cc8c561bb7a90dd9a726b3",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -171,7 +171,7 @@
         "application-model:sha256:414e339b0c64a0bc01deb9869a066b7b319e464539cc8c561bb7a90dd9a726b3",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -197,7 +197,7 @@
         "application-model:sha256:414e339b0c64a0bc01deb9869a066b7b319e464539cc8c561bb7a90dd9a726b3",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -223,7 +223,7 @@
         "application-model:sha256:414e339b0c64a0bc01deb9869a066b7b319e464539cc8c561bb7a90dd9a726b3",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -249,7 +249,7 @@
         "application-model:sha256:414e339b0c64a0bc01deb9869a066b7b319e464539cc8c561bb7a90dd9a726b3",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -275,7 +275,7 @@
         "application-model:sha256:414e339b0c64a0bc01deb9869a066b7b319e464539cc8c561bb7a90dd9a726b3",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -299,7 +299,7 @@
       "output_kind": "go-source",
       "input_record_ids": [
         "application-model:sha256:414e339b0c64a0bc01deb9869a066b7b319e464539cc8c561bb7a90dd9a726b3",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
@@ -309,7 +309,7 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:b673dd1e130e50b78b0fdf76f1a02c44f3671872d9ef365589d84d445b2aad16",
+      "sha256": "sha256:3e30f5a2ae2ea615c8400b8c4381b6142a050735276700fb73514d5b2c915869",
       "generator": "plystra.application-manifest/v1",
       "output_kind": "application-manifest",
       "input_record_ids": [
@@ -318,7 +318,7 @@
         "dependency-composition:sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -344,7 +344,7 @@
         "application-model:sha256:414e339b0c64a0bc01deb9869a066b7b319e464539cc8c561bb7a90dd9a726b3",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -370,7 +370,7 @@
         "application-model:sha256:414e339b0c64a0bc01deb9869a066b7b319e464539cc8c561bb7a90dd9a726b3",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2",
+        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "protobuf-wire-map:sha256:291fb979cc47f081f48f964b9addaace1aa6dc1c7fb03bb29d16794509461183",
@@ -446,7 +446,7 @@
             "module_version": "v0.0.0",
             "directive_source": "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
             "metadata_source": "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.yaml",
-            "shape_digest": "sha256:aac916b801b4577784b6b80b4f7f64168e1e0b29237ef81b7b9afca2c7add994",
+            "shape_digest": "sha256:4b1d718eaa79860b44f83d7c9119057f16236c4919e535db8395b8ba6ea0dc81",
             "contract_digest": "sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
             "documentation_digest": "sha256:4a2825ae70f4f485be68e62ab7fdbf18075afa194e434967637bf164fae3b325",
             "example_digest": "sha256:194c766b4fe6c98a27946dbe93025248af4e3e7b11a3e23c4c069366918cb155"
@@ -471,7 +471,7 @@
             "module_version": "v0.0.0",
             "directive_source": "github.com/plystra/kernel@v0.0.0/interfaces/kernel/info/v1/interface.go:11:1",
             "metadata_source": "github.com/plystra/kernel@v0.0.0/interfaces/kernel/info/v1/interface.yaml",
-            "shape_digest": "sha256:45f3e298d08b64a145be1e03549efeb9dfa8c34f8abd0cde2b95732a57e297e9",
+            "shape_digest": "sha256:39a2d3c781b168b60e5466acd672e6cd0cf4d7c29038d0f83f6ca5c859816340",
             "contract_digest": "sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
             "documentation_digest": "sha256:69a1583352beb2398c1049435e5c460428fde2e2d3c9a09b9d8b2140887bc886",
             "example_digest": "sha256:ab5ed5d9dc1313c51b4530bf4a1c788ef38222d61504d7463d1dd06e758588db"
@@ -489,7 +489,7 @@
           "mappings": {}
         }
       ],
-      "digest": "sha256:bf58f6456bee261d2a2c3d2250b4a446c7796e2010fc799de351eb21c5b8e5d2"
+      "digest": "sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e"
     },
     "transport_toolchain": {
       "schema": "plystra.transport-toolchain/v2",

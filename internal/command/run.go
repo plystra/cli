@@ -172,6 +172,8 @@ PLYSTRA_PROTOBUF_IDENTITY_COLLISION reports the owning Interface Go contract at
 its declaration position as an interface-contract source before recovery.
 PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED reports the effective http.expose
 document at 1:1 as an exposure source before selector-aware recovery.
+PLYSTRA_PROTOBUF_POINTER_PROJECTION_UNSUPPORTED reports the effective http.expose
+document at 1:1 as an exposure source before selector-aware recovery.
 PLYSTRA_CAPABILITY_MANIFEST_INVALID reports the invalid authored capability.yaml
 at 1:1 as a provider-declaration source before recovery.
 PLYSTRA_GENERATION_ACTIVATION_CONFLICT reports each conflicting plugin.yaml
@@ -287,6 +289,8 @@ uses the reserved kernel.* namespace before recovery.
 PLYSTRA_PROTOBUF_IDENTITY_COLLISION reports the owning Interface Go contract at
 its declaration position as an interface-contract source before recovery.
 PLYSTRA_PROTOBUF_OPERATION_KIND_UNSUPPORTED reports the effective http.expose
+document at 1:1 as an exposure source before selector-aware recovery.
+PLYSTRA_PROTOBUF_POINTER_PROJECTION_UNSUPPORTED reports the effective http.expose
 document at 1:1 as an exposure source before selector-aware recovery.
 PLYSTRA_CAPABILITY_MANIFEST_INVALID reports the invalid authored capability.yaml
 at 1:1 as a provider-declaration source before recovery.

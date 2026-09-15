@@ -27,7 +27,67 @@ var (
 	ErrInterfaceBuild = errors.New("build Interface Protobuf projection model")
 	// ErrInterfaceInput reports one invalid canonical Interface definition.
 	ErrInterfaceInput = errors.New("invalid Interface Protobuf projection input")
+	// ErrPointerProjection reports an active Connect Interface whose pointer
+	// presence cannot yet be projected without state collapse.
+	ErrPointerProjection = errors.New("unsupported Interface pointer Protobuf projection")
 )
+
+// InterfacePointerProjectionError identifies the first deterministic active
+// Interface field whose pointer presence requires generated wrappers.
+type InterfacePointerProjectionError struct {
+	interfaceID  interfaceid.Identifier
+	messageName  string
+	fieldName    string
+	pointerDepth uint8
+}
+
+// InterfaceID returns the exact canonical Interface rejected by projection.
+func (e *InterfacePointerProjectionError) InterfaceID() interfaceid.Identifier {
+	if e == nil {
+		return interfaceid.Identifier{}
+	}
+	return e.interfaceID
+}
+
+// MessageName returns the authored Go message containing the pointer field.
+func (e *InterfacePointerProjectionError) MessageName() string {
+	if e == nil {
+		return ""
+	}
+	return e.messageName
+}
+
+// FieldName returns the authored Go field whose presence would collapse.
+func (e *InterfacePointerProjectionError) FieldName() string {
+	if e == nil {
+		return ""
+	}
+	return e.fieldName
+}
+
+// PointerDepth returns the exact direct pointer depth, one or two.
+func (e *InterfacePointerProjectionError) PointerDepth() uint8 {
+	if e == nil {
+		return 0
+	}
+	return e.pointerDepth
+}
+
+func (e *InterfacePointerProjectionError) Error() string {
+	if e == nil || e.interfaceID.String() == "" || e.messageName == "" || e.fieldName == "" || e.pointerDepth == 0 {
+		return ErrPointerProjection.Error()
+	}
+	return fmt.Sprintf(
+		"Interface %s message %s field %s uses pointer depth %d, which cannot yet be projected to Protobuf without collapsing presence states",
+		e.interfaceID,
+		e.messageName,
+		e.fieldName,
+		e.pointerDepth,
+	)
+}
+
+// Unwrap supports errors.Is with ErrPointerProjection.
+func (*InterfacePointerProjectionError) Unwrap() error { return ErrPointerProjection }
 
 // InterfaceIdentityCollisionError identifies the authored Interface whose
 // canonical Go contract projects two names onto one generated Protobuf
@@ -80,6 +140,7 @@ type InterfaceField struct {
 	jsonName     string
 	number       uint64
 	required     bool
+	pointerDepth uint8
 	fieldType    interfacecontract.Type
 }
 
@@ -97,6 +158,9 @@ func (f InterfaceField) Number() uint64 { return f.number }
 
 // Required reports the authored required-field marker.
 func (f InterfaceField) Required() bool { return f.required }
+
+// PointerDepth returns the exact direct pointer depth around the field value.
+func (f InterfaceField) PointerDepth() uint8 { return f.pointerDepth }
 
 // Type returns the exact normalized closed-graph Go field type.
 func (f InterfaceField) Type() interfacecontract.Type { return f.fieldType }
@@ -286,6 +350,7 @@ type canonicalInterfaceField struct {
 	JSONName     string `json:"json_name"`
 	Number       uint64 `json:"number"`
 	Required     bool   `json:"required"`
+	PointerDepth uint8  `json:"pointer_depth,omitempty"`
 	Type         string `json:"type"`
 }
 
@@ -321,6 +386,9 @@ func BuildInterfaceSelection(
 	}
 	if err := validateActiveInterfaceHistory(active, history); err != nil {
 		return InterfaceModel{}, fmt.Errorf("%w: %w: %v", ErrInterfaceBuild, ErrInterfaceInput, err)
+	}
+	if err := validateActivePointerProjection(active); err != nil {
+		return InterfaceModel{}, fmt.Errorf("%w: %w", ErrInterfaceBuild, err)
 	}
 	return finalizeInterfaceSelection(connect, active, history)
 }
@@ -496,6 +564,7 @@ func normalizeInterfaceFields(message interfacecontract.Message, messageNames ma
 			jsonName:     jsonName,
 			number:       number,
 			required:     field.Required(),
+			pointerDepth: field.PointerDepth(),
 			fieldType:    field.Type(),
 		}
 	}
@@ -581,6 +650,25 @@ func validateActiveInterfaceHistory(active, history []InterfaceOperation) error 
 	return nil
 }
 
+func validateActivePointerProjection(active []InterfaceOperation) error {
+	for _, operation := range active {
+		for _, message := range operation.Messages() {
+			for _, field := range message.Fields() {
+				if field.PointerDepth() == 0 {
+					continue
+				}
+				return &InterfacePointerProjectionError{
+					interfaceID:  operation.ID(),
+					messageName:  message.GoName(),
+					fieldName:    field.GoName(),
+					pointerDepth: field.PointerDepth(),
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func finalizeInterfaceSelection(
 	enabled bool,
 	operations []InterfaceOperation,
@@ -636,6 +724,7 @@ func canonicalizeInterfaceOperation(operation InterfaceOperation) canonicalInter
 				JSONName:     field.JSONName(),
 				Number:       field.Number(),
 				Required:     field.Required(),
+				PointerDepth: field.PointerDepth(),
 				Type:         field.Type().Canonical(),
 			}
 		}

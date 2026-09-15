@@ -20,14 +20,14 @@ func TestMetadataBaselineKnownAnswerAndStrictRoundTrip(t *testing.T) {
 	if err != nil || !baseline.Valid() {
 		t.Fatalf("NewMetadata = %#v, %v", baseline, err)
 	}
-	const wantDigest = "sha256:afb51698d6075718bdd62fbb0f7daf1beb779d9048219353a2f255de4899a2ef"
+	const wantDigest = "sha256:b04fd076124cc6ae4c8fa1e99f590929d9a654a0f128ad1047bcaa9ebeda9343"
 	if baseline.Schema() != interfacecompatibility.MetadataSchema ||
 		baseline.Digest() != wantDigest {
 		t.Fatalf("metadata baseline schema = %q, digest = %q, canonical = %s", baseline.Schema(), baseline.Digest(), baseline.CanonicalJSON())
 	}
 	wantRecord := strings.TrimSpace(fmt.Sprintf(`
-{"schema":"plystra.interface-metadata-baseline/v1","interfaces":[{"id":"records.echo/v1","contract_digest":"%s","documentation_digest":"%s","example_digest":"%s"}],"digest":"%s"}
-`, input.ContractDigest, input.DocumentationDigest, input.ExampleDigest, wantDigest))
+	{"schema":"plystra.interface-metadata-baseline/v2","interfaces":[{"id":"records.echo/v1","contract_digest":"%s","contract_supplement_digest":"%s","documentation_digest":"%s","example_digest":"%s"}],"digest":"%s"}
+`, input.ContractDigest, input.ContractSupplementDigest, input.DocumentationDigest, input.ExampleDigest, wantDigest))
 	if string(baseline.RecordJSON()) != wantRecord {
 		t.Fatalf("metadata record = %s, want %s", baseline.RecordJSON(), wantRecord)
 	}
@@ -39,6 +39,9 @@ func TestMetadataBaselineKnownAnswerAndStrictRoundTrip(t *testing.T) {
 		interfaces[0].DocumentationDigest() != input.DocumentationDigest ||
 		interfaces[0].ExampleDigest() != input.ExampleDigest {
 		t.Fatalf("metadata Interfaces = %#v", interfaces)
+	}
+	if supplement, present := interfaces[0].ContractSupplementDigest(); !present || supplement != input.ContractSupplementDigest {
+		t.Fatalf("contract supplement digest = %q, %t", supplement, present)
 	}
 	interfaces[0] = interfacecompatibility.MetadataInterface{}
 	if !baseline.Valid() || baseline.Interfaces()[0].ID() != input.ID {
@@ -78,13 +81,15 @@ func TestMetadataBaselineIsDeterministicAndComparesEachClass(t *testing.T) {
 		t.Fatalf("NewMetadata(base): %v", err)
 	}
 	tests := []struct {
-		name  string
-		class interfacecompatibility.MetadataClass
-		edit  func(*interfacecompatibility.MetadataInput)
+		name      string
+		class     interfacecompatibility.MetadataClass
+		shapeOnly bool
+		edit      func(*interfacecompatibility.MetadataInput)
 	}{
 		{
-			name:  "contract",
-			class: interfacecompatibility.MetadataClassContract,
+			name:      "contract",
+			class:     interfacecompatibility.MetadataClassContract,
+			shapeOnly: true,
 			edit: func(input *interfacecompatibility.MetadataInput) {
 				input.ContractDigest = testDigest("contract-v2")
 			},
@@ -130,6 +135,9 @@ func TestMetadataBaselineIsDeterministicAndComparesEachClass(t *testing.T) {
 			currentDigest, currentExists := changes[0].CurrentDigest(test.class)
 			if !previousExists || !currentExists || previousDigest == currentDigest {
 				t.Fatalf("class %s digests = %q, %t -> %q, %t", test.class, previousDigest, previousExists, currentDigest, currentExists)
+			}
+			if changes[0].ContractShapeOnly() != test.shapeOnly {
+				t.Fatalf("ContractShapeOnly = %t, want %t", changes[0].ContractShapeOnly(), test.shapeOnly)
 			}
 			classes := changes[0].Classes()
 			classes[0] = interfacecompatibility.MetadataClass("mutated")
@@ -179,6 +187,143 @@ func TestMetadataComparisonClassifiesAddedRemovedAndChangedInterfaces(t *testing
 	}
 }
 
+func TestMetadataComparisonValidatesContractSupplementEvidence(t *testing.T) {
+	t.Parallel()
+
+	baseInput := metadataInput("records.echo/v1", "v1")
+	base, err := interfacecompatibility.NewMetadata([]interfacecompatibility.MetadataInput{baseInput})
+	if err != nil {
+		t.Fatalf("NewMetadata(base): %v", err)
+	}
+	tests := []struct {
+		name      string
+		edit      func(*interfacecompatibility.MetadataInput)
+		wantError bool
+		shapeOnly bool
+	}{
+		{
+			name: "shape-only contract change",
+			edit: func(input *interfacecompatibility.MetadataInput) {
+				input.ContractDigest = testDigest("contract-shape-v2")
+			},
+			shapeOnly: true,
+		},
+		{
+			name: "supplement and full contract change",
+			edit: func(input *interfacecompatibility.MetadataInput) {
+				input.ContractDigest = testDigest("contract-semantics-v2")
+				input.ContractSupplementDigest = testDigest("contract-supplement-v2")
+			},
+		},
+		{
+			name: "supplement changes without full contract",
+			edit: func(input *interfacecompatibility.MetadataInput) {
+				input.ContractSupplementDigest = testDigest("contract-supplement-v2")
+			},
+			wantError: true,
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			currentInput := baseInput
+			test.edit(&currentInput)
+			current, err := interfacecompatibility.NewMetadata([]interfacecompatibility.MetadataInput{currentInput})
+			if err != nil {
+				t.Fatalf("NewMetadata(current): %v", err)
+			}
+			comparison, err := interfacecompatibility.CompareMetadata(base, current)
+			if test.wantError {
+				if !errors.Is(err, interfacecompatibility.ErrInvalid) || comparison.Valid() {
+					t.Fatalf("CompareMetadata = %#v, %v", comparison, err)
+				}
+				return
+			}
+			if err != nil || !comparison.Valid() || comparison.Clean() {
+				t.Fatalf("CompareMetadata = %#v, %v", comparison, err)
+			}
+			changes := comparison.Changes()
+			if len(changes) != 1 || changes[0].ContractShapeOnly() != test.shapeOnly {
+				t.Fatalf("changes = %#v; ContractShapeOnly = %t, want %t", changes, changes[0].ContractShapeOnly(), test.shapeOnly)
+			}
+		})
+	}
+}
+
+func TestMetadataComparisonRejectsV2ToV1Downgrade(t *testing.T) {
+	t.Parallel()
+
+	input := metadataInput("records.echo/v1", "v1")
+	current, err := interfacecompatibility.NewMetadata([]interfacecompatibility.MetadataInput{input})
+	if err != nil {
+		t.Fatalf("NewMetadata(v2): %v", err)
+	}
+	const legacyDigest = "sha256:afb51698d6075718bdd62fbb0f7daf1beb779d9048219353a2f255de4899a2ef"
+	legacy := []byte(strings.TrimSpace(fmt.Sprintf(`
+{"schema":"plystra.interface-metadata-baseline/v1","interfaces":[{"id":"records.echo/v1","contract_digest":"%s","documentation_digest":"%s","example_digest":"%s"}],"digest":"%s"}
+`, input.ContractDigest, input.DocumentationDigest, input.ExampleDigest, legacyDigest)))
+	previous, err := interfacecompatibility.DecodeMetadata(legacy)
+	if err != nil {
+		t.Fatalf("DecodeMetadata(v1): %v", err)
+	}
+
+	comparison, err := interfacecompatibility.CompareMetadata(current, previous)
+	if !errors.Is(err, interfacecompatibility.ErrInvalid) || comparison.Valid() || !strings.Contains(err.Error(), "cannot downgrade from v2 to v1") {
+		t.Fatalf("CompareMetadata(v2, v1) = %#v, %v", comparison, err)
+	}
+}
+
+func TestMetadataComparisonRejectsV2ToV1DowngradeWithoutSharedInterfaces(t *testing.T) {
+	t.Parallel()
+
+	current, err := interfacecompatibility.NewMetadata([]interfacecompatibility.MetadataInput{
+		metadataInput("records.echo/v1", "current"),
+	})
+	if err != nil {
+		t.Fatalf("NewMetadata(v2): %v", err)
+	}
+	legacyRecord := func(identifier string) []byte {
+		interfaces := "[]"
+		if identifier != "" {
+			input := metadataInput(identifier, "legacy")
+			interfaces = fmt.Sprintf(
+				`[{"id":%q,"contract_digest":%q,"documentation_digest":%q,"example_digest":%q}]`,
+				input.ID,
+				input.ContractDigest,
+				input.DocumentationDigest,
+				input.ExampleDigest,
+			)
+		}
+		canonical := fmt.Sprintf(`{"schema":"plystra.interface-metadata-baseline/v1","interfaces":%s}`, interfaces)
+		return []byte(fmt.Sprintf(
+			`{"schema":"plystra.interface-metadata-baseline/v1","interfaces":%s,"digest":%q}`,
+			interfaces,
+			testDigest(canonical),
+		))
+	}
+	for _, test := range []struct {
+		name       string
+		identifier string
+	}{
+		{name: "empty legacy record"},
+		{name: "disjoint legacy record", identifier: "accounts.read/v1"},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			legacy, err := interfacecompatibility.DecodeMetadata(legacyRecord(test.identifier))
+			if err != nil {
+				t.Fatalf("DecodeMetadata(v1): %v", err)
+			}
+			comparison, err := interfacecompatibility.CompareMetadata(current, legacy)
+			if !errors.Is(err, interfacecompatibility.ErrInvalid) || comparison.Valid() || !strings.Contains(err.Error(), "cannot downgrade from v2 to v1") {
+				t.Fatalf("CompareMetadata(v2, v1) = %#v, %v", comparison, err)
+			}
+		})
+	}
+}
+
 func TestDecodeMetadataRejectsMalformedTamperedAndNoncanonicalHistory(t *testing.T) {
 	t.Parallel()
 
@@ -204,12 +349,18 @@ func TestDecodeMetadataRejectsMalformedTamperedAndNoncanonicalHistory(t *testing
 	tests := map[string][]byte{
 		"empty":          nil,
 		"unknown field":  bytes.Replace(record, []byte(`"schema":`), []byte(`"unknown":true,"schema":`), 1),
-		"unknown schema": bytes.Replace(record, []byte(interfacecompatibility.MetadataSchema), []byte("plystra.interface-metadata-baseline/v2"), 1),
+		"unknown schema": bytes.Replace(record, []byte(interfacecompatibility.MetadataSchema), []byte("plystra.interface-metadata-baseline/v3"), 1),
 		"invalid ID":     bytes.Replace(record, []byte("records.echo/v1"), []byte("records/v1"), 1),
 		"invalid class digest": bytes.Replace(
 			record,
 			[]byte(`"contract_digest":"sha256:`),
 			[]byte(`"contract_digest":"invalid:`),
+			1,
+		),
+		"invalid supplement digest": bytes.Replace(
+			record,
+			[]byte(`"contract_supplement_digest":"sha256:`),
+			[]byte(`"contract_supplement_digest":"invalid:`),
 			1,
 		),
 		"tampered digest": tamperedDigest,
@@ -227,6 +378,34 @@ func TestDecodeMetadataRejectsMalformedTamperedAndNoncanonicalHistory(t *testing
 				t.Fatalf("DecodeMetadata = %#v, %v", decoded, err)
 			}
 		})
+	}
+}
+
+func TestDecodeMetadataAcceptsCanonicalV1ForMigration(t *testing.T) {
+	t.Parallel()
+
+	input := metadataInput("records.echo/v1", "v1")
+	const legacyDigest = "sha256:afb51698d6075718bdd62fbb0f7daf1beb779d9048219353a2f255de4899a2ef"
+	legacy := []byte(strings.TrimSpace(fmt.Sprintf(`
+{"schema":"plystra.interface-metadata-baseline/v1","interfaces":[{"id":"records.echo/v1","contract_digest":"%s","documentation_digest":"%s","example_digest":"%s"}],"digest":"%s"}
+`, input.ContractDigest, input.DocumentationDigest, input.ExampleDigest, legacyDigest)))
+
+	decoded, err := interfacecompatibility.DecodeMetadata(legacy)
+	if err != nil || !decoded.Valid() || decoded.Schema() != "plystra.interface-metadata-baseline/v1" {
+		t.Fatalf("DecodeMetadata(v1) = %#v, %v", decoded, err)
+	}
+	if supplement, present := decoded.Interfaces()[0].ContractSupplementDigest(); present || supplement != "" {
+		t.Fatalf("legacy contract supplement digest = %q, %t", supplement, present)
+	}
+
+	current, comparison, err := interfacecompatibility.ReconcileMetadata(
+		[]interfacecompatibility.MetadataInput{input},
+		legacy,
+		true,
+	)
+	if err != nil || !current.Valid() || current.Schema() != interfacecompatibility.MetadataSchema ||
+		!comparison.Valid() || !comparison.Clean() || bytes.Equal(current.RecordJSON(), legacy) {
+		t.Fatalf("ReconcileMetadata(v1) = %#v, %#v, %v", current, comparison, err)
 	}
 }
 
@@ -265,10 +444,11 @@ func TestReconcileMetadataRequiresExactPriorOwnershipBytes(t *testing.T) {
 
 func metadataInput(identifier, version string) interfacecompatibility.MetadataInput {
 	return interfacecompatibility.MetadataInput{
-		ID:                  identifier,
-		ContractDigest:      testDigest("contract-" + version),
-		DocumentationDigest: testDigest("documentation-" + version),
-		ExampleDigest:       testDigest("examples-" + version),
+		ID:                       identifier,
+		ContractDigest:           testDigest("contract-" + version),
+		ContractSupplementDigest: testDigest("contract-supplement-" + version),
+		DocumentationDigest:      testDigest("documentation-" + version),
+		ExampleDigest:            testDigest("examples-" + version),
 	}
 }
 

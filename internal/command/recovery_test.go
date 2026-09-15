@@ -222,6 +222,13 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			code:    diagnosticProtobufOperationKindUnsupported,
 		},
 		{
+			name:    "Protobuf pointer projection",
+			err:     fmt.Errorf("project Interface: %w", protobufmodel.ErrPointerProjection),
+			context: commandRecoveryContext("", "", []string{"PLYSTRA_CONFIG=deploy/customer.yaml"}),
+			want:    "Remove the pointer-bearing Interface from http.expose in deploy/customer.yaml, then run `plystra generate --config \"deploy/customer.yaml\"`.",
+			code:    diagnosticProtobufPointerProjectionUnsupported,
+		},
+		{
 			name: "Capability create confirmation",
 			err:  errors.Join(capabilitycreate.ErrCreate, capabilitycreate.ErrConfirmationRequired),
 			want: "Review the visible Capability versions, then rerun the same `plystra capability create` command with `--confirm`.",
@@ -434,6 +441,34 @@ func TestWriteCommandFailureReportsGenerationInvocationSources(t *testing.T) {
 				t.Fatalf("generation invocation output = %q, want suffix %q", got, wantSuffix)
 			}
 		})
+	}
+}
+
+func TestWriteCommandFailureReportsPointerProjectionExposureSource(t *testing.T) {
+	t.Parallel()
+
+	failure := &locatedGenerationSourceTestError{
+		modulePath: "example.com/acme/library",
+		sourcePath: "plystra.yaml",
+		sourceKind: "exposure",
+		line:       1,
+		column:     1,
+		cause:      fmt.Errorf("project Interface: %w", protobufmodel.ErrPointerProjection),
+	}
+	var output strings.Builder
+	writeCommandFailure(
+		&output,
+		"generate",
+		failure,
+		commandRecoveryContext("", "", []string{"PLYSTRA_CONFIG=deploy/customer.yaml"}),
+	)
+	got := output.String()
+	wantSuffix := "\n\n" +
+		"Source: example.com/acme/library:plystra.yaml:1:1 (exposure)\n\n" +
+		"Recovery:\nRemove the pointer-bearing Interface from http.expose in plystra.yaml, then run `plystra generate --config \"deploy/customer.yaml\"`.\n\n" +
+		"Diagnostic: " + diagnosticProtobufPointerProjectionUnsupported + "\n"
+	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 1 || strings.Count(got, "Recovery:") != 1 || strings.Count(got, "Diagnostic:") != 1 {
+		t.Fatalf("pointer projection output = %q, want suffix %q", got, wantSuffix)
 	}
 }
 
@@ -978,6 +1013,7 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "Protobuf wire history", err: protobufwiremap.ErrHistory, code: diagnosticcode.ProtobufWireHistoryInvalid},
 		{name: "Protobuf identity", err: protobufidentity.ErrCollision, code: diagnosticcode.ProtobufIdentityCollision},
 		{name: "Protobuf operation kind", err: protobufmodel.ErrOperationKind, code: diagnosticcode.ProtobufOperationKindUnsupported},
+		{name: "Protobuf pointer projection", err: protobufmodel.ErrPointerProjection, code: diagnosticcode.ProtobufPointerProjectionUnsupported},
 		{name: "generated ownership", err: generatedfiles.ErrConflict, code: diagnosticcode.GeneratedOwnershipConflict},
 		{name: "unexpected generated output", err: generatedfiles.ErrUnexpected, code: diagnosticcode.GeneratedUnexpectedOutput},
 		{name: "generated manifest", err: generatedfiles.ErrManifest, code: diagnosticcode.GeneratedManifestInvalid},

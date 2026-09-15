@@ -1231,6 +1231,9 @@ replace example.com/dependency => ../dependency
 	if digest := byID["local.records.list/v1"].ContractDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
 		t.Fatalf("local Interface contract digest = %q", digest)
 	}
+	if digest := byID["local.records.list/v1"].ContractSupplementDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") || digest == byID["local.records.list/v1"].ContractDigest() {
+		t.Fatalf("local Interface contract supplement digest = %q", digest)
+	}
 	if digest := byID["local.records.list/v1"].DocumentationDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
 		t.Fatalf("local Interface documentation digest = %q", digest)
 	}
@@ -1279,6 +1282,9 @@ replace example.com/dependency => ../dependency
 	}
 	if digest := byID["dependency.records.list/v1"].ContractDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
 		t.Fatalf("dependency Interface contract digest = %q", digest)
+	}
+	if digest := byID["dependency.records.list/v1"].ContractSupplementDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") || digest == byID["dependency.records.list/v1"].ContractDigest() {
+		t.Fatalf("dependency Interface contract supplement digest = %q", digest)
 	}
 	if digest := byID["dependency.records.list/v1"].DocumentationDigest(); len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
 		t.Fatalf("dependency Interface documentation digest = %q", digest)
@@ -1806,29 +1812,30 @@ func implementationSummaries(implementations []implementationinventory.Implement
 }
 
 type interfaceSummary struct {
-	ID                  string
-	ModulePath          string
-	ModuleVersion       string
-	PackagePath         string
-	SourcePath          string
-	Source              string
-	Local               bool
-	Method              string
-	Request             string
-	Response            string
-	ContractDigest      string
-	DocumentationDigest string
-	ExampleDigest       string
-	MetadataPath        string
-	MetadataData        string
-	MetadataSource      string
-	SemanticsKind       interfacemeta.OperationKind
-	HasSemantics        bool
-	ErrorCodes          []string
-	ConstraintPaths     []string
-	Examples            []string
-	Deprecation         []string
-	Conformance         string
+	ID                       string
+	ModulePath               string
+	ModuleVersion            string
+	PackagePath              string
+	SourcePath               string
+	Source                   string
+	Local                    bool
+	Method                   string
+	Request                  string
+	Response                 string
+	ContractDigest           string
+	ContractSupplementDigest string
+	DocumentationDigest      string
+	ExampleDigest            string
+	MetadataPath             string
+	MetadataData             string
+	MetadataSource           string
+	SemanticsKind            interfacemeta.OperationKind
+	HasSemantics             bool
+	ErrorCodes               []string
+	ConstraintPaths          []string
+	Examples                 []string
+	Deprecation              []string
+	Conformance              string
 }
 
 func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
@@ -1852,29 +1859,30 @@ func inventorySummary(index interfaceinventory.Index) []interfaceSummary {
 		deprecation, _ := discovered.Deprecation()
 		conformance, _ := discovered.Conformance()
 		result[position] = interfaceSummary{
-			ID:                  discovered.ID(),
-			ModulePath:          discovered.ModulePath(),
-			ModuleVersion:       discovered.ModuleVersion(),
-			PackagePath:         discovered.PackagePath(),
-			SourcePath:          discovered.SourcePath(),
-			Source:              discovered.Source(),
-			Local:               discovered.Local(),
-			Method:              contract.MethodName(),
-			Request:             contract.RequestName(),
-			Response:            contract.ResponseName(),
-			ContractDigest:      discovered.ContractDigest(),
-			DocumentationDigest: discovered.DocumentationDigest(),
-			ExampleDigest:       discovered.ExampleDigest(),
-			MetadataPath:        metadata.Path(),
-			MetadataData:        string(metadata.Data()),
-			MetadataSource:      discovered.MetadataSource(),
-			SemanticsKind:       semantics.Kind(),
-			HasSemantics:        hasSemantics,
-			ErrorCodes:          errorCodes,
-			ConstraintPaths:     constraintPaths,
-			Examples:            examples,
-			Deprecation:         inventoryDeprecationSummary(deprecation),
-			Conformance:         conformance.Package(),
+			ID:                       discovered.ID(),
+			ModulePath:               discovered.ModulePath(),
+			ModuleVersion:            discovered.ModuleVersion(),
+			PackagePath:              discovered.PackagePath(),
+			SourcePath:               discovered.SourcePath(),
+			Source:                   discovered.Source(),
+			Local:                    discovered.Local(),
+			Method:                   contract.MethodName(),
+			Request:                  contract.RequestName(),
+			Response:                 contract.ResponseName(),
+			ContractDigest:           discovered.ContractDigest(),
+			ContractSupplementDigest: discovered.ContractSupplementDigest(),
+			DocumentationDigest:      discovered.DocumentationDigest(),
+			ExampleDigest:            discovered.ExampleDigest(),
+			MetadataPath:             metadata.Path(),
+			MetadataData:             string(metadata.Data()),
+			MetadataSource:           discovered.MetadataSource(),
+			SemanticsKind:            semantics.Kind(),
+			HasSemantics:             hasSemantics,
+			ErrorCodes:               errorCodes,
+			ConstraintPaths:          constraintPaths,
+			Examples:                 examples,
+			Deprecation:              inventoryDeprecationSummary(deprecation),
+			Conformance:              conformance.Package(),
 		}
 	}
 	return result
