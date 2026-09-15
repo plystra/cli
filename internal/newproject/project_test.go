@@ -459,6 +459,12 @@ composition:
           - kernel.info/v1
         use:
           email.send/v1: example.com/acme/platform/mailer.New
+        policies:
+          email.send/v1:
+            timeout: 7s
+      config:
+        example.com/acme/platform/mailer.New:
+          sender: adopted-template
 `),
 		"plystra.production.yaml": []byte("interfaces:\n  require:\n    - missing.overlay/v1\n"),
 		"interfaces/email/send/v1/interface.go": []byte(`package sendv1
@@ -481,10 +487,18 @@ import (
 	sendv1 "example.com/acme/platform/interfaces/email/send/v1"
 )
 
-type Service struct{}
+type Service struct {
+	sender string
+}
+
+type Config struct {
+	Sender string ` + "`yaml:\"sender\" plystra:\"required,build-visible\"`" + `
+}
 
 //plystra:implements email.send/v1
-func New() (*Service, error) { return &Service{}, nil }
+func New(configuration Config) (*Service, error) {
+	return &Service{sender: configuration.Sender}, nil
+}
 
 func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
 	return sendv1.Response{}, nil
@@ -547,6 +561,12 @@ var _ sendv1.Interface = (*Service)(nil)
 	if choices := model.ImplementationChoices(); len(choices) != 0 {
 		t.Fatalf("template Implementation choices were copied into current-project declarations = %#v", choices)
 	}
+	if policies := model.InterfacePolicies(); len(policies) != 0 {
+		t.Fatalf("template Interface policies were copied into current-project declarations = %#v", policies)
+	}
+	if configurations := model.Configurations(); len(configurations) != 0 {
+		t.Fatalf("template constructor configuration was copied into current-project declarations = %#v", configurations)
+	}
 	adoptions := model.ExportAdoptions()
 	if len(adoptions) != 1 || adoptions[0].ModulePath() != templatePath || adoptions[0].ExportName() != "defaults" {
 		t.Fatalf("resolved template export adoptions = %#v", adoptions)
@@ -563,6 +583,26 @@ var _ sendv1.Interface = (*Service)(nil)
 	if err != nil || !bytes.Contains(manifest, []byte(templatePath)) || !bytes.Contains(manifest, []byte("email.send/v1")) || !bytes.Contains(manifest, []byte("example.com/acme/platform/mailer.New")) {
 		t.Fatalf("generated manifest template provenance = %q, %v", manifest, err)
 	}
+	provenance, err := applicationgen.DecodeManifestProvenance(manifest)
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance: %v", err)
+	}
+	binding := provenance.InterfaceProvenance().Bindings()
+	constructors := provenance.InterfaceProvenance().Constructors()
+	configurationOwner := `config["example.com/acme/platform/mailer.New"]`
+	if len(binding) != 1 ||
+		binding[0].InterfaceID() != "email.send/v1" ||
+		binding[0].Selection().Constructor() != "example.com/acme/platform/mailer.New" ||
+		binding[0].Policy().Timeout() != "7s" ||
+		binding[0].ConfigurationOwner() != configurationOwner ||
+		len(constructors) != 1 ||
+		constructors[0].Symbol() != "example.com/acme/platform/mailer.New" ||
+		constructors[0].ConfigurationOwner() != configurationOwner {
+		t.Fatalf("adopted export runtime membership = bindings %#v, constructors %#v", binding, constructors)
+	}
+	if len(provenance.DormantImplementationSelections()) != 0 || len(provenance.DormantConstructorConfigurations()) != 0 {
+		t.Fatalf("active adopted export retained dormant intent = selections %#v, configurations %#v", provenance.DormantImplementationSelections(), provenance.DormantConstructorConfigurations())
+	}
 	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:       target,
 		Check:       true,
@@ -578,6 +618,97 @@ var _ sendv1.Interface = (*Service)(nil)
 	if proxyAfter := snapshotTree(t, proxy); !reflect.DeepEqual(proxyAfter, proxyBefore) {
 		t.Fatalf("Go Module proxy changed during template creation:\nbefore: %#v\nafter:  %#v", proxyBefore, proxyAfter)
 	}
+}
+
+func TestCreateKeepsTemplateResourceDataAndUnadoptedResourceExportInert(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/resource-platform"
+	const templateVersion = "v1.0.0"
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"template.go": []byte("package platform\n"),
+		"plystra.yaml": []byte(`resources: invalid-consumer-root
+data: [invalid-consumer-root]
+composition:
+  exports:
+    resource-defaults:
+      interfaces:
+        require: [missing.unadopted/v1]
+      resources: [unsupported-resource-fragment]
+`),
+	})
+	environment := isolatedGoEnvironment(t, proxy)
+	result, err := newproject.Create(t.Context(), newproject.Options{
+		Parent:      t.TempDir(),
+		ProjectName: "my-app",
+		ModulePath:  "example.com/acme/my-app",
+		Template:    templatePath + "@" + templateVersion,
+		Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	assertDirectRequirement(t, result.Path(), templatePath, templateVersion)
+	configuration, err := os.ReadFile(filepath.Join(result.Path(), "plystra.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile(plystra.yaml): %v", err)
+	}
+	manifest, err := applicationmeta.Parse(configuration)
+	if err != nil || len(manifest.ExportAdoptions()) != 0 || len(manifest.InterfaceRequirements()) != 0 {
+		t.Fatalf("created Project activated inert template state = manifest %#v, %v", manifest, err)
+	}
+	generatedManifest, err := os.ReadFile(filepath.Join(result.Path(), "generated", "manifest.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(generated/manifest.json): %v", err)
+	}
+	provenance, err := applicationgen.DecodeManifestProvenance(generatedManifest)
+	if err != nil {
+		t.Fatalf("DecodeManifestProvenance: %v", err)
+	}
+	if bindings, constructors := provenance.InterfaceProvenance().Bindings(), provenance.InterfaceProvenance().Constructors(); len(bindings) != 0 || len(constructors) != 0 {
+		t.Fatalf("inert template state entered runtime membership = bindings %#v, constructors %#v", bindings, constructors)
+	}
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: result.Path(), Check: true, Environment: environment})
+	if err != nil || !checked.Report().Clean() || checked.ConfigurationChanged() {
+		t.Fatalf("template generation check = changes %#v, configuration changed %t, %v", checked.Report().Changes(), checked.ConfigurationChanged(), err)
+	}
+}
+
+func TestCreateRejectsResourceBearingTemplateExportAndRollsBack(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/resource-platform"
+	const templateVersion = "v1.0.0"
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"template.go": []byte("package platform\n"),
+		"plystra.yaml": []byte(`composition:
+  exports:
+    resource-defaults:
+      interfaces:
+        require: [kernel.info/v1]
+      resources:
+        instances:
+          primary:
+            use: example.com/acme/resource-platform/postgres.New
+`),
+	})
+	parent := t.TempDir()
+	_, err := newproject.Create(t.Context(), newproject.Options{
+		Parent:       parent,
+		ProjectName:  "my-app",
+		ModulePath:   "example.com/acme/my-app",
+		Template:     templatePath + "@" + templateVersion,
+		AdoptExports: []string{"resource-defaults"},
+		Environment:  isolatedGoEnvironment(t, proxy),
+	})
+	if !errors.Is(err, newproject.ErrCreate) ||
+		!errors.Is(err, applicationmeta.ErrResolveAdoptedExports) ||
+		!strings.Contains(err.Error(), `export "resource-defaults" from module "example.com/acme/resource-platform"`) ||
+		!strings.Contains(err.Error(), `composition.exports["resource-defaults"] resources are not supported by this installed CLI`) {
+		t.Fatalf("Create error = %v", err)
+	}
+	if _, statErr := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("target exists after unsupported Resource export adoption: %v", statErr)
+	}
+	assertNoTransactionFiles(t, parent)
 }
 
 func TestCreateIgnoresTemplateExposureWithoutGeneratingJavaScriptSDK(t *testing.T) {

@@ -305,21 +305,26 @@ Rule inputs, outputs, dependency graphs, contribution digests, and final results
 Before provider resolution, the CLI reads root `plystra.yaml` from each direct
 and transitive dependency Plystra Project only as a Project marker and inert
 `composition.exports` inventory. Dependency top-level requirements, choices,
-configuration, exposure, process settings, and adoptions have no consumer
-effect. Dependency environment overlays are never inspected, and a markerless
-Go dependency remains unscanned.
+policies, constructor configuration, Resource instances and bindings, Data
+members, exposure, process settings, and adoptions have no consumer effect.
+Dependency environment overlays are never inspected, and a markerless Go
+dependency remains unscanned.
 
 Only exact `{module, export}` identities in the selected current Project's
 `composition.adopt` set activate reusable configuration. This installed CLI
-accepts `interfaces` and `config` declarations inside an export; `resources`
-is recognized but reported as unsupported. Adopted exports form one unordered
-lower-precedence layer. Identical declarations deduplicate with all-source
-provenance, incompatible declarations fail with every contributing
-`module@version/plystra.yaml` location, and the selected current-Project layer
-may resolve that exact decision. Directness, graph depth, version, discovery
-order, filesystem order, template origin, and declaration sorting never choose
-a winner. Expose an imported Interface in the selected current Project;
-dependency exposure creates no consumer root, transport, or SDK surface.
+inventories a Resource-bearing export and its currently supported `interfaces`
+and `config` fragment without rejecting or activating it while it remains
+unadopted. Exact adoption of that export fails before any portion contributes,
+because Resource composition is not yet supported; the CLI never partially
+activates `interfaces` or `config` while dropping `resources`. Adopted supported
+exports form one unordered lower-precedence layer. Identical declarations
+deduplicate with all-source provenance, incompatible declarations fail with
+every contributing `module@version/plystra.yaml` location, and the selected
+current-Project layer may resolve that exact decision. Directness, graph depth,
+version, discovery order, filesystem order, template origin, and declaration
+sorting never choose a winner. Expose an imported Interface in the selected
+current Project; dependency exposure creates no consumer root, transport, or
+SDK surface.
 
 Root `plystra.yaml` is the mandatory Project marker, shared current-Project layer, and default configuration for every invocation. `plystra generate --env production` adds exactly one sparse project-root `plystra.production.yaml` overlay above that root; the overlay must exist, omitted fields inherit, and typed scalar, keyed-object, set, and tombstone semantics determine each field rather than a generic YAML deep merge. Within `http.expose`, omitted Interface entries inherit, a supplied complete entry replaces that exact choice, and `null` removes that entry. An empty mapping preserves inherited entries; the complete exposure field cannot be null. A supplied `http.cors.allowed_origins` list replaces the complete normalized root list while omitted origins inherit and credentials replace independently; `http.cors: null` disables inherited current-project CORS. The overlay may replace or sparsely add and remove exact export adoptions. Dependency environment files are never loaded, unselected overlays are ignored, and generation preserves both authored current-Project documents byte-for-byte.
 

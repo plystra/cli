@@ -31,15 +31,17 @@ var (
 // ConfigurationExport is one inert named reusable configuration fragment from
 // a Project's root plystra.yaml.
 type ConfigurationExport struct {
-	name     string
-	manifest Manifest
+	name                 string
+	manifest             Manifest
+	unsupportedResources bool
 }
 
 // Name returns the canonical export name.
 func (e ConfigurationExport) Name() string { return e.name }
 
-// Manifest returns the immutable typed fragment. The fragment contains no
-// process settings, exposure, nested exports, or adoptions.
+// Manifest returns the immutable currently supported typed fragment. The
+// fragment contains no process settings, exposure, nested exports, adoptions,
+// or unsupported Resource declarations.
 func (e ConfigurationExport) Manifest() Manifest { return e.manifest }
 
 // ExportAdoption is one exact module/export identity selected by the current
@@ -127,7 +129,7 @@ func ParseExportInventorySource(source string, data []byte) (Manifest, error) {
 	}
 	for _, key := range sortedNodeKeys(values) {
 		switch key {
-		case "composition", "http", "timeouts", "capabilities", "interfaces", "config":
+		case "composition", "http", "timeouts", "capabilities", "interfaces", "config", "resources", "data":
 		default:
 			return Manifest{}, invalid("unknown key %q", key)
 		}
@@ -201,11 +203,12 @@ func parseConfigurationExports(node *yaml.Node, source string) ([]ConfigurationE
 		if err != nil {
 			return nil, err
 		}
+		unsupportedResources := false
 		for _, key := range sortedNodeKeys(fragmentValues) {
 			switch key {
 			case "interfaces", "config":
 			case "resources":
-				return nil, invalid("%s resources are not supported by this installed CLI", path)
+				unsupportedResources = true
 			default:
 				return nil, invalid("%s may contain only interfaces, config, and resources", path)
 			}
@@ -219,7 +222,9 @@ func parseConfigurationExports(node *yaml.Node, source string) ([]ConfigurationE
 				return nil, invalid("%s.interfaces.require must use the positive sequence form", path)
 			}
 		}
-		data, err := yaml.Marshal(values[name])
+		fragmentNode := cloneYAMLNode(values[name])
+		removeMappingValue(fragmentNode, "resources")
+		data, err := yaml.Marshal(fragmentNode)
 		if err != nil {
 			return nil, invalid("%s cannot be normalized", path)
 		}
@@ -232,7 +237,11 @@ func parseConfigurationExports(node *yaml.Node, source string) ([]ConfigurationE
 		}
 		rewriteManifestSourcePrefix(&fragment, source, path+".")
 		fragment.source = source
-		result = append(result, ConfigurationExport{name: name, manifest: fragment})
+		result = append(result, ConfigurationExport{
+			name:                 name,
+			manifest:             fragment,
+			unsupportedResources: unsupportedResources,
+		})
 	}
 	return result, nil
 }
@@ -379,6 +388,9 @@ func ResolveAdoptedExports(currentProjectModule string, root, selected Manifest,
 		export, exists := findConfigurationExport(owner.Manifest, adoption.exportName)
 		if !exists {
 			return nil, fmt.Errorf("%w: %w: %s", ErrResolveAdoptedExports, ErrExportNotFound, renderExportAdoption(adoption))
+		}
+		if export.unsupportedResources {
+			return nil, fmt.Errorf("%w: %s: composition.exports[%q] resources are not supported by this installed CLI", ErrResolveAdoptedExports, renderExportAdoption(adoption), adoption.exportName)
 		}
 		fragment, err := WithProjectModule(export.Manifest(), adoption.modulePath)
 		if err != nil {

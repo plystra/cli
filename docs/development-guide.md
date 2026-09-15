@@ -796,11 +796,12 @@ Every direct or transitive module in the effective Go Module graph whose root
 contains regular `plystra.yaml` is a dependency Plystra Project. The CLI scans
 its root-level Plugins and reads that root configuration only as the Project
 marker plus an inert `composition.exports` inventory. Dependency top-level
-requirements, choices, configuration, exposure, process settings, and
-adoptions have no consumer effect. It ignores `plystra.production.yaml`,
-`plystra.test.yaml`, and every other dependency environment sibling. A
-markerless Go module remains an ordinary dependency even when it contains a
-file named `plugin.yaml` below its root.
+requirements, choices, policies, constructor configuration, Resource instances
+and bindings, Data members, exposure, process settings, and adoptions have no
+consumer effect. It ignores `plystra.production.yaml`, `plystra.test.yaml`, and
+every other dependency environment sibling. A markerless Go module remains an
+ordinary dependency even when it contains a file named `plugin.yaml` below its
+root.
 
 A reusable Project publishes a named fragment in its root document:
 
@@ -826,9 +827,11 @@ For Project creation, the repeatable
 `--template <query> --adopt-export <name>` form writes those exact identities
 after validating that every named export exists in the resolved template.
 For an existing Project, edit the selected current-Project document and then
-run `plystra generate` with the same selector. This installed CLI accepts
-`interfaces` and `config` inside an export; it recognizes `resources` as a
-specified field but reports it as unsupported.
+run `plystra generate` with the same selector. This installed CLI inventories a
+Resource-bearing export and its currently supported `interfaces` and `config`
+fragment while the export remains unadopted. Exact adoption fails before any
+portion activates because Resource composition is not yet supported; the CLI
+does not apply the supported fragment while silently dropping `resources`.
 
 Adopted exports compose as one unordered lower-precedence layer. Identical
 declarations deduplicate, incompatible declarations fail with every selected

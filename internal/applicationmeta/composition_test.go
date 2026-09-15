@@ -61,12 +61,18 @@ timeouts: [invalid-consumer-value]
 capabilities: invalid-consumer-value
 interfaces: invalid-consumer-value
 config: invalid-consumer-value
+resources: [invalid-consumer-value]
+data: invalid-consumer-value
 composition:
   adopt: invalid-consumer-value
   exports:
     defaults:
       interfaces:
         require: [email.send/v1]
+      resources:
+        instances:
+          primary:
+            use: example.com/acme/platform/postgres.New
 `))
 	if err != nil {
 		t.Fatalf("ParseExportInventorySource: %v", err)
@@ -120,6 +126,7 @@ func TestParseRejectsInvalidReusableConfiguration(t *testing.T) {
 		{name: "invalid export name", yaml: "composition: {exports: {Bad: {}}}\n", want: "export name"},
 		{name: "export process setting", yaml: "composition: {exports: {defaults: {http: {address: ':8080'}}}}\n", want: "may contain only interfaces, config, and resources"},
 		{name: "recursive export", yaml: "composition: {exports: {defaults: {composition: {adopt: []}}}}\n", want: "may contain only interfaces, config, and resources"},
+		{name: "export data member", yaml: "composition: {exports: {defaults: {data: {members: {orders: {}}}}}}\n", want: "may contain only interfaces, config, and resources"},
 		{name: "sparse export requirement", yaml: "composition: {exports: {defaults: {interfaces: {require: {add: [email.send/v1]}}}}}\n", want: "positive sequence"},
 		{name: "export removal", yaml: "composition: {exports: {defaults: {interfaces: {use: {email.send/v1: null}}}}}\n", want: "cannot contain removals"},
 		{name: "missing adoption module", yaml: "composition: {adopt: [{export: defaults}]}\n", want: "exactly module and export"},
@@ -136,6 +143,57 @@ func TestParseRejectsInvalidReusableConfiguration(t *testing.T) {
 				t.Fatalf("Parse error = %v, want ErrInvalidManifest containing %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestResolveAdoptedExportsRejectsUnsupportedResourceFragmentOnlyAtActivation(t *testing.T) {
+	t.Parallel()
+
+	dependencyRoot, err := applicationmeta.ParseExportInventorySource("dependency/plystra.yaml", []byte(`composition:
+  exports:
+    defaults:
+      interfaces:
+        require: [email.send/v1]
+      resources:
+        instances:
+          primary:
+            use: example.com/acme/platform/postgres.New
+`))
+	if err != nil {
+		t.Fatalf("ParseExportInventorySource: %v", err)
+	}
+	exports := dependencyRoot.Exports()
+	if len(exports) != 1 || exports[0].Name() != "defaults" {
+		t.Fatalf("Exports = %#v", exports)
+	}
+	if got := interfaceRequirementIDs(exports[0].Manifest().InterfaceRequirements()); !reflect.DeepEqual(got, []string{"email.send/v1"}) {
+		t.Fatalf("supported export fragment requirements = %q", got)
+	}
+
+	empty := mustParseManifest(t, "{}\n")
+	withoutAdoption, err := applicationmeta.ResolveAdoptedExports("example.com/acme/app", empty, empty, []applicationmeta.Dependency{{
+		ModulePath:    "example.com/acme/platform",
+		ModuleVersion: "v1.2.3",
+		Manifest:      dependencyRoot,
+	}})
+	if err != nil || len(withoutAdoption) != 0 {
+		t.Fatalf("ResolveAdoptedExports without adoption = %#v, %v", withoutAdoption, err)
+	}
+
+	selected := mustParseManifest(t, `composition:
+  adopt:
+    - module: example.com/acme/platform
+      export: defaults
+`)
+	_, err = applicationmeta.ResolveAdoptedExports("example.com/acme/app", empty, selected, []applicationmeta.Dependency{{
+		ModulePath:    "example.com/acme/platform",
+		ModuleVersion: "v1.2.3",
+		Manifest:      dependencyRoot,
+	}})
+	if !errors.Is(err, applicationmeta.ErrResolveAdoptedExports) ||
+		!strings.Contains(err.Error(), `export "defaults" from module "example.com/acme/platform"`) ||
+		!strings.Contains(err.Error(), `composition.exports["defaults"] resources are not supported by this installed CLI`) {
+		t.Fatalf("ResolveAdoptedExports error = %v", err)
 	}
 }
 
