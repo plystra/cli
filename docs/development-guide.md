@@ -37,6 +37,7 @@ plystra plugin create <name>
 plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]
 plystra capability implement <capability-name>/vN [--plugin <plugin>]
 plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
+plystra inspect capabilities [--format human|json]
 plystra generate [--check] [--env <environment>|--config <yaml-path>]
 ```
 
@@ -1889,6 +1890,7 @@ After a manual `plugin.yaml`, `capability.yaml`, selected configuration,
 selection:
 
 ```powershell
+plystra inspect capabilities --format json
 plystra inspect
 plystra inspect modules
 plystra inspect modules --env production
@@ -1926,6 +1928,15 @@ plystra generate --check --env production
 plystra generate --config deploy/customer-a.yaml
 plystra generate --check --config deploy/customer-a.yaml
 ```
+
+`plystra inspect capabilities` reports facts compiled into the installed CLI
+without requiring or resolving a Project. Its JSON form is one canonical
+`plystra.result/v1` document with a `plystra.capabilities/v1` payload containing
+the CLI, Kernel, specification, Go, platform, stable-default, bound,
+transport-toolchain, and five-stage support facts. The human projection names
+the transport component detail it omits. Invalid or missing Projects and
+ambient `PLYSTRA_ENV` or `PLYSTRA_CONFIG` selectors cannot change the result;
+explicit `--verbose`, `--env`, and `--config` are invalid.
 
 `plystra inspect` first resolves that exact selected model without modifying the
 Project. The default view stays concise: Project and configuration identity,

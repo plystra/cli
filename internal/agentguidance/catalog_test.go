@@ -98,6 +98,9 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	}
 	diagnostics := byPath[Root+"/tasks/diagnostics-and-recovery.md"]
 	for _, phrase := range []string{
+		"plystra inspect capabilities --format json",
+		"is separate from Project inspection",
+		"independent `specified`, `parsed`, `generated`, `executed`, and `accepted` support stages",
 		"plystra guidance check",
 		"Ordinary sync changes or removes only unchanged prior-manifest-owned files",
 		"PLYSTRA_AGENT_GUIDANCE_DRIFT",
@@ -112,6 +115,10 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		if !bytes.Contains(diagnostics, []byte(phrase)) {
 			t.Fatalf("diagnostics guidance omits %q:\n%s", phrase, diagnostics)
 		}
+	}
+	resources := byPath[Root+"/tasks/resources-and-data.md"]
+	if !bytes.Contains(resources, []byte("plystra inspect capabilities --format json")) {
+		t.Fatalf("Resource and Data guidance omits installed capability discovery:\n%s", resources)
 	}
 	for _, forbidden := range []string{"TODO", "create a feature branch", "open a pull request", "push the change"} {
 		for name, data := range byPath {

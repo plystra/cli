@@ -43,6 +43,7 @@ const (
   plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
   plystra guidance sync [--replace-generated]
   plystra guidance check
+  plystra inspect capabilities [--format human|json]
   plystra inspect [modules|interfaces|implementations|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
@@ -348,6 +349,7 @@ configuration-declaration, module-dependency, or generated-artifact source
 without a fabricated span.
 `
 	inspectUsage = `Usage:
+  plystra inspect capabilities [--format human|json]
   plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra inspect modules [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra inspect interfaces [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
@@ -355,6 +357,7 @@ without a fabricated span.
   plystra inspect configuration [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
 
 Views:
+  capabilities           Show installed versions, defaults, limits, toolchain identity, and support stages.
   modules                Show the selected current-model module graph.
   interfaces             Show visible Interfaces, active selections, and constructor dependencies.
   implementations        Show visible constructors, selection state, dependencies, configuration, and assembly.
@@ -366,7 +369,14 @@ Options:
   --env <environment>    Inspect root plystra.yaml with plystra.<environment>.yaml.
   --config <yaml-path>   Inspect one complete current-project configuration instead of root plystra.yaml.
 
-The command is read-only and resolves the same selected application model used
+Installed capability discovery is Project-independent and accepts only
+--format. It ignores PLYSTRA_ENV and PLYSTRA_CONFIG, and invalid Projects cannot
+alter its installed facts. Human output identifies omitted transport component
+details; JSON nests one plystra.capabilities/v1 payload in plystra.result/v1.
+Explicit --verbose, --env, or --config is invalid and emits
+PLYSTRA_INSPECT_CAPABILITIES_INVOCATION_INVALID.
+
+The remaining commands are read-only and resolve the same selected application model used
 by generation and validation. JSON stdout contains exactly one schema document;
 progress and diagnostics use stderr. Graph views emit the versioned plystra.graph
 v1 schema with project-relative source references and no resolved Secrets or
@@ -575,7 +585,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 	case "guidance":
 		return runGuidance(arguments, stdout, stderr, workingDirectory)
 	case "inspect":
-		if len(arguments) == 2 && isHelp(arguments[1]) || len(arguments) == 3 && (arguments[1] == "modules" || arguments[1] == "interfaces" || arguments[1] == "implementations" || arguments[1] == "configuration") && isHelp(arguments[2]) {
+		if len(arguments) == 2 && isHelp(arguments[1]) || len(arguments) == 3 && (arguments[1] == "capabilities" || arguments[1] == "modules" || arguments[1] == "interfaces" || arguments[1] == "implementations" || arguments[1] == "configuration") && isHelp(arguments[2]) {
 			_, _ = io.WriteString(stdout, inspectUsage)
 			return 0
 		}

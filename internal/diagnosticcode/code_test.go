@@ -116,6 +116,8 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.ImplementationCreateTargetExists,
 		diagnosticcode.UseInterfaceInvalid,
 		diagnosticcode.UseConstructorInvalid,
+		diagnosticcode.InspectCapabilitiesInvocationInvalid,
+		diagnosticcode.InspectCapabilitiesFailed,
 		diagnosticcode.DependencyAddQueryInvalid,
 		diagnosticcode.DependencyRemovePathInvalid,
 		diagnosticcode.DependencyRemoveNotSelected,

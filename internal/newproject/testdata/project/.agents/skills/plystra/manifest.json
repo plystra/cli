@@ -3,7 +3,7 @@
   "cli_version": "0.1.0",
   "kernel_version": "v0.0.0-20260724160327-26ece9a0df89",
   "specification_revision": "b959f277b7661c0725660f394b84f7175c8df54b",
-  "catalog_digest": "sha256:0836f15ca055b5e501f9ee70c8f9b8a57c595ee684035dbb743f11844146538e",
+  "catalog_digest": "sha256:39896b863e0f982393989030d13e24b664fa244f735ae811634cb2fe6914512e",
   "files": [
     {
       "path": ".agents/skills/plystra/SKILL.md",
@@ -15,7 +15,7 @@
     },
     {
       "path": ".agents/skills/plystra/tasks/diagnostics-and-recovery.md",
-      "sha256": "sha256:462488a5c178e61b7c372ea94b47b587d9dc7e1ffcd8e13a0c725bcd2124ef04"
+      "sha256": "sha256:a2416044721e071f1fc391cce273eddafdf1eb91c8b0a24d63d565d511af5163"
     },
     {
       "path": ".agents/skills/plystra/tasks/interfaces-and-implementations.md",
@@ -27,7 +27,7 @@
     },
     {
       "path": ".agents/skills/plystra/tasks/resources-and-data.md",
-      "sha256": "sha256:a1d8bf5d5a5ee0a95faa36dd539d005ff41b5e68a4c86bad8f987ecaa2b81d45"
+      "sha256": "sha256:5cf9a185e70b3d8f9917b34e530e6849cda7aa2fb439c9a72d18e092f1b97787"
     },
     {
       "path": ".agents/skills/plystra/tasks/verify-build-and-release.md",

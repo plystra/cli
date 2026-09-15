@@ -23,6 +23,9 @@ type inspectArguments struct {
 }
 
 func runInspect(arguments []string, stdout, stderr io.Writer, workingDirectory string, environment []string) int {
+	if isInspectCapabilitiesCommand(arguments) {
+		return runInspectCapabilities(arguments, stdout, stderr, defaultInspectCapabilitiesDependencies())
+	}
 	parsed, ok := parseInspectArguments(arguments)
 	if !ok {
 		_, _ = io.WriteString(stderr, inspectUsage)

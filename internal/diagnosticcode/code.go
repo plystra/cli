@@ -121,6 +121,11 @@ const (
 )
 
 const (
+	InspectCapabilitiesInvocationInvalid = Prefix + "INSPECT_CAPABILITIES_INVOCATION_INVALID"
+	InspectCapabilitiesFailed            = Prefix + "INSPECT_CAPABILITIES_FAILED"
+)
+
+const (
 	DependencyAddQueryInvalid    = Prefix + "DEPENDENCY_ADD_QUERY_INVALID"
 	DependencyRemovePathInvalid  = Prefix + "DEPENDENCY_REMOVE_PATH_INVALID"
 	DependencyRemoveNotSelected  = Prefix + "DEPENDENCY_REMOVE_NOT_SELECTED"

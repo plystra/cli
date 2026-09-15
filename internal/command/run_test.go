@@ -9,6 +9,23 @@ import (
 	"github.com/plystra/cli/internal/command"
 )
 
+var (
+	wantCurrentUsage = strings.Replace(
+		wantUsage,
+		"  plystra inspect [modules|interfaces|implementations|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n",
+		"  plystra inspect capabilities [--format human|json]\n  plystra inspect [modules|interfaces|implementations|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n",
+		1,
+	)
+	wantCurrentInspectUsage = strings.NewReplacer(
+		"Usage:\n",
+		"Usage:\n  plystra inspect capabilities [--format human|json]\n",
+		"\n\nViews:\n",
+		"\n\nViews:\n  capabilities           Show installed versions, defaults, limits, toolchain identity, and support stages.\n",
+		"\n\nThe command is read-only and resolves",
+		"\n\nInstalled capability discovery is Project-independent and accepts only\n--format. It ignores PLYSTRA_ENV and PLYSTRA_CONFIG, and invalid Projects cannot\nalter its installed facts. Human output identifies omitted transport component\ndetails; JSON nests one plystra.capabilities/v1 payload in plystra.result/v1.\nExplicit --verbose, --env, or --config is invalid and emits\nPLYSTRA_INSPECT_CAPABILITIES_INVOCATION_INVALID.\n\nThe remaining commands are read-only and resolve",
+	).Replace(wantInspectUsage)
+)
+
 const (
 	wantUsage       = "Usage:\n  plystra help\n  plystra version\n  plystra new <project-name> [options]\n  plystra add <go-module-query>\n  plystra remove <go-module-path>\n  plystra update <go-module-query>\n  plystra use <interface-id> <constructor-symbol> [--env <environment>|--config <yaml-path>]\n  plystra plugin create <name>\n  plystra interface create <interface-name>\n  plystra implement <interface-id> --package <project-relative-package>\n  plystra capability create <capability-name> [--query] [--plugin <plugin>] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>]\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n  plystra guidance sync [--replace-generated]\n  plystra guidance check\n  plystra inspect [modules|interfaces|implementations|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain config <field-path> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain alias <alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra explain exposure <capability-or-alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra check [--env <environment>|--config <yaml-path>]\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]\n\nCommon actionable failures end with one Recovery block containing the primary\ncommand or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.\n"
 	wantUsageSource = "Typed source-bearing failures, including invalid Project and Go Module\ndeclarations, safe missing configuration selections, concurrent Project inputs,\ngenerated-output conflicts and drift, application module dependency drift,\ngeneration-activation failures,\nselected-Provider generation-extension mismatches, ambiguous local Plugin\ntargets, invalid explicit choices, and\nmissing, ambiguous, or cyclic Interface Implementation resolution, add\ncanonical module-relative Source lines first.\n"
@@ -104,8 +121,8 @@ func TestRunHelp(t *testing.T) {
 			if exitCode := command.Run(arguments, &stdout, &stderr); exitCode != 0 {
 				t.Fatalf("Run(%q) exit code = %d, want 0", arguments, exitCode)
 			}
-			if stdout.String() != wantUsage+wantUsageSource {
-				t.Fatalf("Run(%q) stdout = %q, want %q", arguments, stdout.String(), wantUsage+wantUsageSource)
+			if stdout.String() != wantCurrentUsage+wantUsageSource {
+				t.Fatalf("Run(%q) stdout = %q, want %q", arguments, stdout.String(), wantCurrentUsage+wantUsageSource)
 			}
 			if stderr.Len() != 0 {
 				t.Fatalf("Run(%q) stderr = %q, want empty", arguments, stderr.String())
@@ -167,6 +184,9 @@ func TestRunInspectHelp(t *testing.T) {
 		{"inspect", "help"},
 		{"inspect", "-h"},
 		{"inspect", "--help"},
+		{"inspect", "capabilities", "help"},
+		{"inspect", "capabilities", "-h"},
+		{"inspect", "capabilities", "--help"},
 		{"inspect", "modules", "help"},
 		{"inspect", "modules", "-h"},
 		{"inspect", "modules", "--help"},
@@ -182,7 +202,7 @@ func TestRunInspectHelp(t *testing.T) {
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
-		if exitCode := command.Run(arguments, &stdout, &stderr); exitCode != 0 || stdout.String() != wantInspectUsage || stderr.Len() != 0 {
+		if exitCode := command.Run(arguments, &stdout, &stderr); exitCode != 0 || stdout.String() != wantCurrentInspectUsage || stderr.Len() != 0 {
 			t.Fatalf("Run(%q) = %d, stdout %q, stderr %q", arguments, exitCode, stdout.String(), stderr.String())
 		}
 	}
@@ -390,7 +410,7 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		arguments []string
 		wantError string
 	}{
-		{name: "unknown", arguments: []string{"unknown"}, wantError: "unknown command \"unknown\"\n\n" + wantUsage + wantUsageSource},
+		{name: "unknown", arguments: []string{"unknown"}, wantError: "unknown command \"unknown\"\n\n" + wantCurrentUsage + wantUsageSource},
 		{name: "help arguments", arguments: []string{"help", "extra"}, wantError: "help does not accept arguments\n"},
 		{name: "version arguments", arguments: []string{"version", "extra"}, wantError: "version does not accept arguments\n"},
 		{name: "new missing project", arguments: []string{"new"}, wantError: wantNewInvalidInvocation},
@@ -451,18 +471,18 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "guidance check replacement", arguments: []string{"guidance", "check", "--replace-generated"}, wantError: wantGuidanceUsage},
 		{name: "guidance sync duplicate replacement", arguments: []string{"guidance", "sync", "--replace-generated", "--replace-generated"}, wantError: wantGuidanceUsage},
 		{name: "guidance sync unknown option", arguments: []string{"guidance", "sync", "--unknown"}, wantError: wantGuidanceUsage},
-		{name: "inspect unknown option", arguments: []string{"inspect", "--graph"}, wantError: wantInspectUsage},
-		{name: "inspect unknown view", arguments: []string{"inspect", "resources"}, wantError: wantInspectUsage},
-		{name: "inspect duplicate view", arguments: []string{"inspect", "modules", "modules"}, wantError: wantInspectUsage},
-		{name: "inspect view help with extra option", arguments: []string{"inspect", "modules", "--help", "--format", "json"}, wantError: wantInspectUsage},
-		{name: "inspect duplicate verbose", arguments: []string{"inspect", "--verbose", "--verbose"}, wantError: wantInspectUsage},
-		{name: "inspect missing format", arguments: []string{"inspect", "--format"}, wantError: wantInspectUsage},
-		{name: "inspect unknown format", arguments: []string{"inspect", "--format", "yaml"}, wantError: wantInspectUsage},
-		{name: "inspect duplicate format", arguments: []string{"inspect", "--format", "human", "--format", "json"}, wantError: wantInspectUsage},
-		{name: "inspect missing configuration path", arguments: []string{"inspect", "--config"}, wantError: wantInspectUsage},
-		{name: "inspect duplicate configuration", arguments: []string{"inspect", "--config", "a.yaml", "--config", "b.yaml"}, wantError: wantInspectUsage},
-		{name: "inspect missing environment", arguments: []string{"inspect", "--env"}, wantError: wantInspectUsage},
-		{name: "inspect duplicate environment", arguments: []string{"inspect", "--env", "test", "--env", "production"}, wantError: wantInspectUsage},
+		{name: "inspect unknown option", arguments: []string{"inspect", "--graph"}, wantError: wantCurrentInspectUsage},
+		{name: "inspect unknown view", arguments: []string{"inspect", "resources"}, wantError: wantCurrentInspectUsage},
+		{name: "inspect duplicate view", arguments: []string{"inspect", "modules", "modules"}, wantError: wantCurrentInspectUsage},
+		{name: "inspect view help with extra option", arguments: []string{"inspect", "modules", "--help", "--format", "json"}, wantError: wantCurrentInspectUsage},
+		{name: "inspect duplicate verbose", arguments: []string{"inspect", "--verbose", "--verbose"}, wantError: wantCurrentInspectUsage},
+		{name: "inspect missing format", arguments: []string{"inspect", "--format"}, wantError: wantCurrentInspectUsage},
+		{name: "inspect unknown format", arguments: []string{"inspect", "--format", "yaml"}, wantError: wantCurrentInspectUsage},
+		{name: "inspect duplicate format", arguments: []string{"inspect", "--format", "human", "--format", "json"}, wantError: wantCurrentInspectUsage},
+		{name: "inspect missing configuration path", arguments: []string{"inspect", "--config"}, wantError: wantCurrentInspectUsage},
+		{name: "inspect duplicate configuration", arguments: []string{"inspect", "--config", "a.yaml", "--config", "b.yaml"}, wantError: wantCurrentInspectUsage},
+		{name: "inspect missing environment", arguments: []string{"inspect", "--env"}, wantError: wantCurrentInspectUsage},
+		{name: "inspect duplicate environment", arguments: []string{"inspect", "--env", "test", "--env", "production"}, wantError: wantCurrentInspectUsage},
 		{name: "explain missing subject", arguments: []string{"explain", "capability"}, wantError: wantExplainCapabilityUsage},
 		{name: "explain missing Plugin subject", arguments: []string{"explain", "plugin"}, wantError: wantExplainCapabilityUsage},
 		{name: "explain missing Alias subject", arguments: []string{"explain", "alias"}, wantError: wantExplainCapabilityUsage},

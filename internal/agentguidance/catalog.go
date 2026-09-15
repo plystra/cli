@@ -443,7 +443,7 @@ const resourcesAndDataTask = `# Resources and Data
 
 The installed CLI ` + "`" + cliToken + "`" + ` does not expose public Resource declaration, Data schema/query generation, or ` + "`" + `data migration plan|apply|status` + "`" + ` operations.
 
-Do not simulate those operations with handwritten files under ` + "`" + `generated/` + "`" + `, legacy Plugin conventions, or an unversioned migration script. Check ` + "`" + `plystra help` + "`" + ` after upgrading and use the installed capability facts before adopting any Resource contract, provider, backend, Data compiler, or migration workflow.
+Do not simulate those operations with handwritten files under ` + "`" + `generated/` + "`" + `, legacy Plugin conventions, or an unversioned migration script. Check ` + "`" + `plystra help` + "`" + ` after upgrading and run ` + "`" + `plystra inspect capabilities --format json` + "`" + ` before adopting any Resource contract, provider, backend, Data compiler, or migration workflow.
 
 Until those commands are present, keep persistence behavior inside ordinary authored Implementation code and its tests without claiming Plystra-managed Data generation or migration support.
 
@@ -454,6 +454,7 @@ const diagnosticsAndRecoveryTask = `# Diagnostics and recovery
 
 Use read-only inspection before changing authored inputs:
 
+    plystra inspect capabilities --format json
     plystra inspect
     plystra inspect modules
     plystra inspect interfaces
@@ -465,6 +466,8 @@ Use read-only inspection before changing authored inputs:
     plystra generate --check
     plystra check
 
+` + "`" + `plystra inspect capabilities` + "`" + ` is separate from Project inspection. It ignores the working directory, invalid Project state, ` + "`" + `PLYSTRA_ENV` + "`" + `, and ` + "`" + `PLYSTRA_CONFIG` + "`" + ` while reporting installed versions, stable defaults and bounds, the exact transport toolchain, and independent ` + "`" + `specified` + "`" + `, ` + "`" + `parsed` + "`" + `, ` + "`" + `generated` + "`" + `, ` + "`" + `executed` + "`" + `, and ` + "`" + `accepted` + "`" + ` support stages. Its only option is ` + "`" + `--format human|json` + "`" + `.
+
 Inspect versioned Agent guidance before refreshing it:
 
     plystra guidance check
@@ -473,7 +476,7 @@ Inspect versioned Agent guidance before refreshing it:
 
 ` + "`" + `guidance check` + "`" + ` is always non-mutating. Ordinary sync changes or removes only unchanged prior-manifest-owned files, and any drift blocks the complete transaction. ` + "`" + `--replace-generated` + "`" + ` can replace only an existing bounded regular prior-owned file; missing prior-owned paths and desired paths absent from previous ownership remain blocked whether missing or occupied. Neither sync mode touches optional ` + "`" + `local.md` + "`" + `, another unlisted file, a sibling skill, or repository-wide Agent instructions.
 
-Reuse the same ` + "`" + `--env` + "`" + ` or ` + "`" + `--config` + "`" + ` selector. ` + "`" + `--format json` + "`" + ` returns the installed schema: ` + "`" + `plystra new` + "`" + ` uses ` + "`" + `plystra.result/v1` + "`" + `, while inspect and explain retain their current top-level schemas.
+Reuse the same ` + "`" + `--env` + "`" + ` or ` + "`" + `--config` + "`" + ` selector for Project-bound inspection and explanation. ` + "`" + `--format json` + "`" + ` returns the installed schema: ` + "`" + `plystra new` + "`" + ` and ` + "`" + `plystra inspect capabilities` + "`" + ` use ` + "`" + `plystra.result/v1` + "`" + `, while Project inspect and explain retain their current top-level schemas.
 
 Actionable human failures end with one ` + "`" + `Recovery:` + "`" + ` block and one stable ` + "`" + `Diagnostic: PLYSTRA_<AREA>_<CONDITION>` + "`" + ` code. Source-bearing failures add deterministic module-relative ` + "`" + `Source:` + "`" + ` lines. Use the code as the automation identity, apply the recovery to the reported authored source, and rerun the same selected command.
 
