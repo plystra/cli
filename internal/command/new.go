@@ -3,8 +3,6 @@ package command
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -106,11 +104,9 @@ type newProjectResult interface {
 
 type newProjectCreator func(context.Context, newproject.Options) (newProjectResult, error)
 
-type newInvocationIDGenerator func() (string, error)
-
 type newCommandDependencies struct {
 	create       newProjectCreator
-	invocationID newInvocationIDGenerator
+	invocationID invocationIDGenerator
 }
 
 type newResultEncoder struct {
@@ -123,7 +119,7 @@ func defaultNewCommandDependencies() newCommandDependencies {
 		create: func(ctx context.Context, options newproject.Options) (newProjectResult, error) {
 			return newproject.Create(ctx, options)
 		},
-		invocationID: generateNewInvocationID,
+		invocationID: generateInvocationID,
 	}
 }
 
@@ -393,19 +389,7 @@ func promptNewProject(input io.Reader, output io.Writer) newProjectPrompter {
 	}
 }
 
-func generateNewInvocationID() (string, error) {
-	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", fmt.Errorf("read UUID entropy: %w", err)
-	}
-	raw[6] = raw[6]&0x0f | 0x40
-	raw[8] = raw[8]&0x3f | 0x80
-	var encoded [32]byte
-	hex.Encode(encoded[:], raw[:])
-	return string(encoded[0:8]) + "-" + string(encoded[8:12]) + "-" + string(encoded[12:16]) + "-" + string(encoded[16:20]) + "-" + string(encoded[20:32]), nil
-}
-
-func initializeNewResultEncoder(stderr io.Writer, generateID newInvocationIDGenerator) (newResultEncoder, bool) {
+func initializeNewResultEncoder(stderr io.Writer, generateID invocationIDGenerator) (newResultEncoder, bool) {
 	if generateID == nil {
 		writeNewInitializationFailure(stderr)
 		return newResultEncoder{}, false
