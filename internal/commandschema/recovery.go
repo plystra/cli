@@ -10,7 +10,11 @@ import (
 	"github.com/plystra/cli/internal/modulepath"
 )
 
-const RecoverySchemaV1 = "plystra.recovery/v1"
+const (
+	RecoverySchemaName    = "plystra.recovery"
+	RecoverySchemaVersion = 1
+	RecoverySchemaV1      = RecoverySchemaName + "/v1"
+)
 
 // ErrRecovery reports an invalid typed recovery action.
 var ErrRecovery = errors.New("build plystra.recovery action")

@@ -232,13 +232,30 @@ func writeHumanInspectCapabilities(writer io.Writer, capabilities commandschema.
 	toolchain := capabilities.TransportToolchain()
 	if _, err := fmt.Fprintf(
 		writer,
-		"Installed Plystra capabilities\nCLI: %s\nKernel: %s\nSpecification: %s\nGo requirement: %s\nPlatform: %s/%s\nProject document limit: %d bytes\nDefaults: startup %s, invocation %s\nTransport toolchain: %s (%d components)\nSupport stages:\n",
+		"Installed Plystra capabilities\nCLI: %s\nKernel: %s\nSpecification: %s\nGo requirement: %s\nPlatform: %s/%s\nPublic schemas:\n",
 		capabilities.CLIVersion(),
 		capabilities.KernelVersion(),
 		capabilities.SpecificationRevision(),
 		capabilities.GoRequirement(),
 		capabilities.GOOS(),
 		capabilities.GOARCH(),
+	); err != nil {
+		return err
+	}
+	for _, schema := range capabilities.Schemas() {
+		if schema.Available() {
+			if _, err := fmt.Fprintf(writer, "  %s: %s/v%d\n", schema.Role(), schema.Name(), schema.Version()); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := fmt.Fprintf(writer, "  %s: unavailable\n", schema.Role()); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(
+		writer,
+		"Project document limit: %d bytes\nDefaults: startup %s, invocation %s\nTransport toolchain: %s (%d components)\nSupport stages:\n",
 		capabilities.ProjectDocumentBytes(),
 		capabilities.StartupTimeoutText(),
 		capabilities.InvocationTimeoutText(),

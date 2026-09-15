@@ -20,9 +20,9 @@ var (
 		"Usage:\n",
 		"Usage:\n  plystra inspect capabilities [--format human|json]\n",
 		"\n\nViews:\n",
-		"\n\nViews:\n  capabilities           Show installed versions, defaults, limits, toolchain identity, and support stages.\n",
+		"\n\nViews:\n  capabilities           Show installed versions, schema availability, defaults, limits, toolchain identity, and support stages.\n",
 		"\n\nThe command is read-only and resolves",
-		"\n\nInstalled capability discovery is Project-independent and accepts only\n--format. It ignores PLYSTRA_ENV and PLYSTRA_CONFIG, and invalid Projects cannot\nalter its installed facts. Human output identifies omitted transport component\ndetails; JSON nests one plystra.capabilities/v1 payload in plystra.result/v1.\nExplicit --verbose, --env, or --config is invalid and emits\nPLYSTRA_INSPECT_CAPABILITIES_INVOCATION_INVALID.\n\nThe remaining commands are read-only and resolve",
+		"\n\nInstalled capability discovery is Project-independent and accepts only\n--format. It ignores PLYSTRA_ENV and PLYSTRA_CONFIG, and invalid Projects cannot\nalter its installed facts. Human output identifies omitted transport component\ndetails; JSON nests one plystra.capabilities/v1 payload in plystra.result/v1 and\nreports result, diagnostic, recovery, inspection, graph, and continuation schema\navailability without inventing unsupported identities.\nExplicit --verbose, --env, or --config is invalid and emits\nPLYSTRA_INSPECT_CAPABILITIES_INVOCATION_INVALID.\n\nThe remaining commands are read-only and resolve",
 	).Replace(wantInspectUsage)
 )
 

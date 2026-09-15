@@ -142,6 +142,7 @@ func TestRunInspectCapabilitiesHumanOutputIdentifiesOmissions(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"Installed Plystra capabilities\n",
+		"Public schemas:\n  continuation: unavailable\n  diagnostic: unavailable\n  graph: plystra.graph/v1\n  inspection: plystra.inspect/v1\n  recovery: plystra.recovery/v1\n  result: plystra.result/v1\n",
 		"Defaults: startup 2m, invocation 30s\n",
 		"inspect.capabilities: specified=yes parsed=yes generated=not_applicable executed=yes accepted=yes\n",
 		"Transport component details are omitted from human output; use --format json for the complete installed payload.\n",

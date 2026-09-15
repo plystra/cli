@@ -1938,6 +1938,11 @@ the transport component detail it omits. Invalid or missing Projects and
 ambient `PLYSTRA_ENV` or `PLYSTRA_CONFIG` selectors cannot change the result;
 explicit `--verbose`, `--env`, and `--config` are invalid.
 
+The closed schema inventory reports result and recovery as
+`plystra.result/v1` and `plystra.recovery/v1`, plus `plystra.inspect` version 1
+and `plystra.graph` version 1. Standalone diagnostic and continuation schema
+roles are present but unavailable, with no invented name or version.
+
 `plystra inspect` first resolves that exact selected model without modifying the
 Project. The default view stays concise: Project and configuration identity,
 Plugin and Capability counts, AuthN/AuthZ activation, transports, readiness,

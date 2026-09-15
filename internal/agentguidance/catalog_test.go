@@ -100,6 +100,9 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	for _, phrase := range []string{
 		"plystra inspect capabilities --format json",
 		"is separate from Project inspection",
+		"public schema availability",
+		"Result, recovery, inspection, and graph schemas are available",
+		"standalone diagnostic and continuation schema roles remain explicitly unavailable",
 		"independent `specified`, `parsed`, `generated`, `executed`, and `accepted` support stages",
 		"plystra guidance check",
 		"Ordinary sync changes or removes only unchanged prior-manifest-owned files",

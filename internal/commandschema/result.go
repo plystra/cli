@@ -15,7 +15,11 @@ import (
 	"github.com/plystra/cli/internal/diagnosticjson"
 )
 
-const ResultSchemaV1 = "plystra.result/v1"
+const (
+	ResultSchemaName    = "plystra.result"
+	ResultSchemaVersion = 1
+	ResultSchemaV1      = ResultSchemaName + "/v1"
+)
 
 // ErrResult reports an invalid shared command result.
 var ErrResult = errors.New("build plystra.result")

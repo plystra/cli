@@ -896,6 +896,12 @@ toolchain identity. Each supported feature reports independent `specified`,
 state. Explicit `--verbose`, `--env`, or `--config` is invalid and reports
 `PLYSTRA_INSPECT_CAPABILITIES_INVOCATION_INVALID`.
 
+The payload's closed schema inventory reports `plystra.result/v1`,
+`plystra.recovery/v1`, `plystra.inspect` version 1, and `plystra.graph` version
+1 as available. The standalone diagnostic and continuation schema roles are
+reported explicitly as unavailable; the CLI does not infer or publish an
+identity for either unsupported role.
+
 The current `plystra inspect` implementation is a read-only view over the same
 selected application model used by generation and validation. Its default human
 output reports the Project and selected configuration, Plugin and Capability

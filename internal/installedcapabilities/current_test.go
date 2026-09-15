@@ -2,6 +2,7 @@ package installedcapabilities_test
 
 import (
 	"bytes"
+	"fmt"
 	"reflect"
 	"runtime"
 	"strings"
@@ -29,6 +30,21 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		capabilities.StartupTimeout() != applicationmeta.DefaultStartupTimeout ||
 		capabilities.InvocationTimeout() != applicationmeta.DefaultInvocationTimeout {
 		t.Fatalf("installed facts = %#v", capabilities)
+	}
+	wantSchemas := []string{
+		"continuation|false||0",
+		"diagnostic|false||0",
+		"graph|true|plystra.graph|1",
+		"inspection|true|plystra.inspect|1",
+		"recovery|true|plystra.recovery|1",
+		"result|true|plystra.result|1",
+	}
+	gotSchemas := make([]string, 0, len(capabilities.Schemas()))
+	for _, schema := range capabilities.Schemas() {
+		gotSchemas = append(gotSchemas, fmt.Sprintf("%s|%t|%s|%d", schema.Role(), schema.Available(), schema.Name(), schema.Version()))
+	}
+	if !reflect.DeepEqual(gotSchemas, wantSchemas) {
+		t.Fatalf("schemas = %#v, want %#v", gotSchemas, wantSchemas)
 	}
 	wantSupport := []string{
 		"data|yes|no|no|no|no",

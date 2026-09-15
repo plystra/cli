@@ -9,6 +9,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/commandschema"
+	"github.com/plystra/cli/internal/diagnosticschema"
 	"github.com/plystra/cli/internal/transporttoolchain"
 	"github.com/plystra/cli/internal/version"
 )
@@ -31,9 +32,37 @@ func Current() (commandschema.Capabilities, error) {
 		GOOS:                  runtime.GOOS,
 		GOARCH:                runtime.GOARCH,
 		TransportToolchain:    toolchain,
-		ProjectDocumentBytes:  applicationmeta.MaximumSize,
-		StartupTimeout:        applicationmeta.DefaultStartupTimeout,
-		InvocationTimeout:     applicationmeta.DefaultInvocationTimeout,
+		Schemas: []commandschema.CapabilitySchemaInput{
+			{Role: commandschema.CapabilitySchemaContinuation},
+			{Role: commandschema.CapabilitySchemaDiagnostic},
+			{
+				Role:      commandschema.CapabilitySchemaGraph,
+				Available: true,
+				Name:      diagnosticschema.GraphSchemaV1().Name(),
+				Version:   diagnosticschema.GraphSchemaV1().Version(),
+			},
+			{
+				Role:      commandschema.CapabilitySchemaInspection,
+				Available: true,
+				Name:      diagnosticschema.InspectSchemaV1().Name(),
+				Version:   diagnosticschema.InspectSchemaV1().Version(),
+			},
+			{
+				Role:      commandschema.CapabilitySchemaRecovery,
+				Available: true,
+				Name:      commandschema.RecoverySchemaName,
+				Version:   commandschema.RecoverySchemaVersion,
+			},
+			{
+				Role:      commandschema.CapabilitySchemaResult,
+				Available: true,
+				Name:      commandschema.ResultSchemaName,
+				Version:   commandschema.ResultSchemaVersion,
+			},
+		},
+		ProjectDocumentBytes: applicationmeta.MaximumSize,
+		StartupTimeout:       applicationmeta.DefaultStartupTimeout,
+		InvocationTimeout:    applicationmeta.DefaultInvocationTimeout,
 		Support: []commandschema.CapabilitySupportInput{
 			{
 				ID:        "inspect.capabilities",

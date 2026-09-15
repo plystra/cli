@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/plystra/cli/internal/diagnosticjson"
 	"github.com/plystra/cli/internal/transporttoolchain"
 	"golang.org/x/mod/semver"
 )
@@ -30,6 +31,58 @@ const (
 	SupportUnknown       SupportState = "unknown"
 	SupportNotApplicable SupportState = "not_applicable"
 )
+
+// CapabilitySchemaRole is one canonical public schema category reported by
+// installed capability discovery.
+type CapabilitySchemaRole string
+
+const (
+	CapabilitySchemaContinuation CapabilitySchemaRole = "continuation"
+	CapabilitySchemaDiagnostic   CapabilitySchemaRole = "diagnostic"
+	CapabilitySchemaGraph        CapabilitySchemaRole = "graph"
+	CapabilitySchemaInspection   CapabilitySchemaRole = "inspection"
+	CapabilitySchemaRecovery     CapabilitySchemaRole = "recovery"
+	CapabilitySchemaResult       CapabilitySchemaRole = "result"
+)
+
+var capabilitySchemaRoles = []CapabilitySchemaRole{
+	CapabilitySchemaContinuation,
+	CapabilitySchemaDiagnostic,
+	CapabilitySchemaGraph,
+	CapabilitySchemaInspection,
+	CapabilitySchemaRecovery,
+	CapabilitySchemaResult,
+}
+
+// CapabilitySchemaInput is the construction-only installed state for one
+// canonical public schema role. An unavailable role has no name or version.
+type CapabilitySchemaInput struct {
+	Role      CapabilitySchemaRole
+	Available bool
+	Name      string
+	Version   uint32
+}
+
+// CapabilitySchema is one immutable public schema availability record.
+type CapabilitySchema struct {
+	input CapabilitySchemaInput
+}
+
+// Role returns the canonical public schema role.
+func (s CapabilitySchema) Role() CapabilitySchemaRole { return s.input.Role }
+
+// Available reports whether the installed CLI exposes this schema role.
+func (s CapabilitySchema) Available() bool { return s.input.Available }
+
+// Name returns the schema name without a version suffix when available.
+func (s CapabilitySchema) Name() string { return s.input.Name }
+
+// Version returns the independent positive schema version when available.
+func (s CapabilitySchema) Version() uint32 { return s.input.Version }
+
+// Valid reports whether this record has one canonical role and a consistent
+// available or unavailable identity.
+func (s CapabilitySchema) Valid() bool { return validateCapabilitySchema(s.input) == nil }
 
 // CapabilitySupportInput is the construction-only support record for one
 // installed feature.
@@ -81,6 +134,7 @@ type CapabilitiesInput struct {
 	GOOS                  string
 	GOARCH                string
 	TransportToolchain    transporttoolchain.Identity
+	Schemas               []CapabilitySchemaInput
 	ProjectDocumentBytes  int64
 	StartupTimeout        time.Duration
 	InvocationTimeout     time.Duration
@@ -96,6 +150,7 @@ type Capabilities struct {
 	goos                  string
 	goarch                string
 	transportToolchain    transporttoolchain.Identity
+	schemas               []CapabilitySchema
 	projectDocumentBytes  int64
 	startupTimeout        time.Duration
 	invocationTimeout     time.Duration
@@ -107,6 +162,7 @@ type Capabilities struct {
 type capabilitiesDocument struct {
 	Schema    string                        `json:"schema"`
 	Installed capabilitiesInstalledDocument `json:"installed"`
+	Schemas   []capabilitySchemaDocument    `json:"schemas"`
 	Limits    capabilitiesLimitsDocument    `json:"limits"`
 	Defaults  capabilitiesDefaultsDocument  `json:"defaults"`
 	Support   []capabilitySupportDocument   `json:"support"`
@@ -124,6 +180,13 @@ type capabilitiesInstalledDocument struct {
 type capabilitiesPlatformDocument struct {
 	GOOS   string `json:"goos"`
 	GOARCH string `json:"goarch"`
+}
+
+type capabilitySchemaDocument struct {
+	Role      CapabilitySchemaRole `json:"role"`
+	Available bool                 `json:"available"`
+	Name      *string              `json:"name"`
+	Version   *uint32              `json:"version"`
 }
 
 type capabilitiesLimitsDocument struct {
@@ -149,6 +212,10 @@ func NewCapabilities(input CapabilitiesInput) (Capabilities, error) {
 	if err := validateCapabilitiesInput(input); err != nil {
 		return Capabilities{}, fmt.Errorf("%w: %v", ErrCapabilities, err)
 	}
+	schemas, err := normalizeCapabilitySchemas(input.Schemas)
+	if err != nil {
+		return Capabilities{}, fmt.Errorf("%w: %v", ErrCapabilities, err)
+	}
 	support, err := normalizeCapabilitySupport(input.Support)
 	if err != nil {
 		return Capabilities{}, fmt.Errorf("%w: %v", ErrCapabilities, err)
@@ -161,6 +228,7 @@ func NewCapabilities(input CapabilitiesInput) (Capabilities, error) {
 		goos:                  input.GOOS,
 		goarch:                input.GOARCH,
 		transportToolchain:    input.TransportToolchain,
+		schemas:               schemas,
 		projectDocumentBytes:  input.ProjectDocumentBytes,
 		startupTimeout:        input.StartupTimeout,
 		invocationTimeout:     input.InvocationTimeout,
@@ -212,6 +280,11 @@ func (c Capabilities) GOARCH() string { return c.goarch }
 // TransportToolchain returns the exact immutable embedded toolchain identity.
 func (c Capabilities) TransportToolchain() transporttoolchain.Identity {
 	return c.transportToolchain
+}
+
+// Schemas returns a defensive copy in canonical role order.
+func (c Capabilities) Schemas() []CapabilitySchema {
+	return append([]CapabilitySchema(nil), c.schemas...)
 }
 
 // ProjectDocumentBytes returns the maximum accepted Project declaration size.
@@ -288,6 +361,55 @@ func normalizeCapabilitySupport(input []CapabilitySupportInput) ([]CapabilitySup
 		result[index] = CapabilitySupport{input: support}
 	}
 	return result, nil
+}
+
+func normalizeCapabilitySchemas(input []CapabilitySchemaInput) ([]CapabilitySchema, error) {
+	if len(input) != len(capabilitySchemaRoles) {
+		return nil, fmt.Errorf("schemas must contain exactly %d canonical roles", len(capabilitySchemaRoles))
+	}
+	ordered := append([]CapabilitySchemaInput(nil), input...)
+	sort.Slice(ordered, func(left, right int) bool { return ordered[left].Role < ordered[right].Role })
+	result := make([]CapabilitySchema, len(ordered))
+	for index, schema := range ordered {
+		if schema.Role != capabilitySchemaRoles[index] {
+			return nil, fmt.Errorf("schemas must contain role %q exactly once", capabilitySchemaRoles[index])
+		}
+		if err := validateCapabilitySchema(schema); err != nil {
+			return nil, fmt.Errorf("schemas[%d]: %v", index, err)
+		}
+		result[index] = CapabilitySchema{input: schema}
+	}
+	return result, nil
+}
+
+func validateCapabilitySchema(input CapabilitySchemaInput) error {
+	if !validCapabilitySchemaRole(input.Role) {
+		return fmt.Errorf("role %q is not supported", input.Role)
+	}
+	if !input.Available {
+		if input.Name != "" || input.Version != 0 {
+			return errors.New("unavailable schema must not declare a name or version")
+		}
+		return nil
+	}
+	if _, err := diagnosticjson.NewSchema(input.Name, input.Version); err != nil {
+		return fmt.Errorf("available schema identity is invalid: %v", err)
+	}
+	return nil
+}
+
+func validCapabilitySchemaRole(value CapabilitySchemaRole) bool {
+	switch value {
+	case CapabilitySchemaContinuation,
+		CapabilitySchemaDiagnostic,
+		CapabilitySchemaGraph,
+		CapabilitySchemaInspection,
+		CapabilitySchemaRecovery,
+		CapabilitySchemaResult:
+		return true
+	default:
+		return false
+	}
 }
 
 func validateCapabilitySupport(input CapabilitySupportInput) error {
@@ -380,6 +502,10 @@ func formatCapabilitiesDuration(value time.Duration) string {
 }
 
 func (c Capabilities) input() CapabilitiesInput {
+	schemas := make([]CapabilitySchemaInput, len(c.schemas))
+	for index, value := range c.schemas {
+		schemas[index] = value.input
+	}
 	support := make([]CapabilitySupportInput, len(c.support))
 	for index, value := range c.support {
 		support[index] = value.input
@@ -392,6 +518,7 @@ func (c Capabilities) input() CapabilitiesInput {
 		GOOS:                  c.goos,
 		GOARCH:                c.goarch,
 		TransportToolchain:    c.transportToolchain,
+		Schemas:               schemas,
 		ProjectDocumentBytes:  c.projectDocumentBytes,
 		StartupTimeout:        c.startupTimeout,
 		InvocationTimeout:     c.invocationTimeout,
@@ -400,6 +527,17 @@ func (c Capabilities) input() CapabilitiesInput {
 }
 
 func (c Capabilities) document() capabilitiesDocument {
+	schemas := make([]capabilitySchemaDocument, len(c.schemas))
+	for index, value := range c.schemas {
+		document := capabilitySchemaDocument{Role: value.Role(), Available: value.Available()}
+		if value.Available() {
+			name := value.Name()
+			version := value.Version()
+			document.Name = &name
+			document.Version = &version
+		}
+		schemas[index] = document
+	}
 	support := make([]capabilitySupportDocument, len(c.support))
 	for index, value := range c.support {
 		support[index] = capabilitySupportDocument(value.input)
@@ -414,7 +552,8 @@ func (c Capabilities) document() capabilitiesDocument {
 			Platform:              capabilitiesPlatformDocument{GOOS: c.goos, GOARCH: c.goarch},
 			TransportToolchain:    c.transportToolchain.RecordJSON(),
 		},
-		Limits: capabilitiesLimitsDocument{ProjectDocumentBytes: c.projectDocumentBytes},
+		Schemas: schemas,
+		Limits:  capabilitiesLimitsDocument{ProjectDocumentBytes: c.projectDocumentBytes},
 		Defaults: capabilitiesDefaultsDocument{
 			StartupTimeout:    formatCapabilitiesDuration(c.startupTimeout),
 			InvocationTimeout: formatCapabilitiesDuration(c.invocationTimeout),
