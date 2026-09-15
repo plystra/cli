@@ -14,7 +14,7 @@ Use read-only inspection before changing authored inputs:
     plystra generate --check
     plystra check
 
-`plystra inspect capabilities` is separate from Project inspection. It ignores the working directory, invalid Project state, `PLYSTRA_ENV`, and `PLYSTRA_CONFIG` while reporting installed versions, stable defaults and bounds, the exact transport toolchain, public schema availability, and independent `specified`, `parsed`, `generated`, `executed`, and `accepted` support stages. Result, recovery, inspection, and graph schemas are available; standalone diagnostic and continuation schema roles remain explicitly unavailable. Its only option is `--format human|json`.
+`plystra inspect capabilities` is separate from Project inspection. It ignores the working directory, invalid Project state, `PLYSTRA_ENV`, and `PLYSTRA_CONFIG` while reporting exact installed commands and arguments, selectors, stable defaults, interaction and output modes, effect classes, schemas, bounds, toolchain identity, and independent `specified`, `parsed`, `generated`, `executed`, and `accepted` support stages. Planned commands are absent. Result, recovery, inspection, and graph schemas are available; standalone diagnostic and continuation schema roles remain explicitly unavailable. Its only option is `--format human|json`.
 
 Inspect versioned Agent guidance before refreshing it:
 

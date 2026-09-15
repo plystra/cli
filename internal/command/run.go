@@ -357,7 +357,7 @@ without a fabricated span.
   plystra inspect configuration [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
 
 Views:
-  capabilities           Show installed versions, schema availability, defaults, limits, toolchain identity, and support stages.
+  capabilities           Show installed command, schema, selector, default, effect, limit, toolchain, and support facts.
   modules                Show the selected current-model module graph.
   interfaces             Show visible Interfaces, active selections, and constructor dependencies.
   implementations        Show visible constructors, selection state, dependencies, configuration, and assembly.
@@ -371,10 +371,11 @@ Options:
 
 Installed capability discovery is Project-independent and accepts only
 --format. It ignores PLYSTRA_ENV and PLYSTRA_CONFIG, and invalid Projects cannot
-alter its installed facts. Human output identifies omitted transport component
-details; JSON nests one plystra.capabilities/v1 payload in plystra.result/v1 and
-reports result, diagnostic, recovery, inspection, graph, and continuation schema
-availability without inventing unsupported identities.
+alter its installed facts. Human output summarizes command, selector, and effect
+counts and identifies omitted command argument, selector, effect-class, and
+transport component details. JSON nests one plystra.capabilities/v1 payload in
+plystra.result/v1 and reports exact installed command and schema support without
+inventing planned commands or unsupported schema identities.
 Explicit --verbose, --env, or --config is invalid and emits
 PLYSTRA_INSPECT_CAPABILITIES_INVOCATION_INVALID.
 

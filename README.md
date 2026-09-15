@@ -891,13 +891,18 @@ Mutating commands perform all derivable generation automatically. Build and gene
 
 `plystra inspect capabilities` is the Project-independent view of the installed
 CLI distribution. Human output reports the CLI, supported Kernel, implemented
-specification revision, Go requirement, running platform, stable document and
-timeout bounds, transport-toolchain digest, and five-stage support summary; it
-identifies the transport component details omitted from that filtered view.
+specification revision, Go requirement, running platform, global interaction and
+output defaults, stable document and timeout bounds, command, selector, and
+effect-class counts, transport-toolchain digest, and five-stage support summary.
+It identifies the command argument, selector, effect-class, and transport
+component details omitted from that filtered view.
 `--format json` writes one canonical `plystra.result/v1` document whose payload
-is `plystra.capabilities/v1`, including the complete 13-component transport
-toolchain identity. Each supported feature reports independent `specified`,
-`parsed`, `generated`, `executed`, and `accepted` states. The command ignores
+is `plystra.capabilities/v1`, including the exact 28 installed leaf commands and
+their arguments, selectors, stable defaults, interaction modes, output formats,
+all nine effect classes, and the complete 13-component transport toolchain
+identity. Planned commands are absent. Each supported feature reports
+independent `specified`, `parsed`, `generated`, `executed`, and `accepted`
+states. The command ignores
 `PLYSTRA_ENV`, `PLYSTRA_CONFIG`, the working directory, and invalid Project
 state. Explicit `--verbose`, `--env`, or `--config` is invalid and reports
 `PLYSTRA_INSPECT_CAPABILITIES_INVOCATION_INVALID`.

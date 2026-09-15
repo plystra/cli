@@ -255,8 +255,13 @@ func writeHumanInspectCapabilities(writer io.Writer, capabilities commandschema.
 	}
 	if _, err := fmt.Fprintf(
 		writer,
-		"Project document limit: %d bytes\nDefaults: startup %s, invocation %s\nTransport toolchain: %s (%d components)\nSupport stages:\n",
+		"Command surface: %d installed leaf commands\nSelectors: %d installed\nEffect classes: %d closed\nProject document limit: %d bytes\nDefaults: interaction %s, output %s, startup %s, invocation %s\nTransport toolchain: %s (%d components)\nSupport stages:\n",
+		len(capabilities.Commands()),
+		len(capabilities.Selectors()),
+		len(capabilities.EffectClasses()),
 		capabilities.ProjectDocumentBytes(),
+		capabilities.DefaultInteraction(),
+		capabilities.DefaultOutput(),
 		capabilities.StartupTimeoutText(),
 		capabilities.InvocationTimeoutText(),
 		toolchain.Digest(),
@@ -278,7 +283,7 @@ func writeHumanInspectCapabilities(writer io.Writer, capabilities commandschema.
 			return err
 		}
 	}
-	_, err := io.WriteString(writer, "Transport component details are omitted from human output; use --format json for the complete installed payload.\n")
+	_, err := io.WriteString(writer, "Command argument, selector, effect-class, and transport component details are omitted from human output; use --format json for the complete installed payload.\n")
 	return err
 }
 

@@ -135,6 +135,11 @@ type CapabilitiesInput struct {
 	GOARCH                string
 	TransportToolchain    transporttoolchain.Identity
 	Schemas               []CapabilitySchemaInput
+	Commands              []CapabilityCommandInput
+	Selectors             []CapabilitySelectorInput
+	DefaultInteraction    CapabilityInteractionMode
+	DefaultOutput         CapabilityOutputFormat
+	EffectClasses         []EffectClass
 	ProjectDocumentBytes  int64
 	StartupTimeout        time.Duration
 	InvocationTimeout     time.Duration
@@ -151,6 +156,11 @@ type Capabilities struct {
 	goarch                string
 	transportToolchain    transporttoolchain.Identity
 	schemas               []CapabilitySchema
+	commands              []CapabilityCommand
+	selectors             []CapabilitySelector
+	defaultInteraction    CapabilityInteractionMode
+	defaultOutput         CapabilityOutputFormat
+	effectClasses         []EffectClass
 	projectDocumentBytes  int64
 	startupTimeout        time.Duration
 	invocationTimeout     time.Duration
@@ -163,6 +173,9 @@ type capabilitiesDocument struct {
 	Schema    string                        `json:"schema"`
 	Installed capabilitiesInstalledDocument `json:"installed"`
 	Schemas   []capabilitySchemaDocument    `json:"schemas"`
+	Commands  []capabilityCommandDocument   `json:"commands"`
+	Selectors []capabilitySelectorDocument  `json:"selectors"`
+	Effects   []EffectClass                 `json:"effect_classes"`
 	Limits    capabilitiesLimitsDocument    `json:"limits"`
 	Defaults  capabilitiesDefaultsDocument  `json:"defaults"`
 	Support   []capabilitySupportDocument   `json:"support"`
@@ -194,8 +207,10 @@ type capabilitiesLimitsDocument struct {
 }
 
 type capabilitiesDefaultsDocument struct {
-	StartupTimeout    string `json:"startup_timeout"`
-	InvocationTimeout string `json:"invocation_timeout"`
+	InteractionMode   CapabilityInteractionMode `json:"interaction_mode"`
+	OutputFormat      CapabilityOutputFormat    `json:"output_format"`
+	StartupTimeout    string                    `json:"startup_timeout"`
+	InvocationTimeout string                    `json:"invocation_timeout"`
 }
 
 type capabilitySupportDocument struct {
@@ -216,6 +231,18 @@ func NewCapabilities(input CapabilitiesInput) (Capabilities, error) {
 	if err != nil {
 		return Capabilities{}, fmt.Errorf("%w: %v", ErrCapabilities, err)
 	}
+	selectors, err := normalizeCapabilitySelectors(input.Selectors)
+	if err != nil {
+		return Capabilities{}, fmt.Errorf("%w: %v", ErrCapabilities, err)
+	}
+	commands, err := normalizeCapabilityCommands(input.Commands, selectors, input.DefaultInteraction, input.DefaultOutput)
+	if err != nil {
+		return Capabilities{}, fmt.Errorf("%w: %v", ErrCapabilities, err)
+	}
+	effectClasses, err := normalizeCapabilityEffectClasses(input.EffectClasses)
+	if err != nil {
+		return Capabilities{}, fmt.Errorf("%w: %v", ErrCapabilities, err)
+	}
 	support, err := normalizeCapabilitySupport(input.Support)
 	if err != nil {
 		return Capabilities{}, fmt.Errorf("%w: %v", ErrCapabilities, err)
@@ -229,6 +256,11 @@ func NewCapabilities(input CapabilitiesInput) (Capabilities, error) {
 		goarch:                input.GOARCH,
 		transportToolchain:    input.TransportToolchain,
 		schemas:               schemas,
+		commands:              commands,
+		selectors:             selectors,
+		defaultInteraction:    input.DefaultInteraction,
+		defaultOutput:         input.DefaultOutput,
+		effectClasses:         effectClasses,
 		projectDocumentBytes:  input.ProjectDocumentBytes,
 		startupTimeout:        input.StartupTimeout,
 		invocationTimeout:     input.InvocationTimeout,
@@ -287,6 +319,40 @@ func (c Capabilities) Schemas() []CapabilitySchema {
 	return append([]CapabilitySchema(nil), c.schemas...)
 }
 
+// Commands returns defensive copies of the installed invokable leaf commands
+// in canonical command-ID order.
+func (c Capabilities) Commands() []CapabilityCommand {
+	result := make([]CapabilityCommand, len(c.commands))
+	for index, command := range c.commands {
+		result[index] = CapabilityCommand{input: cloneCapabilityCommandInput(command.input)}
+	}
+	return result
+}
+
+// Selectors returns defensive copies of installed cross-command selectors in
+// canonical selector-ID order.
+func (c Capabilities) Selectors() []CapabilitySelector {
+	result := make([]CapabilitySelector, len(c.selectors))
+	for index, selector := range c.selectors {
+		result[index] = CapabilitySelector{input: cloneCapabilitySelectorInput(selector.input)}
+	}
+	return result
+}
+
+// DefaultInteraction returns the installed interaction mode used when a
+// command invocation does not select one explicitly.
+func (c Capabilities) DefaultInteraction() CapabilityInteractionMode { return c.defaultInteraction }
+
+// DefaultOutput returns the installed output format used when a command does
+// not select one explicitly.
+func (c Capabilities) DefaultOutput() CapabilityOutputFormat { return c.defaultOutput }
+
+// EffectClasses returns every closed effect class understood by this CLI in
+// canonical order.
+func (c Capabilities) EffectClasses() []EffectClass {
+	return append([]EffectClass(nil), c.effectClasses...)
+}
+
 // ProjectDocumentBytes returns the maximum accepted Project declaration size.
 func (c Capabilities) ProjectDocumentBytes() int64 { return c.projectDocumentBytes }
 
@@ -334,6 +400,12 @@ func validateCapabilitiesInput(input CapabilitiesInput) error {
 	}
 	if !input.TransportToolchain.Valid() {
 		return errors.New("transport toolchain identity is invalid")
+	}
+	if !validCapabilityInteractionMode(input.DefaultInteraction) {
+		return errors.New("default interaction mode is invalid")
+	}
+	if !validCapabilityOutputFormat(input.DefaultOutput) {
+		return errors.New("default output format is invalid")
 	}
 	if input.ProjectDocumentBytes <= 0 || input.ProjectDocumentBytes > 1<<40 {
 		return errors.New("project document limit is outside the supported range")
@@ -506,6 +578,14 @@ func (c Capabilities) input() CapabilitiesInput {
 	for index, value := range c.schemas {
 		schemas[index] = value.input
 	}
+	commands := make([]CapabilityCommandInput, len(c.commands))
+	for index, value := range c.commands {
+		commands[index] = cloneCapabilityCommandInput(value.input)
+	}
+	selectors := make([]CapabilitySelectorInput, len(c.selectors))
+	for index, value := range c.selectors {
+		selectors[index] = cloneCapabilitySelectorInput(value.input)
+	}
 	support := make([]CapabilitySupportInput, len(c.support))
 	for index, value := range c.support {
 		support[index] = value.input
@@ -519,6 +599,11 @@ func (c Capabilities) input() CapabilitiesInput {
 		GOARCH:                c.goarch,
 		TransportToolchain:    c.transportToolchain,
 		Schemas:               schemas,
+		Commands:              commands,
+		Selectors:             selectors,
+		DefaultInteraction:    c.defaultInteraction,
+		DefaultOutput:         c.defaultOutput,
+		EffectClasses:         append([]EffectClass(nil), c.effectClasses...),
 		ProjectDocumentBytes:  c.projectDocumentBytes,
 		StartupTimeout:        c.startupTimeout,
 		InvocationTimeout:     c.invocationTimeout,
@@ -552,9 +637,14 @@ func (c Capabilities) document() capabilitiesDocument {
 			Platform:              capabilitiesPlatformDocument{GOOS: c.goos, GOARCH: c.goarch},
 			TransportToolchain:    c.transportToolchain.RecordJSON(),
 		},
-		Schemas: schemas,
-		Limits:  capabilitiesLimitsDocument{ProjectDocumentBytes: c.projectDocumentBytes},
+		Schemas:   schemas,
+		Commands:  capabilityCommandDocuments(c.commands),
+		Selectors: capabilitySelectorDocuments(c.selectors),
+		Effects:   append([]EffectClass{}, c.effectClasses...),
+		Limits:    capabilitiesLimitsDocument{ProjectDocumentBytes: c.projectDocumentBytes},
 		Defaults: capabilitiesDefaultsDocument{
+			InteractionMode:   c.defaultInteraction,
+			OutputFormat:      c.defaultOutput,
 			StartupTimeout:    formatCapabilitiesDuration(c.startupTimeout),
 			InvocationTimeout: formatCapabilitiesDuration(c.invocationTimeout),
 		},

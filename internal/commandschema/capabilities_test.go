@@ -38,7 +38,7 @@ func TestCapabilitiesAreCanonicalClosedAndDefensive(t *testing.T) {
 		t.Fatalf("NewCapabilities = %#v, %v", payload, err)
 	}
 	want := fmt.Sprintf(
-		`{"schema":"plystra.capabilities/v1","installed":{"cli_version":"1.2.3","kernel_version":"v1.4.0","specification_revision":"0123456789abcdef0123456789abcdef01234567","go_requirement":"1.26","platform":{"goos":"testos","goarch":"testarch"},"transport_toolchain":%s},"schemas":[{"role":"continuation","available":false,"name":null,"version":null},{"role":"diagnostic","available":false,"name":null,"version":null},{"role":"graph","available":true,"name":"plystra.graph","version":1},{"role":"inspection","available":true,"name":"plystra.inspect","version":1},{"role":"recovery","available":true,"name":"plystra.recovery","version":1},{"role":"result","available":true,"name":"plystra.result","version":1}],"limits":{"project_document_bytes":1048576},"defaults":{"startup_timeout":"2m","invocation_timeout":"30s"},"support":[{"id":"data","specified":"yes","parsed":"no","generated":"no","executed":"no","accepted":"no"},{"id":"inspect.capabilities","specified":"yes","parsed":"yes","generated":"not_applicable","executed":"yes","accepted":"yes"}]}`,
+		`{"schema":"plystra.capabilities/v1","installed":{"cli_version":"1.2.3","kernel_version":"v1.4.0","specification_revision":"0123456789abcdef0123456789abcdef01234567","go_requirement":"1.26","platform":{"goos":"testos","goarch":"testarch"},"transport_toolchain":%s},"schemas":[{"role":"continuation","available":false,"name":null,"version":null},{"role":"diagnostic","available":false,"name":null,"version":null},{"role":"graph","available":true,"name":"plystra.graph","version":1},{"role":"inspection","available":true,"name":"plystra.inspect","version":1},{"role":"recovery","available":true,"name":"plystra.recovery","version":1},{"role":"result","available":true,"name":"plystra.result","version":1}],"commands":[{"id":"inspect","path":["inspect"],"arguments":[{"name":"--config","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":[],"requires":[],"conflicts":["--env"]},{"name":"--env","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":[],"requires":[],"conflicts":["--config"]},{"name":"--format","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":["human","json"],"requires":[],"conflicts":[]}],"selectors":["configuration"],"stable_defaults":[{"name":"verbosity","value":"concise"}],"interaction_modes":["non_interactive"],"output_formats":["human","json"]}],"selectors":[{"id":"configuration","arguments":["--config","--env"],"environment_variables":["PLYSTRA_CONFIG","PLYSTRA_ENV"],"modes":["default","environment","explicit-config"],"default_mode":"default"}],"effect_classes":["project_write","temporary_file","cache_materialization","download","trusted_code_execution","process_startup","backend_read","backend_write","publication"],"limits":{"project_document_bytes":1048576},"defaults":{"interaction_mode":"non_interactive","output_format":"human","startup_timeout":"2m","invocation_timeout":"30s"},"support":[{"id":"data","specified":"yes","parsed":"no","generated":"no","executed":"no","accepted":"no"},{"id":"inspect.capabilities","specified":"yes","parsed":"yes","generated":"not_applicable","executed":"yes","accepted":"yes"}]}`,
 		input.TransportToolchain.RecordJSON(),
 	)
 	if string(payload.CanonicalJSON()) != want {
@@ -51,22 +51,36 @@ func TestCapabilitiesAreCanonicalClosedAndDefensive(t *testing.T) {
 		payload.GoRequirement() != input.GoRequirement ||
 		payload.GOOS() != input.GOOS || payload.GOARCH() != input.GOARCH ||
 		len(payload.Schemas()) != 6 || payload.Schemas()[0].Role() != commandschema.CapabilitySchemaContinuation || payload.Schemas()[0].Available() || payload.Schemas()[5].Name() != commandschema.ResultSchemaName || payload.Schemas()[5].Version() != commandschema.ResultSchemaVersion ||
+		len(payload.Commands()) != 1 || payload.Commands()[0].ID() != "inspect" || len(payload.Commands()[0].Arguments()) != 3 || payload.Commands()[0].Arguments()[0].Name() != "--config" ||
+		len(payload.Selectors()) != 1 || payload.Selectors()[0].ID() != "configuration" || payload.DefaultInteraction() != commandschema.CapabilityInteractionNonInteractive || payload.DefaultOutput() != commandschema.CapabilityOutputHuman || len(payload.EffectClasses()) != 9 ||
 		payload.ProjectDocumentBytes() != input.ProjectDocumentBytes ||
 		payload.StartupTimeoutText() != "2m" || payload.InvocationTimeoutText() != "30s" {
 		t.Fatalf("capability accessors do not match input: %#v", payload)
 	}
 
 	input.Schemas[0].Name = "changed"
+	input.Commands[0].ID = "changed"
+	input.Commands[0].Arguments[0].Name = "--changed"
+	input.Selectors[0].ID = "changed"
+	input.EffectClasses[0] = "changed"
 	input.Support[0].ID = "changed"
 	returnedSchemas := payload.Schemas()
 	returnedSchemas[0] = commandschema.CapabilitySchema{}
+	returnedCommands := payload.Commands()
+	returnedCommands[0] = commandschema.CapabilityCommand{}
+	returnedArguments := payload.Commands()[0].Arguments()
+	returnedArguments[0] = commandschema.CapabilityArgument{}
+	returnedSelectors := payload.Selectors()
+	returnedSelectors[0] = commandschema.CapabilitySelector{}
+	returnedEffects := payload.EffectClasses()
+	returnedEffects[0] = "changed"
 	returnedSupport := payload.Support()
 	returnedSupport[0] = commandschema.CapabilitySupport{}
 	returnedComponents := payload.TransportToolchain().Components()
 	returnedComponents[0] = transporttoolchain.Component{}
 	canonical := payload.CanonicalJSON()
 	canonical[0] = '['
-	if !payload.Valid() || payload.Schemas()[0].Role() != commandschema.CapabilitySchemaContinuation || payload.Support()[0].ID() != "data" || bytes.HasPrefix(payload.CanonicalJSON(), []byte("[")) || len(payload.TransportToolchain().Components()) != 13 {
+	if !payload.Valid() || payload.Schemas()[0].Role() != commandschema.CapabilitySchemaContinuation || payload.Commands()[0].ID() != "inspect" || payload.Commands()[0].Arguments()[0].Name() != "--config" || payload.Selectors()[0].ID() != "configuration" || payload.EffectClasses()[0] != commandschema.EffectProjectWrite || payload.Support()[0].ID() != "data" || bytes.HasPrefix(payload.CanonicalJSON(), []byte("[")) || len(payload.TransportToolchain().Components()) != 13 {
 		t.Fatal("Capabilities exposed mutable construction or result state")
 	}
 }
@@ -118,6 +132,47 @@ func TestCapabilitiesRejectInvalidInstalledFactsAndSupport(t *testing.T) {
 		{name: "wildcard schema name", mutate: func(input *commandschema.CapabilitiesInput) { input.Schemas[0].Name = "plystra.*" }},
 		{name: "available schema version", mutate: func(input *commandschema.CapabilitiesInput) { input.Schemas[0].Version = 0 }},
 		{name: "excessive schema version", mutate: func(input *commandschema.CapabilitiesInput) { input.Schemas[0].Version = 1 << 31 }},
+		{name: "missing commands", mutate: func(input *commandschema.CapabilitiesInput) { input.Commands = nil }},
+		{name: "command ID", mutate: func(input *commandschema.CapabilitiesInput) { input.Commands[0].ID = "Inspect" }},
+		{name: "command path", mutate: func(input *commandschema.CapabilitiesInput) { input.Commands[0].Path = []string{"explain"} }},
+		{name: "duplicate command", mutate: func(input *commandschema.CapabilitiesInput) {
+			input.Commands = append(input.Commands, input.Commands[0])
+		}},
+		{name: "command argument", mutate: func(input *commandschema.CapabilitiesInput) { input.Commands[0].Arguments[0].Name = "config" }},
+		{name: "asymmetric conflict", mutate: func(input *commandschema.CapabilitiesInput) { input.Commands[0].Arguments[1].Conflicts = nil }},
+		{name: "required conflict", mutate: func(input *commandschema.CapabilitiesInput) {
+			input.Commands[0].Arguments[1].Requires = []string{"--config"}
+		}},
+		{name: "format choices", mutate: func(input *commandschema.CapabilitiesInput) {
+			input.Commands[0].Arguments[0].Choices = []string{"human"}
+		}},
+		{name: "unknown selector", mutate: func(input *commandschema.CapabilitiesInput) { input.Commands[0].Selectors[0] = "future" }},
+		{name: "selector argument absent", mutate: func(input *commandschema.CapabilitiesInput) {
+			input.Commands[0].Arguments = input.Commands[0].Arguments[2:]
+		}},
+		{name: "missing selectors", mutate: func(input *commandschema.CapabilitiesInput) { input.Selectors = nil }},
+		{name: "selector ID", mutate: func(input *commandschema.CapabilitiesInput) { input.Selectors[0].ID = "Configuration" }},
+		{name: "selector environment", mutate: func(input *commandschema.CapabilitiesInput) {
+			input.Selectors[0].EnvironmentVariables[0] = "plystra_config"
+		}},
+		{name: "selector default", mutate: func(input *commandschema.CapabilitiesInput) { input.Selectors[0].DefaultMode = "future" }},
+		{name: "unused selector", mutate: func(input *commandschema.CapabilitiesInput) { input.Commands[0].Selectors = nil }},
+		{name: "default interaction", mutate: func(input *commandschema.CapabilitiesInput) { input.DefaultInteraction = "terminal" }},
+		{name: "unsupported command default interaction", mutate: func(input *commandschema.CapabilitiesInput) {
+			input.Commands[0].InteractionModes = []commandschema.CapabilityInteractionMode{commandschema.CapabilityInteractionExplicit}
+			input.Commands[0].Arguments = append(input.Commands[0].Arguments, commandschema.CapabilityArgumentInput{Name: "--interactive", Kind: commandschema.CapabilityArgumentOption, Value: commandschema.CapabilityArgumentFlag})
+		}},
+		{name: "interactive string", mutate: func(input *commandschema.CapabilitiesInput) {
+			input.Commands[0].InteractionModes = append(input.Commands[0].InteractionModes, commandschema.CapabilityInteractionExplicit)
+			input.Commands[0].Arguments = append(input.Commands[0].Arguments, commandschema.CapabilityArgumentInput{Name: "--interactive", Kind: commandschema.CapabilityArgumentOption, Value: commandschema.CapabilityArgumentString})
+		}},
+		{name: "default output", mutate: func(input *commandschema.CapabilitiesInput) { input.DefaultOutput = "yaml" }},
+		{name: "unsupported command default output", mutate: func(input *commandschema.CapabilitiesInput) {
+			input.Commands[0].OutputFormats = []commandschema.CapabilityOutputFormat{commandschema.CapabilityOutputJSON}
+		}},
+		{name: "missing effect classes", mutate: func(input *commandschema.CapabilitiesInput) { input.EffectClasses = nil }},
+		{name: "unknown effect class", mutate: func(input *commandschema.CapabilitiesInput) { input.EffectClasses[0] = "filesystem" }},
+		{name: "duplicate effect class", mutate: func(input *commandschema.CapabilitiesInput) { input.EffectClasses[0] = input.EffectClasses[1] }},
 		{name: "document limit", mutate: func(input *commandschema.CapabilitiesInput) { input.ProjectDocumentBytes = 0 }},
 		{name: "startup timeout", mutate: func(input *commandschema.CapabilitiesInput) { input.StartupTimeout = 0 }},
 		{name: "invocation timeout", mutate: func(input *commandschema.CapabilitiesInput) { input.InvocationTimeout = -time.Second }},
@@ -161,6 +216,39 @@ func validCapabilitiesInput(t testing.TB) commandschema.CapabilitiesInput {
 			{Role: commandschema.CapabilitySchemaInspection, Available: true, Name: "plystra.inspect", Version: 1},
 			{Role: commandschema.CapabilitySchemaDiagnostic},
 			{Role: commandschema.CapabilitySchemaRecovery, Available: true, Name: commandschema.RecoverySchemaName, Version: commandschema.RecoverySchemaVersion},
+		},
+		Commands: []commandschema.CapabilityCommandInput{{
+			ID:   "inspect",
+			Path: []string{"inspect"},
+			Arguments: []commandschema.CapabilityArgumentInput{
+				{Name: "--format", Kind: commandschema.CapabilityArgumentOption, Value: commandschema.CapabilityArgumentString, Choices: []string{"json", "human"}},
+				{Name: "--env", Kind: commandschema.CapabilityArgumentOption, Value: commandschema.CapabilityArgumentString, Conflicts: []string{"--config"}},
+				{Name: "--config", Kind: commandschema.CapabilityArgumentOption, Value: commandschema.CapabilityArgumentString, Conflicts: []string{"--env"}},
+			},
+			Selectors:        []string{"configuration"},
+			StableDefaults:   []commandschema.CapabilityDefaultInput{{Name: "verbosity", Value: "concise"}},
+			InteractionModes: []commandschema.CapabilityInteractionMode{commandschema.CapabilityInteractionNonInteractive},
+			OutputFormats:    []commandschema.CapabilityOutputFormat{commandschema.CapabilityOutputJSON, commandschema.CapabilityOutputHuman},
+		}},
+		Selectors: []commandschema.CapabilitySelectorInput{{
+			ID:                   "configuration",
+			Arguments:            []string{"--env", "--config"},
+			EnvironmentVariables: []string{"PLYSTRA_ENV", "PLYSTRA_CONFIG"},
+			Modes:                []string{"explicit-config", "default", "environment"},
+			DefaultMode:          "default",
+		}},
+		DefaultInteraction: commandschema.CapabilityInteractionNonInteractive,
+		DefaultOutput:      commandschema.CapabilityOutputHuman,
+		EffectClasses: []commandschema.EffectClass{
+			commandschema.EffectPublication,
+			commandschema.EffectBackendWrite,
+			commandschema.EffectBackendRead,
+			commandschema.EffectProcessStartup,
+			commandschema.EffectTrustedCodeExecution,
+			commandschema.EffectDownload,
+			commandschema.EffectCacheMaterialization,
+			commandschema.EffectTemporaryFile,
+			commandschema.EffectProjectWrite,
 		},
 		ProjectDocumentBytes: 1 << 20,
 		StartupTimeout:       2 * time.Minute,

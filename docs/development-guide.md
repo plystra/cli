@@ -1932,9 +1932,12 @@ plystra generate --check --config deploy/customer-a.yaml
 `plystra inspect capabilities` reports facts compiled into the installed CLI
 without requiring or resolving a Project. Its JSON form is one canonical
 `plystra.result/v1` document with a `plystra.capabilities/v1` payload containing
-the CLI, Kernel, specification, Go, platform, stable-default, bound,
-transport-toolchain, and five-stage support facts. The human projection names
-the transport component detail it omits. Invalid or missing Projects and
+the CLI, Kernel, specification, Go, platform, exact 28-command leaf surface,
+arguments, selectors, stable defaults, interaction modes, output formats, all
+nine effect classes, bounds, transport toolchain, and five-stage support facts.
+Planned commands are absent. The human projection reports the global defaults
+and category counts, then names the command argument, selector, effect-class,
+and transport component detail it omits. Invalid or missing Projects and
 ambient `PLYSTRA_ENV` or `PLYSTRA_CONFIG` selectors cannot change the result;
 explicit `--verbose`, `--env`, and `--config` are invalid.
 

@@ -143,9 +143,10 @@ func TestRunInspectCapabilitiesHumanOutputIdentifiesOmissions(t *testing.T) {
 	for _, expected := range []string{
 		"Installed Plystra capabilities\n",
 		"Public schemas:\n  continuation: unavailable\n  diagnostic: unavailable\n  graph: plystra.graph/v1\n  inspection: plystra.inspect/v1\n  recovery: plystra.recovery/v1\n  result: plystra.result/v1\n",
-		"Defaults: startup 2m, invocation 30s\n",
+		"Command surface: 28 installed leaf commands\nSelectors: 2 installed\nEffect classes: 9 closed\n",
+		"Defaults: interaction non_interactive, output human, startup 2m, invocation 30s\n",
 		"inspect.capabilities: specified=yes parsed=yes generated=not_applicable executed=yes accepted=yes\n",
-		"Transport component details are omitted from human output; use --format json for the complete installed payload.\n",
+		"Command argument, selector, effect-class, and transport component details are omitted from human output; use --format json for the complete installed payload.\n",
 	} {
 		if !strings.Contains(stdout, expected) {
 			t.Fatalf("human output %q does not contain %q", stdout, expected)
