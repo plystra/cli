@@ -21,7 +21,7 @@ func TestPublicCommandsReportMalformedSelectedConfigurationSourcesWithoutMutatio
 		{name: "generate-check", arguments: []string{"generate", "--check"}},
 		{name: "check", arguments: []string{"check"}},
 		{name: "inspect", arguments: []string{"inspect"}, wantStdout: inspectProgress},
-		{name: "explain", arguments: []string{"explain", "capability", "kernel.health/v1"}, wantStdout: inspectProgress},
+		{name: "explain", arguments: []string{"explain", "capability", "kernel.health/v1"}},
 		{name: "use", arguments: []string{"use", "kernel.health/v1", "example.com/acme/library/records.New"}},
 		{name: "capability-expose", arguments: []string{"capability", "expose", "kernel.health/v1"}},
 	}
@@ -44,7 +44,11 @@ func TestPublicCommandsReportMalformedSelectedConfigurationSourcesWithoutMutatio
 				before := commandTree(t, root)
 				arguments := append(append([]string(nil), command.arguments...), selection.selectors...)
 				exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "records"), commandGoEnvironment())
-				if exitCode != 1 || stdout != command.wantStdout || !commandContainsAll(
+				wantExit := 1
+				if command.name == "explain" {
+					wantExit = 3
+				}
+				if exitCode != wantExit || stdout != command.wantStdout || !commandContainsAll(
 					stderr,
 					`unknown key "unknown"`,
 					"Source: example.com/acme/library:"+selection.path+":1:1 (configuration-declaration)",

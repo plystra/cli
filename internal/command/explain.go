@@ -2,7 +2,6 @@ package command
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,63 +32,7 @@ type commandExplanation struct {
 }
 
 func runExplain(arguments []string, stdout, stderr io.Writer, workingDirectory string, environment []string) int {
-	parsed, ok := parseExplainArguments(arguments)
-	if !ok {
-		_, _ = io.WriteString(stderr, explainUsage)
-		return 2
-	}
-	if rejectConflictingConfigurationSelectors(stderr, parsed.configurationPath, parsed.environmentName) {
-		return 1
-	}
-	output, err := newCommandOutput(parsed.format, stdout, stderr)
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "configure explain output: %v\n", err)
-		return 2
-	}
-
-	_, _ = io.WriteString(output.progressWriter(), "Resolving selected application model...\n")
-	ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
-	defer cancel()
-	resolved, err := applicationresolve.Resolve(ctx, applicationresolve.Options{
-		Start:             workingDirectory,
-		ConfigurationPath: parsed.configurationPath,
-		EnvironmentName:   parsed.environmentName,
-		Environment:       environment,
-	})
-	if err != nil {
-		writeCommandFailure(output.diagnosticWriter(), "explain selected application", err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
-		return 1
-	}
-
-	var explanation commandExplanation
-	switch parsed.subjectKind {
-	case diagnosticschema.ExplainSubjectCapability:
-		explanation, err = explainCapability(resolved, parsed.subject)
-	case diagnosticschema.ExplainSubjectPlugin:
-		explanation, err = explainPlugin(resolved, parsed.subject)
-	case diagnosticschema.ExplainSubjectConfiguration:
-		explanation, err = explainConfiguration(resolved, parsed.subject)
-	case diagnosticschema.ExplainSubjectAlias:
-		explanation, err = explainAlias(resolved, parsed.subject)
-	case diagnosticschema.ExplainSubjectExposure:
-		explanation, err = explainPublicExposure(resolved, parsed.subject)
-	default:
-		err = fmt.Errorf("explanation subject kind %q is not implemented", parsed.subjectKind)
-	}
-	if err != nil {
-		writeCommandFailure(output.diagnosticWriter(), fmt.Sprintf("explain %s %s", parsed.subjectKind, parsed.subject), err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
-		return 1
-	}
-	if parsed.format == commandFormatJSON {
-		_, _ = output.resultWriter().Write(explanation.result.Envelope().CanonicalJSON())
-		_, _ = io.WriteString(output.resultWriter(), "\n")
-		return 0
-	}
-	if err := writeHumanExplanation(output.resultWriter(), explanation, parsed.verbose); err != nil {
-		_, _ = fmt.Fprintf(output.diagnosticWriter(), "render %s explanation: %v\n", parsed.subjectKind, err)
-		return 1
-	}
-	return 0
+	return runExplainWithDependencies(arguments, stdout, stderr, workingDirectory, environment, defaultExplainDependencies())
 }
 
 func parseExplainArguments(arguments []string) (explainArguments, bool) {
@@ -162,7 +105,7 @@ func explainCapability(resolved applicationresolve.Result, subject string) (comm
 	context := resolved.Resolution().Context()
 	_, visible := context.Capability(capabilityID)
 	if !visible {
-		return commandExplanation{}, fmt.Errorf("capability %q is not visible in the selected application model", subject)
+		return commandExplanation{}, newExplainTargetNotFound(diagnosticschema.ExplainSubjectCapability, subject)
 	}
 
 	evidence := resolved.ResolutionEvidence()
@@ -220,7 +163,7 @@ func explainCapability(resolved applicationresolve.Result, subject string) (comm
 				input.PrimarySources[index] = explainSource(source.Source())
 			}
 		}
-		input.Change = requiredCapabilityChange(evidence, selection, currentModule, subject, provider)
+		input.Change = requiredCapabilityChange(selection, currentModule, subject, provider)
 	}
 
 	result, err := diagnosticschema.NewExplain(input)
@@ -242,7 +185,7 @@ func explainPlugin(resolved applicationresolve.Result, subject string) (commandE
 	}
 	candidate, visible := visiblePlugin(evidence, subject)
 	if !visible {
-		return commandExplanation{}, fmt.Errorf("plugin %q is not visible in the selected application model", subject)
+		return commandExplanation{}, newExplainTargetNotFound(diagnosticschema.ExplainSubjectPlugin, subject)
 	}
 
 	input := diagnosticschema.ExplainInput{
@@ -317,7 +260,7 @@ func explainConfiguration(resolved applicationresolve.Result, subject string) (c
 	}
 	field, canonicalSubject, exists := selectedConfigurationField(evidence, subject)
 	if !exists {
-		return commandExplanation{}, fmt.Errorf("configuration field %q is not present in the selected application model", subject)
+		return commandExplanation{}, newExplainTargetNotFound(diagnosticschema.ExplainSubjectConfiguration, subject)
 	}
 
 	input := diagnosticschema.ExplainInput{
@@ -401,7 +344,7 @@ func explainAlias(resolved applicationresolve.Result, subject string) (commandEx
 		}
 	}
 	if !found {
-		return commandExplanation{}, fmt.Errorf("alias %q is not present in the selected application model", subject)
+		return commandExplanation{}, newExplainTargetNotFound(diagnosticschema.ExplainSubjectAlias, subject)
 	}
 	sources := selected.Sources()
 	if len(sources) == 0 {
@@ -510,7 +453,7 @@ func explainPublicExposure(resolved applicationresolve.Result, subject string) (
 
 	alias, visible := selectedCapabilityAlias(evidence, capabilityID.String())
 	if !visible {
-		return commandExplanation{}, fmt.Errorf("capability or Alias %q is not visible in the selected application model", subject)
+		return commandExplanation{}, newExplainTargetNotFound(diagnosticschema.ExplainSubjectExposure, subject)
 	}
 	sources := alias.Sources()
 	if len(sources) == 0 {
@@ -650,7 +593,7 @@ func aliasChange(evidence resolutionevidence.Evidence, selection resolutionevide
 		if !found || provider.PluginID() != source.PluginID() {
 			return diagnosticschema.ExplainChange{}, fmt.Errorf("alias %q generation source omits its selected activation Provider decision", alias.ID())
 		}
-		return requiredCapabilityChange(evidence, selection, currentModule, source.ActivationCapability(), provider), nil
+		return requiredCapabilityChange(selection, currentModule, source.ActivationCapability(), provider), nil
 	}
 	return diagnosticschema.ExplainChange{
 		Kind:   diagnosticschema.ExplainChangeFile,
@@ -867,10 +810,7 @@ func selectedPluginChange(evidence resolutionevidence.Evidence, selection resolu
 	for _, capability := range capabilities {
 		for _, candidate := range evidence.ProviderCandidates() {
 			if candidate.Capability() == capability && candidate.PluginID() != pluginID {
-				return diagnosticschema.ExplainChange{
-					Kind:    diagnosticschema.ExplainChangeCommand,
-					Command: "plystra use " + capability + " " + candidate.PluginID() + explainSelectorSuffix(selection),
-				}
+				return explainProviderChange(capability, currentModule, selection)
 			}
 		}
 	}
@@ -887,10 +827,7 @@ func unselectedPluginDecision(evidence resolutionevidence.Evidence, selection re
 		if candidate.RejectionReason() != resolutionevidence.ProviderRejectionAnotherProviderSelected {
 			continue
 		}
-		return string(candidate.RejectionReason()), []diagnosticjson.Source{explainSource(candidate.Source())}, diagnosticschema.ExplainChange{
-			Kind:    diagnosticschema.ExplainChangeCommand,
-			Command: "plystra use " + candidate.Capability() + " " + plugin.ID() + explainSelectorSuffix(selection),
-		}
+		return string(candidate.RejectionReason()), []diagnosticjson.Source{explainSource(candidate.Source())}, explainProviderChange(candidate.Capability(), currentModule, selection)
 	}
 	if len(candidates) > 0 {
 		sources := make([]diagnosticjson.Source, len(candidates))
@@ -915,6 +852,7 @@ func unselectedPluginDecision(evidence resolutionevidence.Evidence, selection re
 			change = diagnosticschema.ExplainChange{
 				Kind:    diagnosticschema.ExplainChangeCommand,
 				Command: "plystra remove " + plugin.ModulePath(),
+				Argv:    []string{"plystra", "remove", plugin.ModulePath()},
 			}
 			break
 		}
@@ -931,23 +869,9 @@ func selectedCapabilityProvider(evidence resolutionevidence.Evidence, capability
 	return resolutionevidence.SelectedProvider{}, false
 }
 
-func requiredCapabilityChange(evidence resolutionevidence.Evidence, selection resolutionevidence.ConfigurationSelection, currentModule, capability string, selected resolutionevidence.SelectedProvider) diagnosticschema.ExplainChange {
+func requiredCapabilityChange(selection resolutionevidence.ConfigurationSelection, currentModule, capability string, selected resolutionevidence.SelectedProvider) diagnosticschema.ExplainChange {
 	if !selected.Intrinsic() {
-		for _, candidate := range evidence.ProviderCandidates() {
-			if candidate.Capability() != capability || candidate.PluginID() == selected.PluginID() {
-				continue
-			}
-			return diagnosticschema.ExplainChange{
-				Kind:    diagnosticschema.ExplainChangeCommand,
-				Command: "plystra use " + capability + " " + candidate.PluginID() + explainSelectorSuffix(selection),
-			}
-		}
-		return diagnosticschema.ExplainChange{
-			Kind:   diagnosticschema.ExplainChangeFile,
-			Module: currentModule,
-			Path:   selection.SelectedPath(),
-			Field:  fmt.Sprintf("capabilities.use[%q]", capability),
-		}
+		return explainProviderChange(capability, currentModule, selection)
 	}
 	return diagnosticschema.ExplainChange{
 		Kind:   diagnosticschema.ExplainChangeFile,
@@ -957,14 +881,23 @@ func requiredCapabilityChange(evidence resolutionevidence.Evidence, selection re
 	}
 }
 
-func explainSelectorSuffix(selection resolutionevidence.ConfigurationSelection) string {
+func explainProviderChange(capability, currentModule string, selection resolutionevidence.ConfigurationSelection) diagnosticschema.ExplainChange {
+	return diagnosticschema.ExplainChange{
+		Kind:   diagnosticschema.ExplainChangeFile,
+		Module: currentModule,
+		Path:   selection.SelectedPath(),
+		Field:  fmt.Sprintf("capabilities.use[%q]", capability),
+	}
+}
+
+func explainSelectorArgv(selection resolutionevidence.ConfigurationSelection) []string {
 	switch selection.Mode() {
 	case generation.ConfigurationModeEnvironment:
-		return " --env " + strconv.Quote(selection.Environment())
+		return []string{"--env", selection.Environment()}
 	case generation.ConfigurationModeExplicit:
-		return " --config " + strconv.Quote(selection.SelectedPath())
+		return []string{"--config", selection.SelectedPath()}
 	default:
-		return ""
+		return nil
 	}
 }
 

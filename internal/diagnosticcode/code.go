@@ -126,6 +126,13 @@ const (
 )
 
 const (
+	ExplainInvocationInvalid = Prefix + "EXPLAIN_INVOCATION_INVALID"
+	ExplainSubjectInvalid    = Prefix + "EXPLAIN_SUBJECT_INVALID"
+	ExplainTargetNotFound    = Prefix + "EXPLAIN_TARGET_NOT_FOUND"
+	ExplainFailed            = Prefix + "EXPLAIN_FAILED"
+)
+
+const (
 	DependencyAddQueryInvalid    = Prefix + "DEPENDENCY_ADD_QUERY_INVALID"
 	DependencyRemovePathInvalid  = Prefix + "DEPENDENCY_REMOVE_PATH_INVALID"
 	DependencyRemoveNotSelected  = Prefix + "DEPENDENCY_REMOVE_NOT_SELECTED"

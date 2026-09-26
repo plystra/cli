@@ -103,6 +103,12 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	diagnostics := byPath[Root+"/tasks/diagnostics-and-recovery.md"]
 	for _, phrase := range []string{
 		"plystra inspect capabilities --format json",
+		"all five explanation commands",
+		"plystra.explain/v1",
+		"plystra.recovery/v1",
+		"JSON stderr stays empty after initialization",
+		"PLYSTRA_EXPLAIN_FAILED",
+		"fully bound `argv`",
 		"is separate from Project inspection",
 		"exact installed commands and arguments",
 		"effect classes",

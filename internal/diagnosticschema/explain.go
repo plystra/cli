@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -47,13 +48,15 @@ const (
 
 // ExplainChange is a closed file-or-command union. File changes identify the
 // current Project module, one Project-relative document, and one typed field.
-// Command changes contain one public Plystra CLI invocation.
+// Command changes contain one public Plystra CLI invocation plus its exact,
+// shell-independent argument vector.
 type ExplainChange struct {
 	Kind    ExplainChangeKind
 	Module  string
 	Path    string
 	Field   string
 	Command string
+	Argv    []string
 }
 
 // ExplainInput is the construction-only input for one plystra.explain v1
@@ -114,6 +117,7 @@ type explainChange struct {
 	Path    string            `json:"path"`
 	Field   string            `json:"field"`
 	Command string            `json:"command"`
+	Argv    []string          `json:"argv"`
 }
 
 type explainSource struct {
@@ -142,7 +146,7 @@ func NewExplain(input ExplainInput) (ExplainResult, error) {
 	if _, exists := input.Evidence.HTTPTransports(); !exists {
 		return ExplainResult{}, fmt.Errorf("%w: resolution evidence omits selected HTTP transports", ErrExplain)
 	}
-	if err := validateExplainSubject(input.SubjectKind, input.Subject); err != nil {
+	if err := ValidateExplainSubject(input.SubjectKind, input.Subject); err != nil {
 		return ExplainResult{}, fmt.Errorf("%w: subject: %v", ErrExplain, err)
 	}
 	if !validExplanationCode(input.Outcome) {
@@ -199,7 +203,7 @@ func NewExplain(input ExplainInput) (ExplainResult, error) {
 			Code:    input.Reason,
 			Sources: explainSources(primarySources),
 		},
-		Change:             explainChange(change),
+		Change:             explainChangeDocument(change),
 		ResolutionEvidence: evidenceJSON,
 	})
 	if err != nil {
@@ -224,7 +228,7 @@ func NewExplain(input ExplainInput) (ExplainResult, error) {
 		outcome:                input.Outcome,
 		reason:                 input.Reason,
 		primarySources:         primarySources,
-		change:                 change,
+		change:                 cloneExplainChange(change),
 		resolutionEvidenceJSON: evidenceJSON,
 		prepared:               true,
 	}, nil
@@ -245,7 +249,7 @@ func (r ExplainResult) Valid() bool {
 	if _, exists := r.evidence.HTTPTransports(); !exists {
 		return false
 	}
-	if validateExplainSubject(r.subjectKind, r.subject) != nil || !validExplanationCode(r.outcome) || !validExplanationCode(r.reason) {
+	if ValidateExplainSubject(r.subjectKind, r.subject) != nil || !validExplanationCode(r.outcome) || !validExplanationCode(r.reason) {
 		return false
 	}
 	for index, diagnostic := range r.envelope.Diagnostics() {
@@ -254,7 +258,7 @@ func (r ExplainResult) Valid() bool {
 		}
 	}
 	change, changeSource, err := normalizeExplainChange(r.change, currentProjectModule(r.evidence), selection.Mode(), r.evidence.BuildModelDigest())
-	if err != nil || change != r.change {
+	if err != nil || !equalExplainChange(change, r.change) {
 		return false
 	}
 	allSources := collectSources(r.evidence, nil)
@@ -286,7 +290,7 @@ func (r ExplainResult) Valid() bool {
 			Code:    r.reason,
 			Sources: explainSources(r.primarySources),
 		},
-		Change:             explainChange(r.change),
+		Change:             explainChangeDocument(r.change),
 		ResolutionEvidence: append([]byte(nil), r.resolutionEvidenceJSON...),
 	})
 	if err != nil {
@@ -325,7 +329,7 @@ func (r ExplainResult) PrimarySources() []diagnosticjson.Source {
 
 // Change returns the exact current-Project file/field or public CLI command
 // that changes the explained decision.
-func (r ExplainResult) Change() ExplainChange { return r.change }
+func (r ExplainResult) Change() ExplainChange { return cloneExplainChange(r.change) }
 
 // ResolutionEvidenceJSON returns a defensive copy of the complete canonical
 // resolution-evidence document embedded in this command result.
@@ -333,7 +337,11 @@ func (r ExplainResult) ResolutionEvidenceJSON() []byte {
 	return append([]byte(nil), r.resolutionEvidenceJSON...)
 }
 
-func validateExplainSubject(kind ExplainSubjectKind, subject string) error {
+// ValidateExplainSubject validates one exact public explanation target.
+func ValidateExplainSubject(kind ExplainSubjectKind, subject string) error {
+	if containsExplainPlaceholder(subject) {
+		return errors.New("subject contains an unresolved placeholder")
+	}
 	switch kind {
 	case ExplainSubjectCapability, ExplainSubjectAlias, ExplainSubjectExposure:
 		if _, err := capabilityid.Parse(subject); err != nil {
@@ -354,9 +362,74 @@ func validateExplainSubject(kind ExplainSubjectKind, subject string) error {
 }
 
 func validConfigurationSubject(value string) bool {
-	return value != "" && len(value) <= maximumExplanationIdentityLength && utf8.ValidString(value) && strings.IndexFunc(value, func(character rune) bool {
+	if value == "" || len(value) > maximumExplanationIdentityLength || !utf8.ValidString(value) || strings.Contains(value, "\\") || strings.IndexFunc(value, func(character rune) bool {
 		return unicode.IsControl(character) || unicode.IsSpace(character)
-	}) < 0 && !containsAbsolutePath(value)
+	}) >= 0 || containsAbsolutePath(value) {
+		return false
+	}
+	index := 0
+	if !consumeExplainPathSegment(value, &index) {
+		return false
+	}
+	for index < len(value) {
+		switch value[index] {
+		case '.':
+			index++
+			if !consumeExplainPathSegment(value, &index) {
+				return false
+			}
+		case '[':
+			if !consumeExplainPathKey(value, &index) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func consumeExplainPathSegment(value string, index *int) bool {
+	start := *index
+	for *index < len(value) && value[*index] != '.' && value[*index] != '[' {
+		if strings.ContainsRune("]\"'", rune(value[*index])) {
+			return false
+		}
+		*index++
+	}
+	return *index > start
+}
+
+func consumeExplainPathKey(value string, index *int) bool {
+	start := *index
+	if start+3 >= len(value) || value[start] != '[' || value[start+1] != '"' {
+		return false
+	}
+	escaped := false
+	quoteEnd := -1
+	for cursor := start + 2; cursor < len(value); cursor++ {
+		switch {
+		case escaped:
+			escaped = false
+		case value[cursor] == '\\':
+			escaped = true
+		case value[cursor] == '"':
+			quoteEnd = cursor
+			cursor = len(value)
+		}
+	}
+	if quoteEnd < 0 || quoteEnd+1 >= len(value) || value[quoteEnd+1] != ']' {
+		return false
+	}
+	quoted := value[start+1 : quoteEnd+1]
+	key, err := strconv.Unquote(quoted)
+	if err != nil || key == "" || strconv.Quote(key) != quoted || strings.IndexFunc(key, func(character rune) bool {
+		return unicode.IsControl(character) || unicode.IsSpace(character)
+	}) >= 0 {
+		return false
+	}
+	*index = quoteEnd + 2
+	return true
 }
 
 func validExplanationCode(value string) bool {
@@ -396,15 +469,17 @@ func normalizeExplainChange(input ExplainChange, currentModule string, mode gene
 		if !validConfigurationSubject(input.Field) {
 			return ExplainChange{}, nil, fmt.Errorf("file field %q is not a canonical typed field path", input.Field)
 		}
-		if input.Command != "" {
-			return ExplainChange{}, nil, errors.New("file change must not contain a command")
+		if input.Command != "" || len(input.Argv) != 0 {
+			return ExplainChange{}, nil, errors.New("file change must not contain a command or argv")
 		}
 		source := diagnosticjson.Source{Module: input.Module, Path: input.Path, Kind: "change-target"}
 		normalized, err := normalizeExplainSources(mode, digest, []diagnosticjson.Source{source})
 		if err != nil {
 			return ExplainChange{}, nil, fmt.Errorf("file target: %v", err)
 		}
-		return input, &normalized[0], nil
+		result := cloneExplainChange(input)
+		result.Argv = make([]string, 0)
+		return result, &normalized[0], nil
 	case ExplainChangeCommand:
 		if input.Module != "" || input.Path != "" || input.Field != "" {
 			return ExplainChange{}, nil, errors.New("command change must not contain file fields")
@@ -418,9 +493,74 @@ func normalizeExplainChange(input ExplainChange, currentModule string, mode gene
 		if strings.ContainsAny(input.Command, "&|;<>") {
 			return ExplainChange{}, nil, errors.New("command change must contain exactly one Plystra invocation")
 		}
-		return input, nil, nil
+		if len(input.Argv) == 0 || input.Argv[0] != "plystra" {
+			return ExplainChange{}, nil, errors.New("command change must contain exact public Plystra argv")
+		}
+		for index, argument := range input.Argv {
+			if err := validateDisplayText(fmt.Sprintf("change argv[%d]", index), argument); err != nil {
+				return ExplainChange{}, nil, err
+			}
+			if containsExplainPlaceholder(argument) {
+				return ExplainChange{}, nil, fmt.Errorf("change argv[%d] contains an unresolved placeholder", index)
+			}
+		}
+		if input.Command != explainCommandDisplay(input.Argv) {
+			return ExplainChange{}, nil, errors.New("command change display does not match its exact argv")
+		}
+		return cloneExplainChange(input), nil, nil
 	default:
 		return ExplainChange{}, nil, fmt.Errorf("kind %q is not supported", input.Kind)
+	}
+}
+
+func containsExplainPlaceholder(value string) bool {
+	if strings.Contains(value, "${") || strings.Contains(value, "{{") || strings.Contains(value, "}}") {
+		return true
+	}
+	start := strings.IndexByte(value, '<')
+	return start >= 0 && strings.IndexByte(value[start+1:], '>') >= 0
+}
+
+func explainCommandDisplay(argv []string) string {
+	var result strings.Builder
+	for index, argument := range argv {
+		if index != 0 {
+			result.WriteByte(' ')
+		}
+		if index > 0 && (argv[index-1] == "--env" || argv[index-1] == "--config") || strings.IndexFunc(argument, unicode.IsSpace) >= 0 {
+			result.WriteString(strconv.Quote(argument))
+			continue
+		}
+		result.WriteString(argument)
+	}
+	return result.String()
+}
+
+func cloneExplainChange(value ExplainChange) ExplainChange {
+	value.Argv = append([]string(nil), value.Argv...)
+	return value
+}
+
+func equalExplainChange(left, right ExplainChange) bool {
+	if left.Kind != right.Kind || left.Module != right.Module || left.Path != right.Path || left.Field != right.Field || left.Command != right.Command || len(left.Argv) != len(right.Argv) {
+		return false
+	}
+	for index := range left.Argv {
+		if left.Argv[index] != right.Argv[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func explainChangeDocument(value ExplainChange) explainChange {
+	return explainChange{
+		Kind:    value.Kind,
+		Module:  value.Module,
+		Path:    value.Path,
+		Field:   value.Field,
+		Command: value.Command,
+		Argv:    append([]string{}, value.Argv...),
 	}
 }
 

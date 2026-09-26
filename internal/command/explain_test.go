@@ -1,6 +1,7 @@
 package command_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,41 +10,123 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/commandschema"
+	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/testkernel"
 )
 
+type explainCommandSource struct {
+	Module string `json:"module"`
+	Path   string `json:"path"`
+	Kind   string `json:"kind"`
+	Line   int    `json:"line"`
+	Column int    `json:"column"`
+}
+
+type explainCommandResult struct {
+	Subject struct {
+		Kind string `json:"kind"`
+		ID   string `json:"id"`
+	} `json:"subject"`
+	Decision struct {
+		Outcome string `json:"outcome"`
+	} `json:"decision"`
+	Reason struct {
+		Code    string                 `json:"code"`
+		Sources []explainCommandSource `json:"sources"`
+	} `json:"reason"`
+	Change struct {
+		Kind    string   `json:"kind"`
+		Module  string   `json:"module"`
+		Path    string   `json:"path"`
+		Field   string   `json:"field"`
+		Command string   `json:"command"`
+		Argv    []string `json:"argv"`
+	} `json:"change"`
+	ResolutionEvidence json.RawMessage `json:"resolution_evidence"`
+}
+
+type explainCommandPayload struct {
+	Schema                 string                 `json:"schema"`
+	ConfigurationMode      string                 `json:"configuration_mode"`
+	ApplicationModelDigest string                 `json:"application_model_digest"`
+	Sources                []explainCommandSource `json:"sources"`
+	Result                 explainCommandResult   `json:"result"`
+}
+
 type explainCommandEnvelope struct {
-	Schema                 string `json:"schema"`
-	SchemaVersion          int    `json:"schema_version"`
-	ConfigurationMode      string `json:"configuration_mode"`
-	ApplicationModelDigest string `json:"application_model_digest"`
-	Result                 struct {
-		Subject struct {
+	Schema       string `json:"schema"`
+	Operation    string `json:"operation"`
+	InvocationID string `json:"invocation_id"`
+	Snapshot     *struct {
+		Selector struct {
+			Mode string `json:"mode"`
+			Name string `json:"name"`
+			Path string `json:"path"`
+		} `json:"selector"`
+	} `json:"snapshot"`
+	Status      string            `json:"status"`
+	ExitClass   int               `json:"exit_class"`
+	Changes     []json.RawMessage `json:"changes"`
+	Diagnostics []struct {
+		Code      string                 `json:"code"`
+		Severity  string                 `json:"severity"`
+		Message   string                 `json:"message"`
+		Locations []explainCommandSource `json:"locations"`
+	} `json:"diagnostics"`
+	Recovery []struct {
+		Schema string `json:"schema"`
+		ID     string `json:"id"`
+		Kind   string `json:"kind"`
+		Target struct {
 			Kind string `json:"kind"`
 			ID   string `json:"id"`
-		} `json:"subject"`
-		Decision struct {
-			Outcome string `json:"outcome"`
-		} `json:"decision"`
-		Reason struct {
-			Code    string `json:"code"`
-			Sources []struct {
-				Module string `json:"module"`
-				Path   string `json:"path"`
-				Kind   string `json:"kind"`
-				Line   int    `json:"line"`
-				Column int    `json:"column"`
-			} `json:"sources"`
-		} `json:"reason"`
-		Change struct {
-			Kind    string `json:"kind"`
-			Module  string `json:"module"`
-			Path    string `json:"path"`
-			Field   string `json:"field"`
-			Command string `json:"command"`
-		} `json:"change"`
-		ResolutionEvidence json.RawMessage `json:"resolution_evidence"`
-	} `json:"result"`
+		} `json:"target"`
+		Owner *struct {
+			Module string `json:"module"`
+			Path   string `json:"path"`
+		} `json:"owner"`
+		Provenance []explainCommandSource `json:"provenance"`
+		Selector   *struct {
+			Mode string `json:"mode"`
+			Name string `json:"name"`
+			Path string `json:"path"`
+		} `json:"selector"`
+		Preconditions []struct {
+			Kind  string `json:"kind"`
+			Value string `json:"value"`
+			Count int    `json:"count"`
+		} `json:"preconditions"`
+		Effects []struct {
+			Kind  string `json:"kind"`
+			Value string `json:"value"`
+			Count int    `json:"count"`
+		} `json:"effects"`
+		Verification struct {
+			WorkingDirectory string   `json:"working_directory"`
+			Argv             []string `json:"argv"`
+		} `json:"verification"`
+		WorkingDirectory string   `json:"working_directory"`
+		Argv             []string `json:"argv"`
+		Options          []struct {
+			Value            string   `json:"value"`
+			WorkingDirectory string   `json:"working_directory"`
+			Argv             []string `json:"argv"`
+		} `json:"options"`
+	} `json:"recovery"`
+	Effects struct {
+		Observed   []json.RawMessage `json:"observed"`
+		Planned    []json.RawMessage `json:"planned"`
+		Skipped    []json.RawMessage `json:"skipped"`
+		Unverified []json.RawMessage `json:"unverified"`
+	} `json:"effects"`
+	Support      []json.RawMessage      `json:"support"`
+	Payload      *explainCommandPayload `json:"payload"`
+	Continuation json.RawMessage        `json:"continuation"`
+
+	ConfigurationMode      string               `json:"-"`
+	ApplicationModelDigest string               `json:"-"`
+	Result                 explainCommandResult `json:"-"`
 }
 
 func TestExplainCapabilityHumanOutputIsConciseCausalAndReadOnly(t *testing.T) {
@@ -53,13 +136,12 @@ func TestExplainCapabilityHumanOutputIsConciseCausalAndReadOnly(t *testing.T) {
 	before := snapshotInspectProject(t, root)
 	exitCode, stdout, stderr := runCommand(t, []string{"explain", "capability", "email.send/v1"}, nested, inspectCommandEnvironment(nil))
 	for _, fragment := range []string{
-		inspectProgress,
 		"Capability: email.send/v1\n",
 		"Decision: required; Provider acme.email.smtp is selected\n",
 		"Reason: current-project-replacement\n",
 		"Source: example.com/acme/provider-use:plystra.yaml:",
 		"(provider-selection)\n",
-		"Change: plystra use email.send/v1 acme.email.local\n",
+		`Change: edit plystra.yaml at capabilities.use["email.send/v1"]`,
 	} {
 		if !strings.Contains(stdout, fragment) {
 			t.Fatalf("capability explanation omits %q:\n%s", fragment, stdout)
@@ -70,7 +152,7 @@ func TestExplainCapabilityHumanOutputIsConciseCausalAndReadOnly(t *testing.T) {
 			t.Fatalf("concise capability explanation contains %q:\n%s", forbidden, stdout)
 		}
 	}
-	if exitCode != 0 || stderr != "" {
+	if exitCode != 0 || stderr != inspectProgress {
 		t.Fatalf("capability explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
@@ -82,30 +164,41 @@ func TestExplainCapabilityJSONOwnsStdoutAndIsDeterministic(t *testing.T) {
 	t.Parallel()
 
 	root, nested := createExplainCommandProject(t)
+	before := snapshotInspectProject(t, root)
 	environment := inspectCommandEnvironment(nil)
 	firstExit, firstStdout, firstStderr := runCommand(t, []string{"explain", "capability", "email.send/v1", "--format", "json"}, nested, environment)
 	secondExit, secondStdout, secondStderr := runCommand(t, []string{"explain", "capability", "email.send/v1", "--verbose", "--format", "json"}, root, environment)
-	if firstExit != 0 || secondExit != 0 || firstStderr != inspectProgress || secondStderr != inspectProgress {
+	if firstExit != 0 || secondExit != 0 || firstStderr != "" || secondStderr != "" {
 		t.Fatalf("JSON explanation = first (%d, %q) second (%d, %q)", firstExit, firstStderr, secondExit, secondStderr)
 	}
-	if firstStdout != secondStdout || !strings.HasSuffix(firstStdout, "\n") || strings.Count(firstStdout, "\n") != 1 {
+	if !bytes.Equal(canonicalExplainCommandResult(t, firstStdout), canonicalExplainCommandResult(t, secondStdout)) || !strings.HasSuffix(firstStdout, "\n") || strings.Count(firstStdout, "\n") != 1 {
 		t.Fatalf("JSON stdout is not one deterministic document:\nfirst:  %q\nsecond: %q", firstStdout, secondStdout)
 	}
 	document := decodeExplainCommandEnvelope(t, firstStdout)
-	if document.Schema != "plystra.explain" || document.SchemaVersion != 1 || document.ConfigurationMode != "default" || document.ApplicationModelDigest == "" {
+	if document.Schema != commandschema.ResultSchemaV1 || document.Operation != "explain.capability" || document.InvocationID == "" || document.Status != "success" || document.ExitClass != 0 || document.Snapshot.Selector.Mode != "default" || document.Payload == nil || document.Payload.Schema != "plystra.explain/v1" || document.ConfigurationMode != "default" || document.ApplicationModelDigest == "" {
 		t.Fatalf("explain envelope identity = %#v", document)
 	}
+	if document.Changes == nil || len(document.Changes) != 0 || document.Diagnostics == nil || len(document.Diagnostics) != 0 || document.Support == nil || len(document.Support) != 0 || string(document.Continuation) != "null" {
+		t.Fatalf("explain result collections = changes %#v diagnostics %#v support %#v continuation %s", document.Changes, document.Diagnostics, document.Support, document.Continuation)
+	}
+	assertExplainCommandEmptyEffects(t, document)
 	if document.Result.Subject.Kind != "capability" || document.Result.Subject.ID != "email.send/v1" || document.Result.Decision.Outcome != "required" || document.Result.Reason.Code != "current-project-replacement" {
 		t.Fatalf("capability decision = %#v", document.Result)
 	}
 	if len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Module != "example.com/acme/provider-use" || document.Result.Reason.Sources[0].Path != "plystra.yaml" || document.Result.Reason.Sources[0].Kind != "provider-selection" {
 		t.Fatalf("capability reason sources = %#v", document.Result.Reason.Sources)
 	}
-	if document.Result.Change.Kind != "command" || document.Result.Change.Command != "plystra use email.send/v1 acme.email.local" || document.Result.Change.Module != "" || document.Result.Change.Path != "" || document.Result.Change.Field != "" || len(document.Result.ResolutionEvidence) == 0 {
+	if document.Result.Change.Kind != "file" || document.Result.Change.Command != "" || len(document.Result.Change.Argv) != 0 || document.Result.Change.Module != "example.com/acme/provider-use" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `capabilities.use["email.send/v1"]` || len(document.Result.ResolutionEvidence) == 0 {
 		t.Fatalf("capability change/evidence = %#v, %s", document.Result.Change, document.Result.ResolutionEvidence)
+	}
+	if len(document.Recovery) != 1 || document.Recovery[0].Schema != commandschema.RecoverySchemaV1 || document.Recovery[0].ID != "change-explained-decision" || document.Recovery[0].Kind != "edit_source" || document.Recovery[0].Target.Kind != "configuration_field" || document.Recovery[0].Target.ID != `capabilities.use["email.send/v1"]` || document.Recovery[0].Owner == nil || document.Recovery[0].Owner.Module != "example.com/acme/provider-use" || document.Recovery[0].Owner.Path != "plystra.yaml" || document.Recovery[0].Selector == nil || document.Recovery[0].Selector.Mode != "default" || document.Recovery[0].WorkingDirectory != "" || len(document.Recovery[0].Argv) != 0 || document.Recovery[0].Verification.WorkingDirectory != "." || !reflect.DeepEqual(document.Recovery[0].Verification.Argv, []string{"plystra", "explain", "capability", "email.send/v1", "--format", "json"}) {
+		t.Fatalf("capability recovery = %#v", document.Recovery)
 	}
 	if strings.Contains(firstStdout, root) || strings.Contains(firstStdout, "resolved-secret-marker") {
 		t.Fatalf("capability JSON leaked a Project path or unrestricted configuration: %s", firstStdout)
+	}
+	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("capability JSON explanation mutated the Project:\nbefore: %#v\nafter:  %#v", before, after)
 	}
 }
 
@@ -132,7 +225,7 @@ func TestExplainAliasHumanOutputIsConciseCausalAndReadOnly(t *testing.T) {
 			t.Fatalf("concise Alias explanation contains %q:\n%s", forbidden, stdout)
 		}
 	}
-	if exitCode != 0 || stderr != "" {
+	if exitCode != 0 || stderr != inspectProgress {
 		t.Fatalf("Alias explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
@@ -149,7 +242,7 @@ func TestExplainAliasHumanOutputIsConciseCausalAndReadOnly(t *testing.T) {
 			t.Fatalf("narrowed Alias explanation omits %q:\n%s", fragment, stdout)
 		}
 	}
-	if exitCode != 0 || stderr != "" || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
+	if exitCode != 0 || stderr != inspectProgress || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
 		t.Fatalf("narrowed Alias explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
@@ -178,7 +271,7 @@ func TestExplainAliasJSONIsDeterministicAndSelectorMatched(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			firstExit, firstStdout, firstStderr := runCommand(t, test.arguments, nested, inspectCommandEnvironment(test.environment))
 			secondExit, secondStdout, secondStderr := runCommand(t, append(append([]string(nil), test.arguments...), "--verbose"), root, inspectCommandEnvironment(test.environment))
-			if firstExit != 0 || secondExit != 0 || firstStderr != inspectProgress || secondStderr != inspectProgress || firstStdout != secondStdout {
+			if firstExit != 0 || secondExit != 0 || firstStderr != "" || secondStderr != "" || !bytes.Equal(canonicalExplainCommandResult(t, firstStdout), canonicalExplainCommandResult(t, secondStdout)) {
 				t.Fatalf("Alias JSON = first (%d, %q) second (%d, %q)\nfirst: %s\nsecond: %s", firstExit, firstStderr, secondExit, secondStderr, firstStdout, secondStdout)
 			}
 			document := decodeExplainCommandEnvelope(t, firstStdout)
@@ -215,7 +308,7 @@ func TestExplainExposureHumanOutputCoversPublicAndInternalCapabilities(t *testin
 			t.Fatalf("concise exposure explanation contains %q:\n%s", forbidden, stdout)
 		}
 	}
-	if exitCode != 0 || stderr != "" {
+	if exitCode != 0 || stderr != inspectProgress {
 		t.Fatalf("public exposure explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 
@@ -231,7 +324,7 @@ func TestExplainExposureHumanOutputCoversPublicAndInternalCapabilities(t *testin
 			t.Fatalf("internal exposure explanation omits %q:\n%s", fragment, stdout)
 		}
 	}
-	if exitCode != 0 || stderr != "" || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
+	if exitCode != 0 || stderr != inspectProgress || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
 		t.Fatalf("internal exposure explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
@@ -262,7 +355,7 @@ func TestExplainExposureJSONIsDeterministicAndSelectorMatched(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			firstExit, firstStdout, firstStderr := runCommand(t, test.arguments, nested, inspectCommandEnvironment(test.environment))
 			secondExit, secondStdout, secondStderr := runCommand(t, append(append([]string(nil), test.arguments...), "--verbose"), root, inspectCommandEnvironment(test.environment))
-			if firstExit != 0 || secondExit != 0 || firstStderr != inspectProgress || secondStderr != inspectProgress || firstStdout != secondStdout {
+			if firstExit != 0 || secondExit != 0 || firstStderr != "" || secondStderr != "" || !bytes.Equal(canonicalExplainCommandResult(t, firstStdout), canonicalExplainCommandResult(t, secondStdout)) {
 				t.Fatalf("exposure JSON = first (%d, %q) second (%d, %q)\nfirst: %s\nsecond: %s", firstExit, firstStderr, secondExit, secondStderr, firstStdout, secondStdout)
 			}
 			document := decodeExplainCommandEnvelope(t, firstStdout)
@@ -298,7 +391,7 @@ func TestExplainPluginCurrentProjectOutputIsConciseCausalAndReadOnly(t *testing.
 			t.Fatalf("concise Plugin explanation contains %q:\n%s", forbidden, stdout)
 		}
 	}
-	if exitCode != 0 || stderr != "" {
+	if exitCode != 0 || stderr != inspectProgress {
 		t.Fatalf("Plugin explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
@@ -313,7 +406,7 @@ func TestExplainPluginCoversProviderAndVisibleUnselectedDecisions(t *testing.T) 
 	environment := inspectCommandEnvironment(nil)
 	firstExit, firstStdout, firstStderr := runCommand(t, []string{"explain", "plugin", "example.shared", "--format", "json"}, nested, environment)
 	secondExit, secondStdout, secondStderr := runCommand(t, []string{"explain", "plugin", "example.shared", "--verbose", "--format", "json"}, root, environment)
-	if firstExit != 0 || secondExit != 0 || firstStderr != inspectProgress || secondStderr != inspectProgress || firstStdout != secondStdout {
+	if firstExit != 0 || secondExit != 0 || firstStderr != "" || secondStderr != "" || !bytes.Equal(canonicalExplainCommandResult(t, firstStdout), canonicalExplainCommandResult(t, secondStdout)) {
 		t.Fatalf("selected Plugin JSON = first (%d, %q) second (%d, %q)\nfirst: %s\nsecond: %s", firstExit, firstStderr, secondExit, secondStderr, firstStdout, secondStdout)
 	}
 	document := decodeExplainCommandEnvelope(t, firstStdout)
@@ -323,19 +416,19 @@ func TestExplainPluginCoversProviderAndVisibleUnselectedDecisions(t *testing.T) 
 	if len(document.Result.Reason.Sources) != 2 || document.Result.Reason.Sources[0].Module != "example.com/app" || document.Result.Reason.Sources[0].Path != "plystra.yaml" || document.Result.Reason.Sources[1].Module != "example.com/platform" || document.Result.Reason.Sources[1].Path != "shared/capabilities/reports.read/v1/capability.yaml" {
 		t.Fatalf("selected Plugin sources = %#v", document.Result.Reason.Sources)
 	}
-	if document.Result.Change.Kind != "command" || document.Result.Change.Command != "plystra use email.send/v1 example.alternative" || strings.Contains(firstStdout, root) || strings.Contains(firstStdout, "resolved-secret-marker") {
+	if document.Result.Change.Kind != "file" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `capabilities.use["email.send/v1"]` || strings.Contains(firstStdout, root) || strings.Contains(firstStdout, "resolved-secret-marker") {
 		t.Fatalf("selected Plugin change/output = %#v\n%s", document.Result.Change, firstStdout)
 	}
 
 	exitCode, stdout, stderr := runCommand(t, []string{"explain", "plugin", "example.alternative", "--format", "json"}, nested, environment)
 	document = decodeExplainCommandEnvelope(t, stdout)
-	if exitCode != 0 || stderr != inspectProgress || document.Result.Decision.Outcome != "available" || document.Result.Reason.Code != "another-provider-selected" || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != "alternative/capabilities/email.send/v1/capability.yaml" || document.Result.Change.Command != "plystra use email.send/v1 example.alternative" {
+	if exitCode != 0 || stderr != "" || document.Result.Decision.Outcome != "available" || document.Result.Reason.Code != "another-provider-selected" || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != "alternative/capabilities/email.send/v1/capability.yaml" || document.Result.Change.Kind != "file" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `capabilities.use["email.send/v1"]` {
 		t.Fatalf("unselected alternative Plugin = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
 	}
 
 	exitCode, stdout, stderr = runCommand(t, []string{"explain", "plugin", "example.optional", "--format", "json"}, nested, environment)
 	document = decodeExplainCommandEnvelope(t, stdout)
-	if exitCode != 0 || stderr != inspectProgress || document.Result.Decision.Outcome != "available" || document.Result.Reason.Code != "capability-not-required" || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != "optional/capabilities/audit.record/v1/capability.yaml" || document.Result.Change.Kind != "file" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `capabilities.require["audit.record/v1"]` {
+	if exitCode != 0 || stderr != "" || document.Result.Decision.Outcome != "available" || document.Result.Reason.Code != "capability-not-required" || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != "optional/capabilities/audit.record/v1/capability.yaml" || document.Result.Change.Kind != "file" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `capabilities.require["audit.record/v1"]` {
 		t.Fatalf("unrequired Provider Plugin = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
 	}
 }
@@ -350,18 +443,17 @@ func TestExplainPluginSelectorsUseOneSharedSelectedModel(t *testing.T) {
 		environment map[string]string
 		mode        string
 		path        string
-		command     string
 	}{
-		{name: "explicit environment", arguments: []string{"explain", "plugin", "example.alternative", "--format", "json", "--env", "production"}, environment: map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"}, mode: "environment", path: "plystra.production.yaml", command: `plystra use email.send/v1 example.shared --env "production"`},
-		{name: "ambient environment", arguments: []string{"explain", "plugin", "example.alternative", "--format", "json"}, environment: map[string]string{"PLYSTRA_ENV": "production"}, mode: "environment", path: "plystra.production.yaml", command: `plystra use email.send/v1 example.shared --env "production"`},
-		{name: "explicit configuration", arguments: []string{"explain", "plugin", "example.alternative", "--format", "json", "--config", "deploy/customer.yaml"}, environment: map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"}, mode: "explicit-config", path: "deploy/customer.yaml", command: `plystra use email.send/v1 example.shared --config "deploy/customer.yaml"`},
-		{name: "ambient configuration", arguments: []string{"explain", "plugin", "example.alternative", "--format", "json"}, environment: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"}, mode: "explicit-config", path: "deploy/customer.yaml", command: `plystra use email.send/v1 example.shared --config "deploy/customer.yaml"`},
+		{name: "explicit environment", arguments: []string{"explain", "plugin", "example.alternative", "--format", "json", "--env", "production"}, environment: map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"}, mode: "environment", path: "plystra.production.yaml"},
+		{name: "ambient environment", arguments: []string{"explain", "plugin", "example.alternative", "--format", "json"}, environment: map[string]string{"PLYSTRA_ENV": "production"}, mode: "environment", path: "plystra.production.yaml"},
+		{name: "explicit configuration", arguments: []string{"explain", "plugin", "example.alternative", "--format", "json", "--config", "deploy/customer.yaml"}, environment: map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"}, mode: "explicit-config", path: "deploy/customer.yaml"},
+		{name: "ambient configuration", arguments: []string{"explain", "plugin", "example.alternative", "--format", "json"}, environment: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"}, mode: "explicit-config", path: "deploy/customer.yaml"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			exitCode, stdout, stderr := runCommand(t, test.arguments, nested, inspectCommandEnvironment(test.environment))
 			document := decodeExplainCommandEnvelope(t, stdout)
-			if exitCode != 0 || stderr != inspectProgress || document.ConfigurationMode != test.mode || document.Result.Decision.Outcome != "selected" || document.Result.Reason.Code != "provider" || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != test.path || document.Result.Change.Command != test.command {
+			if exitCode != 0 || stderr != "" || document.ConfigurationMode != test.mode || document.Result.Decision.Outcome != "selected" || document.Result.Reason.Code != "provider" || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != test.path || document.Result.Change.Kind != "file" || document.Result.Change.Path != test.path || document.Result.Change.Field != `capabilities.use["email.send/v1"]` || document.Result.Change.Command != "" || len(document.Result.Change.Argv) != 0 {
 				t.Fatalf("selected Plugin explanation = exit %d, stderr %q, mode %q, result %#v", exitCode, stderr, document.ConfigurationMode, document.Result)
 			}
 			if strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
@@ -460,7 +552,7 @@ func TestExplainConfigurationReportsTypedOwnershipReplacementAndRemoval(t *testi
 		t.Run(test.name, func(t *testing.T) {
 			exitCode, stdout, stderr := runCommand(t, test.arguments, nested, inspectCommandEnvironment(nil))
 			document := decodeExplainCommandEnvelope(t, stdout)
-			if exitCode != 0 || stderr != inspectProgress || document.ConfigurationMode != test.mode {
+			if exitCode != 0 || stderr != "" || document.ConfigurationMode != test.mode {
 				t.Fatalf("configuration explanation = exit %d, stderr %q, mode %q", exitCode, stderr, document.ConfigurationMode)
 			}
 			if document.Result.Subject.Kind != "configuration" || document.Result.Subject.ID != test.changeField || document.Result.Decision.Outcome != test.outcome || document.Result.Reason.Code != test.reason {
@@ -490,10 +582,10 @@ func TestExplainConfigurationCanonicalPathProducesDeterministicJSON(t *testing.T
 	environment := inspectCommandEnvironment(nil)
 	firstExit, firstStdout, firstStderr := runCommand(t, []string{"explain", "config", `config["example.com/platform/shared.New"]["host"]`, "--format", "json"}, nested, environment)
 	secondExit, secondStdout, secondStderr := runCommand(t, []string{"explain", "config", `config["example.com/platform/shared.New"]["host"]`, "--verbose", "--format", "json"}, root, environment)
-	if firstExit != 0 || secondExit != 0 || firstStderr != inspectProgress || secondStderr != inspectProgress {
+	if firstExit != 0 || secondExit != 0 || firstStderr != "" || secondStderr != "" {
 		t.Fatalf("configuration JSON = first (%d, %q) second (%d, %q)", firstExit, firstStderr, secondExit, secondStderr)
 	}
-	if firstStdout != secondStdout || !strings.HasSuffix(firstStdout, "\n") || strings.Count(firstStdout, "\n") != 1 {
+	if !bytes.Equal(canonicalExplainCommandResult(t, firstStdout), canonicalExplainCommandResult(t, secondStdout)) || !strings.HasSuffix(firstStdout, "\n") || strings.Count(firstStdout, "\n") != 1 {
 		t.Fatalf("configuration JSON is not one deterministic canonical document:\nfirst:  %q\nsecond: %q", firstStdout, secondStdout)
 	}
 	document := decodeExplainCommandEnvelope(t, firstStdout)
@@ -509,7 +601,7 @@ func TestExplainConfigurationReportsAncestorSuppression(t *testing.T) {
 	root, nested := createExplainDependencyPluginProject(t)
 	exitCode, stdout, stderr := runCommand(t, []string{"explain", "config", `config["example.com/platform/shared.New"]["settings"]["nested"]`, "--format", "json", "--env", "suppressed"}, nested, inspectCommandEnvironment(nil))
 	document := decodeExplainCommandEnvelope(t, stdout)
-	if exitCode != 0 || stderr != inspectProgress || document.ConfigurationMode != "environment" || document.Result.Decision.Outcome != "suppressed" || document.Result.Reason.Code != "ancestor-removal" {
+	if exitCode != 0 || stderr != "" || document.ConfigurationMode != "environment" || document.Result.Decision.Outcome != "suppressed" || document.Result.Reason.Code != "ancestor-removal" {
 		t.Fatalf("suppressed configuration explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
 	}
 	if document.Result.Subject.ID != `config["example.com/platform/shared.New"]["settings"]["nested"]` || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Module != "example.com/app" || document.Result.Reason.Sources[0].Path != "plystra.suppressed.yaml" || document.Result.Reason.Sources[0].Kind != "configuration-removal" {
@@ -542,7 +634,7 @@ func TestExplainConfigurationSelectorsUseOneSharedSelectedModel(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			exitCode, stdout, stderr := runCommand(t, test.arguments, nested, inspectCommandEnvironment(test.environment))
 			document := decodeExplainCommandEnvelope(t, stdout)
-			if exitCode != 0 || stderr != inspectProgress || document.ConfigurationMode != test.mode || document.Result.Decision.Outcome != "effective" || document.Result.Reason.Code != test.reason || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != test.path || document.Result.Change.Path != test.path {
+			if exitCode != 0 || stderr != "" || document.ConfigurationMode != test.mode || document.Result.Decision.Outcome != "effective" || document.Result.Reason.Code != test.reason || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != test.path || document.Result.Change.Path != test.path {
 				t.Fatalf("selected configuration explanation = exit %d, stderr %q, mode %q, result %#v", exitCode, stderr, document.ConfigurationMode, document.Result)
 			}
 			assertConfigurationExplanationRedacted(t, stdout, root)
@@ -568,7 +660,7 @@ func TestExplainConfigurationHumanOutputNamesPluginAndVerboseEvidence(t *testing
 			t.Fatalf("configuration explanation omits %q:\n%s", fragment, stdout)
 		}
 	}
-	if exitCode != 0 || stderr != "" {
+	if exitCode != 0 || stderr != inspectProgress {
 		t.Fatalf("configuration explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	assertConfigurationExplanationRedacted(t, stdout, root)
@@ -584,7 +676,6 @@ func TestExplainCapabilitySelectorsUseOneSharedSelectedModel(t *testing.T) {
 		environment map[string]string
 		mode        string
 		path        string
-		command     string
 	}{
 		{
 			name:        "explicit environment",
@@ -592,7 +683,6 @@ func TestExplainCapabilitySelectorsUseOneSharedSelectedModel(t *testing.T) {
 			environment: map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"},
 			mode:        "environment",
 			path:        "plystra.production.yaml",
-			command:     `plystra use email.send/v1 acme.email.smtp --env "production"`,
 		},
 		{
 			name:        "ambient environment",
@@ -600,7 +690,6 @@ func TestExplainCapabilitySelectorsUseOneSharedSelectedModel(t *testing.T) {
 			environment: map[string]string{"PLYSTRA_ENV": "production"},
 			mode:        "environment",
 			path:        "plystra.production.yaml",
-			command:     `plystra use email.send/v1 acme.email.smtp --env "production"`,
 		},
 		{
 			name:        "explicit configuration",
@@ -608,7 +697,6 @@ func TestExplainCapabilitySelectorsUseOneSharedSelectedModel(t *testing.T) {
 			environment: map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"},
 			mode:        "explicit-config",
 			path:        "deploy/customer.yaml",
-			command:     `plystra use email.send/v1 acme.email.smtp --config "deploy/customer.yaml"`,
 		},
 		{
 			name:        "ambient configuration",
@@ -616,17 +704,16 @@ func TestExplainCapabilitySelectorsUseOneSharedSelectedModel(t *testing.T) {
 			environment: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"},
 			mode:        "explicit-config",
 			path:        "deploy/customer.yaml",
-			command:     `plystra use email.send/v1 acme.email.smtp --config "deploy/customer.yaml"`,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			exitCode, stdout, stderr := runCommand(t, test.arguments, nested, inspectCommandEnvironment(test.environment))
-			if exitCode != 0 || stderr != inspectProgress {
+			if exitCode != 0 || stderr != "" {
 				t.Fatalf("explain = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 			}
 			document := decodeExplainCommandEnvelope(t, stdout)
-			if document.ConfigurationMode != test.mode || document.Result.Decision.Outcome != "required" || document.Result.Reason.Code != "current-project-replacement" || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != test.path || document.Result.Change.Command != test.command {
+			if document.ConfigurationMode != test.mode || document.Result.Decision.Outcome != "required" || document.Result.Reason.Code != "current-project-replacement" || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Path != test.path || document.Result.Change.Kind != "file" || document.Result.Change.Path != test.path || document.Result.Change.Field != `capabilities.use["email.send/v1"]` || document.Result.Change.Command != "" || len(document.Result.Change.Argv) != 0 {
 				t.Fatalf("selected explanation = mode %q outcome %q reason %q sources %#v change %#v", document.ConfigurationMode, document.Result.Decision.Outcome, document.Result.Reason.Code, document.Result.Reason.Sources, document.Result.Change)
 			}
 			if strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
@@ -643,7 +730,7 @@ func TestExplainCapabilityCoversAvailableSoleProviderAndIntrinsicDecisions(t *te
 		_, nested := createExplainCommandProject(t)
 		exitCode, stdout, stderr := runCommand(t, []string{"explain", "capability", "reports.read/v1", "--format", "json"}, nested, inspectCommandEnvironment(nil))
 		document := decodeExplainCommandEnvelope(t, stdout)
-		if exitCode != 0 || stderr != inspectProgress || document.Result.Decision.Outcome != "available" || document.Result.Reason.Code != "capability-not-required" || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Kind != "configuration-selection" || document.Result.Change.Kind != "file" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `capabilities.require["reports.read/v1"]` {
+		if exitCode != 0 || stderr != "" || document.Result.Decision.Outcome != "available" || document.Result.Reason.Code != "capability-not-required" || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Kind != "configuration-selection" || document.Result.Change.Kind != "file" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `capabilities.require["reports.read/v1"]` {
 			t.Fatalf("available explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
 		}
 	})
@@ -662,7 +749,7 @@ func TestExplainCapabilityCoversAvailableSoleProviderAndIntrinsicDecisions(t *te
 				t.Fatalf("sole-Provider explanation omits %q:\n%s", fragment, stdout)
 			}
 		}
-		if exitCode != 0 || stderr != "" {
+		if exitCode != 0 || stderr != inspectProgress {
 			t.Fatalf("sole-Provider explanation = exit %d, stderr %q", exitCode, stderr)
 		}
 	})
@@ -672,7 +759,7 @@ func TestExplainCapabilityCoversAvailableSoleProviderAndIntrinsicDecisions(t *te
 		writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "capabilities:\n  require: [email.send/v1, kernel.health/v1]\n  use: {email.send/v1: acme.email.smtp}\n")
 		exitCode, stdout, stderr := runCommand(t, []string{"explain", "capability", "kernel.health/v1", "--format", "json"}, nested, inspectCommandEnvironment(nil))
 		document := decodeExplainCommandEnvelope(t, stdout)
-		if exitCode != 0 || stderr != inspectProgress || document.Result.Decision.Outcome != "required" || document.Result.Reason.Code != "intrinsic-kernel" || len(document.Result.Reason.Sources) != 1 || document.Result.Change.Kind != "file" || document.Result.Change.Field != `capabilities.require["kernel.health/v1"]` {
+		if exitCode != 0 || stderr != "" || document.Result.Decision.Outcome != "required" || document.Result.Reason.Code != "intrinsic-kernel" || len(document.Result.Reason.Sources) != 1 || document.Result.Change.Kind != "file" || document.Result.Change.Field != `capabilities.require["kernel.health/v1"]` {
 			t.Fatalf("intrinsic explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
 		}
 	})
@@ -712,7 +799,7 @@ replace example.com/b => ../b
 	before := snapshotInspectProject(t, root)
 	exitCode, stdout, stderr := runCommand(t, []string{"explain", "capability", "email.send/v1", "--format", "json"}, nested, inspectCommandEnvironment(nil))
 	document := decodeExplainCommandEnvelope(t, stdout)
-	if exitCode != 0 || stderr != inspectProgress || document.Result.Decision.Outcome != "required" || document.Result.Reason.Code != "sole-provider" || len(document.Result.Reason.Sources) != 1 {
+	if exitCode != 0 || stderr != "" || document.Result.Decision.Outcome != "required" || document.Result.Reason.Code != "sole-provider" || len(document.Result.Reason.Sources) != 1 {
 		t.Fatalf("dependency-inert explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
 	}
 	if document.Result.Reason.Sources[0].Module != "example.com/a" || document.Result.Reason.Sources[0].Path != "smtp/capabilities/email.send/v1/capability.yaml" || document.Result.Reason.Sources[0].Kind != "provider-declaration" {
@@ -723,13 +810,14 @@ replace example.com/b => ../b
 	}
 
 	exitCode, stdout, stderr = runCommand(t, []string{"explain", "alias", "mail.send/v1", "--format", "json"}, nested, inspectCommandEnvironment(nil))
-	if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, inspectProgress) || !strings.Contains(stderr, "is not present in the selected application model") {
-		t.Fatalf("dependency Alias was not inert = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	document = decodeExplainCommandEnvelope(t, stdout)
+	if exitCode != 3 || stderr != "" || document.Status != "validation_failed" || document.ExitClass != 3 || document.Payload != nil || len(document.Diagnostics) != 1 || document.Diagnostics[0].Code != diagnosticcode.ExplainTargetNotFound || len(document.Recovery) != 1 || document.Recovery[0].ID != "select-visible-explain-target" || document.Recovery[0].Target.Kind != "alias" || document.Recovery[0].Target.ID != "mail.send/v1" {
+		t.Fatalf("dependency Alias was not inert = exit %d, stderr %q, result %#v", exitCode, stderr, document)
 	}
 
 	exitCode, stdout, stderr = runCommand(t, []string{"explain", "exposure", "email.send/v1", "--format", "json"}, nested, inspectCommandEnvironment(nil))
 	document = decodeExplainCommandEnvelope(t, stdout)
-	if exitCode != 0 || stderr != inspectProgress || document.Result.Subject.Kind != "exposure" || document.Result.Decision.Outcome != "internal" || document.Result.Reason.Code != "not-publicly-exposed" || len(document.Result.Reason.Sources) != 1 {
+	if exitCode != 0 || stderr != "" || document.Result.Subject.Kind != "exposure" || document.Result.Decision.Outcome != "internal" || document.Result.Reason.Code != "not-publicly-exposed" || len(document.Result.Reason.Sources) != 1 {
 		t.Fatalf("dependency exposure was not inert = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
 	}
 	if document.Result.Reason.Sources[0].Module != "example.com/app" || document.Result.Reason.Sources[0].Path != "plystra.yaml" || document.Result.Change.Path != "plystra.yaml" || document.Result.Change.Field != `http.expose["email.send/v1"]` {
@@ -756,7 +844,7 @@ func TestExplainAliasCoversGeneratedOnlyAndMixedSources(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			exitCode, stdout, stderr := runCommand(t, []string{"explain", "alias", test.alias, "--format", "json"}, nested, inspectCommandEnvironment(nil))
 			document := decodeExplainCommandEnvelope(t, stdout)
-			if exitCode != 0 || stderr != inspectProgress || document.Result.Subject.Kind != "alias" || document.Result.Subject.ID != test.alias || document.Result.Decision.Outcome != "valid" || document.Result.Reason.Code != test.reason || len(document.Result.Reason.Sources) != len(test.sourceKinds) {
+			if exitCode != 0 || stderr != "" || document.Result.Subject.Kind != "alias" || document.Result.Subject.ID != test.alias || document.Result.Decision.Outcome != "valid" || document.Result.Reason.Code != test.reason || len(document.Result.Reason.Sources) != len(test.sourceKinds) {
 				t.Fatalf("generated Alias explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
 			}
 			for index, kind := range test.sourceKinds {
@@ -774,7 +862,7 @@ func TestExplainAliasCoversGeneratedOnlyAndMixedSources(t *testing.T) {
 	}
 	exitCode, stdout, stderr := runCommand(t, []string{"explain", "alias", "orders.start/v1", "--format", "json", "--env", "production"}, nested, inspectCommandEnvironment(map[string]string{"PLYSTRA_ENV": "ignored", "PLYSTRA_CONFIG": "ignored.yaml"}))
 	document := decodeExplainCommandEnvelope(t, stdout)
-	if exitCode != 0 || stderr != inspectProgress || document.ConfigurationMode != "environment" || document.Result.Reason.Code != "generation-extension-alias" || document.Result.Change.Kind != "file" || document.Result.Change.Path != "plystra.production.yaml" || document.Result.Change.Field != `capabilities.use["authn.session.verify/v1"]` {
+	if exitCode != 0 || stderr != "" || document.ConfigurationMode != "environment" || document.Result.Reason.Code != "generation-extension-alias" || document.Result.Change.Kind != "file" || document.Result.Change.Path != "plystra.production.yaml" || document.Result.Change.Field != `capabilities.use["authn.session.verify/v1"]` {
 		t.Fatalf("selected generated Alias explanation = exit %d, stderr %q, mode %q, result %#v", exitCode, stderr, document.ConfigurationMode, document.Result)
 	}
 	for _, test := range []struct {
@@ -794,7 +882,7 @@ func TestExplainAliasCoversGeneratedOnlyAndMixedSources(t *testing.T) {
 		t.Run("exposure "+test.name, func(t *testing.T) {
 			exitCode, stdout, stderr := runCommand(t, test.arguments, nested, inspectCommandEnvironment(nil))
 			document := decodeExplainCommandEnvelope(t, stdout)
-			if exitCode != 0 || stderr != inspectProgress || document.ConfigurationMode != test.mode || document.Result.Subject.ID != test.alias || document.Result.Decision.Outcome != test.outcome || document.Result.Reason.Code != test.reason || len(document.Result.Reason.Sources) != test.sourceCount || document.Result.Change.Field != test.changeField {
+			if exitCode != 0 || stderr != "" || document.ConfigurationMode != test.mode || document.Result.Subject.ID != test.alias || document.Result.Decision.Outcome != test.outcome || document.Result.Reason.Code != test.reason || len(document.Result.Reason.Sources) != test.sourceCount || document.Result.Change.Field != test.changeField {
 				t.Fatalf("generated exposure explanation = exit %d, stderr %q, mode %q, result %#v", exitCode, stderr, document.ConfigurationMode, document.Result)
 			}
 			if strings.Contains(stdout, root) || strings.Contains(stdout, "generation-private-marker") {
@@ -807,37 +895,76 @@ func TestExplainAliasCoversGeneratedOnlyAndMixedSources(t *testing.T) {
 	}
 }
 
-func TestExplainFailuresKeepJSONStdoutEmptyAndDoNotMutate(t *testing.T) {
+func TestExplainFailuresReturnCanonicalResultsAndDoNotMutate(t *testing.T) {
 	t.Parallel()
 
 	root, nested := createExplainCommandProject(t)
 	before := snapshotInspectProject(t, root)
 	tests := []struct {
-		name        string
-		arguments   []string
-		environment map[string]string
-		want        string
+		name             string
+		arguments        []string
+		environment      map[string]string
+		operation        string
+		exitClass        int
+		status           string
+		code             string
+		snapshot         bool
+		recoveryID       string
+		targetKind       string
+		targetID         string
+		selectorMode     string
+		locationPath     string
+		verificationArgv []string
 	}{
-		{name: "unknown canonical Capability", arguments: []string{"explain", "capability", "missing.operation/v1", "--format", "json"}, want: "not visible in the selected application model"},
-		{name: "invalid Capability identity", arguments: []string{"explain", "capability", "email.send", "--format", "json"}, want: "invalid capability ID"},
-		{name: "unknown canonical Plugin", arguments: []string{"explain", "plugin", "missing.plugin", "--format", "json"}, want: "not visible in the selected application model"},
-		{name: "invalid Plugin identity", arguments: []string{"explain", "plugin", "missing", "--format", "json"}, want: "invalid plugin ID"},
-		{name: "unknown configuration field", arguments: []string{"explain", "config", "http.missing", "--format", "json"}, want: "is not present in the selected application model"},
-		{name: "invalid configuration path", arguments: []string{"explain", "config", "config..host", "--format", "json"}, want: "is not present in the selected application model"},
-		{name: "unknown canonical Alias", arguments: []string{"explain", "alias", "missing.operation/v1", "--format", "json"}, want: "is not present in the selected application model"},
-		{name: "invalid Alias identity", arguments: []string{"explain", "alias", "mail.send", "--format", "json"}, want: "invalid capability ID"},
-		{name: "unknown exposure identity", arguments: []string{"explain", "exposure", "missing.operation/v1", "--format", "json"}, want: "is not visible in the selected application model"},
-		{name: "invalid exposure identity", arguments: []string{"explain", "exposure", "mail.send", "--format", "json"}, want: "invalid capability ID"},
-		{name: "missing overlay", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json", "--env", "missing"}, want: "plystra.missing.yaml"},
-		{name: "unsafe environment", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json", "--env", "../test"}, want: "safe filename component"},
-		{name: "ambient conflict", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json"}, environment: map[string]string{"PLYSTRA_ENV": "production", "PLYSTRA_CONFIG": "deploy/customer.yaml"}, want: "PLYSTRA_CONFIG and PLYSTRA_ENV cannot be used together"},
+		{name: "unknown canonical Capability", arguments: []string{"explain", "capability", "missing.operation/v1", "--format", "json"}, operation: "explain.capability", exitClass: 3, status: "validation_failed", code: diagnosticcode.ExplainTargetNotFound, snapshot: true, recoveryID: "select-visible-explain-target", targetKind: "capability", targetID: "missing.operation/v1", selectorMode: "default", verificationArgv: []string{"plystra", "explain", "capability", "missing.operation/v1", "--format", "json"}},
+		{name: "invalid Capability identity", arguments: []string{"explain", "capability", "email.send", "--format", "json"}, operation: "explain.capability", exitClass: 2, status: "invalid_invocation", code: diagnosticcode.ExplainSubjectInvalid, recoveryID: "correct-explain-subject", targetKind: "subject", targetID: "explain.capability", verificationArgv: []string{"plystra", "explain", "--help"}},
+		{name: "unknown canonical Plugin", arguments: []string{"explain", "plugin", "missing.plugin", "--format", "json"}, operation: "explain.plugin", exitClass: 3, status: "validation_failed", code: diagnosticcode.ExplainTargetNotFound, snapshot: true, recoveryID: "select-visible-explain-target", targetKind: "plugin", targetID: "missing.plugin", selectorMode: "default", verificationArgv: []string{"plystra", "explain", "plugin", "missing.plugin", "--format", "json"}},
+		{name: "invalid Plugin identity", arguments: []string{"explain", "plugin", "missing", "--format", "json"}, operation: "explain.plugin", exitClass: 2, status: "invalid_invocation", code: diagnosticcode.ExplainSubjectInvalid, recoveryID: "correct-explain-subject", targetKind: "subject", targetID: "explain.plugin", verificationArgv: []string{"plystra", "explain", "--help"}},
+		{name: "unknown configuration field", arguments: []string{"explain", "config", "http.missing", "--format", "json"}, operation: "explain.config", exitClass: 3, status: "validation_failed", code: diagnosticcode.ExplainTargetNotFound, snapshot: true, recoveryID: "select-visible-explain-target", targetKind: "configuration", targetID: "http.missing", selectorMode: "default", verificationArgv: []string{"plystra", "explain", "config", "http.missing", "--format", "json"}},
+		{name: "invalid configuration path", arguments: []string{"explain", "config", "config..host", "--format", "json"}, operation: "explain.config", exitClass: 2, status: "invalid_invocation", code: diagnosticcode.ExplainSubjectInvalid, recoveryID: "correct-explain-subject", targetKind: "subject", targetID: "explain.config", verificationArgv: []string{"plystra", "explain", "--help"}},
+		{name: "unknown canonical Alias", arguments: []string{"explain", "alias", "missing.operation/v1", "--format", "json"}, operation: "explain.alias", exitClass: 3, status: "validation_failed", code: diagnosticcode.ExplainTargetNotFound, snapshot: true, recoveryID: "select-visible-explain-target", targetKind: "alias", targetID: "missing.operation/v1", selectorMode: "default", verificationArgv: []string{"plystra", "explain", "alias", "missing.operation/v1", "--format", "json"}},
+		{name: "invalid Alias identity", arguments: []string{"explain", "alias", "mail.send", "--format", "json"}, operation: "explain.alias", exitClass: 2, status: "invalid_invocation", code: diagnosticcode.ExplainSubjectInvalid, recoveryID: "correct-explain-subject", targetKind: "subject", targetID: "explain.alias", verificationArgv: []string{"plystra", "explain", "--help"}},
+		{name: "unknown exposure identity", arguments: []string{"explain", "exposure", "missing.operation/v1", "--format", "json"}, operation: "explain.exposure", exitClass: 3, status: "validation_failed", code: diagnosticcode.ExplainTargetNotFound, snapshot: true, recoveryID: "select-visible-explain-target", targetKind: "exposure", targetID: "missing.operation/v1", selectorMode: "default", verificationArgv: []string{"plystra", "explain", "exposure", "missing.operation/v1", "--format", "json"}},
+		{name: "invalid exposure identity", arguments: []string{"explain", "exposure", "mail.send", "--format", "json"}, operation: "explain.exposure", exitClass: 2, status: "invalid_invocation", code: diagnosticcode.ExplainSubjectInvalid, recoveryID: "correct-explain-subject", targetKind: "subject", targetID: "explain.exposure", verificationArgv: []string{"plystra", "explain", "--help"}},
+		{name: "missing overlay", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json", "--env", "missing"}, operation: "explain.capability", exitClass: 3, status: "validation_failed", code: diagnosticcode.ConfigurationSelectionInvalid, recoveryID: "select-explain-configuration", targetKind: "configuration_selector", targetID: "explain.capability", selectorMode: "environment", locationPath: "plystra.missing.yaml", verificationArgv: []string{"plystra", "explain", "capability", "email.send/v1", "--format", "json", "--env", "missing"}},
+		{name: "unsafe environment", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json", "--env", "../test"}, operation: "explain.capability", exitClass: 3, status: "validation_failed", code: diagnosticcode.ConfigurationSelectionInvalid, recoveryID: "select-explain-configuration", targetKind: "configuration_selector", targetID: "explain.capability", verificationArgv: []string{"plystra", "explain", "--help"}},
+		{name: "ambient conflict", arguments: []string{"explain", "capability", "email.send/v1", "--format", "json"}, environment: map[string]string{"PLYSTRA_ENV": "production", "PLYSTRA_CONFIG": "deploy/customer.yaml"}, operation: "explain.capability", exitClass: 3, status: "validation_failed", code: diagnosticcode.ConfigurationSelectionInvalid, recoveryID: "select-explain-configuration", targetKind: "configuration_selector", targetID: "explain.capability", verificationArgv: []string{"plystra", "explain", "--help"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			exitCode, stdout, stderr := runCommand(t, test.arguments, nested, inspectCommandEnvironment(test.environment))
-			if exitCode != 1 || stdout != "" || !strings.HasPrefix(stderr, inspectProgress) || !strings.Contains(stderr, test.want) {
-				t.Fatalf("explain failure = exit %d, stdout %q, stderr %q; want %q", exitCode, stdout, stderr, test.want)
+			if exitCode != test.exitClass || stderr != "" || !strings.HasSuffix(stdout, "\n") || strings.Count(stdout, "\n") != 1 {
+				t.Fatalf("explain failure = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 			}
+			document := decodeExplainCommandEnvelope(t, stdout)
+			if document.Schema != commandschema.ResultSchemaV1 || document.Operation != test.operation || document.InvocationID == "" || document.Status != test.status || document.ExitClass != test.exitClass || document.Payload != nil || (document.Snapshot != nil) != test.snapshot {
+				t.Fatalf("explain failure identity = %#v", document)
+			}
+			if document.Changes == nil || len(document.Changes) != 0 || document.Support == nil || len(document.Support) != 0 || string(document.Continuation) != "null" {
+				t.Fatalf("explain failure collections = changes %#v support %#v continuation %s", document.Changes, document.Support, document.Continuation)
+			}
+			if len(document.Diagnostics) != 1 || document.Diagnostics[0].Code != test.code || document.Diagnostics[0].Severity != "error" || document.Diagnostics[0].Message == "" {
+				t.Fatalf("explain failure diagnostics = %#v", document.Diagnostics)
+			}
+			if test.locationPath == "" {
+				if len(document.Diagnostics[0].Locations) != 0 {
+					t.Fatalf("explain failure locations = %#v, want empty", document.Diagnostics[0].Locations)
+				}
+			} else if len(document.Diagnostics[0].Locations) != 1 || document.Diagnostics[0].Locations[0].Path != test.locationPath {
+				t.Fatalf("explain failure locations = %#v, want path %q", document.Diagnostics[0].Locations, test.locationPath)
+			}
+			if len(document.Recovery) != 1 || document.Recovery[0].Schema != commandschema.RecoverySchemaV1 || document.Recovery[0].ID != test.recoveryID || document.Recovery[0].Kind != "manual" || document.Recovery[0].Target.Kind != test.targetKind || document.Recovery[0].Target.ID != test.targetID || !reflect.DeepEqual(document.Recovery[0].Verification.Argv, test.verificationArgv) {
+				t.Fatalf("explain failure recovery = %#v", document.Recovery)
+			}
+			if test.selectorMode == "" {
+				if document.Recovery[0].Selector != nil {
+					t.Fatalf("explain failure selector = %#v, want null", document.Recovery[0].Selector)
+				}
+			} else if document.Recovery[0].Selector == nil || document.Recovery[0].Selector.Mode != test.selectorMode {
+				t.Fatalf("explain failure selector = %#v, want mode %q", document.Recovery[0].Selector, test.selectorMode)
+			}
+			assertExplainCommandEmptyEffects(t, document)
+			assertConfigurationExplanationRedacted(t, stdout, root)
 			if after := snapshotInspectProject(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("failed explanation mutated the Project:\nbefore: %#v\nafter:  %#v", before, after)
 			}
@@ -852,7 +979,7 @@ func TestExplainCapabilityVerboseIncludesCompleteIndentedEvidence(t *testing.T) 
 	exitCode, stdout, stderr := runCommand(t, []string{"explain", "capability", "email.send/v1", "--verbose", "--env", "production"}, root, inspectCommandEnvironment(nil))
 	for _, fragment := range []string{
 		"Decision: required; Provider acme.email.local is selected\n",
-		`Change: plystra use email.send/v1 acme.email.smtp --env "production"`,
+		`Change: edit plystra.production.yaml at capabilities.use["email.send/v1"]`,
 		"Resolution evidence:\n  {\n",
 		"    \"requirements\": [",
 		"    \"provider_candidates\": [",
@@ -864,7 +991,7 @@ func TestExplainCapabilityVerboseIncludesCompleteIndentedEvidence(t *testing.T) 
 			t.Fatalf("verbose explanation omits %q:\n%s", fragment, stdout)
 		}
 	}
-	if exitCode != 0 || stderr != "" || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
+	if exitCode != 0 || stderr != inspectProgress || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
 		t.Fatalf("verbose explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 }
@@ -878,7 +1005,7 @@ func TestExplainPluginVerboseIncludesCompleteIndentedEvidence(t *testing.T) {
 		"Plugin: example.alternative\n",
 		"Decision: selected as a Provider for email.send/v1\n",
 		"Reason: provider\n",
-		`Change: plystra use email.send/v1 example.shared --env "production"`,
+		`Change: edit plystra.production.yaml at capabilities.use["email.send/v1"]`,
 		"Resolution evidence:\n  {\n",
 		"    \"plugin_candidates\": [",
 		"    \"selected_plugins\": [",
@@ -889,7 +1016,7 @@ func TestExplainPluginVerboseIncludesCompleteIndentedEvidence(t *testing.T) {
 			t.Fatalf("verbose Plugin explanation omits %q:\n%s", fragment, stdout)
 		}
 	}
-	if exitCode != 0 || stderr != "" || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
+	if exitCode != 0 || stderr != inspectProgress || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
 		t.Fatalf("verbose Plugin explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 }
@@ -914,7 +1041,7 @@ func TestExplainAliasVerboseIncludesCompleteIndentedEvidence(t *testing.T) {
 			t.Fatalf("verbose Alias explanation omits %q:\n%s", fragment, stdout)
 		}
 	}
-	if exitCode != 0 || stderr != "" || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
+	if exitCode != 0 || stderr != inspectProgress || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
 		t.Fatalf("verbose Alias explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 }
@@ -939,8 +1066,48 @@ func TestExplainExposureVerboseIncludesCompleteIndentedEvidence(t *testing.T) {
 			t.Fatalf("verbose exposure explanation omits %q:\n%s", fragment, stdout)
 		}
 	}
-	if exitCode != 0 || stderr != "" || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
+	if exitCode != 0 || stderr != inspectProgress || strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
 		t.Fatalf("verbose exposure explanation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+}
+
+func TestExplainImplementationRecoveryCanBeAppliedThroughPublicCommands(t *testing.T) {
+	t.Parallel()
+	root := writeImplementationSelectionCommandProject(t)
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [email.send/v1]}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "{}\n")
+	environment := implementationSelectionCommandEnvironment(map[string]string{"PLYSTRA_ENV": "production"})
+	before := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"explain", "capability", "kernel.health/v1", "--format", "json"}, filepath.Join(root, "smtp"), environment)
+	document := decodeExplainCommandEnvelope(t, stdout)
+	if exitCode != 4 || stderr != "" || document.Status != "decision_required" || document.ExitClass != 4 || len(document.Diagnostics) != 1 || document.Diagnostics[0].Code != diagnosticcode.ResolveMultipleImplementations || len(document.Recovery) != 1 {
+		t.Fatalf("Implementation ambiguity = exit %d stdout %s stderr %q", exitCode, stdout, stderr)
+	}
+	action := document.Recovery[0]
+	if action.Kind != "choose" || action.ID != "choose-interface-implementation" || action.Target.ID != "email.send/v1" || action.Selector == nil || action.Selector.Name != "production" || len(action.Options) != 2 {
+		t.Fatalf("Implementation recovery = %#v", action)
+	}
+	for index, name := range []string{"local", "smtp"} {
+		value := "example.com/acme/implementation-use/" + name + ".New"
+		option := action.Options[index]
+		if option.Value != value || option.WorkingDirectory != "." || !reflect.DeepEqual(option.Argv, []string{"plystra", "use", "email.send/v1", value, "--env", "production"}) {
+			t.Fatalf("Implementation option = %#v", option)
+		}
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatal("failed explanation mutated Project")
+	}
+	exitCode, stdout, stderr = runCommand(t, action.Options[0].Argv[1:], root, environment)
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("apply recovery = %d %s %s", exitCode, stdout, stderr)
+	}
+	exitCode, stdout, stderr = runCommand(t, action.Verification.Argv[1:], root, environment)
+	if exitCode != 0 || stderr != "" || decodeExplainCommandEnvelope(t, stdout).Status != "success" {
+		t.Fatalf("verify recovery = %d %s %s", exitCode, stdout, stderr)
+	}
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check", "--env", "production"}, root, environment)
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("independent generated check = %d %s %s", exitCode, stdout, stderr)
 	}
 }
 
@@ -1163,7 +1330,36 @@ func decodeExplainCommandEnvelope(t testing.TB, output string) explainCommandEnv
 	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		t.Fatalf("decode explain JSON: %v\n%s", err, output)
 	}
+	if result.Payload != nil {
+		result.ConfigurationMode = result.Payload.ConfigurationMode
+		result.ApplicationModelDigest = result.Payload.ApplicationModelDigest
+		result.Result = result.Payload.Result
+	}
 	return result
+}
+
+func canonicalExplainCommandResult(t testing.TB, output string) []byte {
+	t.Helper()
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(output), &document); err != nil {
+		t.Fatalf("decode explain command result: %v\n%s", err, output)
+	}
+	if _, exists := document["invocation_id"]; !exists {
+		t.Fatalf("explain command result omits invocation_id: %s", output)
+	}
+	delete(document, "invocation_id")
+	canonical, err := json.Marshal(document)
+	if err != nil {
+		t.Fatalf("normalize explain command result: %v", err)
+	}
+	return canonical
+}
+
+func assertExplainCommandEmptyEffects(t testing.TB, document explainCommandEnvelope) {
+	t.Helper()
+	if document.Effects.Observed == nil || document.Effects.Planned == nil || document.Effects.Skipped == nil || document.Effects.Unverified == nil || len(document.Effects.Observed) != 0 || len(document.Effects.Planned) != 0 || len(document.Effects.Skipped) != 0 || len(document.Effects.Unverified) != 0 {
+		t.Fatalf("explain command effects = %#v, want four empty dispositions", document.Effects)
+	}
 }
 
 func assertConfigurationExplanationRedacted(t testing.TB, output, root string) {

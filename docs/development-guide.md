@@ -1973,15 +1973,16 @@ Secrets and unrestricted configuration values.
 Use `plystra explain capability <capability-name>/vN` when a particular
 Capability's selection is unexpected. A required Capability reports the
 selected Plugin Provider or Kernel intrinsic, the direct selection reason and
-source, and either a concrete `plystra use` command for an available alternative
-or the selected configuration field that owns the decision. A visible but
-unrequired Capability points to the selected document's
+source, and the selected configuration field that owns the decision. A visible
+but unrequired Capability points to the selected document's
 `capabilities.require["<capability-name>/vN"]` field. Keep the same `--env` or
 `--config` selector throughout diagnosis, generation, checking, testing, and
 startup. Add `--verbose` for the complete candidate, rejection, requirement,
 generation, configuration, and assembly evidence, or `--format json` for one
-deterministic `plystra.explain` v1 document. The command is read-only and emits
-neither Secret values nor machine-specific Project paths.
+`plystra.result/v1` document with a deterministic `plystra.explain/v1` payload.
+JSON diagnostics and typed recovery are inside that result, with no stderr after
+initialization. Human progress and diagnostics use stderr. The command is
+read-only and emits neither Secret values nor machine-specific Project paths.
 
 Use `plystra explain plugin <plugin-id>` when a Plugin's inclusion is
 unexpected. A current-Project Plugin is selected by its root-level declaration.
@@ -1989,8 +1990,8 @@ A selected dependency Plugin lists every exact Capability for which it is the
 chosen Provider and the direct Provider-decision sources. A visible unselected
 dependency Plugin distinguishes an alternate Provider winning from none of its
 provided Capabilities being required. The concise result identifies one
-selector-matched `plystra use` command or selected-configuration field that
-changes the decision. Keep the same selector for follow-up generation and
+field in the selected configuration that changes the decision. Keep the same
+selector for follow-up generation and
 validation; `--verbose` and `--format json` use the same complete redacted
 evidence boundary as Capability explanations.
 
@@ -2024,6 +2025,21 @@ internal Alias distinguishes an explicit Alias narrowing from a target that is
 not public and points to the selected Alias, activation Provider, or target
 exposure field that controls the result. Keep the same selector for the edit,
 generation, check, and startup workflows.
+
+Explanation failures use exit `2` for invalid invocation or subject, `3` for
+invalid Project state or missing targets, `4` for required decisions or missing
+prerequisites, and `8` for internal failures. The corresponding explanation
+codes are `PLYSTRA_EXPLAIN_INVOCATION_INVALID`, `PLYSTRA_EXPLAIN_SUBJECT_INVALID`,
+`PLYSTRA_EXPLAIN_TARGET_NOT_FOUND`, and redacted `PLYSTRA_EXPLAIN_FAILED`.
+Known resolution diagnostics retain their stable codes and module-relative
+locations. Every result includes all four effect arrays and a typed
+`plystra.recovery/v1` action with independent verification. Provider choices
+identify the selected `capabilities.use` field and finite allowed Plugin IDs;
+they have no executable command because installed `plystra use` accepts only
+Interface Implementation constructors. Implementation choices carry sorted,
+fully bound `argv` and the exact selector. Execute only the selected supported
+action from its Project-relative working directory, then run its verification.
+Never execute placeholders or infer shell commands from human display text.
 
 Clean check output resembles:
 

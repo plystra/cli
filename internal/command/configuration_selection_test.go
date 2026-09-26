@@ -52,7 +52,12 @@ func TestRunClassifiesConflictingConfigurationSelectorsWithoutMutation(t *testin
 					arguments = append(arguments, command.selectors...)
 				}
 				exitCode, stdout, stderr := runCommand(t, arguments, start, commandGoEnvironmentWith(conflict.environment))
-				if exitCode != 1 || stdout != "" || !commandContainsAll(
+				if command.name == "explain" {
+					document := decodeExplainCommandEnvelope(t, stdout)
+					if exitCode != 3 || stderr != "" || document.Status != "validation_failed" || document.ExitClass != 3 || len(document.Diagnostics) != 1 || document.Diagnostics[0].Code != diagnosticcode.ConfigurationSelectionInvalid || len(document.Diagnostics[0].Locations) != 0 || len(document.Recovery) != 1 || document.Recovery[0].ID != "select-explain-configuration" || document.Recovery[0].Selector != nil {
+						t.Fatalf("explain selector conflict = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+					}
+				} else if exitCode != 1 || stdout != "" || !commandContainsAll(
 					stderr,
 					conflict.problem,
 					"Recovery:\nSelect exactly one existing Project configuration with `--env <environment>` or `--config <yaml-path>`, then rerun the command.\n",
@@ -60,7 +65,7 @@ func TestRunClassifiesConflictingConfigurationSelectorsWithoutMutation(t *testin
 				) {
 					t.Fatalf("%s selector conflict = exit %d, stdout %q, stderr %q", command.name, exitCode, stdout, stderr)
 				}
-				if strings.Count(stderr, "Source: ") != 0 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 || strings.Contains(strings.ToLower(stderr), "usage:") {
+				if command.name != "explain" && (strings.Count(stderr, "Source: ") != 0 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 || strings.Contains(strings.ToLower(stderr), "usage:")) {
 					t.Fatalf("%s selector conflict emitted unstable diagnostic framing: %q", command.name, stderr)
 				}
 				if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
@@ -84,7 +89,7 @@ func TestPublicCommandsReportMissingSelectedConfigurationSourcesWithoutMutation(
 		{name: "generate-check", arguments: []string{"generate", "--check"}},
 		{name: "check", arguments: []string{"check"}},
 		{name: "inspect", arguments: []string{"inspect"}, wantStdout: inspectProgress},
-		{name: "explain", arguments: []string{"explain", "capability", "kernel.health/v1"}, wantStdout: inspectProgress},
+		{name: "explain", arguments: []string{"explain", "capability", "kernel.health/v1"}},
 		{name: "use", arguments: []string{"use", "kernel.health/v1", "example.com/acme/library/records.New"}},
 		{name: "capability-expose", arguments: []string{"capability", "expose", "kernel.health/v1"}},
 	}
@@ -109,7 +114,14 @@ func TestPublicCommandsReportMissingSelectedConfigurationSourcesWithoutMutation(
 				before := commandTree(t, root)
 				arguments := append(append([]string(nil), command.arguments...), selection.selectors...)
 				exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "records"), commandGoEnvironmentWith(selection.environment))
-				if exitCode != 1 || stdout != command.wantStdout || !commandContainsAll(
+				wantExit := 1
+				if command.name == "explain" {
+					wantExit = 3
+					if !strings.HasPrefix(stderr, inspectProgress) {
+						t.Fatalf("explain progress missing from stderr: %q", stderr)
+					}
+				}
+				if exitCode != wantExit || stdout != command.wantStdout || !commandContainsAll(
 					stderr,
 					selection.path,
 					"Source: example.com/acme/library:"+selection.path+" (configuration-selection)",

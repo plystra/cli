@@ -22,7 +22,7 @@ func TestPublicCommandsReportInvalidCapabilityManifestSourcesWithoutMutation(t *
 		{name: "generate-check", arguments: []string{"generate", "--check"}},
 		{name: "check", arguments: []string{"check"}},
 		{name: "inspect", arguments: []string{"inspect"}, wantStdout: inspectProgress},
-		{name: "explain", arguments: []string{"explain", "capability", "kernel.health/v1"}, wantStdout: inspectProgress},
+		{name: "explain", arguments: []string{"explain", "capability", "kernel.health/v1"}},
 		{name: "capability-create", arguments: []string{"capability", "create", "records.list", "--query", "--plugin", "records"}},
 		{name: "capability-implement", arguments: []string{"capability", "implement", "email.send/v1", "--plugin", "records"}},
 		{name: "capability-expose", arguments: []string{"capability", "expose", "kernel.health/v1"}},
@@ -48,7 +48,11 @@ func TestPublicCommandsReportInvalidCapabilityManifestSourcesWithoutMutation(t *
 				wantSuffix := "\n\n" + provenance.wantSource + "\n\n" +
 					"Recovery:\nCorrect the reported authored capability.yaml, then rerun the command.\n\n" +
 					"Diagnostic: " + diagnosticcode.CapabilityManifestInvalid + "\n"
-				if exitCode != 1 || stdout != command.wantStdout || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+				wantExit := 1
+				if command.name == "explain" {
+					wantExit = 3
+				}
+				if exitCode != wantExit || stdout != command.wantStdout || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
 					t.Fatalf("%s %s = exit %d, stdout %q, stderr %q", provenance.name, command.name, exitCode, stdout, stderr)
 				}
 				if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {

@@ -412,7 +412,7 @@ report none.
 
 Options:
   --verbose              Add the complete deterministic resolution evidence to human output.
-  --format human|json    Select concise human output or the plystra.explain v1 JSON schema.
+  --format human|json    Select concise human output or one plystra.result/v1 document.
   --env <environment>    Explain the model selected by plystra.<environment>.yaml.
   --config <yaml-path>   Explain one complete current-project configuration instead of root plystra.yaml.
 
@@ -420,8 +420,14 @@ The command is read-only and explains one canonical Capability, Plugin, typed
 configuration-field, application-local Alias, or public-exposure decision from
 the same selected application model used by generation and validation. Plugin
 configuration fields accept the dotted form config.<plugin-id>.<field>. JSON
-stdout contains exactly one schema document; progress and diagnostics use
-stderr. PLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no
+stdout contains one plystra.result/v1 document with a plystra.explain/v1 payload,
+structured diagnostics, and plystra.recovery/v1 actions. JSON stderr stays empty
+after initialization; human progress and diagnostics use stderr. Executable
+recovery uses exact argv; Provider choices require editing capabilities.use,
+while Interface Implementation choices use plystra use. Invalid invocation or
+subject exits 2; invalid Project or missing target exits 3; required decisions
+or unavailable prerequisites exit 4; internal failures exit 8 with redacted
+PLYSTRA_EXPLAIN_FAILED. PLYSTRA_ENV and PLYSTRA_CONFIG supply selectors when no
 explicit selector is present; setting both is an error. Explicit --env or
 --config overrides both variables,
 and the two flags cannot be combined. Relative configuration paths are resolved

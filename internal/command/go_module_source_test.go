@@ -44,7 +44,7 @@ func TestPublicCommandsReportInvalidGoModuleDependencySourceWithoutMutation(t *t
 		{name: "generate-check", arguments: []string{"generate", "--check"}},
 		{name: "check", arguments: []string{"check"}},
 		{name: "inspect", arguments: []string{"inspect"}, wantStdout: inspectProgress},
-		{name: "explain", arguments: []string{"explain", "capability", "kernel.health/v1"}, wantStdout: inspectProgress},
+		{name: "explain", arguments: []string{"explain", "capability", "kernel.health/v1"}},
 		{name: "use", arguments: []string{"use", "kernel.health/v1", "example.com/acme/application/records.New"}},
 		{name: "capability-expose", arguments: []string{"capability", "expose", "kernel.health/v1"}},
 	}
@@ -67,7 +67,11 @@ func TestPublicCommandsReportInvalidGoModuleDependencySourceWithoutMutation(t *t
 				wantSuffix := "\n\n" + failure.wantSource + "\n\n" +
 					"Recovery:\nCorrect the reported go.mod entry with standard Go Module syntax, then rerun the command.\n\n" +
 					"Diagnostic: " + diagnosticcode.GoModuleInvalid + "\n"
-				if exitCode != 1 || stdout != command.wantStdout || !strings.Contains(stderr, failure.wantProblem) || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+				wantExit := 1
+				if command.name == "explain" {
+					wantExit = 3
+				}
+				if exitCode != wantExit || stdout != command.wantStdout || !strings.Contains(stderr, failure.wantProblem) || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
 					t.Fatalf("%s %s = exit %d, stdout %q, stderr %q", failure.name, command.name, exitCode, stdout, stderr)
 				}
 				if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {

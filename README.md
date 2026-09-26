@@ -940,11 +940,13 @@ resolved Secrets and unrestricted configuration values. The command accepts the 
 read-only view. For a required Capability it reports the selected ordinary
 Provider or Kernel intrinsic, the exact automatic, current-project, inherited,
 or intrinsic selection reason, its direct module-relative source, and one
-selector-matched command or configuration field that changes the decision. A
+selector-matched configuration field that changes the Provider decision. A
 visible but unrequired Capability reports that state and the selected
 configuration's `capabilities.require` field. `--verbose` appends the complete
-deterministic evidence; `--format json` writes exactly one `plystra.explain` v1
-document while progress remains on stderr. The same explicit and ambient
+deterministic evidence; `--format json` writes one `plystra.result/v1` document
+with a `plystra.explain/v1` payload, structured diagnostics, selector snapshot,
+and `plystra.recovery/v1` actions. JSON stderr is empty after initialization;
+human progress and diagnostics use stderr. The same explicit and ambient
 configuration selectors apply, and unknown canonical Capability IDs fail
 without modifying the Project.
 
@@ -954,8 +956,8 @@ as its direct selection reason. A selected dependency Plugin reports every exact
 Capability for which it is the Provider and the Provider-decision sources that
 caused its inclusion. A visible unselected dependency Plugin reports whether an
 alternate Provider won or none of its provided Capabilities is required, plus a
-selector-matched `plystra use` command or configuration field that changes the
-decision. Unknown canonical Plugin IDs fail without modifying the Project.
+selector-matched configuration field that changes the decision. Unknown
+canonical Plugin IDs fail without modifying the Project.
 
 `plystra explain config <field-path>` traces one typed field through dependency
 Project composition and the selected current-Project layer. Plugin fields accept
@@ -984,8 +986,22 @@ target. The result identifies the selected `http.expose`, Alias, or
 activation-Provider decision that changes the surface without exposing contract
 digests in concise output.
 
-Common actionable CLI failures append exactly one `Recovery:` block after the
-concise problem. Follow that one command or file edit before rerunning the
+All five explanation commands return exit `2` for invalid invocation or subject,
+`3` for invalid Project state or a missing target, `4` for a required decision
+or missing prerequisite, and `8` for an internal failure. The explanation codes
+are `PLYSTRA_EXPLAIN_INVOCATION_INVALID`, `PLYSTRA_EXPLAIN_SUBJECT_INVALID`,
+`PLYSTRA_EXPLAIN_TARGET_NOT_FOUND`, and redacted `PLYSTRA_EXPLAIN_FAILED`;
+known resolution failures retain their source-bearing diagnostic codes.
+Recovery identifies an exact source edit, finite choice, missing prerequisite,
+or manual correction. Executable recovery includes a Project-relative working
+directory and exact `argv`, never a shell string or unresolved placeholder.
+Provider choices edit the selected `capabilities.use` field; the installed
+`plystra use` command accepts Interface Implementations only. Implementation
+ambiguity lists sorted constructors with selector-matched commands and an
+independent verification command. No recovery action runs automatically.
+
+Common actionable human CLI failures append exactly one `Recovery:` block after
+the concise problem. Follow that one command or file edit before rerunning the
 operation. The block is followed by one stable
 `Diagnostic: PLYSTRA_<AREA>_<CONDITION>` code;
 use that code as the machine-stable failure identity instead of matching the
@@ -993,8 +1009,10 @@ human wording. A recovery command preserves the selected default, `--env`, or
 `--config` mode, including a safe selector supplied through `PLYSTRA_ENV` or
 `PLYSTRA_CONFIG`. Unsafe and absolute selector values are replaced by
 `<environment>` or `<yaml-path>` placeholders instead of being copied into the
-advice. Unknown internal failures retain their original diagnostic without an
-invented recovery action or code.
+advice in commands that retain the older human recovery format. Explanation JSON
+never marks placeholders executable. Unknown explanation failures are redacted
+as `PLYSTRA_EXPLAIN_FAILED`; other command families retain their current error
+protocols.
 
 Classified failures with typed provenance insert one or more canonical source
 lines between the problem and recovery:
