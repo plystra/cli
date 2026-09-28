@@ -22,6 +22,7 @@ import (
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/pluginmeta"
 	"github.com/plystra/cli/internal/providerresolution"
+	"github.com/plystra/cli/internal/version"
 )
 
 func TestResolveExtensionsBuildsStableGeneratedRequirementClosure(t *testing.T) {
@@ -158,7 +159,8 @@ func TestResolveExtensionsExecutesSelectedHelperProcess(t *testing.T) {
 	temporaryParent := t.TempDir()
 	cliRoot := extensionTestRepositoryRoot(t)
 	goMod := fmt.Sprintf(
-		"module example.com/generationresolutiontest\n\ngo 1.26\n\nrequire github.com/plystra/cli v0.0.0\n\nrequire (\n\tgithub.com/plystra/kernel v0.0.0-20260724160327-26ece9a0df89 // indirect\n\tgo.yaml.in/yaml/v3 v3.0.4 // indirect\n\tgolang.org/x/mod v0.38.0 // indirect\n)\n\nreplace github.com/plystra/cli => %s\n",
+		"module example.com/generationresolutiontest\n\ngo 1.26\n\nrequire github.com/plystra/cli v0.0.0\n\nrequire (\n\tgithub.com/plystra/kernel %s // indirect\n\tgo.yaml.in/yaml/v3 v3.0.4 // indirect\n\tgolang.org/x/mod v0.38.0 // indirect\n)\n\nreplace github.com/plystra/cli => %s\n",
+		version.KernelVersion,
 		strconv.Quote(filepath.ToSlash(cliRoot)),
 	)
 	extensionWriteTestFile(t, filepath.Join(moduleRoot, "go.mod"), goMod)

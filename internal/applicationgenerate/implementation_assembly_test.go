@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/command"
 )
 
 func TestGeneratedStaticAssemblyPreservesOrdinaryTypedBusinessCalls(t *testing.T) {
@@ -77,6 +78,8 @@ func Reset() {
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 
 	"example.com/acme/static-interface-runtime/probe"
 	writev1 "example.com/acme/static-interface-runtime/interfaces/audit/write/v1"
@@ -85,14 +88,22 @@ import (
 
 type service struct{}
 
+var failStart atomic.Bool
+var failConstruction atomic.Bool
+
+func SetStartFailure(value bool) { failStart.Store(value) }
+func SetConstructorFailure(value bool) { failConstruction.Store(value) }
+
 //plystra:implements audit.write/v1
 func New() (*service, error) {
 	probe.Constructed("audit")
+	if failConstruction.Load() { return nil, errors.New("private-first-constructor-secret") }
 	return &service{}, nil
 }
 
 func (*service) Start(context.Context) error {
 	probe.Lifecycle("start:audit")
+	if failStart.Load() { return errors.New("private-audit-startup-secret") }
 	return nil
 }
 
@@ -127,16 +138,43 @@ type service struct {
 	audit writev1.Interface
 	notify plystra.Optional[sendv1.Interface]
 	instance int64
+	mode string
+	stops int
+	private string
 }
 
 var failStart atomic.Bool
+var constructorMode string
+var lastAudit writev1.Interface
 
 func SetStartFailure(value bool) { failStart.Store(value) }
+func SetConstructorMode(value string) { constructorMode = value; lastAudit = nil }
+func CallCapturedDependency(ctx context.Context) error {
+	_, err := lastAudit.Write(ctx, writev1.Request{})
+	return err
+}
 
 //plystra:implements app.check/v1
 //plystra:implements app.run/v1
 func New(audit writev1.Interface, notify plystra.Optional[sendv1.Interface]) (*service, error) {
-	return &service{audit: audit, notify: notify, instance: probe.Constructed("app")}, nil
+	lastAudit = audit
+	value := &service{audit: audit, notify: notify, instance: probe.Constructed("app"), mode: constructorMode, private: "private-instance-secret"}
+	switch constructorMode {
+	case "nil-error":
+		return nil, errors.New("private-constructor-secret")
+	case "partial-error", "partial-retry", "partial-panic-stop", "partial-timeout", "partial-cancel-success", "partial-retry-bounds":
+		return value, errors.New("private-constructor-secret")
+	case "nil-nil":
+		return nil, nil
+	case "typed-nil":
+		var absent *service
+		return absent, nil
+	case "panic":
+		panic("private-constructor-secret")
+	case "nil-panic":
+		panic(nil)
+	}
+	return value, nil
 }
 
 func (*service) Start(context.Context) error {
@@ -147,8 +185,24 @@ func (*service) Start(context.Context) error {
 	return nil
 }
 
-func (*service) Stop(context.Context) error {
+func (value *service) Stop(ctx context.Context) error {
 	probe.Lifecycle("stop:app")
+	if value.mode == "partial-retry" || value.mode == "partial-panic-stop" || value.mode == "partial-timeout" {
+		if _, ok := ctx.Deadline(); !ok { panic("cleanup deadline missing") }
+	}
+	value.stops++
+	if value.mode == "partial-retry-bounds" {
+		if value.stops == 1 { return errors.New("private-stop-secret") }
+		if value.stops < 4 { <-ctx.Done(); return ctx.Err() }
+	}
+	if value.stops == 1 {
+		switch value.mode {
+		case "partial-retry": return errors.New("private-stop-secret")
+		case "partial-panic-stop": panic("private-stop-secret")
+		case "partial-timeout": <-ctx.Done(); return ctx.Err()
+		case "partial-cancel-success": <-ctx.Done(); return nil
+		}
+	}
 	return nil
 }
 
@@ -169,12 +223,9 @@ func (service *service) Run(ctx context.Context, request runv1.Request) (runv1.R
 }
 `)
 
-	generated, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:       root,
-		Environment: goEnvironment(nil),
-	})
-	if err != nil || !generated.Report().Clean() {
-		t.Fatalf("Generate = %#v, %v", generated.Report().Changes(), err)
+	var stdout, stderr bytes.Buffer
+	if exitCode := command.RunIn([]string{"generate"}, &stdout, &stderr, root, goEnvironment(nil)); exitCode != 0 {
+		t.Fatalf("plystra generate exited %d:\n%s\n%s", exitCode, stdout.Bytes(), stderr.Bytes())
 	}
 	assemblyPath := "generated/go/assembly/interfaces_gen.go"
 	assemblySource := readFile(t, root, assemblyPath)
@@ -192,12 +243,20 @@ func (service *service) Run(ctx context.Context, request runv1.Request) (runv1.R
 	writeFile(t, filepath.Join(root, "static_interface_runtime_test.go"), `package staticinterfaceruntime_test
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	appimplementation "example.com/acme/static-interface-runtime/app"
+	auditimplementation "example.com/acme/static-interface-runtime/audit"
+	assembly "example.com/acme/static-interface-runtime/generated/go/assembly"
 	bootstrap "example.com/acme/static-interface-runtime/generated/go/bootstrap"
 	checkv1 "example.com/acme/static-interface-runtime/interfaces/app/check/v1"
 	runv1 "example.com/acme/static-interface-runtime/interfaces/app/run/v1"
@@ -207,6 +266,7 @@ import (
 )
 
 func TestRuntime(t *testing.T) {
+	probe.Reset()
 	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
 	if err != nil || !application.Valid() {
 		t.Fatalf("bootstrap.New = %#v, %v", application, err)
@@ -277,16 +337,156 @@ func TestRuntime(t *testing.T) {
 		t.Fatalf("post-rollback Stop = %v, State %s, events %v", err, failed.State(), probe.Events())
 	}
 }
+
+func TestConstructorResults(t *testing.T) {
+	for _, mode := range []string{"nil-error", "partial-error", "nil-nil", "typed-nil", "panic", "nil-panic", "partial-retry", "partial-panic-stop", "partial-timeout", "partial-cancel-success"} {
+		t.Run(mode, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+			probe.Reset()
+			appimplementation.SetConstructorMode(mode)
+			defer appimplementation.SetConstructorMode("")
+			timeout := time.Second
+			if mode == "partial-timeout" || mode == "partial-cancel-success" { timeout = 20 * time.Millisecond }
+			runtime, err := assembly.NewInterfaceRuntime(assembly.ConstructorConfiguration{}, timeout)
+			if !errors.Is(err, assembly.ErrInterfaceAssembly) || runtime.Valid() || runtime.AppRunV1() != nil || len(runtime.Catalog().Bindings()) != 0 {
+				t.Fatalf("NewInterfaceRuntime = %v, %v", runtime, err)
+			}
+			if strings.Contains(fmt.Sprintf("%v %#+v", err, err), "secret") {
+				t.Fatalf("assembly error leaked: %v", err)
+			}
+			var logged bytes.Buffer
+			slog.New(slog.NewJSONHandler(&logged, nil)).Error("assembly failed", "error", err)
+			if strings.Contains(logged.String(), "secret") { t.Fatal("assembly error leaked through logging") }
+			dependencyErr := appimplementation.CallCapturedDependency(context.Background())
+			var boundary *kernelinvocation.Error
+			if !errors.As(dependencyErr, &boundary) || boundary.Code() != kernelinvocation.ErrorUnavailable {
+				t.Fatalf("failed assembly published captured dependency: %v", dependencyErr)
+			}
+			want := []string{"construct:audit", "construct:app"}
+			if strings.HasPrefix(mode, "partial-") { want = append(want, "stop:app") }
+			if mode != "partial-timeout" && mode != "partial-cancel-success" { want = append(want, "stop:audit") }
+			if events := probe.Events(); !reflect.DeepEqual(events, want) {
+				t.Fatalf("construction rollback = %v, want %v", events, want)
+			}
+			var cleanup *assembly.InterfaceAssemblyError
+			needsRetry := mode == "partial-retry" || mode == "partial-panic-stop" || mode == "partial-timeout" || mode == "partial-cancel-success"
+			if errors.As(err, &cleanup) != needsRetry || errors.Is(err, kernellifecycle.ErrStop) != needsRetry {
+				t.Fatalf("cleanup failure identity = %v", err)
+			}
+			if needsRetry {
+				if mode == "partial-timeout" && !errors.Is(err, context.DeadlineExceeded) { t.Fatal("cleanup deadline identity lost") }
+				if strings.Contains(fmt.Sprintf("%#+v", cleanup), "secret") { t.Fatal("cleanup state leaked") }
+				if err := cleanup.RetryCleanup(nil); !errors.Is(err, kernellifecycle.ErrInvalidContext) { t.Fatalf("nil retry context: %v", err) }
+				cancelled, cancel := context.WithCancel(context.Background())
+				cancel()
+				if err := cleanup.RetryCleanup(cancelled); !errors.Is(err, context.Canceled) || !reflect.DeepEqual(probe.Events(), want) { t.Fatalf("cancelled retry: %v, %v", err, probe.Events()) }
+				if err := cleanup.RetryCleanup(context.Background()); err != nil { t.Fatalf("RetryCleanup: %v", err) }
+				if mode != "partial-cancel-success" { want = append(want, "stop:app") }
+				if mode == "partial-timeout" || mode == "partial-cancel-success" { want = append(want, "stop:audit") }
+				if err := cleanup.RetryCleanup(context.Background()); err != nil || !reflect.DeepEqual(probe.Events(), want) {
+					t.Fatalf("retry duplicated successful cleanup: %v, %v, want %v", err, probe.Events(), want)
+				}
+			}
+			})
+		})
+	}
+}
+
+func TestFirstConstructorFailure(t *testing.T) {
+	probe.Reset()
+	auditimplementation.SetConstructorFailure(true)
+	defer auditimplementation.SetConstructorFailure(false)
+	runtime, err := assembly.NewInterfaceRuntime(assembly.ConstructorConfiguration{}, time.Second)
+	want := []string{"construct:audit"}
+	if !errors.Is(err, assembly.ErrInterfaceAssembly) || runtime.Valid() || !reflect.DeepEqual(probe.Events(), want) || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("first-constructor failure = %v, %v, events %v", runtime, err, probe.Events())
+	}
+}
+
+func TestCleanupRetryRetainsTimeoutBounds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		probe.Reset()
+		appimplementation.SetConstructorMode("partial-retry-bounds")
+		defer appimplementation.SetConstructorMode("")
+		const timeout = 20 * time.Millisecond
+		_, err := assembly.NewInterfaceRuntime(assembly.ConstructorConfiguration{}, timeout)
+		var cleanup *assembly.InterfaceAssemblyError
+		if !errors.As(err, &cleanup) { t.Fatalf("missing cleanup retry: %v", err) }
+		for _, callerTimeout := range []time.Duration{5 * time.Millisecond, time.Second} {
+			ctx, cancel := context.WithTimeout(context.Background(), callerTimeout)
+			started := time.Now()
+			err := cleanup.RetryCleanup(ctx)
+			cancel()
+			if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) != min(callerTimeout, timeout) {
+				t.Fatalf("retry bound %s: elapsed %s, error %v", callerTimeout, time.Since(started), err)
+			}
+		}
+		if err := cleanup.RetryCleanup(context.Background()); err != nil { t.Fatal(err) }
+		if err := cleanup.RetryCleanup(context.Background()); err != nil { t.Fatal(err) }
+		want := []string{"construct:audit", "construct:app", "stop:app", "stop:audit", "stop:app", "stop:app", "stop:app"}
+		if !reflect.DeepEqual(probe.Events(), want) { t.Fatalf("bounded retries = %v, want %v", probe.Events(), want) }
+	})
+}
+
+func TestBootstrapPreservesCleanupRetry(t *testing.T) {
+	probe.Reset()
+	appimplementation.SetConstructorMode("partial-retry")
+	defer appimplementation.SetConstructorMode("")
+	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+	var cleanup *assembly.InterfaceAssemblyError
+	if application != nil || !errors.Is(err, bootstrap.ErrBootstrap) || !errors.As(err, &cleanup) {
+		t.Fatalf("bootstrap failure = %v, %v", application, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := cleanup.RetryCleanup(ctx); err != nil { t.Fatal(err) }
+	want := []string{"construct:audit", "construct:app", "stop:app", "stop:audit", "stop:app"}
+	if !reflect.DeepEqual(probe.Events(), want) { t.Fatalf("bootstrap cleanup = %v, want %v", probe.Events(), want) }
+}
+
+func TestNeverStartedCleanup(t *testing.T) {
+	for _, mode := range []string{"stop before start", "cancel before start", "dependency failure"} {
+		t.Run(mode, func(t *testing.T) {
+			probe.Reset()
+			application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+			if err != nil { t.Fatal(err) }
+			want := []string{"construct:audit", "construct:app"}
+			if mode != "stop before start" {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				if mode == "cancel before start" { cancel() } else {
+					auditimplementation.SetStartFailure(true)
+					defer auditimplementation.SetStartFailure(false)
+					want = append(want, "start:audit")
+				}
+				if err := application.Start(ctx); !errors.Is(err, kernellifecycle.ErrStart) { t.Fatalf("Start = %v", err) }
+			}
+			if err := application.Stop(context.Background()); err != nil { t.Fatal(err) }
+			want = append(want, "stop:app", "stop:audit")
+			if !reflect.DeepEqual(probe.Events(), want) { t.Fatalf("events = %v, want %v", probe.Events(), want) }
+		})
+	}
+}
+
+func TestInvalidCleanupTimeoutDoesNotConstruct(t *testing.T) {
+	probe.Reset()
+	for _, timeout := range []time.Duration{0, -time.Second} {
+		runtime, err := assembly.NewInterfaceRuntime(assembly.ConstructorConfiguration{}, timeout)
+		if !errors.Is(err, assembly.ErrInterfaceAssembly) || runtime.Valid() || len(probe.Events()) != 0 {
+			t.Fatalf("invalid timeout constructed values: %v, %v", probe.Events(), err)
+		}
+	}
+}
 `)
 
-	command := exec.CommandContext(t.Context(), "go", "test", "./...", "-count=1")
-	command.Dir = root
-	command.Env = mergedEnvironment(map[string]string{
+	compiledTests := exec.CommandContext(t.Context(), "go", "test", "-race", "./...", "-count=1")
+	compiledTests.Dir = root
+	compiledTests.Env = mergedEnvironment(map[string]string{
 		"GOFLAGS":     "",
 		"GOTOOLCHAIN": "local",
 		"GOWORK":      "off",
 	})
-	if output, err := command.CombinedOutput(); err != nil {
+	if output, err := compiledTests.CombinedOutput(); err != nil {
 		t.Fatalf("go test generated static runtime: %v\n%s", err, output)
 	}
 
@@ -297,6 +497,11 @@ func TestRuntime(t *testing.T) {
 	})
 	if err != nil || !check.Report().Clean() {
 		t.Fatalf("Generate --check = %#v, %v", check.Report().Changes(), err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if exitCode := command.RunIn([]string{"generate", "--check"}, &stdout, &stderr, root, goEnvironment(nil)); exitCode != 0 {
+		t.Fatalf("plystra generate --check exited %d:\n%s\n%s", exitCode, stdout.Bytes(), stderr.Bytes())
 	}
 }
 

@@ -864,6 +864,24 @@ authored configuration only and creates no runtime delivery, generated assembly
 or bootstrap membership, Secret lookup, or Kernel state. Configuration for any
 other constructor fails without exposing its values.
 
+Constructors are side-effect-free assembly functions returning a concrete
+pointer and error. Acquire resources and start background work in lifecycle
+`Start`, not in the constructor. Generated assembly rejects nil success values,
+redacts constructor errors and panics, and cleans every returned lifecycle value
+in reverse dependency order after failure, including a non-nil partial result.
+`Stop` must also tolerate never-started values. Startup failure cleans the full
+constructed lifecycle set, not just values whose `Start` ran.
+
+Construction cleanup failures preserve a generated
+`assembly.InterfaceAssemblyError` through ordinary `errors.As`, including when
+wrapped by bootstrap. Its `RetryCleanup(ctx)` method retries only pending stops
+under the original cleanup timeout and any earlier caller deadline. It does not
+restart construction or expose a usable runtime. Fix the authored constructor
+or lifecycle hook, regenerate, test startup and failure cleanup, and check
+generation again. Versioned Kernel dependencies older than the installed CLI's
+supported Kernel must be upgraded before static assembly generation; explicit
+local replacements remain developer-owned source builds.
+
 For an internal application root, add the exact Interface ID to the selected
 document:
 

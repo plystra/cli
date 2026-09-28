@@ -20,9 +20,11 @@ import (
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/intrinsicinterface"
 	"github.com/plystra/cli/internal/modulepath"
+	"github.com/plystra/cli/internal/version"
 	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 )
 
 const (
@@ -172,6 +174,9 @@ func planAssembly(options Options) (plan, error) {
 	}
 	if _, err := kernelinvocation.NewModuleBuild(kernelModulePath, options.KernelModuleVersion, options.KernelBuildIdentity); err != nil {
 		return plan{}, fmt.Errorf("%w: Kernel build provenance: %v", ErrInvalidInput, err)
+	}
+	if options.KernelBuildIdentity == "" && semver.Compare(options.KernelModuleVersion, version.KernelVersion) < 0 {
+		return plan{}, fmt.Errorf("%w: static lifecycle assembly requires %s %s or newer; update the Project Kernel dependency", ErrInvalidInput, kernelModulePath, version.KernelVersion)
 	}
 
 	bindings := append([]BindingInput(nil), options.Bindings...)
@@ -480,7 +485,7 @@ func render(planned plan) ([]byte, error) {
 	fmt.Fprintln(&source, "\treturn nil")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
-	fmt.Fprintln(&source, "// Stop stops active lifecycle-aware Implementations in reverse dependency order.")
+	fmt.Fprintln(&source, "// Stop cleans constructed lifecycle-aware Implementations in reverse dependency order, including before Start.")
 	fmt.Fprintln(&source, "func (runtime InterfaceRuntime) Stop(ctx context.Context) error {")
 	fmt.Fprintln(&source, "\tif !runtime.Valid() {")
 	fmt.Fprintln(&source, "\t\treturn fmt.Errorf(\"%w: %w\", ErrInterfaceStop, ErrInvalidInterfaceRuntime)")
@@ -532,9 +537,83 @@ func render(planned plan) ([]byte, error) {
 	fmt.Fprintln(&source, "\treturn slog.StringValue(\"<generated-interface-runtime>\")")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
+	source.WriteString(`// InterfaceAssemblyError retains failed construction cleanup for an explicit retry.
+// Its error chain contains only safe assembly and lifecycle diagnostics.
+type InterfaceAssemblyError struct {
+	failure error
+	cleanup *kernellifecycle.Manager
+	timeout time.Duration
+}
+
+func (failure *InterfaceAssemblyError) Error() string {
+	if failure == nil || failure.failure == nil {
+		return ErrInterfaceAssembly.Error()
+	}
+	return failure.failure.Error()
+}
+
+func (failure *InterfaceAssemblyError) Unwrap() error {
+	if failure == nil {
+		return nil
+	}
+	return failure.failure
+}
+
+// RetryCleanup retries only pending Stop hooks within the original cleanup timeout.
+func (failure *InterfaceAssemblyError) RetryCleanup(ctx context.Context) error {
+	if failure == nil || failure.cleanup == nil {
+		return ErrInvalidInterfaceRuntime
+	}
+	if ctx == nil {
+		return kernellifecycle.ErrInvalidContext
+	}
+	bounded, cancel := context.WithTimeout(ctx, failure.timeout)
+	defer cancel()
+	return failure.cleanup.Stop(bounded)
+}
+
+// Format keeps concrete instances and private configuration out of formatted errors.
+func (failure *InterfaceAssemblyError) Format(state fmt.State, _ rune) {
+	_, _ = state.Write([]byte(failure.Error()))
+}
+
+func (failure *InterfaceAssemblyError) LogValue() slog.Value {
+	return slog.StringValue(failure.Error())
+}
+
+`)
 	fmt.Fprintln(&source, "// NewInterfaceRuntime constructs every selected Implementation once in dependency order, then publishes all bindings atomically.")
-	fmt.Fprintln(&source, "func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout time.Duration) (InterfaceRuntime, error) {")
+	fmt.Fprintln(&source, "// Failure cleans every returned lifecycle value, including non-nil partial constructor results.")
+	fmt.Fprintln(&source, "func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout time.Duration) (runtime InterfaceRuntime, failure error) {")
 	fmt.Fprintln(&source, "\t_ = configuration")
+	fmt.Fprintln(&source, "\tif rollbackTimeout <= 0 {")
+	fmt.Fprintln(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%w: invalid cleanup timeout\", ErrInterfaceAssembly)")
+	fmt.Fprintln(&source, "\t}")
+	fmt.Fprintf(&source, "\tlifecycleBindings := make([]kernellifecycle.Binding, 0, %d)\n", len(planned.constructors))
+	fmt.Fprintln(&source, "\tcurrentConstructor := \"\"")
+	source.WriteString(`	defer func() {
+		if recover() != nil {
+			failure = fmt.Errorf("%w: constructor %s panicked", ErrInterfaceAssembly, currentConstructor)
+		}
+		if failure == nil {
+			return
+		}
+		runtime = InterfaceRuntime{}
+		if len(lifecycleBindings) == 0 {
+			return
+		}
+		cleanup, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, lifecycleBindings)
+		if err != nil {
+			failure = errors.Join(failure, err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), rollbackTimeout)
+		defer cancel()
+		if err := cleanup.Stop(ctx); err != nil {
+			failure = &InterfaceAssemblyError{failure: errors.Join(failure, err), cleanup: cleanup, timeout: rollbackTimeout}
+		}
+	}()
+`)
 	fmt.Fprintln(&source, "\tif err := RequireKernelCompatibility(); err != nil {")
 	fmt.Fprintln(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%w: Kernel compatibility: %w\", ErrInterfaceAssembly, err)")
 	fmt.Fprintln(&source, "\t}")
@@ -565,6 +644,7 @@ func render(planned plan) ([]byte, error) {
 	for index, constructor := range planned.constructors {
 		constructorIndex[constructor.Symbol.String()] = index
 		implementation := planned.imports[constructor.Symbol.PackagePath()]
+		fmt.Fprintf(&source, "\tcurrentConstructor = %s\n", strconv.Quote(constructor.Symbol.String()))
 		fmt.Fprintf(&source, "\timplementation%d, constructorError := %s.%s(", index, implementation, constructor.Symbol.FunctionName())
 		arguments := make([]string, 0, len(constructor.Dependencies)+1)
 		if constructor.HasConfiguration {
@@ -585,18 +665,19 @@ func render(planned plan) ([]byte, error) {
 		}
 		fmt.Fprint(&source, strings.Join(arguments, ", "))
 		fmt.Fprintln(&source, ")")
-		fmt.Fprintln(&source, "\tif constructorError != nil {")
-		fmt.Fprintf(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%%w: constructor %s failed\", ErrInterfaceAssembly)\n", constructor.Symbol)
-		fmt.Fprintln(&source, "\t}")
-	}
-	fmt.Fprintf(&source, "\tlifecycleBindings := make([]kernellifecycle.Binding, 0, %d)\n", len(planned.constructors))
-	for index, constructor := range planned.constructors {
-		fmt.Fprintf(&source, "\tif instance, ok := any(implementation%d).(kernellifecycle.Instance); ok {\n", index)
+		fmt.Fprintln(&source, "\tcurrentConstructor = \"\"")
+		fmt.Fprintf(&source, "\tif instance, ok := any(implementation%d).(kernellifecycle.Instance); implementation%d != nil && ok {\n", index, index)
 		fmt.Fprintf(&source, "\t\tbinding, err := kernellifecycle.NewBinding(%s, instance)\n", strconv.Quote(constructor.Symbol.String()))
 		fmt.Fprintln(&source, "\t\tif err != nil {")
 		fmt.Fprintf(&source, "\t\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%%w: constructor %s lifecycle: %%w\", ErrInterfaceAssembly, err)\n", constructor.Symbol)
 		fmt.Fprintln(&source, "\t\t}")
 		fmt.Fprintln(&source, "\t\tlifecycleBindings = append(lifecycleBindings, binding)")
+		fmt.Fprintln(&source, "\t}")
+		fmt.Fprintln(&source, "\tif constructorError != nil {")
+		fmt.Fprintf(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%%w: constructor %s failed\", ErrInterfaceAssembly)\n", constructor.Symbol)
+		fmt.Fprintln(&source, "\t}")
+		fmt.Fprintf(&source, "\tif implementation%d == nil {\n", index)
+		fmt.Fprintf(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%%w: constructor %s returned nil\", ErrInterfaceAssembly)\n", constructor.Symbol)
 		fmt.Fprintln(&source, "\t}")
 	}
 	fmt.Fprintln(&source, "\tlifecycle, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, lifecycleBindings)")

@@ -27,7 +27,11 @@ func TestRenderBuildsDependencyFirstGovernedInterfaceRuntime(t *testing.T) {
 	}
 	source := file.Data()
 	for _, required := range []string{
-		`func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout time.Duration) (InterfaceRuntime, error)`,
+		`func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout time.Duration) (runtime InterfaceRuntime, failure error)`,
+		`type InterfaceAssemblyError struct`,
+		`func (failure *InterfaceAssemblyError) RetryCleanup(ctx context.Context) error`,
+		`if implementation0 == nil`,
+		`cleanup.Stop(ctx)`,
 		`kernelinvocation.NewHandle(dispatcher,`,
 		`.Contract(), true)`,
 		`kernelinvocation.BindingKindImplementation`,
@@ -160,6 +164,14 @@ func TestRenderRejectsContradictoryOrCyclicGraph(t *testing.T) {
 		mutate func(*implementationassemblygen.Options)
 		want   error
 	}{
+		{
+			name: "older versioned Kernel lifecycle",
+			mutate: func(options *implementationassemblygen.Options) {
+				options.KernelModuleVersion = "v0.0.0-20260724160327-26ece9a0df89"
+				options.KernelBuildIdentity = ""
+			},
+			want: implementationassemblygen.ErrInvalidInput,
+		},
 		{
 			name: "missing selected constructor",
 			mutate: func(options *implementationassemblygen.Options) {

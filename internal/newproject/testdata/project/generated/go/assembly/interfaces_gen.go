@@ -63,7 +63,7 @@ func (runtime InterfaceRuntime) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops active lifecycle-aware Implementations in reverse dependency order.
+// Stop cleans constructed lifecycle-aware Implementations in reverse dependency order, including before Start.
 func (runtime InterfaceRuntime) Stop(ctx context.Context) error {
 	if !runtime.Valid() {
 		return fmt.Errorf("%w: %w", ErrInterfaceStop, ErrInvalidInterfaceRuntime)
@@ -98,9 +98,81 @@ func (InterfaceRuntime) LogValue() slog.Value {
 	return slog.StringValue("<generated-interface-runtime>")
 }
 
+// InterfaceAssemblyError retains failed construction cleanup for an explicit retry.
+// Its error chain contains only safe assembly and lifecycle diagnostics.
+type InterfaceAssemblyError struct {
+	failure error
+	cleanup *kernellifecycle.Manager
+	timeout time.Duration
+}
+
+func (failure *InterfaceAssemblyError) Error() string {
+	if failure == nil || failure.failure == nil {
+		return ErrInterfaceAssembly.Error()
+	}
+	return failure.failure.Error()
+}
+
+func (failure *InterfaceAssemblyError) Unwrap() error {
+	if failure == nil {
+		return nil
+	}
+	return failure.failure
+}
+
+// RetryCleanup retries only pending Stop hooks within the original cleanup timeout.
+func (failure *InterfaceAssemblyError) RetryCleanup(ctx context.Context) error {
+	if failure == nil || failure.cleanup == nil {
+		return ErrInvalidInterfaceRuntime
+	}
+	if ctx == nil {
+		return kernellifecycle.ErrInvalidContext
+	}
+	bounded, cancel := context.WithTimeout(ctx, failure.timeout)
+	defer cancel()
+	return failure.cleanup.Stop(bounded)
+}
+
+// Format keeps concrete instances and private configuration out of formatted errors.
+func (failure *InterfaceAssemblyError) Format(state fmt.State, _ rune) {
+	_, _ = state.Write([]byte(failure.Error()))
+}
+
+func (failure *InterfaceAssemblyError) LogValue() slog.Value {
+	return slog.StringValue(failure.Error())
+}
+
 // NewInterfaceRuntime constructs every selected Implementation once in dependency order, then publishes all bindings atomically.
-func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout time.Duration) (InterfaceRuntime, error) {
+// Failure cleans every returned lifecycle value, including non-nil partial constructor results.
+func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout time.Duration) (runtime InterfaceRuntime, failure error) {
 	_ = configuration
+	if rollbackTimeout <= 0 {
+		return InterfaceRuntime{}, fmt.Errorf("%w: invalid cleanup timeout", ErrInterfaceAssembly)
+	}
+	lifecycleBindings := make([]kernellifecycle.Binding, 0, 0)
+	currentConstructor := ""
+	defer func() {
+		if recover() != nil {
+			failure = fmt.Errorf("%w: constructor %s panicked", ErrInterfaceAssembly, currentConstructor)
+		}
+		if failure == nil {
+			return
+		}
+		runtime = InterfaceRuntime{}
+		if len(lifecycleBindings) == 0 {
+			return
+		}
+		cleanup, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, lifecycleBindings)
+		if err != nil {
+			failure = errors.Join(failure, err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), rollbackTimeout)
+		defer cancel()
+		if err := cleanup.Stop(ctx); err != nil {
+			failure = &InterfaceAssemblyError{failure: errors.Join(failure, err), cleanup: cleanup, timeout: rollbackTimeout}
+		}
+	}()
 	if err := RequireKernelCompatibility(); err != nil {
 		return InterfaceRuntime{}, fmt.Errorf("%w: Kernel compatibility: %w", ErrInterfaceAssembly, err)
 	}
@@ -108,13 +180,12 @@ func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout
 	if err != nil {
 		return InterfaceRuntime{}, fmt.Errorf("%w: governed dispatcher", ErrInterfaceAssembly)
 	}
-	lifecycleBindings := make([]kernellifecycle.Binding, 0, 0)
 	lifecycle, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, lifecycleBindings)
 	if err != nil {
 		return InterfaceRuntime{}, fmt.Errorf("%w: implementation lifecycle: %w", ErrInterfaceAssembly, err)
 	}
 	bindings, err := kernelintrinsic.NewBindings(kernelintrinsic.BindingOptions{
-		ModuleVersion: "v0.0.0-20260724160327-26ece9a0df89",
+		ModuleVersion: "v0.0.0-20260928055126-4402d1062034",
 		BuildIdentity: "",
 	})
 	if err != nil {

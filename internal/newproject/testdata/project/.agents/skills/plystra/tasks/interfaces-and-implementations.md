@@ -26,6 +26,8 @@ Require an internal root by editing the selected document's `interfaces.require`
 
 When one Implementation needs another Interface, accept the canonical Interface type as a constructor parameter and call its ordinary Go method. Use `plystra.Optional[T]` only for an optional Interface dependency. Do not import another concrete Implementation package.
 
+Constructors only assemble values; resource acquisition and background work belong in lifecycle Start. Return a concrete pointer plus error. Assembly rejects nil success, redacts errors and panics, and cleans all returned lifecycle values after failure, including partial results and never-started values. Stop must tolerate those states. Use errors.As to find a generated assembly.InterfaceAssemblyError and RetryCleanup(ctx) to retry failed construction cleanup under its original timeout; this never restarts construction or publishes a failed runtime. Test constructor failures and startup rollback as well as the success path.
+
 ## Completion checks
 
 1. Run the authored package tests.

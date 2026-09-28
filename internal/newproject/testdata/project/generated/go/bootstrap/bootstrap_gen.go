@@ -34,9 +34,9 @@ const (
 	defaultRuntimeDocument = "plystra.yaml"
 	defaultStartupTimeout  = time.Duration(120000000000)
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:7a78eba0e36b526894f69425fbe9aab34d200925956d7baa6951a1c211a2475b\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":3}"
-	compiledApplicationModelCompatibilityDigest = "sha256:1d91557ffcfff51fbe622da5070552a7f2378a3c6eec556cc377b5c11cfd9189"
-	compiledApplicationModelDigest              = "sha256:7a78eba0e36b526894f69425fbe9aab34d200925956d7baa6951a1c211a2475b"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:f388718d044c9fbd3465cf96de29120e1dbe247b091ef447d957e3ab9c03f1b5\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":3}"
+	compiledApplicationModelCompatibilityDigest = "sha256:2c809d3c25ce1e747783dd5057af6dd71748eab781479c67292a14ec036fc827"
+	compiledApplicationModelDigest              = "sha256:f388718d044c9fbd3465cf96de29120e1dbe247b091ef447d957e3ab9c03f1b5"
 )
 
 var (
