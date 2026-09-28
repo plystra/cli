@@ -52,7 +52,10 @@ Traversal fails closed beyond 64 levels or 65,536 nodes. A generated `ValueError
 reports the Interface, side, field path, and rule, never the submitted value or
 map key; map entries use indices in canonical-key lexical order. Invalid requests
 never enter the target, and invalid responses return an internal contract error
-without a result. Ordinary required values may still be zero. Pointer-bearing
+without a result. Restored response `ValueError` details retain the returned
+Kernel boundary through `Unwrap`, without depending on its pointer identity or
+replacing cancellation and unknown completion. Ordinary required values may
+still be zero. Pointer-bearing
 Connect exposure remains unsupported until transport projections preserve those
 states. Caller cancellation returns independently with result_unknown after
 target entry; late results are discarded. Response validation and copying

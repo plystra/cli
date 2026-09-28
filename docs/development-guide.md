@@ -498,6 +498,9 @@ Interface, side, field path, and failed rule; it exposes no submitted value or
 map key. An invalid request never enters the target, and an invalid response
 returns an internal contract error without a result. Pointer-bearing Connect
 exposure still fails closed until transport projections preserve those states.
+Restored response `ValueError` details retain the returned Kernel boundary
+through `Unwrap`; restoration does not depend on boundary pointer identity and
+never replaces cancellation or unknown completion.
 Caller cancellation returns independently with result_unknown after target
 entry; late results are discarded. Response validation and copying remain
 inside the tracked attempt. Generated InterfaceRuntime.Drain closes admission

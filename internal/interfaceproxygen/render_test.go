@@ -47,7 +47,8 @@ func TestRenderProducesDeterministicTypedProxyPackages(t *testing.T) {
 		[]byte(`snapshot, err := CopyRequest(request)`),
 		[]byte(`response, err := proxy.handle.InvokeWithResponse(ctx, snapshot,`),
 		[]byte(`copied, err := CopyResponse(value)`),
-		[]byte(`err == failure.boundary`),
+		[]byte(`boundary.Completion() == failure.boundary.Completion()`),
+		[]byte(`copied.boundary = boundary`),
 	} {
 		if !bytes.Contains(orderSource, required) {
 			t.Fatalf("order proxy omits %q:\n%s", required, orderSource)
@@ -181,7 +182,12 @@ replace github.com/plystra/kernel => %s
 	// production test hook or replacement Kernel is needed to control scheduling.
 	instrumented := strings.Replace(string(files[0].Data()), "copied, err := CopyResponse(value)", "TestResponseBarrier(\"copy\")\n\t\tcopied, err := CopyResponse(value)", 1)
 	instrumented = strings.Replace(instrumented, "return copied, err", "TestResponseBarrier(\"return\")\n\t\treturn copied, err", 1)
+	instrumented = strings.Replace(instrumented, "return copied, err", "return copied, TestResponseOutcome(err)", 1)
+	// Kernel normalization may copy a boundary to attach per-call evidence.
+	instrumented = strings.Replace(instrumented, "\tif failure := validation.Load();", "\tif boundary, ok := err.(*kernelinvocation.Error); ok { copied := *boundary; err = &copied; TestReturnedBoundary.Store(&copied) }\n\tif failure := validation.Load();", 1)
 	instrumented += "\nvar TestResponseBarrier = func(string) {}\n"
+	instrumented += "\nvar TestReturnedBoundary atomic.Pointer[kernelinvocation.Error]\n"
+	instrumented += "\nvar TestResponseOutcome = func(err error) error { return err }\n"
 	writeProxyFile(t, root, files[0].Path(), instrumented)
 	lifetimeTests := generatedResponseLifetimeTests
 	if shared {
@@ -241,6 +247,7 @@ const generatedProxyRuntimeTest = `package proxy_test
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"testing"
 	"time"
 
@@ -253,6 +260,10 @@ import (
 func TestProxyUsesGovernedHandle(t *testing.T) {
 	contractToken := capability.MustParseContract[contract.Request, contract.Response]("order.create/v1")
 	endpoint, err := invocation.NewEndpoint(contractToken, func(_ context.Context, request contract.Request) (contract.Response, error) {
+		if request.Value == "failure" {
+			boundary, _ := invocation.NewError(invocation.ErrorInternal, "contract.response_invalid")
+			return contract.Response{}, boundary
+		}
 		return contract.Response{Value: "handled:" + request.Value}, nil
 	})
 	if err != nil { t.Fatal(err) }
@@ -278,6 +289,12 @@ func TestProxyUsesGovernedHandle(t *testing.T) {
 	response, err := implementation.Create(context.Background(), contract.Request{Value: "request"})
 	if err != nil || response.Value != "handled:request" {
 		t.Fatalf("Create = %#v, %v", response, err)
+	}
+	response, err = implementation.Create(context.Background(), contract.Request{Value: "failure"})
+	var validation *proxy.ValueError
+	var boundary *invocation.Error
+	if response != (contract.Response{}) || errors.As(err, &validation) || !errors.As(err, &boundary) || boundary.DetailCode() != "contract.response_invalid" {
+		t.Fatalf("target error gained fabricated validation details: %#v, %v", response, err)
 	}
 }
 
@@ -308,14 +325,15 @@ import (
 
 func TestGeneratedResponseProcessingRetainsAttempt(t *testing.T) {
 	for _, stage := range []string{"copy", "return"} {
-		for _, mode := range []string{"normal", "cancel", "deadline", "shutdown"} {
+		for _, mode := range []string{"normal", "cancel", "deadline", "shutdown", "panic", "unknown"} {
 			for _, value := range []string{"valid-response", "invalid"} {
 				t.Run(stage+"/"+mode+"/"+value, func(t *testing.T) {
 					synctest.Test(t, func(t *testing.T) {
 					entered, release := make(chan struct{}), make(chan struct{})
 					var released sync.Once
 					unblock := func() { released.Do(func() { close(release) }) }
-					proxy.TestResponseBarrier = func(at string) { if at == stage { close(entered); <-release } }
+					proxy.TestResponseBarrier = func(at string) { if at == stage { close(entered); <-release; if mode == "panic" { panic("private processor panic") } } }
+					proxy.TestResponseOutcome = func(err error) error { if mode == "unknown" && err != nil { return invocation.NewResultUnknown(err) }; return err }
 					token := capability.MustParseContract[contract.Request, contract.Response]("order.create/v1")
 					endpoint, err := invocation.NewEndpoint(token, func(context.Context, contract.Request) (contract.Response, error) {
 						return contract.Response{Value: value}, nil
@@ -339,6 +357,7 @@ func TestGeneratedResponseProcessingRetainsAttempt(t *testing.T) {
 						ctx, cancel := context.WithTimeout(context.Background(), time.Second); defer cancel()
 						if err := dispatcher.Drain(ctx); err != nil { t.Error(err) }
 						proxy.TestResponseBarrier = func(string) {}
+						proxy.TestResponseOutcome = func(err error) error { return err }
 					}()
 					if err := dispatcher.Publish(catalog); err != nil { t.Fatal(err) }
 					handle, err := invocation.NewHandle(dispatcher, token, true)
@@ -359,7 +378,7 @@ func TestGeneratedResponseProcessingRetainsAttempt(t *testing.T) {
 						if response != (contract.Response{}) || !errors.As(err, &failure) || failure.Code() != invocation.ErrorResourceExhausted || invocation.CompletionOf(err) != invocation.CompletionNotStarted { t.Fatalf("processor released admission: %#v, %v", response, err) }
 					}
 					assertCapacity()
-					if mode == "normal" {
+					if mode == "normal" || mode == "panic" || mode == "unknown" {
 						unblock()
 					} else {
 						if mode == "cancel" { cancel() }
@@ -373,9 +392,16 @@ func TestGeneratedResponseProcessingRetainsAttempt(t *testing.T) {
 					var got result
 					select { case got = <-done: case <-time.After(time.Second): t.Fatal("caller did not complete") }
 					var validation *proxy.ValueError
-					if mode == "normal" {
+					if mode == "panic" || (mode == "unknown" && value == "invalid") {
+						var boundary *invocation.Error
+						wantCompletion := invocation.CompletionResultKnown
+						wantDetail := "runtime.response_processing_failed"
+						if mode == "unknown" { wantCompletion = invocation.CompletionResultUnknown; wantDetail = "contract.response_invalid" }
+						if errors.As(got.err, &validation) || !errors.As(got.err, &boundary) || boundary.Code() != invocation.ErrorInternal || boundary.DetailCode() != wantDetail || invocation.CompletionOf(got.err) != wantCompletion { t.Fatalf("processor failure replaced by validation: %v", got.err) }
+					} else if mode == "normal" || mode == "unknown" {
 						if value == "invalid" {
 							if !errors.As(got.err, &validation) || validation.Side() != "response" || invocation.CompletionOf(got.err) != invocation.CompletionResultKnown { t.Fatalf("validation not restored: %v", got.err) }
+							if validation.Unwrap() != proxy.TestReturnedBoundary.Load() { t.Fatal("restoration lost the returned Kernel evidence") }
 						} else if got.err != nil || got.response.Value != value { t.Fatalf("successful response = %#v", got) }
 					} else {
 						want := context.Canceled
