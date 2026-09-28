@@ -513,7 +513,9 @@ func TestShutdownRetainsDependenciesUntilLateTargetsTerminate(t *testing.T) {
 						go func() { response, err := runtime.AppRunV1().Run(ctx, runv1.Request{Value: outcome}); done <- result{response, err} }()
 						<-entered
 						if finish == "cancel" { cancel() }
-						if finish == "deadline" { time.Sleep(10*time.Millisecond) }
+						// Observe caller completion before shutdown can independently cancel it.
+						var got result
+						if finish != "shutdown" { got = <-done }
 						before := probe.Events()
 						shutdown := context.Background()
 						if surface == "bootstrap" { var end context.CancelFunc; shutdown, end = context.WithTimeout(shutdown, 20*time.Millisecond); defer end() }
@@ -523,7 +525,7 @@ func TestShutdownRetainsDependenciesUntilLateTargetsTerminate(t *testing.T) {
 							t.Fatalf("bounded drain = %v after %s", err, time.Since(start))
 						}
 						if !reflect.DeepEqual(probe.Events(), before) { t.Fatalf("cleanup raced target: %v", probe.Events()) }
-						got := <-done
+						if finish == "shutdown" { got = <-done }
 						want := context.Canceled
 						if finish == "deadline" { want = context.DeadlineExceeded }
 						if !errors.Is(got.err, want) || kernelinvocation.CompletionOf(got.err) != kernelinvocation.CompletionResultUnknown || got.response != (runv1.Response{}) {
