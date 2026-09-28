@@ -2,6 +2,7 @@ package applicationgen_test
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationadaptergen"
+	"github.com/plystra/cli/internal/implementationassemblygen"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfacemeta"
 	"github.com/plystra/cli/internal/interfaceprovenance"
@@ -610,8 +612,9 @@ func manifestInterfaceProvenance(t testing.TB) interfaceprovenance.Provenance {
 			RequirementSources: []string{packagePath + " //plystra:interface " + identifier},
 			ExposureSources:    []string{},
 			Policy: interfaceprovenance.PolicyInput{
-				Timeout: "30s",
-				Sources: []string{"built-in Plystra default Interface invocation timeout"},
+				ConcurrencyLimit: 64,
+				Timeout:          "30s",
+				Sources:          []string{"built-in Plystra default Interface invocation timeout"},
 			},
 		}
 	}
@@ -825,7 +828,7 @@ func TestApplicationModelDigestPinsNormalizedConnectProtobufProjection(t *testin
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(Connect Protobuf projection): %v", err)
 	}
-	const expected = "sha256:2064f9c6062d846997a973796dd60841ae0f4537c0af7c229b871ab999e29d30"
+	const expected = "sha256:e155c678b60ef422da8cdd25c5102d8e57a520f90cdf45c67955c67076cc4cfc"
 	if digest != expected {
 		t.Fatalf("Connect Protobuf projection application-model digest = %q; want %q", digest, expected)
 	}
@@ -994,6 +997,47 @@ func TestApplicationModelDigestIncludesImplementationAdaptersDeterministically(t
 	}
 	if concreteDigest == withAdapters {
 		t.Fatal("changed adapter concrete provenance did not alter the application-model digest")
+	}
+}
+
+func TestApplicationModelDigestIncludesBindingAdmissionLimit(t *testing.T) {
+	t.Parallel()
+	identifier, err := interfaceid.Parse("order.create/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	constructor, err := constructorsymbol.Parse(applicationModulePath + "/orders.New")
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := applicationgen.ApplicationModelOptions{
+		ModulePath:          applicationModulePath,
+		JavaScriptPackage:   applicationSDKPackage,
+		KernelModuleVersion: "v0.0.0",
+		KernelBuildIdentity: "application-render-test",
+		Providers:           selectedProviderInputs(),
+		Resolution:          resolvedApplication(t, ""),
+		ImplementationAssembly: implementationassemblygen.Options{
+			Bindings: []implementationassemblygen.BindingInput{{
+				InterfaceID: identifier, PackagePath: applicationModulePath + "/interfaces/order/create/v1",
+				Constructor: constructor, SelectionReason: implementationassemblygen.SelectionUniqueCompatible,
+				ContractDigest: sha256.Sum256([]byte(identifier.String())), ConcurrencyLimit: 64,
+			}},
+			Constructors: []implementationassemblygen.ConstructorInput{{Symbol: constructor, ModulePath: applicationModulePath}},
+		},
+	}
+	first, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options.ImplementationAssembly.Bindings[0].ConcurrencyLimit = 32
+	second, err := applicationModelDigest(t, options)
+	if err != nil || first == second {
+		t.Fatalf("admission limit did not change frozen model: %v", err)
+	}
+	options.ImplementationAssembly.Bindings[0].ConcurrencyLimit = 0
+	if _, err := applicationModelDigest(t, options); err == nil {
+		t.Fatal("unbounded binding entered frozen model")
 	}
 }
 

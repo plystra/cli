@@ -127,46 +127,50 @@ func (s CapabilitySupport) Valid() bool { return validateCapabilitySupport(s.inp
 // facts. All inputs must describe the running distribution rather than a
 // current Project or caller.
 type CapabilitiesInput struct {
-	CLIVersion            string
-	KernelVersion         string
-	SpecificationRevision string
-	GoRequirement         string
-	GOOS                  string
-	GOARCH                string
-	TransportToolchain    transporttoolchain.Identity
-	Schemas               []CapabilitySchemaInput
-	Commands              []CapabilityCommandInput
-	Selectors             []CapabilitySelectorInput
-	DefaultInteraction    CapabilityInteractionMode
-	DefaultOutput         CapabilityOutputFormat
-	EffectClasses         []EffectClass
-	ProjectDocumentBytes  int64
-	StartupTimeout        time.Duration
-	InvocationTimeout     time.Duration
-	Support               []CapabilitySupportInput
+	CLIVersion                 string
+	KernelVersion              string
+	SpecificationRevision      string
+	GoRequirement              string
+	GOOS                       string
+	GOARCH                     string
+	TransportToolchain         transporttoolchain.Identity
+	Schemas                    []CapabilitySchemaInput
+	Commands                   []CapabilityCommandInput
+	Selectors                  []CapabilitySelectorInput
+	DefaultInteraction         CapabilityInteractionMode
+	DefaultOutput              CapabilityOutputFormat
+	EffectClasses              []EffectClass
+	ProjectDocumentBytes       int64
+	StartupTimeout             time.Duration
+	InvocationTimeout          time.Duration
+	InvocationConcurrencyLimit int
+	MaximumConcurrencyLimit    int
+	Support                    []CapabilitySupportInput
 }
 
 // Capabilities is one immutable plystra.capabilities/v1 payload.
 type Capabilities struct {
-	cliVersion            string
-	kernelVersion         string
-	specificationRevision string
-	goRequirement         string
-	goos                  string
-	goarch                string
-	transportToolchain    transporttoolchain.Identity
-	schemas               []CapabilitySchema
-	commands              []CapabilityCommand
-	selectors             []CapabilitySelector
-	defaultInteraction    CapabilityInteractionMode
-	defaultOutput         CapabilityOutputFormat
-	effectClasses         []EffectClass
-	projectDocumentBytes  int64
-	startupTimeout        time.Duration
-	invocationTimeout     time.Duration
-	support               []CapabilitySupport
-	canonicalJSON         []byte
-	prepared              bool
+	cliVersion                 string
+	kernelVersion              string
+	specificationRevision      string
+	goRequirement              string
+	goos                       string
+	goarch                     string
+	transportToolchain         transporttoolchain.Identity
+	schemas                    []CapabilitySchema
+	commands                   []CapabilityCommand
+	selectors                  []CapabilitySelector
+	defaultInteraction         CapabilityInteractionMode
+	defaultOutput              CapabilityOutputFormat
+	effectClasses              []EffectClass
+	projectDocumentBytes       int64
+	startupTimeout             time.Duration
+	invocationTimeout          time.Duration
+	invocationConcurrencyLimit int
+	maximumConcurrencyLimit    int
+	support                    []CapabilitySupport
+	canonicalJSON              []byte
+	prepared                   bool
 }
 
 type capabilitiesDocument struct {
@@ -203,14 +207,21 @@ type capabilitySchemaDocument struct {
 }
 
 type capabilitiesLimitsDocument struct {
-	ProjectDocumentBytes int64 `json:"project_document_bytes"`
+	ProjectDocumentBytes       int64 `json:"project_document_bytes"`
+	InvocationConcurrencyLimit int   `json:"invocation_concurrency_limit"`
 }
 
 type capabilitiesDefaultsDocument struct {
-	InteractionMode   CapabilityInteractionMode `json:"interaction_mode"`
-	OutputFormat      CapabilityOutputFormat    `json:"output_format"`
-	StartupTimeout    string                    `json:"startup_timeout"`
-	InvocationTimeout string                    `json:"invocation_timeout"`
+	InteractionMode       CapabilityInteractionMode              `json:"interaction_mode"`
+	OutputFormat          CapabilityOutputFormat                 `json:"output_format"`
+	StartupTimeout        string                                 `json:"startup_timeout"`
+	InvocationTimeout     string                                 `json:"invocation_timeout"`
+	InvocationConcurrency capabilitiesConcurrencyDefaultDocument `json:"invocation_concurrency"`
+}
+
+type capabilitiesConcurrencyDefaultDocument struct {
+	DefaultLimit int `json:"default_limit"`
+	Queue        int `json:"queue"`
 }
 
 type capabilitySupportDocument struct {
@@ -248,24 +259,26 @@ func NewCapabilities(input CapabilitiesInput) (Capabilities, error) {
 		return Capabilities{}, fmt.Errorf("%w: %v", ErrCapabilities, err)
 	}
 	result := Capabilities{
-		cliVersion:            input.CLIVersion,
-		kernelVersion:         input.KernelVersion,
-		specificationRevision: input.SpecificationRevision,
-		goRequirement:         input.GoRequirement,
-		goos:                  input.GOOS,
-		goarch:                input.GOARCH,
-		transportToolchain:    input.TransportToolchain,
-		schemas:               schemas,
-		commands:              commands,
-		selectors:             selectors,
-		defaultInteraction:    input.DefaultInteraction,
-		defaultOutput:         input.DefaultOutput,
-		effectClasses:         effectClasses,
-		projectDocumentBytes:  input.ProjectDocumentBytes,
-		startupTimeout:        input.StartupTimeout,
-		invocationTimeout:     input.InvocationTimeout,
-		support:               support,
-		prepared:              true,
+		cliVersion:                 input.CLIVersion,
+		kernelVersion:              input.KernelVersion,
+		specificationRevision:      input.SpecificationRevision,
+		goRequirement:              input.GoRequirement,
+		goos:                       input.GOOS,
+		goarch:                     input.GOARCH,
+		transportToolchain:         input.TransportToolchain,
+		schemas:                    schemas,
+		commands:                   commands,
+		selectors:                  selectors,
+		defaultInteraction:         input.DefaultInteraction,
+		defaultOutput:              input.DefaultOutput,
+		effectClasses:              effectClasses,
+		projectDocumentBytes:       input.ProjectDocumentBytes,
+		startupTimeout:             input.StartupTimeout,
+		invocationTimeout:          input.InvocationTimeout,
+		invocationConcurrencyLimit: input.InvocationConcurrencyLimit,
+		maximumConcurrencyLimit:    input.MaximumConcurrencyLimit,
+		support:                    support,
+		prepared:                   true,
 	}
 	canonical, err := json.Marshal(result.document())
 	if err != nil {
@@ -362,6 +375,12 @@ func (c Capabilities) StartupTimeout() time.Duration { return c.startupTimeout }
 // InvocationTimeout returns the default invocation bound.
 func (c Capabilities) InvocationTimeout() time.Duration { return c.invocationTimeout }
 
+// InvocationConcurrencyLimit returns the finite per-binding default, without queueing.
+func (c Capabilities) InvocationConcurrencyLimit() int { return c.invocationConcurrencyLimit }
+
+// MaximumConcurrencyLimit returns the installed Kernel's greatest binding limit.
+func (c Capabilities) MaximumConcurrencyLimit() int { return c.maximumConcurrencyLimit }
+
 // StartupTimeoutText returns the canonical public duration spelling.
 func (c Capabilities) StartupTimeoutText() string {
 	return formatCapabilitiesDuration(c.startupTimeout)
@@ -412,6 +431,9 @@ func validateCapabilitiesInput(input CapabilitiesInput) error {
 	}
 	if input.StartupTimeout <= 0 || input.InvocationTimeout <= 0 {
 		return errors.New("default timeouts must be positive")
+	}
+	if input.MaximumConcurrencyLimit < 1 || input.MaximumConcurrencyLimit > 1<<30 || input.InvocationConcurrencyLimit < 1 || input.InvocationConcurrencyLimit > input.MaximumConcurrencyLimit {
+		return errors.New("concurrency limits must be positive and the default must not exceed the maximum")
 	}
 	return nil
 }
@@ -591,23 +613,25 @@ func (c Capabilities) input() CapabilitiesInput {
 		support[index] = value.input
 	}
 	return CapabilitiesInput{
-		CLIVersion:            c.cliVersion,
-		KernelVersion:         c.kernelVersion,
-		SpecificationRevision: c.specificationRevision,
-		GoRequirement:         c.goRequirement,
-		GOOS:                  c.goos,
-		GOARCH:                c.goarch,
-		TransportToolchain:    c.transportToolchain,
-		Schemas:               schemas,
-		Commands:              commands,
-		Selectors:             selectors,
-		DefaultInteraction:    c.defaultInteraction,
-		DefaultOutput:         c.defaultOutput,
-		EffectClasses:         append([]EffectClass(nil), c.effectClasses...),
-		ProjectDocumentBytes:  c.projectDocumentBytes,
-		StartupTimeout:        c.startupTimeout,
-		InvocationTimeout:     c.invocationTimeout,
-		Support:               support,
+		CLIVersion:                 c.cliVersion,
+		KernelVersion:              c.kernelVersion,
+		SpecificationRevision:      c.specificationRevision,
+		GoRequirement:              c.goRequirement,
+		GOOS:                       c.goos,
+		GOARCH:                     c.goarch,
+		TransportToolchain:         c.transportToolchain,
+		Schemas:                    schemas,
+		Commands:                   commands,
+		Selectors:                  selectors,
+		DefaultInteraction:         c.defaultInteraction,
+		DefaultOutput:              c.defaultOutput,
+		EffectClasses:              append([]EffectClass(nil), c.effectClasses...),
+		ProjectDocumentBytes:       c.projectDocumentBytes,
+		StartupTimeout:             c.startupTimeout,
+		InvocationTimeout:          c.invocationTimeout,
+		InvocationConcurrencyLimit: c.invocationConcurrencyLimit,
+		MaximumConcurrencyLimit:    c.maximumConcurrencyLimit,
+		Support:                    support,
 	}
 }
 
@@ -641,12 +665,13 @@ func (c Capabilities) document() capabilitiesDocument {
 		Commands:  capabilityCommandDocuments(c.commands),
 		Selectors: capabilitySelectorDocuments(c.selectors),
 		Effects:   append([]EffectClass{}, c.effectClasses...),
-		Limits:    capabilitiesLimitsDocument{ProjectDocumentBytes: c.projectDocumentBytes},
+		Limits:    capabilitiesLimitsDocument{ProjectDocumentBytes: c.projectDocumentBytes, InvocationConcurrencyLimit: c.maximumConcurrencyLimit},
 		Defaults: capabilitiesDefaultsDocument{
-			InteractionMode:   c.defaultInteraction,
-			OutputFormat:      c.defaultOutput,
-			StartupTimeout:    formatCapabilitiesDuration(c.startupTimeout),
-			InvocationTimeout: formatCapabilitiesDuration(c.invocationTimeout),
+			InteractionMode:       c.defaultInteraction,
+			OutputFormat:          c.defaultOutput,
+			StartupTimeout:        formatCapabilitiesDuration(c.startupTimeout),
+			InvocationTimeout:     formatCapabilitiesDuration(c.invocationTimeout),
+			InvocationConcurrency: capabilitiesConcurrencyDefaultDocument{DefaultLimit: c.invocationConcurrencyLimit, Queue: 0},
 		},
 		Support: support,
 	}

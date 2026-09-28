@@ -62,8 +62,18 @@ cleanup. Drain and cleanup share the construction/startup cleanup timeout and
 any earlier caller deadline. Failed drain keeps dependencies live for a fresh
 bounded Stop retry. This guarantee covers static Interface attempts; bootstrap
 does not yet drain the transitional legacy Capability dispatcher. Readiness,
-lifecycle-hook dependency access, permits, retries, and separate telemetry
+lifecycle-hook dependency access, retries, and separate telemetry
 remain unfinished.
+
+Each exact binding admits 64 target attempts with no queue. Capacity remains
+held through actual target termination and response copying, including after
+caller cancellation or timeout. Saturation returns `resource_exhausted` with
+`not_started`; Connect and transitional HTTP use status 429, and JavaScript
+preserves both facts without automatic retries. Generated assembly, the frozen
+model, and Interface provenance v2 record the limit. Installed capability JSON
+reports `defaults.invocation_concurrency` (`default_limit: 64`, `queue: 0`) and
+`limits.invocation_concurrency_limit` (65,536). Authored concurrency, queue,
+retry, circuit, and full compiled-policy compatibility remain unsupported.
 
 `generated/compatibility/interfaces.json` is the committed, CLI-owned
 replaceable shape working record for every visible authored Interface, whether
@@ -379,7 +389,7 @@ Private values and Secret reference targets do not enter generation-extension co
 The required top-level `transport_toolchain` record contains the exact embedded `go/format` runtime, built-in Protobuf-model, descriptor, wire-map, Connect, JavaScript, and API-documentation generator versions, pinned generated Go and npm dependency versions, and a canonical digest. Generation never consults an implicit global `protoc`, another generator executable, or a hosted generation service; changing this embedded identity changes the manifest and is detected by `plystra generate --check`. `generated/go/bootstrap/bootstrap_gen.go` records only the bounded executable compatibility projection: selected public Interface exposure entries with their transports, CORS policy, explicit Interface requirements, exact executable Interface-to-Implementation constructor choices, normalized Interface timeout policies, and the complete application-model digest. Dormant choices and dormant constructor-configuration records remain only in manifest configuration/composition provenance until activation, so a dormant-only edit changes manifest provenance without changing bootstrap source or artifact provenance. The projection digest keeps the runtime check cryptographically associated with the exact generated assembly. Process address, `timeouts.startup`, runtime configuration, Secret references, resolved Secrets, source paths, selector-only document identity, and machine-specific absolute paths are excluded. Changing selected CORS origins, credential handling, an adoption, or an Interface timeout policy creates deterministic generation drift when it changes the normalized selected model; equivalent normalized values retain one static model identity. Adopted-export records contain deterministic path, digest, removal, module/export, and source provenance, while current-project ownership remains separate. A separate private digest covers validated runtime configuration only for concurrent-input detection during the generation transaction.
 
 The required top-level `interface_provenance` record in
-`generated/manifest.json` uses schema `plystra.interface-provenance/v1`. It
+`generated/manifest.json` uses schema `plystra.interface-provenance/v2`. It
 identifies every visible authored Interface, every reachable ordinary binding,
 the selected constructor and selection reason, the complete dependency-first
 constructor graph, configuration ownership and source paths, effective

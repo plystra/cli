@@ -294,6 +294,7 @@ var sharedRuntimeAPI = []publicRuntimeAPI{
 			`"denied"`,
 			`"unauthenticated"`,
 			`"unavailable"`,
+			`"resource_exhausted"`,
 			`"timeout"`,
 			`"cancelled"`,
 			`"internal"`,

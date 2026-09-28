@@ -967,6 +967,8 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 				return contract.Response{}, mustKernelError(kernelinvocation.ErrorUnauthenticated, "authentication.required")
 			case "kernel-unavailable":
 				return contract.Response{}, mustKernelError(kernelinvocation.ErrorUnavailable, "runtime.unavailable")
+			case "kernel-resource-exhausted":
+				return contract.Response{}, mustKernelError(kernelinvocation.ErrorResourceExhausted, "runtime.resource_exhausted")
 			case "kernel-timeout":
 				return contract.Response{}, mustKernelError(kernelinvocation.ErrorTimeout, "runtime.timeout")
 			case "kernel-cancelled":
@@ -1557,6 +1559,7 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 		{name: "denied", note: "kernel-denied", code: connect.CodePermissionDenied, kernel: "denied"},
 		{name: "unauthenticated", note: "kernel-unauthenticated", code: connect.CodeUnauthenticated, kernel: "unauthenticated"},
 		{name: "unavailable", note: "kernel-unavailable", code: connect.CodeUnavailable, kernel: "unavailable"},
+		{name: "resource exhausted", note: "kernel-resource-exhausted", code: connect.CodeResourceExhausted, kernel: "resource_exhausted"},
 		{name: "timeout", note: "kernel-timeout", code: connect.CodeDeadlineExceeded, kernel: "timeout"},
 		{name: "cancelled", note: "kernel-cancelled", code: connect.CodeCanceled, kernel: "cancelled"},
 		{name: "result unknown", note: "kernel-result-unknown", code: connect.CodeUnavailable, kernel: "unavailable"},

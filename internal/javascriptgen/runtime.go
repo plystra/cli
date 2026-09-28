@@ -65,6 +65,7 @@ export type KernelErrorClass =
   | "denied"
   | "unauthenticated"
   | "unavailable"
+  | "resource_exhausted"
   | "timeout"
   | "cancelled"
   | "internal"
@@ -1572,6 +1573,7 @@ function isKernelErrorClass(value: string): value is KernelErrorClass {
     case "denied":
     case "unauthenticated":
     case "unavailable":
+    case "resource_exhausted":
     case "timeout":
     case "cancelled":
     case "internal":
@@ -1596,6 +1598,8 @@ function connectCodeForKernelError(value: KernelErrorClass): Code {
       return Code.Unauthenticated;
     case "unavailable":
       return Code.Unavailable;
+    case "resource_exhausted":
+      return Code.ResourceExhausted;
     case "timeout":
       return Code.DeadlineExceeded;
     case "cancelled":
@@ -1624,6 +1628,8 @@ function kernelPlystraError(
       return new PlystraError(401, code, detail);
     case "unavailable":
       return new PlystraError(503, code, detail);
+    case "resource_exhausted":
+      return new PlystraError(429, code, detail);
     case "timeout":
       return new PlystraError(504, code, detail);
     case "cancelled":

@@ -36,8 +36,9 @@ func TestRenderBuildsDependencyFirstGovernedInterfaceRuntime(t *testing.T) {
 		`.Contract(), true)`,
 		`kernelinvocation.BindingKindImplementation`,
 		`kernelinvocation.SelectionReasonUniqueCompatible`,
-		`Constructor:     "example.com/application/app.New"`,
-		`ContractDigest:  [32]byte{`,
+		`Constructor:      "example.com/application/app.New"`,
+		`ContractDigest:   [32]byte{`,
+		`ConcurrencyLimit: 64,`,
 		`plystra.Optional[`,
 		`kernelinvocation.NewCatalog(bindings)`,
 		`dispatcher.Publish(catalog)`,
@@ -69,7 +70,7 @@ func TestRenderBuildsDependencyFirstGovernedInterfaceRuntime(t *testing.T) {
 	if auditLifecycle < 0 || appLifecycle < 0 || auditLifecycle >= appLifecycle {
 		t.Fatalf("lifecycle bindings are not dependency-first:\n%s", source)
 	}
-	if bytes.Count(source, []byte(`Constructor:     "example.com/application/app.New"`)) != 2 {
+	if bytes.Count(source, []byte(`Constructor:      "example.com/application/app.New"`)) != 2 {
 		t.Fatalf("multi-Interface constructor provenance was not retained for two bindings:\n%s", source)
 	}
 	if !bytes.Contains(source, []byte(`.NewEndpoint(implementation1)`)) || bytes.Count(source, []byte(`.NewEndpoint(implementation1)`)) != 2 {
@@ -240,6 +241,25 @@ func TestRenderRejectsContradictoryOrCyclicGraph(t *testing.T) {
 	}
 }
 
+func TestRenderBindsAndBoundsAdmissionLimits(t *testing.T) {
+	base, err := implementationassemblygen.Render(validOptions(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, limit := range []int{-1, 0, 1, 65536, 65537} {
+		options := validOptions(t)
+		options.Bindings[0].ConcurrencyLimit = limit
+		file, err := implementationassemblygen.Render(options)
+		if limit < 1 || limit > 65536 {
+			if !errors.Is(err, implementationassemblygen.ErrInvalidInput) || len(file.Data()) != 0 {
+				t.Fatalf("limit %d: %v", limit, err)
+			}
+		} else if err != nil || bytes.Equal(file.Data(), base.Data()) {
+			t.Fatalf("limit %d did not change assembly: %v", limit, err)
+		}
+	}
+}
+
 func validOptions(t testing.TB) implementationassemblygen.Options {
 	t.Helper()
 	app := mustSymbol(t, "example.com/application/app.New")
@@ -283,11 +303,12 @@ func validOptions(t testing.TB) implementationassemblygen.Options {
 func binding(t testing.TB, id, packagePath string, constructor constructorsymbol.Symbol) implementationassemblygen.BindingInput {
 	t.Helper()
 	return implementationassemblygen.BindingInput{
-		InterfaceID:     mustInterfaceID(t, id),
-		PackagePath:     packagePath,
-		Constructor:     constructor,
-		SelectionReason: implementationassemblygen.SelectionUniqueCompatible,
-		ContractDigest:  sha256.Sum256([]byte(id)),
+		ConcurrencyLimit: 64,
+		InterfaceID:      mustInterfaceID(t, id),
+		PackagePath:      packagePath,
+		Constructor:      constructor,
+		SelectionReason:  implementationassemblygen.SelectionUniqueCompatible,
+		ContractDigest:   sha256.Sum256([]byte(id)),
 	}
 }
 

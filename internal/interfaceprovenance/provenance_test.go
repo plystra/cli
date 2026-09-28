@@ -21,7 +21,7 @@ func TestProvenanceCanonicalizesCompleteInterfaceAndConstructorGraph(t *testing.
 	if !first.Valid() || first.SchemaVersion() != interfaceprovenance.Schema {
 		t.Fatalf("constructed provenance is invalid: schema %q digest %q", first.SchemaVersion(), first.Digest())
 	}
-	const expectedDigest = "sha256:5bebddaa40054144aa607784144e7ff61dfe09e4b9cfdbf49310e9ef30438f24"
+	const expectedDigest = "sha256:3a1456207493dad0d24922ef8caeb6b8923cf413139598831b3ee6e98473ec09"
 	if first.Digest() != expectedDigest {
 		t.Fatalf("digest = %q; want %q", first.Digest(), expectedDigest)
 	}
@@ -70,6 +70,7 @@ func TestProvenanceCanonicalizesCompleteInterfaceAndConstructorGraph(t *testing.
 		bindings[1].Selection().ConstructionOrder() != 2 ||
 		bindings[1].ConfigurationOwner() != `config["example.com/app/order.New"]` ||
 		bindings[1].Policy().Timeout() != "5s" ||
+		bindings[1].Policy().ConcurrencyLimit() != 64 ||
 		bindings[1].Mappings().ConnectProcedure() != "/plystra.generated.order.create.v1.OrderCreateV1Service/Invoke" ||
 		bindings[1].Mappings().JavaScriptModulePath() != "generated/sdk/javascript/src/interfaces/order/create/v1.ts" {
 		t.Fatalf("Bindings = %#v", bindings)
@@ -87,6 +88,7 @@ func TestProvenanceCanonicalizesCompleteInterfaceAndConstructorGraph(t *testing.
 	if len(intrinsics) != 1 ||
 		intrinsics[0].Interface().ID() != "kernel.health/v1" ||
 		intrinsics[0].Mappings().AdapterPath() != "" ||
+		intrinsics[0].Policy().ConcurrencyLimit() != 64 ||
 		intrinsics[0].Mappings().ProxyPath() != "generated/go/proxies/kernel/health/v1/proxy_gen.go" {
 		t.Fatalf("Intrinsics = %#v", intrinsics)
 	}
@@ -198,6 +200,35 @@ func TestProvenanceRejectsIncompleteAndTamperedRecords(t *testing.T) {
 	}
 }
 
+func TestProvenanceBindsAndBoundsAdmissionLimits(t *testing.T) {
+	base, err := interfaceprovenance.New(completeInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, intrinsic := range []bool{false, true} {
+		for _, limit := range []int{-1, 0, 1, 65536, 65537} {
+			input := completeInput()
+			if intrinsic {
+				input.Intrinsics[0].Policy.ConcurrencyLimit = limit
+			} else {
+				input.Bindings[0].Policy.ConcurrencyLimit = limit
+			}
+			got, err := interfaceprovenance.New(input)
+			if limit < 1 || limit > 65536 {
+				if !errors.Is(err, interfaceprovenance.ErrInvalid) {
+					t.Fatalf("limit %d: %v", limit, err)
+				}
+			} else if err != nil || !got.Valid() || got.Digest() == base.Digest() {
+				t.Fatalf("limit %d did not change valid provenance: %v", limit, err)
+			}
+		}
+	}
+	oldSchema := bytes.Replace(base.RecordJSON(), []byte(interfaceprovenance.Schema), []byte("plystra.interface-provenance/v1"), 1)
+	if _, err := interfaceprovenance.Decode(oldSchema); !errors.Is(err, interfaceprovenance.ErrRecord) {
+		t.Fatalf("old schema: %v", err)
+	}
+}
+
 func completeInput() interfaceprovenance.Input {
 	auditConstructor := interfaceprovenance.ConstructorInput{
 		Symbol:            "example.com/app/audit.New",
@@ -285,8 +316,9 @@ func completeInput() interfaceprovenance.Input {
 				},
 				ConfigurationOwner: orderConstructor.ConfigurationOwner,
 				Policy: interfaceprovenance.PolicyInput{
-					Timeout: "5s",
-					Sources: []string{`plystra.yaml interfaces.policies["order.create/v1"].timeout`},
+					ConcurrencyLimit: 64,
+					Timeout:          "5s",
+					Sources:          []string{`plystra.yaml interfaces.policies["order.create/v1"].timeout`},
 				},
 				Mappings: orderMapping,
 			},
@@ -306,8 +338,9 @@ func completeInput() interfaceprovenance.Input {
 					ConstructionOrder: auditConstructor.ConstructionOrder,
 				},
 				Policy: interfaceprovenance.PolicyInput{
-					Timeout: "2m0s",
-					Sources: []string{"built-in Plystra default Interface invocation timeout"},
+					ConcurrencyLimit: 64,
+					Timeout:          "2m0s",
+					Sources:          []string{"built-in Plystra default Interface invocation timeout"},
 				},
 				Mappings: interfaceprovenance.MappingInput{
 					ProxyPath:    "generated/go/proxies/audit/write/v1/proxy_gen.go",
@@ -334,8 +367,9 @@ func completeInput() interfaceprovenance.Input {
 				RequirementSources: []string{"Kernel intrinsic inventory kernel.health/v1", `plystra.yaml http.expose["kernel.health/v1"]`},
 				ExposureSources:    []string{`plystra.yaml http.expose["kernel.health/v1"]`},
 				Policy: interfaceprovenance.PolicyInput{
-					Timeout: "2m0s",
-					Sources: []string{"built-in Plystra default Interface invocation timeout"},
+					ConcurrencyLimit: 64,
+					Timeout:          "2m0s",
+					Sources:          []string{"built-in Plystra default Interface invocation timeout"},
 				},
 				Mappings: intrinsicMapping(),
 			},

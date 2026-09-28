@@ -424,6 +424,8 @@ func TestGeneratedHTTPHandlerValidatesAndInvokesCanonicalPath(t *testing.T) {
 			return contract.Response{}, kernelinvocation.NewTestPanickingSemanticError()
 		case "denied":
 			return contract.Response{}, kernelinvocation.NewTestError(kernelinvocation.ErrorDenied, "authorization.denied")
+		case "resource-exhausted":
+			return contract.Response{}, kernelinvocation.NewTestError(kernelinvocation.ErrorResourceExhausted, "runtime.resource_exhausted")
 		case "cancelled":
 			return contract.Response{}, context.Canceled
 		case "unknown-secret":
@@ -521,6 +523,7 @@ func TestGeneratedHTTPHandlerValidatesAndInvokesCanonicalPath(t *testing.T) {
 		{name:"undeclared semantic", subject:"undeclared-semantic", status:http.StatusInternalServerError, code:"internal", completion:"result_known"},
 		{name:"panicking semantic", subject:"panicking-semantic", status:http.StatusInternalServerError, code:"internal"},
 		{name:"classified", subject:"denied", status:http.StatusForbidden, code:"denied", detail:"authorization.denied", completion:"result_known"},
+		{name:"resource exhausted", subject:"resource-exhausted", status:http.StatusTooManyRequests, code:"resource_exhausted", detail:"runtime.resource_exhausted", completion:"result_known"},
 		{name:"cancelled", subject:"cancelled", status:499, code:"cancelled"},
 		{name:"unknown", subject:"unknown-secret", status:http.StatusInternalServerError, code:"internal"},
 		{name:"panic", subject:"panic", status:http.StatusInternalServerError, code:"internal"},

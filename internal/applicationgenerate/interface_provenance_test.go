@@ -125,6 +125,9 @@ config:
 		t.Fatalf("binding order = %#v", bindings)
 	}
 	configurationBinding := bindings[0]
+	if configurationBinding.Policy().ConcurrencyLimit() != 64 || bindings[1].Policy().ConcurrencyLimit() != 64 {
+		t.Fatal("binding provenance omitted the executable admission default")
+	}
 	if len(configurationBinding.RootSources()) != 0 ||
 		!slices.Equal(configurationBinding.RequiringConstructors(), []string{orderConstructor}) ||
 		configurationBinding.Selection().Constructor() != configConstructor ||

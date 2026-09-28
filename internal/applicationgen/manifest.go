@@ -27,6 +27,7 @@ import (
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/transporttoolchain"
+	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -540,25 +541,26 @@ type ApplicationModelOptions struct {
 }
 
 type applicationModelDocument struct {
-	Version                int                                     `json:"version"`
-	ModulePath             string                                  `json:"module_path"`
-	JavaScriptPackage      string                                  `json:"javascript_package"`
-	KernelModuleVersion    string                                  `json:"kernel_module_version"`
-	KernelBuildIdentity    string                                  `json:"kernel_build_identity"`
-	HTTPTransports         applicationModelHTTPTransports          `json:"http_transports"`
-	HTTPCORS               *applicationModelHTTPCORS               `json:"http_cors"`
-	ContextDigest          string                                  `json:"context_digest"`
-	AliasDigest            string                                  `json:"alias_digest"`
-	Configurations         []applicationModelConfiguration         `json:"configurations"`
-	Providers              []applicationModelProvider              `json:"providers"`
-	InterfaceProxies       []applicationModelInterfaceProxy        `json:"interface_proxies"`
-	ImplementationAdapters []applicationModelImplementationAdapter `json:"implementation_adapters"`
-	ImplementationAssembly applicationModelImplementationAssembly  `json:"implementation_assembly"`
-	InterfacePolicies      []applicationModelInterfacePolicy       `json:"interface_policies"`
-	GenerationExtensions   []applicationModelGenerationExtension   `json:"generation_extensions"`
-	ProtobufProjection     json.RawMessage                         `json:"protobuf_projection"`
-	InterfaceProtobufModel json.RawMessage                         `json:"interface_protobuf_projection"`
-	ProtobufWireProjection json.RawMessage                         `json:"protobuf_wire_projection"`
+	DefaultConcurrencyLimit int                                     `json:"default_concurrency_limit"`
+	Version                 int                                     `json:"version"`
+	ModulePath              string                                  `json:"module_path"`
+	JavaScriptPackage       string                                  `json:"javascript_package"`
+	KernelModuleVersion     string                                  `json:"kernel_module_version"`
+	KernelBuildIdentity     string                                  `json:"kernel_build_identity"`
+	HTTPTransports          applicationModelHTTPTransports          `json:"http_transports"`
+	HTTPCORS                *applicationModelHTTPCORS               `json:"http_cors"`
+	ContextDigest           string                                  `json:"context_digest"`
+	AliasDigest             string                                  `json:"alias_digest"`
+	Configurations          []applicationModelConfiguration         `json:"configurations"`
+	Providers               []applicationModelProvider              `json:"providers"`
+	InterfaceProxies        []applicationModelInterfaceProxy        `json:"interface_proxies"`
+	ImplementationAdapters  []applicationModelImplementationAdapter `json:"implementation_adapters"`
+	ImplementationAssembly  applicationModelImplementationAssembly  `json:"implementation_assembly"`
+	InterfacePolicies       []applicationModelInterfacePolicy       `json:"interface_policies"`
+	GenerationExtensions    []applicationModelGenerationExtension   `json:"generation_extensions"`
+	ProtobufProjection      json.RawMessage                         `json:"protobuf_projection"`
+	InterfaceProtobufModel  json.RawMessage                         `json:"interface_protobuf_projection"`
+	ProtobufWireProjection  json.RawMessage                         `json:"protobuf_wire_projection"`
 }
 
 type applicationModelHTTPTransports struct {
@@ -624,17 +626,19 @@ type applicationModelImplementationAssembly struct {
 }
 
 type applicationModelAssemblyBinding struct {
-	InterfaceID     string `json:"interface_id"`
-	PackagePath     string `json:"package_path"`
-	Constructor     string `json:"constructor"`
-	SelectionReason string `json:"selection_reason"`
-	ContractDigest  string `json:"contract_digest"`
+	InterfaceID      string `json:"interface_id"`
+	PackagePath      string `json:"package_path"`
+	Constructor      string `json:"constructor"`
+	SelectionReason  string `json:"selection_reason"`
+	ContractDigest   string `json:"contract_digest"`
+	ConcurrencyLimit int    `json:"concurrency_limit"`
 }
 
 type applicationModelAssemblyIntrinsicBinding struct {
-	InterfaceID string `json:"interface_id"`
-	PackagePath string `json:"package_path"`
-	MethodName  string `json:"method_name"`
+	ConcurrencyLimit int    `json:"concurrency_limit"`
+	InterfaceID      string `json:"interface_id"`
+	PackagePath      string `json:"package_path"`
+	MethodName       string `json:"method_name"`
 }
 
 type applicationModelAssemblyConstructor struct {
@@ -798,20 +802,22 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 	bindingRecords := make([]applicationModelAssemblyBinding, len(assemblyBindings))
 	for index, binding := range assemblyBindings {
 		bindingRecords[index] = applicationModelAssemblyBinding{
-			InterfaceID:     binding.InterfaceID.String(),
-			PackagePath:     binding.PackagePath,
-			Constructor:     binding.Constructor.String(),
-			SelectionReason: string(binding.SelectionReason),
-			ContractDigest:  "sha256:" + hex.EncodeToString(binding.ContractDigest[:]),
+			InterfaceID:      binding.InterfaceID.String(),
+			PackagePath:      binding.PackagePath,
+			Constructor:      binding.Constructor.String(),
+			SelectionReason:  string(binding.SelectionReason),
+			ContractDigest:   "sha256:" + hex.EncodeToString(binding.ContractDigest[:]),
+			ConcurrencyLimit: binding.ConcurrencyLimit,
 		}
 	}
 	assemblyIntrinsics := assemblyFile.IntrinsicBindings()
 	intrinsicBindingRecords := make([]applicationModelAssemblyIntrinsicBinding, len(assemblyIntrinsics))
 	for index, binding := range assemblyIntrinsics {
 		intrinsicBindingRecords[index] = applicationModelAssemblyIntrinsicBinding{
-			InterfaceID: binding.InterfaceID.String(),
-			PackagePath: binding.PackagePath,
-			MethodName:  binding.MethodName,
+			ConcurrencyLimit: kernelintrinsic.ConcurrencyLimit,
+			InterfaceID:      binding.InterfaceID.String(),
+			PackagePath:      binding.PackagePath,
+			MethodName:       binding.MethodName,
 		}
 	}
 	assemblyConstructors := assemblyFile.Constructors()
@@ -889,11 +895,12 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		return "", fmt.Errorf("%w: Protobuf wire map is absent or does not match the normalized Interface and legacy projections", ErrResolution)
 	}
 	document := applicationModelDocument{
-		Version:             16,
-		ModulePath:          options.ModulePath,
-		JavaScriptPackage:   options.JavaScriptPackage,
-		KernelModuleVersion: options.KernelModuleVersion,
-		KernelBuildIdentity: options.KernelBuildIdentity,
+		DefaultConcurrencyLimit: applicationmeta.DefaultInvocationConcurrencyLimit,
+		Version:                 17,
+		ModulePath:              options.ModulePath,
+		JavaScriptPackage:       options.JavaScriptPackage,
+		KernelModuleVersion:     options.KernelModuleVersion,
+		KernelBuildIdentity:     options.KernelBuildIdentity,
 		HTTPTransports: applicationModelHTTPTransports{
 			Connect: options.HTTPTransports.Connect,
 			REST:    options.HTTPTransports.REST,

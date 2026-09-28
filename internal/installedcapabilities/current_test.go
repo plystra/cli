@@ -13,6 +13,7 @@ import (
 	"github.com/plystra/cli/internal/installedcapabilities"
 	"github.com/plystra/cli/internal/transporttoolchain"
 	"github.com/plystra/cli/internal/version"
+	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
 func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
@@ -28,6 +29,8 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		capabilities.GoRequirement() != version.GoRequirement ||
 		capabilities.GOOS() != runtime.GOOS || capabilities.GOARCH() != runtime.GOARCH ||
 		capabilities.ProjectDocumentBytes() != applicationmeta.MaximumSize ||
+		capabilities.InvocationConcurrencyLimit() != applicationmeta.DefaultInvocationConcurrencyLimit ||
+		capabilities.MaximumConcurrencyLimit() != kernelinvocation.MaximumConcurrencyLimit ||
 		capabilities.StartupTimeout() != applicationmeta.DefaultStartupTimeout ||
 		capabilities.InvocationTimeout() != applicationmeta.DefaultInvocationTimeout {
 		t.Fatalf("installed facts = %#v", capabilities)
@@ -131,6 +134,7 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		"data.compiler|yes|no|no|no|no",
 		"inspect.capabilities|yes|yes|not_applicable|yes|yes",
 		"interfaces.policies.*.timeout|yes|yes|yes|no|no",
+		"invocation.default-concurrency|yes|not_applicable|yes|yes|yes",
 		"resource|yes|no|no|no|no",
 		"transport.connect|yes|yes|yes|yes|yes",
 	}

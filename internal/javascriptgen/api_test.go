@@ -31,7 +31,7 @@ func TestBuildPublicAPIUsesRenderedInterfaceNamesAndCallerVisibleTypes(t *testin
 		t.Fatalf("BuildPublicAPI = %#v, %v", api, err)
 	}
 	const (
-		wantPackageDigest = "sha256:909290f6a4e648bd8d8707f9d028a770789f6b490706e5e9e597f55497ffd1ec"
+		wantPackageDigest = "sha256:a9182e22c46fa446eaf6c856717b7a76b6802b0273a78c2656461afe1a6f49c6"
 		wantSurfaceDigest = "sha256:1e349062c883a95d9431328653050ac8e7efb9464b6e269ac93a9938c503c712"
 		wantTypesDigest   = "sha256:a0b62b98c6cb4137eb59ce893d553ec53de94989895ba8677074dbcfe6887fc5"
 		wantErrorsDigest  = "sha256:01177aceea6027c3781dd05b2f1020da1e5f7f7102ce022a832378de3865130c"

@@ -863,6 +863,7 @@ test("closed Kernel error classes retain typed safe details", async () => {
     ["permission_denied", "denied", 403, "denied"],
     ["unauthenticated", "unauthenticated", 401, "unauthenticated"],
     ["unavailable", "unavailable", 503, "unavailable"],
+    ["resource_exhausted", "resource_exhausted", 429, "resource_exhausted"],
     ["deadline_exceeded", "timeout", 504, "timeout"],
     ["canceled", "cancelled", 0, "cancelled"],
     ["internal", "internal", 500, "internal"],
@@ -1017,17 +1018,18 @@ test("missing, malformed, duplicate, and mismatched details fail closed", async 
 
 test("completion is preserved independently of the semantic or Kernel code", async () => {
   for (const completion of ["not_started", "result_known", "result_unknown"]) {
-    for (const semantic of [false, true]) {
+    for (const code of ["unavailable", "resource_exhausted", "capability_error"]) {
+      const semantic = code === "capability_error";
       let calls = 0;
       const send = createEmailSendV1({
         baseUrl: "https://api.example.test",
         credentialPolicy: anonymousCredentialPolicy,
         fetch: async () => {
           calls++;
-          return connectErrorResponse(semantic ? "failed_precondition" : "unavailable", "private", 400, [
+          return connectErrorResponse(semantic ? "failed_precondition" : code, "private", 400, [
             safeErrorDetail({
               semanticErrorCode: semantic ? "temporarily_unavailable" : "",
-              kernelErrorClass: semantic ? "" : "unavailable",
+              kernelErrorClass: semantic ? "" : code,
               completion,
             }),
           ]);
@@ -1036,7 +1038,8 @@ test("completion is preserved independently of the semantic or Kernel code", asy
       await assert.rejects(
         () => send({ to: "person@example.com", tags: [], priority: "normal" }),
         (error) => error instanceof PlystraError && error.completion === completion &&
-          error.detail?.completion === completion && error.code === (semantic ? "capability_error" : "unavailable"),
+          error.detail?.completion === completion && error.code === code &&
+          (code !== "resource_exhausted" || error.status === 429),
       );
       assert.equal(calls, 1);
     }

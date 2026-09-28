@@ -60,11 +60,12 @@ const (
 
 // BindingInput is one exact reachable Interface-to-constructor binding.
 type BindingInput struct {
-	InterfaceID     interfaceid.Identifier
-	PackagePath     string
-	Constructor     constructorsymbol.Symbol
-	SelectionReason SelectionReason
-	ContractDigest  [sha256.Size]byte
+	InterfaceID      interfaceid.Identifier
+	PackagePath      string
+	Constructor      constructorsymbol.Symbol
+	SelectionReason  SelectionReason
+	ContractDigest   [sha256.Size]byte
+	ConcurrencyLimit int
 }
 
 // IntrinsicBindingInput is one exposed reserved Kernel Interface that needs a
@@ -194,6 +195,9 @@ func planAssembly(options Options) (plan, error) {
 		}
 		if binding.SelectionReason != SelectionExplicit && binding.SelectionReason != SelectionUniqueCompatible {
 			return plan{}, fmt.Errorf("%w: Interface %s has selection reason %q", ErrInvalidInput, identifier, binding.SelectionReason)
+		}
+		if binding.ConcurrencyLimit < 1 || binding.ConcurrencyLimit > kernelinvocation.MaximumConcurrencyLimit {
+			return plan{}, fmt.Errorf("%w: Interface %s concurrency limit must be within 1 through %d", ErrInvalidInput, identifier, kernelinvocation.MaximumConcurrencyLimit)
 		}
 		if _, duplicate := bindingByID[identifier]; duplicate {
 			return plan{}, fmt.Errorf("%w: duplicate Interface binding %s", ErrInvalidInput, identifier)
@@ -727,6 +731,7 @@ func (failure *InterfaceAssemblyError) LogValue() slog.Value {
 		fmt.Fprintf(&source, "\t\tModuleBuild:     moduleBuild%d,\n", implementationIndex)
 		fmt.Fprintf(&source, "\t\tSelectionReason: kernelinvocation.%s,\n", kernelSelectionName(binding.SelectionReason))
 		fmt.Fprintf(&source, "\t\tContractDigest:  %s,\n", digestLiteral(binding.ContractDigest))
+		fmt.Fprintf(&source, "\t\tConcurrencyLimit: %d,\n", binding.ConcurrencyLimit)
 		fmt.Fprintf(&source, "\t}, endpoint%d)\n", index)
 		fmt.Fprintln(&source, "\tif err != nil {")
 		fmt.Fprintf(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%%w: exact binding %s\", ErrInterfaceAssembly)\n", binding.InterfaceID)

@@ -494,6 +494,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		KernelModuleVersion:      options.KernelModuleVersion,
 		KernelBuildIdentity:      options.KernelBuildIdentity,
 		DefaultTimeout:           applicationmeta.DefaultInvocationTimeout,
+		ConcurrencyLimit:         applicationmeta.DefaultInvocationConcurrencyLimit,
 		Providers:                options.Providers,
 		Invocations:              invocationInputs,
 	})

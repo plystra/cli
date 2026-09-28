@@ -291,6 +291,8 @@ func plystraStatus(code string) int {
 		return http.StatusConflict
 	case "timeout", "unavailable":
 		return http.StatusServiceUnavailable
+	case "resource_exhausted":
+		return http.StatusTooManyRequests
 	case "cancelled":
 		return 499
 	default:

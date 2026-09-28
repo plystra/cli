@@ -506,8 +506,18 @@ Drain and cleanup share the construction/startup cleanup timeout and any
 earlier caller deadline. Failed drain keeps dependencies live for a fresh
 bounded Stop retry. This guarantee covers static Interface attempts; bootstrap
 does not yet drain the transitional legacy Capability dispatcher. Readiness,
-lifecycle-hook dependency access, permits, retries, and separate telemetry
+lifecycle-hook dependency access, retries, and separate telemetry
 remain unfinished.
+
+Each exact binding admits 64 target attempts with no queue. Capacity remains
+held through actual target termination and response copying, including after
+caller cancellation or timeout. Saturation returns `resource_exhausted` with
+`not_started`; Connect and transitional HTTP use status 429, and JavaScript
+preserves both facts without automatic retries. Generated assembly, the frozen
+model, and Interface provenance v2 record the limit. Installed capability JSON
+reports `defaults.invocation_concurrency` (`default_limit: 64`, `queue: 0`) and
+`limits.invocation_concurrency_limit` (65,536). Authored concurrency, queue,
+retry, circuit, and full compiled-policy compatibility remain unsupported.
 
 `generated/compatibility/interfaces.json` is the committed, CLI-owned,
 replaceable shape working record for every visible authored Interface,
@@ -1175,7 +1185,7 @@ paths. Use the same selection for generation and its check; selecting another
 build-affecting model correctly reports generated drift.
 
 The same manifest requires `interface_provenance` schema
-`plystra.interface-provenance/v1`. This is the non-secret join between authored
+`plystra.interface-provenance/v2`. This is the non-secret join between authored
 Interfaces and generated assembly. It records:
 
 - every visible authored Interface and its module, source, shape, contract,
@@ -1202,7 +1212,7 @@ $manifest.interface_provenance.constructors |
   Select-Object symbol, construction_order, dependencies
 ```
 
-The first command prints `plystra.interface-provenance/v1`. The exact same
+The first command prints `plystra.interface-provenance/v2`. The exact same
 record is embedded under `application_manifest` in
 `generated/.plystra-manifest.json` so recovery and ownership validation use
 the same evidence. Neither copy contains configuration values,

@@ -12,6 +12,7 @@ import (
 	"github.com/plystra/cli/internal/diagnosticschema"
 	"github.com/plystra/cli/internal/transporttoolchain"
 	"github.com/plystra/cli/internal/version"
+	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
 // ErrCurrent reports an internally inconsistent installed distribution.
@@ -60,15 +61,25 @@ func Current() (commandschema.Capabilities, error) {
 				Version:   commandschema.ResultSchemaVersion,
 			},
 		},
-		Commands:             installedCommands(),
-		Selectors:            installedSelectors(),
-		DefaultInteraction:   commandschema.CapabilityInteractionNonInteractive,
-		DefaultOutput:        commandschema.CapabilityOutputHuman,
-		EffectClasses:        installedEffectClasses(),
-		ProjectDocumentBytes: applicationmeta.MaximumSize,
-		StartupTimeout:       applicationmeta.DefaultStartupTimeout,
-		InvocationTimeout:    applicationmeta.DefaultInvocationTimeout,
+		Commands:                   installedCommands(),
+		Selectors:                  installedSelectors(),
+		DefaultInteraction:         commandschema.CapabilityInteractionNonInteractive,
+		DefaultOutput:              commandschema.CapabilityOutputHuman,
+		EffectClasses:              installedEffectClasses(),
+		ProjectDocumentBytes:       applicationmeta.MaximumSize,
+		StartupTimeout:             applicationmeta.DefaultStartupTimeout,
+		InvocationTimeout:          applicationmeta.DefaultInvocationTimeout,
+		InvocationConcurrencyLimit: applicationmeta.DefaultInvocationConcurrencyLimit,
+		MaximumConcurrencyLimit:    kernelinvocation.MaximumConcurrencyLimit,
 		Support: []commandschema.CapabilitySupportInput{
+			{
+				ID:        "invocation.default-concurrency",
+				Specified: commandschema.SupportYes,
+				Parsed:    commandschema.SupportNotApplicable,
+				Generated: commandschema.SupportYes,
+				Executed:  commandschema.SupportYes,
+				Accepted:  commandschema.SupportYes,
+			},
 			{
 				ID:        "inspect.capabilities",
 				Specified: commandschema.SupportYes,

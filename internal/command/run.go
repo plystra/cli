@@ -386,6 +386,8 @@ counts and identifies omitted command argument, selector, effect-class, and
 transport component details. JSON nests one plystra.capabilities/v1 payload in
 plystra.result/v1 and reports exact installed command and schema support without
 inventing planned commands or unsupported schema identities.
+Admission defaults report 64 attempts per exact binding, queue 0, and the
+Kernel maximum of 65536; authored concurrency policies remain unsupported.
 Explicit --verbose, --env, or --config is invalid and emits
 PLYSTRA_INSPECT_CAPABILITIES_INVOCATION_INVALID.
 

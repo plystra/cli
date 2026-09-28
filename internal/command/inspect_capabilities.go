@@ -259,7 +259,7 @@ func writeHumanInspectCapabilities(writer io.Writer, capabilities commandschema.
 	}
 	if _, err := fmt.Fprintf(
 		writer,
-		"Command surface: %d installed leaf commands\nSelectors: %d installed\nEffect classes: %d closed\nProject document limit: %d bytes\nDefaults: interaction %s, output %s, startup %s, invocation %s\nTransport toolchain: %s (%d components)\nSupport stages:\n",
+		"Command surface: %d installed leaf commands\nSelectors: %d installed\nEffect classes: %d closed\nProject document limit: %d bytes\nDefaults: interaction %s, output %s, startup %s, invocation %s\nTransport toolchain: %s (%d components)\n",
 		len(capabilities.Commands()),
 		len(capabilities.Selectors()),
 		len(capabilities.EffectClasses()),
@@ -271,6 +271,9 @@ func writeHumanInspectCapabilities(writer io.Writer, capabilities commandschema.
 		toolchain.Digest(),
 		len(toolchain.Components()),
 	); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "Invocation concurrency: default_limit %d, queue 0, maximum %d\nSupport stages:\n", capabilities.InvocationConcurrencyLimit(), capabilities.MaximumConcurrencyLimit()); err != nil {
 		return err
 	}
 	for _, support := range capabilities.Support() {

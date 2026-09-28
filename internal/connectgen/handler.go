@@ -637,6 +637,8 @@ func renderBoundaryHelpers(source *strings.Builder, useHTTPPath bool, requestedC
 	fmt.Fprintln(source, "\t\tcode = connect.CodeUnauthenticated")
 	fmt.Fprintln(source, "\tcase \"unavailable\":")
 	fmt.Fprintln(source, "\t\tcode = connect.CodeUnavailable")
+	fmt.Fprintln(source, "\tcase \"resource_exhausted\":")
+	fmt.Fprintln(source, "\t\tcode = connect.CodeResourceExhausted")
 	fmt.Fprintln(source, "\tcase \"timeout\":")
 	fmt.Fprintln(source, "\t\tcode = connect.CodeDeadlineExceeded")
 	fmt.Fprintln(source, "\tcase \"cancelled\":")

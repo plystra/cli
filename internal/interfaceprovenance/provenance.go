@@ -21,12 +21,13 @@ import (
 
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceid"
+	kernelinvocation "github.com/plystra/kernel/invocation"
 	"golang.org/x/mod/module"
 )
 
 const (
 	// Schema identifies the only supported Interface-provenance record.
-	Schema = "plystra.interface-provenance/v1"
+	Schema = "plystra.interface-provenance/v2"
 	// MaximumBytes bounds one generated manifest provenance record.
 	MaximumBytes int64 = 16 << 20
 
@@ -130,10 +131,11 @@ type DependencyInput struct {
 }
 
 // PolicyInput is the normalized effective declarative invocation-policy input.
-// Runtime policy enforcement remains owned by its later roadmap gate.
+// Concurrency admission is enforced; other policy support is reported separately.
 type PolicyInput struct {
-	Timeout string
-	Sources []string
+	Timeout          string
+	ConcurrencyLimit int
+	Sources          []string
 }
 
 // MappingInput identifies every currently generated projection for one
@@ -332,8 +334,9 @@ func (d Dependency) SelectedConstructor() string { return d.record.SelectedConst
 // Policy is one immutable normalized invocation-policy input.
 type Policy struct{ record wirePolicy }
 
-func (p Policy) Timeout() string   { return p.record.Timeout }
-func (p Policy) Sources() []string { return append([]string(nil), p.record.Sources...) }
+func (p Policy) Timeout() string       { return p.record.Timeout }
+func (p Policy) ConcurrencyLimit() int { return p.record.ConcurrencyLimit }
+func (p Policy) Sources() []string     { return append([]string(nil), p.record.Sources...) }
 
 // Mapping is one immutable generated-projection mapping.
 type Mapping struct{ record wireMapping }
@@ -392,8 +395,9 @@ func New(input Input) (Provenance, error) {
 			Selection:             wireSelection(value.Selection),
 			ConfigurationOwner:    value.ConfigurationOwner,
 			Policy: wirePolicy{
-				Timeout: value.Policy.Timeout,
-				Sources: canonicalStrings(value.Policy.Sources),
+				Timeout:          value.Policy.Timeout,
+				ConcurrencyLimit: value.Policy.ConcurrencyLimit,
+				Sources:          canonicalStrings(value.Policy.Sources),
 			},
 			Mappings: wireMapping(value.Mappings),
 		}
@@ -426,8 +430,9 @@ func New(input Input) (Provenance, error) {
 			RequirementSources: canonicalStrings(value.RequirementSources),
 			ExposureSources:    canonicalStrings(value.ExposureSources),
 			Policy: wirePolicy{
-				Timeout: value.Policy.Timeout,
-				Sources: canonicalStrings(value.Policy.Sources),
+				Timeout:          value.Policy.Timeout,
+				ConcurrencyLimit: value.Policy.ConcurrencyLimit,
+				Sources:          canonicalStrings(value.Policy.Sources),
 			},
 			Mappings: wireMapping(value.Mappings),
 		}
@@ -563,8 +568,9 @@ type wireDependency struct {
 }
 
 type wirePolicy struct {
-	Timeout string   `json:"timeout"`
-	Sources []string `json:"sources"`
+	Timeout          string   `json:"timeout"`
+	ConcurrencyLimit int      `json:"concurrency_limit"`
+	Sources          []string `json:"sources"`
 }
 
 type wireMapping struct {
@@ -937,6 +943,9 @@ func validateDependency(value wireDependency) error {
 }
 
 func validatePolicy(value wirePolicy) error {
+	if value.ConcurrencyLimit < 1 || value.ConcurrencyLimit > kernelinvocation.MaximumConcurrencyLimit {
+		return fmt.Errorf("policy concurrency limit must be within 1 through %d", kernelinvocation.MaximumConcurrencyLimit)
+	}
 	timeout, err := time.ParseDuration(value.Timeout)
 	if err != nil || timeout <= 0 || value.Timeout != timeout.String() {
 		return fmt.Errorf("policy timeout %q is not one normalized positive Go duration", value.Timeout)

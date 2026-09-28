@@ -259,6 +259,7 @@ func TestProxyUsesGovernedHandle(t *testing.T) {
 	build, err := invocation.NewModuleBuild("example.com/proxyfixture", "v1.0.0", "")
 	if err != nil { t.Fatal(err) }
 	binding, err := invocation.NewBinding(invocation.BindingOptions{
+		ConcurrencyLimit: 64,
 		Kind: invocation.BindingKindImplementation,
 		Constructor: "example.com/proxyfixture/implementation.New",
 		ModuleBuild: build,
@@ -323,6 +324,7 @@ func TestGeneratedResponseProcessingRetainsAttempt(t *testing.T) {
 					build, err := invocation.NewModuleBuild("example.com/proxyfixture", "v1.0.0", "")
 					if err != nil { t.Fatal(err) }
 					binding, err := invocation.NewBinding(invocation.BindingOptions{
+						ConcurrencyLimit: 1,
 						Kind: invocation.BindingKindImplementation, Constructor: "example.com/proxyfixture/implementation.New",
 						ModuleBuild: build, SelectionReason: invocation.SelectionReasonUniqueCompatible,
 						ContractDigest: sha256.Sum256([]byte("order.create/v1")),
@@ -351,11 +353,19 @@ func TestGeneratedResponseProcessingRetainsAttempt(t *testing.T) {
 					go func() { response, err := proxy.New(handle).Create(ctx, contract.Request{Value: "request"}); done <- result{response, err} }()
 					select { case <-entered: case <-time.After(time.Second): t.Fatal("processor was not entered") }
 					if dispatcher.ActiveAttempts() != 1 { t.Fatal("response processing lost attempt ownership") }
+					assertCapacity := func() {
+						response, err := handle.Invoke(context.Background(), contract.Request{Value: "request"})
+						var failure *invocation.Error
+						if response != (contract.Response{}) || !errors.As(err, &failure) || failure.Code() != invocation.ErrorResourceExhausted || invocation.CompletionOf(err) != invocation.CompletionNotStarted { t.Fatalf("processor released admission: %#v, %v", response, err) }
+					}
+					assertCapacity()
 					if mode == "normal" {
 						unblock()
 					} else {
 						if mode == "cancel" { cancel() }
 						if mode == "deadline" { <-ctx.Done() }
+						synctest.Wait()
+						assertCapacity()
 						bounded, stop := context.WithTimeout(context.Background(), 5*time.Millisecond)
 						err := dispatcher.Drain(bounded); stop()
 						if err == nil || dispatcher.ActiveAttempts() != 1 || !dispatcher.AdmissionClosed() { t.Fatal("drain ignored active response processing") }

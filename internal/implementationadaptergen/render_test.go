@@ -306,6 +306,7 @@ func TestAdapterUsesSelectedUnexportedConcretePointer(t *testing.T) {
 	build, err := invocation.NewModuleBuild("example.com/adapterfixture", "v1.0.0", "")
 	if err != nil { t.Fatal(err) }
 	binding, err := invocation.NewBinding(invocation.BindingOptions{
+		ConcurrencyLimit: 64,
 		Kind: invocation.BindingKindImplementation,
 		Constructor: "example.com/adapterfixture/implementation.New",
 		ModuleBuild: build,

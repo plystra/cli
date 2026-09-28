@@ -150,11 +150,12 @@ func benchmarkHTTPHandle(b testing.TB) kernelinvocation.Handle[benchmarkHTTPRequ
 		b.Fatalf("NewModuleBuild: %v", err)
 	}
 	binding, err := kernelinvocation.NewBinding(kernelinvocation.BindingOptions{
-		Kind:            kernelinvocation.BindingKindImplementation,
-		Constructor:     "example.com/benchmark/provider.New",
-		ModuleBuild:     providerBuild,
-		SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible,
-		ContractDigest:  sha256.Sum256([]byte("benchmark.invoke/v1")),
+		ConcurrencyLimit: 64,
+		Kind:             kernelinvocation.BindingKindImplementation,
+		Constructor:      "example.com/benchmark/provider.New",
+		ModuleBuild:      providerBuild,
+		SelectionReason:  kernelinvocation.SelectionReasonUniqueCompatible,
+		ContractDigest:   sha256.Sum256([]byte("benchmark.invoke/v1")),
 	}, endpoint)
 	if err != nil {
 		b.Fatalf("NewBinding: %v", err)

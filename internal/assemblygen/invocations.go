@@ -61,6 +61,7 @@ type InvocationOptions struct {
 	KernelModuleVersion      string
 	KernelBuildIdentity      string
 	DefaultTimeout           time.Duration
+	ConcurrencyLimit         int
 	Providers                []ProviderInput
 	Invocations              []InvocationInput
 }
@@ -98,6 +99,9 @@ type plannedInvocation struct {
 // dispatcher, typed ordinary-provider endpoint adapters, raw handles, and
 // generated application invocation handles for every required Capability.
 func RenderInvocations(options InvocationOptions) ([]byte, error) {
+	if options.ConcurrencyLimit < 1 || options.ConcurrencyLimit > kernelinvocation.MaximumConcurrencyLimit {
+		return nil, fmt.Errorf("%w: %w: concurrency limit must be within 1 through %d", ErrRenderInvocations, ErrInvalidInvocation, kernelinvocation.MaximumConcurrencyLimit)
+	}
 	invocations, order, err := planInvocations(options)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrRenderInvocations, err)
@@ -590,6 +594,7 @@ func renderEndpointBinding(source *strings.Builder, options InvocationOptions, i
 	fmt.Fprintf(source, "\t\tModuleBuild:     implementationBuild%d,\n", invocation.provider.index)
 	fmt.Fprintf(source, "\t\tSelectionReason: kernelinvocation.%s,\n", selectionReasonName(invocation.selectionReason))
 	fmt.Fprintf(source, "\t\tContractDigest:  %s,\n", digestLiteral(invocation.digest))
+	fmt.Fprintf(source, "\t\tConcurrencyLimit: %d,\n", options.ConcurrencyLimit)
 	fmt.Fprintf(source, "\t}, endpoint%d)\n", invocation.index)
 	fmt.Fprintln(source, "\tif err != nil {")
 	fmt.Fprintf(source, "\t\treturn Invocations{}, fmt.Errorf(\"%%w: binding %s to plugin %%q: %%w\", ErrInvocationAssembly, %s, err)\n", invocation.id, strconv.Quote(invocation.provider.PluginID))

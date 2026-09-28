@@ -35,6 +35,9 @@ const (
 	// DefaultInvocationTimeout bounds one raw canonical Kernel dispatch when
 	// the caller and generated application path provide no earlier deadline.
 	DefaultInvocationTimeout = 30 * time.Second
+	// DefaultInvocationConcurrencyLimit bounds executing attempts per exact
+	// ordinary binding, including targets that outlive their callers.
+	DefaultInvocationConcurrencyLimit = 64
 )
 
 // ErrInvalidManifest reports unsafe or invalid plystra.yaml metadata.

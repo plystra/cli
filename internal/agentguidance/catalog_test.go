@@ -87,6 +87,8 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"64 levels or 65,536 nodes",
 		"Caller cancellation returns independently with result_unknown after target entry",
 		"Response validation and copying remain inside the tracked attempt",
+		"Each exact binding admits 64 attempts with no queue",
+		"Saturation returns resource_exhausted with not_started",
 		"Failed drain keeps dependencies live for a fresh bounded Stop retry",
 		"Static Interface drain does not cover the transitional legacy Capability dispatcher",
 		"keep them out of `http.expose`",

@@ -662,6 +662,8 @@ func renderInvocationBoundary(source *strings.Builder, useHTTPPath bool) {
 	fmt.Fprintln(source, "\t\treturn http.StatusConflict")
 	fmt.Fprintln(source, "\tcase \"timeout\", \"unavailable\":")
 	fmt.Fprintln(source, "\t\treturn http.StatusServiceUnavailable")
+	fmt.Fprintln(source, "\tcase \"resource_exhausted\":")
+	fmt.Fprintln(source, "\t\treturn http.StatusTooManyRequests")
 	fmt.Fprintln(source, "\tcase \"cancelled\":")
 	fmt.Fprintln(source, "\t\treturn 499")
 	fmt.Fprintln(source, "\tdefault:")

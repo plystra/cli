@@ -5,7 +5,7 @@ const (
 	// Current is the canonical Semantic Versioning 2.0.0 CLI release version.
 	Current = "0.1.0"
 	// KernelVersion is the exact Kernel release supported by this CLI release.
-	KernelVersion = "v0.0.0-20260928111401-7ec80c2a00e3"
+	KernelVersion = "v0.0.0-20260928141628-5f0fd6f5e90d"
 	// GoRequirement is the language version required by the installed CLI
 	// module and the Projects it generates.
 	GoRequirement = "1.26"

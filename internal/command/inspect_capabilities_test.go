@@ -146,6 +146,8 @@ func TestRunInspectCapabilitiesHumanOutputIdentifiesOmissions(t *testing.T) {
 		"Public schemas:\n  continuation: unavailable\n  diagnostic: unavailable\n  graph: plystra.graph/v1\n  inspection: plystra.inspect/v1\n  recovery: plystra.recovery/v1\n  result: plystra.result/v1\n",
 		"Command surface: 28 installed leaf commands\nSelectors: 2 installed\nEffect classes: 9 closed\n",
 		"Defaults: interaction non_interactive, output human, startup 2m, invocation 30s\n",
+		"Invocation concurrency: default_limit 64, queue 0, maximum 65536\n",
+		"invocation.default-concurrency: specified=yes parsed=not_applicable generated=yes executed=yes accepted=yes\n",
 		"inspect.capabilities: specified=yes parsed=yes generated=not_applicable executed=yes accepted=yes\n",
 		"Command argument, selector, effect-class, and transport component details are omitted from human output; use --format json for the complete installed payload.\n",
 	} {

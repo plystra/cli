@@ -191,6 +191,7 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 		t.Fatalf("RenderProviders: %v", err)
 	}
 	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
+		ConcurrencyLimit:         64,
 		ModulePath:               "example.com/assemblyapp",
 		ApplicationBuildIdentity: "test-build",
 		KernelModuleVersion:      "v0.0.0",
@@ -271,6 +272,7 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("RenderProviders: %v", err)
 	}
 	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
+		ConcurrencyLimit:         64,
 		ModulePath:               "example.com/emptyapp",
 		ApplicationBuildIdentity: "test-build",
 		KernelModuleVersion:      "v0.0.0",

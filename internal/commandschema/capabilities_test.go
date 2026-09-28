@@ -38,7 +38,7 @@ func TestCapabilitiesAreCanonicalClosedAndDefensive(t *testing.T) {
 		t.Fatalf("NewCapabilities = %#v, %v", payload, err)
 	}
 	want := fmt.Sprintf(
-		`{"schema":"plystra.capabilities/v1","installed":{"cli_version":"1.2.3","kernel_version":"v1.4.0","specification_revision":"0123456789abcdef0123456789abcdef01234567","go_requirement":"1.26","platform":{"goos":"testos","goarch":"testarch"},"transport_toolchain":%s},"schemas":[{"role":"continuation","available":false,"name":null,"version":null},{"role":"diagnostic","available":false,"name":null,"version":null},{"role":"graph","available":true,"name":"plystra.graph","version":1},{"role":"inspection","available":true,"name":"plystra.inspect","version":1},{"role":"recovery","available":true,"name":"plystra.recovery","version":1},{"role":"result","available":true,"name":"plystra.result","version":1}],"commands":[{"id":"inspect","path":["inspect"],"arguments":[{"name":"--config","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":[],"requires":[],"conflicts":["--env"]},{"name":"--env","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":[],"requires":[],"conflicts":["--config"]},{"name":"--format","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":["human","json"],"requires":[],"conflicts":[]}],"selectors":["configuration"],"stable_defaults":[{"name":"verbosity","value":"concise"}],"interaction_modes":["non_interactive"],"output_formats":["human","json"]}],"selectors":[{"id":"configuration","arguments":["--config","--env"],"environment_variables":["PLYSTRA_CONFIG","PLYSTRA_ENV"],"modes":["default","environment","explicit-config"],"default_mode":"default"}],"effect_classes":["project_write","temporary_file","cache_materialization","download","trusted_code_execution","process_startup","backend_read","backend_write","publication"],"limits":{"project_document_bytes":1048576},"defaults":{"interaction_mode":"non_interactive","output_format":"human","startup_timeout":"2m","invocation_timeout":"30s"},"support":[{"id":"data","specified":"yes","parsed":"no","generated":"no","executed":"no","accepted":"no"},{"id":"inspect.capabilities","specified":"yes","parsed":"yes","generated":"not_applicable","executed":"yes","accepted":"yes"}]}`,
+		`{"schema":"plystra.capabilities/v1","installed":{"cli_version":"1.2.3","kernel_version":"v1.4.0","specification_revision":"0123456789abcdef0123456789abcdef01234567","go_requirement":"1.26","platform":{"goos":"testos","goarch":"testarch"},"transport_toolchain":%s},"schemas":[{"role":"continuation","available":false,"name":null,"version":null},{"role":"diagnostic","available":false,"name":null,"version":null},{"role":"graph","available":true,"name":"plystra.graph","version":1},{"role":"inspection","available":true,"name":"plystra.inspect","version":1},{"role":"recovery","available":true,"name":"plystra.recovery","version":1},{"role":"result","available":true,"name":"plystra.result","version":1}],"commands":[{"id":"inspect","path":["inspect"],"arguments":[{"name":"--config","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":[],"requires":[],"conflicts":["--env"]},{"name":"--env","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":[],"requires":[],"conflicts":["--config"]},{"name":"--format","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":["human","json"],"requires":[],"conflicts":[]}],"selectors":["configuration"],"stable_defaults":[{"name":"verbosity","value":"concise"}],"interaction_modes":["non_interactive"],"output_formats":["human","json"]}],"selectors":[{"id":"configuration","arguments":["--config","--env"],"environment_variables":["PLYSTRA_CONFIG","PLYSTRA_ENV"],"modes":["default","environment","explicit-config"],"default_mode":"default"}],"effect_classes":["project_write","temporary_file","cache_materialization","download","trusted_code_execution","process_startup","backend_read","backend_write","publication"],"limits":{"project_document_bytes":1048576,"invocation_concurrency_limit":65536},"defaults":{"interaction_mode":"non_interactive","output_format":"human","startup_timeout":"2m","invocation_timeout":"30s","invocation_concurrency":{"default_limit":64,"queue":0}},"support":[{"id":"data","specified":"yes","parsed":"no","generated":"no","executed":"no","accepted":"no"},{"id":"inspect.capabilities","specified":"yes","parsed":"yes","generated":"not_applicable","executed":"yes","accepted":"yes"}]}`,
 		input.TransportToolchain.RecordJSON(),
 	)
 	if string(payload.CanonicalJSON()) != want {
@@ -54,6 +54,7 @@ func TestCapabilitiesAreCanonicalClosedAndDefensive(t *testing.T) {
 		len(payload.Commands()) != 1 || payload.Commands()[0].ID() != "inspect" || len(payload.Commands()[0].Arguments()) != 3 || payload.Commands()[0].Arguments()[0].Name() != "--config" ||
 		len(payload.Selectors()) != 1 || payload.Selectors()[0].ID() != "configuration" || payload.DefaultInteraction() != commandschema.CapabilityInteractionNonInteractive || payload.DefaultOutput() != commandschema.CapabilityOutputHuman || len(payload.EffectClasses()) != 9 ||
 		payload.ProjectDocumentBytes() != input.ProjectDocumentBytes ||
+		payload.InvocationConcurrencyLimit() != input.InvocationConcurrencyLimit || payload.MaximumConcurrencyLimit() != input.MaximumConcurrencyLimit ||
 		payload.StartupTimeoutText() != "2m" || payload.InvocationTimeoutText() != "30s" {
 		t.Fatalf("capability accessors do not match input: %#v", payload)
 	}
@@ -176,6 +177,13 @@ func TestCapabilitiesRejectInvalidInstalledFactsAndSupport(t *testing.T) {
 		{name: "document limit", mutate: func(input *commandschema.CapabilitiesInput) { input.ProjectDocumentBytes = 0 }},
 		{name: "startup timeout", mutate: func(input *commandschema.CapabilitiesInput) { input.StartupTimeout = 0 }},
 		{name: "invocation timeout", mutate: func(input *commandschema.CapabilitiesInput) { input.InvocationTimeout = -time.Second }},
+		{name: "zero concurrency", mutate: func(input *commandschema.CapabilitiesInput) { input.InvocationConcurrencyLimit = 0 }},
+		{name: "negative concurrency", mutate: func(input *commandschema.CapabilitiesInput) { input.InvocationConcurrencyLimit = -1 }},
+		{name: "excessive concurrency", mutate: func(input *commandschema.CapabilitiesInput) {
+			input.InvocationConcurrencyLimit = input.MaximumConcurrencyLimit + 1
+		}},
+		{name: "zero maximum concurrency", mutate: func(input *commandschema.CapabilitiesInput) { input.MaximumConcurrencyLimit = 0 }},
+		{name: "excessive maximum concurrency", mutate: func(input *commandschema.CapabilitiesInput) { input.MaximumConcurrencyLimit = 1<<30 + 1 }},
 		{name: "missing support", mutate: func(input *commandschema.CapabilitiesInput) { input.Support = nil }},
 		{name: "support ID", mutate: func(input *commandschema.CapabilitiesInput) { input.Support[0].ID = "Inspect.Capabilities" }},
 		{name: "support stage", mutate: func(input *commandschema.CapabilitiesInput) { input.Support[0].Accepted = "future" }},
@@ -250,9 +258,11 @@ func validCapabilitiesInput(t testing.TB) commandschema.CapabilitiesInput {
 			commandschema.EffectTemporaryFile,
 			commandschema.EffectProjectWrite,
 		},
-		ProjectDocumentBytes: 1 << 20,
-		StartupTimeout:       2 * time.Minute,
-		InvocationTimeout:    30 * time.Second,
+		ProjectDocumentBytes:       1 << 20,
+		StartupTimeout:             2 * time.Minute,
+		InvocationTimeout:          30 * time.Second,
+		InvocationConcurrencyLimit: 64,
+		MaximumConcurrencyLimit:    65536,
 		Support: []commandschema.CapabilitySupportInput{{
 			ID:        "interfaces.policies.*.timeout",
 			Specified: commandschema.SupportYes,

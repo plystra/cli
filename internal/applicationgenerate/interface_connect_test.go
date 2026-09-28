@@ -155,6 +155,8 @@ func (*Service) Echo(ctx context.Context, request echov1.Request) (echov1.Respon
 		return echov1.Response{}, kernelError(kernelinvocation.ErrorUnauthenticated)
 	case "kernel-unavailable":
 		return echov1.Response{}, kernelError(kernelinvocation.ErrorUnavailable)
+	case "kernel-resource-exhausted":
+		return echov1.Response{}, kernelError(kernelinvocation.ErrorResourceExhausted)
 	case "kernel-timeout":
 		return echov1.Response{}, kernelError(kernelinvocation.ErrorTimeout)
 	case "kernel-cancelled":
@@ -672,6 +674,7 @@ func TestConnectAndInternalCallsUseTheSameGovernedInterface(t *testing.T) {
 		{name: "denied", behavior: "kernel-denied", code: connect.CodePermissionDenied, kernel: "denied"},
 		{name: "unauthenticated", behavior: "kernel-unauthenticated", code: connect.CodeUnauthenticated, kernel: "unauthenticated"},
 		{name: "unavailable", behavior: "kernel-unavailable", code: connect.CodeUnavailable, kernel: "unavailable"},
+		{name: "resource exhausted", behavior: "kernel-resource-exhausted", code: connect.CodeResourceExhausted, kernel: "resource_exhausted"},
 		{name: "timeout", behavior: "kernel-timeout", code: connect.CodeDeadlineExceeded, kernel: "timeout"},
 		{name: "cancelled", behavior: "kernel-cancelled", code: connect.CodeCanceled, kernel: "cancelled"},
 		{name: "result unknown", behavior: "kernel-result-unknown", code: connect.CodeUnavailable, kernel: "unavailable", completion: "result_unknown"},

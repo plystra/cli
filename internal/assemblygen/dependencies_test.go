@@ -215,6 +215,7 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("RenderProviders: %v", err)
 	}
 	invocationSource, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
+		ConcurrencyLimit:         64,
 		ModulePath:               wiringApplicationModule,
 		ApplicationBuildIdentity: "wiring-test-build",
 		KernelModuleVersion:      "v0.0.0",

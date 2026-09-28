@@ -97,6 +97,7 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 		},
 	}
 	options := assemblygen.InvocationOptions{
+		ConcurrencyLimit:         64,
 		ModulePath:               "example.com/runtime-application",
 		ApplicationBuildIdentity: "sha256:0123456789abcdef",
 		KernelModuleVersion:      "v0.1.0",
@@ -116,9 +117,10 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 		`kernelintrinsic.NewBindings`,
 		`len(i.catalog.Bindings()) != 4`,
 		`kernelinvocation.NewModuleBuild("example.com/runtime-dependency", "v1.2.3", "sha256:0123456789abcdef")`,
-		`Kind:            kernelinvocation.BindingKindImplementation`,
-		`Constructor:     "example.com/runtime-dependency/remote-service.New"`,
-		`ModuleBuild:     implementationBuild0`,
+		`Kind:             kernelinvocation.BindingKindImplementation`,
+		`Constructor:      "example.com/runtime-dependency/remote-service.New"`,
+		`ModuleBuild:      implementationBuild0`,
+		`ConcurrencyLimit: 64,`,
 		`kernelinvocation.SelectionReasonExplicit`,
 		`kernelinvocation.SelectionReasonUniqueCompatible`,
 		`kernelcapability.MustParseContractWithSemanticErrors[contract0.Request, contract0.Response](contract0.CapabilityID, "invalid_recipient")`,
@@ -152,6 +154,7 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 	}
 
 	empty, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
+		ConcurrencyLimit:         64,
 		ModulePath:               options.ModulePath,
 		ApplicationBuildIdentity: options.ApplicationBuildIdentity,
 		KernelModuleVersion:      options.KernelModuleVersion,
@@ -179,6 +182,7 @@ func TestRenderInvocationsRejectsInvalidRuntimePlans(t *testing.T) {
 		ImportPath:    "example.com/runtime-dependency/remote-service",
 	}
 	valid := assemblygen.InvocationOptions{
+		ConcurrencyLimit:         64,
 		ModulePath:               "example.com/runtime-application",
 		ApplicationBuildIdentity: "test-build",
 		KernelModuleVersion:      "v0.1.0",
@@ -198,6 +202,11 @@ func TestRenderInvocationsRejectsInvalidRuntimePlans(t *testing.T) {
 	}{
 		{name: "invalid application module", edit: func(value *assemblygen.InvocationOptions) { value.ModulePath = "../application" }, reason: assemblygen.ErrInvalidInvocation},
 		{name: "invalid timeout", edit: func(value *assemblygen.InvocationOptions) { value.DefaultTimeout = 0 }, reason: assemblygen.ErrInvalidInvocation},
+		{name: "zero concurrency", edit: func(value *assemblygen.InvocationOptions) { value.ConcurrencyLimit = 0 }, reason: assemblygen.ErrInvalidInvocation},
+		{name: "negative concurrency", edit: func(value *assemblygen.InvocationOptions) { value.ConcurrencyLimit = -1 }, reason: assemblygen.ErrInvalidInvocation},
+		{name: "excessive concurrency", edit: func(value *assemblygen.InvocationOptions) {
+			value.ConcurrencyLimit = kernelinvocation.MaximumConcurrencyLimit + 1
+		}, reason: assemblygen.ErrInvalidInvocation},
 		{name: "missing Kernel provenance", edit: func(value *assemblygen.InvocationOptions) {
 			value.KernelModuleVersion = ""
 			value.KernelBuildIdentity = ""
@@ -360,6 +369,7 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("RenderProviders: %v", err)
 	}
 	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
+		ConcurrencyLimit:         64,
 		ModulePath:               "example.com/runtime-application",
 		ApplicationBuildIdentity: "runtime-build-123",
 		KernelModuleVersion:      "v0.0.0",
@@ -428,6 +438,7 @@ func FuzzRenderInvocations(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, schema []byte) {
 		options := assemblygen.InvocationOptions{
+			ConcurrencyLimit:         64,
 			ModulePath:               "example.com/runtime-application",
 			ApplicationBuildIdentity: "fuzz-build",
 			KernelModuleVersion:      "v0.1.0",
