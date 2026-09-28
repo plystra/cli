@@ -133,6 +133,11 @@ one span-less configuration-selection source; conflicting or unsafe selectors
 report none.
 Dependency Project roots contribute only explicitly adopted named exports.
 Generation does not rewrite the selected current-Project configuration document.
+PLYSTRA_POLICY_NOT_ENFORCED rejects a reachable Interface policy unless the
+installed CLI/Kernel pair both generates and executes it. The diagnostic reports
+the field, support stages, and module-relative configuration declarations.
+Remove the policy or use a compatible stack; inspect capabilities reports support.
+Dormant policies remain intent, not enforced guarantees.
 PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
 Project plystra.yaml as a project-marker source. Malformed readable documents
 use 1:1; unsafe or unreadable markers omit the unavailable span.
@@ -251,6 +256,11 @@ report none.
 Adopted-export conflicts and invalid or unselected constructor configuration
 failures emit module-relative
 configuration-declaration sources before selector-aware recovery.
+PLYSTRA_POLICY_NOT_ENFORCED rejects a reachable Interface policy unless the
+installed CLI/Kernel pair both generates and executes it. The diagnostic reports
+the field, support stages, and module-relative configuration declarations.
+Remove the policy or use a compatible stack; inspect capabilities reports support.
+Dormant policies remain intent, not enforced guarantees.
 PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
 Project plystra.yaml as a project-marker source. Malformed readable documents
 use 1:1; unsafe or unreadable markers omit the unavailable span.

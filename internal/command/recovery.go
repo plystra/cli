@@ -97,6 +97,7 @@ const (
 	diagnosticConfigurationOwnershipAmbiguous      = diagnosticcode.ConfigurationOwnershipAmbiguous
 	diagnosticEnvironmentOverlayInvalid            = diagnosticcode.EnvironmentOverlayInvalid
 	diagnosticConfigurationInvalid                 = diagnosticcode.ConfigurationInvalid
+	diagnosticPolicyNotEnforced                    = diagnosticcode.PolicyNotEnforced
 	diagnosticPluginConfigurationUnselected        = diagnosticcode.PluginConfigurationUnselected
 	diagnosticPluginConfigurationPluginMissing     = diagnosticcode.PluginConfigurationPluginMissing
 	diagnosticConfigurationSelectionInvalid        = diagnosticcode.ConfigurationSelectionInvalid
@@ -770,6 +771,14 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: source.Column,
 			})
 		}
+	case diagnosticPolicyNotEnforced:
+		var policy *applicationresolve.PolicyNotEnforcedError
+		if !errors.As(err, &policy) || policy == nil {
+			return nil
+		}
+		for _, source := range policy.Sources() {
+			sources = append(sources, diagnosticjson.Source{Module: source.ModulePath, Path: source.Path, Kind: "configuration-declaration", Line: source.Line, Column: source.Column})
+		}
 	case diagnosticConstructorConfigurationSchemaInvalid, diagnosticConstructorConfigurationValuesInvalid:
 		var located diagnosticSourceLocation
 		if !errors.As(err, &located) || located == nil || located.SourceKind() != "configuration-declaration" {
@@ -1209,6 +1218,9 @@ func primaryFailureMessage(err error) string {
 }
 
 func primaryActionableDiagnostic(err error, context recoveryContext) (actionableDiagnostic, bool) {
+	if errors.Is(err, applicationresolve.ErrPolicyNotEnforced) {
+		return recoveryDiagnostic(diagnosticPolicyNotEnforced, "Remove the reported policy from the selected configuration, or install a compatible CLI/Kernel pair that generates and executes it. Run `plystra inspect capabilities --format json` to verify installed support before retrying.")
+	}
 	if errors.Is(err, errNewInvocation) {
 		return recoveryDiagnostic(diagnosticProjectCreateInvocationInvalid, "Review `plystra new --help`, then rerun `plystra new <project-name> [options]` with one valid argument form.")
 	}

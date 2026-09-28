@@ -20,6 +20,8 @@ Do not combine `--env` and `--config`. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` supply
 
 Configuration values belong under the exact constructor-owned `config.<constructor-symbol>` object. Keep Secret values out of YAML, generated source, diagnostics, SDKs, and tests. A Secret field contains only a valid `env` or absolute `file` reference, and generation validates the reference without resolving its value.
 
+Active Interface timeout policies currently fail generation and check with PLYSTRA_POLICY_NOT_ENFORCED because Kernel execution is unsupported. Remove the policy from the selected layer or install a compatible CLI/Kernel pair. Inspect capabilities for support stages; read-only Project inspection remains available. Dormant policies are intent, not enforced guarantees.
+
 ## Completion checks
 
 1. Inspect the selected layer and ownership with `plystra inspect configuration`.

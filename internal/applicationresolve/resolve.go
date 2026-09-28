@@ -126,15 +126,18 @@ func (*UnownedConstructorConfigurationError) Unwrap() error {
 // discovery plus selected legacy generation compilation so each observes the
 // same Go workspace state during the architecture transition.
 type Options struct {
-	Start                 string
-	ConfigurationPath     string
-	EnvironmentName       string
-	GoCommand             string
-	Environment           []string
-	DependencyOutputLimit int
-	CompileTimeout        time.Duration
-	ExecutionTimeout      time.Duration
-	TemporaryParent       string
+	// RequireExecutablePolicies rejects active policy fields that the installed
+	// CLI/Kernel pair cannot enforce. Read-only inspection leaves it false.
+	RequireExecutablePolicies bool
+	Start                     string
+	ConfigurationPath         string
+	EnvironmentName           string
+	GoCommand                 string
+	Environment               []string
+	DependencyOutputLimit     int
+	CompileTimeout            time.Duration
+	ExecutionTimeout          time.Duration
+	TemporaryParent           string
 }
 
 // Result is one immutable filesystem provenance and stable generation
@@ -433,6 +436,11 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
+	if options.RequireExecutablePolicies {
+		if err := validateExecutablePolicies(manifest, interfaceResolution, resolution.Context(), sourceContext); err != nil {
+			return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+		}
+	}
 	configs, err := configurationresolve.Resolve(manifest, inventory, resolution.Context())
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
@@ -575,6 +583,9 @@ func resolutionDeclarationPaths(manifest applicationmeta.Manifest) []string {
 	}
 	for _, choice := range manifest.ImplementationChoices() {
 		paths = append(paths, fmt.Sprintf("interfaces.use[%q]", choice.InterfaceID().String()))
+	}
+	for _, policy := range manifest.InterfacePolicies() {
+		paths = append(paths, fmt.Sprintf("interfaces.policies[%q].timeout", policy.InterfaceID().String()))
 	}
 	for _, configured := range manifest.Configurations() {
 		paths = append(paths, fmt.Sprintf("config[%q]", configured.Constructor().String()))

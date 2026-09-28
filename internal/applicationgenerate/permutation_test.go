@@ -303,7 +303,7 @@ interfaces:
   require: [configuration.owner/v1, kernel.health/v1]
   use: {configuration.owner/v1: ` + constructor + `}
   policies:
-    configuration.owner/v1: {timeout: 5s}
+    dormant.owner/v1: {timeout: 5s}
 http:
   address: ":8080"
   cors:
@@ -328,7 +328,7 @@ http:
   address: ':8080'
 interfaces:
   policies:
-    configuration.owner/v1:
+    dormant.owner/v1:
       timeout: 5000ms
   use:
     configuration.owner/v1: `+constructor+`
@@ -341,7 +341,7 @@ func normalizedEnvironmentConfiguration(modulePath string, variant int) string {
 	if variant == 0 {
 		return `# sparse production differences
 interfaces:
-  policies: {configuration.owner/v1: {timeout: 7s}}
+  policies: {dormant.owner/v1: {timeout: 7s}}
 http:
   cors:
     allowed_origins: [https://B.example:443, https://a.example]
@@ -359,7 +359,7 @@ http:
   cors: {allowed_origins: [https://a.example:443, https://b.example]}
 interfaces:
   policies:
-    configuration.owner/v1: {timeout: 7000ms}
+    dormant.owner/v1: {timeout: 7000ms}
 `, "\n", "\r\n")
 }
 
@@ -370,7 +370,7 @@ func normalizedExplicitConfiguration(modulePath string, variant int) string {
 interfaces:
   require: [configuration.owner/v1, kernel.health/v1]
   use: {configuration.owner/v1: ` + constructor + `}
-  policies: {configuration.owner/v1: {timeout: 9s}}
+  policies: {dormant.owner/v1: {timeout: 9s}}
 http:
   address: ":9090"
   cors:
@@ -395,7 +395,7 @@ http:
 interfaces:
   use: {configuration.owner/v1: `+constructor+`}
   policies:
-    configuration.owner/v1: {timeout: 9000ms}
+    dormant.owner/v1: {timeout: 9000ms}
   require: [kernel.health/v1, configuration.owner/v1]
 `, "\n", "\r\n")
 }

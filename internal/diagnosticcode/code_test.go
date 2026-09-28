@@ -25,6 +25,7 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.ConstructorConfigurationUnselected,
 		diagnosticcode.EnvironmentOverlayInvalid,
 		diagnosticcode.ConfigurationInvalid,
+		diagnosticcode.PolicyNotEnforced,
 		diagnosticcode.PluginConfigurationUnselected,
 		diagnosticcode.PluginConfigurationPluginMissing,
 		diagnosticcode.ConfigurationSelectionInvalid,

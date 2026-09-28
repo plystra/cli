@@ -1765,61 +1765,23 @@ interfaces:
 	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), rootConfiguration)
 }
 
-func TestRunGenerateCarriesInterfacePoliciesThroughEveryConfigurationMode(t *testing.T) {
-	root := t.TempDir()
-	cliRoot := commandRepositoryRoot(t)
-	kernelRoot := testkernel.Root(t)
-	goMod := fmt.Sprintf(`module example.com/acme/policy
-
-go 1.26
-
-require (
-	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4
-	golang.org/x/mod v0.38.0 // indirect
-)
-
-replace github.com/plystra/kernel => %s
-`, filepath.ToSlash(kernelRoot))
-	writeCommandFile(t, filepath.Join(root, "go.mod"), goMod)
-	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
-	if err != nil {
-		t.Fatalf("ReadFile(go.sum): %v", err)
-	}
-	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
-	writeCommandGraphInterface(t, root, "email/send/v1", "sendv1", "email.send/v1", "Send")
-	writeCommandFile(t, filepath.Join(root, "smtp", "service.go"), `package smtp
-
-import (
-	"context"
-
-	sendv1 "example.com/acme/policy/interfaces/email/send/v1"
-)
-
-type Service struct{}
-
-//plystra:implements email.send/v1
-func New() (*Service, error) { return &Service{}, nil }
-
-func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
-	return sendv1.Response{}, nil
-}
-`)
+func TestRunGenerateCarriesDormantInterfacePoliciesThroughEveryConfigurationMode(t *testing.T) {
+	root := writeCommandPolicyProject(t)
 	rootConfiguration := `interfaces:
   require: [email.send/v1]
   policies:
-    email.send/v1: {timeout: 5000ms}
+    email.preview/v1: {timeout: 5000ms}
 `
 	overlayConfiguration := `# environment-specific policy
 interfaces:
   policies:
-    email.send/v1: {timeout: 2s}
+    email.preview/v1: {timeout: 2s}
 `
 	replacementConfiguration := `# complete replacement policy
 interfaces:
   require: [email.send/v1]
   policies:
-    email.send/v1: {timeout: 7s}
+    email.preview/v1: {timeout: 7s}
 `
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootConfiguration)
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayConfiguration)
@@ -1835,7 +1797,7 @@ interfaces:
 		t.Fatalf("DecodeManifestProvenance(default): %v", err)
 	}
 	defaultBootstrap := readCommandFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
-	if !bytes.Contains(defaultBootstrap, []byte(`\"interface_policies\":[{\"interface\":\"email.send/v1\",\"timeout\":\"5s\"}]`)) {
+	if !bytes.Contains(defaultBootstrap, []byte(`\"interface_policies\":[{\"interface\":\"email.preview/v1\",\"timeout\":\"5s\"}]`)) {
 		t.Fatalf("default generated bootstrap omits normalized Interface policy:\n%s", defaultBootstrap)
 	}
 	beforeDefaultCheck := commandTree(t, root)
@@ -1849,7 +1811,7 @@ interfaces:
 	removedOverlay := `# environment-specific policy removal
 interfaces:
   policies:
-    email.send/v1: null
+    email.preview/v1: null
 `
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), removedOverlay)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--env", "production"}, root, environment)
@@ -1889,7 +1851,7 @@ interfaces:
 		t.Fatal("environment policy replacement did not change the build-affecting application model")
 	}
 	environmentBootstrap := readCommandFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
-	if !bytes.Contains(environmentBootstrap, []byte(`\"interface_policies\":[{\"interface\":\"email.send/v1\",\"timeout\":\"2s\"}]`)) {
+	if !bytes.Contains(environmentBootstrap, []byte(`\"interface_policies\":[{\"interface\":\"email.preview/v1\",\"timeout\":\"2s\"}]`)) {
 		t.Fatalf("environment generated bootstrap omits selected Interface policy:\n%s", environmentBootstrap)
 	}
 	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--env", "production")
@@ -1929,7 +1891,7 @@ interfaces:
 	invalidOverlay := `# invalid environment policy must be preserved
 interfaces:
   policies:
-    email.send/v1: {timeout: 2s, retry: 2}
+    email.preview/v1: {timeout: 2s, retry: 2}
 `
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), invalidOverlay)
 	beforeInvalid := commandTree(t, root)
@@ -1937,11 +1899,11 @@ interfaces:
 	process.Dir = root
 	process.Env = environment
 	output, runErr = process.CombinedOutput()
-	if runErr == nil || !strings.Contains(string(output), `interfaces.policies["email.send/v1"] contains unknown key "retry"`) {
+	if runErr == nil || !strings.Contains(string(output), `interfaces.policies["email.preview/v1"] contains unknown key "retry"`) {
 		t.Fatalf("generated application accepted invalid environment policy: %v\n%s", runErr, output)
 	}
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--env", "production"}, root, environment)
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, `interfaces.policies["email.send/v1"] contains unknown key "retry"`) {
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, `interfaces.policies["email.preview/v1"] contains unknown key "retry"`) {
 		t.Fatalf("invalid environment policy = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeInvalid) {

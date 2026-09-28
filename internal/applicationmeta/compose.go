@@ -128,8 +128,8 @@ func (c Composition) Provenance() []Provenance {
 }
 
 // ResolutionSources returns dependency provenance whose normalized value
-// matches one effective Interface or legacy requirement, selection, remaining
-// Alias, or constructor-configuration root. Public exposure is
+// matches one effective Interface or legacy requirement, selection, Interface
+// policy, remaining Alias, or constructor-configuration root. Public exposure is
 // current-Project-owned and therefore has no dependency provenance. Superseded
 // and removed dependency declarations remain in Provenance but do not
 // introduce final application requirements or configuration ownership.
@@ -294,6 +294,9 @@ func effectiveResolutionSources(manifest Manifest, provenance []Provenance) []Pr
 	for _, choice := range manifest.implementationChoices {
 		path := fmt.Sprintf("interfaces.use[%q]", choice.interfaceID.String())
 		effective[path] = implementationChoiceDigest(choice)
+	}
+	for _, policy := range manifest.interfacePolicies {
+		effective[interfacePolicyPath(policy.interfaceID)] = interfacePolicyDigest(policy)
 	}
 	for _, alias := range manifest.aliases {
 		path := fmt.Sprintf("capabilities.aliases[%q]", alias.id.String())

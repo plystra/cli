@@ -1115,6 +1115,18 @@ model without transferring current-Project ownership. Check mode reports
 generated drift for that model and does not write configuration, generated
 output, or module metadata.
 
+An authored `interfaces.policies.<interface-id>.timeout` remains parseable,
+but the installed Kernel does not yet execute it. `generate`,
+`generate --check`, and `check` reject the policy on a reachable Interface
+with `PLYSTRA_POLICY_NOT_ENFORCED` before rendering or changing the Project.
+The diagnostic identifies the Interface, field, installed support stages, and
+owning configuration documents, including adopted exports. Remove the policy
+from the selected layer or install a compatible stack that both generates and
+executes it; `plystra inspect capabilities --format json` reports those stages.
+Read-only inspection remains available. An unreachable policy is dormant
+intent, not an enforced guarantee, and is checked when its Interface activates.
+This rule applies equally to root, environment, and replacement selections.
+
 `generated/manifest.json` records a versioned canonical constraint projection
 with every resolved canonical Capability ID, its exact contract and constraint
 digests, and each constrained request or response field's path, type, and

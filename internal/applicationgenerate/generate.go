@@ -458,15 +458,16 @@ type preparedGeneration struct {
 
 func prepare(ctx context.Context, options Options, start string) (preparedGeneration, error) {
 	resolved, err := applicationresolve.Resolve(ctx, applicationresolve.Options{
-		Start:                 start,
-		ConfigurationPath:     options.ConfigurationPath,
-		EnvironmentName:       options.EnvironmentName,
-		GoCommand:             options.GoCommand,
-		Environment:           append([]string(nil), options.Environment...),
-		DependencyOutputLimit: options.DependencyOutputLimit,
-		CompileTimeout:        options.CompileTimeout,
-		ExecutionTimeout:      options.ExecutionTimeout,
-		TemporaryParent:       options.TemporaryParent,
+		RequireExecutablePolicies: true,
+		Start:                     start,
+		ConfigurationPath:         options.ConfigurationPath,
+		EnvironmentName:           options.EnvironmentName,
+		GoCommand:                 options.GoCommand,
+		Environment:               append([]string(nil), options.Environment...),
+		DependencyOutputLimit:     options.DependencyOutputLimit,
+		CompileTimeout:            options.CompileTimeout,
+		ExecutionTimeout:          options.ExecutionTimeout,
+		TemporaryParent:           options.TemporaryParent,
 	})
 	if err != nil {
 		return preparedGeneration{}, err

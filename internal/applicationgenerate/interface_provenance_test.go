@@ -78,8 +78,6 @@ interfaces:
   require: [order.create/v1]
   use:
     order.create/v1: example.com/interface-provenance/order.New
-  policies:
-    order.create/v1: {timeout: 5s}
 config:
   example.com/interface-provenance/configowner.New:
     endpoint: https://private.example
@@ -144,7 +142,7 @@ config:
 		orderBinding.Selection().Constructor() != orderConstructor ||
 		orderBinding.Selection().Reason() != interfaceprovenance.SelectionExplicit ||
 		orderBinding.Selection().ConstructionOrder() != 2 ||
-		orderBinding.Policy().Timeout() != "5s" {
+		orderBinding.Policy().Timeout() != "30s" {
 		t.Fatalf("order binding = %#v", orderBinding)
 	}
 	assertExposedMapping(

@@ -21,6 +21,7 @@ const (
 	ConfigurationOwnershipAmbiguous      = Prefix + "CONFIGURATION_OWNERSHIP_AMBIGUOUS"
 	EnvironmentOverlayInvalid            = Prefix + "ENVIRONMENT_OVERLAY_INVALID"
 	ConfigurationInvalid                 = Prefix + "CONFIGURATION_INVALID"
+	PolicyNotEnforced                    = Prefix + "POLICY_NOT_ENFORCED"
 	PluginConfigurationUnselected        = Prefix + "PLUGIN_CONFIGURATION_UNSELECTED"
 	PluginConfigurationPluginMissing     = Prefix + "PLUGIN_CONFIGURATION_PLUGIN_MISSING"
 	ConfigurationSelectionInvalid        = Prefix + "CONFIGURATION_SELECTION_INVALID"

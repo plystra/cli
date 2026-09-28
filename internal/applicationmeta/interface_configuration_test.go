@@ -232,6 +232,37 @@ interfaces:
 	}
 }
 
+func TestComposePolicyResolutionSourcesTrackOnlyEffectiveValues(t *testing.T) {
+	dependencies := []applicationmeta.Dependency{
+		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "interfaces: {policies: {email.send/v1: {timeout: 5s}}}\n")},
+		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "interfaces: {policies: {email.send/v1: {timeout: 5000ms}}}\n")},
+	}
+	for _, test := range []struct {
+		name, current string
+		count         int
+	}{
+		{"inherited", "{}", 1},
+		{"equal", "interfaces: {policies: {email.send/v1: {timeout: 5s}}}", 1},
+		{"replaced", "interfaces: {policies: {email.send/v1: {timeout: 2s}}}", 0},
+		{"removed", "interfaces: {policies: {email.send/v1: null}}", 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			composed, err := applicationmeta.Compose(dependencies, composeManifest(t, test.current), composeSchemaLookup(nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			records := findProvenance(t, composed.ResolutionSources(), `interfaces.policies["email.send/v1"].timeout`)
+			if len(records) != test.count || test.count == 1 && len(records[0].Sources()) != 2 {
+				t.Fatalf("effective policy sources = %#v", records)
+			}
+			reversed, err := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[1], dependencies[0]}, composeManifest(t, test.current), composeSchemaLookup(nil))
+			if err != nil || !reflect.DeepEqual(composed.ResolutionSources(), reversed.ResolutionSources()) {
+				t.Fatalf("permuted policy sources changed: %v", err)
+			}
+		})
+	}
+}
+
 func TestComposeInterfaceRequirementAddRemoveConflictNeedsCurrentDecision(t *testing.T) {
 	t.Parallel()
 

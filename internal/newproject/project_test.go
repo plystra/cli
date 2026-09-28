@@ -460,11 +460,16 @@ composition:
         use:
           email.send/v1: example.com/acme/platform/mailer.New
         policies:
-          email.send/v1:
+          email.preview/v1:
             timeout: 7s
       config:
         example.com/acme/platform/mailer.New:
           sender: adopted-template
+    unenforced:
+      interfaces:
+        require: [email.send/v1]
+        policies:
+          email.send/v1: {timeout: 7s}
 `),
 		"plystra.production.yaml": []byte("interfaces:\n  require:\n    - missing.overlay/v1\n"),
 		"interfaces/email/send/v1/interface.go": []byte(`package sendv1
@@ -593,7 +598,7 @@ var _ sendv1.Interface = (*Service)(nil)
 	if len(binding) != 1 ||
 		binding[0].InterfaceID() != "email.send/v1" ||
 		binding[0].Selection().Constructor() != "example.com/acme/platform/mailer.New" ||
-		binding[0].Policy().Timeout() != "7s" ||
+		binding[0].Policy().Timeout() != "30s" ||
 		binding[0].ConfigurationOwner() != configurationOwner ||
 		len(constructors) != 1 ||
 		constructors[0].Symbol() != "example.com/acme/platform/mailer.New" ||
@@ -612,6 +617,17 @@ var _ sendv1.Interface = (*Service)(nil)
 		t.Fatalf("template generation check = changes %#v, configuration changed %t, %v", checked.Report().Changes(), checked.ConfigurationChanged(), err)
 	}
 	assertPlystraGuidance(t, target, "example.com/acme/my-app")
+	beforeRejected := snapshotTree(t, parent)
+	stdout.Reset()
+	stderr.Reset()
+	if code := command.RunIn([]string{"new", "rejected-policy", "--module", "example.com/acme/rejected-policy", "--template", templateQuery, "--adopt-export", "unenforced"}, &stdout, &stderr, parent, environment); code != 8 ||
+		stdout.Len() != 0 || !strings.Contains(stderr.String(), "PLYSTRA_POLICY_NOT_ENFORCED") ||
+		!strings.Contains(stderr.String(), "Source: example.com/acme/platform:plystra.yaml:1:1 (configuration-declaration)") {
+		t.Fatalf("unenforced template policy = %d, %q, %q", code, stdout.String(), stderr.String())
+	}
+	if afterRejected := snapshotTree(t, parent); !reflect.DeepEqual(afterRejected, beforeRejected) {
+		t.Fatal("rejected template policy left Project or transaction files")
+	}
 	if cacheAfter := snapshotTree(t, cacheRoot); !reflect.DeepEqual(cacheAfter, cacheBefore) {
 		t.Fatalf("template Module Cache source changed:\nbefore: %#v\nafter:  %#v", cacheBefore, cacheAfter)
 	}
